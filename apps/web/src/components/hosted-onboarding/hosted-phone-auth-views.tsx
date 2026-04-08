@@ -1,6 +1,7 @@
 "use client";
 
 import { LoaderCircleIcon } from "lucide-react";
+import type { FormEvent } from "react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -15,6 +16,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
+import type { HostedPhoneVerificationAttempt } from "./hosted-phone-auth";
 
 export type HostedPhoneAuthMode = "invite" | "public";
 export type HostedPhoneAuthPendingAction = "continue" | "logout" | "send-code" | "verify-code" | null;
@@ -28,31 +30,35 @@ interface HostedPhoneCountryOption {
 }
 
 interface SharedFlowProps {
+  activeAttempt: HostedPhoneVerificationAttempt | null;
   code: string;
   disabled: boolean;
   mode: HostedPhoneAuthMode;
   pendingAction: HostedPhoneAuthPendingAction;
   phoneCountryOptions: HostedPhoneCountryOption[];
   phoneNumber: string;
+  sendCodeDisabled: boolean;
   selectedPhoneCountry: HostedPhoneCountryOption;
   onCodeChange: (value: string) => void;
   onPhoneCountryChange: (code: string) => void;
   onPhoneNumberChange: (value: string) => void;
   onResendCode: () => void;
-  onSendCode: () => void;
+  onSendCode?: () => void;
+  onSubmitPhoneEntry: (event: FormEvent<HTMLFormElement>) => void;
   onUseDifferentNumber: () => void;
   onVerifyCode: () => void;
-  step: "phone" | "code";
 }
 
-interface InviteFlowProps extends SharedFlowProps {
+interface InviteFlowProps extends Omit<SharedFlowProps, "onSendCode"> {
   manualEntryVisible: boolean;
+  onSendCode: () => void;
 }
 
 interface AuthenticatedStateProps {
   body: string;
   description: string;
   disabled: boolean;
+  mode: HostedPhoneAuthMode;
   pendingAction: HostedPhoneAuthPendingAction;
   title: string;
   view: HostedAuthenticatedPhoneAuthView;
@@ -64,9 +70,10 @@ export function HostedInvitePhoneAuthFlow({
   manualEntryVisible,
   ...props
 }: InviteFlowProps) {
-  if (props.step === "code") {
+  if (props.activeAttempt) {
     return (
       <HostedCodeEntryStep
+        verificationPhoneNumberHint={props.activeAttempt.maskedPhoneNumber}
         code={props.code}
         disabled={props.disabled}
         mode={props.mode}
@@ -92,23 +99,24 @@ export function HostedInvitePhoneAuthFlow({
 
   return (
     <HostedPhoneEntryStep
-      disabled={props.disabled}
       mode={props.mode}
       pendingAction={props.pendingAction}
       phoneCountryOptions={props.phoneCountryOptions}
       phoneNumber={props.phoneNumber}
+      sendCodeDisabled={props.sendCodeDisabled}
       selectedPhoneCountry={props.selectedPhoneCountry}
       onPhoneCountryChange={props.onPhoneCountryChange}
       onPhoneNumberChange={props.onPhoneNumberChange}
-      onSendCode={props.onSendCode}
+      onSubmitPhoneEntry={props.onSubmitPhoneEntry}
     />
   );
 }
 
 export function HostedPublicPhoneAuthFlow(props: SharedFlowProps) {
-  if (props.step === "code") {
+  if (props.activeAttempt) {
     return (
       <HostedCodeEntryStep
+        verificationPhoneNumberHint={props.activeAttempt.maskedPhoneNumber}
         code={props.code}
         disabled={props.disabled}
         mode={props.mode}
@@ -123,15 +131,15 @@ export function HostedPublicPhoneAuthFlow(props: SharedFlowProps) {
 
   return (
     <HostedPhoneEntryStep
-      disabled={props.disabled}
       mode={props.mode}
       pendingAction={props.pendingAction}
       phoneCountryOptions={props.phoneCountryOptions}
       phoneNumber={props.phoneNumber}
+      sendCodeDisabled={props.sendCodeDisabled}
       selectedPhoneCountry={props.selectedPhoneCountry}
       onPhoneCountryChange={props.onPhoneCountryChange}
       onPhoneNumberChange={props.onPhoneNumberChange}
-      onSendCode={props.onSendCode}
+      onSubmitPhoneEntry={props.onSubmitPhoneEntry}
     />
   );
 }
@@ -140,6 +148,7 @@ export function HostedAuthenticatedPhoneAuthState({
   body,
   description,
   disabled,
+  mode,
   pendingAction,
   title,
   view,
@@ -168,13 +177,14 @@ export function HostedAuthenticatedPhoneAuthState({
             type="button"
             onClick={onContinue}
             disabled={disabled}
-            size="xl"
+            size="lg"
           >
             Continue signup
           </Button>
           <HostedUseDifferentNumberButton
             disabled={disabled}
             pendingAction={pendingAction}
+            size={mode === "public" ? "lg" : "sm"}
             onClick={onUseDifferentNumber}
           />
         </div>
@@ -191,6 +201,7 @@ export function HostedAuthenticatedPhoneAuthState({
           <HostedUseDifferentNumberButton
             disabled={disabled}
             pendingAction={pendingAction}
+            size={mode === "public" ? "lg" : "sm"}
             onClick={onUseDifferentNumber}
           />
         </div>
@@ -222,7 +233,7 @@ function HostedInviteShortcutStep({
           type="button"
           onClick={onSendCode}
           disabled={disabled}
-          size="xl"
+          size="lg"
           className="w-full"
         >
           {pendingAction === "send-code" ? "Sending code..." : "Send me a code"}
@@ -230,6 +241,7 @@ function HostedInviteShortcutStep({
         <HostedUseDifferentNumberButton
           disabled={disabled}
           pendingAction={pendingAction}
+          size="sm"
           onClick={onUseDifferentNumber}
         />
       </div>
@@ -241,10 +253,12 @@ function HostedUseDifferentNumberButton({
   disabled,
   onClick,
   pendingAction,
+  size,
 }: {
   disabled: boolean;
   onClick: () => void;
   pendingAction: HostedPhoneAuthPendingAction;
+  size: "sm" | "lg";
 }) {
   return (
     <Button
@@ -252,7 +266,7 @@ function HostedUseDifferentNumberButton({
       onClick={onClick}
       disabled={disabled}
       variant="link"
-      size="sm"
+      size={size}
       className="w-full"
     >
       {pendingAction === "logout" ? "Signing out..." : "Use a different number"}
@@ -261,28 +275,28 @@ function HostedUseDifferentNumberButton({
 }
 
 function HostedPhoneEntryStep({
-  disabled,
   mode,
   pendingAction,
   phoneCountryOptions,
   phoneNumber,
+  sendCodeDisabled,
   selectedPhoneCountry,
   onPhoneCountryChange,
   onPhoneNumberChange,
-  onSendCode,
+  onSubmitPhoneEntry,
 }: {
-  disabled: boolean;
   mode: HostedPhoneAuthMode;
   pendingAction: HostedPhoneAuthPendingAction;
   phoneCountryOptions: HostedPhoneCountryOption[];
   phoneNumber: string;
+  sendCodeDisabled: boolean;
   selectedPhoneCountry: HostedPhoneCountryOption;
   onPhoneCountryChange: (code: string) => void;
   onPhoneNumberChange: (value: string) => void;
-  onSendCode: () => void;
+  onSubmitPhoneEntry: (event: FormEvent<HTMLFormElement>) => void;
 }) {
   return (
-    <>
+    <form className="space-y-3" onSubmit={onSubmitPhoneEntry}>
       <div className="space-y-3">
         <Label htmlFor={`hosted-phone-${mode}`}>
           {mode === "invite" ? "Phone number" : "Your phone number"}
@@ -325,6 +339,7 @@ function HostedPhoneEntryStep({
             id={`hosted-phone-${mode}`}
             autoComplete="tel-national"
             inputMode="tel"
+            name="phone-number"
             placeholder={selectedPhoneCountry.placeholder}
             value={phoneNumber}
             onChange={(event) => onPhoneNumberChange(event.currentTarget.value)}
@@ -338,15 +353,16 @@ function HostedPhoneEntryStep({
         ) : null}
       </div>
       <div className="flex flex-wrap gap-3">
-        <Button type="button" onClick={onSendCode} disabled={disabled} size="xl" className="w-full">
+        <Button type="submit" disabled={sendCodeDisabled} size="lg" className="w-full">
           {pendingAction === "send-code" ? "Sending code..." : "Text me a code"}
         </Button>
       </div>
-    </>
+    </form>
   );
 }
 
 function HostedCodeEntryStep({
+  verificationPhoneNumberHint,
   code,
   disabled,
   mode,
@@ -356,6 +372,7 @@ function HostedCodeEntryStep({
   onUseDifferentNumber,
   onVerifyCode,
 }: {
+  verificationPhoneNumberHint: string;
   code: string;
   disabled: boolean;
   mode: HostedPhoneAuthMode;
@@ -393,13 +410,16 @@ function HostedCodeEntryStep({
           onChange={(event) => onCodeChange(event.currentTarget.value)}
           className="h-14 px-4 text-lg md:text-base"
         />
+        <p className="text-sm text-stone-500">
+          We texted the latest code to {verificationPhoneNumberHint}.
+        </p>
       </div>
       <div className="flex flex-wrap gap-3">
         <Button
           type="button"
           onClick={onVerifyCode}
           disabled={disabled}
-          size="xl"
+          size="lg"
           className="w-full"
         >
           {pendingAction === "verify-code" ? "Finishing setup..." : "Verify phone"}
@@ -407,6 +427,7 @@ function HostedCodeEntryStep({
         <HostedUseDifferentNumberButton
           disabled={disabled}
           pendingAction={pendingAction}
+          size={mode === "public" ? "lg" : "sm"}
           onClick={onUseDifferentNumber}
         />
       </div>

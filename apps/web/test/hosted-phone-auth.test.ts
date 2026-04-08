@@ -117,6 +117,10 @@ describe("HostedPhoneAuth", () => {
 
     const markup = renderToStaticMarkup(
       React.createElement(HostedInvitePhoneAuthFlow, {
+        activeAttempt: {
+          maskedPhoneNumber: "*** 2671",
+          phoneNumber: "+14155552671",
+        },
         code: "",
         disabled: false,
         manualEntryVisible: false,
@@ -124,13 +128,14 @@ describe("HostedPhoneAuth", () => {
         pendingAction: null,
         phoneCountryOptions: [{ code: "US", dialCode: "+1", label: "United States", placeholder: "(415) 555-2671" }],
         phoneNumber: "",
+        sendCodeDisabled: false,
         selectedPhoneCountry: { code: "US", dialCode: "+1", label: "United States", placeholder: "(415) 555-2671" },
-        step: "code",
         onCodeChange() {},
         onPhoneCountryChange() {},
         onPhoneNumberChange() {},
         onResendCode() {},
         onSendCode() {},
+        onSubmitPhoneEntry() {},
         onUseDifferentNumber() {},
         onVerifyCode() {},
       }),
@@ -138,6 +143,7 @@ describe("HostedPhoneAuth", () => {
 
     assert.match(markup, /autofocus=""/);
     assert.match(markup, /class="[^"]*h-14[^"]*text-lg[^"]*"/);
+    assert.match(markup, /We texted the latest code to \*\*\* 2671\./);
   });
 
   it("renders invite shortcut actions full width", async () => {
@@ -145,6 +151,7 @@ describe("HostedPhoneAuth", () => {
 
     const markup = renderToStaticMarkup(
       React.createElement(HostedInvitePhoneAuthFlow, {
+        activeAttempt: null,
         code: "",
         disabled: false,
         manualEntryVisible: false,
@@ -152,13 +159,14 @@ describe("HostedPhoneAuth", () => {
         pendingAction: null,
         phoneCountryOptions: [{ code: "US", dialCode: "+1", label: "United States", placeholder: "(415) 555-2671" }],
         phoneNumber: "",
+        sendCodeDisabled: false,
         selectedPhoneCountry: { code: "US", dialCode: "+1", label: "United States", placeholder: "(415) 555-2671" },
-        step: "phone",
         onCodeChange() {},
         onPhoneCountryChange() {},
         onPhoneNumberChange() {},
         onResendCode() {},
         onSendCode() {},
+        onSubmitPhoneEntry() {},
         onUseDifferentNumber() {},
         onVerifyCode() {},
       }),
@@ -168,6 +176,68 @@ describe("HostedPhoneAuth", () => {
     assert.match(markup, /Use a different number/);
     assert.match(markup, /underline-offset-4/);
     assert.equal(markup.match(/w-full/g)?.length ?? 0, 2);
+  });
+
+  it("disables invite manual-entry send-code submit until the phone number is valid", async () => {
+    const { HostedInvitePhoneAuthFlow } = await import("@/src/components/hosted-onboarding/hosted-phone-auth-views");
+
+    const markup = renderToStaticMarkup(
+      React.createElement(HostedInvitePhoneAuthFlow, {
+        activeAttempt: null,
+        code: "",
+        disabled: false,
+        manualEntryVisible: true,
+        mode: "invite",
+        pendingAction: null,
+        phoneCountryOptions: [{ code: "US", dialCode: "+1", label: "United States", placeholder: "(415) 555-2671" }],
+        phoneNumber: "",
+        sendCodeDisabled: true,
+        selectedPhoneCountry: { code: "US", dialCode: "+1", label: "United States", placeholder: "(415) 555-2671" },
+        onCodeChange() {},
+        onPhoneCountryChange() {},
+        onPhoneNumberChange() {},
+        onResendCode() {},
+        onSendCode() {},
+        onSubmitPhoneEntry() {},
+        onUseDifferentNumber() {},
+        onVerifyCode() {},
+      }),
+    );
+
+    assert.match(markup, /Phone number/);
+    assert.match(markup, /Text me a code/);
+    assert.match(markup, /disabled=""/);
+  });
+
+  it("enables invite manual-entry send-code submit once the phone number is valid", async () => {
+    const { HostedInvitePhoneAuthFlow } = await import("@/src/components/hosted-onboarding/hosted-phone-auth-views");
+
+    const markup = renderToStaticMarkup(
+      React.createElement(HostedInvitePhoneAuthFlow, {
+        activeAttempt: null,
+        code: "",
+        disabled: false,
+        manualEntryVisible: true,
+        mode: "invite",
+        pendingAction: null,
+        phoneCountryOptions: [{ code: "US", dialCode: "+1", label: "United States", placeholder: "(415) 555-2671" }],
+        phoneNumber: "4155552671",
+        sendCodeDisabled: false,
+        selectedPhoneCountry: { code: "US", dialCode: "+1", label: "United States", placeholder: "(415) 555-2671" },
+        onCodeChange() {},
+        onPhoneCountryChange() {},
+        onPhoneNumberChange() {},
+        onResendCode() {},
+        onSendCode() {},
+        onSubmitPhoneEntry() {},
+        onUseDifferentNumber() {},
+        onVerifyCode() {},
+      }),
+    );
+
+    assert.match(markup, /Phone number/);
+    assert.match(markup, /Text me a code/);
+    assert.doesNotMatch(markup, /disabled=""/);
   });
 
   it("keeps the public homepage in a manual resume state for authenticated sessions", async () => {
@@ -189,7 +259,107 @@ describe("HostedPhoneAuth", () => {
     assert.match(markup, /You already started signup in this browser/);
     assert.match(markup, /Continue signup/);
     assert.match(markup, /Use a different number/);
+    assert.ok((markup.match(/h-14/g)?.length ?? 0) >= 2);
     assert.doesNotMatch(markup, /Preparing your account/);
+  });
+
+  it("uses tall secondary actions for the public homepage code step", async () => {
+    const { HostedPublicPhoneAuthFlow } = await import("@/src/components/hosted-onboarding/hosted-phone-auth-views");
+
+    const markup = renderToStaticMarkup(
+      React.createElement(HostedPublicPhoneAuthFlow, {
+        activeAttempt: {
+          maskedPhoneNumber: "*** 2671",
+          phoneNumber: "+14155552671",
+        },
+        code: "",
+        disabled: false,
+        mode: "public",
+        pendingAction: null,
+        phoneCountryOptions: [{ code: "US", dialCode: "+1", label: "United States", placeholder: "(415) 555-2671" }],
+        phoneNumber: "4155552671",
+        sendCodeDisabled: false,
+        selectedPhoneCountry: { code: "US", dialCode: "+1", label: "United States", placeholder: "(415) 555-2671" },
+        onCodeChange() {},
+        onPhoneCountryChange() {},
+        onPhoneNumberChange() {},
+        onResendCode() {},
+        onSendCode() {},
+        onSubmitPhoneEntry() {},
+        onUseDifferentNumber() {},
+        onVerifyCode() {},
+      }),
+    );
+
+    assert.match(markup, /Verify phone/);
+    assert.match(markup, /Use a different number/);
+    assert.ok((markup.match(/h-14/g)?.length ?? 0) >= 3);
+    assert.match(markup, /We texted the latest code to \*\*\* 2671\./);
+  });
+
+  it("builds the active verification attempt with a masked phone hint", async () => {
+    const { createHostedPhoneVerificationAttempt } = await import("@/src/components/hosted-onboarding/hosted-phone-auth");
+
+    assert.deepEqual(
+      createHostedPhoneVerificationAttempt("+14155552671"),
+      {
+        maskedPhoneNumber: "*** 2671",
+        phoneNumber: "+14155552671",
+      },
+    );
+  });
+
+  it("prefers the just-submitted phone input over a stale draft value", async () => {
+    const { resolveHostedPhoneSubmission } = await import("@/src/components/hosted-onboarding/hosted-phone-auth");
+
+    assert.deepEqual(
+      resolveHostedPhoneSubmission({
+        countryDialCode: "+1",
+        draftPhoneNumber: "404409252",
+        submittedPhoneNumber: "+1 (404) 409-2523",
+      }),
+      {
+        draftPhoneNumber: "+1 (404) 409-2523",
+        normalizedPhoneNumber: "+14044092523",
+      },
+    );
+  });
+
+  it("keeps invite shortcut resend on the server-backed invite path even after an active attempt exists", async () => {
+    const { resolveHostedPhoneResendTarget } = await import("@/src/components/hosted-onboarding/hosted-phone-auth");
+
+    assert.deepEqual(
+      resolveHostedPhoneResendTarget({
+        inviteCode: "invite-code",
+        manualEntryVisible: false,
+        mode: "invite",
+        phoneVerificationAttempt: {
+          maskedPhoneNumber: "*** 2523",
+          phoneNumber: "+14044092523",
+        },
+      }),
+      { kind: "invite-shortcut" },
+    );
+  });
+
+  it("resends from the active attempt number during manual entry flows", async () => {
+    const { resolveHostedPhoneResendTarget } = await import("@/src/components/hosted-onboarding/hosted-phone-auth");
+
+    assert.deepEqual(
+      resolveHostedPhoneResendTarget({
+        inviteCode: "invite-code",
+        manualEntryVisible: true,
+        mode: "invite",
+        phoneVerificationAttempt: {
+          maskedPhoneNumber: "*** 2523",
+          phoneNumber: "+14044092523",
+        },
+      }),
+      {
+        kind: "active-attempt",
+        phoneNumber: "+14044092523",
+      },
+    );
   });
 
   it("keeps invite-mode authenticated sessions in the manual resume state instead of auto-loading", async () => {

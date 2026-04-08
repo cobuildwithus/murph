@@ -30,7 +30,20 @@ export function normalizePhoneNumberForCountry(
   }
 
   if (normalized.startsWith("+") || normalized.startsWith("00")) {
-    return normalizePhoneNumber(normalized);
+    const explicitNumber = normalizePhoneNumber(normalized);
+
+    if (!explicitNumber) {
+      return null;
+    }
+
+    if (
+      normalizeCountryDialCode(countryDialCode) === "+1"
+      && explicitNumber.startsWith("+1")
+    ) {
+      return /^\+1\d{10}$/u.test(explicitNumber) ? explicitNumber : null;
+    }
+
+    return explicitNumber;
   }
 
   const normalizedDialCode = normalizeCountryDialCode(countryDialCode);
@@ -48,13 +61,23 @@ export function normalizePhoneNumberForCountry(
   const explicitCountryNumber = normalizePhoneNumber(`+${digits}`);
 
   if (explicitCountryNumber && explicitCountryNumber.startsWith(normalizedDialCode)) {
+    if (normalizedDialCode === "+1") {
+      return /^\+1\d{10}$/u.test(explicitCountryNumber) ? explicitCountryNumber : null;
+    }
+
     return explicitCountryNumber;
   }
 
+  if (normalizedDialCode === "+1") {
+    if (digits.length === 11 && digits.startsWith("1")) {
+      return normalizePhoneNumber(`+${digits}`);
+    }
+
+    return digits.length === 10 ? normalizePhoneNumber(`${normalizedDialCode}${digits}`) : null;
+  }
+
   const nationalDigits =
-    normalizedDialCode === "+1" && digits.length === 11 && digits.startsWith("1")
-      ? digits.slice(1)
-      : digits.replace(/^0+/u, "");
+    digits.replace(/^0+/u, "");
 
   if (!nationalDigits) {
     return null;
