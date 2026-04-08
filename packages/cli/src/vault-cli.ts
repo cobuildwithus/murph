@@ -4,9 +4,11 @@ import {
   createIntegratedVaultServices,
   type VaultServices,
 } from '@murphai/vault-usecases'
+import { loadRuntimeModule } from '@murphai/vault-usecases/runtime'
 import { createAssistantFoodAutoLogHooks } from '@murphai/assistant-engine/assistant-cron'
 import {
   createIntegratedInboxServices,
+  type InboxImessageRuntimeModule,
   type InboxServices,
 } from '@murphai/inbox-services'
 import { incurErrorBridge } from './incur-error-bridge.js'
@@ -33,7 +35,10 @@ export function createVaultCli(
   services: VaultServices = createIntegratedVaultServices({
     foodAutoLogHooks: createAssistantFoodAutoLogHooks(),
   }),
-  inboxServices: InboxServices = createIntegratedInboxServices(),
+  inboxServices: InboxServices = createIntegratedInboxServices({
+    loadInboxImessageModule: () =>
+      loadRuntimeModule<InboxImessageRuntimeModule>('@murphai/inboxd-imessage'),
+  }),
 ): Cli.Cli {
   const cli = Cli.create('vault-cli', {
     description: CLI_DESCRIPTION,

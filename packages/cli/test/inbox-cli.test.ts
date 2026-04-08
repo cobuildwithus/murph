@@ -230,7 +230,7 @@ async function listNamedFiles(root: string, name: string): Promise<string[]> {
   }
 }
 
-function createFakeInboxRuntimeModule(input?: {
+type FakeInboxRuntimeModuleInput = {
   onCreateImessageConnector?(options: {
     id?: string
     accountId?: string | null
@@ -293,7 +293,11 @@ function createFakeInboxRuntimeModule(input?: {
     }
   }): Promise<void> | void
   rebuiltCaptureCount?: number
-}): any {
+}
+
+function createFakeInboxCoreRuntimeModule(
+  input?: Omit<FakeInboxRuntimeModuleInput, 'onCreateImessageConnector'>,
+): any {
   const cursorStore = new Map<string, Record<string, unknown> | null>()
   const runtime = {
     close() {},
@@ -347,32 +351,6 @@ function createFakeInboxRuntimeModule(input?: {
           return { deduped: false }
         },
         close() {},
-      }
-    },
-    createImessageConnector(options: {
-      id?: string
-      accountId?: string | null
-      includeOwnMessages?: boolean
-      backfillLimit?: number
-    }) {
-      input?.onCreateImessageConnector?.(options)
-      return {
-        id: options.id ?? 'imessage:self',
-        source: 'imessage',
-        accountId: options.accountId ?? null,
-        kind: 'poll' as const,
-        capabilities: {
-          attachments: true,
-          backfill: true,
-          ownMessages: options.includeOwnMessages,
-          watch: true,
-          webhooks: false,
-        },
-        async backfill() {
-          return null
-        },
-        async watch() {},
-        async close() {},
       }
     },
     createTelegramPollConnector(options: {
@@ -448,9 +426,6 @@ function createFakeInboxRuntimeModule(input?: {
         async close() {},
       }
     },
-    async loadImessageKitDriver() {
-      return createFakeImessageDriver({ photoPath: '' })
-    },
     async rebuildRuntimeFromVault() {},
     async runInboxDaemon(payload: {
       pipeline: {
@@ -513,6 +488,49 @@ function createFakeInboxRuntimeModule(input?: {
         payload.runtime.close()
       }
     },
+  }
+}
+
+function createFakeImessageRuntimeModule(
+  input?: Pick<FakeInboxRuntimeModuleInput, 'onCreateImessageConnector'>,
+): any {
+  return {
+    createImessageConnector(options: {
+      id?: string
+      accountId?: string | null
+      includeOwnMessages?: boolean
+      backfillLimit?: number
+    }) {
+      input?.onCreateImessageConnector?.(options)
+      return {
+        id: options.id ?? 'imessage:self',
+        source: 'imessage',
+        accountId: options.accountId ?? null,
+        kind: 'poll' as const,
+        capabilities: {
+          attachments: true,
+          backfill: true,
+          ownMessages: options.includeOwnMessages,
+          watch: true,
+          webhooks: false,
+        },
+        async backfill() {
+          return null
+        },
+        async watch() {},
+        async close() {},
+      }
+    },
+    async loadImessageKitDriver() {
+      return createFakeImessageDriver({ photoPath: '' })
+    },
+  }
+}
+
+function createFakeInboxRuntimeModule(input?: FakeInboxRuntimeModuleInput): any {
+  return {
+    ...createFakeInboxCoreRuntimeModule(input),
+    ...createFakeImessageRuntimeModule(input),
   }
 }
 
@@ -2215,28 +2233,33 @@ test.sequential('run forwards the configured connector id and account namespace 
   let seenDaemonConnectorId: string | null = null
   let seenDaemonConnectorAccountId: string | null = null
   const fakeParsers = createFakeParsersRuntimeModule()
+  const inboxCoreModule = createFakeInboxCoreRuntimeModule({
+    onRunInboxDaemon() {
+      throw new Error('expected parser-aware daemon path')
+    },
+    onRunInboxDaemonWithParsers({ connectors, runtime }) {
+      seenDaemonConnectorId = connectors[0]?.id ?? null
+      seenDaemonConnectorAccountId = connectors[0]?.accountId ?? null
+      runtime.setCursor('imessage', connectors[0]?.accountId ?? null, {
+        externalId: 'daemon-cursor',
+      })
+    },
+  })
+  const imessageModule = createFakeImessageRuntimeModule({
+    onCreateImessageConnector(options) {
+      createdConnectorId = options.id ?? null
+      createdConnectorAccountId = options.accountId ?? null
+    },
+  })
+  assert.equal('createImessageConnector' in inboxCoreModule, false)
+  assert.equal('loadImessageKitDriver' in inboxCoreModule, false)
   const services = createIntegratedInboxServices({
     getHomeDirectory: () => fixture.homeRoot,
     getPid: () => 4242,
     getPlatform: () => 'darwin',
     loadCoreModule: loadBuiltCoreRuntime,
-    loadInboxModule: async () =>
-      createFakeInboxRuntimeModule({
-        onCreateImessageConnector(options) {
-          createdConnectorId = options.id ?? null
-          createdConnectorAccountId = options.accountId ?? null
-        },
-        onRunInboxDaemon() {
-          throw new Error('expected parser-aware daemon path')
-        },
-        onRunInboxDaemonWithParsers({ connectors, runtime }) {
-          seenDaemonConnectorId = connectors[0]?.id ?? null
-          seenDaemonConnectorAccountId = connectors[0]?.accountId ?? null
-          runtime.setCursor('imessage', connectors[0]?.accountId ?? null, {
-            externalId: 'daemon-cursor',
-          })
-        },
-      }),
+    loadInboxModule: async () => inboxCoreModule,
+    loadInboxImessageModule: async () => imessageModule,
     loadParsersModule: async () => fakeParsers,
   })
 
@@ -2284,21 +2307,48 @@ test.sequential('run emits foreground connector events for backfill summaries an
       attachments?: Array<unknown>
     }
   }> = []
-  const baseInboxModule = createFakeInboxRuntimeModule()
+  const baseInboxCoreModule = createFakeInboxCoreRuntimeModule()
+  const baseImessageModule = createFakeImessageRuntimeModule()
   const services = createIntegratedInboxServices({
     getHomeDirectory: () => fixture.homeRoot,
     getPid: () => 4242,
     getPlatform: () => 'darwin',
     loadCoreModule: loadBuiltCoreRuntime,
     loadInboxModule: async () => ({
-      ...baseInboxModule,
+      ...baseInboxCoreModule,
+      async runInboxDaemonWithParsers({ connectors, runtime, signal, vaultRoot }) {
+        const connector = connectors[0]
+        assert.ok(connector)
+        try {
+          await connector.backfill?.(
+            null,
+            async () => ({
+              captureId: 'cap-backfill',
+              deduped: false,
+            }),
+          )
+          await connector.watch?.(
+            null,
+            async () => ({
+              captureId: 'cap-watch',
+              deduped: false,
+            }),
+            signal,
+          )
+        } finally {
+          runtime.close()
+        }
+      },
+    }),
+    loadInboxImessageModule: async () => ({
+      ...baseImessageModule,
       createImessageConnector(options: {
         id?: string
         accountId?: string | null
         includeOwnMessages?: boolean
         backfillLimit?: number
       }) {
-        const connector = baseInboxModule.createImessageConnector(options)
+        const connector = baseImessageModule.createImessageConnector(options)
         return {
           ...connector,
           async backfill(
@@ -2376,29 +2426,6 @@ test.sequential('run emits foreground connector events for backfill summaries an
               },
             )
           },
-        }
-      },
-      async runInboxDaemonWithParsers({ connectors, runtime, signal, vaultRoot }) {
-        const connector = connectors[0]
-        assert.ok(connector)
-        try {
-          await connector.backfill?.(
-            null,
-            async () => ({
-              captureId: 'cap-backfill',
-              deduped: false,
-            }),
-          )
-          await connector.watch?.(
-            null,
-            async () => ({
-              captureId: 'cap-watch',
-              deduped: false,
-            }),
-            signal,
-          )
-        } finally {
-          runtime.close()
         }
       },
     }),
@@ -2504,12 +2531,12 @@ test.sequential('run on Linux skips unsupported iMessage connectors and continue
     source?: string
     phase?: string
   }> = []
-  const baseInboxModule = createFakeInboxRuntimeModule()
   const darwinServices = createIntegratedInboxServices({
     getHomeDirectory: () => fixture.homeRoot,
     getPlatform: () => 'darwin',
     loadCoreModule: loadBuiltCoreRuntime,
-    loadInboxModule: async () => baseInboxModule,
+    loadInboxModule: async () => createFakeInboxCoreRuntimeModule(),
+    loadInboxImessageModule: async () => createFakeImessageRuntimeModule(),
   })
   const linuxServices = createIntegratedInboxServices({
     getHomeDirectory: () => fixture.homeRoot,
@@ -2517,7 +2544,7 @@ test.sequential('run on Linux skips unsupported iMessage connectors and continue
     getPlatform: () => 'linux',
     loadCoreModule: loadBuiltCoreRuntime,
     loadInboxModule: async () => ({
-      ...baseInboxModule,
+      ...createFakeInboxCoreRuntimeModule(),
       createTelegramPollConnector(options: {
         id?: string
         accountId?: string | null
@@ -2634,6 +2661,7 @@ test.sequential('run on Linux skips unsupported iMessage connectors and continue
         }
       },
     }),
+    loadInboxImessageModule: async () => createFakeImessageRuntimeModule(),
     loadTelegramDriver: async () => ({
       async getMe() {
         return {}
@@ -2708,18 +2736,19 @@ test.sequential('run on Linux skips unsupported iMessage connectors and continue
 test.sequential('run on Linux fails cleanly when only unsupported iMessage connectors are enabled', async () => {
   const fixture = await makeVaultFixture('murph-inbox-run-linux-imessage-only')
   const events: Array<{ type: string; connectorId?: string; phase?: string }> = []
-  const baseInboxModule = createFakeInboxRuntimeModule()
   const darwinServices = createIntegratedInboxServices({
     getHomeDirectory: () => fixture.homeRoot,
     getPlatform: () => 'darwin',
     loadCoreModule: loadBuiltCoreRuntime,
-    loadInboxModule: async () => baseInboxModule,
+    loadInboxModule: async () => createFakeInboxCoreRuntimeModule(),
+    loadInboxImessageModule: async () => createFakeImessageRuntimeModule(),
   })
   const linuxServices = createIntegratedInboxServices({
     getHomeDirectory: () => fixture.homeRoot,
     getPlatform: () => 'linux',
     loadCoreModule: loadBuiltCoreRuntime,
-    loadInboxModule: async () => baseInboxModule,
+    loadInboxModule: async () => createFakeInboxCoreRuntimeModule(),
+    loadInboxImessageModule: async () => createFakeImessageRuntimeModule(),
     loadParsersModule: async () => createFakeParsersRuntimeModule(),
   })
 
