@@ -20,11 +20,6 @@
       "types": "./dist/id-families.d.ts",
       "import": "./dist/id-families.js",
       "default": "./dist/id-families.js"
-    },
-    "./search": {
-      "types": "./dist/search.d.ts",
-      "import": "./dist/search.js",
-      "default": "./dist/search.js"
     }
   },
   "files": [

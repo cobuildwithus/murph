@@ -19,10 +19,6 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
-    "./device-providers": {
-      "types": "./dist/device-providers/index.d.ts",
-      "default": "./dist/device-providers/index.js"
-    },
     "./device-providers/provider-descriptors": {
       "types": "./dist/device-providers/provider-descriptors.d.ts",
       "default": "./dist/device-providers/provider-descriptors.js"

@@ -22,7 +22,7 @@ import {
   incrementHostedLinqInboundDailyState,
   incrementHostedLinqOutboundDailyState,
 } from "./linq-daily-state";
-import { minimizeHostedLinqMessageReceivedEvent } from "./webhook-event-snapshots";
+import { minimizeLinqMessageReceivedEvent } from "@murphai/messaging-ingress";
 import {
   createHostedPhoneLookupKey,
   sanitizeHostedLinqEventForStorage,
@@ -117,7 +117,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
           dispatch: buildHostedExecutionLinqMessageReceivedDispatch({
             eventId: input.event.event_id,
             linqEvent: sanitizeHostedLinqEventForStorage(
-              minimizeHostedLinqMessageReceivedEvent(messageEvent),
+              minimizeLinqMessageReceivedEvent(messageEvent),
               {
                 omitRecipientPhone: true,
               },

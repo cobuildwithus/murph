@@ -105,6 +105,24 @@ async function verifyWorkspacePackageExports(failures) {
         );
       }
 
+      if (
+        packageJson.name === "@murphai/importers"
+        && exportKey === "./device-providers"
+      ) {
+        failures.push(
+          `${path.relative(repoRoot, packageJsonPath)} declares ${JSON.stringify(exportKey)} as a public entrypoint; cross-package wearable metadata must stay on @murphai/importers/device-providers/provider-descriptors instead of leaking the full device-provider implementation barrel.`,
+        );
+      }
+
+      if (
+        packageJson.name === "@murphai/query"
+        && exportKey === "./search"
+      ) {
+        failures.push(
+          `${path.relative(repoRoot, packageJsonPath)} declares ${JSON.stringify(exportKey)} as a public entrypoint; lexical vault search already lives on the @murphai/query root surface, so the internal search module should not leak as a second boundary.`,
+        );
+      }
+
       if (exportKey === "./testing") {
         failures.push(
           `${path.relative(repoRoot, packageJsonPath)} declares ${JSON.stringify(exportKey)} as a public entrypoint; test helpers must stay package-local or use package-local Vitest aliases instead of leaking through the workspace package surface.`,
@@ -131,6 +149,7 @@ async function verifyAssistantEnginePublicSourceSurface(failures) {
     "./assistant-cli-access.js",
     "./assistant-cli-tools.js",
     "./assistant-vault-paths.js",
+    "./process-kill.js",
   ]) {
     if (sourceReexportsSpecifier(indexSource, specifier)) {
       failures.push(
@@ -239,6 +258,7 @@ async function verifyWorkspaceImports(failures) {
     for (const specifier of extractModuleSpecifiers(source)) {
       const importPolicyFailure = verifyWorkspaceImportPolicy({
         filePath,
+        source,
         sourceMember,
         specifier,
       });
@@ -354,6 +374,7 @@ function workspacePackageAllowsRootSpecifier(packageJson) {
 
 function verifyWorkspaceImportPolicy({
   filePath,
+  source,
   sourceMember,
   specifier,
 }) {
@@ -408,6 +429,28 @@ function verifyWorkspaceImportPolicy({
     && filePath.includes(`${path.sep}apps${path.sep}cloudflare${path.sep}src${path.sep}`)
   ) {
     return `${path.relative(repoRoot, filePath)} imports ${JSON.stringify(specifier)} directly; apps/cloudflare must depend on @murphai/assistant-runtime or another hosted-runtime owner surface instead of lower local assistant owner packages.`;
+  }
+
+  if (
+    specifier === "@murphai/importers"
+    && sourceMember !== "packages/importers"
+    && importsNamedBindingsFromSpecifier(source, specifier, [
+      "GARMIN_DEVICE_PROVIDER_DESCRIPTOR",
+      "OURA_DEVICE_PROVIDER_DESCRIPTOR",
+      "WHOOP_DEVICE_PROVIDER_DESCRIPTOR",
+      "defaultDeviceProviderDescriptors",
+      "createNamedDeviceProviderRegistry",
+      "resolveDeviceProviderDescriptor",
+      "resolveDeviceProviderSourcePriority",
+      "requireDeviceProviderOAuthDescriptor",
+      "requireDeviceProviderSyncDescriptor",
+      "requireDeviceProviderWebhookDescriptor",
+      "DeviceProviderDescriptor",
+      "DeviceProviderMetricFamily",
+      "NamedDeviceProviderRegistry",
+    ])
+  ) {
+    return `${path.relative(repoRoot, filePath)} imports provider-descriptor metadata from ${JSON.stringify(specifier)}; workspace consumers must use @murphai/importers/device-providers/provider-descriptors so they do not depend on the full device-provider barrel.`;
   }
 
   return null;
@@ -541,6 +584,7 @@ function isAssistantEngineInternalHelperExport(exportKey) {
   return (
     exportKey === "./assistant-cli-access"
     || exportKey === "./assistant-cli-tools"
+    || exportKey === "./process-kill"
     || exportKey === "./health-registry-command-metadata"
     || exportKey === "./inbox-app/types"
     || exportKey === "./inbox-services/connectors"
@@ -555,6 +599,17 @@ function isAssistantEngineInternalHelperExport(exportKey) {
 function sourceReexportsSpecifier(source, specifier) {
   return new RegExp(
     `^\\s*export\\s+(?:\\*|\\{[^}]+\\})\\s+from\\s+["']${escapeRegExp(specifier)}["']`,
+    "mu",
+  ).test(source);
+}
+
+function importsNamedBindingsFromSpecifier(source, specifier, bindingNames) {
+  const bindingPattern = bindingNames
+    .map((name) => escapeRegExp(name))
+    .join("|");
+
+  return new RegExp(
+    String.raw`^\s*import\s+type\s*\{[^}]*\b(?:${bindingPattern})\b[^}]*\}\s+from\s+["']${escapeRegExp(specifier)}["']|^\s*import\s*\{[^}]*\b(?:${bindingPattern})\b[^}]*\}\s+from\s+["']${escapeRegExp(specifier)}["']`,
     "mu",
   ).test(source);
 }
