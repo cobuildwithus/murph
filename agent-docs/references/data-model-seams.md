@@ -252,6 +252,43 @@ The effect owner is unclear because the table itself tries to own every variant 
 **Main refactor risk:** do not use this cleanup to reintroduce raw webhook event blobs or to hide fields that the retry/idempotency logic actually needs for indexed lookup.
 Preserve the privacy-minimized common fields, and only move the effect-specific remainder.
 
+#### 4. Return hosted-member lookup results from the slice that actually matched
+
+**Seam:** `apps/web/src/lib/hosted-onboarding/hosted-member-identity-store.ts` (`findHostedMemberByPrivyUserId`, `findHostedMemberByPhoneLookupKey`, `findHostedMemberByPhoneNumber`, `findHostedMemberByWalletAddress`, `readHostedMemberIdentity`), `apps/web/src/lib/hosted-onboarding/hosted-member-billing-store.ts` (`findHostedMemberByStripeCustomerId`, `findHostedMemberByStripeSubscriptionId`, `readHostedMemberStripeBillingRef`), `apps/web/src/lib/hosted-onboarding/hosted-member-routing-store.ts` (`findHostedMemberByTelegramUserId`, `findHostedMemberByTelegramUserLookupKey`), `apps/web/src/lib/hosted-onboarding/member-identity-service.ts` (`findHostedMemberForPrivyIdentity`, `refreshHostedMemberForPhone`, `reconcileHostedPrivyIdentityOnMember`), `apps/web/src/lib/hosted-onboarding/billing-service.ts` (`ensureHostedStripeCustomer`)
+
+The slice lookup stores already know which identity, routing, or billing binding matched, but most of them return only `HostedMember` or a tiny ad hoc snapshot.
+That throws away the slice-owned state that made the match, so callers immediately fan back out into follow-up reads or reconstruct the match set themselves.
+`findHostedMemberForPrivyIdentity(...)` is the clearest example: it runs three separate identity lookups and dedupes on `HostedMember.id`, while `refreshHostedMemberForPhone(...)` and `ensureHostedStripeCustomer(...)` do a lookup and then a second read to recover the slice state they actually care about.
+
+**Current cost:** simple operations require extra orchestration because the lookup owner is not allowed to return its own slice result.
+One more auth, billing, or routing use case is likely to add another round of lookup-then-read or another ad hoc partial snapshot type.
+
+**Simpler target:** let each specialized store own a nested lookup result such as `HostedMemberIdentityLookup = { core, identity, matchedBy }`, `HostedMemberBillingLookup = { core, billingRef, matchedBy }`, and `HostedMemberRoutingLookup = { core, routing, matchedBy }`.
+Keep `readHostedMemberSnapshot(...)` as the full composition seam, but let the lookup functions that already resolve a blind index or stable binding return the matched slice and the core row together in one read.
+That keeps slice ownership explicit without flattening the hosted member back into a wide aggregate.
+
+**Main refactor risk:** do not answer this by reintroducing one wide `HostedMemberAggregate` or by exposing raw encrypted columns/lookup-key internals outside the slice owners.
+The lookup result should stay nested and privacy-minimized: matched slice plus core state, not a second pre-cutover wide row.
+
+#### 5. Normalize hosted execution dispatch lifecycle around one cross-boundary outcome owner
+
+**Seam:** `packages/hosted-execution/src/contracts.ts` (`HostedExecutionEventDispatchState`, `HostedExecutionDispatchStateSnapshot`, `resolveHostedExecutionDispatchOutcomeState`), `apps/cloudflare/src/user-runner/runner-queue-store.ts` (`readEventState`), `apps/cloudflare/src/user-runner/types.ts` (`RunnerStateRecord`, `toUserStatus`), `apps/web/prisma/schema.prisma` (`ExecutionOutbox.status`), `apps/web/src/lib/hosted-execution/outbox.ts` (`resolveHostedExecutionDeliveryOutcome`, `isHostedExecutionOutboxPayloadSettled`)
+
+A single hosted dispatch currently moves through three overlapping state models.
+The web outbox has transport-local Postgres statuses (`queued`, `dispatching`, `dispatched`, `delivery_failed`), the Cloudflare queue reconstructs event presence from `pending`/`consumed`/`backpressured`/`poisoned`, and the shared hosted-execution contract exposes the public outcome vocabulary (`queued`, `duplicate_pending`, `duplicate_consumed`, `backpressured`, `completed`, `poisoned`).
+Simple questions like “is this event really done?” or “should web retry?” require translation across all three.
+
+**Current cost:** adding one more dispatch outcome or changing duplicate semantics would require coordinated edits in the shared contract, Cloudflare queue projection, and web outbox mapper.
+The current shape also collapses distinct runner outcomes back into `ExecutionOutboxStatus.dispatched`, which makes the transport row less useful as a source of truth once the handoff succeeds.
+
+**Simpler target:** keep `HostedExecutionEventDispatchState` as the only cross-boundary outcome vocabulary, and keep the Postgres outbox status transport-local: lease/retry/handoff only.
+Persist the last or terminal hosted dispatch outcome explicitly using the shared union instead of collapsing everything into `dispatched`, and let the Cloudflare queue surface that same shared outcome directly rather than making downstream callers reason from raw presence booleans.
+This would reduce the concept count without weakening the web/Cloudflare trust boundary.
+
+**Main refactor risk:** do not collapse transport lifecycle and runner outcome into one enum.
+Web still needs local claim/retry state, and Cloudflare still needs queue-internal scheduling detail.
+If the cleanup is done poorly, the system could lose the `duplicate_pending` versus `duplicate_consumed` distinction or make retry policy depend on Cloudflare-specific storage details.
+
 ### Keep as-is
 
 #### A. Keep health registry taxonomy, projection metadata, and command metadata owned by contracts
@@ -277,3 +314,29 @@ The hosted-execution package owns the real payload/storage model (`HostedExecuti
 Web does not redefine inline-vs-reference payload semantics; it just adapts the shared owner to Prisma.
 
 **Main failure mode if changed poorly:** moving the payload model back into web or letting Prisma types leak into the shared hosted-execution package would recreate a cross-layer contract fork and make Cloudflare/web rollouts harder to keep aligned.
+
+#### C. Keep current-profile document ownership in contracts, canonical materialization in core, and fallback resolution in query
+
+**Seam:** `packages/contracts/src/current-profile.ts` (`buildCurrentProfileDocument`, `CurrentProfileDocument`), `packages/core/src/profile/storage.ts` (`buildCurrentProfileMarkdown`, `stageCurrentProfileMaterialization`), `packages/query/src/health/current-profile-resolution.ts` (`resolveCurrentProfileDocument`, `resolveCurrentProfileProjection`), `packages/query/src/health/projectors/profile.ts` (`materializeCurrentProfileDocumentFromSnapshotEntity`)
+
+This seam is already layered in a composable way.
+Contracts own the current-profile document/frontmatter contract, core owns writing and rebuilding the canonical `bank/profile/current.md` materialization from the latest snapshot, and query owns the stale-document fallback logic it needs when the materialized file lags behind the latest snapshot.
+Those are three different responsibilities, but they currently point at one document owner instead of restating the same record shape.
+
+**Why keep it:** the current split preserves the canonical-write boundary while still letting query fall back to snapshot-derived materialization without becoming a second document owner.
+It is a good example of a layered model seam where the owner and the adapters are already clear.
+
+**Main failure mode if changed poorly:** moving fallback logic into core or letting query redefine the current-profile document shape would blur the write/read boundary and reintroduce parallel representations of the same document contract.
+
+#### D. Keep hosted execution event, builder, and parser ownership in `@murphai/hosted-execution`
+
+**Seam:** `packages/hosted-execution/src/contracts.ts` (`HostedExecutionEvent`, `HostedExecutionDispatchRequest`), `packages/hosted-execution/src/builders.ts`, `packages/hosted-execution/src/parsers.ts`, `apps/web/src/lib/hosted-onboarding/member-activation.ts`, `apps/web/src/lib/hosted-share/shared.ts`, `apps/web/src/lib/device-sync/hosted-dispatch.ts`, `packages/assistant-runtime/src/hosted-runtime/events.ts`
+
+This is another seam that is already simple enough.
+The hosted-execution package owns the event kind vocabulary, the request shape, the shared builders, and the boundary parsers.
+Web composes event ids or source-specific reason mapping around those builders, and assistant-runtime consumes the shared union in one place when it switches on dispatch kinds.
+
+**Why keep it:** adding a new hosted dispatch event is already localized to the shared transport owner plus the layer-local handler that actually uses it.
+The event model is not being restated independently in web, Cloudflare, and assistant-runtime.
+
+**Main failure mode if changed poorly:** moving event construction or parsing back into web or assistant-runtime would recreate the exact parallel-representation drift that other review findings are trying to remove.
