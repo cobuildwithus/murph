@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
   applyGatewayProjectionSnapshotToEventLog,
@@ -8,7 +8,9 @@ import {
   createGatewayOutboxMessageId,
   diffGatewayProjectionSnapshots,
   fetchGatewayAttachmentsFromSnapshot,
+  getGatewayConversationFromSnapshot,
   listGatewayConversationsFromSnapshot,
+  listGatewayOpenPermissionsFromSnapshot,
   gatewayProjectionSnapshotSchema,
   pollGatewayEventLogState,
   readGatewayConversationSessionToken,
@@ -207,6 +209,10 @@ function buildProjectionSnapshots() {
   }
 }
 
+afterEach(() => {
+  vi.restoreAllMocks()
+})
+
 describe('@murphai/gateway-core snapshot, event-log, and barrel behavior', () => {
   it('lists conversations with derived title controls and search filtering', () => {
     const { next } = buildProjectionSnapshots()
@@ -264,6 +270,51 @@ describe('@murphai/gateway-core snapshot, event-log, and barrel behavior', () =>
     expect(paged.nextCursor).toBeNull()
   })
 
+  it('reads conversations and permissions by session while rejecting invalid runtime ids', () => {
+    const { archive, next, primary, primaryNewestMessageId } = buildProjectionSnapshots()
+
+    const equivalentPrimarySessionKey = createGatewayConversationSessionKey(
+      readGatewayConversationSessionToken(primary.sessionKey),
+    )
+
+    expect(
+      getGatewayConversationFromSnapshot(next, {
+        sessionKey: equivalentPrimarySessionKey,
+      }),
+    ).toMatchObject({
+      lastMessagePreview: 'Need help',
+      sessionKey: primary.sessionKey,
+      title: 'Alice from Telegram',
+    })
+    expect(
+      getGatewayConversationFromSnapshot(next, {
+        sessionKey: createGatewayConversationSessionKey('route-missing'),
+      }),
+    ).toBeNull()
+
+    expect(
+      listGatewayOpenPermissionsFromSnapshot(next, {
+        sessionKey: equivalentPrimarySessionKey,
+      }).map((permission) => permission.requestId),
+    ).toEqual([])
+
+    const previousPermissions = listGatewayOpenPermissionsFromSnapshot(buildProjectionSnapshots().previous)
+    expect(previousPermissions.map((permission) => permission.requestId)).toEqual(['perm-primary'])
+
+    expect(() =>
+      readGatewayMessagesFromSnapshot(next, {
+        afterMessageId: primaryNewestMessageId,
+        sessionKey: archive.sessionKey,
+      }),
+    ).toThrow(/Gateway message id did not belong to the requested session key\./u)
+
+    expect(() =>
+      getGatewayConversationFromSnapshot(next, {
+        sessionKey: 'not-a-session-key',
+      }),
+    ).toThrow(/Gateway opaque id is invalid\./u)
+  })
+
   it('deduplicates attachment lookups and rejects cross-session attachment reads', () => {
     const { archive, attachmentId, next, primary } = buildProjectionSnapshots()
 
@@ -282,6 +333,19 @@ describe('@murphai/gateway-core snapshot, event-log, and barrel behavior', () =>
         sessionKey: archive.sessionKey,
       }),
     ).toThrow(/Gateway attachment id did not belong to the requested session key\./u)
+
+    expect(
+      fetchGatewayAttachmentsFromSnapshot(next, {
+        messageId: next.messages[0].messageId,
+      }).map((attachment) => attachment.attachmentId),
+    ).toEqual([attachmentId])
+
+    expect(() =>
+      fetchGatewayAttachmentsFromSnapshot(next, {
+        messageId: next.messages[0].messageId,
+        sessionKey: archive.sessionKey,
+      }),
+    ).toThrow(/Gateway message id did not belong to the requested session key\./u)
   })
 
   it('diffs projection changes and applies them to the event log with retention', () => {
@@ -422,5 +486,92 @@ describe('@murphai/gateway-core snapshot, event-log, and barrel behavior', () =>
     expect(sleepCalls).toEqual([25])
     expect(waited.events).toHaveLength(1)
     expect(waited.events[0].cursor).toBe(1)
+  })
+
+  it('returns the current cursor when polling finds no matching events', () => {
+    const { next, primary } = buildProjectionSnapshots()
+    const equivalentPrimarySessionKey = createGatewayConversationSessionKey(
+      readGatewayConversationSessionToken(primary.sessionKey),
+    )
+
+    const state: GatewayEventLogState = {
+      events: [
+        {
+          createdAt: '2026-04-08T10:00:00.000Z',
+          cursor: 3,
+          kind: 'conversation.updated',
+          messageId: null,
+          permissionRequestId: null,
+          schema: 'murph.gateway-event.v1',
+          sessionKey: primary.sessionKey,
+          summary: 'Alice from Telegram',
+        },
+      ],
+      nextCursor: 3,
+      snapshot: next,
+    }
+
+    expect(
+      pollGatewayEventLogState(state, {
+        cursor: 10,
+        kinds: ['permission.requested'],
+        sessionKey: equivalentPrimarySessionKey,
+      }),
+    ).toEqual({
+      events: [],
+      live: true,
+      nextCursor: 10,
+    })
+  })
+
+  it('stops waiting at the timeout boundary and clamps sleep to the remaining deadline', async () => {
+    let now = 1_000
+    vi.spyOn(Date, 'now').mockImplementation(() => now)
+
+    const pollCalls: GatewayPollEventsInput[] = []
+    const sleepCalls: number[] = []
+
+    const waited = await waitForGatewayEventsByPolling(
+      async (input) => {
+        pollCalls.push(input)
+        return {
+          events: [],
+          live: true,
+          nextCursor: 4,
+        }
+      },
+      {
+        cursor: 4,
+        timeoutMs: 50,
+      },
+      {
+        intervalMs: 500,
+        sleep: async (ms) => {
+          sleepCalls.push(ms)
+          now += ms
+        },
+      },
+    )
+
+    expect(pollCalls).toEqual([
+      {
+        cursor: 4,
+        kinds: [],
+        limit: 50,
+        sessionKey: null,
+      },
+      {
+        cursor: 4,
+        kinds: [],
+        limit: 50,
+        sessionKey: null,
+      },
+    ])
+    expect(sleepCalls).toEqual([50])
+    expect(waited).toEqual({
+      events: [],
+      live: true,
+      nextCursor: 4,
+    })
   })
 })

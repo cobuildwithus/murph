@@ -7,7 +7,10 @@ import {
   gatewayConversationSchema,
   gatewayListConversationsInputSchema,
   gatewayPollEventsResultSchema,
+  gatewayRespondToPermissionInputSchema,
   gatewaySendMessageResultSchema,
+  gatewaySendMessageInputSchema,
+  gatewayWaitForEventsInputSchema,
 } from '../src/contracts.ts'
 import {
   createGatewayInvalidRuntimeIdError,
@@ -102,6 +105,46 @@ test('gateway contract schemas apply their current defaults', () => {
     queued: false,
     sessionKey: 'session_123',
   })
+
+  assert.deepEqual(
+    gatewayWaitForEventsInputSchema.parse({
+      kinds: ['message.created'],
+    }),
+    {
+      cursor: 0,
+      kinds: ['message.created'],
+      limit: 50,
+      sessionKey: null,
+      timeoutMs: 30_000,
+    },
+  )
+
+  assert.deepEqual(
+    gatewaySendMessageInputSchema.parse({
+      clientRequestId: '  req_1  ',
+      replyToMessageId: '  msg_1  ',
+      sessionKey: 'session_123',
+      text: 'hello',
+    }),
+    {
+      clientRequestId: '  req_1  ',
+      replyToMessageId: '  msg_1  ',
+      sessionKey: 'session_123',
+      text: 'hello',
+    },
+  )
+
+  assert.deepEqual(
+    gatewayRespondToPermissionInputSchema.parse({
+      decision: 'approve',
+      requestId: 'perm_1',
+    }),
+    {
+      decision: 'approve',
+      note: null,
+      requestId: 'perm_1',
+    },
+  )
 })
 
 test('route helpers preserve normalized conversation state and reply inference', () => {
@@ -248,6 +291,56 @@ test('route helpers preserve normalized conversation state and reply inference',
       threadId: 'thread_5',
     }),
     false,
+  )
+
+  assert.equal(
+    resolveGatewayConversationRouteKey({
+      channel: 'sms',
+      participantId: 'actor direct',
+      threadId: 'thread_unused',
+    }),
+    'channel:sms|actor:actor%20direct',
+  )
+
+  assert.deepEqual(
+    mergeGatewayConversationRoutes(
+      {
+        channel: 'telegram',
+        participantId: 'actor_6',
+        reply: {
+          kind: 'thread',
+          target: 'thread-old',
+        },
+        threadId: 'thread-old',
+      },
+      {
+        threadId: 'thread-new',
+      },
+    ),
+    {
+      channel: 'telegram',
+      directness: null,
+      identityId: null,
+      participantId: 'actor_6',
+      reply: {
+        kind: 'thread',
+        target: 'thread-new',
+      },
+      threadId: 'thread-new',
+    },
+  )
+
+  assert.deepEqual(
+    gatewayBindingDeliveryFromRoute({
+      channel: 'custom',
+      directness: 'group',
+      participantId: 'actor_7',
+      threadId: 'thread_7',
+    }),
+    {
+      kind: 'thread',
+      target: 'thread_7',
+    },
   )
 })
 
