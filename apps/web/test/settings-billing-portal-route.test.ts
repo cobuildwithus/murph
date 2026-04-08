@@ -1,10 +1,15 @@
 import { beforeEach, expect, test, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  assertHostedOnboardingMutationOrigin: vi.fn(),
   getPrisma: vi.fn(),
   readHostedMemberStripeBillingRef: vi.fn(),
   requireHostedPrivyActiveRequestAuthContext: vi.fn(),
   requireHostedStripeApi: vi.fn(),
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/csrf", () => ({
+  assertHostedOnboardingMutationOrigin: mocks.assertHostedOnboardingMutationOrigin,
 }));
 
 vi.mock("@/src/lib/prisma", () => ({
@@ -29,6 +34,7 @@ let billingPortalRoute: BillingPortalRouteModule;
 
 beforeEach(async () => {
   vi.clearAllMocks();
+  mocks.assertHostedOnboardingMutationOrigin.mockImplementation(() => {});
   mocks.getPrisma.mockReturnValue({} as never);
   mocks.requireHostedPrivyActiveRequestAuthContext.mockResolvedValue({
     member: {
@@ -57,6 +63,9 @@ beforeEach(async () => {
 test("creates a Stripe billing portal session for the active hosted member", async () => {
   const response = await billingPortalRoute.POST(
     new Request("https://join.example.test/api/settings/billing/portal", {
+      headers: {
+        origin: "https://join.example.test",
+      },
       method: "POST",
     }),
   );
@@ -69,6 +78,7 @@ test("creates a Stripe billing portal session for the active hosted member", asy
     expect.any(Request),
     expect.any(Object),
   );
+  expect(mocks.assertHostedOnboardingMutationOrigin).toHaveBeenCalledWith(expect.any(Request));
   expect(mocks.readHostedMemberStripeBillingRef).toHaveBeenCalledWith({
     memberId: "member_123",
     prisma: expect.any(Object),
@@ -84,6 +94,9 @@ test("fails closed when the hosted member has no stored Stripe customer", async 
 
   const response = await billingPortalRoute.POST(
     new Request("https://join.example.test/api/settings/billing/portal", {
+      headers: {
+        origin: "https://join.example.test",
+      },
       method: "POST",
     }),
   );
