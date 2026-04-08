@@ -19,11 +19,11 @@ export interface KnowledgePage extends KnowledgePageMetadata {
 }
 
 export interface KnowledgeUpsertResult {
-  vault: string
+  bodyLength: number
   indexPath: string
   page: KnowledgePageMetadata
-  bodyLength: number
   savedAt: string
+  vault: string
 }
 
 export interface KnowledgeListResult {
@@ -38,6 +38,16 @@ export interface KnowledgeSearchHit extends KnowledgePageReference {
   matchedTerms: string[]
   score: number
   snippet: string
+}
+
+export interface KnowledgeSearchResult {
+  format: "murph.knowledge-search.v1"
+  hits: KnowledgeSearchHit[]
+  pageType: string | null
+  query: string
+  status: string | null
+  total: number
+  vault: string
 }
 
 export interface KnowledgeLogEntry {
@@ -55,20 +65,8 @@ export interface KnowledgeLogTailResult {
   vault: string
 }
 
-export interface KnowledgeShowResult {
+export interface KnowledgeGetResult {
   page: KnowledgePage
-  vault: string
-}
-
-export type KnowledgeGetResult = KnowledgeShowResult
-
-export interface KnowledgeSearchResult {
-  format: 'murph.knowledge-search.v1'
-  hits: KnowledgeSearchHit[]
-  pageType: string | null
-  query: string
-  status: string | null
-  total: number
   vault: string
 }
 
@@ -84,8 +82,8 @@ export interface KnowledgeLintProblem {
   code: string
   message: string
   pagePath: string
+  severity: "error" | "warning"
   slug: string | null
-  severity: 'error' | 'warning'
 }
 
 export interface KnowledgeLintResult {
@@ -95,3 +93,5 @@ export interface KnowledgeLintResult {
   problems: KnowledgeLintProblem[]
   vault: string
 }
+
+export type KnowledgeShowResult = KnowledgeGetResult
