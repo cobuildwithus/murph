@@ -1,4 +1,7 @@
-export { runHostedWebhookWithReceipt } from "./webhook-receipt-engine";
+export {
+  continueHostedWebhookReceipt,
+  runHostedWebhookWithReceipt,
+} from "./webhook-receipt-engine";
 export type {
   HostedWebhookDispatchEnqueueInput,
   HostedWebhookDispatchSideEffect,
@@ -18,3 +21,7 @@ export {
   createHostedWebhookRevnetIssuanceSideEffect,
   HostedWebhookReceiptSideEffectDrainError,
 } from "./webhook-receipt-types";
+export {
+  claimHostedWebhookReceiptForContinuation,
+  listHostedWebhookReceiptContinuationCandidates,
+} from "./webhook-receipt-store";

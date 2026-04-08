@@ -110,6 +110,12 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", async () => {
   };
 });
 
+vi.mock("@/src/lib/prisma", () => ({
+  getPrisma: vi.fn(() => {
+    throw new Error("Unexpected getPrisma call in hosted-onboarding-linq-dispatch.test.ts");
+  }),
+}));
+
 import { handleHostedOnboardingLinqWebhook } from "@/src/lib/hosted-onboarding/webhook-service";
 
 describe("handleHostedOnboardingLinqWebhook", () => {
@@ -642,6 +648,174 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       occurredAt: "2026-03-26T12:00:00.000Z",
       prisma,
     });
+  });
+
+  it("defers first-contact signup replies until after the webhook response is committed", async () => {
+    const invite = {
+      channel: "linq",
+      id: "invite_123",
+      inviteCode: "code_deferred",
+      memberId: "member_123",
+      sentAt: null,
+      status: "pending",
+    };
+    const prismaMocks = {
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventType: "message.received",
+            receiptAttemptCount: 1,
+            receiptStatus: "processing",
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedInvite: {
+        create: vi.fn().mockResolvedValue(invite),
+        findFirst: vi.fn().mockResolvedValue(null),
+        findUnique: vi.fn().mockResolvedValue(invite),
+        update: vi.fn().mockResolvedValue({
+          id: "invite_123",
+          sentAt: new Date("2026-03-26T12:00:01.000Z"),
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedMember: {
+        create: vi.fn().mockResolvedValue({
+          billingStatus: HostedBillingStatus.not_started,
+          id: "member_123",
+          phoneLookupKey: "+15551234567",
+        }),
+        findUnique: vi.fn().mockResolvedValue(null),
+        update: vi.fn(),
+      },
+    };
+    const prisma = asPrismaTransactionClient(prismaMocks);
+    const deferred: Array<() => Promise<void>> = [];
+
+    const response = await handleHostedOnboardingLinqWebhook({
+      defer: (drain) => {
+        deferred.push(drain);
+      },
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        eventId: "evt_deferred_signup",
+      }),
+      signature: null,
+      timestamp: null,
+    });
+
+    expect(response).toMatchObject({
+      inviteCode: "code_deferred",
+      joinUrl: "https://join.example.test/join/code_deferred",
+      ok: true,
+      reason: "sent-signup-link",
+    });
+    expect(deferred).toHaveLength(1);
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+
+    await deferred[0]?.();
+
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        chatId: "chat_123",
+        message: buildHostedInviteReply({
+          activeSubscription: false,
+          joinUrl: "https://join.example.test/join/code_deferred",
+        }),
+        replyToMessageId: "msg_123",
+      }),
+    );
+    expect(prismaMocks.hostedWebhookReceipt.updateMany.mock.calls).toContainEqual([
+      expect.objectContaining({
+        data: expect.objectContaining({
+          completedAt: expect.any(Date),
+          status: "completed",
+        }),
+      }),
+    ]);
+  });
+
+  it("ignores an aborted request signal once a signup reply has been deferred", async () => {
+    const invite = {
+      channel: "linq",
+      id: "invite_123",
+      inviteCode: "code_aborted",
+      memberId: "member_123",
+      sentAt: null,
+      status: "pending",
+    };
+    const prismaMocks = {
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventType: "message.received",
+            receiptAttemptCount: 1,
+            receiptStatus: "processing",
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedInvite: {
+        create: vi.fn().mockResolvedValue(invite),
+        findFirst: vi.fn().mockResolvedValue(null),
+        findUnique: vi.fn().mockResolvedValue(invite),
+        update: vi.fn().mockResolvedValue({
+          id: "invite_123",
+          sentAt: new Date("2026-03-26T12:00:01.000Z"),
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedMember: {
+        create: vi.fn().mockResolvedValue({
+          billingStatus: HostedBillingStatus.not_started,
+          id: "member_123",
+          phoneLookupKey: "+15551234567",
+        }),
+        findUnique: vi.fn().mockResolvedValue(null),
+        update: vi.fn(),
+      },
+    };
+    const prisma = asPrismaTransactionClient(prismaMocks);
+    const controller = new AbortController();
+    const deferred: Array<() => Promise<void>> = [];
+
+    await expect(handleHostedOnboardingLinqWebhook({
+      defer: (drain) => {
+        deferred.push(drain);
+      },
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        eventId: "evt_aborted_signup",
+      }),
+      signal: controller.signal,
+      signature: null,
+      timestamp: null,
+    })).resolves.toMatchObject({
+      ok: true,
+      reason: "sent-signup-link",
+    });
+
+    controller.abort();
+    await deferred[0]?.();
+
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
+      expect.not.objectContaining({
+        signal: controller.signal,
+      }),
+    );
+    expect(prismaMocks.hostedWebhookReceipt.updateMany.mock.calls).toContainEqual([
+      expect.objectContaining({
+        data: expect.objectContaining({
+          completedAt: expect.any(Date),
+          status: "completed",
+        }),
+      }),
+    ]);
   });
 
   it("sends the signup link even when the first-contact Linq message has no text", async () => {

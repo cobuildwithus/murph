@@ -89,6 +89,12 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", async () => {
   };
 });
 
+vi.mock("@/src/lib/prisma", () => ({
+  getPrisma: vi.fn(() => {
+    throw new Error("Unexpected getPrisma call in hosted-onboarding-telegram-dispatch.test.ts");
+  }),
+}));
+
 import { handleHostedOnboardingTelegramWebhook } from "@/src/lib/hosted-onboarding/webhook-service";
 
 describe("handleHostedOnboardingTelegramWebhook", () => {

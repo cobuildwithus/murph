@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   drainHostedPendingAiUsageImports: vi.fn(),
   drainHostedExecutionOutbox: vi.fn(),
   drainHostedAiUsageStripeMetering: vi.fn(),
+  drainHostedOnboardingWebhookReceipts: vi.fn(),
   getPrisma: vi.fn(),
   requireVercelCronRequest: vi.fn(),
   resolveHostedPrivyRequestAuthContext: vi.fn(),
@@ -32,6 +33,10 @@ vi.mock("@/src/lib/hosted-share/service", () => ({
   buildHostedSharePageData: mocks.buildHostedSharePageData,
 }));
 
+vi.mock("@/src/lib/hosted-onboarding/webhook-service", () => ({
+  drainHostedOnboardingWebhookReceipts: mocks.drainHostedOnboardingWebhookReceipts,
+}));
+
 vi.mock("@/src/lib/prisma", () => ({
   getPrisma: mocks.getPrisma,
 }));
@@ -42,16 +47,19 @@ vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({
 
 type HostedExecutionCronRouteModule = typeof import("../app/api/internal/hosted-execution/outbox/cron/route");
 type HostedExecutionUsageCronRouteModule = typeof import("../app/api/internal/hosted-execution/usage/cron/route");
+type HostedOnboardingWebhookReceiptCronRouteModule = typeof import("../app/api/internal/hosted-onboarding/webhook-receipts/cron/route");
 type HostedShareStatusRouteModule = typeof import("../app/api/hosted-share/[shareCode]/status/route");
 
 let hostedExecutionCronRoute: HostedExecutionCronRouteModule;
 let hostedExecutionUsageCronRoute: HostedExecutionUsageCronRouteModule;
+let hostedOnboardingWebhookReceiptCronRoute: HostedOnboardingWebhookReceiptCronRouteModule;
 let hostedShareStatusRoute: HostedShareStatusRouteModule;
 
 describe("hosted execution async routes", () => {
   beforeAll(async () => {
     hostedExecutionCronRoute = await import("../app/api/internal/hosted-execution/outbox/cron/route");
     hostedExecutionUsageCronRoute = await import("../app/api/internal/hosted-execution/usage/cron/route");
+    hostedOnboardingWebhookReceiptCronRoute = await import("../app/api/internal/hosted-onboarding/webhook-receipts/cron/route");
     hostedShareStatusRoute = await import("../app/api/hosted-share/[shareCode]/status/route");
   });
 
@@ -94,6 +102,23 @@ describe("hosted execution async routes", () => {
       imported: 2,
       scannedUsers: 3,
     });
+    mocks.drainHostedOnboardingWebhookReceipts.mockResolvedValue([
+      {
+        eventId: "evt_linq",
+        source: "linq",
+        status: "continued",
+      },
+      {
+        eventId: "evt_telegram",
+        source: "telegram",
+        status: "skipped",
+      },
+      {
+        eventId: "evt_failed",
+        source: "linq",
+        status: "failed",
+      },
+    ]);
   });
 
   it("returns drain counts, event ids, and per-event statuses from the cron route", async () => {
@@ -195,6 +220,47 @@ describe("hosted execution async routes", () => {
         metered: 1,
         skipped: 1,
       },
+    });
+  });
+
+  it("returns hosted webhook receipt continuation counts and statuses from the cron route", async () => {
+    const response = await hostedOnboardingWebhookReceiptCronRoute.GET(
+      new Request("https://join.example.test/api/internal/hosted-onboarding/webhook-receipts/cron", {
+        headers: {
+          authorization: "Bearer cron-token",
+        },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    expect(mocks.requireVercelCronRequest).toHaveBeenCalledTimes(1);
+    expect(mocks.drainHostedOnboardingWebhookReceipts).toHaveBeenCalledWith({
+      prisma: {
+        prisma: true,
+      },
+    });
+    await expect(response.json()).resolves.toEqual({
+      continued: 1,
+      failed: 1,
+      receipts: [
+        {
+          eventId: "evt_linq",
+          source: "linq",
+          status: "continued",
+        },
+        {
+          eventId: "evt_telegram",
+          source: "telegram",
+          status: "skipped",
+        },
+        {
+          eventId: "evt_failed",
+          source: "linq",
+          status: "failed",
+        },
+      ],
+      skipped: 1,
     });
   });
 

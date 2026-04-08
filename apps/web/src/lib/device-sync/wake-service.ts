@@ -16,7 +16,10 @@ import type {
 } from "@murphai/hosted-execution";
 
 import { getPrisma } from "../prisma";
-import { enqueueHostedExecutionOutbox } from "../hosted-execution/outbox";
+import {
+  drainHostedExecutionOutboxBestEffort,
+  enqueueHostedExecutionOutbox,
+} from "../hosted-execution/outbox";
 import {
   buildHostedDeviceSyncWakeDispatch,
   type HostedDeviceSyncWakeSource,
@@ -390,6 +393,13 @@ async function publishHostedDeviceSyncWake(input: {
     sourceType: "device_sync_signal",
     storage: "reference",
     tx: input.store.prisma,
+  });
+  void drainHostedExecutionOutboxBestEffort({
+    eventIds: [
+      input.dispatch.eventId,
+    ],
+    limit: 1,
+    prisma: input.store.prisma,
   });
 }
 

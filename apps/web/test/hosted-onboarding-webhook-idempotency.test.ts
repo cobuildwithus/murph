@@ -167,6 +167,12 @@ vi.mock("@/src/lib/hosted-onboarding/revnet", () => ({
   submitHostedRevnetPayment: mocks.submitHostedRevnetPayment,
 }));
 
+vi.mock("@/src/lib/prisma", () => ({
+  getPrisma: vi.fn(() => {
+    throw new Error("Unexpected getPrisma call in hosted-onboarding-webhook-idempotency.test.ts");
+  }),
+}));
+
 import {
   handleHostedOnboardingLinqWebhook,
   handleHostedStripeWebhook,
@@ -1335,7 +1341,7 @@ describe("hosted onboarding webhook retry safety", () => {
     });
 
     const firstAttemptCalls = readMockCallPayloads(prisma.hostedWebhookReceipt.updateMany.mock.calls);
-    expect(firstAttemptCalls).toHaveLength(4);
+    expect(firstAttemptCalls).toHaveLength(5);
     expect(firstAttemptCalls[0]).toEqual(
       expect.objectContaining({
         data: expect.objectContaining({

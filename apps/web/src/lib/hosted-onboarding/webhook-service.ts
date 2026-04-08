@@ -2,7 +2,7 @@ import type { PrismaClient } from "@prisma/client";
 import type Stripe from "stripe";
 
 import { getPrisma } from "../prisma";
-import { hostedOnboardingError } from "./errors";
+import { hostedOnboardingError, isHostedOnboardingError } from "./errors";
 import {
   requireHostedLinqMessageReceivedEvent,
   verifyAndParseHostedLinqWebhookRequest,
@@ -17,7 +17,12 @@ import {
 } from "./stripe-event-reconciliation";
 import { drainHostedRevnetIssuanceSubmissionQueue } from "./stripe-revnet-issuance";
 import { assertHostedTelegramWebhookSecret, buildHostedTelegramWebhookEventId, parseHostedTelegramWebhookUpdate } from "./telegram";
-import { runHostedWebhookWithReceipt } from "./webhook-receipts";
+import {
+  claimHostedWebhookReceiptForContinuation,
+  continueHostedWebhookReceipt,
+  listHostedWebhookReceiptContinuationCandidates,
+  runHostedWebhookWithReceipt,
+} from "./webhook-receipts";
 import {
   planHostedOnboardingLinqWebhook,
   type HostedOnboardingLinqWebhookResponse,
@@ -35,6 +40,7 @@ export type HostedStripeWebhookResponse = {
 };
 
 export async function handleHostedOnboardingLinqWebhook(input: {
+  defer?: (drain: () => Promise<void>) => Promise<void> | void;
   rawBody: string;
   signature: string | null;
   timestamp: string | null;
@@ -51,6 +57,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
     requireHostedLinqMessageReceivedEvent(event);
   }
   const response = await runHostedWebhookWithReceipt({
+    deferSideEffectDrain: input.defer,
     duplicateResponse: {
       ok: true,
       duplicate: true,
@@ -171,6 +178,129 @@ export async function handleHostedStripeWebhook(input: {
     ok: true,
     type: recorded.type,
   };
+}
+
+export async function continueHostedOnboardingWebhookReceiptBestEffort(input: {
+  eventId: string;
+  prisma?: PrismaClient;
+  signal?: AbortSignal;
+  source: "linq" | "telegram";
+}): Promise<void> {
+  const prisma = input.prisma ?? getPrisma();
+
+  try {
+    const claimedReceipt = await claimHostedWebhookReceiptForContinuation({
+      eventId: input.eventId,
+      prisma,
+      source: input.source,
+    });
+
+    if (!claimedReceipt) {
+      return;
+    }
+
+    await continueHostedWebhookReceipt({
+      claimedReceipt,
+      eventId: input.eventId,
+      handlers: createHostedWebhookReceiptHandlers(),
+      prisma,
+      signal: input.signal,
+      source: input.source,
+    });
+  } catch (error) {
+    console.error(
+      "Hosted webhook receipt continuation failed.",
+      error instanceof Error ? error.message : String(error),
+    );
+  }
+}
+
+export async function drainHostedOnboardingWebhookReceipts(input: {
+  limit?: number;
+  prisma?: PrismaClient;
+} = {}): Promise<Array<{
+  eventId: string;
+  source: string;
+  status: "continued" | "failed" | "skipped";
+}>> {
+  const prisma = input.prisma ?? getPrisma();
+  const candidates = await listHostedWebhookReceiptContinuationCandidates({
+    limit: input.limit,
+    prisma,
+  });
+  const drained: Array<{
+    eventId: string;
+    source: string;
+    status: "continued" | "failed" | "skipped";
+  }> = [];
+
+  for (const candidate of candidates) {
+    let claimedReceipt;
+
+    try {
+      claimedReceipt = await claimHostedWebhookReceiptForContinuation({
+        eventId: candidate.eventId,
+        prisma,
+        source: candidate.source,
+      });
+    } catch (error) {
+      if (isHostedWebhookReceiptInProgressError(error)) {
+        drained.push({
+          eventId: candidate.eventId,
+          source: candidate.source,
+          status: "skipped",
+        });
+        continue;
+      }
+
+      console.error(
+        "Hosted webhook receipt claim failed during cron recovery.",
+        error instanceof Error ? error.message : String(error),
+      );
+      drained.push({
+        eventId: candidate.eventId,
+        source: candidate.source,
+        status: "failed",
+      });
+      continue;
+    }
+
+    if (!claimedReceipt) {
+      drained.push({
+        eventId: candidate.eventId,
+        source: candidate.source,
+        status: "skipped",
+      });
+      continue;
+    }
+
+    try {
+      await continueHostedWebhookReceipt({
+        claimedReceipt,
+        eventId: candidate.eventId,
+        handlers: createHostedWebhookReceiptHandlers(),
+        prisma,
+        source: candidate.source,
+      });
+      drained.push({
+        eventId: candidate.eventId,
+        source: candidate.source,
+        status: "continued",
+      });
+    } catch {
+      drained.push({
+        eventId: candidate.eventId,
+        source: candidate.source,
+        status: "failed",
+      });
+    }
+  }
+
+  return drained;
+}
+
+function isHostedWebhookReceiptInProgressError(error: unknown): boolean {
+  return isHostedOnboardingError(error) && error.code === "WEBHOOK_RECEIPT_IN_PROGRESS";
 }
 
 function constructStripeWebhookEvent(input: {

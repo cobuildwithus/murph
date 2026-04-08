@@ -3,8 +3,18 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 
 const mocks = vi.hoisted(() => ({
+  after: vi.fn(),
   handleHostedOnboardingLinqWebhook: vi.fn(),
 }));
+
+vi.mock("next/server", async () => {
+  const actual = await vi.importActual<typeof import("next/server")>("next/server");
+
+  return {
+    ...actual,
+    after: mocks.after,
+  };
+});
 
 vi.mock("@/src/lib/hosted-onboarding/webhook-service", () => ({
   handleHostedOnboardingLinqWebhook: mocks.handleHostedOnboardingLinqWebhook,
@@ -21,6 +31,7 @@ describe("hosted onboarding Linq webhook route", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.after.mockImplementation((callback: () => void) => callback());
     mocks.handleHostedOnboardingLinqWebhook.mockResolvedValue({
       ok: true,
     });
@@ -42,6 +53,7 @@ describe("hosted onboarding Linq webhook route", () => {
 
     expect(response.status).toBe(202);
     expect(mocks.handleHostedOnboardingLinqWebhook).toHaveBeenCalledWith({
+      defer: expect.any(Function),
       rawBody: JSON.stringify({
         ok: true,
       }),

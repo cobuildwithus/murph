@@ -27,6 +27,7 @@ import { HostedWebhookReceiptSideEffectDrainError as ReceiptSideEffectDrainError
 import { hostedOnboardingError } from "./errors";
 
 export async function runHostedWebhookWithReceipt<TResult extends HostedWebhookResponsePayload>(input: {
+  deferSideEffectDrain?: (drain: () => Promise<void>) => Promise<void> | void;
   duplicateResponse: TResult;
   eventId: string;
   handlers: HostedWebhookReceiptHandlers;
@@ -78,19 +79,39 @@ export async function runHostedWebhookWithReceipt<TResult extends HostedWebhookR
       response = plannedResult.response;
     }
 
-    claimedReceipt = await drainHostedWebhookReceiptSideEffects({
+    if (
+      input.deferSideEffectDrain
+      && hasDeferredHostedWebhookSideEffects(claimedReceipt)
+    ) {
+      const deferredClaim = claimedReceipt;
+
+      try {
+        await input.deferSideEffectDrain(() =>
+          continueHostedWebhookReceipt({
+            claimedReceipt: deferredClaim,
+            eventId: input.eventId,
+            handlers: input.handlers,
+            markFailure: true,
+            prisma: input.prisma,
+            source: input.source,
+          }),
+        );
+        return response ?? input.duplicateResponse;
+      } catch (error) {
+        console.error(
+          "Hosted webhook side-effect drain scheduling failed.",
+          error instanceof Error ? error.message : String(error),
+        );
+      }
+    }
+
+    await continueHostedWebhookReceipt({
       claimedReceipt,
       eventId: input.eventId,
       handlers: input.handlers,
+      markFailure: false,
       prisma: input.prisma,
       signal: input.signal,
-      source: input.source,
-    });
-
-    await markHostedWebhookReceiptCompleted({
-      claimedReceipt,
-      eventId: input.eventId,
-      prisma: input.prisma,
       source: input.source,
     });
 
@@ -107,6 +128,51 @@ export async function runHostedWebhookWithReceipt<TResult extends HostedWebhookR
       prisma: input.prisma,
       source: input.source,
     });
+    throw failure;
+  }
+}
+
+export async function continueHostedWebhookReceipt(input: {
+  claimedReceipt: HostedWebhookReceiptClaim;
+  eventId: string;
+  handlers: HostedWebhookReceiptHandlers;
+  markFailure?: boolean;
+  prisma: PrismaClient;
+  signal?: AbortSignal;
+  source: string;
+}): Promise<void> {
+  let claimedReceipt = input.claimedReceipt;
+
+  try {
+    claimedReceipt = await drainHostedWebhookReceiptSideEffects({
+      claimedReceipt,
+      eventId: input.eventId,
+      handlers: input.handlers,
+      prisma: input.prisma,
+      signal: input.signal,
+      source: input.source,
+    });
+
+    await markHostedWebhookReceiptCompleted({
+      claimedReceipt,
+      eventId: input.eventId,
+      prisma: input.prisma,
+      source: input.source,
+    });
+  } catch (error) {
+    const drainFailure = readHostedWebhookReceiptDrainError(error);
+    const failure = drainFailure?.cause ?? error;
+    claimedReceipt = drainFailure?.claimedReceipt ?? claimedReceipt;
+
+    if (input.markFailure !== false) {
+      await markHostedWebhookReceiptFailed({
+        claimedReceipt,
+        error: failure,
+        eventId: input.eventId,
+        prisma: input.prisma,
+        source: input.source,
+      });
+    }
     throw failure;
   }
 }
@@ -294,6 +360,14 @@ function readHostedWebhookReceiptDrainError(
   return error instanceof ReceiptSideEffectDrainError
     ? error
     : null;
+}
+
+function hasDeferredHostedWebhookSideEffects(
+  claimedReceipt: HostedWebhookReceiptClaim,
+): boolean {
+  return claimedReceipt.state.sideEffects.some(
+    (effect) => effect.kind !== "hosted_execution_dispatch",
+  );
 }
 
 function buildHostedWebhookSideEffectDeliveryUncertainError(

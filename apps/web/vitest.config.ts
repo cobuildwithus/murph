@@ -30,5 +30,6 @@ export default defineProject({
     environment: "node",
     ...resolveMurphVitestConcurrency(),
     include: ["apps/web/test/**/*.test.ts"],
+    setupFiles: [path.join(appDir, "test", "setup-env.ts")],
   },
 });
