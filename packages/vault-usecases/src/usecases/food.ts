@@ -249,6 +249,7 @@ export async function editFoodRecord(input: {
 export async function deleteFoodRecord(input: {
   vault: string
   lookup: string
+  hooks?: FoodAutoLogHooks
 }) {
   const food = await requireFoodRecord(input.vault, input.lookup)
   const normalizedLookup = input.lookup.trim()
@@ -272,6 +273,27 @@ export async function deleteFoodRecord(input: {
         code: 'contract_invalid',
       },
     })
+  }
+
+  try {
+    await syncRecurringFoodAutoLog({
+      food: {
+        foodId: food.foodId,
+        slug: food.slug,
+        title: food.title,
+        autoLogDaily: null,
+      },
+      hooks: input.hooks,
+      vault: input.vault,
+    })
+  } catch (error) {
+    await rollbackFoodDeletionAfterRecurringCronFailure({
+      core,
+      food,
+      hooks: input.hooks,
+      vault: input.vault,
+    })
+    throw error
   }
 
   return {
@@ -742,7 +764,7 @@ async function rollbackFoodRecordAfterRecurringCronFailure(input: {
 }
 
 async function syncRecurringFoodAutoLog(input: {
-  food: FoodReadModel
+  food: FoodAutoLogSyncRecord
   hooks?: FoodAutoLogHooks
   vault: string
 }) {
@@ -757,6 +779,32 @@ async function syncRecurringFoodAutoLog(input: {
       title: input.food.title,
       autoLogDaily: input.food.autoLogDaily ?? null,
     },
+    vault: input.vault,
+  })
+}
+
+async function rollbackFoodDeletionAfterRecurringCronFailure(input: {
+  core: FoodCoreRuntime
+  food: FoodReadModel
+  hooks?: FoodAutoLogHooks
+  vault: string
+}) {
+  await input.core.upsertFood(
+    buildFoodCoreInput({
+      vault: input.vault,
+      payload: buildFoodPayload(input.food),
+      allowSlugRename: true,
+    }),
+  )
+
+  const restoredFood = await input.core.readFood({
+    vaultRoot: input.vault,
+    foodId: input.food.foodId,
+  })
+
+  await syncRecurringFoodAutoLog({
+    food: restoredFood,
+    hooks: input.hooks,
     vault: input.vault,
   })
 }

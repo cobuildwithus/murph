@@ -332,7 +332,7 @@ function readDeploymentMode(value: string | undefined): DeploymentMode {
   const normalized = normalizeOptionalString(value);
 
   if (!normalized) {
-    return "gradual";
+    return "direct";
   }
 
   if (normalized === "direct" || normalized === "gradual") {

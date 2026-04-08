@@ -398,14 +398,6 @@ function isTestOnlyInternalAssistantSpecifier({
         || specifier === "@murphai/assistant-engine/assistant-cli-access"
         || specifier === "@murphai/assistant-engine/assistant-cli-tools"
         || specifier === "@murphai/assistant-engine/assistant-vault-paths"
-        || specifier === "@murphai/assistant-engine/health-registry-command-metadata"
-        || specifier === "@murphai/assistant-engine/inbox-app/types"
-        || specifier === "@murphai/assistant-engine/inbox-services/connectors"
-        || specifier === "@murphai/assistant-engine/inbox-services/daemon"
-        || specifier === "@murphai/assistant-engine/inbox-services/promotions"
-        || specifier === "@murphai/assistant-engine/usecases/experiment-journal-vault"
-        || specifier === "@murphai/assistant-engine/usecases/explicit-health-family-services"
-        || specifier === "@murphai/assistant-engine/usecases/record-mutations"
       )
     )
   );
@@ -620,6 +612,7 @@ export function shouldSkipDirectory(name) {
   return (
     name === "node_modules" ||
     name === "dist" ||
+    name === ".deploy" ||
     name === ".next" ||
     name === ".next-dev" ||
     name === ".next-smoke" ||
