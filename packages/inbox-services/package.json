@@ -31,8 +31,8 @@
   "scripts": {
     "build": "node ../../scripts/rm-paths.mjs dist && tsc -b tsconfig.json --force",
     "typecheck": "tsc -p tsconfig.typecheck.json --pretty false",
-    "test": "node --import tsx --test test/**/*.test.ts",
-    "test:coverage": "node --experimental-test-coverage --import tsx --test test/**/*.test.ts"
+    "test": "pnpm exec vitest run --config vitest.config.ts --no-coverage",
+    "test:coverage": "pnpm exec vitest run --config vitest.config.ts --coverage"
   },
   "dependencies": {
     "@murphai/contracts": "workspace:*",

@@ -481,49 +481,38 @@ run_repo_vitest() {
   MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 pnpm exec vitest run --config "vitest.config.ts" "$@"
 }
 
-run_owner_package_coverage() {
-  run_timed_step \
-    "Core owner coverage" \
-    pnpm --dir "packages/core" exec vitest run --config "vitest.config.ts" --coverage
-  run_timed_step \
-    "Hosted execution owner coverage" \
-    pnpm --dir "packages/hosted-execution" exec vitest run --config "vitest.config.ts" --coverage
-  run_timed_step \
-    "Importers owner coverage" \
-    pnpm --dir "packages/importers" exec vitest run --config "vitest.config.ts" --coverage
-  run_timed_step \
-    "Query owner coverage" \
-    pnpm --dir "packages/query" exec vitest run --config "vitest.config.ts" --coverage
+run_workspace_package_coverage() {
+  local package_dir="$1"
+  local label="$2"
+
+  run_timed_step "$label" pnpm --dir "$package_dir" test:coverage
 }
 
-run_rollout_package_coverage() {
-  run_timed_step \
-    "Assistant engine package coverage" \
-    pnpm --dir "packages/assistant-engine" exec vitest run --config "vitest.config.ts" --coverage
-  run_timed_step \
-    "Assistant runtime package coverage" \
-    pnpm --dir "packages/assistant-runtime" exec vitest run --config "vitest.config.ts" --coverage
-  run_timed_step \
-    "Assistantd package coverage" \
-    pnpm --dir "packages/assistantd" exec vitest run --config "vitest.config.ts" --coverage
-  run_timed_step \
-    "CLI package coverage" \
-    env MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 pnpm exec vitest run --config "packages/cli/vitest.workspace.ts" --coverage
-  run_timed_step \
-    "Contracts package coverage" \
-    pnpm --dir "packages/contracts" exec vitest run --config "vitest.config.ts" --coverage
-  run_timed_step \
-    "Device syncd package coverage" \
-    pnpm --dir "packages/device-syncd" exec vitest run --config "vitest.config.ts" --coverage
-  run_timed_step \
-    "Inboxd package coverage" \
-    pnpm --dir "packages/inboxd" exec vitest run --config "vitest.config.ts" --coverage
-  run_timed_step \
-    "Messaging ingress package coverage" \
-    pnpm --dir "packages/messaging-ingress" exec vitest run --config "vitest.config.ts" --coverage
-  run_timed_step \
-    "OpenClaw package coverage" \
-    pnpm --dir "packages/openclaw-plugin" exec vitest run --config "vitest.config.ts" --coverage
+run_all_package_coverage() {
+  run_workspace_package_coverage "packages/assistant-cli" "Assistant CLI package coverage"
+  run_workspace_package_coverage "packages/assistant-engine" "Assistant engine package coverage"
+  run_workspace_package_coverage "packages/assistant-runtime" "Assistant runtime package coverage"
+  run_workspace_package_coverage "packages/assistantd" "Assistantd package coverage"
+  run_workspace_package_coverage "packages/cli" "CLI package coverage"
+  run_workspace_package_coverage "packages/cloudflare-hosted-control" "Cloudflare hosted control package coverage"
+  run_workspace_package_coverage "packages/contracts" "Contracts package coverage"
+  run_workspace_package_coverage "packages/core" "Core owner coverage"
+  run_workspace_package_coverage "packages/device-syncd" "Device syncd package coverage"
+  run_workspace_package_coverage "packages/gateway-core" "Gateway core package coverage"
+  run_workspace_package_coverage "packages/gateway-local" "Gateway local package coverage"
+  run_workspace_package_coverage "packages/hosted-execution" "Hosted execution owner coverage"
+  run_workspace_package_coverage "packages/importers" "Importers owner coverage"
+  run_workspace_package_coverage "packages/inbox-services" "Inbox services package coverage"
+  run_workspace_package_coverage "packages/inboxd" "Inboxd package coverage"
+  run_workspace_package_coverage "packages/inboxd-imessage" "Inboxd iMessage package coverage"
+  run_workspace_package_coverage "packages/messaging-ingress" "Messaging ingress package coverage"
+  run_workspace_package_coverage "packages/openclaw-plugin" "OpenClaw package coverage"
+  run_workspace_package_coverage "packages/operator-config" "Operator config package coverage"
+  run_workspace_package_coverage "packages/parsers" "Parsers package coverage"
+  run_workspace_package_coverage "packages/query" "Query owner coverage"
+  run_workspace_package_coverage "packages/runtime-state" "Runtime state package coverage"
+  run_workspace_package_coverage "packages/setup-cli" "Setup CLI package coverage"
+  run_workspace_package_coverage "packages/vault-usecases" "Vault usecases package coverage"
 }
 
 run_typecheck() {
@@ -578,14 +567,13 @@ run_test_packages_coverage() {
 
   run_timed_step \
     "Coverage cleanup" \
-    node "scripts/rm-paths.mjs" "coverage" "packages/core/coverage" "packages/hosted-execution/coverage" "packages/importers/coverage" "packages/query/coverage"
+    node "scripts/rm-paths.mjs" "coverage" "packages/*/coverage"
   run_timed_step "Package smoke prerequisites" run_test_packages_common
   if [[ "$artifacts_prepared" != "1" ]]; then
     run_timed_step "Prepared runtime artifacts" prepare_repo_vitest_runtime_artifacts
   fi
   run_timed_step "Repo Vitest" run_repo_vitest --no-coverage
-  run_timed_step "Owner package coverage" run_owner_package_coverage
-  run_timed_step "Rollout package coverage" run_rollout_package_coverage
+  run_timed_step "All package coverage" run_all_package_coverage
 }
 
 run_test_coverage() {

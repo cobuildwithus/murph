@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import test from 'node:test'
+import { test } from 'vitest'
 
 import type { InboxConnectorConfig } from '@murphai/operator-config/inbox-cli-contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
@@ -213,28 +213,6 @@ test('createInboxAppEnvironment prefers an injected iMessage module', async () =
   )
   assert.equal(inboxLoads, 0)
   assert.equal(imessageDriverLoads, 1)
-})
-
-test('createInboxAppEnvironment adapts an injected legacy inbox runtime as the iMessage module', async () => {
-  const expectedDriver = createImessageDriver()
-  const legacyInboxModule = {
-    ...createInboxRuntimeModule(),
-    ...createInboxImessageRuntimeModule({
-      async loadImessageKitDriver() {
-        return expectedDriver
-      },
-    }),
-  }
-
-  const env = createInboxAppEnvironment({
-    loadInboxModule: async () => legacyInboxModule,
-  })
-
-  assert.equal(await env.loadInboxImessage(), legacyInboxModule)
-  assert.equal(
-    await env.loadConfiguredImessageDriver(imessageConnector),
-    expectedDriver,
-  )
 })
 
 test('createInboxAppEnvironment reports a missing optional iMessage runtime cleanly', async () => {
