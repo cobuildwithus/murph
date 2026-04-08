@@ -8,13 +8,11 @@ export function assertHostedOnboardingMutationOrigin(request: Request): void {
     throw hostedOnboardingError({
       code: "HOSTED_ONBOARDING_ORIGIN_REQUIRED",
       httpStatus: 403,
-      message: "Hosted browser mutation routes require an Origin header.",
+      message: "Hosted browser mutation routes require a valid Origin header.",
     });
   }
 
-  const requestOrigin = normalizeOrigin(request.url);
-  const publicBaseUrl = normalizeOrigin(getHostedOnboardingEnvironment().publicBaseUrl);
-  const allowedOrigins = new Set([requestOrigin, publicBaseUrl].filter((value): value is string => Boolean(value)));
+  const allowedOrigins = resolveHostedOnboardingMutationOrigins(request);
 
   if (allowedOrigins.has(origin)) {
     return;
@@ -25,6 +23,23 @@ export function assertHostedOnboardingMutationOrigin(request: Request): void {
     httpStatus: 403,
     message: "Hosted browser mutation origin is not allowed.",
   });
+}
+
+function resolveHostedOnboardingMutationOrigins(request: Request): Set<string> {
+  const allowedOrigins = new Set<string>();
+  const publicBaseUrl = normalizeOrigin(getHostedOnboardingEnvironment().publicBaseUrl);
+
+  if (publicBaseUrl) {
+    allowedOrigins.add(publicBaseUrl);
+  } else {
+    const requestOrigin = normalizeOrigin(request.url);
+
+    if (requestOrigin) {
+      allowedOrigins.add(requestOrigin);
+    }
+  }
+
+  return allowedOrigins;
 }
 
 function normalizeOrigin(value: string | null | undefined): string | null {

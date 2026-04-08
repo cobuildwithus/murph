@@ -13,6 +13,8 @@ import type {
   HostedExecutionDeviceSyncRuntimeTokenBundle,
 } from "@murphai/device-syncd/hosted-runtime";
 
+import { sanitizeHostedRuntimeErrorCode, sanitizeHostedRuntimeErrorText } from "./shared";
+
 export {
   parseHostedDeviceSyncRuntimeApplyRequest,
   parseHostedDeviceSyncRuntimeSnapshotRequest,
@@ -123,8 +125,8 @@ export function buildHostedPublicDeviceSyncAccount(input: {
       lastSyncStartedAt: runtimeConnection.localState.lastSyncStartedAt,
       lastSyncCompletedAt: runtimeConnection.localState.lastSyncCompletedAt,
       lastSyncErrorAt: runtimeConnection.localState.lastSyncErrorAt,
-      lastErrorCode: runtimeConnection.localState.lastErrorCode,
-      lastErrorMessage: runtimeConnection.localState.lastErrorMessage,
+      lastErrorCode: sanitizeHostedRuntimeErrorCode(runtimeConnection.localState.lastErrorCode),
+      lastErrorMessage: sanitizeHostedRuntimeErrorText(runtimeConnection.localState.lastErrorMessage),
       nextReconcileAt: runtimeConnection.localState.nextReconcileAt,
       createdAt: runtimeConnection.connection.createdAt,
       updatedAt: runtimeConnection.connection.updatedAt ?? runtimeConnection.connection.createdAt,
@@ -151,8 +153,12 @@ export function buildHostedPublicDeviceSyncAccount(input: {
     lastSyncStartedAt: fallback.lastSyncStartedAt ?? input.record.lastSyncStartedAt,
     lastSyncCompletedAt: fallback.lastSyncCompletedAt ?? input.record.lastSyncCompletedAt,
     lastSyncErrorAt: fallback.lastSyncErrorAt ?? input.record.lastSyncErrorAt,
-    lastErrorCode: fallback.lastErrorCode ?? input.record.lastErrorCode,
-    lastErrorMessage: fallback.lastErrorMessage ?? input.record.lastErrorMessage,
+    lastErrorCode: sanitizeHostedRuntimeErrorCode(
+      fallback.lastErrorCode ?? input.record.lastErrorCode,
+    ),
+    lastErrorMessage: sanitizeHostedRuntimeErrorText(
+      fallback.lastErrorMessage ?? input.record.lastErrorMessage,
+    ),
     nextReconcileAt: fallback.nextReconcileAt ?? input.record.nextReconcileAt,
     createdAt: fallback.createdAt ?? input.record.createdAt,
     updatedAt: fallback.updatedAt ?? input.record.updatedAt,
@@ -180,8 +186,12 @@ export function buildHostedDeviceSyncRuntimeSeedFromPublicAccount(input: {
       updatedAt: input.account.updatedAt,
     },
     localState: {
-      lastErrorCode: input.localState?.lastErrorCode ?? input.account.lastErrorCode ?? null,
-      lastErrorMessage: input.localState?.lastErrorMessage ?? input.account.lastErrorMessage ?? null,
+      lastErrorCode: sanitizeHostedRuntimeErrorCode(
+        input.localState?.lastErrorCode ?? input.account.lastErrorCode ?? null,
+      ),
+      lastErrorMessage: sanitizeHostedRuntimeErrorText(
+        input.localState?.lastErrorMessage ?? input.account.lastErrorMessage ?? null,
+      ),
       lastSyncCompletedAt: input.localState?.lastSyncCompletedAt ?? input.account.lastSyncCompletedAt ?? null,
       lastSyncErrorAt: input.localState?.lastSyncErrorAt ?? input.account.lastSyncErrorAt ?? null,
       lastSyncStartedAt: input.localState?.lastSyncStartedAt ?? input.account.lastSyncStartedAt ?? null,

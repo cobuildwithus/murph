@@ -202,6 +202,16 @@ vi.mock("@/src/lib/device-sync/shared", () => ({
   normalizeNullableString: vi.fn((value: unknown) =>
     typeof value === "string" && value.trim().length > 0 ? value.trim() : null),
   parseInteger: vi.fn(),
+  sanitizeHostedRuntimeErrorCode: vi.fn((value: unknown) =>
+    typeof value === "string" && value.trim().length > 0
+      ? value.trim().replace(/([?&]?(?:access_token|refresh_token|id_token)=)[^\s]+/giu, "$1[redacted]")
+      : null),
+  sanitizeHostedRuntimeErrorText: vi.fn((value: unknown) =>
+    typeof value === "string" && value.trim().length > 0
+      ? value
+          .replace(/\bBearer\s+\S+/giu, "Bearer [redacted]")
+          .replace(/([?&]?(?:access_token|refresh_token|id_token)=)[^\s]+/giu, "$1[redacted]")
+      : null),
   sha256Hex: vi.fn(),
   toIsoTimestamp: vi.fn(() => "2026-03-26T12:00:00.000Z"),
   toJsonRecord: vi.fn((value: unknown) => value),
@@ -651,6 +661,83 @@ describe("dispatchHostedDeviceSyncWake", () => {
         sourceId: "device-sync:disconnect:user-123:oura:dsc_123:2026-03-26T12:00:00.000Z",
         sourceType: "device_sync_signal",
         tx: mocks.prisma,
+      }),
+    );
+  });
+
+  it("sanitizes revoke failures before they fan out to runtime state, signals, dispatches, and the browser response", async () => {
+    const controlPlane = new HostedDeviceSyncControlPlane(
+      new Request("https://control.example.test/api/settings/device-sync/connections/dsc_123/disconnect"),
+    );
+    const activeConnection = buildHostedConnection();
+    const disconnectedConnection = buildHostedConnection({
+      lastErrorCode: "PROVIDER_REVOKE_FAILED",
+      lastErrorMessage: "authorization=Bearer [redacted] refresh_token=[redacted]",
+      status: "disconnected",
+    });
+    const revokeAccess = vi.fn(async () => {
+      throw new Error("authorization=Bearer secret-token refresh_token=refresh-secret");
+    });
+    mocks.registryGet.mockReturnValue({
+      revokeAccess,
+    });
+    mocks.listConnectionsForUser.mockResolvedValue([activeConnection]);
+    mocks.getConnectionForUser
+      .mockResolvedValueOnce(activeConnection)
+      .mockResolvedValueOnce(disconnectedConnection);
+    const publicConnectionId = controlPlane.createBrowserConnectionId("dsc_123");
+
+    await expect(controlPlane.disconnectConnection("user-123", publicConnectionId)).resolves.toMatchObject({
+      connection: {
+        id: publicConnectionId,
+        status: "disconnected",
+      },
+      warning: {
+        code: "PROVIDER_REVOKE_FAILED",
+        message: "authorization=Bearer [redacted] refresh_token=[redacted]",
+      },
+    });
+
+    expect(revokeAccess).toHaveBeenCalledTimes(1);
+    expect(mocks.applyDeviceSyncRuntimeUpdates).toHaveBeenCalledWith(
+      "user-123",
+      expect.objectContaining({
+        updates: [
+          expect.objectContaining({
+            localState: expect.objectContaining({
+              lastErrorCode: "PROVIDER_REVOKE_FAILED",
+              lastErrorMessage: "authorization=Bearer [redacted] refresh_token=[redacted]",
+            }),
+            seed: expect.objectContaining({
+              localState: expect.objectContaining({
+                lastErrorCode: "PROVIDER_REVOKE_FAILED",
+                lastErrorMessage: "authorization=Bearer [redacted] refresh_token=[redacted]",
+              }),
+            }),
+          }),
+        ],
+      }),
+    );
+    expect(mocks.createSignal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        revokeWarning: {
+          code: "PROVIDER_REVOKE_FAILED",
+          message: "authorization=Bearer [redacted] refresh_token=[redacted]",
+        },
+      }),
+    );
+    expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
+      expect.objectContaining({
+        dispatch: expect.objectContaining({
+          event: expect.objectContaining({
+            hint: expect.objectContaining({
+              revokeWarning: {
+                code: "PROVIDER_REVOKE_FAILED",
+                message: "authorization=Bearer [redacted] refresh_token=[redacted]",
+              },
+            }),
+          }),
+        }),
       }),
     );
   });
