@@ -4,6 +4,12 @@ import path from "node:path";
 import { afterEach, test, vi } from "vitest";
 
 import { formatStructuredErrorMessage } from "@murphai/operator-config/text/shared";
+import {
+  formatMurphCliError,
+  installSqliteExperimentalWarningFilter,
+  loadCliEnvFiles,
+  runMurphCliAction,
+} from "../src/cli-entry.ts";
 
 const originalEmitWarning = process.emitWarning;
 const mockedCliEntryModules = [
@@ -13,12 +19,7 @@ const mockedCliEntryModules = [
   "@murphai/operator-config/setup-runtime-env",
 ] as const;
 
-async function importCliEntry() {
-  vi.resetModules();
-  return import("../src/cli-entry.ts");
-}
-
-async function importCliEntryWithMocks(input: {
+function mockCliActionModules(input: {
   cli: {
     serve: ReturnType<typeof vi.fn>;
   };
@@ -26,7 +27,6 @@ async function importCliEntryWithMocks(input: {
   setupCliModule: Record<string, unknown>;
   setupRuntimeEnvModule?: Record<string, unknown>;
 }) {
-  vi.resetModules();
   vi.doMock("../src/index.js", () => ({
     default: input.cli,
   }));
@@ -36,8 +36,6 @@ async function importCliEntryWithMocks(input: {
     SETUP_RUNTIME_ENV_NOTICE: "Set the missing wearable environment variables.",
     ...input.setupRuntimeEnvModule,
   }));
-
-  return import("../src/cli-entry.ts");
 }
 
 afterEach(() => {
@@ -45,11 +43,10 @@ afterEach(() => {
   for (const moduleId of mockedCliEntryModules) {
     vi.doUnmock(moduleId);
   }
-  vi.resetModules();
   process.emitWarning = originalEmitWarning;
 });
 
-test("loadCliEnvFiles attempts .env.local before .env and skips missing files", async () => {
+test("loadCliEnvFiles attempts .env.local before .env and skips missing files", () => {
   const loadEnvFileCalls: string[] = [];
   const missingFileError = Object.assign(new Error("missing"), {
     code: "ENOENT",
@@ -64,7 +61,6 @@ test("loadCliEnvFiles attempts .env.local before .env and skips missing files", 
       }
     });
 
-  const { loadCliEnvFiles } = await importCliEntry();
   loadCliEnvFiles("/repo/worktree");
 
   assert.equal(loadEnvFile.mock.calls.length, 2);
@@ -74,18 +70,16 @@ test("loadCliEnvFiles attempts .env.local before .env and skips missing files", 
   ]);
 });
 
-test("loadCliEnvFiles rethrows non-ENOENT load errors", async () => {
+test("loadCliEnvFiles rethrows non-ENOENT load errors", () => {
   const loadFailure = new Error("permission denied");
   vi.spyOn(process, "loadEnvFile").mockImplementation(() => {
     throw loadFailure;
   });
 
-  const { loadCliEnvFiles } = await importCliEntry();
-
   assert.throws(() => loadCliEnvFiles("/repo/worktree"), loadFailure);
 });
 
-test("formatMurphCliError reuses the shared structured formatter", async () => {
+test("formatMurphCliError reuses the shared structured formatter", () => {
   const error = Object.assign(new Error("Config validation failed."), {
     code: "CONFIG_INVALID",
     details: {
@@ -95,8 +89,6 @@ test("formatMurphCliError reuses the shared structured formatter", async () => {
       ],
     },
   });
-
-  const { formatMurphCliError } = await importCliEntry();
 
   assert.equal(formatMurphCliError(error), formatStructuredErrorMessage(error));
   assert.equal(
@@ -110,13 +102,12 @@ test("formatMurphCliError reuses the shared structured formatter", async () => {
   );
 });
 
-test("installSqliteExperimentalWarningFilter suppresses SQLite experimental warnings only", async () => {
+test("installSqliteExperimentalWarningFilter suppresses SQLite experimental warnings only", () => {
   const forwardedWarnings: unknown[][] = [];
   process.emitWarning = ((warning: string | Error, ...args: unknown[]) => {
     forwardedWarnings.push([warning, ...args]);
   }) as typeof process.emitWarning;
 
-  const { installSqliteExperimentalWarningFilter } = await importCliEntry();
   installSqliteExperimentalWarningFilter();
 
   process.emitWarning(
@@ -133,11 +124,10 @@ test("installSqliteExperimentalWarningFilter suppresses SQLite experimental warn
   ]);
 });
 
-test("installSqliteExperimentalWarningFilter is idempotent", async () => {
+test("installSqliteExperimentalWarningFilter is idempotent", () => {
   process.emitWarning = ((warning: string | Error, ...args: unknown[]) =>
     originalEmitWarning(warning, ...(args as []))) as typeof process.emitWarning;
 
-  const { installSqliteExperimentalWarningFilter } = await importCliEntry();
   installSqliteExperimentalWarningFilter();
   const wrappedEmitWarning = process.emitWarning;
 
@@ -154,7 +144,7 @@ test("runMurphCliAction injects the resolved default vault for non-setup invocat
   );
   const resolveDefaultVault = vi.fn(async () => "/vaults/default");
 
-  const { runMurphCliAction } = await importCliEntryWithMocks({
+  mockCliActionModules({
     cli: { serve },
     operatorConfigModule: {
       applyDefaultVaultToArgs,
@@ -211,7 +201,7 @@ test("runMurphCliAction reuses setup results for wearable launches and assistant
       }) => void)
     | null = null;
 
-  const { runMurphCliAction } = await importCliEntryWithMocks({
+  mockCliActionModules({
     cli: { serve },
     operatorConfigModule: {
       applyDefaultVaultToArgs: vi.fn(),
@@ -261,19 +251,11 @@ test("runMurphCliAction reuses setup results for wearable launches and assistant
       },
     ],
   ]);
-  assert.equal(
-    stderrWrites.some((entry) =>
-      entry.includes("Selected wearable setup is waiting on credentials: WHOOP"),
-    ),
-    true,
-  );
-  assert.equal(
-    stderrWrites.some((entry) => entry.includes("Opening OURA connect flow in your browser.")),
-    true,
-  );
-  assert.equal(
-    stderrWrites.some((entry) => entry.includes("Opening Murph assistant chat. Type /exit to quit.")),
-    true,
-  );
-  stderrSpy.mockRestore();
+  assert.deepEqual(stderrSpy.mock.calls, [
+    [
+      "\nSelected wearable setup is waiting on credentials: WHOOP (WHOOP_CLIENT_ID). Set the missing wearable environment variables.\n",
+    ],
+    ["\nOpening OURA connect flow in your browser.\n\n"],
+    ["\nOpening Murph assistant chat. Type /exit to quit.\n\n"],
+  ]);
 });
