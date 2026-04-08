@@ -7,6 +7,7 @@ import {
   normalizePublicBaseUrl,
   normalizeString,
   resolveRelativeOrAllowedOriginUrl,
+  sha256Text,
   toIsoTimestamp,
 } from "./shared.ts";
 
@@ -159,7 +160,6 @@ export class DeviceSyncPublicIngress {
         this.logger.warn?.("OAuth callback was rejected by the provider.", {
           provider: provider.provider,
           callbackError,
-          errorDescription: normalizeString(input.errorDescription),
         });
 
         throw deviceSyncError({
@@ -289,7 +289,7 @@ export class DeviceSyncPublicIngress {
     if (!account) {
       this.logger.warn?.("Ignoring webhook for unknown device sync account.", {
         provider: provider.provider,
-        externalAccountId: parsed.externalAccountId,
+        externalAccountIdHash: hashExternalAccountIdForLogs(parsed.externalAccountId),
         eventType: parsed.eventType,
         traceId: parsed.traceId,
       });
@@ -405,6 +405,10 @@ export class DeviceSyncPublicIngress {
 
 export function createDeviceSyncPublicIngress(input: CreateDeviceSyncPublicIngressInput): DeviceSyncPublicIngress {
   return new DeviceSyncPublicIngress(input);
+}
+
+function hashExternalAccountIdForLogs(value: string): string {
+  return sha256Text(value);
 }
 
 function attachOAuthCallbackContext(

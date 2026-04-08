@@ -4,6 +4,7 @@ import { test, vi } from "vitest";
 import { DeviceSyncError } from "../src/errors.ts";
 import { createDeviceSyncPublicIngress } from "../src/public-ingress.ts";
 import { createDeviceSyncRegistry } from "../src/registry.ts";
+import { sha256Text } from "../src/shared.ts";
 
 import type {
   ClaimDeviceSyncWebhookTraceInput,
@@ -796,6 +797,76 @@ test("public ingress keeps accepted webhook traces when only receipt timestamp p
   assert.equal(store.lastRecordedWebhookTrace?.traceId, "trace-mark-failure");
   assert.equal(store.completedWebhookTraceCalls, 1);
   assert.equal(warn.mock.calls.length, 1);
+});
+
+test("public ingress omits provider-supplied OAuth error descriptions from warning logs", async () => {
+  const store = new InMemoryPublicIngressStore();
+  const warn = vi.fn();
+  const ingress = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    registry: createDeviceSyncRegistry([createFakeProvider()]),
+    store,
+    log: { warn },
+  });
+
+  const begin = await ingress.startConnection({ provider: "demo" });
+
+  await assert.rejects(
+    () =>
+      ingress.handleOAuthCallback({
+        provider: "demo",
+        state: begin.state,
+        error: "access_denied",
+        errorDescription: "Bearer very-secret-token",
+      }),
+    (error: unknown) =>
+      error instanceof DeviceSyncError && error.code === "OAUTH_CALLBACK_REJECTED",
+  );
+
+  assert.equal(warn.mock.calls.length, 1);
+  assert.deepEqual(warn.mock.calls[0]?.[1], {
+    provider: "demo",
+    callbackError: "access_denied",
+  });
+});
+
+test("public ingress hashes unknown external account ids before logging them", async () => {
+  const store = new InMemoryPublicIngressStore();
+  const warn = vi.fn();
+  const ingress = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    registry: createDeviceSyncRegistry([
+      createFakeProvider({
+        async verifyAndParseWebhook() {
+          return {
+            externalAccountId: "demo-unknown",
+            eventType: "demo.updated",
+            traceId: "trace-unknown-account",
+            jobs: [],
+          };
+        },
+      }),
+    ]),
+    store,
+    log: { warn },
+  });
+
+  const result = await ingress.handleWebhook("demo", new Headers(), Buffer.from("{}"));
+
+  assert.deepEqual(result, {
+    accepted: true,
+    duplicate: false,
+    provider: "demo",
+    eventType: "demo.updated",
+    traceId: "trace-unknown-account",
+  });
+  assert.equal(warn.mock.calls.length, 1);
+  assert.deepEqual(warn.mock.calls[0]?.[1], {
+    provider: "demo",
+    externalAccountIdHash: sha256Text("demo-unknown"),
+    eventType: "demo.updated",
+    traceId: "trace-unknown-account",
+  });
 });
 
 test("public ingress rejects overlapping active webhook deliveries until the first claim finishes", async () => {

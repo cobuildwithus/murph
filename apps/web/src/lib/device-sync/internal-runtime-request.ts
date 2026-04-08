@@ -8,6 +8,8 @@ import {
   type HostedExecutionDeviceSyncRuntimeTokenBundle as HostedDeviceSyncRuntimeTokenBundle,
 } from "@murphai/device-syncd/hosted-runtime";
 
+import { sanitizeHostedRuntimeErrorCode, sanitizeHostedRuntimeErrorText } from "./shared";
+
 export function parseHostedDeviceSyncRuntimeSnapshotRequest(
   value: Record<string, unknown>,
   trustedUserId: string | null = null,
@@ -161,17 +163,21 @@ function parseHostedDeviceSyncRuntimeLocalStateUpdate(
     ...(record.lastErrorCode === undefined
       ? {}
       : {
-          lastErrorCode: readNullableString(
-            record.lastErrorCode,
-            `updates[${index}].localState.lastErrorCode`,
+          lastErrorCode: sanitizeHostedRuntimeErrorCode(
+            readNullableString(
+              record.lastErrorCode,
+              `updates[${index}].localState.lastErrorCode`,
+            ),
           ),
         }),
     ...(record.lastErrorMessage === undefined
       ? {}
       : {
-          lastErrorMessage: readNullableString(
-            record.lastErrorMessage,
-            `updates[${index}].localState.lastErrorMessage`,
+          lastErrorMessage: sanitizeHostedRuntimeErrorText(
+            readNullableString(
+              record.lastErrorMessage,
+              `updates[${index}].localState.lastErrorMessage`,
+            ),
           ),
         }),
     ...(record.lastSyncCompletedAt === undefined
@@ -247,8 +253,12 @@ function parseHostedDeviceSyncRuntimeLocalStateSnapshot(
   const record = requireObject(value, label);
 
   return {
-    lastErrorCode: readNullableString(record.lastErrorCode, `${label}.lastErrorCode`),
-    lastErrorMessage: readNullableString(record.lastErrorMessage, `${label}.lastErrorMessage`),
+    lastErrorCode: sanitizeHostedRuntimeErrorCode(
+      readNullableString(record.lastErrorCode, `${label}.lastErrorCode`),
+    ),
+    lastErrorMessage: sanitizeHostedRuntimeErrorText(
+      readNullableString(record.lastErrorMessage, `${label}.lastErrorMessage`),
+    ),
     lastSyncCompletedAt: readNullableIsoTimestamp(record.lastSyncCompletedAt, `${label}.lastSyncCompletedAt`),
     lastSyncErrorAt: readNullableIsoTimestamp(record.lastSyncErrorAt, `${label}.lastSyncErrorAt`),
     lastSyncStartedAt: readNullableIsoTimestamp(record.lastSyncStartedAt, `${label}.lastSyncStartedAt`),

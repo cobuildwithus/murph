@@ -76,20 +76,20 @@ export async function requireAuthenticatedHostedUser(
 }
 
 export function assertBrowserMutationOrigin(request: Request, env: HostedDeviceSyncEnvironment): void {
-  const origin = normalizeHeaderValue(request.headers.get("origin"));
+  const origin = normalizeStrictOriginHeaderValue(request.headers.get("origin"));
 
   if (!origin) {
     throw deviceSyncError({
       code: "CSRF_ORIGIN_REQUIRED",
-      message: "Hosted device-sync browser mutation routes require an Origin header.",
+      message: "Hosted device-sync browser mutation routes require a valid Origin header.",
       retryable: false,
       httpStatus: 403,
     });
   }
 
-  const requestOrigin = new URL(request.url).origin;
+  const allowedOrigins = resolveAllowedBrowserOrigins(request, env);
 
-  if (origin === requestOrigin || env.allowedMutationOrigins.includes(origin)) {
+  if (allowedOrigins.has(origin)) {
     return;
   }
 
@@ -281,11 +281,7 @@ function validateHostedUserAssertionClaims(
   const url = new URL(request.url);
   const requestMethod = request.method.toUpperCase();
   const requestOriginHeader = normalizeStrictOriginHeaderValue(request.headers.get("origin"));
-  const allowedAudiences = new Set<string>([url.origin]);
-
-  if (env.publicBaseUrl) {
-    allowedAudiences.add(new URL(env.publicBaseUrl).origin);
-  }
+  const allowedAudiences = resolveAllowedBrowserOrigins(request, env);
 
   if (!allowedAudiences.has(claims.aud)) {
     throw invalidHostedUserHeaders("Hosted device-sync user assertion audience is invalid.");
@@ -308,6 +304,45 @@ function secureEqual(expectedValue: string, providedValue: string): boolean {
   const expected = Buffer.from(expectedValue, "utf8");
   const provided = Buffer.from(providedValue, "utf8");
   return expected.length === provided.length && timingSafeEqual(expected, provided);
+}
+
+function resolveAllowedBrowserOrigins(
+  request: Request,
+  env: HostedDeviceSyncEnvironment,
+): Set<string> {
+  const allowedOrigins = new Set<string>();
+
+  for (const value of env.allowedMutationOrigins) {
+    const origin = normalizeStrictOriginClaim(value);
+
+    if (origin) {
+      allowedOrigins.add(origin);
+    }
+  }
+
+  const configuredOrigin = resolveConfiguredHostedDeviceSyncOrigin(env);
+
+  if (configuredOrigin) {
+    allowedOrigins.add(configuredOrigin);
+  } else {
+    allowedOrigins.add(new URL(request.url).origin);
+  }
+
+  return allowedOrigins;
+}
+
+function resolveConfiguredHostedDeviceSyncOrigin(env: HostedDeviceSyncEnvironment): string | null {
+  const configuredBaseUrl = normalizeNullableString(env.publicBaseUrl);
+
+  if (!configuredBaseUrl) {
+    return null;
+  }
+
+  try {
+    return new URL(configuredBaseUrl).origin;
+  } catch {
+    return null;
+  }
 }
 
 function invalidHostedUserHeaders(message: string) {

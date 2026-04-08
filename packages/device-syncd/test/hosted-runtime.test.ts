@@ -157,6 +157,66 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
     });
   });
 
+  it("redacts secret-bearing error fields in runtime apply payloads and seeds", () => {
+    const parsed = parseHostedExecutionDeviceSyncRuntimeApplyRequest({
+      updates: [
+        {
+          connectionId: "conn_123",
+          localState: {
+            lastErrorCode: "access_token=apply-secret",
+            lastErrorMessage:
+              "authorization=Bearer secret-token refresh_token=refresh-secret eyJhbGciOiJIUzI1NiJ9.payload.signature",
+          },
+          seed: {
+            connection: {
+              accessTokenExpiresAt: null,
+              connectedAt: "2026-04-06T23:00:00+00:00",
+              createdAt: "2026-04-06T22:00:00+00:00",
+              displayName: "Seed User",
+              externalAccountId: "oura-user-1",
+              id: "conn_123",
+              metadata: {},
+              provider: "oura",
+              scopes: ["daily"],
+              status: "active",
+            },
+            localState: {
+              lastErrorCode: "refresh_token=seed-secret",
+              lastErrorMessage:
+                "authorization=Bearer seed-token refresh_token=seed-refresh eyJhbGciOiJIUzI1NiJ9.seed.payload",
+              lastSyncCompletedAt: null,
+              lastSyncErrorAt: null,
+              lastSyncStartedAt: null,
+              lastWebhookAt: null,
+              nextReconcileAt: null,
+            },
+            tokenBundle: null,
+          },
+        },
+      ],
+      userId: "user_123",
+    });
+
+    expect(parsed).toMatchObject({
+      updates: [
+        {
+          connectionId: "conn_123",
+          localState: {
+            lastErrorCode: "access_token=[redacted]",
+            lastErrorMessage: "authorization=[redacted] refresh_token=[redacted] [redacted.jwt]",
+          },
+          seed: {
+            localState: {
+              lastErrorCode: "refresh_token=[redacted]",
+              lastErrorMessage: "authorization=[redacted] refresh_token=[redacted] [redacted.jwt]",
+            },
+          },
+        },
+      ],
+      userId: "user_123",
+    });
+  });
+
   it("sanitizes connection metadata updates before they reach durable runtime state", () => {
     const parsed = parseHostedExecutionDeviceSyncRuntimeApplyRequest({
       updates: [

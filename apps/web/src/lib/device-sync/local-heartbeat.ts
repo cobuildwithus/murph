@@ -1,7 +1,11 @@
 import { deviceSyncError } from "@murphai/device-syncd/public-ingress";
 
 import type { PublicDeviceSyncAccount } from "@murphai/device-syncd/public-ingress";
-import { normalizeNullableString } from "./shared";
+import {
+  normalizeNullableString,
+  sanitizeHostedRuntimeErrorCode,
+  sanitizeHostedRuntimeErrorText,
+} from "./shared";
 
 const HEARTBEAT_ALLOWED_FIELDS = new Set([
   "lastSyncStartedAt",
@@ -71,11 +75,15 @@ export function parseHostedLocalHeartbeatPatch(
   }
 
   if ("lastErrorCode" in body) {
-    patch.lastErrorCode = parseHeartbeatString("lastErrorCode", body.lastErrorCode, MAX_ERROR_CODE_LENGTH);
+    patch.lastErrorCode = sanitizeHostedRuntimeErrorCode(
+      parseHeartbeatString("lastErrorCode", body.lastErrorCode, MAX_ERROR_CODE_LENGTH),
+    )!;
   }
 
   if ("lastErrorMessage" in body) {
-    patch.lastErrorMessage = parseHeartbeatString("lastErrorMessage", body.lastErrorMessage, MAX_ERROR_MESSAGE_LENGTH);
+    patch.lastErrorMessage = sanitizeHostedRuntimeErrorText(
+      parseHeartbeatString("lastErrorMessage", body.lastErrorMessage, MAX_ERROR_MESSAGE_LENGTH),
+    )!;
   }
 
   if ((patch.lastErrorCode !== undefined || patch.lastErrorMessage !== undefined) && patch.lastSyncErrorAt === undefined) {

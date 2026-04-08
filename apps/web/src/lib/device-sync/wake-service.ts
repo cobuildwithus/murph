@@ -31,7 +31,13 @@ import {
 } from "./internal-runtime";
 import { PrismaDeviceSyncControlPlaneStore } from "./prisma-store";
 import { requireHostedDeviceSyncRuntimeClient } from "./runtime-client";
-import { normalizeNullableString, sha256Hex, toIsoTimestamp } from "./shared";
+import {
+  normalizeNullableString,
+  sanitizeHostedRuntimeErrorCode,
+  sanitizeHostedRuntimeErrorText,
+  sha256Hex,
+  toIsoTimestamp,
+} from "./shared";
 
 export async function disconnectHostedDeviceSyncConnection(input: {
   connectionId: string;
@@ -78,9 +84,16 @@ export async function disconnectHostedDeviceSyncConnection(input: {
           tokenBundle: runtimeConnection.tokenBundle,
         }));
       } catch (error) {
+        const code = sanitizeHostedRuntimeErrorCode(
+          isDeviceSyncError(error) ? error.code : "PROVIDER_REVOKE_FAILED",
+        ) ?? "PROVIDER_REVOKE_FAILED";
+        const message = sanitizeHostedRuntimeErrorText(
+          error instanceof Error ? error.message : "Provider revoke request failed during disconnect.",
+        ) ?? "Provider revoke request failed during disconnect.";
+
         warning = {
-          code: isDeviceSyncError(error) ? error.code : "PROVIDER_REVOKE_FAILED",
-          message: error instanceof Error ? error.message : "Provider revoke request failed during disconnect.",
+          code,
+          message,
         };
       }
     }
