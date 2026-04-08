@@ -339,6 +339,7 @@ async function resolveAssistantRouteTurnPlan(input: {
   const assistantCliContract = shouldInjectBootstrapContext
     ? await resolveAssistantCliSurfaceBootstrapContext({
         cliEnv: input.sharedPlan.cliAccess.env,
+        executionContext: input.input.executionContext,
         sessionId: input.session.sessionId,
         vault: input.input.vault,
         workingDirectory,

@@ -305,6 +305,7 @@ test('resolveAssistantCliSurfaceBootstrapContext falls back to a persisted summa
       {
         cliEnv: undefined,
         detail: 'full',
+        executionContext: undefined,
         vault: vaultRoot,
         workingDirectory: undefined,
       },

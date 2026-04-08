@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
 import {
+  executeAssistantCliCommand,
   readAssistantCliLlmsManifest,
   readAssistantTextFile,
   withAssistantPayloadFile,
@@ -147,6 +148,41 @@ describe('readAssistantCliLlmsManifest', () => {
     })
   })
 
+  it('disables incur config autodiscovery for hosted manifest reads', async () => {
+    const vaultRoot = await createVaultRoot()
+    const homeRoot = await createPathRoot()
+    await writeExecutable(
+      path.join(homeRoot, '.local', 'bin', 'vault-cli'),
+      [
+        '#!/bin/sh',
+        'printf \'{"commands":[{"name":"argv","description":"%s"}]}\\n\' "$*"',
+      ].join('\n'),
+    )
+
+    await expect(
+      readAssistantCliLlmsManifest({
+        cliEnv: {
+          HOME: homeRoot,
+          PATH: '/usr/bin:/bin',
+        },
+        executionContext: {
+          hosted: {
+            memberId: 'member_123',
+            userEnvKeys: [],
+          },
+        },
+        vault: vaultRoot,
+      }),
+    ).resolves.toEqual({
+      commands: [
+        {
+          description: '--no-config --llms --format json',
+          name: 'argv',
+        },
+      ],
+    })
+  })
+
   it('fails with command output context when vault-cli returns an invalid llms manifest shape', async () => {
     const vaultRoot = await createVaultRoot()
     const homeRoot = await createPathRoot()
@@ -180,6 +216,58 @@ describe('readAssistantCliLlmsManifest', () => {
         stdout: '{"invalid":true}',
       },
       message: 'vault-cli --llms-full --format json returned an unexpected manifest shape.',
+    })
+  })
+})
+
+describe('executeAssistantCliCommand', () => {
+  it('adds --no-config for hosted vault-cli invocations only', async () => {
+    const vaultRoot = await createVaultRoot()
+    const homeRoot = await createPathRoot()
+    await writeExecutable(
+      path.join(homeRoot, '.local', 'bin', 'vault-cli'),
+      [
+        '#!/bin/sh',
+        'printf "%s\\n" "$*"',
+      ].join('\n'),
+    )
+
+    await expect(
+      executeAssistantCliCommand({
+        args: ['audit', 'list'],
+        input: {
+          cliEnv: {
+            HOME: homeRoot,
+            PATH: '/usr/bin:/bin',
+          },
+          executionContext: {
+            hosted: {
+              memberId: 'member_123',
+              userEnvKeys: [],
+            },
+          },
+          vault: vaultRoot,
+        },
+      }),
+    ).resolves.toMatchObject({
+      argv: ['vault-cli', '--no-config', 'audit', 'list', '--format', 'json', '--vault', '<REDACTED_PATH>'],
+      stdout: `--no-config audit list --format json --vault ${vaultRoot}`,
+    })
+
+    await expect(
+      executeAssistantCliCommand({
+        args: ['audit', 'list'],
+        input: {
+          cliEnv: {
+            HOME: homeRoot,
+            PATH: '/usr/bin:/bin',
+          },
+          vault: vaultRoot,
+        },
+      }),
+    ).resolves.toMatchObject({
+      argv: ['vault-cli', 'audit', 'list', '--format', 'json', '--vault', '<REDACTED_PATH>'],
+      stdout: `audit list --format json --vault ${vaultRoot}`,
     })
   })
 })

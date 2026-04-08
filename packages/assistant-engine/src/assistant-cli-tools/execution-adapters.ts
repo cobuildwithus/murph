@@ -9,6 +9,7 @@ import { resolveAssistantVaultPath } from '@murphai/vault-usecases/assistant-vau
 import { sanitizeChildProcessEnv } from '../child-process-env.js'
 import { resolveRuntimePaths } from '@murphai/runtime-state/node'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import type { AssistantExecutionContext } from '../assistant/execution-context.js'
 import type { AssistantToolContext, AssistantCliLlmsManifest } from './shared.js'
 import {
   assistantCliDefaultTimeoutMs,
@@ -29,6 +30,7 @@ interface AssistantCliLauncher {
 export async function readAssistantCliLlmsManifest(input: {
   cliEnv?: NodeJS.ProcessEnv
   detail?: 'compact' | 'full'
+  executionContext?: AssistantExecutionContext | null
   vault: string
   workingDirectory?: string | null
 }): Promise<AssistantCliLlmsManifest> {
@@ -37,6 +39,7 @@ export async function readAssistantCliLlmsManifest(input: {
     args: [detail === 'full' ? '--llms-full' : '--llms', '--format', 'json'],
     input: {
       cliEnv: input.cliEnv,
+      executionContext: input.executionContext,
       vault: input.vault,
       workingDirectory: input.workingDirectory ?? undefined,
     },
@@ -73,6 +76,10 @@ export async function executeAssistantCliCommand(input: {
     stdin: input.stdin,
     vault: input.input.vault,
   })
+  const disableConfigAutodiscovery = shouldDisableAssistantCliConfigAutodiscovery(input.input)
+  const argv = disableConfigAutodiscovery
+    ? ['--no-config', ...preparedRequest.args]
+    : [...preparedRequest.args]
   const env = sanitizeChildProcessEnv(
     prepareAssistantDirectCliEnv({
       NO_COLOR: '1',
@@ -85,7 +92,7 @@ export async function executeAssistantCliCommand(input: {
   try {
     const launcher = await resolveAssistantCliLauncher(env)
     return await new Promise((resolve, reject) => {
-      const child = spawn(launcher.command, [...launcher.argvPrefix, ...preparedRequest.args], {
+      const child = spawn(launcher.command, [...launcher.argvPrefix, ...argv], {
         cwd: normalizeNullableString(input.input.workingDirectory) ?? process.cwd(),
         env,
         stdio: 'pipe',
@@ -186,7 +193,9 @@ export async function executeAssistantCliCommand(input: {
           }
 
           resolve({
-            argv: ['vault-cli', ...preparedRequest.redactedArgv],
+            argv: ['vault-cli', ...(disableConfigAutodiscovery
+              ? ['--no-config', ...preparedRequest.redactedArgv]
+              : preparedRequest.redactedArgv)],
             exitCode,
             json: tryParseAssistantCliJsonOutput(redactedStdout),
             stderr: redactedStderr,
@@ -200,6 +209,12 @@ export async function executeAssistantCliCommand(input: {
       await rm(preparedRequest.cleanupPath, { force: true, recursive: true })
     }
   }
+}
+
+function shouldDisableAssistantCliConfigAutodiscovery(
+  input: Pick<AssistantToolContext, 'executionContext'>,
+): boolean {
+  return Boolean(input.executionContext?.hosted?.memberId)
 }
 
 export async function readAssistantTextFile(

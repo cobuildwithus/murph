@@ -288,6 +288,7 @@ describe('executeProviderTurnWithRecovery', () => {
       cliEnv: {
         CLI_TOKEN: 'test-cli-token',
       },
+      executionContext: null,
       sessionId: session.sessionId,
       vault: '/tmp/test-vault',
       workingDirectory: '/tmp/provider-turn-runner-tests',
