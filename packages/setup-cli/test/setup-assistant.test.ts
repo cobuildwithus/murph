@@ -86,6 +86,12 @@ test('setup assistant option normalization infers presets from explicit assistan
   )
   assert.equal(
     inferSetupAssistantPresetFromOptions({
+      assistantZeroDataRetention: true,
+    }),
+    'openai-compatible',
+  )
+  assert.equal(
+    inferSetupAssistantPresetFromOptions({
       assistantModel: 'gpt-5.4',
     }),
     'codex',
@@ -132,6 +138,7 @@ test('setup assistant defaults round-trip between saved operator defaults and se
       model: 'openrouter/auto',
       providerName: 'openrouter',
       reasoningEffort: 'high',
+      zeroDataRetention: true,
     },
     identityId: null,
     failoverRoutes: null,
@@ -161,6 +168,7 @@ test('setup assistant defaults round-trip between saved operator defaults and se
     assistantApiKeyEnv: 'OPENROUTER_API_KEY',
     assistantProviderName: 'openrouter',
     assistantReasoningEffort: 'high',
+    assistantZeroDataRetention: true,
   })
   assert.equal(
     formatSavedAssistantDefaultsSummary(codexDefaults),
@@ -744,6 +752,7 @@ test('setup assistant defaults helpers retain explicit codex command and surface
       assistantApiKeyEnv: undefined,
       assistantProviderName: undefined,
       assistantReasoningEffort: undefined,
+      assistantZeroDataRetention: undefined,
     },
   )
 })
@@ -775,6 +784,15 @@ test('setup assistant provider preset resolution prefers explicit preset ids and
       assistantProviderName: undefined,
     }),
     null,
+  )
+  assert.equal(
+    resolveSetupAssistantProviderPreset({
+      assistantProviderPreset: undefined,
+      assistantBaseUrl: 'https://ai-gateway.vercel.sh/v1',
+      assistantApiKeyEnv: undefined,
+      assistantProviderName: undefined,
+    })?.id,
+    'vercel-ai-gateway',
   )
 })
 

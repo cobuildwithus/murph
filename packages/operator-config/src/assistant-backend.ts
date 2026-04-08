@@ -71,6 +71,7 @@ export function assistantModelTargetToProviderConfigInput(
         model: normalizeNullableString(target.model),
         providerName: normalizeNullableString(target.providerName),
         reasoningEffort: normalizeNullableString(target.reasoningEffort),
+        zeroDataRetention: target.zeroDataRetention === true ? true : null,
       }
     case 'codex-cli':
     default:
@@ -146,6 +147,7 @@ function convertAssistantProviderConfigToModelTarget(
           config.reasoningEffort,
           assistantReasoningEffortValues,
         ),
+        ...(config.zeroDataRetention ? { zeroDataRetention: true } : {}),
       }
     case 'codex-cli':
     default:
@@ -184,7 +186,8 @@ function hasAssistantModelTargetValues(target: AssistantModelTarget): boolean {
           target.apiKeyEnv ??
           target.providerName ??
           (target.headers && Object.keys(target.headers).length > 0 ? 'headers' : null) ??
-          target.reasoningEffort,
+          target.reasoningEffort ??
+          (target.zeroDataRetention ? 'zero-data-retention' : null),
       )
     case 'codex-cli':
     default:

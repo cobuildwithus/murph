@@ -7,6 +7,7 @@ import type {
 import { splitAssistantHeadersForPersistence } from './redaction.js'
 import {
   isAssistantOpenAIBaseUrl,
+  isAssistantVercelAIGatewayBaseUrl,
   normalizeNullableString,
 } from './shared.js'
 
@@ -24,6 +25,7 @@ export interface AssistantProviderConfig {
   providerName: string | null
   reasoningEffort: string | null
   sandbox: AssistantSandbox | null
+  zeroDataRetention: boolean | null
 }
 
 export const DEFAULT_MURPH_CODEX_REASONING_EFFORT = 'medium'
@@ -42,6 +44,7 @@ export type AssistantProviderConfigInput = {
   providerName?: string | null
   reasoningEffort?: string | null
   sandbox?: AssistantSandbox | null
+  zeroDataRetention?: boolean | null
 }
 
 const ASSISTANT_PROVIDER_CONFIG_FIELDS = [
@@ -57,6 +60,7 @@ const ASSISTANT_PROVIDER_CONFIG_FIELDS = [
   'providerName',
   'reasoningEffort',
   'sandbox',
+  'zeroDataRetention',
 ] as const satisfies readonly (keyof AssistantProviderConfigInput)[]
 
 export function resolveAssistantProvider(
@@ -76,7 +80,8 @@ export function inferAssistantProviderFromConfigInput(
     normalizeNullableString(input?.baseUrl) ||
     normalizeNullableString(input?.apiKeyEnv) ||
     normalizeNullableString(input?.providerName) ||
-    normalizeAssistantHeaders(input?.headers)
+    normalizeAssistantHeaders(input?.headers) ||
+    input?.zeroDataRetention === true
   ) {
     return 'openai-compatible'
   }
@@ -124,6 +129,7 @@ export function sanitizeAssistantProviderConfig(
         providerName: normalizeNullableString(input?.providerName),
         reasoningEffort: normalizeNullableString(input?.reasoningEffort),
         sandbox: null,
+        zeroDataRetention: input?.zeroDataRetention === true ? true : null,
       }
     case 'codex-cli':
     default:
@@ -143,6 +149,7 @@ export function sanitizeAssistantProviderConfig(
           normalizeNullableString(input?.reasoningEffort) ??
           DEFAULT_MURPH_CODEX_REASONING_EFFORT,
         sandbox: input?.sandbox ?? null,
+        zeroDataRetention: null,
       }
   }
 }
@@ -232,6 +239,9 @@ export function serializeAssistantProviderSessionOptions(
     ...(normalized.provider === 'openai-compatible' && normalized.headers
       ? { headers: normalized.headers }
       : {}),
+    ...(normalized.provider === 'openai-compatible' && normalized.zeroDataRetention
+      ? { zeroDataRetention: true }
+      : {}),
   }
 }
 
@@ -254,6 +264,10 @@ export function serializeAssistantProviderOperatorDefaults(
     headers:
       normalized.provider === 'openai-compatible'
         ? normalizeAssistantPersistedHeaders(normalized.headers)
+        : null,
+    zeroDataRetention:
+      normalized.provider === 'openai-compatible' && normalized.zeroDataRetention
+        ? true
         : null,
   }
 }
@@ -297,6 +311,16 @@ export function supportsAssistantReasoningEffort(
   return (
     normalized.provider === 'codex-cli' ||
     normalized.provider === 'openai-compatible'
+  )
+}
+
+export function supportsAssistantZeroDataRetention(
+  input: AssistantProviderConfigInput | null | undefined,
+): boolean {
+  const normalized = normalizeAssistantProviderConfig(input)
+  return (
+    normalized.provider === 'openai-compatible' &&
+    isAssistantVercelAIGatewayBaseUrl(normalized.baseUrl)
   )
 }
 

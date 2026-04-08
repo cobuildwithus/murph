@@ -19,6 +19,7 @@ import {
 } from './helpers.js'
 import type { AssistantProviderTraceUpdate } from '../provider-traces.js'
 import {
+  isAssistantVercelAIGatewayBaseUrl,
   normalizeAssistantProviderOptionKey,
   normalizeNullableString,
 } from '../shared.js'
@@ -195,8 +196,13 @@ export const openAiCompatibleProviderDefinition: AssistantProviderDefinition = {
     try {
       const messages = buildAssistantProviderMessages(input)
       const reasoningEffort = normalizeNullableString(providerConfig.reasoningEffort)
+      const usesVercelAIGateway = isAssistantVercelAIGatewayBaseUrl(
+        providerConfig.baseUrl,
+      )
       const providerOptionKey = usesOpenAIResponsesApi
         ? 'openai'
+        : usesVercelAIGateway
+          ? 'gateway'
         : normalizeAssistantProviderOptionKey(providerConfig.providerName)
       const providerOptionValues: Record<string, boolean | string> = {}
 
@@ -212,6 +218,10 @@ export const openAiCompatibleProviderDefinition: AssistantProviderDefinition = {
             input.resumeProviderSessionId,
           )!
         }
+      }
+
+      if (usesVercelAIGateway && providerConfig.zeroDataRetention === true) {
+        providerOptionValues.zeroDataRetention = true
       }
 
       const result = await generateText({

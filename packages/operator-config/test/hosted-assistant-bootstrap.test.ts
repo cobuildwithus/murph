@@ -39,6 +39,7 @@ test('hosted assistant config parsing and readiness helpers normalize expected s
   const hostedConfigModule = await loadHostedAssistantModule()
   const {
     HOSTED_ASSISTANT_API_KEY_ENV,
+    HOSTED_ASSISTANT_ZERO_DATA_RETENTION_ENV,
     compileHostedAssistantProfileProviderConfig,
     isHostedAssistantProfileReady,
     parseHostedAssistantConfig,
@@ -82,7 +83,31 @@ test('hosted assistant config parsing and readiness helpers normalize expected s
   assert.equal(tryParseHostedAssistantConfig('bad-json-shape'), null)
   assert.deepEqual(prepareHostedAssistantConfigForWrite(config), config)
   assert.equal(readHostedAssistantApiKeyEnvName({ [HOSTED_ASSISTANT_API_KEY_ENV]: ' OPENAI_API_KEY ' }), 'OPENAI_API_KEY')
+  assert.equal(
+    prepareHostedAssistantConfigForWrite(
+      createHostedAssistantConfig({
+        activeProfileId: 'zdr',
+        profiles: [
+          createHostedAssistantProfile({
+            id: 'zdr',
+            providerConfig: {
+              provider: 'openai-compatible',
+              apiKeyEnv: 'VERCEL_AI_API_KEY',
+              baseUrl: 'https://ai-gateway.vercel.sh/v1',
+              model: 'openai/gpt-5.4',
+              zeroDataRetention: true,
+            },
+          }),
+        ],
+      }),
+    )?.profiles[0]?.target.zeroDataRetention,
+    true,
+  )
   assert.equal(readHostedAssistantApiKeyEnvName({ [HOSTED_ASSISTANT_API_KEY_ENV]: '   ' }), null)
+  assert.equal(
+    HOSTED_ASSISTANT_ZERO_DATA_RETENTION_ENV,
+    'HOSTED_ASSISTANT_ZERO_DATA_RETENTION',
+  )
   assert.deepEqual(resolveHostedAssistantProfile(config, ' platform-default '), readyProfile)
   assert.equal(resolveHostedAssistantProfile(config, 'missing'), null)
   assert.equal(resolveHostedAssistantProfile(config, '   '), null)
@@ -99,6 +124,7 @@ test('hosted assistant config parsing and readiness helpers normalize expected s
     provider: 'openai-compatible',
     providerName: null,
     reasoningEffort: null,
+    zeroDataRetention: null,
   })
   assert.deepEqual(resolveHostedAssistantProviderConfig(config), {
     apiKeyEnv: 'OPENAI_API_KEY',
@@ -108,6 +134,7 @@ test('hosted assistant config parsing and readiness helpers normalize expected s
     provider: 'openai-compatible',
     providerName: null,
     reasoningEffort: null,
+    zeroDataRetention: null,
   })
   assert.deepEqual(resolveHostedAssistantOperatorDefaultsState(config), {
     configured: true,
@@ -200,6 +227,40 @@ test('hosted assistant bootstrap reads process env and accepts valid boolean and
       error instanceof hostedConfigModule.HostedAssistantConfigurationError &&
       error.code === 'HOSTED_ASSISTANT_CONFIG_INVALID' &&
       /HOSTED_ASSISTANT_APPROVAL_POLICY cannot be used/u.test(error.message),
+  )
+
+  const gatewaySeed = await hostedConfigModule.ensureHostedAssistantOperatorDefaults({
+    allowMissing: false,
+    env: {
+      HOSTED_ASSISTANT_PROVIDER: 'vercel-ai-gateway',
+      HOSTED_ASSISTANT_MODEL: 'openai/gpt-5.4',
+      HOSTED_ASSISTANT_ZERO_DATA_RETENTION: 'true',
+    },
+  })
+
+  assert.deepEqual(gatewaySeed, {
+    configured: true,
+    provider: 'openai-compatible',
+    seeded: true,
+    source: 'hosted-env',
+  })
+
+  await assert.rejects(
+    () =>
+      hostedConfigModule.ensureHostedAssistantOperatorDefaults({
+        allowMissing: false,
+        env: {
+          HOSTED_ASSISTANT_PROVIDER: 'openai',
+          HOSTED_ASSISTANT_MODEL: 'gpt-5',
+          HOSTED_ASSISTANT_ZERO_DATA_RETENTION: 'true',
+        },
+      }),
+    (error) =>
+      error instanceof hostedConfigModule.HostedAssistantConfigurationError &&
+      error.code === 'HOSTED_ASSISTANT_CONFIG_INVALID' &&
+      /HOSTED_ASSISTANT_ZERO_DATA_RETENTION can be used only with Vercel AI Gateway/u.test(
+        error.message,
+      ),
   )
 })
 

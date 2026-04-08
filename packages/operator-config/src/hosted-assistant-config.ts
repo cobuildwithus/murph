@@ -23,6 +23,7 @@ import {
   resolveOpenAICompatibleProviderPresetFromProviderName,
 } from './assistant/openai-compatible-provider-presets.js'
 import type { AssistantProviderConfigInput } from './assistant/provider-config.js'
+import { isAssistantVercelAIGatewayBaseUrl } from './assistant/shared.js'
 import {
   readOperatorConfig,
   saveHostedAssistantConfig,
@@ -39,6 +40,8 @@ export const HOSTED_ASSISTANT_SANDBOX_ENV = 'HOSTED_ASSISTANT_SANDBOX'
 export const HOSTED_ASSISTANT_PROFILE_ENV = 'HOSTED_ASSISTANT_PROFILE'
 export const HOSTED_ASSISTANT_REASONING_EFFORT_ENV = 'HOSTED_ASSISTANT_REASONING_EFFORT'
 export const HOSTED_ASSISTANT_OSS_ENV = 'HOSTED_ASSISTANT_OSS'
+export const HOSTED_ASSISTANT_ZERO_DATA_RETENTION_ENV =
+  'HOSTED_ASSISTANT_ZERO_DATA_RETENTION'
 
 export const HOSTED_ASSISTANT_CONFIG_ENV_NAMES = [
   HOSTED_ASSISTANT_PROVIDER_ENV,
@@ -52,6 +55,7 @@ export const HOSTED_ASSISTANT_CONFIG_ENV_NAMES = [
   HOSTED_ASSISTANT_PROFILE_ENV,
   HOSTED_ASSISTANT_REASONING_EFFORT_ENV,
   HOSTED_ASSISTANT_OSS_ENV,
+  HOSTED_ASSISTANT_ZERO_DATA_RETENTION_ENV,
 ] as const
 
 const HOSTED_ASSISTANT_PLATFORM_PROFILE_ID = 'platform-default'
@@ -100,6 +104,7 @@ interface HostedAssistantRawEnvConfig {
   providerToken: string | null
   reasoningEffort: AssistantReasoningEffort | null
   sandbox: AssistantSandbox | null
+  zeroDataRetention: boolean | null
 }
 
 export {
@@ -424,6 +429,16 @@ function resolveHostedAssistantSeedPlan(
     )
   }
 
+  if (
+    raw.zeroDataRetention !== null &&
+    !isAssistantVercelAIGatewayBaseUrl(baseUrl)
+  ) {
+    throw new HostedAssistantConfigurationError(
+      'HOSTED_ASSISTANT_CONFIG_INVALID',
+      `${HOSTED_ASSISTANT_ZERO_DATA_RETENTION_ENV} can be used only with Vercel AI Gateway.`,
+    )
+  }
+
   return {
     providerConfig: {
       provider: 'openai-compatible',
@@ -432,6 +447,7 @@ function resolveHostedAssistantSeedPlan(
       model: raw.model,
       providerName: raw.providerName ?? providerSelection.presetProviderName,
       reasoningEffort: raw.reasoningEffort,
+      ...(raw.zeroDataRetention === true ? { zeroDataRetention: true } : {}),
     },
   }
 }
@@ -441,6 +457,9 @@ function readHostedAssistantRawEnvConfig(
 ): HostedAssistantRawEnvConfig {
   const source = env ?? process.env
   const rawOss = normalizeHostedAssistantString(source[HOSTED_ASSISTANT_OSS_ENV])
+  const rawZeroDataRetention = normalizeHostedAssistantString(
+    source[HOSTED_ASSISTANT_ZERO_DATA_RETENTION_ENV],
+  )
   const values = {
     apiKeyEnv: normalizeHostedAssistantString(source[HOSTED_ASSISTANT_API_KEY_ENV]),
     approvalPolicy: parseHostedAssistantEnum(
@@ -465,6 +484,10 @@ function readHostedAssistantRawEnvConfig(
       HOSTED_ASSISTANT_SANDBOX_ENV,
       assistantSandboxValues,
     ),
+    zeroDataRetention: parseHostedAssistantBoolean(
+      rawZeroDataRetention,
+      HOSTED_ASSISTANT_ZERO_DATA_RETENTION_ENV,
+    ),
   }
 
   return {
@@ -481,6 +504,7 @@ function readHostedAssistantRawEnvConfig(
       values.profile,
       values.reasoningEffort,
       rawOss,
+      rawZeroDataRetention,
     ].some((value) => value !== null),
   }
 }

@@ -83,6 +83,7 @@ export function hasExplicitSetupAssistantOptions(
     | 'assistantCodexHome'
     | 'assistantProfile'
     | 'assistantReasoningEffort'
+    | 'assistantZeroDataRetention'
     | 'assistantOss'
   >,
 ): boolean {
@@ -97,6 +98,7 @@ export function hasExplicitSetupAssistantOptions(
       options.assistantCodexHome ||
       options.assistantProfile ||
       options.assistantReasoningEffort ||
+      options.assistantZeroDataRetention ||
       options.assistantOss,
   )
 }
@@ -114,6 +116,7 @@ export function inferSetupAssistantPresetFromOptions(
     | 'assistantCodexHome'
     | 'assistantProfile'
     | 'assistantReasoningEffort'
+    | 'assistantZeroDataRetention'
     | 'assistantOss'
   >,
 ): SetupAssistantPreset | null {
@@ -125,7 +128,8 @@ export function inferSetupAssistantPresetFromOptions(
     options.assistantProviderPreset ||
     options.assistantBaseUrl ||
     options.assistantApiKeyEnv ||
-    options.assistantProviderName
+    options.assistantProviderName ||
+    options.assistantZeroDataRetention
   ) {
     return 'openai-compatible'
   }
@@ -281,6 +285,8 @@ export function createSetupAssistantResolver(
           const explicitReasoningEffort = normalizeNullableString(
             resolutionInput.options.assistantReasoningEffort,
           )
+          const explicitZeroDataRetention =
+            resolutionInput.options.assistantZeroDataRetention === true
 
           const providerPreset =
             resolveSetupAssistantProviderPreset(resolutionInput.options) ??
@@ -362,12 +368,14 @@ export function createSetupAssistantResolver(
             sandbox: null,
             approvalPolicy: null,
             oss: false,
+            ...(explicitZeroDataRetention ? { zeroDataRetention: true } : {}),
             account: null,
             detail: buildOpenAICompatibleAssistantDetail({
               apiKeyEnv,
               baseUrl,
               model,
               providerTitle: providerPreset.title,
+              zeroDataRetention: explicitZeroDataRetention,
             }),
           }
           break
@@ -551,15 +559,19 @@ function buildOpenAICompatibleAssistantDetail(input: {
   baseUrl: string
   model: string
   providerTitle?: string | null
+  zeroDataRetention?: boolean
 }): string {
   const providerLabel =
     normalizeNullableString(input.providerTitle) ?? input.baseUrl
+  const retentionNote = input.zeroDataRetention
+    ? ' Zero data retention is enabled.'
+    : ''
 
   if (input.apiKeyEnv) {
-    return `Use ${input.model} from ${providerLabel}. Murph will read the key from ${input.apiKeyEnv}.`
+    return `Use ${input.model} from ${providerLabel}. Murph will read the key from ${input.apiKeyEnv}.${retentionNote}`
   }
 
-  return `Use ${input.model} from ${providerLabel}.`
+  return `Use ${input.model} from ${providerLabel}.${retentionNote}`
 }
 
 function buildCodexAssistantDetail(input: {

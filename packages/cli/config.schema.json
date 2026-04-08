@@ -2021,6 +2021,7 @@
                   "type": "string",
                   "enum": [
                     "openai",
+                    "vercel-ai-gateway",
                     "openrouter",
                     "venice",
                     "deepseek",
@@ -2057,6 +2058,10 @@
                   "description": "Stable label for the saved OpenAI-compatible provider.",
                   "type": "string",
                   "minLength": 1
+                },
+                "zeroDataRetention": {
+                  "description": "Request zero data retention on Vercel AI Gateway assistant turns.",
+                  "type": "boolean"
                 },
                 "codexCommand": {
                   "description": "Optional Codex CLI executable path. Defaults to codex.",

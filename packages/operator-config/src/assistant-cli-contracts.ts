@@ -196,6 +196,7 @@ export const assistantOpenAiCompatibleModelTargetSchema = z
     model: z.string().min(1).nullable().default(null),
     providerName: z.string().min(1).nullable().default(null),
     reasoningEffort: z.enum(assistantReasoningEffortValues).nullable().default(null),
+    zeroDataRetention: z.boolean().optional(),
   })
   .strict()
 
@@ -234,6 +235,7 @@ export const assistantProviderSessionOptionsSchema = z.object({
   apiKeyEnv: z.string().min(1).nullable().optional(),
   providerName: z.string().min(1).nullable().optional(),
   headers: assistantHeadersSchema.nullable().optional(),
+  zeroDataRetention: z.boolean().optional(),
 })
 
 export const assistantSessionSecretsSchema = z
@@ -262,6 +264,7 @@ export const assistantProviderFailoverRouteSchema = z
     apiKeyEnv: z.string().min(1).nullable().optional(),
     providerName: z.string().min(1).nullable().optional(),
     headers: assistantHeadersSchema.nullable().optional(),
+    zeroDataRetention: z.boolean().optional(),
     cooldownMs: z.number().int().positive().nullable().default(null),
   })
   .strict()
@@ -357,6 +360,7 @@ function buildAssistantRuntimeSession(
             ? { providerName: value.target.providerName }
             : {}),
           ...(value.target.headers ? { headers: value.target.headers } : {}),
+          ...(value.target.zeroDataRetention ? { zeroDataRetention: true } : {}),
         })
       : assistantProviderSessionOptionsSchema.parse({
           model: value.target.model,

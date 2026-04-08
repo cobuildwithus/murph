@@ -34,6 +34,7 @@ export type AssistantTurnRouteOverride = Pick<
   | 'providerName'
   | 'reasoningEffort'
   | 'sandbox'
+  | 'zeroDataRetention'
 >
 
 export function resolveAssistantTurnRoutes(
@@ -119,6 +120,7 @@ export function selectAssistantTurnRouteOverride(
       providerName: selectedRoute.providerOptions.providerName ?? null,
       reasoningEffort: selectedRoute.providerOptions.reasoningEffort ?? null,
       sandbox: selectedRoute.providerOptions.sandbox ?? null,
+      zeroDataRetention: selectedRoute.providerOptions.zeroDataRetention ?? null,
     },
     route: selectedRoute,
   }
