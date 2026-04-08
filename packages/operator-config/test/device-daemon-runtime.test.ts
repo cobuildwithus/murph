@@ -45,6 +45,8 @@ afterEach(async () => {
   vi.restoreAllMocks()
   vi.resetModules()
   vi.doUnmock('node:child_process')
+  vi.doUnmock('node:fs')
+  vi.doUnmock('node:fs/promises')
 
   for (const directory of tempDirectories) {
     await rm(directory, { force: true, recursive: true })

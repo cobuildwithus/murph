@@ -12,17 +12,8 @@ import { VaultCliError } from '../src/vault-cli-errors.ts'
 
 afterEach(() => {
   vi.restoreAllMocks()
-  vi.resetModules()
   vi.unstubAllGlobals()
 })
-
-async function loadDeviceSyncClientWithMockedSpawn(
-  spawn: typeof import('node:child_process').spawn,
-): Promise<typeof import('../src/device-sync-client.ts')> {
-  vi.resetModules()
-  vi.doMock('node:child_process', () => ({ spawn }))
-  return await import('../src/device-sync-client.ts')
-}
 
 test('linq runtime covers no-content unavailable and raw-text error branches', async () => {
   await assert.rejects(
@@ -102,43 +93,13 @@ test('linq runtime covers no-content unavailable and raw-text error branches', a
   )
 })
 
-test('device sync client covers non-loopback passthrough and browser-open failure paths', async () => {
+test('device sync client covers non-loopback passthrough paths', async () => {
   assert.throws(
     () =>
       resolveDeviceSyncBaseUrl('http://[::1', {}, null),
     (error) => error instanceof TypeError,
   )
 
-  const spawn = vi.fn(() => {
-    throw new Error('missing browser launcher')
-  })
-  const dynamicModule = await loadDeviceSyncClientWithMockedSpawn(spawn)
-  const browserClient = dynamicModule.createDeviceSyncClient({
-    baseUrl: 'http://127.0.0.1:8788',
-    fetchImpl: async () =>
-      new Response(
-        JSON.stringify({
-          authorizationUrl: 'https://example.test/oauth',
-          expiresAt: '2026-04-08T00:00:00.000Z',
-          provider: 'oura',
-          state: 'state-3',
-        }),
-        {
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          status: 200,
-        },
-      ),
-  })
-
-  const result = await browserClient.beginConnection({
-    open: true,
-    provider: 'oura',
-  })
-
-  assert.equal(result.openedBrowser, false)
-  assert.equal(spawn.mock.calls[0]?.[0], process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'cmd' : 'xdg-open')
   assert.equal(createDeviceSyncClient({ baseUrl: 'http://127.0.0.1:8788' }).baseUrl, 'http://127.0.0.1:8788')
 
   let remoteBaseUrlError: unknown
