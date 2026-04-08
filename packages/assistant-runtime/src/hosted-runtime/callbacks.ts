@@ -3,10 +3,11 @@ import {
   buildHostedAssistantDeliverySentRecord,
   buildHostedAssistantDeliverySideEffect,
   parseHostedExecutionSideEffects,
+  type HostedAssistantDeliveryRecord,
+  type HostedAssistantDeliverySideEffect,
   type HostedExecutionDispatchRequest,
   type HostedExecutionRunnerResult,
   type HostedExecutionSideEffect,
-  type HostedExecutionSideEffectRecord,
 } from "@murphai/hosted-execution";
 import type { GatewayProjectionSnapshot } from "@murphai/gateway-core";
 import {
@@ -157,7 +158,7 @@ function createHostedAssistantDeliveryDispatchHooks(input: {
       intent: AssistantOutboxIntent;
       vault: string;
     }) => {
-      await callHostedRunnerSideEffectJournal({
+      await callHostedAssistantDeliveryJournal({
         commit: input.commit,
         effectsPort: input.effectsPort,
         method: "DELETE",
@@ -185,7 +186,7 @@ function createHostedAssistantDeliveryDispatchHooks(input: {
       intent: AssistantOutboxIntent;
       vault: string;
     }) => {
-      await callHostedRunnerSideEffectJournal({
+      await callHostedAssistantDeliveryJournal({
         commit: input.commit,
         effectsPort: input.effectsPort,
         method: "PUT",
@@ -205,7 +206,7 @@ function createHostedAssistantDeliveryDispatchHooks(input: {
         dedupeKey: intent.dedupeKey,
         intentId: intent.intentId,
       });
-      const record = await callHostedRunnerSideEffectJournal({
+      const record = await callHostedAssistantDeliveryJournal({
         commit: input.commit,
         effectsPort: input.effectsPort,
         method: "GET",
@@ -213,7 +214,7 @@ function createHostedAssistantDeliveryDispatchHooks(input: {
         userId: input.userId,
       });
 
-      if (record?.kind !== "assistant.delivery") {
+      if (!record) {
         return null;
       }
 
@@ -272,7 +273,7 @@ async function persistHostedAssistantDeliveryRecord(input: {
     );
   }
 
-  await callHostedRunnerSideEffectJournal({
+  await callHostedAssistantDeliveryJournal({
     commit: input.commit,
     effectsPort: input.effectsPort,
     method: "PUT",
@@ -306,21 +307,21 @@ function readLocallyRecordedAssistantDelivery(
   };
 }
 
-async function callHostedRunnerSideEffectJournal(input:
+async function callHostedAssistantDeliveryJournal(input:
   | {
       commit: HostedExecutionCommitCallback;
       effectsPort: HostedRuntimeEffectsPort;
       method: "DELETE" | "GET";
-      sideEffect: HostedExecutionSideEffect;
+      sideEffect: HostedAssistantDeliverySideEffect;
       userId: string;
     }
   | {
       commit: HostedExecutionCommitCallback;
       effectsPort: HostedRuntimeEffectsPort;
       method: "PUT";
-      record: HostedExecutionSideEffectRecord;
+      record: HostedAssistantDeliveryRecord;
       userId: string;
-    }): Promise<HostedExecutionSideEffectRecord | null> {
+    }): Promise<HostedAssistantDeliveryRecord | null> {
   const sideEffect = input.method === "PUT"
     ? buildHostedAssistantDeliverySideEffect({
         dedupeKey: input.record.fingerprint,
@@ -333,20 +334,18 @@ async function callHostedRunnerSideEffectJournal(input:
         await input.effectsPort.deletePreparedSideEffect({
           effectId: sideEffect.effectId,
           fingerprint: sideEffect.fingerprint,
-          kind: sideEffect.kind,
         });
         return null;
       case "GET":
         return await input.effectsPort.readSideEffect({
           effectId: sideEffect.effectId,
           fingerprint: sideEffect.fingerprint,
-          kind: sideEffect.kind,
         });
       case "PUT":
         return await input.effectsPort.writeSideEffect(input.record);
     }
   } catch (error) {
-    throw createHostedRunnerSideEffectJournalError(input, null, error);
+    throw createHostedAssistantDeliveryJournalError(input, null, error);
   }
 }
 
@@ -392,16 +391,16 @@ function createHostedAssistantDeliveryConfirmationPendingError(input: {
   return error;
 }
 
-function createHostedRunnerSideEffectJournalError(
+function createHostedAssistantDeliveryJournalError(
   input:
     | {
         method: "DELETE" | "GET";
-        sideEffect: HostedExecutionSideEffect;
+        sideEffect: HostedAssistantDeliverySideEffect;
         userId: string;
       }
     | {
         method: "PUT";
-        record: HostedExecutionSideEffectRecord;
+        record: HostedAssistantDeliveryRecord;
         userId: string;
       },
   status: number | null,

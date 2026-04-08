@@ -10,7 +10,7 @@ import {
 } from "../src/bundle-store.js";
 import { createHostedExecutionJournalStore } from "../src/execution-journal.js";
 import { writeHostedEmailRawMessage } from "../src/hosted-email.js";
-import { createHostedExecutionSideEffectJournalStore } from "../src/side-effect-journal.js";
+import { createHostedAssistantDeliveryJournalStore } from "../src/side-effect-journal.js";
 import {
   encryptHostedBundle,
   readEncryptedR2Payload,
@@ -211,7 +211,7 @@ describe("hosted storage object keys", () => {
     );
     expectOpaqueStrings([storedJournalKey], ["user_journal_123", "evt_journal_1"]);
 
-    const sideEffectStore = createHostedExecutionSideEffectJournalStore({
+    const sideEffectStore = createHostedAssistantDeliveryJournalStore({
       bucket,
       key: rootKey,
       keyId,

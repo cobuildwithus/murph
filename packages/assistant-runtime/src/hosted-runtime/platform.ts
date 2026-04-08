@@ -5,7 +5,8 @@ import type {
   HostedExecutionDeviceSyncRuntimeSnapshotResponse,
 } from "@murphai/device-syncd/hosted-runtime";
 import type {
-  HostedExecutionSideEffectRecord,
+  HostedAssistantDeliveryRecord,
+  HostedAssistantDeliverySideEffect,
 } from "@murphai/hosted-execution";
 
 import type {
@@ -25,19 +26,15 @@ export interface HostedRuntimeEffectsPort {
     eventId: string;
     payload: Record<string, unknown>;
   }): Promise<void>;
-  deletePreparedSideEffect(input: {
-    effectId: string;
-    fingerprint: string;
-    kind: string;
-  }): Promise<void>;
+  deletePreparedSideEffect(
+    input: Pick<HostedAssistantDeliverySideEffect, "effectId" | "fingerprint">,
+  ): Promise<void>;
   readRawEmailMessage(rawMessageKey: string): Promise<Uint8Array | null>;
-  readSideEffect(input: {
-    effectId: string;
-    fingerprint: string;
-    kind: string;
-  }): Promise<HostedExecutionSideEffectRecord | null>;
+  readSideEffect(
+    input: Pick<HostedAssistantDeliverySideEffect, "effectId" | "fingerprint">,
+  ): Promise<HostedAssistantDeliveryRecord | null>;
   sendEmail(request: HostedEmailSendRequest): Promise<{ target: string } | void>;
-  writeSideEffect(record: HostedExecutionSideEffectRecord): Promise<HostedExecutionSideEffectRecord>;
+  writeSideEffect(record: HostedAssistantDeliveryRecord): Promise<HostedAssistantDeliveryRecord>;
 }
 
 export interface HostedRuntimeDeviceSyncPort {

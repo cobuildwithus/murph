@@ -11,13 +11,13 @@ import {
 } from "../src/crypto-context.ts";
 import { writeEncryptedR2Json } from "../src/crypto.ts";
 import {
-  HostedExecutionSideEffectConflictError,
-  createHostedExecutionSideEffectJournalStore,
+  HostedAssistantDeliveryConflictError,
+  createHostedAssistantDeliveryJournalStore,
 } from "../src/side-effect-journal.ts";
 
 import { MemoryEncryptedR2Bucket } from "./test-helpers";
 
-describe("createHostedExecutionSideEffectJournalStore", () => {
+describe("createHostedAssistantDeliveryJournalStore", () => {
   it("reads side-effect records stored at the authoritative effect key", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
     const key = Buffer.alloc(32, 9);
@@ -42,7 +42,7 @@ describe("createHostedExecutionSideEffectJournalStore", () => {
       value: record,
     });
 
-    const store = createHostedExecutionSideEffectJournalStore({
+    const store = createHostedAssistantDeliveryJournalStore({
       bucket,
       key,
       keyId: "v1",
@@ -51,7 +51,6 @@ describe("createHostedExecutionSideEffectJournalStore", () => {
     await expect(store.read({
       effectId: record.effectId,
       fingerprint: record.fingerprint,
-      kind: record.kind,
       userId: "member_123",
     })).resolves.toEqual(record);
   });
@@ -81,7 +80,7 @@ describe("createHostedExecutionSideEffectJournalStore", () => {
       value: record,
     });
 
-    await expect(createHostedExecutionSideEffectJournalStore({
+    await expect(createHostedAssistantDeliveryJournalStore({
       bucket,
       key: currentKey,
       keyId: "v2",
@@ -92,7 +91,6 @@ describe("createHostedExecutionSideEffectJournalStore", () => {
     }).read({
       effectId: record.effectId,
       fingerprint: record.fingerprint,
-      kind: record.kind,
       userId: "member_123",
     })).resolves.toEqual(record);
   });
@@ -122,7 +120,7 @@ describe("createHostedExecutionSideEffectJournalStore", () => {
       value: record,
     });
 
-    const store = createHostedExecutionSideEffectJournalStore({
+    const store = createHostedAssistantDeliveryJournalStore({
       bucket,
       key: currentKey,
       keyId: "v2",
@@ -135,13 +133,11 @@ describe("createHostedExecutionSideEffectJournalStore", () => {
     await expect(store.read({
       effectId: record.effectId,
       fingerprint: record.fingerprint,
-      kind: record.kind,
       userId: "member_legacy",
     })).resolves.toBeNull();
     await expect(store.deletePrepared({
       effectId: record.effectId,
       fingerprint: record.fingerprint,
-      kind: record.kind,
       userId: "member_legacy",
     })).resolves.toBe(false);
   });
@@ -157,7 +153,7 @@ describe("createHostedExecutionSideEffectJournalStore", () => {
       effectId: "outbox_promote",
       fingerprint: "dedupe_promote",
     });
-    const store = createHostedExecutionSideEffectJournalStore({
+    const store = createHostedAssistantDeliveryJournalStore({
       bucket,
       key,
       keyId: "v1",
@@ -184,7 +180,7 @@ describe("createHostedExecutionSideEffectJournalStore", () => {
       effectId: "outbox_conflict",
       fingerprint: "dedupe_a",
     });
-    const store = createHostedExecutionSideEffectJournalStore({
+    const store = createHostedAssistantDeliveryJournalStore({
       bucket,
       key,
       keyId: "v1",
@@ -201,7 +197,7 @@ describe("createHostedExecutionSideEffectJournalStore", () => {
         fingerprint: "dedupe_b",
       }),
       userId: "member_123",
-    })).rejects.toBeInstanceOf(HostedExecutionSideEffectConflictError);
+    })).rejects.toBeInstanceOf(HostedAssistantDeliveryConflictError);
   });
 
   it("deletes only prepared reservations", async () => {
@@ -215,7 +211,7 @@ describe("createHostedExecutionSideEffectJournalStore", () => {
       effectId: "outbox_sent",
       fingerprint: "dedupe_sent",
     });
-    const store = createHostedExecutionSideEffectJournalStore({
+    const store = createHostedAssistantDeliveryJournalStore({
       bucket,
       key,
       keyId: "v1",
@@ -233,26 +229,22 @@ describe("createHostedExecutionSideEffectJournalStore", () => {
     await expect(store.deletePrepared({
       effectId: preparedRecord.effectId,
       fingerprint: preparedRecord.fingerprint,
-      kind: preparedRecord.kind,
       userId: "member_123",
     })).resolves.toBe(true);
     await expect(store.read({
       effectId: preparedRecord.effectId,
       fingerprint: preparedRecord.fingerprint,
-      kind: preparedRecord.kind,
       userId: "member_123",
     })).resolves.toBeNull();
 
     await expect(store.deletePrepared({
       effectId: sentRecord.effectId,
       fingerprint: sentRecord.fingerprint,
-      kind: sentRecord.kind,
       userId: "member_123",
     })).resolves.toBe(false);
     await expect(store.read({
       effectId: sentRecord.effectId,
       fingerprint: sentRecord.fingerprint,
-      kind: sentRecord.kind,
       userId: "member_123",
     })).resolves.toEqual(sentRecord);
   });

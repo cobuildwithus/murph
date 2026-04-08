@@ -1,23 +1,31 @@
+export const HOSTED_ASSISTANT_DELIVERY_KIND = "assistant.delivery" as const;
+
 export const HOSTED_EXECUTION_SIDE_EFFECT_KINDS = [
-  "assistant.delivery",
+  HOSTED_ASSISTANT_DELIVERY_KIND,
 ] as const;
 
-export const HOSTED_EXECUTION_SIDE_EFFECT_RECORD_STATES = [
+export const hostedAssistantDeliveryRecordStateValues = [
   "prepared",
   "sent",
 ] as const;
 
-export type HostedExecutionSideEffectKind =
-  (typeof HOSTED_EXECUTION_SIDE_EFFECT_KINDS)[number];
+export const HOSTED_EXECUTION_SIDE_EFFECT_RECORD_STATES =
+  hostedAssistantDeliveryRecordStateValues;
 
-export type HostedExecutionSideEffectRecordState =
-  (typeof HOSTED_EXECUTION_SIDE_EFFECT_RECORD_STATES)[number];
+export type HostedAssistantDeliveryKind = typeof HOSTED_ASSISTANT_DELIVERY_KIND;
+
+export type HostedExecutionSideEffectKind = HostedAssistantDeliveryKind;
+
+export type HostedAssistantDeliveryRecordState =
+  (typeof hostedAssistantDeliveryRecordStateValues)[number];
+
+export type HostedExecutionSideEffectRecordState = HostedAssistantDeliveryRecordState;
 
 export interface HostedAssistantDeliverySideEffect {
   effectId: string;
   fingerprint: string;
   intentId: string;
-  kind: "assistant.delivery";
+  kind: HostedAssistantDeliveryKind;
 }
 
 export type HostedExecutionSideEffect = HostedAssistantDeliverySideEffect;
@@ -37,7 +45,7 @@ interface HostedAssistantDeliverySideEffectRecordBase {
   effectId: string;
   fingerprint: string;
   intentId: string;
-  kind: "assistant.delivery";
+  kind: HostedAssistantDeliveryKind;
   recordedAt: string;
 }
 
@@ -52,9 +60,17 @@ export interface HostedAssistantDeliverySentSideEffectRecord
   state: "sent";
 }
 
-export type HostedExecutionSideEffectRecord =
-  | HostedAssistantDeliveryPreparedSideEffectRecord
-  | HostedAssistantDeliverySentSideEffectRecord;
+export type HostedAssistantDeliveryPreparedRecord =
+  HostedAssistantDeliveryPreparedSideEffectRecord;
+
+export type HostedAssistantDeliverySentRecord =
+  HostedAssistantDeliverySentSideEffectRecord;
+
+export type HostedAssistantDeliveryRecord =
+  | HostedAssistantDeliveryPreparedRecord
+  | HostedAssistantDeliverySentRecord;
+
+export type HostedExecutionSideEffectRecord = HostedAssistantDeliveryRecord;
 
 export function buildHostedAssistantDeliverySideEffect(input: {
   dedupeKey: string;
@@ -64,7 +80,7 @@ export function buildHostedAssistantDeliverySideEffect(input: {
     effectId: input.intentId,
     fingerprint: input.dedupeKey,
     intentId: input.intentId,
-    kind: "assistant.delivery",
+    kind: HOSTED_ASSISTANT_DELIVERY_KIND,
   };
 }
 
@@ -104,7 +120,7 @@ export function parseHostedExecutionSideEffect(value: unknown): HostedExecutionS
   );
 
   switch (kind) {
-    case "assistant.delivery":
+    case HOSTED_ASSISTANT_DELIVERY_KIND:
       return {
         effectId: requireString(record.effectId, "Hosted assistant side effect effectId"),
         fingerprint: requireString(
@@ -137,7 +153,7 @@ export function parseHostedExecutionSideEffectRecord(
   );
 
   switch (kind) {
-    case "assistant.delivery": {
+    case HOSTED_ASSISTANT_DELIVERY_KIND: {
       const baseRecord = {
         effectId: requireString(
           record.effectId,
@@ -181,6 +197,24 @@ export function parseHostedExecutionSideEffectRecord(
   }
 }
 
+export function parseHostedAssistantDeliverySideEffect(
+  value: unknown,
+): HostedAssistantDeliverySideEffect {
+  return parseHostedExecutionSideEffect(value);
+}
+
+export function parseHostedAssistantDeliverySideEffects(
+  value: unknown,
+): HostedAssistantDeliverySideEffect[] {
+  return parseHostedExecutionSideEffects(value);
+}
+
+export function parseHostedAssistantDeliveryRecord(
+  value: unknown,
+): HostedAssistantDeliveryRecord {
+  return parseHostedExecutionSideEffectRecord(value);
+}
+
 export function sameHostedExecutionSideEffectIdentity(
   left: Pick<HostedExecutionSideEffectRecord, "effectId" | "fingerprint" | "intentId" | "kind">,
   right: Pick<HostedExecutionSideEffectRecord, "effectId" | "fingerprint" | "intentId" | "kind">,
@@ -191,6 +225,23 @@ export function sameHostedExecutionSideEffectIdentity(
     && left.intentId === right.intentId
     && left.kind === right.kind
   );
+}
+
+export function sameHostedAssistantDeliverySideEffectIdentity(
+  left: Pick<HostedAssistantDeliveryRecord, "effectId" | "fingerprint" | "intentId" | "kind">,
+  right: Pick<HostedAssistantDeliveryRecord, "effectId" | "fingerprint" | "intentId" | "kind">,
+): boolean {
+  return sameHostedExecutionSideEffectIdentity(left, right);
+}
+
+export function assertHostedAssistantDeliveryRecordConsistency(
+  record: HostedAssistantDeliveryRecord,
+): void {
+  if (record.effectId !== record.intentId) {
+    throw new TypeError(
+      `Hosted assistant delivery ${record.effectId} must reuse the same intentId as effectId.`,
+    );
+  }
 }
 
 export function sameHostedExecutionAssistantDelivery(
@@ -262,13 +313,19 @@ function requireHostedExecutionSideEffectRecordState(
 export function isHostedExecutionSideEffectKind(
   value: string,
 ): value is HostedExecutionSideEffectKind {
-  return (HOSTED_EXECUTION_SIDE_EFFECT_KINDS as readonly string[]).includes(value);
+  return isHostedAssistantDeliveryKind(value);
 }
 
 export function isHostedExecutionSideEffectRecordState(
   value: string,
 ): value is HostedExecutionSideEffectRecordState {
   return (HOSTED_EXECUTION_SIDE_EFFECT_RECORD_STATES as readonly string[]).includes(value);
+}
+
+export function isHostedAssistantDeliveryKind(
+  value: string,
+): value is HostedAssistantDeliveryKind {
+  return value === HOSTED_ASSISTANT_DELIVERY_KIND;
 }
 
 function parseHostedExecutionAssistantDelivery(

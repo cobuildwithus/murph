@@ -1984,7 +1984,7 @@ describe("runHostedExecutionJob", () => {
 
     expect(fetchCalls).toEqual([
       "POST http://results.worker/events/evt_outbox/commit",
-      "GET http://results.worker/effects/outbox_hosted_reconcile?fingerprint=dedupe_hosted&kind=assistant.delivery",
+      "GET http://results.worker/effects/outbox_hosted_reconcile?fingerprint=dedupe_hosted",
     ]);
 
     const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-outbox-restored-"));
@@ -2131,7 +2131,7 @@ describe("runHostedExecutionJob", () => {
 
         if (
           String(url)
-          === "http://results.worker/effects/outbox_hosted_send?fingerprint=dedupe_hosted_send&kind=assistant.delivery"
+          === "http://results.worker/effects/outbox_hosted_send?fingerprint=dedupe_hosted_send"
           && (init?.method ?? "GET") === "GET"
         ) {
           return new Response(JSON.stringify({
@@ -2142,7 +2142,7 @@ describe("runHostedExecutionJob", () => {
 
         if (
           String(url)
-          === "http://results.worker/effects/outbox_hosted_send?fingerprint=dedupe_hosted_send&kind=assistant.delivery"
+          === "http://results.worker/effects/outbox_hosted_send?fingerprint=dedupe_hosted_send"
           && init?.method === "PUT"
         ) {
           return new Response(JSON.stringify({
@@ -2179,8 +2179,8 @@ describe("runHostedExecutionJob", () => {
 
       expect(fetchCalls).toEqual([
         "POST http://results.worker/events/evt_outbox_send/commit",
-        "GET http://results.worker/effects/outbox_hosted_send?fingerprint=dedupe_hosted_send&kind=assistant.delivery",
-        "PUT http://results.worker/effects/outbox_hosted_send?fingerprint=dedupe_hosted_send&kind=assistant.delivery",
+        "GET http://results.worker/effects/outbox_hosted_send?fingerprint=dedupe_hosted_send",
+        "PUT http://results.worker/effects/outbox_hosted_send?fingerprint=dedupe_hosted_send",
       ]);
 
       const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-outbox-journal-restored-"));
@@ -2322,7 +2322,7 @@ describe("runHostedExecutionJob", () => {
 
         if (
           String(url)
-          === "http://results.worker/effects/outbox_hosted_resume?fingerprint=dedupe_hosted_resume&kind=assistant.delivery"
+          === "http://results.worker/effects/outbox_hosted_resume?fingerprint=dedupe_hosted_resume"
           && (init?.method ?? "GET") === "GET"
         ) {
           return new Response(JSON.stringify({
@@ -2333,7 +2333,7 @@ describe("runHostedExecutionJob", () => {
 
         if (
           String(url)
-          === "http://results.worker/effects/outbox_hosted_resume?fingerprint=dedupe_hosted_resume&kind=assistant.delivery"
+          === "http://results.worker/effects/outbox_hosted_resume?fingerprint=dedupe_hosted_resume"
           && init?.method === "PUT"
         ) {
           return new Response(JSON.stringify({
@@ -2386,8 +2386,8 @@ describe("runHostedExecutionJob", () => {
 
     expect(hostedCliMocks.runAssistantAutomation).not.toHaveBeenCalled();
     expect(fetchCalls).toEqual([
-      "GET http://results.worker/effects/outbox_hosted_resume?fingerprint=dedupe_hosted_resume&kind=assistant.delivery",
-      "PUT http://results.worker/effects/outbox_hosted_resume?fingerprint=dedupe_hosted_resume&kind=assistant.delivery",
+      "GET http://results.worker/effects/outbox_hosted_resume?fingerprint=dedupe_hosted_resume",
+      "PUT http://results.worker/effects/outbox_hosted_resume?fingerprint=dedupe_hosted_resume",
     ]);
     expect(fetchCalls).not.toContain("POST http://results.worker/events/evt_outbox_resume/commit");
     expect(result.result).toEqual({

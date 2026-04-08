@@ -196,6 +196,32 @@ Adding or renaming a knowledge result field now has one type owner instead of tw
 **Main refactor risk:** do not move CLI-only descriptions or parsing ergonomics into `operator-config` just because the result types are shared there.
 The shared owner should stay on the product record shape; the CLI file should remain a thin boundary adapter.
 
+### 12. Keep Linq chat binding writes with the routing owner
+
+**Seam:** `apps/web/src/lib/hosted-onboarding/member-identity-service.ts`, `apps/web/src/lib/hosted-onboarding/hosted-member-routing-store.ts`, `apps/web/src/lib/hosted-onboarding/webhook-provider-linq.ts`
+
+`persistHostedMemberLinqChatBinding(...)` lived in `member-identity-service.ts` even though the mutation was a straight pass-through to `upsertHostedMemberLinqChatBinding(...)` in the routing store.
+That made the identity slice look like it owned a messaging-routing write path again after the hosted-member privacy split.
+
+This patch removes the identity-service wrapper and has the Linq webhook planner call the routing-store owner directly.
+
+**Why this is simpler:** Linq chat binding writes now sit with the routing owner, so identity changes no longer widen the import surface for routing flows.
+
+**Main refactor risk:** if future Linq binding writes need workflow-specific validation or retries, add that seam under a routing-owned service instead of drifting the mutation back into identity.
+
+### 13. Narrow hosted assistant-delivery journal APIs to the only effect they serve today
+
+**Seam:** `packages/hosted-execution/src/side-effects.ts`, `packages/assistant-runtime/src/hosted-runtime/{platform,callbacks}.ts`, `apps/cloudflare/src/{runtime-platform.ts,runner-outbound/results.ts,side-effect-journal.ts}`
+
+The hosted runner's read/delete journal path still carried a generic `kind` query parameter and a generically named Cloudflare journal store even though the only supported effect kind is `assistant.delivery`.
+The assistant runtime and Cloudflare worker were already specialized to assistant delivery in practice, but the internal API still looked multi-kind.
+
+This patch adds assistant-delivery-specific parser/type aliases at the shared owner, narrows the assistant-runtime effects port to assistant-delivery records, removes the redundant `kind` query parameter from the internal read/delete route, and renames the Cloudflare journal store/error surface to assistant-delivery-specific names.
+
+**Why this is simpler:** the current hosted journal no longer pretends to compose arbitrary side-effect families. One effect kind is represented once in the payload itself instead of also being repeated in the internal route contract and journal query surface.
+
+**Main refactor risk:** if a second durable side-effect family appears later, reintroduce a real multi-kind route contract intentionally instead of copy-pasting `kind` parameters back across the stack.
+
 ## Current targeted review findings
 
 The notes below are the remaining review-only pass after the simplifications landed above.
@@ -288,6 +314,16 @@ This would reduce the concept count without weakening the web/Cloudflare trust b
 **Main refactor risk:** do not collapse transport lifecycle and runner outcome into one enum.
 Web still needs local claim/retry state, and Cloudflare still needs queue-internal scheduling detail.
 If the cleanup is done poorly, the system could lose the `duplicate_pending` versus `duplicate_consumed` distinction or make retry policy depend on Cloudflare-specific storage details.
+
+#### 4. Split hosted Stripe billing policy by responsibility before it becomes the next wide owner
+
+**Seam:** `apps/web/src/lib/hosted-onboarding/stripe-billing-policy.ts` (`activateHostedMemberFromConfirmedRevnetIssuance`, `activateHostedMemberForPositiveSource`, `updateHostedMemberStripeBillingIfFresh`, `suspendHostedMemberForBillingReversal`, `findMemberForStripeObject`, `resolveStripeCustomerContext`)
+
+**Current cost:** one file currently owns entitlement transitions, Stripe ref lookup, canonical Stripe refresh, hosted activation dispatch building, managed-user crypto provisioning triggers, and suspension handling. That makes any change to Stripe reconciliation or activation semantics widen the blast radius across multiple responsibilities.
+
+**Simpler target:** keep pure billing-status and freshness rules in `stripe-billing-policy.ts`, move activation/outbox orchestration beside `member-activation.ts`, and move Stripe object/member resolution into a smaller billing-ref lookup helper or store-owned seam. The current nested hosted-member snapshot shape is already good enough to support that split.
+
+**Main refactor risk:** preserve the existing transaction boundaries, row locking, and monotonic Stripe freshness rules. A sloppy split here could accidentally reintroduce out-of-order reactivation or double-activation sends.
 
 ### Keep as-is
 

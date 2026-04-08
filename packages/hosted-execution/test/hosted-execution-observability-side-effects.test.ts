@@ -1,16 +1,23 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  HOSTED_ASSISTANT_DELIVERY_KIND,
+  assertHostedAssistantDeliveryRecordConsistency,
   buildHostedAssistantDeliveryPreparedRecord,
   buildHostedAssistantDeliverySentRecord,
   buildHostedAssistantDeliverySideEffect,
   buildHostedExecutionStructuredLogRecord,
   deriveHostedExecutionErrorCode,
   emitHostedExecutionStructuredLog,
+  isHostedAssistantDeliveryKind,
   normalizeHostedExecutionOperatorMessage,
+  parseHostedAssistantDeliveryRecord,
+  parseHostedAssistantDeliverySideEffect,
+  parseHostedAssistantDeliverySideEffects,
   parseHostedExecutionSideEffect,
   parseHostedExecutionSideEffectRecord,
   parseHostedExecutionSideEffects,
+  sameHostedAssistantDeliverySideEffectIdentity,
   sameHostedExecutionAssistantDelivery,
   sameHostedExecutionSideEffectIdentity,
   summarizeHostedExecutionError,
@@ -290,6 +297,21 @@ describe("hosted execution side-effects", () => {
       ...delivery,
       providerThreadId: "thread_123",
     })).toBe(false);
+
+    expect(sameHostedAssistantDeliverySideEffectIdentity(
+      {
+        effectId: "effect_123",
+        fingerprint: "fingerprint_123",
+        intentId: "intent_123",
+        kind: "assistant.delivery",
+      },
+      {
+        effectId: "effect_123",
+        fingerprint: "fingerprint_123",
+        intentId: "intent_123",
+        kind: "assistant.delivery",
+      },
+    )).toBe(true);
   });
 
   it("fails closed on invalid side-effect shapes", () => {
@@ -339,5 +361,44 @@ describe("hosted execution side-effects", () => {
       recordedAt: "2026-04-08T00:00:00.000Z",
       state: "sent",
     })).toThrow(/Unsupported hosted execution assistant delivery target kind: group/i);
+    expect(() => parseHostedExecutionSideEffectRecord({
+      effectId: "effect_123",
+      fingerprint: "fingerprint_123",
+      intentId: "intent_123",
+      kind: "other",
+      recordedAt: "2026-04-08T00:00:00.000Z",
+      state: "prepared",
+    })).toThrow(/Unsupported hosted execution side effect kind: other/i);
+  });
+
+  it("exposes assistant-delivery-specific aliases and guards", () => {
+    const preparedRecord = buildHostedAssistantDeliveryPreparedRecord({
+      dedupeKey: "dedupe_123",
+      intentId: "intent_123",
+      recordedAt: "2026-04-08T00:00:00.000Z",
+    });
+
+    expect(parseHostedAssistantDeliverySideEffect({
+      effectId: "intent_123",
+      fingerprint: "dedupe_123",
+      intentId: "intent_123",
+      kind: "assistant.delivery",
+    })).toEqual(buildHostedAssistantDeliverySideEffect({
+      dedupeKey: "dedupe_123",
+      intentId: "intent_123",
+    }));
+    expect(parseHostedAssistantDeliverySideEffects([preparedRecord])).toEqual([{
+      effectId: "intent_123",
+      fingerprint: "dedupe_123",
+      intentId: "intent_123",
+      kind: "assistant.delivery",
+    }]);
+    expect(parseHostedAssistantDeliveryRecord(preparedRecord)).toEqual(preparedRecord);
+    expect(isHostedAssistantDeliveryKind(HOSTED_ASSISTANT_DELIVERY_KIND)).toBe(true);
+    expect(isHostedAssistantDeliveryKind("other")).toBe(false);
+    expect(() => assertHostedAssistantDeliveryRecordConsistency({
+      ...preparedRecord,
+      intentId: "different_intent",
+    })).toThrow(/must reuse the same intentId as effectId/i);
   });
 });
