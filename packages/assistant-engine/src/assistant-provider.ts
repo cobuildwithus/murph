@@ -1,4 +1,3 @@
-export * from './assistant/provider-config.js'
 export * from './assistant/provider-registry.js'
 export * from './assistant/provider-state.js'
 export * from './assistant/provider-traces.js'
