@@ -33,7 +33,7 @@ import {
   relativeToVault,
   runtimeNamespaceAccountId,
 } from '../inbox-services/shared.js'
-import { tryKillProcess } from '../process-kill.js'
+import { tryKillProcess } from '@murphai/runtime-state/node'
 
 const FOREGROUND_CONNECTOR_RESTART_POLICY = {
   enabled: true,

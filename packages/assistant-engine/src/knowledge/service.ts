@@ -1,6 +1,6 @@
 import { access, readFile, stat } from 'node:fs/promises'
 import path from 'node:path'
-import { resolveAssistantVaultPath } from '../assistant-vault-paths.js'
+import { resolveAssistantVaultPath } from '@murphai/vault-usecases/assistant-vault-paths'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { loadIntegratedRuntime } from '@murphai/vault-usecases/runtime'
 import {

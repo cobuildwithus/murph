@@ -3,7 +3,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
 
-import { resolveRuntimePaths } from '@murphai/runtime-state/node'
+import { resolveRuntimePaths, tryKillProcess } from '@murphai/runtime-state/node'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { test } from 'vitest'
 
@@ -14,11 +14,10 @@ import type {
   RuntimeStore,
 } from '../src/index.ts'
 import { describeLinqConnectorEndpoint } from '../src/linq-endpoint.ts'
-import { tryKillProcess } from '../src/process-kill.ts'
 import {
   resolveAssistantInboxArtifactPath,
   resolveAssistantVaultPath,
-} from '../src/vault-paths.ts'
+} from '@murphai/vault-usecases/assistant-vault-paths'
 import {
   buildDaemonState,
   createProcessSignalBridge,

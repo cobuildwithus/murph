@@ -8,7 +8,7 @@ import {
   readVersionedJsonStateFile,
   writeVersionedJsonStateFile,
 } from '@murphai/runtime-state/node'
-import { resolveAssistantVaultPath } from '../vault-paths.js'
+import { resolveAssistantVaultPath } from '@murphai/vault-usecases/assistant-vault-paths'
 import {
   inboxPromotionStoreSchema,
   inboxPreserveDocumentAttachmentsResultSchema,

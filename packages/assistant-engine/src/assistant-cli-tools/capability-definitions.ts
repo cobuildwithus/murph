@@ -30,7 +30,7 @@ import {
   healthEntityDescriptors,
   hasHealthCommandDescriptor,
 } from '@murphai/vault-usecases'
-import { resolveAssistantVaultPath } from '../assistant-vault-paths.js'
+import { resolveAssistantVaultPath } from '@murphai/vault-usecases/assistant-vault-paths'
 import {
   defineAssistantCapability,
   type AssistantCapabilityDefinition,

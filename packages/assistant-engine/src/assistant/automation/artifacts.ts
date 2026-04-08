@@ -1,6 +1,6 @@
 import { access, mkdir } from 'node:fs/promises'
 import { writeJsonFileAtomic } from '../shared.js'
-import { resolveAssistantInboxArtifactPath } from '../../assistant-vault-paths.js'
+import { resolveAssistantInboxArtifactPath } from '@murphai/vault-usecases/assistant-vault-paths'
 import type { sendAssistantMessage } from '../service.js'
 import type { AssistantAutoReplyFailureSnapshot } from './failure-observability.js'
 

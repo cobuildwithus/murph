@@ -1,7 +1,7 @@
 import { mkdir, writeFile } from 'node:fs/promises'
 import {
   resolveAssistantInboxArtifactPath,
-} from './assistant-vault-paths.js'
+} from '@murphai/vault-usecases/assistant-vault-paths'
 import {
   createInboxRoutingAssistantToolCatalog,
 } from './assistant-cli-tools.js'
@@ -30,7 +30,7 @@ import {
   prepareInboxMultimodalUserMessageContent,
 } from './inbox-multimodal.js'
 import { errorMessage, normalizeNullableString } from '@murphai/operator-config/text/shared'
-import type { VaultServices } from '@murphai/vault-usecases'
+import type { VaultServices } from '@murphai/vault-usecases/vault-services'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
 const DEFAULT_MAX_ROUTING_CHARS = 24000
