@@ -230,6 +230,7 @@ Hosted execution maintenance routes:
 
 - `GET /api/internal/hosted-execution/outbox/cron`
 - `GET /api/internal/hosted-execution/usage/cron`
+- `GET /api/internal/hosted-onboarding/webhook-receipts/cron`
 - `POST /api/internal/hosted-execution/share-import/complete` (Cloudflare-signed internal callback only)
 - `POST /api/internal/hosted-execution/share-import/release` (Cloudflare-signed internal callback only)
 
@@ -270,7 +271,7 @@ The onboarding lane is intentionally thin:
 - new steady-state outbox rows are immutable: inline events store the full dispatch body, while reference-backed events stage the full dispatch into Cloudflare-owned encrypted dispatch-payload storage and persist only the dispatch ref plus opaque payload ref in Postgres
 - a best-effort drain still runs after commit, but the Postgres outbox is now delivery-only: once Cloudflare accepts the dispatch, retries, poison/backpressure, in-flight execution, business-outcome callbacks, and completion live in the Cloudflare queue instead of on the outbox row; new reference-backed rows still require a staged Cloudflare payload ref instead of falling back to web-side dispatch reconstruction
 - if Cloudflare later cannot hydrate the share pack, it releases the hosted share claim through the signed `/api/internal/hosted-execution/share-import/release` callback instead of leaving the acceptance stuck
-- hosted onboarding webhook receipts still keep receipt-local side-effect markers for retry-safe Linq invite replies, persist the planned response plus queued side effects before any external send, and use a reclaimable processing lease so a retried Linq or Telegram webhook can resume abandoned work instead of being dropped as a duplicate
+- hosted onboarding webhook receipts still keep receipt-local side-effect markers for retry-safe Linq invite replies, persist the planned response plus queued side effects before any external send, use `after()` to finish Linq signup/quota replies after the public 202 response, and keep a reclaimable processing lease plus internal cron recovery so abandoned or retryable receipts can resume safely instead of being dropped as duplicates
 - the current hosted outward-effect lanes are now explicit: Cloudflare-bound execution uses `execution_outbox`, receipt-owned Linq or Telegram replies use the webhook receipt side-effect journal, and Stripe facts use inline webhook reconciliation plus cron recovery
 - Stripe customer/subscription entitlement writes now re-fetch canonical subscription state from Stripe before mutating local billing status, so out-of-order webhook delivery does not rely on durable local event-order markers
 - subscription cancellation, pause, unpaid, refund, and dispute paths revoke hosted access through billing or suspension state; refund and dispute suspensions stay blocked until an operator clears them explicitly

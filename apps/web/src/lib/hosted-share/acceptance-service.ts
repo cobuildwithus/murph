@@ -1,7 +1,10 @@
 import { Prisma, type HostedMember, type PrismaClient } from "@prisma/client";
 
 import { getPrisma } from "../prisma";
-import { enqueueHostedExecutionOutbox } from "../hosted-execution/outbox";
+import {
+  drainHostedExecutionOutboxBestEffort,
+  enqueueHostedExecutionOutbox,
+} from "../hosted-execution/outbox";
 import { hasHostedMemberActiveAccess } from "../hosted-onboarding/entitlement";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 
@@ -132,6 +135,7 @@ export async function acceptHostedShareLink(input: {
     });
 
     return {
+      eventId,
       outcome: "pending" as const,
       record,
     };
@@ -145,6 +149,14 @@ export async function acceptHostedShareLink(input: {
       shareCode,
     };
   }
+
+  void drainHostedExecutionOutboxBestEffort({
+    eventIds: [
+      claim.eventId,
+    ],
+    limit: 1,
+    prisma,
+  });
 
   const imported = Boolean(
     claim.record.consumedAt && claim.record.consumedByMemberId === memberId,

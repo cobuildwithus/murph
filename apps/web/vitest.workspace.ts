@@ -41,6 +41,9 @@ function createHostedWebProject(name: string, patterns: readonly string[]) {
       environment: "node",
       ...hostedWebVitestConcurrency,
       include: patterns.map(hostedWebPattern),
+      setupFiles: [
+        path.join(appDir, "test", "setup-env.ts"),
+      ],
     },
   });
 }

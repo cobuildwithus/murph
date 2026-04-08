@@ -7,6 +7,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const shareHarness = vi.hoisted(() => ({
+  drainHostedExecutionOutboxBestEffort: vi.fn(),
   issueHostedInviteForPhone: vi.fn(),
   sharePacks: new Map<string, SharePack>(),
   stagedPayloads: [] as HostedExecutionDispatchRequest[],
@@ -36,6 +37,21 @@ vi.mock("@/src/lib/hosted-execution/control", () => ({
     shareHarness.stagedPayloads.push(dispatch);
     return createStagedPayload(dispatch);
   },
+}));
+vi.mock("@/src/lib/hosted-execution/outbox", async () => {
+  const actual = await vi.importActual<typeof import("@/src/lib/hosted-execution/outbox")>(
+    "@/src/lib/hosted-execution/outbox",
+  );
+
+  return {
+    ...actual,
+    drainHostedExecutionOutboxBestEffort: shareHarness.drainHostedExecutionOutboxBestEffort,
+  };
+});
+vi.mock("@/src/lib/prisma", () => ({
+  getPrisma: vi.fn(() => {
+    throw new Error("Unexpected getPrisma call in hosted-share-service.test.ts");
+  }),
 }));
 vi.mock("@/src/lib/hosted-onboarding/invite-service", async () => {
   const actual = await vi.importActual<typeof import("@/src/lib/hosted-onboarding/invite-service")>(
@@ -117,6 +133,8 @@ function createStagedPayload(
 
 describe("hosted share service", () => {
   beforeEach(() => {
+    shareHarness.drainHostedExecutionOutboxBestEffort.mockReset();
+    shareHarness.drainHostedExecutionOutboxBestEffort.mockResolvedValue(undefined);
     shareHarness.issueHostedInviteForPhone.mockReset();
     shareHarness.issueHostedInviteForPhone.mockRejectedValue(
       new Error("Unexpected invite issuance in hosted share service test."),
@@ -277,6 +295,13 @@ describe("hosted share service", () => {
     expect(pageData.stage).toBe("processing");
     expect(pageData.share?.acceptedByCurrentMember).toBe(true);
     expect(prisma.rows[0]?.consumedByMemberId).toBeNull();
+    expect(shareHarness.drainHostedExecutionOutboxBestEffort).toHaveBeenCalledWith({
+      eventIds: [
+        prisma.rows[0]?.lastEventId ?? "",
+      ],
+      limit: 1,
+      prisma,
+    });
 
     await finalizeHostedShareAcceptance({
       eventId: prisma.rows[0]?.lastEventId ?? "",
@@ -351,6 +376,31 @@ describe("hosted share service", () => {
     });
   });
 
+  it("does not wait for the best-effort outbox drain before returning the share claim", async () => {
+    const prisma = createHostedSharePrisma();
+    const created = await createHostedShareLink({
+      prisma: prisma as never,
+      pack: buildPack(),
+      senderMemberId: "member_sender",
+    });
+    shareHarness.drainHostedExecutionOutboxBestEffort.mockReturnValue(new Promise(() => {}));
+
+    await expect(acceptHostedShareLink({
+      member: {
+        billingStatus: HostedBillingStatus.active,
+        id: "member_123",
+        suspendedAt: null,
+      } as never,
+      prisma: prisma as never,
+      shareCode: created.shareCode,
+    })).resolves.toMatchObject({
+      imported: false,
+      pending: true,
+    });
+
+    expect(shareHarness.drainHostedExecutionOutboxBestEffort).toHaveBeenCalledTimes(1);
+  });
+
   it("accepts the share even when the Cloudflare-backed pack is already missing at claim time", async () => {
     const prisma = createHostedSharePrisma();
     const created = await createHostedShareLink({
@@ -376,6 +426,13 @@ describe("hosted share service", () => {
 
     expect(prisma.outboxRows).toHaveLength(1);
     expect(shareHarness.stagedPayloads).toHaveLength(0);
+    expect(shareHarness.drainHostedExecutionOutboxBestEffort).toHaveBeenCalledWith({
+      eventIds: [
+        prisma.rows[0]?.lastEventId ?? "",
+      ],
+      limit: 1,
+      prisma,
+    });
   });
 
   it("keeps the hosted share claim and reuses the same event id across retries before finalization", async () => {
@@ -418,6 +475,7 @@ describe("hosted share service", () => {
     expect(prisma.outboxRows).toHaveLength(1);
     expect(prisma.outboxRows[0]?.eventId).toBe(prisma.rows[0]?.lastEventId);
     expect(shareHarness.stagedPayloads).toHaveLength(0);
+    expect(shareHarness.drainHostedExecutionOutboxBestEffort).toHaveBeenCalledTimes(2);
 
     await finalizeHostedShareAcceptance({
       eventId: prisma.rows[0]?.lastEventId ?? "",

@@ -58,11 +58,83 @@ export async function recordHostedWebhookReceipt(input: {
     return receipt;
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
-      return reclaimHostedWebhookReceipt(input, now);
+      return claimExistingHostedWebhookReceipt(
+        input,
+        now,
+        {
+          createIfMissing: true,
+        },
+      );
     }
 
     throw error;
   }
+}
+
+export async function claimHostedWebhookReceiptForContinuation(input: {
+  eventId: string;
+  prisma: PrismaClient;
+  source: string;
+}): Promise<HostedWebhookReceiptClaim | null> {
+  return claimExistingHostedWebhookReceipt(
+    input,
+    new Date(),
+    {
+      createIfMissing: false,
+    },
+  );
+}
+
+export async function listHostedWebhookReceiptContinuationCandidates(input: {
+  limit?: number;
+  now?: string;
+  prisma: PrismaClient;
+}): Promise<Array<{ eventId: string; source: string }>> {
+  const now = new Date(input.now ?? new Date().toISOString());
+  const candidates = await input.prisma.hostedWebhookReceipt.findMany({
+    where: {
+      plannedAt: {
+        not: null,
+      },
+      sideEffects: {
+        some: {},
+      },
+      OR: [
+        {
+          status: "failed",
+          lastErrorRetryable: true,
+        },
+        {
+          status: "processing",
+          OR: [
+            {
+              claimExpiresAt: null,
+            },
+            {
+              claimExpiresAt: {
+                lt: now,
+              },
+            },
+          ],
+        },
+      ],
+    },
+    orderBy: [
+      {
+        updatedAt: "asc",
+      },
+      {
+        firstReceivedAt: "asc",
+      },
+    ],
+    select: {
+      eventId: true,
+      source: true,
+    },
+    take: Math.max(Math.trunc(input.limit ?? 16), 1),
+  });
+
+  return candidates;
 }
 
 export async function queueHostedWebhookReceiptSideEffects(input: {
@@ -266,13 +338,16 @@ async function cleanupHostedWebhookReceiptStagedPayloadsBestEffort(
   );
 }
 
-async function reclaimHostedWebhookReceipt(
+async function claimExistingHostedWebhookReceipt(
   input: {
     eventId: string;
     prisma: PrismaClient;
     source: string;
   },
   receivedAt: Date,
+  options: {
+    createIfMissing: boolean;
+  },
 ): Promise<HostedWebhookReceiptClaim | null> {
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const existingReceipt = await input.prisma.hostedWebhookReceipt.findUnique({
@@ -288,6 +363,10 @@ async function reclaimHostedWebhookReceipt(
     });
 
     if (!existingReceipt) {
+      if (!options.createIfMissing) {
+        return null;
+      }
+
       const state = claimHostedWebhookReceipt({
         receivedAt,
       });
