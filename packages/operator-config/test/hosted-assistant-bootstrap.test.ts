@@ -234,7 +234,6 @@ test('hosted assistant bootstrap reads process env and accepts valid boolean and
     env: {
       HOSTED_ASSISTANT_PROVIDER: 'vercel-ai-gateway',
       HOSTED_ASSISTANT_MODEL: 'openai/gpt-5.4',
-      HOSTED_ASSISTANT_ZERO_DATA_RETENTION: 'true',
     },
   })
 
@@ -244,6 +243,32 @@ test('hosted assistant bootstrap reads process env and accepts valid boolean and
     seeded: true,
     source: 'hosted-env',
   })
+  assert.equal(
+    hostedConfigModule.saveHostedAssistantConfig.mock.calls[1]?.[0]?.profiles?.[0]?.target
+      ?.zeroDataRetention,
+    true,
+  )
+
+  const gatewaySeedWithoutZdr = await hostedConfigModule.ensureHostedAssistantOperatorDefaults({
+    allowMissing: false,
+    env: {
+      HOSTED_ASSISTANT_PROVIDER: 'vercel-ai-gateway',
+      HOSTED_ASSISTANT_MODEL: 'openai/gpt-5.4',
+      HOSTED_ASSISTANT_ZERO_DATA_RETENTION: 'false',
+    },
+  })
+
+  assert.deepEqual(gatewaySeedWithoutZdr, {
+    configured: true,
+    provider: 'openai-compatible',
+    seeded: true,
+    source: 'hosted-env',
+  })
+  assert.equal(
+    hostedConfigModule.saveHostedAssistantConfig.mock.calls[2]?.[0]?.profiles?.[0]?.target
+      ?.zeroDataRetention,
+    undefined,
+  )
 
   await assert.rejects(
     () =>

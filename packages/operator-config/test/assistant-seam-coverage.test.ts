@@ -392,9 +392,10 @@ test('openai-compatible provider preset helpers resolve aliases, fallbacks, and 
   assert.equal(resolveOpenAICompatibleProviderPresetFromProviderName(''), null)
   assert.equal(resolveOpenAICompatibleProviderPresetFromApiKeyEnv(' ngc_api_key ')?.id, 'nvidia')
   assert.equal(
-    resolveOpenAICompatibleProviderPresetFromApiKeyEnv(' ai_gateway_api_key ')?.id,
+    resolveOpenAICompatibleProviderPresetFromApiKeyEnv(' vercel_ai_api_key ')?.id,
     'vercel-ai-gateway',
   )
+  assert.equal(resolveOpenAICompatibleProviderPresetFromApiKeyEnv(' ai_gateway_api_key '), null)
   assert.equal(resolveOpenAICompatibleProviderPresetFromApiKeyEnv('missing'), null)
   assert.equal(resolveOpenAICompatibleProviderPresetFromBaseUrl('https://openrouter.ai/api/v1/chat/completions')?.id, 'openrouter')
   assert.equal(
