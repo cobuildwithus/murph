@@ -3,6 +3,7 @@ import { PassThrough } from 'node:stream'
 import { afterEach, test, vi } from 'vitest'
 import type { SetupCommandOptions } from '@murphai/operator-config/setup-cli-contracts'
 import { createSetupAssistantResolver } from '../src/setup-assistant.ts'
+import { createCapturedOutputStream } from './helpers.ts'
 
 const promptState = vi.hoisted(() => ({
   answers: [] as string[],
@@ -64,11 +65,7 @@ function createSetupOptions(
 
 test('setup assistant prompt flow uses discovered models and numeric model selection', async () => {
   promptState.answers = ['', '', '2']
-  const output = new PassThrough()
-  let rendered = ''
-  output.on('data', (chunk) => {
-    rendered += chunk.toString()
-  })
+  const { output, readOutput } = createCapturedOutputStream()
 
   const resolver = createSetupAssistantResolver({
     assistantAccount: {
@@ -120,18 +117,14 @@ test('setup assistant prompt flow uses discovered models and numeric model selec
       providerName: 'openrouter',
     },
   ])
-  assert.match(rendered, /Discovered models/u)
-  assert.match(rendered, /Available models:/u)
+  assert.match(readOutput(), /Discovered models/u)
+  assert.match(readOutput(), /Available models:/u)
 })
 
 test('setup assistant prompt flow retries required model entry and rejects unsupported reasoning effort', async () => {
   promptState.answers = ['https://example.test/v1', '', '', 'custom-model']
   promptState.supportsReasoningEffort = false
-  const output = new PassThrough()
-  let rendered = ''
-  output.on('data', (chunk) => {
-    rendered += chunk.toString()
-  })
+  const { output, readOutput } = createCapturedOutputStream()
 
   const resolver = createSetupAssistantResolver({
     assistantAccount: {
@@ -166,5 +159,5 @@ test('setup assistant prompt flow retries required model entry and rejects unsup
     }),
     /does not support assistantReasoningEffort/u,
   )
-  assert.match(rendered, /A model id is required\./u)
+  assert.match(readOutput(), /A model id is required\./u)
 })
