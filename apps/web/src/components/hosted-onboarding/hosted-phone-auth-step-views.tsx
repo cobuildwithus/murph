@@ -144,10 +144,6 @@ export function HostedPhoneEntryStep({
           <p className="text-sm text-stone-500">
             Enter the number that messaged Murph.
           </p>
-        ) : intent === "signin" ? (
-          <p className="text-sm text-stone-500">
-            Enter the phone number already linked to your Murph account.
-          </p>
         ) : null}
       </div>
       <div className="flex flex-wrap gap-3">
