@@ -220,9 +220,9 @@ export async function prepareHostedInvitePhoneCode(input: {
     await lockHostedMemberRow(tx, invite.memberId);
 
     const identity = await readHostedInviteIdentityStateOrThrow(invite.memberId, tx);
-    const signupPhoneNumber = identity.signupPhoneNumber;
+    const resumePhoneNumber = identity.phoneNumber ?? identity.signupPhoneNumber;
 
-    if (!signupPhoneNumber) {
+    if (!resumePhoneNumber) {
       throw hostedOnboardingError({
         code: "SIGNUP_PHONE_UNAVAILABLE",
         message: "Enter the number that messaged Murph to continue.",
@@ -256,7 +256,7 @@ export async function prepareHostedInvitePhoneCode(input: {
     });
 
     return {
-      phoneNumber: signupPhoneNumber,
+      phoneNumber: resumePhoneNumber,
       sendAttemptId,
     };
   });

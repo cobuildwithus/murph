@@ -51,6 +51,7 @@ describe("hosted-member-store", () => {
     const identity: HostedMemberIdentityState = {
       maskedPhoneNumberHint: "+1 **** 1234",
       memberId: core.id,
+      phoneNumber: "+15551234",
       phoneLookupKey: "phone_lookup_123",
       phoneNumberVerifiedAt: new Date("2026-04-07T00:02:00.000Z"),
       privyUserId: "did:privy:member_123",

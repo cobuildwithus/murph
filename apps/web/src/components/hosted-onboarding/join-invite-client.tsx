@@ -13,7 +13,11 @@ import type {
 } from "@/src/lib/hosted-onboarding/types";
 
 import { requestHostedOnboardingJson } from "./client-api";
-import { fetchHostedInviteStatus, useHostedInviteStatusRefresh } from "./invite-status-client";
+import {
+  fetchHostedInviteStatus,
+  resolveHostedInviteStatusAuthMode,
+  useHostedInviteStatusRefresh,
+} from "./invite-status-client";
 import {
   resolveInviteStatusAfterPrivyCompletion,
   resolveJoinInviteSubtitle,
@@ -82,7 +86,10 @@ export function JoinInviteClient({
   });
 
   async function refreshStatus(): Promise<HostedInviteStatusPayload> {
-    const payload = await fetchHostedInviteStatus(inviteCode);
+    const payload = await fetchHostedInviteStatus(
+      inviteCode,
+      resolveHostedInviteStatusAuthMode(authenticated),
+    );
     setStatus(payload);
     setStatusRefreshErrorMessage(null);
     return payload;

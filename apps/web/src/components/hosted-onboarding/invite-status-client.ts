@@ -4,13 +4,20 @@ import { useEffect, useEffectEvent } from "react";
 
 import type { HostedInviteStatusPayload } from "@/src/lib/hosted-onboarding/types";
 
-import { requestHostedOnboardingJson } from "./client-api";
+import { requestHostedOnboardingJson, type HostedOnboardingAuthMode } from "./client-api";
 
 const HOSTED_INVITE_STATUS_POLL_INTERVAL_MS = 3_000;
 
-export async function fetchHostedInviteStatus(inviteCode: string): Promise<HostedInviteStatusPayload> {
+export function resolveHostedInviteStatusAuthMode(authenticated: boolean): HostedOnboardingAuthMode {
+  return authenticated ? "required" : "optional";
+}
+
+export async function fetchHostedInviteStatus(
+  inviteCode: string,
+  authMode: HostedOnboardingAuthMode = "optional",
+): Promise<HostedInviteStatusPayload> {
   return requestHostedOnboardingJson<HostedInviteStatusPayload>({
-    auth: "optional",
+    auth: authMode,
     url: buildHostedInviteStatusUrl(inviteCode),
   });
 }
@@ -25,7 +32,10 @@ export function useHostedInviteStatusRefresh(input: {
   shouldPoll: boolean;
 }) {
   const refreshStatusEffect = useEffectEvent(() => {
-    void fetchHostedInviteStatus(input.inviteCode)
+    void fetchHostedInviteStatus(
+      input.inviteCode,
+      resolveHostedInviteStatusAuthMode(input.authenticated),
+    )
       .then(input.onStatus)
       .catch((error: unknown) => {
         input.onError?.(error);

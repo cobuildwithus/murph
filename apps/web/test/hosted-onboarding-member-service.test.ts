@@ -394,6 +394,35 @@ describe("prepareHostedInvitePhoneCode", () => {
     });
   });
 
+  it("reuses the canonical verified phone after the signup-only phone has been cleared", async () => {
+    const hostedMemberIdentity = {
+      findUnique: vi.fn().mockResolvedValue(makeIdentityRecord({
+        memberId: "member_123",
+        phoneNumber: "+15557654321",
+        signupPhoneNumber: null,
+      })),
+      update: vi.fn().mockResolvedValue({}),
+    };
+    const prisma = {
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      hostedInvite: {
+        findUnique: vi.fn().mockResolvedValue(makeInviteRecord()),
+      },
+      hostedMemberIdentity,
+    } as never;
+
+    await expect(
+      prepareHostedInvitePhoneCode({
+        inviteCode: "invite-code",
+        now: NOW,
+        prisma,
+      }),
+    ).resolves.toEqual({
+      phoneNumber: "+15557654321",
+      sendAttemptId: expect.stringMatching(/^hbpc_/u),
+    });
+  });
+
   it("rate limits repeated invite send-code requests", async () => {
     const update = vi.fn();
     const prisma = {
@@ -673,6 +702,7 @@ function makeInviteRecord() {
 function makeIdentityRecord(input: {
   memberId: string;
   phoneLookupKey?: string;
+  phoneNumber?: string | null;
   phoneNumberVerifiedAt?: Date | null;
   privyUserId?: string | null;
   privyUserLookupKey?: string | null;
@@ -690,6 +720,11 @@ function makeIdentityRecord(input: {
     maskedPhoneNumberHint: "*** 4567",
     memberId: input.memberId,
     phoneLookupKey: input.phoneLookupKey ?? "hbidx:phone:v1:existing",
+    phoneNumberEncrypted: encryptHostedWebNullableString({
+      field: "hosted-member-identity.phone-number",
+      memberId: input.memberId,
+      value: input.phoneNumber ?? null,
+    }),
     phoneNumberVerifiedAt: input.phoneNumberVerifiedAt ?? null,
     privyUserIdEncrypted: encryptHostedWebNullableString({
       field: "hosted-member-identity.privy-user-id",
