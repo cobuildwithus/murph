@@ -28,6 +28,7 @@ import {
   inferQueryIdEntityKind,
   isQueryableQueryLookupId,
 } from "../src/query-runtime.ts";
+import { importWithMocks } from "./mock-import.ts";
 
 import type { QueryRecord } from "../src/query-runtime.ts";
 
@@ -62,26 +63,6 @@ function createCommandQueryRuntimeShape() {
     lookupEntityById: vi.fn(() => null),
     listEntities: vi.fn(() => []),
   };
-}
-
-async function importCommandHelpersWithQueryRuntimeMock(
-  loadQueryRuntimeMock: (operation?: string) => Promise<unknown>,
-) {
-  vi.resetModules();
-  vi.doMock("../src/query-runtime.ts", () => ({
-    loadQueryRuntime: vi.fn(loadQueryRuntimeMock),
-  }));
-  return import("../src/commands/query-record-command-helpers.ts");
-}
-
-async function importQueryRuntimeWithLoaderMock(
-  loadRuntimeModuleMock: (specifier: string) => Promise<unknown>,
-) {
-  vi.resetModules();
-  vi.doMock("../src/runtime-import.ts", () => ({
-    loadRuntimeModule: vi.fn(loadRuntimeModuleMock),
-  }));
-  return import("../src/query-runtime.ts");
 }
 
 afterEach(() => {
@@ -329,7 +310,14 @@ describe("query runtime wrappers", () => {
       expect(specifier).toBe("@murphai/query");
       return runtimeStub;
     });
-    const queryRuntimeModule = await importQueryRuntimeWithLoaderMock(loadRuntimeModuleMock);
+    const queryRuntimeModule = await importWithMocks<typeof import("../src/query-runtime.ts")>(
+      "../src/query-runtime.ts",
+      {
+        "../src/runtime-import.ts": () => ({
+          loadRuntimeModule: vi.fn(loadRuntimeModuleMock),
+        }),
+      },
+    );
 
     await expect(queryRuntimeModule.loadQueryRuntime()).resolves.toBe(runtimeStub);
     expect(loadRuntimeModuleMock).toHaveBeenCalledTimes(1);
@@ -338,7 +326,13 @@ describe("query runtime wrappers", () => {
   it("validates the command-helper query runtime shape and caches successful loads", async () => {
     const runtimeStub = createCommandQueryRuntimeShape();
     const loadQueryRuntimeMock = vi.fn(async () => runtimeStub);
-    const helperModule = await importCommandHelpersWithQueryRuntimeMock(loadQueryRuntimeMock);
+    const helperModule = await importWithMocks<
+      typeof import("../src/commands/query-record-command-helpers.ts")
+    >("../src/commands/query-record-command-helpers.ts", {
+      "../src/query-runtime.ts": () => ({
+        loadQueryRuntime: vi.fn(loadQueryRuntimeMock),
+      }),
+    });
 
     const firstRuntime = await helperModule.loadQueryRuntime("query helper reads");
     const secondRuntime = await helperModule.loadQueryRuntime("query helper reads");
@@ -360,7 +354,13 @@ describe("query runtime wrappers", () => {
           }
         : runtimeStub,
     );
-    const helperModule = await importCommandHelpersWithQueryRuntimeMock(loadQueryRuntimeMock);
+    const helperModule = await importWithMocks<
+      typeof import("../src/commands/query-record-command-helpers.ts")
+    >("../src/commands/query-record-command-helpers.ts", {
+      "../src/query-runtime.ts": () => ({
+        loadQueryRuntime: vi.fn(loadQueryRuntimeMock),
+      }),
+    });
 
     await expect(helperModule.loadQueryRuntime("samples/audit query reads")).rejects.toMatchObject({
       name: "VaultCliError",

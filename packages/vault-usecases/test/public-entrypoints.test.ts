@@ -2,15 +2,15 @@ import assert from "node:assert/strict";
 
 import { test } from "vitest";
 
-test("public entrypoints expose the expected symbols", async () => {
-  const indexModule = await import("../src/index.ts");
-  const helpersModule = await import("../src/helpers.ts");
-  const recordsModule = await import("../src/records.ts");
-  const runtimeModule = await import("../src/runtime.ts");
-  const testingModule = await import("../src/testing.ts");
-  const vaultServicesModule = await import("../src/vault-services.ts");
-  const workoutsModule = await import("../src/workouts.ts");
+import * as helpersModule from "../src/helpers.ts";
+import * as indexModule from "../src/index.ts";
+import * as recordsModule from "../src/records.ts";
+import * as runtimeModule from "../src/runtime.ts";
+import * as testingModule from "../src/testing.ts";
+import * as vaultServicesModule from "../src/vault-services.ts";
+import * as workoutsModule from "../src/workouts.ts";
 
+test("public entrypoints expose the expected symbols", () => {
   assert.equal(typeof indexModule.normalizeInputFileOption, "function");
   assert.equal(typeof indexModule.normalizeRepeatableFlagOption, "function");
   assert.equal(typeof indexModule.inputFileOptionSchema.parse, "function");
