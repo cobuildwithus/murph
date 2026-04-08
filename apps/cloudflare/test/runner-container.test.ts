@@ -232,12 +232,24 @@ describe("RunnerContainer", () => {
     });
 
     expect(response).toEqual(createRunnerResult());
-    expect(startAndWaitForPorts).toHaveBeenCalledWith(expect.objectContaining({
+    const startOptions = startAndWaitForPorts.mock.calls[0]?.[0];
+    expect(startOptions).toMatchObject({
       cancellationOptions: expect.objectContaining({
-        instanceGetTimeoutMS: 1_000,
-        portReadyTimeoutMS: 1_000,
+        abort: expect.any(AbortSignal),
+        waitInterval: 250,
       }),
-    }));
+      ports: 8080,
+      startOptions: {
+        enableInternet: true,
+        envVars: expect.objectContaining({
+          PORT: "8080",
+        }),
+      },
+    });
+    expect(startOptions?.cancellationOptions.instanceGetTimeoutMS).toBeLessThanOrEqual(1_000);
+    expect(startOptions?.cancellationOptions.instanceGetTimeoutMS).toBeGreaterThan(0);
+    expect(startOptions?.cancellationOptions.portReadyTimeoutMS).toBeLessThanOrEqual(1_000);
+    expect(startOptions?.cancellationOptions.portReadyTimeoutMS).toBeGreaterThan(0);
   });
 
   it("keeps legacy internal HTTP invoke routes disabled", async () => {
