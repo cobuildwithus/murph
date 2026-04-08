@@ -15,11 +15,7 @@ interface HostedPhoneAuthProps {
 }
 type HostedPhoneAuthIntent = "signup" | "signin";
 
-export function HostedPhoneAuth(props: HostedPhoneAuthProps) {
-  return <HostedPhoneAuthInner {...props} />;
-}
-
-function HostedPhoneAuthInner({
+export function HostedPhoneAuth({
   intent = "signup",
   onCompleted,
   onSignOut,
