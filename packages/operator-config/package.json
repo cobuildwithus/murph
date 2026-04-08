@@ -143,7 +143,8 @@
   ],
   "scripts": {
     "build": "node ../../scripts/rm-paths.mjs dist && tsc -b tsconfig.json --force",
-    "typecheck": "tsc -p tsconfig.typecheck.json --pretty false"
+    "typecheck": "tsc -p tsconfig.typecheck.json --pretty false",
+    "test": "pnpm exec vitest run --config vitest.config.ts --no-coverage"
   },
   "dependencies": {
     "@murphai/contracts": "workspace:*",
