@@ -57,7 +57,7 @@ export function HomepageAuthPanel() {
       </h2>
 
       <div className="mt-5 rounded bg-white p-4 text-stone-900">
-        <HostedPhoneAuth />
+        <HostedPhoneAuth mode="public" />
       </div>
       <div className="mt-4">
         <HostedExistingAccountSignInDialog />
