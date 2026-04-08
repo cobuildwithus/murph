@@ -40,6 +40,21 @@ export interface HostedMemberIdentityState {
   walletProvider: string | null;
 }
 
+export type HostedMemberIdentityLookupMatch =
+  | "phoneLookupKey"
+  | "phoneNumber"
+  | "privyUserId"
+  | "walletAddress";
+
+export interface HostedMemberIdentityLookup {
+  core: HostedMember;
+  identity: HostedMemberIdentityState;
+  matchedBy: HostedMemberIdentityLookupMatch;
+}
+
+// Lookup helpers return the matched identity slice with the core row so auth
+// and onboarding flows do not need to round-trip through readHostedMemberIdentity.
+
 export interface HostedMemberIdentityWriteInput {
   maskedPhoneNumberHint: string;
   memberId: string;
@@ -67,10 +82,10 @@ export interface HostedMemberSignupPhoneStateWriteInput {
   signupPhoneNumber?: string | null;
 }
 
-export async function findHostedMemberByPrivyUserId(input: {
+export async function lookupHostedMemberIdentityByPrivyUserId(input: {
   prisma: HostedOnboardingPrismaClient;
   privyUserId: string;
-}): Promise<HostedMember | null> {
+}): Promise<HostedMemberIdentityLookup | null> {
   const privyUserLookupKeys = createHostedPrivyUserLookupKeyReadCandidates(input.privyUserId);
 
   if (privyUserLookupKeys.length === 0) {
@@ -88,13 +103,15 @@ export async function findHostedMemberByPrivyUserId(input: {
     },
   });
 
-  return identityRecord?.member ?? null;
+  return identityRecord
+    ? projectHostedMemberIdentityLookup(identityRecord, "privyUserId")
+    : null;
 }
 
-export async function findHostedMemberByPhoneLookupKey(input: {
+export async function lookupHostedMemberIdentityByPhoneLookupKey(input: {
   phoneLookupKey: string;
   prisma: HostedOnboardingPrismaClient;
-}): Promise<HostedMember | null> {
+}): Promise<HostedMemberIdentityLookup | null> {
   const identityRecord = await input.prisma.hostedMemberIdentity.findUnique({
     where: {
       phoneLookupKey: input.phoneLookupKey,
@@ -104,13 +121,15 @@ export async function findHostedMemberByPhoneLookupKey(input: {
     },
   });
 
-  return identityRecord?.member ?? null;
+  return identityRecord
+    ? projectHostedMemberIdentityLookup(identityRecord, "phoneLookupKey")
+    : null;
 }
 
-export async function findHostedMemberByPhoneNumber(input: {
+export async function lookupHostedMemberIdentityByPhoneNumber(input: {
   phoneNumber: string;
   prisma: HostedOnboardingPrismaClient;
-}): Promise<HostedMember | null> {
+}): Promise<HostedMemberIdentityLookup | null> {
   const phoneLookupKeys = createHostedPhoneLookupKeyReadCandidates(input.phoneNumber);
 
   if (phoneLookupKeys.length === 0) {
@@ -128,13 +147,15 @@ export async function findHostedMemberByPhoneNumber(input: {
     },
   });
 
-  return identityRecord?.member ?? null;
+  return identityRecord
+    ? projectHostedMemberIdentityLookup(identityRecord, "phoneNumber")
+    : null;
 }
 
-export async function findHostedMemberByWalletAddress(input: {
+export async function lookupHostedMemberIdentityByWalletAddress(input: {
   prisma: HostedOnboardingPrismaClient;
   walletAddress: string;
-}): Promise<HostedMember | null> {
+}): Promise<HostedMemberIdentityLookup | null> {
   const walletAddressLookupKeys = createHostedWalletAddressLookupKeyReadCandidates(
     input.walletAddress,
   );
@@ -154,7 +175,37 @@ export async function findHostedMemberByWalletAddress(input: {
     },
   });
 
-  return identityRecord?.member ?? null;
+  return identityRecord
+    ? projectHostedMemberIdentityLookup(identityRecord, "walletAddress")
+    : null;
+}
+
+export async function findHostedMemberByPrivyUserId(input: {
+  prisma: HostedOnboardingPrismaClient;
+  privyUserId: string;
+}): Promise<HostedMember | null> {
+  return (await lookupHostedMemberIdentityByPrivyUserId(input))?.core ?? null;
+}
+
+export async function findHostedMemberByPhoneLookupKey(input: {
+  phoneLookupKey: string;
+  prisma: HostedOnboardingPrismaClient;
+}): Promise<HostedMember | null> {
+  return (await lookupHostedMemberIdentityByPhoneLookupKey(input))?.core ?? null;
+}
+
+export async function findHostedMemberByPhoneNumber(input: {
+  phoneNumber: string;
+  prisma: HostedOnboardingPrismaClient;
+}): Promise<HostedMember | null> {
+  return (await lookupHostedMemberIdentityByPhoneNumber(input))?.core ?? null;
+}
+
+export async function findHostedMemberByWalletAddress(input: {
+  prisma: HostedOnboardingPrismaClient;
+  walletAddress: string;
+}): Promise<HostedMember | null> {
+  return (await lookupHostedMemberIdentityByWalletAddress(input))?.core ?? null;
 }
 
 export async function readHostedMemberIdentity(input: {
@@ -243,6 +294,19 @@ export function projectHostedMemberIdentityState(
     walletChainType: identity.walletChainType,
     walletCreatedAt: identity.walletCreatedAt,
     walletProvider: identity.walletProvider,
+  };
+}
+
+function projectHostedMemberIdentityLookup(
+  identity: HostedMemberIdentity & {
+    member: HostedMember;
+  },
+  matchedBy: HostedMemberIdentityLookupMatch,
+): HostedMemberIdentityLookup {
+  return {
+    core: identity.member,
+    identity: projectHostedMemberIdentityState(identity),
+    matchedBy,
   };
 }
 

@@ -13,9 +13,11 @@ import { isHostedAccessBlockedBillingStatus } from "./entitlement";
 import { writeHostedMemberStripeBillingRef } from "./hosted-member-billing-store";
 import { normalizeNullableString } from "./shared";
 import {
-  activateHostedMemberForPositiveSource,
   findMemberForStripeObject,
   findMemberForStripeReversal,
+} from "./stripe-billing-lookup";
+import {
+  activateHostedMemberForPositiveSource,
   suspendHostedMemberForBillingReversal,
   type HostedStripeDispatchContext,
   updateHostedMemberStripeBillingIfFresh,
