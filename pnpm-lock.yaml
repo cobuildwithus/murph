@@ -629,6 +629,9 @@ importers:
       '@murphai/messaging-ingress':
         specifier: workspace:*
         version: link:../messaging-ingress
+      '@murphai/query':
+        specifier: workspace:*
+        version: link:../query
       '@murphai/runtime-state':
         specifier: workspace:*
         version: link:../runtime-state

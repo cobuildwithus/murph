@@ -11,6 +11,5 @@ export type {
   KnowledgePageReference,
   KnowledgeSearchHit,
   KnowledgeSearchResult,
-  KnowledgeShowResult,
   KnowledgeUpsertResult,
-} from '@murphai/operator-config/knowledge-contracts'
+} from '@murphai/query'

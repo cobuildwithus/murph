@@ -3,9 +3,9 @@ import {
   type GatewayProjectionSnapshot,
 } from "@murphai/gateway-core";
 import {
-  type HostedAssistantDeliverySideEffect,
+  type HostedAssistantDeliveryEffect,
   type HostedExecutionBundleRef,
-  parseHostedAssistantDeliverySideEffects,
+  parseHostedAssistantDeliveryEffects,
   type HostedExecutionRunnerResult,
 } from "@murphai/hosted-execution";
 import {
@@ -33,21 +33,23 @@ export interface HostedExecutionRunnerCommitRequest {
 }
 
 export interface HostedExecutionCommittedResult {
+  assistantDeliveryEffects: HostedAssistantDeliveryEffect[];
+  sideEffects?: HostedAssistantDeliveryEffect[];
   bundleRef: HostedExecutionBundleRef | null;
   committedAt: string;
   eventId: string;
   finalizedAt: string | null;
   gatewayProjectionSnapshot: GatewayProjectionSnapshot | null;
   result: HostedExecutionRunnerResult["result"];
-  sideEffects: HostedAssistantDeliverySideEffect[];
   userId: string;
 }
 
 export interface HostedExecutionCommitPayload {
+  assistantDeliveryEffects?: HostedAssistantDeliveryEffect[];
+  sideEffects?: HostedAssistantDeliveryEffect[];
   bundle: HostedExecutionRunnerResult["bundle"];
   gatewayProjectionSnapshot?: GatewayProjectionSnapshot | null;
   result: HostedExecutionRunnerResult["result"];
-  sideEffects?: HostedAssistantDeliverySideEffect[];
 }
 
 export interface HostedExecutionFinalizePayload {
@@ -149,7 +151,11 @@ export async function persistHostedExecutionCommit(input: {
     keysById: input.keysById,
   });
   const committedAt = new Date().toISOString();
+  const assistantDeliveryEffects = parseHostedAssistantDeliveryEffects(
+    input.payload.assistantDeliveryEffects ?? input.payload.sideEffects,
+  );
   const committedResult: HostedExecutionCommittedResult = {
+    assistantDeliveryEffects,
     bundleRef: await writeHostedBase64BundleIfChanged({
       bundleStore,
       currentRef: input.currentBundleRef,
@@ -161,7 +167,7 @@ export async function persistHostedExecutionCommit(input: {
     finalizedAt: null,
     gatewayProjectionSnapshot: input.payload.gatewayProjectionSnapshot ?? null,
     result: input.payload.result,
-    sideEffects: parseHostedAssistantDeliverySideEffects(input.payload.sideEffects),
+    sideEffects: assistantDeliveryEffects,
     userId: input.userId,
   };
 
@@ -227,8 +233,15 @@ export async function persistHostedExecutionFinalBundles(input: {
 function normalizeHostedExecutionCommittedResult(
   value: HostedExecutionCommittedResult,
 ): HostedExecutionCommittedResult {
+  const assistantDeliveryEffects = parseHostedAssistantDeliveryEffects(
+    (value as { assistantDeliveryEffects?: unknown; sideEffects?: unknown })
+      .assistantDeliveryEffects
+    ?? (value as { assistantDeliveryEffects?: unknown; sideEffects?: unknown })
+      .sideEffects,
+  );
   return {
     ...value,
+    assistantDeliveryEffects,
     bundleRef: parseHostedExecutionBundleRef(
       (value as { bundleRef?: unknown }).bundleRef,
       "Hosted execution committed result bundleRef",
@@ -241,7 +254,7 @@ function normalizeHostedExecutionCommittedResult(
         : gatewayProjectionSnapshotSchema.parse(
             (value as { gatewayProjectionSnapshot: unknown }).gatewayProjectionSnapshot,
           ),
-    sideEffects: parseHostedAssistantDeliverySideEffects((value as { sideEffects?: unknown }).sideEffects),
+    sideEffects: assistantDeliveryEffects,
     userId: requireCommittedResultString(
       (value as { userId?: unknown }).userId,
       "Hosted execution committed result userId",
@@ -278,10 +291,12 @@ function assertEquivalentDuplicateCommit(
     );
   }
 
-  const expectedSideEffects = parseHostedAssistantDeliverySideEffects(input.payload.sideEffects);
-  if (!sameStructuredValue(existing.sideEffects, expectedSideEffects)) {
+  const expectedAssistantDeliveryEffects = parseHostedAssistantDeliveryEffects(
+    input.payload.assistantDeliveryEffects ?? input.payload.sideEffects,
+  );
+  if (!sameStructuredValue(existing.assistantDeliveryEffects, expectedAssistantDeliveryEffects)) {
     throw new Error(
-      `Hosted execution commit ${input.eventId} side effects do not match the existing durable commit.`,
+      `Hosted execution commit ${input.eventId} assistant deliveries do not match the existing durable commit.`,
     );
   }
 

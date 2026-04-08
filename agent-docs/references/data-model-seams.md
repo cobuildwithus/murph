@@ -177,24 +177,26 @@ Adding one more query field now flows from the real query owner through the CLI/
 **Main refactor risk:** keep the adapter limited to runtime loading and narrow naming compatibility.
 Do not let `vault-usecases` start reaching into query internals or reintroducing narrower local copies just to preserve older field subsets.
 
-### 11. Keep knowledge result contracts owned by `operator-config`, with CLI schemas as the boundary adapter
+### 11. Keep knowledge result contracts owned by `@murphai/query`, with assistant/CLI as thin adapters
 
-**Seam:** `packages/operator-config/src/knowledge-contracts.ts`, `packages/operator-config/package.json`, `packages/assistant-engine/src/knowledge/contracts.ts`, `packages/cli/src/knowledge-cli-contracts.ts`
+**Seam:** `packages/query/src/knowledge-contracts.ts`, `packages/query/src/index.ts`, `packages/operator-config/src/knowledge-contracts.ts`, `packages/assistant-engine/src/knowledge/{contracts.ts,service.ts}`, `packages/assistant-engine/src/knowledge.ts`, `packages/cli/src/knowledge-cli-contracts.ts`
 
-`KnowledgePageReference`, `KnowledgePage`, `KnowledgeSearchResult`, `KnowledgeLogTailResult`, and the lint/index result shapes were split between assistant-engine interfaces and CLI-local inferred types.
-That forced the same product contract to drift across two packages even though both layers already depend on `operator-config` for shared contract surfaces.
+The query package already owned the stable knowledge read model, but result contracts were still split across assistant-engine and CLI-local schemas.
+That made one shared product contract drift across multiple packages even though both layers already depend on the query runtime.
 
 This patch:
 
-- adds one shared `Knowledge*` contract owner in `packages/operator-config/src/knowledge-contracts.ts`
-- turns `packages/assistant-engine/src/knowledge/contracts.ts` into a pure re-export of those shared result types
-- keeps `packages/cli/src/knowledge-cli-contracts.ts` as the CLI boundary schema layer, but types each schema against the shared owner instead of inferring a second nominal contract surface
+- adds one shared `Knowledge*` contract owner in `packages/query/src/knowledge-contracts.ts` and exports it from the public query entrypoint
+- turns `packages/operator-config/src/knowledge-contracts.ts` into a compatibility shim over the query-owned types
+- turns `packages/assistant-engine/src/knowledge/contracts.ts` into a pure compatibility re-export of the query-owned result types
+- switches assistant-engine's knowledge service and public barrel back to the query-owned result contracts
+- keeps `packages/cli/src/knowledge-cli-contracts.ts` as a thin compatibility schema surface that re-exports the query-owned schemas and aliases `KnowledgeShowResult` to the shared `KnowledgeGetResult`
 
-**Why this is simpler:** assistant-engine and CLI now share one source of truth for the knowledge result model while CLI still owns its parse/validation boundary.
-Adding or renaming a knowledge result field now has one type owner instead of two.
+**Why this is simpler:** query is now the only real owner of the knowledge result model, while assistant-engine, operator-config, and CLI keep only compatibility or boundary seams.
+Adding or renaming a knowledge result field now has one type owner instead of multiple parallel copies.
 
-**Main refactor risk:** do not move CLI-only descriptions or parsing ergonomics into `operator-config` just because the result types are shared there.
-The shared owner should stay on the product record shape; the CLI file should remain a thin boundary adapter.
+**Main refactor risk:** do not move CLI-only help text or command ergonomics into query just because the schemas are now shared there.
+The shared owner should stay on the reusable product record shape; presentation concerns can stay local.
 
 ### 12. Keep Linq chat binding writes with the routing owner
 
@@ -238,6 +240,25 @@ This landing makes `packages/gateway-core/src/contracts.ts` the single owner of 
 **Why this is simpler:** gateway-core already owns the concrete route semantics, so the rest of the stack can now consume one stable vocabulary instead of carrying parallel unions that drift independently.
 
 **Main refactor risk:** keep the sharing limited to the route-kind vocabulary.
+
+### 15. Keep hosted webhook receipt side-effect persistence centered on a common retry shell plus kind-owned JSON detail
+
+**Seam:** `apps/web/prisma/schema.prisma`, `apps/web/prisma/migrations/2026040801_hosted_webhook_side_effect_json_normalization/migration.sql`, `apps/web/src/lib/hosted-onboarding/webhook-receipt-codec.ts`
+
+`HostedWebhookReceiptSideEffect` had drifted into a wide sparse row that carried dispatch, Linq, and RevNet payload/result columns side-by-side.
+That widened the Prisma model and forced the codec to reconstruct a per-kind shape from many nullable columns even though the shared retry/error shell was the only real common owner.
+
+This patch:
+
+- replaces the sparse per-kind columns with `payloadJson` and `resultJson` on `HostedWebhookReceiptSideEffect`
+- adds an additive migration that backfills the JSON detail from the old sparse columns before dropping them
+- rewrites `webhook-receipt-codec.ts` so it serializes one common retry/error shell plus kind-owned payload/result JSON detail
+
+**Why this is simpler:** adding one more hosted webhook side effect no longer requires widening the relational row with another batch of nullable columns.
+The common owner stays the retry/idempotency shell, while each effect kind owns only its detail payload/result shape.
+
+**Main refactor risk:** do not let `payloadJson` or `resultJson` turn into a dumping ground for raw webhook bodies or cross-kind lookup fields.
+Keep only the effect-specific remainder there and preserve the indexed common retry shell on the row itself.
 Do not pull assistant policy, hosted callback rules, or CLI-only behavior into gateway-core just to centralize more strings.
 
 ### 15. Collapse active hosted side-effect paths to the assistant-delivery-specific surface they already use

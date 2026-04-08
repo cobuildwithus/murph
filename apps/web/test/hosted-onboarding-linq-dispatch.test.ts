@@ -1386,9 +1386,53 @@ function readHostedWebhookSideEffectUpsertCalls(prisma: object | null | undefine
     };
   }).hostedWebhookReceiptSideEffect;
 
-  return (hostedWebhookReceiptSideEffect?.upsert?.mock?.calls ?? []).map(
-    (call) => ((call[0] as Record<string, unknown> | undefined) ?? {}),
+  return (hostedWebhookReceiptSideEffect?.upsert?.mock?.calls ?? []).map((call) =>
+    normalizeHostedWebhookSideEffectUpsertCall(
+      ((call[0] as Record<string, unknown> | undefined) ?? {}),
+    )
   );
+}
+
+function normalizeHostedWebhookSideEffectUpsertCall(
+  call: Record<string, unknown>,
+): Record<string, unknown> {
+  return {
+    ...call,
+    create: normalizeHostedWebhookSideEffectRecord(call.create),
+    update: normalizeHostedWebhookSideEffectRecord(call.update),
+  };
+}
+
+function normalizeHostedWebhookSideEffectRecord(value: unknown): Record<string, unknown> | unknown {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return value;
+  }
+
+  const record = value as Record<string, unknown>;
+  const payload =
+    record.payloadJson && typeof record.payloadJson === "object" && !Array.isArray(record.payloadJson)
+      ? record.payloadJson as Record<string, unknown>
+      : null;
+  const result =
+    record.resultJson && typeof record.resultJson === "object" && !Array.isArray(record.resultJson)
+      ? record.resultJson as Record<string, unknown>
+      : null;
+
+  return {
+    ...record,
+    dispatchPayloadJson: record.kind === "hosted_execution_dispatch" ? record.payloadJson ?? null : null,
+    linqChatId: record.kind === "linq_message_send" && typeof payload?.chatId === "string" ? payload.chatId : null,
+    linqInviteId: record.kind === "linq_message_send" && typeof payload?.inviteId === "string" ? payload.inviteId : null,
+    linqReplyToMessageId:
+      record.kind === "linq_message_send" && typeof payload?.replyToMessageId === "string"
+        ? payload.replyToMessageId
+        : null,
+    linqResultChatId:
+      record.kind === "linq_message_send" && typeof result?.chatId === "string" ? result.chatId : null,
+    linqResultMessageId:
+      record.kind === "linq_message_send" && typeof result?.messageId === "string" ? result.messageId : null,
+    linqTemplate: record.kind === "linq_message_send" && typeof payload?.template === "string" ? payload.template : null,
+  };
 }
 
 function makeHostedLinqDailyState(input: {

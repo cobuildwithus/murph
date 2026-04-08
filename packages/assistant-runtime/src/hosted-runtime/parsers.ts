@@ -1,5 +1,5 @@
 import {
-  parseHostedAssistantDeliverySideEffects,
+  parseHostedAssistantDeliveryEffects,
   parseHostedExecutionBundleRef,
   parseHostedExecutionRunnerRequest,
   type HostedExecutionRunnerResult,
@@ -109,6 +109,9 @@ function parseHostedAssistantRuntimeResume(
     record.committedResult,
     "Hosted assistant runtime resume state.committedResult",
   );
+  const assistantDeliveryEffects = parseHostedAssistantDeliveryEffects(
+    committedResult.assistantDeliveryEffects ?? committedResult.sideEffects,
+  );
 
   return {
     committedResult: {
@@ -116,7 +119,8 @@ function parseHostedAssistantRuntimeResume(
         committedResult.result,
         "Hosted assistant runtime resume state.committedResult.result",
       ),
-      sideEffects: parseHostedAssistantDeliverySideEffects(committedResult.sideEffects),
+      assistantDeliveryEffects,
+      sideEffects: assistantDeliveryEffects,
     },
   };
 }

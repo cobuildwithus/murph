@@ -4,7 +4,7 @@ import {
   restoreHostedExecutionContext,
 } from "@murphai/runtime-state/node";
 import type {
-  HostedAssistantDeliverySideEffect,
+  HostedAssistantDeliveryEffect,
   HostedExecutionBundleRefState,
   HostedExecutionDispatchRequest,
   HostedExecutionRunnerRequest,
@@ -30,7 +30,8 @@ export interface HostedAssistantRuntimeJobRequest extends HostedExecutionRunnerR
   resume?: {
     committedResult: {
       result: HostedExecutionRunnerResult["result"];
-      sideEffects: HostedAssistantDeliverySideEffect[];
+      assistantDeliveryEffects: HostedAssistantDeliveryEffect[];
+      sideEffects?: HostedAssistantDeliveryEffect[];
     };
   } | null;
 }
@@ -65,7 +66,8 @@ export interface NormalizedHostedAssistantRuntimeConfig {
 export interface HostedCommittedExecutionState {
   committedGatewayProjectionSnapshot: GatewayProjectionSnapshot;
   committedResult: HostedExecutionRunnerResult;
-  committedSideEffects: HostedAssistantDeliverySideEffect[];
+  committedAssistantDeliveryEffects: HostedAssistantDeliveryEffect[];
+  committedSideEffects?: HostedAssistantDeliveryEffect[];
 }
 
 export interface HostedAssistantRuntimeJobResult {

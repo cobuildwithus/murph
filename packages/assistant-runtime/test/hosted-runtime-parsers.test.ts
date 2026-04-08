@@ -67,6 +67,8 @@ describe("parseHostedAssistantRuntimeJobInput", () => {
     });
     expect(parsed.request.bundle).toBe("vault-bundle");
     expect(parsed.request.commit?.bundleRef?.key).toBe("bundles/user/vault.json");
+    expect(parsed.request.resume?.committedResult.assistantDeliveryEffects).toEqual([]);
+    expect(parsed.request.resume?.committedResult.sideEffects).toEqual([]);
     expect(parsed.runtime?.userEnv).toEqual({ OPENAI_API_KEY: "secret" });
   });
 

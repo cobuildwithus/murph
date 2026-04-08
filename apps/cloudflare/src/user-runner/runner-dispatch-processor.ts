@@ -242,8 +242,9 @@ export class RunnerDispatchProcessor {
           committed && !isCommittedResultFinalized(committed)
             ? {
               committedResult: {
+                assistantDeliveryEffects: committed.assistantDeliveryEffects,
                 result: committed.result,
-                sideEffects: committed.sideEffects,
+                sideEffects: committed.assistantDeliveryEffects,
               },
             }
             : null,
@@ -428,8 +429,10 @@ export class RunnerDispatchProcessor {
     run: HostedExecutionRunContext,
     resume: {
       committedResult: {
+        assistantDeliveryEffects:
+          HostedExecutionCommittedResult["assistantDeliveryEffects"];
         result: HostedExecutionCommittedResult["result"];
-        sideEffects: HostedExecutionCommittedResult["sideEffects"];
+        sideEffects?: HostedExecutionCommittedResult["assistantDeliveryEffects"];
       };
     } | null = null,
   ): Promise<HostedAssistantRuntimeJobResult> {
