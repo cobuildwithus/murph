@@ -1,5 +1,3 @@
-import { chmod, mkdir, readFile, stat, writeFile } from 'node:fs/promises'
-import os from 'node:os'
 import path from 'node:path'
 import { z } from 'zod'
 import {
@@ -35,6 +33,15 @@ import {
   saveAssistantSelfDeliveryTarget as saveAssistantSelfDeliveryTargetFromModule,
   type AssistantSelfDeliveryTargetLookupInput,
 } from './operator-config/self-delivery-targets.js'
+import {
+  expandConfiguredVaultPath,
+  normalizeVaultForConfig,
+  pathExists,
+  readOperatorConfigFile,
+  resolveOperatorConfigPath,
+  resolveOperatorHomeDirectory,
+  writeOperatorConfigFile,
+} from './operator-config/storage.js'
 export {
   ROOT_OPTIONS_WITH_VALUES,
   resolveEffectiveTopLevelToken,
@@ -44,13 +51,15 @@ export {
   applyDefaultVaultToArgs,
   hasExplicitVaultOption,
 } from './operator-config/cli-vault-defaults.js'
+export {
+  expandConfiguredVaultPath,
+  normalizeVaultForConfig,
+  resolveOperatorConfigPath,
+  resolveOperatorHomeDirectory,
+} from './operator-config/storage.js'
 export type { AssistantSelfDeliveryTargetLookupInput } from './operator-config/self-delivery-targets.js'
 
 const OPERATOR_CONFIG_SCHEMA = 'murph.operator-config.v1'
-const OPERATOR_CONFIG_DIRECTORY = '.murph'
-const OPERATOR_CONFIG_PATH = path.join(OPERATOR_CONFIG_DIRECTORY, 'config.json')
-const OPERATOR_CONFIG_DIRECTORY_MODE = 0o700
-const OPERATOR_CONFIG_FILE_MODE = 0o600
 export const VAULT_ENV = 'VAULT'
 export const VAULT_ENV_KEYS = [VAULT_ENV] as const
 
@@ -127,70 +136,19 @@ const assistantSelfDeliveryTargetDependencies = {
   saveDefaultsPatch: saveAssistantOperatorDefaultsPatch,
 }
 
-export function resolveOperatorHomeDirectory(
-  env: NodeJS.ProcessEnv = process.env,
-): string {
-  const configuredHome = env.HOME?.trim()
-  return path.resolve(configuredHome && configuredHome.length > 0 ? configuredHome : os.homedir())
-}
-
-export function resolveOperatorConfigPath(
-  homeDirectory = resolveOperatorHomeDirectory(),
-): string {
-  return path.join(homeDirectory, OPERATOR_CONFIG_PATH)
-}
-
-export function normalizeVaultForConfig(
-  vault: string,
-  homeDirectory = resolveOperatorHomeDirectory(),
-): string {
-  const absoluteVault = path.resolve(vault)
-  const normalizedHome = path.resolve(homeDirectory)
-
-  if (absoluteVault === normalizedHome) {
-    return '~'
-  }
-
-  if (absoluteVault.startsWith(`${normalizedHome}${path.sep}`)) {
-    return `~${absoluteVault.slice(normalizedHome.length)}`
-  }
-
-  return absoluteVault
-}
-
-export function expandConfiguredVaultPath(
-  configuredPath: string,
-  homeDirectory = resolveOperatorHomeDirectory(),
-): string {
-  if (configuredPath === '~') {
-    return homeDirectory
-  }
-
-  if (configuredPath.startsWith('~/')) {
-    return path.join(homeDirectory, configuredPath.slice(2))
-  }
-
-  return path.resolve(configuredPath)
-}
-
 export async function readOperatorConfig(
   homeDirectory = resolveOperatorHomeDirectory(),
 ): Promise<OperatorConfig | null> {
   try {
-    const raw = await readFile(resolveOperatorConfigPath(homeDirectory), 'utf8')
+    const raw = await readOperatorConfigFile(resolveOperatorConfigPath(homeDirectory))
+    if (raw === null) {
+      return null
+    }
+
     return normalizeParsedOperatorConfig(
       operatorConfigSchema.parse(JSON.parse(raw) as unknown),
     )
   } catch (error) {
-    if (
-      typeof error === 'object' &&
-      error !== null &&
-      'code' in error &&
-      error.code === 'ENOENT'
-    ) {
-      return null
-    }
-
     if (error instanceof z.ZodError || error instanceof SyntaxError) {
       return null
     }
@@ -212,7 +170,10 @@ export async function saveDefaultVaultConfig(
   )
   const configPath = resolveOperatorConfigPath(homeDirectory)
 
-  await writeOperatorConfigFile(configPath, config)
+  await writeOperatorConfigFile(
+    configPath,
+    `${JSON.stringify(serializeOperatorConfigForWrite(config), null, 2)}\n`,
+  )
 
   return config
 }
@@ -230,7 +191,10 @@ export async function saveAssistantOperatorDefaultsPatch(
   )
   const configPath = resolveOperatorConfigPath(homeDirectory)
 
-  await writeOperatorConfigFile(configPath, config)
+  await writeOperatorConfigFile(
+    configPath,
+    `${JSON.stringify(serializeOperatorConfigForWrite(config), null, 2)}\n`,
+  )
 
   return config
 }
@@ -248,42 +212,12 @@ export async function saveHostedAssistantConfig(
   )
   const configPath = resolveOperatorConfigPath(homeDirectory)
 
-  await writeOperatorConfigFile(configPath, config)
-
-  return config
-}
-
-async function writeOperatorConfigFile(
-  configPath: string,
-  config: OperatorConfig,
-): Promise<void> {
-  const directoryPath = path.dirname(configPath)
-
-  await mkdir(directoryPath, {
-    recursive: true,
-    mode: OPERATOR_CONFIG_DIRECTORY_MODE,
-  })
-  await applyOperatorConfigMode(directoryPath, OPERATOR_CONFIG_DIRECTORY_MODE)
-  await writeFile(
+  await writeOperatorConfigFile(
     configPath,
     `${JSON.stringify(serializeOperatorConfigForWrite(config), null, 2)}\n`,
-    {
-      encoding: 'utf8',
-      mode: OPERATOR_CONFIG_FILE_MODE,
-    },
   )
-  await applyOperatorConfigMode(configPath, OPERATOR_CONFIG_FILE_MODE)
-}
 
-async function applyOperatorConfigMode(
-  targetPath: string,
-  mode: number,
-): Promise<void> {
-  if (process.platform === 'win32') {
-    return
-  }
-
-  await chmod(targetPath, mode)
+  return config
 }
 
 function normalizeAssistantBackendTargetForPersistence(
@@ -392,25 +326,6 @@ export async function resolveDefaultVault(
 
   return null
 }
-
-async function pathExists(targetPath: string): Promise<boolean> {
-  try {
-    await stat(targetPath)
-    return true
-  } catch (error) {
-    if (
-      typeof error === 'object' &&
-      error !== null &&
-      'code' in error &&
-      error.code === 'ENOENT'
-    ) {
-      return false
-    }
-
-    throw error
-  }
-}
-
 export async function resolveAssistantOperatorDefaults(
   homeDirectory = resolveOperatorHomeDirectory(),
 ): Promise<AssistantOperatorDefaults | null> {

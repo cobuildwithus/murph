@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
@@ -119,6 +119,7 @@ test('operator config persists defaults, hosted config, and invalid hosted paylo
       providerName: 'Example API',
       reasoningEffort: 'medium',
       sandbox: null,
+      zeroDataRetention: null,
     },
   )
 
@@ -146,6 +147,12 @@ test('operator config persists defaults, hosted config, and invalid hosted paylo
   const resolvedConfigPath = resolveOperatorConfigPath(homeDirectory)
   const rawSavedConfig = await readFile(resolvedConfigPath, 'utf8')
   assert.match(rawSavedConfig, /"defaultVault": "~\/vaults\/primary"/u)
+  if (process.platform !== 'win32') {
+    const directoryStats = await stat(path.dirname(resolvedConfigPath))
+    const fileStats = await stat(resolvedConfigPath)
+    assert.equal(directoryStats.mode & 0o777, 0o700)
+    assert.equal(fileStats.mode & 0o777, 0o600)
+  }
 
   assert.deepEqual((await readOperatorConfig(homeDirectory))?.hostedAssistant, hostedConfig)
   assert.deepEqual(await resolveHostedAssistantConfig(homeDirectory), hostedConfig)
