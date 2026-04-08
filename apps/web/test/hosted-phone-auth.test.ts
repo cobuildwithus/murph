@@ -104,7 +104,7 @@ describe("HostedPhoneAuth", () => {
     );
 
     assert.match(markup, /Send me a code/);
-    assert.match(markup, /We&#x27;ll text a verification code to the number that messaged Murph\./);
+    assert.match(markup, /We&#x27;ll text a verification code to your phone\./);
     assert.match(markup, /Use a different number/);
     assert.doesNotMatch(markup, /Phone number/);
     assert.doesNotMatch(markup, /Text me a code/);
@@ -138,6 +138,36 @@ describe("HostedPhoneAuth", () => {
 
     assert.match(markup, /autofocus=""/);
     assert.match(markup, /class="[^"]*h-14[^"]*text-lg[^"]*"/);
+  });
+
+  it("renders invite shortcut actions full width", async () => {
+    const { HostedInvitePhoneAuthFlow } = await import("@/src/components/hosted-onboarding/hosted-phone-auth-views");
+
+    const markup = renderToStaticMarkup(
+      React.createElement(HostedInvitePhoneAuthFlow, {
+        code: "",
+        disabled: false,
+        manualEntryVisible: false,
+        mode: "invite",
+        pendingAction: null,
+        phoneCountryOptions: [{ code: "US", dialCode: "+1", label: "United States", placeholder: "(415) 555-2671" }],
+        phoneNumber: "",
+        selectedPhoneCountry: { code: "US", dialCode: "+1", label: "United States", placeholder: "(415) 555-2671" },
+        step: "phone",
+        onCodeChange() {},
+        onPhoneCountryChange() {},
+        onPhoneNumberChange() {},
+        onResendCode() {},
+        onSendCode() {},
+        onUseDifferentNumber() {},
+        onVerifyCode() {},
+      }),
+    );
+
+    assert.match(markup, /Send me a code/);
+    assert.match(markup, /Use a different number/);
+    assert.match(markup, /underline-offset-4/);
+    assert.equal(markup.match(/w-full/g)?.length ?? 0, 2);
   });
 
   it("keeps the public homepage in a manual resume state for authenticated sessions", async () => {
