@@ -270,3 +270,73 @@ test('setup assistant selection normalizes chosen assistant values into operator
     true,
   )
 })
+
+test('setup assistant defaults helpers clear backend state and summarize empty saved defaults', () => {
+  const patch = assistantSelectionToOperatorDefaults(
+    {
+      preset: 'skip',
+      enabled: false,
+      provider: null,
+      model: null,
+      baseUrl: null,
+      apiKeyEnv: null,
+      providerName: null,
+      codexCommand: null,
+      codexHome: undefined,
+      profile: null,
+      reasoningEffort: null,
+      sandbox: null,
+      approvalPolicy: null,
+      oss: false,
+      account: null,
+      detail: 'Skipped',
+    },
+    {
+      backend: {
+        adapter: 'codex-cli',
+        approvalPolicy: 'never',
+        codexCommand: 'codex',
+        codexHome: null,
+        model: 'gpt-5.4',
+        oss: false,
+        profile: null,
+        reasoningEffort: 'medium',
+        sandbox: 'workspace-write',
+      },
+      identityId: null,
+      failoverRoutes: null,
+      account: null,
+      selfDeliveryTargets: null,
+    },
+  )
+
+  assert.deepEqual(patch, {
+    backend: null,
+    account: null,
+  })
+  assert.equal(
+    assistantOperatorDefaultsMatch(
+      {
+        backend: {
+          adapter: 'codex-cli',
+          approvalPolicy: 'never',
+          codexCommand: 'codex',
+          codexHome: null,
+          model: 'gpt-5.4',
+          oss: false,
+          profile: null,
+          reasoningEffort: 'medium',
+          sandbox: 'workspace-write',
+        },
+        identityId: null,
+        failoverRoutes: null,
+        account: null,
+        selfDeliveryTargets: null,
+      },
+      patch,
+    ),
+    false,
+  )
+  assert.deepEqual(buildSetupAssistantOptionsFromDefaults(null), {})
+  assert.equal(formatSavedAssistantDefaultsSummary(null), null)
+})

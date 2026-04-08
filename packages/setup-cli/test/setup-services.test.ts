@@ -33,6 +33,8 @@ import {
   listSetupPendingWearables,
   listSetupReadyWearables,
   resolveSetupPostLaunchAction,
+  resolveInitialSetupWizardChannels,
+  shouldAutoLaunchAssistantAfterSetup,
   shouldRunSetupWizard,
 } from '../src/setup-cli.ts'
 
@@ -163,6 +165,70 @@ test('setup scheduling helpers respect terminal gating and launch routing', () =
     ),
     'assistant-chat',
   )
+  assert.equal(
+    resolveSetupPostLaunchAction(
+      {
+        agent: false,
+        format: 'toon',
+        formatExplicit: false,
+        result: {
+          arch: 'arm64',
+          assistant: null,
+          bootstrap: null,
+          channels: [],
+          dryRun: false,
+          notes: [],
+          platform: 'darwin',
+          scheduledUpdates: [],
+          steps: [],
+          toolchainRoot: '~/.murph/toolchain',
+          tools: {
+            ffmpegCommand: null,
+            pdftotextCommand: null,
+            whisperCommand: null,
+            whisperModelPath: '~/.murph/toolchain/models/whisper/ggml-base.en.bin',
+          },
+          vault: '~/vault',
+          wearables: [],
+          whisperModel: 'base.en',
+        },
+      },
+      { stdinIsTTY: false, stderrIsTTY: true },
+    ),
+    null,
+  )
+  assert.equal(
+    shouldAutoLaunchAssistantAfterSetup(
+      {
+        agent: false,
+        format: 'toon',
+        formatExplicit: false,
+        result: {
+          arch: 'arm64',
+          assistant: null,
+          bootstrap: null,
+          channels: [],
+          dryRun: false,
+          notes: [],
+          platform: 'darwin',
+          scheduledUpdates: [],
+          steps: [],
+          toolchainRoot: '~/.murph/toolchain',
+          tools: {
+            ffmpegCommand: null,
+            pdftotextCommand: null,
+            whisperCommand: null,
+            whisperModelPath: '~/.murph/toolchain/models/whisper/ggml-base.en.bin',
+          },
+          vault: '~/vault',
+          wearables: [],
+          whisperModel: 'base.en',
+        },
+      },
+      { stdinIsTTY: true, stderrIsTTY: true },
+    ),
+    true,
+  )
   assert.deepEqual(
     listSetupReadyWearables({
       arch: 'arm64',
@@ -241,6 +307,65 @@ test('setup scheduling helpers respect terminal gating and launch routing', () =
     }).map((wearable) => wearable.wearable),
     ['oura'],
   )
+})
+
+test('setup wizard initial channels reuse saved automation channels and fall back when none are saved', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'setup-cli-vault-'))
+  const automationStatePath = path.join(
+    vaultRoot,
+    '.runtime',
+    'operations',
+    'assistant',
+    'automation-state.json',
+  )
+
+  try {
+    assert.deepEqual(
+      await resolveInitialSetupWizardChannels(vaultRoot, 'darwin'),
+      ['imessage'],
+    )
+
+    await mkdir(path.dirname(automationStatePath), { recursive: true })
+    await writeFile(
+      automationStatePath,
+      JSON.stringify({
+        version: 2,
+        inboxScanCursor: null,
+        autoReplyScanCursor: null,
+        autoReplyChannels: ['telegram', 'email', 'unknown'],
+        autoReplyBacklogChannels: [],
+        autoReplyPrimed: true,
+        updatedAt: '2026-04-08T00:00:00.000Z',
+      }),
+      'utf8',
+    )
+
+    assert.deepEqual(
+      await resolveInitialSetupWizardChannels(vaultRoot, 'darwin'),
+      ['telegram', 'email'],
+    )
+
+    await writeFile(
+      automationStatePath,
+      JSON.stringify({
+        version: 2,
+        inboxScanCursor: null,
+        autoReplyScanCursor: null,
+        autoReplyChannels: [],
+        autoReplyBacklogChannels: [],
+        autoReplyPrimed: false,
+        updatedAt: '2026-04-08T00:00:00.000Z',
+      }),
+      'utf8',
+    )
+
+    assert.deepEqual(
+      await resolveInitialSetupWizardChannels(vaultRoot, 'linux'),
+      [],
+    )
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
 })
 
 test('shell and process helpers normalize paths and command failures predictably', async () => {

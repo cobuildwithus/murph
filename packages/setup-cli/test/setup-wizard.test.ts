@@ -5,6 +5,9 @@ import {
   describeSetupWizardPublicUrlStrategyChoice,
   getDefaultSetupWizardScheduledUpdates,
   resolveSetupWizardInitialScheduledUpdates,
+  toggleSetupWizardChannel,
+  toggleSetupWizardScheduledUpdate,
+  toggleSetupWizardWearable,
 } from '../src/setup-wizard.js'
 import {
   createSetupWizardCompletionController,
@@ -35,6 +38,21 @@ test('setup wizard core wraps indices and waits for exit before resolving', asyn
   assert.equal(wrapSetupWizardIndex(3, 4, 2), 1)
 })
 
+test('setup wizard completion controller rejects unexpected exits and preserves the first terminal state', async () => {
+  const controller = createSetupWizardCompletionController<string>({
+    unexpectedExitMessage: 'wizard exited early',
+  })
+
+  controller.completeExit()
+
+  await assert.rejects(controller.waitForResult(), /wizard exited early/u)
+
+  controller.submit('late')
+  controller.fail(new Error('ignored'))
+
+  await assert.rejects(controller.waitForResult(), /wizard exited early/u)
+})
+
 test('setup wizard scheduled updates keep the starter bundle unless explicitly overridden', () => {
   assert.deepEqual(getDefaultSetupWizardScheduledUpdates(), [
     'environment-health-watch',
@@ -49,6 +67,35 @@ test('setup wizard scheduled updates keep the starter bundle unless explicitly o
     resolveSetupWizardInitialScheduledUpdates(['weekly-health-snapshot']),
     ['weekly-health-snapshot'],
   )
+  assert.deepEqual(
+    toggleSetupWizardScheduledUpdate(
+      ['environment-health-watch'],
+      'weekly-health-snapshot',
+    ),
+    ['environment-health-watch', 'weekly-health-snapshot'],
+  )
+  assert.deepEqual(
+    toggleSetupWizardScheduledUpdate(
+      ['environment-health-watch', 'weekly-health-snapshot'],
+      'environment-health-watch',
+    ),
+    ['weekly-health-snapshot'],
+  )
+})
+
+test('setup wizard selection toggles keep channels and wearables in canonical order', () => {
+  assert.deepEqual(toggleSetupWizardChannel(['telegram'], 'imessage'), [
+    'imessage',
+    'telegram',
+  ])
+  assert.deepEqual(toggleSetupWizardChannel(['imessage', 'telegram'], 'imessage'), [
+    'telegram',
+  ])
+  assert.deepEqual(toggleSetupWizardWearable(['whoop'], 'garmin'), [
+    'garmin',
+    'whoop',
+  ])
+  assert.deepEqual(toggleSetupWizardWearable(['garmin', 'oura'], 'garmin'), ['oura'])
 })
 
 test('setup wizard public URL guidance stays disabled when a public base URL is already set', () => {
@@ -100,5 +147,31 @@ test('setup wizard public URL guidance recommends hosted web for wearables and k
       strategy: 'tunnel',
     }),
     'Expose the local callback routes through a tunnel instead of setting up hosted `apps/web` first.',
+  )
+})
+
+test('setup wizard public URL guidance recommends a tunnel for Linq-only setups', () => {
+  const review = buildSetupWizardPublicUrlReview({
+    channels: ['linq'],
+    wearables: [],
+  })
+
+  assert.equal(review.enabled, true)
+  assert.equal(review.recommendedStrategy, 'tunnel')
+  assert.match(review.summary, /local inbox webhook/u)
+  assert.deepEqual(review.targets.map((target) => target.label), ['Linq webhook'])
+  assert.equal(
+    describeSetupWizardPublicUrlStrategyChoice({
+      review,
+      strategy: 'hosted',
+    }),
+    'Use hosted `apps/web` for Garmin/WHOOP/Oura, but keep Linq on the local webhook path for now.',
+  )
+  assert.equal(
+    describeSetupWizardPublicUrlStrategyChoice({
+      review,
+      strategy: 'tunnel',
+    }),
+    'Expose the local Linq webhook through a tunnel. Murph does not have a hosted Linq webhook yet.',
   )
 })
