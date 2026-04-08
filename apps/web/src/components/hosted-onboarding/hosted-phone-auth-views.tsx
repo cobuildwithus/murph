@@ -51,8 +51,8 @@ interface SharedFlowProps {
   onVerifyCode: () => void;
 }
 
-interface InviteFlowProps extends Omit<SharedFlowProps, "onSendCode"> {
-  manualEntryVisible: boolean;
+interface HostedPhoneAuthFlowProps extends SharedFlowProps {
+  shortcutVisible: boolean;
   onSendCode: () => void;
 }
 
@@ -69,10 +69,10 @@ interface AuthenticatedStateProps {
   onUseDifferentNumber: () => void;
 }
 
-export function HostedInvitePhoneAuthFlow({
-  manualEntryVisible,
+export function HostedPhoneAuthFlow({
+  shortcutVisible,
   ...props
-}: InviteFlowProps) {
+}: HostedPhoneAuthFlowProps) {
   if (props.activeAttempt) {
     return (
       <HostedCodeEntryStep
@@ -90,47 +90,13 @@ export function HostedInvitePhoneAuthFlow({
     );
   }
 
-  if (!manualEntryVisible) {
+  if (shortcutVisible) {
     return (
       <HostedInviteShortcutStep
         disabled={props.disabled}
         pendingAction={props.pendingAction}
         onSendCode={props.onSendCode}
         onUseDifferentNumber={props.onUseDifferentNumber}
-      />
-    );
-  }
-
-  return (
-    <HostedPhoneEntryStep
-      intent={props.intent}
-      mode={props.mode}
-      pendingAction={props.pendingAction}
-      phoneCountryOptions={props.phoneCountryOptions}
-      phoneNumber={props.phoneNumber}
-      sendCodeDisabled={props.sendCodeDisabled}
-      selectedPhoneCountry={props.selectedPhoneCountry}
-      onPhoneCountryChange={props.onPhoneCountryChange}
-      onPhoneNumberChange={props.onPhoneNumberChange}
-      onSubmitPhoneEntry={props.onSubmitPhoneEntry}
-    />
-  );
-}
-
-export function HostedPublicPhoneAuthFlow(props: SharedFlowProps) {
-  if (props.activeAttempt) {
-    return (
-      <HostedCodeEntryStep
-        verificationPhoneNumberHint={props.activeAttempt.maskedPhoneNumber}
-        code={props.code}
-        disabled={props.disabled}
-        intent={props.intent}
-        mode={props.mode}
-        pendingAction={props.pendingAction}
-        onCodeChange={props.onCodeChange}
-        onResendCode={props.onResendCode}
-        onUseDifferentNumber={props.onUseDifferentNumber}
-        onVerifyCode={props.onVerifyCode}
       />
     );
   }

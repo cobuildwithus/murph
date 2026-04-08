@@ -113,10 +113,10 @@ describe("HostedPhoneAuth", () => {
   });
 
   it("autofocuses and enlarges the verification code input", async () => {
-    const { HostedInvitePhoneAuthFlow } = await import("@/src/components/hosted-onboarding/hosted-phone-auth-views");
+    const { HostedPhoneAuthFlow } = await import("@/src/components/hosted-onboarding/hosted-phone-auth-views");
 
     const markup = renderToStaticMarkup(
-      React.createElement(HostedInvitePhoneAuthFlow, {
+      React.createElement(HostedPhoneAuthFlow, {
         activeAttempt: {
           maskedPhoneNumber: "*** 2671",
           phoneNumber: "+14155552671",
@@ -124,12 +124,12 @@ describe("HostedPhoneAuth", () => {
         code: "",
         disabled: false,
         intent: "signup",
-        manualEntryVisible: false,
         mode: "invite",
         pendingAction: null,
         phoneCountryOptions: [{ code: "US", dialCode: "+1", label: "United States", placeholder: "(415) 555-2671" }],
         phoneNumber: "",
         sendCodeDisabled: false,
+        shortcutVisible: false,
         selectedPhoneCountry: { code: "US", dialCode: "+1", label: "United States", placeholder: "(415) 555-2671" },
         onCodeChange() {},
         onPhoneCountryChange() {},
@@ -148,20 +148,20 @@ describe("HostedPhoneAuth", () => {
   });
 
   it("renders invite shortcut actions full width", async () => {
-    const { HostedInvitePhoneAuthFlow } = await import("@/src/components/hosted-onboarding/hosted-phone-auth-views");
+    const { HostedPhoneAuthFlow } = await import("@/src/components/hosted-onboarding/hosted-phone-auth-views");
 
     const markup = renderToStaticMarkup(
-      React.createElement(HostedInvitePhoneAuthFlow, {
+      React.createElement(HostedPhoneAuthFlow, {
         activeAttempt: null,
         code: "",
         disabled: false,
         intent: "signup",
-        manualEntryVisible: false,
         mode: "invite",
         pendingAction: null,
         phoneCountryOptions: [{ code: "US", dialCode: "+1", label: "United States", placeholder: "(415) 555-2671" }],
         phoneNumber: "",
         sendCodeDisabled: false,
+        shortcutVisible: true,
         selectedPhoneCountry: { code: "US", dialCode: "+1", label: "United States", placeholder: "(415) 555-2671" },
         onCodeChange() {},
         onPhoneCountryChange() {},
@@ -181,20 +181,20 @@ describe("HostedPhoneAuth", () => {
   });
 
   it("disables invite manual-entry send-code submit until the phone number is valid", async () => {
-    const { HostedInvitePhoneAuthFlow } = await import("@/src/components/hosted-onboarding/hosted-phone-auth-views");
+    const { HostedPhoneAuthFlow } = await import("@/src/components/hosted-onboarding/hosted-phone-auth-views");
 
     const markup = renderToStaticMarkup(
-      React.createElement(HostedInvitePhoneAuthFlow, {
+      React.createElement(HostedPhoneAuthFlow, {
         activeAttempt: null,
         code: "",
         disabled: false,
         intent: "signup",
-        manualEntryVisible: true,
         mode: "invite",
         pendingAction: null,
         phoneCountryOptions: [{ code: "US", dialCode: "+1", label: "United States", placeholder: "(415) 555-2671" }],
         phoneNumber: "",
         sendCodeDisabled: true,
+        shortcutVisible: false,
         selectedPhoneCountry: { code: "US", dialCode: "+1", label: "United States", placeholder: "(415) 555-2671" },
         onCodeChange() {},
         onPhoneCountryChange() {},
@@ -213,20 +213,20 @@ describe("HostedPhoneAuth", () => {
   });
 
   it("enables invite manual-entry send-code submit once the phone number is valid", async () => {
-    const { HostedInvitePhoneAuthFlow } = await import("@/src/components/hosted-onboarding/hosted-phone-auth-views");
+    const { HostedPhoneAuthFlow } = await import("@/src/components/hosted-onboarding/hosted-phone-auth-views");
 
     const markup = renderToStaticMarkup(
-      React.createElement(HostedInvitePhoneAuthFlow, {
+      React.createElement(HostedPhoneAuthFlow, {
         activeAttempt: null,
         code: "",
         disabled: false,
         intent: "signup",
-        manualEntryVisible: true,
         mode: "invite",
         pendingAction: null,
         phoneCountryOptions: [{ code: "US", dialCode: "+1", label: "United States", placeholder: "(415) 555-2671" }],
         phoneNumber: "4155552671",
         sendCodeDisabled: false,
+        shortcutVisible: false,
         selectedPhoneCountry: { code: "US", dialCode: "+1", label: "United States", placeholder: "(415) 555-2671" },
         onCodeChange() {},
         onPhoneCountryChange() {},
@@ -268,10 +268,10 @@ describe("HostedPhoneAuth", () => {
   });
 
   it("uses tall secondary actions for the public homepage code step", async () => {
-    const { HostedPublicPhoneAuthFlow } = await import("@/src/components/hosted-onboarding/hosted-phone-auth-views");
+    const { HostedPhoneAuthFlow } = await import("@/src/components/hosted-onboarding/hosted-phone-auth-views");
 
     const markup = renderToStaticMarkup(
-      React.createElement(HostedPublicPhoneAuthFlow, {
+      React.createElement(HostedPhoneAuthFlow, {
         activeAttempt: {
           maskedPhoneNumber: "*** 2671",
           phoneNumber: "+14155552671",
@@ -284,6 +284,7 @@ describe("HostedPhoneAuth", () => {
         phoneCountryOptions: [{ code: "US", dialCode: "+1", label: "United States", placeholder: "(415) 555-2671" }],
         phoneNumber: "4155552671",
         sendCodeDisabled: false,
+        shortcutVisible: false,
         selectedPhoneCountry: { code: "US", dialCode: "+1", label: "United States", placeholder: "(415) 555-2671" },
         onCodeChange() {},
         onPhoneCountryChange() {},
@@ -303,10 +304,10 @@ describe("HostedPhoneAuth", () => {
   });
 
   it("switches the public homepage copy into sign-in language", async () => {
-    const { HostedPublicPhoneAuthFlow } = await import("@/src/components/hosted-onboarding/hosted-phone-auth-views");
+    const { HostedPhoneAuthFlow } = await import("@/src/components/hosted-onboarding/hosted-phone-auth-views");
 
     const phoneEntryMarkup = renderToStaticMarkup(
-      React.createElement(HostedPublicPhoneAuthFlow, {
+      React.createElement(HostedPhoneAuthFlow, {
         activeAttempt: null,
         code: "",
         disabled: false,
@@ -316,6 +317,7 @@ describe("HostedPhoneAuth", () => {
         phoneCountryOptions: [{ code: "US", dialCode: "+1", label: "United States", placeholder: "(415) 555-2671" }],
         phoneNumber: "4155552671",
         sendCodeDisabled: false,
+        shortcutVisible: false,
         selectedPhoneCountry: { code: "US", dialCode: "+1", label: "United States", placeholder: "(415) 555-2671" },
         onCodeChange() {},
         onPhoneCountryChange() {},
@@ -329,7 +331,7 @@ describe("HostedPhoneAuth", () => {
     );
 
     const codeEntryMarkup = renderToStaticMarkup(
-      React.createElement(HostedPublicPhoneAuthFlow, {
+      React.createElement(HostedPhoneAuthFlow, {
         activeAttempt: {
           maskedPhoneNumber: "*** 2671",
           phoneNumber: "+14155552671",
@@ -342,6 +344,7 @@ describe("HostedPhoneAuth", () => {
         phoneCountryOptions: [{ code: "US", dialCode: "+1", label: "United States", placeholder: "(415) 555-2671" }],
         phoneNumber: "4155552671",
         sendCodeDisabled: false,
+        shortcutVisible: false,
         selectedPhoneCountry: { code: "US", dialCode: "+1", label: "United States", placeholder: "(415) 555-2671" },
         onCodeChange() {},
         onPhoneCountryChange() {},

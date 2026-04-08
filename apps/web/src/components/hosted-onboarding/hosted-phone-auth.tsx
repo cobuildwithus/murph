@@ -29,8 +29,7 @@ import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/t
 
 import {
   HostedAuthenticatedPhoneAuthState,
-  HostedInvitePhoneAuthFlow,
-  HostedPublicPhoneAuthFlow,
+  HostedPhoneAuthFlow,
   type HostedPhoneAuthIntent,
   type HostedAuthenticatedPhoneAuthView,
 } from "./hosted-phone-auth-views";
@@ -176,10 +175,35 @@ function HostedPhoneAuthInner({
     effectiveIntent === "signin"
       ? "Keep this tab open. We are verifying your number and signing you into your account."
       : "Keep this tab open. We are verifying your number, preparing your account, and moving you to the next step.";
+  const sharedFlowProps = {
+    activeAttempt: phoneVerificationAttempt,
+    code,
+    disabled: flowDisabled,
+    intent: effectiveIntent,
+    mode,
+    pendingAction,
+    phoneCountryOptions: HOSTED_PHONE_COUNTRY_OPTIONS,
+    phoneNumber,
+    sendCodeDisabled: phoneEntrySendCodeDisabled,
+    selectedPhoneCountry,
+    onCodeChange: setCode,
+    onPhoneCountryChange: setPhoneCountryCode,
+    onPhoneNumberChange: setPhoneNumber,
+    onResendCode: handleResendCode,
+    onSubmitPhoneEntry: handleSendCode,
+    onVerifyCode: handleVerifyCode,
+  } as const;
 
   function updateFinalizationState(nextState: HostedPrivyFinalizationState) {
     finalizationStateRef.current = nextState;
     setFinalizationState(nextState);
+  }
+
+  function resetPhoneAuthFlow(nextManualEntryVisible: boolean) {
+    setErrorMessage(null);
+    setCode("");
+    setPhoneVerificationAttempt(null);
+    setManualEntryVisible(nextManualEntryVisible);
   }
 
   useEffect(() => {
@@ -270,9 +294,7 @@ function HostedPhoneAuthInner({
         error instanceof HostedOnboardingApiError
         && error.code === "SIGNUP_PHONE_UNAVAILABLE"
       ) {
-        setCode("");
-        setPhoneVerificationAttempt(null);
-        setManualEntryVisible(true);
+        resetPhoneAuthFlow(true);
         setErrorMessage("Enter the number that messaged Murph to continue.");
         return;
       }
@@ -369,9 +391,7 @@ function HostedPhoneAuthInner({
     try {
       await logout();
       await onSignOut?.();
-      setCode("");
-      setPhoneVerificationAttempt(null);
-      setManualEntryVisible(mode !== "invite");
+      resetPhoneAuthFlow(mode !== "invite");
       setPhoneCountryCode(DEFAULT_HOSTED_PHONE_COUNTRY_CODE);
       setPhoneNumber("");
     } catch (error) {
@@ -422,56 +442,14 @@ function HostedPhoneAuthInner({
           onContinue={handleContinueAuthenticated}
           onUseDifferentNumber={handleLogout}
         />
-      ) : mode === "invite" ? (
-        <HostedInvitePhoneAuthFlow
-          activeAttempt={phoneVerificationAttempt}
-          code={code}
-          disabled={flowDisabled}
-          intent={effectiveIntent}
-          manualEntryVisible={manualEntryVisible}
-          mode={mode}
-          pendingAction={pendingAction}
-          phoneCountryOptions={HOSTED_PHONE_COUNTRY_OPTIONS}
-          phoneNumber={phoneNumber}
-          sendCodeDisabled={phoneEntrySendCodeDisabled}
-          selectedPhoneCountry={selectedPhoneCountry}
-          onCodeChange={setCode}
-          onPhoneCountryChange={setPhoneCountryCode}
-          onPhoneNumberChange={setPhoneNumber}
-          onResendCode={handleResendCode}
-          onSendCode={handleInviteSendCode}
-          onSubmitPhoneEntry={handleSendCode}
-          onUseDifferentNumber={() => {
-            setErrorMessage(null);
-            setCode("");
-            setPhoneVerificationAttempt(null);
-            setManualEntryVisible(true);
-          }}
-          onVerifyCode={handleVerifyCode}
-        />
       ) : (
-        <HostedPublicPhoneAuthFlow
-          activeAttempt={phoneVerificationAttempt}
-          code={code}
-          disabled={flowDisabled}
-          intent={effectiveIntent}
-          mode={mode}
-          pendingAction={pendingAction}
-          phoneCountryOptions={HOSTED_PHONE_COUNTRY_OPTIONS}
-          phoneNumber={phoneNumber}
-          sendCodeDisabled={phoneEntrySendCodeDisabled}
-          selectedPhoneCountry={selectedPhoneCountry}
-          onCodeChange={setCode}
-          onPhoneCountryChange={setPhoneCountryCode}
-          onPhoneNumberChange={setPhoneNumber}
-          onResendCode={handleResendCode}
-          onSubmitPhoneEntry={handleSendCode}
+        <HostedPhoneAuthFlow
+          {...sharedFlowProps}
+          shortcutVisible={mode === "invite" && !manualEntryVisible}
+          onSendCode={handleInviteSendCode}
           onUseDifferentNumber={() => {
-            setErrorMessage(null);
-            setCode("");
-            setPhoneVerificationAttempt(null);
+            resetPhoneAuthFlow(mode === "invite");
           }}
-          onVerifyCode={handleVerifyCode}
         />
       )}
     </div>
