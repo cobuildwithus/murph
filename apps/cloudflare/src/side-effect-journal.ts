@@ -1,7 +1,7 @@
 import {
   assertHostedAssistantDeliveryRecordConsistency,
   parseHostedAssistantDeliveryRecord,
-  sameHostedExecutionAssistantDelivery,
+  sameHostedAssistantDeliveryReceipt,
   sameHostedAssistantDeliverySideEffectIdentity,
   type HostedAssistantDeliveryRecord,
 } from "@murphai/hosted-execution";
@@ -211,7 +211,7 @@ function mergeHostedAssistantDeliveryRecord(
       return existing;
     }
 
-    if (!sameHostedExecutionAssistantDelivery(existing.delivery, next.delivery)) {
+    if (!sameHostedAssistantDeliveryReceipt(existing.delivery, next.delivery)) {
       throw new HostedAssistantDeliveryConflictError(
         `Hosted assistant delivery ${next.effectId} cannot change delivery details after it has been sent.`,
       );

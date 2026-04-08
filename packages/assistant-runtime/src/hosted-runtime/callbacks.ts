@@ -2,12 +2,11 @@ import {
   buildHostedAssistantDeliveryPreparedRecord,
   buildHostedAssistantDeliverySentRecord,
   buildHostedAssistantDeliverySideEffect,
-  parseHostedExecutionSideEffects,
+  parseHostedAssistantDeliverySideEffects,
   type HostedAssistantDeliveryRecord,
   type HostedAssistantDeliverySideEffect,
   type HostedExecutionDispatchRequest,
   type HostedExecutionRunnerResult,
-  type HostedExecutionSideEffect,
 } from "@murphai/hosted-execution";
 import type { GatewayProjectionSnapshot } from "@murphai/gateway-core";
 import {
@@ -46,7 +45,7 @@ export function resumeHostedCommittedExecution(
       bundle: request.bundle,
       result: request.resume!.committedResult.result,
     },
-    committedSideEffects: parseHostedExecutionSideEffects(
+    committedSideEffects: parseHostedAssistantDeliverySideEffects(
       request.resume!.committedResult.sideEffects,
     ),
   };
@@ -58,7 +57,7 @@ export async function commitHostedExecutionResult(input: {
   effectsPort: HostedRuntimeEffectsPort;
   gatewayProjectionSnapshot?: GatewayProjectionSnapshot | null;
   result: HostedExecutionRunnerResult;
-  sideEffects: HostedExecutionSideEffect[];
+  sideEffects: HostedAssistantDeliverySideEffect[];
 }): Promise<void> {
   if (!input.commit) {
     return;
@@ -82,9 +81,9 @@ export async function commitHostedExecutionResult(input: {
   }
 }
 
-export async function collectHostedExecutionSideEffects(
+export async function collectHostedAssistantDeliverySideEffects(
   vaultRoot: string,
-): Promise<HostedExecutionSideEffect[]> {
+): Promise<HostedAssistantDeliverySideEffect[]> {
   const now = new Date();
   const intents = await listAssistantOutboxIntents(vaultRoot);
 
@@ -101,11 +100,13 @@ export async function collectHostedExecutionSideEffects(
     );
 }
 
+export const collectHostedExecutionSideEffects = collectHostedAssistantDeliverySideEffects;
+
 export async function drainHostedCommittedSideEffectsAfterCommit(input: {
   commit: HostedExecutionCommitCallback | null;
   dispatch: HostedExecutionDispatchRequest;
   effectsPort: HostedRuntimeEffectsPort;
-  sideEffects: HostedExecutionSideEffect[];
+  sideEffects: HostedAssistantDeliverySideEffect[];
   vaultRoot: string;
 }): Promise<void> {
   for (const sideEffect of input.sideEffects) {
@@ -122,19 +123,20 @@ export async function drainHostedCommittedSideEffectsAfterCommit(input: {
 async function dispatchHostedCommittedSideEffect(input: {
   commit: HostedExecutionCommitCallback;
   effectsPort: HostedRuntimeEffectsPort;
-  sideEffect: HostedExecutionSideEffect;
+  sideEffect: HostedAssistantDeliverySideEffect;
   userId: string;
   vaultRoot: string;
 } | {
   commit: null;
   effectsPort: HostedRuntimeEffectsPort;
-  sideEffect: HostedExecutionSideEffect;
+  sideEffect: HostedAssistantDeliverySideEffect;
   userId: string;
   vaultRoot: string;
 }): Promise<void> {
   await dispatchAssistantOutboxIntent({
     dependencies: {
-      sendEmail: (request) => input.effectsPort.sendEmail(request),
+      sendEmail: (request: Parameters<HostedRuntimeEffectsPort["sendEmail"]>[0]) =>
+        input.effectsPort.sendEmail(request),
     },
     dispatchHooks: input.commit
       ? createHostedAssistantDeliveryDispatchHooks({
@@ -331,22 +333,63 @@ async function callHostedAssistantDeliveryJournal(input:
   try {
     switch (input.method) {
       case "DELETE":
-        await input.effectsPort.deletePreparedSideEffect({
+        await deletePreparedAssistantDelivery(input.effectsPort, {
           effectId: sideEffect.effectId,
           fingerprint: sideEffect.fingerprint,
         });
         return null;
       case "GET":
-        return await input.effectsPort.readSideEffect({
+        return await readAssistantDeliveryRecord(input.effectsPort, {
           effectId: sideEffect.effectId,
           fingerprint: sideEffect.fingerprint,
         });
       case "PUT":
-        return await input.effectsPort.writeSideEffect(input.record);
+        return await writeAssistantDeliveryRecord(input.effectsPort, input.record);
     }
   } catch (error) {
     throw createHostedAssistantDeliveryJournalError(input, null, error);
   }
+}
+
+async function deletePreparedAssistantDelivery(
+  effectsPort: HostedRuntimeEffectsPort,
+  input: Pick<HostedAssistantDeliverySideEffect, "effectId" | "fingerprint">,
+): Promise<void> {
+  const deletePrepared =
+    effectsPort.deletePreparedAssistantDelivery ?? effectsPort.deletePreparedSideEffect;
+
+  if (!deletePrepared) {
+    throw new Error("Hosted runtime effectsPort is missing deletePreparedAssistantDelivery.");
+  }
+
+  await deletePrepared(input);
+}
+
+async function readAssistantDeliveryRecord(
+  effectsPort: HostedRuntimeEffectsPort,
+  input: Pick<HostedAssistantDeliverySideEffect, "effectId" | "fingerprint">,
+): Promise<HostedAssistantDeliveryRecord | null> {
+  const readRecord = effectsPort.readAssistantDeliveryRecord ?? effectsPort.readSideEffect;
+
+  if (!readRecord) {
+    throw new Error("Hosted runtime effectsPort is missing readAssistantDeliveryRecord.");
+  }
+
+  return await readRecord(input);
+}
+
+async function writeAssistantDeliveryRecord(
+  effectsPort: HostedRuntimeEffectsPort,
+  record: HostedAssistantDeliveryRecord,
+): Promise<HostedAssistantDeliveryRecord> {
+  const writeRecord =
+    effectsPort.writeAssistantDeliveryRecord ?? effectsPort.writeSideEffect;
+
+  if (!writeRecord) {
+    throw new Error("Hosted runtime effectsPort is missing writeAssistantDeliveryRecord.");
+  }
+
+  return await writeRecord(record);
 }
 
 function createHostedAssistantDeliveryConfirmationPendingError(input: {

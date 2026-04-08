@@ -2,9 +2,9 @@ import { parseHostedEmailSendRequest } from "@murphai/assistant-runtime";
 import {
   HOSTED_EXECUTION_RUNNER_EMAIL_SEND_PATH,
   parseHostedAssistantDeliveryRecord,
+  parseHostedAssistantDeliverySideEffects,
   parseHostedExecutionBundlePayload,
   parseHostedExecutionBundleRef,
-  parseHostedExecutionSideEffects,
   type HostedExecutionBundleRef,
 } from "@murphai/hosted-execution";
 import { gatewayProjectionSnapshotSchema } from "@murphai/gateway-core";
@@ -57,7 +57,7 @@ export async function handleRunnerResultsRequest(input: {
       return methodNotAllowed();
     }
 
-    return handleRunnerSideEffectRequest({
+    return handleRunnerAssistantDeliveryRequest({
       bucket: input.bucket,
       env: input.env,
       effectId: decodeRouteParam(sideEffectMatch.groups.effectId),
@@ -176,7 +176,7 @@ async function forwardRunnerCommit(
   });
 }
 
-async function handleRunnerSideEffectRequest(input: {
+async function handleRunnerAssistantDeliveryRequest(input: {
   bucket: RunnerOutboundEnvironmentSource["BUNDLES"];
   env: RunnerOutboundEnvironmentSource;
   effectId: string;
@@ -281,7 +281,7 @@ function parseHostedExecutionCommitRequest(payload: Record<string, unknown>): Ho
       nextWakeAt: readOptionalString(result.nextWakeAt, "result.nextWakeAt"),
       summary: requireString(result.summary, "result.summary"),
     },
-    sideEffects: parseHostedExecutionSideEffects(payload.sideEffects),
+    sideEffects: parseHostedAssistantDeliverySideEffects(payload.sideEffects),
   };
 }
 
