@@ -1,15 +1,11 @@
 import path from "node:path";
 import { readFile } from "node:fs/promises";
-import {
-  IMessageSDK,
-  type ChatSummary as PhotonImessageChatSummary,
-  type Message as PhotonImessageMessage,
-} from "@photon-ai/imessage-kit";
+
 import {
   createNormalizedChatPollConnector,
   type ChatPollDriver,
-  type ChatPollMessagePage,
-} from "../chat/poll.ts";
+} from "@murphai/inboxd";
+
 import {
   type ImessageKitChatLike,
   type ImessageKitMessageLike,
@@ -17,6 +13,50 @@ import {
 } from "./normalize.ts";
 
 const MAX_EAGER_IMESSAGE_ATTACHMENT_BYTES = 25 * 1024 * 1024;
+const PHOTON_IMESSAGE_KIT_MODULE_ID: string = "@photon-ai/imessage-kit";
+
+interface PhotonImessageAttachmentLike {
+  id?: string | null;
+  filename?: string | null;
+  path?: string | null;
+  mimeType?: string | null;
+  size?: number | null;
+}
+
+interface PhotonImessageMessageLike {
+  guid?: string | null;
+  id?: string | null;
+  text?: string | null;
+  date?: Date | string | number | null;
+  chatId?: string | null;
+  sender?: string | null;
+  senderName?: string | null;
+  isFromMe?: boolean | null;
+  attachments: PhotonImessageAttachmentLike[];
+}
+
+interface PhotonImessageChatSummaryLike {
+  chatId?: string | null;
+  displayName?: string | null;
+  isGroup?: boolean | null;
+}
+
+interface PhotonImessageSdk {
+  getMessages(filter?: Record<string, unknown>): Promise<{
+    messages: PhotonImessageMessageLike[];
+  }>;
+  listChats(): Promise<PhotonImessageChatSummaryLike[]>;
+  startWatching(events?: {
+    onError?: (error: Error) => void;
+    onMessage?: (message: PhotonImessageMessageLike) => void | Promise<void>;
+  }): Promise<void>;
+  stopWatching(): void;
+  close(): Promise<void>;
+}
+
+type PhotonImessageKitModule = {
+  IMessageSDK: new () => PhotonImessageSdk;
+};
 
 export interface ImessageGetMessagesInput {
   cursor?: Record<string, unknown> | null;
@@ -38,8 +78,13 @@ export interface ImessageWatcherHandle {
   done?: Promise<void>;
 }
 
+interface ImessagePollMessagePage {
+  messages: ImessageKitMessageLike[];
+  nextCursor?: Record<string, unknown> | null;
+}
+
 export interface ImessagePollDriver extends ChatPollDriver<ImessageKitMessageLike> {
-  getMessages(input: ImessageGetMessagesInput): Promise<ChatPollMessagePage<ImessageKitMessageLike>>;
+  getMessages(input: ImessageGetMessagesInput): Promise<ImessagePollMessagePage>;
   listChats?(): Promise<ImessageKitChatLike[]>;
   startWatching(options: ImessageWatchOptions): Promise<ImessageWatcherHandle | (() => Promise<void> | void) | void>;
 }
@@ -80,7 +125,12 @@ export function createImessageConnector({
       ownMessages: includeOwnMessages,
     },
     loadContext: loadChats,
-    refreshContext: async ({ driver, context, message }) => {
+    refreshContext: async (input: {
+      driver: ImessagePollDriver;
+      context: Map<string, ImessageKitChatLike> | null;
+      message: ImessageKitMessageLike;
+    }) => {
+      const { driver, context, message } = input;
       const existing = context ? resolveChat(context, message) : null;
 
       if (existing || !driver.listChats) {
@@ -89,12 +139,17 @@ export function createImessageConnector({
 
       return loadChats(driver);
     },
-    normalize: async ({ message, source, accountId, context }) =>
+    normalize: async (input: {
+      message: ImessageKitMessageLike;
+      source: string;
+      accountId?: string | null;
+      context: Map<string, ImessageKitChatLike> | null;
+    }) =>
       normalizeImessageMessage({
-        message: await hydrateEphemeralImessageAttachments(message),
-        source,
-        accountId,
-        chat: resolveChat(context ?? new Map(), message),
+        message: await hydrateEphemeralImessageAttachments(input.message),
+        source: input.source,
+        accountId: input.accountId,
+        chat: resolveChat(input.context ?? new Map(), input.message),
       }),
   });
 }
@@ -128,7 +183,7 @@ export async function loadImessageKitDriver(): Promise<ImessagePollDriver> {
         return;
       }
 
-      const sdk = new IMessageSDK();
+      const sdk = await createIMessageSdk();
       let closed = false;
       let resolveDone!: () => void;
       let rejectDone!: (error: Error) => void;
@@ -157,7 +212,7 @@ export async function loadImessageKitDriver(): Promise<ImessagePollDriver> {
 
       try {
         await sdk.startWatching({
-          onMessage: async (message) => {
+          onMessage: async (message: PhotonImessageMessageLike) => {
             if (options.signal.aborted) {
               return;
             }
@@ -168,7 +223,7 @@ export async function loadImessageKitDriver(): Promise<ImessagePollDriver> {
 
             await options.onMessage(toImessageKitMessageLike(message));
           },
-          onError(error) {
+          onError(error: Error) {
             rejectDone(error);
             void close();
           },
@@ -189,9 +244,9 @@ export async function loadImessageKitDriver(): Promise<ImessagePollDriver> {
 }
 
 async function withIMessageSdk<TResult>(
-  run: (sdk: IMessageSDK) => Promise<TResult>,
+  run: (sdk: PhotonImessageSdk) => Promise<TResult>,
 ): Promise<TResult> {
-  const sdk = new IMessageSDK();
+  const sdk = await createIMessageSdk();
 
   try {
     return await run(sdk);
@@ -200,14 +255,19 @@ async function withIMessageSdk<TResult>(
   }
 }
 
-async function closeIMessageSdk(sdk: IMessageSDK): Promise<void> {
+async function createIMessageSdk(): Promise<PhotonImessageSdk> {
+  const module = await import(PHOTON_IMESSAGE_KIT_MODULE_ID) as PhotonImessageKitModule;
+  return new module.IMessageSDK();
+}
+
+async function closeIMessageSdk(sdk: PhotonImessageSdk): Promise<void> {
   try {
     await sdk.close();
   } catch {}
 }
 
 function toImessageKitMessageLike(
-  message: PhotonImessageMessage,
+  message: PhotonImessageMessageLike,
 ): ImessageKitMessageLike {
   return {
     guid: message.guid,
@@ -220,7 +280,9 @@ function toImessageKitMessageLike(
     displayName: message.senderName,
     senderName: message.senderName,
     isFromMe: message.isFromMe,
-    attachments: message.attachments.map((attachment) => ({
+    attachments: message.attachments.map((
+      attachment: NonNullable<PhotonImessageMessageLike["attachments"]>[number],
+    ) => ({
       id: attachment.id,
       filename: attachment.filename,
       path: attachment.path,
@@ -231,7 +293,7 @@ function toImessageKitMessageLike(
 }
 
 function toImessageKitChatLike(
-  chat: PhotonImessageChatSummary,
+  chat: PhotonImessageChatSummaryLike,
 ): ImessageKitChatLike {
   return {
     id: chat.chatId,
@@ -258,65 +320,6 @@ function filterImessageMessages(input: {
     : ordered;
 
   return filtered.slice(0, normalizedLimit);
-}
-
-async function hydrateEphemeralImessageAttachments(
-  message: ImessageKitMessageLike,
-): Promise<ImessageKitMessageLike> {
-  const attachments = message.attachments;
-
-  if (!attachments || attachments.length === 0) {
-    return message;
-  }
-
-  let changed = false;
-  const hydrated = await Promise.all(
-    attachments.map(async (attachment) => {
-      const nextAttachment = await snapshotEphemeralImessageAttachment(attachment);
-      if (nextAttachment !== attachment) {
-        changed = true;
-      }
-      return nextAttachment;
-    }),
-  );
-
-  return changed
-    ? {
-        ...message,
-        attachments: hydrated,
-      }
-    : message;
-}
-
-async function snapshotEphemeralImessageAttachment(
-  attachment: NonNullable<ImessageKitMessageLike["attachments"]>[number],
-): Promise<NonNullable<ImessageKitMessageLike["attachments"]>[number]> {
-  const attachmentPath = resolveEphemeralAttachmentPath(attachment.path);
-  if (!attachmentPath || hasAttachmentData(attachment)) {
-    return attachment;
-  }
-
-  const byteSize = normalizeAttachmentByteSize(attachment);
-  if (byteSize !== null && byteSize > MAX_EAGER_IMESSAGE_ATTACHMENT_BYTES) {
-    return attachment;
-  }
-
-  try {
-    const data = await readFile(attachmentPath);
-    return {
-      ...attachment,
-      data: new Uint8Array(data),
-    };
-  } catch (error) {
-    if (isMissingFileError(error)) {
-      return {
-        ...attachment,
-        path: null,
-      };
-    }
-
-    throw error;
-  }
 }
 
 function compareImessageMessages(
@@ -405,6 +408,31 @@ function readImessageMessageCursor(
   return { occurredAt, externalId };
 }
 
+function normalizeImessageAccountId(
+  accountId: string | null | undefined,
+): string | null {
+  if (accountId === undefined) {
+    return "self";
+  }
+
+  if (accountId === null) {
+    return null;
+  }
+
+  const normalized = accountId.trim();
+  return normalized.length > 0 ? normalized : null;
+}
+
+async function loadChats(
+  driver: ImessagePollDriver,
+): Promise<Map<string, ImessageKitChatLike>> {
+  if (!driver.listChats) {
+    return new Map();
+  }
+
+  return indexChats(await driver.listChats());
+}
+
 function resolveChat(
   chats: Map<string, ImessageKitChatLike>,
   message: ImessageKitMessageLike,
@@ -413,12 +441,63 @@ function resolveChat(
   return key ? (chats.get(key) ?? null) : null;
 }
 
-async function loadChats(driver: ImessagePollDriver): Promise<Map<string, ImessageKitChatLike>> {
-  if (!driver.listChats) {
-    return new Map();
+async function hydrateEphemeralImessageAttachments(
+  message: ImessageKitMessageLike,
+): Promise<ImessageKitMessageLike> {
+  const attachments = message.attachments;
+
+  if (!attachments || attachments.length === 0) {
+    return message;
   }
 
-  return indexChats(await driver.listChats());
+  let changed = false;
+  const hydrated = await Promise.all(
+    attachments.map(async (attachment) => {
+      const nextAttachment = await snapshotEphemeralImessageAttachment(attachment);
+      if (nextAttachment !== attachment) {
+        changed = true;
+      }
+      return nextAttachment;
+    }),
+  );
+
+  return changed
+    ? {
+        ...message,
+        attachments: hydrated,
+      }
+    : message;
+}
+
+async function snapshotEphemeralImessageAttachment(
+  attachment: NonNullable<ImessageKitMessageLike["attachments"]>[number],
+): Promise<NonNullable<ImessageKitMessageLike["attachments"]>[number]> {
+  const attachmentPath = resolveEphemeralAttachmentPath(attachment.path);
+  if (!attachmentPath || hasAttachmentData(attachment)) {
+    return attachment;
+  }
+
+  const byteSize = normalizeAttachmentByteSize(attachment);
+  if (byteSize !== null && byteSize > MAX_EAGER_IMESSAGE_ATTACHMENT_BYTES) {
+    return attachment;
+  }
+
+  try {
+    const data = await readFile(attachmentPath);
+    return {
+      ...attachment,
+      data: new Uint8Array(data),
+    };
+  } catch (error) {
+    if (isMissingFileError(error)) {
+      return {
+        ...attachment,
+        path: null,
+      };
+    }
+
+    throw error;
+  }
 }
 
 function resolveEphemeralAttachmentPath(candidate: string | null | undefined): string | null {
@@ -461,17 +540,4 @@ function indexChats(chats: ImessageKitChatLike[]): Map<string, ImessageKitChatLi
       return keys.map((key) => [key, chat] as const);
     }),
   );
-}
-
-function normalizeImessageAccountId(accountId: string | null | undefined): string | null {
-  if (accountId === undefined) {
-    return "self";
-  }
-
-  if (accountId === null) {
-    return null;
-  }
-
-  const normalized = accountId.trim();
-  return normalized.length > 0 ? normalized : null;
 }

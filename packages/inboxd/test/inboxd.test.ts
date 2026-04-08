@@ -12,9 +12,7 @@ import { initializeVault, isVaultError, readJsonlRecords } from "@murphai/core";
 import {
   createConnectorRegistry,
   createInboxPipeline,
-  createImessageConnector,
   listInboxCaptureMutations,
-  normalizeImessageMessage,
   openInboxRuntime,
   readInboxCaptureMutationHead,
   rebuildRuntimeFromVault,
@@ -991,147 +989,6 @@ test("runtime decoding rejects malformed sqlite rows with clear column errors", 
   runtime.close();
 });
 
-test("runPollConnector backfills and watches iMessage messages while advancing the cursor", async () => {
-  const vaultRoot = await makeTempDirectory("murph-inbox-daemon-vault");
-  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
-
-  let watcher: ((message: Record<string, unknown>) => Promise<void> | void) | null = null;
-  let closeCount = 0;
-  const driver = {
-    async getMessages() {
-      return {
-        messages: [
-          {
-            guid: "im-1",
-            text: "Backfill capture",
-            date: "2026-03-13T08:00:00.000Z",
-            isFromMe: false,
-            chatGuid: "chat-1",
-            handleId: "friend",
-          },
-        ],
-      };
-    },
-    async startWatching(options: {
-      onMessage(message: Record<string, unknown>): Promise<void> | void;
-    }) {
-      watcher = options.onMessage;
-      return {
-        close() {
-          closeCount += 1;
-        },
-      };
-    },
-  };
-
-  const runtime = await openInboxRuntime({ vaultRoot });
-  const pipeline = await createInboxPipeline({ vaultRoot, runtime });
-  const connector = createImessageConnector({
-    driver,
-    accountId: "self",
-  });
-  const controller = new AbortController();
-  const running = runPollConnector({
-    connector,
-    pipeline,
-    accountId: "self",
-    signal: controller.signal,
-  });
-
-  for (let attempt = 0; attempt < 50 && watcher === null; attempt += 1) {
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
-  assert.ok(watcher);
-  await watcher?.({
-    guid: "im-2",
-    text: "Watch capture",
-    date: "2026-03-13T08:10:00.000Z",
-    isFromMe: true,
-    chatGuid: "chat-1",
-    handleId: "self",
-  });
-  controller.abort();
-  await running;
-
-  const captures = runtime.listCaptures({ limit: 10 });
-  assert.equal(captures.length, 2);
-  assert.equal(captures[0]?.externalId, "im-2");
-  assert.deepEqual(runtime.getCursor("imessage", "self"), {
-    occurredAt: "2026-03-13T08:10:00.000Z",
-    externalId: "im-2",
-    receivedAt: null,
-  });
-  assert.equal(closeCount, 1);
-
-  pipeline.close();
-});
-
-test("normalizeImessageMessage trims text, allowlists raw fields, and registry kind checks stay explicit", () => {
-  const capture = normalizeImessageMessage({
-    message: {
-      guid: "im-raw-1",
-      chatGuid: "chat-raw-1",
-      text: "  hello from raw  ",
-      date: new Date("2026-03-13T10:00:00.000Z"),
-      displayName: "Friend",
-      authorization: "Bearer <AUTH_SECRET>",
-      attachments: [
-        {
-          guid: "att-raw-1",
-          fileName: "photo.heic",
-          path: "/Users/<REDACTED_USER>/Library/Messages/Attachments/photo.heic",
-          mimeType: "image/heic",
-          api_key: "<API_KEY>",
-        },
-      ],
-      nested: {
-        childKey: new Date("2026-03-13T10:00:01.000Z"),
-      },
-    },
-    chat: {
-      participantCount: 3,
-    },
-  });
-
-  assert.equal(capture.text, "hello from raw");
-  assert.equal(capture.thread.isDirect, false);
-  assert.equal(capture.raw.display_name, "Friend");
-  assert.equal(capture.raw.date, "2026-03-13T10:00:00.000Z");
-  assert.deepEqual(capture.raw.attachments, [
-    {
-      guid: "att-raw-1",
-      file_name: "photo.heic",
-      path: "<REDACTED_PATH>",
-      mime_type: "image/heic",
-    },
-  ]);
-  assert.equal("authorization" in capture.raw, false);
-  assert.equal("nested" in capture.raw, false);
-
-  const registry = createConnectorRegistry([
-    {
-      source: "imessage",
-      kind: "poll",
-      capabilities: {
-        backfill: false,
-        watch: false,
-        webhooks: false,
-        attachments: true,
-      },
-      async backfill(_cursor, _emit) {
-        return null;
-      },
-      async watch(_cursor, _emit, _signal) {},
-    },
-  ]);
-
-  assert.equal(registry.requirePoll("imessage").source, "imessage");
-  assert.throws(
-    () => registry.requireWebhook("imessage"),
-    /Webhook connector not registered for source: imessage/,
-  );
-});
-
 test("sanitizeRawMetadata redacts the current sensitive raw-key set", () => {
   const sensitiveKeys = [
     "authorization",
@@ -1183,21 +1040,6 @@ test("sanitizeRawMetadata keeps current near-miss raw keys unchanged", () => {
   for (const [key, value] of nearMissEntries) {
     assert.equal(sanitized[key], value);
   }
-});
-
-test("normalizeImessageMessage treats non-string text payloads as null", () => {
-  const malformedMessage = {
-    guid: "im-raw-2",
-    chatGuid: "chat-raw-2",
-    text: 42,
-    date: "2026-03-13T10:02:00.000Z",
-  } as unknown as Parameters<typeof normalizeImessageMessage>[0]["message"];
-
-  const capture = normalizeImessageMessage({
-    message: malformedMessage,
-  });
-
-  assert.equal(capture.text, null);
 });
 
 function openDatabaseSync(databasePath: string): DatabaseSync {

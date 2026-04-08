@@ -1,5 +1,9 @@
-import type { InboundAttachment, InboundCapture } from "../../contracts/capture.ts";
-import { normalizeTextValue, sanitizeRawMetadata, toIsoTimestamp } from "../../shared.ts";
+import type { InboundAttachment, InboundCapture } from "@murphai/inboxd";
+import {
+  normalizeTextValue,
+  sanitizeRawMetadata,
+  toIsoTimestamp,
+} from "./shared-runtime.ts";
 
 export interface ImessageKitAttachmentLike {
   guid?: string | null;
@@ -240,7 +244,9 @@ function pickImessageAttachment(
   });
 }
 
-function compactRecord(fields: Record<string, unknown>): Record<string, unknown> {
+function compactRecord(
+  fields: Record<string, unknown>,
+): Record<string, unknown> {
   return Object.fromEntries(
     Object.entries(fields).filter(([, value]) => value !== undefined),
   );

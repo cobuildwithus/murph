@@ -70,10 +70,6 @@ vi.mock("@murphai/parsers", () => ({
   createInboxParserService: mocks.createInboxParserServiceMock,
 }));
 
-vi.mock("@photon-ai/imessage-kit", () => ({
-  IMessageSDK: class IMessageSDK {},
-}));
-
 import * as indexModule from "../src/index.ts";
 import * as parsersModule from "../src/parsers.ts";
 import * as runtimeModule from "../src/runtime.ts";

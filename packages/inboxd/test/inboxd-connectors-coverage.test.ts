@@ -14,8 +14,6 @@ import {
   createLinqWebhookConnector,
   createNormalizedChatPollConnector,
   createTelegramPollConnector,
-  normalizeImessageAttachment,
-  normalizeImessageMessage,
   normalizeLinqWebhookEvent,
   normalizeParsedEmailMessage,
   normalizeTelegramUpdate,
@@ -592,83 +590,6 @@ test("createEmailPollConnector watch falls back to the driver inbox account, reu
   assert.equal(unreadCalls, 1);
   assert.deepEqual(emitted, ["email:msg-watch-1"]);
   assert.deepEqual(processedMessageIds, ["msg-watch-1"]);
-});
-
-test("normalizeImessageAttachment and normalizeImessageMessage cover attachment kinds, direct-chat heuristics, and missing identifier failures", () => {
-  assert.deepEqual(
-    normalizeImessageAttachment({
-      guid: "att-audio",
-      transferName: "voice-note.m4a",
-      mimeType: "audio/mpeg",
-      size: 12,
-      data: new Uint8Array([1, 2]),
-    }),
-    {
-      externalId: "att-audio",
-      kind: "audio",
-      mime: "audio/mpeg",
-      originalPath: null,
-      fileName: "voice-note.m4a",
-      byteSize: 12,
-      data: new Uint8Array([1, 2]),
-    },
-  );
-
-  const capture = normalizeImessageMessage({
-    accountId: null,
-    chat: {
-      participantCount: 3,
-      title: "Project Group",
-    },
-    message: {
-      guid: "imessage-1",
-      date: "2026-04-08T12:00:00.000Z",
-      chatId: "chat-1",
-      from: "+15551230000",
-      senderName: "Casey",
-      fromMe: true,
-      attributedBody: "Group update",
-      attachments: [
-        {
-          id: "att-doc",
-          filename: "notes.pdf",
-          mime: "application/pdf",
-          type: "document",
-          path: "/tmp/notes.pdf",
-          byteSize: 20,
-        },
-      ],
-    },
-  });
-
-  assert.equal(capture.accountId, null);
-  assert.equal(capture.thread.isDirect, false);
-  assert.equal(capture.thread.title, "Project Group");
-  assert.equal(capture.actor.id, "+15551230000");
-  assert.equal(capture.actor.displayName, "Casey");
-  assert.equal(capture.actor.isSelf, true);
-  assert.equal(capture.text, "Group update");
-  assert.equal(capture.attachments[0]?.kind, "document");
-  assert.equal(capture.attachments[0]?.originalPath, "/tmp/notes.pdf");
-
-  assert.throws(
-    () =>
-      normalizeImessageMessage({
-        message: {
-          chatId: "chat-1",
-        },
-      }),
-    /stable external id/u,
-  );
-  assert.throws(
-    () =>
-      normalizeImessageMessage({
-        message: {
-          guid: "imessage-no-thread",
-        },
-      }),
-    /stable thread id/u,
-  );
 });
 
 test("createTelegramPollConnector fails closed when an active webhook exists but deleteWebhook is unavailable", async () => {
