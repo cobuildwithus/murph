@@ -255,17 +255,10 @@ function HostedPhoneAuthInner({
         throw error;
       }
 
-      const confirmSucceeded = await confirmInvitePhoneCodeSend({
+      void finalizeInvitePhoneCodeSendConfirmation({
         inviteCode,
         sendAttemptId: payload.sendAttemptId,
       });
-      if (!confirmSucceeded) {
-        writePendingInvitePhoneCodeMutation({
-          inviteCode,
-          kind: "confirm",
-          sendAttemptId: payload.sendAttemptId,
-        });
-      }
     } catch (error) {
       if (
         error instanceof HostedOnboardingApiError
@@ -623,6 +616,34 @@ async function confirmInvitePhoneCodeSend(input: {
   }
 
   return false;
+}
+
+export async function finalizeInvitePhoneCodeSendConfirmation(input: {
+  confirm?: (input: { inviteCode: string; sendAttemptId: string }) => Promise<boolean>;
+  inviteCode: string;
+  sendAttemptId: string;
+  writePending?: (input: PendingInvitePhoneCodeMutation) => void;
+}): Promise<void> {
+  const confirm = input.confirm ?? confirmInvitePhoneCodeSend;
+  const writePending = input.writePending ?? writePendingInvitePhoneCodeMutation;
+  try {
+    const confirmSucceeded = await confirm({
+      inviteCode: input.inviteCode,
+      sendAttemptId: input.sendAttemptId,
+    });
+
+    if (confirmSucceeded) {
+      return;
+    }
+  } catch {
+    // Queue a retry below.
+  }
+
+  writePending({
+    inviteCode: input.inviteCode,
+    kind: "confirm",
+    sendAttemptId: input.sendAttemptId,
+  });
 }
 
 async function abortInvitePhoneCodeSend(input: {
