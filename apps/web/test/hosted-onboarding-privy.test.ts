@@ -44,6 +44,7 @@ import {
   requireHostedPrivyCompletionIdentityFromCookies,
   requireHostedPrivyIdentity,
   requireHostedPrivyIdentityFromCookies,
+  requireHostedPrivyPhoneAuthConfig,
   verifyHostedPrivyAccessToken,
   verifyHostedPrivyIdentityToken,
 } from "@/src/lib/hosted-onboarding/privy";
@@ -76,6 +77,20 @@ describe("hosted Privy verification", () => {
         }),
       ),
     ).toBe(true);
+  });
+
+  it("fails fast when the hosted phone-auth config is incomplete", () => {
+    mocks.runtimeEnv.privyVerificationKey = null;
+
+    try {
+      requireHostedPrivyPhoneAuthConfig();
+      expect.fail("Expected hosted phone-auth config to be required.");
+    } catch (error) {
+      expect(error).toMatchObject({
+        code: "PRIVY_CONFIG_REQUIRED",
+        httpStatus: 500,
+      });
+    }
   });
 
   it("verifies the identity token locally and uses the verified linked accounts", async () => {

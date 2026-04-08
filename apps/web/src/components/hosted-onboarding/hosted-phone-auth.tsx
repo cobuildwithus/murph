@@ -8,7 +8,6 @@ import {
   HostedPhoneAuthFlow,
 } from "./hosted-phone-auth-views";
 import { useHostedPhoneAuthController } from "./hosted-phone-auth-controller";
-import { HostedPrivyProvider } from "./privy-provider";
 
 interface HostedPhoneAuthProps {
   inviteCode?: string | null;
@@ -17,24 +16,11 @@ interface HostedPhoneAuthProps {
   onCompleted?: (payload: HostedPrivyCompletionPayload) => Promise<void> | void;
   onSignOut?: () => Promise<void> | void;
   phoneHint?: string | null;
-  privyAppId: string;
-  privyClientId?: string | null;
-  wrapProvider?: boolean;
 }
 type HostedPhoneAuthIntent = "signup" | "signin";
 
-export function HostedPhoneAuth({ privyAppId, privyClientId, wrapProvider = true, ...props }: HostedPhoneAuthProps) {
-  const content = <HostedPhoneAuthInner {...props} />;
-
-  if (!wrapProvider) {
-    return content;
-  }
-
-  return (
-    <HostedPrivyProvider appId={privyAppId} clientId={privyClientId}>
-      {content}
-    </HostedPrivyProvider>
-  );
+export function HostedPhoneAuth(props: HostedPhoneAuthProps) {
+  return <HostedPhoneAuthInner {...props} />;
 }
 
 function HostedPhoneAuthInner({
@@ -43,7 +29,7 @@ function HostedPhoneAuthInner({
   mode,
   onCompleted,
   onSignOut,
-}: Omit<HostedPhoneAuthProps, "privyAppId" | "wrapProvider">) {
+}: HostedPhoneAuthProps) {
   const controller = useHostedPhoneAuthController({
     inviteCode,
     intent,

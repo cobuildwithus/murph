@@ -15,13 +15,11 @@ vi.mock("@privy-io/react-auth", () => ({
 }));
 
 vi.mock("@/src/components/hosted-onboarding/hosted-phone-auth", () => ({
-  HostedPhoneAuth(input: { mode: string; privyAppId: string; privyClientId?: string | null }) {
+  HostedPhoneAuth(input: { mode: string }) {
     return createElement(
       "div",
       {
         "data-hosted-phone-auth": input.mode,
-        "data-privy-app-id": input.privyAppId,
-        "data-privy-client-id": input.privyClientId ?? "",
       },
       "Hosted phone auth",
     );
@@ -52,26 +50,6 @@ beforeEach(() => {
   });
 });
 
-test("JoinInviteClient keeps the fallback copy when phone auth is ready but the public app id is missing", () => {
-  const markup = renderToStaticMarkup(
-    createElement(JoinInviteClient, {
-      initialStatus: createStatus({
-        capabilities: {
-          billingReady: true,
-          phoneAuthReady: true,
-        },
-      }),
-      inviteCode: "invite-code",
-      privyAppId: null,
-      shareCode: null,
-      sharePreview: null,
-    }),
-  );
-
-  assert.match(markup, /Phone signup is not configured for this environment yet\./);
-  assert.doesNotMatch(markup, /data-hosted-phone-auth=/);
-});
-
 test("verify-stage invite copy stays neutral and does not expose the masked phone hint", () => {
   const markup = renderToStaticMarkup(
     createElement(JoinInviteClient, {
@@ -82,7 +60,6 @@ test("verify-stage invite copy stays neutral and does not expose the masked phon
         },
       }),
       inviteCode: "invite-code",
-      privyAppId: "cm_app_123",
       shareCode: null,
       sharePreview: null,
     }),
@@ -112,7 +89,6 @@ test("verify-stage invite waits for Privy readiness before showing phone auth", 
         },
       }),
       inviteCode: "invite-code",
-      privyAppId: "cm_app_123",
       shareCode: null,
       sharePreview: null,
     }),
@@ -139,7 +115,6 @@ test("verify-stage invite waits for the auth-backed status refresh when Privy is
         },
       }),
       inviteCode: "invite-code",
-      privyAppId: "cm_app_123",
       shareCode: null,
       sharePreview: null,
     }),
@@ -161,7 +136,6 @@ test("active invite state links to hosted settings with client navigation markup
         stage: "active",
       }),
       inviteCode: "invite-code",
-      privyAppId: "cm_app_123",
       shareCode: null,
       sharePreview: null,
     }),
@@ -183,7 +157,6 @@ test("activating invite state explains that payment finished and setup is still 
         stage: "activating",
       }),
       inviteCode: "invite-code",
-      privyAppId: "cm_app_123",
       shareCode: "share-code",
       sharePreview: {
         kinds: ["food"],
@@ -213,7 +186,6 @@ test("invite share preview renders the generic bundle copy from the tiny summary
         },
       }),
       inviteCode: "invite-code",
-      privyAppId: "cm_app_123",
       shareCode: "share-code",
       sharePreview: {
         kinds: ["food", "recipe"],

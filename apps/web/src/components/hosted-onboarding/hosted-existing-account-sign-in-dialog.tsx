@@ -13,15 +13,7 @@ import {
 
 import { HostedPhoneAuth } from "./hosted-phone-auth";
 
-interface HostedExistingAccountSignInDialogProps {
-  privyAppId: string;
-  privyClientId?: string | null;
-}
-
-export function HostedExistingAccountSignInDialog({
-  privyAppId,
-  privyClientId,
-}: HostedExistingAccountSignInDialogProps) {
+export function HostedExistingAccountSignInDialog() {
   const [open, setOpen] = useState(false);
 
   return (
@@ -49,8 +41,6 @@ export function HostedExistingAccountSignInDialog({
             <HostedPhoneAuth
               intent="signin"
               mode="public"
-              privyAppId={privyAppId}
-              privyClientId={privyClientId}
             />
           ) : null}
         </DialogContent>

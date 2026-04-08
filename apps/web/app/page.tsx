@@ -12,10 +12,7 @@ import { QuickStartSection } from "@/src/components/homepage/quick-start-section
 import { TrustStrip } from "@/src/components/homepage/trust-strip";
 import {
   resolveHostedInstallScriptUrl,
-  resolveHostedPrivyClientAppId,
-  resolveHostedPrivyClientId,
 } from "@/src/lib/hosted-onboarding/landing";
-import { hasHostedPrivyPhoneAuthConfig } from "@/src/lib/hosted-onboarding/privy";
 
 export const metadata: Metadata = {
   title: "Murph — Health assistant that fits your real life",
@@ -26,18 +23,11 @@ export const metadata: Metadata = {
 export default function HomePage() {
   const installCommandUrl =
     resolveHostedInstallScriptUrl() ?? "https://YOUR_DOMAIN/install.sh";
-  const privyAppId = resolveHostedPrivyClientAppId();
-  const privyClientId = resolveHostedPrivyClientId();
-  const phoneAuthReady = hasHostedPrivyPhoneAuthConfig() && Boolean(privyAppId);
 
   return (
     <main className="min-h-screen">
       <NavHeader />
-      <HeroSection
-        phoneAuthReady={phoneAuthReady}
-        privyAppId={privyAppId}
-        privyClientId={privyClientId}
-      />
+      <HeroSection />
       <IntegrationsBar />
       <QuickStartSection installCommandUrl={installCommandUrl} />
       <CapabilitiesGrid />

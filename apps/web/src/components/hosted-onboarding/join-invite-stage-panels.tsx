@@ -23,9 +23,6 @@ import { describeHostedSharePreview } from "../hosted-share/hosted-share-preview
 interface JoinInviteVerificationPanelProps {
   awaitingInviteSessionResolution: boolean;
   inviteCode: string;
-  phoneAuthReady: boolean;
-  privyAppId: string | null;
-  privyClientId?: string | null;
   statusRefreshErrorMessage: string | null;
   statusRefreshRetryPending: boolean;
   onPhoneVerified: (payload: HostedPrivyCompletionPayload) => Promise<void>;
@@ -58,9 +55,6 @@ export function JoinInviteSignedInMismatchAlert({
 export function JoinInviteVerificationPanel({
   awaitingInviteSessionResolution,
   inviteCode,
-  phoneAuthReady,
-  privyAppId,
-  privyClientId,
   statusRefreshErrorMessage,
   statusRefreshRetryPending,
   onPhoneVerified,
@@ -99,29 +93,17 @@ export function JoinInviteVerificationPanel({
     );
   }
 
-  if (phoneAuthReady && privyAppId) {
-    return (
-      <div className="rounded-xl border border-stone-200/60 bg-stone-50/60 p-5">
-        <HostedPhoneAuth
-          inviteCode={inviteCode}
-          mode="invite"
-          onSignOut={async () => {
-            await onRefreshStatus();
-          }}
-          onCompleted={onPhoneVerified}
-          privyAppId={privyAppId}
-          privyClientId={privyClientId}
-          wrapProvider={false}
-        />
-      </div>
-    );
-  }
-
   return (
-    <Alert className="border-stone-200 bg-stone-50">
-      <AlertTitle>Phone signup is unavailable</AlertTitle>
-      <AlertDescription>Phone signup is not configured for this environment yet.</AlertDescription>
-    </Alert>
+    <div className="rounded-xl border border-stone-200/60 bg-stone-50/60 p-5">
+      <HostedPhoneAuth
+        inviteCode={inviteCode}
+        mode="invite"
+        onSignOut={async () => {
+          await onRefreshStatus();
+        }}
+        onCompleted={onPhoneVerified}
+      />
+    </div>
   );
 }
 

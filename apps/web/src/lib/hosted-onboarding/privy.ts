@@ -99,7 +99,7 @@ export async function verifyHostedPrivyIdentityToken(identityToken: string): Pro
     });
   }
 
-  const { appId, verificationKey } = requireHostedPrivyVerificationConfig();
+  const { appId, verificationKey } = requireHostedPrivyPhoneAuthConfig();
 
   try {
     const user = await verifyIdentityToken({
@@ -175,7 +175,7 @@ export async function verifyHostedPrivyAccessToken(accessToken: string): Promise
     });
   }
 
-  const { appId, verificationKey } = requireHostedPrivyVerificationConfig();
+  const { appId, verificationKey } = requireHostedPrivyPhoneAuthConfig();
 
   try {
     const claims = await verifyAccessToken({
@@ -208,7 +208,7 @@ export function hasHostedPrivyPhoneAuthConfig(source: NodeJS.ProcessEnv = proces
   return Boolean(normalizeEnvValue(source.NEXT_PUBLIC_PRIVY_APP_ID) && normalizeEnvValue(source.PRIVY_VERIFICATION_KEY));
 }
 
-function requireHostedPrivyVerificationConfig(): { appId: string; verificationKey: string } {
+export function requireHostedPrivyPhoneAuthConfig(): { appId: string; verificationKey: string } {
   const environment = getHostedOnboardingEnvironment();
 
   if (!environment.privyAppId || !environment.privyVerificationKey) {

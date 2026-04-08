@@ -33,8 +33,6 @@ import { useJoinInviteShareImport } from "./use-join-invite-share-import";
 interface JoinInviteClientProps {
   initialStatus: HostedInviteStatusPayload;
   inviteCode: string;
-  privyAppId: string | null;
-  privyClientId?: string | null;
   shareCode: string | null;
   sharePreview: HostedSharePreview | null;
 }
@@ -42,8 +40,6 @@ interface JoinInviteClientProps {
 export function JoinInviteClient({
   initialStatus,
   inviteCode,
-  privyAppId,
-  privyClientId,
   shareCode,
   sharePreview,
 }: JoinInviteClientProps) {
@@ -54,7 +50,6 @@ export function JoinInviteClient({
   const [statusRefreshErrorMessage, setStatusRefreshErrorMessage] = useState<string | null>(null);
   const [statusRefreshRetryPending, setStatusRefreshRetryPending] = useState(false);
 
-  const phoneAuthReady = status.capabilities.phoneAuthReady && Boolean(privyAppId);
   const awaitingInviteSessionResolution = shouldAwaitHostedInviteSessionResolution({
     authenticated,
     ready,
@@ -200,9 +195,6 @@ export function JoinInviteClient({
             awaitingInviteSessionResolution={awaitingInviteSessionResolution}
             inviteCode={inviteCode}
             pendingAction={pendingAction}
-            phoneAuthReady={phoneAuthReady}
-            privyAppId={privyAppId}
-            privyClientId={privyClientId}
             shareImportState={shareImportState}
             sharePreview={sharePreview}
             status={status}
