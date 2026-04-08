@@ -2,6 +2,209 @@
 
 All notable changes to `@murphai/murph` will be documented in this file.
 
+## [0.2.0] - 2026-04-08
+
+### Added
+- auto-submit hosted phone auth code
+- add hosted phone sign-in dialog
+- add hosted Stripe billing portal handoff
+- normalize auth action sizing
+- increase default input height
+- autofocus invite verification code input
+- add vercel analytics providers
+- delete linq messages after hosted commit
+
+### Fixed
+- restore green clean workspace
+- narrow runner container build context
+- harden hosted runtime redaction
+- harden attachment path persistence
+- restore root verification green
+- harden device ingest boundaries
+- unblock hosted deploy bundle
+- add built package smoke proof
+- harden runner bundle contract
+- align package coverage configs and restore typecheck
+- move section labels above cards, remove duplicates
+- remove extra top padding from messaging cards
+- deduplicate messaging labels and hide save button when unlinked
+- derive local service contracts from owners
+- restore runtime error entrypoints
+- restore inboxd-imessage package shape
+- restore workspace verification
+- keep hosted auth redirect local
+- restore homepage public auth mode
+- hide homepage auth for signed-in users
+- simplify hosted phone auth cta
+- tidy hosted sign-in phone copy
+- shorten hosted sign-in dialog copy
+- remove hosted sign-in phone hint
+- move hosted privy provider to app shell
+- resume hosted invites after checkout cancel
+- guard hosted invite verify rehydration
+- restore workspace metadata after bundle build
+- prepare hosted artifacts before verify
+- scope raw assets by owner
+- wire food autolog hooks in assistant flows
+- land downloaded audit patch
+- tighten helper public surface
+- guard hosted billing portal route origin
+- show hosted activation progress after checkout
+- rely on privy hook state during signup
+- align hosted privy auth with local-storage sessions
+- warm per-user runner containers safely
+- pin active phone auth attempt
+- reduce hosted privy auth burst traffic
+- keep invite code flow out of phone entry
+- trim hosted latency regressions
+- tune prisma pooled runtime
+- raise hosted onboarding transaction max wait
+- stabilize prisma singleton
+- improve hosted onboarding route diagnostics
+- repair package test regressions
+- drain active webhook dispatches
+- make join invite send-code button full width
+- tighten package export boundaries
+- defer assistant cli adapter path resolution
+- green and speed up cloudflare verify
+- surface hosted onboarding config errors
+- remove duplicate join invite CTA
+
+### Changed
+- stabilize runner timeout assertion
+- close remaining active plan paths
+- tighten package entrypoints
+- narrow assistant delivery seams
+- land code-quality patch cleanup
+- remove hosted fallback paths
+- split command factory seams
+- simplify timeline helpers
+- green package coverage and harden runtime-state tests
+- narrow identity and stripe lookups
+- drop legacy assistant vault path helper
+- consolidate shared helper owners
+- narrow assistant-delivery journal seam
+- extract edit command input helpers
+- simplify shared vault cli bootstrap
+- remove legacy verifier guards
+- add composability seam notes
+- close package coverage gaps
+- simplify hosted onboarding stores
+- get package coverage green
+- tighten leaked package surfaces
+- share knowledge contracts
+- add deterministic coverage seams
+- extract setup wizard and http protocol seams
+- drop legacy raw manifest and imessage shims
+- close final test cleanup plans
+- get package-local coverage green
+- get package green above local coverage thresholds
+- share query runtime owner types
+- clean up remaining test seams
+- get package green
+- unify package coverage policy
+- remove dead internal helpers
+- dedupe prompt output capture helpers
+- mark assistant-engine threshold lane complete
+- remove http test seam
+- finish assistant-engine threshold coverage
+- simplify importer test seams
+- simplify package seam coverage
+- narrow assistant-engine coverage gaps
+- remove assessment test barrel seam
+- dedupe wizard inference assertions
+- add event attachment coverage
+- add event threshold coverage
+- raise package coverage
+- raise package-local coverage
+- finish package coverage
+- add deterministic memory wrapper coverage
+- raise package coverage proof
+- add core coverage branches
+- cover Oura normalization branches
+- restore package coverage
+- simplify cli-entry imports
+- clean up runtime and workout imports
+- simplify built runtime loader helpers
+- dedupe vault-usecases imports in canonical lock test
+- simplify record service barrel imports
+- drop redundant device-sync reset
+- simplify device-sync imports
+- dedupe device daemon process mocks
+- clean up more test import patterns
+- clean up more test import patterns
+- dedupe bin import helper
+- clean up more test import patterns
+- clean up hacky import patterns
+- clean up settings page design and copy
+- remove lazy package boundary import
+- add package-local coverage suite
+- add product marketing context
+- inline device-daemon child fixture
+- align foreground logging assertions
+- clear coverage rollout ledger
+- add package coverage commands
+- add memory and shares coverage cases
+- raise package coverage
+- use published murph package in runner bundle
+- forbid pnpm verify-deps bypass
+- add hosted privy session diagnostics
+- finish package-wide coverage rollout
+- align package coverage helper usage
+- load imessage via optional seam
+- split imessage owner package
+- align inbox imessage split seams
+- finalize runner leaf artifact cleanup
+- trim hosted phone auth wrappers
+- stop enforcing pnpm verify-before-run
+- split invite phone auth wrapper
+- raise telegram and persist coverage
+- tighten cloudflare runner artifact contract
+- harden runner bundle assembly
+- raise rollout package gates
+- remove file whitelists from coverage and split runners
+- close package coverage thresholds plan
+- add scoped coverage thresholds
+- expand follow-up helper coverage
+- split oversized hosted components
+- expand package coverage
+- align cloudflare runner artifact contract
+- expand helper coverage
+- expand package coverage rollout
+- expand helper coverage
+- expand package helper coverage
+- expand client coverage
+- expand config helper coverage
+- add package boundary hygiene rules
+- centralize vault family registry
+- stand up initial vitest suites
+- tighten assistant package boundaries
+- finish deploy artifact cleanup
+- tighten public surface
+- unify canonical markdown document writes
+- remove assistant-engine inbox runtime duplicates
+- package hosted runner as built artifact
+- add diff-aware verification lane
+- widen package coverage acceptance lane
+- simplify hosted phone auth flow
+- Update button.tsx
+- move invite send-code confirm off critical path
+- split invite and public phone auth flows
+- clear closed review-gpt row
+- bump to 0.5.51
+- remove shadow thread wake helpers
+- clear stale coordination ledger entries
+- clear full hosted assistant env in node-runner cases
+- make cloudflare node-runner env-stable
+- remove dead compatibility helpers
+- keep hosted member slices nested
+- refresh data-model seam review
+- share deploy automation helpers
+- simplify chatgpt watch helpers
+- split telegram webhook payload helpers
+- speed up backpressure route tests
+- Update deploy-cloudflare-hosted.yml
+
 ## [0.1.18] - 2026-04-07
 
 ### Fixed
