@@ -27,7 +27,7 @@ import type {
 } from "@murphai/gateway-core";
 import {
   emitHostedExecutionStructuredLog,
-  resolveHostedExecutionDispatchOutcomeState,
+  resolveHostedExecutionDispatchOutcome,
 } from "@murphai/hosted-execution";
 
 import type { R2BucketLike } from "./bundle-store.js";
@@ -500,20 +500,17 @@ export class HostedUserRunner {
     await this.queueStore.bootstrapUser(input.event.userId);
     await this.provisionManagedUserCryptoForActivationIfNeeded(input);
     await this.ensureRunnerStores(input.event.userId);
-    const initialState = await this.queueStore.readEventState(input.eventId);
+    const initialStatus = await this.queueStore.readEventDispatchStatus(input.eventId);
     const status = await this.dispatchProcessor.dispatchBootstrapped(input, stagedPayloadId);
-    const nextState = await this.queueStore.readEventState(input.eventId);
+    const nextStatus = await this.queueStore.readEventDispatchStatus(input.eventId);
 
     return {
-      event: {
+      event: resolveHostedExecutionDispatchOutcome({
         eventId: input.eventId,
-        lastError: nextState.lastError ?? status.lastError,
-        state: resolveHostedExecutionDispatchOutcomeState({
-          initialState,
-          nextState,
-        }),
+        initialStatus,
+        nextStatus,
         userId: input.event.userId,
-      },
+      }),
       status,
     };
   }

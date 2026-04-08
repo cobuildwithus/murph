@@ -77,11 +77,14 @@ describe("RunnerQueueStore", () => {
     );
     expect(claimed.pendingDispatch?.eventId).toBe("evt_good");
 
-    const badEvent = await store.readEventState("evt_bad");
-    expect(badEvent.pending).toBe(false);
-    expect(badEvent.poisoned).toBe(true);
-    expect(badEvent.lastError).toBe("Hosted execution rejected an invalid request.");
-    expectOpaqueStrings([badEvent.lastError], ["evt_bad"]);
+    const badEvent = await store.readEventDispatchStatus("evt_bad");
+    expect(badEvent).toEqual({
+      eventId: "evt_bad",
+      lastError: "Hosted execution rejected an invalid request.",
+      state: "poisoned",
+      userId: "member_123",
+    });
+    expectOpaqueStrings([badEvent?.lastError ?? null], ["evt_bad"]);
   });
 
   it("classifies malformed pending rows as invalid requests", async () => {
@@ -377,9 +380,14 @@ describe("RunnerQueueStore", () => {
     expect(result.record.lastError).toBe("Hosted execution authorization failed.");
     expect(result.record.lastErrorCode).toBe("authorization_error");
 
-    const eventState = await store.readEventState("evt_secret_retry");
-    expect(eventState.lastError).toBe("Hosted execution authorization failed.");
-    expectOpaqueStrings([eventState.lastError], ["secret-token", "ops@example.com"]);
+    const eventState = await store.readEventDispatchStatus("evt_secret_retry");
+    expect(eventState).toMatchObject({
+      eventId: "evt_secret_retry",
+      lastError: "Hosted execution authorization failed.",
+      state: "queued",
+      userId: "member_123",
+    });
+    expectOpaqueStrings([eventState?.lastError ?? null], ["secret-token", "ops@example.com"]);
   });
 
   it("keeps runtime exception summaries generic in persisted retry state", async () => {
@@ -435,9 +443,14 @@ describe("RunnerQueueStore", () => {
     expect(result.lastError).toBe("Hosted execution configuration is invalid.");
     expect(result.lastErrorCode).toBe("configuration_error");
 
-    const eventState = await store.readEventState("evt_secret_config");
-    expect(eventState.lastError).toBe("Hosted execution configuration is invalid.");
-    expectOpaqueStrings([eventState.lastError], ["sk-live-secret"]);
+    const eventState = await store.readEventDispatchStatus("evt_secret_config");
+    expect(eventState).toMatchObject({
+      eventId: "evt_secret_config",
+      lastError: "Hosted execution configuration is invalid.",
+      state: "queued",
+      userId: "member_123",
+    });
+    expectOpaqueStrings([eventState?.lastError ?? null], ["sk-live-secret"]);
   });
 
   it("stores sanitized finalize-retry summaries for committed results", async () => {
@@ -478,9 +491,14 @@ describe("RunnerQueueStore", () => {
     expect(result.lastError).toBe("Hosted execution authorization failed.");
     expect(result.lastErrorCode).toBe("authorization_error");
 
-    const eventState = await store.readEventState("evt_secret_finalize");
-    expect(eventState.lastError).toBe("Hosted execution authorization failed.");
-    expectOpaqueStrings([eventState.lastError], ["secret-token", "ops@example.com"]);
+    const eventState = await store.readEventDispatchStatus("evt_secret_finalize");
+    expect(eventState).toMatchObject({
+      eventId: "evt_secret_finalize",
+      lastError: "Hosted execution authorization failed.",
+      state: "queued",
+      userId: "member_123",
+    });
+    expectOpaqueStrings([eventState?.lastError ?? null], ["secret-token", "ops@example.com"]);
   });
 
   it("clears stale last-error text when committed bundles are synchronized after a finalize retry", async () => {

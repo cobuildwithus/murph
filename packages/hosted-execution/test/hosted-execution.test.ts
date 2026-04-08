@@ -18,6 +18,7 @@ import {
   HOSTED_EXECUTION_SIGNING_KEY_ID_HEADER,
   HOSTED_EXECUTION_TIMESTAMP_HEADER,
   HOSTED_EXECUTION_USER_ID_HEADER,
+  resolveHostedExecutionDispatchOutcome,
   resolveHostedExecutionDispatchOutcomeState,
 } from "../src/contracts.ts";
 import {
@@ -183,112 +184,77 @@ describe("hosted execution coverage gaps", () => {
 
     expect(
       resolveHostedExecutionDispatchOutcomeState({
-        initialState: {
-          backpressured: false,
-          consumed: false,
+        initialStatus: null,
+        nextStatus: {
           lastError: null,
-          pending: false,
-          poisoned: false,
-        },
-        nextState: {
-          backpressured: false,
-          consumed: false,
-          lastError: null,
-          pending: false,
-          poisoned: true,
+          state: "poisoned",
         },
       }),
     ).toBe("poisoned");
     expect(
       resolveHostedExecutionDispatchOutcomeState({
-        initialState: {
-          backpressured: false,
-          consumed: false,
+        initialStatus: null,
+        nextStatus: {
           lastError: null,
-          pending: false,
-          poisoned: false,
-        },
-        nextState: {
-          backpressured: true,
-          consumed: false,
-          lastError: null,
-          pending: false,
-          poisoned: false,
+          state: "backpressured",
         },
       }),
     ).toBe("backpressured");
     expect(
       resolveHostedExecutionDispatchOutcomeState({
-        initialState: {
-          backpressured: false,
-          consumed: true,
+        initialStatus: {
           lastError: null,
-          pending: false,
-          poisoned: false,
+          state: "completed",
         },
-        nextState: {
-          backpressured: false,
-          consumed: false,
-          lastError: null,
-          pending: false,
-          poisoned: false,
-        },
+        nextStatus: null,
       }),
     ).toBe("duplicate_consumed");
     expect(
       resolveHostedExecutionDispatchOutcomeState({
-        initialState: {
-          backpressured: false,
-          consumed: false,
-          lastError: null,
-          pending: true,
-          poisoned: false,
+        initialStatus: {
+          lastError: "Hosted execution runtime failed.",
+          state: "queued",
         },
-        nextState: {
-          backpressured: false,
-          consumed: false,
-          lastError: null,
-          pending: false,
-          poisoned: false,
+        nextStatus: {
+          lastError: "Hosted execution runtime failed.",
+          state: "queued",
         },
       }),
     ).toBe("duplicate_pending");
     expect(
       resolveHostedExecutionDispatchOutcomeState({
-        initialState: {
-          backpressured: false,
-          consumed: false,
+        initialStatus: null,
+        nextStatus: {
           lastError: null,
-          pending: false,
-          poisoned: false,
-        },
-        nextState: {
-          backpressured: false,
-          consumed: true,
-          lastError: null,
-          pending: false,
-          poisoned: false,
+          state: "completed",
         },
       }),
     ).toBe("completed");
     expect(
       resolveHostedExecutionDispatchOutcomeState({
-        initialState: {
-          backpressured: false,
-          consumed: false,
-          lastError: null,
-          pending: false,
-          poisoned: false,
-        },
-        nextState: {
-          backpressured: false,
-          consumed: false,
-          lastError: null,
-          pending: false,
-          poisoned: false,
-        },
+        initialStatus: null,
+        nextStatus: null,
       }),
     ).toBe("queued");
+    expect(
+      resolveHostedExecutionDispatchOutcome({
+        eventId: "evt_queued",
+        initialStatus: {
+          lastError: "Hosted execution runtime failed.",
+          state: "queued",
+        },
+        nextStatus: {
+          lastError: null,
+          state: "queued",
+        },
+        userId: "user_123",
+      }),
+    ).toEqual({
+      eventId: "evt_queued",
+      lastError: "Hosted execution runtime failed.",
+      state: "duplicate_pending",
+      userId: "user_123",
+    });
   });
 
   it("dispatches hosted execution requests through the client and handles failures", async () => {
