@@ -745,6 +745,59 @@ test("parseCanonicalLinqMessageReceivedEvent infers canonical outbound direction
   });
 });
 
+test("parseCanonicalLinqMessageReceivedEvent falls back to sender and sent timestamps when canonical fields are sparse", () => {
+  const event = parseCanonicalLinqMessageReceivedEvent({
+    api_version: "v3",
+    created_at: "2026-04-04T01:02:03.000Z",
+    data: {
+      chat: {
+        id: "chat_sparse",
+        owner_handle: {
+          handle: "+15557654321",
+          id: "handle_owner_sparse",
+          is_me: true,
+          service: "SMS",
+        },
+      },
+      chat_id: "chat_sparse",
+      from: "+15557654321",
+      is_from_me: true,
+      message: {
+        id: "msg_sparse",
+        parts: [],
+      },
+      sender_handle: {
+        handle: "+15557654321",
+        id: "sender_sparse",
+        service: "SMS",
+      },
+      sent_at: "2026-04-04T01:01:59.000Z",
+    },
+    event_id: "evt_sparse",
+    event_type: "message.received",
+  });
+
+  assert.equal(event.data.direction, "outbound");
+  assert.equal(event.data.received_at, "2026-04-04T01:01:59.000Z");
+  assert.equal(event.data.from_handle.handle, "+15557654321");
+  assert.equal(event.data.from_handle.id, "sender_sparse");
+  assert.equal(event.data.from_handle.service, "SMS");
+  assert.equal(event.data.service, "SMS");
+
+  assert.throws(
+    () =>
+      resolveLinqWebhookOccurredAt({
+        ...event,
+        created_at: "   ",
+        data: {
+          ...event.data,
+          received_at: "  ",
+        },
+      }),
+    /occurredAt is required/u,
+  );
+});
+
 test("parseCanonicalLinqMessageReceivedEvent rejects canonical snapshots missing required chat fields", () => {
   assert.throws(
     () =>
@@ -920,6 +973,75 @@ test("parseCanonicalLinqMessageReceivedEvent rejects invalid directions", () => 
         }),
       }),
     /direction must be "inbound" or "outbound"/u,
+  );
+
+  assert.throws(
+    () =>
+      parseCanonicalLinqMessageReceivedEvent({
+        api_version: "v3",
+        created_at: "2026-04-04T01:02:03.000Z",
+        data: {
+          chat: {
+            id: "chat_missing_direction",
+            owner_handle: {
+              handle: "+15557654321",
+              id: "handle_owner_missing_direction",
+              is_me: true,
+              service: "SMS",
+            },
+          },
+          chat_id: "chat_missing_direction",
+          from: "+15551230000",
+          message: {
+            id: "msg_missing_direction",
+            parts: [],
+          },
+          sender_handle: {
+            handle: "+15551230000",
+            id: "sender_missing_direction",
+            service: "SMS",
+          },
+        },
+        event_id: "evt_missing_direction",
+        event_type: "message.received",
+      }),
+    /is_from_me must be a boolean/u,
+  );
+
+  assert.throws(
+    () =>
+      parseCanonicalLinqMessageReceivedEvent({
+        api_version: "v3",
+        created_at: "2026-04-04T01:02:03.000Z",
+        data: {
+          chat: {
+            id: "chat_mismatched_direction",
+            owner_handle: {
+              handle: "+15557654321",
+              id: "handle_owner_mismatched_direction",
+              is_me: true,
+              service: "SMS",
+            },
+          },
+          chat_id: "chat_mismatched_direction",
+          direction: "outbound",
+          from: "+15551230000",
+          is_from_me: false,
+          message: {
+            id: "msg_mismatched_direction",
+            parts: [],
+          },
+          sender_handle: {
+            handle: "+15551230000",
+            id: "sender_mismatched_direction",
+            service: "SMS",
+          },
+          service: "SMS",
+        },
+        event_id: "evt_mismatched_direction",
+        event_type: "message.received",
+      }),
+    /must match direction/u,
   );
 });
 

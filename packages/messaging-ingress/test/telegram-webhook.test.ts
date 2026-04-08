@@ -75,6 +75,44 @@ test("parseTelegramWebhookUpdate rejects invalid direct message topics", () => {
   );
 });
 
+test("parseTelegramWebhookUpdate rejects invalid envelopes and malformed media records", () => {
+  assert.throws(() => parseTelegramWebhookUpdate("{"), /must be valid JSON/u);
+  assert.throws(() => parseTelegramWebhookUpdate("null"), /must be a JSON object/u);
+
+  assert.throws(
+    () =>
+      parseTelegramWebhookUpdate(JSON.stringify({
+        message: {
+          chat: {
+            id: {
+              nope: true,
+            },
+            type: "private",
+          },
+          message_id: 1,
+        },
+        update_id: 321,
+      })),
+    /message\.chat\.id must be a string or finite number/u,
+  );
+
+  assert.throws(
+    () =>
+      parseTelegramWebhookUpdate(JSON.stringify({
+        message: {
+          chat: {
+            id: 123,
+            type: "private",
+          },
+          message_id: 1,
+          photo: [null],
+        },
+        update_id: 322,
+      })),
+    /message\.photo\[0\] must be a JSON object/u,
+  );
+});
+
 test("summarizeTelegramUpdate infers hosted bot identity only when asked", () => {
   const update = parseTelegramWebhookUpdate(JSON.stringify({
     message: {
@@ -512,4 +550,27 @@ test("summarizeTelegramUpdate formats fallback message text and infers sender bu
   } finally {
     vi.useRealTimers();
   }
+});
+
+test("summarizeTelegramUpdate returns null for empty updates and empty fallback payloads", () => {
+  assert.equal(summarizeTelegramUpdate({ update: { update_id: 99 } }), null);
+  assert.equal(
+    summarizeTelegramUpdate({
+      update: {
+        message: {
+          chat: {
+            id: 127,
+            type: "private",
+          },
+          contact: {},
+          location: {
+            latitude: 12.34,
+          },
+          message_id: 11,
+        },
+        update_id: 100,
+      },
+    })?.text,
+    null,
+  );
 });

@@ -68,3 +68,32 @@ test("compactRecord removes undefined values and toIsoTimestamp rejects invalid 
   assert.equal(toIsoTimestamp("2026-04-08T00:00:00.000Z"), "2026-04-08T00:00:00.000Z");
   assert.throws(() => toIsoTimestamp("not-a-date"), /Invalid ISO timestamp: not-a-date/u);
 });
+
+test("sanitizeRawMetadata stringifies non-JSON primitives and drops undefined object fields", () => {
+  const tokenSymbol = Symbol("token");
+  function namedValue() {
+    return "ok";
+  }
+
+  const result = sanitizeRawMetadata({
+    functionValue: namedValue,
+    keepCombo: "keep",
+    nested: {
+      dropMe: undefined,
+    },
+    numberLikeKey: "keep",
+    symbolValue: tokenSymbol,
+    token_api_extra: "keep",
+    weirdBigInt: 42n,
+  });
+
+  assert.deepEqual(result, {
+    functionValue: String(namedValue),
+    keepCombo: "keep",
+    nested: {},
+    numberLikeKey: "keep",
+    symbolValue: "Symbol(token)",
+    token_api_extra: "keep",
+    weirdBigInt: "42",
+  });
+});

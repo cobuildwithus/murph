@@ -273,3 +273,329 @@ test("Garmin provider schedules reconcile polling and imports requested collecti
   assert.match(fetchedUrls[0] ?? "", /uploadStartTimeInSeconds=/u);
   assert.match(fetchedUrls[0] ?? "", /uploadEndTimeInSeconds=/u);
 });
+
+test("Garmin provider falls back to token scopes when permissions cannot be fetched", async () => {
+  const provider = createGarminDeviceSyncProvider({
+    clientId: "garmin-client-id",
+    clientSecret: "garmin-client-secret",
+    fetchImpl: async (input) => {
+      const url = readUrl(input);
+
+      if (url === "https://connectapi.garmin.com/di-oauth2-service/oauth/token") {
+        return createJsonResponse({
+          access_token: "access-token",
+          refresh_token: "refresh-token",
+          expires_in: 3600,
+          scope: "HEALTH_EXPORT SLEEP_EXPORT",
+        });
+      }
+
+      if (url === "https://apis.garmin.com/wellness-api/rest/user/id") {
+        return createJsonResponse({
+          account_id: "garmin-user-fallback",
+        });
+      }
+
+      if (url === "https://apis.garmin.com/wellness-api/rest/user/permissions") {
+        return createJsonResponse({ error: "forbidden" }, 403);
+      }
+
+      throw new Error(`Unexpected request: ${url}`);
+    },
+  });
+
+  const connection = await provider.exchangeAuthorizationCode(
+    {
+      callbackUrl: "https://sync.example.test/device-sync/oauth/garmin/callback",
+      grantedScopes: [],
+      now: "2026-03-16T10:00:00.000Z",
+      state: "state-2",
+    },
+    "auth-code-2",
+  );
+
+  assert.equal(connection.externalAccountId, "garmin-user-fallback");
+  assert.deepEqual(connection.scopes, ["HEALTH_EXPORT", "SLEEP_EXPORT"]);
+});
+
+test("Garmin provider rejects authorization responses without a refresh token", async () => {
+  const provider = createGarminDeviceSyncProvider({
+    clientId: "garmin-client-id",
+    clientSecret: "garmin-client-secret",
+    fetchImpl: async (input) => {
+      const url = readUrl(input);
+
+      if (url === "https://connectapi.garmin.com/di-oauth2-service/oauth/token") {
+        return createJsonResponse({
+          access_token: "access-token",
+          expires_in: 3600,
+        });
+      }
+
+      throw new Error(`Unexpected request: ${url}`);
+    },
+  });
+
+  await assert.rejects(
+    () =>
+      provider.exchangeAuthorizationCode(
+        {
+          callbackUrl: "https://sync.example.test/device-sync/oauth/garmin/callback",
+          grantedScopes: [],
+          now: "2026-03-16T10:00:00.000Z",
+          state: "state-3",
+        },
+        "auth-code-3",
+      ),
+    (error: unknown) =>
+      typeof error === "object"
+      && error !== null
+      && "code" in error
+      && error.code === "GARMIN_REFRESH_TOKEN_MISSING",
+  );
+});
+
+test("Garmin provider requires an existing refresh token before token refresh", async () => {
+  const provider = createGarminDeviceSyncProvider({
+    clientId: "garmin-client-id",
+    clientSecret: "garmin-client-secret",
+    fetchImpl: async () => {
+      throw new Error("refresh request should not run without a refresh token");
+    },
+  });
+
+  await assert.rejects(
+    () =>
+      provider.refreshTokens(
+        createAccount(["HEALTH_EXPORT"], {
+          refreshToken: null,
+        }),
+      ),
+    (error: unknown) =>
+      typeof error === "object"
+      && error !== null
+      && "code" in error
+      && error.code === "GARMIN_REFRESH_TOKEN_MISSING",
+  );
+});
+
+test("Garmin provider backfill normalizes aliases, swaps inverted windows, and skips empty imports", async () => {
+  const fetchedUrls: string[] = [];
+  const importedSnapshots: unknown[] = [];
+  const provider = createGarminDeviceSyncProvider({
+    clientId: "garmin-client-id",
+    clientSecret: "garmin-client-secret",
+    fetchImpl: async (input) => {
+      const url = readUrl(input);
+      fetchedUrls.push(url);
+
+      if (url.includes("/wellness-api/rest/dailies?")) {
+        return createJsonResponse({
+          records: [{ summaryId: "daily-1" }],
+        });
+      }
+
+      if (url.includes("/wellness-api/rest/activityDetails?")) {
+        return createJsonResponse({
+          items: [{ fileId: "activity-file-1" }],
+        });
+      }
+
+      if (url.includes("/wellness-api/rest/sleeps?")) {
+        return new Response("", {
+          status: 404,
+        });
+      }
+
+      throw new Error(`Unexpected request: ${url}`);
+    },
+  });
+
+  const context: ProviderJobContext = {
+    account: createAccount(["HEALTH_EXPORT"]),
+    async importSnapshot(snapshot) {
+      importedSnapshots.push(snapshot);
+      return {};
+    },
+    logger: {},
+    now: "2026-03-16T12:00:00.000Z",
+    async refreshAccountTokens() {
+      return createAccount(["HEALTH_EXPORT"]);
+    },
+  };
+
+  await provider.executeJob(
+    context,
+    createJob("backfill", {
+      dataType: "day summaries",
+      dataTypes: ["activityDetails", "sleep", "activity-files"],
+      includeProfile: false,
+      windowEnd: "2026-03-14T00:00:00.000Z",
+      windowStart: "2026-03-16T00:00:00.000Z",
+    }),
+  );
+
+  assert.equal(importedSnapshots.length, 1);
+  assert.deepEqual(importedSnapshots[0], {
+    accountId: "garmin-user-1",
+    activityFiles: [{ fileId: "activity-file-1" }],
+    dailySummaries: [{ summaryId: "daily-1" }],
+    importedAt: "2026-03-16T12:00:00.000Z",
+    sleeps: [],
+  });
+  assert.equal(fetchedUrls.length, 3);
+  const firstRequestSearch = new URL(fetchedUrls[0] ?? "").searchParams;
+  assert.equal(firstRequestSearch.get("uploadStartTimeInSeconds"), "1773446400");
+  assert.equal(firstRequestSearch.get("uploadEndTimeInSeconds"), "1773619200");
+
+  const emptyImportProvider = createGarminDeviceSyncProvider({
+    clientId: "garmin-client-id",
+    clientSecret: "garmin-client-secret",
+    fetchImpl: async (input) => {
+      const url = readUrl(input);
+
+      if (url.includes("/wellness-api/rest/")) {
+        return new Response("", {
+          status: 404,
+        });
+      }
+
+      throw new Error(`Unexpected request: ${url}`);
+    },
+  });
+
+  let emptyImportCount = 0;
+  await emptyImportProvider.executeJob(
+    {
+      ...context,
+      async importSnapshot() {
+        emptyImportCount += 1;
+        return {};
+      },
+    },
+    createJob("reconcile", {
+      dataType: "unsupported-type",
+      includeProfile: false,
+    }),
+  );
+
+  assert.equal(emptyImportCount, 0);
+});
+
+test("Garmin provider rethrows collection request failures that are not tolerated", async () => {
+  const provider = createGarminDeviceSyncProvider({
+    clientId: "garmin-client-id",
+    clientSecret: "garmin-client-secret",
+    fetchImpl: async (input) => {
+      const url = readUrl(input);
+
+      if (url.includes("/wellness-api/rest/sleeps?")) {
+        return createJsonResponse({ error: "rate limited" }, 429);
+      }
+
+      throw new Error(`Unexpected request: ${url}`);
+    },
+  });
+
+  await assert.rejects(
+    () =>
+      provider.executeJob(
+        {
+          account: createAccount(["HEALTH_EXPORT"]),
+          async importSnapshot() {
+            return {};
+          },
+          logger: {},
+          now: "2026-03-16T12:00:00.000Z",
+          async refreshAccountTokens() {
+            return createAccount(["HEALTH_EXPORT"]);
+          },
+        },
+        createJob("reconcile", {
+          dataTypes: ["sleeps"],
+        }),
+      ),
+    (error: unknown) =>
+      typeof error === "object"
+      && error !== null
+      && "code" in error
+      && error.code === "GARMIN_API_REQUEST_FAILED",
+  );
+});
+
+test("Garmin provider revokes access tolerantly and surfaces revoke failures", async () => {
+  const requests: Array<{ method: string | undefined; url: string }> = [];
+  const provider = createGarminDeviceSyncProvider({
+    clientId: "garmin-client-id",
+    clientSecret: "garmin-client-secret",
+    fetchImpl: async (input, init) => {
+      const url = readUrl(input);
+      requests.push({
+        method: init?.method,
+        url,
+      });
+
+      if (requests.length === 1) {
+        return new Response(null, { status: 204 });
+      }
+
+      if (requests.length === 2) {
+        return createJsonResponse({ error: "rate limited" }, 429);
+      }
+
+      throw new Error(`Unexpected request: ${url}`);
+    },
+  });
+
+  await provider.revokeAccess?.(createAccount(["HEALTH_EXPORT"]));
+
+  await assert.rejects(
+    () => provider.revokeAccess?.(createAccount(["HEALTH_EXPORT"])),
+    (error: unknown) =>
+      typeof error === "object"
+      && error !== null
+      && "code" in error
+      && error.code === "GARMIN_REVOKE_FAILED",
+  );
+
+  assert.deepEqual(requests, [
+    {
+      method: "DELETE",
+      url: "https://apis.garmin.com/wellness-api/rest/user/registration",
+    },
+    {
+      method: "DELETE",
+      url: "https://apis.garmin.com/wellness-api/rest/user/registration",
+    },
+  ]);
+});
+
+test("Garmin provider rejects unsupported job kinds", async () => {
+  const provider = createGarminDeviceSyncProvider({
+    clientId: "garmin-client-id",
+    clientSecret: "garmin-client-secret",
+  });
+
+  await assert.rejects(
+    () =>
+      provider.executeJob(
+        {
+          account: createAccount(["HEALTH_EXPORT"]),
+          async importSnapshot() {
+            return {};
+          },
+          logger: {},
+          now: "2026-03-16T12:00:00.000Z",
+          async refreshAccountTokens() {
+            return createAccount(["HEALTH_EXPORT"]);
+          },
+        },
+        createJob("webhook", {}),
+      ),
+    (error: unknown) =>
+      typeof error === "object"
+      && error !== null
+      && "code" in error
+      && error.code === "GARMIN_JOB_KIND_UNSUPPORTED",
+  );
+});

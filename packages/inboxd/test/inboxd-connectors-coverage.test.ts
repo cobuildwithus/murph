@@ -521,6 +521,79 @@ test("createAgentmailApiPollDriver validates inputs, normalizes empty download U
   );
 });
 
+test("createEmailPollConnector watch falls back to the driver inbox account, reuses unread summaries, and stops after aborting mid-batch", async () => {
+  const processedMessageIds: string[] = [];
+  const emitted: string[] = [];
+  const controller = new AbortController();
+  let unreadCalls = 0;
+
+  const connector = createEmailPollConnector({
+    accountId: null,
+    backfillLimit: 2,
+    driver: {
+      inboxId: "inbox-coverage",
+      async listUnreadMessages({ limit }) {
+        unreadCalls += 1;
+        assert.equal(limit, 2);
+
+        return [
+          {
+            inbox_id: "inbox-coverage",
+            thread_id: "thread-1",
+            message_id: "msg-watch-1",
+            timestamp: "2026-04-08T12:00:00.000Z",
+            from: "Alice Example <alice@example.test>",
+            to: ["murph@example.test"],
+            extracted_text: "summary body",
+          },
+          {
+            inbox_id: "inbox-coverage",
+            thread_id: "thread-1",
+            message_id: "msg-watch-2",
+            timestamp: "2026-04-08T12:01:00.000Z",
+            from: "Alice Example <alice@example.test>",
+            to: ["murph@example.test"],
+            extracted_text: "should stay unread",
+          },
+        ];
+      },
+      async markProcessed({ messageId }) {
+        processedMessageIds.push(messageId);
+      },
+      async downloadAttachment() {
+        return null;
+      },
+    },
+    pollIntervalMs: 250,
+  });
+
+  assert.equal(connector.id, "email:inbox-coverage");
+  assert.equal(connector.accountId, "inbox-coverage");
+
+  await connector.watch(
+    null,
+    async (capture) => {
+      emitted.push(capture.externalId);
+      assert.equal(capture.accountId, "inbox-coverage");
+      assert.equal(capture.text, "summary body");
+      controller.abort();
+
+      return {
+        captureId: "cap-email-watch-1",
+        eventId: "evt-email-watch-1",
+        envelopePath: "raw/inbox/email/msg-watch-1.json",
+        createdAt: capture.occurredAt,
+        deduped: false,
+      };
+    },
+    controller.signal,
+  );
+
+  assert.equal(unreadCalls, 1);
+  assert.deepEqual(emitted, ["email:msg-watch-1"]);
+  assert.deepEqual(processedMessageIds, ["msg-watch-1"]);
+});
+
 test("normalizeImessageAttachment and normalizeImessageMessage cover attachment kinds, direct-chat heuristics, and missing identifier failures", () => {
   assert.deepEqual(
     normalizeImessageAttachment({
@@ -726,6 +799,98 @@ test("createTelegramPollConnector deletes active webhooks once and skips file do
   assert.equal(downloadCalls, 0);
   assert.equal(emitted.length, 2);
   assert.equal(emitted[0]?.attachments[0]?.data ?? null, null);
+});
+
+test("createTelegramPollConnector treats blank webhook URLs as inactive, preserves null accounts, and keeps attachment metadata when file paths are missing", async () => {
+  let deleteWebhookCalls = 0;
+  let getMessagesCalls = 0;
+  let getFileCalls = 0;
+  let downloadFileCalls = 0;
+  const connector = createTelegramPollConnector({
+    accountId: null,
+    driver: {
+      async getMe() {
+        return {
+          id: 999,
+          username: "murph_bot",
+        };
+      },
+      async getMessages() {
+        getMessagesCalls += 1;
+
+        return getMessagesCalls === 1
+          ? [
+              {
+                update_id: 211,
+                message: {
+                  message_id: 22,
+                  date: 1_773_400_010,
+                  text: "Document without file path",
+                  chat: {
+                    id: 42,
+                    type: "private",
+                    first_name: "Alice",
+                  },
+                  from: {
+                    id: 111,
+                    first_name: "Alice",
+                  },
+                  document: {
+                    file_id: "doc-1",
+                    file_unique_id: "doc-unique-1",
+                    file_name: "notes.txt",
+                  },
+                },
+              },
+            ]
+          : [];
+      },
+      async startWatching() {
+        return undefined;
+      },
+      async deleteWebhook() {
+        deleteWebhookCalls += 1;
+      },
+      async getWebhookInfo() {
+        return {
+          url: "   ",
+        };
+      },
+      async getFile(fileId) {
+        getFileCalls += 1;
+        return {
+          file_id: fileId,
+        };
+      },
+      async downloadFile() {
+        downloadFileCalls += 1;
+        return new Uint8Array([1, 2, 3]);
+      },
+    },
+    resetWebhookOnStart: false,
+  });
+  const emitted: InboundCapture[] = [];
+
+  const cursor = await connector.backfill(null, async (capture) => {
+    emitted.push(capture);
+    return {
+      captureId: "cap-telegram-blank-webhook",
+      eventId: "evt-telegram-blank-webhook",
+      envelopePath: "raw/inbox/telegram/update-211.json",
+      createdAt: capture.occurredAt,
+      deduped: false,
+    };
+  });
+
+  assert.equal(connector.id, "telegram:default");
+  assert.equal(connector.accountId, null);
+  assert.equal(deleteWebhookCalls, 0);
+  assert.equal(getFileCalls, 1);
+  assert.equal(downloadFileCalls, 0);
+  assert.deepEqual(cursor, { updateId: 211 });
+  assert.equal(emitted[0]?.attachments[0]?.kind, "document");
+  assert.equal(emitted[0]?.attachments[0]?.fileName, "notes.txt");
+  assert.equal(emitted[0]?.attachments[0]?.data, undefined);
 });
 
 test("normalizeTelegramUpdate rejects unsupported payloads and normalizeHostedTelegramMessage infers multiple hosted attachment kinds", async () => {
