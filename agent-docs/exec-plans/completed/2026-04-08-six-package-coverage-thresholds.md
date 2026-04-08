@@ -1,6 +1,6 @@
 # Add shared coverage thresholds to the six newly tested standalone packages
 
-Status: active
+Status: completed
 Created: 2026-04-08
 Updated: 2026-04-08
 
