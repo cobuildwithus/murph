@@ -139,14 +139,26 @@
       "@murphai/assistant-engine": [
         "packages/assistant-engine/src/index.ts"
       ],
+      "@murphai/assistant-engine/assistant-cli-access": [
+        "packages/assistant-engine/src/assistant-cli-access.ts"
+      ],
+      "@murphai/assistant-engine/assistant-cli-tools": [
+        "packages/assistant-engine/src/assistant-cli-tools.ts"
+      ],
       "@murphai/assistant-engine/assistant/*": [
         "packages/assistant-engine/src/assistant/*.ts"
       ],
       "@murphai/assistant-engine/*": [
         "packages/assistant-engine/src/*"
       ],
+      "@murphai/inbox-services/testing": [
+        "packages/inbox-services/src/testing.ts"
+      ],
       "@murphai/vault-usecases": [
         "packages/vault-usecases/src/index.ts"
+      ],
+      "@murphai/vault-usecases/testing": [
+        "packages/vault-usecases/src/testing.ts"
       ],
       "@murphai/vault-usecases/*": [
         "packages/vault-usecases/src/*"

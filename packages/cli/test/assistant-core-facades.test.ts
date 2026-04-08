@@ -29,6 +29,9 @@ test('cli and split owner packages publish the expected owner dependencies', asy
   const vaultUsecasesManifest = JSON.parse(
     await readFile(new URL('../../vault-usecases/package.json', import.meta.url), 'utf8'),
   ) as PackageManifest
+  const inboxServicesManifest = JSON.parse(
+    await readFile(new URL('../../inbox-services/package.json', import.meta.url), 'utf8'),
+  ) as PackageManifest
   const operatorConfigManifest = JSON.parse(
     await readFile(new URL('../../operator-config/package.json', import.meta.url), 'utf8'),
   ) as PackageManifest
@@ -72,8 +75,8 @@ test('cli and split owner packages publish the expected owner dependencies', asy
   assert.equal(setupCliManifest.dependencies?.['@murphai/vault-inbox'], undefined)
   assert.equal(assistantEngineManifest.exports?.['./assistant-backend'], undefined)
   assert.equal(assistantEngineManifest.exports?.['./assistant-cli-contracts'], undefined)
-  assert.equal(assistantEngineManifest.exports?.['./assistant-cli-access'] !== undefined, true)
-  assert.equal(assistantEngineManifest.exports?.['./assistant-cli-tools'] !== undefined, true)
+  assert.equal(assistantEngineManifest.exports?.['./assistant-cli-access'], undefined)
+  assert.equal(assistantEngineManifest.exports?.['./assistant-cli-tools'], undefined)
   assert.equal(assistantEngineManifest.exports?.['./assistant/*'], undefined)
   assert.equal(assistantEngineManifest.exports?.['./commands/*'], undefined)
   assert.equal(assistantEngineManifest.exports?.['./commands/query-record-command-helpers'], undefined)
@@ -100,8 +103,9 @@ test('cli and split owner packages publish the expected owner dependencies', asy
   assert.equal(vaultUsecasesManifest.exports?.['./helpers'] !== undefined, true)
   assert.equal(vaultUsecasesManifest.exports?.['./records'] !== undefined, true)
   assert.equal(vaultUsecasesManifest.exports?.['./runtime'] !== undefined, true)
-  assert.equal(vaultUsecasesManifest.exports?.['./testing'] !== undefined, true)
+  assert.equal(vaultUsecasesManifest.exports?.['./testing'], undefined)
   assert.equal(vaultUsecasesManifest.exports?.['./workouts'] !== undefined, true)
+  assert.equal(inboxServicesManifest.exports?.['./testing'], undefined)
   assert.equal(operatorConfigManifest.exports?.['./text/*'], undefined)
   assert.equal(operatorConfigManifest.exports?.['./text/shared'] !== undefined, true)
 

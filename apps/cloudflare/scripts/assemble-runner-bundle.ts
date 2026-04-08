@@ -19,6 +19,7 @@ import { resolveCloudflareDeployPaths } from "./deploy-automation.js";
 import {
   buildHostedRunnerRuntimeArtifactPackageJson,
   hostedRunnerBuildPackageNames,
+  hostedRunnerBundleOnlyDependencyNames,
   hostedRunnerRuntimeDistDirectoryName,
   hostedRunnerRuntimeDependencyNames,
   hostedRunnerRuntimePackageName,
@@ -125,10 +126,15 @@ async function stageHostedRunnerRuntimeArtifact(
     path.join(bundleDir, "package.json"),
     `${JSON.stringify(
       buildHostedRunnerRuntimeArtifactPackageJson({
-        dependencies: resolveDeclaredDependencySpecs(
-          hostedRunnerRuntimeDependencyNames,
-          runtimePackageJson,
-        ),
+        dependencies: {
+          ...resolveDeclaredDependencySpecs(
+            hostedRunnerRuntimeDependencyNames,
+            runtimePackageJson,
+          ),
+          ...createBundleOnlyWorkspaceDependencySpecs(
+            hostedRunnerBundleOnlyDependencyNames,
+          ),
+        },
         engines: runtimePackageJson.engines,
         exports: runtimePackageJson.exports,
         license: runtimePackageJson.license ?? "Apache-2.0",
@@ -283,6 +289,16 @@ function resolveDeclaredDependencySpecs<const TDependencyNames extends readonly 
   }
 
   return dependencies;
+}
+
+function createBundleOnlyWorkspaceDependencySpecs<
+  const TDependencyNames extends readonly string[],
+>(
+  dependencyNames: TDependencyNames,
+): Record<TDependencyNames[number], string> {
+  return Object.fromEntries(
+    dependencyNames.map((dependencyName) => [dependencyName, "workspace:*"]),
+  ) as Record<TDependencyNames[number], string>;
 }
 
 function rewriteDependencySpecs(
