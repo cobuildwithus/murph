@@ -4,6 +4,10 @@ import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'vitest/config'
 
 import {
+  createMurphVitestCoverage,
+  resolveMurphVitestCoverageProviderModule,
+} from '../../config/vitest-coverage.js'
+import {
   createVitestWorkspaceRuntimeAliases,
   resolveWorkspaceSourceEntries,
 } from '../../config/workspace-source-resolution.js'
@@ -29,5 +33,9 @@ export default defineConfig({
     name: 'assistant-cli',
     environment: 'node',
     include: ['test/**/*.test.ts'],
+    coverage: createMurphVitestCoverage({
+      customProviderModule: resolveMurphVitestCoverageProviderModule(packageDir),
+      include: ['src/assistant-runtime.ts'],
+    }),
   },
 })
