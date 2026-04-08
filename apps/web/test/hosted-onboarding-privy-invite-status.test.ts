@@ -1,6 +1,10 @@
 import { HostedBillingStatus } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+const mocks = vi.hoisted(() => ({
+  readHostedExecutionControlClientIfConfigured: vi.fn(),
+}));
+
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
   getHostedOnboardingEnvironment: () => ({
     encryptionKeyVersion: "v1",
@@ -21,6 +25,10 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
   requireHostedOnboardingPublicBaseUrl: () => "https://join.example.test",
 }));
 
+vi.mock("@/src/lib/hosted-execution/control", () => ({
+  readHostedExecutionControlClientIfConfigured: mocks.readHostedExecutionControlClientIfConfigured,
+}));
+
 import { getHostedInviteStatus } from "@/src/lib/hosted-onboarding/invite-service";
 
 const NOW = new Date("2026-04-06T12:00:00.000Z");
@@ -28,6 +36,7 @@ const NOW = new Date("2026-04-06T12:00:00.000Z");
 describe("getHostedInviteStatus", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue(null);
   });
 
   it("loads the identity relation when reading invite status", async () => {
@@ -85,6 +94,40 @@ describe("getHostedInviteStatus", () => {
       invite: {
         phoneHint: "*** 4567",
       },
+    });
+  });
+
+  it("surfaces an activating stage while hosted execution is still queued after payment", async () => {
+    const prisma = {
+      executionOutbox: {
+        findFirst: vi.fn().mockResolvedValue({
+          eventId: "member.activated:stripe.invoice.paid:member_123:evt_123",
+          status: "queued",
+        }),
+      },
+      hostedInvite: {
+        findUnique: vi.fn().mockResolvedValue(createInvite({
+          member: createMember({
+            billingStatus: HostedBillingStatus.active,
+            identity: createIdentity(),
+          }),
+        })),
+      },
+    } as never;
+
+    await expect(
+      getHostedInviteStatus({
+        authenticatedMember: createAuthenticatedMember(),
+        inviteCode: "invite-code",
+        now: NOW,
+        prisma,
+      }),
+    ).resolves.toMatchObject({
+      session: {
+        authenticated: true,
+        matchesInvite: true,
+      },
+      stage: "activating",
     });
   });
 });
@@ -145,5 +188,15 @@ function createMember(overrides: Record<string, unknown> = {}) {
     walletCreatedAt: null,
     walletProvider: null,
     ...overrides,
+  };
+}
+
+function createAuthenticatedMember() {
+  return {
+    billingStatus: HostedBillingStatus.active,
+    createdAt: NOW,
+    id: "member_123",
+    suspendedAt: null,
+    updatedAt: NOW,
   };
 }

@@ -153,7 +153,7 @@ describe("createHostedBillingCheckout", () => {
           },
         },
         success_url:
-          "https://join.example.test/join/invite-code/success?session_id=%7BCHECKOUT_SESSION_ID%7D&share=share_123",
+          "https://join.example.test/join/invite-code/success?session_id={CHECKOUT_SESSION_ID}&share=share_123",
       }),
     );
     expect(mocks.stripe.checkout.sessions.create.mock.calls[0]?.[1]).toBeUndefined();
