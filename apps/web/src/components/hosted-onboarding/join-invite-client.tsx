@@ -53,8 +53,15 @@ export function JoinInviteClient({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState<"checkout" | "logout" | "share" | null>(null);
   const [shareImportState, setShareImportState] = useState<JoinInviteShareImportState>("idle");
+  const [statusRefreshErrorMessage, setStatusRefreshErrorMessage] = useState<string | null>(null);
+  const [statusRefreshRetryPending, setStatusRefreshRetryPending] = useState(false);
   const phoneAuthReady = status.capabilities.phoneAuthReady && Boolean(privyAppId);
   const sharePreviewSummary = sharePreview ? formatHostedSharePreviewSummary(sharePreview) : null;
+  const awaitingInviteSessionResolution = shouldAwaitHostedInviteSessionResolution({
+    authenticated,
+    ready,
+    status,
+  });
 
   const title = resolveTitle(status);
   const subtitle = resolveSubtitle(status);
@@ -113,7 +120,15 @@ export function JoinInviteClient({
   useHostedInviteStatusRefresh({
     authenticated,
     inviteCode,
-    onStatus: setStatus,
+    onError: (error: unknown) => {
+      setStatusRefreshErrorMessage(
+        error instanceof Error ? error.message : "We could not refresh your signup state.",
+      );
+    },
+    onStatus: (payload) => {
+      setStatus(payload);
+      setStatusRefreshErrorMessage(null);
+    },
     ready,
     sessionAuthenticated: status.session.authenticated,
     shouldPoll: status.stage === "activating",
@@ -122,7 +137,23 @@ export function JoinInviteClient({
   async function refreshStatus(): Promise<HostedInviteStatusPayload> {
     const payload = await fetchHostedInviteStatus(inviteCode);
     setStatus(payload);
+    setStatusRefreshErrorMessage(null);
     return payload;
+  }
+
+  async function handleRetryStatusRefresh() {
+    setStatusRefreshErrorMessage(null);
+    setStatusRefreshRetryPending(true);
+
+    try {
+      await refreshStatus();
+    } catch (error) {
+      setStatusRefreshErrorMessage(
+        error instanceof Error ? error.message : "We could not refresh your signup state.",
+      );
+    } finally {
+      setStatusRefreshRetryPending(false);
+    }
   }
 
   async function handleCheckout() {
@@ -268,7 +299,35 @@ export function JoinInviteClient({
           ) : null}
 
           {status.stage === "verify" ? (
-            phoneAuthReady && privyAppId ? (
+            awaitingInviteSessionResolution ? (
+              statusRefreshErrorMessage ? (
+                <Alert variant="destructive">
+                  <AlertTitle>Unable to refresh your signup state</AlertTitle>
+                  <AlertDescription>
+                    We couldn&apos;t pick up your verified phone session yet. Check again to continue.
+                  </AlertDescription>
+                  <div className="mt-3">
+                    <Button
+                      type="button"
+                      onClick={handleRetryStatusRefresh}
+                      disabled={statusRefreshRetryPending}
+                      size="lg"
+                      variant="outline"
+                    >
+                      {statusRefreshRetryPending ? "Checking..." : "Check again"}
+                    </Button>
+                  </div>
+                </Alert>
+              ) : (
+                <Alert className="border-stone-200 bg-stone-50">
+                  <LoaderCircleIcon className="mt-0.5 size-4 animate-spin" />
+                  <AlertTitle>Checking your signup state</AlertTitle>
+                  <AlertDescription>
+                    One moment while we pick up your verified phone session.
+                  </AlertDescription>
+                </Alert>
+              )
+            ) : phoneAuthReady && privyAppId ? (
               <div className="rounded-xl border border-stone-200/60 bg-stone-50/60 p-5">
                 <HostedPhoneAuth
                   inviteCode={inviteCode}
@@ -411,6 +470,22 @@ export function resolveInviteStatusAfterPrivyCompletion(
     },
     stage: payload.stage,
   };
+}
+
+export function shouldAwaitHostedInviteSessionResolution(input: {
+  authenticated: boolean;
+  ready: boolean;
+  status: HostedInviteStatusPayload;
+}): boolean {
+  if (input.status.stage !== "verify" || input.status.session.authenticated) {
+    return false;
+  }
+
+  if (!input.ready) {
+    return true;
+  }
+
+  return input.authenticated;
 }
 
 function resolveTitle(status: HostedInviteStatusPayload): string {

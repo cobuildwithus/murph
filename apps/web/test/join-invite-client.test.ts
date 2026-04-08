@@ -4,6 +4,16 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, expect, test, vi } from "vitest";
 
+const mocks = vi.hoisted(() => ({
+  fetchHostedInviteStatus: vi.fn(),
+  logout: vi.fn(),
+  usePrivy: vi.fn(),
+}));
+
+vi.mock("@privy-io/react-auth", () => ({
+  usePrivy: mocks.usePrivy,
+}));
+
 vi.mock("@/src/components/hosted-onboarding/hosted-phone-auth", () => ({
   HostedPhoneAuth(input: { mode: string; privyAppId: string; privyClientId?: string | null }) {
     return createElement(
@@ -18,17 +28,28 @@ vi.mock("@/src/components/hosted-onboarding/hosted-phone-auth", () => ({
   },
 }));
 
+vi.mock("@/src/components/hosted-onboarding/invite-status-client", () => ({
+  fetchHostedInviteStatus: mocks.fetchHostedInviteStatus,
+  useHostedInviteStatusRefresh: () => {},
+}));
+
 import {
   JoinInviteClient,
   resolveInviteStatusAfterPrivyCompletion,
   resolveJoinInviteShareStateFromAccept,
   resolveJoinInviteShareStateFromStatus,
+  shouldAwaitHostedInviteSessionResolution,
 } from "@/src/components/hosted-onboarding/join-invite-client";
 import type { HostedSharePageData } from "@/src/lib/hosted-share/service";
 import type { HostedInviteStatusPayload, HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.usePrivy.mockReturnValue({
+    authenticated: false,
+    logout: mocks.logout,
+    ready: true,
+  });
 });
 
 test("JoinInviteClient keeps the fallback copy when phone auth is ready but the public app id is missing", () => {
@@ -72,6 +93,60 @@ test("verify-stage invite copy stays neutral and does not expose the masked phon
   assert.doesNotMatch(markup, /What happens next/);
   assert.doesNotMatch(markup, /Invite for/);
   assert.doesNotMatch(markup, /\+1 415 555 2671/);
+  assert.match(markup, /data-hosted-phone-auth="invite"/);
+});
+
+test("verify-stage invite waits for Privy readiness before showing phone auth", () => {
+  mocks.usePrivy.mockReturnValue({
+    authenticated: false,
+    logout: mocks.logout,
+    ready: false,
+  });
+
+  const markup = renderToStaticMarkup(
+    createElement(JoinInviteClient, {
+      initialStatus: createStatus({
+        capabilities: {
+          billingReady: true,
+          phoneAuthReady: true,
+        },
+      }),
+      inviteCode: "invite-code",
+      privyAppId: "cm_app_123",
+      shareCode: null,
+      sharePreview: null,
+    }),
+  );
+
+  assert.match(markup, /Checking your signup state/);
+  assert.match(markup, /One moment while we pick up your verified phone session\./);
+  assert.doesNotMatch(markup, /data-hosted-phone-auth=/);
+});
+
+test("verify-stage invite waits for the auth-backed status refresh when Privy is already authenticated", () => {
+  mocks.usePrivy.mockReturnValue({
+    authenticated: true,
+    logout: mocks.logout,
+    ready: true,
+  });
+
+  const markup = renderToStaticMarkup(
+    createElement(JoinInviteClient, {
+      initialStatus: createStatus({
+        capabilities: {
+          billingReady: true,
+          phoneAuthReady: true,
+        },
+      }),
+      inviteCode: "invite-code",
+      privyAppId: "cm_app_123",
+      shareCode: null,
+      sharePreview: null,
+    }),
+  );
+
+  assert.match(markup, /Checking your signup state/);
+  assert.doesNotMatch(markup, /data-hosted-phone-auth=/);
 });
 
 test("active invite state links to hosted settings with client navigation markup", () => {
@@ -195,6 +270,62 @@ test("resolveInviteStatusAfterPrivyCompletion marks the invite session authentic
     },
     stage: "checkout",
   });
+});
+
+test("verify-stage auth-settling guard only holds while Privy session state is unresolved", () => {
+  assert.equal(
+    shouldAwaitHostedInviteSessionResolution({
+      authenticated: false,
+      ready: false,
+      status: createStatus({
+        capabilities: {
+          billingReady: true,
+          phoneAuthReady: true,
+        },
+      }),
+    }),
+    true,
+  );
+  assert.equal(
+    shouldAwaitHostedInviteSessionResolution({
+      authenticated: true,
+      ready: true,
+      status: createStatus({
+        capabilities: {
+          billingReady: true,
+          phoneAuthReady: true,
+        },
+      }),
+    }),
+    true,
+  );
+  assert.equal(
+    shouldAwaitHostedInviteSessionResolution({
+      authenticated: false,
+      ready: true,
+      status: createStatus({
+        capabilities: {
+          billingReady: true,
+          phoneAuthReady: true,
+        },
+      }),
+    }),
+    false,
+  );
+  assert.equal(
+    shouldAwaitHostedInviteSessionResolution({
+      authenticated: true,
+      ready: true,
+      status: createStatus({
+        session: {
+          authenticated: true,
+          expiresAt: null,
+          matchesInvite: true,
+        },
+      }),
+    }),
+    false,
+  );
 });
 
 function createStatus(
