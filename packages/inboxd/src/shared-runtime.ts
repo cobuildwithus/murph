@@ -1,6 +1,8 @@
 const USER_PATH_PATTERNS = [
   /^\/Users\/[^/]+/u,
   /^\/home\/[^/]+/u,
+  /^\/private\/var\/folders\//u,
+  /^\/var\/folders\//u,
   /^[A-Za-z]:\\Users\\[^\\]+/u,
 ];
 const REDACTED_PATH = "<REDACTED_PATH>";

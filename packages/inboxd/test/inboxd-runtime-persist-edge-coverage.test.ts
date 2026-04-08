@@ -17,6 +17,10 @@ async function makeTempDirectory(name: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), `${name}-`));
 }
 
+async function makeHomeTempDirectory(name: string): Promise<string> {
+  return fs.mkdtemp(path.join(os.homedir(), `${name}-`));
+}
+
 async function writeExternalFile(directory: string, fileName: string, content: string): Promise<string> {
   const filePath = path.join(directory, fileName);
   await fs.writeFile(filePath, content, "utf8");
@@ -189,6 +193,97 @@ test("rebuildRuntimeFromVault rewrites legacy attachment ids from canonical ordi
     );
   } finally {
     runtime.close();
+  }
+});
+
+test("persistRawCapture only stores trusted imessage attachment files and drops blocked path metadata", async () => {
+  const vaultRoot = await makeTempDirectory("murph-inbox-trusted-imessage-vault");
+  const trustedSourceRoot = await makeTempDirectory("murph-inbox-trusted-imessage-source");
+  const untrustedSourceRoot = await makeHomeTempDirectory("murph-inbox-untrusted-imessage-source-");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
+
+  try {
+    const trustedAttachmentPath = await writeExternalFile(
+      trustedSourceRoot,
+      "trusted-note.txt",
+      "trusted attachment",
+    );
+    const blockedAttachmentPath = await writeExternalFile(
+      untrustedSourceRoot,
+      "do-not-copy.txt",
+      "blocked attachment",
+    );
+    const trustedDirectoryPath = path.join(trustedSourceRoot, "directory-only");
+    await fs.mkdir(trustedDirectoryPath);
+
+    const inbound = createCapture({
+      externalId: "msg-trusted-imessage-attachments",
+      attachments: [
+        {
+          externalId: "att-trusted",
+          kind: "document",
+          mime: "text/plain",
+          originalPath: trustedAttachmentPath,
+        },
+        {
+          externalId: "att-blocked",
+          kind: "document",
+          mime: "text/plain",
+          originalPath: blockedAttachmentPath,
+        },
+        {
+          externalId: "att-directory",
+          kind: "document",
+          mime: "text/plain",
+          originalPath: trustedDirectoryPath,
+        },
+      ],
+    });
+
+    const captureId = createDeterministicInboxCaptureId(inbound);
+    const stored = await indexSurface.persistRawCapture({
+      vaultRoot,
+      captureId,
+      eventId: "evt_01HQW7K0M9N8P7Q6R5S4T3VA04",
+      input: inbound,
+      storedAt: "2026-03-13T12:34:00.000Z",
+    });
+
+    assert.equal(stored.attachments.length, 3);
+    const trustedAttachment = stored.attachments[0];
+    const blockedAttachment = stored.attachments[1];
+    const directoryAttachment = stored.attachments[2];
+
+    assert.ok(trustedAttachment);
+    assert.match(trustedAttachment.storedPath ?? "", /trusted-note\.txt$/u);
+    assert.equal(trustedAttachment.fileName, "trusted-note.txt");
+    assert.notEqual(trustedAttachment.sha256, null);
+
+    assert.ok(blockedAttachment);
+    assert.equal(blockedAttachment.storedPath, null);
+    assert.equal(blockedAttachment.sha256, null);
+    assert.equal(blockedAttachment.originalPath, null);
+    assert.equal(blockedAttachment.fileName, undefined);
+
+    assert.ok(directoryAttachment);
+    assert.equal(directoryAttachment.storedPath, null);
+    assert.equal(directoryAttachment.sha256, null);
+    assert.equal(directoryAttachment.originalPath, null);
+    assert.equal(directoryAttachment.fileName, undefined);
+
+    const envelope = await findStoredCaptureEnvelope({
+      vaultRoot,
+      inbound,
+      captureId,
+    });
+    assert.ok(envelope);
+
+    const envelopeJson = JSON.stringify(envelope);
+    assert.match(envelopeJson, /trusted-note\.txt/u);
+    assert.doesNotMatch(envelopeJson, /do-not-copy\.txt/u);
+    assert.doesNotMatch(envelopeJson, /directory-only/u);
+  } finally {
+    await fs.rm(untrustedSourceRoot, { recursive: true, force: true });
   }
 });
 
