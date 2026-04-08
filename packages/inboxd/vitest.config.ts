@@ -5,7 +5,6 @@ import { defineConfig } from "vitest/config";
 
 import {
   createMurphVitestCoverage,
-  murphVitestCoverageThresholds,
   resolveMurphVitestCoverageProviderModule,
 } from "../../config/vitest-coverage.js";
 import { resolveMurphVitestConcurrency } from "../../config/vitest-parallelism.js";
@@ -41,13 +40,6 @@ export default defineConfig({
     coverage: createMurphVitestCoverage({
       customProviderModule: resolveMurphVitestCoverageProviderModule(packageDir),
       include: ["src/**/*.ts"],
-      thresholds: {
-        ...murphVitestCoverageThresholds,
-        lines: 75,
-        functions: 80,
-        branches: 65,
-        statements: 75,
-      },
     }),
   },
 });

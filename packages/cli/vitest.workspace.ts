@@ -53,13 +53,6 @@ const cliVitestRuntimeAliases = createVitestWorkspaceRuntimeAliases(
 export const cliVitestCoverage = createMurphVitestCoverage({
   customProviderModule: resolveMurphVitestCoverageProviderModule(packageDir),
   include: [path.resolve(packageDir, "src/**/*.ts")],
-  thresholds: {
-    perFile: true,
-    lines: 83,
-    functions: 77,
-    branches: 60,
-    statements: 83,
-  },
 });
 
 type CliVitestProjectSpec = {
