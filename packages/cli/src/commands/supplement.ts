@@ -4,13 +4,13 @@ import {
   createHealthScaffoldResultSchema,
   healthListResultSchema,
   healthShowResultSchema,
-} from "@murphai/vault-usecases/health-cli-descriptors"
+} from "@murphai/vault-usecases"
 import {
   createRegistryDocEntityGroup,
   suggestedCommandsCta,
 } from "./health-command-factory.js"
 import { localDateSchema, pathSchema } from "@murphai/operator-config/vault-cli-contracts"
-import type { VaultServices } from "@murphai/vault-usecases/vault-services"
+import type { VaultServices } from "@murphai/vault-usecases"
 
 const limitOptionSchema = z.number().int().positive().max(200).default(50)
 const supplementSlugSchema = z

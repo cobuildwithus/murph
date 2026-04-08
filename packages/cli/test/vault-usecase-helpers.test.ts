@@ -6,7 +6,7 @@ import { test } from 'vitest'
 import {
   loadJsonInputFile,
   preparePatchedUpsertPayload,
-} from '@murphai/vault-usecases/usecases/shared'
+} from '@murphai/vault-usecases/helpers'
 import {
   compactObject,
   inferVaultLinkKind,
@@ -16,7 +16,7 @@ import {
   normalizeStringArray,
   resolveVaultRelativePath,
   stringArray,
-} from '@murphai/vault-usecases/usecases/vault-usecase-helpers'
+} from '@murphai/vault-usecases/helpers'
 
 test('link-kind and queryable helpers preserve provider and current semantics', () => {
   assert.equal(inferVaultLinkKind('prov_01JNV422Y2M5ZBV64ZP4N1DRB1'), 'entity')

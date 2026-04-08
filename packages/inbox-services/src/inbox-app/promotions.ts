@@ -1,5 +1,5 @@
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
-import { toVaultCliError } from '@murphai/vault-usecases/usecases/vault-usecase-helpers'
+import { toVaultCliError } from '@murphai/vault-usecases/helpers'
 import type {
   InboxAppEnvironment,
   InboxServices,

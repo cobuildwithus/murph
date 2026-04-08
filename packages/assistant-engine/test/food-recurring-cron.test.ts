@@ -5,10 +5,11 @@ import path from 'node:path'
 import { initializeVault, readFood } from '@murphai/core'
 import {
   addDailyFoodRecord,
+  deleteFoodRecord,
   editFoodRecord,
   renameFoodRecord,
   upsertFoodRecord,
-} from '@murphai/vault-usecases/usecases/food'
+} from '@murphai/vault-usecases/records'
 import { afterEach, test } from 'vitest'
 
 import {
@@ -140,6 +141,37 @@ test('clearing recurring food auto-log removes the backing cron job', async () =
     foodId: created.foodId,
   })
   assert.equal(food.autoLogDaily, undefined)
+  assert.deepEqual(await listAssistantCronJobs(vaultRoot), [])
+})
+
+test('deleting a recurring food removes the backing cron job', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-food-delete-recurring-cron-'))
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await initializeVault({ vaultRoot })
+
+  const created = await upsertFoodRecord({
+    vault: vaultRoot,
+    hooks: createAssistantFoodAutoLogHooks(),
+    payload: {
+      title: 'Daily Oats',
+      slug: 'daily-oats',
+      autoLogDaily: {
+        time: '07:30',
+      },
+    },
+  })
+
+  assert.equal((await listAssistantCronJobs(vaultRoot)).length, 1)
+
+  const deleted = await deleteFoodRecord({
+    vault: vaultRoot,
+    hooks: createAssistantFoodAutoLogHooks(),
+    lookup: created.lookupId,
+  })
+
+  assert.equal(deleted.deleted, true)
   assert.deepEqual(await listAssistantCronJobs(vaultRoot), [])
 })
 

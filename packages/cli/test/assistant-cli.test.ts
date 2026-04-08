@@ -40,7 +40,7 @@ import {
 } from '../src/vault-cli-command-manifest.js'
 import { registerModelCommands } from '../src/commands/model.js'
 import { createVaultCli } from '../src/vault-cli.js'
-import { createUnwiredVaultServices } from '@murphai/vault-usecases/vault-services'
+import { createUnwiredVaultServices } from '@murphai/vault-usecases'
 import {
   requireData,
   runCli,

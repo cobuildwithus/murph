@@ -30,7 +30,7 @@ import {
   prepareInboxMultimodalUserMessageContent,
 } from './inbox-multimodal.js'
 import { errorMessage, normalizeNullableString } from '@murphai/operator-config/text/shared'
-import type { VaultServices } from '@murphai/vault-usecases/vault-services'
+import type { VaultServices } from '@murphai/vault-usecases'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
 const DEFAULT_MAX_ROUTING_CHARS = 24000

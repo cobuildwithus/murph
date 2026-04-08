@@ -8,15 +8,15 @@ import {
 import {
   inputFileOptionSchema,
   normalizeInputFileOption,
-} from '@murphai/vault-usecases/json-input'
+} from '@murphai/vault-usecases'
 import type {
   CommandContext,
   EntityLookupInput as ShowCommandContext,
   HealthListInput as ListCommandContext,
   JsonFileInput as UpsertCommandContext,
-} from '@murphai/vault-usecases/health-cli-method-types'
-export { healthPayloadSchema } from '@murphai/vault-usecases/health-cli-descriptors'
-export { inputFileOptionSchema, normalizeInputFileOption } from '@murphai/vault-usecases/json-input'
+} from '@murphai/vault-usecases'
+export { healthPayloadSchema } from '@murphai/vault-usecases'
+export { inputFileOptionSchema, normalizeInputFileOption } from '@murphai/vault-usecases'
 
 const limitOptionSchema = z.number().int().positive().max(200).default(50)
 const localDateOptionSchema = z

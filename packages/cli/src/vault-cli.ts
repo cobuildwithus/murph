@@ -3,7 +3,7 @@ import { Cli } from 'incur'
 import {
   createIntegratedVaultServices,
   type VaultServices,
-} from '@murphai/vault-usecases/vault-services'
+} from '@murphai/vault-usecases'
 import { createAssistantFoodAutoLogHooks } from '@murphai/assistant-engine/assistant-cron'
 import {
   createIntegratedInboxServices,

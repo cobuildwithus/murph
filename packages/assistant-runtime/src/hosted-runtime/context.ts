@@ -9,7 +9,7 @@ import {
   createAssistantFoodAutoLogHooks,
 } from "@murphai/assistant-engine";
 import { createIntegratedInboxServices } from "@murphai/inbox-services";
-import { createIntegratedVaultServices } from "@murphai/vault-usecases/vault-services";
+import { createIntegratedVaultServices } from "@murphai/vault-usecases";
 import {
   ensureHostedAssistantOperatorDefaults,
   resolveHostedAssistantOperatorDefaultsState,

@@ -15,11 +15,11 @@ import {
   showStoredExportPack,
 } from '../src/commands/export-intake-read-helpers.js'
 import { registerIntakeCommands } from '../src/commands/intake.js'
-import { materializeExportPack } from '@murphai/vault-usecases/usecases/shared'
+import { materializeExportPack } from '@murphai/vault-usecases/helpers'
 import {
   createIntegratedVaultServices,
   createUnwiredVaultServices,
-} from '@murphai/vault-usecases/vault-services'
+} from '@murphai/vault-usecases'
 import type { CliEnvelope } from './cli-test-helpers.js'
 import { requireData } from './cli-test-helpers.js'
 
@@ -170,6 +170,11 @@ test.sequential(
           schemaVersion: string
           importId: string
           importKind: string
+          owner?: {
+            kind: string
+            id: string
+            partition?: string
+          }
           rawDirectory: string
           source: string | null
           artifacts: Array<{
@@ -220,9 +225,13 @@ test.sequential(
       assert.equal(requireData(manifestResult).lookupId, requireData(imported).assessmentId)
       assert.equal(requireData(manifestResult).kind, 'assessment')
       assert.equal(requireData(manifestResult).manifestFile, requireData(imported).manifestFile)
-      assert.equal(requireData(manifestResult).manifest.schemaVersion, 'murph.raw-import-manifest.v1')
+      assert.equal(requireData(manifestResult).manifest.schemaVersion, 'murph.raw-import-manifest.v2')
       assert.equal(requireData(manifestResult).manifest.importId, requireData(imported).assessmentId)
       assert.equal(requireData(manifestResult).manifest.importKind, 'assessment')
+      assert.deepEqual(requireData(manifestResult).manifest.owner, {
+        kind: 'assessment',
+        id: requireData(imported).assessmentId,
+      })
       assert.equal(requireData(manifestResult).manifest.source, 'manual')
       assert.equal(
         requireData(manifestResult).manifest.rawDirectory,

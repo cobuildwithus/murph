@@ -304,7 +304,7 @@ test.sequential("provider and event CLI usecases map renamed core error codes to
     },
     run: async () => {
       const { listProviderRecords, upsertEventRecord, upsertProviderRecord } = await import(
-        "@murphai/vault-usecases/usecases/provider-event"
+        "@murphai/vault-usecases/records"
       );
 
       await assert.rejects(
@@ -355,7 +355,7 @@ test.sequential("provider and event CLI usecases map renamed core error codes to
           coreRuntime: eventRuntime,
           run: async () => {
             const { upsertEventRecord: upsertEventRecordWithRuntime } = await import(
-              "@murphai/vault-usecases/usecases/provider-event"
+              "@murphai/vault-usecases/records"
             );
 
             await assert.rejects(
@@ -394,7 +394,7 @@ test.sequential("provider and event CLI usecases map renamed core error codes to
             lookupEntityById: () => eventRecord,
           },
           run: async () => {
-            const { editEventRecord } = await import("@murphai/vault-usecases/usecases/event-record-mutations");
+            const { editEventRecord } = await import("@murphai/vault-usecases/records");
 
             await assert.rejects(
               () =>
@@ -470,7 +470,7 @@ test.sequential("editEventRecord strips stored lifecycle metadata before calling
       lookupEntityById: () => eventRecord,
     },
     run: async () => {
-      const { editEventRecord } = await import("@murphai/vault-usecases/usecases/event-record-mutations");
+      const { editEventRecord } = await import("@murphai/vault-usecases/records");
 
       await editEventRecord({
         vault: "/tmp/mock-vault",

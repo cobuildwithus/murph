@@ -3,8 +3,8 @@ import {
   buildDailyFoodCronJobName,
   buildDailyFoodCronPrompt,
   buildDailyFoodSchedule,
-} from '@murphai/vault-usecases/usecases/food-autolog'
-import { loadRuntimeModule } from '@murphai/vault-usecases/runtime-import'
+} from '@murphai/vault-usecases/records'
+import { loadRuntimeModule } from '@murphai/vault-usecases'
 import {
   addAssistantCronJob,
   listAssistantCronJobs,

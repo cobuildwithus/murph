@@ -4,9 +4,4 @@ export * from './json-input.js'
 export * from './option-utils.js'
 export * from './query-runtime.js'
 export * from './runtime-import.js'
-export type {
-  FoodAutoLogHooks,
-  FoodAutoLogSyncJob,
-  FoodAutoLogSyncRecord,
-} from './usecases/food.js'
 export * from './vault-services.js'

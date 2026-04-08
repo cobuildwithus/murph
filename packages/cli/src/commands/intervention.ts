@@ -4,12 +4,12 @@ import {
   interventionAddResultSchema,
   isoTimestampSchema,
 } from '@murphai/operator-config/vault-cli-contracts'
-import type { VaultServices } from '@murphai/vault-usecases/vault-services'
+import type { VaultServices } from '@murphai/vault-usecases'
 import {
   addInterventionRecord,
   deleteInterventionRecord,
   editInterventionRecord,
-} from '@murphai/vault-usecases/usecases/intervention'
+} from '@murphai/vault-usecases/records'
 import {
   createDirectEntityDeleteCommandDefinition,
   createDirectEventBackedEntityEditCommandDefinition,

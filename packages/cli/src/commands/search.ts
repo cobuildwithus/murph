@@ -3,7 +3,7 @@ import { emptyArgsSchema, withBaseOptions } from '@murphai/operator-config/comma
 import {
   ALL_QUERY_ENTITY_FAMILIES,
   loadQueryRuntime,
-} from '@murphai/vault-usecases/query-runtime'
+} from '@murphai/vault-usecases'
 import {
   isoTimestampSchema,
   localDateSchema,
@@ -14,8 +14,8 @@ import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   normalizeRepeatableEnumFlagOption,
   normalizeRepeatableFlagOption,
-} from '@murphai/vault-usecases/option-utils'
-import type { VaultServices } from '@murphai/vault-usecases/vault-services'
+} from '@murphai/vault-usecases'
+import type { VaultServices } from '@murphai/vault-usecases'
 
 const recordTypeValues = ALL_QUERY_ENTITY_FAMILIES
 

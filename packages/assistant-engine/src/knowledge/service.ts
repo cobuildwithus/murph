@@ -2,7 +2,7 @@ import { access, readFile, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { resolveAssistantVaultPath } from '../assistant-vault-paths.js'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
-import { loadIntegratedRuntime } from '@murphai/vault-usecases/usecases/runtime'
+import { loadIntegratedRuntime } from '@murphai/vault-usecases/runtime'
 import {
   DERIVED_KNOWLEDGE_INDEX_PATH,
   DERIVED_KNOWLEDGE_LOG_PATH,

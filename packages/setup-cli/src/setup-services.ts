@@ -9,7 +9,7 @@ import {
 import {
   createIntegratedVaultServices,
   type VaultServices,
-} from '@murphai/vault-usecases/vault-services'
+} from '@murphai/vault-usecases'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { resolveEffectiveTopLevelToken } from '@murphai/operator-config/command-helpers'
 import {

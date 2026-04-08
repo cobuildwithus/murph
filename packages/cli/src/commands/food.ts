@@ -8,8 +8,8 @@ import {
   pathSchema,
   showResultSchema,
 } from '@murphai/operator-config/vault-cli-contracts'
-import type { VaultServices } from '@murphai/vault-usecases/vault-services'
-import { dailyFoodTimeSchema } from '@murphai/vault-usecases/usecases/food-autolog'
+import type { VaultServices } from '@murphai/vault-usecases'
+import { dailyFoodTimeSchema } from '@murphai/vault-usecases/records'
 import { createRegistryDocEntityGroup } from './health-command-factory.js'
 import {
   createDirectEntityDeleteCommandDefinition,

@@ -1,6 +1,46 @@
-import { loadRuntimeModule } from '@murphai/vault-usecases/runtime-import'
-import type { ImportersRuntimeModule } from '@murphai/vault-usecases/usecases/types'
+import { loadRuntimeModule } from '@murphai/vault-usecases'
 import { createRuntimeUnavailableError } from '@murphai/operator-config/runtime-errors'
+
+interface ImportersRuntimeModule {
+  createImporters(): {
+    importCsvSamples(input: {
+      delimiter?: string
+      filePath: string
+      metadataColumns?: string[]
+      presetId?: string
+      requestId?: string | null
+      source?: string
+      stream?: string
+      tsColumn?: string
+      unit?: string
+      valueColumn?: string
+      vaultRoot: string
+    }): Promise<{
+      count: number
+      transformId: string
+      manifestPath: string
+      records: Array<{
+        id: string
+      }>
+      shardPaths: string[]
+    }>
+  }
+  prepareCsvSampleImport(input: {
+    delimiter?: string
+    filePath: string
+    metadataColumns?: string[]
+    presetId?: string
+    requestId?: string | null
+    source?: string
+    stream?: string
+    tsColumn?: string
+    unit?: string
+    valueColumn?: string
+    vaultRoot: string
+  }): Promise<{
+    stream: string
+  }>
+}
 
 export interface ImportCsvSamplesOptions {
   delimiter?: string

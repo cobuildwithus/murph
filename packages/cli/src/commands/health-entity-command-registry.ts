@@ -12,9 +12,9 @@ import {
   healthPayloadSchema,
   healthShowResultSchema,
   type HealthCommandDescriptorEntry,
-} from "@murphai/vault-usecases/health-cli-descriptors";
+} from "@murphai/vault-usecases";
 import { pathSchema } from "@murphai/operator-config/vault-cli-contracts";
-import type { VaultServices } from "@murphai/vault-usecases/vault-services";
+import type { VaultServices } from "@murphai/vault-usecases";
 
 function requireHealthCommandDescriptor(commandName: string): HealthCommandDescriptorEntry {
   const descriptor = healthEntityDescriptorByCommandName.get(commandName);

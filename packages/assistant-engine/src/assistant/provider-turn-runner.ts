@@ -49,7 +49,7 @@ import {
 import {
   appendAssistantTurnReceiptEvent,
 } from './turns.js'
-import { createIntegratedVaultServices } from '@murphai/vault-usecases/vault-services'
+import { createIntegratedVaultServices } from '@murphai/vault-usecases'
 import { createAssistantFoodAutoLogHooks } from './food-auto-log-hooks.js'
 import type { AssistantMessageInput } from './service-contracts.js'
 
