@@ -7,7 +7,7 @@ export interface AssistantToolContext {
   requestId?: string | null
   sessionId?: string | null
   vault: string
-  vaultServices?: import('@murphai/vault-usecases').VaultServices
+  vaultServices?: import('@murphai/vault-usecases/vault-services').VaultServices
   workingDirectory?: string | null
 }
 

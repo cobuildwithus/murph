@@ -86,10 +86,10 @@ describe("HostedEmailSettings", () => {
       }),
     );
 
-    assert.match(markup, /Current verified email/);
+    assert.match(markup, /Connected as verified@example\.com\./);
     assert.match(markup, /verified@example\.com/);
-    assert.doesNotMatch(markup, /Current email<\/strong><p class="mt-1">stale@example\.com/);
-    assert.match(markup, /Sync current verified email/);
+    assert.doesNotMatch(markup, /Connected as stale@example\.com\./);
+    assert.match(markup, /Save verified email/);
   });
 });
 

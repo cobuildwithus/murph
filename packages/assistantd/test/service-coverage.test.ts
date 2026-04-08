@@ -61,7 +61,7 @@ vi.mock('@murphai/inbox-services', () => ({
   createIntegratedInboxServices: mocks.createIntegratedInboxServices,
 }))
 
-vi.mock('@murphai/vault-usecases', () => ({
+vi.mock('@murphai/vault-usecases/vault-services', () => ({
   createIntegratedVaultServices: mocks.createIntegratedVaultServices,
 }))
 

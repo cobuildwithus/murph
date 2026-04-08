@@ -37,5 +37,6 @@ test("SettingsPage renders the Privy-backed settings tree in the shared app shel
   assert.match(markup, /Hosted email settings/);
   assert.match(markup, /Hosted Telegram settings/);
   assert.match(markup, /Hosted device sync settings/);
-  assert.match(markup, /Sign in with the same phone-backed Privy account you use for Murph/);
+  assert.match(markup, /Your account/);
+  assert.match(markup, /Subscription, connected accounts, and wearables\./);
 });

@@ -98,6 +98,21 @@ test('loadAssistantdEnvFiles preserves exported shell variables over local env d
   }
 })
 
+test('loadAssistantdEnvFiles rethrows non-ENOENT env-file failures', () => {
+  const loadEnvFile = process.loadEnvFile
+  const expected = Object.assign(new Error('permission denied'), { code: 'EACCES' })
+
+  process.loadEnvFile = () => {
+    throw expected
+  }
+
+  try {
+    assert.throws(() => loadAssistantdEnvFiles('/tmp/assistantd-env-error'), expected)
+  } finally {
+    process.loadEnvFile = loadEnvFile
+  }
+})
+
 test('loadAssistantdEnvironment requires the bound vault and control token', () => {
   assert.throws(
     () =>
@@ -142,5 +157,22 @@ test('loadAssistantdEnvironment validates the loopback host and numeric port', (
         ASSISTANTD_PORT: 'not-a-number',
       }),
     /ASSISTANTD_PORT must be an integer between 1 and 65535/u,
+  )
+})
+
+test('loadAssistantdEnvironment accepts a custom loopback host and numeric port', () => {
+  assert.deepEqual(
+    loadAssistantdEnvironment({
+      ASSISTANTD_VAULT_ROOT: '/tmp/vault',
+      ASSISTANTD_CONTROL_TOKEN: 'secret-token',
+      ASSISTANTD_HOST: 'localhost',
+      ASSISTANTD_PORT: '50242',
+    }),
+    {
+      controlToken: 'secret-token',
+      host: 'localhost',
+      port: 50_242,
+      vaultRoot: '/tmp/vault',
+    },
   )
 })

@@ -1,11 +1,11 @@
-import { normalizeNullableString } from './shared.js'
+import { normalizeNullableString } from './shared.ts'
 import {
   gatewayConversationDirectnessValues,
   gatewayConversationRouteSchema,
   type GatewayConversationDirectness,
   type GatewayConversationRoute,
   type GatewayReplyRouteKind,
-} from './contracts.js'
+} from './contracts.ts'
 
 export interface GatewayConversationRouteInput {
   channel?: string | null

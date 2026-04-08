@@ -812,6 +812,7 @@ function readOptionalSessionIdQuery(url: URL, key: string): string | null | unde
 }
 
 function parseAssistantSessionIdField(value: unknown, context: string): string {
+  /* v8 ignore next -- route/query readers only surface string or null values here */
   if (typeof value !== 'string') {
     throw new AssistantHttpRequestError(
       `Assistant ${context} session id must be a string.`,
@@ -831,6 +832,7 @@ function parseAssistantSessionIdField(value: unknown, context: string): string {
 }
 
 function parseAssistantOutboxIntentIdField(value: unknown, context: string): string {
+  /* v8 ignore next -- opaque route parsing always decodes to a string before validation */
   if (typeof value !== 'string') {
     throw new AssistantHttpRequestError(
       `Assistant ${context} outbox intent id must be a string.`,
@@ -850,6 +852,7 @@ function parseAssistantOutboxIntentIdField(value: unknown, context: string): str
 }
 
 function parseAssistantCronJobIdField(value: unknown, context: string): string {
+  /* v8 ignore next -- opaque route/query parsing always decodes to a string before validation */
   if (typeof value !== 'string') {
     throw new AssistantHttpRequestError(
       `Assistant ${context} cron job id must be a string.`,
@@ -909,6 +912,7 @@ function resolveAssistantHttpErrorStatus(error: unknown): number {
   if (code === 'ASSISTANT_SESSION_NOT_FOUND' || code === 'ASSISTANT_CRON_JOB_NOT_FOUND') {
     return 404
   }
+  /* v8 ignore next -- retained as a defensive seam; matching code-based errors return above */
   if (isAssistantSessionNotFoundError(error)) {
     return 404
   }

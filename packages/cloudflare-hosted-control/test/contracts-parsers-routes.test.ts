@@ -56,6 +56,14 @@ describe("@murphai/cloudflare-hosted-control contracts, parsers, and routes", ()
 
     expect(() =>
       parseCloudflareHostedManagedUserCryptoStatus({
+        recipientKinds: "automation",
+        rootKeyId: "root-key-123",
+        userId: "user_123",
+      }),
+    ).toThrow("Managed user crypto status response recipientKinds must be an array.");
+
+    expect(() =>
+      parseCloudflareHostedManagedUserCryptoStatus({
         recipientKinds: ["automation"],
         rootKeyId: "",
         userId: "user_123",
@@ -68,6 +76,10 @@ describe("@murphai/cloudflare-hosted-control contracts, parsers, and routes", ()
         userId: " ",
       }),
     ).toThrow("Hosted execution user env status userId must be a non-empty string.");
+
+    expect(() =>
+      parseCloudflareHostedUserEnvUpdate(null),
+    ).toThrow("Hosted execution user env update must be an object.");
 
     expect(() =>
       parseCloudflareHostedUserEnvUpdate({

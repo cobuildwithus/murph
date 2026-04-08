@@ -3,7 +3,7 @@ import {
   type GatewayPollEventsInput,
   type GatewayPollEventsResult,
   type GatewayWaitForEventsInput,
-} from './contracts.js'
+} from './contracts.ts'
 
 export {
   applyGatewayProjectionSnapshotToEventLog,
@@ -11,7 +11,7 @@ export {
   pollGatewayEventLogState,
   type GatewayEventEmission,
   type GatewayEventLogState,
-} from './snapshot.js'
+} from './snapshot.ts'
 
 export const DEFAULT_GATEWAY_EVENT_POLL_INTERVAL_MS = 250
 

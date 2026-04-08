@@ -3,12 +3,12 @@ import { beforeAll, describe, expect, it, vi } from "vitest";
 vi.mock("next/server", () => {
   class MockNextResponse extends Response {
     static json(body: unknown, init?: ResponseInit) {
+      const headers = new Headers(init?.headers);
+      headers.set("content-type", "application/json");
+
       return new MockNextResponse(JSON.stringify(body), {
         ...init,
-        headers: {
-          "content-type": "application/json",
-          ...(init?.headers ?? {}),
-        },
+        headers,
       });
     }
   }

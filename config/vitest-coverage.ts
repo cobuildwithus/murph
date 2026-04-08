@@ -1,7 +1,7 @@
 import path from "node:path";
 
 export type MurphVitestCoverageThresholds = {
-  perFile: true;
+  perFile: boolean;
   lines: number;
   functions: number;
   branches: number;

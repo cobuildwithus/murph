@@ -71,7 +71,7 @@ describe("hosted Prisma baseline migration", () => {
     expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_member_identity"');
     expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_member_routing"');
     expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_member_billing_ref"');
-    expect(baselineMigrationSql).toContain('CREATE UNIQUE INDEX "hosted_member_routing_linq_chat_id_key"');
+    expect(baselineMigrationSql).toContain('CREATE UNIQUE INDEX "hosted_member_routing_linq_chat_lookup_key_key"');
     expect(baselineMigrationSql).toContain('"masked_phone_number_hint" TEXT NOT NULL');
     expect(baselineMigrationSql).toContain('"phone_lookup_key" TEXT NOT NULL');
     expect(baselineMigrationSql).toContain('"telegram_user_lookup_key" TEXT');

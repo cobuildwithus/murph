@@ -1,6 +1,6 @@
 import { z } from 'zod'
 
-import { isoTimestampSchema } from './shared.js'
+import { isoTimestampSchema } from './shared.ts'
 
 export const gatewayConversationDirectnessValues = [
   'direct',

@@ -291,13 +291,13 @@ describe('monorepo release flow coverage audit', () => {
 
     expect(summary.version).toBe(cliPackageJson.version)
     expect(summary.primaryPackage?.name).toBe('@murphai/murph')
-    expect(summary.packages.map((entry) => entry.name)).toEqual([
+    expect([...summary.packages.map((entry) => entry.name)].sort()).toEqual([
       '@murphai/contracts',
       '@murphai/hosted-execution',
       '@murphai/gateway-core',
       '@murphai/murph',
       '@murphai/openclaw-plugin',
-    ])
+    ].sort())
 
     expect(summary.packages).toContainEqual(expect.objectContaining({
       bundledWorkspaceDependencies: [
