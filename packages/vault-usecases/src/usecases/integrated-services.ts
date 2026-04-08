@@ -341,7 +341,10 @@ function createIntegratedCoreServices(
     async deleteFood(input: CommandContext & {
       lookup: string
     }) {
-      return deleteFoodRecord(input)
+      return deleteFoodRecord({
+        ...input,
+        hooks: dependencies.foodAutoLogHooks,
+      })
     },
     async addDailyFood(input: CommandContext & {
       title: string

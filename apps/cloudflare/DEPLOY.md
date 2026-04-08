@@ -16,6 +16,7 @@ This repo now includes:
 - `.dockerignore`
 - `apps/cloudflare/r2-bundles-lifecycle.json`
 - generated deploy artifacts under `apps/cloudflare/.deploy/`
+- a prebuilt runner bundle under `apps/cloudflare/.deploy/runner-bundle/` that the Docker image copies directly during deploy
 - a manual GitHub Actions deploy workflow at `.github/workflows/deploy-cloudflare-hosted.yml`
 - a deploy helper that drives a direct Worker deploy through the rendered config and secrets payload
 - scripts to render:
@@ -241,6 +242,7 @@ You should now have:
 
 - `apps/cloudflare/.deploy/wrangler.generated.jsonc`
 - `apps/cloudflare/.deploy/worker-secrets.json`
+- `apps/cloudflare/.deploy/runner-bundle/`
 
 `pnpm --dir apps/cloudflare r2:lifecycle:apply` reads `CF_BUNDLES_BUCKET` and `CF_BUNDLES_PREVIEW_BUCKET` from your environment and applies the checked-in `apps/cloudflare/r2-bundles-lifecycle.json` rules to whichever of those buckets are configured. The Wrangler command requires Cloudflare auth with R2 write access.
 
@@ -258,11 +260,11 @@ pnpm --dir apps/cloudflare worker:deploy -- \
   --secrets-file ./.deploy/worker-secrets.json
 ```
 
-`wrangler deploy` builds the native container image from `Dockerfile.cloudflare-hosted-runner`, pushes it through Cloudflare's deploy path, and deploys the worker. Docker needs to be available on the machine running that command.
+That script prepares the rendered deploy artifacts first, then runs `wrangler deploy`. `wrangler deploy` builds the native container image from `Dockerfile.cloudflare-hosted-runner`, pushes it through Cloudflare's deploy path, and deploys the worker. The deploy automation now prepares `apps/cloudflare/.deploy/runner-bundle/` first, so the Docker build just copies the already-built runner artifact instead of running another workspace install/build inside the image stage. Docker still needs to be available on the machine running that command.
 
 ### Normal deploys
 
-Use the deploy helper so the rendered config, built runtime bundle, and secrets file stay aligned with the actual `wrangler deploy` call:
+Use the deploy helper so the rendered config, prebuilt runner bundle, and secrets file stay aligned with the actual `wrangler deploy` call:
 
 ```bash
 export HOSTED_EXECUTION_INCLUDE_SECRETS=true

@@ -34,5 +34,9 @@ output-packages
 chatgpt-artifacts
 apps/cloudflare/.dev.vars*
 apps/cloudflare/.deploy
+!apps/cloudflare/.deploy/
+apps/cloudflare/.deploy/*
+!apps/cloudflare/.deploy/runner-bundle/
+!apps/cloudflare/.deploy/runner-bundle/**
 *.zip
 *.patch

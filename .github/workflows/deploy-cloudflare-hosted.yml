@@ -148,16 +148,11 @@ jobs:
           HOSTED_EXECUTION_DEPLOY_WORKER: ${{ inputs.deploy_worker }}
         run: pnpm --dir apps/cloudflare deploy:preflight
 
-      - name: Prebuild workspace package outputs
-        run: pnpm build:workspace:incremental
-
       - name: Run focused Cloudflare checks
         run: pnpm --dir apps/cloudflare verify
 
-      - name: Render generated deploy artifacts
-        run: |
-          pnpm --dir apps/cloudflare deploy:config:render
-          pnpm --dir apps/cloudflare deploy:secrets:render
+      - name: Prepare deploy artifacts
+        run: pnpm --dir apps/cloudflare deploy:artifacts
 
       - name: Show generated artifact paths
         run: ls -lah apps/cloudflare/.deploy
@@ -169,7 +164,7 @@ jobs:
           HOSTED_EXECUTION_DEPLOYMENT_MODE: direct
           HOSTED_EXECUTION_DEPLOY_CONTEXT: ${{ inputs.environment }}
           HOSTED_EXECUTION_INCLUDE_SECRETS: ${{ inputs.sync_worker_secrets }}
-        run: pnpm --dir apps/cloudflare deploy:worker -- --config ./.deploy/wrangler.generated.jsonc
+        run: pnpm --dir apps/cloudflare deploy:worker:apply -- --config ./.deploy/wrangler.generated.jsonc
 
       - name: Smoke test deployed endpoints
         if: ${{ inputs.deploy_worker }}

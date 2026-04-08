@@ -109,7 +109,7 @@ The native container image is declared in `apps/cloudflare/wrangler.jsonc` under
 
 ## Container image
 
-`Dockerfile.cloudflare-hosted-runner` builds the container image used by Wrangler. Inside that image, the private container entrypoint still serves:
+`Dockerfile.cloudflare-hosted-runner` builds the container image used by Wrangler. The deploy helper now assembles a production runner bundle under `apps/cloudflare/.deploy/runner-bundle` first, and the Docker build only copies that prepared artifact plus the pinned Whisper assets into the final image. Inside that image, the private container entrypoint still serves:
 
 - `GET /health`
 - `POST /__internal/run`
@@ -121,7 +121,7 @@ The default image now bakes the local parser toolchain directly into the contain
 Current expectations for the container image:
 
 - Node `>=22.16.0`
-- the runner app assembled as a built package bundle, with runtime dependencies materialized through `pnpm deploy`
+- the runner app assembled as a built package bundle under `apps/cloudflare/.deploy/runner-bundle`, with runtime dependencies materialized through `pnpm deploy` before `wrangler deploy` starts the Docker build
 - writable temp storage for ephemeral hosted bundle restore/snapshot work
 - the baked `/app` tree is a runtime artifact bundle and the runtime executes as a dedicated non-root user, so any job that needs scratch space must use temp/vault paths rather than mutating shipped assets
 - `PORT` for the internal bridge listen port, defaulting to `8080`
@@ -172,7 +172,7 @@ The Cloudflare app now keeps two focused Vitest lanes:
 - Missing hosted share packs are treated as an async runner-side failure instead of a web claim-time validation step. If hydration fails, Cloudflare releases the Postgres share claim through the signed hosted-web release callback and then poisons the queue event instead of retrying a permanently missing pack forever.
 - Follow-up hosted events now require an already bootstrapped member context; they no longer create the vault or force-enable Linq auto-reply as a hidden side effect.
 - The checked-in Wrangler scaffold now explicitly enables Workers Logs and Workers Traces so request logs, container logs, and trace spans are available before production deploys. The generated deploy config exposes log and trace sampling through `CF_LOG_HEAD_SAMPLING_RATE` and `CF_TRACE_HEAD_SAMPLING_RATE`.
-- The operational deploy path now uses a direct cut through `wrangler deploy` semantics on every GitHub Actions run and local `deploy:worker` invocation. The lower-level version/deploy split stays in the helper code as a manual escape hatch, but the default workflow no longer treats gradual traffic rollout as the normal path.
+- The operational deploy path now uses a direct cut through `wrangler deploy` semantics on every GitHub Actions run and local `deploy:worker` invocation. The helper prepares the rendered config, rendered secrets file, and prebuilt runner bundle once before the deploy call, so the workflow no longer prebuilds the workspace and then repeats that work inside the Docker stage. The lower-level version/deploy split stays in the helper code as a manual escape hatch, but the default workflow no longer treats gradual traffic rollout as the normal path.
 - Frequent deploys can accumulate old managed-registry tags. Use `pnpm --dir apps/cloudflare images:cleanup -- --filter '<repo-regex>' --keep 10` first, then add `--apply` once the dry-run plan looks correct.
 - The checked-in deploy surface now documents and forwards only the canonical runtime vars that the container actually consumes, such as `HOSTED_EMAIL_*`, `FFMPEG_COMMAND`, `PDFTOTEXT_COMMAND`, `WHISPER_COMMAND`, `WHISPER_MODEL_PATH`, and the explicit runner web-control host allowlist override. The default image already bakes the standard parser-toolchain values, so the parser vars are operator-only override knobs rather than baseline deployment requirements or per-user env settings. AgentMail stays a local-only integration and is not part of the hosted deploy surface.
 - The deploy automation now also forwards the hosted email bridge config (`HOSTED_EMAIL_*`) into the generated Worker vars/secrets payload and the manual GitHub Actions deploy workflow, so the documented hosted email contract matches the deploy surface.

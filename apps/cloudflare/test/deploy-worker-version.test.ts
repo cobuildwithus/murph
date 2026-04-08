@@ -177,6 +177,47 @@ describe("runHostedWorkerDeployment", () => {
     );
   });
 
+  it("defaults to a direct deploy when no deployment mode is provided", async () => {
+    const finalDeployment: DeploymentStatusPayload = {
+      created_on: "2026-03-27T00:10:00.000Z",
+      versions: [
+        {
+          percentage: 100,
+          version_id: "version-direct",
+        },
+      ],
+    };
+    const readCurrentDeployment = vi
+      .fn<HostedWorkerDeploymentDependencies["readCurrentDeployment"]>()
+      .mockResolvedValue(finalDeployment);
+    const dependencies = createDependencies({
+      readCurrentDeployment,
+    });
+
+    const result = await runHostedWorkerDeployment({
+      configPath: "/tmp/wrangler.generated.jsonc",
+      dependencies,
+      env: {
+        CF_WORKER_NAME: "hosted-worker",
+      },
+      resultPath: "/tmp/deployment-result.json",
+      secretsFilePath: "/tmp/worker-secrets.json",
+      workerName: "hosted-worker",
+    });
+
+    expect(dependencies.deployDirect).toHaveBeenCalledWith({
+      configPath: "/tmp/wrangler.generated.jsonc",
+      deploymentMessage: expect.stringContaining("direct deploy"),
+      includeSecrets: true,
+      secretsFilePath: "/tmp/worker-secrets.json",
+      versionTag: expect.any(String),
+      workerName: "hosted-worker",
+    });
+    expect(dependencies.deployVersions).not.toHaveBeenCalled();
+    expect(dependencies.uploadVersion).not.toHaveBeenCalled();
+    expect(result.mode).toBe("direct");
+  });
+
   it("keeps deployment and version message overrides scoped to the gradual upload flow", async () => {
     const currentDeployment: DeploymentStatusPayload = {
       created_on: "2026-03-27T00:00:00.000Z",
