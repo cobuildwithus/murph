@@ -50,6 +50,7 @@ import {
   appendAssistantTurnReceiptEvent,
 } from './turns.js'
 import { createIntegratedVaultServices } from '@murphai/vault-usecases/vault-services'
+import { createAssistantFoodAutoLogHooks } from './food-auto-log-hooks.js'
 import type { AssistantMessageInput } from './service-contracts.js'
 
 interface AssistantTurnSharedPlan {
@@ -239,7 +240,9 @@ function buildAssistantProviderTurnExecutionPlan(input: {
     requestId: input.turnId,
     sessionId: input.resolvedSession.sessionId,
     vault: input.input.vault,
-    vaultServices: createIntegratedVaultServices(),
+    vaultServices: createIntegratedVaultServices({
+      foodAutoLogHooks: createAssistantFoodAutoLogHooks(),
+    }),
     workingDirectory: input.plan.requestedWorkingDirectory,
   })
 
