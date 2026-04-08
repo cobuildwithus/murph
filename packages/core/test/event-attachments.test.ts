@@ -45,7 +45,7 @@ async function createSourceFile(vaultRoot: string, fileName: string, content: st
 }
 
 const WORKOUT_OWNER_ID = "wfmt_01JNV422Y2M5ZBV64ZP4N1DRB1";
-const IMPORT_ID = "wkimp_01JNV422Y2M5ZBV64ZP4N1DRB1";
+const IMPORT_ID = "xfm_01JNV422Y2M5ZBV64ZP4N1DRB1";
 
 function makeCompatibilityAttachment(input: {
   role: string;

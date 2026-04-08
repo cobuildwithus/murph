@@ -34,7 +34,6 @@ import { parseFrontmatterDocument } from "./frontmatter.ts";
 import { generateVaultId } from "./ids.ts";
 import { readJsonlRecords } from "./jsonl.ts";
 import { stageMarkdownDocumentWrite } from "./markdown-documents.ts";
-import { parseRawImportManifestWithLegacySupport } from "./operations/raw-manifests.ts";
 import { normalizeVaultRoot, resolveVaultPath } from "./path-safety.ts";
 import { rawDirectoryMatchesOwner } from "./raw.ts";
 import {
@@ -777,16 +776,7 @@ async function validateRawManifestFile(
   const isInboxAttachmentRecoveryManifest =
     isEnvelopeBasedInboxRawPath(relativePath)
     && expectedRawDirectory.endsWith("/attachments");
-  const contractResult = (() => {
-    try {
-      return {
-        success: true as const,
-        data: parseRawImportManifestWithLegacySupport(manifest),
-      };
-    } catch {
-      return safeParseContract(rawImportManifestSchema, manifest);
-    }
-  })();
+  const contractResult = safeParseContract(rawImportManifestSchema, manifest);
 
   if (!contractResult.success && !isInboxAttachmentRecoveryManifest) {
     issues.push(

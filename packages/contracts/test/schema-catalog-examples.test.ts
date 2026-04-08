@@ -249,13 +249,13 @@ describe("schema catalog and example seam", () => {
     });
     expect(safeParseContract(rawAssetOwnerContract, {
       kind: "workout_batch",
-      id: "wkimp_0123456789ABCDEFGHJKMNPQRS",
+      id: "xfm_0123456789ABCDEFGHJKMNPQRS",
       partition: "2026-04",
     })).toEqual({
       success: true,
       data: {
         kind: "workout_batch",
-        id: "wkimp_0123456789ABCDEFGHJKMNPQRS",
+        id: "xfm_0123456789ABCDEFGHJKMNPQRS",
         partition: "2026-04",
       },
     });
@@ -314,13 +314,13 @@ describe("schema catalog and example seam", () => {
     });
     expect(safeParseContract(rawImportManifestContract, {
       schemaVersion: "murph.raw-import-manifest.v2",
-      importId: "wkimp_0123456789ABCDEFGHJKMNPQRS",
+      importId: "xfm_0123456789ABCDEFGHJKMNPQRS",
       importKind: "workout_batch",
       importedAt: "2026-04-08T10:11:12.000Z",
       source: null,
       owner: {
         kind: "workout_batch",
-        id: "wkimp_0123456789ABCDEFGHJKMNPQRS",
+        id: "xfm_0123456789ABCDEFGHJKMNPQRS",
         partition: "2026-04",
       },
       rawDirectory: "raw/workouts/2026/04",
@@ -330,13 +330,13 @@ describe("schema catalog and example seam", () => {
       success: true,
       data: {
         schemaVersion: "murph.raw-import-manifest.v2",
-        importId: "wkimp_0123456789ABCDEFGHJKMNPQRS",
+        importId: "xfm_0123456789ABCDEFGHJKMNPQRS",
         importKind: "workout_batch",
         importedAt: "2026-04-08T10:11:12.000Z",
         source: null,
         owner: {
           kind: "workout_batch",
-          id: "wkimp_0123456789ABCDEFGHJKMNPQRS",
+          id: "xfm_0123456789ABCDEFGHJKMNPQRS",
           partition: "2026-04",
         },
         rawDirectory: "raw/workouts/2026/04",

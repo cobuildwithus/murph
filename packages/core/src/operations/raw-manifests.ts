@@ -15,8 +15,7 @@ import {
 
 import type { WriteBatch } from "./write-batch.ts";
 import { normalizeRelativeVaultPath } from "../path-safety.ts";
-import { inferRawAssetOwnerFromDirectory, rawDirectoryMatchesOwner } from "../raw.ts";
-import { isPlainRecord } from "../types.ts";
+import { rawDirectoryMatchesOwner } from "../raw.ts";
 
 interface RawArtifactLike {
   relativePath: string;
@@ -53,7 +52,6 @@ export interface BuildRawImportManifestInput {
 }
 
 const RAW_MANIFEST_OPERATOR_METADATA_KEY = "operatorMetadata";
-const LEGACY_RAW_IMPORT_MANIFEST_SCHEMA_VERSION = "murph.raw-import-manifest.v1";
 
 export async function describeRawArtifact(
   artifact: RawArtifactLike,
@@ -197,32 +195,8 @@ export function buildRawImportManifest({
   });
 }
 
-export function parseRawImportManifestWithLegacySupport(manifest: unknown): RawImportManifest {
-  const parsedManifest = rawImportManifestSchema.safeParse(manifest);
-  if (parsedManifest.success) {
-    return parsedManifest.data;
-  }
-
-  if (!isPlainRecord(manifest) || manifest.schemaVersion !== LEGACY_RAW_IMPORT_MANIFEST_SCHEMA_VERSION) {
-    throw parsedManifest.error;
-  }
-
-  const rawDirectory =
-    typeof manifest.rawDirectory === "string"
-      ? normalizeRelativeVaultPath(manifest.rawDirectory)
-      : null;
-  const owner = rawDirectory ? inferRawAssetOwnerFromDirectory(rawDirectory) : null;
-
-  if (!rawDirectory || !owner) {
-    throw parsedManifest.error;
-  }
-
-  return rawImportManifestSchema.parse({
-    ...manifest,
-    schemaVersion: CONTRACT_SCHEMA_VERSION.rawImportManifest,
-    owner,
-    rawDirectory,
-  });
+export function parseRawImportManifest(manifest: unknown): RawImportManifest {
+  return rawImportManifestSchema.parse(manifest);
 }
 
 export async function stageRawImportManifest({

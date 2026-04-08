@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   buildRawImportManifest,
   initializeVault,
-  parseRawImportManifestWithLegacySupport,
+  parseRawImportManifest,
   resolveRawAssetDirectory,
   validateVault,
 } from "../src/index.ts";
@@ -153,13 +153,17 @@ describe("raw owner model", () => {
     ).toThrow(/does not match owner/);
   });
 
-  it("normalizes legacy v1 manifests by inferring owner metadata from rawDirectory", () => {
-    const manifest = parseRawImportManifestWithLegacySupport({
-      schemaVersion: "murph.raw-import-manifest.v1",
+  it("parses current raw import manifests without mutating their owner metadata", () => {
+    const manifest = parseRawImportManifest({
+      schemaVersion: CONTRACT_SCHEMA_VERSION.rawImportManifest,
       importId: "doc_01ARZ3NDEKTSV4RRFFQ69G5FAV",
       importKind: "document",
       importedAt: FIXED_TIME,
       source: "manual",
+      owner: {
+        kind: "document",
+        id: "doc_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+      },
       rawDirectory: "raw/documents/2026/04/doc_01ARZ3NDEKTSV4RRFFQ69G5FAV",
       artifacts: [
         {
@@ -248,7 +252,7 @@ describe("raw owner model", () => {
     ).toBe(true);
   });
 
-  it("accepts legacy v1 canonical raw manifests during validation", async () => {
+  it("rejects legacy v1 canonical raw manifests during validation", async () => {
     const vaultRoot = await createTempVault();
     const rawDirectory = "raw/documents/2026/04/doc_01ARZ3NDEKTSV4RRFFQ69G5FAV";
     const rawFile = `${rawDirectory}/report.pdf`;
@@ -290,10 +294,17 @@ describe("raw owner model", () => {
 
     const result = await validateVault({ vaultRoot });
 
-    expect(result.valid).toBe(true);
+    expect(result.valid).toBe(false);
+    expect(
+      result.issues.some(
+        (issue) =>
+          issue.code === "RAW_MANIFEST_INVALID"
+          && issue.path === manifestPath,
+      ),
+    ).toBe(true);
   });
 
-  it("accepts legacy wkimp workout-batch manifests during validation and legacy parsing", async () => {
+  it("rejects legacy wkimp workout-batch manifests during parsing and validation", async () => {
     const vaultRoot = await createTempVault();
     const rawDirectory = "raw/workouts/strong/2026/04/wkimp_01ARZ3NDEKTSV4RRFFQ69G5FAV";
     const rawFile = `${rawDirectory}/workout.csv`;
@@ -333,16 +344,20 @@ describe("raw owner model", () => {
       "utf8",
     );
 
-    const manifest = parseRawImportManifestWithLegacySupport(
-      JSON.parse(await readFile(resolveVaultPath(vaultRoot, manifestPath).absolutePath, "utf8")) as unknown,
-    );
+    await expect(
+      readFile(resolveVaultPath(vaultRoot, manifestPath).absolutePath, "utf8").then((manifestText) =>
+        parseRawImportManifest(JSON.parse(manifestText) as unknown),
+      ),
+    ).rejects.toThrow();
     const result = await validateVault({ vaultRoot });
 
-    expect(manifest.owner).toEqual({
-      kind: "workout_batch",
-      id: "wkimp_01ARZ3NDEKTSV4RRFFQ69G5FAV",
-      partition: "strong",
-    });
-    expect(result.valid).toBe(true);
+    expect(result.valid).toBe(false);
+    expect(
+      result.issues.some(
+        (issue) =>
+          issue.code === "RAW_MANIFEST_INVALID"
+          && issue.path === manifestPath,
+      ),
+    ).toBe(true);
   });
 });

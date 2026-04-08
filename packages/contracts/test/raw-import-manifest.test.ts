@@ -7,7 +7,7 @@ import {
 } from "../src/zod.ts";
 
 const VALID_ULID = "0123456789ABCDEFGHJKMNPQRS";
-const LEGACY_WORKOUT_IMPORT_ID = `wkimp_${VALID_ULID}`;
+const WORKOUT_IMPORT_ID = `${ID_PREFIXES.transform}_${VALID_ULID}`;
 
 describe("raw import manifest schemas", () => {
   it("accepts owners that require or forbid partitions according to kind", () => {
@@ -26,12 +26,12 @@ describe("raw import manifest schemas", () => {
     expect(
       rawAssetOwnerSchema.parse({
         kind: "workout_batch",
-        id: LEGACY_WORKOUT_IMPORT_ID,
+        id: WORKOUT_IMPORT_ID,
         partition: "apple-health",
       }),
     ).toEqual({
       kind: "workout_batch",
-      id: LEGACY_WORKOUT_IMPORT_ID,
+      id: WORKOUT_IMPORT_ID,
       partition: "apple-health",
     });
 
@@ -74,13 +74,13 @@ describe("raw import manifest schemas", () => {
     expect(
       rawImportManifestSchema.parse({
         schemaVersion: CONTRACT_SCHEMA_VERSION.rawImportManifest,
-        importId: LEGACY_WORKOUT_IMPORT_ID,
+        importId: WORKOUT_IMPORT_ID,
         importKind: "workout_batch",
         importedAt: "2026-04-08T05:00:00.000Z",
         source: "apple-health",
         owner: {
           kind: "workout_batch",
-          id: LEGACY_WORKOUT_IMPORT_ID,
+          id: WORKOUT_IMPORT_ID,
           partition: "apple-health",
         },
         rawDirectory: "raw/workouts/2026/04/08",
@@ -99,7 +99,7 @@ describe("raw import manifest schemas", () => {
         },
       }),
     ).toMatchObject({
-      importId: LEGACY_WORKOUT_IMPORT_ID,
+      importId: WORKOUT_IMPORT_ID,
       owner: {
         kind: "workout_batch",
       },
@@ -114,7 +114,34 @@ describe("raw import manifest schemas", () => {
         source: null,
         owner: {
           kind: "workout_batch",
-          id: LEGACY_WORKOUT_IMPORT_ID,
+          id: WORKOUT_IMPORT_ID,
+          partition: "apple-health",
+        },
+        rawDirectory: "raw/workouts/2026/04/08",
+        artifacts: [
+          {
+            role: "source",
+            relativePath: "raw/workouts/2026/04/08/workout.json",
+            originalFileName: "workout.json",
+            mediaType: "application/json",
+            byteSize: 512,
+            sha256: "a".repeat(64),
+          },
+        ],
+        provenance: {},
+      }),
+    ).toThrow(/Invalid raw import id/u);
+
+    expect(() =>
+      rawImportManifestSchema.parse({
+        schemaVersion: CONTRACT_SCHEMA_VERSION.rawImportManifest,
+        importId: `wkimp_${VALID_ULID}`,
+        importKind: "workout_batch",
+        importedAt: "2026-04-08T05:00:00.000Z",
+        source: null,
+        owner: {
+          kind: "workout_batch",
+          id: WORKOUT_IMPORT_ID,
           partition: "apple-health",
         },
         rawDirectory: "raw/workouts/2026/04/08",
