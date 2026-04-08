@@ -10,11 +10,15 @@ vi.mock("@privy-io/react-auth", () => ({
   getIdentityToken: mocks.getIdentityToken,
 }));
 
-import { requestHostedOnboardingJson } from "@/src/components/hosted-onboarding/client-api";
+import {
+  requestHostedOnboardingJson,
+  resetHostedOnboardingAuthHeadersForTests,
+} from "@/src/components/hosted-onboarding/client-api";
 
 describe("hosted onboarding client auth headers", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    resetHostedOnboardingAuthHeadersForTests();
     vi.stubGlobal("location", {
       origin: "https://join.example.test",
     });
@@ -241,8 +245,8 @@ describe("hosted onboarding client auth headers", () => {
       url: "/api/hosted-onboarding/example",
     })).resolves.toEqual({ ok: true });
 
-    expect(mocks.getAccessToken).toHaveBeenCalledTimes(2);
-    expect(mocks.getIdentityToken).toHaveBeenCalledTimes(2);
+    expect(mocks.getAccessToken).toHaveBeenCalledTimes(3);
+    expect(mocks.getIdentityToken).toHaveBeenCalledTimes(3);
   });
 
   it("fails cleanly when a successful response has an empty body", async () => {

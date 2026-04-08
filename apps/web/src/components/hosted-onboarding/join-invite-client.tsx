@@ -1,7 +1,7 @@
 "use client";
 
 import { usePrivy } from "@privy-io/react-auth";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -28,6 +28,10 @@ import {
   JoinInviteSharePreviewAlert,
   JoinInviteStageContent,
 } from "./join-invite-sections";
+import {
+  logHostedPrivySessionDebug,
+  sanitizeHostedPrivyDebugError,
+} from "./privy-session-debug";
 import { useJoinInviteShareImport } from "./use-join-invite-share-import";
 
 interface JoinInviteClientProps {
@@ -67,11 +71,24 @@ export function JoinInviteClient({
     authenticated,
     inviteCode,
     onError: (error: unknown) => {
+      logHostedPrivySessionDebug("join:status-refresh-error", {
+        authenticated,
+        error: sanitizeHostedPrivyDebugError(error),
+        ready,
+        sessionAuthenticated: status.session.authenticated,
+        stage: status.stage,
+      });
       setStatusRefreshErrorMessage(
         error instanceof Error ? error.message : "We could not refresh your signup state.",
       );
     },
     onStatus: (payload) => {
+      logHostedPrivySessionDebug("join:status-refresh-success", {
+        authenticated,
+        ready,
+        sessionAuthenticated: payload.session.authenticated,
+        stage: payload.stage,
+      });
       setStatus(payload);
       setStatusRefreshErrorMessage(null);
     },
@@ -80,11 +97,42 @@ export function JoinInviteClient({
     shouldPoll: status.stage === "activating",
   });
 
+  useEffect(() => {
+    logHostedPrivySessionDebug("join:state", {
+      authenticated,
+      awaitingInviteSessionResolution,
+      ready,
+      sessionAuthenticated: status.session.authenticated,
+      stage: status.stage,
+      statusMatchesInvite: status.session.matchesInvite,
+    });
+  }, [
+    authenticated,
+    awaitingInviteSessionResolution,
+    ready,
+    status.session.authenticated,
+    status.session.matchesInvite,
+    status.stage,
+  ]);
+
   async function refreshStatus(): Promise<HostedInviteStatusPayload> {
+    logHostedPrivySessionDebug("join:refresh-status:start", {
+      authenticated,
+      authMode: resolveHostedInviteStatusAuthMode(authenticated),
+      ready,
+      sessionAuthenticated: status.session.authenticated,
+      stage: status.stage,
+    });
     const payload = await fetchHostedInviteStatus(
       inviteCode,
       resolveHostedInviteStatusAuthMode(authenticated),
     );
+    logHostedPrivySessionDebug("join:refresh-status:success", {
+      authenticated,
+      ready,
+      sessionAuthenticated: payload.session.authenticated,
+      stage: payload.stage,
+    });
     setStatus(payload);
     setStatusRefreshErrorMessage(null);
     return payload;
@@ -155,6 +203,12 @@ export function JoinInviteClient({
 
   async function handlePhoneVerified(payload: HostedPrivyCompletionPayload) {
     const nextStatus = resolveInviteStatusAfterPrivyCompletion(status, payload);
+    logHostedPrivySessionDebug("join:phone-verified", {
+      nextStage: nextStatus.stage,
+      payloadStage: payload.stage,
+      sessionAuthenticated: nextStatus.session.authenticated,
+      statusMatchesInvite: nextStatus.session.matchesInvite,
+    });
     setStatus(nextStatus);
 
     if (payload.stage === "checkout" && nextStatus.capabilities.billingReady) {
