@@ -180,4 +180,27 @@ describe("HostedPhoneAuth", () => {
     assert.equal(finalizationState, "idle");
     assert.deepEqual(pendingActions, ["continue", null]);
   });
+
+  it("keeps the invite known-number code step out of manual phone entry", async () => {
+    const { shouldShowHostedPhoneNumberEntry } = await import("@/src/components/hosted-onboarding/hosted-phone-auth");
+
+    assert.equal(
+      shouldShowHostedPhoneNumberEntry({
+        authenticated: false,
+        manualEntryVisible: false,
+        mode: "invite",
+        step: "code",
+      }),
+      false,
+    );
+    assert.equal(
+      shouldShowHostedPhoneNumberEntry({
+        authenticated: false,
+        manualEntryVisible: false,
+        mode: "invite",
+        step: "phone",
+      }),
+      true,
+    );
+  });
 });
