@@ -6,6 +6,7 @@ import { test } from "vitest";
 
 import {
   ASSISTANT_USAGE_SCHEMA,
+  type AssistantUsageRecord,
   createAssistantUsageId,
   deletePendingAssistantUsageRecord,
   listPendingAssistantUsageRecords,
@@ -19,7 +20,7 @@ test("assistant usage records round-trip through pending storage and sort by occ
   const vaultRoot = path.join(parent, "vault");
 
   try {
-    const laterRecord = {
+    const laterRecord: AssistantUsageRecord = {
       apiKeyEnv: "OPENAI_API_KEY",
       attemptCount: 2,
       baseUrl: "https://api.example.test/v1",
@@ -53,7 +54,7 @@ test("assistant usage records round-trip through pending storage and sort by occ
         turnId: "turn_123",
       }),
     };
-    const earlierRecord = {
+    const earlierRecord: AssistantUsageRecord = {
       ...laterRecord,
       attemptCount: 1,
       occurredAt: "2026-03-29T12:00:00.000Z",

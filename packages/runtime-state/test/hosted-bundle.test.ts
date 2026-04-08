@@ -573,7 +573,7 @@ test("hosted execution can defer artifact materialization until a targeted resto
     await assert.rejects(
       readFile(path.join(restored.vaultRoot, "raw", "inbox", "example", "scan.pdf")),
     );
-    assert.deepEqual(resolvedHashes, []);
+    assert.equal(resolvedHashes.length, 0);
 
     await materializeHostedExecutionArtifacts({
       artifactResolver: async ({ ref }) => {

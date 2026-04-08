@@ -1,0 +1,26 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "noEmit": true,
+    "paths": {
+      "@murphai/runtime-state": [
+        "./src/index.ts"
+      ],
+      "@murphai/runtime-state/node": [
+        "./src/node/index.ts"
+      ]
+    },
+    "rootDir": ".",
+    "composite": false,
+    "incremental": false
+  },
+  "include": [
+    "src/**/*.ts",
+    "test/**/*.ts"
+  ],
+  "exclude": [
+    "dist",
+    "coverage"
+  ]
+}

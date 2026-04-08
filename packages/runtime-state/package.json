@@ -26,8 +26,9 @@
   ],
   "scripts": {
     "build": "node ../../scripts/rm-paths.mjs dist && tsc -b tsconfig.json --force",
-    "typecheck": "tsc -p tsconfig.json --noEmit --pretty false",
-    "test": "pnpm exec vitest run --config vitest.config.ts --no-coverage"
+    "typecheck": "tsc -p tsconfig.typecheck.json --pretty false",
+    "test": "pnpm exec vitest run --config vitest.config.ts --no-coverage",
+    "test:coverage": "pnpm exec vitest run --config vitest.config.ts --coverage"
   },
   "engines": {
     "node": ">=22.16.0"
