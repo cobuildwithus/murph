@@ -86,10 +86,6 @@
     "./outbound-channel": {
       "types": "./dist/outbound-channel.d.ts",
       "default": "./dist/outbound-channel.js"
-    },
-    "./process-kill": {
-      "types": "./dist/process-kill.d.ts",
-      "default": "./dist/process-kill.js"
     }
   },
   "files": [

@@ -1,5 +1,5 @@
 import { assistantStopResultSchema } from '@murphai/operator-config/assistant-cli-contracts'
-import { tryKillProcess } from '@murphai/assistant-engine/process-kill'
+import { tryKillProcess } from '@murphai/runtime-state/node'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   redactAssistantDisplayPath,

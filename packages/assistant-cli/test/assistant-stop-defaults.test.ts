@@ -18,7 +18,7 @@ const automationMocks = vi.hoisted(() => ({
   inspectAssistantAutomationRunLock: vi.fn(),
 }))
 
-vi.mock('@murphai/assistant-engine/process-kill', () => ({
+vi.mock('@murphai/runtime-state/node', () => ({
   tryKillProcess: processKillMocks.tryKillProcess,
 }))
 

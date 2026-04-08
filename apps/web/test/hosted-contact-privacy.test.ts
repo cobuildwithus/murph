@@ -1,12 +1,13 @@
 import { describe, expect, it } from "vitest";
 
+import { minimizeLinqMessageReceivedEvent } from "@murphai/messaging-ingress";
+
 import { parseHostedDeviceSyncRuntimeApplyRequest } from "@/src/lib/device-sync/internal-runtime";
 import { sanitizeHostedLinqEventForStorage } from "@/src/lib/hosted-onboarding/contact-privacy";
-import { minimizeHostedLinqMessageReceivedEvent } from "@/src/lib/hosted-onboarding/webhook-event-snapshots";
 
 describe("hosted contact privacy", () => {
   it("preserves Linq attachment URLs in minimized webhook snapshots", () => {
-    const minimized = minimizeHostedLinqMessageReceivedEvent({
+    const minimized = minimizeLinqMessageReceivedEvent({
       api_version: "2026-04-01",
       created_at: "2026-04-01T00:00:00.000Z",
       webhook_version: "2026-02-03",

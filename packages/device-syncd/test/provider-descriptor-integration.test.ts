@@ -4,7 +4,7 @@ import {
   GARMIN_DEVICE_PROVIDER_DESCRIPTOR,
   OURA_DEVICE_PROVIDER_DESCRIPTOR,
   WHOOP_DEVICE_PROVIDER_DESCRIPTOR,
-} from "@murphai/importers";
+} from "@murphai/importers/device-providers/provider-descriptors";
 
 import { createGarminDeviceSyncProvider } from "../src/providers/garmin.ts";
 import { createOuraDeviceSyncProvider } from "../src/providers/oura.ts";

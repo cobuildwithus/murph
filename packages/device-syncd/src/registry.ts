@@ -1,4 +1,4 @@
-import { createNamedDeviceProviderRegistry } from "@murphai/importers";
+import { createNamedDeviceProviderRegistry } from "@murphai/importers/device-providers/provider-descriptors";
 
 import type { DeviceSyncProvider, DeviceSyncRegistry } from "./types.ts";
 
