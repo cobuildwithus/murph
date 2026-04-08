@@ -20,6 +20,7 @@ import type {
   EmailDriver,
   ImessageDriver,
   InboxAppEnvironment,
+  InboxImessageRuntimeModule,
   InboxServicesDependencies,
   InboxRuntimeModule,
   ParsersRuntimeModule,
@@ -58,6 +59,40 @@ function createParserRuntimeUnavailableError(
   )
 }
 
+function createImessageRuntimeUnavailableError(
+  operation: string,
+  cause?: unknown,
+): VaultCliError {
+  const details =
+    cause instanceof Error
+      ? {
+          cause: cause.message,
+          packages: ['@murphai/inboxd-imessage'],
+        }
+      : {
+          packages: ['@murphai/inboxd-imessage'],
+        }
+
+  return new VaultCliError(
+    'runtime_unavailable',
+    `packages/cli can describe ${operation}, but local execution is blocked until the integrating workspace builds and links @murphai/inboxd-imessage.`,
+    details,
+  )
+}
+
+function isInboxImessageRuntimeModule(
+  value: unknown,
+): value is InboxImessageRuntimeModule {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'createImessageConnector' in value &&
+    typeof value.createImessageConnector === 'function' &&
+    'loadImessageKitDriver' in value &&
+    typeof value.loadImessageKitDriver === 'function'
+  )
+}
+
 export { IMESSAGE_MESSAGES_DB_RELATIVE_PATH }
 
 export function createInboxAppEnvironment(
@@ -88,6 +123,31 @@ export function createInboxAppEnvironment(
   const loadInbox =
     dependencies.loadInboxModule ??
     (() => loadRuntimeModule<InboxRuntimeModule>('@murphai/inboxd'))
+  const loadInboxImessage = async (): Promise<InboxImessageRuntimeModule> => {
+    try {
+      if (dependencies.inboxImessageModule) {
+        return dependencies.inboxImessageModule
+      }
+
+      if (dependencies.loadInboxImessageModule) {
+        return dependencies.loadInboxImessageModule()
+      }
+
+      if (dependencies.loadInboxModule) {
+        const legacyInboxModule = await loadInbox()
+        if (isInboxImessageRuntimeModule(legacyInboxModule)) {
+          return legacyInboxModule
+        }
+      }
+
+      return loadRuntimeModule<InboxImessageRuntimeModule>('@murphai/inboxd-imessage')
+    } catch (error) {
+      throw createImessageRuntimeUnavailableError(
+        'the iMessage inbox connector',
+        error,
+      )
+    }
+  }
   const loadParsers =
     dependencies.loadParsersModule ??
     (() => loadRuntimeModule<ParsersRuntimeModule>('@murphai/parsers'))
@@ -112,8 +172,18 @@ export function createInboxAppEnvironment(
       return dependencies.loadImessageDriver(config)
     }
 
-    const inboxd = await loadInbox()
-    return inboxd.loadImessageKitDriver()
+    try {
+      const inboxImessage = await loadInboxImessage()
+      return inboxImessage.loadImessageKitDriver()
+    } catch (error) {
+      if (error instanceof VaultCliError && error.code === 'runtime_unavailable') {
+        throw error
+      }
+      throw createImessageRuntimeUnavailableError(
+        `the iMessage inbox connector for "${config.id}"`,
+        error,
+      )
+    }
   }
 
   const loadConfiguredTelegramDriver = async (
@@ -395,6 +465,7 @@ export function createInboxAppEnvironment(
     loadCore,
     loadImporters,
     loadInbox,
+    loadInboxImessage,
     loadParsers,
     loadQuery,
     requireParsers,

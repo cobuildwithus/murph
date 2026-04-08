@@ -281,6 +281,17 @@ export interface ImessageDriver {
   listChats?(): Promise<unknown[]>
 }
 
+export interface InboxImessageRuntimeModule {
+  createImessageConnector(input: {
+    driver: ImessageDriver
+    id?: string
+    accountId?: string | null
+    includeOwnMessages?: boolean
+    backfillLimit?: number
+  }): PollConnector
+  loadImessageKitDriver(): Promise<ImessageDriver>
+}
+
 export interface TelegramDriver {
   getMe(signal?: AbortSignal): Promise<unknown>
   getMessages(input: {
@@ -337,13 +348,6 @@ export interface InboxRuntimeModule {
     vaultRoot: string
     runtime: RuntimeStore
   }): Promise<InboxPipeline>
-  createImessageConnector(input: {
-    driver: ImessageDriver
-    id?: string
-    accountId?: string | null
-    includeOwnMessages?: boolean
-    backfillLimit?: number
-  }): PollConnector
   createTelegramPollConnector(input: {
     driver: TelegramDriver
     id?: string
@@ -382,7 +386,6 @@ export interface InboxRuntimeModule {
     inboxId: string
     baseUrl?: string
   }): EmailDriver
-  loadImessageKitDriver(): Promise<ImessageDriver>
   rebuildRuntimeFromVault(input: {
     vaultRoot: string
     runtime: RuntimeStore
@@ -559,6 +562,8 @@ export interface InboxServicesDependencies {
   loadCoreModule?: () => Promise<CoreRuntimeModule>
   loadImportersModule?: () => Promise<ImportersFactoryRuntimeModule>
   loadInboxModule?: () => Promise<InboxRuntimeModule>
+  inboxImessageModule?: InboxImessageRuntimeModule
+  loadInboxImessageModule?: () => Promise<InboxImessageRuntimeModule>
   loadParsersModule?: () => Promise<ParsersRuntimeModule>
   loadQueryModule?: () => Promise<QueryRuntimeModule>
   loadImessageDriver?: (config: InboxConnectorConfig) => Promise<ImessageDriver>
@@ -762,6 +767,7 @@ export interface InboxAppEnvironment {
   loadCore: () => Promise<CoreRuntimeModule>
   loadImporters: () => Promise<ImportersFactoryRuntimeModule>
   loadInbox: () => Promise<InboxRuntimeModule>
+  loadInboxImessage: () => Promise<InboxImessageRuntimeModule>
   loadParsers: () => Promise<ParsersRuntimeModule>
   loadQuery: () => Promise<QueryRuntimeModule>
   requireParsers: (operation: string) => Promise<ParsersRuntimeModule>

@@ -416,6 +416,9 @@ importers:
       '@murphai/inboxd':
         specifier: workspace:*
         version: link:../inboxd
+      '@murphai/inboxd-imessage':
+        specifier: workspace:*
+        version: link:../inboxd-imessage
       '@murphai/messaging-ingress':
         specifier: workspace:*
         version: link:../messaging-ingress
@@ -595,12 +598,18 @@ importers:
       '@murphai/runtime-state':
         specifier: workspace:*
         version: link:../runtime-state
-      '@photon-ai/imessage-kit':
-        specifier: 2.1.2
-        version: 2.1.2
       grammy:
         specifier: 1.41.1
         version: 1.41.1
+
+  packages/inboxd-imessage:
+    dependencies:
+      '@murphai/inboxd':
+        specifier: workspace:*
+        version: link:../inboxd
+      '@photon-ai/imessage-kit':
+        specifier: 2.1.2
+        version: 2.1.2
 
   packages/messaging-ingress: {}
 

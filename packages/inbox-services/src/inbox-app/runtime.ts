@@ -285,12 +285,13 @@ export function createInboxRuntimeOps(
         const connector = await instantiateConnector({
           connector: connectorConfig,
           inputLimit: input.limit,
+          loadInbox: env.loadInbox,
+          loadInboxImessage: env.loadInboxImessage,
           loadImessageDriver: env.loadConfiguredImessageDriver,
           loadTelegramDriver: env.loadConfiguredTelegramDriver,
           loadEmailDriver: env.loadConfiguredEmailDriver,
           linqWebhookSecret: resolveLinqWebhookSecret(env.getEnvironment()),
           ensureImessageReady: env.ensureConfiguredImessageReady,
-          loadInbox: env.loadInbox,
         })
         let importedCount = 0
         let dedupedCount = 0
@@ -390,12 +391,13 @@ export function createInboxRuntimeOps(
         try {
           const instantiated = await instantiateConnector({
             connector,
+            loadInbox: env.loadInbox,
+            loadInboxImessage: env.loadInboxImessage,
             loadImessageDriver: env.loadConfiguredImessageDriver,
             loadTelegramDriver: env.loadConfiguredTelegramDriver,
             loadEmailDriver: env.loadConfiguredEmailDriver,
             linqWebhookSecret,
             ensureImessageReady: env.ensureConfiguredImessageReady,
-            loadInbox: env.loadInbox,
           })
           activeConnectorConfigs.push(connector)
           instrumentedConnectors.push(

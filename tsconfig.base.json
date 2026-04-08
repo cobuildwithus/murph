@@ -79,6 +79,9 @@
       "@murphai/inboxd": [
         "packages/inboxd/src/index.ts"
       ],
+      "@murphai/inboxd-imessage": [
+        "packages/inboxd-imessage/src/index.ts"
+      ],
       "@murphai/inboxd/connectors/email/normalize-parsed": [
         "packages/inboxd/src/connectors/email/normalize-parsed.ts"
       ],

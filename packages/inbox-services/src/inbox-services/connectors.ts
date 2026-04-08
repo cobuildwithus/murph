@@ -4,6 +4,7 @@ import type {
 import type {
   EmailDriver,
   ImessageDriver,
+  InboxImessageRuntimeModule,
   InboxRuntimeModule,
   PollConnector,
   TelegramDriver,
@@ -14,19 +15,23 @@ export async function instantiateConnector(input: {
   connector: InboxConnectorConfig
   inputLimit?: number
   loadInbox: () => Promise<InboxRuntimeModule>
+  loadInboxImessage?: () => Promise<InboxImessageRuntimeModule>
   loadImessageDriver: (config: InboxConnectorConfig) => Promise<ImessageDriver>
   loadTelegramDriver: (config: InboxConnectorConfig) => Promise<TelegramDriver>
   loadEmailDriver?: (config: InboxConnectorConfig) => Promise<EmailDriver>
   linqWebhookSecret: string | null
   ensureImessageReady?: () => Promise<void>
 }): Promise<PollConnector> {
-  const inboxd = await input.loadInbox()
-
   switch (input.connector.source) {
     case 'imessage': {
+      if (!input.loadInboxImessage) {
+        throw new Error('iMessage connector instantiation requires loadInboxImessage.')
+      }
+
       await input.ensureImessageReady?.()
+      const inboxImessage = await input.loadInboxImessage()
       const driver = await input.loadImessageDriver(input.connector)
-      return inboxd.createImessageConnector({
+      return inboxImessage.createImessageConnector({
         driver,
         id: input.connector.id,
         accountId: input.connector.accountId ?? 'self',
@@ -39,6 +44,7 @@ export async function instantiateConnector(input: {
       })
     }
     case 'telegram': {
+      const inboxd = await input.loadInbox()
       const driver = await input.loadTelegramDriver(input.connector)
       return inboxd.createTelegramPollConnector({
         driver,
@@ -53,6 +59,7 @@ export async function instantiateConnector(input: {
       })
     }
     case 'email': {
+      const inboxd = await input.loadInbox()
       if (!input.loadEmailDriver) {
         throw new Error('Email connector instantiation requires loadEmailDriver.')
       }
@@ -69,6 +76,7 @@ export async function instantiateConnector(input: {
       })
     }
     case 'linq': {
+      const inboxd = await input.loadInbox()
       const webhookSecret = requireLinqWebhookSecret(input.linqWebhookSecret)
       return inboxd.createLinqWebhookConnector({
         id: input.connector.id,
