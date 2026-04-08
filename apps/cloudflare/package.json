@@ -55,6 +55,7 @@
     "@murphai/device-syncd": "workspace:*",
     "@murphai/gateway-core": "workspace:*",
     "@murphai/hosted-execution": "workspace:*",
+    "@murphai/murph": "workspace:*",
     "@murphai/inboxd": "workspace:*",
     "@murphai/parsers": "workspace:*",
     "@murphai/runtime-state": "workspace:*",

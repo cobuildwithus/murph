@@ -3,16 +3,14 @@ export const runnerBundleDirectoryName = "runner-bundle";
 export const hostedRunnerRuntimePackageName = "@murphai/cloudflare-runner";
 export const hostedRunnerRuntimeDistDirectoryName = "dist";
 
-export const runnerVaultCliArtifactPackageName =
-  "@murphai/cloudflare-runner-vault-cli";
-
-export const hostedRunnerWorkerDependencyNames = [
+export const hostedRunnerRuntimeDependencyNames = [
   "@cloudflare/containers",
   "@murphai/assistant-runtime",
   "@murphai/cloudflare-hosted-control",
   "@murphai/device-syncd",
   "@murphai/gateway-core",
   "@murphai/hosted-execution",
+  "@murphai/murph",
   "@murphai/inboxd",
   "@murphai/parsers",
   "@murphai/runtime-state",
@@ -33,6 +31,7 @@ export const hostedRunnerWorkspacePackageNames = [
   "@murphai/inbox-services",
   "@murphai/inboxd",
   "@murphai/messaging-ingress",
+  "@murphai/murph",
   "@murphai/operator-config",
   "@murphai/parsers",
   "@murphai/query",
@@ -40,51 +39,42 @@ export const hostedRunnerWorkspacePackageNames = [
   "@murphai/vault-usecases",
 ] as const;
 
-export const runnerVaultCliArtifactDependencyNames = [
+export const publishedMurphBundledWorkspacePackageNames = [
+  "@murphai/assistant-cli",
   "@murphai/assistant-engine",
-  "@murphai/contracts",
-  "@murphai/core",
-  "@murphai/inbox-services",
-  "@murphai/operator-config",
-  "@murphai/query",
-  "@murphai/vault-usecases",
-  "incur",
-] as const;
-
-export const runnerVaultCliArtifactWorkspacePackageNames = [
-  "@murphai/assistant-engine",
-  "@murphai/contracts",
+  "@murphai/assistantd",
   "@murphai/core",
   "@murphai/device-syncd",
-  "@murphai/gateway-core",
   "@murphai/gateway-local",
-  "@murphai/hosted-execution",
   "@murphai/importers",
   "@murphai/inbox-services",
   "@murphai/inboxd",
+  "@murphai/inboxd-imessage",
   "@murphai/messaging-ingress",
   "@murphai/operator-config",
   "@murphai/parsers",
   "@murphai/query",
   "@murphai/runtime-state",
+  "@murphai/setup-cli",
   "@murphai/vault-usecases",
 ] as const;
 
+const hostedRunnerWorkspacePackageNameSet = new Set<string>(
+  hostedRunnerWorkspacePackageNames,
+);
+
 export const hostedRunnerBuildPackageNames = [
-  ...new Set([
-    ...hostedRunnerWorkspacePackageNames,
-    ...runnerVaultCliArtifactWorkspacePackageNames,
-    "@murphai/murph",
-  ]),
+  ...hostedRunnerWorkspacePackageNames,
+  ...publishedMurphBundledWorkspacePackageNames.filter(
+    (packageName) => !hostedRunnerWorkspacePackageNameSet.has(packageName),
+  ),
 ];
 
-type HostedRunnerWorkerDependencyName =
-  (typeof hostedRunnerWorkerDependencyNames)[number];
-type RunnerVaultCliArtifactDependencyName =
-  (typeof runnerVaultCliArtifactDependencyNames)[number];
+type HostedRunnerRuntimeDependencyName =
+  (typeof hostedRunnerRuntimeDependencyNames)[number];
 
 export function buildHostedRunnerRuntimeArtifactPackageJson(input: {
-  dependencies: Record<HostedRunnerWorkerDependencyName, string>;
+  dependencies: Record<HostedRunnerRuntimeDependencyName, string>;
   engines?: Record<string, string>;
   exports?: Record<string, unknown> | string;
   license: string;
@@ -103,29 +93,6 @@ export function buildHostedRunnerRuntimeArtifactPackageJson(input: {
     main: input.main,
     exports: input.exports,
     engines: input.engines,
-    dependencies: input.dependencies,
-  };
-}
-
-export function buildRunnerVaultCliArtifactPackageJson(input: {
-  dependencies: Record<RunnerVaultCliArtifactDependencyName, string>;
-  license: string;
-  version: string;
-}) {
-  return {
-    name: runnerVaultCliArtifactPackageName,
-    private: true,
-    type: "module",
-    version: input.version,
-    license: input.license,
-    main: "./dist/runner-vault-cli.js",
-    exports: {
-      ".": "./dist/runner-vault-cli.js",
-      "./package.json": "./package.json",
-    },
-    bin: {
-      "vault-cli": "./dist/runner-vault-cli-bin.js",
-    },
     dependencies: input.dependencies,
   };
 }

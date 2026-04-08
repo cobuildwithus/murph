@@ -109,7 +109,7 @@ The native container image is declared in `apps/cloudflare/wrangler.jsonc` under
 
 ## Container image
 
-`Dockerfile.cloudflare-hosted-runner` builds the container image used by Wrangler. The deploy-only helpers under `apps/cloudflare/scripts/**` prepare the app-owned runtime leaf artifact under `apps/cloudflare/.deploy/runner-bundle`, stage the runner-owned `@murphai/cloudflare-runner-vault-cli` runtime package inside that bundle, and then let the Docker build copy only that prepared runtime artifact plus the pinned Whisper assets into the final image. The sibling generated deploy files under `.deploy/`, including `wrangler.generated.jsonc` and `worker-secrets.json`, are deploy inputs, not container image contents. Inside that image, the private container entrypoint still serves:
+`Dockerfile.cloudflare-hosted-runner` builds the container image used by Wrangler. The deploy-only helpers under `apps/cloudflare/scripts/**` prepare the app-owned runtime leaf artifact under `apps/cloudflare/.deploy/runner-bundle`, install the real published-shape `@murphai/murph` package there so `vault-cli` resolves from `/app/node_modules/.bin`, and then let the Docker build copy only that prepared runtime artifact plus the pinned Whisper assets into the final image. The sibling generated deploy files under `.deploy/`, including `wrangler.generated.jsonc` and `worker-secrets.json`, are deploy inputs, not container image contents. Inside that image, the private container entrypoint still serves:
 
 - `GET /health`
 - `POST /__internal/run`
@@ -123,7 +123,7 @@ Current expectations for the container image:
 - Node `>=22.16.0`
 - the runner app assembled by `apps/cloudflare` into `apps/cloudflare/.deploy/runner-bundle` before `wrangler deploy` starts the Docker build
 - the prepared `/app` tree remains a runtime leaf artifact: bundle assembly strips deploy-only docs plus build metadata such as lockfiles, declaration files, sourcemaps, and `.tsbuildinfo`
-- the hosted `vault-cli` surface is shipped as the dedicated runner-owned `@murphai/cloudflare-runner-vault-cli` artifact inside the bundle rather than by depending on the published `@murphai/murph` package
+- the hosted `vault-cli` surface resolves from the real installed `@murphai/murph` package inside the bundle, while hosted execution behavior still runs through `@murphai/assistant-runtime`
 - a copy-only Docker contract: the final image copies `/app` from `apps/cloudflare/.deploy/runner-bundle`, then starts `dist/container-entrypoint.js`
 - `wrangler.generated.jsonc` and `worker-secrets.json` stay alongside the bundle as deploy inputs, not container image contents
 - bundle assembly is the app-owned artifact step and no longer depends on `pnpm deploy --legacy` or any Docker-stage workspace repair

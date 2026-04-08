@@ -18,16 +18,12 @@ import { fileURLToPath } from "node:url";
 import { resolveCloudflareDeployPaths } from "./deploy-automation.js";
 import {
   buildHostedRunnerRuntimeArtifactPackageJson,
-  buildRunnerVaultCliArtifactPackageJson,
   hostedRunnerBuildPackageNames,
   hostedRunnerRuntimeDistDirectoryName,
+  hostedRunnerRuntimeDependencyNames,
   hostedRunnerRuntimePackageName,
   hostedRunnerWorkspacePackageNames,
-  hostedRunnerWorkerDependencyNames,
   runnerBundleDirectoryName,
-  runnerVaultCliArtifactDependencyNames,
-  runnerVaultCliArtifactPackageName,
-  runnerVaultCliArtifactWorkspacePackageNames,
 } from "./runner-bundle-contract.js";
 
 import { resolvePnpmCommand } from "./wrangler-runner.js";
@@ -48,7 +44,6 @@ interface WorkspacePackageManifest {
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const appDir = path.resolve(scriptDir, "..");
 const repoRoot = path.resolve(appDir, "../..");
-const workspaceCliPackageDir = path.join(repoRoot, "packages", "cli");
 const runnerBundleDeployRoot = path.join(
   resolveCloudflareDeployPaths().deployDir,
   runnerBundleDirectoryName,
@@ -65,10 +60,7 @@ async function assembleRunnerBundle(): Promise<void> {
   );
   const stagingBundleDir = path.join(stagingRoot, runnerBundleDirectoryName);
   const tarballsDir = path.join(stagingRoot, "tarballs");
-  const packedWorkspacePackageNames = [...new Set([
-    ...hostedRunnerWorkspacePackageNames,
-    ...runnerVaultCliArtifactWorkspacePackageNames,
-  ])].sort();
+  const packedWorkspacePackageNames = [...hostedRunnerWorkspacePackageNames].sort();
 
   try {
     await buildHostedRunnerWorkspaceArtifacts(hostedRunnerBuildPackageNames);
@@ -83,11 +75,6 @@ async function assembleRunnerBundle(): Promise<void> {
       stagingBundleDir,
       tarballPaths,
       hostedRunnerWorkspacePackageNames,
-    );
-    await stageRunnerVaultCliArtifact(
-      stagingBundleDir,
-      tarballPaths,
-      runnerVaultCliArtifactWorkspacePackageNames,
     );
     await pruneRunnerBundle(stagingBundleDir);
     await rewriteRuntimePackageManifest(stagingBundleDir);
@@ -139,7 +126,7 @@ async function stageHostedRunnerRuntimeArtifact(
     `${JSON.stringify(
       buildHostedRunnerRuntimeArtifactPackageJson({
         dependencies: resolveDeclaredDependencySpecs(
-          hostedRunnerWorkerDependencyNames,
+          hostedRunnerRuntimeDependencyNames,
           runtimePackageJson,
         ),
         engines: runtimePackageJson.engines,
@@ -335,7 +322,7 @@ function pinDirectExternalDependencyVersions(
 
 function readInstalledPackageVersion(
   packageName: string,
-  searchRoots: readonly string[] = [repoRoot, workspaceCliPackageDir],
+  searchRoots: readonly string[] = [repoRoot],
 ): string | null {
   try {
     const manifestPath = resolveInstalledPackageManifestPath(
@@ -632,95 +619,6 @@ async function resolveInstalledBundleDependencyVersions(
   return Object.fromEntries(resolvedEntries);
 }
 
-async function stageRunnerVaultCliArtifact(
-  bundleDir: string,
-  tarballPaths: Map<string, string>,
-  runnerCliWorkspacePackages: readonly string[],
-): Promise<void> {
-  const cliPackageJson = JSON.parse(
-    await readFile(path.join(workspaceCliPackageDir, "package.json"), "utf8"),
-  ) as {
-    dependencies?: Record<string, string>;
-    license?: string;
-    optionalDependencies?: Record<string, string>;
-    version?: string;
-  };
-  const artifactRoot = path.join(
-    bundleDir,
-    "node_modules",
-    ...runnerVaultCliArtifactPackageName.split("/"),
-  );
-  const artifactDistRoot = path.join(artifactRoot, "dist");
-
-  await rm(artifactRoot, { force: true, recursive: true });
-  await mkdir(path.dirname(artifactRoot), { recursive: true });
-  await cp(path.join(workspaceCliPackageDir, "dist"), artifactDistRoot, {
-    force: true,
-    recursive: true,
-  });
-
-  const artifactWorkspaceTarballOverrides = buildWorkspaceTarballOverrides(
-    artifactRoot,
-    tarballPaths,
-    runnerCliWorkspacePackages,
-  );
-  const artifactInstallPackageJson = {
-    ...buildRunnerVaultCliArtifactPackageJson({
-      dependencies: resolveStagedDependencySpecs(
-        runnerVaultCliArtifactDependencyNames,
-        artifactWorkspaceTarballOverrides,
-        cliPackageJson,
-      ),
-      version: cliPackageJson.version ?? "0.0.0",
-      license: cliPackageJson.license ?? "Apache-2.0",
-    }),
-    pnpm: {
-      overrides: artifactWorkspaceTarballOverrides,
-    },
-  };
-
-  await writeFile(
-    path.join(artifactRoot, "package.json"),
-    `${JSON.stringify(artifactInstallPackageJson, null, 2)}\n`,
-    "utf8",
-  );
-  await installPinnedProductionDependencies(artifactRoot);
-
-  const artifactRuntimePackageJson = buildRunnerVaultCliArtifactPackageJson({
-    dependencies: await readInstalledDependencyVersions(
-      artifactRoot,
-      runnerVaultCliArtifactDependencyNames,
-    ),
-    version: cliPackageJson.version ?? "0.0.0",
-    license: cliPackageJson.license ?? "Apache-2.0",
-  });
-
-  await writeFile(
-    path.join(artifactRoot, "package.json"),
-    `${JSON.stringify(artifactRuntimePackageJson, null, 2)}\n`,
-    "utf8",
-  );
-}
-
-function resolveStagedDependencySpecs<const TDependencyNames extends readonly string[]>(
-  dependencyNames: TDependencyNames,
-  workspaceTarballOverrides: Record<string, string>,
-  manifest: WorkspacePackageManifest,
-): Record<TDependencyNames[number], string> {
-  const dependencies = resolveDeclaredDependencySpecs(dependencyNames, manifest);
-
-  for (const dependencyName of dependencyNames) {
-    const workspaceSpecifier = workspaceTarballOverrides[dependencyName];
-
-    if (typeof workspaceSpecifier === "string") {
-      dependencies[dependencyName as TDependencyNames[number]] =
-        workspaceSpecifier;
-    }
-  }
-
-  return dependencies;
-}
-
 async function installPinnedProductionDependencies(
   installRoot: string,
 ): Promise<void> {
@@ -736,43 +634,6 @@ async function installPinnedProductionDependencies(
     cwd: installRoot,
     env: installEnv,
   });
-}
-
-async function readInstalledDependencyVersions<
-  const TDependencyNames extends readonly string[],
->(
-  bundleDir: string,
-  dependencyNames: TDependencyNames,
-): Promise<Record<TDependencyNames[number], string>> {
-  const versions = {} as Record<TDependencyNames[number], string>;
-
-  for (const dependencyName of dependencyNames) {
-    const installedPackageJsonPath = path.join(
-      bundleDir,
-      "node_modules",
-      ...dependencyName.split("/"),
-      "package.json",
-    );
-    const installedPackageJson = JSON.parse(
-      await readFile(installedPackageJsonPath, "utf8"),
-    ) as {
-      version?: string;
-    };
-
-    if (
-      typeof installedPackageJson.version !== "string" ||
-      installedPackageJson.version.length === 0
-    ) {
-      throw new Error(
-        `Runner bundle is missing a concrete version for ${dependencyName}.`,
-      );
-    }
-
-    versions[dependencyName as TDependencyNames[number]] =
-      installedPackageJson.version;
-  }
-
-  return versions;
 }
 
 async function rewriteRuntimeBinWrappers(bundleDir: string): Promise<void> {

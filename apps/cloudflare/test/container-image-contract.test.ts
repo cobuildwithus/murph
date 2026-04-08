@@ -3,14 +3,11 @@ import { access, readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import {
   buildHostedRunnerRuntimeArtifactPackageJson,
-  buildRunnerVaultCliArtifactPackageJson,
   hostedRunnerBuildPackageNames,
+  hostedRunnerRuntimeDependencyNames,
   hostedRunnerWorkspacePackageNames,
-  hostedRunnerWorkerDependencyNames,
+  publishedMurphBundledWorkspacePackageNames,
   runnerBundleDirectoryName,
-  runnerVaultCliArtifactDependencyNames,
-  runnerVaultCliArtifactPackageName,
-  runnerVaultCliArtifactWorkspacePackageNames,
 } from "../scripts/runner-bundle-contract.js";
 
 describe("hosted runner container image contract", () => {
@@ -41,9 +38,6 @@ describe("hosted runner container image contract", () => {
       "await installPackedRunnerDependencies(",
     );
     expect(bundleAssemblyScript).toContain(
-      "await stageRunnerVaultCliArtifact(",
-    );
-    expect(bundleAssemblyScript).toContain(
       'const recursiveBuildArgs = [',
     );
     expect(bundleAssemblyScript).toContain('"recursive",');
@@ -53,9 +47,6 @@ describe("hosted runner container image contract", () => {
     );
     expect(bundleAssemblyScript).toContain("hostedRunnerBuildPackageNames");
     expect(bundleAssemblyScript).toContain("hostedRunnerWorkspacePackageNames,");
-    expect(bundleAssemblyScript).toContain(
-      "runnerVaultCliArtifactWorkspacePackageNames,",
-    );
     expect(bundleAssemblyScript).toContain(
       "await materializeFinalRunnerBundle(",
     );
@@ -91,6 +82,9 @@ describe("hosted runner container image contract", () => {
     expect(bundleAssemblyScript).not.toContain("workspaceRootDirs");
     expect(bundleAssemblyScript).not.toContain("extractTarball(");
     expect(bundleAssemblyScript).not.toContain("build:workspace:incremental");
+    expect(bundleAssemblyScript).not.toContain("stageRunnerVaultCliArtifact(");
+    expect(bundleAssemblyScript).not.toContain("buildRunnerVaultCliArtifactPackageJson(");
+    expect(bundleAssemblyScript).not.toContain("runnerVaultCliArtifact");
     expect(bundleAssemblyScript).not.toContain('../src/deploy-automation.js');
     expect(bundleAssemblyScript).not.toContain('../src/runner-bundle-contract.js');
     expect(bundleAssemblyScript).not.toContain('"--legacy"');
@@ -110,7 +104,7 @@ describe("hosted runner container image contract", () => {
     ).rejects.toThrow();
   });
 
-  it("keeps apps/cloudflare free of a direct @murphai/murph dependency and limits root deps to the worker runtime closure", async () => {
+  it("declares the published @murphai/murph package as a leaf bundle dependency", async () => {
     const packageJson = JSON.parse(await readFile(
       new URL("../package.json", import.meta.url),
       "utf8",
@@ -118,17 +112,14 @@ describe("hosted runner container image contract", () => {
       dependencies?: Record<string, string>;
     };
 
-    expect(packageJson.dependencies).not.toHaveProperty("@murphai/murph");
-    expect(packageJson.dependencies).not.toHaveProperty(
-      runnerVaultCliArtifactPackageName,
-    );
+    expect(packageJson.dependencies).toHaveProperty("@murphai/murph");
 
-    for (const dependencyName of hostedRunnerWorkerDependencyNames) {
+    for (const dependencyName of hostedRunnerRuntimeDependencyNames) {
       expect(packageJson.dependencies).toHaveProperty(dependencyName);
     }
 
     expect(Object.keys(packageJson.dependencies ?? {}).sort()).toEqual(
-      [...hostedRunnerWorkerDependencyNames].sort(),
+      [...hostedRunnerRuntimeDependencyNames].sort(),
     );
   });
 
@@ -147,11 +138,11 @@ describe("hosted runner container image contract", () => {
 
   it("describes the runtime artifact and explicit build/runtime closures", () => {
     const runtimeDependencies = Object.fromEntries(
-      hostedRunnerWorkerDependencyNames.map((dependencyName) => [
+      hostedRunnerRuntimeDependencyNames.map((dependencyName) => [
         dependencyName,
         "1.2.3",
       ]),
-    ) as Record<(typeof hostedRunnerWorkerDependencyNames)[number], string>;
+    ) as Record<(typeof hostedRunnerRuntimeDependencyNames)[number], string>;
     const runtimePackageJson = buildHostedRunnerRuntimeArtifactPackageJson({
       dependencies: runtimeDependencies,
       engines: {
@@ -167,7 +158,7 @@ describe("hosted runner container image contract", () => {
 
     expect(runnerBundleDirectoryName).toBe("runner-bundle");
     expect(Object.keys(runtimeDependencies).sort()).toEqual(
-      [...hostedRunnerWorkerDependencyNames].sort(),
+      [...hostedRunnerRuntimeDependencyNames].sort(),
     );
     expect(hostedRunnerWorkspacePackageNames).toEqual([
       "@murphai/assistant-engine",
@@ -183,10 +174,30 @@ describe("hosted runner container image contract", () => {
       "@murphai/inbox-services",
       "@murphai/inboxd",
       "@murphai/messaging-ingress",
+      "@murphai/murph",
       "@murphai/operator-config",
       "@murphai/parsers",
       "@murphai/query",
       "@murphai/runtime-state",
+      "@murphai/vault-usecases",
+    ]);
+    expect(publishedMurphBundledWorkspacePackageNames).toEqual([
+      "@murphai/assistant-cli",
+      "@murphai/assistant-engine",
+      "@murphai/assistantd",
+      "@murphai/core",
+      "@murphai/device-syncd",
+      "@murphai/gateway-local",
+      "@murphai/importers",
+      "@murphai/inbox-services",
+      "@murphai/inboxd",
+      "@murphai/inboxd-imessage",
+      "@murphai/messaging-ingress",
+      "@murphai/operator-config",
+      "@murphai/parsers",
+      "@murphai/query",
+      "@murphai/runtime-state",
+      "@murphai/setup-cli",
       "@murphai/vault-usecases",
     ]);
     expect(hostedRunnerBuildPackageNames).toEqual([
@@ -203,18 +214,21 @@ describe("hosted runner container image contract", () => {
       "@murphai/inbox-services",
       "@murphai/inboxd",
       "@murphai/messaging-ingress",
+      "@murphai/murph",
       "@murphai/operator-config",
       "@murphai/parsers",
       "@murphai/query",
       "@murphai/runtime-state",
       "@murphai/vault-usecases",
-      "@murphai/murph",
+      "@murphai/assistant-cli",
+      "@murphai/assistantd",
+      "@murphai/inboxd-imessage",
+      "@murphai/setup-cli",
     ]);
     expect(new Set(hostedRunnerBuildPackageNames)).toEqual(
       new Set([
         ...hostedRunnerWorkspacePackageNames,
-        ...runnerVaultCliArtifactWorkspacePackageNames,
-        "@murphai/murph",
+        ...publishedMurphBundledWorkspacePackageNames,
       ]),
     );
     expect(runtimePackageJson).toEqual({
@@ -234,49 +248,21 @@ describe("hosted runner container image contract", () => {
     });
   });
 
-  it("stages a self-described vault-cli artifact with its own runtime closure", () => {
-    const artifactDependencies = Object.fromEntries(
-      runnerVaultCliArtifactDependencyNames.map((dependencyName) => [
-        dependencyName,
-        "1.2.3",
-      ]),
-    ) as Record<(typeof runnerVaultCliArtifactDependencyNames)[number], string>;
-    const artifactPackageJson = buildRunnerVaultCliArtifactPackageJson({
-      dependencies: artifactDependencies,
-      license: "Apache-2.0",
-      version: "0.0.0",
-    });
+  it("builds every bundled private workspace dependency that the published murph package packs", async () => {
+    const murphPackageJson = JSON.parse(await readFile(
+      new URL("../../../packages/cli/package.json", import.meta.url),
+      "utf8",
+    )) as {
+      bundleDependencies?: string[];
+    };
 
-    expect(Object.keys(artifactDependencies).sort()).toEqual(
-      [...runnerVaultCliArtifactDependencyNames].sort(),
+    expect(murphPackageJson.bundleDependencies).toEqual(
+      publishedMurphBundledWorkspacePackageNames,
     );
-    expect(runnerVaultCliArtifactWorkspacePackageNames).toEqual([
-      "@murphai/assistant-engine",
-      "@murphai/contracts",
-      "@murphai/core",
-      "@murphai/device-syncd",
-      "@murphai/gateway-core",
-      "@murphai/gateway-local",
-      "@murphai/hosted-execution",
-      "@murphai/importers",
-      "@murphai/inbox-services",
-      "@murphai/inboxd",
-      "@murphai/messaging-ingress",
-      "@murphai/operator-config",
-      "@murphai/parsers",
-      "@murphai/query",
-      "@murphai/runtime-state",
-      "@murphai/vault-usecases",
-    ]);
-    expect(artifactPackageJson.name).toBe(runnerVaultCliArtifactPackageName);
-    expect(artifactPackageJson.exports).toEqual({
-      ".": "./dist/runner-vault-cli.js",
-      "./package.json": "./package.json",
-    });
-    expect(artifactPackageJson.bin).toEqual({
-      "vault-cli": "./dist/runner-vault-cli-bin.js",
-    });
-    expect(artifactPackageJson.dependencies).toEqual(artifactDependencies);
+
+    for (const dependencyName of publishedMurphBundledWorkspacePackageNames) {
+      expect(hostedRunnerBuildPackageNames).toContain(dependencyName);
+    }
   });
 
   it("pins whisper.cpp provisioning and default parser env in the image", async () => {

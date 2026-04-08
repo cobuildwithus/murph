@@ -32,7 +32,7 @@ The deploy artifact contract is intentionally narrow:
 - deploy-only helpers live under `apps/cloudflare/scripts/**`; runtime worker/container code stays under `apps/cloudflare/src/**`
 - `apps/cloudflare` assembles the runtime bundle into `apps/cloudflare/.deploy/runner-bundle/`
 - the prepared bundle is a runtime leaf artifact, not a deploy scratch directory: assembly strips deploy-only docs plus build metadata such as lockfiles, declaration files, sourcemaps, and `.tsbuildinfo`
-- the hosted `vault-cli` surface is staged inside that bundle as the dedicated runner-owned `@murphai/cloudflare-runner-vault-cli` artifact
+- the hosted `vault-cli` surface comes from the real installed `@murphai/murph` package inside that bundle, while hosted execution behavior still runs through `@murphai/assistant-runtime`
 - `wrangler.generated.jsonc` and `worker-secrets.json` stay alongside that bundle under `.deploy/`, but they are deploy inputs, not container image contents
 - `Dockerfile.cloudflare-hosted-runner` stays copy-only for app code: it copies the prepared runner bundle into `/app` and starts `dist/container-entrypoint.js`
 - bundle assembly no longer depends on `pnpm deploy --legacy` or a post-bundle workspace repair install
@@ -131,7 +131,7 @@ For Venice as the platform default hosted assistant, set these GitHub environmen
 
 You do not need to set `HOSTED_ASSISTANT_API_KEY_ENV` for that path because the Venice preset resolves it to `VENICE_API_KEY`.
 
-The default container image already installs `ffmpeg`, `pdftotext`, a pinned `whisper.cpp` `whisper-cli`, and the default `base.en` model, and it sets `FFMPEG_COMMAND`, `PDFTOTEXT_COMMAND`, `WHISPER_COMMAND`, and `WHISPER_MODEL_PATH` inside the image. The app-owned assembly step writes the built runtime bundle into `apps/cloudflare/.deploy/runner-bundle/`, stages the runner-owned `@murphai/cloudflare-runner-vault-cli` artifact there, and leaves `wrangler.generated.jsonc` plus `worker-secrets.json` outside the image as deploy-only inputs. Only set those vars in Worker config when you want to override the baked defaults.
+The default container image already installs `ffmpeg`, `pdftotext`, a pinned `whisper.cpp` `whisper-cli`, and the default `base.en` model, and it sets `FFMPEG_COMMAND`, `PDFTOTEXT_COMMAND`, `WHISPER_COMMAND`, and `WHISPER_MODEL_PATH` inside the image. The app-owned assembly step writes the built runtime bundle into `apps/cloudflare/.deploy/runner-bundle/`, installs the real `@murphai/murph` package there so the image gets the standard `vault-cli` bin on `PATH`, and leaves `wrangler.generated.jsonc` plus `worker-secrets.json` outside the image as deploy-only inputs. Only set those vars in Worker config when you want to override the baked defaults.
 
 ### Required environment secrets
 
