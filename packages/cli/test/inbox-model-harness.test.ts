@@ -14,7 +14,7 @@ import {
   createDefaultAssistantCapabilityRegistry,
   createDefaultAssistantToolCatalog,
   createInboxRoutingAssistantToolCatalog,
-} from '@murphai/assistant-engine/assistant-provider'
+} from '@murphai/assistant-engine/assistant-cli-tools'
 import { materializeInboxModelBundle } from '@murphai/assistant-engine/inbox-model-harness'
 import {
   CliBackedCapabilityHost,

@@ -16,6 +16,7 @@ import {
   startTelegramTypingIndicator,
 } from '@murphai/assistant-engine/assistant/channel-adapters'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import { repoRoot } from './cli-test-helpers.js'
 
 type OutboundChannelModule = Awaited<typeof import('@murphai/assistant-engine/outbound-channel')>
 type AssistantStateModule = Awaited<typeof import('@murphai/assistant-engine/assistant-state')>
@@ -1982,7 +1983,7 @@ test('sendImessageMessage maps adapter database-open failures to permission guid
 
 test('sendImessageMessage loads the iMessage SDK at runtime instead of statically importing it', async () => {
   const runtimeSource = await readFile(
-    path.resolve('packages/assistant-engine/src/assistant/channels/runtime.ts'),
+    path.join(repoRoot, 'packages/assistant-engine/src/assistant/channels/runtime.ts'),
     'utf8',
   )
 

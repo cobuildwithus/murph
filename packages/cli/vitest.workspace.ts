@@ -24,6 +24,13 @@ import {
 const packageDir = path.dirname(fileURLToPath(import.meta.url));
 const cliVitestConcurrency = resolveMurphVitestConcurrency();
 const cliVitestMaxWorkers = resolveMurphVitestMaxWorkers();
+const cliVitestCoverageThresholds = {
+  perFile: false,
+  lines: 80,
+  functions: 70,
+  branches: 55,
+  statements: 80,
+} as const;
 const WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS = {
   "@murphai/assistantd": "../assistantd/src/index.ts",
   "@murphai/assistant-cli": "../assistant-cli/src/index.ts",
@@ -59,6 +66,7 @@ export const cliVitestCoverage = createMurphVitestCoverage({
     "src/index.ts",
     "src/runner-vault-cli-bin.ts",
   ],
+  thresholds: cliVitestCoverageThresholds,
 });
 
 type CliVitestProjectSpec = {
