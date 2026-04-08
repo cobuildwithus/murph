@@ -53,6 +53,9 @@ importers:
       '@murphai/inboxd':
         specifier: workspace:*
         version: link:../../packages/inboxd
+      '@murphai/murph':
+        specifier: workspace:*
+        version: link:../../packages/cli
       '@murphai/parsers':
         specifier: workspace:*
         version: link:../../packages/parsers
