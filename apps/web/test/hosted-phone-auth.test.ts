@@ -106,6 +106,7 @@ describe("HostedPhoneAuth", () => {
     assert.match(markup, /Send me a code/);
     assert.match(markup, /We&#x27;ll text a verification code to the number that messaged Murph\./);
     assert.match(markup, /Use a different number/);
+    assert.doesNotMatch(markup, /Phone number/);
     assert.doesNotMatch(markup, /Text me a code/);
     assert.doesNotMatch(markup, /\*\*\* 4567/);
     assert.doesNotMatch(markup, /Phone number that received this invite/);
@@ -181,26 +182,32 @@ describe("HostedPhoneAuth", () => {
     assert.deepEqual(pendingActions, ["continue", null]);
   });
 
-  it("keeps the invite known-number code step out of manual phone entry", async () => {
-    const { shouldShowHostedPhoneNumberEntry } = await import("@/src/components/hosted-onboarding/hosted-phone-auth");
+  it("resolves authenticated phone auth recovery states in priority order", async () => {
+    const { resolveHostedAuthenticatedPhoneAuthView } = await import("@/src/components/hosted-onboarding/hosted-phone-auth");
 
     assert.equal(
-      shouldShowHostedPhoneNumberEntry({
-        authenticated: false,
-        manualEntryVisible: false,
-        mode: "invite",
-        step: "code",
+      resolveHostedAuthenticatedPhoneAuthView({
+        showAuthenticatedLoadingState: false,
+        showAuthenticatedManualResumeState: false,
+        showAuthenticatedRestartState: false,
       }),
-      false,
+      null,
     );
     assert.equal(
-      shouldShowHostedPhoneNumberEntry({
-        authenticated: false,
-        manualEntryVisible: false,
-        mode: "invite",
-        step: "phone",
+      resolveHostedAuthenticatedPhoneAuthView({
+        showAuthenticatedLoadingState: false,
+        showAuthenticatedManualResumeState: true,
+        showAuthenticatedRestartState: false,
       }),
-      true,
+      "manual-resume",
+    );
+    assert.equal(
+      resolveHostedAuthenticatedPhoneAuthView({
+        showAuthenticatedLoadingState: true,
+        showAuthenticatedManualResumeState: true,
+        showAuthenticatedRestartState: true,
+      }),
+      "loading",
     );
   });
 });
