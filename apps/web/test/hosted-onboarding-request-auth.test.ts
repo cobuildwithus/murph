@@ -2,14 +2,14 @@ import { HostedBillingStatus, type HostedMember } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  findHostedMemberForPrivyIdentity: vi.fn(),
+  lookupHostedMemberForPrivyIdentity: vi.fn(),
   revnetEnabled: false,
   verifyHostedPrivyAccessToken: vi.fn(),
   verifyHostedPrivyIdentityToken: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/member-identity-service", () => ({
-  findHostedMemberForPrivyIdentity: mocks.findHostedMemberForPrivyIdentity,
+  lookupHostedMemberForPrivyIdentity: mocks.lookupHostedMemberForPrivyIdentity,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/revnet", () => ({
@@ -76,7 +76,9 @@ describe("hosted Privy request auth", () => {
         },
       ],
     });
-    mocks.findHostedMemberForPrivyIdentity.mockResolvedValue(createHostedMember());
+    mocks.lookupHostedMemberForPrivyIdentity.mockResolvedValue(
+      createHostedMemberLookup(),
+    );
   });
 
   it("returns null when no Privy auth headers are present", async () => {
@@ -122,11 +124,17 @@ describe("hosted Privy request auth", () => {
       code: "PRIVY_SESSION_MISMATCH",
       httpStatus: 403,
     });
-    expect(mocks.findHostedMemberForPrivyIdentity).not.toHaveBeenCalled();
+    expect(mocks.lookupHostedMemberForPrivyIdentity).not.toHaveBeenCalled();
   });
 
   it("returns the authenticated hosted member when both Privy tokens verify for the same user", async () => {
     await expect(requireHostedPrivyRequestAuthContext(createAuthenticatedRequest(), prisma)).resolves.toMatchObject({
+      memberLookup: {
+        matchedBy: [
+          "privyUserId",
+          "phoneNumber",
+        ],
+      },
       member: {
         id: "member_123",
       },
@@ -139,7 +147,7 @@ describe("hosted Privy request auth", () => {
   });
 
   it("allows the completion route to verify the same strict auth contract before a member exists", async () => {
-    mocks.findHostedMemberForPrivyIdentity.mockResolvedValue(null);
+    mocks.lookupHostedMemberForPrivyIdentity.mockResolvedValue(null);
 
     await expect(requireHostedPrivyCompletionRequestAuthContext(createAuthenticatedRequest(), prisma)).resolves.toMatchObject({
       identity: {
@@ -169,7 +177,7 @@ describe("hosted Privy request auth", () => {
         },
       ],
     });
-    mocks.findHostedMemberForPrivyIdentity.mockResolvedValue(null);
+    mocks.lookupHostedMemberForPrivyIdentity.mockResolvedValue(null);
 
     await expect(requireHostedPrivyCompletionRequestAuthContext(createAuthenticatedRequest(), prisma)).resolves.toMatchObject({
       identity: {
@@ -181,13 +189,15 @@ describe("hosted Privy request auth", () => {
       },
       member: null,
     });
-    expect(mocks.findHostedMemberForPrivyIdentity).toHaveBeenCalledTimes(1);
+    expect(mocks.lookupHostedMemberForPrivyIdentity).toHaveBeenCalledTimes(1);
   });
 
   it("blocks suspended members from active hosted mutations", async () => {
-    mocks.findHostedMemberForPrivyIdentity.mockResolvedValue(
-      createHostedMember({
-        suspendedAt: new Date("2025-03-27T08:00:00.000Z"),
+    mocks.lookupHostedMemberForPrivyIdentity.mockResolvedValue(
+      createHostedMemberLookup({
+        core: createHostedMember({
+          suspendedAt: new Date("2025-03-27T08:00:00.000Z"),
+        }),
       }),
     );
 
@@ -198,9 +208,11 @@ describe("hosted Privy request auth", () => {
   });
 
   it("blocks unpaid members from active hosted mutations", async () => {
-    mocks.findHostedMemberForPrivyIdentity.mockResolvedValue(
-      createHostedMember({
-        billingStatus: HostedBillingStatus.unpaid,
+    mocks.lookupHostedMemberForPrivyIdentity.mockResolvedValue(
+      createHostedMemberLookup({
+        core: createHostedMember({
+          billingStatus: HostedBillingStatus.unpaid,
+        }),
       }),
     );
 
@@ -229,6 +241,35 @@ function createHostedMember(
     id: "member_123",
     suspendedAt: null,
     updatedAt: new Date("2025-03-27T08:00:00.000Z"),
+    ...overrides,
+  };
+}
+
+function createHostedMemberLookup(overrides: Partial<{
+  core: HostedMember;
+  matchedBy: string[];
+}> = {}) {
+  return {
+    core: createHostedMember(),
+    identity: {
+      maskedPhoneNumberHint: "*** 2671",
+      memberId: "member_123",
+      phoneNumber: "+14155552671",
+      phoneNumberVerifiedAt: new Date("2025-03-27T08:00:00.000Z"),
+      privyUserId: "did:privy:user_123",
+      signupPhoneCodeSendAttemptId: null,
+      signupPhoneCodeSendAttemptStartedAt: null,
+      signupPhoneCodeSentAt: null,
+      signupPhoneNumber: null,
+      walletAddress: "0xD8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
+      walletChainType: "ethereum",
+      walletCreatedAt: new Date("2025-03-27T08:00:00.000Z"),
+      walletProvider: "privy",
+    },
+    matchedBy: [
+      "privyUserId",
+      "phoneNumber",
+    ],
     ...overrides,
   };
 }

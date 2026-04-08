@@ -8,6 +8,7 @@ import {
 import {
   buildCloudflareHostedControlUserCryptoContextPath,
   buildCloudflareHostedControlUserDispatchPayloadPath,
+  buildCloudflareHostedControlUserEventStatusPath,
   buildCloudflareHostedControlUserEnvPath,
   buildCloudflareHostedControlUserRunPath,
   buildCloudflareHostedControlUserStatusPath,
@@ -109,6 +110,9 @@ describe("@murphai/cloudflare-hosted-control contracts, parsers, and routes", ()
     );
     expect(buildCloudflareHostedControlUserDispatchPayloadPath(userId)).toBe(
       `/internal/users/${encodedUserId}/dispatch-payload`,
+    );
+    expect(buildCloudflareHostedControlUserEventStatusPath(userId, "evt/with spaces?#%")).toBe(
+      `/internal/users/${encodedUserId}/events/${encodeURIComponent("evt/with spaces?#%")}/status`,
     );
     expect(buildCloudflareHostedControlUserEnvPath(userId)).toBe(
       `/internal/users/${encodedUserId}/env`,

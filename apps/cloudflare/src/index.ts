@@ -50,6 +50,7 @@ import {
 } from "./user-runner.ts";
 import { handleGatewayRoute } from "./worker-routes/gateway.ts";
 import {
+  handleEventStatusRoute,
   handleManualRunRoute,
   handlePendingUsageRoute,
   handlePendingUsageUsersRoute,
@@ -118,6 +119,16 @@ const workerInternalRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
     },
     match: matchNamedPath(/^\/internal\/users\/(?<userId>[^/]+)\/run$/u),
     methods: ["POST"],
+    wrongMethodResponse: "method-not-allowed",
+  },
+  {
+    authorizeBeforeMethod: true,
+    authorization: "vercel-oidc",
+    async handle(context, params) {
+      return handleEventStatusRoute(context, params.userId, params.eventId);
+    },
+    match: matchNamedPath(/^\/internal\/users\/(?<userId>[^/]+)\/events\/(?<eventId>[^/]+)\/status$/u),
+    methods: ["GET"],
     wrongMethodResponse: "method-not-allowed",
   },
   {
@@ -371,6 +382,12 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
 
   async status(): Promise<HostedExecutionUserStatus> {
     return this.runner.status();
+  }
+
+  async getEventStatus(input: {
+    eventId: string;
+  }) {
+    return this.runner.getEventStatus(input);
   }
 
   async getUserEnvStatus(): Promise<CloudflareHostedUserEnvStatus> {

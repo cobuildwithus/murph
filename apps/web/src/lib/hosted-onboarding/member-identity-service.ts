@@ -29,9 +29,15 @@ import {
   lookupHostedMemberIdentityByWalletAddress,
   readHostedMemberIdentity,
   type HostedMemberIdentityLookup,
-  type HostedMemberIdentityState,
+  type HostedMemberIdentityLookupMatch,
   upsertHostedMemberIdentity,
 } from "./hosted-member-identity-store";
+
+export interface HostedMemberPrivyIdentityLookup {
+  core: HostedMemberIdentityLookup["core"];
+  identity: HostedMemberIdentityLookup["identity"];
+  matchedBy: HostedMemberIdentityLookupMatch[];
+}
 
 export async function ensureHostedMemberForPhone(input: {
   phoneNumber: string;
@@ -106,7 +112,7 @@ export async function ensureHostedMemberForPhone(input: {
 }
 
 async function refreshHostedMemberForPhone(input: {
-  currentIdentity: HostedMemberIdentityState | null;
+  currentIdentity: HostedMemberIdentityLookup["identity"] | null;
   member: HostedMember;
   phoneNumber: string;
   prisma: HostedOnboardingPrismaClient;
@@ -204,12 +210,12 @@ export async function ensureHostedMemberForPrivyIdentity(input: {
   assertHostedPrivyWalletAvailableWhenRequired(input.identity);
 
   const member = await withHostedOnboardingTransaction(input.prisma, async (tx) => {
-    const existingMember = await findHostedMemberForPrivyIdentity({
+    const existingMemberLookup = await lookupHostedMemberForPrivyIdentity({
       identity: input.identity,
       prisma: tx,
     });
 
-    if (!existingMember) {
+    if (!existingMemberLookup) {
       const memberId = generateHostedMemberId();
 
       const createdMember = await createHostedMember({
@@ -237,7 +243,7 @@ export async function ensureHostedMemberForPrivyIdentity(input: {
 
     return reconcileHostedPrivyIdentityOnMember({
       identity: input.identity,
-      member: existingMember,
+      member: existingMemberLookup.core,
       prisma: tx,
       now: input.now,
     });
@@ -357,19 +363,11 @@ export async function reconcileHostedPrivyIdentityOnMember(input: {
   return member;
 }
 
-export async function findHostedMemberForPrivyIdentity(input: {
+export async function lookupHostedMemberForPrivyIdentity(input: {
   identity: HostedPrivyIdentity;
   prisma: HostedOnboardingPrismaClient;
-}): Promise<HostedMember | null> {
-  const lookup = await findHostedMemberIdentityForPrivyIdentity(input);
-  return lookup?.core ?? null;
-}
-
-async function findHostedMemberIdentityForPrivyIdentity(input: {
-  identity: HostedPrivyIdentity;
-  prisma: HostedOnboardingPrismaClient;
-}): Promise<HostedMemberIdentityLookup | null> {
-  const matches = new Map<string, HostedMemberIdentityLookup>();
+}): Promise<HostedMemberPrivyIdentityLookup | null> {
+  const matches = new Map<string, HostedMemberPrivyIdentityLookup>();
   const normalizedWalletAddress = input.identity.wallet
     ? normalizeHostedWalletAddress(input.identity.wallet.address)
     : null;
@@ -382,7 +380,7 @@ async function findHostedMemberIdentityForPrivyIdentity(input: {
     });
 
     if (memberByPrivyUserId) {
-      matches.set(memberByPrivyUserId.core.id, memberByPrivyUserId);
+      addHostedMemberPrivyIdentityMatch(matches, memberByPrivyUserId);
     }
   }
 
@@ -394,7 +392,7 @@ async function findHostedMemberIdentityForPrivyIdentity(input: {
     : null;
 
   if (memberByPhoneNumber) {
-    matches.set(memberByPhoneNumber.core.id, memberByPhoneNumber);
+    addHostedMemberPrivyIdentityMatch(matches, memberByPhoneNumber);
   }
 
   if (normalizedWalletAddress) {
@@ -404,7 +402,7 @@ async function findHostedMemberIdentityForPrivyIdentity(input: {
     });
 
     if (memberByWalletAddress) {
-      matches.set(memberByWalletAddress.core.id, memberByWalletAddress);
+      addHostedMemberPrivyIdentityMatch(matches, memberByWalletAddress);
     }
   }
 
@@ -417,4 +415,26 @@ async function findHostedMemberIdentityForPrivyIdentity(input: {
   }
 
   return matches.values().next().value ?? null;
+}
+
+function addHostedMemberPrivyIdentityMatch(
+  matches: Map<string, HostedMemberPrivyIdentityLookup>,
+  match: HostedMemberIdentityLookup,
+): void {
+  const existingMatch = matches.get(match.core.id);
+
+  if (existingMatch) {
+    if (!existingMatch.matchedBy.includes(match.matchedBy)) {
+      existingMatch.matchedBy.push(match.matchedBy);
+    }
+    return;
+  }
+
+  matches.set(match.core.id, {
+    core: match.core,
+    identity: match.identity,
+    matchedBy: [
+      match.matchedBy,
+    ],
+  });
 }

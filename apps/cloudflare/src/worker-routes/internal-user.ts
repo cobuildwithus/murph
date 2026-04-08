@@ -51,6 +51,17 @@ export async function handleStatusRoute(
   return json(await stub.status());
 }
 
+export async function handleEventStatusRoute(
+  context: WorkerRouteContext,
+  encodedUserId: string,
+  encodedEventId: string,
+): Promise<Response> {
+  const userId = decodeRouteParam(encodedUserId);
+  const eventId = decodeRouteParam(encodedEventId);
+  const stub = await resolveUserRunnerStub(context.env, userId);
+  return json(await requireUserRunnerStubMethod(stub, "getEventStatus")({ eventId }));
+}
+
 export async function handleUserEnvRoute(
   context: WorkerRouteContext,
   encodedUserId: string,

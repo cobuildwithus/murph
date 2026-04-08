@@ -134,17 +134,50 @@ describe("getHostedInviteStatus", () => {
 
   it("resolves back to active when live Cloudflare status shows the activation event poisoned", async () => {
     mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
-      getStatus: vi.fn().mockResolvedValue({
-        backpressuredEventIds: [],
-        bundleRef: null,
-        inFlight: false,
+      getEventStatus: vi.fn().mockResolvedValue({
+        eventId: "member.activated:stripe.invoice.paid:member_123:evt_123",
         lastError: "poisoned by runner",
-        lastEventId: "member.activated:stripe.invoice.paid:member_123:evt_123",
-        lastRunAt: null,
-        nextWakeAt: null,
-        pendingEventCount: 0,
-        poisonedEventIds: ["member.activated:stripe.invoice.paid:member_123:evt_123"],
-        retryingEventId: null,
+        state: "poisoned",
+        userId: "member_123",
+      }),
+    });
+
+    const prisma = {
+      executionOutbox: {
+        findFirst: vi.fn().mockResolvedValue({
+          dispatchState: "queued",
+          eventId: "member.activated:stripe.invoice.paid:member_123:evt_123",
+          status: "dispatched",
+        }),
+      },
+      hostedInvite: {
+        findUnique: vi.fn().mockResolvedValue(createInvite({
+          member: createMember({
+            billingStatus: HostedBillingStatus.active,
+            identity: createIdentity(),
+          }),
+        })),
+      },
+    } as never;
+
+    await expect(
+      getHostedInviteStatus({
+        authenticatedMember: createAuthenticatedMember(),
+        inviteCode: "invite-code",
+        now: NOW,
+        prisma,
+      }),
+    ).resolves.toMatchObject({
+      stage: "active",
+    });
+  });
+
+  it("resolves back to active when the specific activation event is already completed", async () => {
+    mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
+      getEventStatus: vi.fn().mockResolvedValue({
+        eventId: "member.activated:stripe.invoice.paid:member_123:evt_123",
+        lastError: null,
+        state: "completed",
         userId: "member_123",
       }),
     });

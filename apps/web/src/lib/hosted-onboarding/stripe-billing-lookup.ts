@@ -2,10 +2,11 @@ import { type Prisma } from "@prisma/client";
 
 import { coerceStripeObjectId } from "./billing";
 import {
-  findHostedMemberByStripeCustomerId,
-  findHostedMemberByStripeSubscriptionId,
+  lookupHostedMemberStripeBillingRefByStripeCustomerId,
+  lookupHostedMemberStripeBillingRefByStripeSubscriptionId,
 } from "./hosted-member-billing-store";
 import {
+  composeHostedMemberSnapshot,
   type HostedMemberSnapshot,
   readHostedMemberSnapshot,
 } from "./hosted-member-store";
@@ -47,29 +48,31 @@ export async function findMemberForStripeObject(input: {
   }
 
   if (input.subscriptionId) {
-    const member = await findHostedMemberByStripeSubscriptionId({
+    const billingLookup = await lookupHostedMemberStripeBillingRefByStripeSubscriptionId({
       prisma: input.prisma,
       stripeSubscriptionId: input.subscriptionId,
     });
 
-    if (member) {
-      return readHostedMemberSnapshot({
-        memberId: member.id,
-        prisma: input.prisma,
+    if (billingLookup) {
+      return composeHostedMemberSnapshot(billingLookup.core, {
+        billingRef: billingLookup.billingRef,
+        identity: null,
+        routing: null,
       });
     }
   }
 
   if (input.customerId) {
-    const member = await findHostedMemberByStripeCustomerId({
+    const billingLookup = await lookupHostedMemberStripeBillingRefByStripeCustomerId({
       prisma: input.prisma,
       stripeCustomerId: input.customerId,
     });
 
-    if (member) {
-      return readHostedMemberSnapshot({
-        memberId: member.id,
-        prisma: input.prisma,
+    if (billingLookup) {
+      return composeHostedMemberSnapshot(billingLookup.core, {
+        billingRef: billingLookup.billingRef,
+        identity: null,
+        routing: null,
       });
     }
   }

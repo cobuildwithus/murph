@@ -2,6 +2,7 @@ import type { CloudflareHostedUserEnvStatus } from "@murphai/cloudflare-hosted-c
 import type {
   HostedExecutionDispatchRequest,
   HostedExecutionDispatchResult,
+  HostedExecutionEventDispatchStatus,
   HostedExecutionOutboxPayload,
   HostedExecutionUserStatus,
 } from "@murphai/hosted-execution";
@@ -32,6 +33,7 @@ export interface UserRunnerDurableObjectStubLike extends WorkerUserRunnerStubLik
   clearUserEnv(): Promise<CloudflareHostedUserEnvStatus>;
   dispatch(input: HostedExecutionDispatchRequest): Promise<HostedExecutionUserStatus>;
   dispatchWithOutcome(input: HostedExecutionDispatchRequest): Promise<HostedExecutionDispatchResult>;
+  getEventStatus(input: { eventId: string }): Promise<HostedExecutionEventDispatchStatus | null>;
   getUserEnvStatus(): Promise<CloudflareHostedUserEnvStatus>;
   getDeviceSyncRuntimeSnapshot(input: {
     request: HostedExecutionDeviceSyncRuntimeSnapshotRequest;

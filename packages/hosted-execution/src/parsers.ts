@@ -6,6 +6,7 @@ import type {
   HostedExecutionAssistantCronTickEvent,
   HostedExecutionBundleRef,
   HostedExecutionDeviceSyncJobHint,
+  HostedExecutionEventDispatchStatus,
   HostedExecutionDeviceSyncRuntimeSnapshotResponse,
   HostedExecutionDeviceSyncWakeEvent,
   HostedExecutionDispatchResult,
@@ -130,19 +131,26 @@ export function parseHostedExecutionRunnerResult(value: unknown): HostedExecutio
 
 export function parseHostedExecutionDispatchResult(value: unknown): HostedExecutionDispatchResult {
   const record = requireObject(value, "Hosted execution dispatch result");
-  const event = requireObject(record.event, "Hosted execution dispatch result event");
 
   return {
-    event: {
-      eventId: requireString(event.eventId, "Hosted execution dispatch result eventId"),
-      lastError: readNullableString(
-        event.lastError,
-        "Hosted execution dispatch result lastError",
-      ),
-      state: parseHostedExecutionEventDispatchState(event.state),
-      userId: requireString(event.userId, "Hosted execution dispatch result userId"),
-    },
+    event: parseHostedExecutionEventDispatchStatus(record.event),
     status: parseHostedExecutionUserStatus(record.status),
+  };
+}
+
+export function parseHostedExecutionEventDispatchStatus(
+  value: unknown,
+): HostedExecutionEventDispatchStatus {
+  const event = requireObject(value, "Hosted execution dispatch status");
+
+  return {
+    eventId: requireString(event.eventId, "Hosted execution dispatch status eventId"),
+    lastError: readNullableString(
+      event.lastError,
+      "Hosted execution dispatch status lastError",
+    ),
+    state: parseHostedExecutionEventDispatchState(event.state),
+    userId: requireString(event.userId, "Hosted execution dispatch status userId"),
   };
 }
 

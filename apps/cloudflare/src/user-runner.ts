@@ -3,6 +3,7 @@ import type {
   HostedExecutionBundleRef,
   HostedExecutionDispatchResult,
   HostedExecutionDispatchRequest,
+  HostedExecutionEventDispatchStatus,
   HostedExecutionOutboxPayload,
   HostedExecutionUserStatus,
 } from "@murphai/hosted-execution";
@@ -568,6 +569,12 @@ export class HostedUserRunner {
 
   async status(): Promise<HostedExecutionUserStatus> {
     return toUserStatus(await this.queueStore.readState());
+  }
+
+  async getEventStatus(input: {
+    eventId: string;
+  }): Promise<HostedExecutionEventDispatchStatus | null> {
+    return this.queueStore.readEventDispatchStatus(input.eventId);
   }
 
   async getUserEnvStatus(): Promise<CloudflareHostedUserEnvStatus> {

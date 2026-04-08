@@ -193,6 +193,45 @@ describe("createHostedBillingCheckout", () => {
       }),
     );
   });
+
+  it("reuses the winning Stripe customer binding without a post-bind reread", async () => {
+    mocks.requireHostedInviteForAuthentication.mockResolvedValue(makeInvite());
+    const existingBinding = {
+      memberId: "member_123",
+      ...buildHostedMemberBillingPrivateColumns({
+        memberId: "member_123",
+        stripeCustomerId: "cus_raced",
+        stripeSubscriptionId: null,
+      }),
+      stripeCustomerLookupKey: "hbidx:stripe-customer:v1:raced",
+      stripeSubscriptionLookupKey: null,
+    };
+    const prisma = makePrisma({
+      findUniqueResults: [
+        null,
+        existingBinding,
+      ],
+    });
+
+    await createHostedBillingCheckout({
+      inviteCode: "invite-code",
+      member: makeAuthenticatedMember(),
+      now: new Date("2026-03-27T12:00:00.000Z"),
+      prisma: prisma as never,
+    });
+
+    expect(prisma.hostedMemberBillingRef.findUnique).toHaveBeenCalledTimes(2);
+    expect(mocks.stripe.customers.update).toHaveBeenCalledWith("cus_raced", {
+      metadata: {
+        memberId: "member_123",
+      },
+    });
+    expect(mocks.stripe.checkout.sessions.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        customer: "cus_raced",
+      }),
+    );
+  });
 });
 
 function makeAuthenticatedMember() {
@@ -228,12 +267,55 @@ function makePrisma(input: {
     stripeSubscriptionIdEncrypted: string | null;
     stripeSubscriptionLookupKey: string | null;
   } | null;
+  findUniqueResults?: Array<{
+    memberId: string;
+    stripeCustomerIdEncrypted: string | null;
+    stripeCustomerLookupKey: string | null;
+    stripeSubscriptionIdEncrypted: string | null;
+    stripeSubscriptionLookupKey: string | null;
+  } | null>;
 } = {}) {
+  const findUnique = input.findUniqueResults
+    ? vi.fn()
+        .mockResolvedValueOnce(input.findUniqueResults[0] ?? null)
+        .mockResolvedValueOnce(input.findUniqueResults[1] ?? null)
+    : vi.fn().mockResolvedValue(input.billingRef ?? null);
+
   return {
     $queryRaw: vi.fn().mockResolvedValue([]),
     hostedMemberBillingRef: {
-      findUnique: vi.fn().mockResolvedValue(input.billingRef ?? null),
-      upsert: vi.fn().mockResolvedValue({}),
+      findUnique,
+      upsert: vi.fn().mockImplementation(
+        async (inputData: {
+          create: {
+            memberId: string;
+            stripeCustomerIdEncrypted: string | null;
+            stripeCustomerLookupKey: string | null;
+            stripeSubscriptionIdEncrypted: string | null;
+            stripeSubscriptionLookupKey: string | null;
+          };
+          update: {
+            stripeCustomerIdEncrypted?: string | null;
+            stripeCustomerLookupKey?: string | null;
+            stripeSubscriptionIdEncrypted?: string | null;
+            stripeSubscriptionLookupKey?: string | null;
+          };
+        }) => ({
+          memberId: inputData.create.memberId,
+          stripeCustomerIdEncrypted:
+            inputData.update.stripeCustomerIdEncrypted
+            ?? inputData.create.stripeCustomerIdEncrypted,
+          stripeCustomerLookupKey:
+            inputData.update.stripeCustomerLookupKey
+            ?? inputData.create.stripeCustomerLookupKey,
+          stripeSubscriptionIdEncrypted:
+            inputData.update.stripeSubscriptionIdEncrypted
+            ?? inputData.create.stripeSubscriptionIdEncrypted,
+          stripeSubscriptionLookupKey:
+            inputData.update.stripeSubscriptionLookupKey
+            ?? inputData.create.stripeSubscriptionLookupKey,
+        }),
+      ),
     },
   } as const;
 }

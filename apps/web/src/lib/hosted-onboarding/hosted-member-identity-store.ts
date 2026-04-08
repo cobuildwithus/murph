@@ -40,6 +40,8 @@ export interface HostedMemberIdentityState {
   walletProvider: string | null;
 }
 
+export type HostedMemberIdentityLookupState = Omit<HostedMemberIdentityState, "phoneLookupKey">;
+
 export type HostedMemberIdentityLookupMatch =
   | "phoneLookupKey"
   | "phoneNumber"
@@ -48,7 +50,7 @@ export type HostedMemberIdentityLookupMatch =
 
 export interface HostedMemberIdentityLookup {
   core: HostedMember;
-  identity: HostedMemberIdentityState;
+  identity: HostedMemberIdentityLookupState;
   matchedBy: HostedMemberIdentityLookupMatch;
 }
 
@@ -180,34 +182,6 @@ export async function lookupHostedMemberIdentityByWalletAddress(input: {
     : null;
 }
 
-export async function findHostedMemberByPrivyUserId(input: {
-  prisma: HostedOnboardingPrismaClient;
-  privyUserId: string;
-}): Promise<HostedMember | null> {
-  return (await lookupHostedMemberIdentityByPrivyUserId(input))?.core ?? null;
-}
-
-export async function findHostedMemberByPhoneLookupKey(input: {
-  phoneLookupKey: string;
-  prisma: HostedOnboardingPrismaClient;
-}): Promise<HostedMember | null> {
-  return (await lookupHostedMemberIdentityByPhoneLookupKey(input))?.core ?? null;
-}
-
-export async function findHostedMemberByPhoneNumber(input: {
-  phoneNumber: string;
-  prisma: HostedOnboardingPrismaClient;
-}): Promise<HostedMember | null> {
-  return (await lookupHostedMemberIdentityByPhoneNumber(input))?.core ?? null;
-}
-
-export async function findHostedMemberByWalletAddress(input: {
-  prisma: HostedOnboardingPrismaClient;
-  walletAddress: string;
-}): Promise<HostedMember | null> {
-  return (await lookupHostedMemberIdentityByWalletAddress(input))?.core ?? null;
-}
-
 export async function readHostedMemberIdentity(input: {
   memberId: string;
   prisma: HostedOnboardingPrismaClient;
@@ -303,9 +277,25 @@ function projectHostedMemberIdentityLookup(
   },
   matchedBy: HostedMemberIdentityLookupMatch,
 ): HostedMemberIdentityLookup {
+  const identityState = projectHostedMemberIdentityState(identity);
+
   return {
     core: identity.member,
-    identity: projectHostedMemberIdentityState(identity),
+    identity: {
+      maskedPhoneNumberHint: identityState.maskedPhoneNumberHint,
+      memberId: identityState.memberId,
+      phoneNumber: identityState.phoneNumber,
+      phoneNumberVerifiedAt: identityState.phoneNumberVerifiedAt,
+      privyUserId: identityState.privyUserId,
+      signupPhoneCodeSendAttemptId: identityState.signupPhoneCodeSendAttemptId,
+      signupPhoneCodeSendAttemptStartedAt: identityState.signupPhoneCodeSendAttemptStartedAt,
+      signupPhoneCodeSentAt: identityState.signupPhoneCodeSentAt,
+      signupPhoneNumber: identityState.signupPhoneNumber,
+      walletAddress: identityState.walletAddress,
+      walletChainType: identityState.walletChainType,
+      walletCreatedAt: identityState.walletCreatedAt,
+      walletProvider: identityState.walletProvider,
+    },
     matchedBy,
   };
 }

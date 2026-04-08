@@ -14,7 +14,7 @@ import {
   isHostedMemberSuspended,
 } from "./entitlement";
 import { ensureHostedMemberForPhone } from "./member-identity-service";
-import { findHostedMemberByPhoneNumber } from "./hosted-member-identity-store";
+import { lookupHostedMemberIdentityByPhoneNumber } from "./hosted-member-identity-store";
 import { upsertHostedMemberLinqChatBinding } from "./hosted-member-routing-store";
 import {
   claimHostedLinqOnboardingLinkNotice,
@@ -64,10 +64,11 @@ export async function planHostedOnboardingLinqWebhook(input: {
     return buildIgnoredLinqWebhookPlan("invalid-phone");
   }
 
-  const existingMember = await findHostedMemberByPhoneNumber({
+  const existingMemberLookup = await lookupHostedMemberIdentityByPhoneNumber({
     phoneNumber: participantPhoneNumber,
     prisma: input.prisma,
   });
+  const existingMember = existingMemberLookup?.core ?? null;
 
   if (summary.isFromMe) {
     if (existingMember) {

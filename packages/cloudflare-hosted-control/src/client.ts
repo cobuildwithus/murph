@@ -1,6 +1,7 @@
 import type {
   HostedExecutionDispatchRequest,
   HostedExecutionDispatchResult,
+  HostedExecutionEventDispatchStatus,
   HostedExecutionOutboxPayload,
   HostedExecutionUserStatus,
 } from "@murphai/hosted-execution";
@@ -8,6 +9,7 @@ import {
   normalizeHostedExecutionBaseUrl,
   parseHostedExecutionDispatchRequest,
   parseHostedExecutionDispatchResult,
+  parseHostedExecutionEventDispatchStatus,
   parseHostedExecutionOutboxPayload,
   parseHostedExecutionUserStatus,
 } from "@murphai/hosted-execution";
@@ -25,6 +27,7 @@ import {
 import {
   buildCloudflareHostedControlUserCryptoContextPath,
   buildCloudflareHostedControlUserDispatchPayloadPath,
+  buildCloudflareHostedControlUserEventStatusPath,
   buildCloudflareHostedControlUserEnvPath,
   buildCloudflareHostedControlUserRunPath,
   buildCloudflareHostedControlUserStatusPath,
@@ -35,6 +38,7 @@ export interface CloudflareHostedControlClient {
   clearUserEnv(userId: string): Promise<CloudflareHostedUserEnvStatus>;
   deleteStoredDispatchPayload(payload: HostedExecutionOutboxPayload): Promise<void>;
   dispatchStoredPayload(payload: HostedExecutionOutboxPayload): Promise<HostedExecutionDispatchResult>;
+  getEventStatus(userId: string, eventId: string): Promise<HostedExecutionEventDispatchStatus | null>;
   getStatus(userId: string): Promise<HostedExecutionUserStatus>;
   getUserEnvStatus(userId: string): Promise<CloudflareHostedUserEnvStatus>;
   provisionManagedUserCrypto(userId: string): Promise<CloudflareHostedManagedUserCryptoStatus>;
@@ -108,6 +112,18 @@ export function createCloudflareHostedControlClient(
           headers: { "content-type": "application/json; charset=utf-8" },
           method: "POST",
         },
+        timeoutMs: options.timeoutMs,
+      });
+    },
+    getEventStatus(userId, eventId) {
+      return requestHostedExecutionAuthorizedJson({
+        baseUrl,
+        fetchImpl,
+        getAuthorizationHeader,
+        label: "event status",
+        parse: parseHostedExecutionEventDispatchStatusOrNull,
+        path: buildCloudflareHostedControlUserEventStatusPath(userId, eventId),
+        request: { method: "GET" },
         timeoutMs: options.timeoutMs,
       });
     },
@@ -202,6 +218,12 @@ export function createCloudflareHostedControlClient(
       });
     },
   };
+}
+
+function parseHostedExecutionEventDispatchStatusOrNull(
+  value: unknown,
+): HostedExecutionEventDispatchStatus | null {
+  return value === null ? null : parseHostedExecutionEventDispatchStatus(value);
 }
 
 function requireHostedExecutionBaseUrl(value: string): string {
