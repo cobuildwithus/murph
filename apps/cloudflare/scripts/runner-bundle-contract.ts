@@ -1,3 +1,7 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
 export const runnerBundleDirectoryName = "runner-bundle";
 
 export const hostedRunnerRuntimePackageName = "@murphai/cloudflare-runner";
@@ -39,25 +43,8 @@ export const hostedRunnerWorkspacePackageNames = [
   "@murphai/vault-usecases",
 ] as const;
 
-export const publishedMurphBundledWorkspacePackageNames = [
-  "@murphai/assistant-cli",
-  "@murphai/assistant-engine",
-  "@murphai/assistantd",
-  "@murphai/core",
-  "@murphai/device-syncd",
-  "@murphai/gateway-local",
-  "@murphai/importers",
-  "@murphai/inbox-services",
-  "@murphai/inboxd",
-  "@murphai/inboxd-imessage",
-  "@murphai/messaging-ingress",
-  "@murphai/operator-config",
-  "@murphai/parsers",
-  "@murphai/query",
-  "@murphai/runtime-state",
-  "@murphai/setup-cli",
-  "@murphai/vault-usecases",
-] as const;
+export const publishedMurphBundledWorkspacePackageNames =
+  readPublishedMurphBundledWorkspacePackageNames();
 
 const hostedRunnerWorkspacePackageNameSet = new Set<string>(
   hostedRunnerWorkspacePackageNames,
@@ -95,4 +82,29 @@ export function buildHostedRunnerRuntimeArtifactPackageJson(input: {
     engines: input.engines,
     dependencies: input.dependencies,
   };
+}
+
+function readPublishedMurphBundledWorkspacePackageNames(): readonly string[] {
+  const scriptDir = path.dirname(fileURLToPath(import.meta.url));
+  const repoRoot = path.resolve(scriptDir, "../../..");
+  const murphPackageJsonPath = path.join(repoRoot, "packages/cli/package.json");
+  const packageJson = JSON.parse(
+    readFileSync(murphPackageJsonPath, "utf8"),
+  ) as {
+    bundleDependencies?: unknown;
+  };
+
+  if (
+    !Array.isArray(packageJson.bundleDependencies) ||
+    packageJson.bundleDependencies.some(
+      (dependencyName) =>
+        typeof dependencyName !== "string" || dependencyName.length === 0,
+    )
+  ) {
+    throw new Error(
+      "packages/cli/package.json must declare a string-only bundleDependencies array.",
+    );
+  }
+
+  return packageJson.bundleDependencies;
 }

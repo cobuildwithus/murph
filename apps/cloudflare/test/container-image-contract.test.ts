@@ -51,6 +51,9 @@ describe("hosted runner container image contract", () => {
       "await materializeFinalRunnerBundle(",
     );
     expect(bundleAssemblyScript).toContain(
+      "await mkdir(finalParentDir, { recursive: true });",
+    );
+    expect(bundleAssemblyScript).toContain(
       "await pruneRunnerBundle(stagingBundleDir);",
     );
     expect(bundleAssemblyScript).toContain(
@@ -181,49 +184,11 @@ describe("hosted runner container image contract", () => {
       "@murphai/runtime-state",
       "@murphai/vault-usecases",
     ]);
-    expect(publishedMurphBundledWorkspacePackageNames).toEqual([
-      "@murphai/assistant-cli",
-      "@murphai/assistant-engine",
-      "@murphai/assistantd",
-      "@murphai/core",
-      "@murphai/device-syncd",
-      "@murphai/gateway-local",
-      "@murphai/importers",
-      "@murphai/inbox-services",
-      "@murphai/inboxd",
-      "@murphai/inboxd-imessage",
-      "@murphai/messaging-ingress",
-      "@murphai/operator-config",
-      "@murphai/parsers",
-      "@murphai/query",
-      "@murphai/runtime-state",
-      "@murphai/setup-cli",
-      "@murphai/vault-usecases",
-    ]);
     expect(hostedRunnerBuildPackageNames).toEqual([
-      "@murphai/assistant-engine",
-      "@murphai/assistant-runtime",
-      "@murphai/cloudflare-hosted-control",
-      "@murphai/contracts",
-      "@murphai/core",
-      "@murphai/device-syncd",
-      "@murphai/gateway-core",
-      "@murphai/gateway-local",
-      "@murphai/hosted-execution",
-      "@murphai/importers",
-      "@murphai/inbox-services",
-      "@murphai/inboxd",
-      "@murphai/messaging-ingress",
-      "@murphai/murph",
-      "@murphai/operator-config",
-      "@murphai/parsers",
-      "@murphai/query",
-      "@murphai/runtime-state",
-      "@murphai/vault-usecases",
-      "@murphai/assistant-cli",
-      "@murphai/assistantd",
-      "@murphai/inboxd-imessage",
-      "@murphai/setup-cli",
+      ...hostedRunnerWorkspacePackageNames,
+      ...publishedMurphBundledWorkspacePackageNames.filter(
+        (packageName) => !hostedRunnerWorkspacePackageNames.includes(packageName),
+      ),
     ]);
     expect(new Set(hostedRunnerBuildPackageNames)).toEqual(
       new Set([
