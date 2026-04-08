@@ -9,6 +9,7 @@ import { createIntegratedInboxServices } from '@murphai/inbox-services'
 import type { AssistantModelSpec } from '../../model-harness.js'
 import type { VaultServices } from '@murphai/vault-usecases/vault-services'
 import { createIntegratedVaultServices } from '@murphai/vault-usecases/vault-services'
+import { createAssistantFoodAutoLogHooks } from '../food-auto-log-hooks.js'
 import { processDueAssistantCronJobsLocal as processDueAssistantCronJobs } from '../cron.js'
 import { recordAssistantDiagnosticEvent } from '../diagnostics.js'
 import type { AssistantExecutionContext } from '../execution-context.js'
@@ -69,7 +70,9 @@ export async function runAssistantAutomation(
   const cleanup = bridgeAbortSignals(controller, input.signal)
   const paths = resolveAssistantStatePaths(input.vault)
   const inboxServices = input.inboxServices ?? createIntegratedInboxServices()
-  const vaultServices = input.vaultServices ?? createIntegratedVaultServices()
+  const vaultServices = input.vaultServices ?? createIntegratedVaultServices({
+    foodAutoLogHooks: createAssistantFoodAutoLogHooks(),
+  })
   const aggregateRouting = createEmptyInboxScanResult()
   const aggregateReplies = createEmptyAutoReplyScanResult()
   let scans = 0
