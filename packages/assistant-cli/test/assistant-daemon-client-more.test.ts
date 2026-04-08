@@ -9,12 +9,18 @@ import type {
 } from '@murphai/operator-config/assistant-cli-contracts'
 
 import {
+  maybeGetAssistantCronStatusViaDaemon,
+  maybeGetAssistantSessionViaDaemon,
   maybeDrainAssistantOutboxViaDaemon,
+  maybeListAssistantSessionsViaDaemon,
   maybeListAssistantCronJobsViaDaemon,
   maybeListAssistantCronRunsViaDaemon,
+  maybeOpenAssistantConversationViaDaemon,
   maybeProcessDueAssistantCronViaDaemon,
   maybeSetAssistantCronTargetViaDaemon,
+  maybeUpdateAssistantSessionOptionsViaDaemon,
 } from '../src/assistant-daemon-client.js'
+import type { AssistantSession } from '@murphai/operator-config/assistant-cli-contracts'
 
 const test = baseTest.sequential
 
@@ -83,6 +89,46 @@ const TEST_CRON_RUN = {
   responseLength: 4,
   error: null,
 } satisfies AssistantCronRunRecord
+
+const TEST_SESSION = {
+  schema: 'murph.assistant-session.v4',
+  sessionId: 'session-daemon-more',
+  target: {
+    adapter: 'codex-cli',
+    approvalPolicy: null,
+    codexCommand: null,
+    model: null,
+    oss: false,
+    profile: null,
+    reasoningEffort: null,
+    sandbox: null,
+  },
+  resumeState: null,
+  provider: 'codex-cli',
+  providerOptions: {
+    model: null,
+    reasoningEffort: null,
+    sandbox: null,
+    approvalPolicy: null,
+    profile: null,
+    oss: false,
+  },
+  providerBinding: null,
+  alias: 'chat:daemon',
+  binding: {
+    conversationKey: 'chat:daemon',
+    channel: 'local',
+    identityId: null,
+    actorId: null,
+    threadId: null,
+    threadIsDirect: true,
+    delivery: null,
+  },
+  createdAt: '2026-04-01T00:00:00.000Z',
+  updatedAt: '2026-04-01T00:00:00.000Z',
+  lastTurnAt: null,
+  turnCount: 1,
+} satisfies AssistantSession
 
 beforeAll(() => {
   vi.stubGlobal('fetch', fetchMock)
@@ -265,5 +311,173 @@ test('daemon client rejects invalid JSON success payloads with route-specific co
   await assert.rejects(
     () => maybeListAssistantCronJobsViaDaemon({ vault: '/tmp/vault' }, TEST_ENV),
     /invalid JSON response for \/cron\/jobs/u,
+  )
+})
+
+test('daemon client serializes open-conversation, session-options, and session listing helpers', async () => {
+  fetchMock
+    .mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          created: true,
+          session: TEST_SESSION,
+        }),
+        {
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          status: 200,
+        },
+      ),
+    )
+    .mockResolvedValueOnce(
+      new Response(JSON.stringify(TEST_SESSION), {
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        status: 200,
+      }),
+    )
+    .mockResolvedValueOnce(
+      new Response(JSON.stringify([TEST_SESSION]), {
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        status: 200,
+      }),
+    )
+
+  const opened = await maybeOpenAssistantConversationViaDaemon(
+    {
+      alias: 'chat:daemon',
+      channel: 'telegram',
+      identityId: 'identity_123',
+      participantId: 'participant_123',
+      sourceThreadId: 'thread_123',
+      vault: '/tmp/vault',
+    },
+    TEST_ENV,
+  )
+  const updatedSession = await maybeUpdateAssistantSessionOptionsViaDaemon(
+    {
+      providerOptions: {
+        model: 'gpt-5.4',
+      },
+      sessionId: TEST_SESSION.sessionId,
+      vault: '/tmp/vault',
+    },
+    TEST_ENV,
+  )
+  const sessions = await maybeListAssistantSessionsViaDaemon(
+    {
+      vault: '/tmp/vault',
+    },
+    TEST_ENV,
+  )
+
+  assert.deepEqual(opened, {
+    created: true,
+    session: TEST_SESSION,
+  })
+  assert.deepEqual(updatedSession, TEST_SESSION)
+  assert.deepEqual(sessions, [TEST_SESSION])
+
+  assert.equal(fetchMock.mock.calls.length, 3)
+  assert.equal(String(fetchMock.mock.calls[0]?.[0]), 'http://127.0.0.1:50242/open-conversation')
+  assert.deepEqual(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)), {
+    alias: 'chat:daemon',
+    channel: 'telegram',
+    identityId: 'identity_123',
+    participantId: 'participant_123',
+    sourceThreadId: 'thread_123',
+    vault: '/tmp/vault',
+  })
+  assert.equal(String(fetchMock.mock.calls[1]?.[0]), 'http://127.0.0.1:50242/session-options')
+  assert.deepEqual(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body)), {
+    providerOptions: {
+      model: 'gpt-5.4',
+    },
+    sessionId: TEST_SESSION.sessionId,
+    vault: '/tmp/vault',
+  })
+  assert.equal(
+    String(fetchMock.mock.calls[2]?.[0]),
+    'http://127.0.0.1:50242/sessions?vault=%2Ftmp%2Fvault',
+  )
+})
+
+test('daemon client session and cron status helpers omit null query params and normalize counts', async () => {
+  fetchMock
+    .mockResolvedValueOnce(
+      new Response(JSON.stringify(TEST_SESSION), {
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        status: 200,
+      }),
+    )
+    .mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          dueJobs: 1,
+          enabledJobs: 2,
+          nextRunAt: null,
+          runningJobs: 0,
+          totalJobs: 3,
+        }),
+        {
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          status: 200,
+        },
+      ),
+    )
+
+  const session = await maybeGetAssistantSessionViaDaemon(
+    {
+      sessionId: 'session/slash',
+      vault: '/tmp/vault',
+    },
+    TEST_ENV,
+  )
+  const cronStatus = await maybeGetAssistantCronStatusViaDaemon(
+    {
+      vault: '/tmp/vault',
+    },
+    TEST_ENV,
+  )
+
+  assert.deepEqual(session, TEST_SESSION)
+  assert.deepEqual(cronStatus, {
+    dueJobs: 1,
+    enabledJobs: 2,
+    nextRunAt: null,
+    runningJobs: 0,
+    totalJobs: 3,
+  })
+
+  assert.equal(
+    String(fetchMock.mock.calls[0]?.[0]),
+    'http://127.0.0.1:50242/sessions/session%2Fslash?vault=%2Ftmp%2Fvault',
+  )
+  assert.equal(
+    String(fetchMock.mock.calls[1]?.[0]),
+    'http://127.0.0.1:50242/cron/status?vault=%2Ftmp%2Fvault',
+  )
+})
+
+test('daemon client converts pre-response fetch failures into route-specific errors', async () => {
+  fetchMock.mockRejectedValueOnce(new Error('socket closed'))
+
+  await assert.rejects(
+    () =>
+      maybeGetAssistantCronStatusViaDaemon(
+        {
+          vault: '/tmp/vault',
+        },
+        TEST_ENV,
+      ),
+    /request failed before receiving a response for \/cron\/status/u,
   )
 })

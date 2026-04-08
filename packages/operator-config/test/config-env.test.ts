@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 
+import { z } from 'zod'
 import { test } from 'vitest'
 
 import {
@@ -9,10 +10,17 @@ import {
   sanitizeAssistantBackendTargetForPersistence,
 } from '../src/assistant-backend.ts'
 import {
+  assistantSessionIdSchema,
+  assistantStatusAutomationSchema,
+  parseAssistantSessionRecord,
+} from '../src/assistant-cli-contracts.ts'
+import {
+  emptyArgsSchema,
   firstString,
   parseHeadersJsonOption,
   requestIdFromOptions,
   resolveEffectiveTopLevelToken,
+  withBaseOptions,
 } from '../src/command-helpers.ts'
 import { readEnvValue } from '../src/env-values.ts'
 import {
@@ -34,6 +42,10 @@ import {
   resolveSetupChannelMissingEnv,
   resolveSetupWearableMissingEnv,
 } from '../src/setup-runtime-env.ts'
+import {
+  timeZoneSchema,
+  workoutFormatListResultSchema,
+} from '../src/vault-cli-contracts.ts'
 import { VaultCliError } from '../src/vault-cli-errors.ts'
 
 async function withTemporaryProcessEnv(
@@ -157,6 +169,21 @@ test('applySetupRuntimeEnvOverridesToProcess only writes trimmed non-empty overr
 })
 
 test('command helpers normalize top-level tokens, request ids, and JSON headers', () => {
+  assert.deepEqual(emptyArgsSchema.parse({}), {})
+  assert.deepEqual(
+    withBaseOptions({
+      extra: z.string().min(1),
+    }).parse({
+      extra: 'value',
+      vault: '/vault',
+    }),
+    {
+      extra: 'value',
+      vault: '/vault',
+    },
+  )
+  assert.equal(parseHeadersJsonOption(), undefined)
+
   const headers = parseHeadersJsonOption(
     '{"Authorization":"Bearer abcdefghijklmnop","X-Trace":" trace-id "}',
   )
@@ -166,7 +193,22 @@ test('command helpers normalize top-level tokens, request ids, and JSON headers'
     'X-Trace': ' trace-id ',
   })
   assert.throws(
+    () => parseHeadersJsonOption('{'),
+    (error: unknown) =>
+      error instanceof VaultCliError &&
+      error.code === 'invalid_payload' &&
+      error.message === 'headersJson must be a valid JSON object.' &&
+      typeof error.context?.cause === 'string',
+  )
+  assert.throws(
     () => parseHeadersJsonOption('[]'),
+    (error: unknown) =>
+      error instanceof VaultCliError &&
+      error.code === 'invalid_payload' &&
+      error.message === 'headersJson must be a JSON object with string values.',
+  )
+  assert.throws(
+    () => parseHeadersJsonOption('{"X-Trace":1}'),
     (error: unknown) =>
       error instanceof VaultCliError &&
       error.code === 'invalid_payload' &&
@@ -183,8 +225,10 @@ test('command helpers normalize top-level tokens, request ids, and JSON headers'
     ]),
     'assistant',
   )
+  assert.equal(resolveEffectiveTopLevelToken(['', '--token-offset', '5']), null)
   assert.equal(resolveEffectiveTopLevelToken(['--format', 'json', '--', 'show']), 'show')
   assert.equal(firstString({ a: '   ', b: '  keep-me  ' }, ['a', 'b']), 'keep-me')
+  assert.equal(firstString({ a: '   ', b: 1 }, ['a', 'b']), null)
   assert.equal(
     requestIdFromOptions({ requestId: 'req-123', vault: '/vault' }),
     'req-123',
@@ -256,6 +300,191 @@ test('assistant backend targets trim config input and strip sensitive headers be
       }),
     ),
     true,
+  )
+})
+
+test('representative contract schemas stay wired to the owned setup/operator seams', () => {
+  assert.equal(timeZoneSchema.parse('Australia/Sydney'), 'Australia/Sydney')
+  assert.equal(timeZoneSchema.safeParse('Not/A_Zone').success, false)
+  assert.equal(
+    workoutFormatListResultSchema.parse({
+      count: 1,
+      filters: {
+        limit: 25,
+      },
+      items: [
+        {
+          data: {},
+          id: 'entity-1',
+          kind: 'note',
+          links: [],
+          markdown: null,
+          occurredAt: '2026-04-08T12:00:00.000Z',
+          path: 'notes/entity-1.md',
+          title: 'Entity',
+        },
+      ],
+      nextCursor: null,
+      vault: '/vault',
+    }).items[0]?.id,
+    'entity-1',
+  )
+
+  assert.equal(assistantSessionIdSchema.safeParse('session_1').success, true)
+  assert.equal(assistantSessionIdSchema.safeParse('../session').success, false)
+  assert.deepEqual(
+    parseAssistantSessionRecord({
+      alias: 'daily',
+      binding: {
+        actorId: null,
+        channel: 'telegram',
+        conversationKey: 'conv-1',
+        delivery: {
+          kind: 'thread',
+          target: 'thread-1',
+        },
+        identityId: 'identity-1',
+        threadId: 'thread-1',
+        threadIsDirect: true,
+      },
+      createdAt: '2026-04-08T12:00:00.000Z',
+      lastTurnAt: null,
+      resumeState: {
+        providerSessionId: ' provider-session ',
+        resumeRouteId: ' route-1 ',
+      },
+      schema: 'murph.assistant-session.v4',
+      sessionId: 'session_1',
+      target: {
+        adapter: 'openai-compatible',
+        apiKeyEnv: 'OPENAI_API_KEY',
+        endpoint: 'https://api.example.test/v1',
+        headers: {
+          'X-Trace-Id': 'trace',
+        },
+        model: 'gpt-5.4',
+        providerName: 'Example',
+        reasoningEffort: 'high',
+      },
+      turnCount: 3,
+      updatedAt: '2026-04-08T12:05:00.000Z',
+    }).providerBinding,
+    {
+      provider: 'openai-compatible',
+      providerOptions: {
+        apiKeyEnv: 'OPENAI_API_KEY',
+        approvalPolicy: null,
+        baseUrl: 'https://api.example.test/v1',
+        headers: {
+          'X-Trace-Id': 'trace',
+        },
+        model: 'gpt-5.4',
+        oss: false,
+        profile: null,
+        providerName: 'Example',
+        reasoningEffort: 'high',
+        sandbox: null,
+      },
+      providerSessionId: 'provider-session',
+      providerState: {
+        resumeRouteId: 'route-1',
+      },
+    },
+  )
+  assert.deepEqual(
+    assistantStatusAutomationSchema.parse({
+      autoReplyBacklogChannels: ['email'],
+      autoReplyChannels: ['telegram'],
+      autoReplyPrimed: true,
+      autoReplyScanCursor: {
+        captureId: 'capture-1',
+        occurredAt: '2026-04-08T12:05:00.000Z',
+      },
+      inboxScanCursor: null,
+      updatedAt: '2026-04-08T12:10:00.000Z',
+    }).autoReplyChannels,
+    ['telegram'],
+  )
+  assert.deepEqual(
+    parseAssistantSessionRecord({
+      alias: null,
+      binding: {
+        actorId: null,
+        channel: null,
+        conversationKey: null,
+        delivery: null,
+        identityId: null,
+        threadId: null,
+        threadIsDirect: null,
+      },
+      createdAt: '2026-04-08T12:00:00.000Z',
+      lastTurnAt: null,
+      resumeState: null,
+      schema: 'murph.assistant-session.v4',
+      sessionId: 'session_codex',
+      target: {
+        adapter: 'codex-cli',
+        approvalPolicy: 'never',
+        codexCommand: null,
+        codexHome: null,
+        model: 'gpt-5.4',
+        oss: false,
+        profile: null,
+        reasoningEffort: 'medium',
+        sandbox: 'workspace-write',
+      },
+      turnCount: 0,
+      updatedAt: '2026-04-08T12:05:00.000Z',
+    }).providerBinding,
+    null,
+  )
+  assert.deepEqual(
+    parseAssistantSessionRecord({
+      alias: null,
+      binding: {
+        actorId: null,
+        channel: null,
+        conversationKey: null,
+        delivery: null,
+        identityId: null,
+        threadId: null,
+        threadIsDirect: null,
+      },
+      createdAt: '2026-04-08T12:00:00.000Z',
+      lastTurnAt: null,
+      resumeState: {
+        providerSessionId: '   ',
+        resumeRouteId: ' route-only ',
+      },
+      schema: 'murph.assistant-session.v4',
+      sessionId: 'session_route_only',
+      target: {
+        adapter: 'openai-compatible',
+        apiKeyEnv: null,
+        endpoint: null,
+        headers: null,
+        model: 'gpt-5.4',
+        providerName: null,
+        reasoningEffort: 'medium',
+      },
+      turnCount: 1,
+      updatedAt: '2026-04-08T12:05:00.000Z',
+    }).providerBinding,
+    {
+      provider: 'openai-compatible',
+      providerOptions: {
+        approvalPolicy: null,
+        model: 'gpt-5.4',
+        oss: false,
+        profile: null,
+        reasoningEffort: 'medium',
+        sandbox: null,
+      },
+      providerSessionId: null,
+      providerState: {
+        resumeRouteId: 'route-only',
+      },
+    },
   )
 })
 

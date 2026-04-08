@@ -10,7 +10,7 @@ export const RUNTIME_PACKAGES = Object.freeze([
 export function createRuntimeUnavailableError(
   operation: string,
   cause: unknown,
-) {
+): VaultCliError {
   const details =
     cause instanceof Error
       ? {
@@ -19,7 +19,7 @@ export function createRuntimeUnavailableError(
         }
       : {
           packages: [...RUNTIME_PACKAGES],
-        };
+        }
 
   return new VaultCliError(
     'runtime_unavailable',

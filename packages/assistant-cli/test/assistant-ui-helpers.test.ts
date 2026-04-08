@@ -3,6 +3,8 @@ import assert from 'node:assert/strict'
 import { test } from 'vitest'
 
 import {
+  clampComposerCursorOffset,
+  enqueuePendingComposerValue,
   findComposerNextWordEnd,
   findComposerPreviousWordStart,
   reconcileComposerControlledValue,
@@ -15,6 +17,7 @@ import {
   inferAssistantInkThemeModeFromColorFgbg,
   LIGHT_ASSISTANT_INK_THEME,
   resolveAssistantInkTheme,
+  resolveAssistantInkThemeForMode,
   resolveAssistantInkThemeForOpenChat,
   resolveAssistantInkThemeModeForOpenChat,
 } from '../src/assistant/ui/theme.js'
@@ -72,6 +75,35 @@ test('theme helpers prefer terminal color hints, capture launch baselines, and a
       initialColorFgbg: baseline.initialColorFgbg,
       platform: 'darwin',
       readAppleInterfaceStyle: () => 'Dark',
+    }),
+    DARK_ASSISTANT_INK_THEME,
+  )
+
+  assert.equal(inferAssistantInkThemeModeFromAppleInterfaceStyle(' twilight '), null)
+  assert.deepEqual(resolveAssistantInkThemeForMode('dark'), DARK_ASSISTANT_INK_THEME)
+  assert.deepEqual(
+    resolveAssistantInkTheme({
+      env: {},
+      platform: 'linux',
+    }),
+    LIGHT_ASSISTANT_INK_THEME,
+  )
+  assert.equal(
+    resolveAssistantInkThemeModeForOpenChat({
+      currentMode: 'dark',
+      currentAppleInterfaceStyle: null,
+      initialAppleInterfaceStyle: 'Dark',
+      initialColorFgbg: undefined,
+      platform: 'darwin',
+    }),
+    'dark',
+  )
+  assert.deepEqual(
+    resolveAssistantInkThemeForOpenChat({
+      currentMode: 'dark',
+      initialAppleInterfaceStyle: 'Dark',
+      initialColorFgbg: '0;0',
+      platform: 'linux',
     }),
     DARK_ASSISTANT_INK_THEME,
   )
@@ -168,6 +200,50 @@ test('provider progress helpers dedupe and finalize trace entries deterministica
       },
     ],
   )
+
+  assert.deepEqual(
+    applyProviderProgressEventToEntries({
+      entries: pendingEntries,
+      event: {
+        id: 'turn_123:message',
+        kind: 'message',
+        state: 'running',
+        text: 'ignored message event',
+      },
+    }),
+    pendingEntries,
+  )
+  assert.deepEqual(
+    finalizePendingInkChatTraces(
+      [
+        {
+          kind: 'trace',
+          pending: true,
+          text: 'finalize every pending trace without a prefix',
+          traceId: null,
+          traceKind: 'tool',
+        },
+        {
+          kind: 'assistant',
+          text: 'leave assistant entries alone',
+        },
+      ],
+      null,
+    ),
+    [
+      {
+        kind: 'trace',
+        pending: false,
+        text: 'finalize every pending trace without a prefix',
+        traceId: null,
+        traceKind: 'tool',
+      },
+      {
+        kind: 'assistant',
+        text: 'leave assistant entries alone',
+      },
+    ],
+  )
 })
 
 test('trace update helpers replace and append stream content while ignoring empty updates', () => {
@@ -207,9 +283,64 @@ test('trace update helpers replace and append stream content while ignoring empt
       text: 'First line\nSecond line',
     },
   ])
+
+  assert.deepEqual(applyInkChatTraceUpdates(entries, []), entries)
+  assert.deepEqual(
+    applyInkChatTraceUpdates(entries, [
+      {
+        kind: 'status',
+        text: 'Saved locally',
+      },
+      {
+        kind: 'assistant',
+        streamKey: 'assistant:1',
+        text: 'Replaced line',
+      },
+      {
+        kind: 'assistant',
+        streamKey: 'assistant:1',
+        mode: 'append',
+        text: '\nAnd appended',
+      },
+    ]),
+    [
+      {
+        kind: 'thinking',
+        streamKey: 'thinking:1',
+        text: 'Plan',
+      },
+      {
+        kind: 'assistant',
+        streamKey: 'assistant:1',
+        text: 'Replaced line\nAnd appended',
+      },
+      {
+        kind: 'status',
+        text: 'Saved locally',
+      },
+    ],
+  )
 })
 
 test('composer state helpers preserve pending echoes and cursor movement across wrapped lines', () => {
+  assert.equal(clampComposerCursorOffset(-2, 5), 0)
+  assert.equal(clampComposerCursorOffset(9, 5), 5)
+  assert.deepEqual(enqueuePendingComposerValue(['draft'], 'draft'), ['draft'])
+  assert.deepEqual(enqueuePendingComposerValue(['draft'], 'next'), ['draft', 'next'])
+  assert.deepEqual(
+    reconcileComposerControlledValue({
+      cursorOffset: 99,
+      currentValue: 'draft',
+      nextControlledValue: 'previous',
+      pendingValues: ['queued 1'],
+      previousControlledValue: 'previous',
+    }),
+    {
+      cursorOffset: 5,
+      nextValue: 'draft',
+      pendingValues: ['queued 1'],
+    },
+  )
   assert.deepEqual(
     reconcileComposerControlledValue({
       cursorOffset: 20,
@@ -252,8 +383,22 @@ test('composer state helpers preserve pending echoes and cursor movement across 
       preferredColumn: 1,
     },
   )
+  assert.deepEqual(
+    resolveComposerVerticalCursorMove({
+      cursorOffset: 1,
+      direction: 'up',
+      preferredColumn: 3,
+      value: 'ab\ncdef\nxy',
+    }),
+    {
+      cursorOffset: 1,
+      preferredColumn: 3,
+    },
+  )
 
   assert.equal(findComposerPreviousWordStart('hello, world', 12), 7)
+  assert.equal(findComposerPreviousWordStart('  hello', 2), 0)
   assert.equal(findComposerNextWordEnd('hello, world', 5), 6)
   assert.equal(findComposerNextWordEnd('hello, world', 7), 12)
+  assert.equal(findComposerNextWordEnd('hello   ', 5), 8)
 })

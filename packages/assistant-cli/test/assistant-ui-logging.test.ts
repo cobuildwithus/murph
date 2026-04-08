@@ -4,21 +4,22 @@ import type { AssistantSession } from '@murphai/operator-config/assistant-cli-co
 import {
   formatAssistantRunEventForTerminal,
   formatForegroundLogLine,
+  formatInboxRunEventForTerminal,
   resolveForegroundTerminalLogOptions,
   UNSAFE_FOREGROUND_LOG_DETAILS_ENV,
-} from '@murphai/assistant-cli/run-terminal-logging'
+} from '../src/run-terminal-logging.js'
 import {
   resolveAssistantQueuedPromptDisposition,
   resolveAssistantSelectionAfterSessionSync,
-} from '@murphai/assistant-cli/assistant/ui/chat-controller-state'
+} from '../src/assistant/ui/chat-controller-state.js'
 import {
   mergeComposerDraftWithQueuedPrompts,
   formatQueuedFollowUpPreview,
-} from '@murphai/assistant-cli/assistant/ui/composer-terminal'
+} from '../src/assistant/ui/composer-terminal.js'
 import {
   resolveChatSubmitAction,
   shouldClearComposerForSubmitAction,
-} from '@murphai/assistant-cli/assistant/ui/view-model'
+} from '../src/assistant/ui/view-model.js'
 
 function createSession(
   overrides: Partial<AssistantSession> = {},
@@ -79,6 +80,14 @@ test('assistant CLI foreground logging resolves unsafe logging flags and stable 
       unsafeDetails: true,
     },
   )
+  assert.deepEqual(
+    resolveForegroundTerminalLogOptions({
+      [UNSAFE_FOREGROUND_LOG_DETAILS_ENV]: ' maybe ',
+    }),
+    {
+      unsafeDetails: false,
+    },
+  )
 
   assert.equal(
     formatForegroundLogLine(
@@ -129,10 +138,429 @@ test('assistant CLI foreground logging keeps safe auto-reply summaries while hid
 test('assistant CLI foreground logging normalizes scan priming hints', () => {
   assert.equal(
     formatAssistantRunEventForTerminal({
+      type: 'reply.scan.primed',
+    }),
+    'primed channel auto-reply',
+  )
+  assert.equal(
+    formatAssistantRunEventForTerminal({
+      details:
+        'no existing captures yet; auto-reply will start with the next inbound message',
+      type: 'reply.scan.primed',
+    }),
+    'primed channel auto-reply: no existing captures yet; auto-reply will start with the next inbound message',
+  )
+  assert.equal(
+    formatAssistantRunEventForTerminal({
+      details:
+        'processing existing 4 capture backlog before switching to new inbound messages',
+      type: 'reply.scan.primed',
+    }),
+    'primed channel auto-reply: processing existing 4 capture backlog before switching to new inbound messages',
+  )
+  assert.equal(
+    formatAssistantRunEventForTerminal({
       details: 'starting after 4 existing captures',
       type: 'reply.scan.primed',
     }),
     'primed channel auto-reply: starting after latest existing capture',
+  )
+})
+
+test('assistant CLI foreground logging skips empty scans and summarizes routing and daemon failures', () => {
+  assert.equal(
+    formatAssistantRunEventForTerminal({
+      details: '0 capture(s)',
+      type: 'scan.started',
+    }),
+    null,
+  )
+  assert.equal(
+    formatAssistantRunEventForTerminal({
+      details: '0 capture(s)',
+      type: 'reply.scan.started',
+    }),
+    null,
+  )
+  assert.equal(
+    formatAssistantRunEventForTerminal({
+      details: 'captures pending',
+      type: 'scan.started',
+    }),
+    'scanning inbox decisions: captures pending',
+  )
+  assert.equal(
+    formatAssistantRunEventForTerminal({
+      captureId: 'cap_route_123',
+      tools: ['search', 'query'],
+      type: 'capture.routed',
+    }),
+    'routed cap_route_123: search, query',
+  )
+  assert.equal(
+    formatAssistantRunEventForTerminal({
+      captureId: 'cap_start_123',
+      details: 'provider startup',
+      type: 'capture.reply-started',
+    }),
+    'reply-started cap_start_123: assistant provider turn started',
+  )
+  assert.equal(
+    formatAssistantRunEventForTerminal({
+      details: 'loopback unavailable',
+      type: 'daemon.failed',
+    }),
+    'inbox daemon failed loopback unavailable',
+  )
+})
+
+test('assistant CLI foreground logging preserves safe details and stable fallbacks across assistant event types', () => {
+  assert.equal(
+    formatAssistantRunEventForTerminal({
+      captureId: 'cap_safe_noop',
+      details: 'assistant result already exists',
+      type: 'capture.noop',
+    }),
+    'noop cap_safe_noop: assistant result already exists',
+  )
+  assert.equal(
+    formatAssistantRunEventForTerminal({
+      captureId: 'cap_skip_retry',
+      details:
+        'temporary network issue. Will retry this capture after the provider reconnects.',
+      type: 'capture.reply-skipped',
+    }),
+    'reply-skipped cap_skip_retry: waiting for provider reconnect',
+  )
+  assert.equal(
+    formatAssistantRunEventForTerminal({
+      captureId: 'cap_failed_safe',
+      details: 'provider raw error',
+      errorCode: 'network_timeout',
+      safeDetails: 'assistant provider timed out safely',
+      type: 'capture.reply-failed',
+    }),
+    'reply-failed cap_failed_safe: assistant provider timed out safely',
+  )
+  assert.equal(
+    formatAssistantRunEventForTerminal({
+      captureId: 'cap_failed_fallback',
+      errorCode: 'network_timeout',
+      type: 'capture.reply-failed',
+    }),
+    'reply-failed cap_failed_fallback: assistant reply failed (network_timeout)',
+  )
+  assert.equal(
+    formatAssistantRunEventForTerminal({
+      captureId: 'cap_failed_unsafe',
+      details: 'provider raw error',
+      safeDetails: 'assistant provider timed out safely',
+      type: 'capture.reply-failed',
+    }, {
+      unsafeDetails: true,
+    }),
+    'reply-failed cap_failed_unsafe: provider raw error',
+  )
+})
+
+test('assistant CLI foreground logging summarizes provider progress for each top-level provider kind', () => {
+  assert.equal(
+    formatAssistantRunEventForTerminal({
+      captureId: 'cap_command_running',
+      providerKind: 'command',
+      providerState: 'running',
+      type: 'capture.reply-progress',
+    }),
+    'reply-progress cap_command_running: running assistant command',
+  )
+  assert.equal(
+    formatAssistantRunEventForTerminal({
+      captureId: 'cap_command_safe',
+      providerKind: 'command',
+      providerState: 'completed',
+      safeDetails: 'assistant command ended cleanly',
+      type: 'capture.reply-progress',
+    }),
+    'reply-progress cap_command_safe: assistant command ended cleanly',
+  )
+  assert.equal(
+    formatAssistantRunEventForTerminal({
+      captureId: 'cap_file_done',
+      providerKind: 'file',
+      providerState: 'completed',
+      type: 'capture.reply-progress',
+    }),
+    'reply-progress cap_file_done: file update finished',
+  )
+  assert.equal(
+    formatAssistantRunEventForTerminal({
+      captureId: 'cap_plan_running',
+      providerKind: 'plan',
+      providerState: 'running',
+      type: 'capture.reply-progress',
+    }),
+    'reply-progress cap_plan_running: updating plan',
+  )
+  assert.equal(
+    formatAssistantRunEventForTerminal({
+      captureId: 'cap_reasoning_done',
+      providerKind: 'reasoning',
+      providerState: 'completed',
+      type: 'capture.reply-progress',
+    }),
+    'reply-progress cap_reasoning_done: thinking step completed',
+  )
+  assert.equal(
+    formatAssistantRunEventForTerminal({
+      captureId: 'cap_search_done',
+      providerKind: 'search',
+      providerState: 'completed',
+      type: 'capture.reply-progress',
+    }),
+    'reply-progress cap_search_done: web search finished',
+  )
+  assert.equal(
+    formatAssistantRunEventForTerminal({
+      captureId: 'cap_status_safe',
+      details: 'assistant still running after 45s',
+      providerKind: 'status',
+      providerState: 'running',
+      type: 'capture.reply-progress',
+    }),
+    'reply-progress cap_status_safe: assistant still running after 45s',
+  )
+  assert.equal(
+    formatAssistantRunEventForTerminal({
+      captureId: 'cap_status_waiting',
+      details: 'status payload with private text',
+      providerKind: 'status',
+      providerState: 'running',
+      type: 'capture.reply-progress',
+    }),
+    'reply-progress cap_status_waiting: waiting on assistant provider',
+  )
+  assert.equal(
+    formatAssistantRunEventForTerminal({
+      captureId: 'cap_tool_done',
+      providerKind: 'tool',
+      providerState: 'completed',
+      safeDetails: 'tool completed safely',
+      type: 'capture.reply-progress',
+    }),
+    'reply-progress cap_tool_done: tool completed safely',
+  )
+  assert.equal(
+    formatAssistantRunEventForTerminal({
+      captureId: 'cap_other_unsafe',
+      details: 'raw custom provider detail',
+      providerKind: 'unknown' as never,
+      providerState: 'running',
+      type: 'capture.reply-progress',
+    }, {
+      unsafeDetails: true,
+    }),
+    'reply-progress cap_other_unsafe: raw custom provider detail',
+  )
+})
+
+test('assistant CLI inbox foreground logging redacts by default and exposes richer unsafe capture labels', () => {
+  assert.equal(
+    formatInboxRunEventForTerminal({
+      connectorId: 'connector_telegram',
+      source: 'telegram',
+      type: 'connector.backfill.started',
+    }),
+    'Telegram connector backfill starting',
+  )
+  assert.equal(
+    formatInboxRunEventForTerminal({
+      connectorId: 'connector_telegram',
+      counts: {
+        deduped: 1,
+        imported: 2,
+      },
+      source: 'telegram',
+      type: 'connector.backfill.finished',
+    }),
+    'Telegram connector backfill finished: 2 imported, 1 deduped',
+  )
+  assert.equal(
+    formatInboxRunEventForTerminal({
+      connectorId: 'connector_imessage',
+      source: 'imessage',
+      type: 'connector.watch.started',
+    }),
+    'iMessage connector watching for new messages',
+  )
+  assert.equal(
+    formatInboxRunEventForTerminal({
+      connectorId: 'connector_email',
+      details: 'mailbox missing',
+      phase: 'startup',
+      source: 'email',
+      type: 'connector.failed',
+    }),
+    'email connector startup failed',
+  )
+  assert.equal(
+    formatInboxRunEventForTerminal({
+      connectorId: 'connector_linq',
+      details: 'disabled by config',
+      source: 'linq',
+      type: 'connector.skipped',
+    }),
+    'Linq connector skipped on this host',
+  )
+  assert.equal(
+    formatInboxRunEventForTerminal({
+        capture: {
+          externalId: 'capture_1',
+          occurredAt: '2026-04-08T00:00:00.000Z',
+          source: 'telegram',
+          attachments: [{ kind: 'document' }],
+        },
+      connectorId: 'connector_telegram',
+      phase: 'watch',
+      source: 'telegram',
+      type: 'capture.imported',
+    }),
+    'new Telegram capture imported: 1 attachment',
+  )
+  assert.equal(
+    formatInboxRunEventForTerminal(
+      {
+        capture: {
+          actor: {
+            displayName: 'Casey',
+            id: 'actor_123',
+            isSelf: false,
+          },
+          attachments: [{ kind: 'document' }, { kind: 'image' }],
+          externalId: 'capture_2',
+          occurredAt: '2026-04-08T00:00:00.000Z',
+          source: 'telegram',
+          text: '  Need a quick follow-up on the parser status.  ',
+          thread: {
+            id: 'thread_123',
+            title: 'Care team',
+          },
+        },
+        connectorId: 'connector_telegram',
+        phase: 'backfill',
+        source: 'telegram',
+        type: 'capture.imported',
+      },
+      {
+        unsafeDetails: true,
+      },
+    ),
+    'backfill Telegram from Casey in Care team: Need a quick follow-up on the parser status. (+2 attachments)',
+  )
+  assert.equal(
+    formatInboxRunEventForTerminal({
+      connectorId: 'connector_signal',
+      details: 'manual operator pause',
+      phase: 'backfill',
+      source: 'signal' as never,
+      type: 'connector.failed',
+    }, {
+      unsafeDetails: true,
+    }),
+    'signal connector connector_signal backfill failed: manual operator pause',
+  )
+  assert.equal(
+    formatInboxRunEventForTerminal({
+      connectorId: 'connector_signal',
+      details: 'not configured locally',
+      source: 'signal' as never,
+      type: 'connector.skipped',
+    }, {
+      unsafeDetails: true,
+    }),
+    'signal connector connector_signal skipped on this host: not configured locally',
+  )
+  assert.equal(
+    formatInboxRunEventForTerminal(
+      {
+        capture: {
+          actor: {
+            displayName: '   ',
+            id: 'actor_signal_123',
+            isSelf: false,
+          },
+          attachments: [{ kind: 'image' }],
+          externalId: 'capture_signal',
+          occurredAt: '2026-04-08T00:00:00.000Z',
+          source: 'signal' as never,
+          text: `${'x'.repeat(120)}   `,
+          thread: {
+            id: 'thread_signal_123',
+            title: '   ',
+          },
+        },
+        connectorId: 'connector_signal',
+        phase: 'watch',
+        source: 'signal' as never,
+        type: 'capture.imported',
+      },
+      {
+        unsafeDetails: true,
+      },
+    ),
+    `new signal from actor_signal_123 in thread_signal_123: ${'x'.repeat(93)}... (+1 attachment)`,
+  )
+  assert.equal(
+    formatInboxRunEventForTerminal(
+      {
+        capture: {
+          actor: {
+            displayName: null,
+            id: null,
+            isSelf: true,
+          },
+          attachments: [],
+          externalId: 'capture_email_self',
+          occurredAt: '2026-04-08T00:00:00.000Z',
+          source: 'email',
+        },
+        connectorId: 'connector_email',
+        phase: 'watch',
+        source: 'email',
+        type: 'capture.imported',
+      },
+      {
+        unsafeDetails: true,
+      },
+    ),
+    'new email from you: message with no text preview',
+  )
+  assert.equal(
+    formatInboxRunEventForTerminal(
+      {
+        capture: {
+          attachments: [{ kind: 'image' }],
+          externalId: 'capture_attachment_only',
+          occurredAt: '2026-04-08T00:00:00.000Z',
+          source: 'telegram',
+        },
+        connectorId: 'connector_telegram',
+        phase: 'watch',
+        source: 'telegram',
+        type: 'capture.imported',
+      },
+      {
+        unsafeDetails: true,
+      },
+    ),
+    'new Telegram: attachment-only message',
+  )
+  assert.equal(
+    formatInboxRunEventForTerminal({
+      connectorId: 'connector_unknown',
+      source: 'telegram',
+      type: 'connector.removed' as never,
+    }),
+    null,
   )
 })
 
