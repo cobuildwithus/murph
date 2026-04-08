@@ -23,9 +23,7 @@ afterEach(() => {
 });
 
 test("createLinqWebhookConnector fails closed before starting when the webhook secret is missing", async () => {
-  const { createLinqWebhookConnector } = await importConnectorWithMockedHttp(
-    createHttpMockRuntime(),
-  );
+  const { createLinqWebhookConnector } = await loadLinqWebhookConnector();
 
   assert.throws(
     () =>
@@ -41,8 +39,7 @@ test("createLinqWebhookConnector fails closed before starting when the webhook s
 });
 
 test("createLinqWebhookConnector serves GET, rejects duplicate watch calls, and normalizes the webhook path", async () => {
-  const runtime = createHttpMockRuntime();
-  const { createLinqWebhookConnector } = await importConnectorWithMockedHttp(runtime);
+  const { runtime, createLinqWebhookConnector } = await loadLinqWebhookConnector();
   const controller = new AbortController();
   const connector = createLinqWebhookConnector({
     accountId: "default",
@@ -88,8 +85,7 @@ test("createLinqWebhookConnector serves GET, rejects duplicate watch calls, and 
 });
 
 test("createLinqWebhookConnector accepts signed webhook requests and emits hydrated captures", async () => {
-  const runtime = createHttpMockRuntime();
-  const { createLinqWebhookConnector } = await importConnectorWithMockedHttp(runtime);
+  const { runtime, createLinqWebhookConnector } = await loadLinqWebhookConnector();
   const controller = new AbortController();
   const emitted: Array<{
     capture: InboundCapture;
@@ -192,8 +188,7 @@ test("createLinqWebhookConnector accepts signed webhook requests and emits hydra
 });
 
 test("createLinqWebhookConnector still accepts a webhook when attachment download fails", async () => {
-  const runtime = createHttpMockRuntime();
-  const { createLinqWebhookConnector } = await importConnectorWithMockedHttp(runtime);
+  const { runtime, createLinqWebhookConnector } = await loadLinqWebhookConnector();
   const controller = new AbortController();
   const emitted: InboundCapture[] = [];
   const fetchImplementation = vi.fn(async () => ({
@@ -277,8 +272,7 @@ test("createLinqWebhookConnector still accepts a webhook when attachment downloa
 });
 
 test("createLinqWebhookConnector waits for successful attachment downloads that resolve within the timeout", async () => {
-  const runtime = createHttpMockRuntime();
-  const { createLinqWebhookConnector } = await importConnectorWithMockedHttp(runtime);
+  const { runtime, createLinqWebhookConnector } = await loadLinqWebhookConnector();
   const controller = new AbortController();
   const emitted: InboundCapture[] = [];
   let resolveDownload: ((response: Response) => void) | null = null;
@@ -375,8 +369,7 @@ test("createLinqWebhookConnector waits for successful attachment downloads that 
 });
 
 test("createLinqWebhookConnector acknowledges webhooks promptly even when attachment downloads hang", async () => {
-  const runtime = createHttpMockRuntime();
-  const { createLinqWebhookConnector } = await importConnectorWithMockedHttp(runtime);
+  const { runtime, createLinqWebhookConnector } = await loadLinqWebhookConnector();
   const controller = new AbortController();
   const emitted: InboundCapture[] = [];
   const connector = createLinqWebhookConnector({
@@ -463,8 +456,7 @@ test("createLinqWebhookConnector acknowledges webhooks promptly even when attach
 });
 
 test("createLinqWebhookConnector maps verification, validation, routing, and emit failures to stable responses", async () => {
-  const runtime = createHttpMockRuntime();
-  const { createLinqWebhookConnector } = await importConnectorWithMockedHttp(runtime);
+  const { runtime, createLinqWebhookConnector } = await loadLinqWebhookConnector();
   const controller = new AbortController();
   const emitFailure = new Error("emit failed");
   let emitAttempts = 0;
@@ -630,8 +622,9 @@ test("createLinqWebhookConnector maps verification, validation, routing, and emi
 
 test("createLinqWebhookConnector handles pre-aborted startup, server errors, and close failures", async () => {
   {
-    const runtime = createHttpMockRuntime({ autoListen: false });
-    const { createLinqWebhookConnector } = await importConnectorWithMockedHttp(runtime);
+    const { runtime, createLinqWebhookConnector } = await loadLinqWebhookConnector({
+      autoListen: false,
+    });
     const controller = new AbortController();
     const connector = createLinqWebhookConnector({
       host: "127.0.0.1",
@@ -652,8 +645,7 @@ test("createLinqWebhookConnector handles pre-aborted startup, server errors, and
   }
 
   {
-    const runtime = createHttpMockRuntime();
-    const { createLinqWebhookConnector } = await importConnectorWithMockedHttp(runtime);
+    const { runtime, createLinqWebhookConnector } = await loadLinqWebhookConnector();
     const controller = new AbortController();
     const connector = createLinqWebhookConnector({
       host: "127.0.0.1",
@@ -673,8 +665,7 @@ test("createLinqWebhookConnector handles pre-aborted startup, server errors, and
   }
 
   {
-    const runtime = createHttpMockRuntime();
-    const { createLinqWebhookConnector } = await importConnectorWithMockedHttp(runtime);
+    const { runtime, createLinqWebhookConnector } = await loadLinqWebhookConnector();
     const controller = new AbortController();
     const connector = createLinqWebhookConnector({
       host: "127.0.0.1",
@@ -703,6 +694,14 @@ async function importConnectorWithMockedHttp(runtime: HttpMockRuntime) {
     createServer: runtime.createServer,
   }));
   return await import("../src/connectors/linq/connector.ts");
+}
+
+async function loadLinqWebhookConnector(
+  input: { autoListen?: boolean } = {},
+): Promise<{ createLinqWebhookConnector: typeof import("../src/connectors/linq/connector.ts").createLinqWebhookConnector; runtime: HttpMockRuntime }> {
+  const runtime = createHttpMockRuntime(input);
+  const { createLinqWebhookConnector } = await importConnectorWithMockedHttp(runtime);
+  return { createLinqWebhookConnector, runtime };
 }
 
 function createPersistedCapture(capture: InboundCapture): PersistedCapture {
