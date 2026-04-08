@@ -39,15 +39,17 @@ export function formatAssistantRunEventForTerminal(
   options: ForegroundTerminalLogOptions = {},
 ): string | null {
   if (event.type === 'scan.started') {
-    return captureCountFromDetails(event.details) === 0
-      ? null
-      : `scanning inbox decisions: ${event.details ?? ''}`.trim()
+    return formatAssistantScanStartedMessage(
+      'scanning inbox decisions',
+      event.details,
+    )
   }
 
   if (event.type === 'reply.scan.started') {
-    return captureCountFromDetails(event.details) === 0
-      ? null
-      : `scanning channel auto-reply: ${event.details ?? ''}`.trim()
+    return formatAssistantScanStartedMessage(
+      'scanning channel auto-reply',
+      event.details,
+    )
   }
 
   if (event.type === 'reply.scan.primed') {
@@ -109,13 +111,7 @@ export function formatInboxRunEventForTerminal(
       return `${formatConnectorLabel(event, options)} watching for new messages`
     case 'connector.failed':
       return formatConnectorEventLine(
-        `${formatConnectorLabel(event, options)} ${
-          event.phase === 'backfill'
-            ? 'backfill'
-            : event.phase === 'startup'
-              ? 'startup'
-              : 'watch'
-        } failed`,
+        `${formatConnectorLabel(event, options)} ${formatConnectorPhase(event.phase)} failed`,
         options.unsafeDetails ? event.details : null,
       )
     case 'connector.skipped':
@@ -128,6 +124,29 @@ export function formatInboxRunEventForTerminal(
     default:
       return null
   }
+}
+
+function formatAssistantScanStartedMessage(
+  label: string,
+  details: string | null | undefined,
+): string | null {
+  return captureCountFromDetails(details) === 0
+    ? null
+    : `${label}: ${details ?? ''}`.trim()
+}
+
+function formatConnectorPhase(phase: InboxRunEvent['phase']): string {
+  if (phase === 'backfill' || phase === 'startup') {
+    return phase
+  }
+
+  return 'watch'
+}
+
+function formatImportedCapturePhase(
+  phase: InboxRunEvent['phase'],
+): 'backfill' | 'new' {
+  return phase === 'backfill' ? 'backfill' : 'new'
 }
 
 function formatConnectorLabel(
@@ -147,13 +166,13 @@ function formatImportedCaptureEvent(
     return formatUnsafeImportedCaptureEvent(event)
   }
 
-  const phase = event.phase === 'backfill' ? 'backfill' : 'new'
+  const phase = formatImportedCapturePhase(event.phase)
   const source = humanizeSource(event.source)
   return `${phase} ${source} capture imported: ${summarizeCapturePayload(event.capture)}`
 }
 
 function formatUnsafeImportedCaptureEvent(event: InboxRunEvent): string {
-  const phase = event.phase === 'backfill' ? 'backfill' : 'new'
+  const phase = formatImportedCapturePhase(event.phase)
   const source = humanizeSource(event.source)
   const capture = event.capture
   const actor = resolveActorLabel(capture)

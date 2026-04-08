@@ -29,38 +29,48 @@ function requireHealthCommandDescriptor(commandName: string): HealthCommandDescr
 export function createHealthUpsertResultSchema(
   descriptor: HealthCommandDescriptorEntry,
 ) {
-  if (
-    healthCoreHasResultCapability(descriptor, "current-profile-path") ||
-    healthCoreHasResultCapability(descriptor, "profile-payload")
-  ) {
+  const baseShape = createHealthUpsertResultBaseShape(descriptor);
+
+  if (hasHealthProfileResultCapability(descriptor)) {
     return z.object({
-      vault: pathSchema,
-      [descriptor.core.resultIdField]: z.string().min(1),
-      lookupId: z.string().min(1),
+      ...baseShape,
       ledgerFile: pathSchema.optional(),
       currentProfilePath: pathSchema.optional(),
-      created: z.boolean(),
       profile: healthPayloadSchema.optional(),
     });
   }
 
   if (healthCoreHasResultCapability(descriptor, "ledger-file")) {
     return z.object({
-      vault: pathSchema,
-      [descriptor.core.resultIdField]: z.string().min(1),
-      lookupId: z.string().min(1),
+      ...baseShape,
       ledgerFile: pathSchema.optional(),
-      created: z.boolean(),
     });
   }
 
   return z.object({
+    ...baseShape,
+    path: pathSchema.optional(),
+  });
+}
+
+function createHealthUpsertResultBaseShape(
+  descriptor: HealthCommandDescriptorEntry,
+) {
+  return {
     vault: pathSchema,
     [descriptor.core.resultIdField]: z.string().min(1),
     lookupId: z.string().min(1),
-    path: pathSchema.optional(),
     created: z.boolean(),
-  });
+  };
+}
+
+function hasHealthProfileResultCapability(
+  descriptor: HealthCommandDescriptorEntry,
+) {
+  return (
+    healthCoreHasResultCapability(descriptor, "current-profile-path") ||
+    healthCoreHasResultCapability(descriptor, "profile-payload")
+  );
 }
 
 function bindCrudServices(

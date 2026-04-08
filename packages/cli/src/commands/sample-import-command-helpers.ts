@@ -3,43 +3,37 @@ import {
   loadRuntimeModule,
 } from '@murphai/vault-usecases/runtime'
 
+interface ImportCsvSamplesRuntimeInput {
+  delimiter?: string
+  filePath: string
+  metadataColumns?: string[]
+  presetId?: string
+  requestId?: string | null
+  source?: string
+  stream?: string
+  tsColumn?: string
+  unit?: string
+  valueColumn?: string
+  vaultRoot: string
+}
+
+interface ImportCsvSamplesRuntimeResult {
+  count: number
+  transformId: string
+  manifestPath: string
+  records: Array<{
+    id: string
+  }>
+  shardPaths: string[]
+}
+
 interface ImportersRuntimeModule {
   createImporters(): {
-    importCsvSamples(input: {
-      delimiter?: string
-      filePath: string
-      metadataColumns?: string[]
-      presetId?: string
-      requestId?: string | null
-      source?: string
-      stream?: string
-      tsColumn?: string
-      unit?: string
-      valueColumn?: string
-      vaultRoot: string
-    }): Promise<{
-      count: number
-      transformId: string
-      manifestPath: string
-      records: Array<{
-        id: string
-      }>
-      shardPaths: string[]
-    }>
+    importCsvSamples(
+      input: ImportCsvSamplesRuntimeInput,
+    ): Promise<ImportCsvSamplesRuntimeResult>
   }
-  prepareCsvSampleImport(input: {
-    delimiter?: string
-    filePath: string
-    metadataColumns?: string[]
-    presetId?: string
-    requestId?: string | null
-    source?: string
-    stream?: string
-    tsColumn?: string
-    unit?: string
-    valueColumn?: string
-    vaultRoot: string
-  }): Promise<{
+  prepareCsvSampleImport(input: ImportCsvSamplesRuntimeInput): Promise<{
     stream: string
   }>
 }
@@ -62,7 +56,26 @@ let importersRuntimePromise: Promise<ImportersRuntimeModule> | null = null
 
 export async function importCsvSamples(options: ImportCsvSamplesOptions) {
   const importers = await loadImportersRuntime()
-  const runtimeInput = {
+  const runtimeInput = createImportCsvSamplesRuntimeInput(options)
+  const preparedImport = await importers.prepareCsvSampleImport(runtimeInput)
+  const result = await importers.createImporters().importCsvSamples(runtimeInput)
+
+  return {
+    vault: options.vault,
+    sourceFile: options.file,
+    stream: preparedImport.stream,
+    importedCount: result.count,
+    transformId: result.transformId,
+    manifestFile: result.manifestPath,
+    lookupIds: result.records.map((record) => record.id),
+    ledgerFiles: result.shardPaths,
+  }
+}
+
+function createImportCsvSamplesRuntimeInput(
+  options: ImportCsvSamplesOptions,
+): ImportCsvSamplesRuntimeInput {
+  return {
     delimiter: options.delimiter,
     filePath: options.file,
     metadataColumns: options.metadataColumns,
@@ -74,19 +87,6 @@ export async function importCsvSamples(options: ImportCsvSamplesOptions) {
     unit: options.unit,
     valueColumn: options.valueColumn,
     vaultRoot: options.vault,
-  }
-  const normalized = await importers.prepareCsvSampleImport(runtimeInput)
-  const result = await importers.createImporters().importCsvSamples(runtimeInput)
-
-  return {
-    vault: options.vault,
-    sourceFile: options.file,
-    stream: normalized.stream,
-    importedCount: result.count,
-    transformId: result.transformId,
-    manifestFile: result.manifestPath,
-    lookupIds: result.records.map((record) => record.id),
-    ledgerFiles: result.shardPaths,
   }
 }
 

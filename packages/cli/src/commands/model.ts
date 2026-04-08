@@ -286,18 +286,38 @@ function assertShowOnly(options: ModelCommandOptions): void {
   )
 }
 
+function hasOpenAiCompatibleModelOptions(
+  options: ModelCommandOptions,
+): boolean {
+  return (
+    options.providerPreset !== undefined ||
+    options.baseUrl !== undefined ||
+    options.apiKeyEnv !== undefined ||
+    options.providerName !== undefined
+  )
+}
+
+function hasCodexModelOptions(options: ModelCommandOptions): boolean {
+  return (
+    options.codexCommand !== undefined ||
+    options.profile !== undefined ||
+    options.oss !== undefined
+  )
+}
+
+function hasModelSelectionOptions(options: ModelCommandOptions): boolean {
+  return (
+    options.model !== undefined ||
+    options.reasoningEffort !== undefined
+  )
+}
+
 function hasModelUpdateOptions(options: ModelCommandOptions): boolean {
-  return Boolean(
-    options.preset ??
-      options.providerPreset ??
-      options.model ??
-      options.baseUrl ??
-      options.apiKeyEnv ??
-      options.providerName ??
-      options.codexCommand ??
-      options.profile ??
-      options.reasoningEffort ??
-      options.oss,
+  return (
+    options.preset !== undefined ||
+    hasOpenAiCompatibleModelOptions(options) ||
+    hasModelSelectionOptions(options) ||
+    hasCodexModelOptions(options)
   )
 }
 
@@ -351,20 +371,15 @@ async function resolveModelCommandPreset(input: {
     return input.options.preset
   }
 
-  if (
-    input.options.providerPreset ??
-    input.options.baseUrl ??
-    input.options.apiKeyEnv ??
-    input.options.providerName
-  ) {
+  if (hasOpenAiCompatibleModelOptions(input.options)) {
     return 'openai-compatible'
   }
 
-  if (input.options.codexCommand ?? input.options.profile ?? input.options.oss) {
+  if (hasCodexModelOptions(input.options)) {
     return 'codex'
   }
 
-  if (input.options.model ?? input.options.reasoningEffort) {
+  if (hasModelSelectionOptions(input.options)) {
     if (
       input.currentPreset === 'codex' ||
       input.currentPreset === 'openai-compatible'
@@ -403,10 +418,7 @@ function assertCompatibleModelCommandOptions(
 ): void {
   if (
     preset === 'codex' &&
-    (options.providerPreset ??
-      options.baseUrl ??
-      options.apiKeyEnv ??
-      options.providerName)
+    hasOpenAiCompatibleModelOptions(options)
   ) {
     throw new VaultCliError(
       'invalid_option',
@@ -416,7 +428,7 @@ function assertCompatibleModelCommandOptions(
 
   if (
     preset === 'openai-compatible' &&
-    (options.codexCommand ?? options.profile ?? options.oss)
+    hasCodexModelOptions(options)
   ) {
     throw new VaultCliError(
       'invalid_option',
