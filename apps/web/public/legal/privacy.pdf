@@ -1,0 +1,713 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+2 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>
+endobj
+3 0 obj
+<< /Length 5247 >>
+stream
+BT /F2 19 Tf 1 0 0 1 54.00 738.00 Tm (Murph Privacy Policy) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 706.00 Tm (Effective Date: April 9, 2026 Last Updated: April 9, 2026) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 688.00 Tm (Murph \("Murph," "we," "us," or "our"\) provides software and services designed to help people) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 674.00 Tm (understand their bodies and lives better through tools such as health journaling, meal tracking, wearable) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 660.00 Tm (and device sync, messaging-based interactions, hosted onboarding, sharing features, and related local or) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 646.00 Tm (hosted experiences.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 628.00 Tm (This Privacy Policy explains how we collect, use, disclose, and otherwise process information when you:) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 610.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 610.00 Tm (use Murph's websites, applications, hosted services, local or self-hosted deployments, and related) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 596.00 Tm (operator tools;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 580.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 580.00 Tm (create or use a Murph account;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 564.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 564.00 Tm (connect third-party services, devices, or communication channels to Murph;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 548.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 548.00 Tm (interact with Murph through email, messaging, passkey, phone verification, or other supported) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 534.00 Tm (interfaces; or) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 518.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 518.00 Tm (otherwise communicate with us about Murph.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 502.00 Tm (This Privacy Policy does not govern third-party services, devices, identity providers, payment providers,) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 488.00 Tm (model providers, search providers, messaging providers, wearable providers, or other integrations) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 474.00 Tm (except to the extent Murph acts as the controller for information we receive from or send to them in) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 460.00 Tm (connection with Murph. Those third parties may have their own privacy policies and terms.) Tj ET
+BT /F2 14 Tf 1 0 0 1 54.00 432.00 Tm (1. Scope and deployment model) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 408.00 Tm (Murph may be used in more than one way:) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 390.00 Tm (1.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 390.00 Tm (Local or self-hosted use. If you run Murph on your own device, workstation, or infrastructure,) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 376.00 Tm (more of your data may remain within systems you control. In that case, your own infrastructure,) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 362.00 Tm (configuration choices, and selected providers may determine much of the privacy and security) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 348.00 Tm (posture.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 332.00 Tm (2.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 332.00 Tm (Hosted Murph services. If you use Murph's hosted onboarding, billing, messaging, sharing, wearable) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 318.00 Tm (sync, email sync, device sync, or execution features, Murph and its service providers may process) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 304.00 Tm (information needed to provide and support those features.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 288.00 Tm (This Privacy Policy applies to Murph-controlled processing. If you self-host Murph or connect Murph to) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 274.00 Tm (providers of your choosing, your use of those providers and systems may also be subject to separate) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 260.00 Tm (privacy policies, terms, security settings, and retention practices that Murph does not control.) Tj ET
+BT /F2 14 Tf 1 0 0 1 54.00 232.00 Tm (2. Our privacy commitments) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 208.00 Tm (Murph is designed around a few core privacy commitments:) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 190.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 190.00 Tm (No sale or rental of personal information. Murph does not sell or rent personal information.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 174.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 174.00 Tm (No health-data advertising profile. Murph does not use health data you provide through Murph for) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 160.00 Tm (cross-context behavioral advertising or health-data ad-targeting profiles.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 144.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 144.00 Tm (Need-to-know access. Murph limits access to personal information to authorized personnel and) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 130.00 Tm (service providers who need it to operate, support, secure, or improve Murph.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 114.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 114.00 Tm (Privacy-protective design where feasible. Murph seeks to use measures such as encryption, data) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 100.00 Tm (minimization, privacy-preserving lookup values, pseudonymization, and short-lived operational) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 86.00 Tm (storage where appropriate.) Tj ET
+endstream
+endobj
+4 0 obj
+<< /Length 5325 >>
+stream
+BT /F1 10 Tf 1 0 0 1 54.00 738.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 738.00 Tm (Sensitive-data care. Some information Murph handles may qualify as health data, sensitive personal) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 724.00 Tm (information, special category data, or consumer health data under applicable law. Where required by) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 710.00 Tm (law, Murph processes such data only with your consent or another valid legal basis.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 694.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 694.00 Tm (Transparent hosted processing. Unless we expressly state otherwise for a specific feature, Hosted) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 680.00 Tm (Murph is not offered as a zero-knowledge, operator-blind, or end-to-end-encrypted service.) Tj ET
+BT /F2 14 Tf 1 0 0 1 54.00 654.00 Tm (3. Information we collect) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 630.00 Tm (We may collect the following categories of information, depending on how you use Murph.) Tj ET
+BT /F2 11 Tf 1 0 0 1 54.00 604.00 Tm (A. Account, identity, and contact information) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 585.00 Tm (This may include:) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 567.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 567.00 Tm (name, display name, username, or alias;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 551.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 551.00 Tm (email address and/or phone number;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 535.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 535.00 Tm (account identifiers, authentication identifiers, passkey-related identifiers, linked-wallet identifiers,) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 521.00 Tm (session information, or linked-account identifiers;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 505.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 505.00 Tm (invite, verification, or onboarding status information; and) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 489.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 489.00 Tm (support communications and account preferences.) Tj ET
+BT /F2 11 Tf 1 0 0 1 54.00 465.00 Tm (B. Health, wellness, and user-provided content) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 446.00 Tm (Murph is built around information you choose to provide, generate, connect, or import, including:) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 428.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 428.00 Tm (journals, notes, observations, symptoms, routines, meals, foods, recipes, supplements, protocols,) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 414.00 Tm (and related wellness records;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 398.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 398.00 Tm (wearable, device, activity, sleep, recovery, or body-state information from connected providers or) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 384.00 Tm (devices;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 368.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 368.00 Tm (heart rate, movement, temperature, respiration, blood oxygen, readiness, recovery, activity, or) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 354.00 Tm (similar measured or derived data, where available through connected services or your own inputs;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 338.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 338.00 Tm (prompts, questions, conversations, messages, and other content you send to Murph;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 322.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 322.00 Tm (files, attachments, photos, audio, transcripts, parsed content, and related metadata; and) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 306.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 306.00 Tm (information included in share links, invite flows, or imported or shared record bundles.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 290.00 Tm (Some of this information may constitute health data, sensitive personal information, special category) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 276.00 Tm (data, or consumer health data under applicable law.) Tj ET
+BT /F2 11 Tf 1 0 0 1 54.00 250.00 Tm (C. Connected-service and integration data) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 231.00 Tm (If you connect devices, accounts, or communication channels, we may collect:) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 213.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 213.00 Tm (connection and authorization metadata;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 197.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 197.00 Tm (provider account identifiers or privacy-preserving lookup values;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 181.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 181.00 Tm (token or credential-related metadata;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 165.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 165.00 Tm (connection status, sync timestamps, webhook traces, and reconciliation or error metadata; and) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 149.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 149.00 Tm (minimal routing or message metadata needed to operate the integration.) Tj ET
+BT /F2 11 Tf 1 0 0 1 54.00 125.00 Tm (D. Communications, support, and assistant data) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 106.00 Tm (We may collect:) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 88.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 88.00 Tm (support requests, feedback, bug reports, and troubleshooting details;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 72.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 72.00 Tm (inbound or outbound email, message, or other channel metadata necessary to provide the service;) Tj ET
+endstream
+endobj
+5 0 obj
+<< /Length 5135 >>
+stream
+BT /F1 10 Tf 1 0 0 1 54.00 738.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 738.00 Tm (prompts, chat history, tool inputs, tool outputs, and related context needed to provide assistant,) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 724.00 Tm (search, or automation features; and) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 708.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 708.00 Tm (records of how privacy, support, or account requests were handled.) Tj ET
+BT /F2 11 Tf 1 0 0 1 54.00 684.00 Tm (E. Sharing, invite, and collaboration data) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 665.00 Tm (If you use Murph sharing features, we may collect:) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 647.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 647.00 Tm (invite codes, share codes, and share-link metadata;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 631.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 631.00 Tm (recipient contact details or lookup values;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 615.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 615.00 Tm (preview metadata, acceptance status, and consumption or expiry data; and) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 599.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 599.00 Tm (records of whether and when a shared pack, invite, or imported item was accepted, rejected,) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 585.00 Tm (expired, or consumed.) Tj ET
+BT /F2 11 Tf 1 0 0 1 54.00 561.00 Tm (F. Billing and transaction information) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 542.00 Tm (If you purchase, subscribe to, or otherwise pay for hosted Murph features, we and our payment) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 528.00 Tm (processors may collect:) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 510.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 510.00 Tm (billing contact information;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 494.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 494.00 Tm (subscription, entitlement, or account-status information;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 478.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 478.00 Tm (checkout, invoice, transaction, or payment-status metadata;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 462.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 462.00 Tm (customer, subscription, checkout-session, or similar processor-issued identifiers; and) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 446.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 446.00 Tm (fraud-prevention or payment-authentication information.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 430.00 Tm (Murph does not need to store full payment card numbers to provide ordinary hosted billing functionality.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 416.00 Tm (Payment card details are typically processed by our payment processor.) Tj ET
+BT /F2 11 Tf 1 0 0 1 54.00 390.00 Tm (G. Technical, device, and usage information) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 371.00 Tm (We may collect information such as:) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 353.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 353.00 Tm (IP address;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 337.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 337.00 Tm (browser, device, app, operating-system, and version information;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 321.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 321.00 Tm (timestamps, request identifiers, crash or error logs, and performance metrics;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 305.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 305.00 Tm (cookie, local-storage, or session-token data used to operate core features; and) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 289.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 289.00 Tm (security, abuse-prevention, and diagnostic information.) Tj ET
+BT /F2 14 Tf 1 0 0 1 54.00 263.00 Tm (4. Sources of information) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 239.00 Tm (We collect information from several sources:) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 221.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 221.00 Tm (Directly from you, when you create an account, complete onboarding, use a feature, upload content,) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 207.00 Tm (send a prompt or message, or contact us.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 191.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 191.00 Tm (From your devices and browsers, when you use Murph.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 175.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 175.00 Tm (From connected providers or integrations, when you choose to link them to Murph.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 159.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 159.00 Tm (From identity and authentication providers, when you sign in, verify an account, or complete an) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 145.00 Tm (onboarding flow through them.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 129.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 129.00 Tm (From payment processors, when you purchase or subscribe to hosted services.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 113.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 113.00 Tm (From other Murph users, such as when someone sends you an invite or share link.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 97.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 97.00 Tm (From service providers and security tools, where needed to operate, support, analyze, or secure) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 83.00 Tm (Murph.) Tj ET
+endstream
+endobj
+6 0 obj
+<< /Length 4529 >>
+stream
+BT /F2 14 Tf 1 0 0 1 54.00 728.00 Tm (5. How we use information) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 704.00 Tm (We may use information for the following purposes.) Tj ET
+BT /F2 11 Tf 1 0 0 1 54.00 678.00 Tm (A. To provide Murph and requested features) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 659.00 Tm (We use information to:) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 641.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 641.00 Tm (create and manage accounts and sessions;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 625.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 625.00 Tm (authenticate users and verify access;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 609.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 609.00 Tm (sync, display, search, organize, and export records;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 593.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 593.00 Tm (operate wearable and provider connections;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 577.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 577.00 Tm (process prompts, messages, attachments, and requested outputs;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 561.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 561.00 Tm (deliver hosted onboarding, invite, sharing, and import flows;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 545.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 545.00 Tm (enable billing, entitlement, and subscription management; and) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 529.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 529.00 Tm (provide customer support and respond to requests.) Tj ET
+BT /F2 11 Tf 1 0 0 1 54.00 505.00 Tm (B. To operate, maintain, and improve Murph) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 486.00 Tm (We use information to:) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 468.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 468.00 Tm (monitor reliability, availability, security, and performance;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 452.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 452.00 Tm (debug and repair errors;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 436.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 436.00 Tm (understand feature usage at a service level;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 420.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 420.00 Tm (improve Murph's features, workflows, and user experience; and) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 404.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 404.00 Tm (test, develop, and support new capabilities.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 388.00 Tm (Where feasible, Murph prefers to use aggregated, de-identified, pseudonymized, or otherwise minimized) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 374.00 Tm (data for product and service improvement.) Tj ET
+BT /F2 11 Tf 1 0 0 1 54.00 348.00 Tm (C. To secure Murph and prevent misuse) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 329.00 Tm (We use information to:) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 311.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 311.00 Tm (detect, investigate, and prevent fraud, abuse, spam, or unauthorized access;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 295.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 295.00 Tm (enforce our Terms and policies;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 279.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 279.00 Tm (maintain logs, audit trails, and security controls;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 263.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 263.00 Tm (protect Murph, our users, and third parties; and) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 247.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 247.00 Tm (respond to incidents and preserve evidence where appropriate.) Tj ET
+BT /F2 11 Tf 1 0 0 1 54.00 223.00 Tm (D. To process transactions and administer commercial relationships) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 204.00 Tm (We use information to:) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 186.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 186.00 Tm (process payments, subscriptions, renewals, and refunds;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 170.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 170.00 Tm (manage billing records, receipts, disputes, and account status; and) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 154.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 154.00 Tm (comply with accounting, tax, and recordkeeping obligations.) Tj ET
+BT /F2 11 Tf 1 0 0 1 54.00 130.00 Tm (E. To communicate with you) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 111.00 Tm (We use information to:) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 93.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 93.00 Tm (send service, security, support, onboarding, and billing communications;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 77.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 77.00 Tm (deliver transactional messages you request or enable;) Tj ET
+endstream
+endobj
+7 0 obj
+<< /Length 4840 >>
+stream
+BT /F1 10 Tf 1 0 0 1 54.00 738.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 738.00 Tm (respond to questions, feedback, and privacy requests; and) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 722.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 722.00 Tm (send legally permitted updates or, where applicable, marketing communications with opt-out choices.) Tj ET
+BT /F2 11 Tf 1 0 0 1 54.00 698.00 Tm (F. To comply with law and protect rights) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 679.00 Tm (We may use information to:) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 661.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 661.00 Tm (comply with legal obligations and regulatory requirements;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 645.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 645.00 Tm (respond to lawful requests and legal process;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 629.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 629.00 Tm (establish, exercise, or defend legal claims; and) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 613.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 613.00 Tm (protect the rights, safety, privacy, or property of Murph, our users, or others.) Tj ET
+BT /F2 14 Tf 1 0 0 1 54.00 587.00 Tm (6. AI, search, and automated features) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 563.00 Tm (Murph may offer assistant, search, parsing, extraction, summarization, automation, or other intelligent) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 549.00 Tm (features. To provide those features, Murph may process or transmit relevant prompts, conversation) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 535.00 Tm (history, user-provided content, connected data, or attachment content to Murph-controlled systems) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 521.00 Tm (and, where applicable, third-party providers that help power those features.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 503.00 Tm (Murph tries to limit the data shared with those systems or providers to what is reasonably necessary) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 489.00 Tm (for the requested feature. Where feasible, Murph may minimize, pseudonymize, redact, hash, or) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 475.00 Tm (otherwise reduce the data used.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 457.00 Tm (Some outputs may be generated automatically and may not be reviewed by a human before they are) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 443.00 Tm (returned to you or used in a workflow you enable.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 425.00 Tm (Unless Murph clearly tells you otherwise and obtains any consent required by law, Murph will not use) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 411.00 Tm (health data you submit through Murph to train Murph's or a third party's general-purpose models.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 393.00 Tm (Automated outputs may be inferential and may not always be accurate, complete, or appropriate for) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 379.00 Tm (every use case. You are responsible for reviewing important outputs before relying on them.) Tj ET
+BT /F2 14 Tf 1 0 0 1 54.00 351.00 Tm (7. Legal bases for processing) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 327.00 Tm (If you are in the EEA, UK, Switzerland, or another jurisdiction that requires a legal basis for) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 313.00 Tm (processing, Murph may process personal data on one or more of the following bases:) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 295.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 295.00 Tm (Performance of a contract: to provide Murph and the features you request.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 279.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 279.00 Tm (Legitimate interests: to secure, maintain, support, and improve Murph, provided those interests are) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 265.00 Tm (not overridden by your rights.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 249.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 249.00 Tm (Consent: where required, including for certain sensitive-data processing, optional integrations,) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 235.00 Tm (optional permissions, or specific marketing activities.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 219.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 219.00 Tm (Legal obligation: where processing is required to comply with applicable law.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 203.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 203.00 Tm (Vital interests or other lawful bases, where applicable.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 187.00 Tm (Where Murph relies on consent, you may withdraw it for future processing at any time, subject to legal) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 173.00 Tm (and operational limits. Withdrawing consent may limit your ability to use certain features.) Tj ET
+BT /F2 14 Tf 1 0 0 1 54.00 145.00 Tm (8. How we disclose information) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 121.00 Tm (We may disclose information in the following circumstances.) Tj ET
+BT /F2 11 Tf 1 0 0 1 54.00 95.00 Tm (A. Service providers and processors) Tj ET
+endstream
+endobj
+8 0 obj
+<< /Length 4879 >>
+stream
+BT /F1 10 Tf 1 0 0 1 54.00 738.00 Tm (We may share information with vendors and service providers that help us operate Murph, such as) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 724.00 Tm (providers for:) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 706.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 706.00 Tm (identity and authentication;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 690.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 690.00 Tm (cloud hosting, storage, and infrastructure;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 674.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 674.00 Tm (messaging, email, and communications;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 658.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 658.00 Tm (payments and billing;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 642.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 642.00 Tm (customer support, logging, monitoring, and security;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 626.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 626.00 Tm (search, model, parsing, or other optional feature providers; and) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 610.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 610.00 Tm (analytics or diagnostics used to operate and improve Murph.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 594.00 Tm (These parties are authorized to process information on Murph's behalf only as needed to provide) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 580.00 Tm (services to us or to you, subject to contractual and legal safeguards where applicable.) Tj ET
+BT /F2 11 Tf 1 0 0 1 54.00 554.00 Tm (B. Connected services and integrations you enable) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 535.00 Tm (If you connect Murph to devices, wearable providers, messaging channels, identity providers, or other) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 521.00 Tm (third-party services, Murph may exchange information with those services as needed to provide the) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 507.00 Tm (feature you requested.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 489.00 Tm (When you direct Murph to share information with a third-party provider, that provider may act as an) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 475.00 Tm (independent controller of the information it receives under its own privacy policy and terms. Please) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 461.00 Tm (review those policies carefully before enabling a connection.) Tj ET
+BT /F2 11 Tf 1 0 0 1 54.00 435.00 Tm (C. Sharing, invites, and user-directed disclosures) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 416.00 Tm (If you create, send, or accept a Murph share link, invite, or similar user-directed sharing flow, Murph) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 402.00 Tm (may disclose the information reasonably necessary to complete that flow to the intended recipient or) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 388.00 Tm (the service providers involved in carrying it out. Depending on the feature, this may include preview) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 374.00 Tm (information, invite status, or the shared records themselves.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 356.00 Tm (Information you intentionally make available to other users or recipients may become visible to them) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 342.00 Tm (under the settings or permissions you choose.) Tj ET
+BT /F2 11 Tf 1 0 0 1 54.00 316.00 Tm (D. Legal, compliance, and protection purposes) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 297.00 Tm (We may disclose information if we believe doing so is reasonably necessary to:) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 279.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 279.00 Tm (comply with law, regulation, legal process, or lawful governmental request;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 263.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 263.00 Tm (enforce our agreements or policies;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 247.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 247.00 Tm (detect, prevent, or address fraud, security, or technical issues; or) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 231.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 231.00 Tm (protect the rights, privacy, safety, or property of Murph, our users, or others.) Tj ET
+BT /F2 11 Tf 1 0 0 1 54.00 207.00 Tm (E. Corporate transactions) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 188.00 Tm (We may disclose information in connection with an actual or proposed merger, acquisition, financing,) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 174.00 Tm (reorganization, bankruptcy, sale of assets, or similar transaction, subject to customary confidentiality) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 160.00 Tm (and legal protections.) Tj ET
+BT /F2 14 Tf 1 0 0 1 54.00 132.00 Tm (9. No sale of personal information; no health-data ad targeting) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 108.00 Tm (Murph does not sell or rent personal information.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 90.00 Tm (Murph also does not use health data you provide through Murph for cross-context behavioral advertising) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 76.00 Tm (or for health-data ad-targeting profiles.) Tj ET
+endstream
+endobj
+9 0 obj
+<< /Length 4963 >>
+stream
+BT /F1 10 Tf 1 0 0 1 54.00 738.00 Tm (If Murph's practices change in the future, we will update this Privacy Policy and provide any notices or) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 724.00 Tm (choices required by law before the change becomes effective.) Tj ET
+BT /F2 14 Tf 1 0 0 1 54.00 696.00 Tm (10. Cookies, local storage, and similar technologies) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 672.00 Tm (Murph and our service providers may use cookies, local storage, session tokens, and similar technologies) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 658.00 Tm (to:) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 640.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 640.00 Tm (authenticate users;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 624.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 624.00 Tm (keep you signed in;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 608.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 608.00 Tm (remember preferences;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 592.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 592.00 Tm (secure sessions and prevent abuse; and) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 576.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 576.00 Tm (operate core website and hosted-service functionality.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 560.00 Tm (Murph may also use analytics or similar tools to understand service performance and usage. If Murph) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 546.00 Tm (uses non-essential analytics, advertising, or personalization technologies in the future, Murph will) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 532.00 Tm (provide any disclosures and consent mechanisms required by applicable law.) Tj ET
+BT /F2 14 Tf 1 0 0 1 54.00 504.00 Tm (11. Data retention) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 480.00 Tm (Murph retains personal information for as long as reasonably necessary for the purposes described in) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 466.00 Tm (this Privacy Policy, including to provide Murph, satisfy legal obligations, resolve disputes, enforce) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 452.00 Tm (agreements, and maintain security.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 434.00 Tm (Retention can vary by category, including:) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 416.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 416.00 Tm (local or self-hosted records: generally according to your own systems, files, settings, and deletion) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 402.00 Tm (choices;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 386.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 386.00 Tm (hosted account and profile information: generally while your account is active and for a reasonable) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 372.00 Tm (period thereafter;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 356.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 356.00 Tm (health and user-submitted content: according to your account status, deployment choices, product) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 342.00 Tm (settings, deletion requests, and backup or recovery needs;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 326.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 326.00 Tm (integration and routing data: for as long as needed to operate the connection and for a reasonable) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 312.00 Tm (period for troubleshooting, fraud prevention, reconciliation, and security;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 296.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 296.00 Tm (messages, assistant history, or support data: for as long as needed to provide the feature, preserve) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 282.00 Tm (continuity, handle support, maintain security, or satisfy legal obligations;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 266.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 266.00 Tm (transaction and billing records: as long as needed for accounting, tax, audit, legal, and compliance) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 252.00 Tm (purposes; and) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 236.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 236.00 Tm (logs, webhook receipts, and operational artifacts: typically for shorter periods, although some may) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 222.00 Tm (be retained longer when needed for security, replay protection, debugging, abuse prevention, or legal) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 208.00 Tm (preservation.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 192.00 Tm (Murph may also keep aggregated, de-identified, or otherwise non-identifying information that does not) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 178.00 Tm (reasonably identify you.) Tj ET
+BT /F2 14 Tf 1 0 0 1 54.00 150.00 Tm (12. Security and hosted processing transparency) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 126.00 Tm (Murph uses administrative, technical, and physical safeguards designed to protect personal information.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 112.00 Tm (These may include, as appropriate:) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 94.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 94.00 Tm (encryption in transit;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 78.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 78.00 Tm (encryption at rest for certain hosted data;) Tj ET
+endstream
+endobj
+10 0 obj
+<< /Length 5101 >>
+stream
+BT /F1 10 Tf 1 0 0 1 54.00 738.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 738.00 Tm (access controls, least-privilege practices, and need-to-know review;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 722.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 722.00 Tm (privacy-preserving identifiers or lookup values for some workflows;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 706.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 706.00 Tm (logging, monitoring, and abuse-prevention controls;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 690.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 690.00 Tm (secure key handling and signed internal requests for certain hosted operations; and) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 674.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 674.00 Tm (staff training and vendor management processes.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 658.00 Tm (Hosted Murph may require Murph and its service providers to process readable content when necessary) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 644.00 Tm (to provide requested features, secure the service, investigate incidents, debug problems, or provide) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 630.00 Tm (support. Although Murph uses encryption and access controls, Hosted Murph is not a zero-knowledge,) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 616.00 Tm (operator-blind, or end-to-end-encrypted service unless we expressly say otherwise for a specific) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 602.00 Tm (feature.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 584.00 Tm (Unless Murph expressly agrees otherwise in a separate signed writing, Murph is not acting as your) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 570.00 Tm (HIPAA business associate for Hosted Murph, and Hosted Murph is not offered under a Business) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 556.00 Tm (Associate Agreement.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 538.00 Tm (If you self-host or run Murph locally, you are responsible for the security of the systems, credentials,) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 524.00 Tm (backups, and network environments you control.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 506.00 Tm (No method of transmission or storage is completely secure, and Murph cannot guarantee absolute) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 492.00 Tm (security.) Tj ET
+BT /F2 14 Tf 1 0 0 1 54.00 464.00 Tm (13. International transfers) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 440.00 Tm (Murph and our service providers may process information in the United States and other countries) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 426.00 Tm (where we or our providers operate. Those countries may have data-protection laws different from) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 412.00 Tm (those in your jurisdiction.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 394.00 Tm (Where required by law, Murph will use appropriate safeguards for cross-border transfers, such as) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 380.00 Tm (contractual protections or other approved transfer mechanisms.) Tj ET
+BT /F2 14 Tf 1 0 0 1 54.00 352.00 Tm (14. Your choices and rights) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 328.00 Tm (Depending on where you live and subject to applicable law, you may have rights to:) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 310.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 310.00 Tm (access personal information Murph holds about you;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 294.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 294.00 Tm (correct inaccurate information;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 278.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 278.00 Tm (delete certain information;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 262.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 262.00 Tm (receive a portable copy of certain information;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 246.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 246.00 Tm (object to or restrict certain processing;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 230.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 230.00 Tm (withdraw consent where processing is based on consent;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 214.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 214.00 Tm (opt out of certain marketing communications; and) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 198.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 198.00 Tm (appeal certain privacy-rights decisions.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 182.00 Tm (Depending on how you use Murph, you may also be able to:) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 164.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 164.00 Tm (disconnect linked integrations or providers;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 148.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 148.00 Tm (change device, browser, or app permissions;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 132.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 132.00 Tm (manage account settings and preferences;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 116.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 116.00 Tm (delete or revoke certain share flows or invitations;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 100.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 100.00 Tm (export or copy data directly from local or self-hosted environments you control; or) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 84.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 84.00 Tm (request account deletion.) Tj ET
+endstream
+endobj
+11 0 obj
+<< /Length 5231 >>
+stream
+BT /F1 10 Tf 1 0 0 1 54.00 738.00 Tm (To exercise privacy rights, contact us at legal@justco.build. We may need to verify your identity before) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 724.00 Tm (fulfilling certain requests. Where allowed by law, you may use an authorized agent to make a request on) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 710.00 Tm (your behalf. Murph may also deny or limit a request where permitted by law, such as where fulfilling it) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 696.00 Tm (would infringe the rights of others, undermine security, or conflict with legal obligations.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 678.00 Tm (If we deny a request that is appealable under applicable law, you may appeal by replying to our decision) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 664.00 Tm (or by emailing legal@justco.build with the subject line "Privacy Appeal.") Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 646.00 Tm (Murph will not discriminate against you for exercising privacy rights provided by law.) Tj ET
+BT /F2 14 Tf 1 0 0 1 54.00 618.00 Tm (15. U.S. Consumer Health Data Supplemental Notice) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 594.00 Tm (This section applies only to the extent Murph processes consumer health data subject to applicable U.S.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 580.00 Tm (state consumer health privacy laws, including laws such as the Washington My Health My Data Act and) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 566.00 Tm (similar laws. It supplements the rest of this Privacy Policy. If there is a conflict between this section) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 552.00 Tm (and the rest of this Privacy Policy, this section controls only for consumer health data and only to the) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 538.00 Tm (extent required by applicable law.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 520.00 Tm (For purposes of this section, consumer health data generally means personal information linked or) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 506.00 Tm (reasonably linkable to you that identifies your past, present, or future physical or mental health status.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 492.00 Tm (Consumer health data does not include information that has been de-identified as permitted by law. If) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 478.00 Tm (Murph maintains de-identified information, Murph will maintain and use it in de-identified form and will) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 464.00 Tm (not attempt to reidentify it except as permitted by law.) Tj ET
+BT /F2 11 Tf 1 0 0 1 54.00 438.00 Tm (A. Categories of consumer health data we may collect) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 419.00 Tm (Depending on how you use Murph, Murph may collect categories of consumer health data such as:) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 401.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 401.00 Tm (journals, notes, symptoms, observations, routines, supplements, foods, meals, and other wellness) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 387.00 Tm (records;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 371.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 371.00 Tm (wearable, device, sleep, activity, recovery, body-state, and physiological measurement data;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 355.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 355.00 Tm (derived or inferred wellness information, trends, summaries, recommendations, or other outputs) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 341.00 Tm (generated from your data;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 325.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 325.00 Tm (files, attachments, messages, or transcripts that identify or describe your physical or mental health) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 311.00 Tm (status; and) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 295.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 295.00 Tm (information included in imported records, share links, or invite bundles that contains health-related) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 281.00 Tm (information.) Tj ET
+BT /F2 11 Tf 1 0 0 1 54.00 257.00 Tm (B. Sources of consumer health data) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 238.00 Tm (Murph may collect consumer health data from:) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 220.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 220.00 Tm (you;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 204.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 204.00 Tm (your devices, browsers, or local deployments;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 188.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 188.00 Tm (connected providers or integrations you authorize;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 172.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 172.00 Tm (other Murph users who share information with you or invite you into Murph; and) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 156.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 156.00 Tm (service providers acting on Murph's behalf.) Tj ET
+BT /F2 11 Tf 1 0 0 1 54.00 132.00 Tm (C. Purposes for collecting and using consumer health data) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 113.00 Tm (Murph may collect and use consumer health data to:) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 95.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 95.00 Tm (provide Murph and the features you request;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 79.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 79.00 Tm (sync, organize, display, search, export, or share records at your direction;) Tj ET
+endstream
+endobj
+12 0 obj
+<< /Length 4385 >>
+stream
+BT /F1 10 Tf 1 0 0 1 54.00 738.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 738.00 Tm (generate summaries, reminders, insights, and other assistant or automation features you enable;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 722.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 722.00 Tm (secure Murph, prevent misuse, debug issues, and maintain service integrity;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 706.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 706.00 Tm (comply with law and protect rights; and) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 690.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 690.00 Tm (improve Murph using aggregated, de-identified, pseudonymized, or otherwise minimized information) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 676.00 Tm (where feasible.) Tj ET
+BT /F2 11 Tf 1 0 0 1 54.00 652.00 Tm (D. How Murph may disclose consumer health data) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 633.00 Tm (Murph may disclose consumer health data to:) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 615.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 615.00 Tm (service providers and processors acting on Murph's behalf;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 599.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 599.00 Tm (connected services or integrations you enable;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 583.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 583.00 Tm (recipients you choose through Murph share links, invites, exports, or similar user-directed) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 569.00 Tm (disclosures;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 553.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 553.00 Tm (parties involved in legal compliance, protection, or corporate transactions as described in this) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 539.00 Tm (Privacy Policy; and) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 523.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 523.00 Tm (other third parties with your consent or at your direction.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 507.00 Tm (Murph does not sell consumer health data. Murph does not use consumer health data for targeted) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 493.00 Tm (advertising.) Tj ET
+BT /F2 11 Tf 1 0 0 1 54.00 467.00 Tm (E. Your consumer health data rights) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 448.00 Tm (Subject to applicable law, you may have rights to:) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 430.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 430.00 Tm (confirm whether Murph collects, uses, or discloses your consumer health data;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 414.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 414.00 Tm (access your consumer health data;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 398.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 398.00 Tm (obtain a list of categories of third parties with whom Murph has shared consumer health data, and in) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 384.00 Tm (some cases a list of specific third parties;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 368.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 368.00 Tm (withdraw consent for future collection, use, or disclosure where consent is the basis for) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 354.00 Tm (processing;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 338.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 338.00 Tm (correct inaccuracies in your consumer health data;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 322.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 322.00 Tm (delete your consumer health data; and) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 306.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 306.00 Tm (appeal a denial of your request.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 290.00 Tm (To exercise these rights, contact Murph at legal@justco.build. Murph may take reasonable steps to) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 276.00 Tm (verify your identity and authority. Where permitted by law, you may designate an authorized agent to) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 262.00 Tm (make a request on your behalf.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 244.00 Tm (Murph will not discriminate against you for exercising rights provided by applicable consumer health) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 230.00 Tm (privacy laws.) Tj ET
+BT /F2 14 Tf 1 0 0 1 54.00 202.00 Tm (16. Region-specific disclosures) Tj ET
+BT /F2 11 Tf 1 0 0 1 54.00 170.00 Tm (A. EEA / UK / Switzerland) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 151.00 Tm (If applicable, you may also have the right to lodge a complaint with your local supervisory authority.) Tj ET
+BT /F2 11 Tf 1 0 0 1 54.00 125.00 Tm (B. U.S. state privacy laws) Tj ET
+endstream
+endobj
+13 0 obj
+<< /Length 3267 >>
+stream
+BT /F1 10 Tf 1 0 0 1 54.00 738.00 Tm (If applicable U.S. state law grants you rights relating to access, deletion, correction, portability,) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 724.00 Tm (opt-out, appeal, or limitation of sensitive-data processing, you may exercise those rights using the) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 710.00 Tm (methods described above. Murph does not sell or rent personal information and does not use health data) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 696.00 Tm (you provide through Murph for cross-context behavioral advertising.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 678.00 Tm (If Murph later offers a dedicated online privacy-rights portal or self-serve workflow, this Privacy) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 664.00 Tm (Policy may be updated to identify that process.) Tj ET
+BT /F2 14 Tf 1 0 0 1 54.00 636.00 Tm (17. Age restrictions and children's privacy) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 612.00 Tm (Murph is not directed to anyone under 18 years old, and we do not knowingly collect personal information) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 598.00 Tm (from anyone under 18 in a manner not permitted by law. If we learn that we collected personal) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 584.00 Tm (information from someone under 18 in a manner not permitted by law, we will take steps to delete it.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 566.00 Tm (If a different age threshold, parental consent rule, or other age-related standard applies under) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 552.00 Tm (applicable law, that law controls.) Tj ET
+BT /F2 14 Tf 1 0 0 1 54.00 524.00 Tm (18. Third-party services and links) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 500.00 Tm (Murph may link to or interoperate with third-party services. This Privacy Policy does not govern) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 486.00 Tm (third-party websites, applications, hardware, wearable providers, identity providers, payment) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 472.00 Tm (processors, messaging channels, model providers, search providers, or integration providers except as) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 458.00 Tm (described here for Murph-controlled processing. Please review their privacy policies before using those) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 444.00 Tm (services.) Tj ET
+BT /F2 14 Tf 1 0 0 1 54.00 416.00 Tm (19. Changes to this Privacy Policy) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 392.00 Tm (We may update this Privacy Policy from time to time. When we do, we will revise the "Last Updated") Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 378.00 Tm (date above and provide any additional notice required by law. Your continued use of Murph after an) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 364.00 Tm (updated Privacy Policy becomes effective is subject to that updated policy.) Tj ET
+BT /F2 14 Tf 1 0 0 1 54.00 336.00 Tm (20. Contact us) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 312.00 Tm (For questions, requests, or complaints regarding this Privacy Policy or Murph's privacy practices,) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 298.00 Tm (contact:) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 280.00 Tm (Just Cobuild, Co. Privacy Email: legal@justco.build Support Email: legal@justco.build Mail: 2261 Market) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 266.00 Tm (Street, STE 85230, San Francisco, CA 94114 USA Website: https://withmurph.ai) Tj ET
+endstream
+endobj
+14 0 obj
+<< /Type /Page /Parent 25 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R /F2 2 0 R >> >> /Contents 3 0 R >>
+endobj
+15 0 obj
+<< /Type /Page /Parent 25 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R /F2 2 0 R >> >> /Contents 4 0 R >>
+endobj
+16 0 obj
+<< /Type /Page /Parent 25 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R /F2 2 0 R >> >> /Contents 5 0 R >>
+endobj
+17 0 obj
+<< /Type /Page /Parent 25 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R /F2 2 0 R >> >> /Contents 6 0 R >>
+endobj
+18 0 obj
+<< /Type /Page /Parent 25 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R /F2 2 0 R >> >> /Contents 7 0 R >>
+endobj
+19 0 obj
+<< /Type /Page /Parent 25 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R /F2 2 0 R >> >> /Contents 8 0 R >>
+endobj
+20 0 obj
+<< /Type /Page /Parent 25 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R /F2 2 0 R >> >> /Contents 9 0 R >>
+endobj
+21 0 obj
+<< /Type /Page /Parent 25 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R /F2 2 0 R >> >> /Contents 10 0 R >>
+endobj
+22 0 obj
+<< /Type /Page /Parent 25 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R /F2 2 0 R >> >> /Contents 11 0 R >>
+endobj
+23 0 obj
+<< /Type /Page /Parent 25 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R /F2 2 0 R >> >> /Contents 12 0 R >>
+endobj
+24 0 obj
+<< /Type /Page /Parent 25 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R /F2 2 0 R >> >> /Contents 13 0 R >>
+endobj
+25 0 obj
+<< /Type /Pages /Count 11 /Kids [14 0 R 15 0 R 16 0 R 17 0 R 18 0 R 19 0 R 20 0 R 21 0 R 22 0 R 23 0 R 24 0 R] >>
+endobj
+26 0 obj
+<< /Title (Murph Privacy Policy) /Producer (Murph legal PDF generator) /Creator (apps/web/scripts/generate-legal-pdfs.ts) >>
+endobj
+27 0 obj
+<< /Type /Catalog /Pages 25 0 R >>
+endobj
+xref
+0 28
+0000000000 65535 f 
+0000000009 00000 n 
+0000000079 00000 n 
+0000000154 00000 n 
+0000005453 00000 n 
+0000010830 00000 n 
+0000016017 00000 n 
+0000020598 00000 n 
+0000025490 00000 n 
+0000030421 00000 n 
+0000035436 00000 n 
+0000040590 00000 n 
+0000045874 00000 n 
+0000050312 00000 n 
+0000053632 00000 n 
+0000053770 00000 n 
+0000053908 00000 n 
+0000054046 00000 n 
+0000054184 00000 n 
+0000054322 00000 n 
+0000054460 00000 n 
+0000054598 00000 n 
+0000054737 00000 n 
+0000054876 00000 n 
+0000055015 00000 n 
+0000055154 00000 n 
+0000055284 00000 n 
+0000055425 00000 n 
+trailer
+<< /Size 28 /Root 27 0 R /Info 26 0 R >>
+startxref
+55476
+%%EOF

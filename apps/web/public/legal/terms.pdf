@@ -1,0 +1,633 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+2 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>
+endobj
+3 0 obj
+<< /Length 4929 >>
+stream
+BT /F2 19 Tf 1 0 0 1 54.00 738.00 Tm (Murph Terms of Service) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 706.00 Tm (Effective Date: April 9, 2026 Company: Just Cobuild, Co. \("Murph," "we," "us," or "our"\)) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 688.00 Tm (These Terms of Service \("Terms"\) govern your access to and use of Murph's hosted websites, hosted) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 674.00 Tm (applications, hosted onboarding flows, hosted settings pages, hosted APIs, hosted messaging features,) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 660.00 Tm (hosted integrations, and related managed services that link to these Terms \(collectively, the "Hosted) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 646.00 Tm (Service"\).) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 628.00 Tm (Murph may also offer local, self-hosted, and open-source software \("Local Software"\). These Terms) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 614.00 Tm (do not replace the open-source license terms that apply to Local Software. If you download, run,) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 600.00 Tm (modify, or distribute Local Software made available under an open-source license, that Local Software) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 586.00 Tm (is governed by the applicable open-source license. These Terms apply only to your use of the Hosted) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 572.00 Tm (Service.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 554.00 Tm (By accessing or using the Hosted Service, you agree to these Terms. If you do not agree, do not use the) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 540.00 Tm (Hosted Service.) Tj ET
+BT /F2 14 Tf 1 0 0 1 54.00 512.00 Tm (Important Notices) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 488.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 488.00 Tm (Auto-renewal. Paid subscriptions renew automatically until canceled, unless applicable law requires) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 474.00 Tm (otherwise or the checkout flow states otherwise.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 458.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 458.00 Tm (Health disclaimer. Murph is not a doctor, medical device, hospital, pharmacy, or emergency service.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 444.00 Tm (Murph does not provide medical care.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 428.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 428.00 Tm (AI and wearable limitations. Murph may use AI-generated responses and third-party wearable or) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 414.00 Tm (imported data, each of which may be incomplete, delayed, or wrong.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 398.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 398.00 Tm (Disputes. These Terms include important rules about dispute handling, governing law, and venue.) Tj ET
+BT /F2 14 Tf 1 0 0 1 54.00 372.00 Tm (1. Eligibility and Authority) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 348.00 Tm (You may use the Hosted Service only if:) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 330.00 Tm (1.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 330.00 Tm (you are legally capable of entering into a binding agreement;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 314.00 Tm (2.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 314.00 Tm (you are not barred from using the Hosted Service under applicable law;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 298.00 Tm (3.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 298.00 Tm (you comply with these Terms; and) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 282.00 Tm (4.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 282.00 Tm (if you use the Hosted Service on behalf of a company, clinic, coach, family office, or other) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 268.00 Tm (organization, you have authority to bind that organization.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 252.00 Tm (Minimum age. You must be at least 18 years old to use the Hosted Service.) Tj ET
+BT /F2 14 Tf 1 0 0 1 54.00 224.00 Tm (2. What Murph Is) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 200.00 Tm (Murph is a health assistant and health-organization tool that may include, depending on the features you) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 186.00 Tm (enable or purchase:) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 168.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 168.00 Tm (health-related conversations through channels such as iMessage, Telegram, email, or similar) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 154.00 Tm (surfaces;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 138.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 138.00 Tm (wearable and connected-source integrations, including sources such as Oura, WHOOP, Garmin, or) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 124.00 Tm (similar providers;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 108.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 108.00 Tm (meal, supplement, routine, note, symptom, health-history, and other wellness logging;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 92.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 92.00 Tm (AI-generated summaries, suggestions, reminders, pattern-spotting, and follow-up prompts;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 76.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 76.00 Tm (phone-based onboarding and identity verification;) Tj ET
+endstream
+endobj
+4 0 obj
+<< /Length 5022 >>
+stream
+BT /F1 10 Tf 1 0 0 1 54.00 738.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 738.00 Tm (subscription billing, account management, and hosted settings;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 722.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 722.00 Tm (share links, invite links, and other import/export flows; and) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 706.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 706.00 Tm (local-first and hosted workflows that may interact with one another.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 690.00 Tm (Some features may be available only in Local Software, while others may be available only in the Hosted) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 676.00 Tm (Service. We may add, remove, or change features, providers, and integrations over time.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 658.00 Tm (Subject to these Terms, Murph grants you a limited, non-exclusive, non-transferable, non-sublicensable,) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 644.00 Tm (revocable right to access and use the Hosted Service only for your personal use or your organization's) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 630.00 Tm (internal lawful use.) Tj ET
+BT /F2 14 Tf 1 0 0 1 54.00 602.00 Tm (3. Health, Safety, Emergency, and Medication Disclaimer) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 578.00 Tm (Murph is not medical advice and is not a substitute for a qualified healthcare professional. Except where) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 564.00 Tm (we expressly and specifically say otherwise in a product-specific notice, Murph and the Hosted Service) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 550.00 Tm (are not a medical device and are not intended to diagnose, treat, cure, prevent, monitor, or alleviate any) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 536.00 Tm (disease, injury, or medical condition.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 518.00 Tm (Murph's content, outputs, summaries, suggestions, reminders, and analytics are provided for) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 504.00 Tm (informational, educational, organizational, and general wellness purposes only. They may not be) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 490.00 Tm (appropriate for your specific circumstances.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 472.00 Tm (You should always use your own judgment and consult a licensed clinician before making decisions about) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 458.00 Tm (medications, supplements, treatment, medical testing, training, diet, sleep, or exercise. Do not use) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 444.00 Tm (Murph to determine medication or supplement dosing, treatment timing, or whether to start, stop, or) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 430.00 Tm (change any medication, supplement, or therapy.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 412.00 Tm (Emergency use is prohibited. Do not use Murph for emergencies, urgent care, crisis response, or) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 398.00 Tm (time-sensitive clinical decisions. If you think you may have a medical emergency, contact emergency) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 384.00 Tm (services or seek immediate in-person medical care.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 366.00 Tm (Use of the Hosted Service does not create a doctor-patient, therapist-patient, coach-patient, fiduciary,) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 352.00 Tm (or similar professional relationship between you and Murph.) Tj ET
+BT /F2 14 Tf 1 0 0 1 54.00 324.00 Tm (4. AI Outputs and Automation) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 300.00 Tm (Murph may use artificial intelligence, machine learning systems, third-party model providers, rules) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 286.00 Tm (engines, and automations to generate messages, summaries, suggested actions, reminders, or other) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 272.00 Tm (output \(collectively, "Output"\).) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 254.00 Tm (Some Output may be generated automatically and may not be reviewed by a human before it is returned) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 240.00 Tm (to you or used in a workflow you enable.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 222.00 Tm (You understand and agree that:) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 204.00 Tm (1.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 204.00 Tm (Output may be inaccurate, incomplete, biased, out of date, poorly phrased, or unsuitable for your) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 190.00 Tm (situation;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 174.00 Tm (2.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 174.00 Tm (Output may reflect limitations in source data, wearable data quality, third-party APIs, or provider) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 160.00 Tm (availability;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 144.00 Tm (3.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 144.00 Tm (Murph may trigger automated messages or workflows based on the rules, channels, and permissions) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 130.00 Tm (you enable; and) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 114.00 Tm (4.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 114.00 Tm (you are responsible for using independent judgment before relying on Output or any automated) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 100.00 Tm (result.) Tj ET
+endstream
+endobj
+5 0 obj
+<< /Length 5161 >>
+stream
+BT /F1 10 Tf 1 0 0 1 54.00 738.00 Tm (Output is for informational purposes only and is not professional medical, legal, tax, financial, or other) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 724.00 Tm (professional advice.) Tj ET
+BT /F2 14 Tf 1 0 0 1 54.00 696.00 Tm (5. Accounts, Identity, and Security) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 672.00 Tm (To use some hosted features, you may need to create or activate an account using a phone number, email) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 658.00 Tm (address, linked wallet, third-party identity service, invite link, passkey, or similar credential.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 640.00 Tm (You agree to:) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 622.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 622.00 Tm (provide accurate, current, and complete information;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 606.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 606.00 Tm (keep your devices, passkeys, sessions, tokens, and linked accounts secure;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 590.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 590.00 Tm (use only phone numbers, messaging accounts, email accounts, wallets, devices, and integrations that) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 576.00 Tm (you are authorized to use;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 560.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 560.00 Tm (promptly update information that changes; and) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 544.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 544.00 Tm (notify us promptly at legal@justco.build if you believe your account or credentials have been) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 530.00 Tm (compromised.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 514.00 Tm (You are responsible for activity that occurs through your account, sessions, devices, or linked) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 500.00 Tm (credentials, except to the extent caused by our breach of law or these Terms.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 482.00 Tm (We may require additional verification, decline onboarding, revoke sessions, reset credentials, or disable) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 468.00 Tm (access if we suspect fraud, impersonation, security risk, unauthorized use, or legal exposure.) Tj ET
+BT /F2 14 Tf 1 0 0 1 54.00 440.00 Tm (6. Transactional Messages and Communications) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 416.00 Tm (If you use phone-based sign-in, invite flows, verification codes, email sync, messaging integrations, or) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 402.00 Tm (similar hosted features, you agree that we and our providers may send you transactional) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 388.00 Tm (communications, including one-time passcodes, sign-in links, service notices, billing notices, security) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 374.00 Tm (notices, and account-related messages.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 356.00 Tm (You understand that:) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 338.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 338.00 Tm (message and data rates may apply;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 322.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 322.00 Tm (consent to receive transactional communications may be necessary to use certain hosted features;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 306.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 306.00 Tm (consent to receive marketing communications, if any, is separate; and) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 290.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 290.00 Tm (opting out of promotional messages will not stop service-related or security-related) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 276.00 Tm (communications where allowed by law.) Tj ET
+BT /F2 14 Tf 1 0 0 1 54.00 250.00 Tm (7. Connected Services, Wearables, and Third-Party Dependencies) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 226.00 Tm (Murph may let you connect or interact with third-party services, devices, or accounts, including identity) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 212.00 Tm (providers, messaging providers, wearable providers, payment processors, AI model providers, cloud) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 198.00 Tm (providers, search providers, and email providers \(collectively, "Connected Services"\).) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 180.00 Tm (If you enable a Connected Service:) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 162.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 162.00 Tm (you authorize us to exchange relevant information with that Connected Service to provide the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 148.00 Tm (feature you enabled;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 132.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 132.00 Tm (your use of the Connected Service remains subject to that provider's own terms and policies;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 116.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 116.00 Tm (you are responsible for maintaining valid credentials, permissions, and legal authorization for the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 102.00 Tm (connection; and) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 86.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 86.00 Tm (you understand that data from Connected Services may be delayed, inaccurate, unavailable,) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 72.00 Tm (incomplete, reformatted, revoked, or changed without notice.) Tj ET
+endstream
+endobj
+6 0 obj
+<< /Length 5419 >>
+stream
+BT /F1 10 Tf 1 0 0 1 54.00 738.00 Tm (Murph does not own or control Connected Services and is not responsible for their products,) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 724.00 Tm (subscriptions, warranties, uptime, safety, security, pricing, API changes, or data practices.) Tj ET
+BT /F2 14 Tf 1 0 0 1 54.00 696.00 Tm (8. User Content and Data Rights) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 672.00 Tm ("User Content" means information you submit to Murph or authorize Murph to access, including) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 658.00 Tm (messages, notes, logs, attachments, chats, health-related text, wearable data, imported data, account) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 644.00 Tm (metadata, and content shared through share or invite features.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 626.00 Tm (As between you and Murph, you retain ownership of your User Content.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 608.00 Tm (You grant us a non-exclusive, worldwide, limited license to host, store, reproduce, process, transmit,) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 594.00 Tm (display, analyze, modify, and otherwise use User Content only as reasonably necessary to:) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 576.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 576.00 Tm (provide, secure, support, and improve the Hosted Service;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 560.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 560.00 Tm (authenticate users and maintain account state;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 544.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 544.00 Tm (sync the Connected Services and features you enable;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 528.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 528.00 Tm (generate Output and service functionality you request;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 512.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 512.00 Tm (process payments, billing, fraud prevention, and customer support;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 496.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 496.00 Tm (investigate abuse, enforce these Terms, and comply with law; and) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 480.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 480.00 Tm (create de-identified or aggregated analytics or service-improvement materials as described in our) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 466.00 Tm (Privacy Policy.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 450.00 Tm (This license ends when your User Content is deleted from our active systems, except to the extent) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 436.00 Tm (retention is reasonably necessary for backups, security, audit logs, legal compliance, dispute resolution,) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 422.00 Tm (or legitimate internal operational purposes.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 404.00 Tm (No public marketing use without separate permission. We will not use your identifiable private health) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 390.00 Tm (logs, messages, attachments, or similar User Content in public marketing materials without your) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 376.00 Tm (separate consent.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 358.00 Tm (You represent and warrant that:) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 340.00 Tm (1.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 340.00 Tm (you have all rights, consents, and permissions needed to provide User Content to Murph;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 324.00 Tm (2.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 324.00 Tm (your User Content and your use of the Hosted Service do not violate any law or third-party rights;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 308.00 Tm (3.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 308.00 Tm (if you upload, sync, or share information about another person, you have any consent required by law;) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 294.00 Tm (and) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 278.00 Tm (4.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 278.00 Tm (you will not submit content that is unlawful, infringing, defamatory, fraudulent, or intentionally) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 264.00 Tm (misleading in a way that could foreseeably cause harm.) Tj ET
+BT /F2 14 Tf 1 0 0 1 54.00 238.00 Tm (9. Share Links, Invites, Imports, and Shared Content) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 214.00 Tm (Murph may allow you to create share links, invite links, or similar features that allow another person to) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 200.00 Tm (view, claim, or import content.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 182.00 Tm (If you use these features:) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 164.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 164.00 Tm (you are solely responsible for deciding what to share;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 148.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 148.00 Tm (you must have the right and any necessary consent to share that content;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 132.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 132.00 Tm (you understand that shared content may be copied into another account, vault, or environment and) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 118.00 Tm (may not be revocable after claim or import;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 102.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 102.00 Tm (you must not disclose another person's private, health, or sensitive information without) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 88.00 Tm (authorization; and) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 72.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 72.00 Tm (you must not access, redeem, intercept, or use a link that was not intended for you.) Tj ET
+endstream
+endobj
+7 0 obj
+<< /Length 5021 >>
+stream
+BT /F1 10 Tf 1 0 0 1 54.00 738.00 Tm (Share links may be single-use, time-limited, automatically expiring, or disabled after claim. For privacy) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 724.00 Tm (and security reasons, some share links may expire on a short schedule shown in the product.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 706.00 Tm (We may refuse, revoke, expire, or invalidate share links, invite links, or import flows at any time for) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 692.00 Tm (security, abuse, legal, policy, or operational reasons.) Tj ET
+BT /F2 14 Tf 1 0 0 1 54.00 664.00 Tm (10. Privacy, Sensitive Information, and HIPAA) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 640.00 Tm (Our Privacy Policy, available at https://withmurph.ai/legal/privacy.pdf, explains how we collect, use,) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 626.00 Tm (disclose, and process personal information through the Hosted Service and is incorporated into these) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 612.00 Tm (Terms by reference.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 594.00 Tm (Because Murph is health-oriented, some information you provide may be sensitive. You understand and) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 580.00 Tm (agree that:) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 562.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 562.00 Tm (the Hosted Service may involve cloud processing, encrypted storage, and third-party subprocessors;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 546.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 546.00 Tm (Local Software and self-hosted Murph may have different privacy, locality, and security) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 532.00 Tm (characteristics than the Hosted Service;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 516.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 516.00 Tm (when we say data is encrypted, that does not mean the Hosted Service is zero-knowledge,) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 502.00 Tm (operator-blind, or inaccessible to us where decryption or readable processing is necessary to) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 488.00 Tm (operate hosted features; and) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 472.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 472.00 Tm (unless we expressly agree otherwise in a separate signed writing, Murph is not acting as your) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 458.00 Tm (HIPAA business associate and the Hosted Service is not offered under a Business Associate) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 444.00 Tm (Agreement.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 428.00 Tm (Do not submit regulated protected health information to the Hosted Service on behalf of a covered) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 414.00 Tm (entity unless and until Murph expressly offers that service under a signed BAA.) Tj ET
+BT /F2 14 Tf 1 0 0 1 54.00 386.00 Tm (11. Subscriptions, Billing, and Automatic Renewal) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 362.00 Tm (Some hosted features require a paid subscription or other fees.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 344.00 Tm (If you purchase a paid hosted plan:) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 326.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 326.00 Tm (you agree to pay all fees, taxes, and charges presented at checkout;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 310.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 310.00 Tm (you authorize us and our payment processors to charge your selected payment method on a) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 296.00 Tm (recurring basis, if your plan is recurring;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 280.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 280.00 Tm (your subscription term may be monthly, annual, prepaid, or another term disclosed at checkout;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 264.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 264.00 Tm (your subscription automatically renews unless you cancel before the renewal date; and) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 248.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 248.00 Tm (all billing, payment, and entitlements may be handled through us or our third-party payment) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 234.00 Tm (processors.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 218.00 Tm (Where required by law, we will provide advance notice of automatic renewal terms and renewal charges.) Tj ET
+BT /F2 11 Tf 1 0 0 1 54.00 192.00 Tm (Trials and Promotions) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 173.00 Tm (We may offer free trials, discounts, credits, or promotional terms. Unless otherwise stated in the) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 159.00 Tm (applicable offer or required by law:) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 141.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 141.00 Tm (trials and promotions may be modified, suspended, or withdrawn at any time;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 125.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 125.00 Tm (a trial may convert to a paid subscription when the trial ends unless you cancel beforehand; and) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 109.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 109.00 Tm (promotional pricing may expire at the end of the promotional period.) Tj ET
+BT /F2 11 Tf 1 0 0 1 54.00 85.00 Tm (Price Changes) Tj ET
+endstream
+endobj
+8 0 obj
+<< /Length 5235 >>
+stream
+BT /F1 10 Tf 1 0 0 1 54.00 738.00 Tm (We may change fees prospectively. If you are on a recurring plan and we change the recurring price for) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 724.00 Tm (a future renewal term, we will provide at least 30 days' advance notice unless a different period is) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 710.00 Tm (required by law.) Tj ET
+BT /F2 14 Tf 1 0 0 1 54.00 682.00 Tm (12. Cancellation, Refunds, Chargebacks, and Payment Reversals) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 658.00 Tm (You may cancel a recurring subscription at any time through your account settings, the payment channel) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 644.00 Tm (you used, or by contacting legal@justco.build, unless a different method is specified at checkout.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 626.00 Tm (Unless otherwise stated at checkout or required by law:) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 608.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 608.00 Tm (cancellation stops future renewals only;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 592.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 592.00 Tm (your cancellation takes effect at the end of the then-current paid term;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 576.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 576.00 Tm (fees already paid are non-refundable;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 560.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 560.00 Tm (partial billing periods are not prorated; and) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 544.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 544.00 Tm (we may, but are not obligated to, issue credits, refunds, or grace periods in individual cases.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 528.00 Tm (If applicable law gives you a cooling-off, withdrawal, or similar consumer right, that law controls.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 510.00 Tm (Material reduction remedy. If we materially reduce the core paid Hosted Service during a then-current) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 496.00 Tm (prepaid term for reasons other than legal compliance, security, fraud prevention, or third-party) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 482.00 Tm (provider loss outside our reasonable control, you may cancel that paid term within 30 days after notice) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 468.00 Tm (and request a prorated refund or service credit for the unused remainder.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 450.00 Tm (We may suspend, downgrade, or terminate access if a payment fails, is reversed, becomes delinquent, is) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 436.00 Tm (disputed, or is subject to a chargeback, refund, fraud review, or similar payment reversal. Reactivation) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 422.00 Tm (may require updated payment information, settlement of past-due amounts, or manual review.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 404.00 Tm (If you purchased through an app store, marketplace, or reseller, that third party's billing, renewal,) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 390.00 Tm (refund, and cancellation terms may also apply.) Tj ET
+BT /F2 14 Tf 1 0 0 1 54.00 362.00 Tm (13. Availability, Support, Changes, and Beta Features) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 338.00 Tm (We may modify, update, suspend, or discontinue all or part of the Hosted Service at any time.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 320.00 Tm (We do not guarantee that any feature, model provider, Connected Service, wearable integration, channel,) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 306.00 Tm (share flow, or import or export pathway will remain available.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 288.00 Tm (We will use commercially reasonable efforts to provide support, but these Terms do not entitle you to) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 274.00 Tm (any guaranteed level of support, uptime, response time, availability, or turnaround time.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 256.00 Tm (The Hosted Service may include experimental, beta, preview, or early-access features. Those features) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 242.00 Tm (may be incomplete, unreliable, changed, or removed at any time and may be subject to additional terms.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 224.00 Tm (We do not guarantee uninterrupted or error-free operation. The Hosted Service may be unavailable or) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 210.00 Tm (degraded due to maintenance, incidents, provider outages, infrastructure failures, integration changes,) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 196.00 Tm (abuse prevention, legal requirements, or reasons outside our reasonable control.) Tj ET
+BT /F2 14 Tf 1 0 0 1 54.00 168.00 Tm (14. Acceptable Use) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 144.00 Tm (You may not use the Hosted Service to, or help others to:) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 126.00 Tm (1.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 126.00 Tm (violate any law, regulation, court order, or third-party right;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 110.00 Tm (2.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 110.00 Tm (upload, import, or share data you do not have the right to use;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 94.00 Tm (3.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 94.00 Tm (impersonate another person or use another person's phone number, email, messaging account, wallet,) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 80.00 Tm (or device connection without authorization;) Tj ET
+endstream
+endobj
+9 0 obj
+<< /Length 5005 >>
+stream
+BT /F1 10 Tf 1 0 0 1 54.00 738.00 Tm (4.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 738.00 Tm (copy, scrape, harvest, probe, reverse engineer, test vulnerabilities, or attempt unauthorized access) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 724.00 Tm (to the Hosted Service or related systems, except to the extent a restriction is prohibited by) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 710.00 Tm (applicable law;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 694.00 Tm (5.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 694.00 Tm (introduce malware, malicious code, denial-of-service traffic, phishing content, or abusive) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 680.00 Tm (automation;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 664.00 Tm (6.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 664.00 Tm (bypass rate limits, access controls, invite limits, payment controls, or security restrictions;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 648.00 Tm (7.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 648.00 Tm (send spam, scams, or unsolicited commercial communications through Murph channels or) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 634.00 Tm (integrations;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 618.00 Tm (8.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 618.00 Tm (use Murph for emergency triage, clinical decision support, medication-dosing decisions, or other) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 604.00 Tm (high-risk uses where inaccurate or delayed output could reasonably cause death, bodily injury, or) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 590.00 Tm (significant property damage;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 574.00 Tm (9.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 574.00 Tm (use Murph to make decisions about another person's employment, housing, insurance, credit,) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 560.00 Tm (education, benefits, or legal status;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 544.00 Tm (10.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 544.00 Tm (misuse share links, invite links, or imported content to exfiltrate or expose another person's) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 530.00 Tm (information; or) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 514.00 Tm (11.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 514.00 Tm (use the Hosted Service in a way that damages, disables, overburdens, or impairs Murph or other) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 500.00 Tm (users.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 484.00 Tm (We may investigate suspected violations and take any action we reasonably believe is appropriate,) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 470.00 Tm (including suspending accounts, revoking sessions, blocking integrations, removing content where) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 456.00 Tm (permitted, and cooperating with law enforcement or affected third parties.) Tj ET
+BT /F2 14 Tf 1 0 0 1 54.00 428.00 Tm (15. Local Software and Open-Source Licenses) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 404.00 Tm (Local Software may be made available under one or more open-source licenses. Nothing in these Terms) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 390.00 Tm (limits the rights you receive under an applicable open-source license for Local Software.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 372.00 Tm (Conversely, no open-source license grants you rights to the Hosted Service, Murph trademarks, paid) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 358.00 Tm (hosted features, hosted infrastructure, or proprietary operational systems except as expressly stated.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 340.00 Tm (Murph does not currently sell or warranty first-party wearable hardware under these Terms. If) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 326.00 Tm (Murph later offers first-party hardware, peripherals, or physical goods, separate terms of sale,) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 312.00 Tm (delivery, or warranty terms may apply.) Tj ET
+BT /F2 14 Tf 1 0 0 1 54.00 284.00 Tm (16. Intellectual Property and Brand) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 260.00 Tm (The Hosted Service, including our site design, hosted application logic, visual interfaces, branding,) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 246.00 Tm (trademarks, logos, and non-open-source content, is owned by Murph or its licensors and is protected by) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 232.00 Tm (intellectual property laws.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 214.00 Tm (Except for the limited rights expressly granted in these Terms, we reserve all rights in and to the) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 200.00 Tm (Hosted Service.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 182.00 Tm (You may not use Murph's name, trademarks, logos, or branding without our prior written consent,) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 168.00 Tm (except as permitted by law or the applicable open-source license.) Tj ET
+BT /F2 14 Tf 1 0 0 1 54.00 140.00 Tm (17. Feedback) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 116.00 Tm (If you provide suggestions, ideas, comments, or feedback about Murph, you grant us a worldwide,) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 102.00 Tm (perpetual, irrevocable, sublicensable, transferable, royalty-free license to use that feedback for any) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 88.00 Tm (purpose without restriction or compensation to you.) Tj ET
+endstream
+endobj
+10 0 obj
+<< /Length 5180 >>
+stream
+BT /F2 14 Tf 1 0 0 1 54.00 728.00 Tm (18. Suspension and Termination) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 704.00 Tm (You may stop using the Hosted Service at any time.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 686.00 Tm (We may suspend or terminate your access, in whole or in part, immediately or prospectively, if:) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 668.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 668.00 Tm (you violate these Terms or applicable law;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 652.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 652.00 Tm (we suspect fraud, abuse, impersonation, or unauthorized access;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 636.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 636.00 Tm (your use creates legal, security, reputational, or operational risk;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 620.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 620.00 Tm (your payment fails or is reversed;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 604.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 604.00 Tm (we are required to do so by law, court order, or a third-party provider obligation; or) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 588.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 588.00 Tm (continuing to provide the Hosted Service is no longer commercially or technically feasible.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 572.00 Tm (After termination:) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 554.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 554.00 Tm (your right to use the Hosted Service ends;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 538.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 538.00 Tm (we may revoke sessions, tokens, access keys, invitations, and hosted permissions;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 522.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 522.00 Tm (Local Software you lawfully obtained may remain available under its own license; and) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 506.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 506.00 Tm (we may retain certain data as permitted or required by law, for backups, fraud prevention, audit) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 492.00 Tm (logs, security, dispute resolution, or as described in our Privacy Policy.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 476.00 Tm (The following sections survive termination to the extent applicable: Sections 8 through 10, 12, 18) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 462.00 Tm (through 27, and any other provisions that by their nature should survive.) Tj ET
+BT /F2 14 Tf 1 0 0 1 54.00 434.00 Tm (19. Data Retention, Deletion, and Export) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 410.00 Tm (You are responsible for maintaining your own copies of content you care about.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 392.00 Tm (Where the Hosted Service offers export, import, or deletion features, you may use those features) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 378.00 Tm (subject to product limits, fraud controls, retention obligations, and applicable law. If the Hosted) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 364.00 Tm (Service does not offer a particular export or deletion control, you may contact legal@justco.build.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 346.00 Tm (We may retain residual copies of data for a limited period in backups, logs, encrypted storage, or) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 332.00 Tm (operational systems, and may retain information longer where necessary for security, fraud prevention,) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 318.00 Tm (legal compliance, tax, accounting, or dispute resolution.) Tj ET
+BT /F2 14 Tf 1 0 0 1 54.00 290.00 Tm (20. Disclaimers) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 266.00 Tm (TO THE MAXIMUM EXTENT PERMITTED BY LAW, THE HOSTED SERVICE IS PROVIDED "AS IS") Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 252.00 Tm (AND "AS AVAILABLE." MURPH AND ITS AFFILIATES, LICENSORS, CONTRACTORS, AND SERVICE) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 238.00 Tm (PROVIDERS DISCLAIM ALL WARRANTIES, WHETHER EXPRESS, IMPLIED, STATUTORY, OR) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 224.00 Tm (OTHERWISE, INCLUDING IMPLIED WARRANTIES OF MERCHANTABILITY, FITNESS FOR A) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 210.00 Tm (PARTICULAR PURPOSE, TITLE, NON-INFRINGEMENT, QUIET ENJOYMENT, ACCURACY, OR THAT) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 196.00 Tm (THE HOSTED SERVICE WILL BE UNINTERRUPTED, ERROR-FREE, SECURE, OR FREE OF HARMFUL) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 182.00 Tm (COMPONENTS.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 164.00 Tm (Without limiting the above, we do not warrant that:) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 146.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 146.00 Tm (Murph's outputs are accurate, complete, current, safe, or clinically appropriate;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 130.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 130.00 Tm (AI-generated output will be reliable or suitable for your needs;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 114.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 114.00 Tm (wearable, imported, or third-party data is accurate, complete, or timely;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 98.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 98.00 Tm (any message, sync event, notification, or import will be delivered or completed;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 82.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 82.00 Tm (any integration will remain available or compatible;) Tj ET
+endstream
+endobj
+11 0 obj
+<< /Length 4638 >>
+stream
+BT /F1 10 Tf 1 0 0 1 54.00 738.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 738.00 Tm (hosted or local data will never be lost, corrupted, delayed, or inaccessible; or) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 722.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 722.00 Tm (the Hosted Service will meet your expectations or achieve any health, wellness, business, or personal) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 708.00 Tm (outcome.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 692.00 Tm (Some jurisdictions do not allow certain disclaimers, so some of the above may not apply to you.) Tj ET
+BT /F2 14 Tf 1 0 0 1 54.00 664.00 Tm (21. Limitation of Liability) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 640.00 Tm (TO THE MAXIMUM EXTENT PERMITTED BY LAW:) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 622.00 Tm (1.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 622.00 Tm (MURPH AND ITS AFFILIATES, LICENSORS, CONTRACTORS, AND SERVICE PROVIDERS WILL) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 608.00 Tm (NOT BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL, EXEMPLARY,) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 594.00 Tm (OR PUNITIVE DAMAGES, OR FOR ANY LOSS OF PROFITS, REVENUE, GOODWILL, DATA,) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 580.00 Tm (BUSINESS OPPORTUNITY, OR BUSINESS INTERRUPTION, EVEN IF ADVISED OF THE) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 566.00 Tm (POSSIBILITY OF THOSE DAMAGES.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 550.00 Tm (2.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 550.00 Tm (OUR TOTAL AGGREGATE LIABILITY FOR ALL CLAIMS ARISING OUT OF OR RELATING TO THE) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 536.00 Tm (HOSTED SERVICE OR THESE TERMS WILL NOT EXCEED THE GREATER OF: \(A\) THE AMOUNTS) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 522.00 Tm (YOU PAID US FOR THE HOSTED SERVICE IN THE 12 MONTHS BEFORE THE CLAIM AROSE; OR) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 508.00 Tm (\(B\) USD $100.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 492.00 Tm (These limitations apply regardless of the legal theory and even if a remedy fails of its essential purpose.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 474.00 Tm (Nothing in these Terms excludes or limits liability that cannot be excluded under applicable law, including) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 460.00 Tm (liability for fraud, willful misconduct, gross negligence, or, where required by law, death or personal) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 446.00 Tm (injury.) Tj ET
+BT /F2 14 Tf 1 0 0 1 54.00 418.00 Tm (22. Indemnity) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 394.00 Tm (To the maximum extent permitted by law, you will defend, indemnify, and hold harmless Murph and its) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 380.00 Tm (affiliates, officers, directors, employees, contractors, licensors, and service providers from and against) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 366.00 Tm (third-party claims, liabilities, damages, judgments, awards, losses, costs, and expenses \(including) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 352.00 Tm (reasonable attorneys' fees\) arising out of or related to:) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 334.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 334.00 Tm (your User Content;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 318.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 318.00 Tm (your misuse of the Hosted Service;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 302.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 302.00 Tm (your violation of these Terms;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 286.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 286.00 Tm (your violation of applicable law or third-party rights; or) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 270.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 270.00 Tm (your sharing, syncing, or disclosure of another person's information without required authorization,) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 254.00 Tm (except to the extent the claim arises from Murph's breach of these Terms or Murph's gross negligence) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 240.00 Tm (or willful misconduct.) Tj ET
+BT /F2 14 Tf 1 0 0 1 54.00 212.00 Tm (23. Export Controls and Sanctions) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 188.00 Tm (You may not use the Hosted Service if you are located in, ordinarily resident in, or organized under the) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 174.00 Tm (laws of a jurisdiction subject to comprehensive sanctions, or if you are on a government) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 160.00 Tm (restricted-party list, except as authorized by applicable law.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 142.00 Tm (You agree not to use, export, re-export, or make available the Hosted Service in violation of export) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 128.00 Tm (control, sanctions, or trade laws.) Tj ET
+BT /F2 14 Tf 1 0 0 1 54.00 100.00 Tm (24. Informal Dispute Resolution, Governing Law, and Venue) Tj ET
+endstream
+endobj
+12 0 obj
+<< /Length 5197 >>
+stream
+BT /F1 10 Tf 1 0 0 1 54.00 738.00 Tm (Before filing a claim, each party agrees to try to resolve the dispute informally by sending written) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 724.00 Tm (notice to the other party describing the dispute and the requested relief. Murph notices must be sent to) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 710.00 Tm (legal@justco.build. If the dispute is not resolved within 30 days after notice is received, either party) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 696.00 Tm (may bring a claim as permitted by this Section.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 678.00 Tm (These Terms are governed by the laws of the State of Delaware, excluding its conflict-of-laws rules.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 660.00 Tm (Any dispute arising out of or relating to these Terms or the Hosted Service that is not resolved) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 646.00 Tm (informally will be brought exclusively in the state or federal courts located in the State of Delaware,) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 632.00 Tm (and each party consents to those courts' personal jurisdiction and venue, except where applicable law) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 618.00 Tm (requires a different forum or gives you a non-waivable right to bring a claim elsewhere.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 600.00 Tm (Nothing in this section limits either party's right to seek temporary or preliminary injunctive relief to) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 586.00 Tm (protect its intellectual property, confidential information, or security interests.) Tj ET
+BT /F2 14 Tf 1 0 0 1 54.00 558.00 Tm (25. Changes to These Terms) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 534.00 Tm (We may update these Terms from time to time. If we make material changes, we will provide notice by) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 520.00 Tm (updating the Effective Date, posting the revised Terms, emailing you, notifying you through the Hosted) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 506.00 Tm (Service, or using another reasonable method.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 488.00 Tm (Changes apply prospectively unless otherwise required by law. If you continue using the Hosted Service) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 474.00 Tm (after the revised Terms become effective, you agree to the updated Terms. If you do not agree, you) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 460.00 Tm (must stop using the Hosted Service.) Tj ET
+BT /F2 14 Tf 1 0 0 1 54.00 432.00 Tm (26. General Terms) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 408.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 408.00 Tm (These Terms, together with any incorporated policies, order forms, checkout terms, and any) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 394.00 Tm (separate written agreements we sign with you, form the entire agreement between you and Murph) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 380.00 Tm (regarding the Hosted Service.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 364.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 364.00 Tm (If any provision is held unenforceable, the remaining provisions remain in effect.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 348.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 348.00 Tm (Our failure to enforce any provision is not a waiver.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 332.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 332.00 Tm (You may not assign these Terms without our prior written consent. We may assign these Terms in) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 318.00 Tm (connection with a merger, acquisition, corporate reorganization, financing, or sale of assets.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 302.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 302.00 Tm (We are not liable for delay or failure to perform caused by events beyond our reasonable control,) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 288.00 Tm (including internet or utility failures, provider outages, labor disputes, acts of God, war, terrorism,) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 274.00 Tm (civil unrest, epidemic or pandemic events, or governmental actions.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 258.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 258.00 Tm (Section headings are for convenience only.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 242.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 242.00 Tm (Nothing in these Terms creates a partnership, joint venture, agency, employment, fiduciary, or) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 228.00 Tm (franchise relationship between you and Murph.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 212.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 212.00 Tm (These Terms do not limit any non-waivable rights you may have under applicable consumer protection) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 198.00 Tm (law.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 182.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 182.00 Tm (In the event of a conflict between these Terms and an applicable open-source license, the) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 168.00 Tm (open-source license controls only with respect to the Local Software governed by that license.) Tj ET
+BT /F2 14 Tf 1 0 0 1 54.00 142.00 Tm (27. Contact Information) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 118.00 Tm (Murph Just Cobuild, Co. 2261 Market Street, STE 85230 San Francisco, CA 94114 USA legal@justco.build) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 104.00 Tm (legal@justco.build legal@justco.build) Tj ET
+endstream
+endobj
+13 0 obj
+<< /Type /Page /Parent 23 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R /F2 2 0 R >> >> /Contents 3 0 R >>
+endobj
+14 0 obj
+<< /Type /Page /Parent 23 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R /F2 2 0 R >> >> /Contents 4 0 R >>
+endobj
+15 0 obj
+<< /Type /Page /Parent 23 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R /F2 2 0 R >> >> /Contents 5 0 R >>
+endobj
+16 0 obj
+<< /Type /Page /Parent 23 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R /F2 2 0 R >> >> /Contents 6 0 R >>
+endobj
+17 0 obj
+<< /Type /Page /Parent 23 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R /F2 2 0 R >> >> /Contents 7 0 R >>
+endobj
+18 0 obj
+<< /Type /Page /Parent 23 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R /F2 2 0 R >> >> /Contents 8 0 R >>
+endobj
+19 0 obj
+<< /Type /Page /Parent 23 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R /F2 2 0 R >> >> /Contents 9 0 R >>
+endobj
+20 0 obj
+<< /Type /Page /Parent 23 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R /F2 2 0 R >> >> /Contents 10 0 R >>
+endobj
+21 0 obj
+<< /Type /Page /Parent 23 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R /F2 2 0 R >> >> /Contents 11 0 R >>
+endobj
+22 0 obj
+<< /Type /Page /Parent 23 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R /F2 2 0 R >> >> /Contents 12 0 R >>
+endobj
+23 0 obj
+<< /Type /Pages /Count 10 /Kids [13 0 R 14 0 R 15 0 R 16 0 R 17 0 R 18 0 R 19 0 R 20 0 R 21 0 R 22 0 R] >>
+endobj
+24 0 obj
+<< /Title (Murph Terms of Service) /Producer (Murph legal PDF generator) /Creator (apps/web/scripts/generate-legal-pdfs.ts) >>
+endobj
+25 0 obj
+<< /Type /Catalog /Pages 23 0 R >>
+endobj
+xref
+0 26
+0000000000 65535 f 
+0000000009 00000 n 
+0000000079 00000 n 
+0000000154 00000 n 
+0000005135 00000 n 
+0000010209 00000 n 
+0000015422 00000 n 
+0000020893 00000 n 
+0000025966 00000 n 
+0000031253 00000 n 
+0000036310 00000 n 
+0000041543 00000 n 
+0000046234 00000 n 
+0000051484 00000 n 
+0000051622 00000 n 
+0000051760 00000 n 
+0000051898 00000 n 
+0000052036 00000 n 
+0000052174 00000 n 
+0000052312 00000 n 
+0000052450 00000 n 
+0000052589 00000 n 
+0000052728 00000 n 
+0000052867 00000 n 
+0000052990 00000 n 
+0000053133 00000 n 
+trailer
+<< /Size 26 /Root 25 0 R /Info 24 0 R >>
+startxref
+53184
+%%EOF
