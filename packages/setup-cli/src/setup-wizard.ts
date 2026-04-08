@@ -1,13 +1,10 @@
 import * as React from 'react'
 import { Box, Text, render, useApp, useInput } from 'ink'
-import { listAssistantCronPresets } from '@murphai/assistant-engine/assistant-cron'
 import {
   type SetupAssistantPreset,
   type SetupAssistantProviderPreset,
   type SetupChannel,
   type SetupWearable,
-  setupChannelValues,
-  setupWearableValues,
 } from '@murphai/operator-config/setup-cli-contracts'
 import {
   SETUP_RUNTIME_ENV_NOTICE,
@@ -53,6 +50,32 @@ import {
   type SetupWizardSelectionLine,
   type SetupWizardTone,
 } from './setup-wizard-ui.js'
+import {
+  buildSetupWizardPublicUrlReview,
+  describeSetupWizardPublicUrlStrategyChoice,
+  formatSetupPublicUrlStrategy,
+  normalizeSetupWizardText,
+  type SetupPublicUrlStrategy,
+  type SetupWizardPublicUrlReview,
+} from './setup-wizard-public-url.js'
+import {
+  formatSetupChannel,
+  formatSetupScheduledUpdate,
+  formatSetupWearable,
+  getDefaultSetupWizardChannels,
+  getDefaultSetupWizardScheduledUpdates,
+  getDefaultSetupWizardWearables,
+  resolveSetupWizardInitialScheduledUpdates,
+  setupWizardChannelOptions,
+  setupWizardScheduledUpdateOptions,
+  setupWizardWearableOptions,
+  sortSetupWizardChannels,
+  sortSetupWizardScheduledUpdates,
+  sortSetupWizardWearables,
+  toggleSetupWizardChannel,
+  toggleSetupWizardScheduledUpdate,
+  toggleSetupWizardWearable,
+} from './setup-wizard-options.js'
 
 export {
   getDefaultSetupWizardAssistantPreset,
@@ -66,6 +89,22 @@ export {
   type SetupWizardResolvedAssistantSelection,
 } from './setup-assistant-wizard.js'
 export { wrapSetupWizardIndex, type SetupWizardCompletionController } from './setup-wizard-core.js'
+export {
+  buildSetupWizardPublicUrlReview,
+  describeSetupWizardPublicUrlStrategyChoice,
+  type SetupPublicUrlStrategy,
+  type SetupWizardPublicUrlReview,
+  type SetupWizardPublicUrlTarget,
+} from './setup-wizard-public-url.js'
+export {
+  getDefaultSetupWizardChannels,
+  getDefaultSetupWizardScheduledUpdates,
+  getDefaultSetupWizardWearables,
+  resolveSetupWizardInitialScheduledUpdates,
+  toggleSetupWizardChannel,
+  toggleSetupWizardScheduledUpdate,
+  toggleSetupWizardWearable,
+} from './setup-wizard-options.js'
 
 export interface SetupWizardResult {
   assistantApiKeyEnv?: string | null
@@ -98,40 +137,6 @@ export interface SetupWizardInput {
   wearableStatuses?: Partial<Record<SetupWearable, SetupWizardRuntimeStatus>>
 }
 
-interface SetupWizardChannelOption {
-  channel: SetupChannel
-  description: string
-  title: string
-}
-
-interface SetupWizardScheduledUpdateOption {
-  description: string
-  id: string
-  scheduleLabel: string
-  title: string
-}
-
-interface SetupWizardWearableOption {
-  description: string
-  title: string
-  wearable: SetupWearable
-}
-
-export type SetupPublicUrlStrategy = 'hosted' | 'tunnel'
-
-export interface SetupWizardPublicUrlTarget {
-  detail: string
-  label: string
-  url: string
-}
-
-export interface SetupWizardPublicUrlReview {
-  enabled: boolean
-  recommendedStrategy: SetupPublicUrlStrategy
-  summary: string
-  targets: SetupWizardPublicUrlTarget[]
-}
-
 type SetupWizardStep =
   | 'intro'
   | 'assistant-provider'
@@ -148,143 +153,11 @@ type SetupWizardSelectionStep = Extract<
   'assistant-provider' | 'assistant-method' | 'scheduled-updates' | 'channels' | 'wearables'
 >
 
-const DEFAULT_SETUP_DEVICE_SYNC_LOCAL_BASE_URL = 'http://localhost:8788'
-const DEFAULT_SETUP_LINQ_WEBHOOK_URL = 'http://127.0.0.1:8789/linq-webhook'
-
-const setupWizardChannelOptions: readonly SetupWizardChannelOption[] = [
-  {
-    channel: 'imessage',
-    description: 'Reply from Messages on this Mac.',
-    title: 'iMessage',
-  },
-  {
-    channel: 'telegram',
-    description: 'Reply through a Telegram bot.',
-    title: 'Telegram',
-  },
-  {
-    channel: 'linq',
-    description: 'Reply by SMS, iMessage, or RCS through Linq.',
-    title: 'Linq',
-  },
-  {
-    channel: 'email',
-    description: 'Read and reply in email.',
-    title: 'Email',
-  },
-]
-
-const setupWizardScheduledUpdateOptions: readonly SetupWizardScheduledUpdateOption[] =
-  listAssistantCronPresets().map((preset) => ({
-    id: preset.id,
-    title: preset.title,
-    description: preset.description,
-    scheduleLabel: preset.suggestedScheduleLabel,
-  }))
-
-const DEFAULT_SETUP_WIZARD_SCHEDULED_UPDATE_IDS = [
-  'weekly-health-snapshot',
-  'environment-health-watch',
-] as const
-
-const setupWizardWearableOptions: readonly SetupWizardWearableOption[] = [
-  {
-    description: 'Sync sleep, daily health metrics, and activities from Garmin Connect.',
-    title: 'Garmin',
-    wearable: 'garmin',
-  },
-  {
-    description: 'Import sleep, readiness, and recovery from Oura.',
-    title: 'Oura',
-    wearable: 'oura',
-  },
-  {
-    description: 'Import sleep, strain, and recovery from WHOOP.',
-    title: 'WHOOP',
-    wearable: 'whoop',
-  },
-]
-
-export function getDefaultSetupWizardChannels(
-  platform: NodeJS.Platform = process.platform,
-): SetupChannel[] {
-  return platform === 'darwin' ? ['imessage'] : []
-}
-
-export function getDefaultSetupWizardWearables(): SetupWearable[] {
-  return []
-}
-
-export function getDefaultSetupWizardScheduledUpdates(): string[] {
-  const available = new Set(
-    setupWizardScheduledUpdateOptions.map((option) => option.id),
-  )
-
-  return sortSetupWizardScheduledUpdates(
-    DEFAULT_SETUP_WIZARD_SCHEDULED_UPDATE_IDS.filter((id) =>
-      available.has(id),
-    ),
-  )
-}
-
-export function resolveSetupWizardInitialScheduledUpdates(
-  initialScheduledUpdates?: readonly string[],
-): string[] {
-  return sortSetupWizardScheduledUpdates(
-    initialScheduledUpdates === undefined
-      ? getDefaultSetupWizardScheduledUpdates()
-      : [...initialScheduledUpdates],
-  )
-}
-
 export function createSetupWizardCompletionController(): SetupWizardCompletionController<SetupWizardResult> {
   return createGenericSetupWizardCompletionController<SetupWizardResult>({
     unexpectedExitMessage: 'Murph setup wizard exited unexpectedly.',
   })
 }
-
-export function toggleSetupWizardChannel(
-  selectedChannels: readonly SetupChannel[],
-  channel: SetupChannel,
-): SetupChannel[] {
-  const next = new Set(selectedChannels)
-  if (next.has(channel)) {
-    next.delete(channel)
-  } else {
-    next.add(channel)
-  }
-
-  return sortSetupWizardChannels([...next])
-}
-
-export function toggleSetupWizardWearable(
-  selectedWearables: readonly SetupWearable[],
-  wearable: SetupWearable,
-): SetupWearable[] {
-  const next = new Set(selectedWearables)
-  if (next.has(wearable)) {
-    next.delete(wearable)
-  } else {
-    next.add(wearable)
-  }
-
-  return sortSetupWizardWearables([...next])
-}
-
-export function toggleSetupWizardScheduledUpdate(
-  selectedPresetIds: readonly string[],
-  presetId: string,
-): string[] {
-  const next = new Set(selectedPresetIds)
-  if (next.has(presetId)) {
-    next.delete(presetId)
-  } else {
-    next.add(presetId)
-  }
-
-  return sortSetupWizardScheduledUpdates([...next])
-}
-
 
 export async function runSetupWizard(
   input: SetupWizardInput,
@@ -1147,80 +1020,6 @@ function normalizeSetupWizardRuntimeStatus(
   )
 }
 
-function sortSetupWizardChannels(channels: readonly SetupChannel[]): SetupChannel[] {
-  const order = new Map<SetupChannel, number>(
-    setupChannelValues.map((channel, index) => [channel, index] as const),
-  )
-  const unique = [...new Set(channels)]
-
-  return unique.sort(
-    (left, right) =>
-      (order.get(left) ?? Number.MAX_SAFE_INTEGER) -
-      (order.get(right) ?? Number.MAX_SAFE_INTEGER),
-  )
-}
-
-function sortSetupWizardWearables(
-  wearables: readonly SetupWearable[],
-): SetupWearable[] {
-  const order = new Map<SetupWearable, number>(
-    setupWearableValues.map((wearable, index) => [wearable, index] as const),
-  )
-  const unique = [...new Set(wearables)]
-
-  return unique.sort(
-    (left, right) =>
-      (order.get(left) ?? Number.MAX_SAFE_INTEGER) -
-      (order.get(right) ?? Number.MAX_SAFE_INTEGER),
-  )
-}
-
-function sortSetupWizardScheduledUpdates(
-  presetIds: readonly string[],
-): string[] {
-  const order = new Map<string, number>(
-    setupWizardScheduledUpdateOptions.map((option, index) => [option.id, index] as const),
-  )
-  const unique = [...new Set(presetIds)]
-
-  return unique.sort(
-    (left, right) =>
-      (order.get(left) ?? Number.MAX_SAFE_INTEGER) -
-      (order.get(right) ?? Number.MAX_SAFE_INTEGER),
-  )
-}
-
-function formatSetupChannel(channel: SetupChannel): string {
-  switch (channel) {
-    case 'imessage':
-      return 'iMessage'
-    case 'telegram':
-      return 'Telegram'
-    case 'linq':
-      return 'Linq'
-    case 'email':
-      return 'Email'
-  }
-}
-
-function formatSetupWearable(wearable: SetupWearable): string {
-  switch (wearable) {
-    case 'garmin':
-      return 'Garmin'
-    case 'oura':
-      return 'Oura'
-    case 'whoop':
-      return 'WHOOP'
-  }
-}
-
-function formatSetupScheduledUpdate(presetId: string): string {
-  return (
-    setupWizardScheduledUpdateOptions.find((option) => option.id === presetId)?.title ??
-    presetId
-  )
-}
-
 function formatSelectionSummary(values: readonly string[]): string {
   return values.length > 0 ? values.join(', ') : 'None'
 }
@@ -1235,10 +1034,6 @@ function formatMissingEnv(values: readonly string[]): string {
   }
 
   return values.join(', ')
-}
-
-function formatSetupPublicUrlStrategy(strategy: SetupPublicUrlStrategy): string {
-  return strategy === 'hosted' ? 'Hosted web app' : 'Local tunnel'
 }
 
 function listSetupWizardSteps(input: {
@@ -1309,12 +1104,10 @@ function buildSetupWizardScheduledUpdateBadges(input: {
 }
 
 function formatSetupWizardPromptTitle(
-  step: SetupWizardStep,
+  step: Exclude<SetupWizardStep, 'intro' | 'confirm'>,
   provider: SetupWizardAssistantProvider,
 ): string {
   switch (step) {
-    case 'intro':
-      return 'Before you start'
     case 'assistant-provider':
       return 'How should Murph answer?'
     case 'assistant-method':
@@ -1331,15 +1124,13 @@ function formatSetupWizardPromptTitle(
       return 'Health data'
     case 'public-url':
       return 'Public links'
-    case 'confirm':
-      return 'Review'
   }
 }
 
 function formatSetupWizardStepIntro(
-  step: SetupWizardStep,
+  step: SetupWizardSelectionStep,
   provider: SetupWizardAssistantProvider,
-): string | undefined {
+): string {
   switch (step) {
     case 'assistant-provider':
       return 'Choose the provider or endpoint style Murph should use by default.'
@@ -1353,8 +1144,6 @@ function formatSetupWizardStepIntro(
       return 'Turn on the chats you want Murph to use first.'
     case 'wearables':
       return 'Pick any health data sources you want to connect after setup.'
-    default:
-      return undefined
   }
 }
 
@@ -1416,145 +1205,4 @@ function describeSetupWizardReviewNextStep(input: {
   }
 
   return 'Murph will finish setup and open anything that can connect right away.'
-}
-
-export function buildSetupWizardPublicUrlReview(input: {
-  channels: readonly SetupChannel[]
-  wearables: readonly SetupWearable[]
-  publicBaseUrl?: string | null
-  deviceSyncLocalBaseUrl?: string | null
-  linqLocalWebhookUrl?: string | null
-}): SetupWizardPublicUrlReview {
-  const publicBaseUrl = normalizeSetupWizardText(input.publicBaseUrl)
-  const hasLinq = input.channels.includes('linq')
-  const selectedWearables = sortSetupWizardWearables(input.wearables)
-  const needsPublicStrategy = hasLinq || selectedWearables.length > 0
-  const deviceSyncLocalBaseUrl =
-    normalizeSetupWizardText(input.deviceSyncLocalBaseUrl) ??
-    DEFAULT_SETUP_DEVICE_SYNC_LOCAL_BASE_URL
-  const linqLocalWebhookUrl =
-    normalizeSetupWizardText(input.linqLocalWebhookUrl) ??
-    DEFAULT_SETUP_LINQ_WEBHOOK_URL
-
-  if (!needsPublicStrategy || publicBaseUrl) {
-    return {
-      enabled: false,
-      recommendedStrategy: 'hosted',
-      summary: '',
-      targets: [],
-    }
-  }
-
-  return {
-    enabled: true,
-    recommendedStrategy:
-      selectedWearables.length > 0 ? 'hosted' : 'tunnel',
-    summary: describeSetupWizardPublicUrlSummary({
-      hasLinq,
-      wearables: selectedWearables,
-    }),
-    targets: buildSetupWizardPublicUrlTargets({
-      hasLinq,
-      wearables: selectedWearables,
-      deviceSyncLocalBaseUrl,
-      linqLocalWebhookUrl,
-    }),
-  }
-}
-
-export function describeSetupWizardPublicUrlStrategyChoice(input: {
-  review: SetupWizardPublicUrlReview
-  strategy: SetupPublicUrlStrategy
-}): string {
-  if (!input.review.enabled) {
-    return ''
-  }
-
-  if (input.strategy === 'hosted') {
-    const hasLinq = input.review.targets.some((target) => target.label === 'Linq webhook')
-    return hasLinq
-      ? 'Use hosted `apps/web` for Garmin/WHOOP/Oura, but keep Linq on the local webhook path for now.'
-      : 'Use hosted `apps/web` for Garmin/WHOOP/Oura so callbacks stay on one stable public base.'
-  }
-
-  const hasWearableTargets = input.review.targets.some((target) =>
-    target.label.startsWith('Garmin') || target.label.startsWith('WHOOP') || target.label.startsWith('Oura'),
-  )
-  if (hasWearableTargets) {
-    return 'Expose the local callback routes through a tunnel instead of setting up hosted `apps/web` first.'
-  }
-
-  return 'Expose the local Linq webhook through a tunnel. Murph does not have a hosted Linq webhook yet.'
-}
-
-function describeSetupWizardPublicUrlSummary(input: {
-  hasLinq: boolean
-  wearables: readonly SetupWearable[]
-}): string {
-  if (input.wearables.length > 0 && input.hasLinq) {
-    return 'Garmin/WHOOP/Oura are easiest through hosted `apps/web`, while Linq still needs the local inbox webhook today.'
-  }
-
-  if (input.wearables.length > 0) {
-    return 'Garmin/WHOOP/Oura need a public callback URL. Hosted `apps/web` is the easiest stable base.'
-  }
-
-  return 'Linq still uses the local inbox webhook today, so a tunnel to your machine is the simplest public path.'
-}
-
-function buildSetupWizardPublicUrlTargets(input: {
-  hasLinq: boolean
-  wearables: readonly SetupWearable[]
-  deviceSyncLocalBaseUrl: string
-  linqLocalWebhookUrl: string
-}): SetupWizardPublicUrlTarget[] {
-  const targets: SetupWizardPublicUrlTarget[] = []
-
-  if (input.wearables.includes('garmin')) {
-    targets.push({
-      label: 'Garmin callback',
-      url: new URL('/oauth/garmin/callback', input.deviceSyncLocalBaseUrl).toString(),
-      detail: 'Use this if Garmin finishes sign-in on your machine through a tunnel.',
-    })
-  }
-
-  if (input.wearables.includes('whoop')) {
-    targets.push({
-      label: 'WHOOP callback',
-      url: new URL('/oauth/whoop/callback', input.deviceSyncLocalBaseUrl).toString(),
-      detail: 'Use this if WHOOP sends the callback directly to your machine through a tunnel.',
-    })
-    targets.push({
-      label: 'WHOOP webhook',
-      url: new URL('/webhooks/whoop', input.deviceSyncLocalBaseUrl).toString(),
-      detail: 'Use this if WHOOP sends webhooks straight to your machine through a tunnel.',
-    })
-  }
-
-  if (input.wearables.includes('oura')) {
-    targets.push({
-      label: 'Oura callback',
-      url: new URL('/oauth/oura/callback', input.deviceSyncLocalBaseUrl).toString(),
-      detail: 'Use this if Oura finishes sign-in on your machine through a tunnel.',
-    })
-    targets.push({
-      label: 'Oura webhook',
-      url: new URL('/webhooks/oura', input.deviceSyncLocalBaseUrl).toString(),
-      detail: 'Optional today. Oura can still work without this, but this is the local webhook URL if you enable it.',
-    })
-  }
-
-  if (input.hasLinq) {
-    targets.push({
-      label: 'Linq webhook',
-      url: input.linqLocalWebhookUrl,
-      detail: 'Point your tunnel here. Hosted `apps/web` does not replace this Linq webhook yet.',
-    })
-  }
-
-  return targets
-}
-
-function normalizeSetupWizardText(value: string | null | undefined): string | null {
-  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null
 }

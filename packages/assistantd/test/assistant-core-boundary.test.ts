@@ -19,12 +19,19 @@ test('assistantd depends on the canonical assistant-engine owner directly', asyn
     new URL('../src/http.ts', import.meta.url),
     'utf8',
   )
+  const httpProtocolSource = await readFile(
+    new URL('../src/http-protocol.ts', import.meta.url),
+    'utf8',
+  )
 
   assert.equal(assistantdManifest.dependencies?.['@murphai/assistant-engine'], 'workspace:*')
   assert.equal(assistantdManifest.dependencies?.['@murphai/vault-inbox'], undefined)
   assert.equal(assistantdManifest.dependencies?.['@murphai/assistant-core'], undefined)
   assert.match(serviceSource, /from '@murphai\/assistant-engine'/)
-  assert.match(httpSource, /from '@murphai\/assistant-engine'/)
+  assert.match(serviceSource, /from '@murphai\/vault-usecases\/vault-services'/)
+  assert.match(httpProtocolSource, /from '@murphai\/assistant-engine'/)
   assert.doesNotMatch(serviceSource, /@murphai\/assistant-core/u)
   assert.doesNotMatch(httpSource, /@murphai\/assistant-core/u)
+  assert.doesNotMatch(httpProtocolSource, /@murphai\/assistant-core/u)
+  assert.doesNotMatch(serviceSource, /from '@murphai\/vault-usecases'(?=['"])/u)
 })
