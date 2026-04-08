@@ -4,6 +4,10 @@ import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 
 import {
+  createMurphVitestCoverage,
+  resolveMurphVitestCoverageProviderModule,
+} from "../../config/vitest-coverage.js";
+import {
   resolveMurphVitestConcurrency,
   resolveMurphVitestMaxWorkers,
 } from "../../config/vitest-parallelism.js";
@@ -46,26 +50,17 @@ const cliVitestRuntimeAliases = createVitestWorkspaceRuntimeAliases(
   resolveWorkspaceSourceEntries(packageDir, WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS),
 );
 
-export const cliVitestCoverage = {
-  provider: "custom" as const,
-  customProviderModule: path.resolve(packageDir, "../../config/vitest-coverage-provider.ts"),
-  reporter: ["text", "lcov"] as string[],
-  reportsDirectory: "./coverage",
+export const cliVitestCoverage = createMurphVitestCoverage({
+  customProviderModule: resolveMurphVitestCoverageProviderModule(packageDir),
   include: [path.resolve(packageDir, "src/**/*.ts")],
-  exclude: [
-    "coverage/**",
-    "dist/**",
-    path.resolve(packageDir, "src/incur.generated.ts"),
-    "**/*.d.ts",
-  ],
   thresholds: {
+    perFile: true,
     lines: 83,
     functions: 77,
     branches: 60,
     statements: 83,
   },
-  reportOnFailure: true,
-};
+});
 
 type CliVitestProjectSpec = {
   readonly env?: Record<string, string>;

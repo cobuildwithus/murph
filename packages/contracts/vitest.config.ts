@@ -3,6 +3,11 @@ import { fileURLToPath } from "node:url";
 
 import { defineConfig } from "vitest/config";
 
+import {
+  createMurphVitestCoverage,
+  resolveMurphVitestCoverageProviderModule,
+} from "../../config/vitest-coverage.js";
+
 const packageDir = path.dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig({
@@ -10,25 +15,16 @@ export default defineConfig({
     name: "contracts",
     environment: "node",
     include: ["test/**/*.test.ts"],
-    coverage: {
-      provider: "custom",
-      customProviderModule: path.resolve(packageDir, "../../config/vitest-coverage-provider.ts"),
-      reporter: ["text", "lcov"],
-      reportsDirectory: "./coverage",
+    coverage: createMurphVitestCoverage({
+      customProviderModule: resolveMurphVitestCoverageProviderModule(packageDir),
       include: ["src/**/*.ts"],
-      exclude: [
-        "coverage/**",
-        "dist/**",
-        "generated/**",
-        "**/*.d.ts",
-      ],
       thresholds: {
+        perFile: true,
         lines: 55,
         functions: 50,
         branches: 45,
         statements: 55,
       },
-      reportOnFailure: true,
-    },
+    }),
   },
 });
