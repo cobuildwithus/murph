@@ -352,6 +352,90 @@ describe("hosted runtime callbacks", () => {
     });
   });
 
+  it("uses the current time when preparing a delivery without a lastAttemptAt and returns null when the journal has no record", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-08T02:03:04.000Z"));
+
+    try {
+      let observedDispatchHooks:
+        | {
+            prepareDispatchIntent(args: { intent: Record<string, unknown>; vault: string }): Promise<void>;
+            resolveDeliveredIntent(args: { intent: Record<string, unknown>; vault: string }): Promise<unknown>;
+          }
+        | undefined;
+      const writes: object[] = [];
+
+      mocks.dispatchAssistantOutboxIntent.mockImplementation(async (input) => {
+        observedDispatchHooks = input.dispatchHooks;
+      });
+
+      await drainHostedCommittedSideEffectsAfterCommit({
+        commit: {
+          bundleRef: {
+            hash: "hash_123",
+            key: "bundles/member/vault.json",
+            size: 42,
+            updatedAt: "2026-04-08T00:00:00.000Z",
+          },
+        },
+        dispatch: {
+          event: {
+            kind: "assistant.cron.tick",
+            reason: "manual",
+            userId: "member_123",
+          },
+          eventId: "evt_prepare_fallback",
+          occurredAt: "2026-04-08T00:00:00.000Z",
+        },
+        effectsPort: {
+          ...createHostedRuntimeEffectsPortStub(),
+          async readSideEffect() {
+            return null;
+          },
+          async writeSideEffect(record) {
+            writes.push(record);
+            return record;
+          },
+        },
+        sideEffects: [
+          buildHostedAssistantDeliverySideEffect({
+            dedupeKey: "dedupe_123",
+            intentId: "intent_123",
+          }),
+        ],
+        vaultRoot: "/tmp/vault",
+      });
+
+      assert.ok(observedDispatchHooks);
+      await observedDispatchHooks.prepareDispatchIntent({
+        intent: {
+          dedupeKey: "dedupe_123",
+          intentId: "intent_123",
+        },
+        vault: "/tmp/vault",
+      });
+      assert.deepEqual(writes, [
+        buildHostedAssistantDeliveryPreparedRecord({
+          dedupeKey: "dedupe_123",
+          intentId: "intent_123",
+          recordedAt: "2026-04-08T02:03:04.000Z",
+        }),
+      ]);
+
+      const resolved = await observedDispatchHooks.resolveDeliveredIntent({
+        intent: {
+          dedupeKey: "dedupe_123",
+          intentId: "intent_123",
+        },
+        vault: "/tmp/vault",
+      });
+
+      assert.equal(resolved, null);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("clears prepared delivery records through the hosted side-effect journal hooks", async () => {
     let observedDispatchHooks:
       | {
@@ -499,6 +583,164 @@ describe("hosted runtime callbacks", () => {
         vault: "/tmp/vault",
       }),
     ).rejects.toThrow(/require a non-empty idempotencyKey/u);
+  });
+
+  it("fails closed when the local delivery record is missing both idempotency key fields", async () => {
+    let observedDispatchHooks:
+      | {
+          resolveDeliveredIntent(args: { intent: Record<string, unknown>; vault: string }): Promise<unknown>;
+        }
+      | undefined;
+    const preparedRecord = buildHostedAssistantDeliveryPreparedRecord({
+      dedupeKey: "dedupe_123",
+      intentId: "intent_123",
+      recordedAt: "2026-04-08T00:00:00.000Z",
+    });
+
+    mocks.dispatchAssistantOutboxIntent.mockImplementation(async (input) => {
+      observedDispatchHooks = input.dispatchHooks;
+    });
+
+    await drainHostedCommittedSideEffectsAfterCommit({
+      commit: {
+        bundleRef: {
+          hash: "hash_123",
+          key: "bundles/member/vault.json",
+          size: 42,
+          updatedAt: "2026-04-08T00:00:00.000Z",
+        },
+      },
+      dispatch: {
+        event: {
+          kind: "assistant.cron.tick",
+          reason: "manual",
+          userId: "member_123",
+        },
+        eventId: "evt_missing_local_idempotency",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+      },
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        async readSideEffect() {
+          return preparedRecord;
+        },
+      }),
+      sideEffects: [
+        buildHostedAssistantDeliverySideEffect({
+          dedupeKey: "dedupe_123",
+          intentId: "intent_123",
+        }),
+      ],
+      vaultRoot: "/tmp/vault",
+    });
+
+    assert.ok(observedDispatchHooks);
+    await expect(
+      observedDispatchHooks.resolveDeliveredIntent({
+        intent: {
+          dedupeKey: "dedupe_123",
+          delivery: {
+            channel: "email",
+            messageLength: 5,
+            providerMessageId: "provider_message_123",
+            providerThreadId: null,
+            sentAt: "2026-04-08T00:01:00.000Z",
+            target: "user@example.com",
+            targetKind: "explicit",
+          },
+          intentId: "intent_123",
+        },
+        vault: "/tmp/vault",
+      }),
+    ).rejects.toMatchObject({
+      code: "ASSISTANT_DELIVERY_CONFIRMATION_PENDING",
+      deliveryMayHaveSucceeded: true,
+      retryable: true,
+    });
+  });
+
+  it("reconciles sent deliveries with null provider ids", async () => {
+    let observedDispatchHooks:
+      | {
+          resolveDeliveredIntent(args: { intent: Record<string, unknown>; vault: string }): Promise<unknown>;
+        }
+      | undefined;
+    const writes: object[] = [];
+    const sentRecord = buildHostedAssistantDeliverySentRecord({
+      dedupeKey: "dedupe_123",
+      delivery: {
+        channel: "email",
+        idempotencyKey: "idem_123",
+        messageLength: 5,
+        providerMessageId: null,
+        providerThreadId: null,
+        sentAt: "2026-04-08T00:01:00.000Z",
+        target: "user@example.com",
+        targetKind: "explicit",
+      },
+      intentId: "intent_123",
+    });
+
+    mocks.dispatchAssistantOutboxIntent.mockImplementation(async (input) => {
+      observedDispatchHooks = input.dispatchHooks;
+    });
+
+    await drainHostedCommittedSideEffectsAfterCommit({
+      commit: {
+        bundleRef: {
+          hash: "hash_123",
+          key: "bundles/member/vault.json",
+          size: 42,
+          updatedAt: "2026-04-08T00:00:00.000Z",
+        },
+      },
+      dispatch: {
+        event: {
+          kind: "assistant.cron.tick",
+          reason: "manual",
+          userId: "member_123",
+        },
+        eventId: "evt_null_provider_ids",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+      },
+      effectsPort: {
+        ...createHostedRuntimeEffectsPortStub(),
+        async readSideEffect() {
+          return sentRecord;
+        },
+        async writeSideEffect(record) {
+          writes.push(record);
+          return record;
+        },
+      },
+      sideEffects: [
+        buildHostedAssistantDeliverySideEffect({
+          dedupeKey: "dedupe_123",
+          intentId: "intent_123",
+        }),
+      ],
+      vaultRoot: "/tmp/vault",
+    });
+
+    assert.ok(observedDispatchHooks);
+    const resolved = await observedDispatchHooks.resolveDeliveredIntent({
+      intent: {
+        dedupeKey: "dedupe_123",
+        intentId: "intent_123",
+      },
+      vault: "/tmp/vault",
+    });
+
+    assert.deepEqual(resolved, {
+      channel: "email",
+      idempotencyKey: "idem_123",
+      messageLength: 5,
+      providerMessageId: null,
+      providerThreadId: null,
+      sentAt: "2026-04-08T00:01:00.000Z",
+      target: "user@example.com",
+      targetKind: "explicit",
+    });
+    assert.deepEqual(writes, []);
   });
 
   it("reconciles delivered intents from the local record when the journal is still prepared", async () => {
@@ -681,5 +923,112 @@ describe("hosted runtime callbacks", () => {
       deliveryMayHaveSucceeded: true,
       retryable: true,
     });
+  });
+
+  it("fails closed when the hosted effects port is missing callback journal methods", async () => {
+    let observedDispatchHooks:
+      | {
+          clearPreparedIntent(args: { intent: Record<string, unknown>; vault: string }): Promise<void>;
+          prepareDispatchIntent(args: { intent: Record<string, unknown>; vault: string }): Promise<void>;
+          resolveDeliveredIntent(args: { intent: Record<string, unknown>; vault: string }): Promise<unknown>;
+        }
+      | undefined;
+    const effectsPort = createHostedRuntimeEffectsPortStub();
+    const preparedRecord = buildHostedAssistantDeliveryPreparedRecord({
+      dedupeKey: "dedupe_123",
+      intentId: "intent_123",
+      recordedAt: "2026-04-08T00:00:00.000Z",
+    });
+
+    Reflect.deleteProperty(effectsPort, "deletePreparedSideEffect");
+    Reflect.deleteProperty(effectsPort, "readSideEffect");
+    Reflect.deleteProperty(effectsPort, "writeSideEffect");
+
+    mocks.dispatchAssistantOutboxIntent.mockImplementation(async (input) => {
+      observedDispatchHooks = input.dispatchHooks;
+    });
+
+    await drainHostedCommittedSideEffectsAfterCommit({
+      commit: {
+        bundleRef: {
+          hash: "hash_123",
+          key: "bundles/member/vault.json",
+          size: 42,
+          updatedAt: "2026-04-08T00:00:00.000Z",
+        },
+      },
+      dispatch: {
+        event: {
+          kind: "assistant.cron.tick",
+          reason: "manual",
+          userId: "member_123",
+        },
+        eventId: "evt_missing_callbacks",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+      },
+      effectsPort,
+      sideEffects: [
+        buildHostedAssistantDeliverySideEffect({
+          dedupeKey: "dedupe_123",
+          intentId: "intent_123",
+        }),
+      ],
+      vaultRoot: "/tmp/vault",
+    });
+
+    assert.ok(observedDispatchHooks);
+
+    await expect(
+      observedDispatchHooks.clearPreparedIntent({
+        intent: {
+          dedupeKey: "dedupe_123",
+          intentId: "intent_123",
+        },
+        vault: "/tmp/vault",
+      }),
+    ).rejects.toThrow(/side-effect journal DELETE failed/u);
+
+    await expect(
+      observedDispatchHooks.prepareDispatchIntent({
+        intent: {
+          dedupeKey: "dedupe_123",
+          intentId: "intent_123",
+          lastAttemptAt: "2026-04-08T00:00:00.000Z",
+        },
+        vault: "/tmp/vault",
+      }),
+    ).rejects.toThrow(/side-effect journal PUT failed/u);
+
+    await expect(
+      observedDispatchHooks.resolveDeliveredIntent({
+        intent: {
+          dedupeKey: "dedupe_123",
+          intentId: "intent_123",
+        },
+        vault: "/tmp/vault",
+      }),
+    ).rejects.toThrow(/side-effect journal GET failed/u);
+
+    await expect(
+      observedDispatchHooks.resolveDeliveredIntent({
+        intent: {
+          dedupeKey: "dedupe_123",
+          delivery: {
+            channel: "email",
+            idempotencyKey: "idem_123",
+            messageLength: 5,
+            providerMessageId: "provider_message_123",
+            providerThreadId: null,
+            sentAt: "2026-04-08T00:01:00.000Z",
+            target: "user@example.com",
+            targetKind: "explicit",
+          },
+          intentId: "intent_123",
+        },
+        vault: "/tmp/vault",
+      }),
+    ).rejects.toThrow(/side-effect journal GET failed/u);
+
+    assert.deepEqual(preparedRecord.state, "prepared");
   });
 });
