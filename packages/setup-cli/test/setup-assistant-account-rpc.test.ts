@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { EventEmitter } from 'node:events'
 import { PassThrough } from 'node:stream'
 import { afterEach, test, vi } from 'vitest'
+import { createSetupAssistantAccountResolver } from '../src/setup-assistant-account.ts'
 
 type MockChildProcess = EventEmitter & {
   exitCode: number | null
@@ -52,7 +53,6 @@ vi.mock('node:events', async () => {
 afterEach(() => {
   mockState.childFactory = null
   mockState.onceImpl = null
-  vi.resetModules()
   vi.clearAllMocks()
 })
 
@@ -136,9 +136,6 @@ test('default codex RPC account probe merges quota windows and auth fallback det
     ])
   mockState.onceImpl = async (_emitter, event) => [event]
 
-  const { createSetupAssistantAccountResolver } = await import(
-    '../src/setup-assistant-account.ts'
-  )
   const resolver = createSetupAssistantAccountResolver({
     env: () => ({
       OPENAI_API_KEY: 'sk-live',
@@ -236,9 +233,6 @@ test('default codex RPC probe falls back to auth snapshot when the app-server pr
   }
   mockState.onceImpl = async (_emitter, event) => [event]
 
-  const { createSetupAssistantAccountResolver } = await import(
-    '../src/setup-assistant-account.ts'
-  )
   const resolver = createSetupAssistantAccountResolver({
     env: () => ({}),
     getHomeDirectory: () => '/tmp/home',
@@ -291,9 +285,6 @@ test('default codex RPC probe ignores RPC error responses and returns null when 
     ])
   mockState.onceImpl = async (_emitter, event) => [event]
 
-  const { createSetupAssistantAccountResolver } = await import(
-    '../src/setup-assistant-account.ts'
-  )
   const resolver = createSetupAssistantAccountResolver({
     env: () => ({}),
     getHomeDirectory: () => '/tmp/home',
@@ -358,9 +349,6 @@ test('default codex RPC probe tolerates blank rate-limit fields and API key acco
     ])
   mockState.onceImpl = async (_emitter, event) => [event]
 
-  const { createSetupAssistantAccountResolver } = await import(
-    '../src/setup-assistant-account.ts'
-  )
   const resolver = createSetupAssistantAccountResolver({
     env: () => ({}),
     getHomeDirectory: () => '/tmp/home',

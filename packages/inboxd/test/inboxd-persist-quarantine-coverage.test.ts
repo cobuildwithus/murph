@@ -38,6 +38,22 @@ async function makeTempDirectory(name: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), `${name}-`));
 }
 
+async function importPersistWithMockedFsPromises(
+  createOverrides: (
+    actualFs: typeof import("node:fs/promises"),
+  ) => Partial<typeof import("node:fs/promises")>,
+): Promise<typeof import("../src/indexing/persist.ts")> {
+  const actualFs = await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises");
+
+  vi.resetModules();
+  vi.doMock("node:fs/promises", () => ({
+    ...actualFs,
+    ...createOverrides(actualFs),
+  }));
+
+  return await import("../src/indexing/persist.ts");
+}
+
 async function writeUnsafeEnvelope(vaultRoot: string, input: InboundCapture): Promise<string> {
   const captureId = createDeterministicInboxCaptureId(input);
   const { absolutePath, relativeDirectory, relativePath } = buildEnvelopePaths(vaultRoot, input, captureId);
@@ -142,20 +158,15 @@ afterEach(() => {
 });
 
 test("findStoredCaptureEnvelope tolerates unsafe-envelope quarantine races when the source file is already gone", async () => {
-  const actualFs = await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises");
   const renameMock = vi.fn(async () => {
     const error = new Error("missing") as NodeJS.ErrnoException;
     error.code = "ENOENT";
     throw error;
   });
 
-  vi.resetModules();
-  vi.doMock("node:fs/promises", () => ({
-    ...actualFs,
+  const { findStoredCaptureEnvelope } = await importPersistWithMockedFsPromises(() => ({
     rename: renameMock,
   }));
-
-  const { findStoredCaptureEnvelope } = await import("../src/indexing/persist.ts");
   const vaultRoot = await makeTempDirectory("murph-inbox-quarantine-race");
   const input = createCapture();
   const captureId = await writeUnsafeEnvelope(vaultRoot, input);
@@ -175,13 +186,9 @@ test("findStoredCaptureEnvelope surfaces quarantine exhaustion when every suffix
   const actualFs = await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises");
   const statMock = vi.fn(async () => await actualFs.stat(os.tmpdir()));
 
-  vi.resetModules();
-  vi.doMock("node:fs/promises", () => ({
-    ...actualFs,
+  const { findStoredCaptureEnvelope } = await importPersistWithMockedFsPromises(() => ({
     stat: statMock,
   }));
-
-  const { findStoredCaptureEnvelope } = await import("../src/indexing/persist.ts");
   const vaultRoot = await makeTempDirectory("murph-inbox-quarantine-exhaustion");
   const input = createCapture();
   const captureId = await writeUnsafeEnvelope(vaultRoot, input);
@@ -327,19 +334,13 @@ test("findStoredCaptureEnvelope rejects malformed stored envelopes with canonica
 });
 
 test("findStoredCaptureEnvelope surfaces unexpected quarantine rename failures", async () => {
-  const actualFs = await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises");
-
-  vi.resetModules();
-  vi.doMock("node:fs/promises", () => ({
-    ...actualFs,
+  const { findStoredCaptureEnvelope } = await importPersistWithMockedFsPromises(() => ({
     rename: vi.fn(async () => {
       const error = new Error("permission denied") as NodeJS.ErrnoException;
       error.code = "EACCES";
       throw error;
     }),
   }));
-
-  const { findStoredCaptureEnvelope } = await import("../src/indexing/persist.ts");
   const vaultRoot = await makeTempDirectory("murph-inbox-quarantine-rename-failure");
   const input = createCapture({
     externalId: "msg-quarantine-rename-failure",
@@ -358,11 +359,7 @@ test("findStoredCaptureEnvelope surfaces unexpected quarantine rename failures",
 });
 
 test("findStoredCaptureEnvelope surfaces unexpected quarantine stat failures", async () => {
-  const actualFs = await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises");
-
-  vi.resetModules();
-  vi.doMock("node:fs/promises", () => ({
-    ...actualFs,
+  const { findStoredCaptureEnvelope } = await importPersistWithMockedFsPromises((actualFs) => ({
     stat: vi.fn(async (targetPath: string | Buffer | URL) => {
       const target = String(targetPath);
       if (target.includes("quarantined-invalid-capture-id")) {
@@ -374,8 +371,6 @@ test("findStoredCaptureEnvelope surfaces unexpected quarantine stat failures", a
       return actualFs.stat(targetPath);
     }),
   }));
-
-  const { findStoredCaptureEnvelope } = await import("../src/indexing/persist.ts");
   const vaultRoot = await makeTempDirectory("murph-inbox-quarantine-stat-failure");
   const input = createCapture({
     externalId: "msg-quarantine-stat-failure",
