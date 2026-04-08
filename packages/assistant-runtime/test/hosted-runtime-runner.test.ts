@@ -63,6 +63,9 @@ import {
   runHostedAssistantRuntimeJobInProcess,
   runHostedAssistantRuntimeJobInProcessDetailed,
 } from "../src/hosted-runtime.ts";
+import {
+  createHostedRuntimeEffectsPortStub,
+} from "./hosted-runtime-test-helpers.ts";
 
 const incomingBundle = Uint8Array.from([1, 2, 3]);
 const committedExecution = {
@@ -227,20 +230,7 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
             async put() {},
           },
           deviceSyncPort,
-          effectsPort: {
-            async commit() {},
-            async deletePreparedSideEffect() {},
-            async readRawEmailMessage() {
-              return null;
-            },
-            async readSideEffect() {
-              return null;
-            },
-            async sendEmail() {},
-            async writeSideEffect(record) {
-              return record;
-            },
-          },
+          effectsPort: createHostedRuntimeEffectsPortStub(),
         },
       },
     );
@@ -309,6 +299,99 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
         root: "operator-home",
       }),
     ).toBe(false);
+    expect(
+      mocks.restoreHostedExecutionContext.mock.calls[0]?.[0].shouldRestoreArtifact({
+        path: "vault/raw/a.bin",
+        root: "vault",
+      }),
+    ).toBe(false);
+  });
+
+  it("skips rematerialization when every requested artifact path is already materialized", async () => {
+    mocks.executeHostedDispatchForCommit.mockImplementation(async (input) => {
+      await input.artifactMaterializer?.(["vault/raw/a.bin"]);
+      await input.artifactMaterializer?.(["vault/raw/a.bin", "vault/raw/a.bin"]);
+      return committedExecution;
+    });
+
+    await runHostedAssistantRuntimeJobInProcessDetailed(
+      {
+        request: {
+          bundle: "incoming-bundle",
+          dispatch: {
+            event: {
+              kind: "assistant.cron.tick",
+              reason: "manual",
+              userId: "member_123",
+            },
+            eventId: "evt_dedupe_artifacts",
+            occurredAt: "2026-04-08T00:00:00.000Z",
+          },
+        },
+      },
+      {
+        platform: {
+          artifactStore: {
+            async get() {
+              return null;
+            },
+            async put() {},
+          },
+          effectsPort: createHostedRuntimeEffectsPortStub(),
+        },
+      },
+    );
+
+    expect(mocks.materializeHostedExecutionArtifacts).toHaveBeenCalledTimes(1);
+    expect(mocks.completeHostedExecutionAfterCommit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        materializedArtifactPaths: new Set(["vault/raw/a.bin"]),
+      }),
+    );
+  });
+
+  it("passes a null artifact materializer when the decoded bundle is absent", async () => {
+    mocks.decodeHostedBundleBase64.mockReturnValueOnce(null);
+
+    await runHostedAssistantRuntimeJobInProcessDetailed(
+      {
+        request: {
+          bundle: "incoming-bundle",
+          dispatch: {
+            event: {
+              kind: "assistant.cron.tick",
+              reason: "manual",
+              userId: "member_123",
+            },
+            eventId: "evt_no_bundle",
+            occurredAt: "2026-04-08T00:00:00.000Z",
+          },
+        },
+      },
+      {
+        platform: {
+          artifactStore: {
+            async get() {
+              return null;
+            },
+            async put() {},
+          },
+          effectsPort: createHostedRuntimeEffectsPortStub(),
+        },
+      },
+    );
+
+    expect(mocks.restoreHostedExecutionContext).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bundle: null,
+      }),
+    );
+    expect(mocks.executeHostedDispatchForCommit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        artifactMaterializer: null,
+      }),
+    );
+    expect(mocks.materializeHostedExecutionArtifacts).not.toHaveBeenCalled();
   });
 
   it("uses the committed resume payload without re-running dispatch or commit callbacks", async () => {
@@ -341,20 +424,7 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
             },
             async put() {},
           },
-          effectsPort: {
-            async commit() {},
-            async deletePreparedSideEffect() {},
-            async readRawEmailMessage() {
-              return null;
-            },
-            async readSideEffect() {
-              return null;
-            },
-            async sendEmail() {},
-            async writeSideEffect(record) {
-              return record;
-            },
-          },
+          effectsPort: createHostedRuntimeEffectsPortStub(),
         },
       },
     );
@@ -397,20 +467,7 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
               },
               async put() {},
             },
-            effectsPort: {
-              async commit() {},
-              async deletePreparedSideEffect() {},
-              async readRawEmailMessage() {
-                return null;
-              },
-              async readSideEffect() {
-                return null;
-              },
-              async sendEmail() {},
-              async writeSideEffect(record) {
-                return record;
-              },
-            },
+            effectsPort: createHostedRuntimeEffectsPortStub(),
           },
         },
       ),
@@ -458,20 +515,7 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
             },
             async put() {},
           },
-          effectsPort: {
-            async commit() {},
-            async deletePreparedSideEffect() {},
-            async readRawEmailMessage() {
-              return null;
-            },
-            async readSideEffect() {
-              return null;
-            },
-            async sendEmail() {},
-            async writeSideEffect(record) {
-              return record;
-            },
-          },
+          effectsPort: createHostedRuntimeEffectsPortStub(),
         },
       },
     );

@@ -49,6 +49,10 @@ test('assistant-runtime depends on the canonical engine and operator-config owne
     /from "@murphai\/operator-config\/text\/shared"/,
   )
   assert.match(
+    hostedContextSource,
+    /from "@murphai\/vault-usecases\/vault-services"/,
+  )
+  assert.match(
     hostedAssistantEnvSource,
     /from "@murphai\/operator-config\/hosted-assistant-config"/,
   )
@@ -59,6 +63,7 @@ test('assistant-runtime depends on the canonical engine and operator-config owne
   assert.match(hostedContextSource, /from "@murphai\/assistant-engine"/)
   assert.doesNotMatch(hostedRuntimeSource, /from "@murphai\/operator-config"/u)
   assert.doesNotMatch(hostedContextSource, /from "@murphai\/operator-config"/u)
+  assert.doesNotMatch(hostedContextSource, /from "@murphai\/vault-usecases"/u)
   assert.doesNotMatch(hostedAssistantEnvSource, /from "@murphai\/operator-config"/u)
   assert.doesNotMatch(hostedEmailRouteSource, /from "@murphai\/operator-config"/u)
   assert.doesNotMatch(hostedRuntimeSource, /@murphai\/assistant-core/u)
