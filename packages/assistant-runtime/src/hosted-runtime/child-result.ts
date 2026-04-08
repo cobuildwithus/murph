@@ -2,6 +2,10 @@ import {
   HostedAssistantConfigurationError,
 } from "@murphai/operator-config/hosted-assistant-config";
 
+import type {
+  HostedAssistantRuntimeJobResult,
+} from "./models.ts";
+
 export interface HostedAssistantRuntimeChildResult {
   ok: boolean;
   error?: {
@@ -10,7 +14,7 @@ export interface HostedAssistantRuntimeChildResult {
     name?: string | null;
     stack?: string | null;
   };
-  result?: unknown;
+  result?: HostedAssistantRuntimeJobResult;
 }
 
 const HOSTED_RUNTIME_CHILD_RESULT_PREFIX = "__HB_ASSISTANT_RUNTIME_RESULT__";
