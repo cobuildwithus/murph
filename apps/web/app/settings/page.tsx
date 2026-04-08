@@ -38,6 +38,10 @@ export default function SettingsPage() {
           </section>
 
           <section className="animate-fade-up" style={{ animationDelay: "80ms" }}>
+            <div className="mb-4 flex items-center gap-2 text-xs font-semibold uppercase tracking-widest text-olive/60">
+              <span className="inline-block h-1 w-1 rounded-full bg-olive/50" />
+              Messaging
+            </div>
             <div className="grid gap-6 xl:grid-cols-2">
               <Card className="border-stone-200/80 shadow-sm transition-shadow hover:shadow-md">
                 <CardContent className="pt-4 md:pt-6">

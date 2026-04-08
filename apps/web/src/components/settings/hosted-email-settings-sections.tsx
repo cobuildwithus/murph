@@ -47,10 +47,6 @@ export function HostedEmailSettingsContent(props: {
   return (
     <>
       <div className="mb-4 space-y-1">
-        <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-widest text-olive/60">
-          <span className="inline-block h-1 w-1 rounded-full bg-olive/50" />
-          Messaging
-        </div>
         <h2 className="text-lg font-semibold tracking-tight text-stone-900">Email</h2>
         <p className="text-sm leading-relaxed text-stone-500">
           {currentEmail
