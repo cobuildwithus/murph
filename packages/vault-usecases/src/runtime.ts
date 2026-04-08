@@ -24,3 +24,4 @@ export type {
   ImportersRuntime,
   IntegratedRuntime,
 } from './usecases/types.js'
+export { createRuntimeUnavailableError } from '@murphai/operator-config/runtime-errors'
