@@ -17,7 +17,6 @@ import type {
   PollConnector,
   TelegramDriver,
 } from '@murphai/inbox-services'
-
 import {
   instantiateConnector,
   normalizeDaemonState,

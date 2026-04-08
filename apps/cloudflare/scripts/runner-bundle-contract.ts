@@ -14,11 +14,14 @@ export const hostedRunnerRuntimeDependencyNames = [
   "@murphai/device-syncd",
   "@murphai/gateway-core",
   "@murphai/hosted-execution",
-  "@murphai/murph",
   "@murphai/inboxd",
-  "@murphai/parsers",
   "@murphai/runtime-state",
   "jose",
+] as const;
+
+export const hostedRunnerBundleOnlyDependencyNames = [
+  "@murphai/murph",
+  "@murphai/parsers",
 ] as const;
 
 export const hostedRunnerWorkspacePackageNames = [
@@ -57,11 +60,12 @@ export const hostedRunnerBuildPackageNames = [
   ),
 ];
 
-type HostedRunnerRuntimeDependencyName =
-  (typeof hostedRunnerRuntimeDependencyNames)[number];
+type HostedRunnerArtifactDependencyName =
+  | (typeof hostedRunnerRuntimeDependencyNames)[number]
+  | (typeof hostedRunnerBundleOnlyDependencyNames)[number];
 
 export function buildHostedRunnerRuntimeArtifactPackageJson(input: {
-  dependencies: Record<HostedRunnerRuntimeDependencyName, string>;
+  dependencies: Record<HostedRunnerArtifactDependencyName, string>;
   engines?: Record<string, string>;
   exports?: Record<string, unknown> | string;
   license: string;

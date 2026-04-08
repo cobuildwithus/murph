@@ -95,6 +95,21 @@ async function verifyWorkspacePackageExports(failures) {
           `${path.relative(repoRoot, packageJsonPath)} declares ${JSON.stringify(exportKey)} as a public entrypoint; assistant-engine must keep CLI/inbox/usecase helper modules behind its canonical owner surfaces instead of exporting the internal helper directly.`,
         );
       }
+
+      if (
+        packageJson.name === "@murphai/operator-config"
+        && exportKey === "./runtime-errors"
+      ) {
+        failures.push(
+          `${path.relative(repoRoot, packageJsonPath)} declares ${JSON.stringify(exportKey)} as a public entrypoint; runtime-unavailable helpers belong with @murphai/vault-usecases/runtime instead of the operator-config contract surface.`,
+        );
+      }
+
+      if (exportKey === "./testing") {
+        failures.push(
+          `${path.relative(repoRoot, packageJsonPath)} declares ${JSON.stringify(exportKey)} as a public entrypoint; test helpers must stay package-local or use package-local Vitest aliases instead of leaking through the workspace package surface.`,
+        );
+      }
     }
   }
 }
@@ -128,6 +143,17 @@ async function verifyAssistantEnginePublicSourceSurface(failures) {
     failures.push(
       "packages/assistant-engine/src/assistant-provider.ts re-exports ./assistant/provider-config.js; assistant provider config remains owned by @murphai/operator-config and should not leak through the assistant-provider surface.",
     );
+  }
+
+  for (const specifier of [
+    "./assistant-cli-access.js",
+    "./assistant-cli-tools.js",
+  ]) {
+    if (sourceReexportsSpecifier(providerSource, specifier)) {
+      failures.push(
+        `packages/assistant-engine/src/assistant-provider.ts re-exports ${JSON.stringify(specifier)}; assistant-provider must stay on provider runtime state and recovery instead of leaking CLI access or tool-catalog helpers.`,
+      );
+    }
   }
 }
 
@@ -364,6 +390,14 @@ function verifyWorkspaceImportPolicy({
   }
 
   if (
+    (sourceMember === "packages/assistant-runtime" || sourceMember === "packages/assistantd")
+    && specifier === "@murphai/vault-usecases"
+    && filePath.includes(`${path.sep}src${path.sep}`)
+  ) {
+    return `${path.relative(repoRoot, filePath)} imports ${JSON.stringify(specifier)} from the vault-usecases root; headless assistant runtimes must depend on @murphai/vault-usecases/vault-services or @murphai/vault-usecases/runtime so they do not couple to CLI descriptor exports.`;
+  }
+
+  if (
     sourceMember === "apps/cloudflare"
     && (
       specifier === "@murphai/assistant-engine"
@@ -393,7 +427,19 @@ function isTestOnlyInternalAssistantSpecifier({
       && specifier.startsWith("@murphai/assistant-cli/assistant/"))
     || (
       packageName === "@murphai/assistant-engine"
-      && specifier.startsWith("@murphai/assistant-engine/assistant/")
+      && (
+        specifier.startsWith("@murphai/assistant-engine/assistant/")
+        || specifier === "@murphai/assistant-engine/assistant-cli-access"
+        || specifier === "@murphai/assistant-engine/assistant-cli-tools"
+      )
+    )
+    || (
+      packageName === "@murphai/inbox-services"
+      && specifier === "@murphai/inbox-services/testing"
+    )
+    || (
+      packageName === "@murphai/vault-usecases"
+      && specifier === "@murphai/vault-usecases/testing"
     )
   );
 }
@@ -493,7 +539,9 @@ function isAssistantEngineWildcardHelperNamespace(exportKey) {
 
 function isAssistantEngineInternalHelperExport(exportKey) {
   return (
-    exportKey === "./health-registry-command-metadata"
+    exportKey === "./assistant-cli-access"
+    || exportKey === "./assistant-cli-tools"
+    || exportKey === "./health-registry-command-metadata"
     || exportKey === "./inbox-app/types"
     || exportKey === "./inbox-services/connectors"
     || exportKey === "./inbox-services/daemon"

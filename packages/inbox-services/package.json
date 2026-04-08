@@ -18,10 +18,6 @@
     "./linq-endpoint": {
       "types": "./dist/linq-endpoint.d.ts",
       "default": "./dist/linq-endpoint.js"
-    },
-    "./testing": {
-      "types": "./dist/testing.d.ts",
-      "default": "./dist/testing.js"
     }
   },
   "files": [

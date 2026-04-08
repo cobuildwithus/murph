@@ -25,6 +25,7 @@ const WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS = {
   "@murphai/gateway-local": "../gateway-local/src/index.ts",
   "@murphai/hosted-execution": "../hosted-execution/src/index.ts",
   "@murphai/importers": "../importers/src/index.ts",
+  "@murphai/inbox-services": "../inbox-services/src/index.ts",
   "@murphai/inboxd": "../inboxd/src/index.ts",
   "@murphai/inboxd-imessage": "../inboxd-imessage/src/index.ts",
   "@murphai/messaging-ingress": "../messaging-ingress/src/index.ts",
