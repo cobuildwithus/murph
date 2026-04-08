@@ -1,6 +1,7 @@
 import path from "node:path";
 import { createHash } from "node:crypto";
-import { mkdir, readFile, rename, stat } from "node:fs/promises";
+import { mkdir, readFile, realpath, rename, stat } from "node:fs/promises";
+import { homedir, tmpdir } from "node:os";
 
 import {
   assertContract,
@@ -50,6 +51,11 @@ import {
 
 const STORED_CAPTURE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]*$/u;
 const QUARANTINED_INVALID_CAPTURE_ID_SUFFIX = "quarantined-invalid-capture-id";
+const IMESSAGE_ATTACHMENT_DIRECTORY = path.join("Library", "Messages", "Attachments");
+const TRUSTED_IMESSAGE_EPHEMERAL_PATH_FRAGMENTS = [
+  "/TemporaryItems/",
+  "/com.apple.imagent/",
+] as const;
 export interface PersistRawCaptureInput {
   vaultRoot: string;
   captureId: string;
@@ -125,6 +131,76 @@ function buildSanitizedInboundCapture(input: InboundCapture): InboundCapture {
   };
 }
 
+async function resolveTrustedAttachmentSourcePath(input: {
+  source: string;
+  originalPath: string;
+}): Promise<string | null> {
+  const sourceAbsolutePath = path.resolve(input.originalPath);
+  let canonicalSourcePath: string;
+
+  try {
+    canonicalSourcePath = await realpath(sourceAbsolutePath);
+  } catch (error) {
+    if (isMissingFileError(error)) {
+      return null;
+    }
+
+    throw error;
+  }
+
+  if (hasTrustedImessageEphemeralPathFragment(canonicalSourcePath)) {
+    return canonicalSourcePath;
+  }
+
+  const trustedRoots = await listTrustedAttachmentRoots(input.source);
+
+  return trustedRoots.some((root) => isPathWithinRoot(root, canonicalSourcePath))
+    ? canonicalSourcePath
+    : null;
+}
+
+async function listTrustedAttachmentRoots(source: string): Promise<string[]> {
+  const rootCandidates = [path.resolve(tmpdir())];
+
+  if (source === "imessage") {
+    rootCandidates.unshift(path.resolve(homedir(), IMESSAGE_ATTACHMENT_DIRECTORY));
+  }
+
+  const trustedRoots: string[] = [];
+
+  for (const rootCandidate of rootCandidates) {
+    try {
+      trustedRoots.push(await realpath(rootCandidate));
+    } catch (error) {
+      if (!isMissingFileError(error)) {
+        throw error;
+      }
+    }
+  }
+
+  return trustedRoots;
+}
+
+function hasTrustedImessageEphemeralPathFragment(candidate: string): boolean {
+  const normalizedCandidate = candidate.replaceAll("\\", "/");
+  return TRUSTED_IMESSAGE_EPHEMERAL_PATH_FRAGMENTS.some((fragment) =>
+    normalizedCandidate.includes(fragment)
+  );
+}
+
+function isPathWithinRoot(root: string, candidate: string): boolean {
+  const relative = path.relative(root, candidate);
+
+  return (
+    relative === "" ||
+    (
+      relative !== ".." &&
+      !relative.startsWith(`..${path.sep}`) &&
+      !path.isAbsolute(relative)
+    )
+  );
+}
+
 async function prepareRawCapturePersistence({
   captureId,
   eventId,
@@ -153,8 +229,18 @@ async function prepareRawCapturePersistence({
       continue;
     }
 
+    const sourceAbsolutePath =
+      !attachment.data && attachment.originalPath
+        ? await resolveTrustedAttachmentSourcePath({
+            source: input.source,
+            originalPath: attachment.originalPath,
+          })
+        : null;
     const safeName = sanitizeFileName(
-      attachment.fileName ?? attachment.originalPath ?? attachment.externalId ?? `attachment-${ordinal}`,
+      attachment.fileName ??
+        (sourceAbsolutePath ? path.basename(sourceAbsolutePath) : null) ??
+        attachment.externalId ??
+        `attachment-${ordinal}`,
       `attachment-${ordinal}`,
     );
     const relativePath = normalizeRelativePath(
@@ -183,9 +269,31 @@ async function prepareRawCapturePersistence({
         originalPath: null,
       });
     } else if (attachment.originalPath) {
-      const sourceAbsolutePath = path.resolve(attachment.originalPath);
+      if (!sourceAbsolutePath) {
+        storedAttachments.push(
+          buildUnstoredAttachment({
+            attachment: sanitizedAttachment,
+            attachmentId,
+            ordinal,
+          }),
+        );
+        continue;
+      }
+
       try {
         const sourceStats = await stat(sourceAbsolutePath);
+
+        if (!sourceStats.isFile()) {
+          storedAttachments.push(
+            buildUnstoredAttachment({
+              attachment: sanitizedAttachment,
+              attachmentId,
+              ordinal,
+            }),
+          );
+          continue;
+        }
+
         const sha256 = await sha256File(sourceAbsolutePath);
 
         rawCopies.push({
