@@ -34,7 +34,7 @@ export function HostedExistingAccountSignInDialog() {
               Sign in with your phone
             </DialogTitle>
             <DialogDescription>
-              Enter the phone number already on your Murph account and we&apos;ll text you a sign-in code.
+              Enter your phone number and we&apos;ll text you a sign-in code.
             </DialogDescription>
           </DialogHeader>
           {open ? (
