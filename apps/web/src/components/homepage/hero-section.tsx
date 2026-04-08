@@ -4,15 +4,7 @@ import { GitHubIcon } from "./github-icon";
 
 const GITHUB_REPO_URL = "https://github.com/cobuildwithus/murph";
 
-export function HeroSection({
-  phoneAuthReady,
-  privyAppId,
-  privyClientId,
-}: {
-  phoneAuthReady: boolean;
-  privyAppId: string | null;
-  privyClientId: string | null;
-}) {
+export function HeroSection() {
   return (
     <section className="mx-auto max-w-7xl px-6 pb-20 pt-16 md:px-12 md:pb-28 md:pt-24 lg:px-16">
       <div className="grid items-start gap-12 lg:grid-cols-[1fr_400px] lg:gap-16 xl:grid-cols-[1fr_440px] xl:gap-24">
@@ -51,26 +43,11 @@ export function HeroSection({
             </h2>
 
             <div className="mt-5 rounded bg-white p-4 text-stone-900">
-              {phoneAuthReady && privyAppId ? (
-                <HostedPhoneAuth
-                  mode="public"
-                  privyAppId={privyAppId}
-                  privyClientId={privyClientId}
-                />
-              ) : (
-                <p className="text-sm leading-relaxed text-stone-500">
-                  Phone signup is not configured for this environment yet.
-                </p>
-              )}
+              <HostedPhoneAuth mode="public" />
             </div>
-            {phoneAuthReady && privyAppId ? (
-              <div className="mt-4">
-                <HostedExistingAccountSignInDialog
-                  privyAppId={privyAppId}
-                  privyClientId={privyClientId}
-                />
-              </div>
-            ) : null}
+            <div className="mt-4">
+              <HostedExistingAccountSignInDialog />
+            </div>
           </section>
         </div>
       </div>

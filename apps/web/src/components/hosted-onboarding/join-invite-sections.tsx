@@ -26,9 +26,6 @@ interface JoinInviteStageContentProps {
   awaitingInviteSessionResolution: boolean;
   inviteCode: string;
   pendingAction: "checkout" | "logout" | "share" | null;
-  phoneAuthReady: boolean;
-  privyAppId: string | null;
-  privyClientId?: string | null;
   shareImportState: JoinInviteShareImportState;
   sharePreview: HostedSharePreview | null;
   status: HostedInviteStatusPayload;
@@ -66,9 +63,6 @@ export function JoinInviteStageContent({
   awaitingInviteSessionResolution,
   inviteCode,
   pendingAction,
-  phoneAuthReady,
-  privyAppId,
-  privyClientId,
   shareImportState,
   sharePreview,
   status,
@@ -91,9 +85,6 @@ export function JoinInviteStageContent({
         <JoinInviteVerificationPanel
           awaitingInviteSessionResolution={awaitingInviteSessionResolution}
           inviteCode={inviteCode}
-          phoneAuthReady={phoneAuthReady}
-          privyAppId={privyAppId}
-          privyClientId={privyClientId}
           statusRefreshErrorMessage={statusRefreshErrorMessage}
           statusRefreshRetryPending={statusRefreshRetryPending}
           onPhoneVerified={onPhoneVerified}

@@ -93,6 +93,8 @@ Hosted onboarding extras:
 - `HOSTED_EXECUTION_DISPATCH_TIMEOUT_MS`
 - `CRON_SECRET`
 
+Hosted web now mounts one app-level Privy provider from `app/layout.tsx`. Hosted pages assume the full hosted Privy phone-auth config is present and fail fast at render time when it is missing instead of carrying page-local fallback UI branches.
+
 Hosted onboarding private state is now local to `apps/web`: blind lookup keys stay queryable in Postgres, while recoverable raw member ids and the raw source values needed to re-derive those lookup keys are encrypted into the owning Prisma rows instead of being mirrored into Cloudflare. Blind-index rotation follows one simple model: write one current version, read any configured keyring versions, backfill the owner tables in place, and only then remove the old version from the contact-privacy keyring. Drain lookup-bearing hosted execution outbox events before a write-mode rotation backfill so staged payload refs do not preserve stale lookup identities.
 
 Optional hosted AI usage metering:

@@ -30,12 +30,6 @@ vi.mock("@privy-io/react-auth", () => ({
   useUser: mocks.useUser,
 }));
 
-vi.mock("@/src/components/hosted-onboarding/privy-provider", () => ({
-  HostedPrivyProvider(input: { children: React.ReactNode }) {
-    return React.createElement(React.Fragment, null, input.children);
-  },
-}));
-
 describe("HostedPhoneAuth", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -56,8 +50,6 @@ describe("HostedPhoneAuth", () => {
     const markup = renderToStaticMarkup(
       React.createElement(HostedPhoneAuth, {
         mode: "public",
-        privyAppId: "privy-app-id",
-        privyClientId: "privy-client-id",
       }),
     );
 
@@ -79,8 +71,6 @@ describe("HostedPhoneAuth", () => {
       React.createElement(HostedPhoneAuth, {
         mode: "invite",
         phoneHint: "+1 (415) 555-2671",
-        privyAppId: "privy-app-id",
-        privyClientId: "privy-client-id",
       }),
     );
 
@@ -98,8 +88,6 @@ describe("HostedPhoneAuth", () => {
         inviteCode: "invite-code",
         mode: "invite",
         phoneHint: "*** 4567",
-        privyAppId: "privy-app-id",
-        privyClientId: "privy-client-id",
       }),
     );
 
@@ -255,8 +243,6 @@ describe("HostedPhoneAuth", () => {
     const markup = renderToStaticMarkup(
       React.createElement(HostedPhoneAuth, {
         mode: "public",
-        privyAppId: "privy-app-id",
-        privyClientId: "privy-client-id",
       }),
     );
 
@@ -450,8 +436,6 @@ describe("HostedPhoneAuth", () => {
     const markup = renderToStaticMarkup(
       React.createElement(HostedPhoneAuth, {
         mode: "invite",
-        privyAppId: "privy-app-id",
-        privyClientId: "privy-client-id",
       }),
     );
 
