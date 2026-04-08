@@ -5,6 +5,7 @@ import { prepareDeviceProviderSnapshotImport } from "@murphai/importers";
 
 import { DeviceSyncError } from "../src/errors.ts";
 import { createOuraDeviceSyncProvider, resolveOuraWebhookVerificationChallenge } from "../src/providers/oura.ts";
+import { OURA_DEFAULT_WEBHOOK_TARGETS } from "../src/providers/oura-webhooks.ts";
 import { subtractDays } from "../src/shared.ts";
 import { createJsonResponse } from "./helpers.ts";
 
@@ -219,6 +220,85 @@ test("Oura provider requires an existing refresh token before attempting refresh
       error.accountStatus === "reauthorization_required",
   );
   assert.equal(fetchCalled, false);
+});
+
+test("Oura provider rejects auth exchanges without a refresh token and personal-info ids", async () => {
+  const missingRefreshProvider = createOuraDeviceSyncProvider({
+    clientId: "oura-client-id",
+    clientSecret: "oura-client-secret",
+    fetchImpl: async (input) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+
+      if (url === "https://api.ouraring.com/oauth/token") {
+        return createJsonResponse({
+          access_token: "access-token",
+          expires_in: 3600,
+          scope: "extapi:personal",
+        });
+      }
+
+      throw new Error(`Unexpected request: ${url}`);
+    },
+  });
+
+  await assert.rejects(
+    () =>
+      missingRefreshProvider.exchangeAuthorizationCode(
+        {
+          callbackUrl: "https://sync.example.test/device-sync/oauth/oura/callback",
+          state: "state-missing-refresh",
+          now: "2026-03-16T10:00:00.000Z",
+          grantedScopes: [],
+        },
+        "auth-code-missing-refresh",
+      ),
+    (error: unknown) =>
+      error instanceof DeviceSyncError &&
+      error.code === "OURA_REFRESH_TOKEN_MISSING" &&
+      error.httpStatus === 502,
+  );
+
+  const missingProfileIdProvider = createOuraDeviceSyncProvider({
+    clientId: "oura-client-id",
+    clientSecret: "oura-client-secret",
+    fetchImpl: async (input) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+
+      if (url === "https://api.ouraring.com/oauth/token") {
+        return createJsonResponse({
+          access_token: "access-token",
+          refresh_token: "refresh-token",
+          expires_in: 3600,
+          scope: "extapi:personal",
+        });
+      }
+
+      if (url === "https://api.ouraring.com/v2/usercollection/personal_info") {
+        return createJsonResponse({
+          email: "oura@example.com",
+        });
+      }
+
+      throw new Error(`Unexpected request: ${url}`);
+    },
+  });
+
+  await assert.rejects(
+    () =>
+      missingProfileIdProvider.exchangeAuthorizationCode(
+        {
+          callbackUrl: "https://sync.example.test/device-sync/oauth/oura/callback",
+          state: "state-missing-profile-id",
+          now: "2026-03-16T10:00:00.000Z",
+          grantedScopes: [],
+        },
+        "auth-code-missing-profile-id",
+      ),
+    (error: unknown) =>
+      error instanceof DeviceSyncError &&
+      error.code === "OURA_PROFILE_INVALID" &&
+      error.httpStatus === 502,
+  );
 });
 
 test("Oura provider backfills snapshot windows with polling-friendly collection fetches", async () => {
@@ -458,6 +538,129 @@ test("Oura provider rejects invalid heartrate window payloads", async () => {
   assert.equal(fetchCalled, false);
 });
 
+test("Oura provider falls back to granted scopes and rejects connections without the personal scope", async () => {
+  const requests: string[] = [];
+  const provider = createOuraDeviceSyncProvider({
+    clientId: "oura-client-id",
+    clientSecret: "oura-client-secret",
+    fetchImpl: async (input) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      requests.push(url);
+
+      if (url === "https://api.ouraring.com/oauth/token") {
+        return createJsonResponse({
+          access_token: "access-token",
+          refresh_token: "refresh-token",
+          expires_in: 3600,
+        });
+      }
+
+      if (url === "https://api.ouraring.com/v2/usercollection/personal_info") {
+        return createJsonResponse({
+          id: "oura-user-granted",
+          email: "granted@example.com",
+        });
+      }
+
+      throw new Error(`Unexpected request: ${url}`);
+    },
+  });
+
+  const grantedScopeConnection = await provider.exchangeAuthorizationCode(
+    {
+      callbackUrl: "https://sync.example.test/device-sync/oauth/oura/callback",
+      state: "state-2",
+      now: "2026-03-16T10:00:00.000Z",
+      grantedScopes: ["personal", "workout"],
+    },
+    "auth-code-granted",
+  );
+
+  assert.deepEqual(grantedScopeConnection.scopes, ["personal", "workout"]);
+  assert.equal(grantedScopeConnection.externalAccountId, "oura-user-granted");
+  assert.deepEqual(requests, [
+    "https://api.ouraring.com/oauth/token",
+    "https://api.ouraring.com/v2/usercollection/personal_info",
+  ]);
+
+  await assert.rejects(
+    () =>
+      provider.exchangeAuthorizationCode(
+        {
+          callbackUrl: "https://sync.example.test/device-sync/oauth/oura/callback",
+          state: "state-3",
+          now: "2026-03-16T10:00:00.000Z",
+          grantedScopes: ["workout"],
+        },
+        "auth-code-without-personal",
+      ),
+    (error) =>
+      error instanceof DeviceSyncError &&
+      error.code === "OURA_PERSONAL_SCOPE_REQUIRED" &&
+      error.httpStatus === 400,
+  );
+});
+
+test("Oura provider turns non-operation webhook events into reconcile hints and rejects stale signed deliveries", async () => {
+  const provider = createOuraDeviceSyncProvider({
+    clientId: "oura-client-id",
+    clientSecret: "oura-client-secret",
+  });
+  const rawBody = Buffer.from(
+    JSON.stringify({
+      event_type: "sync_completed",
+      data_type: "workout",
+      object_id: "workout-99",
+      user_id: "oura-user-1",
+    }),
+    "utf8",
+  );
+  const timestamp = "2026-03-16T09:58:10.000Z";
+
+  const parsed = await provider.verifyAndParseWebhook?.({
+    headers: createOuraWebhookHeaders("oura-client-secret", timestamp, rawBody),
+    rawBody,
+    now: "2026-03-16T10:00:00.000Z",
+  });
+
+  assert.deepEqual(parsed, {
+    externalAccountId: "oura-user-1",
+    eventType: "sync_completed",
+    traceId: parsed?.traceId,
+    occurredAt: "2026-03-16T10:00:00.000Z",
+    payload: {
+      eventType: "sync_completed",
+      dataType: "workout",
+      operation: null,
+    },
+    jobs: [
+      {
+        kind: "reconcile",
+        priority: 90,
+        dedupeKey: `oura-webhook:${parsed?.traceId}`,
+        payload: {
+          windowStart: "2026-02-23T10:00:00.000Z",
+          windowEnd: "2026-03-16T10:00:00.000Z",
+          includePersonalInfo: false,
+        },
+      },
+    ],
+  });
+
+  await assert.rejects(
+    () =>
+      provider.verifyAndParseWebhook?.({
+        headers: createOuraWebhookHeaders("oura-client-secret", timestamp, rawBody),
+        rawBody,
+        now: "2026-03-16T10:10:00.000Z",
+      }),
+    (error) =>
+      error instanceof DeviceSyncError &&
+      error.code === "OURA_WEBHOOK_TIMESTAMP_INVALID" &&
+      error.httpStatus === 400,
+  );
+});
+
 test("Oura provider validates webhook signatures and turns notifications into resource-scoped hints", async () => {
   const provider = createOuraDeviceSyncProvider({
     clientId: "oura-client-id",
@@ -617,6 +820,48 @@ test("Oura webhook verification challenge helper returns the challenge only for 
       }),
     /verification token/u,
   );
+});
+
+test("Oura provider webhook admin no-ops without a verification token and reuses the shared subscription client when one is configured", async () => {
+  const requests: string[] = [];
+  const provider = createOuraDeviceSyncProvider({
+    clientId: "oura-client-id",
+    clientSecret: "oura-client-secret",
+    fetchImpl: async (input, init) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      requests.push(`${init?.method ?? "GET"} ${url}`);
+
+      if (url === "https://api.ouraring.com/v2/webhook/subscription" && (init?.method ?? "GET") === "GET") {
+        return createJsonResponse({
+          data: OURA_DEFAULT_WEBHOOK_TARGETS.map((target, index) => ({
+            id: `sub-${index + 1}`,
+            callback_url: "https://sync.example.test/device-sync/webhooks/oura",
+            event_type: target.eventType,
+            data_type: target.dataType,
+            expiration_time: "2030-01-01T00:00:00.000Z",
+          })),
+        });
+      }
+
+      throw new Error(`Unexpected request: ${init?.method ?? "GET"} ${url}`);
+    },
+  });
+
+  await provider.webhookAdmin?.ensureSubscriptions({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    verificationToken: "   ",
+  });
+  assert.deepEqual(requests, []);
+
+  await provider.webhookAdmin?.ensureSubscriptions({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    verificationToken: "verify-token-for-tests",
+  });
+
+  assert.deepEqual(requests, [
+    "GET https://api.ouraring.com/v2/webhook/subscription",
+    "GET https://api.ouraring.com/v2/webhook/subscription",
+  ]);
 });
 
 test("Oura provider accepts documented numeric-second timestamps, uses event_time, and imports delete webhooks as deletion snapshots", async () => {
@@ -977,5 +1222,231 @@ test("Oura webhook rejects malformed timestamp headers even when the signature m
         now: "2026-03-16T10:00:00.000Z",
       }),
     (error: unknown) => error instanceof DeviceSyncError && error.code === "OURA_WEBHOOK_TIMESTAMP_INVALID",
+  );
+});
+
+test("Oura webhook rejects missing or invalid signatures before parsing the payload", async () => {
+  const provider = createOuraDeviceSyncProvider({
+    clientId: "oura-client-id",
+    clientSecret: "oura-client-secret",
+  });
+  const rawBody = Buffer.from(
+    JSON.stringify({
+      event_type: "update",
+      data_type: "workout",
+      object_id: "workout-1",
+      user_id: "oura-user-1",
+    }),
+    "utf8",
+  );
+  const timestamp = "2026-03-16T09:58:10.000Z";
+
+  await assert.rejects(
+    () =>
+      provider.verifyAndParseWebhook?.({
+        headers: new Headers({
+          "x-oura-timestamp": timestamp,
+        }),
+        rawBody,
+        now: "2026-03-16T10:00:00.000Z",
+      }),
+    (error: unknown) =>
+      error instanceof DeviceSyncError &&
+      error.code === "OURA_WEBHOOK_SIGNATURE_MISSING" &&
+      error.httpStatus === 400,
+  );
+  await assert.rejects(
+    () =>
+      provider.verifyAndParseWebhook?.({
+        headers: new Headers({
+          "x-oura-signature": "invalid-signature",
+          "x-oura-timestamp": timestamp,
+        }),
+        rawBody,
+        now: "2026-03-16T10:00:00.000Z",
+      }),
+    (error: unknown) =>
+      error instanceof DeviceSyncError &&
+      error.code === "OURA_WEBHOOK_SIGNATURE_INVALID" &&
+      error.httpStatus === 401,
+  );
+});
+
+test("Oura provider rejects invalid webhook payloads, schedules reconcile jobs, and rejects unsupported job kinds", async () => {
+  const provider = createOuraDeviceSyncProvider({
+    clientId: "oura-client-id",
+    clientSecret: "oura-client-secret",
+  });
+  const reconcileProvider = createOuraDeviceSyncProvider({
+    clientId: "oura-client-id",
+    clientSecret: "oura-client-secret",
+    fetchImpl: async (input) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+
+      if (url === "https://api.ouraring.com/v2/usercollection/personal_info") {
+        return createJsonResponse({});
+      }
+
+      throw new Error(`Unexpected request: ${url}`);
+    },
+  });
+  const rawBody = Buffer.from(
+    JSON.stringify({
+      event_type: "update",
+      data_type: "workout",
+      user_id: "oura-user-1",
+    }),
+    "utf8",
+  );
+  const timestamp = "2026-03-16T09:58:10.000Z";
+
+  await assert.rejects(
+    () =>
+      provider.verifyAndParseWebhook?.({
+        headers: createOuraWebhookHeaders("oura-client-secret", timestamp, rawBody),
+        rawBody,
+        now: "2026-03-16T10:00:00.000Z",
+      }),
+    (error: unknown) =>
+      error instanceof DeviceSyncError &&
+      error.code === "OURA_WEBHOOK_PAYLOAD_INVALID" &&
+      error.httpStatus === 400,
+  );
+
+  const scheduled = reconcileProvider.createScheduledJobs?.(
+    {
+      ...createAccount(["personal"]),
+      nextReconcileAt: "2026-03-16T09:00:00.000Z",
+      accessTokenEncrypted: "encrypted-access-token",
+      refreshTokenEncrypted: "encrypted-refresh-token",
+      hostedObservedTokenVersion: null,
+      hostedObservedUpdatedAt: null,
+    },
+    "2026-03-16T10:00:00.000Z",
+  );
+  assert.equal(scheduled?.jobs[0]?.kind, "reconcile");
+  assert.deepEqual(scheduled?.jobs[0]?.payload, {
+    windowStart: subtractDays("2026-03-16T10:00:00.000Z", 21),
+    windowEnd: "2026-03-16T10:00:00.000Z",
+    includePersonalInfo: false,
+  });
+
+  const importedSnapshots: unknown[] = [];
+  await reconcileProvider.executeJob(
+    {
+      account: createAccount(["personal"]),
+      async importSnapshot(snapshot) {
+        importedSnapshots.push(snapshot);
+        return { ok: true };
+      },
+      logger: {},
+      now: "2026-03-16T10:00:00.000Z",
+      async refreshAccountTokens() {
+        return createAccount(["personal"]);
+      },
+    },
+    createJob("reconcile", {
+      includePersonalInfo: true,
+    }),
+  );
+  assert.deepEqual(importedSnapshots, [
+    {
+      accountId: "oura-user-1",
+      importedAt: "2026-03-16T10:00:00.000Z",
+      personalInfo: {},
+    },
+  ]);
+
+  await assert.rejects(
+    () =>
+      provider.executeJob(
+        {
+          account: createAccount(["personal"]),
+          async importSnapshot() {
+            return { ok: true };
+          },
+          logger: {},
+          now: "2026-03-16T10:00:00.000Z",
+          async refreshAccountTokens() {
+            return createAccount(["personal"]);
+          },
+        },
+        createJob("webhook", {}),
+      ),
+    (error: unknown) =>
+      error instanceof DeviceSyncError &&
+      error.code === "OURA_JOB_KIND_UNSUPPORTED",
+  );
+});
+
+test("Oura provider exposes the connect URL, forwards webhook verification through the admin surface, and falls back to reconcile for unscoped resource jobs", async () => {
+  const provider = createOuraDeviceSyncProvider({
+    clientId: "oura-client-id",
+    clientSecret: "oura-client-secret",
+  });
+  const fallbackSnapshots: unknown[] = [];
+
+  assert.equal(
+    provider.buildConnectUrl({
+      callbackUrl: "https://sync.example.test/device-sync/oauth/oura/callback",
+      scopes: ["personal", "workout"],
+      state: "state-connect",
+      now: "2026-03-16T10:00:00.000Z",
+    }),
+    "https://cloud.ouraring.com/oauth/authorize?client_id=oura-client-id&response_type=code&redirect_uri=https%3A%2F%2Fsync.example.test%2Fdevice-sync%2Foauth%2Foura%2Fcallback&scope=personal+workout&state=state-connect",
+  );
+  assert.equal(
+    provider.webhookAdmin?.resolveVerificationChallenge({
+      url: new URL("https://sync.example.test/device-sync/webhooks/oura?verification_token=verify-token&challenge=challenge-123"),
+      verificationToken: "verify-token",
+    }),
+    "challenge-123",
+  );
+
+  await provider.executeJob(
+    {
+      account: createAccount(["personal"]),
+      async importSnapshot(snapshot) {
+        fallbackSnapshots.push(snapshot);
+        return { ok: true };
+      },
+      logger: {},
+      now: "2026-03-16T10:00:00.000Z",
+      async refreshAccountTokens() {
+        return createAccount(["personal"]);
+      },
+    },
+    createJob("resource", {
+      objectId: "missing-data-type",
+    }),
+  );
+
+  assert.deepEqual(fallbackSnapshots, [
+    {
+      accountId: "oura-user-1",
+      importedAt: "2026-03-16T10:00:00.000Z",
+    },
+  ]);
+  await assert.rejects(
+    () =>
+      provider.executeJob(
+        {
+          account: createAccount(["personal"]),
+          async importSnapshot() {
+            return { ok: true };
+          },
+          logger: {},
+          now: "2026-03-16T10:00:00.000Z",
+          async refreshAccountTokens() {
+            return createAccount(["personal"]);
+          },
+        },
+        createJob("delete", {
+          dataType: "workout",
+        }),
+      ),
+    (error: unknown) =>
+      error instanceof DeviceSyncError &&
+      error.code === "OURA_DELETE_JOB_INVALID",
   );
 });

@@ -1,11 +1,11 @@
 import { createHmac } from "node:crypto";
 import assert from "node:assert/strict";
 import path from "node:path";
-import { test } from "vitest";
+import { test, vi } from "vitest";
 import { openSqliteRuntimeDatabase, writeSqliteRuntimeUserVersion } from "@murphai/runtime-state/node";
 
 import { createWhoopDeviceSyncProvider } from "../src/providers/whoop.ts";
-import { deviceSyncError } from "../src/errors.ts";
+import { DeviceSyncError, deviceSyncError } from "../src/errors.ts";
 import { createDeviceSyncService } from "../src/service.ts";
 import { SqliteDeviceSyncStore } from "../src/store.ts";
 import { createJsonResponse, makeTempDirectory, readUrl } from "./helpers.ts";
@@ -251,6 +251,431 @@ test("device sync service redacts connection metadata from public account respon
   await service.runWorkerOnce();
   assert.deepEqual(seenMetadata, {
     connectedBy: "sensitive-connect-code",
+  });
+
+  service.close();
+});
+
+test("device sync service starts and stops its timers, closes owned stores, and rejects missing provider or account lookups", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-lifecycle");
+  const setIntervalSpy = vi.spyOn(globalThis, "setInterval");
+  const clearIntervalSpy = vi.spyOn(globalThis, "clearInterval");
+  const service = createDeviceSyncService({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    providers: [],
+  });
+
+  try {
+    let closeCalls = 0;
+    const originalClose = service.store.close.bind(service.store);
+    service.store.close = () => {
+      closeCalls += 1;
+      return originalClose();
+    };
+
+    assert.deepEqual(service.describeProviders(), []);
+    assert.equal(service.getAccount("missing-account"), null);
+    assert.equal(service.getNextWakeAt("2026-03-17T10:00:00.000Z"), null);
+    assert.throws(
+      () => service.describeProvider("missing-provider"),
+      (error: unknown) =>
+        error instanceof DeviceSyncError
+        && error.code === "PROVIDER_NOT_REGISTERED"
+        && error.httpStatus === 404,
+    );
+    assert.throws(
+      () => service.queueManualReconcile("missing-account"),
+      (error: unknown) =>
+        error instanceof DeviceSyncError
+        && error.code === "ACCOUNT_NOT_FOUND"
+        && error.httpStatus === 404,
+    );
+
+    service.start();
+    service.start();
+    service.stop();
+    service.close();
+
+    assert.equal(setIntervalSpy.mock.calls.length, 2);
+    assert.equal(clearIntervalSpy.mock.calls.length, 2);
+    assert.equal(closeCalls, 1);
+  } finally {
+    setIntervalSpy.mockRestore();
+    clearIntervalSpy.mockRestore();
+  }
+});
+
+test("device sync service scheduler queues due active jobs and skips unsupported or inactive accounts", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-scheduler");
+  const service = createDeviceSyncService({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    providers: [
+      createFakeProvider({
+        provider: "scheduled",
+        descriptor: {
+          ...createFakeProvider().descriptor,
+          provider: "scheduled",
+          displayName: "Scheduled",
+          oauth: {
+            callbackPath: "/oauth/scheduled/callback",
+            defaultScopes: ["offline"],
+          },
+        },
+        createScheduledJobs() {
+          return {
+            jobs: [
+              {
+                kind: "scheduled-refresh",
+                payload: {
+                  slice: "summary",
+                },
+              },
+            ],
+            nextReconcileAt: "2026-03-17T12:30:00.000Z",
+          };
+        },
+      }),
+      createFakeProvider({
+        provider: "unsupported",
+        descriptor: {
+          ...createFakeProvider().descriptor,
+          provider: "unsupported",
+          displayName: "Unsupported",
+          oauth: {
+            callbackPath: "/oauth/unsupported/callback",
+            defaultScopes: ["offline"],
+          },
+        },
+        createScheduledJobs: undefined,
+      }),
+    ],
+  });
+
+  const dueActive = service.store.upsertAccount({
+    provider: "scheduled",
+    externalAccountId: "scheduled-1",
+    displayName: "Scheduled",
+    scopes: ["offline"],
+    tokens: {
+      accessToken: "scheduled-access",
+      accessTokenEncrypted: "enc:scheduled-access",
+    },
+    connectedAt: "2026-03-17T10:00:00.000Z",
+    nextReconcileAt: "2026-03-17T11:00:00.000Z",
+  });
+  service.store.upsertAccount({
+    provider: "scheduled",
+    externalAccountId: "scheduled-future",
+    displayName: "Future",
+    scopes: ["offline"],
+    tokens: {
+      accessToken: "future-access",
+      accessTokenEncrypted: "enc:future-access",
+    },
+    connectedAt: "2026-03-17T10:00:00.000Z",
+    nextReconcileAt: "2026-03-17T13:00:00.000Z",
+  });
+  service.store.upsertAccount({
+    provider: "unsupported",
+    externalAccountId: "unsupported-1",
+    displayName: "Unsupported",
+    scopes: ["offline"],
+    tokens: {
+      accessToken: "unsupported-access",
+      accessTokenEncrypted: "enc:unsupported-access",
+    },
+    connectedAt: "2026-03-17T10:00:00.000Z",
+    nextReconcileAt: "2026-03-17T11:00:00.000Z",
+  });
+  const disconnected = service.store.upsertAccount({
+    provider: "scheduled",
+    externalAccountId: "scheduled-disconnected",
+    displayName: "Disconnected",
+    status: "disconnected",
+    scopes: ["offline"],
+    tokens: {
+      accessToken: "disconnected-access",
+      accessTokenEncrypted: "enc:disconnected-access",
+    },
+    connectedAt: "2026-03-17T10:00:00.000Z",
+    nextReconcileAt: "2026-03-17T11:00:00.000Z",
+  });
+
+  await service.runSchedulerOnce();
+
+  const scheduledJobs = service.store.database.prepare(`
+    select kind
+    from device_job
+    where account_id = ?
+    order by created_at asc, id asc
+  `).all(dueActive.id) as Array<{ kind: string }>;
+  const unsupportedJobs = service.store.database.prepare(`
+    select count(*) as total
+    from device_job
+    where account_id = ?
+  `).get(service.store.getAccountByExternalAccount("unsupported", "unsupported-1")?.id) as { total: number };
+  const disconnectedJobs = service.store.database.prepare(`
+    select count(*) as total
+    from device_job
+    where account_id = ?
+  `).get(disconnected.id) as { total: number };
+
+  assert.deepEqual(scheduledJobs.map((job) => job.kind), ["scheduled-refresh"]);
+  assert.equal(service.store.getAccountById(dueActive.id)?.nextReconcileAt, "2026-03-17T12:30:00.000Z");
+  assert.equal(unsupportedJobs.total, 0);
+  assert.equal(disconnectedJobs.total, 0);
+
+  service.close();
+});
+
+test("device sync service scheduler logs failures once and skips reentrant ticks", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-scheduler-error");
+  const schedulerErrors: Array<{ context?: Record<string, unknown>; message: string }> = [];
+  const service = createDeviceSyncService({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+      log: {
+        error(message, context) {
+          schedulerErrors.push({
+            message,
+            context: context as Record<string, unknown> | undefined,
+          });
+        },
+      },
+    },
+    providers: [
+      createFakeProvider({
+        provider: "broken",
+        descriptor: {
+          ...createFakeProvider().descriptor,
+          provider: "broken",
+          displayName: "Broken",
+          oauth: {
+            callbackPath: "/oauth/broken/callback",
+            defaultScopes: ["offline"],
+          },
+        },
+        createScheduledJobs() {
+          throw new Error("scheduler exploded");
+        },
+      }),
+    ],
+  });
+
+  service.store.upsertAccount({
+    provider: "broken",
+    externalAccountId: "broken-1",
+    displayName: "Broken",
+    scopes: ["offline"],
+    tokens: {
+      accessToken: "broken-access",
+      accessTokenEncrypted: "enc:broken-access",
+    },
+    connectedAt: "2026-03-17T10:00:00.000Z",
+    nextReconcileAt: "2026-03-17T11:00:00.000Z",
+  });
+
+  await service.runSchedulerOnce();
+
+  Reflect.set(service, "schedulerTickInFlight", true);
+  await service.runSchedulerOnce();
+  assert.equal(schedulerErrors.length, 1);
+  Reflect.set(service, "schedulerTickInFlight", false);
+
+  service.close();
+});
+
+test("device sync service worker batch logs drain failures once and skips reentrant ticks", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-worker-batch-error");
+  const workerErrors: Array<{ context?: Record<string, unknown>; message: string }> = [];
+  const service = createDeviceSyncService({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+      log: {
+        error(message, context) {
+          workerErrors.push({
+            message,
+            context: context as Record<string, unknown> | undefined,
+          });
+        },
+      },
+    },
+    providers: [createFakeProvider()],
+  });
+
+  let drainCalls = 0;
+  Reflect.set(service, "drainWorker", async () => {
+    drainCalls += 1;
+    throw new Error("worker batch exploded");
+  });
+
+  const runWorkerBatchOnce = Reflect.get(service, "runWorkerBatchOnce") as () => Promise<void>;
+
+  await runWorkerBatchOnce.call(service);
+  assert.equal(drainCalls, 1);
+  assert.equal(workerErrors.length, 1);
+  assert.equal(workerErrors[0]?.message, "Device sync worker tick failed.");
+
+  Reflect.set(service, "workerTickInFlight", true);
+  await runWorkerBatchOnce.call(service);
+  assert.equal(drainCalls, 1);
+  assert.equal(workerErrors.length, 1);
+  Reflect.set(service, "workerTickInFlight", false);
+
+  service.close();
+});
+
+test("device sync service worker handles missing providers, disconnected jobs, and reauthorization-required jobs", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-worker-edges");
+  const service = createDeviceSyncService({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    providers: [createFakeProvider()],
+  });
+
+  const queuedAccount = service.store.upsertAccount({
+    provider: "demo",
+    externalAccountId: "demo-worker-edges",
+    displayName: "Demo",
+    scopes: ["offline"],
+    tokens: {
+      accessToken: "demo-access",
+      accessTokenEncrypted: "enc:demo-access",
+    },
+    connectedAt: "2026-03-17T10:00:00.000Z",
+  });
+
+  const missingProviderJob = service.store.enqueueJob({
+    accountId: queuedAccount.id,
+    provider: "missing-provider",
+    kind: "sync",
+    payload: {},
+    availableAt: "2026-03-17T10:00:00.000Z",
+  });
+  await service.runWorkerOnce();
+  assert.equal(service.store.getJobById(missingProviderJob.id)?.status, "dead");
+  assert.equal(service.store.getJobById(missingProviderJob.id)?.lastErrorCode, "PROVIDER_NOT_REGISTERED");
+
+  service.store.patchAccount(queuedAccount.id, {
+    status: "disconnected",
+  });
+  const disconnectedJob = service.store.enqueueJob({
+    accountId: queuedAccount.id,
+    provider: "demo",
+    kind: "sync",
+    payload: {},
+    availableAt: "2026-03-17T10:00:01.000Z",
+  });
+  await service.runWorkerOnce();
+  assert.equal(service.store.getJobById(disconnectedJob.id)?.status, "succeeded");
+
+  const reauthAccount = service.store.upsertAccount({
+    provider: "demo",
+    externalAccountId: "demo-worker-reauth",
+    displayName: "Demo Reauth",
+    status: "reauthorization_required",
+    scopes: ["offline"],
+    tokens: {
+      accessToken: "reauth-access",
+      accessTokenEncrypted: "enc:reauth-access",
+    },
+    connectedAt: "2026-03-17T10:00:00.000Z",
+  });
+  const reauthJob = service.store.enqueueJob({
+    accountId: reauthAccount.id,
+    provider: "demo",
+    kind: "sync",
+    payload: {},
+    availableAt: "2026-03-17T10:00:02.000Z",
+  });
+  await service.runWorkerOnce();
+  assert.equal(service.store.getJobById(reauthJob.id)?.status, "dead");
+  assert.equal(service.store.getJobById(reauthJob.id)?.lastErrorCode, "ACCOUNT_REAUTHORIZATION_REQUIRED");
+
+  service.close();
+});
+
+test("device sync service treats token refresh races as cancelled work instead of provider failures", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-refresh-cancel");
+  const debugEvents: Array<{ context?: Record<string, unknown>; message: string }> = [];
+  let service!: ReturnType<typeof createDeviceSyncService>;
+  service = createDeviceSyncService({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+      log: {
+        debug(message, context) {
+          debugEvents.push({
+            message,
+            context: context as Record<string, unknown> | undefined,
+          });
+        },
+      },
+    },
+    providers: [
+      createFakeProvider({
+        async refreshTokens(account: DeviceSyncAccount): Promise<ProviderAuthTokens> {
+          service.store.disconnectAccount(account.id, "2026-03-17T11:05:00.000Z");
+          return {
+            accessToken: "refresh-access",
+            refreshToken: "refresh-refresh",
+          };
+        },
+        async executeJob(context) {
+          await context.refreshAccountTokens();
+          return {
+            metadataPatch: {
+              shouldNotPersist: true,
+            },
+          };
+        },
+      }),
+    ],
+  });
+
+  const begin = await service.startConnection({
+    provider: "demo",
+  });
+  const connected = await service.handleOAuthCallback({
+    provider: "demo",
+    state: begin.state,
+    code: "cancelled",
+  });
+
+  const processedJob = await service.runWorkerOnce();
+
+  assert.equal(processedJob?.kind, "backfill");
+  assert.equal(service.store.getAccountById(connected.account.id)?.status, "disconnected");
+  assert.equal(service.store.getAccountById(connected.account.id)?.lastErrorCode, null);
+  assert.equal(service.store.getJobById(processedJob!.id)?.status, "running");
+  assert.equal(debugEvents.length, 1);
+  assert.equal(debugEvents[0]?.message, "Device sync job side effects skipped because execution was cancelled.");
+  assert.deepEqual(debugEvents[0]?.context, {
+    provider: "demo",
+    accountId: connected.account.id,
+    jobId: processedJob!.id,
   });
 
   service.close();
@@ -533,6 +958,77 @@ test("device sync service rejects manual reconcile and webhook enqueue for disco
   const nextJob = await service.runWorkerOnce();
   assert.equal(nextJob, null);
   assert.equal(imports.length, 0);
+
+  service.close();
+});
+
+test("device sync service rejects manual reconcile when the stored account provider is no longer registered", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-manual-missing-provider");
+  const service = createDeviceSyncService({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    providers: [],
+  });
+
+  const account = service.store.upsertAccount({
+    provider: "missing-provider",
+    externalAccountId: "missing-provider-account",
+    displayName: "Missing Provider",
+    scopes: ["offline"],
+    tokens: {
+      accessToken: "missing-provider-access",
+      accessTokenEncrypted: "enc:missing-provider-access",
+    },
+    connectedAt: "2026-03-17T10:00:00.000Z",
+  });
+
+  assert.throws(
+    () => service.queueManualReconcile(account.id),
+    (error: unknown) =>
+      error instanceof DeviceSyncError
+      && error.code === "PROVIDER_NOT_REGISTERED"
+      && error.httpStatus === 404,
+  );
+
+  service.close();
+});
+
+test("device sync service rejects manual reconcile for reauthorization-required accounts", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-manual-reauthorize");
+  const service = createDeviceSyncService({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    providers: [createFakeProvider()],
+  });
+
+  const begin = await service.startConnection({
+    provider: "demo",
+  });
+  const connected = await service.handleOAuthCallback({
+    provider: "demo",
+    state: begin.state,
+    code: "reauthorize",
+  });
+
+  service.store.patchAccount(connected.account.id, {
+    status: "reauthorization_required",
+  });
+
+  assert.throws(
+    () => service.queueManualReconcile(connected.account.id),
+    (error: unknown) =>
+      error instanceof DeviceSyncError
+      && error.code === "ACCOUNT_REAUTHORIZATION_REQUIRED"
+      && error.httpStatus === 409,
+  );
 
   service.close();
 });

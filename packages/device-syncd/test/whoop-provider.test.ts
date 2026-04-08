@@ -271,6 +271,43 @@ test("WHOOP provider requires an existing refresh token before attempting refres
   assert.equal(fetchCalled, false);
 });
 
+test("WHOOP provider rejects auth exchanges without a refresh token", async () => {
+  const provider = createWhoopDeviceSyncProvider({
+    clientId: "whoop-client-id",
+    clientSecret: "whoop-client-secret",
+    fetchImpl: async (input) => {
+      const url = readUrl(input);
+
+      if (url === "https://api.prod.whoop.com/oauth/oauth2/token") {
+        return createJsonResponse({
+          access_token: "access-token",
+          expires_in: 3600,
+          scope: "offline read:profile",
+        });
+      }
+
+      throw new Error(`Unexpected request: ${url}`);
+    },
+  });
+
+  await assert.rejects(
+    () =>
+      provider.exchangeAuthorizationCode(
+        {
+          callbackUrl: "https://sync.example.test/device-sync/oauth/whoop/callback",
+          state: "state-missing-refresh",
+          now: "2026-03-16T10:00:00.000Z",
+          grantedScopes: [],
+        },
+        "auth-code-missing-refresh",
+      ),
+    (error: unknown) =>
+      error instanceof DeviceSyncError &&
+      error.code === "WHOOP_REFRESH_TOKEN_MISSING" &&
+      error.httpStatus === 502,
+  );
+});
+
 test("WHOOP provider revokes with the persisted access token even when it is near expiry", async () => {
   const requests: Array<{ authorization: string | null; method: string; url: string }> = [];
   const provider = createWhoopDeviceSyncProvider({
@@ -686,6 +723,135 @@ test("WHOOP provider turns missing resource imports into the existing delete sna
   ]);
 });
 
+test("WHOOP provider rejects missing, invalid, stale, and bad-signature webhook deliveries before parsing payloads", async () => {
+  const provider = createWhoopDeviceSyncProvider({
+    clientId: "whoop-client-id",
+    clientSecret: "whoop-client-secret",
+  });
+  const rawBody = Buffer.from(
+    JSON.stringify({
+      user_id: "whoop-user-1",
+      type: "sleep.updated",
+      id: "resource-1",
+    }),
+    "utf8",
+  );
+
+  await assert.rejects(
+    () =>
+      provider.verifyAndParseWebhook?.({
+        headers: new Headers(),
+        rawBody,
+        now: "2026-03-16T10:00:00.000Z",
+      }),
+    (error: unknown) =>
+      error instanceof DeviceSyncError &&
+      error.code === "WHOOP_WEBHOOK_SIGNATURE_MISSING" &&
+      error.httpStatus === 401,
+  );
+  await assert.rejects(
+    () =>
+      provider.verifyAndParseWebhook?.({
+        headers: new Headers({
+          "x-whoop-signature": "signature",
+          "x-whoop-signature-timestamp": "not-a-number",
+        }),
+        rawBody,
+        now: "2026-03-16T10:00:00.000Z",
+      }),
+    (error: unknown) =>
+      error instanceof DeviceSyncError &&
+      error.code === "WHOOP_WEBHOOK_TIMESTAMP_INVALID" &&
+      error.httpStatus === 401,
+  );
+  await assert.rejects(
+    () =>
+      provider.verifyAndParseWebhook?.({
+        headers: createWhoopWebhookHeaders(
+          "whoop-client-secret",
+          rawBody,
+          String(Date.parse("2026-03-16T09:40:00.000Z")),
+        ),
+        rawBody,
+        now: "2026-03-16T10:00:00.000Z",
+      }),
+    (error: unknown) =>
+      error instanceof DeviceSyncError &&
+      error.code === "WHOOP_WEBHOOK_TIMESTAMP_STALE" &&
+      error.httpStatus === 401,
+  );
+  await assert.rejects(
+    () =>
+      provider.verifyAndParseWebhook?.({
+        headers: new Headers({
+          "x-whoop-signature": "invalid-signature",
+          "x-whoop-signature-timestamp": String(Date.parse("2026-03-16T10:00:00.000Z")),
+        }),
+        rawBody,
+        now: "2026-03-16T10:00:00.000Z",
+      }),
+    (error: unknown) =>
+      error instanceof DeviceSyncError &&
+      error.code === "WHOOP_WEBHOOK_SIGNATURE_INVALID" &&
+      error.httpStatus === 401,
+  );
+});
+
+test("WHOOP provider rejects profile responses without a stable user id and tolerates already-revoked access", async () => {
+  const revokeStatuses = [401, 404];
+  let revokeIndex = 0;
+  const provider = createWhoopDeviceSyncProvider({
+    clientId: "whoop-client-id",
+    clientSecret: "whoop-client-secret",
+    fetchImpl: async (input, init) => {
+      const url = readUrl(input);
+
+      if (url === "https://api.prod.whoop.com/oauth/oauth2/token") {
+        return createJsonResponse({
+          access_token: "access-token",
+          refresh_token: "refresh-token",
+          expires_in: 3600,
+          scope: "offline read:profile",
+        });
+      }
+
+      if (url === "https://api.prod.whoop.com/developer/v2/user/profile/basic") {
+        return createJsonResponse({
+          email: "whoop@example.com",
+        });
+      }
+
+      if (url === "https://api.prod.whoop.com/developer/v2/user/access" && init?.method === "DELETE") {
+        const status = revokeStatuses[revokeIndex] ?? 204;
+        revokeIndex += 1;
+        return new Response(null, { status });
+      }
+
+      throw new Error(`Unexpected request: ${url}`);
+    },
+  });
+
+  await assert.rejects(
+    () =>
+      provider.exchangeAuthorizationCode(
+        {
+          callbackUrl: "https://sync.example.test/device-sync/oauth/whoop/callback",
+          state: "state-missing-profile-id",
+          now: "2026-03-16T10:00:00.000Z",
+          grantedScopes: [],
+        },
+        "auth-code-missing-profile-id",
+      ),
+    (error: unknown) =>
+      error instanceof DeviceSyncError &&
+      error.code === "WHOOP_PROFILE_INVALID" &&
+      error.httpStatus === 502,
+  );
+
+  await provider.revokeAccess?.(createAccount(["offline"]));
+  await provider.revokeAccess?.(createAccount(["offline"]));
+});
+
 test("WHOOP webhook replay checks use the request context timestamp instead of process wall clock", async () => {
   const provider = createWhoopDeviceSyncProvider({
     clientId: "whoop-client-id",
@@ -717,4 +883,299 @@ test("WHOOP webhook replay checks use the request context timestamp instead of p
   } finally {
     Date.now = originalDateNow;
   }
+});
+
+test("WHOOP provider surfaces revoke failures, rejects payloads missing required fields, and handles direct delete or unsupported jobs", async () => {
+  const provider = createWhoopDeviceSyncProvider({
+    clientId: "whoop-client-id",
+    clientSecret: "whoop-client-secret",
+    fetchImpl: async (input, init) => {
+      const url = readUrl(input);
+
+      if (url === "https://api.prod.whoop.com/developer/v2/user/access" && init?.method === "DELETE") {
+        return createJsonResponse({ error: "rate limited" }, 429);
+      }
+
+      throw new Error(`Unexpected request: ${url}`);
+    },
+  });
+  const rawBody = Buffer.from(
+    JSON.stringify({
+      type: "sleep.updated",
+      id: "resource-1",
+    }),
+    "utf8",
+  );
+  const importedSnapshots: unknown[] = [];
+
+  await assert.rejects(
+    () => provider.revokeAccess?.(createAccount(["offline"])),
+    (error: unknown) =>
+      error instanceof DeviceSyncError &&
+      error.code === "WHOOP_REVOKE_FAILED",
+  );
+  await assert.rejects(
+    () =>
+      provider.verifyAndParseWebhook?.({
+        headers: createWhoopWebhookHeaders("whoop-client-secret", rawBody, String(Date.parse("2026-03-16T10:00:00.000Z"))),
+        rawBody,
+        now: "2026-03-16T10:00:00.000Z",
+      }),
+    (error: unknown) =>
+      error instanceof DeviceSyncError &&
+      error.code === "WHOOP_WEBHOOK_PAYLOAD_INVALID" &&
+      error.httpStatus === 400,
+  );
+  await assert.rejects(
+    () =>
+      provider.executeJob(
+        {
+          account: createAccount(["offline"]),
+          now: "2026-03-16T10:00:00.000Z",
+          logger: {},
+          async importSnapshot() {
+            return { ok: true };
+          },
+          async refreshAccountTokens() {
+            return createAccount(["offline"]);
+          },
+        },
+        createJob("resource", {
+          resourceId: "sleep-99",
+        }),
+      ),
+    (error: unknown) =>
+      error instanceof DeviceSyncError &&
+      error.code === "WHOOP_JOB_INVALID",
+  );
+
+  await provider.executeJob(
+    {
+      account: createAccount(["offline"]),
+      now: "2026-03-16T10:00:00.000Z",
+      logger: {},
+      async importSnapshot(snapshot) {
+        importedSnapshots.push(snapshot);
+        return { ok: true };
+      },
+      async refreshAccountTokens() {
+        return createAccount(["offline"]);
+      },
+    },
+    createJob("delete", {
+      resourceType: "sleep",
+      resourceId: "sleep-99",
+      eventType: "sleep.deleted",
+      occurredAt: "2026-03-15T09:00:00.000Z",
+    }),
+  );
+
+  assert.deepEqual(importedSnapshots, [
+    {
+      accountId: "whoop-user-1",
+      importedAt: "2026-03-16T10:00:00.000Z",
+      deletions: [
+        {
+          resource_type: "sleep",
+          resource_id: "sleep-99",
+          occurred_at: "2026-03-15T09:00:00.000Z",
+          source_event_type: "sleep.deleted",
+        },
+      ],
+    },
+  ]);
+
+  const resourceSnapshots: unknown[] = [];
+  const importProvider = createWhoopDeviceSyncProvider({
+    clientId: "whoop-client-id",
+    clientSecret: "whoop-client-secret",
+    fetchImpl: async (input) => {
+      const url = readUrl(input);
+
+      if (url === "https://api.prod.whoop.com/developer/v2/activity/workout/workout-77") {
+        return createJsonResponse({
+          id: "workout-77",
+          sport_name: "rowing",
+        });
+      }
+
+      if (url.startsWith("https://api.prod.whoop.com/developer/v2/activity/sleep?")) {
+        return createJsonResponse({ records: [] });
+      }
+
+      if (url.startsWith("https://api.prod.whoop.com/developer/v2/recovery?")) {
+        return createJsonResponse({ records: [] });
+      }
+
+      if (url.startsWith("https://api.prod.whoop.com/developer/v2/cycle?")) {
+        return createJsonResponse({ records: [] });
+      }
+
+      if (url.startsWith("https://api.prod.whoop.com/developer/v2/activity/workout?")) {
+        return createJsonResponse({ records: [] });
+      }
+
+      throw new Error(`Unexpected request: ${url}`);
+    },
+  });
+
+  await importProvider.executeJob(
+    {
+      account: createAccount(["offline"]),
+      now: "2026-03-16T10:00:00.000Z",
+      logger: {},
+      async importSnapshot(snapshot) {
+        resourceSnapshots.push(snapshot);
+        return { ok: true };
+      },
+      async refreshAccountTokens() {
+        return createAccount(["offline"]);
+      },
+    },
+    createJob("resource", {
+      resourceType: "workout",
+      resourceId: "workout-77",
+    }),
+  );
+  await importProvider.executeJob(
+    {
+      account: createAccount(["offline"]),
+      now: "2026-03-16T10:00:00.000Z",
+      logger: {},
+      async importSnapshot(snapshot) {
+        resourceSnapshots.push(snapshot);
+        return { ok: true };
+      },
+      async refreshAccountTokens() {
+        return createAccount(["offline"]);
+      },
+    },
+    createJob("reconcile", {}),
+  );
+
+  assert.deepEqual(resourceSnapshots, [
+    {
+      accountId: "whoop-user-1",
+      importedAt: "2026-03-16T10:00:00.000Z",
+      workouts: [
+        {
+          id: "workout-77",
+          sport_name: "rowing",
+        },
+      ],
+    },
+    {
+      accountId: "whoop-user-1",
+      importedAt: "2026-03-16T10:00:00.000Z",
+      sleeps: [],
+      recoveries: [],
+      cycles: [],
+      workouts: [],
+    },
+  ]);
+  await assert.rejects(
+    () =>
+      importProvider.executeJob(
+        {
+          account: createAccount(["offline"]),
+          now: "2026-03-16T10:00:00.000Z",
+          logger: {},
+          async importSnapshot() {
+            return { ok: true };
+          },
+          async refreshAccountTokens() {
+            return createAccount(["offline"]);
+          },
+        },
+        createJob("resource", {
+          resourceType: "mystery",
+          resourceId: "resource-1",
+        }),
+      ),
+    (error: unknown) =>
+      error instanceof DeviceSyncError &&
+      error.code === "WHOOP_RESOURCE_UNSUPPORTED",
+  );
+
+  await assert.rejects(
+    () =>
+      provider.executeJob(
+        {
+          account: createAccount(["offline"]),
+          now: "2026-03-16T10:00:00.000Z",
+          logger: {},
+          async importSnapshot() {
+            return { ok: true };
+          },
+          async refreshAccountTokens() {
+            return createAccount(["offline"]);
+          },
+        },
+        createJob("webhook", {}),
+      ),
+    (error: unknown) =>
+      error instanceof DeviceSyncError &&
+      error.code === "WHOOP_JOB_KIND_UNSUPPORTED",
+  );
+});
+
+test("WHOOP provider imports sleep-related resources with linked cycle and recovery snapshots", async () => {
+  const importedSnapshots: unknown[] = [];
+  const provider = createWhoopDeviceSyncProvider({
+    clientId: "whoop-client-id",
+    clientSecret: "whoop-client-secret",
+    fetchImpl: async (input) => {
+      const url = readUrl(input);
+
+      if (url === "https://api.prod.whoop.com/developer/v2/activity/sleep/sleep-42") {
+        return createJsonResponse({
+          id: "sleep-42",
+          cycle_id: "cycle-42",
+        });
+      }
+
+      if (url === "https://api.prod.whoop.com/developer/v2/cycle/cycle-42") {
+        return createJsonResponse({
+          id: "cycle-42",
+        });
+      }
+
+      if (url === "https://api.prod.whoop.com/developer/v2/cycle/cycle-42/recovery") {
+        return createJsonResponse({
+          id: "recovery-42",
+        });
+      }
+
+      throw new Error(`Unexpected request: ${url}`);
+    },
+  });
+
+  await provider.executeJob(
+    {
+      account: createAccount(["offline"]),
+      now: "2026-03-16T10:00:00.000Z",
+      logger: {},
+      async importSnapshot(snapshot) {
+        importedSnapshots.push(snapshot);
+        return { ok: true };
+      },
+      async refreshAccountTokens() {
+        return createAccount(["offline"]);
+      },
+    },
+    createJob("resource", {
+      resourceType: "sleep",
+      resourceId: "sleep-42",
+    }),
+  );
+
+  assert.deepEqual(importedSnapshots, [
+    {
+      accountId: "whoop-user-1",
+      importedAt: "2026-03-16T10:00:00.000Z",
+      sleeps: [{ id: "sleep-42", cycle_id: "cycle-42" }],
+      cycles: [{ id: "cycle-42" }],
+      recoveries: [{ id: "recovery-42" }],
+    },
+  ]);
 });

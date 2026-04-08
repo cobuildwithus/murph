@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { test } from "vitest";
+import { test, vi } from "vitest";
 
 import { createGarminDeviceSyncProvider } from "../src/providers/garmin.ts";
 import { createJsonResponse, readUrl } from "./helpers.ts";
@@ -497,30 +497,42 @@ test("Garmin provider rethrows collection request failures that are not tolerate
     },
   });
 
-  await assert.rejects(
-    () =>
-      provider.executeJob(
-        {
-          account: createAccount(["HEALTH_EXPORT"]),
-          async importSnapshot() {
-            return {};
-          },
-          logger: {},
-          now: "2026-03-16T12:00:00.000Z",
-          async refreshAccountTokens() {
-            return createAccount(["HEALTH_EXPORT"]);
-          },
+  vi.useFakeTimers();
+  try {
+    const execution = provider.executeJob(
+      {
+        account: createAccount(["HEALTH_EXPORT"]),
+        async importSnapshot() {
+          return {};
         },
-        createJob("reconcile", {
-          dataTypes: ["sleeps"],
-        }),
-      ),
-    (error: unknown) =>
-      typeof error === "object"
-      && error !== null
-      && "code" in error
-      && error.code === "GARMIN_API_REQUEST_FAILED",
-  );
+        logger: {},
+        now: "2026-03-16T12:00:00.000Z",
+        async refreshAccountTokens() {
+          return createAccount(["HEALTH_EXPORT"]);
+        },
+      },
+      createJob("reconcile", {
+        dataTypes: ["sleeps"],
+      }),
+    );
+    const settled = execution.then(
+      () => ({ ok: true as const }),
+      (error) => ({ ok: false as const, error }),
+    );
+
+    await vi.runAllTimersAsync();
+    const result = await settled;
+
+    assert.equal(result.ok, false);
+    assert.equal(
+      result.ok === false && typeof result.error === "object" && result.error !== null && "code" in result.error
+        ? result.error.code
+        : null,
+      "GARMIN_API_REQUEST_FAILED",
+    );
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 test("Garmin provider revokes access tolerantly and surfaces revoke failures", async () => {
@@ -568,6 +580,66 @@ test("Garmin provider revokes access tolerantly and surfaces revoke failures", a
       url: "https://apis.garmin.com/wellness-api/rest/user/registration",
     },
   ]);
+});
+
+test("Garmin provider normalizes structured permissions and tolerates already-missing registrations", async () => {
+  const revokeStatuses = [401, 404];
+  let revokeIndex = 0;
+  const provider = createGarminDeviceSyncProvider({
+    clientId: "garmin-client-id",
+    clientSecret: "garmin-client-secret",
+    fetchImpl: async (input, init) => {
+      const url = readUrl(input);
+
+      if (url === "https://connectapi.garmin.com/di-oauth2-service/oauth/token") {
+        return createJsonResponse({
+          access_token: "access-token",
+          refresh_token: "refresh-token",
+          expires_in: 3600,
+        });
+      }
+
+      if (url === "https://apis.garmin.com/wellness-api/rest/user/id") {
+        return createJsonResponse({
+          external_account_id: "garmin-user-structured",
+        });
+      }
+
+      if (url === "https://apis.garmin.com/wellness-api/rest/user/permissions") {
+        return createJsonResponse({
+          permissions: [
+            { permission: "HEALTH_EXPORT" },
+            { name: "ACTIVITY_EXPORT" },
+            { scope: "HEALTH_EXPORT" },
+          ],
+        });
+      }
+
+      if (url === "https://apis.garmin.com/wellness-api/rest/user/registration" && init?.method === "DELETE") {
+        const status = revokeStatuses[revokeIndex] ?? 204;
+        revokeIndex += 1;
+        return new Response(null, { status });
+      }
+
+      throw new Error(`Unexpected request: ${url}`);
+    },
+  });
+
+  const connection = await provider.exchangeAuthorizationCode(
+    {
+      callbackUrl: "https://sync.example.test/device-sync/oauth/garmin/callback",
+      grantedScopes: [],
+      now: "2026-03-16T10:00:00.000Z",
+      state: "state-4",
+    },
+    "auth-code-4",
+  );
+
+  assert.equal(connection.externalAccountId, "garmin-user-structured");
+  assert.deepEqual(connection.scopes, ["HEALTH_EXPORT", "ACTIVITY_EXPORT"]);
+
+  await provider.revokeAccess?.(createAccount(["HEALTH_EXPORT"]));
+  await provider.revokeAccess?.(createAccount(["HEALTH_EXPORT"]));
 });
 
 test("Garmin provider rejects unsupported job kinds", async () => {

@@ -244,7 +244,9 @@ function normalizeGarminPermissions(value: unknown): string[] {
     record.grantedPermissions,
     record.scopes,
     record.scope,
-  ].flatMap((candidate) => normalizeGarminPermissions(candidate));
+  ]
+    .filter((candidate) => candidate !== value)
+    .flatMap((candidate) => normalizeGarminPermissions(candidate));
 
   if (nestedList.length > 0) {
     return [...new Set(nestedList)];

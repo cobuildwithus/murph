@@ -372,7 +372,7 @@ function normalizeOuraWebhookOperation(value: string | null): OuraWebhookOperati
   }
 
   const suffix = normalized.split(".").at(-1);
-  return suffix ? normalizeOuraWebhookOperation(suffix) : null;
+  return suffix && suffix !== normalized ? normalizeOuraWebhookOperation(suffix) : null;
 }
 
 function buildOuraSourceEventType(

@@ -672,13 +672,6 @@ function sendHtml(response: ServerResponse, statusCode: number, body: string): v
   response.end(body);
 }
 
-function sendText(response: ServerResponse, statusCode: number, body: string): void {
-  response.statusCode = statusCode;
-  response.setHeader("Content-Type", "text/plain; charset=utf-8");
-  response.setHeader("Content-Length", Buffer.byteLength(body));
-  response.end(body);
-}
-
 function redirect(response: ServerResponse, location: string): void {
   response.statusCode = 302;
   response.setHeader("Location", location);
