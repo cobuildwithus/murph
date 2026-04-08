@@ -458,6 +458,97 @@ test("permission helpers filter open requests by session and rebuild snapshot st
   }
 });
 
+test("respondToPermissionInDatabase returns null without rebuilding when the request is missing", () => {
+  const database = new DatabaseSync(":memory:");
+  ensureGatewayStoreBaseSchema(database);
+
+  let rebuildCalls = 0;
+  try {
+    const resolved = respondToPermissionInDatabase(
+      database,
+      {
+        decision: "approve",
+        note: "ignored",
+        requestId: "missing-request",
+      },
+      () => ({
+        events: [],
+        nextCursor: 0,
+        snapshot: null,
+      }),
+      () => {
+        rebuildCalls += 1;
+      },
+    );
+
+    assert.equal(resolved, null);
+    assert.equal(rebuildCalls, 0);
+  } finally {
+    database.close();
+  }
+});
+
+test("snapshot rebuild ignores blank aliases and falls back to the latest thread title", () => {
+  const database = new DatabaseSync(":memory:");
+  ensureGatewayStoreBaseSchema(database);
+
+  replaceSessionSources(database, [
+    {
+      alias: "   ",
+      binding: {
+        actorId: "contact:alex",
+        channel: "email",
+        conversationKey: null,
+        delivery: {
+          kind: "thread",
+          target: "thread-email",
+        },
+        identityId: "murph@example.com",
+        threadId: "thread-email",
+        threadIsDirect: true,
+      },
+      sessionId: "session-email-1",
+      updatedAt: "2026-04-08T00:00:00.000Z",
+    },
+  ]);
+  upsertCaptureSources(database, [
+    {
+      accountId: "murph@example.com",
+      actor: {
+        displayName: "Alex",
+        id: "contact:alex",
+        isSelf: false,
+      },
+      attachments: [],
+      captureId: "capture-email-1",
+      createdAt: "2026-04-08T00:00:05.000Z",
+      envelopePath: "raw/email/envelope.json",
+      eventId: "event-email-1",
+      externalId: "email:provider-message-1",
+      occurredAt: "2026-04-08T00:00:00.000Z",
+      raw: {},
+      source: "email",
+      text: "Hello from email",
+      thread: {
+        id: "thread-email",
+        isDirect: true,
+        title: "  Team thread  ",
+      },
+    },
+  ]);
+
+  try {
+    rebuildSnapshotStateFrom(database, readSnapshotState(database));
+
+    const snapshot = readSnapshotState(database).snapshot;
+    assert.ok(snapshot);
+    assert.equal(snapshot.conversations[0]?.title, "Team thread");
+    assert.equal(snapshot.conversations[0]?.titleSource, "thread-title");
+  } finally {
+    database.close();
+  }
+});
+
 test("LocalGatewayProjectionStore syncs session and outbox sources into the runtime database", async () => {
   const vaultRoot = mkdtempSync(path.join(tmpdir(), "gateway-local-store-"));
   tempRoots.push(vaultRoot);
