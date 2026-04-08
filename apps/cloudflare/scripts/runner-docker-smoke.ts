@@ -59,8 +59,11 @@ async function main(): Promise<void> {
   console.log(`murphBin=${result.murphBin}`);
   console.log(`vaultCliBin=${result.vaultCliBin}`);
   console.log(`reportedVaultId=${result.reportedVaultId}`);
+  console.log(`pdfProviderId=${result.pdfProviderId}`);
   console.log(`pdfText=${JSON.stringify(result.pdfText)}`);
+  console.log(`wavTranscriptProviderId=${result.wavTranscriptProviderId}`);
   console.log(`wavTranscript=${JSON.stringify(result.wavTranscript)}`);
+  console.log(`normalizedTranscriptProviderId=${result.normalizedTranscriptProviderId}`);
   console.log(`normalizedTranscript=${JSON.stringify(result.normalizedTranscript)}`);
 }
 
