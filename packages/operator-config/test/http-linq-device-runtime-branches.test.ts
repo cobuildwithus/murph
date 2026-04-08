@@ -7,6 +7,7 @@ import {
   startLinqChatTypingIndicator,
   stopLinqChatTypingIndicator,
 } from '../src/linq-runtime.ts'
+import { createDeviceSyncClient, resolveDeviceSyncBaseUrl } from '../src/device-sync-client.ts'
 import { VaultCliError } from '../src/vault-cli-errors.ts'
 
 afterEach(() => {
@@ -14,6 +15,14 @@ afterEach(() => {
   vi.resetModules()
   vi.unstubAllGlobals()
 })
+
+async function loadDeviceSyncClientWithMockedSpawn(
+  spawn: typeof import('node:child_process').spawn,
+): Promise<typeof import('../src/device-sync-client.ts')> {
+  vi.resetModules()
+  vi.doMock('node:child_process', () => ({ spawn }))
+  return await import('../src/device-sync-client.ts')
+}
 
 test('linq runtime covers no-content unavailable and raw-text error branches', async () => {
   await assert.rejects(
@@ -94,10 +103,6 @@ test('linq runtime covers no-content unavailable and raw-text error branches', a
 })
 
 test('device sync client covers non-loopback passthrough and browser-open failure paths', async () => {
-  const { resolveDeviceSyncBaseUrl, createDeviceSyncClient } = await import(
-    '../src/device-sync-client.ts'
-  )
-
   assert.throws(
     () =>
       resolveDeviceSyncBaseUrl('http://[::1', {}, null),
@@ -108,8 +113,7 @@ test('device sync client covers non-loopback passthrough and browser-open failur
   const spawn = vi.fn(() => {
     throw new Error('missing browser launcher')
   })
-  vi.doMock('node:child_process', () => ({ spawn }))
-  const dynamicModule = await import('../src/device-sync-client.ts')
+  const dynamicModule = await loadDeviceSyncClientWithMockedSpawn(spawn)
   const browserClient = dynamicModule.createDeviceSyncClient({
     baseUrl: 'http://127.0.0.1:8788',
     fetchImpl: async () =>
