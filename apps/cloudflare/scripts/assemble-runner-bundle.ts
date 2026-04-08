@@ -15,37 +15,43 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { resolveCloudflareDeployPaths } from "../src/deploy-automation.js";
+import { resolveCloudflareDeployPaths } from "./deploy-automation.js";
 import {
+  buildHostedRunnerRuntimeArtifactPackageJson,
   buildRunnerVaultCliArtifactPackageJson,
+  hostedRunnerBuildPackageNames,
+  hostedRunnerRuntimeDistDirectoryName,
+  hostedRunnerRuntimePackageName,
+  hostedRunnerWorkspacePackageNames,
+  hostedRunnerWorkerDependencyNames,
+  runnerBundleDirectoryName,
   runnerVaultCliArtifactDependencyNames,
   runnerVaultCliArtifactPackageName,
-} from "../src/runner-bundle-contract.js";
+  runnerVaultCliArtifactWorkspacePackageNames,
+} from "./runner-bundle-contract.js";
 
 import { resolvePnpmCommand } from "./wrangler-runner.js";
 
-interface WorkspacePackageInfo {
-  dir: string;
-  manifest: WorkspacePackageManifest;
-}
-
 interface WorkspacePackageManifest {
   dependencies?: Record<string, string>;
+  engines?: Record<string, string>;
+  exports?: Record<string, unknown> | string;
+  license?: string;
+  main?: string;
   name?: string;
   optionalDependencies?: Record<string, string>;
+  private?: boolean;
+  type?: string;
+  version?: string;
 }
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const appDir = path.resolve(scriptDir, "..");
 const repoRoot = path.resolve(appDir, "../..");
 const workspaceCliPackageDir = path.join(repoRoot, "packages", "cli");
-const workspaceRootDirs = [
-  path.join(repoRoot, "apps"),
-  path.join(repoRoot, "packages"),
-] as const;
 const runnerBundleDeployRoot = path.join(
   resolveCloudflareDeployPaths().deployDir,
-  "runner-bundle",
+  runnerBundleDirectoryName,
 );
 const runnerBundleDisplayRoot =
   path.relative(appDir, runnerBundleDeployRoot) || runnerBundleDeployRoot;
@@ -57,56 +63,31 @@ async function assembleRunnerBundle(): Promise<void> {
   const stagingRoot = await mkdtemp(
     path.join(tmpdir(), "murph-cloudflare-runner-bundle-"),
   );
-  const stagingBundleDir = path.join(stagingRoot, "runner-bundle");
+  const stagingBundleDir = path.join(stagingRoot, runnerBundleDirectoryName);
   const tarballsDir = path.join(stagingRoot, "tarballs");
-  const workspacePackages = await loadWorkspacePackageIndex();
-  const cloudflarePackageName = "@murphai/cloudflare-runner";
-  const runtimeWorkspaceClosure = await collectWorkspaceRuntimeClosure(
-    cloudflarePackageName,
-    workspacePackages,
-  );
-  const runnerCliWorkspacePackages = await collectWorkspacePackageNamesFromRoots(
-    runnerVaultCliArtifactDependencyNames,
-    workspacePackages,
-  );
-  const runnerCliBuildWorkspacePackages =
-    await collectWorkspacePackageNamesFromRoots(
-      ["@murphai/murph"],
-      workspacePackages,
-    );
   const packedWorkspacePackageNames = [...new Set([
-    cloudflarePackageName,
-    ...runtimeWorkspaceClosure,
-    ...runnerCliWorkspacePackages,
+    ...hostedRunnerWorkspacePackageNames,
+    ...runnerVaultCliArtifactWorkspacePackageNames,
   ])].sort();
-  const workspacePackagesToBuild = [...new Set([
-    ...packedWorkspacePackageNames,
-    ...runnerCliBuildWorkspacePackages,
-  ])];
 
   try {
-    await buildWorkspacePackagesForAssembly(
-      workspacePackagesToBuild,
-      workspacePackages,
-    );
+    await buildHostedRunnerWorkspaceArtifacts(hostedRunnerBuildPackageNames);
+    await runCommand(["build"], { cwd: appDir });
+    await stageHostedRunnerRuntimeArtifact(stagingBundleDir);
     await mkdir(tarballsDir, { recursive: true });
-    const tarballPaths = await packWorkspaceRuntimePackages(
+    const tarballPaths = await packWorkspacePackageArtifacts(
       packedWorkspacePackageNames,
       tarballsDir,
-    );
-    await extractTarball(
-      tarballPaths.get(cloudflarePackageName) ?? null,
-      stagingBundleDir,
     );
     await installPackedRunnerDependencies(
       stagingBundleDir,
       tarballPaths,
-      runtimeWorkspaceClosure,
+      hostedRunnerWorkspacePackageNames,
     );
     await stageRunnerVaultCliArtifact(
       stagingBundleDir,
       tarballPaths,
-      runnerCliWorkspacePackages,
+      runnerVaultCliArtifactWorkspacePackageNames,
     );
     await pruneRunnerBundle(stagingBundleDir);
     await rewriteRuntimePackageManifest(stagingBundleDir);
@@ -124,122 +105,60 @@ async function assembleRunnerBundle(): Promise<void> {
   }
 }
 
-async function loadWorkspacePackageIndex(): Promise<
-  Map<string, WorkspacePackageInfo>
-> {
-  const packages = new Map<string, WorkspacePackageInfo>();
+async function buildHostedRunnerWorkspaceArtifacts(
+  packageNames: readonly string[],
+): Promise<void> {
+  const recursiveBuildArgs = [
+    "recursive",
+    "--workspace-concurrency=1",
+    ...packageNames.flatMap((packageName) => ["--filter", packageName]),
+    "run",
+    "build",
+  ];
 
-  for (const rootDir of workspaceRootDirs) {
-    const entries = await readdir(rootDir, { withFileTypes: true });
-
-    for (const entry of entries) {
-      if (!entry.isDirectory()) {
-        continue;
-      }
-
-      const packageDir = path.join(rootDir, entry.name);
-      const manifestPath = path.join(packageDir, "package.json");
-      let manifestRaw: string;
-
-      try {
-        manifestRaw = await readFile(manifestPath, "utf8");
-      } catch (error) {
-        if (isMissingFileError(error)) {
-          continue;
-        }
-
-        throw error;
-      }
-
-      const manifest = JSON.parse(manifestRaw) as WorkspacePackageManifest;
-
-      if (!manifest.name) {
-        continue;
-      }
-
-      packages.set(manifest.name, {
-        dir: packageDir,
-        manifest,
-      });
-    }
-  }
-
-  return packages;
+  await runCommand(recursiveBuildArgs, { cwd: repoRoot });
 }
 
-async function collectWorkspaceRuntimeClosure(
-  rootPackageName: string,
-  workspacePackages: Map<string, WorkspacePackageInfo>,
-): Promise<string[]> {
-  return collectWorkspacePackageNamesFromRoots(
-    [rootPackageName],
-    workspacePackages,
-    { includeRootPackages: false },
+async function stageHostedRunnerRuntimeArtifact(
+  bundleDir: string,
+): Promise<void> {
+  const runtimePackageJson = JSON.parse(
+    await readFile(path.join(appDir, "package.json"), "utf8"),
+  ) as WorkspacePackageManifest;
+  const runtimeDistDir = path.join(appDir, hostedRunnerRuntimeDistDirectoryName);
+
+  await rm(bundleDir, { force: true, recursive: true });
+  await mkdir(bundleDir, { recursive: true });
+  await cp(runtimeDistDir, path.join(bundleDir, hostedRunnerRuntimeDistDirectoryName), {
+    force: true,
+    recursive: true,
+  });
+
+  await writeFile(
+    path.join(bundleDir, "package.json"),
+    `${JSON.stringify(
+      buildHostedRunnerRuntimeArtifactPackageJson({
+        dependencies: resolveDeclaredDependencySpecs(
+          hostedRunnerWorkerDependencyNames,
+          runtimePackageJson,
+        ),
+        engines: runtimePackageJson.engines,
+        exports: runtimePackageJson.exports,
+        license: runtimePackageJson.license ?? "Apache-2.0",
+        main: runtimePackageJson.main,
+        name: runtimePackageJson.name ?? hostedRunnerRuntimePackageName,
+        private: runtimePackageJson.private ?? true,
+        type: runtimePackageJson.type ?? "module",
+        version: runtimePackageJson.version ?? "0.0.0",
+      }),
+      null,
+      2,
+    )}\n`,
+    "utf8",
   );
 }
 
-async function collectWorkspacePackageNamesFromRoots(
-  rootPackageNames: readonly string[],
-  workspacePackages: Map<string, WorkspacePackageInfo>,
-  options: {
-    includeRootPackages?: boolean;
-  } = {
-    includeRootPackages: true,
-  },
-): Promise<string[]> {
-  const closure = new Set<string>();
-
-  function visit(packageName: string): void {
-    const packageInfo = workspacePackages.get(packageName);
-
-    if (!packageInfo || closure.has(packageName)) {
-      return;
-    }
-
-    closure.add(packageName);
-
-    for (const [dependencyName, specifier] of iterateWorkspaceDependencyEntries(
-      packageInfo.manifest,
-    )) {
-      if (!specifier.startsWith("workspace:")) {
-        continue;
-      }
-
-      visit(dependencyName);
-    }
-  }
-
-  for (const packageName of rootPackageNames) {
-    visit(packageName);
-  }
-
-  if (!options.includeRootPackages) {
-    for (const packageName of rootPackageNames) {
-      closure.delete(packageName);
-    }
-  }
-
-  return [...closure].sort();
-}
-
-function* iterateWorkspaceDependencyEntries(
-  manifest: WorkspacePackageManifest,
-): Iterable<[string, string]> {
-  for (const dependencyGroup of [
-    manifest.dependencies,
-    manifest.optionalDependencies,
-  ]) {
-    if (!dependencyGroup) {
-      continue;
-    }
-
-    for (const entry of Object.entries(dependencyGroup)) {
-      yield entry;
-    }
-  }
-}
-
-async function packWorkspaceRuntimePackages(
+async function packWorkspacePackageArtifacts(
   packageNames: string[],
   tarballsDir: string,
 ): Promise<Map<string, string>> {
@@ -253,73 +172,6 @@ async function packWorkspaceRuntimePackages(
   }
 
   return tarballs;
-}
-
-async function buildWorkspacePackagesForAssembly(
-  packageNames: readonly string[],
-  workspacePackages: Map<string, WorkspacePackageInfo>,
-): Promise<void> {
-  const buildOrder = topologicallySortWorkspacePackages(
-    packageNames,
-    workspacePackages,
-  );
-
-  for (const packageName of buildOrder) {
-    await runCommand(["--dir", "../..", "--filter", packageName, "build"], {
-      cwd: appDir,
-    });
-  }
-}
-
-function topologicallySortWorkspacePackages(
-  packageNames: readonly string[],
-  workspacePackages: Map<string, WorkspacePackageInfo>,
-): string[] {
-  const targetPackages = new Set(packageNames);
-  const visiting = new Set<string>();
-  const visited = new Set<string>();
-  const ordered: string[] = [];
-
-  function visit(packageName: string): void {
-    if (visited.has(packageName)) {
-      return;
-    }
-
-    if (visiting.has(packageName)) {
-      throw new Error(
-        `Detected a cycle while preparing the Cloudflare runner build closure: ${packageName}.`,
-      );
-    }
-
-    const packageInfo = workspacePackages.get(packageName);
-
-    if (!packageInfo) {
-      throw new Error(`Could not resolve workspace package ${packageName}.`);
-    }
-
-    visiting.add(packageName);
-
-    for (const [dependencyName, specifier] of iterateWorkspaceDependencyEntries(
-      packageInfo.manifest,
-    )) {
-      if (
-        specifier.startsWith("workspace:") &&
-        targetPackages.has(dependencyName)
-      ) {
-        visit(dependencyName);
-      }
-    }
-
-    visiting.delete(packageName);
-    visited.add(packageName);
-    ordered.push(packageName);
-  }
-
-  for (const packageName of targetPackages) {
-    visit(packageName);
-  }
-
-  return ordered;
 }
 
 async function packWorkspacePackage(
@@ -351,29 +203,10 @@ async function packWorkspacePackage(
   return path.join(tarballsDir, tarballName);
 }
 
-async function extractTarball(
-  tarballPath: string | null,
-  destinationDir: string,
-): Promise<void> {
-  if (tarballPath === null) {
-    throw new Error(
-      "Missing tarball path for Cloudflare runner bundle assembly.",
-    );
-  }
-
-  await rm(destinationDir, { force: true, recursive: true });
-  await mkdir(destinationDir, { recursive: true });
-  await runProcess(
-    "tar",
-    ["-xzf", tarballPath, "-C", destinationDir, "--strip-components=1"],
-    { cwd: repoRoot },
-  );
-}
-
 async function installPackedRunnerDependencies(
   bundleDir: string,
   tarballPaths: Map<string, string>,
-  runtimeWorkspaceClosure: string[],
+  runtimeWorkspaceClosure: readonly string[],
 ): Promise<void> {
   const packageJsonPath = path.join(bundleDir, "package.json");
   const packageJson = JSON.parse(
@@ -439,6 +272,30 @@ function buildWorkspaceTarballOverrides(
       ];
     }),
   );
+}
+
+function resolveDeclaredDependencySpecs<const TDependencyNames extends readonly string[]>(
+  dependencyNames: TDependencyNames,
+  manifest: WorkspacePackageManifest,
+): Record<TDependencyNames[number], string> {
+  const dependencies = {} as Record<TDependencyNames[number], string>;
+
+  for (const dependencyName of dependencyNames) {
+    const declaredSpecifier =
+      manifest.dependencies?.[dependencyName] ??
+      manifest.optionalDependencies?.[dependencyName] ??
+      null;
+
+    if (declaredSpecifier === null) {
+      throw new Error(
+        `Could not resolve a declared specifier for ${dependencyName}.`,
+      );
+    }
+
+    dependencies[dependencyName as TDependencyNames[number]] = declaredSpecifier;
+  }
+
+  return dependencies;
 }
 
 function rewriteDependencySpecs(
@@ -559,7 +416,10 @@ async function materializeFinalRunnerBundle(
   const preparedParentDir = await mkdtemp(
     path.join(finalParentDir, ".runner-bundle-prepared-"),
   );
-  const preparedBundleDir = path.join(preparedParentDir, "runner-bundle");
+  const preparedBundleDir = path.join(
+    preparedParentDir,
+    runnerBundleDirectoryName,
+  );
 
   try {
     await prepareBundleReplica(stagingBundleDir, preparedBundleDir);
@@ -774,7 +634,7 @@ async function resolveInstalledBundleDependencyVersions(
 async function stageRunnerVaultCliArtifact(
   bundleDir: string,
   tarballPaths: Map<string, string>,
-  runnerCliWorkspacePackages: string[],
+  runnerCliWorkspacePackages: readonly string[],
 ): Promise<void> {
   const cliPackageJson = JSON.parse(
     await readFile(path.join(workspaceCliPackageDir, "package.json"), "utf8"),
@@ -805,7 +665,7 @@ async function stageRunnerVaultCliArtifact(
   );
   const artifactInstallPackageJson = {
     ...buildRunnerVaultCliArtifactPackageJson({
-      dependencies: resolvePackedDependencySpecs(
+      dependencies: resolveStagedDependencySpecs(
         runnerVaultCliArtifactDependencyNames,
         artifactWorkspaceTarballOverrides,
         cliPackageJson,
@@ -841,12 +701,12 @@ async function stageRunnerVaultCliArtifact(
   );
 }
 
-function resolvePackedDependencySpecs<const TDependencyNames extends readonly string[]>(
+function resolveStagedDependencySpecs<const TDependencyNames extends readonly string[]>(
   dependencyNames: TDependencyNames,
   workspaceTarballOverrides: Record<string, string>,
   manifest: WorkspacePackageManifest,
 ): Record<TDependencyNames[number], string> {
-  const dependencies = {} as Record<TDependencyNames[number], string>;
+  const dependencies = resolveDeclaredDependencySpecs(dependencyNames, manifest);
 
   for (const dependencyName of dependencyNames) {
     const workspaceSpecifier = workspaceTarballOverrides[dependencyName];
@@ -854,21 +714,7 @@ function resolvePackedDependencySpecs<const TDependencyNames extends readonly st
     if (typeof workspaceSpecifier === "string") {
       dependencies[dependencyName as TDependencyNames[number]] =
         workspaceSpecifier;
-      continue;
     }
-
-    const declaredSpecifier =
-      manifest.dependencies?.[dependencyName] ??
-      manifest.optionalDependencies?.[dependencyName] ??
-      null;
-
-    if (declaredSpecifier === null) {
-      throw new Error(
-        `Could not resolve a declared specifier for ${dependencyName}.`,
-      );
-    }
-
-    dependencies[dependencyName as TDependencyNames[number]] = declaredSpecifier;
   }
 
   return dependencies;
