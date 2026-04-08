@@ -1,6 +1,6 @@
 # Get packages/inbox-services fully green
 
-Status: active
+Status: completed
 Created: 2026-04-08
 Updated: 2026-04-08
 
@@ -39,3 +39,4 @@ Updated: 2026-04-08
 - `pnpm --dir packages/inbox-services test:coverage`
 - `pnpm --dir packages/inbox-services typecheck`
 - `pnpm typecheck`
+Completed: 2026-04-08
