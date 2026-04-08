@@ -114,6 +114,18 @@ test('runRunnerVaultCliEntrypoint forwards the exit hook into serve options', as
     use: vi.fn(),
   }
   const loadCliEnvFiles = vi.fn()
+  const createCliServeOptions = vi.fn(
+    (providedExit?: (code?: number) => void) => ({
+      env: process.env,
+      ...(providedExit
+        ? {
+            exit(code: number) {
+              providedExit(code)
+            },
+          }
+        : {}),
+    }),
+  )
   const applyDefaultVaultToArgs = vi.fn(
     (argv: readonly string[], defaultVault: string | null) =>
       defaultVault === null ? [...argv] : [...argv, '--vault', defaultVault],
@@ -151,6 +163,7 @@ test('runRunnerVaultCliEntrypoint forwards the exit hook into serve options', as
     createIntegratedInboxServices,
   }))
   vi.doMock('../src/cli-entry.js', () => ({
+    createCliServeOptions,
     loadCliEnvFiles,
   }))
   vi.doMock('../src/incur-error-bridge.js', () => ({
@@ -169,6 +182,7 @@ test('runRunnerVaultCliEntrypoint forwards the exit hook into serve options', as
   })
 
   assert.equal(loadCliEnvFiles.mock.calls.length, 1)
+  assert.deepEqual(createCliServeOptions.mock.calls, [[exit]])
   assert.equal(resolveOperatorHomeDirectory.mock.calls.length, 1)
   assert.deepEqual(applyDefaultVaultToArgs.mock.calls, [
     [['inbox', 'run'], '/vaults/default'],

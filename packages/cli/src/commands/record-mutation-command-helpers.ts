@@ -112,23 +112,11 @@ export function createEntityEditCommandConfig<TResult, TInput extends EntityEdit
       }
       requestId: string | null
     }) {
-      const lookup = String(context.args[config.arg.name] ?? '')
-
-      const input = {
-        vault: context.options.vault,
+      const input = buildEntityEditCommandInput({
+        lookup: String(context.args[config.arg.name] ?? ''),
+        options: context.options,
         requestId: context.requestId,
-        lookup,
-        inputFile:
-          typeof context.options.input === 'string'
-            ? normalizeInputFileOption(context.options.input)
-            : undefined,
-        set: Array.isArray(context.options.set)
-          ? context.options.set.filter((value): value is string => typeof value === 'string')
-          : undefined,
-        clear: Array.isArray(context.options.clear)
-          ? context.options.clear.filter((value): value is string => typeof value === 'string')
-          : undefined,
-      }
+      })
 
       return config.run(
         config.buildInput
@@ -158,10 +146,7 @@ export function createEventBackedEntityEditCommandConfig<TResult>(
     buildInput(input, options) {
       return {
         ...input,
-        dayKeyPolicy:
-          options.dayKeyPolicy === 'keep' || options.dayKeyPolicy === 'recompute'
-            ? options.dayKeyPolicy
-            : undefined,
+        dayKeyPolicy: normalizeDayKeyPolicy(options.dayKeyPolicy),
       }
     },
   })
@@ -293,4 +278,40 @@ export function createDirectEntityDeleteCommandDefinition<TResult>(
       })
     },
   }
+}
+
+function buildEntityEditCommandInput(input: {
+  lookup: string
+  options: {
+    vault: string
+    input?: string
+    set?: string[]
+    clear?: string[]
+  }
+  requestId: string | null
+}): EntityEditCommandInput {
+  return {
+    vault: input.options.vault,
+    requestId: input.requestId,
+    lookup: input.lookup,
+    inputFile: normalizeEditInputFile(input.options.input),
+    set: normalizeStringListOption(input.options.set),
+    clear: normalizeStringListOption(input.options.clear),
+  }
+}
+
+function normalizeEditInputFile(value: unknown): string | undefined {
+  return typeof value === 'string' ? normalizeInputFileOption(value) : undefined
+}
+
+function normalizeStringListOption(value: unknown): string[] | undefined {
+  return Array.isArray(value)
+    ? value.filter((entry): entry is string => typeof entry === 'string')
+    : undefined
+}
+
+function normalizeDayKeyPolicy(
+  value: unknown,
+): EventBackedEntityEditCommandInput['dayKeyPolicy'] {
+  return value === 'keep' || value === 'recompute' ? value : undefined
 }
