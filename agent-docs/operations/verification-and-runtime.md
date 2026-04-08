@@ -48,6 +48,12 @@ When using scoped verification, handoff must include:
 - the prior unrelated failing command(s) and target(s)
 - the focused commands or direct scenario checks that were run instead
 
+## Pnpm Guard
+
+- Do not add `--config.verify-deps-before-run=false` to repo verification commands or package-local verification commands.
+- If `pnpm` reports `ERR_PNPM_VERIFY_DEPS_BEFORE_RUN`, treat that as a real workspace-state problem to fix or report, not a guard to bypass.
+- Verification evidence in plans, prompts, and handoff should use the normal command forms unless a user explicitly asks for a different command shape.
+
 ## Low-Risk Fast Path
 
 Use the low-risk repo-internal workflow/tooling fast path when all of the following are true:
