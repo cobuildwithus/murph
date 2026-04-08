@@ -250,46 +250,35 @@ function buildHostedMemberIdentityCreateData(
   input: HostedMemberIdentityWriteInput,
 ): Prisma.HostedMemberIdentityUncheckedCreateInput {
   return {
-    maskedPhoneNumberHint: input.maskedPhoneNumberHint,
     memberId: input.memberId,
-    phoneLookupKey: input.phoneLookupKey,
-    phoneNumberVerifiedAt: input.phoneNumberVerifiedAt,
-    privyUserLookupKey: createHostedPrivyUserLookupKey(input.privyUserId),
-    ...buildHostedMemberIdentityPrivateColumns({
-      memberId: input.memberId,
-      phoneNumber: input.phoneNumber,
-      privyUserId: input.privyUserId,
-      signupPhoneCodeSendAttemptId: input.signupPhoneCodeSendAttemptId,
-      signupPhoneCodeSendAttemptStartedAt: input.signupPhoneCodeSendAttemptStartedAt,
-      signupPhoneCodeSentAt: input.signupPhoneCodeSentAt,
-      signupPhoneNumber: input.signupPhoneNumber,
-      walletAddress: input.walletAddress,
-    }),
-    walletAddressLookupKey: createHostedWalletAddressLookupKey(input.walletAddress),
-    walletChainType: input.walletChainType,
-    walletCreatedAt: input.walletCreatedAt,
-    walletProvider: input.walletProvider,
+    ...buildHostedMemberIdentityMutationData(input),
   };
 }
 
 function buildHostedMemberIdentityUpdateData(
   input: HostedMemberIdentityWriteInput,
 ): Prisma.HostedMemberIdentityUncheckedUpdateInput {
+  return buildHostedMemberIdentityMutationData(input);
+}
+
+function buildHostedMemberIdentityMutationData(input: HostedMemberIdentityWriteInput) {
+  const privateColumns = buildHostedMemberIdentityPrivateColumns({
+    memberId: input.memberId,
+    phoneNumber: input.phoneNumber,
+    privyUserId: input.privyUserId,
+    signupPhoneCodeSendAttemptId: input.signupPhoneCodeSendAttemptId,
+    signupPhoneCodeSendAttemptStartedAt: input.signupPhoneCodeSendAttemptStartedAt,
+    signupPhoneCodeSentAt: input.signupPhoneCodeSentAt,
+    signupPhoneNumber: input.signupPhoneNumber,
+    walletAddress: input.walletAddress,
+  });
+
   return {
     maskedPhoneNumberHint: input.maskedPhoneNumberHint,
     phoneLookupKey: input.phoneLookupKey,
     phoneNumberVerifiedAt: input.phoneNumberVerifiedAt,
     privyUserLookupKey: createHostedPrivyUserLookupKey(input.privyUserId),
-    ...buildHostedMemberIdentityPrivateColumns({
-      memberId: input.memberId,
-      phoneNumber: input.phoneNumber,
-      privyUserId: input.privyUserId,
-      signupPhoneCodeSendAttemptId: input.signupPhoneCodeSendAttemptId,
-      signupPhoneCodeSendAttemptStartedAt: input.signupPhoneCodeSendAttemptStartedAt,
-      signupPhoneCodeSentAt: input.signupPhoneCodeSentAt,
-      signupPhoneNumber: input.signupPhoneNumber,
-      walletAddress: input.walletAddress,
-    }),
+    ...privateColumns,
     walletAddressLookupKey: createHostedWalletAddressLookupKey(input.walletAddress),
     walletChainType: input.walletChainType,
     walletCreatedAt: input.walletCreatedAt,

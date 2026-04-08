@@ -30,7 +30,6 @@ import {
   readHostedMemberIdentity,
   upsertHostedMemberIdentity,
 } from "./hosted-member-identity-store";
-import { upsertHostedMemberLinqChatBinding } from "./hosted-member-routing-store";
 
 export async function ensureHostedMemberForPhone(input: {
   phoneNumber: string;
@@ -60,6 +59,7 @@ export async function ensureHostedMemberForPhone(input: {
       });
     }
 
+    const phoneIdentityFields = buildHostedMemberPhoneIdentityFields(input.phoneNumber);
     const memberId = generateHostedMemberId();
 
     try {
@@ -69,7 +69,7 @@ export async function ensureHostedMemberForPhone(input: {
         prisma: tx,
       });
       await upsertHostedMemberIdentity({
-        ...buildHostedMemberPhoneIdentity(input.phoneNumber),
+        ...phoneIdentityFields,
         memberId,
         prisma: tx,
         signupPhoneCodeSendAttemptId: null,
@@ -81,7 +81,7 @@ export async function ensureHostedMemberForPhone(input: {
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
         const concurrentMember = await findHostedMemberByPhoneLookupKey({
-          phoneLookupKey: buildHostedMemberPhoneIdentity(input.phoneNumber).phoneLookupKey,
+          phoneLookupKey: phoneIdentityFields.phoneLookupKey,
           prisma: tx,
         });
 
@@ -112,7 +112,7 @@ async function refreshHostedMemberForPhone(input: {
   });
 
   await upsertHostedMemberIdentity({
-    ...buildHostedMemberPhoneIdentity(input.phoneNumber),
+    ...buildHostedMemberPhoneIdentityFields(input.phoneNumber),
     memberId: input.member.id,
     phoneNumberVerifiedAt: currentIdentity?.phoneNumberVerifiedAt ?? null,
     prisma: input.prisma,
@@ -129,7 +129,7 @@ async function refreshHostedMemberForPhone(input: {
   return input.member;
 }
 
-function buildHostedMemberPhoneIdentity(phoneNumber: string) {
+function buildHostedMemberPhoneIdentityFields(phoneNumber: string) {
   const maskedPhoneNumberHint = readHostedPhoneHint(phoneNumber);
   const phoneLookupKey = createHostedPhoneLookupKey(phoneNumber);
 
@@ -154,7 +154,7 @@ function buildHostedMemberPhoneIdentity(phoneNumber: string) {
   };
 }
 
-function buildHostedMemberWalletStorage(input: {
+function buildHostedMemberWalletIdentityFields(input: {
   existingWalletAddress?: string | null;
   existingWalletChainType?: string | null;
   existingWalletCreatedAt?: Date | null;
@@ -196,18 +196,6 @@ export function hasHostedMemberPrivyIdentity(member: {
   return Boolean(member.privyUserId ?? member.privyUserLookupKey);
 }
 
-export async function persistHostedMemberLinqChatBinding(input: {
-  linqChatId: string | null;
-  memberId: string;
-  prisma: HostedOnboardingPrismaClient;
-}): Promise<void> {
-  await upsertHostedMemberLinqChatBinding({
-    linqChatId: input.linqChatId,
-    memberId: input.memberId,
-    prisma: input.prisma,
-  });
-}
-
 export async function ensureHostedMemberForPrivyIdentity(input: {
   identity: HostedPrivyIdentity;
   now: Date;
@@ -230,7 +218,7 @@ export async function ensureHostedMemberForPrivyIdentity(input: {
         prisma: tx,
       });
       await upsertHostedMemberIdentity({
-        ...buildHostedMemberPhoneIdentity(input.identity.phone.number),
+        ...buildHostedMemberPhoneIdentityFields(input.identity.phone.number),
         memberId,
         phoneNumberVerifiedAt: input.now,
         prisma: tx,
@@ -239,7 +227,7 @@ export async function ensureHostedMemberForPrivyIdentity(input: {
         signupPhoneCodeSendAttemptStartedAt: null,
         signupPhoneCodeSentAt: null,
         signupPhoneNumber: null,
-        ...buildHostedMemberWalletStorage({
+        ...buildHostedMemberWalletIdentityFields({
           now: input.now,
           wallet: input.identity.wallet,
         }),
@@ -334,7 +322,7 @@ export async function reconcileHostedPrivyIdentityOnMember(input: {
 
     try {
       await upsertHostedMemberIdentity({
-        ...buildHostedMemberPhoneIdentity(input.identity.phone.number),
+        ...buildHostedMemberPhoneIdentityFields(input.identity.phone.number),
         memberId: currentMember.id,
         phoneNumberVerifiedAt: input.now,
         prisma: tx,
@@ -343,7 +331,7 @@ export async function reconcileHostedPrivyIdentityOnMember(input: {
         signupPhoneCodeSendAttemptStartedAt: null,
         signupPhoneCodeSentAt: null,
         signupPhoneNumber: null,
-        ...buildHostedMemberWalletStorage({
+        ...buildHostedMemberWalletIdentityFields({
           existingWalletAddress: currentIdentity?.walletAddress,
           existingWalletChainType: currentIdentity?.walletChainType,
           existingWalletCreatedAt: currentIdentity?.walletCreatedAt,

@@ -118,6 +118,12 @@ export async function upsertHostedMemberLinqChatBinding(input: {
     return;
   }
 
+  const routingPrivateColumns = buildHostedMemberRoutingPrivateColumns({
+    linqChatId: input.linqChatId,
+    memberId: input.memberId,
+    telegramUserId: null,
+  });
+
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
       await withHostedOnboardingTransaction(input.prisma, async (tx) => {
@@ -141,21 +147,13 @@ export async function upsertHostedMemberLinqChatBinding(input: {
             memberId: input.memberId,
           },
           create: {
-            ...buildHostedMemberRoutingPrivateColumns({
-              linqChatId: input.linqChatId,
-              memberId: input.memberId,
-              telegramUserId: null,
-            }),
+            ...routingPrivateColumns,
             memberId: input.memberId,
             linqChatLookupKey,
             telegramUserLookupKey: null,
           },
           update: {
-            linqChatIdEncrypted: buildHostedMemberRoutingPrivateColumns({
-              linqChatId: input.linqChatId,
-              memberId: input.memberId,
-              telegramUserId: null,
-            }).linqChatIdEncrypted,
+            linqChatIdEncrypted: routingPrivateColumns.linqChatIdEncrypted,
             linqChatLookupKey,
           },
         });
@@ -182,27 +180,25 @@ export async function upsertHostedMemberTelegramRoutingBinding(input: {
     throw new TypeError("Hosted Telegram routing requires a non-empty Telegram user id.");
   }
 
+  const routingPrivateColumns = buildHostedMemberRoutingPrivateColumns({
+    linqChatId: null,
+    memberId: input.memberId,
+    telegramUserId: input.telegramUserId,
+  });
+
   await withHostedOnboardingTransaction(input.prisma, async (tx) => {
     await tx.hostedMemberRouting.upsert({
       where: {
         memberId: input.memberId,
       },
       create: {
-        ...buildHostedMemberRoutingPrivateColumns({
-          linqChatId: null,
-          memberId: input.memberId,
-          telegramUserId: input.telegramUserId,
-        }),
+        ...routingPrivateColumns,
         memberId: input.memberId,
         linqChatLookupKey: null,
         telegramUserLookupKey,
       },
       update: {
-        telegramUserIdEncrypted: buildHostedMemberRoutingPrivateColumns({
-          linqChatId: null,
-          memberId: input.memberId,
-          telegramUserId: input.telegramUserId,
-        }).telegramUserIdEncrypted,
+        telegramUserIdEncrypted: routingPrivateColumns.telegramUserIdEncrypted,
         telegramUserLookupKey,
       },
     });
