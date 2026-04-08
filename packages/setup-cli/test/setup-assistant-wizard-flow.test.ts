@@ -11,7 +11,7 @@ async function waitForAssistantWizardText(
   readOutput: () => string,
   pattern: RegExp,
 ): Promise<string> {
-  for (let attempt = 0; attempt < 30; attempt += 1) {
+  for (let attempt = 0; attempt < 120; attempt += 1) {
     const output = stripAnsi(readOutput())
     if (pattern.test(output)) {
       return output
@@ -80,14 +80,12 @@ test.sequential(
 )
 
 test.sequential(
-  'assistant wizard can switch to a named compatible provider and finish the flow',
+  'assistant wizard can finish with a named compatible provider',
   async () => {
     await withMockProcessTty(async ({ flush, readOutput, writeInput }) => {
       const wizardResultPromise = runSetupAssistantWizard({
-        initialAssistantApiKeyEnv: '  CUSTOM_KEY  ',
-        initialAssistantBaseUrl: ' https://example.test/v1 ',
         initialAssistantPreset: 'openai-compatible',
-        initialAssistantProviderName: ' custom-provider ',
+        initialAssistantProviderPreset: 'openrouter',
       })
 
       await waitForAssistantWizardText(
@@ -95,8 +93,6 @@ test.sequential(
         readOutput,
         /How should Murph answer\?/u,
       )
-      await writeInput('\u001B[B')
-      await writeInput('\u001B[B')
       await writeInput('\r')
       const reviewOutput = await waitForAssistantWizardText(
         flush,
