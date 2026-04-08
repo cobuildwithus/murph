@@ -96,11 +96,6 @@
       "import": "./dist/operator-config.js",
       "default": "./dist/operator-config.js"
     },
-    "./runtime-errors": {
-      "types": "./dist/runtime-errors.d.ts",
-      "import": "./dist/runtime-errors.js",
-      "default": "./dist/runtime-errors.js"
-    },
     "./setup-cli-contracts": {
       "types": "./dist/setup-cli-contracts.d.ts",
       "import": "./dist/setup-cli-contracts.js",

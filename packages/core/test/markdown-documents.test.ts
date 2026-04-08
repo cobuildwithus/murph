@@ -150,7 +150,7 @@ describe("markdown document primitives", () => {
       route: created.record.route,
       continuityPolicy: created.record.continuityPolicy,
       status: created.record.status,
-      summary: created.record.summary,
+      summary: created.record.summary ?? undefined,
       tags: created.record.tags,
       allowSlugRename: true,
     });
