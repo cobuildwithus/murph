@@ -93,7 +93,39 @@ test("active invite state links to hosted settings with client navigation markup
   );
 
   assert.ok(markup.includes('href="/settings"'));
-  assert.match(markup, /Manage email settings/);
+  assert.match(markup, /Manage settings/);
+});
+
+test("activating invite state explains that payment finished and setup is still running", () => {
+  const markup = renderToStaticMarkup(
+    createElement(JoinInviteClient, {
+      initialStatus: createStatus({
+        session: {
+          authenticated: true,
+          expiresAt: null,
+          matchesInvite: true,
+        },
+        stage: "activating",
+      }),
+      inviteCode: "invite-code",
+      privyAppId: "cm_app_123",
+      shareCode: "share-code",
+      sharePreview: {
+        kinds: ["food"],
+        counts: {
+          foods: 1,
+          protocols: 0,
+          recipes: 0,
+          total: 1,
+        },
+        logMealAfterImport: false,
+      },
+    }),
+  );
+
+  assert.match(markup, /We’re setting up your account/);
+  assert.match(markup, /Payment received\. We&#x27;re setting up your account\./);
+  assert.match(markup, /We&#x27;ll add your shared bundle after setup finishes\./);
 });
 
 test("invite share preview renders the generic bundle copy from the tiny summary", () => {

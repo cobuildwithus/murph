@@ -8,6 +8,7 @@ import {
 import type { HostedInviteStatusPayload } from "./types";
 
 import { getPrisma } from "../prisma";
+import { isHostedMemberActivationPending } from "./activation-progress";
 import { readHostedPhoneHint } from "./contact-privacy";
 import { hostedOnboardingError } from "./errors";
 import { deriveHostedOnboardingStage } from "./lifecycle";
@@ -64,6 +65,13 @@ export async function getHostedInviteStatus(input: {
 
   const sessionMatchesInvite = input.authenticatedMember?.id === invite.memberId;
   const inviteIdentity = requireHostedInviteMemberIdentity(invite.member);
+  const activationPending = sessionMatchesInvite
+    ? await isHostedMemberActivationPending({
+        billingStatus: invite.member.billingStatus,
+        memberId: invite.memberId,
+        prisma,
+      })
+    : false;
 
   return {
     capabilities: {
@@ -81,6 +89,7 @@ export async function getHostedInviteStatus(input: {
       matchesInvite: Boolean(sessionMatchesInvite),
     },
     stage: deriveHostedOnboardingStage({
+      activationPending,
       billingStatus: invite.member.billingStatus,
       expiresAt: invite.expiresAt,
       now,

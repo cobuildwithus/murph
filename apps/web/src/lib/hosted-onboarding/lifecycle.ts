@@ -7,6 +7,7 @@ export type HostedOnboardingStage =
   | "expired"
   | "verify"
   | "checkout"
+  | "activating"
   | "blocked"
   | "active";
 
@@ -18,6 +19,7 @@ export function requiresHostedBillingCheckout(
 }
 
 export function deriveHostedOnboardingStage(input: {
+  activationPending?: boolean;
   billingStatus: HostedBillingStatus;
   expiresAt: Date;
   now: Date;
@@ -32,6 +34,14 @@ export function deriveHostedOnboardingStage(input: {
     return "verify";
   }
 
+  if (isHostedMemberSuspended(input.suspendedAt)) {
+    return "blocked";
+  }
+
+  if (input.activationPending) {
+    return "activating";
+  }
+
   if (hasHostedMemberActiveAccess(input)) {
     return "active";
   }
@@ -44,11 +54,16 @@ export function deriveHostedOnboardingStage(input: {
 }
 
 export function deriveHostedPostVerificationStage(input: {
+  activationPending?: boolean;
   billingStatus: HostedBillingStatus;
   suspendedAt?: Date | null;
-}): "active" | "checkout" | "blocked" {
+}): "active" | "activating" | "checkout" | "blocked" {
   if (isHostedMemberSuspended(input.suspendedAt)) {
     return "blocked";
+  }
+
+  if (input.activationPending) {
+    return "activating";
   }
 
   if (input.billingStatus === HostedBillingStatus.active) {

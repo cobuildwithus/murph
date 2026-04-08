@@ -21,5 +21,5 @@ export interface HostedInviteStatusPayload {
 export interface HostedPrivyCompletionPayload {
   inviteCode: string;
   joinUrl: string;
-  stage: "checkout" | "blocked" | "active";
+  stage: "checkout" | "activating" | "blocked" | "active";
 }

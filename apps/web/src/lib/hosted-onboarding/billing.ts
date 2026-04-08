@@ -88,15 +88,8 @@ export function coerceStripeInvoiceSubscriptionId(
 }
 
 export function buildStripeSuccessUrl(baseUrl: string, inviteCode: string, shareCode?: string | null): string {
-  const params = new URLSearchParams({
-    session_id: "{CHECKOUT_SESSION_ID}",
-  });
-
-  if (shareCode) {
-    params.set("share", shareCode);
-  }
-
-  return `${baseUrl}/join/${encodeURIComponent(inviteCode)}/success?${params.toString()}`;
+  const shareParam = shareCode ? `&share=${encodeURIComponent(shareCode)}` : "";
+  return `${baseUrl}/join/${encodeURIComponent(inviteCode)}/success?session_id={CHECKOUT_SESSION_ID}${shareParam}`;
 }
 
 export function buildStripeCancelUrl(baseUrl: string, inviteCode: string, shareCode?: string | null): string {

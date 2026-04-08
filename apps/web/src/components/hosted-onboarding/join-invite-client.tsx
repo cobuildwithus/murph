@@ -4,6 +4,15 @@ import { usePrivy } from "@privy-io/react-auth";
 import Link from "next/link";
 import { startTransition, useEffect, useEffectEvent, useState } from "react";
 
+import {
+  ActivityIcon,
+  CheckCircleIcon,
+  LoaderCircleIcon,
+  MessageCircleIcon,
+  MoonIcon,
+  UtensilsIcon,
+} from "lucide-react";
+
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -18,6 +27,7 @@ import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/t
 
 import { requestHostedOnboardingJson } from "./client-api";
 import { HostedPhoneAuth } from "./hosted-phone-auth";
+import { fetchHostedInviteStatus, useHostedInviteStatusRefresh } from "./invite-status-client";
 
 interface JoinInviteClientProps {
   initialStatus: HostedInviteStatusPayload;
@@ -50,9 +60,6 @@ export function JoinInviteClient({
   const subtitle = resolveSubtitle(status);
   const acceptShareEffect = useEffectEvent(() => {
     void handleAcceptShare();
-  });
-  const refreshStatusEffect = useEffectEvent(() => {
-    void refreshStatus().catch(() => null);
   });
 
   useEffect(() => {
@@ -103,20 +110,17 @@ export function JoinInviteClient({
     };
   }, [inviteCode, shareCode, shareImportState]);
 
-  useEffect(() => {
-    if (!ready || !authenticated || status.session.authenticated) {
-      return;
-    }
-
-    refreshStatusEffect();
-  }, [authenticated, ready, status.session.authenticated]);
+  useHostedInviteStatusRefresh({
+    authenticated,
+    inviteCode,
+    onStatus: setStatus,
+    ready,
+    sessionAuthenticated: status.session.authenticated,
+    shouldPoll: status.stage === "activating",
+  });
 
   async function refreshStatus(): Promise<HostedInviteStatusPayload> {
-    const payload = await requestHostedOnboardingJson<HostedInviteStatusPayload>({
-      auth: "optional",
-      url: `/api/hosted-onboarding/invites/${encodeURIComponent(inviteCode)}/status`,
-    });
-
+    const payload = await fetchHostedInviteStatus(inviteCode);
     setStatus(payload);
     return payload;
   }
@@ -312,21 +316,63 @@ export function JoinInviteClient({
             </Button>
           ) : null}
 
+          {status.stage === "activating" ? (
+            <div className="rounded-xl border border-olive/20 bg-olive/5 px-5 py-4 text-olive">
+              <div className="flex items-start gap-3">
+                <LoaderCircleIcon className="mt-0.5 h-5 w-5 shrink-0 animate-spin" />
+                <div className="space-y-1">
+                  <p className="text-sm font-semibold">Payment received. We&apos;re setting up your account.</p>
+                  <p className="text-sm leading-relaxed">
+                    Keep this page open. Murph is finishing hosted activation now and will switch you through as soon
+                    as it&apos;s ready.
+                  </p>
+                  {sharePreview ? (
+                    <p className="text-sm leading-relaxed">
+                      We&apos;ll add your shared bundle after setup finishes.
+                    </p>
+                  ) : null}
+                </div>
+              </div>
+            </div>
+          ) : null}
+
           {status.stage === "active" ? (
-            <Alert className="border-green-200 bg-green-50 text-green-800">
-              <AlertTitle>Your hosted identity is active.</AlertTitle>
-              <AlertDescription>
-                Your hosted identity is active. Your phone-verified account is ready to use.
-              </AlertDescription>
-              <div className="mt-3 flex flex-wrap gap-3">
-                <Button render={<Link href="/settings" />} nativeButton={false} variant="outline" size="lg">
-                  Manage email settings
-                </Button>
-                {sharePreview ? (
-                  shareImportState === "completed" ? (
-                    <p>{describeHostedSharePreview(sharePreview)} has been added to this hosted vault.</p>
+            <div className="space-y-6">
+              <div className="flex items-center gap-3 rounded-xl border border-olive/20 bg-olive/5 px-5 py-4">
+                <CheckCircleIcon className="h-6 w-6 shrink-0 text-olive" />
+                <p className="text-sm leading-relaxed text-olive">
+                  You should receive a text message from Murph shortly. Just reply to start chatting.
+                </p>
+              </div>
+
+              <div>
+                <p className="mb-4 text-sm font-semibold uppercase tracking-[0.15em] text-olive">
+                  Things Murph can help with
+                </p>
+                <div className="grid gap-px overflow-hidden rounded-xl border border-stone-200 bg-stone-200 sm:grid-cols-2">
+                  {[
+                    { icon: UtensilsIcon, title: "Log meals & nutrition", body: "Text what you ate and Murph tracks it automatically." },
+                    { icon: MoonIcon, title: "Track sleep & recovery", body: "Syncs with Oura, WHOOP, and Garmin in the background." },
+                    { icon: MessageCircleIcon, title: "Ask health questions", body: "Plain-English answers grounded in your own data." },
+                    { icon: ActivityIcon, title: "Spot patterns", body: "Connects how you eat, sleep, and move to show what works." },
+                  ].map((item) => (
+                    <div key={item.title} className="flex gap-3 bg-white p-5">
+                      <item.icon className="mt-0.5 h-5 w-5 shrink-0 text-olive-light" />
+                      <div>
+                        <p className="text-sm font-semibold text-stone-900">{item.title}</p>
+                        <p className="mt-0.5 text-sm leading-relaxed text-stone-400">{item.body}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {sharePreview ? (
+                <div className="rounded-xl border border-green-200 bg-green-50 px-5 py-4 text-green-800">
+                  {shareImportState === "completed" ? (
+                    <p className="text-sm">{describeHostedSharePreview(sharePreview)} has been added to your account.</p>
                   ) : shareImportState === "processing" ? (
-                    <p>{describeHostedSharePreview(sharePreview)} is being added to this hosted vault.</p>
+                    <p className="text-sm">{describeHostedSharePreview(sharePreview)} is being added to your account.</p>
                   ) : (
                     <Button
                       type="button"
@@ -336,10 +382,14 @@ export function JoinInviteClient({
                     >
                       {pendingAction === "share" ? "Adding shared bundle..." : `Add ${describeHostedSharePreview(sharePreview).toLowerCase()}`}
                     </Button>
-                  )
-                ) : null}
-              </div>
-            </Alert>
+                  )}
+                </div>
+              ) : null}
+
+              <Button render={<Link href="/settings" />} nativeButton={false} variant="outline" size="lg">
+                Manage settings
+              </Button>
+            </div>
           ) : null}
         </CardContent>
       </Card>
@@ -373,10 +423,12 @@ function resolveTitle(status: HostedInviteStatusPayload): string {
       return "Finish joining Murph";
     case "checkout":
       return "One last step";
+    case "activating":
+      return "We’re setting up your account";
     case "blocked":
       return "This account is blocked";
     case "active":
-      return "You\u2019re in";
+      return "Welcome to Murph";
     default:
       return "Murph";
   }
@@ -392,10 +444,12 @@ function resolveSubtitle(status: HostedInviteStatusPayload): string {
       return "Verify the number that messaged Murph to finish joining.";
     case "checkout":
       return "Your phone is confirmed. Finish checkout to start using Murph.";
+    case "activating":
+      return "Your payment went through. Murph is finishing hosted activation now.";
     case "blocked":
       return "This hosted account cannot continue from the invite right now. Contact support to restore access.";
     case "active":
-      return "Your Murph account is ready.";
+      return "Congrats, you\u2019re all set. Here\u2019s what to expect next.";
     default:
       return "Murph signup";
   }
