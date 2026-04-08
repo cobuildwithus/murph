@@ -7,6 +7,7 @@ import type {
 } from "@murphai/runtime-state/node";
 
 import type {
+  HostedRuntimeEffectsPort,
   HostedRuntimeArtifactStore,
 } from "../src/hosted-runtime/platform.ts";
 
@@ -74,6 +75,26 @@ export function createHostedRuntimeArtifactStoreStub(initialEntries?: Record<str
     getCalls,
     putCalls,
     storedBytesByHash,
+  };
+}
+
+export function createHostedRuntimeEffectsPortStub(
+  overrides: Partial<HostedRuntimeEffectsPort> = {},
+): HostedRuntimeEffectsPort {
+  return {
+    async commit() {},
+    async deletePreparedSideEffect() {},
+    async readRawEmailMessage() {
+      return null;
+    },
+    async readSideEffect() {
+      return null;
+    },
+    async sendEmail() {},
+    async writeSideEffect(record) {
+      return record;
+    },
+    ...overrides,
   };
 }
 
