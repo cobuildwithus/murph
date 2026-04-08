@@ -1,7 +1,7 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { defineProject } from "vitest/config";
+import { defineConfig } from "vitest/config";
 
 import {
   createMurphVitestCoverage,
@@ -35,7 +35,7 @@ runtimeAliases.push({
   replacement: path.resolve(packageDir, "../runtime-state/src/node/index.ts"),
 })
 
-export default defineProject({
+export default defineConfig({
   resolve: {
     alias: runtimeAliases,
   },
@@ -47,7 +47,7 @@ export default defineProject({
     include: ["test/**/*.test.ts"],
     coverage: createMurphVitestCoverage({
       customProviderModule: resolveMurphVitestCoverageProviderModule(packageDir),
-      include: ["src/shared.ts", "src/store/permissions.ts"],
+      include: ["src/**/*.ts"],
     }),
   },
 });

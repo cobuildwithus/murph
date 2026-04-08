@@ -44,7 +44,7 @@ export default defineConfig({
     include: ['test/**/*.test.ts'],
     coverage: createMurphVitestCoverage({
       customProviderModule: resolveMurphVitestCoverageProviderModule(packageDir),
-      include: ['src/setup-wizard-core.ts'],
+      include: ['src/**/*.ts'],
     }),
   },
 })

@@ -29,6 +29,7 @@ const WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS = {
   "@murphai/parsers": "../parsers/src/index.ts",
   "@murphai/query": "../query/src/index.ts",
   "@murphai/runtime-state": "../runtime-state/src/index.ts",
+  "@murphai/vault-usecases": "../vault-usecases/src/index.ts",
 } as const;
 
 export default defineConfig({
@@ -45,14 +46,7 @@ export default defineConfig({
     include: ["test/**/*.test.ts"],
     coverage: createMurphVitestCoverage({
       customProviderModule: resolveMurphVitestCoverageProviderModule(packageDir),
-      include: [
-        "src/assistant/failover.ts",
-        "src/assistant/state-write-lock.ts",
-        "src/assistant/store/paths.ts",
-        "src/assistant/outbox/intents.ts",
-        "src/assistant/web-search/{config,search}.ts",
-        "src/knowledge/documents.ts",
-      ],
+      include: ["src/**/*.ts"],
     }),
   },
 });

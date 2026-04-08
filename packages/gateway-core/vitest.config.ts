@@ -1,7 +1,7 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { defineProject } from "vitest/config";
+import { defineConfig } from "vitest/config";
 
 import {
   createMurphVitestCoverage,
@@ -20,7 +20,7 @@ const WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS = {
   "@murphai/gateway-core": "./src/index.ts",
 } as const;
 
-export default defineProject({
+export default defineConfig({
   resolve: {
     alias: createVitestWorkspaceRuntimeAliases(
       resolveWorkspaceSourceEntries(packageDir, WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS),
@@ -34,7 +34,7 @@ export default defineProject({
     include: ["test/**/*.test.ts"],
     coverage: createMurphVitestCoverage({
       customProviderModule: resolveMurphVitestCoverageProviderModule(packageDir),
-      include: ["src/contracts.ts", "src/errors.ts", "src/shared.ts"],
+      include: ["src/**/*.ts"],
     }),
   },
 });
