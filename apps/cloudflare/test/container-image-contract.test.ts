@@ -176,7 +176,7 @@ describe("hosted runner container image contract", () => {
     const runtimePackageJson = buildHostedRunnerRuntimeArtifactPackageJson({
       dependencies: runtimeDependencies,
       engines: {
-        node: ">=22.16.0",
+        node: ">=24.14.1",
       },
       exports: {
         ".": "./dist/index.js",
@@ -234,7 +234,7 @@ describe("hosted runner container image contract", () => {
         ".": "./dist/index.js",
       },
       engines: {
-        node: ">=22.16.0",
+        node: ">=24.14.1",
       },
       dependencies: runtimeDependencies,
     });
@@ -265,7 +265,9 @@ describe("hosted runner container image contract", () => {
 
     expect(dockerfile).toContain("ARG WHISPER_CPP_VERSION=v1.8.1");
     expect(dockerfile).toContain("ARG WHISPER_MODEL_FILE=ggml-base.en.bin");
-    expect(dockerfile).toContain("FROM node:22-bookworm-slim AS whisper-builder");
+    expect(dockerfile).toContain("ARG NODE_VERSION=24.14.1");
+    expect(dockerfile).toContain("FROM node:${NODE_VERSION}-bookworm-slim AS whisper-builder");
+    expect(dockerfile).toContain("FROM node:${NODE_VERSION}-bookworm-slim\n\nARG NODE_VERSION");
     expect(dockerfile).toContain(
       "https://github.com/ggml-org/whisper.cpp/archive/refs/tags/${WHISPER_CPP_VERSION}.tar.gz",
     );

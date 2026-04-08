@@ -18,7 +18,7 @@
     "DEPLOY.md"
   ],
   "engines": {
-    "node": ">=22.16.0"
+    "node": ">=24.14.1"
   },
   "scripts": {
     "build": "node ../../scripts/rm-paths.mjs dist && tsc -b tsconfig.build.json --pretty false",
@@ -38,6 +38,9 @@
     "deploy:smoke": "pnpm --dir ../.. exec tsx --tsconfig apps/cloudflare/tsconfig.json apps/cloudflare/scripts/smoke-hosted-deploy.ts",
     "runner:bundle": "pnpm --dir ../.. exec tsx --tsconfig apps/cloudflare/tsconfig.scripts.json apps/cloudflare/scripts/assemble-runner-bundle.ts",
     "runner:docker:build": "pnpm runner:bundle && docker build -f ../../Dockerfile.cloudflare-hosted-runner -t murph-cloudflare-runner .",
+    "runner:docker:smoke:prepare": "pnpm build && pnpm --dir ../.. exec tsx --tsconfig apps/cloudflare/tsconfig.scripts.json apps/cloudflare/scripts/sync-smoke-runner-bundle.ts",
+    "runner:docker:smoke:built": "pnpm --dir ../.. exec tsx --tsconfig apps/cloudflare/tsconfig.scripts.json apps/cloudflare/scripts/runner-docker-smoke.ts",
+    "runner:docker:smoke": "pnpm runner:docker:smoke:prepare && docker build -f ../../Dockerfile.cloudflare-hosted-runner -t murph-cloudflare-runner . && pnpm runner:docker:smoke:built",
     "worker:deploy:apply": "pnpm exec wrangler deploy",
     "worker:deploy": "pnpm deploy:artifacts && pnpm worker:deploy:apply",
     "worker:deployment:status": "pnpm exec wrangler deployments status",

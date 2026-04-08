@@ -27,7 +27,7 @@
     "test:coverage": "pnpm exec vitest run --config vitest.config.ts --coverage"
   },
   "engines": {
-    "node": ">=22.16.0"
+    "node": ">=24.14.1"
   },
   "dependencies": {
     "@murphai/hosted-execution": "workspace:*"

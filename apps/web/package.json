@@ -4,7 +4,7 @@
   "private": true,
   "license": "Apache-2.0",
   "engines": {
-    "node": ">=22.16.0"
+    "node": ">=24.14.1"
   },
   "scripts": {
     "dev": "pnpm --dir ../.. exec tsx apps/web/scripts/dev-local.ts",
@@ -13,6 +13,7 @@
     "lint": "eslint .",
     "start": "next start",
     "dev:smoke": "pnpm --dir ../.. exec tsx apps/web/scripts/dev-smoke.ts",
+    "legal:pdf": "pnpm --dir ../.. exec tsx apps/web/scripts/generate-legal-pdfs.ts",
     "typecheck": "pnpm --dir ../.. exec tsx scripts/ensure-next-route-type-stubs.ts apps/web && prisma generate && tsc -p tsconfig.json --pretty false",
     "typecheck:prepared": "pnpm --dir ../.. exec tsx scripts/ensure-next-route-type-stubs.ts apps/web && tsc -p tsconfig.json --pretty false",
     "test": "pnpm --dir ../.. exec vitest run --config apps/web/vitest.workspace.ts --no-coverage",

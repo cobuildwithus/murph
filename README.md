@@ -23,7 +23,7 @@ The main installable product entrypoint is `@murphai/murph`, which gives you the
 
 ## Install
 
-Runtime: Node `>= 22.16.0`.
+Runtime: Node `>= 24.14.1`.
 
 Preferred install for most users:
 

@@ -12,7 +12,7 @@ Consumers that need inbox-owned normalization without the full inboxd barrel sho
 
 ## Runtime expectations
 
-- Run on Node.js `>=22.16.0`.
+- Run on Node.js `>=24.14.1`.
 - `@murphai/inboxd` resolves runtime paths and opens its SQLite projection database through `@murphai/runtime-state`, storing rebuildable capture/search state under `<vault>/.runtime/projections/inboxd.sqlite`.
 - Inbox daemon/config state lives separately under `<vault>/.runtime/operations/inbox/*.json`.
 - Query-owned lexical search state lives separately under `<vault>/.runtime/projections/search.sqlite`.
