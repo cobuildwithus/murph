@@ -28,6 +28,7 @@ describe("hosted deploy automation helpers", () => {
       CF_RUNNER_COMMIT_TIMEOUT_MS: "45000",
       CF_WORKER_NAME: "hosted-worker",
       HOSTED_EXECUTION_AUTOMATION_RECIPIENT_KEY_ID: "automation:v2",
+      HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "180000",
       HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID: "acct_123",
       HOSTED_EMAIL_CLOUDFLARE_API_BASE_URL: "https://api.cloudflare.com/client/v4",
       HOSTED_EMAIL_DEFAULT_SUBJECT: "Murph note",
@@ -115,6 +116,7 @@ describe("hosted deploy automation helpers", () => {
       },
     });
     expect(config.vars.HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS).toBe("45000");
+    expect(config.vars.HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS).toBe("180000");
     expect(config.vars.HOSTED_EXECUTION_AUTOMATION_RECIPIENT_KEY_ID).toBe("automation:v2");
     expect(config.vars.MURPH_WEB_FETCH_ENABLED).toBe("true");
     expect(config.vars.HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID).toBe("acct_123");

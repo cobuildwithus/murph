@@ -97,13 +97,13 @@ That means:
 - the per-user Durable Object keeps queue/process state in its SQLite storage tables (`runner_meta`, `pending_events`, `consumed_events`, and `poisoned_events`) instead of one serialized record blob
 - the Worker's internal control routes call direct Durable Object methods such as `dispatch`, `commit`, `status`, and per-user env updates instead of routing those control hops back through worker-local `fetch()` URLs
 - the per-user Durable Object invokes a same-name `RunnerContainer` instance on demand
-- the `RunnerContainer` uses the official `@cloudflare/containers` `Container` class to handle startup, port readiness, per-run env injection, and host-specific outbound interception before forwarding the encrypted bundle payloads and dispatch into the internal runner bridge
-- those worker-owned outbound proxy hosts now require an in-memory per-run proxy token from the trusted Worker/container bridge in addition to the bound `userId`, so random code inside one one-shot runner container instance cannot call them directly with `curl` or borrowed env
+- the `RunnerContainer` uses the official `@cloudflare/containers` `Container` class to handle startup, port readiness, short-lived per-user warm retention, and host-specific outbound interception before forwarding the encrypted bundle payloads and dispatch into the internal runner bridge
+- those worker-owned outbound proxy hosts now require an in-memory per-run proxy token from the trusted Worker/container bridge in addition to the bound `userId`, so random code inside one warm runner shell cannot call them directly with `curl` or borrowed env once the worker rotates that token away after the run
 - the worker-owned hosted-AI-usage proxy host injects the Durable Object's bound `userId` into the worker-side usage buffer path, and any later web import still happens from the Durable Object with the broader web control token kept out of the runner environment
 - worker-owned callback and web-control base URLs now normalize to HTTPS by default and only permit explicit loopback or internal worker-host HTTP exceptions
 - the runner process posts the durable commit callback plus hosted email and assistant-delivery journal requests through one internal `http://results.worker` seam; the fuller final result now returns directly to the Durable Object, so bundle finalization no longer needs a second worker callback hop
 - the container-local bridge is intentionally thin; the execution core lives in `packages/assistant-runtime`
-- the queue Durable Object invokes the per-user container on demand and explicitly tears it down after every run so each invocation gets a fresh per-run control token and a clean process boundary
+- the queue Durable Object invokes the per-user container on demand, may keep that outer shell warm for a short idle TTL, and still runs each hosted execution inside a fresh isolated child process with the outbound proxy token rotated away after completion; if any unexpected processes remain, the shell exits instead of being reused
 
 The native container image is declared in `apps/cloudflare/wrangler.jsonc` under the `containers` section, points at `../../Dockerfile.cloudflare-hosted-runner`, uses `instance_type: "standard-1"` in the checked-in scaffold, and now keeps the default `max_instances` at `50` until deploy automation raises it explicitly. Generated deploy config accepts `CF_CONTAINER_INSTANCE_TYPE` as either a named Wrangler preset such as `standard-1` or a JSON object with `vcpu`, `memory_mib`, and `disk_mb`.
 
@@ -127,6 +127,7 @@ Current expectations for the container image:
 - `PORT` for the internal bridge listen port, defaulting to `8080`
 - provider/runtime env such as WHOOP, Oura, Linq, Telegram, hosted email bridge config, and model-provider keys when the one-shot runner should execute those surfaces instead of skipping them
 - optional allowlist extension var `HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS` when separately encrypted per-user env overrides need to cover additional exact key names, excluding operator-only binary/model selectors and process-control env such as `FFMPEG_COMMAND`, `PDFTOTEXT_COMMAND`, `WHISPER_COMMAND`, `WHISPER_MODEL_PATH`, `NODE_OPTIONS`, and dynamic-loader variables
+- optional `HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS` when operators want to override the default 120-second warm-shell idle retention
 - encrypted per-user overrides are read from a dedicated per-user hosted object, injected into the one-shot runtime request, and the default hosted execution path runs each job in an isolated child process launched from a temp cwd rather than `/app` while resolving its `tsx` preload by absolute file URL, so per-user env overrides no longer force container-wide request serialization, the job does not inherit the shipped repo root as its ambient working directory, the child does not inherit supervisor-only container env or proxy credentials, writable cache/temp roots stay per-run, and the launch-time `HOME` no longer reuses the container supervisor account
 
 ## Deployment status
@@ -187,5 +188,5 @@ The Cloudflare app now keeps two focused Vitest lanes:
 ## Known follow-ups
 
 - Only assistant delivery is implemented as a hosted side-effect kind today. Future provider mutations, callbacks, or outbound deliveries should extend the same committed side-effect journal rather than bypassing it.
-- Cloudflare container lifecycle is currently one-shot: start on demand, run one hosted job, then tear the instance down. If you later want pooling or warm reuse, add that back as an explicit design with credential/lease isolation rather than relying on container idle retention.
+- Cloudflare container lifecycle now keeps only the outer per-user shell warm for a short idle TTL. The actual Murph execution remains a fresh isolated child process each time, and ambiguous warm state still fails closed by destroying the shell.
 - The remaining `results.worker` seam is now only for the durable commit callback plus true outward effects such as hosted email and side-effect journal access. Future outward mutations should extend that same committed side-effect journal instead of adding separate reliability lanes.

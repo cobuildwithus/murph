@@ -16,9 +16,13 @@ import { handleRunnerOutboundRequest, type RunnerOutboundEnvironmentSource } fro
 
 const RUNNER_PORT = 8080;
 const RUNNER_PING_ENDPOINT = "container/health";
+const RUNNER_HEALTH_URL = "http://container/health";
 const RUNNER_EXECUTE_URL = "http://container/__internal/run";
 const RUNNER_WAIT_INTERVAL_MS = 250;
 const RUNNER_READY_TIMEOUT_MS = 20_000;
+const DEFAULT_RUNNER_IDLE_TTL_MS = 120_000;
+const MIN_RUNNER_IDLE_TTL_MS = 1_000;
+
 export class HostedExecutionConfigurationError extends Error {
   readonly code: string | null;
 
@@ -31,7 +35,6 @@ export class HostedExecutionConfigurationError extends Error {
 
 interface HostedExecutionContainerInvokeRequest {
   job: HostedAssistantRuntimeJobInput;
-  runnerControlToken: string;
   timeoutMs: number;
   userId: string;
 }
@@ -41,7 +44,6 @@ type HostedExecutionContainerInvokeInput = HostedExecutionContainerInvokeRequest
 interface HostedExecutionContainerRunnerInput {
   job: HostedAssistantRuntimeJobInput;
   runnerContainerNamespace: HostedExecutionContainerNamespaceLike;
-  runnerControlToken: string;
   timeoutMs: number;
   userId: string;
 }
@@ -68,6 +70,13 @@ type RunnerOutboundHandlerName =
   | "resultsWorker"
   | "usageWorker";
 
+interface RunnerContainerStateLike {
+  storage?: {
+    deleteAlarm?: () => Promise<void>;
+    setAlarm?: (scheduledTime: number | Date) => Promise<void>;
+  };
+}
+
 const RUNNER_OUTBOUND_HOSTS = {
   [CLOUDFLARE_HOSTED_RUNTIME_HOSTS.artifactStore]: "artifactsWorker",
   [CLOUDFLARE_HOSTED_RUNTIME_HOSTS.effectsPort]: "resultsWorker",
@@ -87,16 +96,33 @@ export class RunnerContainer extends Container {
   requiredPorts = [RUNNER_PORT];
   pingEndpoint = RUNNER_PING_ENDPOINT;
 
+  private readonly containerState: RunnerContainerStateLike;
+  private readonly idleTtlMs: number;
+  private lifecycleLock: Promise<void> = Promise.resolve();
+  private runnerControlToken: string | null = null;
+
   constructor(state: unknown, env: RunnerContainerEnvironmentSource) {
     super(state as never, env as never);
+    this.containerState = state as RunnerContainerStateLike;
+    this.idleTtlMs = readRunnerIdleTtlMs(env);
   }
 
   async invoke(payload: HostedExecutionContainerInvokeRequest): Promise<HostedAssistantRuntimeJobResult> {
-    return this.invokeHostedExecution(parseHostedExecutionContainerInvokeInput(payload));
+    return this.withLifecycleLock(async () =>
+      this.invokeHostedExecution(parseHostedExecutionContainerInvokeInput(payload))
+    );
   }
 
   async destroyInstance(): Promise<void> {
-    await this.destroyIfRunning();
+    await this.withLifecycleLock(async () => {
+      await this.stopWarmContainer();
+    });
+  }
+
+  async alarm(): Promise<void> {
+    await this.withLifecycleLock(async () => {
+      await this.stopWarmContainer();
+    });
   }
 
   override async fetch(request: Request): Promise<Response> {
@@ -115,64 +141,40 @@ export class RunnerContainer extends Container {
     const dispatch = input.job.request.dispatch;
     const run = input.job.request.run ?? null;
     const internalWorkerProxyToken = crypto.randomUUID();
+    let keepWarm = false;
 
-    await this.destroyIfRunning();
-
-    emitHostedExecutionStructuredLog({
-      component: "container",
-      dispatch,
-      message: "Hosted execution container starting.",
-      phase: "container.starting",
-      run,
-    });
+    await this.clearIdleDestroyAlarm();
 
     try {
       const startTime = Date.now();
-      const readinessTimeoutMs = Math.min(input.timeoutMs, RUNNER_READY_TIMEOUT_MS);
-      await this.startAndWaitForPorts({
-        cancellationOptions: {
-          abort: AbortSignal.timeout(readinessTimeoutMs),
-          instanceGetTimeoutMS: readinessTimeoutMs,
-          portReadyTimeoutMS: readinessTimeoutMs,
-          waitInterval: RUNNER_WAIT_INTERVAL_MS,
-        },
-        ports: RUNNER_PORT,
-        startOptions: {
-          enableInternet: true,
-          envVars: {
-            HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN: input.runnerControlToken,
-            PORT: String(RUNNER_PORT),
-          },
-        },
-      });
-      emitHostedExecutionStructuredLog({
-        component: "container",
-        dispatch,
-        message: "Hosted execution container is ready.",
-        phase: "container.ready",
-        run,
-      });
+      const runnerControlToken = await this.ensureContainerReady(input);
       await this.installOutboundHandlers(input.userId, internalWorkerProxyToken);
 
       const remainingTimeoutMs = Math.max(1, input.timeoutMs - (Date.now() - startTime));
-      const response = await this.containerFetch(RUNNER_EXECUTE_URL, {
-        body: JSON.stringify({
-          internalWorkerProxyToken,
-          job: input.job,
-        }),
-        headers: {
-          authorization: `Bearer ${input.runnerControlToken}`,
-          "content-type": "application/json; charset=utf-8",
+      const response = await this.containerFetch(
+        RUNNER_EXECUTE_URL,
+        {
+          body: JSON.stringify({
+            internalWorkerProxyToken,
+            job: input.job,
+          }),
+          headers: {
+            authorization: `Bearer ${runnerControlToken}`,
+            "content-type": "application/json; charset=utf-8",
+          },
+          method: "POST",
+          signal: AbortSignal.timeout(remainingTimeoutMs),
         },
-        method: "POST",
-        signal: AbortSignal.timeout(remainingTimeoutMs),
-      }, RUNNER_PORT);
+        RUNNER_PORT,
+      );
 
       if (!response.ok) {
         throw await classifyHostedRunnerContainerErrorResponse(response);
       }
 
-      return (await response.json()) as HostedAssistantRuntimeJobResult;
+      const result = (await response.json()) as HostedAssistantRuntimeJobResult;
+      keepWarm = true;
+      return result;
     } catch (error) {
       emitHostedExecutionStructuredLog({
         component: "container",
@@ -184,10 +186,79 @@ export class RunnerContainer extends Container {
       });
       throw error;
     } finally {
-      // Force one-shot runner containers so a stale per-run control token
-      // cannot leak across invocations through warm reuse.
-      await this.destroyIfRunning();
+      const outboundInvalidated = await this.invalidateOutboundHandlers(input.userId);
+      const shouldDestroy = !(keepWarm && outboundInvalidated && await this.scheduleIdleDestroy());
+
+      if (shouldDestroy) {
+        await this.stopWarmContainer();
+      }
     }
+  }
+
+  private async ensureContainerReady(
+    input: HostedExecutionContainerInvokeInput,
+  ): Promise<string> {
+    const readinessStartedAt = Date.now();
+    const dispatch = input.job.request.dispatch;
+    const run = input.job.request.run ?? null;
+    const status = readContainerStatus(await this.getState());
+
+    if (!isRunnerContainerStopped(status) && this.runnerControlToken) {
+      try {
+        await assertRunnerHealthy(this, Math.min(input.timeoutMs, RUNNER_READY_TIMEOUT_MS));
+        emitHostedExecutionStructuredLog({
+          component: "container",
+          dispatch,
+          message: "Hosted execution container is ready.",
+          phase: "container.ready",
+          run,
+        });
+        return this.runnerControlToken;
+      } catch {
+        await this.stopWarmContainer();
+      }
+    } else if (!isRunnerContainerStopped(status)) {
+      await this.stopWarmContainer();
+    }
+
+    emitHostedExecutionStructuredLog({
+      component: "container",
+      dispatch,
+      message: "Hosted execution container starting.",
+      phase: "container.starting",
+      run,
+    });
+
+    const runnerControlToken = crypto.randomUUID();
+    const remainingTimeoutMs = Math.max(1, input.timeoutMs - (Date.now() - readinessStartedAt));
+    const readinessTimeoutMs = Math.min(remainingTimeoutMs, RUNNER_READY_TIMEOUT_MS);
+    await this.startAndWaitForPorts({
+      cancellationOptions: {
+        abort: AbortSignal.timeout(readinessTimeoutMs),
+        instanceGetTimeoutMS: readinessTimeoutMs,
+        portReadyTimeoutMS: readinessTimeoutMs,
+        waitInterval: RUNNER_WAIT_INTERVAL_MS,
+      },
+      ports: RUNNER_PORT,
+      startOptions: {
+        enableInternet: true,
+        envVars: {
+          HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN: runnerControlToken,
+          PORT: String(RUNNER_PORT),
+        },
+      },
+    });
+    this.runnerControlToken = runnerControlToken;
+
+    emitHostedExecutionStructuredLog({
+      component: "container",
+      dispatch,
+      message: "Hosted execution container is ready.",
+      phase: "container.ready",
+      run,
+    });
+
+    return runnerControlToken;
   }
 
   private async installOutboundHandlers(
@@ -210,34 +281,90 @@ export class RunnerContainer extends Container {
     );
   }
 
-  private async destroyIfRunning(): Promise<void> {
+  private async destroyIfRunning(input: {
+    failClosed?: boolean;
+  } = {}): Promise<void> {
     try {
-      const state = await this.getState();
-
-      if (state.status === "stopped" || state.status === "stopped_with_code") {
+      if (isRunnerContainerStopped(readContainerStatus(await this.getState()))) {
         return;
       }
 
       await this.destroy();
+
+      if (!isRunnerContainerStopped(readContainerStatus(await this.getState()))) {
+        throw new Error("Hosted runner container destroy did not stop the shell.");
+      }
+    } catch {
+      if (input.failClosed) {
+        throw new Error("Hosted runner container failed to destroy cleanly.");
+      }
+      // best-effort cleanup only
+    }
+  }
+
+  private async scheduleIdleDestroy(): Promise<boolean> {
+    const setAlarm = this.containerState.storage?.setAlarm;
+
+    if (typeof setAlarm !== "function") {
+      return false;
+    }
+
+    try {
+      await setAlarm(Date.now() + this.idleTtlMs);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  private async clearIdleDestroyAlarm(): Promise<void> {
+    const deleteAlarm = this.containerState.storage?.deleteAlarm;
+
+    if (typeof deleteAlarm !== "function") {
+      return;
+    }
+
+    try {
+      await deleteAlarm();
     } catch {
       // best-effort cleanup only
     }
+  }
+
+  private async stopWarmContainer(): Promise<void> {
+    this.runnerControlToken = null;
+    await this.clearIdleDestroyAlarm();
+    await this.destroyIfRunning({ failClosed: true });
+  }
+
+  private async invalidateOutboundHandlers(userId: string): Promise<boolean> {
+    try {
+      if (isRunnerContainerStopped(readContainerStatus(await this.getState()))) {
+        return false;
+      }
+
+      await this.installOutboundHandlers(userId, crypto.randomUUID());
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  private async withLifecycleLock<T>(work: () => Promise<T>): Promise<T> {
+    const next = this.lifecycleLock.then(work, work);
+    this.lifecycleLock = next.then(
+      () => undefined,
+      () => undefined,
+    );
+    return next;
   }
 }
 
 export async function invokeHostedExecutionContainerRunner(
   input: HostedExecutionContainerRunnerInput,
 ): Promise<HostedAssistantRuntimeJobResult> {
-  if (typeof input.runnerControlToken !== "string" || input.runnerControlToken.trim().length === 0) {
-    throw new HostedExecutionConfigurationError(
-      "Hosted execution native runner control token is required.",
-      "missing_runner_control_token",
-    );
-  }
-
   return input.runnerContainerNamespace.getByName(input.userId).invoke({
     job: input.job,
-    runnerControlToken: input.runnerControlToken,
     timeoutMs: input.timeoutMs,
     userId: input.userId,
   });
@@ -310,14 +437,12 @@ export async function destroyHostedExecutionContainer(input: {
 function parseHostedExecutionContainerInvokeInput(
   payload: {
     job?: unknown;
-    runnerControlToken?: unknown;
     timeoutMs?: unknown;
     userId?: unknown;
   },
 ): HostedExecutionContainerInvokeInput {
   return {
     job: parseHostedAssistantRuntimeJobInput(payload.job),
-    runnerControlToken: requireString(payload.runnerControlToken, "payload.runnerControlToken"),
     timeoutMs: readTimeoutMs(payload.timeoutMs, RUNNER_READY_TIMEOUT_MS),
     userId: requireString(payload.userId, "payload.userId"),
   };
@@ -341,4 +466,56 @@ function readTimeoutMs(value: unknown, fallback: number): number {
   }
 
   return Math.trunc(value);
+}
+
+async function assertRunnerHealthy(
+  container: RunnerContainer,
+  timeoutMs: number,
+): Promise<void> {
+  const response = await container.containerFetch(
+    RUNNER_HEALTH_URL,
+    {
+      method: "GET",
+      signal: AbortSignal.timeout(timeoutMs),
+    },
+    RUNNER_PORT,
+  );
+
+  if (!response.ok) {
+    throw new Error(`Hosted runner container health check returned HTTP ${response.status}.`);
+  }
+}
+
+function readContainerStatus(state: unknown): string | null {
+  if (!state || typeof state !== "object" || Array.isArray(state)) {
+    return null;
+  }
+
+  const status = (state as { status?: unknown }).status;
+  return typeof status === "string" ? status : null;
+}
+
+function isRunnerContainerStopped(status: string | null): boolean {
+  return status === "stopped" || status === "stopped_with_code";
+}
+
+function readRunnerIdleTtlMs(source: RunnerContainerEnvironmentSource): number {
+  const raw = source.HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS;
+
+  if (raw === undefined || raw === null || raw === "") {
+    return DEFAULT_RUNNER_IDLE_TTL_MS;
+  }
+
+  if (typeof raw !== "string") {
+    throw new TypeError("HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS must be a string when configured.");
+  }
+
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isInteger(parsed) || parsed < MIN_RUNNER_IDLE_TTL_MS) {
+    throw new TypeError(
+      `HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS must be an integer greater than or equal to ${MIN_RUNNER_IDLE_TTL_MS}.`,
+    );
+  }
+
+  return parsed;
 }

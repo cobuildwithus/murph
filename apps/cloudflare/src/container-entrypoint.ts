@@ -1,5 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { timingSafeEqual } from "node:crypto";
+import { readdir, readFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 
 import {
@@ -15,12 +16,22 @@ import {
 
 import { runHostedExecutionJob } from "./node-runner.js";
 
+let activeHostedRunnerJobCount = 0;
+
+class HostedRunnerShellIsolationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "HostedRunnerShellIsolationError";
+  }
+}
+
 export async function startHostedContainerEntrypoint(input: {
   controlToken: string | null;
   port?: number;
 }): Promise<ReturnType<typeof createServer>> {
   const server = createServer(async (request, response) => {
     const requestAbort = createRequestAbortController(request, response);
+    let claimedRunnerSlot = false;
     let job: HostedAssistantRuntimeJobInput | null = null;
     let internalWorkerProxyToken: string | null = null;
 
@@ -66,6 +77,21 @@ export async function startHostedContainerEntrypoint(input: {
         return;
       }
 
+      if (activeHostedRunnerJobCount > 0) {
+        emitHostedExecutionStructuredLog({
+          component: "container",
+          level: "warn",
+          message: "Hosted container entrypoint rejected a concurrent run request.",
+          phase: "failed",
+        });
+        writeJsonResponse(response, 409, {
+          error: "Hosted runner is busy.",
+        });
+        return;
+      }
+      activeHostedRunnerJobCount += 1;
+      claimedRunnerSlot = true;
+
       const chunks: Buffer[] = [];
 
       for await (const chunk of request) {
@@ -97,6 +123,9 @@ export async function startHostedContainerEntrypoint(input: {
         internalWorkerProxyToken,
         signal: requestAbort.signal,
       });
+      if (shouldSweepHostedContainerProcesses(input)) {
+        await enforceHostedContainerProcessIsolation();
+      }
 
       if (requestAbort.signal.aborted || response.destroyed) {
         return;
@@ -118,9 +147,15 @@ export async function startHostedContainerEntrypoint(input: {
         phase: "failed",
         run: typeof job === "object" && job ? job.request.run ?? null : null,
       });
+      if (error instanceof HostedRunnerShellIsolationError) {
+        scheduleHostedContainerExit();
+      }
       const classified = classifyRunnerJobError(error);
       writeJsonResponse(response, classified.statusCode, classified.payload);
     } finally {
+      if (claimedRunnerSlot) {
+        activeHostedRunnerJobCount = Math.max(0, activeHostedRunnerJobCount - 1);
+      }
       requestAbort.cleanup();
     }
   });
@@ -221,6 +256,97 @@ function writeJsonResponse(
   response.statusCode = statusCode;
   response.setHeader("content-type", "application/json; charset=utf-8");
   response.end(JSON.stringify(payload));
+}
+
+function shouldSweepHostedContainerProcesses(input: {
+  controlToken: string | null;
+}): boolean {
+  return typeof input.controlToken === "string"
+    && input.controlToken.length > 0
+    && process.env.HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN === input.controlToken;
+}
+
+async function enforceHostedContainerProcessIsolation(): Promise<void> {
+  if (process.platform === "win32") {
+    return;
+  }
+
+  const firstPass = await listUnexpectedHostedContainerProcessIds();
+  if (firstPass.length === 0) {
+    return;
+  }
+
+  for (const pid of firstPass) {
+    try {
+      process.kill(pid, "SIGKILL");
+    } catch {
+      // Re-check after the cleanup pass.
+    }
+  }
+
+  await new Promise((resolve) => setTimeout(resolve, 25));
+
+  const secondPass = await listUnexpectedHostedContainerProcessIds();
+  if (secondPass.length > 0) {
+    throw new HostedRunnerShellIsolationError(
+      `Hosted runner shell still has unexpected live processes after cleanup: ${secondPass.join(", ")}.`,
+    );
+  }
+}
+
+async function listUnexpectedHostedContainerProcessIds(): Promise<number[]> {
+  let entries;
+  try {
+    entries = await readdir("/proc", { encoding: "utf8", withFileTypes: true });
+  } catch (error) {
+    throw new HostedRunnerShellIsolationError(
+      `Hosted runner shell could not inspect /proc for warm-container cleanup: ${String(error)}.`,
+    );
+  }
+
+  const unexpected: number[] = [];
+
+  for (const entry of entries) {
+    if (!entry.isDirectory()) {
+      continue;
+    }
+
+    const pid = Number.parseInt(entry.name, 10);
+    if (!Number.isInteger(pid) || pid <= 1 || pid === process.pid) {
+      continue;
+    }
+
+    const processState = await readHostedContainerProcessState(pid);
+    if (processState === "Z") {
+      continue;
+    }
+
+    unexpected.push(pid);
+  }
+
+  return unexpected;
+}
+
+async function readHostedContainerProcessState(pid: number): Promise<string | null> {
+  try {
+    const stat = await readFile(`/proc/${pid}/stat`, "utf8");
+    const commandEnd = stat.lastIndexOf(") ");
+
+    if (commandEnd === -1 || commandEnd + 2 >= stat.length) {
+      return null;
+    }
+
+    return stat.charAt(commandEnd + 2);
+  } catch {
+    return null;
+  }
+}
+
+function scheduleHostedContainerExit(): void {
+  process.exitCode = 1;
+  setImmediate(() => {
+    process.exit(1);
+  });
 }
 
 function createRequestAbortController(

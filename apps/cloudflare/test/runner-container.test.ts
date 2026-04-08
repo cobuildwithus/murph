@@ -7,199 +7,226 @@ import {
 } from "../src/runner-container.ts";
 
 describe("RunnerContainer", () => {
-  it("starts the container, waits for the port, forwards the runner request, and tears the container down after the run", async () => {
-    const resultPayload = createRunnerResult();
-    const getState = vi.fn()
-      .mockResolvedValueOnce({
-        lastChange: Date.now(),
-        status: "stopped",
-      })
-      .mockResolvedValueOnce({
-        lastChange: Date.now(),
-        status: "running",
-      });
-    const { container, containerFetch, destroy, setOutboundByHosts, startAndWaitForPorts } = createContainerDouble({
-      containerFetch: vi.fn(async () => new Response(JSON.stringify(resultPayload), {
-        headers: {
-          "content-type": "application/json; charset=utf-8",
+  it("reuses a warm per-user shell across back-to-back invocations", async () => {
+    const setAlarm = vi.fn(async () => {});
+    const deleteAlarm = vi.fn(async () => {});
+    const { container, containerFetch, destroy, setOutboundByHosts, startAndWaitForPorts } =
+      createContainerDouble({
+        state: {
+          storage: {
+            deleteAlarm,
+            setAlarm,
+          },
         },
-        status: 200,
-      })),
-      getState,
-    });
+        containerFetch: vi.fn(async (url: string) => {
+          if (url.endsWith("/health")) {
+            return new Response(JSON.stringify({ ok: true }), {
+              headers: {
+                "content-type": "application/json; charset=utf-8",
+              },
+              status: 200,
+            });
+          }
 
-    const response = await container.invoke({
+          return new Response(JSON.stringify(createRunnerResult()), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
+        }),
+      });
+
+    const firstResponse = await container.invoke({
       job: {
         request: createRunnerRequest(),
       },
-      runnerControlToken: "runner-token",
-      timeoutMs: 12_345,
+      timeoutMs: 60_000,
+      userId: "member_123",
+    });
+    const secondResponse = await container.invoke({
+      job: {
+        request: createRunnerRequest("evt_second"),
+      },
+      timeoutMs: 60_000,
       userId: "member_123",
     });
 
-    expect(response).toEqual(resultPayload);
-    expect(startAndWaitForPorts).toHaveBeenCalledWith(expect.objectContaining({
-      cancellationOptions: expect.objectContaining({
-        instanceGetTimeoutMS: 12_345,
-        portReadyTimeoutMS: 12_345,
-        waitInterval: 250,
-      }),
-      ports: 8080,
-      startOptions: {
-        enableInternet: true,
-        envVars: {
-          HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN: "runner-token",
-          PORT: "8080",
-        },
-      },
-    }));
-    expect(setOutboundByHosts).toHaveBeenCalledWith({
-      "device-sync.worker": {
-        method: "deviceSyncWorker",
-        params: {
-          internalWorkerProxyToken: expect.any(String),
-          userId: "member_123",
-        },
-      },
-      "artifacts.worker": {
-        method: "artifactsWorker",
-        params: {
-          internalWorkerProxyToken: expect.any(String),
-          userId: "member_123",
-        },
-      },
-      "results.worker": {
-        method: "resultsWorker",
-        params: {
-          internalWorkerProxyToken: expect.any(String),
-          userId: "member_123",
-        },
-      },
-      "usage.worker": {
-        method: "usageWorker",
-        params: {
-          internalWorkerProxyToken: expect.any(String),
-          userId: "member_123",
-        },
-      },
-    });
-    expect(containerFetch).toHaveBeenCalledWith(
-      "http://container/__internal/run",
-      expect.objectContaining({
-        headers: {
-          authorization: "Bearer runner-token",
-          "content-type": "application/json; charset=utf-8",
-        },
-        method: "POST",
-        signal: expect.any(AbortSignal),
-      }),
-      8080,
+    expect(firstResponse).toEqual(createRunnerResult());
+    expect(secondResponse).toEqual(createRunnerResult());
+    expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
+    expect(destroy).not.toHaveBeenCalled();
+    expect(setAlarm).toHaveBeenCalledTimes(2);
+    expect(deleteAlarm.mock.calls.length).toBeGreaterThanOrEqual(2);
+
+    const coldStartToken =
+      startAndWaitForPorts.mock.calls[0]?.[0]?.startOptions?.envVars?.HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN;
+    expect(typeof coldStartToken).toBe("string");
+    expect(coldStartToken).toBeTruthy();
+
+    const executeCalls = containerFetch.mock.calls.filter(([url]) =>
+      String(url).endsWith("/__internal/run")
     );
-    expect(destroy).toHaveBeenCalledTimes(1);
-    const forwardedBody = JSON.parse(containerFetch.mock.calls[0]?.[1]?.body as string) as {
-      internalWorkerProxyToken: string;
-      job: {
-        request: ReturnType<typeof createRunnerRequest>;
-      };
-    };
-    expect(forwardedBody).toMatchObject({
-      internalWorkerProxyToken: expect.any(String),
-      job: {
-        request: createRunnerRequest(),
+    expect(executeCalls).toHaveLength(2);
+    expect(executeCalls[0]?.[1]).toMatchObject({
+      headers: {
+        authorization: `Bearer ${coldStartToken}`,
       },
     });
+    expect(executeCalls[1]?.[1]).toMatchObject({
+      headers: {
+        authorization: `Bearer ${coldStartToken}`,
+      },
+    });
+
+    const outboundTokens = setOutboundByHosts.mock.calls.map(([mapping]) =>
+      readRunnerProxyToken(mapping as Record<string, unknown>)
+    );
+    expect(outboundTokens).toHaveLength(4);
+    expect(outboundTokens[0]).not.toBe(outboundTokens[1]);
+    expect(outboundTokens[1]).not.toBe(outboundTokens[2]);
+    expect(outboundTokens[2]).not.toBe(outboundTokens[3]);
   });
 
-  it("destroys any leftover running instance before starting a new invocation", async () => {
-    const getState = vi.fn()
-      .mockResolvedValueOnce({
-        lastChange: Date.now(),
-        status: "running",
-      })
-      .mockResolvedValueOnce({
-        lastChange: Date.now(),
-        status: "running",
-      });
+  it("destroys the warm shell on idle alarm and cold-starts the next run", async () => {
     const { container, destroy, startAndWaitForPorts } = createContainerDouble({
-      getState,
+      state: {
+        storage: {
+          async deleteAlarm() {},
+          async setAlarm() {},
+        },
+      },
     });
 
     await container.invoke({
       job: {
-        request: createRunnerRequest("evt_replaces_stale_instance"),
+        request: createRunnerRequest(),
       },
-      runnerControlToken: "runner-token",
-      timeoutMs: 12_345,
+      timeoutMs: 60_000,
+      userId: "member_123",
+    });
+    const firstToken =
+      startAndWaitForPorts.mock.calls[0]?.[0]?.startOptions?.envVars?.HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN;
+
+    await container.alarm();
+    expect(destroy).toHaveBeenCalledTimes(1);
+
+    await container.invoke({
+      job: {
+        request: createRunnerRequest("evt_after_alarm"),
+      },
+      timeoutMs: 60_000,
+      userId: "member_123",
+    });
+    const secondToken =
+      startAndWaitForPorts.mock.calls[1]?.[0]?.startOptions?.envVars?.HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN;
+
+    expect(startAndWaitForPorts).toHaveBeenCalledTimes(2);
+    expect(firstToken).not.toBe(secondToken);
+  });
+
+  it("destroys an already-running shell with ambiguous supervisor state before reusing it", async () => {
+    const { container, destroy, startAndWaitForPorts } = createContainerDouble({
+      initialStatus: "running",
+      state: {
+        storage: {
+          async deleteAlarm() {},
+          async setAlarm() {},
+        },
+      },
+    });
+
+    await container.invoke({
+      job: {
+        request: createRunnerRequest("evt_restart_ambiguous_shell"),
+      },
+      timeoutMs: 30_000,
       userId: "member_123",
     });
 
-    expect(destroy).toHaveBeenCalledTimes(2);
+    expect(destroy).toHaveBeenCalledTimes(1);
     expect(destroy.mock.invocationCallOrder[0]).toBeLessThan(
       startAndWaitForPorts.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
     );
   });
 
-  it("treats stale-instance state lookup failures as best-effort cleanup and still starts the run", async () => {
-    const getState = vi.fn()
-      .mockRejectedValueOnce(new Error("state unavailable"))
-      .mockResolvedValueOnce({
-        lastChange: Date.now(),
-        status: "running",
+  it("uses the remaining caller timeout budget when a warm-shell health check fails", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-08T00:00:00.000Z"));
+
+    try {
+      let healthFailures = 0;
+      const { container, startAndWaitForPorts } = createContainerDouble({
+        state: {
+          storage: {
+            async deleteAlarm() {},
+            async setAlarm() {},
+          },
+        },
+        containerFetch: vi.fn(async (url: string) => {
+          if (url.endsWith("/health")) {
+            healthFailures += 1;
+            vi.setSystemTime(new Date("2026-04-08T00:00:02.500Z"));
+            return new Response(JSON.stringify({ error: "stale shell" }), {
+              headers: {
+                "content-type": "application/json; charset=utf-8",
+              },
+              status: 503,
+            });
+          }
+
+          return new Response(JSON.stringify(createRunnerResult()), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
+        }),
       });
-    const { container, destroy, startAndWaitForPorts } = createContainerDouble({
-      getState,
-    });
 
-    const response = await container.invoke({
-      job: {
-        request: createRunnerRequest("evt_state_lookup_failure"),
-      },
-      runnerControlToken: "runner-token",
-      timeoutMs: 12_345,
-      userId: "member_123",
-    });
+      await container.invoke({
+        job: {
+          request: createRunnerRequest("evt_initial_warm"),
+        },
+        timeoutMs: 5_000,
+        userId: "member_123",
+      });
 
-    expect(response).toEqual(createRunnerResult());
-    expect(startAndWaitForPorts).toHaveBeenCalledOnce();
-    expect(destroy).toHaveBeenCalledTimes(1);
-  });
+      await container.invoke({
+        job: {
+          request: createRunnerRequest("evt_restart_after_failed_health"),
+        },
+        timeoutMs: 5_000,
+        userId: "member_123",
+      });
 
-  it("forwards the hosted run context through the container invoke boundary", async () => {
-    const { containerFetch, container } = createContainerDouble();
-    const run = {
-      attempt: 3,
-      runId: "run_trace",
-      startedAt: "2026-03-27T00:00:00.000Z",
-    };
-
-    const response = await container.invoke({
-      job: {
-        request: createRunnerRequest("evt_with_run", { run }),
-      },
-      runnerControlToken: "runner-token",
-      timeoutMs: 12_345,
-      userId: "member_123",
-    });
-
-    expect(response).toEqual(createRunnerResult());
-    const forwardedBody = JSON.parse(containerFetch.mock.calls[0]?.[1]?.body as string) as {
-      job?: {
-        request?: {
-          run?: typeof run;
-        };
-      };
-    };
-    expect(forwardedBody.job?.request?.run).toEqual(run);
+      expect(healthFailures).toBe(1);
+      expect(startAndWaitForPorts).toHaveBeenCalledTimes(2);
+      expect(startAndWaitForPorts.mock.calls[1]?.[0]).toMatchObject({
+        cancellationOptions: expect.objectContaining({
+          instanceGetTimeoutMS: 2_500,
+          portReadyTimeoutMS: 2_500,
+        }),
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("caps readiness waits to the caller timeout budget when the budget is small", async () => {
-    const { container, startAndWaitForPorts } = createContainerDouble();
+    const { container, startAndWaitForPorts } = createContainerDouble({
+      state: {
+        storage: {
+          async deleteAlarm() {},
+          async setAlarm() {},
+        },
+      },
+    });
 
     const response = await container.invoke({
       job: {
         request: createRunnerRequest("evt_short_budget"),
       },
-      runnerControlToken: "runner-token",
       timeoutMs: 1_000,
       userId: "member_123",
     });
@@ -238,27 +265,6 @@ describe("RunnerContainer", () => {
     expect(containerFetch).not.toHaveBeenCalled();
   });
 
-  it("uses the per-run runner control token instead of requiring an env-configured wrapper token", async () => {
-    const { container, containerFetch, startAndWaitForPorts } = createContainerDouble({
-      env: {
-        HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN: "",
-      },
-    });
-
-    const response = await container.invoke({
-      job: {
-        request: createRunnerRequest("evt_per_run_token"),
-      },
-      runnerControlToken: "runner-token",
-      timeoutMs: 30_000,
-      userId: "member_123",
-    });
-
-    expect(response).toEqual(createRunnerResult());
-    expect(startAndWaitForPorts).toHaveBeenCalledOnce();
-    expect(containerFetch).toHaveBeenCalledOnce();
-  });
-
   it("returns 405 for unsupported internal methods", async () => {
     const { container, startAndWaitForPorts } = createContainerDouble();
 
@@ -285,7 +291,6 @@ describe("RunnerContainer", () => {
 
     await expect(container.invoke({
       job: "not-an-object" as never,
-      runnerControlToken: "runner-token",
       timeoutMs: 0 as never,
       userId: "member_123",
     })).rejects.toThrow("Hosted assistant runtime job input must be an object.");
@@ -294,16 +299,10 @@ describe("RunnerContainer", () => {
 
   it("destroys running containers but skips stopped ones", async () => {
     const running = createContainerDouble({
-      getState: vi.fn(async () => ({
-        lastChange: Date.now(),
-        status: "running",
-      })),
+      initialStatus: "running",
     });
     const stopped = createContainerDouble({
-      getState: vi.fn(async () => ({
-        lastChange: Date.now(),
-        status: "stopped",
-      })),
+      initialStatus: "stopped",
     });
 
     await running.container.destroyInstance();
@@ -325,7 +324,6 @@ describe("RunnerContainer", () => {
         request: createRunnerRequest("evt_namespace"),
       },
       runnerContainerNamespace: { getByName },
-      runnerControlToken: "runner-token",
       timeoutMs: 45_000,
       userId: "member_123",
     });
@@ -342,7 +340,14 @@ describe("RunnerContainer", () => {
   });
 
   it("preserves extended runner request fields when the container is invoked over durable-object RPC", async () => {
-    const { container, containerFetch } = createContainerDouble();
+    const { container, containerFetch } = createContainerDouble({
+      state: {
+        storage: {
+          async deleteAlarm() {},
+          async setAlarm() {},
+        },
+      },
+    });
     const extendedRequest = {
       ...createRunnerRequest("evt_extended"),
       commit: {
@@ -373,13 +378,15 @@ describe("RunnerContainer", () => {
           },
         },
       },
-      runnerControlToken: "runner-token",
       timeoutMs: 30_000,
       userId: "member_123",
     });
 
-    expect(containerFetch).toHaveBeenCalledTimes(1);
-    const forwarded = JSON.parse(containerFetch.mock.calls[0]?.[1]?.body as string) as Record<string, unknown>;
+    const executeCall = containerFetch.mock.calls.find(([url]) =>
+      String(url).endsWith("/__internal/run")
+    );
+    expect(executeCall).toBeTruthy();
+    const forwarded = JSON.parse(executeCall?.[1]?.body as string) as Record<string, unknown>;
     expect(forwarded).toMatchObject({
       internalWorkerProxyToken: expect.any(String),
       job: {
@@ -411,31 +418,6 @@ describe("RunnerContainer", () => {
     });
   });
 
-  it("fails before invoking the namespace when the runner control token is missing", async () => {
-    const invoke = vi.fn();
-    const getByName = vi.fn(() => ({
-      async destroyInstance() {},
-      invoke,
-    }));
-
-    await expect(
-      invokeHostedExecutionContainerRunner({
-        job: {
-          request: createRunnerRequest("evt_missing_token"),
-        },
-        runnerContainerNamespace: { getByName },
-        runnerControlToken: null,
-        timeoutMs: 45_000,
-        userId: "member_123",
-      }),
-    ).rejects.toThrow(
-      "Hosted execution native runner control token is required.",
-    );
-
-    expect(getByName).not.toHaveBeenCalled();
-    expect(invoke).not.toHaveBeenCalled();
-  });
-
   it("destroys the named runner container instance and skips null namespaces", async () => {
     const destroyInstance = vi.fn(async () => {});
 
@@ -448,12 +430,10 @@ describe("RunnerContainer", () => {
           };
         },
       },
-      runnerControlToken: "runner-token",
       userId: "member_123",
     });
     await destroyHostedExecutionContainer({
       runnerContainerNamespace: null,
-      runnerControlToken: "runner-token",
       userId: "member_456",
     });
 
@@ -465,29 +445,43 @@ function createContainerDouble(input: {
   containerFetch?: ReturnType<typeof vi.fn>;
   destroy?: ReturnType<typeof vi.fn>;
   env?: Record<string, unknown>;
-  getState?: ReturnType<typeof vi.fn>;
+  initialStatus?: "running" | "stopped" | "stopped_with_code";
   setOutboundByHosts?: ReturnType<typeof vi.fn>;
   startAndWaitForPorts?: ReturnType<typeof vi.fn>;
+  state?: Record<string, unknown>;
 } = {}) {
-  const container = new RunnerContainer({} as never, {
-    HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN: "runner-token",
+  let currentStatus = input.initialStatus ?? "stopped";
+  const container = new RunnerContainer(input.state ?? {} as never, {
     ...(input.env ?? {}),
   } as never);
-  const containerFetch = input.containerFetch ?? vi.fn(async () => new Response(JSON.stringify(
-    createRunnerResult(),
-  ), {
-    headers: {
-      "content-type": "application/json; charset=utf-8",
-    },
-    status: 200,
-  }));
-  const destroy = input.destroy ?? vi.fn(async () => {});
-  const getState = input.getState ?? vi.fn(async () => ({
+  const containerFetch = input.containerFetch ?? vi.fn(async (url: string) => {
+    if (url.endsWith("/health")) {
+      return new Response(JSON.stringify({ ok: true }), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      });
+    }
+
+    return new Response(JSON.stringify(createRunnerResult()), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 200,
+    });
+  });
+  const destroy = input.destroy ?? vi.fn(async () => {
+    currentStatus = "stopped";
+  });
+  const getState = vi.fn(async () => ({
     lastChange: Date.now(),
-    status: "stopped",
+    status: currentStatus,
   }));
   const setOutboundByHosts = input.setOutboundByHosts ?? vi.fn(async () => {});
-  const startAndWaitForPorts = input.startAndWaitForPorts ?? vi.fn(async () => {});
+  const startAndWaitForPorts = input.startAndWaitForPorts ?? vi.fn(async () => {
+    currentStatus = "running";
+  });
 
   Object.assign(container, {
     containerFetch,
@@ -505,6 +499,15 @@ function createContainerDouble(input: {
     setOutboundByHosts,
     startAndWaitForPorts,
   };
+}
+
+function readRunnerProxyToken(mapping: Record<string, unknown>): string | null {
+  const firstEntry = Object.values(mapping)[0] as {
+    params?: {
+      internalWorkerProxyToken?: string;
+    };
+  } | undefined;
+  return firstEntry?.params?.internalWorkerProxyToken ?? null;
 }
 
 function createRunnerRequest(
