@@ -13,7 +13,7 @@ Your ownership
 - Do not edit root `vitest.config.ts`, `config/**`, or other packages. Report root-integration needs in your final message.
 - The parent rollout lane already owns `agent-docs/exec-plans/active/COORDINATION_LEDGER.md`, `agent-docs/exec-plans/active/2026-04-08-package-coverage-rollout.md`, and the worker prompt files. Read them for context only; do not edit them from this worker.
 - Preserve unrelated worktree edits.
-- If `pnpm` commands fail with `ERR_PNPM_VERIFY_DEPS_BEFORE_RUN`, rerun them with `--config.verify-deps-before-run=false`. Do not run `pnpm install`.
+- If `pnpm` commands fail with `ERR_PNPM_VERIFY_DEPS_BEFORE_RUN`, stop and report the workspace-state blocker. Do not bypass the guard or run `pnpm install`.
 
 Workflow
 

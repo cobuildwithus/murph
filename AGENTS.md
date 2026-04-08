@@ -50,6 +50,7 @@ Always read these before repo code/docs/test/config work:
 - After dependency updates on a trusted machine, review blocked install scripts with `pnpm deps:ignored-builds` / `pnpm deps:approve-builds`, keep `allowBuilds` entries minimal, and never set `dangerouslyAllowAllBuilds: true`.
 - When a hotfix needs a pnpm supply-chain exception, prefer version-scoped `minimumReleaseAgeExclude` or `trustPolicyExclude` entries over package-wide carve-outs, and document the reason in the handoff.
 - Outside intentional dependency-edit flows, installs and setup paths must use the committed lockfile with `pnpm install --frozen-lockfile`.
+- Do not bypass pnpm's dependency-verification guard with `--config.verify-deps-before-run=false`; fix the underlying workspace state or report the blocker instead.
 - Do not use `as any` or lazy `as unknown` / `as unknown as T` casts to silence TypeScript errors; prove the type with control flow or helpers, or isolate the boundary with a narrow documented assertion.
 - Historical plan docs under `agent-docs/exec-plans/completed/` are immutable snapshots.
 - Do not invent compatibility, deployment, or runtime requirements. Document them in repo docs and scripts in the same change that introduces them.
