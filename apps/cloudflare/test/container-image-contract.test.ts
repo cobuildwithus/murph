@@ -1,6 +1,12 @@
 import { readFile } from "node:fs/promises";
 
 import { describe, expect, it } from "vitest";
+import {
+  buildRunnerVaultCliArtifactPackageJson,
+  hostedRunnerWorkerDependencyNames,
+  runnerVaultCliArtifactDependencyNames,
+  runnerVaultCliArtifactPackageName,
+} from "../src/runner-bundle-contract.js";
 
 describe("hosted runner container image contract", () => {
   it("keeps runner bundle assembly app-owned and free of workspace repair steps", async () => {
@@ -9,16 +15,85 @@ describe("hosted runner container image contract", () => {
       "utf8",
     );
 
+    expect(bundleAssemblyScript).toContain("const runnerBundleDeployRoot = path.join(");
     expect(bundleAssemblyScript).toContain(
-      'const runnerBundleDeployRoot = path.join(resolveCloudflareDeployPaths().deployDir, "runner-bundle");',
+      'resolveCloudflareDeployPaths().deployDir,',
     );
+    expect(bundleAssemblyScript).toContain('"runner-bundle",');
     expect(bundleAssemblyScript).toContain(
       'const stagingBundleDir = path.join(stagingRoot, "runner-bundle");',
     );
     expect(bundleAssemblyScript).toContain(
-      "await materializeFinalRunnerBundle(stagingBundleDir, runnerBundleDeployRoot);",
+      "await materializeFinalRunnerBundle(",
     );
-    expect(bundleAssemblyScript).not.toContain("pnpm install --frozen-lockfile");
+    expect(bundleAssemblyScript).toContain("runnerBundleDeployRoot,");
+    expect(bundleAssemblyScript).toContain(
+      "await stageRunnerVaultCliArtifact(",
+    );
+    expect(bundleAssemblyScript).toContain(
+      "await packWorkspaceRuntimePackages(",
+    );
+    expect(bundleAssemblyScript).toContain(
+      "await installPackedRunnerDependencies(",
+    );
+    expect(bundleAssemblyScript).toContain(
+      'await runCommand(["install", "--prod", "--lockfile-only"], {',
+    );
+    expect(bundleAssemblyScript).toContain(
+      'await runCommand(["install", "--prod", "--frozen-lockfile"], {',
+    );
+    expect(bundleAssemblyScript).toContain("await pruneNonRuntimeFiles(bundleDir);");
+    expect(bundleAssemblyScript).not.toContain('"--legacy"');
+    expect(bundleAssemblyScript).not.toContain('"deploy",');
+  });
+
+  it("keeps apps/cloudflare free of a direct @murphai/murph dependency and limits root deps to the worker runtime closure", async () => {
+    const packageJson = JSON.parse(await readFile(
+      new URL("../package.json", import.meta.url),
+      "utf8",
+    )) as {
+      dependencies?: Record<string, string>;
+    };
+
+    expect(packageJson.dependencies).not.toHaveProperty("@murphai/murph");
+    expect(packageJson.dependencies).not.toHaveProperty(
+      runnerVaultCliArtifactPackageName,
+    );
+
+    for (const dependencyName of hostedRunnerWorkerDependencyNames) {
+      expect(packageJson.dependencies).toHaveProperty(dependencyName);
+    }
+
+    expect(Object.keys(packageJson.dependencies ?? {}).sort()).toEqual(
+      [...hostedRunnerWorkerDependencyNames].sort(),
+    );
+  });
+
+  it("stages a self-described vault-cli artifact with its own runtime closure", async () => {
+    const artifactDependencies = Object.fromEntries(
+      runnerVaultCliArtifactDependencyNames.map((dependencyName) => [
+        dependencyName,
+        "1.2.3",
+      ]),
+    ) as Record<(typeof runnerVaultCliArtifactDependencyNames)[number], string>;
+    const artifactPackageJson = buildRunnerVaultCliArtifactPackageJson({
+      dependencies: artifactDependencies,
+      license: "Apache-2.0",
+      version: "0.0.0",
+    });
+
+    expect(Object.keys(artifactDependencies).sort()).toEqual(
+      [...runnerVaultCliArtifactDependencyNames].sort(),
+    );
+    expect(artifactPackageJson.name).toBe(runnerVaultCliArtifactPackageName);
+    expect(artifactPackageJson.exports).toEqual({
+      ".": "./dist/runner-vault-cli.js",
+      "./package.json": "./package.json",
+    });
+    expect(artifactPackageJson.bin).toEqual({
+      "vault-cli": "./dist/runner-vault-cli-bin.js",
+    });
+    expect(artifactPackageJson.dependencies).toEqual(artifactDependencies);
   });
 
   it("pins whisper.cpp provisioning and default parser env in the image", async () => {

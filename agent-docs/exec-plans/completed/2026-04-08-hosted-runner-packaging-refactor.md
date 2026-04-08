@@ -1,4 +1,4 @@
-# Refactor Cloudflare hosted runner packaging to built-artifact deploy shape
+# Cloudflare hosted runner packaging refactor
 
 Status: completed
 Created: 2026-04-08
@@ -6,78 +6,157 @@ Updated: 2026-04-08
 
 ## Goal
 
-- Move the Cloudflare hosted runner deploy path off repo-source execution and onto a built-artifact package shape that installs only the runtime closure the hosted runner actually needs.
-- Eliminate hidden runtime dependency on workspace source fallbacks for `vault-cli`, so hosted execution can run from packaged artifacts instead of a full repo checkout.
+- Finish the Cloudflare hosted-runner packaging refactor so `apps/cloudflare` owns a clean deploy artifact contract end to end.
+- Keep Docker as a thin final stage that copies a prepared runner artifact plus native binaries only.
+- Remove the current workspace-repair behavior and reduce the deploy bundle to the actual runtime closure.
 
 ## Success criteria
 
-- The hosted runner container entrypoint and isolated child path run from built artifacts rather than `tsx` + repo source imports.
-- Hosted assistant CLI execution resolves through an explicit packaged CLI surface, not relative workspace source paths.
-- The Cloudflare deploy packaging path no longer requires copying the whole repo source tree or installing the full workspace dependency graph in the final runtime image.
-- Docs and tests are updated to describe and verify the new packaging/runtime contract.
-- Required repo verification passes for this change surface complete, plus at least one direct packaging scenario check.
+- `apps/cloudflare` exposes one app-owned artifact assembly path that writes the deployable runner bundle into `apps/cloudflare/.deploy/runner-bundle/`.
+- The bundle step no longer ends by repairing the workspace with `pnpm install --frozen-lockfile`.
+- The bundle step does not treat `.deploy/runner-bundle` as a live workspace package during assembly.
+- Bundle contents are intentionally runtime-shaped:
+  - built JS only for the app/runtime entrypoints
+  - production dependency closure only
+  - no test/docs/source-control residue
+  - no unnecessary package-manager/workspace state beyond what runtime install resolution actually needs
+- The Docker contract remains simple: copy the prepared runner bundle and start `dist/container-entrypoint.js`.
+- GitHub Actions and local deploy helpers continue to use the same prepared artifact path.
+- Durable docs and focused tests describe and enforce the new artifact contract.
+
+## Current state
+
+- Good:
+  - `Dockerfile.cloudflare-hosted-runner` already copies `apps/cloudflare/.deploy/runner-bundle/` into `/app`.
+  - GitHub Actions already prepares deploy artifacts before deploy and uses direct deploy by default.
+- Remaining problems:
+  - `apps/cloudflare/package.json` still builds the artifact through `pnpm --filter @murphai/cloudflare-runner deploy --legacy --prod ...`.
+  - `runner:bundle` still runs `pnpm --dir ../.. build:workspace:incremental`.
+  - `runner:bundle` currently restores the workspace afterward with `pnpm --dir ../.. install --frozen-lockfile`.
+  - The assembled bundle is still heavy: current local output is about `243M`, with about `234M` in `node_modules` and only about `1.2M` in app `dist`.
+  - The current bundle root still carries the source package manifest/scripts instead of a runtime-shaped artifact manifest.
 
 ## Scope
 
 - In scope:
-- `Dockerfile.cloudflare-hosted-runner`, `.dockerignore`, and hosted deploy/package assembly for `apps/cloudflare`
-- runtime changes needed to support built-artifact execution in the hosted runner
-- assistant CLI launch-path changes needed to remove repo-source fallback in hosted execution
-- focused docs/tests for the hosted runner packaging and deploy contract
+  - `apps/cloudflare/package.json`
+  - `apps/cloudflare/scripts/**`
+  - `apps/cloudflare/test/**`
+  - `apps/cloudflare/README.md`
+  - `apps/cloudflare/DEPLOY.md`
+  - deploy-path helpers directly coupled to artifact assembly
+  - targeted package-boundary/dependency cleanup only where it materially reduces hosted runner closure
 - Out of scope:
-- functional behavior changes to hosted onboarding, billing, share acceptance, or device-sync semantics
-- unrelated hosted-web UX/auth work already active elsewhere
-- speculative runtime splitting beyond what the packaging refactor requires
+  - unrelated hosted runtime behavior changes
+  - unrelated package-boundary cleanup outside the hosted-runner dependency closure
+  - changing the Worker/container runtime contract beyond what artifact assembly requires
 
 ## Constraints
 
-- Technical constraints:
-- Preserve existing hosted execution behavior, trust boundaries, and parser tool availability.
-- Preserve the current Whisper/ffmpeg/pdftotext runtime contract unless a change is explicitly justified and covered.
-- Avoid introducing new package cycles or sibling-internal imports.
-- Product/process constraints:
-- Keep unrelated worktree edits intact.
-- Treat this as a high-risk deploy/runtime change: update docs and keep verification/proof explicit.
+- Preserve unrelated worktree edits.
+- Treat the Cloudflare packaging row in `COORDINATION_LEDGER.md` as exclusive for `apps/cloudflare` deploy/runtime surface changes.
+- Keep package boundaries clean; do not reintroduce broad compatibility shims or deep-import surfaces.
+- Prefer built-package/runtime ownership over repo-source assumptions.
+- Keep Dockerfile changes minimal unless they directly support the artifact contract.
+
+## Architecture target
+
+1. `apps/cloudflare` owns artifact assembly.
+   - Add an explicit assembly script instead of hiding the core behavior in one long package.json command.
+   - The script owns staging, pruning, manifest shaping, and final bundle write.
+
+2. Stage outside the workspace.
+   - Use a temporary staging directory outside the workspace root so artifact assembly cannot perturb the live workspace install state.
+   - Finalize into `apps/cloudflare/.deploy/runner-bundle/` only after assembly succeeds.
+
+3. Separate build from assembly.
+   - Build the required package/app outputs first.
+   - Assemble the final runtime bundle second.
+   - Avoid conflating package build, workspace install state, and final image contents.
+
+4. Make the final bundle runtime-shaped.
+   - Keep only runtime files that the container actually needs.
+   - Replace the copied source package manifest at the artifact root with a small runtime-oriented manifest if needed.
+   - Prune declaration files, maps, docs, scripts, and non-runtime residue from the final bundle where safe.
+
+5. Keep deploy surfaces aligned.
+   - GitHub workflow, local deploy helper, docs, and tests should all describe the same artifact contract.
+
+## Implementation plan
+
+### Phase 1: App-owned assembly primitive
+
+1. Add a dedicated bundle assembly script under `apps/cloudflare/scripts/`.
+2. Move `runner:bundle` package.json logic into that script.
+3. Stage the bundle in a temporary directory outside the workspace, then atomically move/copy it into `.deploy/runner-bundle`.
+4. Remove the trailing workspace restore step.
+
+### Phase 2: Runtime-shaped artifact output
+
+1. Inspect the staged output and write a small pruning pass for obvious non-runtime files.
+2. Replace or rewrite the artifact-root `package.json` so it reflects the actual runtime contract instead of the full source package scripts.
+3. Preserve only the runtime entrypoints and dependency metadata needed by `node dist/container-entrypoint.js`.
+
+### Phase 3: Dependency-closure reduction
+
+1. Inventory the biggest runtime dependencies in the staged bundle.
+2. Remove any direct hosted-runner dependency edges that are only present because of legacy helper ownership.
+3. Keep any dependency-surface moves narrowly scoped to the hosted runner closure and avoid broad package churn.
+
+### Phase 4: Contract proofs
+
+1. Extend focused tests to cover:
+   - artifact-path resolution
+   - absence of workspace-repair behavior
+   - expected artifact-root manifest/content shape
+   - Docker/image contract staying copy-only
+2. Update README/DEPLOY docs to describe the new assembly contract precisely.
+
+### Phase 5: Verification and deploy readiness
+
+1. Run the required Cloudflare verification commands.
+2. Run any focused artifact assembly checks needed to prove the bundle path.
+3. Run the required completion audit pass before handoff or deploy.
+
+## Parallel work split
+
+- Lane A: app-owned artifact assembly implementation
+  - Own `apps/cloudflare/package.json`
+  - Own new/updated bundle assembly scripts
+  - Own the final `.deploy/runner-bundle` assembly path behavior
+
+- Lane B: artifact contract tests and docs
+  - Own `apps/cloudflare/test/**`
+  - Own `apps/cloudflare/README.md`
+  - Own `apps/cloudflare/DEPLOY.md`
+  - Keep Docker/image contract assertions aligned with the new assembly path
+
+- Lane C: dependency-closure analysis and targeted reduction
+  - Inventory the largest staged runtime dependencies
+  - Identify hosted-runner dependency edges that can be removed cleanly
+  - Only patch package ownership/import surfaces when they directly reduce hosted-runner closure and stay within clean package boundaries
 
 ## Risks and mitigations
 
-1. Risk: Hosted execution may rely on undeclared runtime coupling that only works from a repo checkout.
-   Mitigation: Trace the runtime closure first, make hidden dependencies explicit or remove them, and add focused tests around the new packaging contract.
-2. Risk: CLI execution inside hosted runs could break if `vault-cli` resolution changes.
-   Mitigation: Keep a packaged CLI path in the deploy bundle and add tests for CLI resolution behavior.
-3. Risk: Docker/build changes could accidentally drop required parser/runtime assets.
-   Mitigation: Preserve existing parser env assertions, add packaging-contract tests, and run direct assembly checks before handoff.
+1. Risk: artifact assembly still mutates workspace state indirectly.
+   Mitigation: stage outside the workspace and verify the live install state is not part of the assembly contract.
 
-## Tasks
+2. Risk: pruning removes files needed at runtime.
+   Mitigation: keep pruning explicit, test-backed, and limited to obvious non-runtime classes first.
 
-1. Replace workspace-source execution assumptions with built-artifact/runtime-package assumptions in the hosted runner path.
-2. Remove assistant-engine workspace-relative CLI fallback and switch hosted execution to an explicit packaged CLI dependency.
-3. Add a packaging step that assembles the minimal built runtime closure for `apps/cloudflare`.
-4. Refactor the Docker image to consume that assembled runtime bundle instead of copying repo source + running a full workspace install.
-5. Update tests/docs/verification for the new deploy shape and run required checks.
+3. Risk: dependency reduction causes package-boundary churn.
+   Mitigation: keep package changes surgical and only where the hosted runner closure clearly benefits.
 
-## Decisions
-
-- Hosted execution should target a packaged runtime closure, not a full repo checkout.
-- Hidden workspace-relative CLI fallbacks are not acceptable in the long-term deploy shape; the CLI must be an explicit packaged dependency.
+4. Risk: worker/docs/tests drift from the actual deploy contract.
+   Mitigation: update contract tests and durable docs in the same change.
 
 ## Verification
 
-- Commands to run:
-- `pnpm typecheck`
-- `pnpm --dir apps/cloudflare verify`
-- `pnpm test:coverage`
-- `pnpm --dir apps/cloudflare runner:bundle`
-- focused package/deploy assembly checks to prove the new bundle shape
-- Expected outcomes:
-- Hosted runner code and packaging tests pass against the built-artifact path.
-- The deploy assembly contains only the intended runtime closure.
-
-## Outcome
-
-- Hosted runner execution now ships as a built package artifact in the final image instead of running from repo source through `tsx`.
-- The Cloudflare deploy workflow now uses a direct worker deploy path rather than the previous gradual rollout inputs.
-- `@murphai/assistant-engine` exports were reduced to assistant-owned public surfaces; vault/inbox usecase consumers now resolve through `@murphai/vault-usecases` and `@murphai/inbox-services`.
-- Recurring food auto-log synchronization now crosses the package boundary via explicit hooks instead of a package cycle.
-- Direct verification completed with `pnpm typecheck`, `pnpm test:coverage`, `pnpm --dir apps/cloudflare verify`, and `pnpm --dir apps/cloudflare runner:bundle`.
+- Required commands:
+  - `pnpm typecheck`
+  - `pnpm test:coverage`
+  - `pnpm --dir apps/cloudflare verify`
+- Focused proof to add during implementation:
+  - run `pnpm --dir apps/cloudflare runner:bundle`
+  - inspect artifact contents and size deltas directly
 Completed: 2026-04-08

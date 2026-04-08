@@ -109,7 +109,7 @@ The native container image is declared in `apps/cloudflare/wrangler.jsonc` under
 
 ## Container image
 
-`Dockerfile.cloudflare-hosted-runner` builds the container image used by Wrangler. The deploy helper now assembles a production runner bundle under `apps/cloudflare/.deploy/runner-bundle` first, and the Docker build only copies that prepared artifact plus the pinned Whisper assets into the final image. Inside that image, the private container entrypoint still serves:
+`Dockerfile.cloudflare-hosted-runner` builds the container image used by Wrangler. The deploy helper now assembles a production runner bundle under `apps/cloudflare/.deploy/runner-bundle` first by packing the app and its workspace runtime closure into local tarballs, generating a temp staging lockfile, and running a frozen production install in that staging dir, and the Docker build only copies that prepared artifact plus the pinned Whisper assets into the final image. Inside that image, the private container entrypoint still serves:
 
 - `GET /health`
 - `POST /__internal/run`
@@ -123,7 +123,7 @@ Current expectations for the container image:
 - Node `>=22.16.0`
 - the runner app assembled by `apps/cloudflare` into `apps/cloudflare/.deploy/runner-bundle` before `wrangler deploy` starts the Docker build
 - a copy-only Docker contract: the final image copies `/app` from `apps/cloudflare/.deploy/runner-bundle`, then starts `dist/container-entrypoint.js`
-- bundle assembly is the app-owned artifact step and no longer ends with a workspace repair install
+- bundle assembly is the app-owned artifact step, no longer depends on `pnpm deploy --legacy` or a workspace repair install, and now freezes its temp staging installs from a generated local lockfile before materializing the runtime artifact
 - writable temp storage for ephemeral hosted bundle restore/snapshot work
 - the baked `/app` tree is a runtime artifact bundle and the runtime executes as a dedicated non-root user, so any job that needs scratch space must use temp/vault paths rather than mutating shipped assets
 - `PORT` for the internal bridge listen port, defaulting to `8080`
