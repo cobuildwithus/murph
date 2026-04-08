@@ -1,3 +1,5 @@
+import { z } from "zod";
+
 import { stripEmptyObject, stripUndefined } from "../shared.ts";
 import {
   asArray,
@@ -32,7 +34,7 @@ import type { DeviceProviderAdapter, NormalizedDeviceBatch } from "./types.ts";
 import { WHOOP_DEVICE_PROVIDER_DESCRIPTOR } from "./provider-descriptors.ts";
 
 export interface WhoopSnapshotInput {
-  accountId?: string;
+  accountId?: string | number;
   importedAt?: string | number | Date;
   profile?: unknown;
   bodyMeasurement?: unknown;
@@ -42,6 +44,25 @@ export interface WhoopSnapshotInput {
   sleeps?: unknown[];
   workouts?: unknown[];
   deletions?: unknown[];
+}
+
+const whoopCollectionSchema = z.array(z.unknown());
+
+const whoopSnapshotSchema = z.object({
+  accountId: z.union([z.string(), z.number()]).optional(),
+  importedAt: z.union([z.string(), z.number(), z.date()]).optional(),
+  profile: z.unknown().optional(),
+  bodyMeasurement: z.unknown().optional(),
+  bodyMeasurements: z.unknown().optional(),
+  cycles: whoopCollectionSchema.optional(),
+  recoveries: whoopCollectionSchema.optional(),
+  sleeps: whoopCollectionSchema.optional(),
+  workouts: whoopCollectionSchema.optional(),
+  deletions: whoopCollectionSchema.optional(),
+}).catchall(z.unknown());
+
+function parseWhoopSnapshot(snapshot: unknown): WhoopSnapshotInput {
+  return whoopSnapshotSchema.parse(snapshot);
 }
 
 function makeExternalRef(
@@ -547,5 +568,6 @@ export function normalizeWhoopSnapshot(snapshot: WhoopSnapshotInput): Normalized
 
 export const whoopProviderAdapter: DeviceProviderAdapter<WhoopSnapshotInput> = {
   ...WHOOP_DEVICE_PROVIDER_DESCRIPTOR,
+  parseSnapshot: parseWhoopSnapshot,
   normalizeSnapshot: normalizeWhoopSnapshot,
 };
