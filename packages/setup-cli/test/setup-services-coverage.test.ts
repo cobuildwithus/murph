@@ -11,6 +11,10 @@ const readlineMockState = vi.hoisted(() => ({
   prompts: [] as string[],
 }))
 
+const toolchainMockState = vi.hoisted(() => ({
+  unavailableCommands: new Set<string>(),
+}))
+
 vi.mock('node:readline/promises', () => ({
   default: {
     createInterface: () => ({
@@ -22,6 +26,34 @@ vi.mock('node:readline/promises', () => ({
     }),
   },
 }))
+
+vi.mock('../src/setup-services/toolchain.ts', async () => {
+  const actual = await vi.importActual<
+    typeof import('../src/setup-services/toolchain.ts')
+  >('../src/setup-services/toolchain.ts')
+
+  return {
+    ...actual,
+    async resolveExecutablePath(
+      candidates: string[],
+      env: NodeJS.ProcessEnv,
+      absoluteFallbacks: string[] = [],
+    ): Promise<string | null> {
+      const requestedCandidates = [...absoluteFallbacks, ...candidates].map(
+        (candidate) => candidate.trim(),
+      )
+      if (
+        requestedCandidates.some((candidate) =>
+          toolchainMockState.unavailableCommands.has(candidate),
+        )
+      ) {
+        return null
+      }
+
+      return actual.resolveExecutablePath(candidates, env, absoluteFallbacks)
+    },
+  }
+})
 
 import {
   listAssistantCronPresets,
@@ -92,6 +124,7 @@ import {
 afterEach(() => {
   readlineMockState.answers = []
   readlineMockState.prompts = []
+  toolchainMockState.unavailableCommands.clear()
 })
 
 async function fileExists(absolutePath: string): Promise<boolean> {
@@ -2483,6 +2516,15 @@ test('createSetupServices on linux records apt provisioning failures and saves a
     )
     assert.ok(runCalls.some((call) => call.includes(' update')))
     assert.ok(runCalls.some((call) => call.includes(' install -y poppler-utils')))
+
+    toolchainMockState.unavailableCommands = new Set([
+      'apt-get',
+      '/usr/bin/apt-get',
+      '/bin/apt-get',
+      'sudo',
+      '/usr/bin/sudo',
+      '/bin/sudo',
+    ])
 
     const noAptServices = createSetupServices({
       downloadFile: async (_url, destinationPath) => {

@@ -64,7 +64,13 @@ test.sequential(
     const checkpointPayloadPath = path.join(vaultRoot, 'experiment-checkpoint.json')
 
     try {
-      await runSliceCli(['init', '--vault', vaultRoot])
+      await runSliceCli([
+        'init',
+        '--vault',
+        vaultRoot,
+        '--timezone',
+        'Australia/Sydney',
+      ])
       const created = await runSliceCli<{
         experimentId: string
         slug: string
