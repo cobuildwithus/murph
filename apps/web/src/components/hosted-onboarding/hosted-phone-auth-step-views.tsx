@@ -1,6 +1,6 @@
 "use client";
 
-import type { FormEvent } from "react";
+import { useId, type FormEvent } from "react";
 
 import { Button, buttonVariants } from "@/components/ui/button";
 import {
@@ -85,14 +85,16 @@ export function HostedPhoneEntryStep({
   onPhoneNumberChange: (value: string) => void;
   onSubmitPhoneEntry: (event: FormEvent<HTMLFormElement>) => void;
 }) {
+  const phoneInputId = useId();
+
   return (
     <form className="space-y-3" onSubmit={onSubmitPhoneEntry}>
       <div className="space-y-3">
-        <Label htmlFor={`hosted-phone-${mode}`}>
+        <Label htmlFor={phoneInputId}>
           {mode === "invite"
             ? "Phone number"
             : intent === "signin"
-              ? "Phone number on your account"
+              ? "Phone number"
               : "Your phone number"}
         </Label>
         <div className="flex flex-col gap-3 sm:flex-row">
@@ -130,7 +132,7 @@ export function HostedPhoneEntryStep({
             </ComboboxContent>
           </Combobox>
           <Input
-            id={`hosted-phone-${mode}`}
+            id={phoneInputId}
             autoComplete="tel-national"
             inputMode="tel"
             name="phone-number"
