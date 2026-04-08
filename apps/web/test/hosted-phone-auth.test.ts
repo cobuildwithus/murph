@@ -49,7 +49,6 @@ describe("HostedPhoneAuth", () => {
 
     const markup = renderToStaticMarkup(
       React.createElement(HostedPhoneAuth, {
-        mode: "public",
       }),
     );
 
@@ -65,11 +64,9 @@ describe("HostedPhoneAuth", () => {
     const markup = renderToStaticMarkup(
       React.createElement(React.Fragment, null,
         React.createElement(HostedPhoneAuth, {
-          mode: "public",
         }),
         React.createElement(HostedPhoneAuth, {
           intent: "signin",
-          mode: "public",
         }),
       ),
     );
@@ -87,12 +84,11 @@ describe("HostedPhoneAuth", () => {
       logout: mocks.logout,
       ready: true,
     });
-    const { HostedPhoneAuth } = await import("@/src/components/hosted-onboarding/hosted-phone-auth");
+    const { HostedInvitePhoneAuth } = await import("@/src/components/hosted-onboarding/hosted-invite-phone-auth");
 
     const markup = renderToStaticMarkup(
-      React.createElement(HostedPhoneAuth, {
-        mode: "invite",
-        phoneHint: "+1 (415) 555-2671",
+      React.createElement(HostedInvitePhoneAuth, {
+        inviteCode: "invite-code",
       }),
     );
 
@@ -103,13 +99,11 @@ describe("HostedPhoneAuth", () => {
   });
 
   it("renders the one-tap invite send-code shortcut without exposing the phone hint", async () => {
-    const { HostedPhoneAuth } = await import("@/src/components/hosted-onboarding/hosted-phone-auth");
+    const { HostedInvitePhoneAuth } = await import("@/src/components/hosted-onboarding/hosted-invite-phone-auth");
 
     const markup = renderToStaticMarkup(
-      React.createElement(HostedPhoneAuth, {
+      React.createElement(HostedInvitePhoneAuth, {
         inviteCode: "invite-code",
-        mode: "invite",
-        phoneHint: "*** 4567",
       }),
     );
 
@@ -134,18 +128,18 @@ describe("HostedPhoneAuth", () => {
         code: "",
         disabled: false,
         intent: "signup",
-        mode: "invite",
         pendingAction: null,
+        phoneFieldDescription: "Enter the number that messaged Murph.",
+        phoneFieldLabel: "Phone number",
         phoneCountryOptions: [{ code: "US", dialCode: "+1", label: "United States", placeholder: "(415) 555-2671" }],
         phoneNumber: "",
         sendCodeDisabled: false,
-        shortcutVisible: false,
+        secondaryActionSize: "sm",
         selectedPhoneCountry: { code: "US", dialCode: "+1", label: "United States", placeholder: "(415) 555-2671" },
         onCodeChange() {},
         onPhoneCountryChange() {},
         onPhoneNumberChange() {},
         onResendCode() {},
-        onSendCode() {},
         onSubmitPhoneEntry() {},
         onUseDifferentNumber() {},
         onVerifyCode() {},
@@ -158,29 +152,14 @@ describe("HostedPhoneAuth", () => {
   });
 
   it("renders invite shortcut actions full width", async () => {
-    const { HostedPhoneAuthFlow } = await import("@/src/components/hosted-onboarding/hosted-phone-auth-views");
+    const { HostedInviteShortcutStep } = await import("@/src/components/hosted-onboarding/hosted-phone-auth-step-views");
 
     const markup = renderToStaticMarkup(
-      React.createElement(HostedPhoneAuthFlow, {
-        activeAttempt: null,
-        code: "",
+      React.createElement(HostedInviteShortcutStep, {
         disabled: false,
-        intent: "signup",
-        mode: "invite",
         pendingAction: null,
-        phoneCountryOptions: [{ code: "US", dialCode: "+1", label: "United States", placeholder: "(415) 555-2671" }],
-        phoneNumber: "",
-        sendCodeDisabled: false,
-        shortcutVisible: true,
-        selectedPhoneCountry: { code: "US", dialCode: "+1", label: "United States", placeholder: "(415) 555-2671" },
-        onCodeChange() {},
-        onPhoneCountryChange() {},
-        onPhoneNumberChange() {},
-        onResendCode() {},
         onSendCode() {},
-        onSubmitPhoneEntry() {},
         onUseDifferentNumber() {},
-        onVerifyCode() {},
       }),
     );
 
@@ -199,18 +178,18 @@ describe("HostedPhoneAuth", () => {
         code: "",
         disabled: false,
         intent: "signup",
-        mode: "invite",
         pendingAction: null,
+        phoneFieldDescription: "Enter the number that messaged Murph.",
+        phoneFieldLabel: "Phone number",
         phoneCountryOptions: [{ code: "US", dialCode: "+1", label: "United States", placeholder: "(415) 555-2671" }],
         phoneNumber: "",
         sendCodeDisabled: true,
-        shortcutVisible: false,
+        secondaryActionSize: "sm",
         selectedPhoneCountry: { code: "US", dialCode: "+1", label: "United States", placeholder: "(415) 555-2671" },
         onCodeChange() {},
         onPhoneCountryChange() {},
         onPhoneNumberChange() {},
         onResendCode() {},
-        onSendCode() {},
         onSubmitPhoneEntry() {},
         onUseDifferentNumber() {},
         onVerifyCode() {},
@@ -231,18 +210,18 @@ describe("HostedPhoneAuth", () => {
         code: "",
         disabled: false,
         intent: "signup",
-        mode: "invite",
         pendingAction: null,
+        phoneFieldDescription: "Enter the number that messaged Murph.",
+        phoneFieldLabel: "Phone number",
         phoneCountryOptions: [{ code: "US", dialCode: "+1", label: "United States", placeholder: "(415) 555-2671" }],
         phoneNumber: "4155552671",
         sendCodeDisabled: false,
-        shortcutVisible: false,
+        secondaryActionSize: "sm",
         selectedPhoneCountry: { code: "US", dialCode: "+1", label: "United States", placeholder: "(415) 555-2671" },
         onCodeChange() {},
         onPhoneCountryChange() {},
         onPhoneNumberChange() {},
         onResendCode() {},
-        onSendCode() {},
         onSubmitPhoneEntry() {},
         onUseDifferentNumber() {},
         onVerifyCode() {},
@@ -264,7 +243,6 @@ describe("HostedPhoneAuth", () => {
 
     const markup = renderToStaticMarkup(
       React.createElement(HostedPhoneAuth, {
-        mode: "public",
       }),
     );
 
@@ -287,18 +265,18 @@ describe("HostedPhoneAuth", () => {
         code: "",
         disabled: false,
         intent: "signup",
-        mode: "public",
         pendingAction: null,
+        phoneFieldDescription: null,
+        phoneFieldLabel: null,
         phoneCountryOptions: [{ code: "US", dialCode: "+1", label: "United States", placeholder: "(415) 555-2671" }],
         phoneNumber: "4155552671",
         sendCodeDisabled: false,
-        shortcutVisible: false,
+        secondaryActionSize: "lg",
         selectedPhoneCountry: { code: "US", dialCode: "+1", label: "United States", placeholder: "(415) 555-2671" },
         onCodeChange() {},
         onPhoneCountryChange() {},
         onPhoneNumberChange() {},
         onResendCode() {},
-        onSendCode() {},
         onSubmitPhoneEntry() {},
         onUseDifferentNumber() {},
         onVerifyCode() {},
@@ -320,18 +298,18 @@ describe("HostedPhoneAuth", () => {
         code: "",
         disabled: false,
         intent: "signin",
-        mode: "public",
         pendingAction: null,
+        phoneFieldDescription: null,
+        phoneFieldLabel: null,
         phoneCountryOptions: [{ code: "US", dialCode: "+1", label: "United States", placeholder: "(415) 555-2671" }],
         phoneNumber: "4155552671",
         sendCodeDisabled: false,
-        shortcutVisible: false,
+        secondaryActionSize: "lg",
         selectedPhoneCountry: { code: "US", dialCode: "+1", label: "United States", placeholder: "(415) 555-2671" },
         onCodeChange() {},
         onPhoneCountryChange() {},
         onPhoneNumberChange() {},
         onResendCode() {},
-        onSendCode() {},
         onSubmitPhoneEntry() {},
         onUseDifferentNumber() {},
         onVerifyCode() {},
@@ -347,18 +325,18 @@ describe("HostedPhoneAuth", () => {
         code: "",
         disabled: false,
         intent: "signin",
-        mode: "public",
         pendingAction: null,
+        phoneFieldDescription: null,
+        phoneFieldLabel: null,
         phoneCountryOptions: [{ code: "US", dialCode: "+1", label: "United States", placeholder: "(415) 555-2671" }],
         phoneNumber: "4155552671",
         sendCodeDisabled: false,
-        shortcutVisible: false,
+        secondaryActionSize: "lg",
         selectedPhoneCountry: { code: "US", dialCode: "+1", label: "United States", placeholder: "(415) 555-2671" },
         onCodeChange() {},
         onPhoneCountryChange() {},
         onPhoneNumberChange() {},
         onResendCode() {},
-        onSendCode() {},
         onSubmitPhoneEntry() {},
         onUseDifferentNumber() {},
         onVerifyCode() {},
@@ -412,31 +390,11 @@ describe("HostedPhoneAuth", () => {
     assert.equal(isHostedPhoneVerificationCodeComplete("123456"), true);
   });
 
-  it("keeps invite shortcut resend on the server-backed invite path even after an active attempt exists", async () => {
+  it("resends from the active attempt number when a verification attempt already exists", async () => {
     const { resolveHostedPhoneResendTarget } = await import("@/src/components/hosted-onboarding/hosted-phone-auth");
 
     assert.deepEqual(
       resolveHostedPhoneResendTarget({
-        inviteCode: "invite-code",
-        manualEntryVisible: false,
-        mode: "invite",
-        phoneVerificationAttempt: {
-          maskedPhoneNumber: "*** 2523",
-          phoneNumber: "+14044092523",
-        },
-      }),
-      { kind: "invite-shortcut" },
-    );
-  });
-
-  it("resends from the active attempt number during manual entry flows", async () => {
-    const { resolveHostedPhoneResendTarget } = await import("@/src/components/hosted-onboarding/hosted-phone-auth");
-
-    assert.deepEqual(
-      resolveHostedPhoneResendTarget({
-        inviteCode: "invite-code",
-        manualEntryVisible: true,
-        mode: "invite",
         phoneVerificationAttempt: {
           maskedPhoneNumber: "*** 2523",
           phoneNumber: "+14044092523",
@@ -449,17 +407,28 @@ describe("HostedPhoneAuth", () => {
     );
   });
 
-  it("keeps invite-mode authenticated sessions in the manual resume state instead of auto-loading", async () => {
+  it("falls back to the draft-submit resend path when no active attempt exists", async () => {
+    const { resolveHostedPhoneResendTarget } = await import("@/src/components/hosted-onboarding/hosted-phone-auth");
+
+    assert.deepEqual(
+      resolveHostedPhoneResendTarget({
+        phoneVerificationAttempt: null,
+      }),
+      { kind: "draft-submit" },
+    );
+  });
+
+  it("keeps invite authenticated sessions in the manual resume state instead of auto-loading", async () => {
     mocks.usePrivy.mockReturnValue({
       authenticated: true,
       logout: mocks.logout,
       ready: true,
     });
-    const { HostedPhoneAuth } = await import("@/src/components/hosted-onboarding/hosted-phone-auth");
+    const { HostedInvitePhoneAuth } = await import("@/src/components/hosted-onboarding/hosted-invite-phone-auth");
 
     const markup = renderToStaticMarkup(
-      React.createElement(HostedPhoneAuth, {
-        mode: "invite",
+      React.createElement(HostedInvitePhoneAuth, {
+        inviteCode: "invite-code",
       }),
     );
 
@@ -619,4 +588,212 @@ describe("HostedPhoneAuth", () => {
       "/join/invite-code",
     );
   });
+
+  it("uses the invite shortcut route for the first invite send-code request", async () => {
+    const harness = await loadHostedInvitePhoneAuthHarness();
+
+    renderToStaticMarkup(
+      React.createElement(harness.HostedInvitePhoneAuth, {
+        inviteCode: "invite-code",
+      }),
+    );
+
+    assert.equal(harness.shortcutProps.length, 1);
+    await harness.shortcutProps[0].onSendCode();
+
+    assert.equal(harness.requestHostedOnboardingJson.mock.calls.length, 1);
+    assert.match(String(harness.requestHostedOnboardingJson.mock.calls[0]?.[0]?.url), /\/invites\/invite-code\/send-code$/);
+    assert.deepEqual(harness.requestHostedOnboardingJson.mock.calls[0]?.[0]?.auth, "none");
+    assert.equal(harness.controller.sendVerificationCode.mock.calls[0]?.[0], "+14044092523");
+    assert.equal(harness.finalizeInvitePhoneCodeSendConfirmation.mock.calls[0]?.[0]?.sendAttemptId, "attempt-id");
+    assert.equal(harness.controller.handleResendCode.mock.calls.length, 0);
+  });
+
+  it("keeps resend on the invite shortcut path while the invite code step is active", async () => {
+    const harness = await loadHostedInvitePhoneAuthHarness({
+      activeAttempt: {
+        maskedPhoneNumber: "*** 2523",
+        phoneNumber: "+14044092523",
+      },
+    });
+
+    renderToStaticMarkup(
+      React.createElement(harness.HostedInvitePhoneAuth, {
+        inviteCode: "invite-code",
+      }),
+    );
+
+    assert.equal(harness.flowProps.length, 1);
+    await harness.flowProps[0].onResendCode();
+
+    assert.equal(harness.requestHostedOnboardingJson.mock.calls.length, 1);
+    assert.match(String(harness.requestHostedOnboardingJson.mock.calls[0]?.[0]?.url), /\/invites\/invite-code\/send-code$/);
+    assert.equal(harness.controller.sendVerificationCode.mock.calls[0]?.[0], "+14044092523");
+    assert.equal(harness.controller.handleResendCode.mock.calls.length, 0);
+  });
+
+  it("falls back to manual entry when the invite shortcut phone is unavailable", async () => {
+    const setManualEntryVisible = vi.fn();
+    const harness = await loadHostedInvitePhoneAuthHarness({
+      ReactMock: async () => {
+        const actual = await vi.importActual<typeof import("react")>("react");
+        return {
+          ...actual,
+          useState(initialValue: boolean) {
+            return [initialValue, setManualEntryVisible] as const;
+          },
+        };
+      },
+      requestErrorFactory: (HostedOnboardingApiError) =>
+        new HostedOnboardingApiError({
+          code: "SIGNUP_PHONE_UNAVAILABLE",
+          message: "Enter the number that messaged Murph to continue.",
+        }),
+    });
+
+    renderToStaticMarkup(
+      React.createElement(harness.HostedInvitePhoneAuth, {
+        inviteCode: "invite-code",
+      }),
+    );
+
+    assert.equal(harness.shortcutProps.length, 1);
+    await harness.shortcutProps[0].onSendCode();
+
+    assert.deepEqual(harness.controller.resetPhoneAuthFlow.mock.calls.length, 1);
+    assert.deepEqual(setManualEntryVisible.mock.calls, [[true]]);
+    assert.equal(
+      harness.controller.setErrorMessage.mock.calls.at(-1)?.[0],
+      "Enter the number that messaged Murph to continue.",
+    );
+  });
 });
+
+async function loadHostedInvitePhoneAuthHarness(input?: {
+  activeAttempt?: { maskedPhoneNumber: string; phoneNumber: string } | null;
+  ReactMock?: () => Promise<Record<string, unknown>>;
+  requestErrorFactory?: (HostedOnboardingApiError: new (input: { code?: string | null; message: string }) => Error) => Error;
+}) {
+  vi.resetModules();
+
+  if (input?.ReactMock) {
+    vi.doMock("react", input.ReactMock);
+  }
+
+  const shortcutProps: Array<{ onSendCode: () => Promise<void>; onUseDifferentNumber: () => void }> = [];
+  const flowProps: Array<{ onResendCode: () => Promise<void>; onUseDifferentNumber: () => void }> = [];
+  const controller = createHostedInvitePhoneAuthControllerHarness(input?.activeAttempt ?? null);
+
+  class HostedOnboardingApiError extends Error {
+    readonly code: string | null;
+
+    constructor(input: { code?: string | null; message: string }) {
+      super(input.message);
+      this.name = "HostedOnboardingApiError";
+      this.code = input.code ?? null;
+    }
+  }
+
+  const requestHostedOnboardingJson = vi.fn();
+  if (input?.requestErrorFactory) {
+    requestHostedOnboardingJson.mockRejectedValue(input.requestErrorFactory(HostedOnboardingApiError));
+  } else {
+    requestHostedOnboardingJson.mockResolvedValue({
+      phoneNumber: "+14044092523",
+      sendAttemptId: "attempt-id",
+    });
+  }
+
+  const abortInvitePhoneCodeSend = vi.fn().mockResolvedValue(true);
+  const finalizeInvitePhoneCodeSendConfirmation = vi.fn().mockResolvedValue(undefined);
+  const flushPendingInvitePhoneCodeMutation = vi.fn().mockResolvedValue(undefined);
+  const queuePendingInvitePhoneCodeMutation = vi.fn();
+
+  vi.doMock("@/src/components/hosted-onboarding/hosted-phone-auth-controller", () => ({
+    useHostedPhoneAuthController: () => controller,
+  }));
+  vi.doMock("@/src/components/hosted-onboarding/client-api", () => ({
+    HostedOnboardingApiError,
+    requestHostedOnboardingJson,
+  }));
+  vi.doMock("@/src/components/hosted-onboarding/hosted-phone-auth-support", () => ({
+    abortInvitePhoneCodeSend,
+    finalizeInvitePhoneCodeSendConfirmation,
+    flushPendingInvitePhoneCodeMutation,
+    queuePendingInvitePhoneCodeMutation,
+    toErrorMessage(error: unknown, fallback: string) {
+      return error instanceof Error && error.message ? error.message : fallback;
+    },
+  }));
+  vi.doMock("@/src/components/hosted-onboarding/hosted-phone-auth-step-views", () => ({
+    HostedInviteShortcutStep(props: { onSendCode: () => Promise<void>; onUseDifferentNumber: () => void }) {
+      shortcutProps.push(props);
+      return React.createElement("div", { "data-shortcut-step": "true" });
+    },
+  }));
+  vi.doMock("@/src/components/hosted-onboarding/hosted-phone-auth-views", () => ({
+    HostedPhoneAuthFlow(props: { onResendCode: () => Promise<void>; onUseDifferentNumber: () => void }) {
+      flowProps.push(props);
+      return React.createElement("div", { "data-phone-auth-flow": "true" });
+    },
+    HostedPhoneAuthScaffold({ children }: { children: React.ReactNode }) {
+      return React.createElement(React.Fragment, null, children);
+    },
+  }));
+
+  const { HostedInvitePhoneAuth } = await import("@/src/components/hosted-onboarding/hosted-invite-phone-auth");
+
+  return {
+    HostedInvitePhoneAuth,
+    abortInvitePhoneCodeSend,
+    controller,
+    finalizeInvitePhoneCodeSendConfirmation,
+    flowProps,
+    flushPendingInvitePhoneCodeMutation,
+    queuePendingInvitePhoneCodeMutation,
+    requestHostedOnboardingJson,
+    shortcutProps,
+  };
+}
+
+function createHostedInvitePhoneAuthControllerHarness(
+  activeAttempt: { maskedPhoneNumber: string; phoneNumber: string } | null,
+) {
+  return {
+    authenticatedLoadingBody: "loading body",
+    authenticatedLoadingTitle: "loading title",
+    authenticatedSessionDescription: "session description",
+    authenticatedView: null,
+    errorMessage: null,
+    flowDisabled: false,
+    handleContinueAuthenticated: vi.fn(),
+    handleLogout: vi.fn(),
+    handleResendCode: vi.fn(),
+    pendingAction: null,
+    resetPhoneAuthFlow: vi.fn(),
+    sendVerificationCode: vi.fn().mockResolvedValue(undefined),
+    setErrorMessage: vi.fn(),
+    setPendingAction: vi.fn(),
+    sharedFlowProps: {
+      activeAttempt,
+      code: "",
+      disabled: false,
+      intent: "signup" as const,
+      onCodeChange: vi.fn(),
+      onPhoneCountryChange: vi.fn(),
+      onPhoneNumberChange: vi.fn(),
+      onResendCode: vi.fn(),
+      onSubmitPhoneEntry: vi.fn(),
+      onUseDifferentNumber: vi.fn(),
+      onVerifyCode: vi.fn(),
+      pendingAction: null,
+      phoneCountryOptions: [],
+      phoneFieldDescription: null,
+      phoneFieldLabel: null,
+      phoneNumber: "",
+      secondaryActionSize: "lg" as const,
+      selectedPhoneCountry: { code: "US", dialCode: "+1", label: "United States", placeholder: "(415) 555-2671" },
+      sendCodeDisabled: false,
+    },
+  };
+}

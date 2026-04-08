@@ -1,4 +1,3 @@
-export type HostedPhoneAuthMode = "invite" | "public";
 export type HostedPhoneAuthIntent = "signup" | "signin";
 export type HostedPhoneAuthPendingAction = "continue" | "logout" | "send-code" | "verify-code" | null;
 export type HostedAuthenticatedPhoneAuthView = "loading" | "manual-resume" | "restart" | null;

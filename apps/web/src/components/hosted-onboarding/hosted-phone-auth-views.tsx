@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { LoaderCircleIcon } from "lucide-react";
 import type { FormEvent } from "react";
 
@@ -8,14 +9,12 @@ import { Button } from "@/components/ui/button";
 
 import {
   HostedCodeEntryStep,
-  HostedInviteShortcutStep,
   HostedPhoneEntryStep,
 } from "./hosted-phone-auth-step-views";
 import { HostedUseDifferentNumberButton } from "./hosted-phone-auth-use-different-number-button";
 import type {
   HostedAuthenticatedPhoneAuthView,
   HostedPhoneAuthIntent,
-  HostedPhoneAuthMode,
   HostedPhoneAuthPendingAction,
   HostedPhoneCountryOption,
   HostedPhoneVerificationAttempt,
@@ -26,25 +25,21 @@ interface SharedFlowProps {
   code: string;
   disabled: boolean;
   intent: HostedPhoneAuthIntent;
-  mode: HostedPhoneAuthMode;
   pendingAction: HostedPhoneAuthPendingAction;
+  phoneFieldDescription?: string | null;
+  phoneFieldLabel?: string | null;
   phoneCountryOptions: HostedPhoneCountryOption[];
   phoneNumber: string;
   sendCodeDisabled: boolean;
+  secondaryActionSize: "sm" | "lg";
   selectedPhoneCountry: HostedPhoneCountryOption;
   onCodeChange: (value: string) => void;
   onPhoneCountryChange: (code: string) => void;
   onPhoneNumberChange: (value: string) => void;
   onResendCode: () => void;
-  onSendCode?: () => void;
   onSubmitPhoneEntry: (event: FormEvent<HTMLFormElement>) => void;
   onUseDifferentNumber: () => void;
   onVerifyCode: () => void;
-}
-
-interface HostedPhoneAuthFlowProps extends SharedFlowProps {
-  shortcutVisible: boolean;
-  onSendCode: () => void;
 }
 
 interface AuthenticatedStateProps {
@@ -52,18 +47,61 @@ interface AuthenticatedStateProps {
   description: string;
   disabled: boolean;
   intent: HostedPhoneAuthIntent;
-  mode: HostedPhoneAuthMode;
   pendingAction: HostedPhoneAuthPendingAction;
+  secondaryActionSize: "sm" | "lg";
   title: string;
   view: HostedAuthenticatedPhoneAuthView;
   onContinue: () => void;
   onUseDifferentNumber: () => void;
 }
 
-export function HostedPhoneAuthFlow({
-  shortcutVisible,
-  ...props
-}: HostedPhoneAuthFlowProps) {
+interface HostedPhoneAuthScaffoldProps extends AuthenticatedStateProps {
+  errorMessage: string | null;
+  children: ReactNode;
+}
+
+export function HostedPhoneAuthScaffold({
+  body,
+  children,
+  description,
+  disabled,
+  errorMessage,
+  intent,
+  pendingAction,
+  secondaryActionSize,
+  title,
+  view,
+  onContinue,
+  onUseDifferentNumber,
+}: HostedPhoneAuthScaffoldProps) {
+  return (
+    <div className="space-y-4">
+      {errorMessage ? (
+        <Alert variant="destructive">
+          <AlertTitle>Unable to continue</AlertTitle>
+          <AlertDescription>{errorMessage}</AlertDescription>
+        </Alert>
+      ) : null}
+
+      {view ? (
+        <HostedAuthenticatedPhoneAuthState
+          body={body}
+          description={description}
+          disabled={disabled}
+          intent={intent}
+          pendingAction={pendingAction}
+          secondaryActionSize={secondaryActionSize}
+          title={title}
+          view={view}
+          onContinue={onContinue}
+          onUseDifferentNumber={onUseDifferentNumber}
+        />
+      ) : children}
+    </div>
+  );
+}
+
+export function HostedPhoneAuthFlow(props: SharedFlowProps) {
   if (props.activeAttempt) {
     return (
       <HostedCodeEntryStep
@@ -71,8 +109,8 @@ export function HostedPhoneAuthFlow({
         code={props.code}
         disabled={props.disabled}
         intent={props.intent}
-        mode={props.mode}
         pendingAction={props.pendingAction}
+        secondaryActionSize={props.secondaryActionSize}
         onCodeChange={props.onCodeChange}
         onResendCode={props.onResendCode}
         onUseDifferentNumber={props.onUseDifferentNumber}
@@ -81,21 +119,11 @@ export function HostedPhoneAuthFlow({
     );
   }
 
-  if (shortcutVisible) {
-    return (
-      <HostedInviteShortcutStep
-        disabled={props.disabled}
-        pendingAction={props.pendingAction}
-        onSendCode={props.onSendCode}
-        onUseDifferentNumber={props.onUseDifferentNumber}
-      />
-    );
-  }
-
   return (
     <HostedPhoneEntryStep
       intent={props.intent}
-      mode={props.mode}
+      phoneFieldDescription={props.phoneFieldDescription}
+      phoneFieldLabel={props.phoneFieldLabel}
       pendingAction={props.pendingAction}
       phoneCountryOptions={props.phoneCountryOptions}
       phoneNumber={props.phoneNumber}
@@ -113,8 +141,8 @@ export function HostedAuthenticatedPhoneAuthState({
   description,
   disabled,
   intent,
-  mode,
   pendingAction,
+  secondaryActionSize,
   title,
   view,
   onContinue,
@@ -153,7 +181,7 @@ export function HostedAuthenticatedPhoneAuthState({
           <HostedUseDifferentNumberButton
             disabled={disabled}
             pendingAction={pendingAction}
-            size={mode === "public" ? "lg" : "sm"}
+            size={secondaryActionSize}
             onClick={onUseDifferentNumber}
           />
         </div>
@@ -174,7 +202,7 @@ export function HostedAuthenticatedPhoneAuthState({
           <HostedUseDifferentNumberButton
             disabled={disabled}
             pendingAction={pendingAction}
-            size={mode === "public" ? "lg" : "sm"}
+            size={secondaryActionSize}
             onClick={onUseDifferentNumber}
           />
         </div>

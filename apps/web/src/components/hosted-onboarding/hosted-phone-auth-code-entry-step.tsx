@@ -1,12 +1,13 @@
 "use client";
 
+import { useId } from "react";
+
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
 import type {
   HostedPhoneAuthIntent,
-  HostedPhoneAuthMode,
   HostedPhoneAuthPendingAction,
 } from "./hosted-phone-auth-types";
 import { HostedUseDifferentNumberButton } from "./hosted-phone-auth-use-different-number-button";
@@ -16,8 +17,8 @@ export function HostedCodeEntryStep({
   code,
   disabled,
   intent,
-  mode,
   pendingAction,
+  secondaryActionSize,
   onCodeChange,
   onResendCode,
   onUseDifferentNumber,
@@ -27,18 +28,20 @@ export function HostedCodeEntryStep({
   code: string;
   disabled: boolean;
   intent: HostedPhoneAuthIntent;
-  mode: HostedPhoneAuthMode;
   pendingAction: HostedPhoneAuthPendingAction;
+  secondaryActionSize: "sm" | "lg";
   onCodeChange: (value: string) => void;
   onResendCode: () => void;
   onUseDifferentNumber: () => void;
   onVerifyCode: () => void;
 }) {
+  const codeInputId = useId();
+
   return (
     <>
       <div className="space-y-3">
         <div className="flex items-baseline justify-between">
-          <Label htmlFor={`hosted-code-${mode}`}>Verification code</Label>
+          <Label htmlFor={codeInputId}>Verification code</Label>
           <Button
             type="button"
             onClick={onResendCode}
@@ -51,7 +54,7 @@ export function HostedCodeEntryStep({
           </Button>
         </div>
         <Input
-          id={`hosted-code-${mode}`}
+          id={codeInputId}
           autoFocus
           autoComplete="one-time-code"
           inputMode="numeric"
@@ -77,7 +80,7 @@ export function HostedCodeEntryStep({
         <HostedUseDifferentNumberButton
           disabled={disabled}
           pendingAction={pendingAction}
-          size={mode === "public" ? "lg" : "sm"}
+          size={secondaryActionSize}
           onClick={onUseDifferentNumber}
         />
       </div>

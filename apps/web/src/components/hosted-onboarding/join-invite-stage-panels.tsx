@@ -15,7 +15,7 @@ import type {
   HostedPrivyCompletionPayload,
 } from "@/src/lib/hosted-onboarding/types";
 
-import { HostedPhoneAuth } from "./hosted-phone-auth";
+import { HostedInvitePhoneAuth } from "./hosted-invite-phone-auth";
 import { JOIN_INVITE_ACTIVE_FEATURE_CARDS } from "./join-invite-active-feature-cards";
 import type { JoinInviteShareImportState } from "./join-invite-state";
 import { describeHostedSharePreview } from "../hosted-share/hosted-share-preview";
@@ -95,9 +95,8 @@ export function JoinInviteVerificationPanel({
 
   return (
     <div className="rounded-xl border border-stone-200/60 bg-stone-50/60 p-5">
-      <HostedPhoneAuth
+      <HostedInvitePhoneAuth
         inviteCode={inviteCode}
-        mode="invite"
         onSignOut={async () => {
           await onRefreshStatus();
         }}
