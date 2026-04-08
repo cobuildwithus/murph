@@ -8,7 +8,7 @@ import {
   type AssistantSession,
   type AssistantProviderBinding,
   type AssistantSessionResumeState,
-} from '../assistant-cli-contracts.js'
+} from '@murphai/operator-config/assistant-cli-contracts'
 import { normalizeNullableString } from './shared.js'
 
 export function readAssistantProviderResumeRouteId(input: {

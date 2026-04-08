@@ -1,4 +1,4 @@
-import type { AssistantAutomationCursor } from '../../assistant-cli-contracts.js'
+import type { AssistantAutomationCursor } from '@murphai/operator-config/assistant-cli-contracts'
 
 type ShutdownTimer = ReturnType<typeof setTimeout> | number
 

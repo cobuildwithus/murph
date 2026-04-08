@@ -1,7 +1,9 @@
 export { loadRuntimeModule } from './runtime-import.js'
 export {
+  ALL_QUERY_ENTITY_FAMILIES,
   loadQueryRuntime,
   type QueryCanonicalEntity,
+  type QueryEntityFamily,
   type QueryEntity,
   type QueryRuntimeModule,
   type QueryVaultReadModel,

@@ -5,11 +5,11 @@ import {
 import {
   assistantProviderBindingSchema,
   type AssistantSession,
-} from '../assistant-cli-contracts.js'
+} from '@murphai/operator-config/assistant-cli-contracts'
 import {
   compactAssistantProviderConfigInput,
   serializeAssistantProviderSessionOptions,
-} from './provider-config.js'
+} from '@murphai/operator-config/assistant/provider-config'
 import {
   readAssistantProviderResumeRouteId,
   readAssistantProviderSessionId,

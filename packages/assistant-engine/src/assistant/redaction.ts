@@ -1,7 +1,7 @@
 import type {
   AssistantProviderSessionOptions,
   AssistantSession,
-} from '../assistant-cli-contracts.js'
+} from '@murphai/operator-config/assistant-cli-contracts'
 
 const REDACTED_SECRET_TEXT = '[REDACTED]' as const
 

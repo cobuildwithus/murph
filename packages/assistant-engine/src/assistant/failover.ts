@@ -8,7 +8,7 @@ import {
   type AssistantProviderFailoverRoute,
   type AssistantProviderRouteState,
   type AssistantProviderSessionOptions,
-} from '../assistant-cli-contracts.js'
+} from '@murphai/operator-config/assistant-cli-contracts'
 import {
   resolveAssistantProviderDefaults,
   type AssistantOperatorDefaults,
@@ -21,7 +21,7 @@ import { resolveAssistantStatePaths, type AssistantStatePaths } from './store/pa
 import {
   mergeAssistantProviderConfigsForProvider,
   serializeAssistantProviderSessionOptions,
-} from './provider-config.js'
+} from '@murphai/operator-config/assistant/provider-config'
 import { resolveAssistantProviderLabel } from './provider-registry.js'
 import {
   isMissingFileError,

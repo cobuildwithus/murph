@@ -36,8 +36,10 @@ import type {
   InboxSourceListResult,
   InboxSourceRemoveResult,
 } from '@murphai/operator-config/inbox-cli-contracts'
-import type { QueryRuntimeModule } from '@murphai/vault-usecases'
-import type { ImportersFactoryRuntimeModule } from '@murphai/vault-usecases/runtime'
+import type {
+  ImportersFactoryRuntimeModule,
+  QueryRuntimeModule,
+} from '@murphai/vault-usecases/runtime'
 
 export interface RuntimeAttachmentRecord {
   attachmentId?: string | null

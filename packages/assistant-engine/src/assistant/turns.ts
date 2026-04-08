@@ -9,7 +9,7 @@ import {
   type AssistantTurnReceipt,
   type AssistantTurnTimelineEvent,
   type AssistantTurnTimelineEventKind,
-} from '../assistant-cli-contracts.js'
+} from '@murphai/operator-config/assistant-cli-contracts'
 import { quarantineAssistantStateFile } from './quarantine.js'
 import { appendAssistantRuntimeEventAtPaths } from './runtime-events.js'
 import { resolveAssistantOpaqueStateFilePath } from './state-ids.js'

@@ -8,7 +8,7 @@ import {
   type AssistantDiagnosticLevel,
   type AssistantDiagnosticsCounters,
   type AssistantDiagnosticsSnapshot,
-} from '../assistant-cli-contracts.js'
+} from '@murphai/operator-config/assistant-cli-contracts'
 import { quarantineAssistantStateFile } from './quarantine.js'
 import { appendAssistantRuntimeEventAtPaths } from './runtime-events.js'
 import { ensureAssistantState } from './store/persistence.js'

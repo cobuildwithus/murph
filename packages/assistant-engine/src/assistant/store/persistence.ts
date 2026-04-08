@@ -10,7 +10,7 @@ import {
   type AssistantSession,
   type AssistantTranscriptEntry,
   parseAssistantSessionRecord,
-} from '../../assistant-cli-contracts.js'
+} from '@murphai/operator-config/assistant-cli-contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   getAssistantBindingIsolationConflicts,
@@ -31,7 +31,7 @@ import {
   writeTextFileAtomic,
   writeJsonFileAtomic,
 } from '../shared.js'
-import { serializeAssistantProviderSessionOptions } from '../provider-config.js'
+import { serializeAssistantProviderSessionOptions } from '@murphai/operator-config/assistant/provider-config'
 import {
   normalizeAssistantSessionSnapshot,
   serializeAssistantSessionForPersistence,

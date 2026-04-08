@@ -1,7 +1,7 @@
 import type {
   AssistantBindingDelivery,
   AssistantBindingDeliveryKind,
-} from '../../assistant-cli-contracts.js'
+} from '@murphai/operator-config/assistant-cli-contracts'
 import type { ConversationRef } from '../conversation-ref.js'
 import {
   inferFallbackBindingDelivery,

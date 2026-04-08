@@ -15,7 +15,7 @@ import {
   type InboxPromotionEntry,
   type InboxPreserveDocumentAttachmentsResult,
 } from '@murphai/operator-config/inbox-cli-contracts'
-import type { QueryRuntimeModule } from '@murphai/vault-usecases'
+import type { QueryRuntimeModule } from '@murphai/vault-usecases/runtime'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import type {
   CanonicalAttachmentPromotionResult,

@@ -1,6 +1,6 @@
 import type {
   AssistantSession,
-} from '../assistant-cli-contracts.js'
+} from '@murphai/operator-config/assistant-cli-contracts'
 import { markAssistantFirstContactSeen } from './first-contact.js'
 import { normalizeAssistantDeliveryError } from './outbox.js'
 import { sanitizeAssistantOutboundReply } from './reply-sanitizer.js'

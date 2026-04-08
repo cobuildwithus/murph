@@ -3,13 +3,13 @@ import type {
   AssistantChatProvider,
   AssistantSandbox,
   AssistantSessionBinding,
-} from '../../assistant-cli-contracts.js'
+} from '@murphai/operator-config/assistant-cli-contracts'
 import type {
   AssistantProviderTraceEvent,
 } from '../provider-traces.js'
 import type {
   AssistantProviderConfig,
-} from '../provider-config.js'
+} from '@murphai/operator-config/assistant/provider-config'
 import type {
   AssistantProviderProgressEvent as SharedAssistantProviderProgressEvent,
 } from '../provider-progress.js'

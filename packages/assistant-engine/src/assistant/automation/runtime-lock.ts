@@ -7,7 +7,7 @@ import {
   inspectDirectoryLock,
   isProcessRunning,
 } from '@murphai/runtime-state/node'
-import type { AssistantStatusRunLock } from '../../assistant-cli-contracts.js'
+import type { AssistantStatusRunLock } from '@murphai/operator-config/assistant-cli-contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import type { AssistantStatePaths } from '../store/paths.js'
 

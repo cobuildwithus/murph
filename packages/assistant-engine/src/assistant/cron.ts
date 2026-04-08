@@ -19,8 +19,8 @@ import {
   type AssistantCronTargetSnapshot,
   type AssistantCronTrigger,
   type AssistantBindingDelivery,
-} from '../assistant-cli-contracts.ts'
-import { loadRuntimeModule } from '@murphai/vault-usecases'
+} from '@murphai/operator-config/assistant-cli-contracts'
+import { loadRuntimeModule } from '@murphai/vault-usecases/runtime'
 import { renderAutoLoggedFoodMealNote } from '@murphai/vault-usecases/records'
 import { loadImporterRuntime } from '@murphai/vault-usecases/runtime'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
@@ -74,7 +74,7 @@ import type { AssistantOutboxDispatchMode } from './outbox.ts'
 import { errorMessage, normalizeNullableString } from './shared.ts'
 import type { AssistantExecutionContext } from './execution-context.ts'
 
-export type { AssistantCronTargetSnapshot } from '../assistant-cli-contracts.ts'
+export type { AssistantCronTargetSnapshot } from '@murphai/operator-config/assistant-cli-contracts'
 
 const ASSISTANT_CRON_JOB_SCHEMA = 'murph.assistant-cron-job.v1'
 const ASSISTANT_CRON_RUN_SCHEMA = 'murph.assistant-cron-run.v1'

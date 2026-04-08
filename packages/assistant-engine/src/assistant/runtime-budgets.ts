@@ -5,7 +5,7 @@ import {
   assistantRuntimeBudgetSnapshotSchema,
   type AssistantQuarantineEntry,
   type AssistantRuntimeBudgetSnapshot,
-} from '../assistant-cli-contracts.js'
+} from '@murphai/operator-config/assistant-cli-contracts'
 import {
   clearAssistantAutomationRunLock,
   inspectAssistantAutomationRunLock,

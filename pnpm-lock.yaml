@@ -368,6 +368,9 @@ importers:
       '@murphai/inbox-services':
         specifier: workspace:*
         version: link:../inbox-services
+      '@murphai/operator-config':
+        specifier: workspace:*
+        version: link:../operator-config
       '@murphai/runtime-state':
         specifier: workspace:*
         version: link:../runtime-state

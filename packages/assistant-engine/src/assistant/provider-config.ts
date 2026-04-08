@@ -8,8 +8,6 @@ import {
 } from '@murphai/operator-config/assistant/provider-config'
 import { normalizeNullableString } from '@murphai/operator-config/text/shared'
 
-export * from '@murphai/operator-config/assistant/provider-config'
-
 export function resolveAssistantModelSpecFromProviderConfig(
   input: AssistantProviderConfigInput | null | undefined,
   env: NodeJS.ProcessEnv = process.env,

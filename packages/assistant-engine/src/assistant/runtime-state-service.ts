@@ -4,7 +4,7 @@ import type {
   AssistantStatusResult,
   AssistantTranscriptEntry,
   AssistantTurnReceipt,
-} from '../assistant-cli-contracts.js'
+} from '@murphai/operator-config/assistant-cli-contracts'
 import {
   appendAssistantTranscriptEntries,
   getAssistantSession,

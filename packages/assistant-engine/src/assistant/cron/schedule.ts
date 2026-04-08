@@ -6,7 +6,7 @@ import {
 import type {
   AssistantCronSchedule,
   AssistantCronScheduleInput,
-} from '../../assistant-cli-contracts.js'
+} from '@murphai/operator-config/assistant-cli-contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
 const DURATION_UNITS = {

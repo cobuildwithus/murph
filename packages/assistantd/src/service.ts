@@ -16,28 +16,30 @@ import {
   sendAssistantMessage,
   setAssistantCronJobTarget,
   updateAssistantSessionOptions,
-  type AssistantAskResult,
-  type AssistantCronJob,
-  type AssistantCronProcessDueResult,
-  type AssistantCronRunRecord,
-  type AssistantCronStatusSnapshot,
-  type AssistantCronTargetMutationResult,
-  type AssistantCronTargetSnapshot,
-  type AssistantMessageInput,
-  type AssistantOutboxDispatchMode,
-  type AssistantOutboxIntent,
-  type AssistantRunResult,
-  type AssistantSession,
-  type AssistantStatusResult,
-  type RunAssistantAutomationInput,
   createAssistantFoodAutoLogHooks,
 } from '@murphai/assistant-engine'
+import type {
+  AssistantAskResult,
+  AssistantCronJob,
+  AssistantCronProcessDueResult,
+  AssistantCronRunRecord,
+  AssistantCronStatusSnapshot,
+  AssistantCronTargetMutationResult,
+  AssistantCronTargetSnapshot,
+  AssistantMessageInput,
+  AssistantOutboxIntent,
+  AssistantRunResult,
+  AssistantSession,
+  AssistantStatusResult,
+} from '@murphai/operator-config/assistant-cli-contracts'
 import { createIntegratedInboxServices } from '@murphai/inbox-services'
 import { createIntegratedVaultServices } from '@murphai/vault-usecases'
 import {
   assistantGatewayLocalMessageSender,
   assistantGatewayLocalProjectionSourceReader,
 } from '@murphai/assistant-engine/gateway-local-adapter'
+import type { RunAssistantAutomationInput } from '@murphai/assistant-engine/assistant-automation'
+import type { AssistantOutboxDispatchMode } from '@murphai/assistant-engine/assistant-outbox'
 import { createLocalGatewayService } from '@murphai/gateway-local'
 import type { GatewayService } from '@murphai/gateway-core'
 

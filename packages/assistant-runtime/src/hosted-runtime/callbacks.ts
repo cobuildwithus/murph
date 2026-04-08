@@ -16,8 +16,8 @@ import {
   shouldDispatchAssistantOutboxIntent,
   type AssistantChannelDelivery,
   type AssistantOutboxDispatchHooks,
-  type AssistantOutboxIntent,
 } from "@murphai/assistant-engine";
+import type { AssistantOutboxIntent } from "@murphai/operator-config/assistant-cli-contracts";
 
 import type {
   HostedCommittedExecutionState,

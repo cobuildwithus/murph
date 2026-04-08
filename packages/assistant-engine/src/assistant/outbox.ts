@@ -9,7 +9,7 @@ import {
   type AssistantOutboxIntent,
   type AssistantSession,
   type AssistantStatusOutboxSummary,
-} from '../assistant-cli-contracts.js'
+} from '@murphai/operator-config/assistant-cli-contracts'
 import type { AssistantChannelDependencies } from './channel-adapters.js'
 import { deliverAssistantMessageOverBinding } from '../outbound-channel.js'
 import { maybeThrowInjectedAssistantFault } from './fault-injection.js'

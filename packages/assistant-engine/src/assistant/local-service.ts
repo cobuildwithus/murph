@@ -2,7 +2,7 @@ import {
   assistantAskResultSchema,
   type AssistantAskResult,
   type AssistantSession,
-} from '../assistant-cli-contracts.js'
+} from '@murphai/operator-config/assistant-cli-contracts'
 import { createDefaultLocalAssistantModelTarget } from '@murphai/operator-config/assistant-backend'
 import {
   type ResolvedAssistantSession,
@@ -39,7 +39,7 @@ import {
 import {
   mergeAssistantProviderConfigsForProvider,
   serializeAssistantProviderSessionOptions,
-} from './provider-config.js'
+} from '@murphai/operator-config/assistant/provider-config'
 import { normalizeAssistantExecutionContext } from './execution-context.js'
 import {
   extractRecoveredAssistantSession,

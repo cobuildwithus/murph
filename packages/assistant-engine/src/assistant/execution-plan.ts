@@ -1,7 +1,7 @@
 import type {
   AssistantProviderFailoverRoute,
   AssistantSessionResumeState,
-} from '../assistant-cli-contracts.js'
+} from '@murphai/operator-config/assistant-cli-contracts'
 import {
   assistantBackendTargetToProviderConfigInput,
   createAssistantModelTarget,
@@ -21,7 +21,7 @@ import {
   serializeAssistantProviderSessionOptions,
   type AssistantProviderConfig,
   type AssistantProviderConfigInput,
-} from './provider-config.js'
+} from '@murphai/operator-config/assistant/provider-config'
 
 export interface AssistantExecutionPlan {
   primaryProviderConfig: AssistantProviderConfig

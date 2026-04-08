@@ -8,7 +8,7 @@ import {
   type AssistantFailoverState,
   type AssistantStatusResult,
   type AssistantTurnReceipt,
-} from '../assistant-cli-contracts.js'
+} from '@murphai/operator-config/assistant-cli-contracts'
 import { buildAssistantOutboxSummary } from './outbox.js'
 import { readAssistantDiagnosticsSnapshot } from './diagnostics.js'
 import { readAssistantFailoverState } from './failover.js'

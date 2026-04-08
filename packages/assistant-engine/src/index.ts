@@ -7,7 +7,6 @@
  */
 
 export * from './assistant-automation.js'
-export * from './assistant-cli-contracts.js'
 export * from './assistant-codex.js'
 export * from './assistant-cron.js'
 export * from './assistant-outbox.js'

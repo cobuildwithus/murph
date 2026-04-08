@@ -3,7 +3,7 @@ import {
   assistantRuntimeEventSchema,
   type AssistantRuntimeEvent,
   type AssistantRuntimeEventKind,
-} from '../assistant-cli-contracts.js'
+} from '@murphai/operator-config/assistant-cli-contracts'
 import { withAssistantRuntimeWriteLock } from './runtime-write-lock.js'
 import {
   appendTextFile,
