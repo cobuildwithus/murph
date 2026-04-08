@@ -48,11 +48,13 @@ import {
   linkJournalEventIds,
   linkJournalStreams,
   loadVault,
+  listAssessmentResponses,
   promoteInboxExperimentNote,
   promoteInboxJournal,
   parseFrontmatterDocument,
   projectAssessmentResponse,
   readJsonlRecords,
+  readAssessmentResponse,
   repairVault,
   stopExperiment,
   stringifyFrontmatterDocument,
@@ -1137,6 +1139,227 @@ test("assessment imports append contract-shaped records and emit intake audits",
   assert.equal(validation.valid, true);
 });
 
+test("assessment imports and projections normalize rich nested proposals across every supported category", async () => {
+  const vaultRoot = await makeTempDirectory("murph-vault");
+  const sourceRoot = await makeTempDirectory("murph-source");
+  await initializeVault({ vaultRoot });
+
+  const goalId = "goal_01JNW7YJ7MNE7M9Q2QWQK4Z3F8";
+  const secondaryGoalId = "goal_01JNW7YJ7MNE7M9Q2QWQK4Z3F9";
+  const assessmentPath = await writeExternalFile(
+    sourceRoot,
+    "rich-intake.json",
+    JSON.stringify({
+      response: {
+        profile: {
+          goals: {
+            topGoalIds: [goalId],
+          },
+          custom: {
+            domains: ["sleep", "nutrition"],
+          },
+        },
+        goals: [
+          {
+            label: "Sleep 8 hours",
+            status: "active",
+            horizon: "quarter",
+            priority: "high",
+            details: "Recover faster.",
+            tags: ["sleep", "recovery"],
+          },
+        ],
+        conditions: [
+          {
+            diagnosis: "Asthma",
+            status: "active",
+            recordedAt: "2021-02-03T07:30:00.000Z",
+            details: "Exercise induced.",
+          },
+        ],
+        allergies: [
+          {
+            allergen: "Shellfish",
+            reactions: "hives",
+            severity: "severe",
+            description: "Avoid entirely.",
+          },
+        ],
+        protocols: [
+          {
+            medicationName: "Magnesium glycinate",
+            dose: "200",
+            unit: "mg",
+            frequency: "nightly",
+            instructions: "Take before bed.",
+          },
+        ],
+        historyEvents: [
+          {
+            event: "ACL surgery",
+            type: "procedure",
+            date: "2022-07-04T12:00:00.000Z",
+            note: "Recovered fully.",
+          },
+        ],
+        familyMembers: [
+          {
+            relationship: "mother",
+            note: "Migraines.",
+          },
+        ],
+        genetics: [
+          {
+            variant: "BRCA1 c.68_69delAG",
+            gene: "BRCA1",
+            classification: "pathogenic",
+            zygosity: "heterozygous",
+          },
+        ],
+        proposal: {
+          structured: {
+            data: {
+              profileSnapshot: {
+                profile: {
+                  goals: {
+                    topGoalIds: [secondaryGoalId],
+                  },
+                  custom: {
+                    domains: ["nutrition"],
+                  },
+                },
+              },
+              goal: {
+                name: "Build base",
+                note: "Nested goal.",
+                tags: ["baseline"],
+              },
+              condition: {
+                name: "Hypertension",
+                onsetAt: "2021-03-01T08:15:00.000Z",
+                note: "Managed.",
+              },
+              allergy: {
+                substance: "Penicillin",
+                reaction: "rash",
+                severity: "moderate",
+              },
+              supplements: {
+                name: "Vitamin D",
+                dose: "2000",
+                unit: "IU",
+                schedule: "daily",
+                note: "Morning.",
+              },
+              historyEvent: {
+                title: "Appendectomy",
+                occurredAt: "2020-06-12T09:00:00.000Z",
+                description: "No complications.",
+              },
+              familyMember: {
+                name: "Father",
+                relation: "father",
+                description: "Heart disease.",
+              },
+              geneticVariant: {
+                name: "APOE E4",
+                significance: "risk",
+                zygosity: "heterozygous",
+              },
+            },
+          },
+        },
+      },
+    }),
+  );
+
+  const imported = await importAssessmentResponse({
+    vaultRoot,
+    sourcePath: assessmentPath,
+    assessmentType: " intake ",
+    questionnaireSlug: " rich-intake ",
+    recordedAt: "2026-03-12T09:15:00.000Z",
+    relatedIds: [goalId, ` ${goalId} `, secondaryGoalId],
+  });
+  const projected = await projectAssessmentResponse({
+    vaultRoot,
+    assessmentId: imported.assessment.id,
+  });
+
+  assert.equal(imported.assessment.assessmentType, "intake");
+  assert.equal(imported.assessment.title, "rich-intake.json");
+  assert.equal(imported.assessment.questionnaireSlug, "rich-intake");
+  assert.deepEqual(imported.assessment.relatedIds, [goalId, secondaryGoalId]);
+  assert.equal(projected.assessmentId, imported.assessment.id);
+  assert.equal(projected.sourcePath, imported.assessment.rawPath);
+  assert.equal(projected.profileSnapshots.length, 2);
+  assert.equal(projected.goals.length, 2);
+  assert.equal(projected.conditions.length, 2);
+  assert.equal(projected.allergies.length, 2);
+  assert.equal(projected.protocols.length, 2);
+  assert.equal(projected.historyEvents.length, 2);
+  assert.equal(projected.familyMembers.length, 2);
+  assert.equal(projected.geneticVariants.length, 2);
+  assert.deepEqual(
+    projected.profileSnapshots.map((snapshot) => snapshot.sourceAssessmentIds),
+    [[imported.assessment.id], [imported.assessment.id]],
+  );
+  assert.deepEqual(
+    projected.profileSnapshots.map((snapshot) => snapshot.source),
+    ["assessment_projection", "assessment_projection"],
+  );
+
+  const nestedGoal = projected.goals.find((goal) => goal.title === "Build base");
+  const nestedCondition = projected.conditions.find((condition) => condition.name === "Hypertension");
+  const nestedAllergy = projected.allergies.find((allergy) => allergy.substance === "Penicillin");
+  const nestedProtocol = projected.protocols.find((protocol) => protocol.name === "Vitamin D");
+  const nestedHistory = projected.historyEvents.find((event) => event.title === "Appendectomy");
+  const nestedFamily = projected.familyMembers.find((member) => member.name === "Father");
+  const nestedVariant = projected.geneticVariants.find((variant) => variant.variant === "APOE E4");
+
+  assert.ok(nestedGoal);
+  assert.equal(nestedGoal.source.assessmentPointer, "/response/proposal/structured/data/goal");
+  assert.deepEqual(nestedGoal.tags, ["baseline"]);
+  assert.ok(nestedCondition);
+  assert.equal(nestedCondition.source.assessmentPointer, "/response/proposal/structured/data/condition");
+  assert.equal(nestedCondition.onsetAt, "2021-03-01T08:15:00.000Z");
+  assert.ok(nestedAllergy);
+  assert.equal(nestedAllergy.source.assessmentPointer, "/response/proposal/structured/data/allergy");
+  assert.equal(nestedAllergy.reaction, "rash");
+  assert.ok(nestedProtocol);
+  assert.equal(nestedProtocol.source.assessmentPointer, "/response/proposal/structured/data/supplements");
+  assert.equal(nestedProtocol.dose, "2000 IU");
+  assert.ok(nestedHistory);
+  assert.equal(nestedHistory.source.assessmentPointer, "/response/proposal/structured/data/historyEvent");
+  assert.equal(nestedHistory.occurredAt, "2020-06-12T09:00:00.000Z");
+  assert.ok(nestedFamily);
+  assert.equal(nestedFamily.source.assessmentPointer, "/response/proposal/structured/data/familyMember");
+  assert.ok(nestedVariant);
+  assert.equal(nestedVariant.source.assessmentPointer, "/response/proposal/structured/data/geneticVariant");
+  assert.equal(nestedVariant.significance, "risk");
+  assert.equal(typeof projected.auditPath, "string");
+
+  const validation = await validateVault({ vaultRoot });
+  assert.equal(validation.valid, true);
+});
+
+test("projectAssessmentResponse rejects missing payloads and assessmentIds without a vault root", async () => {
+  await assert.rejects(
+    () => projectAssessmentResponse({}),
+    (error: unknown) =>
+      error instanceof VaultError && error.code === "ASSESSMENT_RESPONSE_PROJECT_INVALID",
+  );
+
+  await assert.rejects(
+    () =>
+      projectAssessmentResponse({
+        assessmentId: "asmt_01JQ9R7WF97M1WAB2B4QF2Q1A1",
+      }),
+    (error: unknown) =>
+      error instanceof VaultError && error.code === "ASSESSMENT_RESPONSE_PROJECT_INVALID",
+  );
+});
+
 test("assessment projection drops legacy flat profile blobs after the hard cutover", async () => {
   const vaultRoot = await makeTempDirectory("murph-vault");
   const sourceRoot = await makeTempDirectory("murph-source");
@@ -1165,6 +1388,106 @@ test("assessment projection drops legacy flat profile blobs after the hard cutov
   });
 
   assert.equal(projected.profileSnapshots.length, 0);
+});
+
+test("importAssessmentResponse rejects non-object assessment payloads", async () => {
+  const vaultRoot = await makeTempDirectory("murph-vault");
+  const sourceRoot = await makeTempDirectory("murph-source");
+  await initializeVault({ vaultRoot });
+
+  const assessmentPath = await writeExternalFile(sourceRoot, "invalid-intake.json", "[]");
+
+  await assert.rejects(
+    () =>
+      importAssessmentResponse({
+        vaultRoot,
+        sourcePath: assessmentPath,
+        assessmentType: "intake",
+      }),
+    (error: unknown) => error instanceof VaultError && error.code === "ASSESSMENT_INVALID_JSON",
+  );
+});
+
+test("listAssessmentResponses sorts by recordedAt and id", async () => {
+  const vaultRoot = await makeTempDirectory("murph-vault");
+  const sourceRoot = await makeTempDirectory("murph-source");
+  await initializeVault({ vaultRoot });
+
+  const earlierPath = await writeExternalFile(
+    sourceRoot,
+    "earlier-intake.json",
+    JSON.stringify({
+      profile: {
+        goals: {
+          topGoalIds: ["goal_01JNW7YJ7MNE7M9Q2QWQK4Z3F8"],
+        },
+      },
+    }),
+  );
+  const laterPath = await writeExternalFile(
+    sourceRoot,
+    "later-intake.json",
+    JSON.stringify({
+      profile: {
+        goals: {
+          topGoalIds: ["goal_01JNW7YJ7MNE7M9Q2QWQK4Z3F9"],
+        },
+      },
+    }),
+  );
+
+  const later = await importAssessmentResponse({
+    vaultRoot,
+    sourcePath: laterPath,
+    recordedAt: "2026-03-14T10:00:00.000Z",
+  });
+  const earlier = await importAssessmentResponse({
+    vaultRoot,
+    sourcePath: earlierPath,
+    recordedAt: "2026-03-12T10:00:00.000Z",
+  });
+
+  const records = await listAssessmentResponses({ vaultRoot });
+  const actualOrder = records.map((record) => record.id);
+
+  assert.deepEqual(actualOrder, [earlier.assessment.id, later.assessment.id]);
+});
+
+test("listAssessmentResponses rejects malformed stored assessment rows", async () => {
+  const vaultRoot = await makeTempDirectory("murph-vault");
+  await initializeVault({ vaultRoot });
+
+  const shardPath = path.join(vaultRoot, "ledger/assessments/2026/2026-03.jsonl");
+  await fs.mkdir(path.dirname(shardPath), { recursive: true });
+  await fs.writeFile(
+    shardPath,
+    `${JSON.stringify({
+      schemaVersion: "murph.assessment-response.v1",
+      id: "asmt_01JQ9R7WF97M1WAB2B4QF2Q1A2",
+    })}\n`,
+    "utf8",
+  );
+
+  await assert.rejects(
+    () => listAssessmentResponses({ vaultRoot }),
+    (error: unknown) =>
+      error instanceof VaultError && error.code === "ASSESSMENT_RESPONSE_INVALID",
+  );
+});
+
+test("readAssessmentResponse throws when the assessment id is missing", async () => {
+  const vaultRoot = await makeTempDirectory("murph-vault");
+  await initializeVault({ vaultRoot });
+
+  await assert.rejects(
+    () =>
+      readAssessmentResponse({
+        vaultRoot,
+        assessmentId: "asmt_01JQ9R7WF97M1WAB2B4QF2Q1A9",
+      }),
+    (error: unknown) =>
+      error instanceof VaultError && error.code === "ASSESSMENT_RESPONSE_NOT_FOUND",
+  );
 });
 
 test("ensureJournalDay rethrows non-file-exists write failures", async () => {
