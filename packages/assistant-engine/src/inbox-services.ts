@@ -1,7 +1,5 @@
-/**
- * Neutral inbox service surface shared by the CLI shell and headless assistant consumers.
- */
-export { createIntegratedInboxServices } from './inbox-app/service.js'
+// Legacy internal shim while inbox runtime ownership lives in @murphai/inbox-services.
+export { createIntegratedInboxServices } from '@murphai/inbox-services'
 
 export type {
   CanonicalAttachmentPromotionResult,
@@ -14,6 +12,7 @@ export type {
   EmailDriver,
   ImessageDriver,
   InboxServices,
+  InboxSourceSetEnabledResult,
   InboxParserServiceRuntime,
   InboxPaths,
   InboxPipeline,
@@ -35,4 +34,4 @@ export type {
   RuntimeSearchHit,
   RuntimeStore,
   TelegramDriver,
-} from './inbox-app/types.js'
+} from '@murphai/inbox-services'

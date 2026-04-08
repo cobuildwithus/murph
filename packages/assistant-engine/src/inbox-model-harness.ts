@@ -12,7 +12,7 @@ import {
   type AssistantModelSpec,
 } from './model-harness.js'
 import type { InboxShowResult } from '@murphai/operator-config/inbox-cli-contracts'
-import type { InboxServices } from './inbox-services.js'
+import type { InboxServices } from '@murphai/inbox-services'
 import {
   assistantExecutionPlanSchema,
   inboxModelBundleResultSchema,
