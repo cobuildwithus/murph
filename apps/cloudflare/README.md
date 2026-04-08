@@ -105,18 +105,18 @@ That means:
 - the container-local bridge is intentionally thin; the execution core lives in `packages/assistant-runtime`
 - the queue Durable Object invokes the per-user container on demand, may keep that outer shell warm for a short idle TTL, and still runs each hosted execution inside a fresh isolated child process with the outbound proxy token rotated away after completion; if any unexpected processes remain, the shell exits instead of being reused
 
-The native container image is declared in `apps/cloudflare/wrangler.jsonc` under the `containers` section, points at `../../Dockerfile.cloudflare-hosted-runner`, uses `instance_type: "standard-1"` in the checked-in scaffold, and now keeps the default `max_instances` at `50` until deploy automation raises it explicitly. Generated deploy config accepts `CF_CONTAINER_INSTANCE_TYPE` as either a named Wrangler preset such as `standard-1` or a JSON object with `vcpu`, `memory_mib`, and `disk_mb`.
+The native container image is declared in `apps/cloudflare/wrangler.jsonc` under the `containers` section, points at `../../Dockerfile.cloudflare-hosted-runner`, and now pins the Docker build context to `apps/cloudflare` through Wrangler's `image_build_context` so deploys only upload the app-local container contract instead of the whole repo. The checked-in scaffold still uses `instance_type: "standard-1"` and keeps the default `max_instances` at `50` until deploy automation raises it explicitly. Generated deploy config accepts `CF_CONTAINER_INSTANCE_TYPE` as either a named Wrangler preset such as `standard-1` or a JSON object with `vcpu`, `memory_mib`, and `disk_mb`.
 
 ## Container image
 
-`Dockerfile.cloudflare-hosted-runner` builds the container image used by Wrangler. The deploy-only helpers under `apps/cloudflare/scripts/**` prepare the app-owned runtime leaf artifact under `apps/cloudflare/.deploy/runner-bundle`, install the real published-shape `@murphai/murph` package there so `vault-cli` resolves from `/app/node_modules/.bin`, and then let the Docker build copy only that prepared runtime artifact plus the pinned Whisper assets into the final image. The sibling generated deploy files under `.deploy/`, including `wrangler.generated.jsonc` and `worker-secrets.json`, are deploy inputs, not container image contents. Inside that image, the private container entrypoint still serves:
+`Dockerfile.cloudflare-hosted-runner` builds the container image used by Wrangler. The deploy-only helpers under `apps/cloudflare/scripts/**` prepare the app-owned runtime leaf artifact under `apps/cloudflare/.deploy/runner-bundle`, install the real published-shape `@murphai/murph` package there so `vault-cli` resolves from `/app/node_modules/.bin`, and then let the Docker build copy only that prepared runtime artifact plus the pinned Whisper assets into the final image. Because the build context is now `apps/cloudflare`, the app-local `apps/cloudflare/.dockerignore` keeps that upload limited to `.deploy/runner-bundle/**` instead of shipping unrelated repo files through Docker. The sibling generated deploy files under `.deploy/`, including `wrangler.generated.jsonc` and `worker-secrets.json`, remain deploy inputs, not container image contents. Inside that image, the private container entrypoint still serves:
 
 - `GET /health`
 - `POST /__internal/run`
 
 That HTTP bridge is an internal container implementation detail, not a separately supported hosted service or repo-supported local command surface. The repo no longer supports an external `HOSTED_EXECUTION_RUNNER_BASE_URL` path.
 
-The default image now bakes the local parser toolchain directly into the container: `ffmpeg`, `pdftotext`, a pinned `whisper.cpp` `whisper-cli` build, and the default `base.en` Whisper model under `~/.murph/models/whisper/ggml-base.en.bin`. `FFMPEG_COMMAND`, `PDFTOTEXT_COMMAND`, `WHISPER_COMMAND`, and `WHISPER_MODEL_PATH` are set in the image by default, and operators only need to override the Whisper vars when they intentionally want a different binary or model. Those parser binary/model selector vars are operator-only deploy knobs: separately encrypted per-user env overrides must not set them, and `HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS` cannot re-enable them.
+The default image now bakes the local parser toolchain directly into the container: `ffmpeg`, `pdftotext`, a pinned `whisper.cpp` `whisper-cli` build, and the default `base.en` Whisper model under `~/.murph/models/whisper/ggml-base.en.bin`. `FFMPEG_COMMAND`, `PDFTOTEXT_COMMAND`, `WHISPER_COMMAND`, and `WHISPER_MODEL_PATH` are set in the image by default, and `WHISPER_MODEL_PATH` now follows the selected `WHISPER_MODEL_FILE` build arg instead of assuming the base model path. Operators only need to override the Whisper vars when they intentionally want a different binary or model. Those parser binary/model selector vars are operator-only deploy knobs: separately encrypted per-user env overrides must not set them, and `HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS` cannot re-enable them.
 
 Current expectations for the container image:
 
@@ -124,7 +124,7 @@ Current expectations for the container image:
 - the runner app assembled by `apps/cloudflare` into `apps/cloudflare/.deploy/runner-bundle` before `wrangler deploy` starts the Docker build
 - the prepared `/app` tree remains a runtime leaf artifact: bundle assembly strips deploy-only docs plus build metadata such as lockfiles, declaration files, sourcemaps, and `.tsbuildinfo`
 - the hosted `vault-cli` surface resolves from the real installed `@murphai/murph` package inside the bundle, while hosted execution behavior still runs through `@murphai/assistant-runtime`
-- a copy-only Docker contract: the final image copies `/app` from `apps/cloudflare/.deploy/runner-bundle`, then starts `dist/container-entrypoint.js`
+- a copy-only Docker contract: the final image copies `/app` from `.deploy/runner-bundle` inside the app-local build context, then starts `dist/container-entrypoint.js`
 - `wrangler.generated.jsonc` and `worker-secrets.json` stay alongside the bundle as deploy inputs, not container image contents
 - bundle assembly is the app-owned artifact step and no longer depends on `pnpm deploy --legacy` or any Docker-stage workspace repair
 - writable temp storage for ephemeral hosted bundle restore/snapshot work
@@ -143,7 +143,7 @@ Current scaffold files:
 - `apps/cloudflare/.dev.vars.example`
 - `apps/cloudflare/DEPLOY.md`
 - `Dockerfile.cloudflare-hosted-runner`
-- `.dockerignore`
+- `apps/cloudflare/.dockerignore`
 
 Still intentionally placeholder:
 

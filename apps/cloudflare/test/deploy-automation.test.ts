@@ -44,6 +44,7 @@ describe("hosted deploy automation helpers", () => {
       containers: Array<{
         class_name: string;
         image: string;
+        image_build_context: string;
         instance_type: string | {
           disk_mb: number;
           memory_mib: number;
@@ -82,6 +83,7 @@ describe("hosted deploy automation helpers", () => {
       {
         class_name: "RunnerContainer",
         image: "../../../Dockerfile.cloudflare-hosted-runner",
+        image_build_context: "..",
         instance_type: "standard-1",
         max_instances: 250,
       },

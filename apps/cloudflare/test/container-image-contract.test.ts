@@ -2,6 +2,9 @@ import { access, readFile } from "node:fs/promises";
 
 import { describe, expect, it } from "vitest";
 import {
+  buildHostedWranglerDeployConfig,
+} from "../scripts/deploy-automation/wrangler-config.ts";
+import {
   buildHostedRunnerRuntimeArtifactPackageJson,
   hostedRunnerBuildPackageNames,
   hostedRunnerRuntimeDependencyNames,
@@ -9,6 +12,27 @@ import {
   publishedMurphBundledWorkspacePackageNames,
   runnerBundleDirectoryName,
 } from "../scripts/runner-bundle-contract.js";
+
+function createDeployEnvironment() {
+  return {
+    allowedUserEnvKeys: null,
+    bundlesBucketName: "bundles",
+    bundlesPreviewBucketName: "bundles-preview",
+    platformEnvelopeKeyId: "v1",
+    compatibilityDate: "2026-03-27",
+    containerInstanceType: "standard-1" as const,
+    containerMaxInstances: 50,
+    defaultAlarmDelayMs: "21600000",
+    logHeadSamplingRate: 1,
+    maxEventAttempts: "3",
+    retryDelayMs: "30000",
+    runnerCommitTimeoutMs: "30000",
+    runnerTimeoutMs: "120000",
+    traceHeadSamplingRate: 0.1,
+    workerName: "murph-hosted",
+    workerVars: {},
+  }
+}
 
 describe("hosted runner container image contract", () => {
   it("keeps runner bundle assembly app-owned and materializes a runtime-only leaf artifact", async () => {
@@ -250,7 +274,7 @@ describe("hosted runner container image contract", () => {
       "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/${WHISPER_MODEL_FILE}",
     );
     expect(dockerfile).toContain(
-      "COPY --chown=runner:runner apps/cloudflare/.deploy/runner-bundle/ /app/",
+      "COPY --chown=runner:runner .deploy/runner-bundle/ /app/",
     );
     expect(dockerfile).not.toContain("wrangler.generated.jsonc");
     expect(dockerfile).not.toContain("worker-secrets.json");
@@ -260,22 +284,40 @@ describe("hosted runner container image contract", () => {
     expect(dockerfile).toContain("PDFTOTEXT_COMMAND=/usr/bin/pdftotext");
     expect(dockerfile).toContain("WHISPER_COMMAND=/usr/local/bin/whisper-cli");
     expect(dockerfile).toContain(
-      "WHISPER_MODEL_PATH=/home/runner/.murph/models/whisper/ggml-base.en.bin",
+      "WHISPER_MODEL_PATH=/home/runner/.murph/models/whisper/${WHISPER_MODEL_FILE}",
     );
     expect(dockerfile).toContain('CMD ["node", "dist/container-entrypoint.js"]');
   });
 
-  it("keeps only the prepared runner bundle from .deploy in Docker context", async () => {
-    const dockerignore = await readFile(
-      new URL("../../../.dockerignore", import.meta.url),
+  it("pins the checked-in and rendered Wrangler config to an app-local build context", async () => {
+    const wranglerConfig = await readFile(
+      new URL("../wrangler.jsonc", import.meta.url),
       "utf8",
     );
+    const packageJson = JSON.parse(
+      await readFile(new URL("../package.json", import.meta.url), "utf8"),
+    ) as {
+      scripts?: Record<string, string>;
+    };
+    const rendered = buildHostedWranglerDeployConfig(createDeployEnvironment());
+    const [container] = rendered.containers as Array<Record<string, unknown>>;
 
-    expect(dockerignore).toContain("apps/cloudflare/.deploy");
-    expect(dockerignore).toContain("!apps/cloudflare/.deploy/");
-    expect(dockerignore).toContain("apps/cloudflare/.deploy/*");
-    expect(dockerignore).toContain("!apps/cloudflare/.deploy/runner-bundle/");
-    expect(dockerignore).toContain("!apps/cloudflare/.deploy/runner-bundle/**");
+    expect(wranglerConfig).toContain('"image": "../../Dockerfile.cloudflare-hosted-runner"');
+    expect(wranglerConfig).toContain('"image_build_context": "."');
+    expect(packageJson.scripts?.["runner:docker:build"]).toBe(
+      "pnpm runner:bundle && docker build -f ../../Dockerfile.cloudflare-hosted-runner -t murph-cloudflare-runner .",
+    );
+    expect(container.image).toBe("../../../Dockerfile.cloudflare-hosted-runner");
+    expect(container.image_build_context).toBe("..");
+  });
+
+  it("keeps only the prepared runner bundle from .deploy in the app-local Docker context", async () => {
+    const dockerignore = await readFile(new URL("../.dockerignore", import.meta.url), "utf8");
+
+    expect(dockerignore).toContain("**");
+    expect(dockerignore).toContain("!.deploy/");
+    expect(dockerignore).toContain("!.deploy/runner-bundle/");
+    expect(dockerignore).toContain("!.deploy/runner-bundle/**");
     expect(dockerignore).not.toContain("!apps/cloudflare/.deploy/wrangler.generated.jsonc");
     expect(dockerignore).not.toContain("!apps/cloudflare/.deploy/worker-secrets.json");
   });

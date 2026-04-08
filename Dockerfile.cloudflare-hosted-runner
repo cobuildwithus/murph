@@ -42,7 +42,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     FFMPEG_COMMAND=/usr/bin/ffmpeg \
     PDFTOTEXT_COMMAND=/usr/bin/pdftotext \
     WHISPER_COMMAND=/usr/local/bin/whisper-cli \
-    WHISPER_MODEL_PATH=/home/runner/.murph/models/whisper/ggml-base.en.bin \
+    WHISPER_MODEL_PATH=/home/runner/.murph/models/whisper/${WHISPER_MODEL_FILE} \
     HF_HOME=/home/runner/.cache/huggingface
 
 RUN apt-get update \
@@ -62,7 +62,7 @@ WORKDIR /app
 
 COPY --from=whisper-builder /opt/whisper/whisper-cli /usr/local/bin/whisper-cli
 COPY --from=whisper-builder --chown=runner:runner /opt/whisper/${WHISPER_MODEL_FILE} /home/runner/.murph/models/whisper/${WHISPER_MODEL_FILE}
-COPY --chown=runner:runner apps/cloudflare/.deploy/runner-bundle/ /app/
+COPY --chown=runner:runner .deploy/runner-bundle/ /app/
 
 USER runner
 

@@ -13,7 +13,7 @@ This deploy flow intentionally keeps the local-first agent largely unchanged. Th
 This repo now includes:
 
 - `Dockerfile.cloudflare-hosted-runner`
-- `.dockerignore`
+- `apps/cloudflare/.dockerignore`
 - `apps/cloudflare/r2-bundles-lifecycle.json`
 - generated deploy artifacts under `apps/cloudflare/.deploy/`
 - a prebuilt runner bundle under `apps/cloudflare/.deploy/runner-bundle/` that the Docker image copies directly during deploy
@@ -34,7 +34,8 @@ The deploy artifact contract is intentionally narrow:
 - the prepared bundle is a runtime leaf artifact, not a deploy scratch directory: assembly strips deploy-only docs plus build metadata such as lockfiles, declaration files, sourcemaps, and `.tsbuildinfo`
 - the hosted `vault-cli` surface comes from the real installed `@murphai/murph` package inside that bundle, while hosted execution behavior still runs through `@murphai/assistant-runtime`
 - `wrangler.generated.jsonc` and `worker-secrets.json` stay alongside that bundle under `.deploy/`, but they are deploy inputs, not container image contents
-- `Dockerfile.cloudflare-hosted-runner` stays copy-only for app code: it copies the prepared runner bundle into `/app` and starts `dist/container-entrypoint.js`
+- Wrangler now sets `image_build_context` to the `apps/cloudflare` directory, so Docker uploads the app-local container contract instead of the whole repo during deploys
+- `Dockerfile.cloudflare-hosted-runner` stays copy-only for app code: it copies the prepared runner bundle into `/app` from `.deploy/runner-bundle` inside that app-local build context and starts `dist/container-entrypoint.js`
 - bundle assembly no longer depends on `pnpm deploy --legacy` or a post-bundle workspace repair install
 
 ## What it does not automate yet
@@ -131,7 +132,7 @@ For Venice as the platform default hosted assistant, set these GitHub environmen
 
 You do not need to set `HOSTED_ASSISTANT_API_KEY_ENV` for that path because the Venice preset resolves it to `VENICE_API_KEY`.
 
-The default container image already installs `ffmpeg`, `pdftotext`, a pinned `whisper.cpp` `whisper-cli`, and the default `base.en` model, and it sets `FFMPEG_COMMAND`, `PDFTOTEXT_COMMAND`, `WHISPER_COMMAND`, and `WHISPER_MODEL_PATH` inside the image. The app-owned assembly step writes the built runtime bundle into `apps/cloudflare/.deploy/runner-bundle/`, installs the real `@murphai/murph` package there so the image gets the standard `vault-cli` bin on `PATH`, and leaves `wrangler.generated.jsonc` plus `worker-secrets.json` outside the image as deploy-only inputs. Only set those vars in Worker config when you want to override the baked defaults.
+The default container image already installs `ffmpeg`, `pdftotext`, a pinned `whisper.cpp` `whisper-cli`, and the default `base.en` model, and it sets `FFMPEG_COMMAND`, `PDFTOTEXT_COMMAND`, `WHISPER_COMMAND`, and `WHISPER_MODEL_PATH` inside the image. `WHISPER_MODEL_PATH` now follows the selected `WHISPER_MODEL_FILE` build arg instead of always pointing at the base model path. The app-owned assembly step writes the built runtime bundle into `apps/cloudflare/.deploy/runner-bundle/`, installs the real `@murphai/murph` package there so the image gets the standard `vault-cli` bin on `PATH`, and leaves `wrangler.generated.jsonc` plus `worker-secrets.json` outside the image as deploy-only inputs. Only set those vars in Worker config when you want to override the baked defaults.
 
 ### Required environment secrets
 
@@ -270,7 +271,7 @@ pnpm --dir apps/cloudflare worker:deploy -- \
   --secrets-file ./.deploy/worker-secrets.json
 ```
 
-That script prepares the rendered deploy artifacts first, then runs `wrangler deploy`. `wrangler deploy` builds the native container image from `Dockerfile.cloudflare-hosted-runner`, pushes it through Cloudflare's deploy path, and deploys the worker. The deploy automation now prepares `apps/cloudflare/.deploy/runner-bundle/` first, so the Docker build just copies the already-built runtime leaf artifact while `wrangler.generated.jsonc` and `worker-secrets.json` remain sibling deploy inputs outside the image. Docker still needs to be available on the machine running that command.
+That script prepares the rendered deploy artifacts first, then runs `wrangler deploy`. `wrangler deploy` builds the native container image from `Dockerfile.cloudflare-hosted-runner`, pushes it through Cloudflare's deploy path, and deploys the worker. The deploy automation now prepares `apps/cloudflare/.deploy/runner-bundle/` first, sets the Docker build context to `apps/cloudflare`, and lets the Docker build copy the already-built runtime leaf artifact while `wrangler.generated.jsonc` and `worker-secrets.json` remain sibling deploy inputs outside the image. Docker still needs to be available on the machine running that command.
 
 ### Normal deploys
 

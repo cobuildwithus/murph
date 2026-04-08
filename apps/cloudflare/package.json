@@ -37,7 +37,7 @@
     "deploy:secrets:render": "pnpm --dir ../.. exec tsx --tsconfig apps/cloudflare/tsconfig.scripts.json apps/cloudflare/scripts/render-worker-secrets.ts",
     "deploy:smoke": "pnpm --dir ../.. exec tsx --tsconfig apps/cloudflare/tsconfig.json apps/cloudflare/scripts/smoke-hosted-deploy.ts",
     "runner:bundle": "pnpm --dir ../.. exec tsx --tsconfig apps/cloudflare/tsconfig.scripts.json apps/cloudflare/scripts/assemble-runner-bundle.ts",
-    "runner:docker:build": "pnpm runner:bundle && docker build -f ../../Dockerfile.cloudflare-hosted-runner -t murph-cloudflare-runner ../..",
+    "runner:docker:build": "pnpm runner:bundle && docker build -f ../../Dockerfile.cloudflare-hosted-runner -t murph-cloudflare-runner .",
     "worker:deploy:apply": "pnpm exec wrangler deploy",
     "worker:deploy": "pnpm deploy:artifacts && pnpm worker:deploy:apply",
     "worker:deployment:status": "pnpm exec wrangler deployments status",
