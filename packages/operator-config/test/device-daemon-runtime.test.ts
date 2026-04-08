@@ -3,8 +3,6 @@ import { EventEmitter } from 'node:events'
 import { chmod, mkdtemp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
-
 import { afterEach, test, vi } from 'vitest'
 
 import {
@@ -73,9 +71,17 @@ function createFileDependencies() {
   }
 }
 
-const deviceDaemonChildFixturePath = fileURLToPath(
-  new URL('./fixtures/device-daemon-child.mjs', import.meta.url),
-)
+const deviceDaemonChildFixtureArgs = [
+  '-e',
+  [
+    "console.log(process.env.DEVICE_DAEMON_STDOUT_TEXT ?? 'device-daemon-stdout')",
+    "console.error(process.env.DEVICE_DAEMON_STDERR_TEXT ?? 'device-daemon-stderr')",
+    "console.log(process.env.NODE_V8_COVERAGE ? 'coverage-present' : 'coverage-missing')",
+    'setTimeout(() => {',
+    '  process.exit(0)',
+    '}, 25)',
+  ].join('\n'),
+] as const
 
 test('device-daemon path, env, process, and state helpers stay deterministic', async () => {
   const vault = await createTempVault('operator-config-device-daemon-')
@@ -292,7 +298,7 @@ test('device-daemon path, env, process, and state helpers stay deterministic', a
   }
   const spawnedChild = await defaultSpawnDeviceDaemonProcess({
     command: process.execPath,
-    args: [deviceDaemonChildFixturePath],
+    args: [...deviceDaemonChildFixtureArgs],
     env: {
       DEVICE_DAEMON_STDOUT_TEXT: 'fixture-stdout',
       DEVICE_DAEMON_STDERR_TEXT: 'fixture-stderr',
@@ -905,7 +911,7 @@ test('default spawn helper covers pid-less and synchronous child-process failure
     () =>
       pidlessModule.defaultSpawnDeviceDaemonProcess({
         command: process.execPath,
-        args: [deviceDaemonChildFixturePath],
+        args: [...deviceDaemonChildFixtureArgs],
         env: {},
         stdoutPath: path.join(vault, 'pidless', 'stdout.log'),
         stderrPath: path.join(vault, 'pidless', 'stderr.log'),
@@ -930,7 +936,7 @@ test('default spawn helper covers pid-less and synchronous child-process failure
     () =>
       errorModule.defaultSpawnDeviceDaemonProcess({
         command: process.execPath,
-        args: [deviceDaemonChildFixturePath],
+        args: [...deviceDaemonChildFixtureArgs],
         env: {},
         stdoutPath: path.join(vault, 'error', 'stdout.log'),
         stderrPath: path.join(vault, 'error', 'stderr.log'),
@@ -952,7 +958,7 @@ test('default spawn helper covers pid-less and synchronous child-process failure
     () =>
       throwingModule.defaultSpawnDeviceDaemonProcess({
         command: process.execPath,
-        args: [deviceDaemonChildFixturePath],
+        args: [...deviceDaemonChildFixtureArgs],
         env: {},
         stdoutPath: path.join(vault, 'throwing', 'stdout.log'),
         stderrPath: path.join(vault, 'throwing', 'stderr.log'),
@@ -990,7 +996,7 @@ test('default spawn helper closes the first log descriptor when opening the seco
     () =>
       processModule.defaultSpawnDeviceDaemonProcess({
         command: process.execPath,
-        args: [deviceDaemonChildFixturePath],
+        args: [...deviceDaemonChildFixtureArgs],
         env: {},
         stdoutPath: '/tmp/operator-config-daemon/stdout.log',
         stderrPath: '/tmp/operator-config-daemon/stderr.log',
