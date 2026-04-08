@@ -54,33 +54,40 @@ export async function requestHostedOnboardingJson<T>(input: {
     baseHeaders["content-type"] = "application/json";
   }
 
+  let authHeaders = await resolveInitialHostedOnboardingAuthHeaders(mode);
   let response = await fetch(input.url, {
     method,
-    headers: baseHeaders,
+    headers: {
+      ...baseHeaders,
+      ...authHeaders,
+    },
     credentials: "same-origin",
     cache: "no-store",
     keepalive: input.keepalive ?? false,
     body,
   });
 
-  if (shouldRetryWithExplicitPrivyHeaders({
+  if (shouldRetryHostedOnboardingAuthRequest({
     mode,
+    authHeaders,
     response,
-    url: input.url,
   })) {
     invalidateHostedOnboardingAuthHeaderCache();
-    const authHeaders = await resolveHostedOnboardingAuthHeaders(mode);
-    response = await fetch(input.url, {
-      method,
-      headers: {
-        ...baseHeaders,
-        ...authHeaders,
-      },
-      credentials: "same-origin",
-      cache: "no-store",
-      keepalive: input.keepalive ?? false,
-      body,
-    });
+    authHeaders = await resolveHostedOnboardingAuthHeaders(mode);
+
+    if (Object.keys(authHeaders).length > 0) {
+      response = await fetch(input.url, {
+        method,
+        headers: {
+          ...baseHeaders,
+          ...authHeaders,
+        },
+        credentials: "same-origin",
+        cache: "no-store",
+        keepalive: input.keepalive ?? false,
+        body,
+      });
+    }
   }
 
   const data = await readOptionalJsonValue(response);
@@ -127,6 +134,16 @@ async function resolveHostedOnboardingAuthHeaders(
   }
 
   return buildHostedOnboardingAuthHeaders();
+}
+
+async function resolveInitialHostedOnboardingAuthHeaders(
+  mode: HostedOnboardingAuthMode,
+): Promise<Record<string, string>> {
+  if (mode === "optional") {
+    return readHostedOnboardingAuthHeaderCache() ?? {};
+  }
+
+  return resolveHostedOnboardingAuthHeaders(mode);
 }
 
 async function buildHostedOnboardingAuthHeaders(): Promise<Record<string, string>> {
@@ -201,20 +218,19 @@ async function buildHostedOnboardingAuthHeadersUncached(): Promise<Record<string
   });
 }
 
-function shouldRetryWithExplicitPrivyHeaders(input: {
+function shouldRetryHostedOnboardingAuthRequest(input: {
   mode: HostedOnboardingAuthMode;
+  authHeaders: Record<string, string>;
   response: Response;
-  url: string;
 }): boolean {
-  if (input.mode === "none") {
+  if (input.mode === "none" || input.response.status !== 401) {
     return false;
   }
 
-  if (!isHostedOnboardingSameOriginUrl(input.url)) {
-    return true;
-  }
-
-  return input.mode === "required" && input.response.status === 401;
+  return (
+    input.mode === "required"
+    || Object.keys(input.authHeaders).length > 0
+  );
 }
 
 function sleep(delayMs: number): Promise<void> {
@@ -269,25 +285,6 @@ function readHostedOnboardingAuthHeaderCache(): Record<string, string> | null {
 
 function invalidateHostedOnboardingAuthHeaderCache(): void {
   hostedOnboardingAuthHeaderCache = null;
-}
-
-function isHostedOnboardingSameOriginUrl(url: string): boolean {
-  if (!url.trim()) {
-    return true;
-  }
-
-  try {
-    const target = new URL(url, globalThis.location?.origin ?? "https://murph.invalid");
-    const currentOrigin = globalThis.location?.origin;
-
-    if (!currentOrigin) {
-      return !/^[a-z][a-z0-9+.-]*:/iu.test(url);
-    }
-
-    return target.origin === currentOrigin;
-  } catch {
-    return false;
-  }
 }
 
 function isHostedPrivyRateLimitError(error: unknown): boolean {

@@ -21,7 +21,6 @@ export interface HostedPrivyCookieStore {
 }
 
 export const HOSTED_PRIVY_IDENTITY_TOKEN_HEADER_NAME = "x-privy-identity-token";
-const HOSTED_PRIVY_ACCESS_TOKEN_COOKIE_NAME = "privy-token";
 const HOSTED_PRIVY_IDENTITY_TOKEN_COOKIE_NAME = "privy-id-token";
 
 export interface HostedPrivyIdentity {
@@ -158,17 +157,11 @@ export function readHostedPrivyIdentityTokenFromCookieStore(cookieStore: HostedP
 }
 
 export function readHostedPrivyIdentityTokenFromRequest(request: Request): string | null {
-  return (
-    normalizeEnvValue(request.headers.get(HOSTED_PRIVY_IDENTITY_TOKEN_HEADER_NAME))
-    ?? readHostedPrivyCookieToken(request.headers.get("cookie"), HOSTED_PRIVY_IDENTITY_TOKEN_COOKIE_NAME)
-  );
+  return normalizeEnvValue(request.headers.get(HOSTED_PRIVY_IDENTITY_TOKEN_HEADER_NAME));
 }
 
 export function readHostedPrivyAccessTokenFromRequest(request: Request): string | null {
-  return (
-    normalizeHostedPrivyAccessToken(request.headers.get("authorization"))
-    ?? readHostedPrivyCookieToken(request.headers.get("cookie"), HOSTED_PRIVY_ACCESS_TOKEN_COOKIE_NAME)
-  );
+  return normalizeHostedPrivyAccessToken(request.headers.get("authorization"));
 }
 
 export async function verifyHostedPrivyAccessToken(accessToken: string): Promise<HostedPrivyAccessTokenClaims> {
@@ -238,25 +231,6 @@ function normalizeEnvValue(value: string | null | undefined): string | null {
     if (normalized) {
       return normalized;
     }
-  }
-
-  return null;
-}
-
-function readHostedPrivyCookieToken(cookieHeader: string | null | undefined, cookieName: string): string | null {
-  const header = normalizeEnvValue(cookieHeader);
-
-  if (!header) {
-    return null;
-  }
-
-  for (const segment of header.split(";")) {
-    const [rawName, ...rawValueParts] = segment.split("=");
-    if (normalizeEnvValue(rawName) !== cookieName) {
-      continue;
-    }
-
-    return normalizeEnvValue(rawValueParts.join("="));
   }
 
   return null;
