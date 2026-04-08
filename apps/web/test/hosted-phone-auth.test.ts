@@ -391,6 +391,17 @@ describe("HostedPhoneAuth", () => {
     );
   });
 
+  it("normalizes verification codes to six digits for auto-submit", async () => {
+    const {
+      isHostedPhoneVerificationCodeComplete,
+      normalizeHostedPhoneVerificationCode,
+    } = await import("@/src/components/hosted-onboarding/hosted-phone-auth");
+
+    assert.equal(normalizeHostedPhoneVerificationCode("12 34-56 78"), "123456");
+    assert.equal(isHostedPhoneVerificationCodeComplete("12345"), false);
+    assert.equal(isHostedPhoneVerificationCodeComplete("123456"), true);
+  });
+
   it("keeps invite shortcut resend on the server-backed invite path even after an active attempt exists", async () => {
     const { resolveHostedPhoneResendTarget } = await import("@/src/components/hosted-onboarding/hosted-phone-auth");
 
