@@ -1,6 +1,5 @@
-import { HostedExistingAccountSignInDialog } from "@/src/components/hosted-onboarding/hosted-existing-account-sign-in-dialog";
-import { HostedPhoneAuth } from "@/src/components/hosted-onboarding/hosted-phone-auth";
 import { GitHubIcon } from "./github-icon";
+import { HomepageAuthPanel } from "./homepage-auth-panel";
 
 const GITHUB_REPO_URL = "https://github.com/cobuildwithus/murph";
 
@@ -31,24 +30,7 @@ export function HeroSection() {
         </div>
 
         <div className="animate-fade-up [animation-delay:0.2s]">
-          <section
-            aria-labelledby="signup-title"
-            className="rounded-lg bg-olive p-7 text-white md:p-9"
-          >
-            <h2
-              id="signup-title"
-              className="text-2xl font-bold tracking-tight md:text-3xl"
-            >
-              Sign up with your phone.
-            </h2>
-
-            <div className="mt-5 rounded bg-white p-4 text-stone-900">
-              <HostedPhoneAuth mode="public" />
-            </div>
-            <div className="mt-4">
-              <HostedExistingAccountSignInDialog />
-            </div>
-          </section>
+          <HomepageAuthPanel />
         </div>
       </div>
     </section>
