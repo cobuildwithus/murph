@@ -71,6 +71,12 @@ function createFileDependencies() {
   }
 }
 
+async function importDeviceDaemonProcessWithMocks(setupMocks: () => void) {
+  vi.resetModules()
+  setupMocks()
+  return await import('../src/device-daemon/process.ts')
+}
+
 const deviceDaemonChildFixtureArgs = [
   '-e',
   [
@@ -898,15 +904,15 @@ test('default spawn helper covers pid-less and synchronous child-process failure
     unref(): void {}
   }
 
-  vi.doMock('node:child_process', () => ({
-    spawn() {
-      const child = new MockChild()
-      process.nextTick(() => child.emit('spawn'))
-      return child
-    },
-  }))
-
-  const pidlessModule = await import('../src/device-daemon/process.ts')
+  const pidlessModule = await importDeviceDaemonProcessWithMocks(() => {
+    vi.doMock('node:child_process', () => ({
+      spawn() {
+        const child = new MockChild()
+        process.nextTick(() => child.emit('spawn'))
+        return child
+      },
+    }))
+  })
   await assert.rejects(
     () =>
       pidlessModule.defaultSpawnDeviceDaemonProcess({
@@ -921,17 +927,16 @@ test('default spawn helper covers pid-less and synchronous child-process failure
       error.message === 'Device sync daemon spawn did not yield a PID.',
   )
 
-  vi.resetModules()
-  vi.doMock('node:child_process', () => ({
-    spawn() {
-      const child = new MockChild()
-      child.pid = 9500
-      process.nextTick(() => child.emit('error', new Error('spawn child failed')))
-      return child
-    },
-  }))
-
-  const errorModule = await import('../src/device-daemon/process.ts')
+  const errorModule = await importDeviceDaemonProcessWithMocks(() => {
+    vi.doMock('node:child_process', () => ({
+      spawn() {
+        const child = new MockChild()
+        child.pid = 9500
+        process.nextTick(() => child.emit('error', new Error('spawn child failed')))
+        return child
+      },
+    }))
+  })
   await assert.rejects(
     () =>
       errorModule.defaultSpawnDeviceDaemonProcess({
@@ -946,14 +951,13 @@ test('default spawn helper covers pid-less and synchronous child-process failure
       error.message === 'spawn child failed',
   )
 
-  vi.resetModules()
-  vi.doMock('node:child_process', () => ({
-    spawn() {
-      throw new Error('spawn exploded')
-    },
-  }))
-
-  const throwingModule = await import('../src/device-daemon/process.ts')
+  const throwingModule = await importDeviceDaemonProcessWithMocks(() => {
+    vi.doMock('node:child_process', () => ({
+      spawn() {
+        throw new Error('spawn exploded')
+      },
+    }))
+  })
   await assert.rejects(
     () =>
       throwingModule.defaultSpawnDeviceDaemonProcess({
@@ -973,25 +977,25 @@ test('default spawn helper closes the first log descriptor when opening the seco
   const closedDescriptors: number[] = []
   let openCalls = 0
 
-  vi.doMock('node:fs/promises', () => ({
-    mkdir: async () => undefined,
-  }))
-  vi.doMock('node:fs', () => ({
-    chmodSync: () => undefined,
-    closeSync: (fd: number) => {
-      closedDescriptors.push(fd)
-    },
-    openSync: () => {
-      openCalls += 1
-      if (openCalls === 1) {
-        return 11
-      }
+  const processModule = await importDeviceDaemonProcessWithMocks(() => {
+    vi.doMock('node:fs/promises', () => ({
+      mkdir: async () => undefined,
+    }))
+    vi.doMock('node:fs', () => ({
+      chmodSync: () => undefined,
+      closeSync: (fd: number) => {
+        closedDescriptors.push(fd)
+      },
+      openSync: () => {
+        openCalls += 1
+        if (openCalls === 1) {
+          return 11
+        }
 
-      throw new Error('second log open failed')
-    },
-  }))
-
-  const processModule = await import('../src/device-daemon/process.ts')
+        throw new Error('second log open failed')
+      },
+    }))
+  })
   await assert.rejects(
     () =>
       processModule.defaultSpawnDeviceDaemonProcess({
