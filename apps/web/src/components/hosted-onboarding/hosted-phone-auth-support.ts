@@ -136,20 +136,6 @@ export async function finalizeHostedPrivyVerification(input: {
     return;
   }
 
-  if (payload.stage === "checkout") {
-    const checkout = await requestHostedOnboardingJson<{ alreadyActive: boolean; url: string | null }>({
-      payload: {
-        inviteCode: payload.inviteCode,
-      },
-      url: "/api/hosted-onboarding/billing/checkout",
-    });
-
-    if (!checkout.alreadyActive && checkout.url) {
-      window.location.assign(checkout.url);
-      return;
-    }
-  }
-
   window.location.assign(resolveHostedPrivyCompletionRedirectUrl({
     intent: input.intent,
     payload,
@@ -164,7 +150,7 @@ export function resolveHostedPrivyCompletionRedirectUrl(input: {
     return "/settings";
   }
 
-  return input.payload.joinUrl;
+  return `/join/${encodeURIComponent(input.payload.inviteCode)}`;
 }
 
 export function toErrorMessage(error: unknown, fallback: string): string {
