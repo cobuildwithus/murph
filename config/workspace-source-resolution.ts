@@ -9,6 +9,7 @@ export type WorkspaceSourceEntries<T extends WorkspaceSourceEntryRelativePaths> 
 export const HOSTED_WEB_WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS = {
   "@murphai/cloudflare-hosted-control": "../../packages/cloudflare-hosted-control/src/index.ts",
   "@murphai/contracts": "../../packages/contracts/src/index.ts",
+  "@murphai/gateway-core": "../../packages/gateway-core/src/index.ts",
   "@murphai/hosted-execution": "../../packages/hosted-execution/src/index.ts",
   "@murphai/messaging-ingress": "../../packages/messaging-ingress/src/index.ts",
   "@murphai/runtime-state": "../../packages/runtime-state/src/index.ts",
