@@ -421,6 +421,7 @@ model ExecutionOutbox {
   eventId        String                @unique @map("event_id")
   eventKind      String                @map("event_kind")
   payloadJson    Json                  @map("payload_json")
+  dispatchState  String                @default("queued") @map("dispatch_state")
   status         ExecutionOutboxStatus @default(queued)
   attemptCount   Int                   @default(0) @map("attempt_count")
   lastAttemptAt  DateTime?             @map("last_attempt_at")

@@ -9,8 +9,10 @@ import {
 } from "@prisma/client";
 import {
   HOSTED_EXECUTION_DISPATCH_NOT_CONFIGURED_ERROR,
+  HOSTED_EXECUTION_EVENT_DISPATCH_STATES,
   type HostedExecutionDispatchRequest,
   type HostedExecutionDispatchResult,
+  type HostedExecutionEventDispatchState,
   type HostedExecutionOutboxPayloadStorage,
   resolveHostedExecutionOutboxPayloadStorage,
 } from "@murphai/hosted-execution";
@@ -35,6 +37,10 @@ const CLAIM_LEASE_MS = 30_000;
 const RETRY_BASE_DELAY_MS = 5_000;
 const RETRY_MAX_DELAY_MS = 5 * 60_000;
 const DEFAULT_DRAIN_LIMIT = 8;
+const DEFAULT_HOSTED_EXECUTION_EVENT_DISPATCH_STATE: HostedExecutionEventDispatchState = "queued";
+const HOSTED_EXECUTION_EVENT_DISPATCH_STATE_SET = new Set<HostedExecutionEventDispatchState>(
+  HOSTED_EXECUTION_EVENT_DISPATCH_STATES,
+);
 
 type HostedExecutionOutboxClient = PrismaClient | Prisma.TransactionClient;
 
@@ -293,6 +299,7 @@ async function processHostedExecutionOutboxRecord(
       : await dispatchHostedExecutionStatus(preparedDispatch.dispatch);
     const delivery = resolveHostedExecutionDeliveryOutcome(dispatchResult);
     const nextRecord = await finalizeHostedExecutionOutboxAttempt(prisma, record, {
+      dispatchState: delivery.dispatchState,
       lastError: delivery.lastError,
       nextAttemptAt: delivery.retryable
         ? new Date(Date.parse(nowIso) + computeRetryDelayMs(record.attemptCount))
@@ -309,6 +316,7 @@ async function processHostedExecutionOutboxRecord(
   } catch (error) {
     const permanentPayloadFailure = isPermanentHostedExecutionOutboxError(error);
     const nextRecord = await finalizeHostedExecutionOutboxAttempt(prisma, record, {
+      dispatchState: readHostedExecutionEventDispatchState(record.dispatchState),
       lastError: error instanceof Error ? error.message : String(error),
       nextAttemptAt: permanentPayloadFailure
         ? null
@@ -399,6 +407,7 @@ async function finalizeHostedExecutionOutboxAttempt(
   prisma: PrismaClient,
   record: ExecutionOutbox & { claimToken: string },
   input: {
+    dispatchState: HostedExecutionEventDispatchState;
     lastError: string | null;
     nextAttemptAt: Date | null;
     payloadJson: Prisma.InputJsonValue;
@@ -411,6 +420,7 @@ async function finalizeHostedExecutionOutboxAttempt(
       claimToken: record.claimToken,
     },
     data: {
+      dispatchState: input.dispatchState,
       status: input.status,
       lastError: input.lastError,
       nextAttemptAt: input.nextAttemptAt,
@@ -472,6 +482,7 @@ async function upsertHostedExecutionOutboxRecord(input: {
       eventId: input.dispatchRef.eventId,
       eventKind: input.dispatchRef.eventKind,
       payloadJson: input.payloadJson,
+      dispatchState: DEFAULT_HOSTED_EXECUTION_EVENT_DISPATCH_STATE,
       status: ExecutionOutboxStatus.queued,
       nextAttemptAt: input.now,
     },
@@ -574,6 +585,7 @@ function areHostedExecutionDispatchPayloadRefsEquivalent(
 function resolveHostedExecutionDeliveryOutcome(
   dispatchResult: HostedExecutionDispatchResult,
 ): {
+  dispatchState: HostedExecutionEventDispatchState;
   deleteStoredPayload: boolean;
   lastError: string | null;
   retryable: boolean;
@@ -581,6 +593,7 @@ function resolveHostedExecutionDeliveryOutcome(
 } {
   if (dispatchResult.status.lastError === HOSTED_EXECUTION_DISPATCH_NOT_CONFIGURED_ERROR) {
     return {
+      dispatchState: DEFAULT_HOSTED_EXECUTION_EVENT_DISPATCH_STATE,
       deleteStoredPayload: false,
       lastError: dispatchResult.status.lastError,
       retryable: true,
@@ -591,6 +604,7 @@ function resolveHostedExecutionDeliveryOutcome(
   switch (dispatchResult.event.state) {
     case "backpressured":
       return {
+        dispatchState: dispatchResult.event.state,
         deleteStoredPayload: false,
         lastError:
           dispatchResult.event.lastError
@@ -602,6 +616,7 @@ function resolveHostedExecutionDeliveryOutcome(
     case "queued":
     case "duplicate_pending":
       return {
+        dispatchState: dispatchResult.event.state,
         deleteStoredPayload: false,
         lastError: null,
         retryable: false,
@@ -611,6 +626,7 @@ function resolveHostedExecutionDeliveryOutcome(
     case "completed":
     case "poisoned":
       return {
+        dispatchState: dispatchResult.event.state,
         deleteStoredPayload: true,
         lastError: null,
         retryable: false,
@@ -625,9 +641,34 @@ function computeRetryDelayMs(attemptCount: number): number {
   return Math.min(RETRY_MAX_DELAY_MS, RETRY_BASE_DELAY_MS * (2 ** Math.max(0, attemptCount - 1)));
 }
 
-function isHostedExecutionOutboxPayloadSettled(record: Pick<ExecutionOutbox, "nextAttemptAt" | "status">): boolean {
-  return record.status === ExecutionOutboxStatus.dispatched
+function isHostedExecutionOutboxPayloadSettled(
+  record: Pick<ExecutionOutbox, "dispatchState" | "nextAttemptAt" | "status">,
+): boolean {
+  return isHostedExecutionEventDispatchTerminal(
+    readHostedExecutionEventDispatchState(record.dispatchState),
+  )
     || (record.status === ExecutionOutboxStatus.delivery_failed && record.nextAttemptAt === null);
+}
+
+function readHostedExecutionEventDispatchState(
+  value: string | null | undefined,
+): HostedExecutionEventDispatchState {
+  if (
+    value
+    && HOSTED_EXECUTION_EVENT_DISPATCH_STATE_SET.has(value as HostedExecutionEventDispatchState)
+  ) {
+    return value as HostedExecutionEventDispatchState;
+  }
+
+  return DEFAULT_HOSTED_EXECUTION_EVENT_DISPATCH_STATE;
+}
+
+function isHostedExecutionEventDispatchTerminal(
+  state: HostedExecutionEventDispatchState,
+): boolean {
+  return state === "duplicate_consumed"
+    || state === "completed"
+    || state === "poisoned";
 }
 
 function createHostedExecutionOutboxPayloadError(eventId: string): Error & {

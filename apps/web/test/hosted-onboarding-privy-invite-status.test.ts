@@ -97,12 +97,13 @@ describe("getHostedInviteStatus", () => {
     });
   });
 
-  it("surfaces an activating stage while hosted execution is still queued after payment", async () => {
+  it("keeps the invite in activating while the shared activation outcome is still queued after transport handoff", async () => {
     const prisma = {
       executionOutbox: {
         findFirst: vi.fn().mockResolvedValue({
+          dispatchState: "queued",
           eventId: "member.activated:stripe.invoice.paid:member_123:evt_123",
-          status: "queued",
+          status: "dispatched",
         }),
       },
       hostedInvite: {
@@ -128,6 +129,84 @@ describe("getHostedInviteStatus", () => {
         matchesInvite: true,
       },
       stage: "activating",
+    });
+  });
+
+  it("resolves back to active when live Cloudflare status shows the activation event poisoned", async () => {
+    mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
+      getStatus: vi.fn().mockResolvedValue({
+        backpressuredEventIds: [],
+        bundleRef: null,
+        inFlight: false,
+        lastError: "poisoned by runner",
+        lastEventId: "member.activated:stripe.invoice.paid:member_123:evt_123",
+        lastRunAt: null,
+        nextWakeAt: null,
+        pendingEventCount: 0,
+        poisonedEventIds: ["member.activated:stripe.invoice.paid:member_123:evt_123"],
+        retryingEventId: null,
+        userId: "member_123",
+      }),
+    });
+
+    const prisma = {
+      executionOutbox: {
+        findFirst: vi.fn().mockResolvedValue({
+          dispatchState: "queued",
+          eventId: "member.activated:stripe.invoice.paid:member_123:evt_123",
+          status: "dispatched",
+        }),
+      },
+      hostedInvite: {
+        findUnique: vi.fn().mockResolvedValue(createInvite({
+          member: createMember({
+            billingStatus: HostedBillingStatus.active,
+            identity: createIdentity(),
+          }),
+        })),
+      },
+    } as never;
+
+    await expect(
+      getHostedInviteStatus({
+        authenticatedMember: createAuthenticatedMember(),
+        inviteCode: "invite-code",
+        now: NOW,
+        prisma,
+      }),
+    ).resolves.toMatchObject({
+      stage: "active",
+    });
+  });
+
+  it("treats persisted poisoned activation outcomes as terminal even without a live Cloudflare status read", async () => {
+    const prisma = {
+      executionOutbox: {
+        findFirst: vi.fn().mockResolvedValue({
+          dispatchState: "poisoned",
+          eventId: "member.activated:stripe.invoice.paid:member_123:evt_123",
+          status: "dispatched",
+        }),
+      },
+      hostedInvite: {
+        findUnique: vi.fn().mockResolvedValue(createInvite({
+          member: createMember({
+            billingStatus: HostedBillingStatus.active,
+            identity: createIdentity(),
+          }),
+        })),
+      },
+    } as never;
+
+    await expect(
+      getHostedInviteStatus({
+        authenticatedMember: createAuthenticatedMember(),
+        inviteCode: "invite-code",
+        now: NOW,
+        prisma,
+      }),
+    ).resolves.toMatchObject({
+      stage: "active",
     });
   });
 });
