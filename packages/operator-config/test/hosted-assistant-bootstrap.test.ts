@@ -10,8 +10,6 @@ import { importWithMocks } from './import-with-mocks.ts'
 
 afterEach(() => {
   vi.unstubAllEnvs()
-  vi.resetModules()
-  vi.doUnmock('../src/operator-config.ts')
 })
 
 async function loadHostedAssistantModule(options?: {

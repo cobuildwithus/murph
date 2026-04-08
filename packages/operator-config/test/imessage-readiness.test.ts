@@ -8,10 +8,10 @@ import {
   IMESSAGE_MESSAGES_DB_DISPLAY_PATH,
 } from '../src/imessage-readiness.ts'
 import { VaultCliError } from '../src/vault-cli-errors.ts'
+import { importWithMocks } from './import-with-mocks.ts'
 
 afterEach(() => {
   vi.restoreAllMocks()
-  vi.resetModules()
 })
 
 test('ensureImessageMessagesDbReadable rejects non-macOS and missing HOME before probing', async () => {
@@ -157,11 +157,14 @@ test('probeImessageMessagesDb opens the runtime sqlite database read-only and cl
     prepare,
   }))
 
-  vi.doMock('@murphai/runtime-state/node', () => ({
-    openSqliteRuntimeDatabase,
-  }))
-
-  const { probeImessageMessagesDb } = await import('../src/imessage-readiness.ts')
+  const { probeImessageMessagesDb } = await importWithMocks(
+    '../src/imessage-readiness.ts',
+    () => {
+      vi.doMock('@murphai/runtime-state/node', () => ({
+        openSqliteRuntimeDatabase,
+      }))
+    },
+  )
   await probeImessageMessagesDb('/tmp/test-home/Library/Messages/chat.db')
 
   assert.deepEqual(openSqliteRuntimeDatabase.mock.calls, [
