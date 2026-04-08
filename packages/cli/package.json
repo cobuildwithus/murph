@@ -1,6 +1,6 @@
 {
   "name": "@murphai/murph",
-  "version": "0.1.18",
+  "version": "0.2.0",
   "private": false,
   "description": "Murph is a personal health assistant you run locally. Install this package to get the murph CLI.",
   "license": "Apache-2.0",
