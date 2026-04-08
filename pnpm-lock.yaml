@@ -41,9 +41,6 @@ importers:
       '@murphai/cloudflare-hosted-control':
         specifier: workspace:*
         version: link:../../packages/cloudflare-hosted-control
-      '@murphai/core':
-        specifier: workspace:*
-        version: link:../../packages/core
       '@murphai/device-syncd':
         specifier: workspace:*
         version: link:../../packages/device-syncd
@@ -56,9 +53,6 @@ importers:
       '@murphai/inboxd':
         specifier: workspace:*
         version: link:../../packages/inboxd
-      '@murphai/murph':
-        specifier: workspace:*
-        version: link:../../packages/cli
       '@murphai/parsers':
         specifier: workspace:*
         version: link:../../packages/parsers

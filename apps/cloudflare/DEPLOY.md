@@ -30,9 +30,10 @@ This repo now includes:
 The deploy artifact contract is intentionally narrow:
 
 - `apps/cloudflare` assembles the runtime bundle into `apps/cloudflare/.deploy/runner-bundle/`
+- bundle assembly now happens in a temp leaf staging directory by packing the Cloudflare app and its workspace runtime closure into local tarballs, generating a local staging lockfile, and then running a frozen production-only install there
 - `wrangler.generated.jsonc` and `worker-secrets.json` stay alongside that bundle under `.deploy/`, but they are deploy inputs, not container image contents
 - `Dockerfile.cloudflare-hosted-runner` stays copy-only for app code: it copies the prepared runner bundle into `/app` and starts `dist/container-entrypoint.js`
-- bundle assembly no longer ends with a workspace repair install after the runtime artifact is written
+- bundle assembly no longer depends on `pnpm deploy --legacy` or a post-bundle workspace repair install
 
 ## What it does not automate yet
 
@@ -128,7 +129,7 @@ For Venice as the platform default hosted assistant, set these GitHub environmen
 
 You do not need to set `HOSTED_ASSISTANT_API_KEY_ENV` for that path because the Venice preset resolves it to `VENICE_API_KEY`.
 
-The default container image already installs `ffmpeg`, `pdftotext`, a pinned `whisper.cpp` `whisper-cli`, and the default `base.en` model, and it sets `FFMPEG_COMMAND`, `PDFTOTEXT_COMMAND`, `WHISPER_COMMAND`, and `WHISPER_MODEL_PATH` inside the image. The app-owned assembly step writes the built runtime bundle into `apps/cloudflare/.deploy/runner-bundle/` before the final image stage copies it into place. Only set those vars in Worker config when you want to override the baked defaults.
+The default container image already installs `ffmpeg`, `pdftotext`, a pinned `whisper.cpp` `whisper-cli`, and the default `base.en` model, and it sets `FFMPEG_COMMAND`, `PDFTOTEXT_COMMAND`, `WHISPER_COMMAND`, and `WHISPER_MODEL_PATH` inside the image. The app-owned assembly step writes the built runtime bundle into `apps/cloudflare/.deploy/runner-bundle/` by packing the current workspace runtime packages, generating a local staging lockfile, and installing them through a frozen production pass in a temp staging dir before the final image stage copies that prepared bundle into place. Only set those vars in Worker config when you want to override the baked defaults.
 
 ### Required environment secrets
 
