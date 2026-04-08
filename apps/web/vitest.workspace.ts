@@ -13,6 +13,7 @@ import {
   createVitestWorkspaceRuntimeAliases,
   resolveHostedWebWorkspaceSourceEntries,
 } from "../../config/workspace-source-resolution";
+import { resolveVitestBucketFiles } from "../../config/vitest-test-buckets.js";
 
 const appDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(appDir, "../..");
@@ -30,7 +31,7 @@ function hostedWebPattern(pattern: string): string {
   return path.join(appDir, "test", pattern);
 }
 
-function createHostedWebProject(name: string, patterns: readonly string[]) {
+function createHostedWebProject(name: string, fileNames: readonly string[]) {
   return defineProject({
     resolve: {
       alias: hostedWebAliases,
@@ -40,7 +41,7 @@ function createHostedWebProject(name: string, patterns: readonly string[]) {
       name,
       environment: "node",
       ...hostedWebVitestConcurrency,
-      include: patterns.map(hostedWebPattern),
+      include: fileNames.map(hostedWebPattern),
       setupFiles: [
         path.join(appDir, "test", "setup-env.ts"),
       ],
@@ -48,57 +49,80 @@ function createHostedWebProject(name: string, patterns: readonly string[]) {
   });
 }
 
-export const hostedWebVitestProjects = [
-  createHostedWebProject("hosted-web-onboarding-core", [
-    "hosted-onboarding-billing-service.test.ts",
-    "hosted-onboarding-entitlement.test.ts",
-    "hosted-onboarding-env.test.ts",
-    "hosted-onboarding-landing.test.ts",
-    "hosted-onboarding-member-store.test.ts",
-    "hosted-onboarding-member-service.test.ts",
-    "hosted-onboarding-privacy-foundation-migration.test.ts",
-    "hosted-onboarding-request-auth.test.ts",
-    "hosted-onboarding-routes.test.ts",
-    "hosted-onboarding-session.test.ts",
-    "hosted-onboarding-shared.test.ts",
-    "hosted-onboarding-stripe-event-reconciliation.test.ts",
-    "hosted-onboarding-webhook-idempotency.test.ts",
-    "hosted-onboarding-webhook-receipt-transitions.test.ts",
-  ]),
-  createHostedWebProject("hosted-web-onboarding-integrations", [
-    "connect-start-route.test.ts",
-    "hosted-phone-auth.test.ts",
-    "hosted-onboarding-linq-*.test.ts",
-    "hosted-onboarding-privy*.test.ts",
-    "hosted-onboarding-revnet*.test.ts",
-    "hosted-onboarding-telegram-dispatch.test.ts",
-  ]),
-  createHostedWebProject("hosted-web-execution", [
-    "agent-*.test.ts",
-    "hosted-execution-*.test.ts",
-    "hosted-share-*.test.ts",
-    "linq-control-plane.test.ts",
-    "linq-webhook-route.test.ts",
-  ]),
-  createHostedWebProject("hosted-web-sync-settings", [
-    "auth.test.ts",
-    "device-sync-*.test.ts",
-    "hosted-device-sync-internal-routes.test.ts",
-    "join-*.test.ts",
-    "local-heartbeat-route.test.ts",
-    "settings-*.test.ts",
-  ]),
-  createHostedWebProject("hosted-web-store-config", [
-    "crypto.test.ts",
-    "env.test.ts",
-    "layout.test.ts",
-    "next-config.test.ts",
-    "page.test.ts",
-    "prisma-store-*.test.ts",
-    "public-url.test.ts",
-    "vercel-config.test.ts",
-  ]),
-];
+const hostedWebVitestProjectSpecs = resolveVitestBucketFiles(
+  path.join(appDir, "test"),
+  [
+    {
+      name: "hosted-web-onboarding-integrations",
+      patterns: [
+        "connect-start-route.test.ts",
+        "hosted-onboarding-invite-send-code.test.ts",
+        "hosted-onboarding-linq-*.test.ts",
+        "hosted-onboarding-privy*.test.ts",
+        "hosted-onboarding-revnet*.test.ts",
+        "hosted-onboarding-telegram-dispatch.test.ts",
+        "hosted-phone-auth.test.ts",
+        "invite-status-client.test.ts",
+      ],
+    },
+    {
+      name: "hosted-web-onboarding-core",
+      patterns: ["hosted-onboarding-*.test.ts"],
+    },
+    {
+      name: "hosted-web-execution",
+      patterns: [
+        "agent-*.test.ts",
+        "hosted-execution-*.test.ts",
+        "hosted-member-email-runtime-boundary.test.ts",
+        "hosted-share-*.test.ts",
+        "internal.test.ts",
+        "linq-control-plane.test.ts",
+        "linq-webhook-route.test.ts",
+        "share-link-client.test.ts",
+      ],
+    },
+    {
+      name: "hosted-web-sync-settings",
+      patterns: [
+        "auth.test.ts",
+        "device-sync-*.test.ts",
+        "hosted-billing-settings.test.tsx",
+        "hosted-device-sync-*.test.ts",
+        "join-*.test.ts",
+        "local-heartbeat-route.test.ts",
+        "settings-*.test.ts",
+      ],
+    },
+    {
+      includeRemaining: true,
+      name: "hosted-web-store-config",
+      patterns: [
+        "contact-privacy-*.test.ts",
+        "crypto.test.ts",
+        "dev-local.test.ts",
+        "env.test.ts",
+        "hosted-contact-privacy.test.ts",
+        "http.test.ts",
+        "install-script.test.ts",
+        "layout.test.ts",
+        "next-config.test.ts",
+        "page.test.ts",
+        "prisma-store-*.test.ts",
+        "public-url.test.ts",
+        "route-loading.test.tsx",
+        "vercel-config.test.ts",
+      ],
+    },
+  ],
+  {
+    label: "apps/web/test",
+  },
+);
+
+export const hostedWebVitestProjects = hostedWebVitestProjectSpecs.map(
+  ({ fileNames, name }) => createHostedWebProject(name, fileNames),
+);
 
 export default defineConfig({
   test: {

@@ -440,17 +440,14 @@ run_test_apps() {
     local pids=()
 
     # App verification should not emit V8 coverage into the repo coverage workspace.
-    # The repo Vitest lane already covers Cloudflare node/workers tests, so keep
-    # only the app-local typecheck here to avoid duplicating that matrix under a
-    # second process tree that can linger after the root lane is already green.
     run_package_command_without_node_v8_coverage_with_retry "apps/web" verify &
     local hosted_web_verify_pid="$!"
     pids+=("$hosted_web_verify_pid")
     register_background_pid "$hosted_web_verify_pid"
-    run_package_command_without_node_v8_coverage_with_retry "apps/cloudflare" typecheck &
-    local cloudflare_typecheck_pid="$!"
-    pids+=("$cloudflare_typecheck_pid")
-    register_background_pid "$cloudflare_typecheck_pid"
+    run_package_command_without_node_v8_coverage_with_retry "apps/cloudflare" verify &
+    local cloudflare_verify_pid="$!"
+    pids+=("$cloudflare_verify_pid")
+    register_background_pid "$cloudflare_verify_pid"
 
     if ! wait_for_background_jobs "${pids[@]}"; then
       return 1
@@ -460,7 +457,7 @@ run_test_apps() {
   fi
 
   run_package_command_without_node_v8_coverage_with_retry "apps/web" verify
-  run_package_command_without_node_v8_coverage_with_retry "apps/cloudflare" typecheck
+  run_package_command_without_node_v8_coverage_with_retry "apps/cloudflare" verify
 }
 
 prepare_repo_vitest_runtime_artifacts() {

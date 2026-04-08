@@ -36,11 +36,7 @@ export default defineConfig({
       customProviderModule: "../../config/vitest-coverage-provider.ts",
       reporter: ["text", "lcov"],
       reportsDirectory: "./coverage",
-      include: [
-        "src/csv-sample-importer.ts",
-        "src/document-importer.ts",
-        "src/meal-importer.ts",
-      ],
+      include: ["src/**/*.ts"],
       exclude: [
         "coverage/**",
         "dist/**",

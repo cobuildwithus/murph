@@ -12,6 +12,10 @@ import {
   createVitestWorkspaceRuntimeAliases,
   resolveWorkspaceSourceEntries,
 } from "../../config/workspace-source-resolution.js";
+import {
+  resolveVitestBucketFiles,
+  type VitestBucketSeed,
+} from "../../config/vitest-test-buckets.js";
 
 const packageDir = path.dirname(fileURLToPath(import.meta.url));
 const cliVitestConcurrency = resolveMurphVitestConcurrency();
@@ -54,10 +58,10 @@ export const cliVitestCoverage = {
     "**/*.d.ts",
   ],
   thresholds: {
-    lines: 80,
-    functions: 70,
-    branches: 55,
-    statements: 80,
+    lines: 83,
+    functions: 77,
+    branches: 60,
+    statements: 83,
   },
   reportOnFailure: true,
 };
@@ -68,6 +72,9 @@ type CliVitestProjectSpec = {
   readonly name: string;
   readonly fileNames: readonly string[];
 };
+
+type CliVitestProjectSeed = Omit<CliVitestProjectSpec, "fileNames"> &
+  VitestBucketSeed;
 
 function cliTestFile(fileName: string): string {
   return path.join(packageDir, "test", fileName);
@@ -94,48 +101,43 @@ export function createCliVitestProject(name: string, fileNames: readonly string[
   });
 }
 
-export const cliVitestProjectSpecs: readonly CliVitestProjectSpec[] = [
+const cliVitestProjectSeeds: readonly CliVitestProjectSeed[] = [
   {
     name: "cli-health-tail",
-    fileNames: [
-      "health-tail.test.ts",
-      "health-descriptors.test.ts",
-    ],
+    patterns: ["health-*.test.ts"],
   },
   {
     name: "cli-read-model",
-    fileNames: [
-      "memory.test.ts",
-      "search-runtime.test.ts",
+    includeRemaining: true,
+    patterns: [
+      "canonical-*.test.ts",
+      "json-input.test.ts",
       "list-surface.test.ts",
+      "memory.test.ts",
+      "record-mutations.test.ts",
       "runtime.test.ts",
+      "search-runtime.test.ts",
       "selector-filter-normalization.test.ts",
       "stdin-input.test.ts",
-      "canonical-mutation-boundary.test.ts",
-      "canonical-write-lock.test.ts",
-      "canonical-write-source-audit.test.ts",
-      "json-input.test.ts",
-      "record-mutations.test.ts",
       "vault-usecase-helpers.test.ts",
     ],
   },
   {
     name: "cli-schemas-smoke",
-    fileNames: [
+    includeRemaining: true,
+    patterns: [
+      "assistant-chat-theme.test.ts",
       "automation.test.ts",
       "cli-entry.test.ts",
-      "incur-smoke.test.ts",
-      "inbox-incur-smoke.test.ts",
       "cli-test-helpers.test.ts",
+      "device-cli.test.ts",
       "http-json-retry.test.ts",
+      "inbox-incur-smoke.test.ts",
+      "incur-smoke.test.ts",
       "knowledge-cli-contracts.test.ts",
       "knowledge-documents.test.ts",
+      "release-*.test.ts",
       "wearables-schema.test.ts",
-      "release-script-coverage-audit.test.ts",
-      "release-workflow-guards.test.ts",
-      "assistant-cli-access.test.ts",
-      "assistant-chat-theme.test.ts",
-      "device-cli.test.ts",
     ],
   },
   {
@@ -143,60 +145,34 @@ export const cliVitestProjectSpecs: readonly CliVitestProjectSpec[] = [
     env: {
       MURPH_CLI_TEST_PERSISTENT_HARNESS: "0",
     },
-    fileNames: [
-      "assistant-cli.test.ts",
-      "assistant-runtime.test.ts",
-      "assistant-chat-controller.test.ts",
-      "assistant-service.test.ts",
-      "assistant-chat-composer.test.ts",
-      "assistant-model-switcher.test.ts",
-      "assistant-channel.test.ts",
-      "assistant-cron.test.ts",
-      "assistant-state.test.ts",
-      "assistant-observability.test.ts",
-      "assistant-robustness.test.ts",
-      "assistant-provider.test.ts",
-      "assistant-daemon-client.test.ts",
-      "assistant-codex.test.ts",
-      "assistant-harness.test.ts",
-      "assistant-runtime-state-service.test.ts",
-      "assistant-core-facades.test.ts",
-      "assistant-web-search.test.ts",
-      "research-runtime.test.ts",
+    patterns: [
+      "assistant-*.test.ts",
       "knowledge-runtime.test.ts",
+      "research-runtime.test.ts",
     ],
   },
   {
     name: "cli-expansions",
-    fileNames: [
-      "cli-expansion-workout.test.ts",
-      "cli-expansion-intervention.test.ts",
-      "cli-expansion-provider-event-samples.test.ts",
-      "cli-expansion-samples-audit.test.ts",
-      "cli-expansion-document-meal.test.ts",
-      "cli-expansion-experiment-journal-vault.test.ts",
-      "cli-expansion-experiment-journal-vault-phase2.test.ts",
-      "cli-expansion-export-intake.test.ts",
-    ],
+    patterns: ["cli-expansion-*.test.ts"],
   },
   {
     name: "cli-inbox-setup",
     fileParallelism: false,
-    fileNames: [
-      "setup-cli.test.ts",
-      "setup-channels.test.ts",
-      "inbox-cli.test.ts",
-      "inbox-model-harness.test.ts",
-      "inbox-model-route.test.ts",
-      "inbox-service-boundaries.test.ts",
+    patterns: [
       "cli-expansion-inbox-attachments.test.ts",
-      "gateway-core.test.ts",
-      "gateway-local-service.test.ts",
       "device-daemon.test.ts",
       "device-sync-client.test.ts",
+      "gateway-*.test.ts",
+      "inbox-*.test.ts",
+      "setup-*.test.ts",
     ],
   },
 ];
+
+export const cliVitestProjectSpecs: readonly CliVitestProjectSpec[] =
+  resolveVitestBucketFiles(path.join(packageDir, "test"), cliVitestProjectSeeds, {
+    label: "packages/cli/test",
+  });
 
 export const cliVitestProjects = cliVitestProjectSpecs.map(({ name, fileNames }) =>
   createCliVitestProject(name, fileNames),

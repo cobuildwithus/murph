@@ -1,7 +1,7 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { defineProject } from "vitest/config";
+import { defineConfig } from "vitest/config";
 
 import {
   createMurphVitestCoverage,
@@ -21,7 +21,7 @@ const WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS = {
   "@murphai/hosted-execution": "../hosted-execution/src/index.ts",
 } as const;
 
-export default defineProject({
+export default defineConfig({
   resolve: {
     alias: createVitestWorkspaceRuntimeAliases(
       resolveWorkspaceSourceEntries(packageDir, WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS),
