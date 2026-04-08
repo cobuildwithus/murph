@@ -6,6 +6,7 @@ import {
 } from "../src/automation.ts";
 import {
   collapseEventRevisions,
+  compareEventRevisionPriority,
   eventRevisionFromLifecycle,
   hasInvalidEventLifecycle,
   parseEventLifecycle,
@@ -170,6 +171,7 @@ describe("memory contract seams", () => {
 describe("event lifecycle seams", () => {
   it("parses missing, valid, and invalid lifecycle values through the public helpers", () => {
     expect(parseEventLifecycle(undefined)).toEqual({ state: "missing" });
+    expect(parseEventLifecycle(null)).toEqual({ state: "invalid" });
     expect(
       parseEventLifecycle({
         revision: 2,
@@ -183,8 +185,58 @@ describe("event lifecycle seams", () => {
       state: "valid",
     });
     expect(parseEventLifecycle({ revision: 0 })).toEqual({ state: "invalid" });
+    expect(parseEventLifecycle({ revision: 1, state: "archived" })).toEqual({
+      state: "invalid",
+    });
     expect(hasInvalidEventLifecycle({ revision: 0 })).toBe(true);
     expect(eventRevisionFromLifecycle({ revision: 0 })).toBe(1);
+  });
+
+  it("compares revision ties by recordedAt, occurredAt, and relativePath", () => {
+    expect(
+      compareEventRevisionPriority(
+        {
+          lifecycle: { revision: 3 },
+          recordedAt: "2026-04-08T00:00:00.000Z",
+        },
+        {
+          lifecycle: { revision: 2 },
+          recordedAt: "2026-04-08T23:59:59.000Z",
+        },
+      ),
+    ).toBeGreaterThan(0);
+
+    expect(
+      compareEventRevisionPriority(
+        {
+          lifecycle: { revision: 1 },
+          recordedAt: "2026-04-08T00:00:00.000Z",
+          occurredAt: "2026-04-08T00:02:00.000Z",
+        },
+        {
+          lifecycle: { revision: 1 },
+          recordedAt: "2026-04-08T00:00:00.000Z",
+          occurredAt: "2026-04-08T00:01:00.000Z",
+        },
+      ),
+    ).toBeGreaterThan(0);
+
+    expect(
+      compareEventRevisionPriority(
+        {
+          lifecycle: { revision: 1 },
+          recordedAt: "2026-04-08T00:00:00.000Z",
+          occurredAt: "2026-04-08T00:00:00.000Z",
+          relativePath: "ledger/events/z.jsonl",
+        },
+        {
+          lifecycle: { revision: 1 },
+          recordedAt: "2026-04-08T00:00:00.000Z",
+          occurredAt: "2026-04-08T00:00:00.000Z",
+          relativePath: "ledger/events/a.jsonl",
+        },
+      ),
+    ).toBeGreaterThan(0);
   });
 
   it("collapses revisions, prefers the latest surviving record, and skips invalid lifecycle entries", () => {
@@ -268,6 +320,21 @@ describe("event lifecycle seams", () => {
         relativePath: "ledger/events/tie-b.jsonl",
       },
     ]);
+  });
+
+  it("skips blank event ids during collapse", () => {
+    expect(
+      collapseEventRevisions(
+        [
+          {
+            eventId: "   ",
+            lifecycle: { revision: 1 },
+            value: "ignored",
+          },
+        ],
+        (value) => value,
+      ),
+    ).toEqual([]);
   });
 });
 

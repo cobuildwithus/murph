@@ -335,28 +335,12 @@ function renderMemoryFrontmatter(
   ].join("\n");
 }
 
-function renderMemoryFrontmatterValue(value: string | number | boolean | null): string {
-  if (value === null) {
-    return "null";
+function renderMemoryFrontmatterValue(value: string): string {
+  if (/^[A-Za-z0-9_./:-]+$/u.test(value)) {
+    return value;
   }
 
-  if (typeof value === "boolean") {
-    return value ? "true" : "false";
-  }
-
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return String(value);
-  }
-
-  if (typeof value === "string") {
-    if (/^[A-Za-z0-9_./:-]+$/u.test(value)) {
-      return value;
-    }
-
-    return JSON.stringify(value);
-  }
-
-  return JSON.stringify(String(value));
+  return JSON.stringify(value);
 }
 
 function parseMemoryRecordMetadata(value: string): MemoryRecordMetadata | null {
