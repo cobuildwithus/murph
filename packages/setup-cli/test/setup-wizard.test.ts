@@ -391,13 +391,12 @@ test.sequential('setup wizard runs the public-link flow, preserves explicit opt-
     await waitForWizardText(flush, readOutput, /Auto updates/u)
     await writeInput('\r')
     await waitForWizardText(flush, readOutput, /Chat channels/u)
-    await writeInput('\u001B[B')
-    await writeInput('\u001B[B')
+    await writeInput('\u001B[A')
+    await writeInput('\u001B[A')
     await writeInput(' ')
     await writeInput('\r')
     await waitForWizardText(flush, readOutput, /Health data/u)
-    await writeInput('\u001B[B')
-    await writeInput('\u001B[B')
+    await writeInput('\u001B[A')
     await writeInput(' ')
     await writeInput('\r')
     const publicLinkOutput = await waitForWizardText(
@@ -522,5 +521,89 @@ test.sequential('setup wizard surfaces cancellation when the operator quits from
     await writeInput('q')
 
     await rejection
+  })
+})
+
+test.sequential('setup wizard surfaces cancellation when the operator presses escape on the intro screen', async () => {
+  await withMockProcessTty(async ({ flush, writeInput }) => {
+    const wizardResultPromise = runSetupWizard({
+      vault: './wizard-cancelled-escape',
+    })
+    const rejection = assert.rejects(
+      wizardResultPromise,
+      /Murph setup was cancelled\./u,
+    )
+
+    await flush()
+    await writeInput('\u001B')
+
+    await rejection
+  })
+})
+
+test.sequential('setup wizard accepts wrapped selection navigation plus space-based public-link and confirm actions', async () => {
+  await withMockProcessTty(async ({ flush, readOutput, writeInput }) => {
+    const wizardResultPromise = runSetupWizard({
+      channelStatuses: {
+        linq: {
+          badge: 'needs env',
+          detail: 'Missing webhook credentials.',
+          missingEnv: ['LINQ_API_TOKEN'],
+          ready: false,
+        },
+      },
+      initialAssistantPreset: 'skip',
+      initialChannels: [],
+      initialScheduledUpdates: [],
+      initialWearables: [],
+      platform: 'linux',
+      vault: './wizard-public-links-space',
+      wearableStatuses: {
+        whoop: {
+          badge: 'needs env',
+          detail: 'Missing WHOOP client credentials.',
+          missingEnv: ['WHOOP_CLIENT_ID'],
+          ready: false,
+        },
+      },
+    })
+
+    await flush()
+    await writeInput('\r')
+    await waitForWizardText(flush, readOutput, /How should Murph answer\?/u)
+    await writeInput('\r')
+    await waitForWizardText(flush, readOutput, /Auto updates/u)
+    await writeInput('\r')
+    await waitForWizardText(flush, readOutput, /Chat channels/u)
+    await writeInput('\u001B[A')
+    await writeInput('\u001B[B')
+    await writeInput('\u001B[B')
+    await writeInput('\u001B[B')
+    await writeInput(' ')
+    await writeInput('\r')
+    await waitForWizardText(flush, readOutput, /Health data/u)
+    await writeInput('\u001B[B')
+    await writeInput('\u001B[B')
+    await writeInput(' ')
+    await writeInput('\r')
+    await waitForWizardText(flush, readOutput, /Public links/u)
+    await writeInput(' ')
+    await waitForWizardText(flush, readOutput, /Review your setup/u)
+    await writeInput('\u001B')
+    await waitForWizardText(flush, readOutput, /Public links/u)
+    await writeInput(' ')
+    await waitForWizardText(flush, readOutput, /Review your setup/u)
+    await writeInput(' ')
+
+    assert.deepEqual(await wizardResultPromise, {
+      assistantApiKeyEnv: null,
+      assistantBaseUrl: null,
+      assistantOss: null,
+      assistantPreset: 'skip',
+      assistantProviderName: null,
+      channels: ['linq'],
+      scheduledUpdates: [],
+      wearables: ['whoop'],
+    })
   })
 })
