@@ -222,6 +222,43 @@ This patch adds assistant-delivery-specific parser/type aliases at the shared ow
 
 **Main refactor risk:** if a second durable side-effect family appears later, reintroduce a real multi-kind route contract intentionally instead of copy-pasting `kind` parameters back across the stack.
 
+### 14. Finish collapsing assistant delivery target vocabulary to the gateway route owner
+
+**Seam:** `packages/gateway-core/src/contracts.ts` (`gatewayDeliveryTargetKindValues`, `gatewayReplyRouteKindValues`), `packages/operator-config/src/assistant-cli-contracts.ts` (`assistantChannelDeliveryTargetKindValues`, `assistantBindingDeliveryKindValues`), `packages/hosted-execution/src/side-effects.ts` (`hostedAssistantDeliveryTargetKindValues`, `HostedAssistantDeliveryReceipt.targetKind`)
+
+The same delivery-target vocabulary was still being owned in three places even after the earlier gateway cleanup: gateway-core, operator-config, and hosted-execution all carried their own copy of `explicit | participant | thread` or `participant | thread`.
+That meant one more delivery target or reply-route variant would still need coordinated literal-union edits across assistant contracts, gateway routing, and hosted delivery receipts.
+
+This landing makes `packages/gateway-core/src/contracts.ts` the single owner of that vocabulary and turns the other layers into thin aliases:
+
+- `packages/operator-config/src/assistant-cli-contracts.ts` now reuses `gatewayDeliveryTargetKindValues`, `gatewayReplyRouteKindValues`, `GatewayDeliveryTargetKind`, and `GatewayReplyRouteKind` instead of restating the same unions
+- `packages/hosted-execution/src/side-effects.ts` now reuses the same gateway-owned target-kind values and type for assistant-delivery receipts
+- focused tests in `packages/operator-config/test/assistant-cli-contracts.test.ts` and `packages/hosted-execution/test/side-effects.test.ts` lock in the shared-owner seam
+
+**Why this is simpler:** gateway-core already owns the concrete route semantics, so the rest of the stack can now consume one stable vocabulary instead of carrying parallel unions that drift independently.
+
+**Main refactor risk:** keep the sharing limited to the route-kind vocabulary.
+Do not pull assistant policy, hosted callback rules, or CLI-only behavior into gateway-core just to centralize more strings.
+
+### 15. Collapse active hosted side-effect paths to the assistant-delivery-specific surface they already use
+
+**Seam:** `packages/hosted-execution/src/side-effects.ts`, `packages/assistant-runtime/src/hosted-runtime/{models,parsers,platform,callbacks}.ts`, `apps/cloudflare/src/{execution-journal.ts,runtime-platform.ts,runner-outbound/results.ts,side-effect-journal.ts}`
+
+The only real hosted side effect in the live tree is still `assistant.delivery`, but assistant-runtime and Cloudflare were continuing to read and write it through generic `HostedExecutionSideEffect*` names.
+That made the active path look more composable than it really is and forced maintainers to reason about a generic framework even when the product behavior was simply “track assistant delivery confirmation.”
+
+This landing keeps the wire field names and compatibility aliases stable, but makes the assistant-delivery-specific model the primary owner again:
+
+- `packages/hosted-execution/src/side-effects.ts` now treats assistant-delivery-specific types, comparators, and target-kind aliases as the main owner surface while leaving the generic `HostedExecutionSideEffect*` exports in place as compatibility aliases
+- `packages/assistant-runtime/src/hosted-runtime/{models,parsers}.ts` now type committed side effects and resume parsing as `HostedAssistantDeliverySideEffect[]`
+- `packages/assistant-runtime/src/hosted-runtime/{platform,callbacks}.ts` now prefer assistant-delivery-specific journal method names while retaining compatibility with the older generic method names
+- `apps/cloudflare/src/{execution-journal.ts,runner-outbound/results.ts}` now parse committed journal payloads through `parseHostedAssistantDeliverySideEffects(...)`
+- `apps/cloudflare/src/side-effect-journal.ts` now uses the assistant-delivery-specific receipt comparator
+
+**Why this is simpler:** the active runtime path now names the one side-effect family it actually handles, while the shared hosted-execution package still keeps compatibility aliases so the refactor does not widen into a trust-boundary or transport rewrite.
+
+**Main refactor risk:** if a second durable side-effect family appears later, re-generalize intentionally from two real cases instead of copy-pasting generic names back into one-effect code paths.
+
 ## Current targeted review findings
 
 The notes below are the remaining review-only pass after the simplifications landed above.
@@ -229,39 +266,7 @@ They focus on the next data-model simplifications that still look highest-levera
 
 ### Worth planning
 
-#### 1. Finish collapsing assistant delivery target vocabulary to one route owner
-
-**Seam:** `packages/operator-config/src/assistant-cli-contracts.ts` (`assistantChannelDeliveryTargetKindValues`, `assistantBindingDeliveryKindValues`), `packages/gateway-core/src/contracts.ts` (`gatewayDeliveryTargetKindValues`, `gatewayReplyRouteKindValues`), `packages/hosted-execution/src/side-effects.ts` (`HostedExecutionAssistantDelivery.targetKind`)
-
-The same delivery-target vocabulary still survives in three packages: operator-config, gateway-core, and hosted-execution.
-The words are the same (`explicit`, `participant`, `thread`), but the owner is not.
-
-**Current cost:** one more target kind or route variant would require copy/paste edits across assistant settings/contracts, gateway routing, and hosted delivery receipts.
-That is exactly the kind of change that tends to produce partial rollouts and adapter glue.
-
-**Simpler target:** keep the shared route vocabulary in `packages/gateway-core/src/contracts.ts`, since that package already owns the concrete reply-route semantics.
-Let operator-config and hosted-execution alias the shared target-kind types/constants from that owner, while keeping their higher-level receipts and CLI schemas local.
-
-**Main refactor risk:** do not pull assistant policy, hosted callback rules, or CLI help text down into gateway-core just to centralize string unions.
-Only the route-kind vocabulary should move; layer-specific policy should stay where it is.
-
-#### 2. Collapse hosted execution side-effect modeling to the one effect that actually exists today
-
-**Seam:** `packages/hosted-execution/src/side-effects.ts` (`HOSTED_EXECUTION_SIDE_EFFECT_KINDS`, `HostedExecutionSideEffect`, `HostedExecutionSideEffectRecord`), `packages/assistant-runtime/src/hosted-runtime/callbacks.ts`, `apps/cloudflare/src/side-effect-journal.ts`
-
-The current side-effect model is a generic framework with kind/state parsing, merging, and identity helpers even though the only real product effect today is `assistant.delivery`.
-Both assistant-runtime and the Cloudflare journal are already effectively specialized to that one case.
-
-**Current cost:** the system pays generic-framework complexity on every read/write path even though there is no second effect family to compose.
-A future maintainer has to reason about kinds, prepared-vs-sent record unions, and generic journal identity rules when the product behavior is still “track assistant delivery confirmation.”
-
-**Simpler target:** rename and narrow the model to an assistant-delivery-specific record/journal surface now: `HostedAssistantDeliveryRecord`, `HostedAssistantDeliveryPreparedRecord`, `HostedAssistantDeliverySentRecord`, and a delivery journal store that keeps the same idempotent prepared/sent transitions.
-If a second effect really appears later, re-generalize from two concrete cases instead of carrying the abstraction in advance.
-
-**Main refactor risk:** do not entangle this cleanup with Cloudflare-specific storage paths or callback protocol logic.
-The simplification should specialize the shared data model, not move trust-boundary or deployment policy into the wrong package.
-
-#### 3. Normalize hosted webhook side-effect persistence around common retry fields plus kind-owned details
+#### 1. Normalize hosted webhook side-effect persistence around common retry fields plus kind-owned details
 
 **Seam:** `apps/web/prisma/schema.prisma` (`HostedWebhookReceiptSideEffect`), `apps/web/src/lib/hosted-onboarding/webhook-receipt-types.ts` (`HostedWebhookSideEffect`), `apps/web/src/lib/hosted-onboarding/webhook-receipt-codec.ts` (`serializeHostedWebhookReceiptSideEffect`, `readHostedWebhookReceiptSideEffect`), `apps/web/src/lib/hosted-onboarding/webhook-dispatch-payload.ts`
 
@@ -278,7 +283,7 @@ The effect owner is unclear because the table itself tries to own every variant 
 **Main refactor risk:** do not use this cleanup to reintroduce raw webhook event blobs or to hide fields that the retry/idempotency logic actually needs for indexed lookup.
 Preserve the privacy-minimized common fields, and only move the effect-specific remainder.
 
-#### 4. Return hosted-member lookup results from the slice that actually matched
+#### 2. Return hosted-member lookup results from the slice that actually matched
 
 **Seam:** `apps/web/src/lib/hosted-onboarding/hosted-member-identity-store.ts` (`findHostedMemberByPrivyUserId`, `findHostedMemberByPhoneLookupKey`, `findHostedMemberByPhoneNumber`, `findHostedMemberByWalletAddress`, `readHostedMemberIdentity`), `apps/web/src/lib/hosted-onboarding/hosted-member-billing-store.ts` (`findHostedMemberByStripeCustomerId`, `findHostedMemberByStripeSubscriptionId`, `readHostedMemberStripeBillingRef`), `apps/web/src/lib/hosted-onboarding/hosted-member-routing-store.ts` (`findHostedMemberByTelegramUserId`, `findHostedMemberByTelegramUserLookupKey`), `apps/web/src/lib/hosted-onboarding/member-identity-service.ts` (`findHostedMemberForPrivyIdentity`, `refreshHostedMemberForPhone`, `reconcileHostedPrivyIdentityOnMember`), `apps/web/src/lib/hosted-onboarding/billing-service.ts` (`ensureHostedStripeCustomer`)
 
@@ -296,7 +301,7 @@ That keeps slice ownership explicit without flattening the hosted member back in
 **Main refactor risk:** do not answer this by reintroducing one wide `HostedMemberAggregate` or by exposing raw encrypted columns/lookup-key internals outside the slice owners.
 The lookup result should stay nested and privacy-minimized: matched slice plus core state, not a second pre-cutover wide row.
 
-#### 5. Normalize hosted execution dispatch lifecycle around one cross-boundary outcome owner
+#### 3. Normalize hosted execution dispatch lifecycle around one cross-boundary outcome owner
 
 **Seam:** `packages/hosted-execution/src/contracts.ts` (`HostedExecutionEventDispatchState`, `HostedExecutionDispatchStateSnapshot`, `resolveHostedExecutionDispatchOutcomeState`), `apps/cloudflare/src/user-runner/runner-queue-store.ts` (`readEventState`), `apps/cloudflare/src/user-runner/types.ts` (`RunnerStateRecord`, `toUserStatus`), `apps/web/prisma/schema.prisma` (`ExecutionOutbox.status`), `apps/web/src/lib/hosted-execution/outbox.ts` (`resolveHostedExecutionDeliveryOutcome`, `isHostedExecutionOutboxPayloadSettled`)
 

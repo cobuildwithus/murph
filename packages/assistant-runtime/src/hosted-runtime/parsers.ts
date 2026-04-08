@@ -1,7 +1,7 @@
 import {
+  parseHostedAssistantDeliverySideEffects,
   parseHostedExecutionBundleRef,
   parseHostedExecutionRunnerRequest,
-  parseHostedExecutionSideEffects,
   type HostedExecutionRunnerResult,
 } from "@murphai/hosted-execution";
 
@@ -116,7 +116,7 @@ function parseHostedAssistantRuntimeResume(
         committedResult.result,
         "Hosted assistant runtime resume state.committedResult.result",
       ),
-      sideEffects: parseHostedExecutionSideEffects(committedResult.sideEffects),
+      sideEffects: parseHostedAssistantDeliverySideEffects(committedResult.sideEffects),
     },
   };
 }

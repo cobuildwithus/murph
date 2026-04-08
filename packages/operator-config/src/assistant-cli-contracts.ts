@@ -1,5 +1,11 @@
 import { z } from 'zod'
 import {
+  gatewayDeliveryTargetKindValues,
+  gatewayReplyRouteKindValues,
+  type GatewayDeliveryTargetKind,
+  type GatewayReplyRouteKind,
+} from '@murphai/gateway-core'
+import {
   isoTimestampSchema,
   pathSchema,
   timeZoneSchema,
@@ -25,15 +31,8 @@ export const assistantReasoningEffortValues = [
 ] as const
 
 export const assistantChatProviderValues = ['codex-cli', 'openai-compatible'] as const
-export const assistantChannelDeliveryTargetKindValues = [
-  'explicit',
-  'participant',
-  'thread',
-] as const
-export const assistantBindingDeliveryKindValues = [
-  'participant',
-  'thread',
-] as const
+export const assistantChannelDeliveryTargetKindValues = gatewayDeliveryTargetKindValues
+export const assistantBindingDeliveryKindValues = gatewayReplyRouteKindValues
 export const assistantTranscriptEntryKindValues = [
   'user',
   'assistant',
@@ -1304,10 +1303,8 @@ export type AssistantReasoningEffort =
   (typeof assistantReasoningEffortValues)[number]
 export type AssistantChatProvider =
   (typeof assistantChatProviderValues)[number]
-export type AssistantChannelDeliveryTargetKind =
-  (typeof assistantChannelDeliveryTargetKindValues)[number]
-export type AssistantBindingDeliveryKind =
-  (typeof assistantBindingDeliveryKindValues)[number]
+export type AssistantChannelDeliveryTargetKind = GatewayDeliveryTargetKind
+export type AssistantBindingDeliveryKind = GatewayReplyRouteKind
 export type AssistantTranscriptEntryKind =
   (typeof assistantTranscriptEntryKindValues)[number]
 export type AssistantTurnTrigger =

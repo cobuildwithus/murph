@@ -11,6 +11,9 @@
       "path": "../contracts/tsconfig.build.json"
     },
     {
+      "path": "../gateway-core"
+    },
+    {
       "path": "../device-syncd"
     },
     {

@@ -3,9 +3,9 @@ import {
   type GatewayProjectionSnapshot,
 } from "@murphai/gateway-core";
 import {
+  type HostedAssistantDeliverySideEffect,
   type HostedExecutionBundleRef,
-  parseHostedExecutionSideEffects,
-  type HostedExecutionSideEffect,
+  parseHostedAssistantDeliverySideEffects,
   type HostedExecutionRunnerResult,
 } from "@murphai/hosted-execution";
 import {
@@ -39,7 +39,7 @@ export interface HostedExecutionCommittedResult {
   finalizedAt: string | null;
   gatewayProjectionSnapshot: GatewayProjectionSnapshot | null;
   result: HostedExecutionRunnerResult["result"];
-  sideEffects: HostedExecutionSideEffect[];
+  sideEffects: HostedAssistantDeliverySideEffect[];
   userId: string;
 }
 
@@ -47,7 +47,7 @@ export interface HostedExecutionCommitPayload {
   bundle: HostedExecutionRunnerResult["bundle"];
   gatewayProjectionSnapshot?: GatewayProjectionSnapshot | null;
   result: HostedExecutionRunnerResult["result"];
-  sideEffects?: HostedExecutionSideEffect[];
+  sideEffects?: HostedAssistantDeliverySideEffect[];
 }
 
 export interface HostedExecutionFinalizePayload {
@@ -161,7 +161,7 @@ export async function persistHostedExecutionCommit(input: {
     finalizedAt: null,
     gatewayProjectionSnapshot: input.payload.gatewayProjectionSnapshot ?? null,
     result: input.payload.result,
-    sideEffects: parseHostedExecutionSideEffects(input.payload.sideEffects),
+    sideEffects: parseHostedAssistantDeliverySideEffects(input.payload.sideEffects),
     userId: input.userId,
   };
 
@@ -241,7 +241,7 @@ function normalizeHostedExecutionCommittedResult(
         : gatewayProjectionSnapshotSchema.parse(
             (value as { gatewayProjectionSnapshot: unknown }).gatewayProjectionSnapshot,
           ),
-    sideEffects: parseHostedExecutionSideEffects((value as { sideEffects?: unknown }).sideEffects),
+    sideEffects: parseHostedAssistantDeliverySideEffects((value as { sideEffects?: unknown }).sideEffects),
     userId: requireCommittedResultString(
       (value as { userId?: unknown }).userId,
       "Hosted execution committed result userId",
@@ -278,7 +278,7 @@ function assertEquivalentDuplicateCommit(
     );
   }
 
-  const expectedSideEffects = parseHostedExecutionSideEffects(input.payload.sideEffects);
+  const expectedSideEffects = parseHostedAssistantDeliverySideEffects(input.payload.sideEffects);
   if (!sameStructuredValue(existing.sideEffects, expectedSideEffects)) {
     throw new Error(
       `Hosted execution commit ${input.eventId} side effects do not match the existing durable commit.`,

@@ -532,6 +532,9 @@ importers:
       '@murphai/device-syncd':
         specifier: workspace:*
         version: link:../device-syncd
+      '@murphai/gateway-core':
+        specifier: workspace:*
+        version: link:../gateway-core
       '@murphai/importers':
         specifier: workspace:*
         version: link:../importers
@@ -620,6 +623,9 @@ importers:
       '@murphai/device-syncd':
         specifier: workspace:*
         version: link:../device-syncd
+      '@murphai/gateway-core':
+        specifier: workspace:*
+        version: link:../gateway-core
       '@murphai/messaging-ingress':
         specifier: workspace:*
         version: link:../messaging-ingress

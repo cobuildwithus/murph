@@ -64,6 +64,7 @@
   "dependencies": {
     "@murphai/core": "workspace:*",
     "@murphai/contracts": "workspace:*",
+    "@murphai/gateway-core": "workspace:*",
     "@murphai/device-syncd": "workspace:*",
     "@murphai/importers": "workspace:*",
     "@murphai/runtime-state": "workspace:*",

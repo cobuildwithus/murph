@@ -149,8 +149,22 @@ export function buildHostedExecutionRuntimePlatform(input: {
 
         assertHostedOk(response, `Hosted commit ${eventId}`);
       },
+      async deletePreparedAssistantDelivery(sideEffect) {
+        const url = createHostedAssistantDeliveryUrl(sideEffect);
+        const response = await fetchHostedResponse({
+          description: `Hosted side-effect delete ${sideEffect.effectId}`,
+          fetchImpl,
+          init: {
+            method: "DELETE",
+          },
+          timeoutMs,
+          url,
+        });
+
+        assertHostedOk(response, `Hosted side-effect delete ${sideEffect.effectId}`);
+      },
       async deletePreparedSideEffect(sideEffect) {
-        const url = createHostedSideEffectUrl(sideEffect);
+        const url = createHostedAssistantDeliveryUrl(sideEffect);
         const response = await fetchHostedResponse({
           description: `Hosted side-effect delete ${sideEffect.effectId}`,
           fetchImpl,
@@ -181,6 +195,19 @@ export function buildHostedExecutionRuntimePlatform(input: {
         assertHostedOk(response, `Hosted raw email read ${rawMessageKey}`);
         return new Uint8Array(await response.arrayBuffer());
       },
+      async readAssistantDeliveryRecord(sideEffect) {
+        const payload = await fetchHostedJson({
+          allowNotFound: false,
+          description: `Hosted side-effect read ${sideEffect.effectId}`,
+          fetchImpl,
+          method: "GET",
+          timeoutMs,
+          url: createHostedAssistantDeliveryUrl(sideEffect),
+        });
+
+        const record = readHostedRecordField(payload, "record");
+        return record === null ? null : parseHostedAssistantDeliveryRecord(record);
+      },
       async readSideEffect(sideEffect) {
         const payload = await fetchHostedJson({
           allowNotFound: false,
@@ -188,7 +215,7 @@ export function buildHostedExecutionRuntimePlatform(input: {
           fetchImpl,
           method: "GET",
           timeoutMs,
-          url: createHostedSideEffectUrl(sideEffect),
+          url: createHostedAssistantDeliveryUrl(sideEffect),
         });
 
         const record = readHostedRecordField(payload, "record");
@@ -210,6 +237,20 @@ export function buildHostedExecutionRuntimePlatform(input: {
 
         return target ? { target } : undefined;
       },
+      async writeAssistantDeliveryRecord(record) {
+        const payload = await fetchHostedJson({
+          body: record,
+          description: `Hosted side-effect write ${record.effectId}`,
+          fetchImpl,
+          method: "PUT",
+          timeoutMs,
+          url: createHostedAssistantDeliveryUrl(record),
+        });
+
+        return parseHostedAssistantDeliveryRecord(
+          requireRecordField(payload, "record"),
+        );
+      },
       async writeSideEffect(record) {
         const payload = await fetchHostedJson({
           body: record,
@@ -217,7 +258,7 @@ export function buildHostedExecutionRuntimePlatform(input: {
           fetchImpl,
           method: "PUT",
           timeoutMs,
-          url: createHostedSideEffectUrl(record),
+          url: createHostedAssistantDeliveryUrl(record),
         });
 
         return parseHostedAssistantDeliveryRecord(
@@ -269,7 +310,7 @@ function createCloudflareHostedRuntimeFetch(
   }) as typeof fetch;
 }
 
-function createHostedSideEffectUrl(input: {
+function createHostedAssistantDeliveryUrl(input: {
   effectId: string;
   fingerprint: string;
 }): URL {

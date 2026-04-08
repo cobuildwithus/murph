@@ -149,6 +149,7 @@
   },
   "dependencies": {
     "@murphai/contracts": "workspace:*",
+    "@murphai/gateway-core": "workspace:*",
     "@murphai/device-syncd": "workspace:*",
     "@murphai/messaging-ingress": "workspace:*",
     "@murphai/runtime-state": "workspace:*",

@@ -66,4 +66,68 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(request).toBeInstanceOf(URL);
     expect(String(request)).toBe("http://device-sync.worker/api/internal/device-sync/runtime/snapshot");
   });
+
+  it("supports the assistant-delivery-specific journal method names", async () => {
+    const record = {
+      delivery: {
+        channel: "email",
+        idempotencyKey: "idem_123",
+        messageLength: 42,
+        providerMessageId: null,
+        providerThreadId: null,
+        sentAt: "2026-04-08T00:00:00.000Z",
+        target: "assistant@example.com",
+        targetKind: "participant" as const,
+      },
+      effectId: "intent_123",
+      fingerprint: "dedupe_123",
+      intentId: "intent_123",
+      kind: "assistant.delivery" as const,
+      recordedAt: "2026-04-08T00:00:00.000Z",
+      state: "sent" as const,
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+
+      if (request.method === "DELETE") {
+        return new Response(null, { status: 200 });
+      }
+
+      return new Response(JSON.stringify({
+        ok: true,
+        record,
+      }), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      });
+    });
+    const platform = buildHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+    });
+
+    await platform.effectsPort.deletePreparedAssistantDelivery({
+      effectId: "intent_123",
+      fingerprint: "dedupe_123",
+    });
+    const readRecord = await platform.effectsPort.readAssistantDeliveryRecord({
+      effectId: "intent_123",
+      fingerprint: "dedupe_123",
+    });
+    const writtenRecord = await platform.effectsPort.writeAssistantDeliveryRecord(record);
+
+    expect(readRecord).toEqual(record);
+    expect(writtenRecord).toEqual(record);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+
+    const deleteRequest = fetchMock.mock.calls[0]?.[0] as URL;
+    const readRequest = fetchMock.mock.calls[1]?.[0] as URL;
+    const writeRequest = fetchMock.mock.calls[2]?.[0] as URL;
+
+    expect(String(deleteRequest)).toBe("http://results.worker/effects/intent_123?fingerprint=dedupe_123");
+    expect(String(readRequest)).toBe("http://results.worker/effects/intent_123?fingerprint=dedupe_123");
+    expect(String(writeRequest)).toBe("http://results.worker/effects/intent_123?fingerprint=dedupe_123");
+  });
 });
