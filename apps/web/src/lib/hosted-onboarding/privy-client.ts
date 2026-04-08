@@ -15,7 +15,6 @@ export type HostedPrivyFinalizationState = "idle" | "running" | "completed";
 export const HOSTED_PRIVY_COMPLETION_RETRY_DELAYS_MS = [0, 500] as const;
 
 interface HostedPrivyClientSessionStateInput {
-  refreshUser: () => Promise<{ linkedAccounts?: unknown } | null>;
   user: { linkedAccounts?: unknown } | null;
 }
 
@@ -26,7 +25,11 @@ interface HostedPrivyWalletProvisioningInput extends HostedPrivyClientSessionSta
 export async function ensureHostedPrivyPhoneReady(
   input: HostedPrivyWalletProvisioningInput,
 ): Promise<void> {
-  let sessionState = await readHostedPrivyClientSessionState(input);
+  const sessionState = readHostedPrivyClientSessionState(input);
+
+  if (!sessionState) {
+    return;
+  }
 
   if (!sessionState.phone) {
     throw new Error("This Privy session is missing a verified phone number.");
@@ -39,37 +42,27 @@ export async function ensureHostedPrivyPhoneReady(
   try {
     await input.createWallet();
   } catch {
-    sessionState = await readHostedPrivyClientSessionState(input);
-
-    if (sessionState.wallet) {
-      return;
-    }
-
     return;
   }
-
-  await readHostedPrivyClientSessionState(input);
 }
 
-export async function readHostedPrivyClientSessionState(
+export function readHostedPrivyClientSessionState(
   input: HostedPrivyClientSessionStateInput,
-): Promise<HostedPrivyLinkedAccountState> {
-  const currentState = resolveHostedPrivyLinkedAccountState(input.user);
-
-  if (currentState.phone && currentState.wallet) {
-    return currentState;
+): HostedPrivyLinkedAccountState | null {
+  if (!hasHostedPrivyLinkedAccountSnapshot(input.user)) {
+    return null;
   }
 
-  try {
-    return resolveHostedPrivyLinkedAccountState(await input.refreshUser());
-  } catch {
-    return currentState;
-  }
+  return resolveHostedPrivyLinkedAccountState(input.user);
 }
 
 export function resolveHostedPrivyClientSessionIssue(
-  sessionState: HostedPrivyLinkedAccountState,
+  sessionState: HostedPrivyLinkedAccountState | null,
 ): HostedPrivyClientSessionIssue | null {
+  if (!sessionState) {
+    return null;
+  }
+
   if (!sessionState.phone) {
     return "missing-phone";
   }
@@ -121,4 +114,15 @@ export function shouldShowHostedPrivyRestartState(input: {
     && !input.showAuthenticatedLoadingState
     && !canContinueHostedPrivyClientSession(input.issue)
   );
+}
+
+function hasHostedPrivyLinkedAccountSnapshot(
+  user: HostedPrivyClientSessionStateInput["user"],
+): user is NonNullable<HostedPrivyClientSessionStateInput["user"]> {
+  if (!user || typeof user !== "object") {
+    return false;
+  }
+
+  const candidate = user as { linkedAccounts?: unknown; linked_accounts?: unknown };
+  return Array.isArray(candidate.linkedAccounts) || Array.isArray(candidate.linked_accounts);
 }

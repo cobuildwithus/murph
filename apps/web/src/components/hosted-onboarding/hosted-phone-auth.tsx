@@ -24,7 +24,6 @@ import {
   shouldShowHostedPrivyManualResumeState,
   type HostedPrivyFinalizationState,
   type HostedPrivyClientPendingAction,
-  type HostedPrivyClientSessionIssue,
 } from "@/src/lib/hosted-onboarding/privy-client";
 import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
 
@@ -124,9 +123,7 @@ function HostedPhoneAuthInner({
   const { authenticated, logout, ready } = usePrivy();
   const { createWallet } = useCreateWallet();
   const { loginWithCode, sendCode } = useLoginWithSms();
-  const { refreshUser, user } = useUser();
-  const [authenticatedSessionIssue, setAuthenticatedSessionIssue] = useState<HostedPrivyClientSessionIssue | null>(null);
-  const [checkingAuthenticatedSession, setCheckingAuthenticatedSession] = useState(false);
+  const { user } = useUser();
   const [code, setCode] = useState("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [finalizationState, setFinalizationState] = useState<HostedPrivyFinalizationState>("idle");
@@ -147,9 +144,13 @@ function HostedPhoneAuthInner({
     () => normalizePhoneNumberForCountry(phoneNumber, selectedPhoneCountry.dialCode),
     [phoneNumber, selectedPhoneCountry.dialCode],
   );
+  const authenticatedSessionIssue = useMemo(
+    () => resolveHostedPrivyClientSessionIssue(readHostedPrivyClientSessionState({ user })),
+    [user],
+  );
   const flowDisabled = !ready || pendingAction !== null;
   const phoneEntrySendCodeDisabled = flowDisabled || !normalizedPhoneNumber;
-  const showAuthenticatedLoadingState = authenticated && (checkingAuthenticatedSession || finalizationState !== "idle");
+  const showAuthenticatedLoadingState = authenticated && finalizationState !== "idle";
   const showAuthenticatedManualResumeState = shouldShowHostedPrivyManualResumeState({
     authenticated,
     issue: authenticatedSessionIssue,
@@ -165,10 +166,7 @@ function HostedPhoneAuthInner({
     showAuthenticatedManualResumeState,
     showAuthenticatedRestartState,
   });
-  const authenticatedLoadingTitle =
-    checkingAuthenticatedSession
-      ? "Checking your setup..."
-      : "Finishing setup...";
+  const authenticatedLoadingTitle = "Finishing setup...";
   const authenticatedLoadingBody =
     "Keep this tab open. We are verifying your number, preparing your account, and moving you to the next step.";
 
@@ -178,37 +176,7 @@ function HostedPhoneAuthInner({
   }
 
   useEffect(() => {
-    let cancelled = false;
-
-    async function inspectAuthenticatedSession() {
-      if (!authenticated || !ready) {
-        setAuthenticatedSessionIssue(null);
-        setCheckingAuthenticatedSession(false);
-        return;
-      }
-
-      setCheckingAuthenticatedSession(true);
-
-      const sessionState = await readHostedPrivyClientSessionState({ refreshUser, user });
-      if (!cancelled) {
-        setAuthenticatedSessionIssue(resolveHostedPrivyClientSessionIssue(sessionState));
-      }
-      if (!cancelled) {
-        setCheckingAuthenticatedSession(false);
-      }
-    }
-
-    void inspectAuthenticatedSession();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [authenticated, ready, refreshUser, user]);
-
-  useEffect(() => {
     if (!authenticated) {
-      setAuthenticatedSessionIssue(null);
-      setCheckingAuthenticatedSession(false);
       updateFinalizationState("idle");
     }
   }, [authenticated]);
@@ -377,17 +345,7 @@ function HostedPhoneAuthInner({
     try {
       await runHostedPrivyFinalization("continue");
     } catch (error) {
-      const latestSessionIssue = await readLatestAuthenticatedSessionIssue({
-        authenticated,
-        ready,
-        refreshUser,
-        user,
-      });
-
-      if (latestSessionIssue !== null) {
-        setAuthenticatedSessionIssue(latestSessionIssue);
-      }
-
+      const latestSessionIssue = resolveHostedPrivyClientSessionIssue(readHostedPrivyClientSessionState({ user }));
       if (!canContinueHostedPrivyClientSession(latestSessionIssue)) {
         return;
       }
@@ -423,7 +381,6 @@ function HostedPhoneAuthInner({
         createWallet,
         inviteCode,
         onCompleted,
-        refreshUser,
         user,
       }),
       getFinalizationState: () => finalizationStateRef.current,
@@ -570,24 +527,6 @@ export function resolveHostedPhoneResendTarget(input: {
   return { kind: "draft-submit" };
 }
 
-async function readLatestAuthenticatedSessionIssue(input: {
-  authenticated: boolean;
-  ready: boolean;
-  refreshUser: () => Promise<{ linkedAccounts?: unknown } | null>;
-  user: { linkedAccounts?: unknown } | null;
-}): Promise<HostedPrivyClientSessionIssue | null> {
-  if (!input.authenticated || !input.ready) {
-    return null;
-  }
-
-  const sessionState = await readHostedPrivyClientSessionState({
-    refreshUser: input.refreshUser,
-    user: input.user,
-  });
-
-  return resolveHostedPrivyClientSessionIssue(sessionState);
-}
-
 function readSubmittedPhoneNumber(event: FormEvent<HTMLFormElement> | undefined): string | null {
   if (!event) {
     return null;
@@ -629,7 +568,6 @@ async function finalizeHostedPrivyVerification(input: {
   createWallet: () => Promise<unknown>;
   inviteCode?: string | null;
   onCompleted?: (payload: HostedPrivyCompletionPayload) => Promise<void> | void;
-  refreshUser: () => Promise<{ linkedAccounts?: unknown } | null>;
   user: { linkedAccounts?: unknown } | null;
 }) {
   await ensureHostedPrivyPhoneReady(input);
