@@ -7,6 +7,7 @@ import {
 
 import { buildAuditRecord, resolveAuditShardPath } from "../audit.ts";
 import { pathExists, readUtf8File, walkVaultFiles } from "../fs.ts";
+import { stageMarkdownDocumentWrite } from "../markdown-documents.ts";
 import { generateRecordId } from "../ids.ts";
 import { readJsonlRecords, toMonthlyShardRelativePath } from "../jsonl.ts";
 import { WriteBatch } from "../operations/write-batch.ts";
@@ -168,7 +169,17 @@ export async function stageCurrentProfileMaterialization(
   const updated = currentState.markdown !== markdown;
 
   if (updated) {
-    await batch.stageTextWrite(PROFILE_CURRENT_DOCUMENT_PATH, markdown, { overwrite: true });
+    await stageMarkdownDocumentWrite(
+      batch,
+      {
+        relativePath: PROFILE_CURRENT_DOCUMENT_PATH,
+        created: !currentState.exists,
+      },
+      markdown,
+      {
+        overwrite: true,
+      },
+    );
   }
 
   return {

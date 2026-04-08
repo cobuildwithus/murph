@@ -1,12 +1,16 @@
 import { VaultError } from "../errors.ts";
-import { parseFrontmatterDocument } from "../frontmatter.ts";
-import { stringifyFrontmatterDocument } from "../frontmatter.ts";
-import { readUtf8File, walkVaultFiles } from "../fs.ts";
-import { emitAuditRecord } from "../audit.ts";
-import { runCanonicalWrite } from "../operations/index.ts";
+import {
+  deleteCanonicalMarkdownDocument,
+  loadMarkdownDocuments,
+  resolveSlugMarkdownDocumentTarget,
+  writeCanonicalFrontmatterDocument,
+  writeCanonicalMarkdownDocument,
+  type CanonicalMarkdownDocumentAuditInput,
+  type SlugMarkdownDocumentTarget,
+} from "../markdown-documents.ts";
 import { resolveRecordByIdOrSlug } from "./id-or-slug.ts";
 
-import type { FrontmatterObject, DateInput } from "../types.ts";
+import type { FrontmatterObject } from "../types.ts";
 
 interface MarkdownRegistryLoadOptions<TRecord> {
   vaultRoot: string;
@@ -33,13 +37,7 @@ interface ExistingRegistrySelectionOptions<TRecord>
   conflictMessage: string;
 }
 
-interface MarkdownRegistryUpsertAuditInput {
-  action: Parameters<typeof emitAuditRecord>[0]["action"];
-  commandName: string;
-  summary: string;
-  targetIds?: string[];
-  occurredAt?: DateInput;
-}
+type MarkdownRegistryUpsertAuditInput = CanonicalMarkdownDocumentAuditInput;
 
 interface UpsertMarkdownRegistryDocumentInput {
   vaultRoot: string;
@@ -72,13 +70,7 @@ interface ResolveMarkdownRegistryUpsertTargetOptions<TRecord> {
   createRecordId: () => string;
 }
 
-export interface MarkdownRegistryUpsertTarget {
-  recordId: string;
-  slug: string;
-  relativePath: string;
-  previousRelativePath?: string;
-  created: boolean;
-}
+export type MarkdownRegistryUpsertTarget = SlugMarkdownDocumentTarget;
 
 interface WriteMarkdownRegistryRecordOptions<TRecord> {
   vaultRoot: string;
@@ -99,22 +91,14 @@ export async function loadMarkdownRegistryDocuments<TRecord>({
   invalidCode,
   invalidMessage,
 }: MarkdownRegistryLoadOptions<TRecord>): Promise<TRecord[]> {
-  const relativePaths = await walkVaultFiles(vaultRoot, directory, { extension: ".md" });
-  const records: TRecord[] = [];
-
-  for (const relativePath of relativePaths) {
-    const markdown = await readUtf8File(vaultRoot, relativePath);
-    const document = parseFrontmatterDocument(markdown);
-    const record = recordFromParts(document.attributes, relativePath, markdown);
-
-    if (!isExpectedRecord(record)) {
-      throw new VaultError(invalidCode, invalidMessage);
-    }
-
-    records.push(record);
-  }
-
-  return records;
+  return loadMarkdownDocuments({
+    vaultRoot,
+    directory,
+    recordFromParts,
+    isExpectedRecord,
+    invalidCode,
+    invalidMessage,
+  });
 }
 
 export function selectExistingRegistryRecord<TRecord>({
@@ -184,20 +168,18 @@ export function resolveMarkdownRegistryUpsertTarget<TRecord>({
   getRecordRelativePath,
   createRecordId,
 }: ResolveMarkdownRegistryUpsertTargetOptions<TRecord>): MarkdownRegistryUpsertTarget {
-  const slug = allowSlugUpdate
-    ? requestedSlug ?? (existingRecord ? getRecordSlug(existingRecord) : undefined) ?? defaultSlug
-    : (existingRecord ? getRecordSlug(existingRecord) : undefined) ?? requestedSlug ?? defaultSlug;
-  const relativePath = `${directory}/${slug}.md`;
-  return {
-    recordId: existingRecord ? getRecordId(existingRecord) : (recordId ?? createRecordId()),
-    slug,
-    relativePath,
-    previousRelativePath:
-      allowSlugUpdate && existingRecord && getRecordRelativePath(existingRecord) !== relativePath
-        ? getRecordRelativePath(existingRecord)
-        : undefined,
-    created: !existingRecord,
-  };
+  return resolveSlugMarkdownDocumentTarget({
+    existingRecord,
+    recordId,
+    requestedSlug,
+    defaultSlug,
+    allowSlugUpdate,
+    directory,
+    getRecordId,
+    getRecordSlug,
+    getRecordRelativePath,
+    createRecordId,
+  });
 }
 
 export async function upsertMarkdownRegistryDocument({
@@ -210,37 +192,24 @@ export async function upsertMarkdownRegistryDocument({
   created,
   audit,
 }: UpsertMarkdownRegistryDocumentInput): Promise<string> {
-  const stagedAudit = await runCanonicalWrite({
+  const result = await writeCanonicalMarkdownDocument({
     vaultRoot,
     operationType,
     summary,
-    occurredAt: audit.occurredAt,
-    mutate: async ({ batch }) => {
-      await batch.stageTextWrite(relativePath, markdown);
-      if (previousRelativePath && previousRelativePath !== relativePath) {
-        await batch.stageDelete(previousRelativePath);
-      }
-
-      const files = previousRelativePath ? [relativePath, previousRelativePath] : [relativePath];
-      const changes = [
-        { path: relativePath, op: created ? "create" as const : "update" as const },
-      ]
-
-      return emitAuditRecord({
-        vaultRoot,
-        batch,
-        action: audit.action,
-        commandName: audit.commandName,
-        summary: audit.summary,
-        occurredAt: audit.occurredAt,
-        files,
-        targetIds: audit.targetIds ?? [],
-        changes,
-      });
+    target: {
+      relativePath,
+      previousRelativePath,
+      created,
     },
+    markdown,
+    audit,
   });
 
-  return stagedAudit.relativePath;
+  if (!result.auditPath) {
+    throw new Error("Markdown registry upsert audit path was not produced.");
+  }
+
+  return result.auditPath;
 }
 
 export async function deleteMarkdownRegistryDocument({
@@ -251,16 +220,11 @@ export async function deleteMarkdownRegistryDocument({
 }: DeleteMarkdownRegistryDocumentInput): Promise<{
   relativePath: string;
 }> {
-  return runCanonicalWrite({
+  return deleteCanonicalMarkdownDocument({
     vaultRoot,
     operationType,
     summary,
-    mutate: async ({ batch }) => {
-      await batch.stageDelete(relativePath);
-      return {
-        relativePath,
-      };
-    },
+    relativePath,
   });
 }
 
@@ -283,20 +247,23 @@ export async function writeMarkdownRegistryRecord<TRecord>({
   auditPath: string;
   record: TRecord;
 }> {
-  const markdown = stringifyFrontmatterDocument({ attributes, body });
-  const auditPath = await upsertMarkdownRegistryDocument({
+  const result = await writeCanonicalFrontmatterDocument({
     vaultRoot,
+    target,
+    attributes,
+    body,
+    recordFromParts,
     operationType,
     summary,
-    relativePath: target.relativePath,
-    previousRelativePath: target.previousRelativePath,
-    markdown,
-    created: target.created,
     audit,
   });
 
+  if (!result.auditPath) {
+    throw new Error("Markdown registry write audit path was not produced.");
+  }
+
   return {
-    auditPath,
-    record: recordFromParts(attributes, target.relativePath, markdown),
+    auditPath: result.auditPath,
+    record: result.record,
   };
 }

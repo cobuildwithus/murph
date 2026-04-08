@@ -62,6 +62,7 @@ repo/
   - `bank/memory.md` as one curated canonical memory document that stays small enough to read whole
   - `bank/automations/*.md`
   - `bank/experiments/<slug>.md`
+  - all canonical markdown writes resolve through one shared `packages/core` document seam with three target shapes only: singleton, slugged, and dated
 - Append-only JSONL ledgers:
   - `ledger/inbox-captures/*.jsonl`
   - `ledger/events/*.jsonl`

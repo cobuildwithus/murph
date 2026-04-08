@@ -6,6 +6,7 @@ import {
 
 import { VAULT_LAYOUT } from "../constants.ts";
 import { stringifyFrontmatterDocument } from "../frontmatter.ts";
+import { stageMarkdownDocumentWrite } from "../markdown-documents.ts";
 import { loadVault } from "../vault.ts";
 
 import {
@@ -101,9 +102,17 @@ export async function updateVaultSummary(
           overwrite: true,
         },
       );
-      await batch.stageTextWrite(VAULT_LAYOUT.coreDocument, nextCoreMarkdown, {
-        overwrite: true,
-      });
+      await stageMarkdownDocumentWrite(
+        batch,
+        {
+          relativePath: VAULT_LAYOUT.coreDocument,
+          created: false,
+        },
+        nextCoreMarkdown,
+        {
+          overwrite: true,
+        },
+      );
 
       return {
         metadataFile: VAULT_LAYOUT.metadata,

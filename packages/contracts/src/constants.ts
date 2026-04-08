@@ -163,6 +163,7 @@ export const VARIANT_SIGNIFICANCES = Object.freeze(
 
 export const AUDIT_ACTIONS = Object.freeze([
   "allergy_upsert",
+  "automation_upsert",
   "condition_upsert",
   "family_upsert",
   "genetics_upsert",
