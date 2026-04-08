@@ -53,6 +53,12 @@ const cliVitestRuntimeAliases = createVitestWorkspaceRuntimeAliases(
 export const cliVitestCoverage = createMurphVitestCoverage({
   customProviderModule: resolveMurphVitestCoverageProviderModule(packageDir),
   include: [path.resolve(packageDir, "src/**/*.ts")],
+  exclude: [
+    "src/bin.ts",
+    "src/incur.generated.ts",
+    "src/index.ts",
+    "src/runner-vault-cli-bin.ts",
+  ],
 });
 
 type CliVitestProjectSpec = {
@@ -112,6 +118,7 @@ const cliVitestProjectSeeds: readonly CliVitestProjectSeed[] = [
     ],
   },
   {
+    fileParallelism: false,
     name: "cli-schemas-smoke",
     includeRemaining: true,
     patterns: [
