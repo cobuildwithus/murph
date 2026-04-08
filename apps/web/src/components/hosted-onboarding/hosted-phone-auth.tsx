@@ -6,10 +6,13 @@ import {
   usePrivy,
   useUser,
 } from "@privy-io/react-auth";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { normalizePhoneNumberForCountry } from "@/src/lib/hosted-onboarding/phone";
+import {
+  maskPhoneNumber,
+  normalizePhoneNumberForCountry,
+} from "@/src/lib/hosted-onboarding/phone";
 import {
   canContinueHostedPrivyClientSession,
   describeHostedPrivyClientSessionIssue,
@@ -74,6 +77,21 @@ interface PendingInvitePhoneCodeMutation {
   sendAttemptId: string;
 }
 
+export interface HostedPhoneVerificationAttempt {
+  maskedPhoneNumber: string;
+  phoneNumber: string;
+}
+
+interface HostedResolvedPhoneSubmission {
+  draftPhoneNumber: string;
+  normalizedPhoneNumber: string | null;
+}
+
+type HostedPhoneResendTarget =
+  | { kind: "active-attempt"; phoneNumber: string }
+  | { kind: "draft-submit" }
+  | { kind: "invite-shortcut" };
+
 const HOSTED_PHONE_COUNTRY_OPTIONS: HostedPhoneCountryOption[] = [
   { code: "US", dialCode: "+1", label: "United States", placeholder: "(415) 555-2671" },
   { code: "CA", dialCode: "+1", label: "Canada", placeholder: "(416) 555-0123" },
@@ -116,7 +134,7 @@ function HostedPhoneAuthInner({
   const [pendingAction, setPendingAction] = useState<HostedPrivyClientPendingAction>(null);
   const [phoneCountryCode, setPhoneCountryCode] = useState<string>(DEFAULT_HOSTED_PHONE_COUNTRY_CODE);
   const [phoneNumber, setPhoneNumber] = useState("");
-  const [step, setStep] = useState<"phone" | "code">("phone");
+  const [phoneVerificationAttempt, setPhoneVerificationAttempt] = useState<HostedPhoneVerificationAttempt | null>(null);
   const finalizationStateRef = useRef<HostedPrivyFinalizationState>("idle");
 
   const selectedPhoneCountry = useMemo(
@@ -129,6 +147,8 @@ function HostedPhoneAuthInner({
     () => normalizePhoneNumberForCountry(phoneNumber, selectedPhoneCountry.dialCode),
     [phoneNumber, selectedPhoneCountry.dialCode],
   );
+  const flowDisabled = !ready || pendingAction !== null;
+  const phoneEntrySendCodeDisabled = flowDisabled || !normalizedPhoneNumber;
   const showAuthenticatedLoadingState = authenticated && (checkingAuthenticatedSession || finalizationState !== "idle");
   const showAuthenticatedManualResumeState = shouldShowHostedPrivyManualResumeState({
     authenticated,
@@ -201,10 +221,21 @@ function HostedPhoneAuthInner({
     void flushPendingInvitePhoneCodeMutation(inviteCode);
   }, [inviteCode, mode]);
 
-  async function handleSendCode() {
+  async function handleSendCode(event?: FormEvent<HTMLFormElement>) {
+    event?.preventDefault();
     setErrorMessage(null);
 
-    if (!normalizedPhoneNumber) {
+    const submission = resolveHostedPhoneSubmission({
+      countryDialCode: selectedPhoneCountry.dialCode,
+      draftPhoneNumber: phoneNumber,
+      submittedPhoneNumber: readSubmittedPhoneNumber(event),
+    });
+
+    if (submission.draftPhoneNumber !== phoneNumber) {
+      setPhoneNumber(submission.draftPhoneNumber);
+    }
+
+    if (!submission.normalizedPhoneNumber) {
       setErrorMessage(`Enter a valid phone number for ${selectedPhoneCountry.label}.`);
       return;
     }
@@ -212,7 +243,7 @@ function HostedPhoneAuthInner({
     setPendingAction("send-code");
 
     try {
-      await sendVerificationCode(normalizedPhoneNumber);
+      await sendVerificationCode(submission.normalizedPhoneNumber);
     } catch (error) {
       setErrorMessage(toErrorMessage(error, "We could not send a verification code."));
     } finally {
@@ -265,8 +296,8 @@ function HostedPhoneAuthInner({
         && error.code === "SIGNUP_PHONE_UNAVAILABLE"
       ) {
         setCode("");
+        setPhoneVerificationAttempt(null);
         setManualEntryVisible(true);
-        setStep("phone");
         setErrorMessage("Enter the number that messaged Murph to continue.");
         return;
       }
@@ -279,12 +310,34 @@ function HostedPhoneAuthInner({
 
   async function sendVerificationCode(nextPhoneNumber: string) {
     await sendCode({ phoneNumber: nextPhoneNumber });
-    setStep("code");
+    setCode("");
+    setPhoneVerificationAttempt(createHostedPhoneVerificationAttempt(nextPhoneNumber));
   }
 
   async function handleResendCode() {
-    if (mode === "invite" && !manualEntryVisible && inviteCode) {
+    const resendTarget = resolveHostedPhoneResendTarget({
+      inviteCode,
+      manualEntryVisible,
+      mode,
+      phoneVerificationAttempt,
+    });
+
+    if (resendTarget.kind === "invite-shortcut") {
       await handleInviteSendCode();
+      return;
+    }
+
+    if (resendTarget.kind === "active-attempt") {
+      setErrorMessage(null);
+      setPendingAction("send-code");
+
+      try {
+        await sendVerificationCode(resendTarget.phoneNumber);
+      } catch (error) {
+        setErrorMessage(toErrorMessage(error, "We could not send a verification code."));
+      } finally {
+        setPendingAction(null);
+      }
       return;
     }
 
@@ -293,6 +346,11 @@ function HostedPhoneAuthInner({
 
   async function handleVerifyCode() {
     setErrorMessage(null);
+
+    if (!phoneVerificationAttempt) {
+      setErrorMessage("Request a fresh verification code before entering one here.");
+      return;
+    }
 
     if (!code.trim()) {
       setErrorMessage("Enter the verification code we texted you.");
@@ -347,10 +405,10 @@ function HostedPhoneAuthInner({
       await logout();
       await onSignOut?.();
       setCode("");
+      setPhoneVerificationAttempt(null);
       setManualEntryVisible(mode !== "invite");
       setPhoneCountryCode(DEFAULT_HOSTED_PHONE_COUNTRY_CODE);
       setPhoneNumber("");
-      setStep("phone");
     } catch (error) {
       setErrorMessage(toErrorMessage(error, "We could not sign you out cleanly."));
     } finally {
@@ -390,7 +448,8 @@ function HostedPhoneAuthInner({
             describeHostedPrivyClientSessionIssue(authenticatedSessionIssue)
             ?? "Sign out and request a fresh code to continue."
           }
-          disabled={!ready || pendingAction !== null}
+          disabled={flowDisabled}
+          mode={mode}
           pendingAction={pendingAction}
           title={authenticatedLoadingTitle}
           view={authenticatedView}
@@ -399,46 +458,50 @@ function HostedPhoneAuthInner({
         />
       ) : mode === "invite" ? (
         <HostedInvitePhoneAuthFlow
+          activeAttempt={phoneVerificationAttempt}
           code={code}
-          disabled={!ready || pendingAction !== null}
+          disabled={flowDisabled}
           manualEntryVisible={manualEntryVisible}
           mode={mode}
           pendingAction={pendingAction}
           phoneCountryOptions={HOSTED_PHONE_COUNTRY_OPTIONS}
           phoneNumber={phoneNumber}
+          sendCodeDisabled={phoneEntrySendCodeDisabled}
           selectedPhoneCountry={selectedPhoneCountry}
-          step={step}
           onCodeChange={setCode}
           onPhoneCountryChange={setPhoneCountryCode}
           onPhoneNumberChange={setPhoneNumber}
           onResendCode={handleResendCode}
           onSendCode={handleInviteSendCode}
+          onSubmitPhoneEntry={handleSendCode}
           onUseDifferentNumber={() => {
             setErrorMessage(null);
             setCode("");
+            setPhoneVerificationAttempt(null);
             setManualEntryVisible(true);
-            setStep("phone");
           }}
           onVerifyCode={handleVerifyCode}
         />
       ) : (
         <HostedPublicPhoneAuthFlow
+          activeAttempt={phoneVerificationAttempt}
           code={code}
-          disabled={!ready || pendingAction !== null}
+          disabled={flowDisabled}
           mode={mode}
           pendingAction={pendingAction}
           phoneCountryOptions={HOSTED_PHONE_COUNTRY_OPTIONS}
           phoneNumber={phoneNumber}
+          sendCodeDisabled={phoneEntrySendCodeDisabled}
           selectedPhoneCountry={selectedPhoneCountry}
-          step={step}
           onCodeChange={setCode}
           onPhoneCountryChange={setPhoneCountryCode}
           onPhoneNumberChange={setPhoneNumber}
           onResendCode={handleResendCode}
-          onSendCode={handleSendCode}
+          onSubmitPhoneEntry={handleSendCode}
           onUseDifferentNumber={() => {
+            setErrorMessage(null);
             setCode("");
-            setStep("phone");
+            setPhoneVerificationAttempt(null);
           }}
           onVerifyCode={handleVerifyCode}
         />
@@ -467,6 +530,46 @@ export function resolveHostedAuthenticatedPhoneAuthView(input: {
   return null;
 }
 
+export function createHostedPhoneVerificationAttempt(phoneNumber: string): HostedPhoneVerificationAttempt {
+  return {
+    maskedPhoneNumber: maskPhoneNumber(phoneNumber),
+    phoneNumber,
+  };
+}
+
+export function resolveHostedPhoneSubmission(input: {
+  countryDialCode: string;
+  draftPhoneNumber: string;
+  submittedPhoneNumber: string | null;
+}): HostedResolvedPhoneSubmission {
+  const draftPhoneNumber = input.submittedPhoneNumber ?? input.draftPhoneNumber;
+
+  return {
+    draftPhoneNumber,
+    normalizedPhoneNumber: normalizePhoneNumberForCountry(draftPhoneNumber, input.countryDialCode),
+  };
+}
+
+export function resolveHostedPhoneResendTarget(input: {
+  inviteCode?: string | null;
+  manualEntryVisible: boolean;
+  mode: HostedPhoneAuthProps["mode"];
+  phoneVerificationAttempt: HostedPhoneVerificationAttempt | null;
+}): HostedPhoneResendTarget {
+  if (input.mode === "invite" && !input.manualEntryVisible && input.inviteCode) {
+    return { kind: "invite-shortcut" };
+  }
+
+  if (input.phoneVerificationAttempt) {
+    return {
+      kind: "active-attempt",
+      phoneNumber: input.phoneVerificationAttempt.phoneNumber,
+    };
+  }
+
+  return { kind: "draft-submit" };
+}
+
 async function readLatestAuthenticatedSessionIssue(input: {
   authenticated: boolean;
   ready: boolean;
@@ -483,6 +586,16 @@ async function readLatestAuthenticatedSessionIssue(input: {
   });
 
   return resolveHostedPrivyClientSessionIssue(sessionState);
+}
+
+function readSubmittedPhoneNumber(event: FormEvent<HTMLFormElement> | undefined): string | null {
+  if (!event) {
+    return null;
+  }
+
+  const formData = new FormData(event.currentTarget);
+  const value = formData.get("phone-number");
+  return typeof value === "string" ? value : null;
 }
 
 export async function runHostedPrivyFinalizationAttempt({

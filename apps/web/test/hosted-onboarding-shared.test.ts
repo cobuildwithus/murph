@@ -17,8 +17,14 @@ describe("hosted onboarding shared helpers", () => {
 
   it("normalizes local numbers against a selected country code", () => {
     expect(normalizePhoneNumberForCountry("(415) 555-2671", "+1")).toBe("+14155552671");
+    expect(normalizePhoneNumberForCountry("+1 (415) 555-2671", "+1")).toBe("+14155552671");
     expect(normalizePhoneNumberForCountry("0400 111 222", "+61")).toBe("+61400111222");
     expect(normalizePhoneNumberForCountry("+44 7700 900123", "+1")).toBe("+447700900123");
+  });
+
+  it("rejects incomplete +1 numbers instead of silently treating them as valid", () => {
+    expect(normalizePhoneNumberForCountry("404409252", "+1")).toBeNull();
+    expect(normalizePhoneNumberForCountry("+1404409252", "+1")).toBeNull();
   });
 
   it("masks phone numbers for invite copy", () => {
