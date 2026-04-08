@@ -112,9 +112,7 @@ const SHA256_HEX_PATTERN = "^[a-f0-9]{64}$";
 const SLUG_PATTERN = "^[a-z0-9]+(?:-[a-z0-9]+)*$";
 const DAILY_TIME_PATTERN = "^(?:[01]\\d|2[0-3]):[0-5]\\d$";
 const UNIT_PATTERN = "^[A-Za-z0-9._/%-]+$";
-const LEGACY_WORKOUT_IMPORT_ID_PATTERN = "^wkimp_[0-9A-HJKMNP-TV-Z]{26}$";
 const GENERIC_CONTRACT_ID_REGEX = new RegExp(GENERIC_CONTRACT_ID_PATTERN);
-const LEGACY_WORKOUT_IMPORT_ID_REGEX = new RegExp(LEGACY_WORKOUT_IMPORT_ID_PATTERN);
 export const FAMILY_MEMBER_LIMITS = Object.freeze({
   title: 160,
   relationship: 120,
@@ -1052,12 +1050,11 @@ export const rawAssetOwnerSchema = z
   .superRefine((owner, context) => {
     const requiresPartition = RAW_ASSET_OWNER_KINDS_REQUIRING_PARTITION.has(owner.kind);
     const hasGenericId = GENERIC_CONTRACT_ID_REGEX.test(owner.id);
-    const hasLegacyWorkoutImportId = LEGACY_WORKOUT_IMPORT_ID_REGEX.test(owner.id);
 
-    if (!hasGenericId && !(owner.kind === "workout_batch" && hasLegacyWorkoutImportId)) {
+    if (!hasGenericId) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
-        message: `Raw asset owner id must match ${GENERIC_CONTRACT_ID_PATTERN}${owner.kind === "workout_batch" ? ` or ${LEGACY_WORKOUT_IMPORT_ID_PATTERN}` : ""}.`,
+        message: `Raw asset owner id must match ${GENERIC_CONTRACT_ID_PATTERN}.`,
         path: ["id"],
       });
     }
@@ -1083,8 +1080,8 @@ export const rawImportManifestSchema = z
   .object({
     schemaVersion: z.literal(CONTRACT_SCHEMA_VERSION.rawImportManifest),
     importId: z.string().refine(
-      (value) => GENERIC_CONTRACT_ID_REGEX.test(value) || LEGACY_WORKOUT_IMPORT_ID_REGEX.test(value),
-      `Invalid raw import id. Expected ${GENERIC_CONTRACT_ID_PATTERN} or ${LEGACY_WORKOUT_IMPORT_ID_PATTERN}.`,
+      (value) => GENERIC_CONTRACT_ID_REGEX.test(value),
+      `Invalid raw import id. Expected ${GENERIC_CONTRACT_ID_PATTERN}.`,
     ),
     importKind: z.enum(RAW_IMPORT_KINDS),
     importedAt: isoDateTimeString(),

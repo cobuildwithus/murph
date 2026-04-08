@@ -80,19 +80,6 @@ function createImessageRuntimeUnavailableError(
   )
 }
 
-function isInboxImessageRuntimeModule(
-  value: unknown,
-): value is InboxImessageRuntimeModule {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    'createImessageConnector' in value &&
-    typeof value.createImessageConnector === 'function' &&
-    'loadImessageKitDriver' in value &&
-    typeof value.loadImessageKitDriver === 'function'
-  )
-}
-
 export { IMESSAGE_MESSAGES_DB_RELATIVE_PATH }
 
 export function createInboxAppEnvironment(
@@ -131,13 +118,6 @@ export function createInboxAppEnvironment(
 
       if (dependencies.loadInboxImessageModule) {
         return dependencies.loadInboxImessageModule()
-      }
-
-      if (dependencies.loadInboxModule) {
-        const legacyInboxModule = await loadInbox()
-        if (isInboxImessageRuntimeModule(legacyInboxModule)) {
-          return legacyInboxModule
-        }
       }
 
       return loadRuntimeModule<InboxImessageRuntimeModule>('@murphai/inboxd-imessage')

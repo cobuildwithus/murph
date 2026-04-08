@@ -120,7 +120,7 @@ export type {
 } from "./operations/index.ts";
 export {
   buildRawImportManifest,
-  parseRawImportManifestWithLegacySupport,
+  parseRawImportManifest,
   resolveRawManifestPath,
 } from "./operations/raw-manifests.ts";
 export {
