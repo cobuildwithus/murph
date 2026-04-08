@@ -18,7 +18,6 @@ import { cn } from "@/lib/utils";
 import { HostedUseDifferentNumberButton } from "./hosted-phone-auth-use-different-number-button";
 import type {
   HostedPhoneAuthIntent,
-  HostedPhoneAuthMode,
   HostedPhoneAuthPendingAction,
   HostedPhoneCountryOption,
 } from "./hosted-phone-auth-types";
@@ -64,7 +63,8 @@ export function HostedInviteShortcutStep({
 
 export function HostedPhoneEntryStep({
   intent,
-  mode,
+  phoneFieldLabel,
+  phoneFieldDescription,
   pendingAction,
   phoneCountryOptions,
   phoneNumber,
@@ -75,7 +75,8 @@ export function HostedPhoneEntryStep({
   onSubmitPhoneEntry,
 }: {
   intent: HostedPhoneAuthIntent;
-  mode: HostedPhoneAuthMode;
+  phoneFieldLabel?: string | null;
+  phoneFieldDescription?: string | null;
   pendingAction: HostedPhoneAuthPendingAction;
   phoneCountryOptions: HostedPhoneCountryOption[];
   phoneNumber: string;
@@ -91,11 +92,7 @@ export function HostedPhoneEntryStep({
     <form className="space-y-3" onSubmit={onSubmitPhoneEntry}>
       <div className="space-y-3">
         <Label htmlFor={phoneInputId}>
-          {mode === "invite"
-            ? "Phone number"
-            : intent === "signin"
-              ? "Phone number"
-              : "Your phone number"}
+          {phoneFieldLabel ?? (intent === "signin" ? "Phone number" : "Your phone number")}
         </Label>
         <div className="flex flex-col gap-3 sm:flex-row">
           <Combobox
@@ -142,9 +139,9 @@ export function HostedPhoneEntryStep({
             className="px-4 text-base sm:flex-1 md:text-sm"
           />
         </div>
-        {mode === "invite" ? (
+        {phoneFieldDescription ? (
           <p className="text-sm text-stone-500">
-            Enter the number that messaged Murph.
+            {phoneFieldDescription}
           </p>
         ) : null}
       </div>

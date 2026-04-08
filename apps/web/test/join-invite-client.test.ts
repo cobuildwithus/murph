@@ -14,14 +14,14 @@ vi.mock("@privy-io/react-auth", () => ({
   usePrivy: mocks.usePrivy,
 }));
 
-vi.mock("@/src/components/hosted-onboarding/hosted-phone-auth", () => ({
-  HostedPhoneAuth(input: { mode: string }) {
+vi.mock("@/src/components/hosted-onboarding/hosted-invite-phone-auth", () => ({
+  HostedInvitePhoneAuth() {
     return createElement(
       "div",
       {
-        "data-hosted-phone-auth": input.mode,
+        "data-hosted-invite-phone-auth": "true",
       },
-      "Hosted phone auth",
+      "Hosted invite phone auth",
     );
   },
 }));
@@ -70,7 +70,7 @@ test("verify-stage invite copy stays neutral and does not expose the masked phon
   assert.doesNotMatch(markup, /What happens next/);
   assert.doesNotMatch(markup, /Invite for/);
   assert.doesNotMatch(markup, /\+1 415 555 2671/);
-  assert.match(markup, /data-hosted-phone-auth="invite"/);
+  assert.match(markup, /data-hosted-invite-phone-auth="true"/);
 });
 
 test("verify-stage invite waits for Privy readiness before showing phone auth", () => {
@@ -96,7 +96,7 @@ test("verify-stage invite waits for Privy readiness before showing phone auth", 
 
   assert.match(markup, /Checking your signup state/);
   assert.match(markup, /One moment while we pick up your verified phone session\./);
-  assert.doesNotMatch(markup, /data-hosted-phone-auth=/);
+  assert.doesNotMatch(markup, /data-hosted-invite-phone-auth=/);
 });
 
 test("verify-stage invite waits for the auth-backed status refresh when Privy is already authenticated", () => {
@@ -121,7 +121,7 @@ test("verify-stage invite waits for the auth-backed status refresh when Privy is
   );
 
   assert.match(markup, /Checking your signup state/);
-  assert.doesNotMatch(markup, /data-hosted-phone-auth=/);
+  assert.doesNotMatch(markup, /data-hosted-invite-phone-auth=/);
 });
 
 test("active invite state links to hosted settings with client navigation markup", () => {

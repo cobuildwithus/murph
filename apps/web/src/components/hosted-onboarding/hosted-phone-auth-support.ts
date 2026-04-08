@@ -18,7 +18,6 @@ import {
 } from "./client-api";
 import type {
   HostedPhoneAuthIntent,
-  HostedPhoneAuthMode,
   HostedPhoneVerificationAttempt,
   HostedResolvedPhoneSubmission,
 } from "./hosted-phone-auth-types";
@@ -39,8 +38,7 @@ interface PendingInvitePhoneCodeMutation {
 
 type HostedPhoneResendTarget =
   | { kind: "active-attempt"; phoneNumber: string }
-  | { kind: "draft-submit" }
-  | { kind: "invite-shortcut" };
+  | { kind: "draft-submit" };
 
 const HOSTED_INVITE_SEND_CONFIRM_RETRY_DELAYS_MS = [0, 250, 1_000] as const;
 const HOSTED_INVITE_PHONE_CODE_MUTATION_STORAGE_KEY = "murph.hosted-onboarding.invite-phone-code-mutation";
@@ -74,15 +72,8 @@ export function isHostedPhoneVerificationCodeComplete(value: string): boolean {
 }
 
 export function resolveHostedPhoneResendTarget(input: {
-  inviteCode?: string | null;
-  manualEntryVisible: boolean;
-  mode: HostedPhoneAuthMode;
   phoneVerificationAttempt: HostedPhoneVerificationAttempt | null;
 }): HostedPhoneResendTarget {
-  if (input.mode === "invite" && !input.manualEntryVisible && input.inviteCode) {
-    return { kind: "invite-shortcut" };
-  }
-
   if (input.phoneVerificationAttempt) {
     return {
       kind: "active-attempt",

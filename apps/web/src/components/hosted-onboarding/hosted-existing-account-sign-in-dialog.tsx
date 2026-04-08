@@ -38,7 +38,6 @@ export function HostedExistingAccountSignInDialog() {
           {open ? (
             <HostedPhoneAuth
               intent="signin"
-              mode="public"
             />
           ) : null}
         </DialogContent>
