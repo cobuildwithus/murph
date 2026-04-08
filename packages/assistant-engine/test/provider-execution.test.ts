@@ -579,6 +579,56 @@ describe('openAiCompatibleProviderDefinition.executeTurn', () => {
       timeout: 600000,
     })
   })
+
+  it('routes Vercel AI Gateway zero-data-retention through gateway provider options', async () => {
+    providerMocks.generateText.mockResolvedValue({
+      text: 'Gateway answer',
+      response: {
+        id: 'gateway-resp-1',
+        modelId: 'openai/gpt-5.4',
+      },
+      usage: {
+        completion_tokens: 4,
+        prompt_tokens: 6,
+      },
+    })
+
+    await openAiCompatibleProviderDefinition.executeTurn({
+      providerConfig: normalizeAssistantProviderConfig({
+        provider: 'openai-compatible',
+        apiKeyEnv: 'VERCEL_AI_API_KEY',
+        baseUrl: 'https://ai-gateway.vercel.sh/v1',
+        model: 'openai/gpt-5.4',
+        providerName: 'vercel-ai-gateway',
+        reasoningEffort: 'low',
+        zeroDataRetention: true,
+      }),
+      prompt: 'Use the gateway',
+      workingDirectory: WORKING_DIRECTORY,
+    })
+
+    expect(providerMocks.generateText).toHaveBeenCalledWith({
+      abortSignal: undefined,
+      maxRetries: 2,
+      messages: [
+        {
+          content: 'Use the gateway',
+          role: 'user',
+        },
+      ],
+      model: {
+        provider: 'mock-language-model',
+      },
+      providerOptions: {
+        gateway: {
+          reasoningEffort: 'low',
+          zeroDataRetention: true,
+        },
+      },
+      system: undefined,
+      timeout: 600000,
+    })
+  })
 })
 
 describe('codexCliProviderDefinition', () => {

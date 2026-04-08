@@ -38,6 +38,7 @@ export interface CreateAssistantSessionInput extends AssistantSessionLocator {
   providerName?: string | null
   reasoningEffort?: string | null
   sandbox?: AssistantSandbox | null
+  zeroDataRetention?: boolean | null
   target?: AssistantModelTarget | null
   vault: string
 }

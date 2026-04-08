@@ -52,6 +52,25 @@ export function isAssistantOpenAIBaseUrl(
   }
 }
 
+export function isAssistantVercelAIGatewayBaseUrl(
+  value: string | null | undefined,
+): boolean {
+  const normalized = normalizeNullableString(value)
+  if (!normalized) {
+    return false
+  }
+
+  try {
+    const parsed = new URL(normalized)
+    return (
+      parsed.protocol === 'https:' &&
+      parsed.hostname.toLowerCase() === 'ai-gateway.vercel.sh'
+    )
+  } catch {
+    return false
+  }
+}
+
 export function normalizeAssistantProviderOptionKey(
   value: string | null | undefined,
 ): string {

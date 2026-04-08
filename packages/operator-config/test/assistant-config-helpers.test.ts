@@ -27,6 +27,7 @@ import {
   serializeAssistantProviderSessionOptions,
   shouldUseAssistantOpenAIResponsesApi,
   supportsAssistantReasoningEffort,
+  supportsAssistantZeroDataRetention,
 } from '../src/assistant/provider-config.ts'
 import {
   isSensitiveAssistantHeaderName,
@@ -129,6 +130,7 @@ test('assistant provider config helpers infer, merge, compact, and serialize by 
     providerName: 'OpenAI',
     reasoningEffort: 'high',
     sandbox: null,
+    zeroDataRetention: null,
   })
   assert.deepEqual(serializeAssistantProviderSessionOptions(mergedOpenAi), {
     apiKeyEnv: 'OPENAI_API_KEY',
@@ -160,9 +162,11 @@ test('assistant provider config helpers infer, merge, compact, and serialize by 
     providerName: 'OpenAI',
     reasoningEffort: 'high',
     sandbox: null,
+    zeroDataRetention: null,
   })
   assert.equal(shouldUseAssistantOpenAIResponsesApi(mergedOpenAi), true)
   assert.equal(supportsAssistantReasoningEffort(mergedOpenAi), true)
+  assert.equal(supportsAssistantZeroDataRetention(mergedOpenAi), false)
   assert.deepEqual(
     compactAssistantProviderConfigInput({
       provider: 'openai-compatible',
@@ -207,6 +211,7 @@ test('assistant provider config helpers infer, merge, compact, and serialize by 
     providerName: null,
     reasoningEffort: 'low',
     sandbox: 'workspace-write',
+    zeroDataRetention: null,
   })
   assert.equal(
     normalizeAssistantProviderConfig({ provider: 'codex-cli' }).reasoningEffort,
@@ -243,6 +248,14 @@ test('assistant provider config helpers infer, merge, compact, and serialize by 
     false,
   )
   assert.equal(supportsAssistantReasoningEffort({ provider: 'codex-cli' }), true)
+  assert.equal(
+    supportsAssistantZeroDataRetention({
+      provider: 'openai-compatible',
+      baseUrl: 'https://ai-gateway.vercel.sh/v1',
+      zeroDataRetention: true,
+    }),
+    true,
+  )
 })
 
 test('hosted assistant helpers normalize equality, labels, and active-profile fallback', () => {
@@ -299,6 +312,7 @@ test('hosted assistant helpers normalize equality, labels, and active-profile fa
     provider: 'openai-compatible',
     providerName: 'Internal Gateway',
     reasoningEffort: null,
+    zeroDataRetention: null,
   })
 
   const normalizedConfig = createHostedAssistantConfig({

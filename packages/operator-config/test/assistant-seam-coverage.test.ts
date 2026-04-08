@@ -46,12 +46,14 @@ import {
   serializeAssistantProviderSessionOptions,
   shouldUseAssistantOpenAIResponsesApi,
   supportsAssistantReasoningEffort,
+  supportsAssistantZeroDataRetention,
 } from '../src/assistant/provider-config.ts'
 import {
   splitAssistantHeadersForPersistence,
 } from '../src/assistant/redaction.ts'
 import {
   isAssistantOpenAIBaseUrl,
+  isAssistantVercelAIGatewayBaseUrl,
   readAssistantEnvString,
 } from '../src/assistant/shared.ts'
 import { isValidAssistantOpaqueId } from '../src/assistant/state-ids.ts'
@@ -67,6 +69,10 @@ test('assistant shared and state-id helpers handle empty, invalid, and valid inp
   assert.equal(readAssistantEnvString(nonStringEnv, 'OPENAI_API_KEY'), null)
 
   assert.equal(isAssistantOpenAIBaseUrl(' https://api.openai.com/v1 '), true)
+  assert.equal(
+    isAssistantVercelAIGatewayBaseUrl(' https://ai-gateway.vercel.sh/v1 '),
+    true,
+  )
   assert.equal(isAssistantOpenAIBaseUrl('   '), false)
   assert.equal(isAssistantOpenAIBaseUrl('http://api.openai.com/v1'), false)
   assert.equal(isAssistantOpenAIBaseUrl('https://example.test/v1'), false)
@@ -132,6 +138,14 @@ test('assistant backend helpers cover null, codex, and openai-compatible persist
     providerName: ' OpenAI ',
     reasoningEffort: ' high ',
   })
+  const gatewayTarget = createAssistantModelTarget({
+    provider: 'openai-compatible',
+    apiKeyEnv: ' VERCEL_AI_API_KEY ',
+    baseUrl: ' https://ai-gateway.vercel.sh/v1 ',
+    model: ' openai/gpt-5.4 ',
+    providerName: ' vercel-ai-gateway ',
+    zeroDataRetention: true,
+  })
 
   assert.deepEqual(sanitizeAssistantModelTargetForPersistence(openAiTarget), {
     adapter: 'openai-compatible',
@@ -154,6 +168,16 @@ test('assistant backend helpers cover null, codex, and openai-compatible persist
     provider: 'codex-cli',
     reasoningEffort: 'medium',
     sandbox: null,
+  })
+  assert.deepEqual(sanitizeAssistantModelTargetForPersistence(gatewayTarget), {
+    adapter: 'openai-compatible',
+    apiKeyEnv: 'VERCEL_AI_API_KEY',
+    endpoint: 'https://ai-gateway.vercel.sh/v1',
+    headers: null,
+    model: 'openai/gpt-5.4',
+    providerName: 'vercel-ai-gateway',
+    reasoningEffort: null,
+    zeroDataRetention: true,
   })
   assert.equal(
     assistantModelTargetsEqual(codexTarget, {
@@ -248,6 +272,7 @@ test('assistant provider helpers cover null inference and empty header canonical
       providerName: null,
       reasoningEffort: null,
       sandbox: null,
+      zeroDataRetention: null,
     },
   )
   assert.deepEqual(
@@ -266,6 +291,7 @@ test('assistant provider helpers cover null inference and empty header canonical
       providerName: null,
       reasoningEffort: 'medium',
       sandbox: null,
+      zeroDataRetention: null,
     },
   )
   assert.deepEqual(
@@ -286,6 +312,7 @@ test('assistant provider helpers cover null inference and empty header canonical
       providerName: 'Example',
       reasoningEffort: null,
       sandbox: null,
+      zeroDataRetention: null,
     },
   )
   assert.deepEqual(
@@ -314,6 +341,7 @@ test('assistant provider helpers cover null inference and empty header canonical
       providerName: null,
       reasoningEffort: 'medium',
       sandbox: null,
+      zeroDataRetention: null,
     },
   )
   assert.equal(
@@ -331,6 +359,14 @@ test('assistant provider helpers cover null inference and empty header canonical
     }),
     true,
   )
+  assert.equal(
+    supportsAssistantZeroDataRetention({
+      provider: 'openai-compatible',
+      baseUrl: 'https://ai-gateway.vercel.sh/v1',
+      zeroDataRetention: true,
+    }),
+    true,
+  )
 })
 
 test('openai-compatible provider preset helpers resolve aliases, fallbacks, and non-matches', () => {
@@ -344,6 +380,10 @@ test('openai-compatible provider preset helpers resolve aliases, fallbacks, and 
   assert.equal(isOpenAICompatibleProviderPresetId('openai'), true)
   assert.equal(isOpenAICompatibleProviderPresetId('unknown'), false)
   assert.equal(resolveOpenAICompatibleProviderPresetFromId('openrouter')?.id, 'openrouter')
+  assert.equal(
+    resolveOpenAICompatibleProviderPresetFromId('vercel-ai-gateway')?.id,
+    'vercel-ai-gateway',
+  )
   assert.equal(resolveOpenAICompatibleProviderPresetFromId('unknown'), null)
   assert.equal(
     resolveOpenAICompatibleProviderPresetFromProviderName(' Hugging Face ' )?.id,
@@ -351,8 +391,16 @@ test('openai-compatible provider preset helpers resolve aliases, fallbacks, and 
   )
   assert.equal(resolveOpenAICompatibleProviderPresetFromProviderName(''), null)
   assert.equal(resolveOpenAICompatibleProviderPresetFromApiKeyEnv(' ngc_api_key ')?.id, 'nvidia')
+  assert.equal(
+    resolveOpenAICompatibleProviderPresetFromApiKeyEnv(' ai_gateway_api_key ')?.id,
+    'vercel-ai-gateway',
+  )
   assert.equal(resolveOpenAICompatibleProviderPresetFromApiKeyEnv('missing'), null)
   assert.equal(resolveOpenAICompatibleProviderPresetFromBaseUrl('https://openrouter.ai/api/v1/chat/completions')?.id, 'openrouter')
+  assert.equal(
+    resolveOpenAICompatibleProviderPresetFromBaseUrl('https://ai-gateway.vercel.sh/v1/chat/completions')?.id,
+    'vercel-ai-gateway',
+  )
   assert.equal(resolveOpenAICompatibleProviderPresetFromBaseUrl('http://localhost:11434/api/tags')?.id, 'ollama')
   assert.equal(resolveOpenAICompatibleProviderPresetFromBaseUrl('http://localhost:9999/v1'), null)
   assert.equal(resolveOpenAICompatibleProviderPresetFromBaseUrl('not a url'), null)
@@ -369,6 +417,12 @@ test('openai-compatible provider preset helpers resolve aliases, fallbacks, and 
       providerName: 'lite llm',
     })?.id,
     'litellm',
+  )
+  assert.equal(
+    resolveOpenAICompatibleProviderPreset({
+      providerName: 'vercel ai gateway',
+    })?.id,
+    'vercel-ai-gateway',
   )
   assert.equal(
     resolveOpenAICompatibleProviderPreset({

@@ -138,6 +138,7 @@ export const setupConfiguredAssistantSchema = z.object({
   sandbox: z.enum(assistantSandboxValues).nullable(),
   approvalPolicy: z.enum(assistantApprovalPolicyValues).nullable(),
   oss: z.boolean().nullable(),
+  zeroDataRetention: z.boolean().optional(),
   account: setupAssistantAccountSchema.nullable().optional(),
   detail: z.string().min(1),
 })
@@ -217,6 +218,10 @@ export const setupCommandOptionsSchema = z.object({
     .min(1)
     .optional()
     .describe('Optional assistant reasoning effort default to save during setup.'),
+  assistantZeroDataRetention: z
+    .boolean()
+    .optional()
+    .describe('Optional OpenAI-compatible flag to request Vercel AI Gateway zero data retention on each assistant turn.'),
   assistantOss: z
     .boolean()
     .optional()

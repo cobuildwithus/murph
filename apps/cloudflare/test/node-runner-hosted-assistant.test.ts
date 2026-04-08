@@ -56,6 +56,24 @@ describe("hosted assistant runner env policy", () => {
     });
   });
 
+  it("forwards Vercel AI Gateway bootstrap vars and gateway key aliases", () => {
+    const env = buildHostedRunnerContainerEnv({
+      AI_GATEWAY_API_KEY: "gateway-secret",
+      HOSTED_ASSISTANT_API_KEY_ENV: "AI_GATEWAY_API_KEY",
+      HOSTED_ASSISTANT_MODEL: "openai/gpt-5.4",
+      HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+      HOSTED_ASSISTANT_ZERO_DATA_RETENTION: "true",
+    });
+
+    expect(env).toMatchObject({
+      AI_GATEWAY_API_KEY: "gateway-secret",
+      HOSTED_ASSISTANT_API_KEY_ENV: "AI_GATEWAY_API_KEY",
+      HOSTED_ASSISTANT_MODEL: "openai/gpt-5.4",
+      HOSTED_ASSISTANT_PROVIDER: "vercel-ai-gateway",
+      HOSTED_ASSISTANT_ZERO_DATA_RETENTION: "true",
+    });
+  });
+
   it("does not forward referenced reserved worker secrets into the runner", () => {
     const env = buildHostedRunnerContainerEnv({
       HOSTED_ASSISTANT_API_KEY_ENV: "HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK",
@@ -72,5 +90,7 @@ describe("hosted assistant runner env policy", () => {
     expect(isHostedUserEnvKeyAllowed("HOSTED_ASSISTANT_PROVIDER")).toBe(false);
     expect(isHostedUserEnvKeyAllowed("HOSTED_ASSISTANT_MODEL")).toBe(false);
     expect(isHostedUserEnvKeyAllowed("OPENAI_API_KEY")).toBe(true);
+    expect(isHostedUserEnvKeyAllowed("AI_GATEWAY_API_KEY")).toBe(true);
+    expect(isHostedUserEnvKeyAllowed("VERCEL_AI_API_KEY")).toBe(true);
   });
 });

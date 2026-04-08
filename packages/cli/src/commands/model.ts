@@ -72,6 +72,10 @@ const modelCommandOptionsSchema = z.object({
     .min(1)
     .optional()
     .describe('Stable label for the saved OpenAI-compatible provider.'),
+  zeroDataRetention: z
+    .boolean()
+    .optional()
+    .describe('Request zero data retention on Vercel AI Gateway assistant turns.'),
   codexCommand: z
     .string()
     .min(1)
@@ -293,7 +297,8 @@ function hasOpenAiCompatibleModelOptions(
     options.providerPreset !== undefined ||
     options.baseUrl !== undefined ||
     options.apiKeyEnv !== undefined ||
-    options.providerName !== undefined
+    options.providerName !== undefined ||
+    options.zeroDataRetention !== undefined
   )
 }
 
@@ -487,6 +492,11 @@ function createModelSetupOptions(input: {
     ...(input.options.providerName !== undefined
       ? {
           assistantProviderName: input.options.providerName,
+        }
+      : {}),
+    ...(input.options.zeroDataRetention !== undefined
+      ? {
+          assistantZeroDataRetention: input.options.zeroDataRetention,
         }
       : {}),
     ...(input.options.codexCommand !== undefined

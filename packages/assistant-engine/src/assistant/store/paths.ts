@@ -104,6 +104,7 @@ export function normalizeProviderOptions(input: {
   providerName?: string | null
   reasoningEffort?: string | null
   sandbox?: AssistantSandbox | null
+  zeroDataRetention?: boolean | null
 }): AssistantProviderSessionOptions {
   return serializeAssistantProviderSessionOptions(input)
 }

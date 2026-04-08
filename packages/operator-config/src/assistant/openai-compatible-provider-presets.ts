@@ -2,6 +2,7 @@ import { normalizeNullableString } from './shared.js'
 
 export const setupAssistantProviderPresetValues = [
   'openai',
+  'vercel-ai-gateway',
   'openrouter',
   'venice',
   'deepseek',
@@ -56,6 +57,24 @@ const OPENAI_COMPATIBLE_PROVIDER_PRESETS: readonly OpenAICompatibleProviderPrese
     urlPrefixes: ['https://api.openai.com', 'https://api.openai.com/v1'],
     aliases: ['openai'],
     envAliases: ['OPENAI_API_KEY'],
+  },
+  {
+    id: 'vercel-ai-gateway',
+    title: 'Vercel AI Gateway',
+    description: 'Use Vercel AI Gateway with a single OpenAI-compatible endpoint.',
+    kind: 'gateway',
+    baseUrl: 'https://ai-gateway.vercel.sh/v1',
+    apiKeyEnv: 'VERCEL_AI_API_KEY',
+    providerName: 'vercel-ai-gateway',
+    hostnames: ['ai-gateway.vercel.sh'],
+    urlPrefixes: ['https://ai-gateway.vercel.sh/v1'],
+    aliases: [
+      'vercel-ai-gateway',
+      'vercel-gateway',
+      'vercel-ai',
+      'ai-gateway',
+    ],
+    envAliases: ['VERCEL_AI_API_KEY', 'AI_GATEWAY_API_KEY', 'VERCEL_OIDC_TOKEN'],
   },
   {
     id: 'openrouter',

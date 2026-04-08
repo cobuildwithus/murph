@@ -44,6 +44,9 @@ export function assistantSelectionToOperatorDefaults(
         baseUrl: assistant.baseUrl,
         apiKeyEnv: assistant.apiKeyEnv,
         providerName: assistant.providerName,
+        ...(assistant.zeroDataRetention === true
+          ? { zeroDataRetention: true }
+          : {}),
       },
     }),
     account: assistant.account ?? null,
@@ -136,6 +139,8 @@ export function buildSetupAssistantOptionsFromDefaults(
         assistantApiKeyEnv: savedDefaults?.apiKeyEnv ?? undefined,
         assistantProviderName: savedDefaults?.providerName ?? undefined,
         assistantReasoningEffort: savedDefaults?.reasoningEffort ?? undefined,
+        assistantZeroDataRetention:
+          savedDefaults?.zeroDataRetention === true ? true : undefined,
       }
     }
 
