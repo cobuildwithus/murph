@@ -6,6 +6,8 @@ import {
   storedMediaSchema,
   type EventAttachment,
   type EventAttachmentKind,
+  type RawAssetOwner,
+  type RawAssetOwnerKind,
   type RawImportKind,
   type StoredMedia,
 } from "@murphai/contracts";
@@ -18,7 +20,7 @@ import { loadVault } from "./vault.ts";
 
 import type { DateInput } from "./types.ts";
 
-export type EventAttachmentOwnerKind = "document" | "meal" | "measurement" | "workout";
+export type EventAttachmentOwnerKind = Extract<RawAssetOwnerKind, "document" | "meal" | "measurement" | "workout">;
 
 export interface EventAttachmentSourceInput {
   role: string;
@@ -34,11 +36,11 @@ export interface PreparedEventAttachment extends EventAttachmentSourceInput {
 
 export interface StagePreparedEventAttachmentsInput {
   batch: WriteBatch;
+  owner: RawAssetOwner;
   attachments: readonly PreparedEventAttachment[];
   importId: string;
   importKind: RawImportKind;
   importedAt: string;
-  rawDirectory?: string;
   source: string | null;
   provenance: Record<string, unknown>;
 }
@@ -64,7 +66,6 @@ export interface StageEventAttachmentsInput extends PrepareEventAttachmentsInput
 export interface StagedEventAttachments {
   attachments: EventAttachment[];
   manifestPath: string;
-  rawDirectory: string;
   rawRefs: string[];
 }
 
@@ -138,50 +139,23 @@ function inferEventAttachmentKind(sourcePath: string, targetName?: string): Even
   return "other";
 }
 
-function inferAttachmentCategory(
-  ownerKind: EventAttachmentOwnerKind,
-  attachment: EventAttachmentSourceInput,
-): { category: string; slot?: string } {
-  if (ownerKind === "document") {
-    return { category: "documents" };
-  }
-
-  if (ownerKind === "meal") {
-    return attachment.kind === "audio"
-      ? {
-          category: "meal-audio",
-          slot: attachment.role,
-        }
-      : {
-          category: "meal-photo",
-          slot: attachment.role,
-        };
-  }
-
-  return {
-    category: ownerKind === "measurement" ? "measurements" : "workouts",
-  };
-}
-
 export function prepareEventAttachments(
   input: PrepareEventAttachmentsInput,
 ): PreparedEventAttachment[] {
   return input.attachments.map((attachment) => {
     const kind = attachment.kind ?? inferEventAttachmentKind(attachment.sourcePath, attachment.targetName);
-    const rawCategory = inferAttachmentCategory(input.ownerKind, {
-      ...attachment,
-      kind,
-    });
 
     return {
       ...attachment,
       kind,
       raw: prepareRawArtifact({
         sourcePath: attachment.sourcePath,
-        category: rawCategory.category,
+        owner: {
+          kind: input.ownerKind,
+          id: input.ownerId,
+        },
         occurredAt: input.occurredAt,
-        recordId: input.ownerId,
-        slot: rawCategory.slot,
+        role: attachment.role,
         targetName: attachment.targetName,
       }),
     };
@@ -281,20 +255,19 @@ export async function stagePreparedEventAttachmentsInBatch(
     importId: input.importId,
     importKind: input.importKind,
     importedAt: input.importedAt,
-    rawDirectory: input.rawDirectory,
+    owner: input.owner,
     source: input.source,
     artifacts: stagedArtifacts.map(({ attachment, raw }) => ({
       role: attachment.role,
       raw,
     })),
-    canonicalProvenance: input.provenance,
+    provenance: input.provenance,
   });
 
   return {
     attachments,
     manifestPath,
-    rawDirectory: path.posix.dirname(manifestPath),
-    rawRefs: [...new Set(attachments.map((attachment) => attachment.relativePath))],
+    rawRefs: Array.from(new Set<string>(attachments.map((attachment) => attachment.relativePath))),
   };
 }
 
@@ -316,6 +289,10 @@ export async function stageEventAttachments(
     mutate: async ({ batch }) =>
       stagePreparedEventAttachmentsInBatch({
         batch,
+        owner: {
+          kind: input.ownerKind,
+          id: input.ownerId,
+        },
         attachments: prepared,
         importId: input.importId,
         importKind: input.importKind,

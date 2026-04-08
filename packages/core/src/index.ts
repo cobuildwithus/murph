@@ -118,6 +118,18 @@ export type {
   CanonicalWriteLockMetadata,
   RecoverableStoredWriteOperation,
 } from "./operations/index.ts";
+export {
+  buildRawImportManifest,
+  parseRawImportManifestWithLegacySupport,
+  resolveRawManifestPath,
+} from "./operations/raw-manifests.ts";
+export {
+  inferRawAssetOwnerFromDirectory,
+  prepareInlineRawArtifact,
+  prepareRawArtifact,
+  rawDirectoryMatchesOwner,
+  resolveRawAssetDirectory,
+} from "./raw.ts";
 export type { ResolvedVaultPath } from "./path-safety.ts";
 export {
   listAssessmentResponses,

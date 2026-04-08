@@ -3,14 +3,13 @@ import { basename, extname } from 'node:path'
 import path from 'node:path'
 import { readFile } from 'node:fs/promises'
 import {
-  CONTRACT_SCHEMA_VERSION,
+  ID_PREFIXES,
   type JsonObject,
-  type RawImportManifest,
   type WorkoutSession,
   type WorkoutSet,
   type WorkoutSetType,
 } from '@murphai/contracts'
-import { applyCanonicalWriteBatch } from '@murphai/core'
+import { applyCanonicalWriteBatch, buildRawImportManifest, resolveRawAssetDirectory } from '@murphai/core'
 import { parseDelimitedRows } from '@murphai/importers'
 import { generateUlid } from '@murphai/runtime-state'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
@@ -539,37 +538,6 @@ function buildWorkoutSessionsFromCsv(headers: readonly string[], rows: readonly 
   }))
 }
 
-function buildManifest(input: {
-  importId: string
-  importKind: 'workout_batch'
-  importedAt: string
-  source: string
-  rawDirectory: string
-  rawFile: string
-  originalFileName: string
-  mediaType: string
-  content: string
-  provenance: JsonObject
-}): RawImportManifest {
-  return {
-    schemaVersion: CONTRACT_SCHEMA_VERSION.rawImportManifest,
-    importId: input.importId,
-    importKind: input.importKind,
-    importedAt: input.importedAt,
-    source: input.source,
-    rawDirectory: input.rawDirectory,
-    artifacts: [{
-      role: 'source',
-      relativePath: input.rawFile,
-      originalFileName: input.originalFileName,
-      mediaType: input.mediaType,
-      byteSize: Buffer.byteLength(input.content, 'utf8'),
-      sha256: createHash('sha256').update(input.content).digest('hex'),
-    }],
-    provenance: input.provenance,
-  }
-}
-
 export async function inspectWorkoutCsvImport(input: {
   vault: string
   file: string
@@ -612,12 +580,17 @@ export async function importWorkoutCsv(input: {
     delimiter: input.delimiter,
     text,
   })
-  const importId = `wkimp_${generateUlid()}`
+  const importId = `${ID_PREFIXES.transform}_${generateUlid()}`
   const importedAt = new Date().toISOString()
   const safeSource = sanitizePathSegment(inspection.source, DEFAULT_SOURCE)
-  const year = importedAt.slice(0, 4)
-  const month = importedAt.slice(5, 7)
-  const rawDirectory = path.posix.join('raw', 'workouts', safeSource, year, month, importId)
+  const rawDirectory = resolveRawAssetDirectory({
+    owner: {
+      kind: 'workout_batch',
+      id: importId,
+      partition: safeSource,
+    },
+    occurredAt: importedAt,
+  })
   const safeFileName = sanitizeFileName(path.basename(input.file))
   const rawFile = path.posix.join(rawDirectory, safeFileName)
   const manifestFile = path.posix.join(rawDirectory, 'manifest.json')
@@ -629,16 +602,25 @@ export async function importWorkoutCsv(input: {
     warnings.push('No structured workouts were detected; only the raw CSV was stored.')
   }
 
-  const manifest = buildManifest({
+  const manifest = buildRawImportManifest({
     importId,
     importKind: 'workout_batch',
     importedAt,
+    owner: {
+      kind: 'workout_batch',
+      id: importId,
+      partition: safeSource,
+    },
     source: inspection.source,
     rawDirectory,
-    rawFile,
-    originalFileName: path.basename(input.file),
-    mediaType: 'text/csv',
-    content: text,
+    artifacts: [{
+      role: 'source',
+      relativePath: rawFile,
+      originalFileName: path.basename(input.file),
+      mediaType: 'text/csv',
+      byteSize: new TextEncoder().encode(text).byteLength,
+      sha256: createHash('sha256').update(text).digest('hex'),
+    }],
     provenance: {
       sourceFileName: path.basename(input.file),
       delimiter: inspection.delimiter,

@@ -862,29 +862,33 @@ test("importDeviceBatch rejects invalid provenance, raw metadata, and empty raw 
 test("prepareRawArtifact and prepareInlineRawArtifact support integration snapshots", () => {
   const copied = prepareRawArtifact({
     sourcePath: "/tmp/snapshot.json",
-    category: "integrations",
-    provider: "whoop",
+    owner: {
+      kind: "device_batch",
+      id: "xfm_01JQ9R7WF97M1WAB2B4QF2Q1AB",
+      partition: "whoop",
+    },
     occurredAt: "2026-03-16T09:30:00.000Z",
-    recordId: "xfm_fixed",
     targetName: "snapshot.json",
   });
   const inline = prepareInlineRawArtifact({
     fileName: "payload.json",
-    category: "integrations",
-    provider: "whoop",
+    owner: {
+      kind: "device_batch",
+      id: "xfm_01JQ9R7WF97M1WAB2B4QF2Q1AB",
+      partition: "whoop",
+    },
     occurredAt: "2026-03-16T09:30:00.000Z",
-    recordId: "xfm_fixed",
     targetName: "01-payload.json",
     mediaType: "application/json",
   });
 
   assert.equal(
     copied.relativePath,
-    "raw/integrations/whoop/2026/03/xfm_fixed/snapshot.json",
+    "raw/integrations/whoop/2026/03/xfm_01JQ9R7WF97M1WAB2B4QF2Q1AB/snapshot.json",
   );
   assert.equal(
     inline.relativePath,
-    "raw/integrations/whoop/2026/03/xfm_fixed/01-payload.json",
+    "raw/integrations/whoop/2026/03/xfm_01JQ9R7WF97M1WAB2B4QF2Q1AB/01-payload.json",
   );
   assert.equal(inline.originalFileName, "payload.json");
   assert.equal(inline.mediaType, "application/json");
@@ -897,9 +901,11 @@ test("raw artifact helpers normalize category paths and inferred media types", (
     {
       artifact: prepareRawArtifact({
         sourcePath: "/tmp/Lab Result.PDF",
-        category: "documents",
+        owner: {
+          kind: "document",
+          id: "doc_01JQ9R7WF97M1WAB2B4QF2Q1A1",
+        },
         occurredAt,
-        recordId: "doc_01JQ9R7WF97M1WAB2B4QF2Q1A1",
         targetName: "Lab Result.PDF",
       }),
       relativePath: "raw/documents/2026/03/doc_01JQ9R7WF97M1WAB2B4QF2Q1A1/lab-result.pdf",
@@ -909,10 +915,12 @@ test("raw artifact helpers normalize category paths and inferred media types", (
     {
       artifact: prepareRawArtifact({
         sourcePath: "/tmp/Breakfast Photo.JPG",
-        category: "meal-photo",
+        owner: {
+          kind: "meal",
+          id: "meal_01JQ9R7WF97M1WAB2B4QF2Q1A2",
+        },
         occurredAt,
-        recordId: "meal_01JQ9R7WF97M1WAB2B4QF2Q1A2",
-        slot: "Photo 01",
+        role: "Photo 01",
         targetName: "Breakfast Photo.JPG",
       }),
       relativePath:
@@ -923,10 +931,12 @@ test("raw artifact helpers normalize category paths and inferred media types", (
     {
       artifact: prepareRawArtifact({
         sourcePath: "/tmp/Voice Note.M4A",
-        category: "meal-audio",
+        owner: {
+          kind: "meal",
+          id: "meal_01JQ9R7WF97M1WAB2B4QF2Q1A3",
+        },
         occurredAt,
-        recordId: "meal_01JQ9R7WF97M1WAB2B4QF2Q1A3",
-        slot: "Audio 02",
+        role: "Audio 02",
         targetName: "Voice Note.M4A",
       }),
       relativePath:
@@ -937,22 +947,26 @@ test("raw artifact helpers normalize category paths and inferred media types", (
     {
       artifact: prepareRawArtifact({
         sourcePath: "/tmp/Resting HRV.JSON",
-        category: "samples",
+        owner: {
+          kind: "sample_batch",
+          id: "xfm_01JQ9R7WF97M1WAB2B4QF2Q1A4",
+          partition: "hrv",
+        },
         occurredAt,
-        recordId: "smp_01JQ9R7WF97M1WAB2B4QF2Q1A4",
-        stream: "hrv",
         targetName: "Resting HRV.JSON",
       }),
-      relativePath: "raw/samples/hrv/2026/03/smp_01JQ9R7WF97M1WAB2B4QF2Q1A4/resting-hrv.json",
+      relativePath: "raw/samples/hrv/2026/03/xfm_01JQ9R7WF97M1WAB2B4QF2Q1A4/resting-hrv.json",
       originalFileName: "Resting HRV.JSON",
       mediaType: "application/json",
     },
     {
       artifact: prepareRawArtifact({
         sourcePath: "/tmp/Assessment Source.TXT",
-        category: "assessments",
+        owner: {
+          kind: "assessment",
+          id: "asmt_01JQ9R7WF97M1WAB2B4QF2Q1A5",
+        },
         occurredAt,
-        recordId: "asmt_01JQ9R7WF97M1WAB2B4QF2Q1A5",
         targetName: "Assessment Source.TXT",
       }),
       relativePath: "raw/assessments/2026/03/asmt_01JQ9R7WF97M1WAB2B4QF2Q1A5/source.json",
@@ -962,22 +976,26 @@ test("raw artifact helpers normalize category paths and inferred media types", (
     {
       artifact: prepareRawArtifact({
         sourcePath: "/tmp/Snapshot.JSON",
-        category: "integrations",
-        provider: "whoop",
+        owner: {
+          kind: "device_batch",
+          id: "xfm_01JQ9R7WF97M1WAB2B4QF2Q1AB",
+          partition: "whoop",
+        },
         occurredAt,
-        recordId: "xfm_fixed",
         targetName: "Snapshot.JSON",
       }),
-      relativePath: "raw/integrations/whoop/2026/03/xfm_fixed/snapshot.json",
+      relativePath: "raw/integrations/whoop/2026/03/xfm_01JQ9R7WF97M1WAB2B4QF2Q1AB/snapshot.json",
       originalFileName: "Snapshot.JSON",
       mediaType: "application/json",
     },
     {
       artifact: prepareRawArtifact({
         sourcePath: "/tmp/Body Weight.CSV",
-        category: "measurements",
+        owner: {
+          kind: "measurement",
+          id: "evt_01JQ9R7WF97M1WAB2B4QF2Q1A6",
+        },
         occurredAt,
-        recordId: "evt_01JQ9R7WF97M1WAB2B4QF2Q1A6",
         targetName: "Body Weight.CSV",
       }),
       relativePath: "raw/measurements/2026/03/evt_01JQ9R7WF97M1WAB2B4QF2Q1A6/body-weight.csv",
@@ -987,26 +1005,16 @@ test("raw artifact helpers normalize category paths and inferred media types", (
     {
       artifact: prepareRawArtifact({
         sourcePath: "/tmp/Workout Session.WEBM",
-        category: "workouts",
+        owner: {
+          kind: "workout",
+          id: "evt_01JQ9R7WF97M1WAB2B4QF2Q1A7",
+        },
         occurredAt,
-        recordId: "evt_01JQ9R7WF97M1WAB2B4QF2Q1A7",
         targetName: "Workout Session.WEBM",
       }),
       relativePath: "raw/workouts/2026/03/evt_01JQ9R7WF97M1WAB2B4QF2Q1A7/workout-session.webm",
       originalFileName: "Workout Session.WEBM",
       mediaType: "video/webm",
-    },
-    {
-      artifact: prepareRawArtifact({
-        sourcePath: "/tmp/Manual Backup.TXT",
-        category: "Custom Category",
-        occurredAt,
-        recordId: "Bad Record/Id",
-        targetName: "Manual Backup.TXT",
-      }),
-      relativePath: "raw/custom-category/2026/03/bad-record-id/manual-backup.txt",
-      originalFileName: "Manual Backup.TXT",
-      mediaType: "text/plain",
     },
   ] as const;
 
@@ -1018,22 +1026,33 @@ test("raw artifact helpers normalize category paths and inferred media types", (
 
   const inferredInline = prepareInlineRawArtifact({
     fileName: "Payload.BIN",
-    category: "artifact",
+    owner: {
+      kind: "document",
+      id: "doc_01JQ9R7WF97M1WAB2B4QF2Q1A8",
+    },
     occurredAt,
     targetName: "Payload.BIN",
   });
   const explicitInline = prepareInlineRawArtifact({
     fileName: "Payload.JSON",
-    category: "integrations",
-    provider: "whoop",
+    owner: {
+      kind: "device_batch",
+      id: "xfm_01JQ9R7WF97M1WAB2B4QF2Q1AB",
+      partition: "whoop",
+    },
     occurredAt,
-    recordId: "xfm_fixed",
     targetName: "Payload.JSON",
     mediaType: "application/json",
   });
 
-  assert.equal(inferredInline.relativePath, "raw/artifact/2026/03/item/payload.bin");
+  assert.equal(
+    inferredInline.relativePath,
+    "raw/documents/2026/03/doc_01JQ9R7WF97M1WAB2B4QF2Q1A8/payload.bin",
+  );
   assert.equal(inferredInline.mediaType, "application/octet-stream");
-  assert.equal(explicitInline.relativePath, "raw/integrations/whoop/2026/03/xfm_fixed/payload.json");
+  assert.equal(
+    explicitInline.relativePath,
+    "raw/integrations/whoop/2026/03/xfm_01JQ9R7WF97M1WAB2B4QF2Q1AB/payload.json",
+  );
   assert.equal(explicitInline.mediaType, "application/json");
 });

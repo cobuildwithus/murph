@@ -135,9 +135,11 @@ export async function importAssessmentResponse({
   const responses = parseAssessmentResponse(content);
   const raw = prepareRawArtifact({
     sourcePath,
-    category: "assessments",
+    owner: {
+      kind: "assessment",
+      id,
+    },
     occurredAt: recordedTimestamp,
-    recordId: id,
   });
   const batch = await WriteBatch.create({
     vaultRoot,
@@ -183,6 +185,10 @@ export async function importAssessmentResponse({
     importId: assessment.id,
     importKind: "assessment",
     importedAt: assessment.recordedAt,
+    owner: {
+      kind: "assessment",
+      id: assessment.id,
+    },
     source: assessment.source ?? source ?? null,
     artifacts: [
       {
@@ -190,7 +196,7 @@ export async function importAssessmentResponse({
         raw: stagedRaw,
       },
     ],
-    canonicalProvenance: {
+    provenance: {
       assessmentType: assessment.assessmentType,
       title: assessment.title ?? null,
       questionnaireSlug: assessment.questionnaireSlug ?? null,

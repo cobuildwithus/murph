@@ -7,12 +7,16 @@ import {
   jsonObjectSchema,
   rawImportManifestSchema,
   type JsonObject,
+  type RawAssetOwner,
   type RawImportKind,
+  type RawImportManifest,
   type RawImportManifestArtifact,
 } from "@murphai/contracts";
 
 import type { WriteBatch } from "./write-batch.ts";
 import { normalizeRelativeVaultPath } from "../path-safety.ts";
+import { inferRawAssetOwnerFromDirectory, rawDirectoryMatchesOwner } from "../raw.ts";
+import { isPlainRecord } from "../types.ts";
 
 interface RawArtifactLike {
   relativePath: string;
@@ -26,18 +30,30 @@ interface StageRawImportManifestInput {
   importId: string;
   importKind: RawImportKind;
   importedAt: string;
+  owner: RawAssetOwner;
   rawDirectory?: string;
   source: string | null;
   artifacts: Array<{
     role: string;
     raw: RawArtifactLike;
   }>;
-  provenance?: Record<string, unknown>;
-  canonicalProvenance?: Record<string, unknown>;
+  provenance: Record<string, unknown>;
   operatorMetadata?: Record<string, unknown>;
 }
 
+export interface BuildRawImportManifestInput {
+  importId: string;
+  importKind: RawImportKind;
+  importedAt: string;
+  owner: RawAssetOwner;
+  rawDirectory?: string;
+  source: string | null;
+  artifacts: readonly RawImportManifestArtifact[];
+  provenance: Record<string, unknown>;
+}
+
 const RAW_MANIFEST_OPERATOR_METADATA_KEY = "operatorMetadata";
+const LEGACY_RAW_IMPORT_MANIFEST_SCHEMA_VERSION = "murph.raw-import-manifest.v1";
 
 export async function describeRawArtifact(
   artifact: RawArtifactLike,
@@ -121,12 +137,12 @@ function sanitizeManifestJsonObject(provenance: Record<string, unknown>): JsonOb
 }
 
 function composeManifestProvenance(input: {
-  canonicalProvenance: Record<string, unknown>;
+  provenance: Record<string, unknown>;
   operatorMetadata?: Record<string, unknown>;
 }): JsonObject {
-  const canonicalProvenance = sanitizeManifestJsonObject(input.canonicalProvenance);
+  const provenance = sanitizeManifestJsonObject(input.provenance);
 
-  if (RAW_MANIFEST_OPERATOR_METADATA_KEY in canonicalProvenance) {
+  if (RAW_MANIFEST_OPERATOR_METADATA_KEY in provenance) {
     throw new TypeError(
       `raw import manifest provenance reserves "${RAW_MANIFEST_OPERATOR_METADATA_KEY}" for caller metadata`,
     );
@@ -137,13 +153,76 @@ function composeManifestProvenance(input: {
     : undefined;
 
   if (!operatorMetadata || Object.keys(operatorMetadata).length === 0) {
-    return canonicalProvenance;
+    return provenance;
   }
 
   return {
-    ...canonicalProvenance,
+    ...provenance,
     [RAW_MANIFEST_OPERATOR_METADATA_KEY]: operatorMetadata,
   };
+}
+
+export function buildRawImportManifest({
+  importId,
+  importKind,
+  importedAt,
+  owner,
+  rawDirectory,
+  source,
+  artifacts,
+  provenance,
+}: BuildRawImportManifestInput): RawImportManifest {
+  const normalizedArtifacts = artifacts.map((artifact) => ({
+    ...artifact,
+    relativePath: normalizeRelativeVaultPath(artifact.relativePath),
+  }));
+  const resolvedRawDirectory = resolveRawArtifactDirectory(normalizedArtifacts, rawDirectory);
+
+  if (!rawDirectoryMatchesOwner(resolvedRawDirectory, owner)) {
+    throw new TypeError(
+      `raw import manifest rawDirectory "${resolvedRawDirectory}" does not match owner ${owner.kind}:${owner.id}.`,
+    );
+  }
+
+  return rawImportManifestSchema.parse({
+    schemaVersion: CONTRACT_SCHEMA_VERSION.rawImportManifest,
+    importId,
+    importKind,
+    importedAt,
+    source,
+    owner,
+    rawDirectory: resolvedRawDirectory,
+    artifacts: normalizedArtifacts,
+    provenance: sanitizeManifestJsonObject(provenance),
+  });
+}
+
+export function parseRawImportManifestWithLegacySupport(manifest: unknown): RawImportManifest {
+  const parsedManifest = rawImportManifestSchema.safeParse(manifest);
+  if (parsedManifest.success) {
+    return parsedManifest.data;
+  }
+
+  if (!isPlainRecord(manifest) || manifest.schemaVersion !== LEGACY_RAW_IMPORT_MANIFEST_SCHEMA_VERSION) {
+    throw parsedManifest.error;
+  }
+
+  const rawDirectory =
+    typeof manifest.rawDirectory === "string"
+      ? normalizeRelativeVaultPath(manifest.rawDirectory)
+      : null;
+  const owner = rawDirectory ? inferRawAssetOwnerFromDirectory(rawDirectory) : null;
+
+  if (!rawDirectory || !owner) {
+    throw parsedManifest.error;
+  }
+
+  return rawImportManifestSchema.parse({
+    ...manifest,
+    schemaVersion: CONTRACT_SCHEMA_VERSION.rawImportManifest,
+    owner,
+    rawDirectory,
+  });
 }
 
 export async function stageRawImportManifest({
@@ -151,41 +230,32 @@ export async function stageRawImportManifest({
   importId,
   importKind,
   importedAt,
+  owner,
   rawDirectory,
   source,
   artifacts,
   provenance,
-  canonicalProvenance,
   operatorMetadata,
 }: StageRawImportManifestInput): Promise<string> {
-  const manifestProvenance = canonicalProvenance ?? provenance;
-
-  if (!manifestProvenance) {
-    throw new TypeError("raw import manifest provenance is required");
-  }
-
-  const resolvedRawDirectory = resolveRawArtifactDirectory(
-    artifacts.map(({ raw }) => raw),
-    rawDirectory,
-  );
-  const manifestPath = resolveRawManifestPath({
-    artifacts: artifacts.map(({ raw }) => raw),
-    rawDirectory: resolvedRawDirectory,
-  });
-  const manifest = rawImportManifestSchema.parse({
-    schemaVersion: CONTRACT_SCHEMA_VERSION.rawImportManifest,
+  const manifest = buildRawImportManifest({
     importId,
     importKind,
     importedAt,
+    owner,
+    rawDirectory,
     source,
-    rawDirectory: resolvedRawDirectory,
     artifacts: await Promise.all(
       artifacts.map(({ raw, role }) => describeRawArtifact(raw, role)),
     ),
     provenance: composeManifestProvenance({
-      canonicalProvenance: manifestProvenance,
+      provenance,
       operatorMetadata,
     }),
+  });
+
+  const manifestPath = resolveRawManifestPath({
+    artifacts: manifest.artifacts,
+    rawDirectory: manifest.rawDirectory,
   });
 
   await batch.stageTextWrite(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, {

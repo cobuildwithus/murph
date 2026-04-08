@@ -1,6 +1,17 @@
+import {
+  rawAssetOwnerSchema,
+  type RawAssetOwner,
+  type RawAssetOwnerKind,
+} from "@murphai/contracts";
+
 import { VAULT_LAYOUT } from "./constants.ts";
 import { copyImmutableFileIntoVaultRaw } from "./fs.ts";
-import { basenameFromFilePath, sanitizeFileName, sanitizePathSegment } from "./path-safety.ts";
+import {
+  basenameFromFilePath,
+  normalizeRelativeVaultPath,
+  sanitizeFileName,
+  sanitizePathSegment,
+} from "./path-safety.ts";
 import { toIsoTimestamp } from "./time.ts";
 
 import type { DateInput } from "./types.ts";
@@ -8,13 +19,10 @@ import type { DateInput } from "./types.ts";
 interface CopyRawArtifactInput {
   vaultRoot: string;
   sourcePath: string;
-  category?: string;
+  owner: RawAssetOwner;
   occurredAt?: DateInput;
+  role?: string;
   targetName?: string;
-  recordId?: string;
-  slot?: string;
-  stream?: string;
-  provider?: string;
   allowExistingMatch?: boolean;
 }
 
@@ -29,6 +37,11 @@ type PrepareRawArtifactInput = Omit<CopyRawArtifactInput, "vaultRoot">;
 interface PrepareInlineRawArtifactInput extends Omit<PrepareRawArtifactInput, "sourcePath"> {
   fileName: string;
   mediaType?: string;
+}
+
+interface RawAssetOwnerDefinition {
+  rootDirectory: string;
+  resolveFileName: (input: { originalFileName: string; role?: string; targetName?: string }) => string;
 }
 
 const MEDIA_TYPES = new Map<string, string>([
@@ -50,6 +63,55 @@ const MEDIA_TYPES = new Map<string, string>([
   [".webp", "image/webp"],
 ]);
 
+const RAW_ASSET_OWNER_PARTITION_KINDS = new Set<RawAssetOwnerKind>([
+  "device_batch",
+  "sample_batch",
+  "workout_batch",
+]);
+
+function resolveDefaultFileName({ originalFileName, targetName }: { originalFileName: string; targetName?: string }): string {
+  return sanitizeFileName(targetName || originalFileName, "artifact");
+}
+
+const RAW_ASSET_OWNER_DEFINITIONS = Object.freeze<Record<RawAssetOwnerKind, RawAssetOwnerDefinition>>({
+  assessment: {
+    rootDirectory: VAULT_LAYOUT.rawAssessmentsDirectory,
+    resolveFileName: () => "source.json",
+  },
+  device_batch: {
+    rootDirectory: VAULT_LAYOUT.rawIntegrationsDirectory,
+    resolveFileName: resolveDefaultFileName,
+  },
+  document: {
+    rootDirectory: VAULT_LAYOUT.rawDocumentsDirectory,
+    resolveFileName: resolveDefaultFileName,
+  },
+  meal: {
+    rootDirectory: VAULT_LAYOUT.rawMealsDirectory,
+    resolveFileName: ({ originalFileName, role, targetName }) => {
+      const safeFileName = resolveDefaultFileName({ originalFileName, targetName });
+      const safeRole = sanitizePathSegment(role, "attachment");
+      return `${safeRole}-${safeFileName}`;
+    },
+  },
+  measurement: {
+    rootDirectory: VAULT_LAYOUT.rawMeasurementsDirectory,
+    resolveFileName: resolveDefaultFileName,
+  },
+  sample_batch: {
+    rootDirectory: VAULT_LAYOUT.rawSamplesDirectory,
+    resolveFileName: resolveDefaultFileName,
+  },
+  workout: {
+    rootDirectory: VAULT_LAYOUT.rawWorkoutsDirectory,
+    resolveFileName: resolveDefaultFileName,
+  },
+  workout_batch: {
+    rootDirectory: VAULT_LAYOUT.rawWorkoutsDirectory,
+    resolveFileName: resolveDefaultFileName,
+  },
+});
+
 function inferMediaType(fileName: string): string {
   const match = /\.([^.]+)$/u.exec(fileName);
   if (!match) {
@@ -59,66 +121,191 @@ function inferMediaType(fileName: string): string {
   return MEDIA_TYPES.get(`.${match[1].toLowerCase()}`) ?? "application/octet-stream";
 }
 
+function normalizeRawAssetOwner(owner: RawAssetOwner): RawAssetOwner {
+  return rawAssetOwnerSchema.parse(owner);
+}
+
+function resolveRawAssetOwnerDefinition(owner: RawAssetOwner): RawAssetOwnerDefinition {
+  return RAW_ASSET_OWNER_DEFINITIONS[owner.kind];
+}
+
+function resolveRawAssetOwnerPrefixSegments(owner: RawAssetOwner): string[] {
+  const normalizedOwner = normalizeRawAssetOwner(owner);
+  const definition = resolveRawAssetOwnerDefinition(normalizedOwner);
+  const segments = definition.rootDirectory.split("/");
+
+  if (RAW_ASSET_OWNER_PARTITION_KINDS.has(normalizedOwner.kind)) {
+    segments.push(normalizedOwner.partition as string);
+  }
+
+  return segments;
+}
+
 function resolveRawRelativePath({
-  category,
+  owner,
   occurredAt,
   originalFileName,
-  recordId,
-  slot,
-  stream,
+  role,
   targetName,
-  provider,
 }: {
-  category: string;
+  owner: RawAssetOwner;
   occurredAt: DateInput;
   originalFileName: string;
-  recordId?: string;
-  slot?: string;
-  stream?: string;
+  role?: string;
   targetName?: string;
-  provider?: string;
 }): string {
+  const rawDirectory = resolveRawAssetDirectory({ owner, occurredAt });
+  const normalizedOwner = normalizeRawAssetOwner(owner);
+  const safeFileName = resolveRawAssetOwnerDefinition(normalizedOwner).resolveFileName({
+    originalFileName,
+    role,
+    targetName,
+  });
+
+  return `${rawDirectory}/${safeFileName}`;
+}
+
+export function resolveRawAssetDirectory({
+  owner,
+  occurredAt,
+}: {
+  owner: RawAssetOwner;
+  occurredAt: DateInput;
+}): string {
+  const normalizedOwner = normalizeRawAssetOwner(owner);
   const timestamp = toIsoTimestamp(occurredAt, "occurredAt");
   const year = timestamp.slice(0, 4);
   const month = timestamp.slice(5, 7);
-  const safeFileName = sanitizeFileName(targetName || originalFileName, "artifact");
-  const stableId =
-    typeof recordId === "string" && /^[A-Za-z0-9_-]+$/u.test(recordId)
-      ? recordId
-      : sanitizePathSegment(recordId, "item");
 
-  if (category === "documents") {
-    return `${VAULT_LAYOUT.rawDocumentsDirectory}/${year}/${month}/${stableId}/${safeFileName}`;
+  return [...resolveRawAssetOwnerPrefixSegments(normalizedOwner), year, month, normalizedOwner.id].join("/");
+}
+
+export function inferRawAssetOwnerFromDirectory(rawDirectory: string): RawAssetOwner | null {
+  let normalizedDirectory: string;
+
+  try {
+    normalizedDirectory = normalizeRelativeVaultPath(rawDirectory);
+  } catch {
+    return null;
   }
 
-  if (category === "meal-photo" || category === "meal-audio") {
-    const safeSlot = sanitizePathSegment(slot, category === "meal-photo" ? "photo" : "audio");
-    return `${VAULT_LAYOUT.rawMealsDirectory}/${year}/${month}/${stableId}/${safeSlot}-${safeFileName}`;
+  const segments = normalizedDirectory.split("/");
+
+  const hasYearMonth = (year: string | undefined, month: string | undefined): boolean =>
+    /^\d{4}$/u.test(year ?? "") && /^\d{2}$/u.test(month ?? "");
+
+  try {
+    if (
+      segments[0] === "raw"
+      && segments[1] === "documents"
+      && segments.length === 5
+      && hasYearMonth(segments[2], segments[3])
+    ) {
+      return normalizeRawAssetOwner({
+        kind: "document",
+        id: segments[4] as string,
+      });
+    }
+
+    if (
+      segments[0] === "raw"
+      && segments[1] === "assessments"
+      && segments.length === 5
+      && hasYearMonth(segments[2], segments[3])
+    ) {
+      return normalizeRawAssetOwner({
+        kind: "assessment",
+        id: segments[4] as string,
+      });
+    }
+
+    if (
+      segments[0] === "raw"
+      && segments[1] === "measurements"
+      && segments.length === 5
+      && hasYearMonth(segments[2], segments[3])
+    ) {
+      return normalizeRawAssetOwner({
+        kind: "measurement",
+        id: segments[4] as string,
+      });
+    }
+
+    if (
+      segments[0] === "raw"
+      && segments[1] === "meals"
+      && segments.length === 5
+      && hasYearMonth(segments[2], segments[3])
+    ) {
+      return normalizeRawAssetOwner({
+        kind: "meal",
+        id: segments[4] as string,
+      });
+    }
+
+    if (segments[0] === "raw" && segments[1] === "workouts") {
+      if (segments.length === 5 && hasYearMonth(segments[2], segments[3])) {
+        return normalizeRawAssetOwner({
+          kind: "workout",
+          id: segments[4] as string,
+        });
+      }
+
+      if (segments.length === 6 && hasYearMonth(segments[3], segments[4])) {
+        return normalizeRawAssetOwner({
+          kind: "workout_batch",
+          partition: segments[2] as string,
+          id: segments[5] as string,
+        });
+      }
+    }
+
+    if (
+      segments[0] === "raw"
+      && segments[1] === "samples"
+      && segments.length === 6
+      && hasYearMonth(segments[3], segments[4])
+    ) {
+      return normalizeRawAssetOwner({
+        kind: "sample_batch",
+        partition: segments[2] as string,
+        id: segments[5] as string,
+      });
+    }
+
+    if (
+      segments[0] === "raw"
+      && segments[1] === "integrations"
+      && segments.length === 6
+      && hasYearMonth(segments[3], segments[4])
+    ) {
+      return normalizeRawAssetOwner({
+        kind: "device_batch",
+        partition: segments[2] as string,
+        id: segments[5] as string,
+      });
+    }
+  } catch {
+    return null;
   }
 
-  if (category === "samples") {
-    const safeStream = sanitizePathSegment(stream, "stream");
-    return `${VAULT_LAYOUT.rawSamplesDirectory}/${safeStream}/${year}/${month}/${stableId}/${safeFileName}`;
+  return null;
+}
+
+export function rawDirectoryMatchesOwner(rawDirectory: string, owner: RawAssetOwner): boolean {
+  let normalizedOwner: RawAssetOwner;
+
+  try {
+    normalizedOwner = normalizeRawAssetOwner(owner);
+  } catch {
+    return false;
   }
 
-  if (category === "assessments") {
-    return `${VAULT_LAYOUT.rawAssessmentsDirectory}/${year}/${month}/${stableId}/source.json`;
-  }
-
-  if (category === "integrations") {
-    const safeProvider = sanitizePathSegment(provider, "provider");
-    return `${VAULT_LAYOUT.rawDirectory}/integrations/${safeProvider}/${year}/${month}/${stableId}/${safeFileName}`;
-  }
-
-  if (category === "measurements") {
-    return `${VAULT_LAYOUT.rawMeasurementsDirectory}/${year}/${month}/${stableId}/${safeFileName}`;
-  }
-
-  if (category === "workouts") {
-    return `${VAULT_LAYOUT.rawWorkoutsDirectory}/${year}/${month}/${stableId}/${safeFileName}`;
-  }
-
-  return `${VAULT_LAYOUT.rawDirectory}/${sanitizePathSegment(category, "artifact")}/${year}/${month}/${stableId}/${safeFileName}`;
+  const inferredOwner = inferRawAssetOwnerFromDirectory(rawDirectory);
+  return inferredOwner !== null
+    && inferredOwner.kind === normalizedOwner.kind
+    && inferredOwner.id === normalizedOwner.id
+    && inferredOwner.partition === normalizedOwner.partition;
 }
 
 export async function copyRawArtifact({
@@ -136,24 +323,18 @@ export async function copyRawArtifact({
 
 export function prepareRawArtifact({
   sourcePath,
-  category = "artifact",
+  owner,
   occurredAt = new Date(),
+  role,
   targetName,
-  recordId,
-  slot,
-  stream,
-  provider,
 }: PrepareRawArtifactInput): RawArtifact {
   const originalFileName = basenameFromFilePath(sourcePath);
   const relativePath = resolveRawRelativePath({
-    category,
+    owner,
     occurredAt,
     originalFileName,
-    recordId,
-    slot,
-    stream,
+    role,
     targetName,
-    provider,
   });
 
   return {
@@ -165,25 +346,19 @@ export function prepareRawArtifact({
 
 export function prepareInlineRawArtifact({
   fileName,
-  category = "artifact",
+  owner,
   occurredAt = new Date(),
+  role,
   targetName,
-  recordId,
-  slot,
-  stream,
-  provider,
   mediaType,
 }: PrepareInlineRawArtifactInput): RawArtifact {
   const originalFileName = basenameFromFilePath(fileName);
   const relativePath = resolveRawRelativePath({
-    category,
+    owner,
     occurredAt,
     originalFileName,
-    recordId,
-    slot,
-    stream,
+    role,
     targetName,
-    provider,
   });
 
   return {

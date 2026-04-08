@@ -87,6 +87,11 @@ interface ManifestEnvelope {
     schemaVersion: string
     importId: string
     importKind: string
+    owner?: {
+      kind: string
+      id: string
+      partition?: string
+    }
     rawDirectory: string
     source: string | null
     artifacts: Array<{
@@ -276,9 +281,13 @@ test.sequential(
       assert.equal(requireData(manifest).lookupId, currentDocument.lookupId)
       assert.equal(requireData(manifest).kind, 'document')
       assert.match(requireData(manifest).manifestFile, /\/manifest\.json$/u)
-      assert.equal(requireData(manifest).manifest.schemaVersion, 'murph.raw-import-manifest.v1')
+      assert.equal(requireData(manifest).manifest.schemaVersion, 'murph.raw-import-manifest.v2')
       assert.equal(requireData(manifest).manifest.importKind, 'document')
       assert.equal(requireData(manifest).manifest.importId, currentDocument.documentId)
+      assert.deepEqual(requireData(manifest).manifest.owner, {
+        kind: 'document',
+        id: currentDocument.documentId,
+      })
       assert.equal(requireData(manifest).manifest.source, 'device')
       assert.equal(
         requireData(manifest).manifest.rawDirectory,

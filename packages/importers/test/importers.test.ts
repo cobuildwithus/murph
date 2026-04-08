@@ -518,7 +518,7 @@ test("importCsvSamples with the real core runtime writes a batch manifest with r
   );
 
   assert.equal(result.count, 2);
-  assert.match(result.manifestPath, /^raw\/samples\/heart-rate\/.+\/manifest\.json$/u);
+  assert.match(result.manifestPath, /^raw\/samples\/heart_rate\/.+\/manifest\.json$/u);
 
   const manifest = JSON.parse(
     await readFile(join(vaultRoot, result.manifestPath), "utf8"),

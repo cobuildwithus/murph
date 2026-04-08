@@ -70,6 +70,8 @@ repo/
   - `audit/*.jsonl`
 - Immutable imported raw artifacts:
   - `raw/**`
+  - stored under owner-scoped directories derived from the owning canonical record or import session (`kind` + `id`, with a partition only for batch families such as device/sample/workout imports)
+  - each raw import directory keeps a `manifest.json` sidecar that records the same explicit owner metadata used to resolve the path
   - including provider/device snapshots under `raw/integrations/**`
 - Rebuildable parser artifacts:
   - `derived/inbox/**`
