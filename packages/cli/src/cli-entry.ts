@@ -10,6 +10,14 @@ export interface MurphCliRunOptions {
 
 type SuccessfulSetupContext = import('@murphai/setup-cli/setup-cli').SuccessfulSetupContext
 type CliServeOptions = Parameters<Cli.Cli['serve']>[1]
+type ProcessEmitWarningRestArgs = Parameters<typeof process.emitWarning> extends [
+  unknown,
+  ...infer Rest,
+]
+  ? Rest
+  : never
+
+const SQLITE_EXPERIMENTAL_WARNING_MESSAGE = 'SQLite is an experimental feature'
 
 let sqliteExperimentalWarningFilterInstalled = false
 
@@ -66,56 +74,61 @@ export async function runMurphCliAction(
     await setupCli.serve(argv, serveOptions)
 
     const setupContext = successfulSetup.current
-    if (setupContext !== null) {
-      const launchVault =
-        (await resolveDefaultVault(homeDirectory)) ??
-        expandConfiguredVaultPath(setupContext.result.vault, homeDirectory)
+    if (setupContext === null) {
+      return
+    }
 
-      const readyWearables = listSetupReadyWearables(setupContext.result)
-      const pendingWearables = listSetupPendingWearables(setupContext.result)
+    const launchVault =
+      (await resolveDefaultVault(homeDirectory)) ??
+      expandConfiguredVaultPath(setupContext.result.vault, homeDirectory)
 
-      if (pendingWearables.length > 0) {
-        const pendingSummary = pendingWearables
-          .map(
-            (wearable) =>
-              `${formatSetupWearableLabel(wearable.wearable)} (${wearable.missingEnv.join(', ')})`,
-          )
-          .join(', ')
-        process.stderr.write(
-          `\nSelected wearable setup is waiting on credentials: ${pendingSummary}. ${SETUP_RUNTIME_ENV_NOTICE}\n`,
+    const readyWearables = listSetupReadyWearables(setupContext.result)
+    const pendingWearables = listSetupPendingWearables(setupContext.result)
+
+    if (pendingWearables.length > 0) {
+      const pendingSummary = pendingWearables
+        .map(
+          (wearable) =>
+            `${formatSetupWearableLabel(wearable.wearable)} (${wearable.missingEnv.join(', ')})`,
         )
-      }
+        .join(', ')
+      process.stderr.write(
+        `\nSelected wearable setup is waiting on credentials: ${pendingSummary}. ${SETUP_RUNTIME_ENV_NOTICE}\n`,
+      )
+    }
 
-      for (const wearable of readyWearables) {
-        process.stderr.write(
-          `\nOpening ${formatSetupWearableLabel(wearable)} connect flow in your browser.\n\n`,
+    for (const wearable of readyWearables) {
+      const wearableLabel = formatSetupWearableLabel(wearable)
+      process.stderr.write(
+        `\nOpening ${wearableLabel} connect flow in your browser.\n\n`,
+      )
+      try {
+        await cli.serve(
+          ['device', 'connect', wearable, '--vault', launchVault, '--open'],
+          serveOptions,
         )
-        try {
-          await cli.serve(
-            ['device', 'connect', wearable, '--vault', launchVault, '--open'],
-            serveOptions,
-          )
-        } catch (error) {
-          process.stderr.write(
-            `Could not start the ${formatSetupWearableLabel(wearable)} connect flow: ${formatErrorMessage(error)}\n`,
-          )
-        }
-      }
-
-      const launchAction = resolveSetupPostLaunchAction(setupContext)
-      if (launchAction !== null) {
-        if (launchAction === 'assistant-run') {
-          process.stderr.write(
-            '\nStarting Murph assistant automation. Leave this terminal open while channel auto-reply is active for iMessage, Telegram, and/or email. Press Ctrl+C to stop.\n\n',
-          )
-          await cli.serve(['assistant', 'run', '--vault', launchVault], serveOptions)
-          return
-        }
-
-        process.stderr.write('\nOpening Murph assistant chat. Type /exit to quit.\n\n')
-        await cli.serve(['assistant', 'chat', '--vault', launchVault], serveOptions)
+      } catch (error) {
+        process.stderr.write(
+          `Could not start the ${wearableLabel} connect flow: ${formatErrorMessage(error)}\n`,
+        )
       }
     }
+
+    const launchAction = resolveSetupPostLaunchAction(setupContext)
+    if (launchAction === null) {
+      return
+    }
+
+    if (launchAction === 'assistant-run') {
+      process.stderr.write(
+        '\nStarting Murph assistant automation. Leave this terminal open while channel auto-reply is active for iMessage, Telegram, and/or email. Press Ctrl+C to stop.\n\n',
+      )
+      await cli.serve(['assistant', 'run', '--vault', launchVault], serveOptions)
+      return
+    }
+
+    process.stderr.write('\nOpening Murph assistant chat. Type /exit to quit.\n\n')
+    await cli.serve(['assistant', 'chat', '--vault', launchVault], serveOptions)
     return
   }
 
@@ -127,7 +140,7 @@ export function formatMurphCliError(error: unknown): string {
   return formatStructuredErrorMessage(error)
 }
 
-function createCliServeOptions(
+export function createCliServeOptions(
   exit: ((code?: number) => void) | undefined,
 ): CliServeOptions {
   return {
@@ -152,12 +165,7 @@ export function loadCliEnvFiles(cwd = process.cwd()): void {
     try {
       process.loadEnvFile(filePath)
     } catch (error) {
-      if (
-        typeof error === 'object' &&
-        error !== null &&
-        'code' in error &&
-        error.code === 'ENOENT'
-      ) {
+      if (isNodeErrorWithCode(error, 'ENOENT')) {
         continue
       }
 
@@ -175,34 +183,42 @@ export function installSqliteExperimentalWarningFilter(): void {
   const originalEmitWarning = process.emitWarning.bind(process)
 
   process.emitWarning = ((warning: string | Error, ...args: unknown[]) => {
-    const message =
-      typeof warning === 'string'
-        ? warning
-        : warning instanceof Error
-          ? warning.message
-          : ''
-    const warningType =
-      typeof args[0] === 'string'
-        ? args[0]
-        : warning instanceof Error
-          ? warning.name
-          : ''
-
-    if (
-      warningType === 'ExperimentalWarning' &&
-      message.includes('SQLite is an experimental feature')
-    ) {
+    if (isSqliteExperimentalWarning(warning, args)) {
       return
     }
 
     return originalEmitWarning(
       warning as Parameters<typeof process.emitWarning>[0],
-      ...(args as Parameters<typeof process.emitWarning> extends [
-        unknown,
-        ...infer Rest,
-      ]
-        ? Rest
-        : never),
+      ...(args as ProcessEmitWarningRestArgs),
     )
   }) as typeof process.emitWarning
+}
+
+function isNodeErrorWithCode(error: unknown, code: string): boolean {
+  return typeof error === 'object' && error !== null && 'code' in error && error.code === code
+}
+
+function isSqliteExperimentalWarning(
+  warning: string | Error,
+  args: readonly unknown[],
+): boolean {
+  return (
+    resolveWarningType(warning, args) === 'ExperimentalWarning' &&
+    resolveWarningMessage(warning).includes(SQLITE_EXPERIMENTAL_WARNING_MESSAGE)
+  )
+}
+
+function resolveWarningMessage(warning: string | Error): string {
+  return typeof warning === 'string' ? warning : warning.message
+}
+
+function resolveWarningType(
+  warning: string | Error,
+  args: readonly unknown[],
+): string {
+  if (typeof args[0] === 'string') {
+    return args[0]
+  }
+
+  return warning instanceof Error ? warning.name : ''
 }

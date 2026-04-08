@@ -147,6 +147,10 @@ export async function runReviewGptPrompt(
   } = {},
 ): Promise<ReviewGptPromptResult> {
   const prompt = normalizeReviewGptPrompt(input.prompt)
+  const chat = normalizeOptionalText(input.chat)
+  const browserPath = normalizeOptionalText(input.browserPath)
+  const timeout = normalizeOptionalText(input.timeout)
+  const waitTimeout = normalizeOptionalText(input.waitTimeout)
   const workspaceRoot = (dependencies.resolveWorkspaceRoot ??
     resolveReviewGptWorkspaceRoot)({
     prompt,
@@ -183,10 +187,10 @@ export async function runReviewGptPrompt(
       prompt,
       responseFile,
       mode: input.mode,
-      chat: normalizeOptionalText(input.chat),
-      browserPath: normalizeOptionalText(input.browserPath),
-      timeout: normalizeOptionalText(input.timeout),
-      waitTimeout: normalizeOptionalText(input.waitTimeout),
+      chat,
+      browserPath,
+      timeout,
+      waitTimeout,
     })
 
     await runProcess({
@@ -201,7 +205,7 @@ export async function runReviewGptPrompt(
     const thinking = input.mode === 'gpt-pro' ? DEFAULT_DEEPTHINK_THINKING : null
 
     return {
-      chat: normalizeOptionalText(input.chat) ?? null,
+      chat: chat ?? null,
       mode: input.mode,
       model,
       prompt,
