@@ -7,6 +7,7 @@ import {
   healthQueryRuntimeMethodNames,
 } from "../src/health-cli-descriptors.ts";
 import { createRuntimeUnavailableError } from "../src/runtime-errors.ts";
+import { createUnwiredMethod } from "../src/usecases/runtime.ts";
 import { loadRuntimeModule } from "../src/runtime-import.ts";
 import { importWithMocks } from "./mock-import.ts";
 
@@ -55,7 +56,6 @@ function createQueryRuntimeStub() {
 
 afterEach(() => {
   vi.doUnmock("../src/runtime-import.ts");
-  vi.resetModules();
   vi.restoreAllMocks();
 });
 
@@ -84,9 +84,7 @@ test("createRuntimeUnavailableError preserves package guidance with and without 
 });
 
 test("createUnwiredMethod rejects with a shared not_implemented error", async () => {
-  const runtimeModule = await import("../src/usecases/runtime.ts");
-
-  await assert.rejects(runtimeModule.createUnwiredMethod("query.showGoal")(), {
+  await assert.rejects(createUnwiredMethod("query.showGoal")(), {
     name: "VaultCliError",
     code: "not_implemented",
     message: "CLI integration for query.showGoal is not wired yet.",

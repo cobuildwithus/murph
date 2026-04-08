@@ -68,7 +68,6 @@ function createCommandQueryRuntimeShape() {
 afterEach(() => {
   vi.doUnmock("../src/query-runtime.ts");
   vi.doUnmock("../src/runtime-import.ts");
-  vi.resetModules();
   vi.restoreAllMocks();
 });
 

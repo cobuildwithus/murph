@@ -41,6 +41,7 @@ import {
   workoutImportManifestResultSchema,
   workoutLookupSchema,
 } from "../src/usecases/workout-read.ts";
+import * as workoutModule from "../src/usecases/workout.ts";
 import { importWithMocks, mockActualModule } from "./mock-import.ts";
 
 const mockedModuleSpecifiers = [
@@ -54,7 +55,6 @@ const mockedModuleSpecifiers = [
 ];
 
 afterEach(() => {
-  vi.resetModules();
   vi.restoreAllMocks();
   for (const specifier of mockedModuleSpecifiers) {
     vi.doUnmock(specifier);
@@ -409,8 +409,6 @@ describe("workout-core", () => {
 
 describe("workout", () => {
   test("resolves workout capture text and builds structured drafts", async () => {
-    const workoutModule = await import("../src/usecases/workout.ts");
-
     assert.throws(
       () => workoutModule.resolveWorkoutCapture({ text: "" }),
       {
