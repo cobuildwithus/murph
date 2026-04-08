@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
 import { afterEach, test, vi } from 'vitest'
 
+import { runSetupAssistantWizard } from '../src/setup-assistant-wizard.ts'
+
 type InputEvent = {
   key?: Partial<{
     ctrl: boolean
@@ -185,7 +187,6 @@ vi.mock('ink', async () => {
 afterEach(() => {
   inkState.events = []
   inkState.exitCalls = 0
-  vi.resetModules()
 })
 
 test('assistant wizard walks the default OpenAI sign-in flow to a saved selection', async () => {
@@ -195,7 +196,6 @@ test('assistant wizard walks the default OpenAI sign-in flow to a saved selectio
     { key: { return: true } },
   ]
 
-  const { runSetupAssistantWizard } = await import('../src/setup-assistant-wizard.ts')
   const result = await runSetupAssistantWizard({
     initialAssistantPreset: 'codex',
   })
@@ -219,7 +219,6 @@ test('assistant wizard can switch to a named compatible provider and finish the 
     { key: { return: true } },
   ]
 
-  const { runSetupAssistantWizard } = await import('../src/setup-assistant-wizard.ts')
   const result = await runSetupAssistantWizard({
     initialAssistantApiKeyEnv: '  CUSTOM_KEY  ',
     initialAssistantBaseUrl: ' https://example.test/v1 ',
@@ -239,8 +238,6 @@ test('assistant wizard can switch to a named compatible provider and finish the 
 test('assistant wizard surfaces the cancellation error when the user quits from the provider step', async () => {
   inkState.events = [{ value: 'q' }]
 
-  const { runSetupAssistantWizard } = await import('../src/setup-assistant-wizard.ts')
-
   await assert.rejects(
     runSetupAssistantWizard({
       initialAssistantPreset: 'codex',
@@ -251,8 +248,6 @@ test('assistant wizard surfaces the cancellation error when the user quits from 
 
 test('assistant wizard also cancels when escape is pressed on the provider step', async () => {
   inkState.events = [{ key: { escape: true } }]
-
-  const { runSetupAssistantWizard } = await import('../src/setup-assistant-wizard.ts')
 
   await assert.rejects(
     runSetupAssistantWizard({
@@ -273,7 +268,6 @@ test('assistant wizard can go back from review to the method step before saving'
     { key: { return: true } },
   ]
 
-  const { runSetupAssistantWizard } = await import('../src/setup-assistant-wizard.ts')
   const result = await runSetupAssistantWizard({
     initialAssistantPreset: 'codex',
   })
@@ -298,7 +292,6 @@ test('assistant wizard lets the user back out of the method step and switch prov
     { key: { return: true } },
   ]
 
-  const { runSetupAssistantWizard } = await import('../src/setup-assistant-wizard.ts')
   const result = await runSetupAssistantWizard({
     initialAssistantPreset: 'codex',
   })
