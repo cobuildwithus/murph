@@ -1,7 +1,7 @@
 import Link from "next/link";
 
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Button } from "@/src/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/src/components/ui/card";
 
 export default async function JoinInviteCancelPage(input: {
   params: Promise<{ inviteCode: string }>;

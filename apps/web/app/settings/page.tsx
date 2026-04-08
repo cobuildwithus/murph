@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 
-import { Badge } from "@/components/ui/badge";
-import { Card, CardContent } from "@/components/ui/card";
+import { Badge } from "@/src/components/ui/badge";
+import { Card, CardContent } from "@/src/components/ui/card";
 import { HostedBillingSettings } from "@/src/components/settings/hosted-billing-settings";
 import { HostedDeviceSyncSettings } from "@/src/components/settings/hosted-device-sync-settings";
 import { HostedEmailSettings } from "@/src/components/settings/hosted-email-settings";

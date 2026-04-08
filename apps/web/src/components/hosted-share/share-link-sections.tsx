@@ -2,8 +2,8 @@
 
 import Link from "next/link";
 
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Button } from "@/components/ui/button";
+import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
+import { Button } from "@/src/components/ui/button";
 import type { HostedSharePageData } from "@/src/lib/hosted-share/service";
 
 import {

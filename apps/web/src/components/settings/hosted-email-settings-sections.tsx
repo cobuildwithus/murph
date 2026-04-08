@@ -1,19 +1,19 @@
 "use client";
 
-import { Button } from "@/components/ui/button";
+import { Button } from "@/src/components/ui/button";
 import {
   Dialog,
   DialogContent,
   DialogDescription,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+} from "@/src/components/ui/dialog";
+import { Input } from "@/src/components/ui/input";
+import { Label } from "@/src/components/ui/label";
 import type { HostedPrivyEmailAccount } from "@/src/lib/hosted-onboarding/privy-shared";
 import { isHostedPrivyEmailAccountVerified } from "@/src/lib/hosted-onboarding/privy-shared";
 
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 
 export function HostedEmailSettingsContent(props: {
   currentEmail: HostedPrivyEmailAccount | null;

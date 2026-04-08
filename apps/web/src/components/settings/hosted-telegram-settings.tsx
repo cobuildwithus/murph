@@ -3,7 +3,7 @@
 import { usePrivy, useUser } from "@privy-io/react-auth";
 import { useState } from "react";
 
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import type { HostedPrivyTelegramAccount } from "@/src/lib/hosted-onboarding/privy-shared";
 
 import {

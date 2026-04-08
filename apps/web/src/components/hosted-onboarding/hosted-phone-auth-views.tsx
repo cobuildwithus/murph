@@ -4,8 +4,8 @@ import type { ReactNode } from "react";
 import { LoaderCircleIcon } from "lucide-react";
 import type { FormEvent } from "react";
 
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Button } from "@/components/ui/button";
+import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
+import { Button } from "@/src/components/ui/button";
 
 import {
   HostedCodeEntryStep,
