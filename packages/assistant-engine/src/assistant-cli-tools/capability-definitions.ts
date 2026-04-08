@@ -29,7 +29,7 @@ import {
 import {
   healthEntityDescriptors,
   hasHealthCommandDescriptor,
-} from '../health-cli-descriptors.js'
+} from '@murphai/vault-usecases/health-cli-descriptors'
 import { resolveAssistantVaultPath } from '../assistant-vault-paths.js'
 import {
   defineAssistantCapability,
@@ -57,7 +57,7 @@ import {
 import {
   executeAssistantCliCommand,
   readAssistantTextFile,
-  writeAssistantPayloadFile,
+  withAssistantPayloadFile,
 } from './execution-adapters.js'
 
 const localDateSchema = z
@@ -931,14 +931,18 @@ export function createCanonicalVaultWriteToolDefinitions(
           title: 'Example Provider',
         },
       },
-      execute: async ({ payload }) => {
-        const inputFile = await writeAssistantPayloadFile(input.vault, 'vault.provider.upsert', payload)
-        return input.vaultServices!.core.upsertProvider({
-          vault: input.vault,
-          requestId: input.requestId ?? null,
-          inputFile,
-        })
-      },
+      execute: ({ payload }) =>
+        withAssistantPayloadFile(
+          input.vault,
+          'vault.provider.upsert',
+          payload,
+          (inputFile) =>
+            input.vaultServices!.core.upsertProvider({
+              vault: input.vault,
+              requestId: input.requestId ?? null,
+              inputFile,
+            }),
+        ),
     }),
     defineVaultServiceBackedTool({
       name: 'vault.recipe.upsert',
@@ -955,14 +959,18 @@ export function createCanonicalVaultWriteToolDefinitions(
           steps: ['Roast the salmon.', 'Serve over rice.'],
         },
       },
-      execute: async ({ payload }) => {
-        const inputFile = await writeAssistantPayloadFile(input.vault, 'vault.recipe.upsert', payload)
-        return input.vaultServices!.core.upsertRecipe({
-          vault: input.vault,
-          requestId: input.requestId ?? null,
-          inputFile,
-        })
-      },
+      execute: ({ payload }) =>
+        withAssistantPayloadFile(
+          input.vault,
+          'vault.recipe.upsert',
+          payload,
+          (inputFile) =>
+            input.vaultServices!.core.upsertRecipe({
+              vault: input.vault,
+              requestId: input.requestId ?? null,
+              inputFile,
+            }),
+        ),
     }),
     defineVaultServiceBackedTool({
       name: 'vault.food.upsert',
@@ -979,14 +987,18 @@ export function createCanonicalVaultWriteToolDefinitions(
           ingredients: ['acai base', 'banana', 'granola'],
         },
       },
-      execute: async ({ payload }) => {
-        const inputFile = await writeAssistantPayloadFile(input.vault, 'vault.food.upsert', payload)
-        return input.vaultServices!.core.upsertFood({
-          vault: input.vault,
-          requestId: input.requestId ?? null,
-          inputFile,
-        })
-      },
+      execute: ({ payload }) =>
+        withAssistantPayloadFile(
+          input.vault,
+          'vault.food.upsert',
+          payload,
+          (inputFile) =>
+            input.vaultServices!.core.upsertFood({
+              vault: input.vault,
+              requestId: input.requestId ?? null,
+              inputFile,
+            }),
+        ),
     }),
     defineVaultServiceBackedTool({
       name: 'vault.event.upsert',
@@ -1002,14 +1014,18 @@ export function createCanonicalVaultWriteToolDefinitions(
           title: 'Example event',
         },
       },
-      execute: async ({ payload }) => {
-        const inputFile = await writeAssistantPayloadFile(input.vault, 'vault.event.upsert', payload)
-        return input.vaultServices!.core.upsertEvent({
-          vault: input.vault,
-          requestId: input.requestId ?? null,
-          inputFile,
-        })
-      },
+      execute: ({ payload }) =>
+        withAssistantPayloadFile(
+          input.vault,
+          'vault.event.upsert',
+          payload,
+          (inputFile) =>
+            input.vaultServices!.core.upsertEvent({
+              vault: input.vault,
+              requestId: input.requestId ?? null,
+              inputFile,
+            }),
+        ),
     }),
     defineVaultServiceBackedTool({
       name: 'vault.samples.add',
@@ -1026,14 +1042,18 @@ export function createCanonicalVaultWriteToolDefinitions(
           samples: [],
         },
       },
-      execute: async ({ payload }) => {
-        const inputFile = await writeAssistantPayloadFile(input.vault, 'vault.samples.add', payload)
-        return input.vaultServices!.core.addSamples({
-          vault: input.vault,
-          requestId: input.requestId ?? null,
-          inputFile,
-        })
-      },
+      execute: ({ payload }) =>
+        withAssistantPayloadFile(
+          input.vault,
+          'vault.samples.add',
+          payload,
+          (inputFile) =>
+            input.vaultServices!.core.addSamples({
+              vault: input.vault,
+              requestId: input.requestId ?? null,
+              inputFile,
+            }),
+        ),
     }),
     defineVaultServiceBackedTool({
       name: 'vault.intake.import',
@@ -1216,26 +1236,27 @@ export function createHealthUpsertToolDefinitions(
         inputExample: {
           payload: descriptor.core.payloadTemplate,
         },
-        execute: async ({ payload }) => {
-          const inputFile = await writeAssistantPayloadFile(
+        execute: ({ payload }) =>
+          withAssistantPayloadFile(
             input.vault,
             `vault.${descriptor.command.commandName}.upsert`,
             payload,
-          )
-          const method = input.vaultServices!.core[
-            descriptor.core.upsertServiceMethod
-          ] as unknown as (input: {
-            vault: string
-            requestId: string | null
-            input: string
-          }) => Promise<unknown>
+            async (inputFile) => {
+              const method = input.vaultServices!.core[
+                descriptor.core.upsertServiceMethod
+              ] as unknown as (input: {
+                vault: string
+                requestId: string | null
+                input: string
+              }) => Promise<unknown>
 
-          return method({
-            vault: input.vault,
-            requestId: input.requestId ?? null,
-            input: inputFile,
-          })
-        },
+              return method({
+                vault: input.vault,
+                requestId: input.requestId ?? null,
+                input: inputFile,
+              })
+            },
+          ),
       }, 'healthEntityDescriptors'),
     )
 }

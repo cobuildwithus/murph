@@ -1,12 +1,13 @@
 import { spawn } from 'node:child_process'
 import { constants } from 'node:fs'
-import { access, mkdir, open, rm, writeFile } from 'node:fs/promises'
+import { access, mkdir, mkdtemp, open, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { prepareAssistantDirectCliEnv } from '../assistant-cli-access.js'
 import { normalizeNullableString } from '../assistant/shared.js'
 import { resolveAssistantVaultPath } from '../assistant-vault-paths.js'
 import { sanitizeChildProcessEnv } from '../child-process-env.js'
+import { resolveRuntimePaths } from '@murphai/runtime-state/node'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import type { AssistantToolContext, AssistantCliLlmsManifest } from './shared.js'
 import {
@@ -261,32 +262,69 @@ export async function readAssistantTextFile(
   }
 }
 
-export async function writeAssistantPayloadFile(
+const ASSISTANT_PAYLOAD_TEMP_DIRECTORY_MODE = 0o700
+const ASSISTANT_PAYLOAD_TEMP_FILE_MODE = 0o600
+
+export async function withAssistantPayloadFile<TResult>(
   vaultRoot: string,
   toolName: string,
   payload: Record<string, unknown>,
-): Promise<string> {
-  const fileName = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}.json`
-  const directory = path.join(
+  action: (inputFile: string) => Promise<TResult>,
+): Promise<TResult> {
+  const { cleanupPath, inputFile } = await createAssistantPayloadFile(
     vaultRoot,
-    'derived',
-    'assistant',
-    'payloads',
-    sanitizeToolName(toolName),
+    toolName,
+    payload,
   )
-  const absolutePath = path.join(directory, fileName)
-  await mkdir(directory, { recursive: true })
-  await writeFile(absolutePath, `${JSON.stringify(payload, null, 2)}\n`, 'utf8')
-  return absolutePath
+
+  try {
+    return await action(inputFile)
+  } finally {
+    await rm(cleanupPath, { force: true, recursive: true })
+  }
+}
+
+async function createAssistantPayloadFile(
+  vaultRoot: string,
+  toolName: string,
+  payload: Record<string, unknown>,
+): Promise<{
+  cleanupPath: string
+  inputFile: string
+}> {
+  const runtimePaths = resolveRuntimePaths(vaultRoot)
+  const payloadRoot = path.join(runtimePaths.tempRoot, 'assistant', 'payloads')
+  await mkdir(payloadRoot, {
+    recursive: true,
+    mode: ASSISTANT_PAYLOAD_TEMP_DIRECTORY_MODE,
+  })
+
+  const tempDirectory = await mkdtemp(
+    path.join(payloadRoot, `${sanitizeToolName(toolName) || 'payload'}-`),
+  )
+  const inputFile = path.join(tempDirectory, 'payload.json')
+
+  try {
+    await writeFile(inputFile, `${JSON.stringify(payload, null, 2)}\n`, {
+      encoding: 'utf8',
+      mode: ASSISTANT_PAYLOAD_TEMP_FILE_MODE,
+    })
+  } catch (error) {
+    await rm(tempDirectory, { force: true, recursive: true })
+    throw error
+  }
+
+  return {
+    cleanupPath: tempDirectory,
+    inputFile,
+  }
 }
 
 async function resolveAssistantCliLauncher(
   env: NodeJS.ProcessEnv,
 ): Promise<AssistantCliLauncher> {
   const preparedEnv = prepareAssistantDirectCliEnv(env)
-  const workspaceCliBinPath = resolveWorkspaceCliBinPath()
-  const workspaceBuiltCliBinPath = resolveWorkspaceBuiltCliBinPath()
-  const workspaceTsxBinPath = resolveWorkspaceTsxBinPath()
+  const localBuiltCliBinPath = resolveLocalBuiltWorkspaceCliBinPath()
   const vaultCliBinary = await resolveExecutableOnPath(
     'vault-cli',
     preparedEnv,
@@ -298,85 +336,26 @@ async function resolveAssistantCliLauncher(
     }
   }
 
-  if (workspaceBuiltCliBinPath && await pathExists(workspaceBuiltCliBinPath)) {
+  if (localBuiltCliBinPath && await pathExists(localBuiltCliBinPath)) {
     return {
-      argvPrefix: [workspaceBuiltCliBinPath],
+      argvPrefix: [localBuiltCliBinPath],
       command: process.execPath,
-    }
-  }
-
-  const workspaceTsxCliPath = await resolveWorkspaceTsxCliPath()
-  if (workspaceTsxCliPath !== null && workspaceCliBinPath !== null) {
-    return {
-      argvPrefix: [workspaceTsxCliPath, workspaceCliBinPath],
-      command: process.execPath,
-    }
-  }
-
-  if (workspaceTsxBinPath && workspaceCliBinPath && await isExecutable(workspaceTsxBinPath)) {
-    return {
-      argvPrefix: [workspaceCliBinPath],
-      command: workspaceTsxBinPath,
-    }
-  }
-
-  const pnpmBinary = await resolveExecutableOnPath(
-    'pnpm',
-    preparedEnv,
-  )
-  if (pnpmBinary && workspaceCliBinPath !== null) {
-    return {
-      argvPrefix: ['exec', 'tsx', workspaceCliBinPath],
-      command: pnpmBinary,
-    }
-  }
-
-  const npxBinary = await resolveExecutableOnPath(
-    'npx',
-    preparedEnv,
-  )
-  if (npxBinary && workspaceCliBinPath !== null) {
-    return {
-      argvPrefix: ['--yes', 'tsx', workspaceCliBinPath],
-      command: npxBinary,
     }
   }
 
   throw new VaultCliError(
     'ASSISTANT_CLI_COMMAND_FAILED',
-    'Could not resolve `vault-cli` on PATH and no workspace tsx fallback was available.',
+    'Could not resolve `vault-cli` on PATH and no local built workspace CLI artifact was available.',
   )
 }
 
-function resolveWorkspaceCliBinPath(): string | null {
-  const moduleDir = resolveExecutionAdaptersModuleDir()
-  if (!moduleDir) {
-    return null
-  }
-
-  return path.resolve(moduleDir, '../../../cli/src/bin.ts')
-}
-
-function resolveWorkspaceBuiltCliBinPath(): string | null {
+function resolveLocalBuiltWorkspaceCliBinPath(): string | null {
   const moduleDir = resolveExecutionAdaptersModuleDir()
   if (!moduleDir) {
     return null
   }
 
   return path.resolve(moduleDir, '../../../cli/dist/bin.js')
-}
-
-function resolveWorkspaceTsxBinPath(): string | null {
-  const moduleDir = resolveExecutionAdaptersModuleDir()
-  if (!moduleDir) {
-    return null
-  }
-
-  return path.resolve(
-    moduleDir,
-    '../../../../node_modules/.bin',
-    process.platform === 'win32' ? 'tsx.cmd' : 'tsx',
-  )
 }
 
 function resolveExecutionAdaptersModuleDir(): string | null {
@@ -420,15 +399,6 @@ async function resolveExecutableOnPath(
   return null
 }
 
-async function pathExists(candidatePath: string): Promise<boolean> {
-  try {
-    await access(candidatePath, constants.F_OK)
-    return true
-  } catch {
-    return false
-  }
-}
-
 async function isExecutable(candidatePath: string): Promise<boolean> {
   try {
     await access(candidatePath, constants.X_OK)
@@ -438,17 +408,12 @@ async function isExecutable(candidatePath: string): Promise<boolean> {
   }
 }
 
-async function resolveWorkspaceTsxCliPath(): Promise<string | null> {
-  if (typeof import.meta.url !== 'string' || import.meta.url.length === 0) {
-    return null
-  }
-
+async function pathExists(candidatePath: string): Promise<boolean> {
   try {
-    const { createRequire } = await import('node:module')
-    const assistantCliRequire = createRequire(import.meta.url)
-    return assistantCliRequire.resolve('tsx/cli')
+    await access(candidatePath, constants.F_OK)
+    return true
   } catch {
-    return null
+    return false
   }
 }
 

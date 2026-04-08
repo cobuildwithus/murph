@@ -105,7 +105,7 @@ describe("dispatchHostedExecutionBestEffort", () => {
     });
     expect(errorSpy).toHaveBeenCalledWith(
       "Hosted execution dispatch failed (device-sync webhook-accepted user=user-123 provider=oura connection=dsc_123).",
-      "Hosted execution dispatch failed with HTTP 503: runner unavailable.",
+      "Hosted execution dispatch failed with HTTP 503.",
     );
     expect(timeoutSpy).toHaveBeenCalledWith(30_000);
   });

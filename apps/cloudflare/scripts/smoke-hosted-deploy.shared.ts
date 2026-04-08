@@ -211,7 +211,7 @@ async function sendSmokeControlRequest(input: SmokeControlRequest & {
   });
 
   if (!response.ok) {
-    throw new Error(`${input.action} failed with HTTP ${response.status}: ${(await response.text()).slice(0, 500)}.`);
+    throw new Error(`${input.action} failed with HTTP ${response.status}.`);
   }
 
   return response;

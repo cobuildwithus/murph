@@ -229,6 +229,40 @@ describe("runSmokeHostedDeploy", () => {
     })).rejects.toThrow(/Timed out waiting for manual smoke run completion/u);
   });
 
+  it("does not echo manual smoke control response bodies in thrown errors", async () => {
+    const promise = runSmokeHostedDeploy({
+      fetchImpl: async (url: RequestInfo | URL) => {
+        if (String(url).endsWith("/health")) {
+          return new Response(JSON.stringify({ ok: true }), { status: 200 });
+        }
+
+        if (String(url).endsWith("/status")) {
+          return new Response(JSON.stringify({
+            bundleRef: null,
+            inFlight: false,
+            lastError: null,
+            lastRunAt: null,
+            pendingEventCount: 0,
+            poisonedEventIds: [],
+            retryingEventId: null,
+            userId: "member_123",
+          }), { status: 200 });
+        }
+
+        return new Response("runner token secret", { status: 500 });
+      },
+      log() {},
+      source: {
+        HOSTED_EXECUTION_SMOKE_OIDC_TOKEN: "vercel-oidc-token",
+        HOSTED_EXECUTION_SMOKE_USER_ID: "member_123",
+        HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL: "https://worker.example.test",
+      },
+    });
+
+    await expect(promise).rejects.toThrow("Manual smoke run failed with HTTP 500.");
+    await expect(promise).rejects.not.toThrow(/runner token secret/u);
+  });
+
   it("accepts either HOSTED_EXECUTION_SMOKE_OIDC_TOKEN or VERCEL_OIDC_TOKEN for manual smoke control requests", async () => {
     const fetchCalls: Array<{
       headers: HeadersInit | undefined;
