@@ -20,9 +20,9 @@ export function HostedSettingsSessionState({
   if (!ready || isLoadingAuthenticatedUser) {
     return (
       <Alert className="border-stone-200 bg-stone-50">
-        <AlertTitle>Checking your session</AlertTitle>
+        <AlertTitle>Loading</AlertTitle>
         <AlertDescription>
-          Checking your Privy session before we show {profileLabel}.
+          Checking your session&hellip;
         </AlertDescription>
       </Alert>
     );
@@ -39,9 +39,9 @@ export function HostedSettingsSessionState({
 
   return (
     <Alert className="border-stone-200 bg-stone-50">
-      <AlertTitle>Loading your profile</AlertTitle>
+      <AlertTitle>Loading</AlertTitle>
       <AlertDescription>
-        Loading your Privy profile before we show {profileLabel}.
+        Loading your account&hellip;
       </AlertDescription>
     </Alert>
   );

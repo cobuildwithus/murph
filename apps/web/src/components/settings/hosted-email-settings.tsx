@@ -35,7 +35,7 @@ function HostedEmailSettingsInner() {
         <Alert className="border-stone-200 bg-stone-50">
           <AlertTitle>Finishing email sync</AlertTitle>
           <AlertDescription>
-            Finishing the hosted email connection and updating your assistant.
+            Saving your email&hellip;
           </AlertDescription>
         </Alert>
       ) : null}
@@ -46,7 +46,7 @@ function HostedEmailSettingsInner() {
           isLoadingAuthenticatedUser={controller.isLoadingAuthenticatedUser}
           profileLabel="email settings"
           ready={controller.ready}
-          signedOutDescription="Open your latest Murph invite or sign-in flow in this browser first. We need your Privy session before we can verify an email on your account."
+          signedOutDescription="Sign in to manage your email."
         />
       ) : (
         <HostedEmailSettingsContent
@@ -56,10 +56,8 @@ function HostedEmailSettingsInner() {
           isBusy={controller.isBusy}
           isSendingCode={controller.isSendingCode}
           isSyncingEmailRoute={controller.isSyncingEmailRoute}
-          loggingOut={controller.loggingOut}
           pendingEmailAddress={controller.pendingEmailAddress}
           onChangeEmailAddress={controller.setEmailAddress}
-          onLogout={controller.handleLogout}
           onOpenDialog={() => controller.setDialogOpen(true)}
           onResendCode={controller.handleResendCode}
           onSendCode={controller.handleSendCode}

@@ -47,22 +47,22 @@ function HostedTelegramSettingsInner() {
     setSuccessMessage(null);
 
     if (!ready) {
-      setErrorMessage("We are still loading your Privy session. Try again in a moment.");
+      setErrorMessage("Still loading — try again in a moment.");
       return;
     }
 
     if (!authenticated) {
-      setErrorMessage("Sign in with your existing hosted account before you try to link Telegram.");
+      setErrorMessage("Please sign in first to link Telegram.");
       return;
     }
 
     if (!user) {
-      setErrorMessage("We are still loading your account details. Try again in a moment.");
+      setErrorMessage("Still loading your account — try again in a moment.");
       return;
     }
 
     if (typeof linkTelegram !== "function") {
-      setErrorMessage("Telegram linking is not available in this Privy session yet.");
+      setErrorMessage("Telegram linking is not available yet.");
       return;
     }
 
@@ -77,7 +77,7 @@ function HostedTelegramSettingsInner() {
 
       await syncLinkedTelegram("link", refreshedTelegram?.telegramUserId ?? null);
     } catch (error) {
-      setErrorMessage(toErrorMessage(error, "We could not link Telegram from Privy yet."));
+      setErrorMessage(toErrorMessage(error, "Could not link Telegram right now."));
     } finally {
       setIsLinkingTelegram(false);
     }
@@ -102,7 +102,7 @@ function HostedTelegramSettingsInner() {
     try {
       await logout();
     } catch (error) {
-      setErrorMessage(toErrorMessage(error, "We could not sign out of the current Privy session."));
+      setErrorMessage(toErrorMessage(error, "Could not sign out right now."));
     } finally {
       setLoggingOut(false);
     }
@@ -110,7 +110,7 @@ function HostedTelegramSettingsInner() {
 
   async function syncLinkedTelegram(mode: "link" | "resync", expectedTelegramUserId: string | null) {
     if (!expectedTelegramUserId) {
-      setErrorMessage("Telegram linked in Privy, but the latest Telegram user id is not available yet. Try again.");
+      setErrorMessage("Telegram was linked but the account details aren't available yet. Try again.");
       return;
     }
 
@@ -161,7 +161,7 @@ function HostedTelegramSettingsInner() {
         <Alert className="border-stone-200 bg-stone-50">
           <AlertTitle>Finishing Telegram sync</AlertTitle>
           <AlertDescription>
-            Finishing the hosted Telegram connection and updating your assistant routing.
+            Saving your Telegram connection&hellip;
           </AlertDescription>
         </Alert>
       ) : null}
@@ -172,7 +172,7 @@ function HostedTelegramSettingsInner() {
           isLoadingAuthenticatedUser={isLoadingAuthenticatedUser}
           profileLabel="Telegram settings"
           ready={ready}
-          signedOutDescription="Open your latest Murph invite or sign-in flow in this browser first. We need your Privy session before we can link Telegram on your account."
+          signedOutDescription="Sign in to manage your Telegram connection."
         />
       ) : (
         <HostedTelegramSettingsContent
@@ -181,9 +181,7 @@ function HostedTelegramSettingsInner() {
           isBusy={isBusy}
           isLinkingTelegram={isLinkingTelegram}
           isSyncingTelegram={isSyncingTelegram}
-          loggingOut={loggingOut}
           onLinkTelegram={handleLinkTelegram}
-          onLogout={handleLogout}
           onSyncTelegram={handleSyncTelegram}
         />
       )}
