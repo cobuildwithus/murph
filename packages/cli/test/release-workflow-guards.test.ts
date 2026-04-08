@@ -10,7 +10,7 @@ describe('release workflow guards', () => {
   it('validates the git tag against the manifest-defined publish set', () => {
     const workflow = readFileSync(releaseWorkflowPath, 'utf8')
 
-    expect(workflow).toContain('node-version: latest')
+    expect(workflow).toContain('node-version-file: .nvmrc')
     expect(workflow).toContain('node scripts/verify-release-target.mjs --expect-version "${tag_version}"')
     expect(workflow).toContain("Tag '${GITHUB_REF_NAME}' is not a supported release tag.")
     expect(workflow).not.toContain('EXPECTED_PACKAGE_NAME')
@@ -52,7 +52,7 @@ describe('release workflow guards', () => {
     expect(workflow).not.toContain('Using NPM_TOKEN authentication for npm publish.')
     expect(workflow).not.toContain('falling back to trusted publishing')
     expect(workflow).not.toContain('unset NODE_AUTH_TOKEN')
-    expect(workflow.match(/node-version: latest/g)).toHaveLength(3)
+    expect(workflow.match(/node-version-file: \.nvmrc/g)).toHaveLength(3)
     expect(workflow.match(/scope: "@murphai"/g)).toHaveLength(2)
     expect(workflow.match(/name: Update npm/g)).toHaveLength(2)
     expect(workflow).toContain('run: npm install -g npm@latest')

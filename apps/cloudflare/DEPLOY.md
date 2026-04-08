@@ -334,7 +334,7 @@ Open Actions, then `Deploy Cloudflare Hosted Execution`, and choose:
 The workflow does this in order:
 
 1. checks out the repo
-2. installs pnpm and Node 22
+2. installs pnpm and Node 24.14.1 from `.nvmrc`
 3. installs workspace dependencies
 4. validates the required deploy environment
 5. renders the generated deploy artifacts

@@ -120,7 +120,7 @@ The default image now bakes the local parser toolchain directly into the contain
 
 Current expectations for the container image:
 
-- Node `>=22.16.0`
+- Node `>=24.14.1`
 - the runner app assembled by `apps/cloudflare` into `apps/cloudflare/.deploy/runner-bundle` before `wrangler deploy` starts the Docker build
 - the prepared `/app` tree remains a runtime leaf artifact: bundle assembly strips deploy-only docs plus build metadata such as lockfiles, declaration files, sourcemaps, and `.tsbuildinfo`
 - the hosted `vault-cli` surface resolves from the real installed `@murphai/murph` package inside the bundle, while hosted execution behavior still runs through `@murphai/assistant-runtime`
