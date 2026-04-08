@@ -370,9 +370,3 @@ async function readDirectoryEntries(directory: string) {
     throw error
   }
 }
-
-async function readDirectoryFiles(directory: string): Promise<string[]> {
-  return (await readDirectoryEntries(directory))
-    .filter((entry) => entry.isFile())
-    .map((entry) => entry.name)
-}

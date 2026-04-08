@@ -101,16 +101,28 @@ function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === 'AbortError'
 }
 
+function createDeferredPromise<TResult>() {
+  let resolve!: (value: TResult | PromiseLike<TResult>) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<TResult>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve
+    reject = promiseReject
+  })
+  return {
+    promise,
+    reject,
+    resolve,
+  }
+}
+
 async function waitForProcessTurnQueue(
   assistantStateRoot: string,
   abortSignal?: AbortSignal,
 ): Promise<() => void> {
   const prior = processTurnQueues.get(assistantStateRoot) ?? Promise.resolve()
-  const { promise: queued, resolve: releaseQueue } = Promise.withResolvers<void>()
-  const tail = prior.then(
-    () => queued,
-    () => queued,
-  )
+  const { promise: queued, resolve: releaseQueue } = createDeferredPromise<void>()
+  const continueQueue = () => queued
+  const tail = prior.then(continueQueue, continueQueue)
   processTurnQueues.set(assistantStateRoot, tail)
 
   try {
@@ -134,8 +146,9 @@ async function waitForPriorTurn(
   prior: Promise<void>,
   abortSignal?: AbortSignal,
 ): Promise<void> {
+  const ignorePriorFailure = () => undefined
   if (!abortSignal) {
-    await prior.catch(() => undefined)
+    await prior.catch(ignorePriorFailure)
     return
   }
 
@@ -146,7 +159,7 @@ async function waitForPriorTurn(
   let onAbort: (() => void) | null = null
 
   try {
-    const abortDeferred = Promise.withResolvers<never>()
+    const abortDeferred = createDeferredPromise<never>()
     onAbort = () => {
       abortDeferred.reject(createAssistantTurnAbortedError())
     }
@@ -154,7 +167,7 @@ async function waitForPriorTurn(
       once: true,
     })
     await Promise.race([
-      prior.catch(() => undefined),
+      prior.catch(ignorePriorFailure),
       abortDeferred.promise,
     ])
   } finally {
