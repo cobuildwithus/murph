@@ -21,15 +21,32 @@ vi.mock("@/src/lib/hosted-onboarding/privy", () => {
 
 vi.mock("@/src/components/hosted-onboarding/hosted-phone-auth", () => {
   return {
-    HostedPhoneAuth(input: { mode: string; privyAppId: string | null; privyClientId?: string | null }) {
+    HostedPhoneAuth(input: { intent?: string; mode: string; privyAppId: string | null; privyClientId?: string | null }) {
       return createElement(
         "div",
         {
+          "data-hosted-phone-auth-intent": input.intent ?? "signup",
           "data-hosted-phone-auth": input.mode,
           "data-privy-app-id": input.privyAppId ?? "",
           "data-privy-client-id": input.privyClientId ?? "",
         },
         "Hosted phone auth",
+      );
+    },
+  };
+});
+
+vi.mock("@/src/components/hosted-onboarding/hosted-existing-account-sign-in-dialog", () => {
+  return {
+    HostedExistingAccountSignInDialog(input: { privyAppId: string; privyClientId?: string | null }) {
+      return createElement(
+        "div",
+        {
+          "data-existing-account-sign-in-dialog": "true",
+          "data-existing-account-privy-app-id": input.privyAppId,
+          "data-existing-account-privy-client-id": input.privyClientId ?? "",
+        },
+        "Existing account sign in",
       );
     },
   };
@@ -78,6 +95,7 @@ test("HomePage renders the fallback copy when hosted phone auth is not ready", a
   assert.doesNotMatch(markup, /Zero data retention/);
   assert.doesNotMatch(markup, /--no-onboard/u);
   assert.doesNotMatch(markup, /data-hosted-phone-auth=/);
+  assert.doesNotMatch(markup, /data-existing-account-sign-in-dialog=/);
 });
 
 test("HomePage renders the hosted phone auth UI when hosted phone auth is ready", async () => {
@@ -108,9 +126,14 @@ test("HomePage renders the hosted phone auth UI when hosted phone auth is ready"
   assert.match(markup, /Open source — Apache 2\.0/u);
   assert.match(markup, /https:\/\/github\.com\/cobuildwithus\/murph/u);
   assert.match(markup, /data-hosted-phone-auth="public"/);
+  assert.match(markup, /data-hosted-phone-auth-intent="signup"/);
   assert.match(markup, /data-privy-app-id="cm_app_123"/);
   assert.match(markup, /data-privy-client-id="client_123"/);
   assert.match(markup, /Hosted phone auth/);
+  assert.match(markup, /data-existing-account-sign-in-dialog="true"/);
+  assert.match(markup, /data-existing-account-privy-app-id="cm_app_123"/);
+  assert.match(markup, /data-existing-account-privy-client-id="client_123"/);
+  assert.match(markup, /Existing account sign in/);
   assert.match(markup, /Local mode keeps your data on your device\. Hosted runs use encrypted cloud snapshots\./);
   assert.match(markup, /Local mode keeps your data on your device, and hosted runs use encrypted cloud snapshots\./);
   assert.match(markup, /Encrypted cloud snapshots for hosted runs/);
@@ -161,4 +184,5 @@ test("HomePage keeps the fallback copy when the server auth config is ready but 
   assert.doesNotMatch(markup, /Zero data retention/);
   assert.doesNotMatch(markup, /--no-onboard/u);
   assert.doesNotMatch(markup, /data-hosted-phone-auth=/);
+  assert.doesNotMatch(markup, /data-existing-account-sign-in-dialog=/);
 });

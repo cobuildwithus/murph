@@ -1,3 +1,4 @@
+import { HostedExistingAccountSignInDialog } from "@/src/components/hosted-onboarding/hosted-existing-account-sign-in-dialog";
 import { HostedPhoneAuth } from "@/src/components/hosted-onboarding/hosted-phone-auth";
 import { GitHubIcon } from "./github-icon";
 
@@ -20,8 +21,8 @@ export function HeroSection({
             Your personal health assistant.
           </h1>
           <p className="mt-8 max-w-lg text-lg leading-relaxed text-stone-400 md:text-xl md:leading-relaxed">
-            Murph meets you where you already are — iMessage, Telegram,
-            or email. Ask questions, track meals, and spot patterns without
+            Murph meets you where you already are — iMessage, Telegram, or
+            email. Ask questions, track meals, and spot patterns without
             downloading another app.
           </p>
           <div className="mt-6 flex items-center gap-3 text-sm text-stone-500">
@@ -48,19 +49,28 @@ export function HeroSection({
             >
               Sign up with your phone.
             </h2>
-            <p className="mt-2 text-sm leading-relaxed text-white/60">
-              Verify your number and you&apos;re in.
-            </p>
 
             <div className="mt-5 rounded bg-white p-4 text-stone-900">
               {phoneAuthReady && privyAppId ? (
-                <HostedPhoneAuth mode="public" privyAppId={privyAppId} privyClientId={privyClientId} />
+                <HostedPhoneAuth
+                  mode="public"
+                  privyAppId={privyAppId}
+                  privyClientId={privyClientId}
+                />
               ) : (
                 <p className="text-sm leading-relaxed text-stone-500">
                   Phone signup is not configured for this environment yet.
                 </p>
               )}
             </div>
+            {phoneAuthReady && privyAppId ? (
+              <div className="mt-4">
+                <HostedExistingAccountSignInDialog
+                  privyAppId={privyAppId}
+                  privyClientId={privyClientId}
+                />
+              </div>
+            ) : null}
           </section>
         </div>
       </div>
