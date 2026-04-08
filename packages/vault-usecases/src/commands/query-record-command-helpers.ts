@@ -6,7 +6,7 @@ import {
   type QueryVaultReadModel as QueryReadModel,
   type QueryCanonicalEntity as QueryRecord,
 } from '../query-runtime.js'
-import { createRuntimeUnavailableError as buildRuntimeUnavailableError } from '@murphai/operator-config/runtime-errors'
+import { createRuntimeUnavailableError as buildRuntimeUnavailableError } from '../runtime-errors.js'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   inferEntityKind,

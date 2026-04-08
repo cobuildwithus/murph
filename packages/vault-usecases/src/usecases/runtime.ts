@@ -1,5 +1,5 @@
 import { loadRuntimeModule } from "../runtime-import.js"
-import { createRuntimeUnavailableError } from "@murphai/operator-config/runtime-errors"
+import { createRuntimeUnavailableError } from "../runtime-errors.js"
 import { VaultCliError } from "@murphai/operator-config/vault-cli-errors"
 import {
   healthCoreRuntimeMethodNames,

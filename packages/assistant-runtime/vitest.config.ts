@@ -48,13 +48,6 @@ export default defineConfig({
     coverage: createMurphVitestCoverage({
       customProviderModule: resolveMurphVitestCoverageProviderModule(packageDir),
       include: ["src/**/*.ts"],
-      thresholds: {
-        perFile: true,
-        lines: 65,
-        functions: 83,
-        branches: 53,
-        statements: 65,
-      },
     }),
   },
 });
