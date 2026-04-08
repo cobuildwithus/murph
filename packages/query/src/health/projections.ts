@@ -1,5 +1,6 @@
 import {
   type HealthHistoryEventKind,
+  VAULT_LAYOUT,
 } from "@murphai/contracts";
 import {
   type CanonicalEntity,
@@ -312,7 +313,7 @@ export function buildCurrentProfileRecord(input: {
     sourceAssessmentIds: input.sourceAssessmentIds,
     sourceEventIds: input.sourceEventIds,
     topGoalIds: input.topGoalIds,
-    relativePath: "bank/profile/current.md",
+    relativePath: VAULT_LAYOUT.profileCurrentDocument,
     markdown: input.markdown,
     body: input.body,
   };

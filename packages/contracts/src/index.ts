@@ -13,6 +13,7 @@ export * from "./relation-links.ts";
 export * from "./shares.ts";
 export * from "./time.ts";
 export * from "./vault.ts";
+export * from "./vault-families.ts";
 export * from "./types.ts";
 export * from "./validate.ts";
 export * from "./zod.ts";

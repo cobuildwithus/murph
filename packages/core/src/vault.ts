@@ -1,29 +1,18 @@
 import path from "node:path";
 
 import {
-  allergyFrontmatterSchema,
-  assessmentResponseSchema,
-  conditionFrontmatterSchema,
-  auditRecordSchema,
-  type ContractSchema,
-  type VaultMetadata,
-  coreFrontmatterSchema,
-  eventRecordSchema,
-  experimentFrontmatterSchema,
-  familyMemberFrontmatterSchema,
-  foodFrontmatterSchema,
-  geneticVariantFrontmatterSchema,
-  goalFrontmatterSchema,
-  journalDayFrontmatterSchema,
-  profileCurrentFrontmatterSchema,
-  profileSnapshotSchema,
   rawImportManifestSchema,
-  recipeFrontmatterSchema,
-  protocolFrontmatterSchema,
   safeParseContract,
-  sampleRecordSchema,
+  type ContractSchema,
+  type VaultFamilyId,
+  type VaultFrontmatterFamilyDescriptor,
+  type VaultJsonValidationFamilyDescriptor,
+  type VaultJsonlValidationFamilyDescriptor,
+  type VaultMetadata,
+  VAULT_FRONTMATTER_FAMILIES,
+  VAULT_JSON_VALIDATION_FAMILIES,
+  VAULT_JSONL_VALIDATION_FAMILIES,
   vaultMetadataSchema,
-  workoutFormatFrontmatterSchema,
 } from "@murphai/contracts";
 
 import {
@@ -95,6 +84,7 @@ interface ValidateFrontmatterFileInput {
   relativePath: string;
   schema: ContractSchema;
   code: string;
+  optional?: boolean;
 }
 
 interface ValidateFrontmatterDirectoryInput {
@@ -102,6 +92,14 @@ interface ValidateFrontmatterDirectoryInput {
   relativeDirectory: string;
   schema: ContractSchema;
   code: string;
+}
+
+interface ValidateJsonFileInput {
+  vaultRoot: string;
+  relativePath: string;
+  schema: ContractSchema;
+  code: string;
+  optional?: boolean;
 }
 
 interface ValidateJsonlFamilyInput {
@@ -379,6 +377,7 @@ async function validateFrontmatterFile({
   relativePath,
   schema,
   code,
+  optional = false,
 }: ValidateFrontmatterFileInput): Promise<ValidationIssue[]> {
   try {
     const content = await readUtf8File(vaultRoot, relativePath);
@@ -389,6 +388,10 @@ async function validateFrontmatterFile({
       return [validationIssue(code, result.errors.join("; "), relativePath)];
     }
   } catch (error) {
+    if (optional && error instanceof VaultError && error.code === "VAULT_FILE_MISSING") {
+      return [];
+    }
+
     return [
       validationIssue(
         error instanceof VaultError && error.code === "VAULT_FILE_MISSING" ? error.code : code,
@@ -424,6 +427,37 @@ async function validateFrontmatterDirectory({
   }
 
   return issues;
+}
+
+async function validateJsonFile({
+  vaultRoot,
+  relativePath,
+  schema,
+  code,
+  optional = false,
+}: ValidateJsonFileInput): Promise<ValidationIssue[]> {
+  try {
+    const value = await readJsonFile(vaultRoot, relativePath);
+    const result = safeParseContract(schema, value);
+
+    if (!result.success) {
+      return [validationIssue(code, result.errors.join("; "), relativePath)];
+    }
+  } catch (error) {
+    if (optional && error instanceof VaultError && error.code === "VAULT_FILE_MISSING") {
+      return [];
+    }
+
+    return [
+      validationIssue(
+        error instanceof VaultError && error.code === "VAULT_FILE_MISSING" ? error.code : code,
+        error instanceof Error ? error.message : String(error),
+        relativePath,
+      ),
+    ];
+  }
+
+  return [];
 }
 
 async function validateJsonlFamily({
@@ -479,12 +513,80 @@ async function validateJsonlFamily({
   return issues;
 }
 
+async function validateFrontmatterFamily(
+  vaultRoot: string,
+  family: VaultFrontmatterFamilyDescriptor,
+): Promise<ValidationIssue[]> {
+  if (family.storageKind === "singleton-file") {
+    return validateFrontmatterFile({
+      vaultRoot,
+      relativePath: family.relativePath,
+      schema: family.validation.schema,
+      code: family.validation.issueCode,
+      optional: family.validation.optional ?? false,
+    });
+  }
+
+  return validateFrontmatterDirectory({
+    vaultRoot,
+    relativeDirectory: family.directory,
+    schema: family.validation.schema,
+    code: family.validation.issueCode,
+  });
+}
+
+async function validateJsonValidationFamily(
+  vaultRoot: string,
+  family: VaultJsonValidationFamilyDescriptor,
+): Promise<ValidationIssue[]> {
+  return validateJsonFile({
+    vaultRoot,
+    relativePath: family.relativePath,
+    schema: family.validation.schema,
+    code: family.validation.issueCode,
+    optional: family.validation.optional ?? false,
+  });
+}
+
+async function validateJsonlValidationFamily(
+  vaultRoot: string,
+  family: VaultJsonlValidationFamilyDescriptor,
+): Promise<ValidationIssue[]> {
+  const postValidateRecord = resolveJsonlFamilyPostValidator(vaultRoot, family.id);
+
+  return validateJsonlFamily({
+    vaultRoot,
+    relativeDirectory: family.directory,
+    schema: family.validation.schema,
+    code: family.validation.issueCode,
+    postValidateRecord,
+  });
+}
+
+function resolveJsonlFamilyPostValidator(
+  vaultRoot: string,
+  familyId: VaultFamilyId,
+): ValidateJsonlFamilyInput["postValidateRecord"] {
+  switch (familyId) {
+    case "assessments":
+      return async (record) =>
+        validateAssessmentRecordReferences(
+          vaultRoot,
+          record as UnknownRecord & { rawPath: string },
+        );
+    case "events":
+      return async (record) => validateEventRecordReferences(vaultRoot, record);
+    default:
+      return undefined;
+  }
+}
+
 function rawManifestPathForArtifact(relativePath: string): string {
   return path.posix.join(path.posix.dirname(relativePath), "manifest.json");
 }
 
 function isEnvelopeBasedInboxRawPath(relativePath: string): boolean {
-  return relativePath.startsWith(`${VAULT_LAYOUT.rawDirectory}/inbox/`);
+  return relativePath.startsWith(`${VAULT_LAYOUT.rawInboxDirectory}/`);
 }
 
 function inboxCaptureRootForRawPath(relativePath: string): string | null {
@@ -986,174 +1088,22 @@ export async function validateVault({ vaultRoot }: LoadVaultInput = {}): Promise
     }
   }
 
-  issues.push(
-    ...(await validateFrontmatterFile({
-      vaultRoot: absoluteRoot,
-      relativePath: VAULT_LAYOUT.coreDocument,
-      schema: coreFrontmatterSchema,
-      code: "FRONTMATTER_INVALID",
-    })),
-  );
-
-  const experimentFiles = await walkVaultFiles(absoluteRoot, VAULT_LAYOUT.experimentsDirectory, {
-    extension: ".md",
-  });
-  for (const relativePath of experimentFiles) {
-    issues.push(
-      ...(await validateFrontmatterFile({
-        vaultRoot: absoluteRoot,
-        relativePath,
-        schema: experimentFrontmatterSchema,
-        code: "FRONTMATTER_INVALID",
-      })),
-    );
+  for (const family of VAULT_FRONTMATTER_FAMILIES) {
+    issues.push(...(await validateFrontmatterFamily(absoluteRoot, family)));
   }
 
-  const journalFiles = await walkVaultFiles(absoluteRoot, VAULT_LAYOUT.journalDirectory, {
-    extension: ".md",
-  });
-  for (const relativePath of journalFiles) {
-    issues.push(
-      ...(await validateFrontmatterFile({
-        vaultRoot: absoluteRoot,
-        relativePath,
-        schema: journalDayFrontmatterSchema,
-        code: "FRONTMATTER_INVALID",
-      })),
-    );
+  for (const family of VAULT_JSON_VALIDATION_FAMILIES) {
+    if (family.relativePath === VAULT_LAYOUT.metadata) {
+      continue;
+    }
+
+    issues.push(...(await validateJsonValidationFamily(absoluteRoot, family)));
   }
 
-  issues.push(
-    ...(await validateFrontmatterDirectory({
-      vaultRoot: absoluteRoot,
-      relativeDirectory: VAULT_LAYOUT.goalsDirectory,
-      schema: goalFrontmatterSchema,
-      code: "FRONTMATTER_INVALID",
-    })),
-  );
-  issues.push(
-    ...(await validateFrontmatterDirectory({
-      vaultRoot: absoluteRoot,
-      relativeDirectory: VAULT_LAYOUT.conditionsDirectory,
-      schema: conditionFrontmatterSchema,
-      code: "FRONTMATTER_INVALID",
-    })),
-  );
-  issues.push(
-    ...(await validateFrontmatterDirectory({
-      vaultRoot: absoluteRoot,
-      relativeDirectory: VAULT_LAYOUT.allergiesDirectory,
-      schema: allergyFrontmatterSchema,
-      code: "FRONTMATTER_INVALID",
-    })),
-  );
-  issues.push(
-    ...(await validateFrontmatterDirectory({
-      vaultRoot: absoluteRoot,
-      relativeDirectory: VAULT_LAYOUT.protocolsDirectory,
-      schema: protocolFrontmatterSchema,
-      code: "FRONTMATTER_INVALID",
-    })),
-  );
-  issues.push(
-    ...(await validateFrontmatterDirectory({
-      vaultRoot: absoluteRoot,
-      relativeDirectory: VAULT_LAYOUT.foodsDirectory,
-      schema: foodFrontmatterSchema,
-      code: "FRONTMATTER_INVALID",
-    })),
-  );
-  issues.push(
-    ...(await validateFrontmatterDirectory({
-      vaultRoot: absoluteRoot,
-      relativeDirectory: VAULT_LAYOUT.recipesDirectory,
-      schema: recipeFrontmatterSchema,
-      code: "FRONTMATTER_INVALID",
-    })),
-  );
-  issues.push(
-    ...(await validateFrontmatterDirectory({
-      vaultRoot: absoluteRoot,
-      relativeDirectory: VAULT_LAYOUT.workoutFormatsDirectory,
-      schema: workoutFormatFrontmatterSchema,
-      code: "FRONTMATTER_INVALID",
-    })),
-  );
-  issues.push(
-    ...(await validateFrontmatterDirectory({
-      vaultRoot: absoluteRoot,
-      relativeDirectory: VAULT_LAYOUT.familyDirectory,
-      schema: familyMemberFrontmatterSchema,
-      code: "FRONTMATTER_INVALID",
-    })),
-  );
-  issues.push(
-    ...(await validateFrontmatterDirectory({
-      vaultRoot: absoluteRoot,
-      relativeDirectory: VAULT_LAYOUT.geneticsDirectory,
-      schema: geneticVariantFrontmatterSchema,
-      code: "FRONTMATTER_INVALID",
-    })),
-  );
-
-  const currentProfilePath = resolveVaultPath(absoluteRoot, VAULT_LAYOUT.profileCurrentDocument);
-  if (await pathExists(currentProfilePath.absolutePath)) {
-    issues.push(
-      ...(await validateFrontmatterFile({
-        vaultRoot: absoluteRoot,
-        relativePath: VAULT_LAYOUT.profileCurrentDocument,
-        schema: profileCurrentFrontmatterSchema,
-        code: "FRONTMATTER_INVALID",
-      })),
-    );
+  for (const family of VAULT_JSONL_VALIDATION_FAMILIES) {
+    issues.push(...(await validateJsonlValidationFamily(absoluteRoot, family)));
   }
 
-  issues.push(
-    ...(await validateJsonlFamily({
-      vaultRoot: absoluteRoot,
-      relativeDirectory: VAULT_LAYOUT.assessmentLedgerDirectory,
-      schema: assessmentResponseSchema,
-      code: "CONTRACT_INVALID",
-      postValidateRecord: async (record) =>
-        validateAssessmentRecordReferences(
-          absoluteRoot,
-          record as UnknownRecord & { rawPath: string },
-        ),
-    })),
-  );
-  issues.push(
-    ...(await validateJsonlFamily({
-      vaultRoot: absoluteRoot,
-      relativeDirectory: VAULT_LAYOUT.eventLedgerDirectory,
-      schema: eventRecordSchema,
-      code: "EVENT_INVALID",
-      postValidateRecord: async (record) => validateEventRecordReferences(absoluteRoot, record),
-    })),
-  );
-  issues.push(
-    ...(await validateJsonlFamily({
-      vaultRoot: absoluteRoot,
-      relativeDirectory: VAULT_LAYOUT.profileSnapshotsDirectory,
-      schema: profileSnapshotSchema,
-      code: "CONTRACT_INVALID",
-    })),
-  );
-  issues.push(
-    ...(await validateJsonlFamily({
-      vaultRoot: absoluteRoot,
-      relativeDirectory: VAULT_LAYOUT.sampleLedgerDirectory,
-      schema: sampleRecordSchema,
-      code: "SAMPLE_INVALID",
-    })),
-  );
-  issues.push(
-    ...(await validateJsonlFamily({
-      vaultRoot: absoluteRoot,
-      relativeDirectory: VAULT_LAYOUT.auditDirectory,
-      schema: auditRecordSchema,
-      code: "AUDIT_INVALID",
-    })),
-  );
   issues.push(...(await validateRawImportManifests(absoluteRoot)));
   issues.push(...(await validateCurrentProfileConsistency(absoluteRoot)));
   issues.push(...(await validateWriteOperations(absoluteRoot)));

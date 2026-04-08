@@ -507,7 +507,7 @@ export async function rebuildRuntimeFromVault(input: {
     restoredIdentityKeys.add(record.identityKey);
   }
 
-  const inboxRoot = await resolveVaultPath(input.vaultRoot, `${VAULT_LAYOUT.rawDirectory}/inbox`);
+  const inboxRoot = await resolveVaultPath(input.vaultRoot, VAULT_LAYOUT.rawInboxDirectory);
 
   try {
     await mkdir(inboxRoot, { recursive: true });
@@ -561,7 +561,7 @@ function buildInboxAccountDirectory(input: InboundCapture): string {
   const accountSegment = sanitizeSegment(normalizeAccountKey(input.accountId) || "default", "default");
   const sourceSegment = sanitizeSegment(input.source, "source");
   return normalizeRelativePath(
-    path.posix.join(VAULT_LAYOUT.rawDirectory, "inbox", sourceSegment, accountSegment),
+    path.posix.join(VAULT_LAYOUT.rawInboxDirectory, sourceSegment, accountSegment),
   );
 }
 

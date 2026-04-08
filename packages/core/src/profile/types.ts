@@ -7,9 +7,11 @@ import {
   type ProfileSnapshotSource,
 } from "@murphai/contracts";
 
+import { VAULT_LAYOUT } from "../constants.ts";
+
 export const PROFILE_SNAPSHOT_SCHEMA_VERSION = CONTRACT_SCHEMA_VERSION.profileSnapshot;
-export const PROFILE_SNAPSHOT_LEDGER_DIRECTORY = "ledger/profile-snapshots";
-export const PROFILE_CURRENT_DOCUMENT_PATH = "bank/profile/current.md";
+export const PROFILE_SNAPSHOT_LEDGER_DIRECTORY = VAULT_LAYOUT.profileSnapshotsDirectory;
+export const PROFILE_CURRENT_DOCUMENT_PATH = VAULT_LAYOUT.profileCurrentDocument;
 export const PROFILE_CURRENT_SCHEMA_VERSION = CONTRACT_SCHEMA_VERSION.profileCurrentFrontmatter;
 export const PROFILE_CURRENT_DOC_TYPE = FRONTMATTER_DOC_TYPES.profileCurrent;
 

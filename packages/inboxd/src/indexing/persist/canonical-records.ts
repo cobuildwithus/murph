@@ -23,7 +23,7 @@ import {
   sanitizeSegment,
 } from "../../shared.ts";
 
-export const INBOX_CAPTURE_LEDGER_DIRECTORY = "ledger/inbox-captures";
+export const INBOX_CAPTURE_LEDGER_DIRECTORY = VAULT_LAYOUT.inboxCaptureLedgerDirectory;
 
 export function buildInboxCaptureRecord(input: {
   auditId?: string;

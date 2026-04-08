@@ -3,6 +3,8 @@ import path from "node:path";
 
 import {
   validateCurrentVaultMetadata,
+  VAULT_LAYOUT,
+  VAULT_QUERY_SOURCE,
 } from "@murphai/contracts";
 
 import {
@@ -18,18 +20,6 @@ import {
   type CanonicalEntity,
 } from "./canonical-entities.ts";
 import { collectCanonicalEntities } from "./health/canonical-collector.ts";
-import {
-  allergyRegistryDefinition,
-  conditionRegistryDefinition,
-  familyRegistryDefinition,
-  foodRegistryDefinition,
-  geneticsRegistryDefinition,
-  goalRegistryDefinition,
-  protocolRegistryDefinition,
-  providerRegistryDefinition,
-  recipeRegistryDefinition,
-  workoutFormatRegistryDefinition,
-} from "./health/registries.ts";
 import { walkRelativeFiles } from "./health/loaders.ts";
 import {
   HEALTH_HISTORY_KINDS,
@@ -54,34 +44,9 @@ export interface QuerySourceManifestEntry {
   mtimeMs: number;
 }
 
-const CANONICAL_MARKDOWN_ROOTS = [
-  "bank/experiments",
-  "journal",
-  goalRegistryDefinition.registry.directory,
-  conditionRegistryDefinition.registry.directory,
-  allergyRegistryDefinition.registry.directory,
-  protocolRegistryDefinition.registry.directory,
-  familyRegistryDefinition.registry.directory,
-  geneticsRegistryDefinition.registry.directory,
-  foodRegistryDefinition.registry.directory,
-  recipeRegistryDefinition.registry.directory,
-  providerRegistryDefinition.registry.directory,
-  workoutFormatRegistryDefinition.registry.directory,
-] as const;
-
-const CANONICAL_JSONL_ROOTS = [
-  "audit",
-  "ledger/assessments",
-  "ledger/events",
-  "ledger/profile-snapshots",
-  "ledger/samples",
-] as const;
-
-const CANONICAL_OPTIONAL_FILES = [
-  "vault.json",
-  "CORE.md",
-  "bank/profile/current.md",
-] as const;
+const CANONICAL_MARKDOWN_ROOTS = VAULT_QUERY_SOURCE.markdownRoots;
+const CANONICAL_JSONL_ROOTS = VAULT_QUERY_SOURCE.jsonlRoots;
+const CANONICAL_OPTIONAL_FILES = VAULT_QUERY_SOURCE.optionalFiles;
 
 class QueryVaultSourceError extends Error {
   readonly code: string;
@@ -137,7 +102,7 @@ function relationFieldsToLinks(
 export async function readVaultSourceStrict(
   vaultRoot: string,
 ): Promise<VaultSourceSnapshot> {
-  const metadata = await readOptionalVaultMetadata(path.join(vaultRoot, "vault.json"));
+  const metadata = await readOptionalVaultMetadata(path.join(vaultRoot, VAULT_LAYOUT.metadata));
   const [baseEntities, healthEntities] = await Promise.all([
     readBaseEntities(vaultRoot, metadata),
     collectCanonicalEntities(vaultRoot, { mode: "strict-async" }),
@@ -152,7 +117,7 @@ export async function readVaultSourceStrict(
 export async function readVaultSourceTolerant(
   vaultRoot: string,
 ): Promise<VaultSourceSnapshot> {
-  const metadata = await readOptionalVaultMetadata(path.join(vaultRoot, "vault.json"));
+  const metadata = await readOptionalVaultMetadata(path.join(vaultRoot, VAULT_LAYOUT.metadata));
   const [baseEntities, healthEntities] = await Promise.all([
     readBaseEntities(vaultRoot, metadata),
     collectCanonicalEntities(vaultRoot, { mode: "tolerant-async" }),
@@ -229,7 +194,7 @@ async function readOptionalVaultMetadata(filePath: string): Promise<QueryRecordD
 
 function validateVaultMetadataForQuery(value: unknown): QueryRecordData {
   const result = validateCurrentVaultMetadata(value, {
-    relativePath: "vault.json",
+    relativePath: VAULT_LAYOUT.metadata,
   });
 
   if (result.success) {
@@ -250,9 +215,9 @@ async function readBaseEntities(
   const coreDocument = await readOptionalCoreEntity(vaultRoot, metadata);
   const experiments = await readExperimentEntities(vaultRoot);
   const journalEntries = await readJournalEntities(vaultRoot);
-  const events = await readJsonlRecordFamily(vaultRoot, "ledger/events", "event");
+  const events = await readJsonlRecordFamily(vaultRoot, VAULT_LAYOUT.eventLedgerDirectory, "event");
   const samples = await readSampleEntities(vaultRoot);
-  const audits = await readJsonlRecordFamily(vaultRoot, "audit", "audit");
+  const audits = await readJsonlRecordFamily(vaultRoot, VAULT_LAYOUT.auditDirectory, "audit");
 
   return [
     ...(coreDocument ? [coreDocument] : []),
@@ -268,7 +233,7 @@ async function readOptionalCoreEntity(
   vaultRoot: string,
   metadata: QueryRecordData | null,
 ): Promise<CanonicalEntity | null> {
-  const filePath = path.join(vaultRoot, "CORE.md");
+  const filePath = path.join(vaultRoot, VAULT_LAYOUT.coreDocument);
 
   try {
     const source = await readFile(filePath, "utf8");
@@ -287,7 +252,7 @@ async function readOptionalCoreEntity(
       status: null,
       occurredAt: pickString(attributes, ["updatedAt"]),
       date: null,
-      path: "CORE.md",
+      path: VAULT_LAYOUT.coreDocument,
       title,
       body: document.body,
       attributes: {
@@ -311,13 +276,11 @@ async function readOptionalCoreEntity(
 }
 
 async function readExperimentEntities(vaultRoot: string): Promise<CanonicalEntity[]> {
-  const experimentDir = path.join(vaultRoot, "bank/experiments");
-  const fileEntries = await listDirectoryFiles(experimentDir);
+  const relativePaths = await walkRelativeFiles(vaultRoot, VAULT_LAYOUT.experimentsDirectory, ".md");
 
   const pages = await Promise.all(
-    fileEntries.filter(hasMarkdownExtension).map(async (entry) => {
-      const filePath = path.join(experimentDir, entry);
-      const relativePath = path.posix.join("bank/experiments", entry);
+    relativePaths.map(async (relativePath) => {
+      const filePath = path.join(vaultRoot, relativePath);
       const source = await readFile(filePath, "utf8");
       const document = parseMarkdownDocument(source);
       const attributes = normalizeFrontmatterAttributes(
@@ -371,55 +334,45 @@ async function readExperimentEntities(vaultRoot: string): Promise<CanonicalEntit
 }
 
 async function readJournalEntities(vaultRoot: string): Promise<CanonicalEntity[]> {
-  const journalDir = path.join(vaultRoot, "journal");
-  const yearEntries = await listDirectoryFiles(journalDir);
+  const relativePaths = await walkRelativeFiles(vaultRoot, VAULT_LAYOUT.journalDirectory, ".md");
   const pages: CanonicalEntity[] = [];
 
-  for (const yearEntry of yearEntries) {
-    const yearDir = path.join(journalDir, yearEntry);
-    const dayEntries = await listDirectoryFiles(yearDir);
+  for (const relativePath of relativePaths) {
+    const filePath = path.join(vaultRoot, relativePath);
+    const source = await readFile(filePath, "utf8");
+    const document = parseMarkdownDocument(source);
+    const attributes = normalizeFrontmatterAttributes("journal", document.attributes);
+    const date = pickString(attributes, ["dayKey"]) ?? path.basename(relativePath, ".md");
+    const title =
+      pickString(attributes, ["title"]) ??
+      extractMarkdownHeading(document.body) ??
+      date;
+    const id = `journal:${date}`;
+    const links = relationFieldsToLinks(attributes.links, attributes.relatedIds, attributes.eventIds);
 
-    for (const dayEntry of dayEntries) {
-      if (!hasMarkdownExtension(dayEntry)) {
-        continue;
-      }
-
-      const filePath = path.join(yearDir, dayEntry);
-      const source = await readFile(filePath, "utf8");
-      const document = parseMarkdownDocument(source);
-      const attributes = normalizeFrontmatterAttributes("journal", document.attributes);
-      const date = pickString(attributes, ["dayKey"]) ?? path.basename(dayEntry, ".md");
-      const title =
-        pickString(attributes, ["title"]) ??
-        extractMarkdownHeading(document.body) ??
-        date;
-      const id = `journal:${date}`;
-      const links = relationFieldsToLinks(attributes.links, attributes.relatedIds, attributes.eventIds);
-
-      pages.push({
-        entityId: id,
-        primaryLookupId: id,
-        lookupIds: uniqueStrings([id, date]),
-        family: "journal",
-        recordClass: resolveCanonicalRecordClass("journal"),
-        kind: "journal_day",
-        status: pickString(attributes, ["status"]),
-        occurredAt: pickString(attributes, ["updatedAt"]),
-        date,
-        path: path.posix.join("journal", yearEntry, dayEntry),
-        title,
-        body: document.body,
-        attributes: {
-          ...attributes,
-        },
-        frontmatter: attributes,
-        links,
-        relatedIds: linkTargetIds(links),
-        stream: null,
-        experimentSlug: pickString(attributes, ["experimentSlug"]),
-        tags: normalizeTags(attributes.tags),
-      });
-    }
+    pages.push({
+      entityId: id,
+      primaryLookupId: id,
+      lookupIds: uniqueStrings([id, date]),
+      family: "journal",
+      recordClass: resolveCanonicalRecordClass("journal"),
+      kind: "journal_day",
+      status: pickString(attributes, ["status"]),
+      occurredAt: pickString(attributes, ["updatedAt"]),
+      date,
+      path: relativePath,
+      title,
+      body: document.body,
+      attributes: {
+        ...attributes,
+      },
+      frontmatter: attributes,
+      links,
+      relatedIds: linkTargetIds(links),
+      stream: null,
+      experimentSlug: pickString(attributes, ["experimentSlug"]),
+      tags: normalizeTags(attributes.tags),
+    });
   }
 
   return pages.sort(compareCanonicalEntities);
@@ -502,7 +455,7 @@ async function readJsonlRecordFamily(
 async function readSampleEntities(vaultRoot: string): Promise<CanonicalEntity[]> {
   return readSortedJsonlRecords(
     vaultRoot,
-    "ledger/samples",
+    VAULT_LAYOUT.sampleLedgerDirectory,
     (sourcePath, lineNumber, rawPayload) => {
       const payload = normalizeJsonRecordPayload("sample", rawPayload);
       const rawRecordId = requireCanonicalString(
@@ -607,19 +560,6 @@ async function readJsonlFile(
       index + 1,
       JSON.parse(line) as QueryRecordData,
     );
-  }
-}
-
-async function listDirectoryFiles(directoryPath: string): Promise<string[]> {
-  try {
-    const entries = await readdir(directoryPath, { withFileTypes: true });
-    return entries.map((entry) => entry.name).sort();
-  } catch (error) {
-    if (isMissingFileError(error)) {
-      return [];
-    }
-
-    throw error;
   }
 }
 
@@ -828,10 +768,6 @@ function normalizeObjectArrayField(target: QueryRecordData, key: string): void {
   target[key] = Array.isArray(target[key])
     ? target[key].filter((entry) => entry !== null && typeof entry === "object" && !Array.isArray(entry))
     : [];
-}
-
-function hasMarkdownExtension(entry: string): boolean {
-  return entry.endsWith(".md");
 }
 
 function toPosixRelative(root: string, filePath: string): string {

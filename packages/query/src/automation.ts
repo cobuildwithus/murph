@@ -4,6 +4,7 @@ import {
   automationContinuityPolicyValues,
   automationScheduleKindValues,
   automationStatusValues,
+  VAULT_LAYOUT,
   isValidIanaTimeZone,
   type AutomationContinuityPolicy,
   type AutomationRoute,
@@ -22,7 +23,7 @@ import {
 } from "./health/shared.ts";
 import { parseFrontmatterDocument, type FrontmatterObject } from "./health/shared.ts";
 
-const AUTOMATIONS_DIRECTORY = "bank/automations";
+const AUTOMATIONS_DIRECTORY = VAULT_LAYOUT.automationsDirectory;
 const dailyLocalTimePattern = /^(?:[01]\d|2[0-3]):[0-5]\d$/u;
 
 export type {

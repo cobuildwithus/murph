@@ -18,6 +18,7 @@ import {
   type StoredMarkdownDocument as ContractStoredMarkdownDocument,
 } from "@murphai/contracts";
 
+import { VAULT_LAYOUT } from "../constants.ts";
 import type { DateInput } from "../types.ts";
 
 export const GOAL_SCHEMA_VERSION = CONTRACT_SCHEMA_VERSION.goalFrontmatter;
@@ -53,13 +54,13 @@ export const WORKOUT_FORMAT_SCHEMA_VERSION = CONTRACT_SCHEMA_VERSION.workoutForm
 export const WORKOUT_FORMAT_DOC_TYPE = FRONTMATTER_DOC_TYPES.workoutFormat;
 export const WORKOUT_FORMAT_STATUSES = CONTRACT_WORKOUT_FORMAT_STATUSES;
 
-export const GOALS_DIRECTORY = "bank/goals";
-export const CONDITIONS_DIRECTORY = "bank/conditions";
-export const ALLERGIES_DIRECTORY = "bank/allergies";
-export const FOODS_DIRECTORY = "bank/foods";
-export const RECIPES_DIRECTORY = "bank/recipes";
-export const PROTOCOLS_DIRECTORY = "bank/protocols";
-export const WORKOUT_FORMATS_DIRECTORY = "bank/workout-formats";
+export const GOALS_DIRECTORY = VAULT_LAYOUT.goalsDirectory;
+export const CONDITIONS_DIRECTORY = VAULT_LAYOUT.conditionsDirectory;
+export const ALLERGIES_DIRECTORY = VAULT_LAYOUT.allergiesDirectory;
+export const FOODS_DIRECTORY = VAULT_LAYOUT.foodsDirectory;
+export const RECIPES_DIRECTORY = VAULT_LAYOUT.recipesDirectory;
+export const PROTOCOLS_DIRECTORY = VAULT_LAYOUT.protocolsDirectory;
+export const WORKOUT_FORMATS_DIRECTORY = VAULT_LAYOUT.workoutFormatsDirectory;
 
 export type GoalStatus = (typeof GOAL_STATUSES)[number];
 export type GoalHorizon = (typeof GOAL_HORIZONS)[number];

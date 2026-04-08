@@ -1,5 +1,6 @@
 import {
   buildCurrentProfileDocument,
+  VAULT_LAYOUT,
 } from "@murphai/contracts";
 
 import {
@@ -165,7 +166,7 @@ export function fallbackCurrentProfileEntity(
     status: null,
     occurredAt: latestSnapshot.occurredAt,
     date: latestSnapshot.date,
-    path: "bank/profile/current.md",
+    path: VAULT_LAYOUT.profileCurrentDocument,
     title: "Current profile",
     body: materialized?.body ?? null,
     attributes: currentProfileAttributes,

@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
 
+import { VAULT_LAYOUT } from "@murphai/contracts";
 import {
   readHostedEmailCapabilities,
   type HostedExecutionDispatchRequest,
@@ -80,7 +81,7 @@ export async function bootstrapHostedMemberContext(
   const vaultServices = createIntegratedVaultServices({
     foodAutoLogHooks: createAssistantFoodAutoLogHooks(),
   });
-  const vaultMetadataPath = path.join(vaultRoot, "vault.json");
+  const vaultMetadataPath = path.join(vaultRoot, VAULT_LAYOUT.metadata);
   const vaultCreated = !existsSync(vaultMetadataPath);
 
   if (vaultCreated) {
@@ -260,7 +261,7 @@ export async function requireHostedBootstrapForDispatch(
   vaultRoot: string,
   dispatch: HostedExecutionDispatchRequest,
 ): Promise<void> {
-  if (existsSync(path.join(vaultRoot, "vault.json"))) {
+  if (existsSync(path.join(vaultRoot, VAULT_LAYOUT.metadata))) {
     return;
   }
 
