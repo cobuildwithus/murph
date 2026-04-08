@@ -34,11 +34,7 @@ export function HostedDeviceSyncSettingsContent(props: {
     <>
       <div className="space-y-2">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="space-y-2">
-            <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-widest text-olive/60">
-              <span className="inline-block h-1 w-1 rounded-full bg-olive/50" />
-              Data sources
-            </div>
+          <div className="space-y-1">
             <h2 className="text-lg font-semibold tracking-tight text-stone-900">Wearables</h2>
             <p className="text-sm leading-relaxed text-stone-500">
               Connect your wearables. Disconnect or reconnect any time.

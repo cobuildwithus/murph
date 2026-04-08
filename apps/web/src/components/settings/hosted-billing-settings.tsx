@@ -64,10 +64,6 @@ function HostedBillingSettingsInner() {
   return (
     <Card className="border-stone-200/80 shadow-sm transition-shadow hover:shadow-md">
       <CardHeader className="space-y-2">
-        <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-widest text-olive/60">
-          <span className="inline-block h-1 w-1 rounded-full bg-olive/50" />
-          Billing
-        </div>
         <CardTitle className="text-lg font-semibold tracking-tight text-stone-900">Subscription</CardTitle>
         <CardDescription className="leading-relaxed text-stone-500">
           View or update your plan and payment details.
