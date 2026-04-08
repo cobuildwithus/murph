@@ -28,43 +28,66 @@ type HostedMemberRoutingRecord = Prisma.HostedMemberRoutingGetPayload<{
   select: typeof hostedMemberRoutingStateSelect;
 }>;
 
+const hostedMemberRoutingLookupSelect = Prisma.validator<Prisma.HostedMemberRoutingSelect>()({
+  linqChatIdEncrypted: true,
+  memberId: true,
+  telegramUserLookupKey: true,
+  telegramUserIdEncrypted: true,
+  member: {
+    select: {
+      billingStatus: true,
+      id: true,
+      suspendedAt: true,
+    },
+  },
+});
+
+type HostedMemberRoutingLookupRecord = Prisma.HostedMemberRoutingGetPayload<{
+  select: typeof hostedMemberRoutingLookupSelect;
+}>;
+
 export interface HostedMemberRoutingStateSnapshot {
   linqChatId: string | null;
   memberId: string;
   telegramUserLookupKey: string | null;
 }
 
-export type HostedMemberTelegramLookupSnapshot = Pick<
-  HostedMember,
-  "billingStatus" | "id" | "suspendedAt"
->;
+export interface HostedMemberRoutingLookupSnapshot {
+  hasTelegramUserBinding: boolean;
+  linqChatId: string | null;
+  memberId: string;
+}
 
-export async function findHostedMemberByTelegramUserLookupKey(input: {
+export type HostedMemberRoutingLookupMatch =
+  | "telegramUserLookupKey"
+  | "telegramUserId";
+
+export interface HostedMemberRoutingLookup {
+  core: Pick<HostedMember, "billingStatus" | "id" | "suspendedAt">;
+  matchedBy: HostedMemberRoutingLookupMatch;
+  routing: HostedMemberRoutingLookupSnapshot;
+}
+
+export async function lookupHostedMemberRoutingByTelegramUserLookupKey(input: {
   prisma: HostedOnboardingPrismaClient;
   telegramUserLookupKey: string;
-}): Promise<HostedMemberTelegramLookupSnapshot | null> {
+}): Promise<HostedMemberRoutingLookup | null> {
   const routingRecord = await input.prisma.hostedMemberRouting.findUnique({
     where: {
       telegramUserLookupKey: input.telegramUserLookupKey,
     },
-    select: {
-      member: {
-        select: {
-          billingStatus: true,
-          id: true,
-          suspendedAt: true,
-        },
-      },
-    },
+    select: hostedMemberRoutingLookupSelect,
   });
 
-  return routingRecord?.member ?? null;
+  return routingRecord
+    ? projectHostedMemberRoutingLookup(routingRecord, "telegramUserLookupKey")
+    : null;
 }
 
-export async function findHostedMemberByTelegramUserId(input: {
+export async function lookupHostedMemberRoutingByTelegramUserId(input: {
   prisma: HostedOnboardingPrismaClient;
   telegramUserId: string;
-}): Promise<HostedMemberTelegramLookupSnapshot | null> {
+}): Promise<HostedMemberRoutingLookup | null> {
   const telegramUserLookupKeys = createHostedTelegramUserLookupKeyReadCandidates(
     input.telegramUserId,
   );
@@ -79,18 +102,12 @@ export async function findHostedMemberByTelegramUserId(input: {
         in: telegramUserLookupKeys,
       },
     },
-    select: {
-      member: {
-        select: {
-          billingStatus: true,
-          id: true,
-          suspendedAt: true,
-        },
-      },
-    },
+    select: hostedMemberRoutingLookupSelect,
   });
 
-  return routingRecord?.member ?? null;
+  return routingRecord
+    ? projectHostedMemberRoutingLookup(routingRecord, "telegramUserId")
+    : null;
 }
 
 export async function readHostedMemberRoutingState(input: {
@@ -214,6 +231,23 @@ export function projectHostedMemberRoutingState(
     linqChatId: privateState.linqChatId,
     memberId: routing.memberId,
     telegramUserLookupKey: routing.telegramUserLookupKey ?? null,
+  };
+}
+
+function projectHostedMemberRoutingLookup(
+  routing: HostedMemberRoutingLookupRecord,
+  matchedBy: HostedMemberRoutingLookupMatch,
+): HostedMemberRoutingLookup {
+  const routingState = projectHostedMemberRoutingState(routing);
+
+  return {
+    core: routing.member,
+    matchedBy,
+    routing: {
+      hasTelegramUserBinding: Boolean(routing.telegramUserLookupKey),
+      linqChatId: routingState.linqChatId,
+      memberId: routingState.memberId,
+    },
   };
 }
 

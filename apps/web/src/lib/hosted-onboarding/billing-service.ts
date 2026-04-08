@@ -157,31 +157,18 @@ async function ensureHostedStripeCustomer(input: {
     },
   );
 
-  const bound = await bindHostedMemberStripeCustomerIdIfMissing({
+  const billingRef = await bindHostedMemberStripeCustomerIdIfMissing({
     memberId: input.memberId,
     prisma: input.prisma,
     stripeCustomerId: customer.id,
   });
 
-  if (bound) {
-    await input.stripe.customers.update(customer.id, {
+  if (billingRef?.stripeCustomerId) {
+    await input.stripe.customers.update(billingRef.stripeCustomerId, {
       metadata: customerMetadata,
     });
 
-    return customer.id;
-  }
-
-  const reboundBillingRef = await readHostedMemberStripeBillingRef({
-    memberId: input.memberId,
-    prisma: input.prisma,
-  });
-
-  if (reboundBillingRef?.stripeCustomerId) {
-    await input.stripe.customers.update(reboundBillingRef.stripeCustomerId, {
-      metadata: customerMetadata,
-    });
-
-    return reboundBillingRef.stripeCustomerId;
+    return billingRef.stripeCustomerId;
   }
 
   throw hostedOnboardingError({

@@ -6,7 +6,10 @@ import {
   isHostedMemberSuspended,
 } from "./entitlement";
 import { hostedOnboardingError } from "./errors";
-import { findHostedMemberForPrivyIdentity } from "./member-identity-service";
+import {
+  lookupHostedMemberForPrivyIdentity,
+  type HostedMemberPrivyIdentityLookup,
+} from "./member-identity-service";
 import {
   readHostedPrivyAccessTokenFromRequest,
   type HostedPrivyIdentity,
@@ -22,6 +25,7 @@ import { type PrivyLinkedAccountLike, resolveHostedPrivyLinkedAccounts } from ".
 export interface HostedPrivyRequestAuthContext {
   identity: HostedPrivyIdentity;
   linkedAccounts: PrivyLinkedAccountLike[];
+  memberLookup: HostedMemberPrivyIdentityLookup | null;
   member: HostedMember | null;
   verifiedPrivyUser: HostedPrivyUser;
 }
@@ -63,7 +67,7 @@ export async function resolveHostedPrivyRequestAuthContext(
   }
 
   const identity = resolveHostedPrivyIdentityFromVerifiedUser(verifiedPrivyUser);
-  const member = await findHostedMemberForPrivyIdentity({
+  const memberLookup = await lookupHostedMemberForPrivyIdentity({
     identity,
     prisma,
   });
@@ -71,7 +75,8 @@ export async function resolveHostedPrivyRequestAuthContext(
   return {
     identity,
     linkedAccounts: resolveHostedPrivyLinkedAccounts(verifiedPrivyUser),
-    member,
+    member: memberLookup?.core ?? null,
+    memberLookup,
     verifiedPrivyUser,
   };
 }

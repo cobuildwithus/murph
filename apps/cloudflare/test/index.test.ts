@@ -765,6 +765,23 @@ describe("cloudflare worker routes", () => {
     );
     expect(statusResponse.status).toBe(200);
     expect(stub.status).toHaveBeenCalledWith();
+
+    const eventStatusResponse = await worker.fetch(
+      await signControlRequest(new Request(
+        "https://runner.example.test/internal/users/member_123/events/member.activated%3Aevt_123/status",
+        {
+          headers: {
+            authorization: "Bearer control-token",
+          },
+          method: "GET",
+        },
+      )),
+      env,
+    );
+    expect(eventStatusResponse.status).toBe(200);
+    expect(stub.getEventStatus).toHaveBeenCalledWith({
+      eventId: "member.activated:evt_123",
+    });
   });
 
   it("forwards device-sync runtime reads and apply updates through the signed user route", async () => {
@@ -2857,6 +2874,12 @@ function createUserRunnerStub() {
     })),
     getUserEnvStatus: vi.fn(async () => ({
       configuredUserEnvKeys: [],
+      userId: "member_123",
+    })),
+    getEventStatus: vi.fn(async (input: { eventId: string }) => ({
+      eventId: input.eventId,
+      lastError: null,
+      state: "completed" as const,
       userId: "member_123",
     })),
     status: vi.fn(async () => ({

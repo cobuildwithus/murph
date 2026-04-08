@@ -77,6 +77,41 @@ describe("createCloudflareHostedControlClient", () => {
     expect(observedRequest?.init?.signal).toBeInstanceOf(AbortSignal);
   });
 
+  it("fetches event status with the expected request shape", async () => {
+    let observedRequest: { init?: RequestInit; url: string } | null = null;
+    const client = createCloudflareHostedControlClient({
+      baseUrl: "https://runner.example.test/root/",
+      fetchImpl: vi.fn(async (url, init) => {
+        observedRequest = { init, url: String(url) };
+        return createJsonResponse({
+          eventId: "member.activated:evt_123",
+          lastError: null,
+          state: "completed",
+          userId: "user_123",
+        });
+      }) as typeof fetch,
+      getBearerToken: async () => "Bearer token-123",
+      timeoutMs: 2_500,
+    });
+
+    await expect(
+      client.getEventStatus("user_123", "member.activated:evt_123"),
+    ).resolves.toEqual({
+      eventId: "member.activated:evt_123",
+      lastError: null,
+      state: "completed",
+      userId: "user_123",
+    });
+
+    expect(observedRequest?.url).toBe(
+      "https://runner.example.test/root/internal/users/user_123/events/member.activated%3Aevt_123/status",
+    );
+    expect(observedRequest?.init?.method).toBe("GET");
+    expect(new Headers(observedRequest?.init?.headers).get("authorization")).toBe(
+      "Bearer token-123",
+    );
+  });
+
   it("stores dispatch payloads using the parsed request body and bearer header", async () => {
     const dispatch = buildHostedExecutionMemberActivatedDispatch({
       eventId: "evt_123",

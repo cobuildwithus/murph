@@ -10,6 +10,7 @@ import {
 import {
   buildCloudflareHostedControlUserCryptoContextPath,
   buildCloudflareHostedControlUserDispatchPayloadPath,
+  buildCloudflareHostedControlUserEventStatusPath,
   buildCloudflareHostedControlUserEnvPath,
   buildCloudflareHostedControlUserRunPath,
   buildCloudflareHostedControlUserStatusPath,
@@ -31,6 +32,7 @@ describe("src/index", () => {
       "buildCloudflareHostedControlUserCryptoContextPath",
       "buildCloudflareHostedControlUserDispatchPayloadPath",
       "buildCloudflareHostedControlUserEnvPath",
+      "buildCloudflareHostedControlUserEventStatusPath",
       "buildCloudflareHostedControlUserRunPath",
       "buildCloudflareHostedControlUserStatusPath",
       "buildCloudflareHostedControlUserStoredDispatchPath",
@@ -47,6 +49,9 @@ describe("src/index", () => {
     );
     expect(cloudflareHostedControl.buildCloudflareHostedControlUserEnvPath).toBe(
       buildCloudflareHostedControlUserEnvPath,
+    );
+    expect(cloudflareHostedControl.buildCloudflareHostedControlUserEventStatusPath).toBe(
+      buildCloudflareHostedControlUserEventStatusPath,
     );
     expect(cloudflareHostedControl.buildCloudflareHostedControlUserStatusPath).toBe(
       buildCloudflareHostedControlUserStatusPath,

@@ -64,14 +64,16 @@ export async function isHostedMemberActivationPending(input: {
   }
 
   try {
-    const status = await controlClient.getStatus(input.memberId);
-    if (status.poisonedEventIds.includes(activationOutbox.eventId)) {
+    const eventStatus = await controlClient.getEventStatus(
+      input.memberId,
+      activationOutbox.eventId,
+    );
+
+    if (!eventStatus) {
       return false;
     }
 
-    return status.inFlight
-      || status.pendingEventCount > 0
-      || status.retryingEventId === activationOutbox.eventId;
+    return !isHostedExecutionEventDispatchTerminal(eventStatus.state);
   } catch {
     return true;
   }

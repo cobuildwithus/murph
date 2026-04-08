@@ -1,6 +1,6 @@
 # Data Model Seams
 
-Last verified: 2026-04-08
+Last verified: 2026-04-09
 
 ## Implemented in this patch
 
@@ -280,6 +280,46 @@ This landing keeps the wire field names and compatibility aliases stable, but ma
 
 **Main refactor risk:** if a second durable side-effect family appears later, re-generalize intentionally from two real cases instead of copy-pasting generic names back into one-effect code paths.
 
+### 16. Return hosted-member lookup results from the slice that actually matched
+
+**Seam:** `apps/web/src/lib/hosted-onboarding/hosted-member-identity-store.ts`, `apps/web/src/lib/hosted-onboarding/hosted-member-billing-store.ts`, `apps/web/src/lib/hosted-onboarding/hosted-member-routing-store.ts`, `apps/web/src/lib/hosted-onboarding/member-identity-service.ts`, `apps/web/src/lib/hosted-onboarding/billing-service.ts`, `apps/web/src/lib/hosted-onboarding/stripe-billing-lookup.ts`, `apps/web/src/lib/hosted-onboarding/request-auth.ts`
+
+The hosted-member slice stores already knew which identity, billing, or routing binding matched, but callers were discarding that slice state and immediately fanning back out into follow-up reads.
+That made auth, billing, and routing flows pay an avoidable lookup-then-read tax even though the lookup owner already had the data.
+
+This patch:
+
+- makes identity lookups return `{ core, identity, matchedBy }` without exposing blind-index-only fields such as `phoneLookupKey`
+- makes Stripe billing lookups return `{ core, billingRef, matchedBy }` and updates the bind path to return the winning billing slice instead of a bare boolean
+- makes Telegram routing lookups return `{ core, routing, matchedBy }` with a narrow routing snapshot rather than a second naked member read
+- teaches the composed Privy identity resolver to preserve multiple match reasons for the same member
+- updates request-auth, Stripe lookup, and webhook callers to consume the nested lookup result directly instead of rereading the same slice
+
+**Why this is simpler:** slice owners now return the matched slice and the core member together in one read, so billing, auth, and routing callers no longer need ad hoc partial snapshots or immediate follow-up reads.
+
+**Main refactor risk:** do not answer future caller needs by reviving a wide `HostedMemberAggregate` or by leaking encrypted/blind-index columns through the lookup surface.
+The seam stays healthy only if the lookup result remains nested and privacy-minimized.
+
+### 17. Normalize hosted execution dispatch lifecycle around one cross-boundary outcome owner
+
+**Seam:** `apps/web/prisma/schema.prisma`, `apps/web/src/lib/hosted-execution/outbox.ts`, `apps/web/src/lib/hosted-onboarding/activation-progress.ts`, `packages/hosted-execution/src/contracts.ts`, `apps/cloudflare/src/user-runner/{runner-queue-store.ts,types.ts}`, `apps/cloudflare/src/user-runner.ts`
+
+Hosted dispatch had been translated across three overlapping models: transport-local web outbox status, Cloudflare queue presence booleans, and the shared hosted-execution outcome union.
+That made web activation state and event outcome reads reason across multiple models even though only one of them should have been product-facing.
+
+This patch:
+
+- adds durable `dispatchState` persistence on `ExecutionOutbox` and stores the shared `HostedExecutionEventDispatchState` union there
+- keeps `ExecutionOutbox.status` transport-local for queue claim/retry/handoff mechanics only
+- updates web outbox finalization so payload cleanup depends on terminal shared outcomes or terminal local failures instead of `status === dispatched`
+- updates activation progress to derive user-facing completion from `dispatchState` plus optional live Cloudflare status
+- teaches the Cloudflare runner queue to return the shared event dispatch status directly on event-scoped reads instead of leaking raw presence booleans across the boundary
+
+**Why this is simpler:** there is now one cross-boundary outcome vocabulary and one local transport lifecycle, so product state does not need to infer meaning from queue-local or Postgres-local mechanics.
+
+**Main refactor risk:** keep queue-local observability and retry mechanics app-local.
+If future edits collapse those back into the shared outcome union, the boundary will blur again and duplicate-pending versus duplicate-consumed semantics will get harder to preserve.
+
 ## Current targeted review findings
 
 The notes below are the remaining review-only pass after the simplifications landed above.
@@ -287,61 +327,7 @@ They focus on the next data-model simplifications that still look highest-levera
 
 ### Worth planning
 
-#### 1. Normalize hosted webhook side-effect persistence around common retry fields plus kind-owned details
-
-**Seam:** `apps/web/prisma/schema.prisma` (`HostedWebhookReceiptSideEffect`), `apps/web/src/lib/hosted-onboarding/webhook-receipt-types.ts` (`HostedWebhookSideEffect`), `apps/web/src/lib/hosted-onboarding/webhook-receipt-codec.ts` (`serializeHostedWebhookReceiptSideEffect`, `readHostedWebhookReceiptSideEffect`), `apps/web/src/lib/hosted-onboarding/webhook-dispatch-payload.ts`
-
-`HostedWebhookReceiptSideEffect` is now a wide sparse row that carries dispatch, Linq, and Revnet payload/result fields side-by-side.
-The codec then has to switch over `kind` and reconstruct whichever subset of columns matters.
-The current tree also suggests those effect-specific columns are not queried outside the codec/store seam, so the relational width is not buying much composition.
-
-**Current cost:** adding one more webhook side effect means adding more nullable columns, widening Prisma types, extending the codec switch, and updating store sync logic even if the shared retry/status behavior did not change.
-The effect owner is unclear because the table itself tries to own every variant at once.
-
-**Simpler target:** keep the common retry/idempotency fields first-class on `HostedWebhookReceiptSideEffect` (`source`, `eventId`, `effectId`, `kind`, `status`, `attemptCount`, `lastAttemptAt`, `sentAt`, `lastError*`), but move effect-specific payload/result data behind a single kind-owned `detailJson` envelope or a small keyed detail table per kind.
-`webhook-receipt-codec.ts` would then parse one common shell plus one detail owner instead of a wide sparse record.
-
-**Main refactor risk:** do not use this cleanup to reintroduce raw webhook event blobs or to hide fields that the retry/idempotency logic actually needs for indexed lookup.
-Preserve the privacy-minimized common fields, and only move the effect-specific remainder.
-
-#### 2. Return hosted-member lookup results from the slice that actually matched
-
-**Seam:** `apps/web/src/lib/hosted-onboarding/hosted-member-identity-store.ts` (`findHostedMemberByPrivyUserId`, `findHostedMemberByPhoneLookupKey`, `findHostedMemberByPhoneNumber`, `findHostedMemberByWalletAddress`, `readHostedMemberIdentity`), `apps/web/src/lib/hosted-onboarding/hosted-member-billing-store.ts` (`findHostedMemberByStripeCustomerId`, `findHostedMemberByStripeSubscriptionId`, `readHostedMemberStripeBillingRef`), `apps/web/src/lib/hosted-onboarding/hosted-member-routing-store.ts` (`findHostedMemberByTelegramUserId`, `findHostedMemberByTelegramUserLookupKey`), `apps/web/src/lib/hosted-onboarding/member-identity-service.ts` (`findHostedMemberForPrivyIdentity`, `refreshHostedMemberForPhone`, `reconcileHostedPrivyIdentityOnMember`), `apps/web/src/lib/hosted-onboarding/billing-service.ts` (`ensureHostedStripeCustomer`)
-
-The slice lookup stores already know which identity, routing, or billing binding matched, but most of them return only `HostedMember` or a tiny ad hoc snapshot.
-That throws away the slice-owned state that made the match, so callers immediately fan back out into follow-up reads or reconstruct the match set themselves.
-`findHostedMemberForPrivyIdentity(...)` is the clearest example: it runs three separate identity lookups and dedupes on `HostedMember.id`, while `refreshHostedMemberForPhone(...)` and `ensureHostedStripeCustomer(...)` do a lookup and then a second read to recover the slice state they actually care about.
-
-**Current cost:** simple operations require extra orchestration because the lookup owner is not allowed to return its own slice result.
-One more auth, billing, or routing use case is likely to add another round of lookup-then-read or another ad hoc partial snapshot type.
-
-**Simpler target:** let each specialized store own a nested lookup result such as `HostedMemberIdentityLookup = { core, identity, matchedBy }`, `HostedMemberBillingLookup = { core, billingRef, matchedBy }`, and `HostedMemberRoutingLookup = { core, routing, matchedBy }`.
-Keep `readHostedMemberSnapshot(...)` as the full composition seam, but let the lookup functions that already resolve a blind index or stable binding return the matched slice and the core row together in one read.
-That keeps slice ownership explicit without flattening the hosted member back into a wide aggregate.
-
-**Main refactor risk:** do not answer this by reintroducing one wide `HostedMemberAggregate` or by exposing raw encrypted columns/lookup-key internals outside the slice owners.
-The lookup result should stay nested and privacy-minimized: matched slice plus core state, not a second pre-cutover wide row.
-
-#### 3. Normalize hosted execution dispatch lifecycle around one cross-boundary outcome owner
-
-**Seam:** `packages/hosted-execution/src/contracts.ts` (`HostedExecutionEventDispatchState`, `HostedExecutionDispatchStateSnapshot`, `resolveHostedExecutionDispatchOutcomeState`), `apps/cloudflare/src/user-runner/runner-queue-store.ts` (`readEventState`), `apps/cloudflare/src/user-runner/types.ts` (`RunnerStateRecord`, `toUserStatus`), `apps/web/prisma/schema.prisma` (`ExecutionOutbox.status`), `apps/web/src/lib/hosted-execution/outbox.ts` (`resolveHostedExecutionDeliveryOutcome`, `isHostedExecutionOutboxPayloadSettled`)
-
-A single hosted dispatch currently moves through three overlapping state models.
-The web outbox has transport-local Postgres statuses (`queued`, `dispatching`, `dispatched`, `delivery_failed`), the Cloudflare queue reconstructs event presence from `pending`/`consumed`/`backpressured`/`poisoned`, and the shared hosted-execution contract exposes the public outcome vocabulary (`queued`, `duplicate_pending`, `duplicate_consumed`, `backpressured`, `completed`, `poisoned`).
-Simple questions like “is this event really done?” or “should web retry?” require translation across all three.
-
-**Current cost:** adding one more dispatch outcome or changing duplicate semantics would require coordinated edits in the shared contract, Cloudflare queue projection, and web outbox mapper.
-The current shape also collapses distinct runner outcomes back into `ExecutionOutboxStatus.dispatched`, which makes the transport row less useful as a source of truth once the handoff succeeds.
-
-**Simpler target:** keep `HostedExecutionEventDispatchState` as the only cross-boundary outcome vocabulary, and keep the Postgres outbox status transport-local: lease/retry/handoff only.
-Persist the last or terminal hosted dispatch outcome explicitly using the shared union instead of collapsing everything into `dispatched`, and let the Cloudflare queue surface that same shared outcome directly rather than making downstream callers reason from raw presence booleans.
-This would reduce the concept count without weakening the web/Cloudflare trust boundary.
-
-**Main refactor risk:** do not collapse transport lifecycle and runner outcome into one enum.
-Web still needs local claim/retry state, and Cloudflare still needs queue-internal scheduling detail.
-If the cleanup is done poorly, the system could lose the `duplicate_pending` versus `duplicate_consumed` distinction or make retry policy depend on Cloudflare-specific storage details.
-
-#### 4. Split hosted Stripe billing policy by responsibility before it becomes the next wide owner
+#### 1. Split hosted Stripe billing policy by responsibility before it becomes the next wide owner
 
 **Seam:** `apps/web/src/lib/hosted-onboarding/stripe-billing-policy.ts` (`activateHostedMemberFromConfirmedRevnetIssuance`, `activateHostedMemberForPositiveSource`, `updateHostedMemberStripeBillingIfFresh`, `suspendHostedMemberForBillingReversal`, `findMemberForStripeObject`, `resolveStripeCustomerContext`)
 
