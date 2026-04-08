@@ -31,17 +31,17 @@ function HostedBillingSettingsInner() {
     setErrorMessage(null);
 
     if (!ready) {
-      setErrorMessage("We are still loading your Privy session. Try again in a moment.");
+      setErrorMessage("Still loading — try again in a moment.");
       return;
     }
 
     if (!authenticated) {
-      setErrorMessage("Sign in with your hosted account before you manage billing.");
+      setErrorMessage("Please sign in first to manage billing.");
       return;
     }
 
     if (!user) {
-      setErrorMessage("We are still loading your account details. Try again in a moment.");
+      setErrorMessage("Still loading your account — try again in a moment.");
       return;
     }
 
@@ -55,18 +55,22 @@ function HostedBillingSettingsInner() {
 
       window.location.assign(response.url);
     } catch (error) {
-      setErrorMessage(toErrorMessage(error, "We could not open Stripe billing yet."));
+      setErrorMessage(toErrorMessage(error, "Could not open billing right now."));
     } finally {
       setIsOpeningPortal(false);
     }
   }
 
   return (
-    <Card className="shadow-sm">
+    <Card className="border-stone-200/80 shadow-sm transition-shadow hover:shadow-md">
       <CardHeader className="space-y-2">
-        <CardTitle className="text-2xl font-semibold tracking-tight text-stone-900">Subscription</CardTitle>
+        <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-widest text-olive/60">
+          <span className="inline-block h-1 w-1 rounded-full bg-olive/50" />
+          Billing
+        </div>
+        <CardTitle className="text-lg font-semibold tracking-tight text-stone-900">Subscription</CardTitle>
         <CardDescription className="leading-relaxed text-stone-500">
-          Manage your Murph subscription in Stripe without leaving this account.
+          View or update your plan and payment details.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -78,19 +82,19 @@ function HostedBillingSettingsInner() {
         ) : null}
 
         {!ready || isLoadingAuthenticatedUser ? (
-          <p className="text-sm leading-relaxed text-stone-500">Checking your Privy session before we show billing.</p>
+          <p className="text-sm leading-relaxed text-stone-500">Loading&hellip;</p>
         ) : !authenticated ? (
           <p className="text-sm leading-relaxed text-stone-500">
-            Sign in with your hosted account to manage the subscription attached to this invite.
+            Sign in to manage your subscription.
           </p>
         ) : !canManageBilling ? (
-          <p className="text-sm leading-relaxed text-stone-500">Loading your hosted profile before we show billing.</p>
+          <p className="text-sm leading-relaxed text-stone-500">Loading your account&hellip;</p>
         ) : (
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-sm leading-relaxed text-stone-500">
-              Stripe handles plan changes, payment method updates, and cancellation in one place.
+              Change your plan, update payment methods, or cancel.
             </p>
-            <Button type="button" onClick={() => void handleManageSubscription()} disabled={isOpeningPortal}>
+            <Button type="button" onClick={() => void handleManageSubscription()} disabled={isOpeningPortal} size="md">
               {isOpeningPortal ? "Opening Stripe..." : "Manage subscription"}
             </Button>
           </div>

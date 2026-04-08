@@ -66,7 +66,7 @@ function HostedDeviceSyncSettingsInner() {
       setSources(response.sources);
       setErrorMessage(null);
     } catch (error) {
-      setErrorMessage(toErrorMessage(error, "We could not load your wearable sources right now."));
+      setErrorMessage(toErrorMessage(error, "Could not load your wearables right now."));
     } finally {
       setIsLoading(false);
       setIsRefreshing(false);
@@ -108,7 +108,7 @@ function HostedDeviceSyncSettingsInner() {
     const errorCode = url.searchParams.get("deviceSyncError");
 
     if (status === "connected") {
-      setSuccessMessage(`Connected ${provider}. Murph will keep this quiet in the background.`);
+      setSuccessMessage(`Connected ${provider}.`);
       setWarningMessage(null);
       setErrorMessage(null);
       void loadSources();
@@ -169,11 +169,11 @@ function HostedDeviceSyncSettingsInner() {
         url: `/api/settings/device-sync/connections/${encodeURIComponent(source.connectionId)}/disconnect`,
       });
       setDisconnectTarget(null);
-      setSuccessMessage(`Disconnected ${source.providerLabel}. Your earlier history stays in place.`);
+      setSuccessMessage(`Disconnected ${source.providerLabel}. Your history is still saved.`);
 
       if (result.warning?.message) {
         setWarningMessage(
-          `Murph cleared the local connection, but ${source.providerLabel} did not confirm revocation cleanly: ${result.warning.message}`,
+          `Disconnected on our end, but ${source.providerLabel} didn't fully confirm: ${result.warning.message}`,
         );
       }
 
@@ -214,7 +214,7 @@ function HostedDeviceSyncSettingsInner() {
           isLoadingAuthenticatedUser={isLoadingAuthenticatedUser}
           profileLabel="wearable sources"
           ready={ready}
-          signedOutDescription="Open your latest Murph invite or sign-in flow in this browser first. We need your Privy session before we can manage wearable sources on your account."
+          signedOutDescription="Sign in to manage your wearables."
         />
       ) : (
         <HostedDeviceSyncSettingsContent
