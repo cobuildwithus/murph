@@ -10,6 +10,7 @@ export async function main() {
   await verifyTypecheckScripts(failures);
   await verifyTypecheckTsconfigs(failures);
   await verifyWorkspacePackageExports(failures);
+  await verifyAssistantEnginePublicSourceSurface(failures);
   await verifyWorkspacePackageExportTargets(failures);
   await verifyTsconfigPathMappings(failures);
   await verifyWorkspaceImports(failures);
@@ -85,7 +86,48 @@ async function verifyWorkspacePackageExports(failures) {
           `${path.relative(repoRoot, packageJsonPath)} declares ${JSON.stringify(exportKey)} as a public entrypoint; assistant-engine helper namespaces must stay on explicit named exports so inbox and usecase internals do not become ambient package surface.`,
         );
       }
+
+      if (
+        packageJson.name === "@murphai/assistant-engine"
+        && isAssistantEngineInternalHelperExport(exportKey)
+      ) {
+        failures.push(
+          `${path.relative(repoRoot, packageJsonPath)} declares ${JSON.stringify(exportKey)} as a public entrypoint; assistant-engine must keep CLI/inbox/usecase helper modules behind its canonical owner surfaces instead of exporting the internal helper directly.`,
+        );
+      }
     }
+  }
+}
+
+async function verifyAssistantEnginePublicSourceSurface(failures) {
+  const assistantEngineIndexPath = path.join(repoRoot, "packages", "assistant-engine", "src", "index.ts");
+  const assistantEngineProviderPath = path.join(
+    repoRoot,
+    "packages",
+    "assistant-engine",
+    "src",
+    "assistant-provider.ts",
+  );
+
+  const indexSource = await readFile(assistantEngineIndexPath, "utf8");
+  const providerSource = await readFile(assistantEngineProviderPath, "utf8");
+
+  for (const specifier of [
+    "./assistant-cli-access.js",
+    "./assistant-cli-tools.js",
+    "./assistant-vault-paths.js",
+  ]) {
+    if (sourceReexportsSpecifier(indexSource, specifier)) {
+      failures.push(
+        `packages/assistant-engine/src/index.ts re-exports ${JSON.stringify(specifier)}; assistant-engine's public root must stay on canonical runtime surfaces instead of leaking internal CLI/config helpers.`,
+      );
+    }
+  }
+
+  if (sourceReexportsSpecifier(providerSource, "./assistant/provider-config.js")) {
+    failures.push(
+      "packages/assistant-engine/src/assistant-provider.ts re-exports ./assistant/provider-config.js; assistant provider config remains owned by @murphai/operator-config and should not leak through the assistant-provider surface.",
+    );
   }
 }
 
@@ -351,7 +393,20 @@ function isTestOnlyInternalAssistantSpecifier({
       && specifier.startsWith("@murphai/assistant-cli/assistant/"))
     || (
       packageName === "@murphai/assistant-engine"
-      && specifier.startsWith("@murphai/assistant-engine/assistant/")
+      && (
+        specifier.startsWith("@murphai/assistant-engine/assistant/")
+        || specifier === "@murphai/assistant-engine/assistant-cli-access"
+        || specifier === "@murphai/assistant-engine/assistant-cli-tools"
+        || specifier === "@murphai/assistant-engine/assistant-vault-paths"
+        || specifier === "@murphai/assistant-engine/health-registry-command-metadata"
+        || specifier === "@murphai/assistant-engine/inbox-app/types"
+        || specifier === "@murphai/assistant-engine/inbox-services/connectors"
+        || specifier === "@murphai/assistant-engine/inbox-services/daemon"
+        || specifier === "@murphai/assistant-engine/inbox-services/promotions"
+        || specifier === "@murphai/assistant-engine/usecases/experiment-journal-vault"
+        || specifier === "@murphai/assistant-engine/usecases/explicit-health-family-services"
+        || specifier === "@murphai/assistant-engine/usecases/record-mutations"
+      )
     )
   );
 }
@@ -447,6 +502,29 @@ function isAssistantEngineWildcardHelperNamespace(exportKey) {
     /^\.\/inbox-services(?:\/.+)?\/\*$/u.test(exportKey)
     || /^\.\/usecases(?:\/.+)?\/\*$/u.test(exportKey)
   );
+}
+
+function isAssistantEngineInternalHelperExport(exportKey) {
+  return (
+    exportKey === "./assistant-cli-access"
+    || exportKey === "./assistant-cli-tools"
+    || exportKey === "./assistant-vault-paths"
+    || exportKey === "./health-registry-command-metadata"
+    || exportKey === "./inbox-app/types"
+    || exportKey === "./inbox-services/connectors"
+    || exportKey === "./inbox-services/daemon"
+    || exportKey === "./inbox-services/promotions"
+    || exportKey === "./usecases/experiment-journal-vault"
+    || exportKey === "./usecases/explicit-health-family-services"
+    || exportKey === "./usecases/record-mutations"
+  );
+}
+
+function sourceReexportsSpecifier(source, specifier) {
+  return new RegExp(
+    `^\\s*export\\s+(?:\\*|\\{[^}]+\\})\\s+from\\s+["']${escapeRegExp(specifier)}["']`,
+    "mu",
+  ).test(source);
 }
 
 function collectWorkspaceExportTargets(exportValue) {

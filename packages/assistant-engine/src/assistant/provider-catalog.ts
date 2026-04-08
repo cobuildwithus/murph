@@ -3,7 +3,7 @@ import {
   normalizeAssistantProviderConfig,
   type AssistantProviderConfig,
   type AssistantProviderConfigInput,
-} from '../assistant-provider.js'
+} from './provider-config.js'
 import {
   createCatalogModel,
   discoverAssistantProviderModels as discoverAssistantProviderModelsWithRegistry,
