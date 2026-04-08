@@ -408,7 +408,6 @@ describe("hosted runtime callbacks", () => {
     assert.deepEqual(deleted, [{
       effectId: "intent_123",
       fingerprint: "dedupe_123",
-      kind: "assistant.delivery",
     }]);
   });
 

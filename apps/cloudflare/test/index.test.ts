@@ -503,7 +503,7 @@ describe("cloudflare worker routes", () => {
   it("persists side-effect journal records through the side-effects route and reads them back through the outbox route", async () => {
     const env = createWorkerEnv();
     const response = await callRunnerOutbound(
-      new Request("http://results.worker/effects/outbox_123?kind=assistant.delivery&fingerprint=dedupe_123", {
+      new Request("http://results.worker/effects/outbox_123?fingerprint=dedupe_123", {
         body: JSON.stringify({
           ...createPreparedSideEffectRecord({
             effectId: "outbox_123",
@@ -521,7 +521,7 @@ describe("cloudflare worker routes", () => {
     expect(response.status).toBe(200);
 
     const readResponse = await callRunnerOutbound(
-      new Request("http://results.worker/intents/outbox_123?kind=assistant.delivery&fingerprint=dedupe_123", {
+      new Request("http://results.worker/intents/outbox_123?fingerprint=dedupe_123", {
         method: "GET",
       }),
       env,
@@ -543,7 +543,7 @@ describe("cloudflare worker routes", () => {
     const env = createWorkerEnv();
 
     await callRunnerOutbound(
-      new Request("http://results.worker/intents/outbox_a?kind=assistant.delivery&fingerprint=dedupe_123", {
+      new Request("http://results.worker/intents/outbox_a?fingerprint=dedupe_123", {
         body: JSON.stringify({
           ...createPreparedSideEffectRecord({
             effectId: "outbox_a",
@@ -559,7 +559,7 @@ describe("cloudflare worker routes", () => {
     );
 
     const conflictResponse = await callRunnerOutbound(
-      new Request("http://results.worker/effects/outbox_a?kind=assistant.delivery&fingerprint=dedupe_conflict", {
+      new Request("http://results.worker/effects/outbox_a?fingerprint=dedupe_conflict", {
         body: JSON.stringify({
           ...createPreparedSideEffectRecord({
             effectId: "outbox_a",
@@ -584,7 +584,7 @@ describe("cloudflare worker routes", () => {
     const env = createWorkerEnv();
 
     await callRunnerOutbound(
-      new Request("http://results.worker/effects/outbox_prepared?kind=assistant.delivery&fingerprint=dedupe_prepared", {
+      new Request("http://results.worker/effects/outbox_prepared?fingerprint=dedupe_prepared", {
         body: JSON.stringify(createPreparedSideEffectRecord({
           effectId: "outbox_prepared",
           fingerprint: "dedupe_prepared",
@@ -597,7 +597,7 @@ describe("cloudflare worker routes", () => {
       env,
     );
     await callRunnerOutbound(
-      new Request("http://results.worker/effects/outbox_sent?kind=assistant.delivery&fingerprint=dedupe_sent", {
+      new Request("http://results.worker/effects/outbox_sent?fingerprint=dedupe_sent", {
         body: JSON.stringify(createSentSideEffectRecord({
           effectId: "outbox_sent",
           fingerprint: "dedupe_sent",
@@ -611,7 +611,7 @@ describe("cloudflare worker routes", () => {
     );
 
     const deletePreparedResponse = await callRunnerOutbound(
-      new Request("http://results.worker/effects/outbox_prepared?kind=assistant.delivery&fingerprint=dedupe_prepared", {
+      new Request("http://results.worker/effects/outbox_prepared?fingerprint=dedupe_prepared", {
         method: "DELETE",
       }),
       env,
@@ -619,7 +619,7 @@ describe("cloudflare worker routes", () => {
     expect(deletePreparedResponse.status).toBe(200);
 
     const readPreparedResponse = await callRunnerOutbound(
-      new Request("http://results.worker/effects/outbox_prepared?kind=assistant.delivery&fingerprint=dedupe_prepared", {
+      new Request("http://results.worker/effects/outbox_prepared?fingerprint=dedupe_prepared", {
         method: "GET",
       }),
       env,
@@ -630,7 +630,7 @@ describe("cloudflare worker routes", () => {
     });
 
     const deleteSentResponse = await callRunnerOutbound(
-      new Request("http://results.worker/effects/outbox_sent?kind=assistant.delivery&fingerprint=dedupe_sent", {
+      new Request("http://results.worker/effects/outbox_sent?fingerprint=dedupe_sent", {
         method: "DELETE",
       }),
       env,
@@ -638,7 +638,7 @@ describe("cloudflare worker routes", () => {
     expect(deleteSentResponse.status).toBe(200);
 
     const readSentResponse = await callRunnerOutbound(
-      new Request("http://results.worker/effects/outbox_sent?kind=assistant.delivery&fingerprint=dedupe_sent", {
+      new Request("http://results.worker/effects/outbox_sent?fingerprint=dedupe_sent", {
         method: "GET",
       }),
       env,
@@ -678,7 +678,7 @@ describe("cloudflare worker routes", () => {
     });
 
     const response = await callRunnerOutbound(
-      new Request(`http://results.worker/intents/${record.effectId}?kind=${record.kind}&fingerprint=${record.fingerprint}`, {
+      new Request(`http://results.worker/intents/${record.effectId}?fingerprint=${record.fingerprint}`, {
         method: "GET",
       }),
       env,

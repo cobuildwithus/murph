@@ -8,7 +8,7 @@ import {
   buildHostedExecutionRunnerCommitPath,
   buildHostedExecutionRunnerEmailMessagePath,
   buildHostedExecutionRunnerSideEffectPath,
-  parseHostedExecutionSideEffectRecord,
+  parseHostedAssistantDeliveryRecord,
 } from "@murphai/hosted-execution";
 import {
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_PATH,
@@ -192,7 +192,7 @@ export function buildHostedExecutionRuntimePlatform(input: {
         });
 
         const record = readHostedRecordField(payload, "record");
-        return record === null ? null : parseHostedExecutionSideEffectRecord(record);
+        return record === null ? null : parseHostedAssistantDeliveryRecord(record);
       },
       async sendEmail(request) {
         const payload = await fetchHostedJson({
@@ -220,7 +220,7 @@ export function buildHostedExecutionRuntimePlatform(input: {
           url: createHostedSideEffectUrl(record),
         });
 
-        return parseHostedExecutionSideEffectRecord(
+        return parseHostedAssistantDeliveryRecord(
           requireRecordField(payload, "record"),
         );
       },
@@ -272,14 +272,12 @@ function createCloudflareHostedRuntimeFetch(
 function createHostedSideEffectUrl(input: {
   effectId: string;
   fingerprint: string;
-  kind: string;
 }): URL {
   const url = new URL(
     buildHostedExecutionRunnerSideEffectPath(input.effectId),
     `${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.effectsPort}/`,
   );
   url.searchParams.set("fingerprint", input.fingerprint);
-  url.searchParams.set("kind", input.kind);
   return url;
 }
 
