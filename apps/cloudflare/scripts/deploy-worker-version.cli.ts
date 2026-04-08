@@ -7,7 +7,7 @@ import {
   type DeploymentStatusPayload,
   type HostedWorkerDeploymentResult,
 } from "./deploy-worker-version.shared.js";
-import { requireConfiguredString } from "../src/deploy-automation/shared.js";
+import { requireConfiguredString } from "./deploy-automation/shared.ts";
 import { resolveDeployWorkerCliPaths } from "./deploy-worker-version-paths.js";
 import { runWranglerJson, runWranglerLogged } from "./wrangler-runner.js";
 

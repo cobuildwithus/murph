@@ -40,28 +40,6 @@ export const hostedRunnerWorkspacePackageNames = [
   "@murphai/vault-usecases",
 ] as const;
 
-export const hostedRunnerBuildPackageNames = [
-  "@murphai/assistant-engine",
-  "@murphai/assistant-runtime",
-  "@murphai/cloudflare-hosted-control",
-  "@murphai/contracts",
-  "@murphai/core",
-  "@murphai/device-syncd",
-  "@murphai/gateway-core",
-  "@murphai/gateway-local",
-  "@murphai/hosted-execution",
-  "@murphai/importers",
-  "@murphai/inbox-services",
-  "@murphai/inboxd",
-  "@murphai/messaging-ingress",
-  "@murphai/murph",
-  "@murphai/operator-config",
-  "@murphai/parsers",
-  "@murphai/query",
-  "@murphai/runtime-state",
-  "@murphai/vault-usecases",
-] as const;
-
 export const runnerVaultCliArtifactDependencyNames = [
   "@murphai/assistant-engine",
   "@murphai/contracts",
@@ -91,6 +69,14 @@ export const runnerVaultCliArtifactWorkspacePackageNames = [
   "@murphai/runtime-state",
   "@murphai/vault-usecases",
 ] as const;
+
+export const hostedRunnerBuildPackageNames = [
+  ...new Set([
+    ...hostedRunnerWorkspacePackageNames,
+    ...runnerVaultCliArtifactWorkspacePackageNames,
+    "@murphai/murph",
+  ]),
+];
 
 type HostedRunnerWorkerDependencyName =
   (typeof hostedRunnerWorkerDependencyNames)[number];

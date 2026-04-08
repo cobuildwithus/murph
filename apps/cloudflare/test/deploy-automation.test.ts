@@ -15,7 +15,7 @@ import {
   resolveHostedWorkerGradualDeploymentSupport,
   resolveHostedWorkerDeploymentTraffic,
   selectHostedContainerImageTagsForCleanup,
-} from "../src/deploy-automation.js";
+} from "../scripts/deploy-automation.js";
 import { renderWorkerSecretsFile } from "../scripts/render-worker-secrets.ts";
 
 describe("hosted deploy automation helpers", () => {

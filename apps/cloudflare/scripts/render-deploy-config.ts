@@ -5,7 +5,7 @@ import {
   buildHostedWranglerDeployConfig,
   readHostedDeployAutomationEnvironment,
   resolveCloudflareDeployPaths,
-} from "../src/deploy-automation.js";
+} from "./deploy-automation.js";
 
 const outputPath = process.argv[2]
   ? path.resolve(process.cwd(), process.argv[2])

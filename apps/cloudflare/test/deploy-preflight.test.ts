@@ -4,7 +4,7 @@ import {
   assertHostedDeployEnvironment,
   listMissingHostedDeployEnvironment,
   parseDeployWorkerFlag,
-} from "../src/deploy-preflight.js";
+} from "../scripts/deploy-preflight.js";
 
 describe("deploy preflight helpers", () => {
   it("requires the base deploy environment regardless of deploy mode", () => {

@@ -1,4 +1,4 @@
-import { isAllowedHostedAssistantReferencedRunnerEnvKey } from "../hosted-env-policy.ts";
+import { isAllowedHostedAssistantReferencedRunnerEnvKey } from "../../src/hosted-env-policy.ts";
 
 import { normalizeOptionalString, requireConfiguredString } from "./shared.ts";
 
