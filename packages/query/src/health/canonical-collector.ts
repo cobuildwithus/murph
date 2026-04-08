@@ -1,4 +1,4 @@
-import type { BankEntityKind } from "@murphai/contracts";
+import { VAULT_LAYOUT, type BankEntityKind } from "@murphai/contracts";
 
 import {
   compareCanonicalEntities,
@@ -301,17 +301,17 @@ async function collectCanonicalEntitiesAsync(
   const markdownByPath = new Map<string, string>();
   const assessments = await readJsonlEntities(
     vaultRoot,
-    "ledger/assessments",
+    VAULT_LAYOUT.assessmentLedgerDirectory,
     projectAssessmentEntity,
   );
   const profileSnapshots = await readJsonlEntities(
     vaultRoot,
-    "ledger/profile-snapshots",
+    VAULT_LAYOUT.profileSnapshotsDirectory,
     projectProfileSnapshotEntity,
   );
   const history = await readJsonlEntities(
     vaultRoot,
-    "ledger/events",
+    VAULT_LAYOUT.eventLedgerDirectory,
     projectHistoryEntity,
   );
   const registryCollections = await readRegistryCollectionsAsync(
@@ -345,17 +345,17 @@ function collectCanonicalEntitiesSync(
   const markdownByPath = new Map<string, string>();
   const assessments = readJsonlEntities(
     vaultRoot,
-    "ledger/assessments",
+    VAULT_LAYOUT.assessmentLedgerDirectory,
     projectAssessmentEntity,
   );
   const profileSnapshots = readJsonlEntities(
     vaultRoot,
-    "ledger/profile-snapshots",
+    VAULT_LAYOUT.profileSnapshotsDirectory,
     projectProfileSnapshotEntity,
   );
   const history = readJsonlEntities(
     vaultRoot,
-    "ledger/events",
+    VAULT_LAYOUT.eventLedgerDirectory,
     projectHistoryEntity,
   );
   const registryCollections = readRegistryCollectionsSync(

@@ -1,3 +1,5 @@
+import { VAULT_LAYOUT } from "@murphai/contracts";
+
 import {
   compareCanonicalEntities,
   type CanonicalEntity,
@@ -42,14 +44,14 @@ export interface CurrentProfileCollection {
 export async function readAssessmentEntitiesStrict(
   vaultRoot: string,
 ): Promise<CanonicalEntity[]> {
-  return readJsonlEntitiesStrict(vaultRoot, "ledger/assessments", projectAssessmentEntity);
+  return readJsonlEntitiesStrict(vaultRoot, VAULT_LAYOUT.assessmentLedgerDirectory, projectAssessmentEntity);
 }
 
 export async function readHistoryEntitiesStrict(
   vaultRoot: string,
 ): Promise<CanonicalEntity[]> {
   return collapseEventLedgerEntities(
-    await readJsonlEntitiesStrict(vaultRoot, "ledger/events", projectHistoryEntity),
+    await readJsonlEntitiesStrict(vaultRoot, VAULT_LAYOUT.eventLedgerDirectory, projectHistoryEntity),
   );
 }
 
@@ -58,7 +60,7 @@ export async function readProfileSnapshotEntitiesStrict(
 ): Promise<CanonicalEntity[]> {
   return readJsonlEntitiesStrict(
     vaultRoot,
-    "ledger/profile-snapshots",
+    VAULT_LAYOUT.profileSnapshotsDirectory,
     projectProfileSnapshotEntity,
   );
 }
@@ -105,7 +107,7 @@ export async function readCurrentProfileCollectionAsync(
   return resolveCurrentProfileCollection(
     profileSnapshots,
     markdownByPath,
-    await readDocument(vaultRoot, "bank/profile/current.md"),
+    await readDocument(vaultRoot, VAULT_LAYOUT.profileCurrentDocument),
   );
 }
 
@@ -121,7 +123,7 @@ export function readCurrentProfileCollectionSync(
   return resolveCurrentProfileCollection(
     profileSnapshots,
     markdownByPath,
-    readDocument(vaultRoot, "bank/profile/current.md"),
+    readDocument(vaultRoot, VAULT_LAYOUT.profileCurrentDocument),
   );
 }
 

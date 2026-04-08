@@ -489,8 +489,9 @@ export function isProtectedCanonicalPath(relativePath: string): boolean {
   return (
     PROTECTED_CANONICAL_ROOT_FILES.has(normalizedRelativePath) ||
     normalizedRelativePath.startsWith(`${VAULT_LAYOUT.journalDirectory}/`) ||
-    normalizedRelativePath.startsWith("bank/") ||
-    (normalizedRelativePath.startsWith("ledger/") && normalizedRelativePath.endsWith(".jsonl")) ||
+    normalizedRelativePath.startsWith(`${VAULT_LAYOUT.bankDirectory}/`) ||
+    (normalizedRelativePath.startsWith(`${VAULT_LAYOUT.ledgerDirectory}/`) &&
+      normalizedRelativePath.endsWith(".jsonl")) ||
     (normalizedRelativePath.startsWith(`${VAULT_LAYOUT.auditDirectory}/`) &&
       normalizedRelativePath.endsWith(".jsonl"))
   );
@@ -507,7 +508,12 @@ export async function listProtectedCanonicalPaths(vaultRoot: string): Promise<st
     }),
   );
 
-  for (const relativeDirectory of [VAULT_LAYOUT.journalDirectory, "bank", "ledger", VAULT_LAYOUT.auditDirectory]) {
+  for (const relativeDirectory of [
+    VAULT_LAYOUT.journalDirectory,
+    VAULT_LAYOUT.bankDirectory,
+    VAULT_LAYOUT.ledgerDirectory,
+    VAULT_LAYOUT.auditDirectory,
+  ]) {
     await walkProtectedCanonicalFiles(vaultRoot, relativeDirectory, matches);
   }
 

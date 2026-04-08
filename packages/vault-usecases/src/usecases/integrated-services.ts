@@ -1,4 +1,4 @@
-import { resolveSystemTimeZone } from "@murphai/contracts"
+import { resolveSystemTimeZone, VAULT_LAYOUT } from "@murphai/contracts"
 import { VaultCliError } from "@murphai/operator-config/vault-cli-errors"
 import {
   ensureManagedDeviceSyncControlPlane,
@@ -127,7 +127,7 @@ function createIntegratedCoreServices(
         vault,
         created: true,
         directories: [...core.REQUIRED_DIRECTORIES],
-        files: ["vault.json", "CORE.md"],
+        files: [VAULT_LAYOUT.metadata, VAULT_LAYOUT.coreDocument],
       }
     },
     async validate(input: CommandContext) {

@@ -6,11 +6,12 @@ import {
 } from "@murphai/contracts";
 
 import type { RawArtifact } from "../raw.ts";
+import { VAULT_LAYOUT } from "../constants.ts";
 import type { UnknownRecord } from "../types.ts";
 import type { ProfileSnapshotProfile, ProfileSnapshotSource } from "../profile/types.ts";
 
 export const ASSESSMENT_RESPONSE_SCHEMA_VERSION = CONTRACT_SCHEMA_VERSION.assessmentResponse;
-export const ASSESSMENT_LEDGER_DIRECTORY = "ledger/assessments";
+export const ASSESSMENT_LEDGER_DIRECTORY = VAULT_LAYOUT.assessmentLedgerDirectory;
 export const ASSESSMENT_SOURCES = CONTRACT_ASSESSMENT_SOURCES;
 
 export type { AssessmentSource };

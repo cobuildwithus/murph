@@ -13,6 +13,7 @@ import {
   type AutomationStatus,
 } from "@murphai/contracts";
 
+import { VAULT_LAYOUT } from "./constants.ts";
 import { generateRecordId } from "./ids.ts";
 import { VaultError } from "./errors.ts";
 import {
@@ -33,7 +34,7 @@ import {
 } from "./bank/shared.ts";
 import type { FrontmatterObject } from "./types.ts";
 
-const AUTOMATIONS_DIRECTORY = "bank/automations";
+const AUTOMATIONS_DIRECTORY = VAULT_LAYOUT.automationsDirectory;
 const dailyLocalTimePattern = /^(?:[01]\d|2[0-3]):[0-5]\d$/u;
 
 function requireValidTimeZone(value: unknown, fieldName: string): string {

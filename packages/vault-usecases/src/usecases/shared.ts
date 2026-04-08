@@ -4,6 +4,7 @@ import path from "node:path"
 import {
   BLOOD_TEST_CATEGORY,
   BLOOD_TEST_SPECIMEN_TYPES,
+  VAULT_LAYOUT,
   healthEntityDefinitions,
   type JsonObject,
 } from "@murphai/contracts"
@@ -68,7 +69,7 @@ export function normalizeIssues(
 ): VaultValidateResult["issues"] {
   return issues.map((issue) => ({
     code: String(issue.code ?? "validation_issue"),
-    path: String(issue.path ?? "vault.json"),
+    path: String(issue.path ?? VAULT_LAYOUT.metadata),
     message: String(issue.message ?? "Validation issue."),
     severity:
       issue.severity === "warning" || issue.severity === "error"

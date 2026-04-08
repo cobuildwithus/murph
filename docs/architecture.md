@@ -42,7 +42,7 @@ repo/
 
 ## Package Boundaries
 
-- `packages/contracts` defines the shared language: canonical Zod contracts, TypeScript types, parse helpers, and generated JSON Schema artifacts.
+- `packages/contracts` defines the shared language: canonical Zod contracts, TypeScript types, parse helpers, generated JSON Schema artifacts, and the shared vault-family registry/layout/query-source metadata consumed by core, query, and inboxd.
 - `packages/runtime-state` defines canonical local-state taxonomy and paths (`.runtime/operations/**`, `.runtime/projections/**`, `.runtime/cache/**`, `.runtime/tmp/**`), aggregates subsystem-owned operational descriptor manifests for portability policy, and provides shared JSON/SQLite versioning helpers and migration defaults.
 - `packages/core` owns vault bootstrap, filesystem primitives, domain mutations, audit emission, canonical write rules, and the ordered canonical `vault upgrade` registry for live-vault evolution; current-format canonical reads/writes fail closed until an outdated vault has been upgraded.
 - `packages/importers` parses external inputs, hosts provider-adapter normalization for direct API connectors, and delegates all canonical writes to core.
