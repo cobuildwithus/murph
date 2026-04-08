@@ -4,6 +4,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { HostedPrivyProvider } from "@/src/components/hosted-onboarding/privy-provider";
+import { HostedBillingSettings } from "@/src/components/settings/hosted-billing-settings";
 import { HostedDeviceSyncSettings } from "@/src/components/settings/hosted-device-sync-settings";
 import { HostedEmailSettings } from "@/src/components/settings/hosted-email-settings";
 import { HostedTelegramSettings } from "@/src/components/settings/hosted-telegram-settings";
@@ -52,6 +53,7 @@ export default function SettingsPage() {
                 directly against that Privy identity.
               </CardContent>
             </Card>
+            <HostedBillingSettings />
             <div className="grid gap-6 xl:grid-cols-2">
               <Card className="shadow-sm">
                 <CardContent className="pt-4 md:pt-6">

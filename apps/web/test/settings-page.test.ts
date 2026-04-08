@@ -15,6 +15,12 @@ vi.mock("@/src/components/settings/hosted-email-settings", () => ({
   },
 }));
 
+vi.mock("@/src/components/settings/hosted-billing-settings", () => ({
+  HostedBillingSettings() {
+    return createElement("div", null, "Hosted billing settings");
+  },
+}));
+
 vi.mock("@/src/components/settings/hosted-telegram-settings", () => ({
   HostedTelegramSettings() {
     return createElement("div", null, "Hosted Telegram settings");
@@ -49,6 +55,7 @@ test("SettingsPage renders the Privy-backed settings tree when client auth is co
 
   const markup = renderToStaticMarkup(SettingsPage());
 
+  assert.match(markup, /Hosted billing settings/);
   assert.match(markup, /Hosted email settings/);
   assert.match(markup, /Hosted Telegram settings/);
   assert.match(markup, /Hosted device sync settings/);
@@ -62,9 +69,10 @@ test("SettingsPage renders a config warning when Privy client auth is unavailabl
   const { default: SettingsPage } = await import("../app/settings/page");
   const markup = renderToStaticMarkup(SettingsPage());
 
-  assert.match(markup, /Privy client auth is not configured/);
-  assert.match(markup, /NEXT_PUBLIC_PRIVY_APP_ID/);
-  assert.doesNotMatch(markup, /Hosted email settings/);
-  assert.doesNotMatch(markup, /Hosted Telegram settings/);
-  assert.doesNotMatch(markup, /Hosted device sync settings/);
+    assert.match(markup, /Privy client auth is not configured/);
+    assert.match(markup, /NEXT_PUBLIC_PRIVY_APP_ID/);
+    assert.doesNotMatch(markup, /Hosted billing settings/);
+    assert.doesNotMatch(markup, /Hosted email settings/);
+    assert.doesNotMatch(markup, /Hosted Telegram settings/);
+    assert.doesNotMatch(markup, /Hosted device sync settings/);
 });
