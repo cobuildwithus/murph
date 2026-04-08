@@ -14,6 +14,11 @@ import {
   stringifyJson,
   toIsoTimestamp,
 } from "./shared.ts";
+import {
+  consumeOAuthState,
+  createOAuthState,
+  deleteExpiredOAuthStates,
+} from "./store/oauth-states.ts";
 
 import type {
   ClaimDeviceSyncWebhookTraceInput,
@@ -130,15 +135,6 @@ interface StoredJobRow {
   finished_at: string | null;
 }
 
-interface OAuthStateRow {
-  state: string;
-  provider: string;
-  return_to: string | null;
-  metadata_json: string | null;
-  created_at: string;
-  expires_at: string;
-}
-
 interface StoredWebhookTraceRow {
   provider: string;
   trace_id: string;
@@ -205,21 +201,6 @@ function mapJobRow(row: StoredJobRow | undefined): DeviceSyncJobRecord | null {
     updatedAt: row.updated_at,
     startedAt: row.started_at,
     finishedAt: row.finished_at,
-  };
-}
-
-function mapOAuthStateRow(row: OAuthStateRow | undefined): OAuthStateRecord | null {
-  if (!row) {
-    return null;
-  }
-
-  return {
-    state: row.state,
-    provider: row.provider,
-    returnTo: row.return_to,
-    metadata: maybeParseJsonObject(row.metadata_json),
-    createdAt: row.created_at,
-    expiresAt: row.expires_at,
   };
 }
 
@@ -478,42 +459,15 @@ export class SqliteDeviceSyncStore {
   }
 
   createOAuthState(input: OAuthStateRecord): OAuthStateRecord {
-    this.database.prepare(`
-      insert into oauth_state (state, provider, return_to, metadata_json, created_at, expires_at)
-      values (?, ?, ?, ?, ?, ?)
-    `).run(
-      input.state,
-      input.provider,
-      input.returnTo,
-      stringifyJson(input.metadata ?? {}),
-      input.createdAt,
-      input.expiresAt,
-    );
-
-    return input;
+    return createOAuthState(this.database, input);
   }
 
   deleteExpiredOAuthStates(now: string): number {
-    const result = this.database.prepare("delete from oauth_state where expires_at <= ?").run(now) as { changes: number };
-    return result.changes ?? 0;
+    return deleteExpiredOAuthStates(this.database, now);
   }
 
   consumeOAuthState(state: string, now: string): OAuthStateRecord | null {
-    return withImmediateTransaction(this.database, () => {
-      const row = this.database.prepare(`
-        select state, provider, return_to, metadata_json, created_at, expires_at
-        from oauth_state
-        where state = ?
-      `).get(state) as OAuthStateRow | undefined;
-
-      if (!row || Date.parse(row.expires_at) <= Date.parse(now)) {
-        this.database.prepare("delete from oauth_state where state = ?").run(state);
-        return null;
-      }
-
-      this.database.prepare("delete from oauth_state where state = ?").run(state);
-      return mapOAuthStateRow(row);
-    });
+    return consumeOAuthState(this.database, state, now);
   }
 
   listAccounts(provider?: string): StoredDeviceSyncAccount[] {
