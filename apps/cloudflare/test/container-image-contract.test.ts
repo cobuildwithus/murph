@@ -3,6 +3,24 @@ import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 
 describe("hosted runner container image contract", () => {
+  it("keeps runner bundle assembly app-owned and free of workspace repair steps", async () => {
+    const bundleAssemblyScript = await readFile(
+      new URL("../scripts/assemble-runner-bundle.ts", import.meta.url),
+      "utf8",
+    );
+
+    expect(bundleAssemblyScript).toContain(
+      'const runnerBundleDeployRoot = path.join(resolveCloudflareDeployPaths().deployDir, "runner-bundle");',
+    );
+    expect(bundleAssemblyScript).toContain(
+      'const stagingBundleDir = path.join(stagingRoot, "runner-bundle");',
+    );
+    expect(bundleAssemblyScript).toContain(
+      "await materializeFinalRunnerBundle(stagingBundleDir, runnerBundleDeployRoot);",
+    );
+    expect(bundleAssemblyScript).not.toContain("pnpm install --frozen-lockfile");
+  });
+
   it("pins whisper.cpp provisioning and default parser env in the image", async () => {
     const dockerfile = await readFile(
       new URL("../../../Dockerfile.cloudflare-hosted-runner", import.meta.url),
@@ -47,5 +65,7 @@ describe("hosted runner container image contract", () => {
     expect(dockerignore).toContain("apps/cloudflare/.deploy/*");
     expect(dockerignore).toContain("!apps/cloudflare/.deploy/runner-bundle/");
     expect(dockerignore).toContain("!apps/cloudflare/.deploy/runner-bundle/**");
+    expect(dockerignore).not.toContain("!apps/cloudflare/.deploy/wrangler.generated.jsonc");
+    expect(dockerignore).not.toContain("!apps/cloudflare/.deploy/worker-secrets.json");
   });
 });

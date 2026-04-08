@@ -27,6 +27,13 @@ This repo now includes:
 - checked-in and generated Wrangler config that declares the four required runtime secrets through Wrangler's experimental `secrets.required` support
 - a smoke-test script that verifies worker health and, when configured with a user id, triggers one manual hosted run and waits for queue drain, `lastRunAt` advance, and durable bundle refs
 
+The deploy artifact contract is intentionally narrow:
+
+- `apps/cloudflare` assembles the runtime bundle into `apps/cloudflare/.deploy/runner-bundle/`
+- `wrangler.generated.jsonc` and `worker-secrets.json` stay alongside that bundle under `.deploy/`, but they are deploy inputs, not container image contents
+- `Dockerfile.cloudflare-hosted-runner` stays copy-only for app code: it copies the prepared runner bundle into `/app` and starts `dist/container-entrypoint.js`
+- bundle assembly no longer ends with a workspace repair install after the runtime artifact is written
+
 ## What it does not automate yet
 
 - real Cloudflare account provisioning
@@ -121,7 +128,7 @@ For Venice as the platform default hosted assistant, set these GitHub environmen
 
 You do not need to set `HOSTED_ASSISTANT_API_KEY_ENV` for that path because the Venice preset resolves it to `VENICE_API_KEY`.
 
-The default container image already installs `ffmpeg`, `pdftotext`, a pinned `whisper.cpp` `whisper-cli`, and the default `base.en` model, and it sets `FFMPEG_COMMAND`, `PDFTOTEXT_COMMAND`, `WHISPER_COMMAND`, and `WHISPER_MODEL_PATH` inside the image. The app itself is assembled into a built runtime bundle through `pnpm deploy` before the final image stage is copied into place. Only set those vars in Worker config when you want to override the baked defaults.
+The default container image already installs `ffmpeg`, `pdftotext`, a pinned `whisper.cpp` `whisper-cli`, and the default `base.en` model, and it sets `FFMPEG_COMMAND`, `PDFTOTEXT_COMMAND`, `WHISPER_COMMAND`, and `WHISPER_MODEL_PATH` inside the image. The app-owned assembly step writes the built runtime bundle into `apps/cloudflare/.deploy/runner-bundle/` before the final image stage copies it into place. Only set those vars in Worker config when you want to override the baked defaults.
 
 ### Required environment secrets
 
@@ -260,7 +267,7 @@ pnpm --dir apps/cloudflare worker:deploy -- \
   --secrets-file ./.deploy/worker-secrets.json
 ```
 
-That script prepares the rendered deploy artifacts first, then runs `wrangler deploy`. `wrangler deploy` builds the native container image from `Dockerfile.cloudflare-hosted-runner`, pushes it through Cloudflare's deploy path, and deploys the worker. The deploy automation now prepares `apps/cloudflare/.deploy/runner-bundle/` first, so the Docker build just copies the already-built runner artifact instead of running another workspace install/build inside the image stage. Docker still needs to be available on the machine running that command.
+That script prepares the rendered deploy artifacts first, then runs `wrangler deploy`. `wrangler deploy` builds the native container image from `Dockerfile.cloudflare-hosted-runner`, pushes it through Cloudflare's deploy path, and deploys the worker. The deploy automation now prepares `apps/cloudflare/.deploy/runner-bundle/` first, so the Docker build just copies the already-built runner artifact instead of trying to rebuild or repair the workspace inside the image stage. Docker still needs to be available on the machine running that command.
 
 ### Normal deploys
 
