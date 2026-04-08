@@ -50,6 +50,8 @@ export function HostedInvitePhoneAuth({
       await onSignOut?.();
     },
   });
+  const inviteShortcutActive = !manualEntryVisible;
+  const inviteCodeAttempt = controller.sharedFlowProps.activeAttempt;
 
   useEffect(() => {
     void flushPendingInvitePhoneCodeMutation(inviteCode);
@@ -103,7 +105,7 @@ export function HostedInvitePhoneAuth({
   }
 
   async function handleResendCode() {
-    if (!manualEntryVisible && controller.sharedFlowProps.activeAttempt) {
+    if (inviteShortcutActive && inviteCodeAttempt) {
       await handleInviteSendCode();
       return;
     }
@@ -130,7 +132,7 @@ export function HostedInvitePhoneAuth({
       onContinue={controller.handleContinueAuthenticated}
       onUseDifferentNumber={controller.handleLogout}
     >
-      {!manualEntryVisible && !controller.sharedFlowProps.activeAttempt ? (
+      {inviteShortcutActive && !inviteCodeAttempt ? (
         <HostedInviteShortcutStep
           disabled={controller.flowDisabled}
           pendingAction={controller.pendingAction}
