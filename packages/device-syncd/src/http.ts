@@ -49,6 +49,11 @@ interface DeviceSyncHttpRouteMatch {
   params: DeviceSyncHttpRouteParams;
 }
 
+export type DeviceSyncHttpRequestHandler = (
+  request: IncomingMessage,
+  response: ServerResponse,
+) => Promise<void>;
+
 export interface CreateDeviceSyncHttpServerInput {
   service: DeviceSyncService;
   config?: DeviceSyncHttpConfig;
@@ -97,25 +102,33 @@ export async function startDeviceSyncHttpServer(input: CreateDeviceSyncHttpServe
   const port = input.config?.port ?? 8788;
   const controlToken = requireControlToken(input.config?.controlToken);
   const publicListener = resolvePublicListener(input.config);
-
-  const controlServer = await startListener({
-    host,
-    port,
+  const controlHandler = createDeviceSyncHttpRequestHandler({
     service,
     bodyLimitBytes,
     controlToken,
     surface: publicListener ? "control" : "combined",
     config: input.config,
   });
-  const publicServer = publicListener
-    ? await startListener({
-        host: publicListener.host,
-        port: publicListener.port,
+  const publicHandler = publicListener
+    ? createDeviceSyncHttpRequestHandler({
         service,
         bodyLimitBytes,
         controlToken,
         surface: "public",
         config: input.config,
+      })
+    : null;
+
+  const controlServer = await startListener({
+    host,
+    port,
+    handler: controlHandler,
+  });
+  const publicServer = publicListener
+    ? await startListener({
+        host: publicListener.host,
+        port: publicListener.port,
+        handler: publicHandler!,
       })
     : null;
 
@@ -366,25 +379,22 @@ async function routeRequest(input: {
   });
 }
 
-async function startListener(input: {
-  host: string;
-  port: number;
+export function createDeviceSyncHttpRequestHandler(input: {
   service: DeviceSyncService;
-  bodyLimitBytes: number;
+  bodyLimitBytes?: number;
   controlToken: string;
   surface: DeviceSyncHttpListenerSurface;
   config?: DeviceSyncHttpConfig;
-}): Promise<{
-  server: Server;
-  address: NodeServerHandle["control"];
-}> {
-  const server = createServer(async (request, response) => {
+}): DeviceSyncHttpRequestHandler {
+  const bodyLimitBytes = Math.max(1024, input.bodyLimitBytes ?? DEFAULT_BODY_LIMIT_BYTES);
+
+  return async (request, response) => {
     try {
       await routeRequest({
         request,
         response,
         service: input.service,
-        bodyLimitBytes: input.bodyLimitBytes,
+        bodyLimitBytes,
         controlToken: input.controlToken,
         surface: input.surface,
         config: input.config,
@@ -392,7 +402,18 @@ async function startListener(input: {
     } catch (error) {
       sendError(response, error);
     }
-  });
+  };
+}
+
+async function startListener(input: {
+  host: string;
+  port: number;
+  handler: DeviceSyncHttpRequestHandler;
+}): Promise<{
+  server: Server;
+  address: NodeServerHandle["control"];
+}> {
+  const server = createServer(input.handler);
   const address = await listenServer(server, input.host, input.port);
   return {
     server,

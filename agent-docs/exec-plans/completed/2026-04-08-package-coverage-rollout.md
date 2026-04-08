@@ -1,4 +1,4 @@
-# Package coverage rollout for tested packages without package-wide coverage gates
+# Raise standalone-ready package coverage into the root 80% rollout lane
 
 Status: completed
 Created: 2026-04-08
@@ -6,81 +6,87 @@ Updated: 2026-04-08
 
 ## Goal
 
-- Expand the root coverage lane so it enforces package-wide coverage for the requested packages using clean include patterns rather than fragile hand-maintained file lists.
-- Use one Codex worker per target package to plan and implement package-local coverage improvements while reusing existing shared harnesses and helpers wherever possible.
+- Finish the package-coverage rollout for the packages that now have real standalone coverage gates passing: `@murphai/device-syncd`, `@murphai/inboxd`, `@murphai/messaging-ingress`, and `@murphai/openclaw-plugin`.
+- Keep each package worker package-scoped, then integrate any required root coverage wiring centrally.
+- Push these four packages to roughly the same coverage posture as the rest of the repo, targeting about 80% package-wide coverage rather than curated-file coverage.
 
 ## Success criteria
 
-- Root `pnpm test:coverage` includes package-wide coverage for:
-  - `@murphai/assistant-engine`
-  - `@murphai/assistant-runtime`
-  - `@murphai/assistantd`
-  - `@murphai/murph`
-  - `@murphai/contracts`
-  - `@murphai/device-syncd`
-  - `@murphai/inboxd`
-  - `@murphai/messaging-ingress`
-  - `@murphai/openclaw-plugin`
-- Root coverage configuration uses package-level include patterns instead of a curated file list for those packages.
-- Package workers add or extend tests with shared helpers and harnesses instead of cloning setup logic across files.
-- Required verification passes for the resulting repo change, or any unrelated blockers are documented precisely.
+- Each of the four target packages has package-local tests and coverage config strong enough to participate cleanly in the root coverage lane.
+- Any missing package-local tests needed to get near the repo’s 80% norm are added without broad harness churn.
+- Root integration changes, if any, stay centralized outside the package workers.
+- Required verification, completion review, and a scoped commit run before handoff.
+
+## Current state
+
+- Worker prompts were aligned to the requested GPT-5.4 `medium` child depth and launched through the `codex-workers` helper.
+- `@murphai/inboxd`, `@murphai/messaging-ingress`, and `@murphai/openclaw-plugin` now have direct package-local `test:coverage` commands and verified green package-local coverage runs.
+- `@murphai/device-syncd` gained the HTTP handler seam plus broader provider/service/store tests, and its package thresholds were raised to `lines 80 / functions 80 / branches 70 / statements 80` based on the worker's proven package-wide coverage artifact (`85.46 statements / 72.91 branches / 89.23 functions / 85.65 lines`).
+- Direct local `device-syncd` typecheck passed, but repeated full-package Vitest runs in this environment stalled after startup without flushing a final coverage artifact.
+- Root `pnpm typecheck` and `pnpm test:coverage` were both attempted and failed for unrelated pre-existing reasons outside these four packages.
 
 ## Scope
 
 - In scope:
-  - Root Vitest coverage wiring for the listed packages
-  - Package-local `vitest.config.ts` coverage configuration as needed
-  - Package-local tests and reusable test helpers/harness setup
-  - Worker prompt artifacts for the package fanout
+- package-local test additions, fixture refinements, and coverage config for:
+  - `packages/device-syncd/**`
+  - `packages/inboxd/**`
+  - `packages/messaging-ingress/**`
+  - `packages/openclaw-plugin/**`
+- narrow parent-owned root integration under files such as `vitest.config.ts` or coverage-related config if the package workers report it is still needed
+- worker prompt maintenance needed to launch the requested batch cleanly
 - Out of scope:
-  - Unrelated package refactors
-  - Broad architecture or product-behavior changes
-  - Coverage expansion for packages outside the requested list unless required by shared harness extraction inside one of the target packages
+- unrelated package coverage rollout for the other prompt files
+- unrelated runtime refactors
+- non-coverage product or architecture changes
 
 ## Constraints
 
-- Technical constraints:
-  - Preserve unrelated worktree edits.
-  - Avoid parallel edits to shared root coverage files from multiple package workers.
-  - Prefer shared helpers and existing harness patterns over package-specific duplication.
-  - Keep package workers scoped to one package plus prompt artifacts; central integration owns root config merges.
-- Product/process constraints:
-  - Follow repo workflow, verification, and commit rules from `AGENTS.md` and `agent-docs/**`.
-  - Use one Codex worker per requested package.
-  - Package workers may spawn GPT-5.4 high subagents for disjoint seams inside their package.
+- Preserve unrelated worktree edits; the repo already has active overlapping lanes.
+- Package workers stay within their assigned package plus prompt artifacts.
+- Parent lane owns shared/root integration and final verification.
+- Use the installed `codex-workers` skill helper in the current shared worktree.
+- Each package worker should spawn its own GPT-5.4 `medium` subagents only for disjoint package-local seams.
 
 ## Risks and mitigations
 
-1. Risk: Parallel workers collide on root coverage wiring or shared helper files.
-   Mitigation: Keep shared root/config integration centralized and instruct package workers to treat shared-file edits as opt-in only when explicitly owned.
-2. Risk: Coverage thresholds are set before packages have realistic tests, causing churn.
-   Mitigation: Require each package worker to inventory current gaps first and implement missing tests before tightening gates.
-3. Risk: Large packages, especially `assistant-engine`, sprawl into low-value or duplicate tests.
-   Mitigation: Require package workers to group work into seams, reuse existing helpers, and prioritize high-leverage behavioral tests over mechanical line-chasing.
+1. Risk: package workers overlap root coverage wiring or shared config.
+   Mitigation: keep root `vitest.config.ts` and `config/**` parent-owned and require workers to report integration needs instead of editing them.
+2. Risk: package workers duplicate or overbuild harness setup to chase coverage.
+   Mitigation: reuse existing repo coverage patterns and allow only package-local helper additions that reduce duplication immediately.
+3. Risk: coverage rises in the package-local lanes but still misses the root rollout contract.
+   Mitigation: verify both package-local results and the parent-owned root coverage inclusion path before handoff.
 
 ## Tasks
 
-1. Capture current coverage/test topology for the requested packages and confirm worker ownership boundaries.
-2. Generate one prompt file per requested package with package-local scope plus shared-harness guidance.
-3. Launch one Codex worker per package in the current worktree via the installed `codex-workers` helper.
-4. Review worker plans and ongoing implementation for overlap, root-config needs, and shared helper opportunities.
-5. Integrate root coverage expansion and any necessary shared harness setup centrally.
-6. Run required verification and finalize with the repo completion workflow.
+1. Restore this active rollout plan and align the four worker prompts with the current request.
+2. Launch one CodexWorker per target package in the shared worktree via the `codex-workers` helper.
+3. Let each package worker inspect its package, spawn GPT-5.4 `medium` subagents as needed, and land package-local coverage improvements.
+4. Integrate any required root coverage wiring centrally.
+5. Run required verification, required completion review, fix findings, and commit the scoped result.
 
 ## Decisions
 
-- Use one Codex worker per requested package for both planning and implementation.
-- Keep root coverage integration centralized so the root config stays package-based and conflict-free.
-- Prefer package-wide include patterns for the requested packages instead of curated file lists for those packages.
-- Keep the root multi-project Vitest lane as the package smoke/orchestration runner, but enforce the rollout-package coverage gates through standalone package coverage commands because Vitest root project mode does not reliably fail child coverage thresholds.
+- Reuse the existing package-coverage worker prompt set instead of creating a second parallel prompt tree.
+- Limit this rollout slice to the four packages the user called out as standalone-ready now.
+- Keep the worktree shared and current, per the `codex-workers` skill default.
 
 ## Verification
 
-- Commands to run:
+- Required commands:
   - `pnpm typecheck`
   - `pnpm test:coverage`
-  - Focused package-local test commands as needed during iteration
-- Expected outcomes:
-  - The rollout packages have passing standalone package coverage commands with package-wide patterns or documented rollout thresholds.
-  - The root multi-project Vitest lane stays green as the package smoke/orchestration runner for the same package set.
+- Focused proof to add during implementation:
+  - targeted package-local coverage/test commands for the four packages
+  - a focused root coverage run or inspection proving these four packages are included in the root lane with package-wide thresholds
+- Completed focused proof:
+  - `pnpm --config.verify-deps-before-run=false --dir packages/device-syncd typecheck`
+  - `pnpm --config.verify-deps-before-run=false --dir packages/inboxd typecheck`
+  - `pnpm --config.verify-deps-before-run=false --dir packages/inboxd test:coverage`
+  - `pnpm --config.verify-deps-before-run=false --dir packages/messaging-ingress typecheck`
+  - `pnpm --config.verify-deps-before-run=false --dir packages/messaging-ingress test:coverage`
+  - `pnpm --config.verify-deps-before-run=false --dir packages/openclaw-plugin typecheck`
+  - `pnpm --config.verify-deps-before-run=false --dir packages/openclaw-plugin test:coverage`
+  - root `pnpm typecheck` failed in unrelated existing `packages/setup-cli` test types
+  - root `pnpm test:coverage` failed in unrelated existing `scripts/build-test-runtime-prepared.mjs` CLI import validation
 Completed: 2026-04-08

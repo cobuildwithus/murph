@@ -5,6 +5,7 @@ import { test } from "vitest";
 import { openSqliteRuntimeDatabase, writeSqliteRuntimeUserVersion } from "@murphai/runtime-state/node";
 
 import { createWhoopDeviceSyncProvider } from "../src/providers/whoop.ts";
+import { deviceSyncError } from "../src/errors.ts";
 import { createDeviceSyncService } from "../src/service.ts";
 import { SqliteDeviceSyncStore } from "../src/store.ts";
 import { createJsonResponse, makeTempDirectory, readUrl } from "./helpers.ts";
@@ -861,6 +862,213 @@ test("device sync service next wake tracks scheduled reconciles and queued jobs"
     service.getNextWakeAt("2026-03-17T10:00:00.000Z"),
     "2026-03-17T10:00:01.000Z",
   );
+
+  service.close();
+});
+
+test("device sync service requeues retryable provider failures and marks the account for reauthorization", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-reauth-retry");
+  const service = createDeviceSyncService({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    providers: [
+      createFakeProvider({
+        async executeJob() {
+          throw deviceSyncError({
+            code: "TOKEN_REFRESH_FAILED",
+            message: "Reconnect required.",
+            retryable: true,
+            accountStatus: "reauthorization_required",
+          });
+        },
+      }),
+    ],
+  });
+
+  const begin = await service.startConnection({
+    provider: "demo",
+  });
+  const connected = await service.handleOAuthCallback({
+    provider: "demo",
+    state: begin.state,
+    code: "reauth",
+  });
+
+  const processedJob = await service.runWorkerOnce();
+  const storedAccount = service.store.getAccountById(connected.account.id);
+  const queuedJobs = service.store.database.prepare(`
+    select status, attempts, last_error_code, last_error_message
+    from device_job
+    where account_id = ?
+    order by created_at asc, id asc
+  `).all(connected.account.id) as Array<{
+    attempts: number;
+    last_error_code: string | null;
+    last_error_message: string | null;
+    status: string;
+  }>;
+
+  assert.equal(processedJob?.kind, "backfill");
+  assert.equal(storedAccount?.status, "reauthorization_required");
+  assert.equal(storedAccount?.lastErrorCode, "TOKEN_REFRESH_FAILED");
+  assert.equal(storedAccount?.lastErrorMessage, "Reconnect required.");
+  assert.equal(service.summarize().jobsQueued, 1);
+  assert.equal(service.summarize().jobsDead, 0);
+  assert.equal(queuedJobs[0]?.status, "queued");
+  assert.equal(queuedJobs[0]?.attempts, 1);
+  assert.equal(queuedJobs[0]?.last_error_code, "TOKEN_REFRESH_FAILED");
+  assert.equal(queuedJobs[0]?.last_error_message, "Reconnect required.");
+
+  service.close();
+});
+
+test("device sync service records unexpected job errors as dead jobs", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-job-error");
+  const service = createDeviceSyncService({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    providers: [
+      createFakeProvider({
+        async executeJob() {
+          throw new Error("provider exploded");
+        },
+      }),
+    ],
+  });
+
+  const begin = await service.startConnection({
+    provider: "demo",
+  });
+  const connected = await service.handleOAuthCallback({
+    provider: "demo",
+    state: begin.state,
+    code: "job-error",
+  });
+
+  const processedJob = await service.runWorkerOnce();
+  const storedAccount = service.store.getAccountById(connected.account.id);
+  const jobStatus = service.store.database.prepare(`
+    select status, last_error_code, last_error_message
+    from device_job
+    where account_id = ?
+    order by created_at asc, id asc
+  `).get(connected.account.id) as {
+    last_error_code: string | null;
+    last_error_message: string | null;
+    status: string;
+  };
+
+  assert.equal(processedJob?.kind, "backfill");
+  assert.equal(storedAccount?.status, "active");
+  assert.equal(storedAccount?.lastErrorCode, "SYNC_JOB_FAILED");
+  assert.equal(storedAccount?.lastErrorMessage, "provider exploded");
+  assert.equal(jobStatus.status, "dead");
+  assert.equal(jobStatus.last_error_code, "SYNC_JOB_FAILED");
+  assert.equal(jobStatus.last_error_message, "provider exploded");
+
+  service.close();
+});
+
+test("device sync service string job failures still produce deterministic dead-job state", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-job-string-error");
+  const service = createDeviceSyncService({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    providers: [
+      createFakeProvider({
+        async executeJob() {
+          throw "plain failure";
+        },
+      }),
+    ],
+  });
+
+  const begin = await service.startConnection({
+    provider: "demo",
+  });
+  const connected = await service.handleOAuthCallback({
+    provider: "demo",
+    state: begin.state,
+    code: "string-error",
+  });
+
+  await service.runWorkerOnce();
+  const storedAccount = service.store.getAccountById(connected.account.id);
+  const jobStatus = service.store.database.prepare(`
+    select status, last_error_code, last_error_message
+    from device_job
+    where account_id = ?
+    order by created_at asc, id asc
+  `).get(connected.account.id) as {
+    last_error_code: string | null;
+    last_error_message: string | null;
+    status: string;
+  };
+
+  assert.equal(storedAccount?.lastErrorCode, "SYNC_JOB_FAILED");
+  assert.equal(storedAccount?.lastErrorMessage, "plain failure");
+  assert.equal(jobStatus.status, "dead");
+  assert.equal(jobStatus.last_error_message, "plain failure");
+
+  service.close();
+});
+
+test("device sync service logs non-error revoke failures but still disconnects locally", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-revoke-warning");
+  const warnEvents: Array<{ context?: Record<string, unknown>; message: string }> = [];
+  const service = createDeviceSyncService({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+      log: {
+        warn(message, context) {
+          warnEvents.push({
+            context: context as Record<string, unknown> | undefined,
+            message,
+          });
+        },
+      },
+    },
+    providers: [
+      createFakeProvider({
+        async revokeAccess() {
+          throw "remote revoke unavailable";
+        },
+      }),
+    ],
+  });
+
+  const begin = await service.startConnection({
+    provider: "demo",
+  });
+  const connected = await service.handleOAuthCallback({
+    provider: "demo",
+    state: begin.state,
+    code: "disconnect-warning",
+  });
+
+  const disconnected = await service.disconnectAccount(connected.account.id);
+
+  assert.equal(disconnected.account.status, "disconnected");
+  assert.equal(warnEvents.length, 1);
+  assert.equal(warnEvents[0]?.message, "Provider revoke access failed during disconnect; continuing local disconnect.");
+  assert.deepEqual(warnEvents[0]?.context?.error, {
+    value: "remote revoke unavailable",
+  });
 
   service.close();
 });
