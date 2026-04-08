@@ -3,7 +3,7 @@
 import { usePrivy, useUser } from "@privy-io/react-auth";
 import { useCallback, useEffect, useState } from "react";
 
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { requestHostedOnboardingJson } from "@/src/components/hosted-onboarding/client-api";
 import {
   formatHostedDeviceSyncProviderLabel,

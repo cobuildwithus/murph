@@ -2,14 +2,14 @@
 
 import { useState } from "react";
 
-import { Button } from "@/components/ui/button";
+import { Button } from "@/src/components/ui/button";
 import {
   Dialog,
   DialogContent,
   DialogDescription,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
+} from "@/src/components/ui/dialog";
 
 import { HostedPhoneAuth } from "./hosted-phone-auth";
 

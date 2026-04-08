@@ -2,7 +2,7 @@
 
 import { useId, type FormEvent } from "react";
 
-import { Button, buttonVariants } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/src/components/ui/button";
 import {
   Combobox,
   ComboboxContent,
@@ -10,10 +10,10 @@ import {
   ComboboxItem,
   ComboboxList,
   ComboboxTrigger,
-} from "@/components/ui/combobox";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { cn } from "@/lib/utils";
+} from "@/src/components/ui/combobox";
+import { Input } from "@/src/components/ui/input";
+import { Label } from "@/src/components/ui/label";
+import { cn } from "@/src/lib/utils";
 
 import { HostedUseDifferentNumberButton } from "./hosted-phone-auth-use-different-number-button";
 import type {

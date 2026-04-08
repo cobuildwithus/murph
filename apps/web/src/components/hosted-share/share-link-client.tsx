@@ -3,9 +3,9 @@
 import { usePrivy } from "@privy-io/react-auth";
 import { useEffect, useState, startTransition } from "react";
 
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
+import { Badge } from "@/src/components/ui/badge";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/src/components/ui/card";
 import type { HostedSharePageData } from "@/src/lib/hosted-share/service";
 
 import { requestHostedOnboardingJson } from "../hosted-onboarding/client-api";

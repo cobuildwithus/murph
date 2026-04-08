@@ -3,9 +3,9 @@
 import { usePrivy } from "@privy-io/react-auth";
 import { useEffect, useState } from "react";
 
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
+import { Badge } from "@/src/components/ui/badge";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/src/components/ui/card";
 import type { HostedSharePreview } from "@/src/lib/hosted-share/service";
 import type {
   HostedInviteStatusPayload,
