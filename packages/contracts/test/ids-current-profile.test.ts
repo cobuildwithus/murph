@@ -191,4 +191,46 @@ describe("buildCurrentProfileDocument", () => {
     expect(parsed.rawFrontmatter).not.toContain("topGoalIds:");
     expect(parsed.rawFrontmatter).not.toContain("unitPreferences:");
   });
+
+  it("renders empty nested frontmatter objects and tolerates a scalar runtime profile value", () => {
+    const result = buildCurrentProfileDocument({
+      snapshotId,
+      updatedAt,
+      source: "import",
+      profile: {
+        goals: {},
+        unitPreferences: {},
+      },
+    });
+
+    expect(result.attributes).toEqual({
+      schemaVersion: CONTRACT_SCHEMA_VERSION.profileCurrentFrontmatter,
+      docType: FRONTMATTER_DOC_TYPES.profileCurrent,
+      snapshotId,
+      updatedAt,
+      unitPreferences: {},
+    });
+    expect(result.markdown).toContain("unitPreferences: {}");
+
+    const scalarProfile = buildCurrentProfileDocument({
+      snapshotId,
+      updatedAt,
+      source: "runtime",
+      profile: "summary-only" as unknown as Record<string, unknown>,
+    });
+
+    expect(scalarProfile.body).toContain("summary-only");
+    expect(scalarProfile.markdown).toContain("Source: runtime");
+  });
+
+  it("throws a joined validation error when derived frontmatter attributes are invalid", () => {
+    expect(() =>
+      buildCurrentProfileDocument({
+        snapshotId: "bad-id",
+        updatedAt: "not-a-timestamp",
+        source: "invalid",
+        profile: {},
+      }),
+    ).toThrowError(/snapshotId|updatedAt/u);
+  });
 });
