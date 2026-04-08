@@ -6,22 +6,9 @@ import {
   usePrivy,
   useUser,
 } from "@privy-io/react-auth";
-import { LoaderCircleIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Button, buttonVariants } from "@/components/ui/button";
-import {
-  Combobox,
-  ComboboxContent,
-  ComboboxInput,
-  ComboboxItem,
-  ComboboxList,
-  ComboboxTrigger,
-} from "@/components/ui/combobox";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { cn } from "@/lib/utils";
 import { normalizePhoneNumberForCountry } from "@/src/lib/hosted-onboarding/phone";
 import {
   canContinueHostedPrivyClientSession,
@@ -38,6 +25,12 @@ import {
 } from "@/src/lib/hosted-onboarding/privy-client";
 import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
 
+import {
+  HostedAuthenticatedPhoneAuthState,
+  HostedInvitePhoneAuthFlow,
+  HostedPublicPhoneAuthFlow,
+  type HostedAuthenticatedPhoneAuthView,
+} from "./hosted-phone-auth-views";
 import {
   HostedOnboardingApiError,
   requestHostedOnboardingJson,
@@ -79,13 +72,6 @@ interface PendingInvitePhoneCodeMutation {
   inviteCode: string;
   kind: "abort" | "confirm";
   sendAttemptId: string;
-}
-
-interface HostedPhoneAuthPhoneEntryVisibilityInput {
-  authenticated: boolean;
-  manualEntryVisible: boolean;
-  mode: HostedPhoneAuthProps["mode"];
-  step: "phone" | "code";
 }
 
 const HOSTED_PHONE_COUNTRY_OPTIONS: HostedPhoneCountryOption[] = [
@@ -154,12 +140,10 @@ function HostedPhoneAuthInner({
     issue: authenticatedSessionIssue,
     showAuthenticatedLoadingState,
   });
-  const showInviteSendCodeShortcut = !authenticated && mode === "invite" && step === "phone" && !manualEntryVisible;
-  const showPhoneNumberEntry = shouldShowHostedPhoneNumberEntry({
-    authenticated,
-    manualEntryVisible,
-    mode,
-    step,
+  const authenticatedView = resolveHostedAuthenticatedPhoneAuthView({
+    showAuthenticatedLoadingState,
+    showAuthenticatedManualResumeState,
+    showAuthenticatedRestartState,
   });
   const authenticatedLoadingTitle =
     checkingAuthenticatedSession
@@ -406,214 +390,88 @@ function HostedPhoneAuthInner({
         </Alert>
       ) : null}
 
-      {showInviteSendCodeShortcut ? (
-        <div className="space-y-3">
-          <p className="text-sm text-stone-600">
-            We&apos;ll text a verification code to the number that messaged Murph.
-          </p>
-          <div className="flex flex-wrap gap-3">
-            <Button
-              type="button"
-              onClick={handleInviteSendCode}
-              disabled={!ready || pendingAction !== null}
-              size="xl"
-              className="w-full"
-            >
-              {pendingAction === "send-code" ? "Sending code..." : "Send me a code"}
-            </Button>
-            <Button
-              type="button"
-              onClick={() => {
-                setErrorMessage(null);
-                setManualEntryVisible(true);
-              }}
-              disabled={pendingAction !== null}
-              variant="outline"
-              size="xl"
-            >
-              Use a different number
-            </Button>
-          </div>
-        </div>
-      ) : null}
-
-      {showPhoneNumberEntry ? (
-        <div className="space-y-3">
-          <Label htmlFor={`hosted-phone-${mode}`}>
-            {mode === "invite" ? "Phone number" : "Your phone number"}
-          </Label>
-          <div className="flex flex-col gap-3 sm:flex-row">
-            <Combobox
-              items={HOSTED_PHONE_COUNTRY_OPTIONS}
-              value={selectedPhoneCountry}
-              itemToStringValue={(option) => `${option.label} (${option.dialCode})`}
-              onValueChange={(option) => {
-                if (option) {
-                  setPhoneCountryCode(option.code);
-                }
-              }}
-            >
-              <ComboboxTrigger
-                aria-label={`Country or region, ${selectedPhoneCountry.label} ${selectedPhoneCountry.dialCode}`}
-                className={cn(
-                  buttonVariants({ variant: "outline", size: "lg" }),
-                  "h-12 w-auto shrink-0 justify-between px-4 text-left font-medium sm:min-w-28",
-                )}
-              >
-                {selectedPhoneCountry.dialCode}
-              </ComboboxTrigger>
-              <ComboboxContent className="w-64">
-                <ComboboxInput placeholder="Search countries..." />
-                <ComboboxList>
-                  {(option) => (
-                    <ComboboxItem key={option.code} value={option}>
-                      <span className="flex min-w-0 items-center justify-between gap-3">
-                        <span>{option.label}</span>
-                        <span className="text-xs text-stone-500">{option.dialCode}</span>
-                      </span>
-                    </ComboboxItem>
-                  )}
-                </ComboboxList>
-              </ComboboxContent>
-            </Combobox>
-            <Input
-              id={`hosted-phone-${mode}`}
-              autoComplete="tel-national"
-              inputMode="tel"
-              placeholder={selectedPhoneCountry.placeholder}
-              value={phoneNumber}
-              onChange={(event) => setPhoneNumber(event.currentTarget.value)}
-              className="h-12 px-4 text-base sm:flex-1 md:text-sm"
-            />
-          </div>
-          {mode === "invite" ? (
-            <p className="text-sm text-stone-500">
-              Enter the number that messaged Murph.
-            </p>
-          ) : null}
-        </div>
-      ) : null}
-
-      {!authenticated && step === "code" ? (
-        <div className="space-y-3">
-          <div className="flex items-baseline justify-between">
-            <Label htmlFor={`hosted-code-${mode}`}>
-              Verification code
-            </Label>
-            <Button
-              type="button"
-              onClick={handleResendCode}
-              disabled={!ready || pendingAction !== null}
-              variant="link"
-              size="xs"
-              className="h-auto p-0 text-xs text-stone-500"
-            >
-              {pendingAction === "send-code" ? "Sending..." : "Resend code"}
-            </Button>
-          </div>
-          <Input
-            id={`hosted-code-${mode}`}
-            autoComplete="one-time-code"
-            inputMode="numeric"
-            placeholder="123456"
-            value={code}
-            onChange={(event) => setCode(event.currentTarget.value)}
-            className="h-12 px-4 text-base md:text-sm"
-          />
-        </div>
-      ) : null}
-
-      {authenticated && showAuthenticatedLoadingState ? (
-        <Alert className="border-stone-200 bg-stone-50">
-          <LoaderCircleIcon className="mt-0.5 size-4 animate-spin" />
-          <AlertTitle>{authenticatedLoadingTitle}</AlertTitle>
-          <AlertDescription>{authenticatedLoadingBody}</AlertDescription>
-        </Alert>
-      ) : showAuthenticatedManualResumeState ? (
-        <Alert className="border-stone-200 bg-stone-50">
-          <AlertTitle>You already started signup in this browser.</AlertTitle>
-          <AlertDescription>
-            Keep going with this number, or sign out and use a different one.
-          </AlertDescription>
-          <div className="mt-3 flex flex-wrap gap-3">
-            <Button
-              type="button"
-              onClick={handleContinueAuthenticated}
-              disabled={!ready || pendingAction !== null}
-              size="xl"
-            >
-              Continue signup
-            </Button>
-            <Button type="button" onClick={handleLogout} disabled={pendingAction !== null} variant="outline" size="xl">
-              {pendingAction === "logout" ? "Signing out..." : "Use a different number"}
-            </Button>
-          </div>
-        </Alert>
-      ) : showAuthenticatedRestartState ? (
-        <Alert className="border-stone-200 bg-stone-50">
-          <AlertTitle>This browser needs a fresh phone sign-in.</AlertTitle>
-          <AlertDescription>
-            {describeHostedPrivyClientSessionIssue(authenticatedSessionIssue)
-              ?? "Sign out and request a fresh code to continue."}
-          </AlertDescription>
-          <div className="mt-3 flex flex-wrap gap-3">
-            <Button type="button" onClick={handleLogout} disabled={pendingAction !== null} variant="outline" size="xl">
-              {pendingAction === "logout" ? "Signing out..." : "Use a different number"}
-            </Button>
-          </div>
-        </Alert>
-      ) : showInviteSendCodeShortcut ? null : (
-        <div className="flex flex-wrap gap-3">
-          {step === "phone" ? (
-            <Button type="button" onClick={handleSendCode} disabled={!ready || pendingAction !== null} size="xl">
-              {pendingAction === "send-code" ? "Sending code..." : "Text me a code"}
-            </Button>
-          ) : (
-            <>
-              <Button
-                type="button"
-                onClick={handleVerifyCode}
-                disabled={!ready || pendingAction !== null}
-                size="xl"
-                className="w-full"
-              >
-                {pendingAction === "verify-code" ? "Finishing setup..." : "Verify phone"}
-              </Button>
-              <Button
-                type="button"
-                onClick={() => {
-                  setCode("");
-                  if (mode === "invite") {
-                    setManualEntryVisible(true);
-                  }
-                  setStep("phone");
-                }}
-                disabled={pendingAction !== null}
-                variant="link"
-                className="w-full"
-              >
-                Use a different number
-              </Button>
-            </>
-          )}
-        </div>
+      {authenticatedView ? (
+        <HostedAuthenticatedPhoneAuthState
+          body={authenticatedLoadingBody}
+          description={
+            describeHostedPrivyClientSessionIssue(authenticatedSessionIssue)
+            ?? "Sign out and request a fresh code to continue."
+          }
+          disabled={!ready || pendingAction !== null}
+          pendingAction={pendingAction}
+          title={authenticatedLoadingTitle}
+          view={authenticatedView}
+          onContinue={handleContinueAuthenticated}
+          onUseDifferentNumber={handleLogout}
+        />
+      ) : mode === "invite" ? (
+        <HostedInvitePhoneAuthFlow
+          code={code}
+          disabled={!ready || pendingAction !== null}
+          manualEntryVisible={manualEntryVisible}
+          mode={mode}
+          pendingAction={pendingAction}
+          phoneCountryOptions={HOSTED_PHONE_COUNTRY_OPTIONS}
+          phoneNumber={phoneNumber}
+          selectedPhoneCountry={selectedPhoneCountry}
+          step={step}
+          onCodeChange={setCode}
+          onPhoneCountryChange={setPhoneCountryCode}
+          onPhoneNumberChange={setPhoneNumber}
+          onResendCode={handleResendCode}
+          onSendCode={handleInviteSendCode}
+          onUseDifferentNumber={() => {
+            setErrorMessage(null);
+            setCode("");
+            setManualEntryVisible(true);
+            setStep("phone");
+          }}
+          onVerifyCode={handleVerifyCode}
+        />
+      ) : (
+        <HostedPublicPhoneAuthFlow
+          code={code}
+          disabled={!ready || pendingAction !== null}
+          mode={mode}
+          pendingAction={pendingAction}
+          phoneCountryOptions={HOSTED_PHONE_COUNTRY_OPTIONS}
+          phoneNumber={phoneNumber}
+          selectedPhoneCountry={selectedPhoneCountry}
+          step={step}
+          onCodeChange={setCode}
+          onPhoneCountryChange={setPhoneCountryCode}
+          onPhoneNumberChange={setPhoneNumber}
+          onResendCode={handleResendCode}
+          onSendCode={handleSendCode}
+          onUseDifferentNumber={() => {
+            setCode("");
+            setStep("phone");
+          }}
+          onVerifyCode={handleVerifyCode}
+        />
       )}
     </div>
   );
 }
 
-export function shouldShowHostedPhoneNumberEntry(
-  input: HostedPhoneAuthPhoneEntryVisibilityInput,
-): boolean {
-  if (input.authenticated) {
-    return false;
+export function resolveHostedAuthenticatedPhoneAuthView(input: {
+  showAuthenticatedLoadingState: boolean;
+  showAuthenticatedManualResumeState: boolean;
+  showAuthenticatedRestartState: boolean;
+}): HostedAuthenticatedPhoneAuthView {
+  if (input.showAuthenticatedLoadingState) {
+    return "loading";
   }
 
-  if (input.mode === "invite" && !input.manualEntryVisible) {
-    return input.step === "phone";
+  if (input.showAuthenticatedManualResumeState) {
+    return "manual-resume";
   }
 
-  return true;
+  if (input.showAuthenticatedRestartState) {
+    return "restart";
+  }
+
+  return null;
 }
 
 async function readLatestAuthenticatedSessionIssue(input: {
