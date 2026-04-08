@@ -148,11 +148,11 @@ jobs:
           HOSTED_EXECUTION_DEPLOY_WORKER: ${{ inputs.deploy_worker }}
         run: pnpm --dir apps/cloudflare deploy:preflight
 
-      - name: Run focused Cloudflare checks
-        run: pnpm --dir apps/cloudflare verify
-
       - name: Prepare deploy artifacts
         run: pnpm --dir apps/cloudflare deploy:artifacts
+
+      - name: Run focused Cloudflare checks
+        run: pnpm --dir apps/cloudflare verify
 
       - name: Show generated artifact paths
         run: ls -lah apps/cloudflare/.deploy
