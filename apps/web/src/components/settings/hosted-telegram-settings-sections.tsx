@@ -18,10 +18,6 @@ export function HostedTelegramSettingsContent(props: {
   return (
     <div className="space-y-5">
       <div className="space-y-2">
-        <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-widest text-olive/60">
-          <span className="inline-block h-1 w-1 rounded-full bg-olive/50" />
-          Messaging
-        </div>
         <h2 className="text-lg font-semibold tracking-tight text-stone-900">Telegram</h2>
         <p className="text-sm leading-relaxed text-stone-500">
           Connect your Telegram account so Murph can message you there.
@@ -47,17 +43,19 @@ export function HostedTelegramSettingsContent(props: {
 
       <div className="flex flex-wrap gap-3">
         <Button type="button" onClick={() => void props.onLinkTelegram()} disabled={isBusy} size="md">
-          {isLinkingTelegram ? "Linking Telegram..." : currentTelegram ? "Relink Telegram" : "Link Telegram"}
+          {isLinkingTelegram ? "Linking..." : currentTelegram ? "Relink Telegram" : "Link Telegram"}
         </Button>
-        <Button
-          type="button"
-          onClick={() => void props.onSyncTelegram()}
-          disabled={isBusy || !currentTelegram}
-          variant="outline"
-          size="md"
-        >
-          {isSyncingTelegram ? "Saving..." : "Save connection"}
-        </Button>
+        {currentTelegram ? (
+          <Button
+            type="button"
+            onClick={() => void props.onSyncTelegram()}
+            disabled={isBusy}
+            variant="outline"
+            size="md"
+          >
+            {isSyncingTelegram ? "Saving..." : "Save connection"}
+          </Button>
+        ) : null}
         {botLink ? (
           <Button render={<a href={botLink} target="_blank" rel="noreferrer" />} nativeButton={false} variant="outline" size="md">
             Open Telegram bot
