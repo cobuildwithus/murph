@@ -34,6 +34,10 @@ export default function SettingsPage() {
       <div className="mx-auto max-w-3xl px-5 py-10 md:px-8">
         <div className="space-y-8">
           <section className="animate-fade-up">
+            <div className="mb-4 flex items-center gap-2 text-xs font-semibold uppercase tracking-widest text-olive/60">
+              <span className="inline-block h-1 w-1 rounded-full bg-olive/50" />
+              Billing
+            </div>
             <HostedBillingSettings />
           </section>
 
@@ -57,6 +61,10 @@ export default function SettingsPage() {
           </section>
 
           <section className="animate-fade-up" style={{ animationDelay: "160ms" }}>
+            <div className="mb-4 flex items-center gap-2 text-xs font-semibold uppercase tracking-widest text-olive/60">
+              <span className="inline-block h-1 w-1 rounded-full bg-olive/50" />
+              Wearables
+            </div>
             <Card className="border-stone-200/80 shadow-sm transition-shadow hover:shadow-md">
               <CardContent className="pt-4 md:pt-6">
                 <HostedDeviceSyncSettings />
