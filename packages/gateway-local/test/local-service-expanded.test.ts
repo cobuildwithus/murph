@@ -11,14 +11,26 @@ import { beforeEach, test, vi } from "vitest";
 
 const {
   exportGatewayProjectionSnapshotLocal,
+  listGatewayOpenPermissionsLocal,
+  pollGatewayEventsLocal,
+  respondToGatewayPermissionLocal,
   sendGatewayMessageLocal,
+  waitForGatewayEventsLocal,
 } = vi.hoisted(() => ({
   exportGatewayProjectionSnapshotLocal: vi.fn(),
+  listGatewayOpenPermissionsLocal: vi.fn(),
+  pollGatewayEventsLocal: vi.fn(),
+  respondToGatewayPermissionLocal: vi.fn(),
   sendGatewayMessageLocal: vi.fn(),
+  waitForGatewayEventsLocal: vi.fn(),
 }));
 
 vi.mock("../src/store.js", () => ({
   exportGatewayProjectionSnapshotLocal,
+  listGatewayOpenPermissionsLocal,
+  pollGatewayEventsLocal,
+  respondToGatewayPermissionLocal,
+  waitForGatewayEventsLocal,
 }));
 
 vi.mock("../src/send.js", () => ({
@@ -114,12 +126,32 @@ const TEST_SNAPSHOT: GatewayProjectionSnapshot = {
 beforeEach(() => {
   vi.clearAllMocks();
   exportGatewayProjectionSnapshotLocal.mockResolvedValue(TEST_SNAPSHOT);
+  listGatewayOpenPermissionsLocal.mockResolvedValue([{ requestId: "permission-1" }]);
+  pollGatewayEventsLocal.mockResolvedValue({
+    nextCursor: 1,
+    live: true,
+    events: [],
+  });
+  respondToGatewayPermissionLocal.mockResolvedValue({
+    schema: "murph.gateway-permission-request.v1",
+    requestId: "permission-1",
+    sessionKey: TEST_SESSION_KEY,
+    requestedAt: "2026-04-08T00:02:00.000Z",
+    route: TEST_SNAPSHOT.conversations[0]?.route,
+    excerpt: "Allow reply",
+    status: "approved",
+  });
   sendGatewayMessageLocal.mockResolvedValue({
     schema: "murph.gateway-send-message-result.v1",
     sessionKey: TEST_SESSION_KEY,
     messageId: "gwm_gateway-local-route_sent",
     queued: false,
     delivery: null,
+  });
+  waitForGatewayEventsLocal.mockResolvedValue({
+    nextCursor: 2,
+    live: true,
+    events: [],
   });
 });
 
@@ -189,16 +221,48 @@ test("sendGatewayMessage forwards parsed input and service dependencies to the l
   assert.equal(result.messageId, "gwm_gateway-local-route_sent");
 });
 
-test("createLocalGatewayService wires the local gateway method surface", () => {
+test("createLocalGatewayService forwards wrapper calls to the local store and sender seams", async () => {
   const service = createLocalGatewayService("/vault/local");
 
-  assert.equal(typeof service.listConversations, "function");
-  assert.equal(typeof service.getConversation, "function");
-  assert.equal(typeof service.readMessages, "function");
-  assert.equal(typeof service.fetchAttachments, "function");
-  assert.equal(typeof service.listOpenPermissions, "function");
-  assert.equal(typeof service.respondToPermission, "function");
-  assert.equal(typeof service.sendMessage, "function");
-  assert.equal(typeof service.pollEvents, "function");
-  assert.equal(typeof service.waitForEvents, "function");
+  const permissions = await service.listOpenPermissions({
+    sessionKey: TEST_SESSION_KEY,
+  });
+  const permission = await service.respondToPermission({
+    requestId: "permission-1",
+    decision: "approve",
+  });
+  const pollResult = await service.pollEvents({
+    cursor: 0,
+    limit: 5,
+  });
+  const waitResult = await service.waitForEvents({
+    cursor: 0,
+    limit: 5,
+    timeoutMs: 10,
+  });
+
+  assert.deepEqual(listGatewayOpenPermissionsLocal.mock.calls[0], [
+    "/vault/local",
+    { sessionKey: TEST_SESSION_KEY },
+    {},
+  ]);
+  assert.deepEqual(respondToGatewayPermissionLocal.mock.calls[0], [
+    "/vault/local",
+    { requestId: "permission-1", decision: "approve" },
+    {},
+  ]);
+  assert.deepEqual(pollGatewayEventsLocal.mock.calls[0], [
+    "/vault/local",
+    { cursor: 0, kinds: [], limit: 5, sessionKey: null },
+    {},
+  ]);
+  assert.deepEqual(waitForGatewayEventsLocal.mock.calls[0], [
+    "/vault/local",
+    { cursor: 0, kinds: [], limit: 5, sessionKey: null, timeoutMs: 10 },
+    {},
+  ]);
+  assert.equal(permissions[0]?.requestId, "permission-1");
+  assert.equal(permission.requestId, "permission-1");
+  assert.equal(pollResult.nextCursor, 1);
+  assert.equal(waitResult.nextCursor, 2);
 });
