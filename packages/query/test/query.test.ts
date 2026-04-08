@@ -2405,6 +2405,19 @@ test("buildTimeline applies toggles, fallback timestamps, and filter caps", () =
     title: "Skip me too",
     data: {},
   });
+  const eventBlankOccurredAt = createRecord({
+    id: "evt_blank_occurred_at",
+    lookupIds: ["evt_blank_occurred_at"],
+    recordType: "event",
+    sourcePath: "ledger/events/2026/2026-03.jsonl",
+    occurredAt: "",
+    date: "2026-03-13",
+    kind: "",
+    stream: "glucose",
+    experimentSlug: "focus",
+    title: "Still skip me",
+    data: {},
+  });
   const sampleFallback = createSampleRecord({
     id: "smp_focus_01",
     occurredAt: null,
@@ -2437,7 +2450,12 @@ test("buildTimeline applies toggles, fallback timestamps, and filter caps", () =
   sampleFallback.occurredAt = null;
 
   vault.journalEntries = [journalFallback, journalMissingDate];
-  vault.events = [eventFallback, eventWrongStream, eventMissingDate];
+  vault.events = [
+    eventFallback,
+    eventWrongStream,
+    eventMissingDate,
+    eventBlankOccurredAt,
+  ];
   vault.samples = [sampleFallback, sampleOtherExperiment];
   vault.entities = [
     journalFallback,
@@ -2445,6 +2463,7 @@ test("buildTimeline applies toggles, fallback timestamps, and filter caps", () =
     eventFallback,
     eventWrongStream,
     eventMissingDate,
+    eventBlankOccurredAt,
     sampleFallback,
     sampleOtherExperiment,
   ];

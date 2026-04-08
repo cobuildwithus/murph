@@ -30,10 +30,6 @@ const REGISTRY_LINK_TYPE_MAP = {
   source_family_member: "source_family_member",
 } as const satisfies Record<string, CanonicalEntityLinkType>;
 
-function normalizeTags(value: unknown): string[] {
-  return normalizeUniqueStringArray(value);
-}
-
 function normalizeRegistryLinkType(
   link: BankEntityRegistryLink,
 ): CanonicalEntityLinkType {
@@ -105,6 +101,6 @@ export function projectRegistryEntity(
     relatedIds,
     stream: null,
     experimentSlug: firstString(attributes, ["experimentSlug"]),
-    tags: normalizeTags(attributes.tags),
+    tags: normalizeUniqueStringArray(attributes.tags),
   };
 }
