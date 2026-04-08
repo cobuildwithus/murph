@@ -23,11 +23,13 @@ import {
 } from "./revnet";
 import { createHostedMember, readHostedMemberCoreState } from "./hosted-member-store";
 import {
-  findHostedMemberByPhoneLookupKey,
-  findHostedMemberByPhoneNumber,
-  findHostedMemberByPrivyUserId,
-  findHostedMemberByWalletAddress,
+  lookupHostedMemberIdentityByPhoneLookupKey,
+  lookupHostedMemberIdentityByPhoneNumber,
+  lookupHostedMemberIdentityByPrivyUserId,
+  lookupHostedMemberIdentityByWalletAddress,
   readHostedMemberIdentity,
+  type HostedMemberIdentityLookup,
+  type HostedMemberIdentityState,
   upsertHostedMemberIdentity,
 } from "./hosted-member-identity-store";
 
@@ -46,14 +48,15 @@ export async function ensureHostedMemberForPhone(input: {
       });
     }
 
-    const existingMember = await findHostedMemberByPhoneNumber({
+    const existingIdentity = await lookupHostedMemberIdentityByPhoneNumber({
       phoneNumber: input.phoneNumber,
       prisma: tx,
     });
 
-    if (existingMember) {
+    if (existingIdentity) {
       return refreshHostedMemberForPhone({
-        member: existingMember,
+        currentIdentity: existingIdentity.identity,
+        member: existingIdentity.core,
         phoneNumber: input.phoneNumber,
         prisma: tx,
       });
@@ -80,14 +83,15 @@ export async function ensureHostedMemberForPhone(input: {
       return createdMember;
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
-        const concurrentMember = await findHostedMemberByPhoneLookupKey({
+        const concurrentIdentity = await lookupHostedMemberIdentityByPhoneLookupKey({
           phoneLookupKey: phoneIdentityFields.phoneLookupKey,
           prisma: tx,
         });
 
-        if (concurrentMember) {
+        if (concurrentIdentity) {
           return refreshHostedMemberForPhone({
-            member: concurrentMember,
+            currentIdentity: concurrentIdentity.identity,
+            member: concurrentIdentity.core,
             phoneNumber: input.phoneNumber,
             prisma: tx,
           });
@@ -102,29 +106,25 @@ export async function ensureHostedMemberForPhone(input: {
 }
 
 async function refreshHostedMemberForPhone(input: {
+  currentIdentity: HostedMemberIdentityState | null;
   member: HostedMember;
   phoneNumber: string;
   prisma: HostedOnboardingPrismaClient;
 }): Promise<HostedMember> {
-  const currentIdentity = await readHostedMemberIdentity({
-    memberId: input.member.id,
-    prisma: input.prisma,
-  });
-
   await upsertHostedMemberIdentity({
     ...buildHostedMemberPhoneIdentityFields(input.phoneNumber),
     memberId: input.member.id,
-    phoneNumberVerifiedAt: currentIdentity?.phoneNumberVerifiedAt ?? null,
+    phoneNumberVerifiedAt: input.currentIdentity?.phoneNumberVerifiedAt ?? null,
     prisma: input.prisma,
-    privyUserId: currentIdentity?.privyUserId ?? null,
+    privyUserId: input.currentIdentity?.privyUserId ?? null,
     signupPhoneCodeSendAttemptId: null,
     signupPhoneCodeSendAttemptStartedAt: null,
     signupPhoneCodeSentAt: null,
     signupPhoneNumber: input.phoneNumber,
-    walletAddress: currentIdentity?.walletAddress ?? null,
-    walletChainType: currentIdentity?.walletChainType ?? null,
-    walletCreatedAt: currentIdentity?.walletCreatedAt ?? null,
-    walletProvider: currentIdentity?.walletProvider ?? null,
+    walletAddress: input.currentIdentity?.walletAddress ?? null,
+    walletChainType: input.currentIdentity?.walletChainType ?? null,
+    walletCreatedAt: input.currentIdentity?.walletCreatedAt ?? null,
+    walletProvider: input.currentIdentity?.walletProvider ?? null,
   });
   return input.member;
 }
@@ -361,42 +361,50 @@ export async function findHostedMemberForPrivyIdentity(input: {
   identity: HostedPrivyIdentity;
   prisma: HostedOnboardingPrismaClient;
 }): Promise<HostedMember | null> {
-  const matches = new Map<string, HostedMember>();
+  const lookup = await findHostedMemberIdentityForPrivyIdentity(input);
+  return lookup?.core ?? null;
+}
+
+async function findHostedMemberIdentityForPrivyIdentity(input: {
+  identity: HostedPrivyIdentity;
+  prisma: HostedOnboardingPrismaClient;
+}): Promise<HostedMemberIdentityLookup | null> {
+  const matches = new Map<string, HostedMemberIdentityLookup>();
   const normalizedWalletAddress = input.identity.wallet
     ? normalizeHostedWalletAddress(input.identity.wallet.address)
     : null;
   const phoneLookupKey = createHostedPhoneLookupKey(input.identity.phone.number);
 
   if (input.identity.userId) {
-    const memberByPrivyUserId = await findHostedMemberByPrivyUserId({
+    const memberByPrivyUserId = await lookupHostedMemberIdentityByPrivyUserId({
       privyUserId: input.identity.userId,
       prisma: input.prisma,
     });
 
     if (memberByPrivyUserId) {
-      matches.set(memberByPrivyUserId.id, memberByPrivyUserId);
+      matches.set(memberByPrivyUserId.core.id, memberByPrivyUserId);
     }
   }
 
   const memberByPhoneNumber = phoneLookupKey
-    ? await findHostedMemberByPhoneNumber({
+    ? await lookupHostedMemberIdentityByPhoneNumber({
         phoneNumber: input.identity.phone.number,
         prisma: input.prisma,
       })
     : null;
 
   if (memberByPhoneNumber) {
-    matches.set(memberByPhoneNumber.id, memberByPhoneNumber);
+    matches.set(memberByPhoneNumber.core.id, memberByPhoneNumber);
   }
 
   if (normalizedWalletAddress) {
-    const memberByWalletAddress = await findHostedMemberByWalletAddress({
+    const memberByWalletAddress = await lookupHostedMemberIdentityByWalletAddress({
       prisma: input.prisma,
       walletAddress: normalizedWalletAddress,
     });
 
     if (memberByWalletAddress) {
-      matches.set(memberByWalletAddress.id, memberByWalletAddress);
+      matches.set(memberByWalletAddress.core.id, memberByWalletAddress);
     }
   }
 

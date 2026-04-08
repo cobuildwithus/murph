@@ -3,14 +3,12 @@ import {
   HostedRevnetIssuanceStatus,
   type Prisma,
 } from "@prisma/client";
-import type Stripe from "stripe";
 
 import { provisionManagedUserCryptoInHostedExecution } from "../hosted-execution/control";
 import {
   enqueueHostedExecutionOutbox,
 } from "../hosted-execution/outbox";
 import {
-  coerceStripeObjectId,
   mapStripeSubscriptionStatusToHostedBillingStatus,
 } from "./billing";
 import {
@@ -26,8 +24,6 @@ import {
   updateHostedMemberCoreState,
 } from "./hosted-member-store";
 import {
-  findHostedMemberByStripeCustomerId,
-  findHostedMemberByStripeSubscriptionId,
   writeHostedMemberStripeBillingRef,
 } from "./hosted-member-billing-store";
 import { requireHostedStripeApi } from "./runtime";
@@ -406,136 +402,4 @@ export async function suspendHostedMemberForBillingReversal(input: {
     stripeCustomerId: input.stripeCustomerId,
     suspendedAtOverride: input.dispatchContext.eventCreatedAt,
   });
-}
-
-export async function findMemberForStripeObject(input: {
-  clientReferenceId: string | null;
-  customerId: string | null;
-  memberId: string | null;
-  prisma: HostedOnboardingPrismaClient;
-  subscriptionId: string | null;
-}): Promise<HostedMemberSnapshot | null> {
-  if (input.memberId) {
-    const member = await findHostedMemberById(input.prisma, input.memberId);
-
-    if (member) {
-      return member;
-    }
-  }
-
-  if (input.clientReferenceId) {
-    const member = await findHostedMemberById(input.prisma, input.clientReferenceId);
-
-    if (member) {
-      return member;
-    }
-  }
-
-  if (input.subscriptionId) {
-    const member = await findHostedMemberByStripeSubscriptionId({
-      prisma: input.prisma,
-      stripeSubscriptionId: input.subscriptionId,
-    });
-
-    if (member) {
-      return findHostedMemberById(input.prisma, member.id);
-    }
-  }
-
-  if (input.customerId) {
-    const member = await findHostedMemberByStripeCustomerId({
-      prisma: input.prisma,
-      stripeCustomerId: input.customerId,
-    });
-
-    if (member) {
-      return findHostedMemberById(input.prisma, member.id);
-    }
-  }
-
-  return null;
-}
-
-export async function findMemberForStripeReversal(input: {
-  chargeId: string | null;
-  customerId: string | null;
-  paymentIntentId: string | null;
-  prisma: HostedOnboardingPrismaClient;
-  subscriptionId: string | null;
-}): Promise<HostedMemberSnapshot | null> {
-  const directMember = await findMemberForStripeObject({
-    clientReferenceId: null,
-    customerId: input.customerId,
-    memberId: null,
-    prisma: input.prisma,
-    subscriptionId: input.subscriptionId,
-  });
-
-  if (directMember) {
-    return directMember;
-  }
-
-  if (!input.chargeId && !input.paymentIntentId) {
-    return null;
-  }
-
-  const issuance = await input.prisma.hostedRevnetIssuance.findFirst({
-    where: {
-      OR: [
-        ...(input.chargeId
-          ? [
-              {
-                stripeChargeId: input.chargeId,
-              },
-            ]
-          : []),
-        ...(input.paymentIntentId
-          ? [
-              {
-                stripePaymentIntentId: input.paymentIntentId,
-              },
-            ]
-          : []),
-      ],
-    },
-    include: {
-      member: true,
-    },
-    orderBy: {
-      createdAt: "desc",
-    },
-  });
-
-  return issuance?.member
-    ? findHostedMemberById(input.prisma, issuance.member.id)
-    : null;
-}
-
-export async function resolveStripeCustomerContext(input: {
-  chargeId: string | null;
-  paymentIntentId: string | null;
-}): Promise<{ customerId: string | null }> {
-  const stripe = requireHostedStripeApi();
-
-  if (input.chargeId) {
-    const charge = await stripe.charges.retrieve(input.chargeId);
-
-    return {
-      customerId: coerceStripeObjectId((charge as Stripe.Charge & { customer?: unknown }).customer ?? null),
-    };
-  }
-
-  if (input.paymentIntentId) {
-    const paymentIntent = await stripe.paymentIntents.retrieve(input.paymentIntentId);
-
-    return {
-      customerId: coerceStripeObjectId(
-        (paymentIntent as Stripe.PaymentIntent & { customer?: unknown }).customer ?? null,
-      ),
-    };
-  }
-
-  return {
-    customerId: null,
-  };
 }

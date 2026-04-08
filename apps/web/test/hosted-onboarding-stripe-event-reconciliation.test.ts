@@ -30,10 +30,10 @@ vi.mock("@/src/lib/hosted-onboarding/stripe-billing-events", () => ({
   applyStripeSubscriptionUpdated: mocks.applyStripeSubscriptionUpdated,
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/stripe-billing-policy", async () => {
+vi.mock("@/src/lib/hosted-onboarding/stripe-billing-lookup", async () => {
   const actual = await vi.importActual<
-    typeof import("@/src/lib/hosted-onboarding/stripe-billing-policy")
-  >("@/src/lib/hosted-onboarding/stripe-billing-policy");
+    typeof import("@/src/lib/hosted-onboarding/stripe-billing-lookup")
+  >("@/src/lib/hosted-onboarding/stripe-billing-lookup");
 
   return {
     ...actual,

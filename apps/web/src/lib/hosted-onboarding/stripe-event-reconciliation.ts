@@ -18,9 +18,9 @@ import {
 } from "./stripe-billing-events";
 import {
   activateHostedMemberFromConfirmedRevnetIssuance,
-  resolveStripeCustomerContext,
   type HostedStripeDispatchContext,
 } from "./stripe-billing-policy";
+import { resolveStripeCustomerContext } from "./stripe-billing-lookup";
 import {
   coerceStripeObjectId,
 } from "./billing";
