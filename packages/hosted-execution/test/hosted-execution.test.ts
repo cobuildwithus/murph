@@ -382,10 +382,12 @@ describe("hosted execution coverage gaps", () => {
       fetchImpl: longErrorFetchImpl,
       getBearerToken: async () => "token-123",
     });
+    const longErrorPromise = longErrorClient.dispatch(dispatch);
 
-    await expect(longErrorClient.dispatch(dispatch)).rejects.toThrow(
-      `Hosted execution dispatch failed with HTTP 502: ${"x".repeat(500)}.`,
+    await expect(longErrorPromise).rejects.toThrow(
+      "Hosted execution dispatch failed with HTTP 502.",
     );
+    await expect(longErrorPromise).rejects.not.toThrow(/x{20}/u);
   });
 
   it("rejects invalid hosted execution client configuration", () => {

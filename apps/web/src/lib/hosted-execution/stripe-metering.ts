@@ -142,11 +142,9 @@ async function createHostedAiUsageStripeMeterEvent(input: {
     },
     body,
   });
-  const text = await response.text();
-
   if (!response.ok) {
     throw new StripeMeterEventError(
-      `Stripe meter event ${input.identifier} failed with HTTP ${response.status}${formatStripeMeterErrorSuffix(text)}.`,
+      `Stripe meter event ${input.identifier} failed with HTTP ${response.status}.`,
       response.status,
     );
   }
@@ -183,11 +181,6 @@ function readPositiveInteger(value: string | null, fallback: number, label: stri
   }
 
   return parsed;
-}
-
-function formatStripeMeterErrorSuffix(text: string): string {
-  const trimmed = text.trim();
-  return trimmed.length > 0 ? `: ${trimmed.slice(0, 500)}` : "";
 }
 
 function shouldRetryStripeMeterEvent(error: unknown): boolean {

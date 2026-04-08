@@ -173,8 +173,11 @@ describe("drainHostedAiUsageStripeMetering", () => {
     });
     expect(mocks.markHostedAiUsageStripeRetryableFailure).toHaveBeenCalledWith({
       id: "usage_retry",
-      message: expect.stringContaining("HTTP 500"),
+      message: "Stripe meter event usage_retry failed with HTTP 500.",
     });
+    expect(mocks.markHostedAiUsageStripeRetryableFailure).not.toHaveBeenCalledWith(expect.objectContaining({
+      message: expect.stringContaining("temporary failure"),
+    }));
   });
 
   it("marks permanent Stripe client failures as terminal", async () => {
@@ -213,7 +216,7 @@ describe("drainHostedAiUsageStripeMetering", () => {
     });
     expect(mocks.markHostedAiUsageStripeFailed).toHaveBeenCalledWith({
       id: "usage_bad_request",
-      message: expect.stringContaining("HTTP 400"),
+      message: "Stripe meter event usage_bad_request failed with HTTP 400.",
     });
     expect(mocks.markHostedAiUsageStripeRetryableFailure).not.toHaveBeenCalled();
   });

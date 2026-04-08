@@ -74,9 +74,8 @@ async function completeHostedWebShareImport(input: {
     return;
   }
 
-  const responseText = await response.text();
   throw new Error(
-    `Hosted web business outcome callback failed for ${input.dispatch.event.userId}/${input.dispatch.eventId} with HTTP ${response.status}${formatResponseSuffix(responseText)}.`,
+    `Hosted web business outcome callback failed for ${input.dispatch.event.userId}/${input.dispatch.eventId} with HTTP ${response.status}.`,
   );
 }
 
@@ -116,9 +115,8 @@ export async function releaseHostedWebShareClaim(input: {
     return;
   }
 
-  const responseText = await response.text();
   throw new Error(
-    `Hosted web share-claim release callback failed for ${input.dispatch.event.userId}/${input.dispatch.eventId} with HTTP ${response.status}${formatResponseSuffix(responseText)}.`,
+    `Hosted web share-claim release callback failed for ${input.dispatch.event.userId}/${input.dispatch.eventId} with HTTP ${response.status}.`,
   );
 }
 
@@ -181,17 +179,11 @@ async function deleteHostedLinqMessageFromSystem(input: {
     return;
   }
 
-  const responseText = await response.text();
   throw new Error(
-    `Hosted Linq post-commit delete failed for ${input.dispatch.event.userId}/${input.dispatch.eventId}/${messageId} with HTTP ${response.status}${formatResponseSuffix(responseText)}.`,
+    `Hosted Linq post-commit delete failed for ${input.dispatch.event.userId}/${input.dispatch.eventId}/${messageId} with HTTP ${response.status}.`,
   );
 }
 
 function normalizeLinqApiBaseUrl(value: string | undefined): string {
   return normalizeHostedExecutionString(value)?.replace(/\/$/u, "") ?? DEFAULT_LINQ_API_BASE_URL;
-}
-
-function formatResponseSuffix(value: string): string {
-  const normalized = value.trim();
-  return normalized.length > 0 ? `: ${normalized.slice(0, 500)}` : "";
 }

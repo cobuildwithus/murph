@@ -101,7 +101,7 @@ describe("applyHostedWebBusinessOutcomeIfNeeded", () => {
   it("surfaces callback HTTP failures for the committed finalize retry lane", async () => {
     const fetchMock = vi.fn(async () => new Response("not ready", { status: 503 }));
 
-    await expect(applyHostedWebBusinessOutcomeIfNeeded({
+    const promise = applyHostedWebBusinessOutcomeIfNeeded({
       dispatch: createShareDispatch(),
       env: {
         HOSTED_WEB_BASE_URL: "https://web.example.test/app",
@@ -111,7 +111,10 @@ describe("applyHostedWebBusinessOutcomeIfNeeded", () => {
         privateKeyJwkJson: TEST_CALLBACK_PRIVATE_JWK_JSON,
       },
       fetchImpl: fetchMock as typeof fetch,
-    })).rejects.toThrow(/HTTP 503/u);
+    });
+
+    await expect(promise).rejects.toThrow(/HTTP 503/u);
+    await expect(promise).rejects.not.toThrow(/not ready/u);
   });
 
   it("posts the signed share-claim release callback to hosted web", async () => {
@@ -187,6 +190,40 @@ describe("applyHostedBusinessOutcomeIfNeeded", () => {
       },
       fetchImpl: vi.fn(async () => new Response(null, { status: 404 })) as typeof fetch,
     })).resolves.toBeUndefined();
+  });
+
+  it("does not echo hosted-web release response bodies in thrown errors", async () => {
+    const promise = releaseHostedWebShareClaim({
+      dispatch: createShareDispatch(),
+      env: {
+        HOSTED_WEB_BASE_URL: "https://web.example.test/app",
+      },
+      callbackSigning: {
+        keyId: "test-callback-key",
+        privateKeyJwkJson: TEST_CALLBACK_PRIVATE_JWK_JSON,
+      },
+      fetchImpl: vi.fn(async () => new Response("share pack missing", { status: 500 })) as typeof fetch,
+    });
+
+    await expect(promise).rejects.toThrow(/HTTP 500/u);
+    await expect(promise).rejects.not.toThrow(/share pack missing/u);
+  });
+
+  it("does not echo Linq delete response bodies in thrown errors", async () => {
+    const promise = applyHostedBusinessOutcomeIfNeeded({
+      dispatch: createLinqDispatch(),
+      env: {
+        LINQ_API_TOKEN: "linq-token",
+      },
+      callbackSigning: {
+        keyId: "test-callback-key",
+        privateKeyJwkJson: TEST_CALLBACK_PRIVATE_JWK_JSON,
+      },
+      fetchImpl: vi.fn(async () => new Response("provider token leaked", { status: 500 })) as typeof fetch,
+    });
+
+    await expect(promise).rejects.toThrow(/HTTP 500/u);
+    await expect(promise).rejects.not.toThrow(/provider token leaked/u);
   });
 });
 
