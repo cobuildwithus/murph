@@ -3,6 +3,7 @@ import { rm } from "node:fs/promises";
 import path from "node:path";
 
 import { test } from "vitest";
+import { openSqliteRuntimeDatabase } from "@murphai/runtime-state/node";
 
 import { SqliteDeviceSyncStore } from "../src/store.ts";
 import { makeTempDirectory } from "./helpers.ts";
@@ -352,6 +353,288 @@ test("device sync store reuses queued jobs with the same dedupe key", async () =
     assert.deepEqual(duplicateJob.payload, {
       full: true,
     });
+  } finally {
+    store.close();
+    await rm(tempDir, {
+      force: true,
+      recursive: true,
+    });
+  }
+});
+
+test("device sync store rejects legacy schemas and consumes missing or expired OAuth state safely", async () => {
+  const tempDir = await makeTempDirectory("murph-device-syncd-store-legacy");
+  const legacyDatabasePath = path.join(tempDir, "legacy.sqlite");
+  const legacyDatabase = openSqliteRuntimeDatabase(legacyDatabasePath);
+  legacyDatabase.exec(`
+    create table device_account (
+      id text primary key
+    );
+  `);
+  legacyDatabase.close();
+
+  assert.throws(
+    () => new SqliteDeviceSyncStore(legacyDatabasePath),
+    /Unsupported legacy device-sync runtime schema detected/u,
+  );
+
+  const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));
+
+  try {
+    store.createOAuthState({
+      state: "expired-state",
+      provider: "demo",
+      returnTo: "/devices",
+      metadata: {},
+      createdAt: "2026-04-07T00:00:00.000Z",
+      expiresAt: "2026-04-07T00:00:10.000Z",
+    });
+
+    assert.equal(store.consumeOAuthState("missing-state", "2026-04-07T00:01:00.000Z"), null);
+    assert.equal(store.consumeOAuthState("expired-state", "2026-04-07T00:01:00.000Z"), null);
+  } finally {
+    store.close();
+    await rm(tempDir, {
+      force: true,
+      recursive: true,
+    });
+  }
+});
+
+test("device sync store filters listed accounts by provider and returns unexpired OAuth state once", async () => {
+  const tempDir = await makeTempDirectory("murph-device-syncd-store-listing");
+  const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));
+
+  try {
+    store.upsertAccount({
+      provider: "demo",
+      externalAccountId: "demo-account",
+      displayName: "Demo Account",
+      scopes: ["offline"],
+      tokens: {
+        accessToken: "demo-access",
+        accessTokenEncrypted: "enc:demo-access",
+      },
+      connectedAt: "2026-04-07T00:00:00.000Z",
+    });
+    store.upsertAccount({
+      provider: "oura",
+      externalAccountId: "oura-account",
+      displayName: "Oura Account",
+      scopes: ["daily"],
+      tokens: {
+        accessToken: "oura-access",
+        accessTokenEncrypted: "enc:oura-access",
+      },
+      connectedAt: "2026-04-07T01:00:00.000Z",
+    });
+    store.createOAuthState({
+      state: "active-state",
+      provider: "demo",
+      returnTo: "/devices",
+      metadata: {
+        intent: "connect",
+      },
+      createdAt: "2026-04-07T00:00:00.000Z",
+      expiresAt: "2026-04-07T00:10:00.000Z",
+    });
+
+    assert.deepEqual(
+      store.listAccounts().map((account) => account.provider),
+      ["oura", "demo"],
+    );
+    assert.deepEqual(
+      store.listAccounts("demo").map((account) => account.externalAccountId),
+      ["demo-account"],
+    );
+    assert.deepEqual(store.consumeOAuthState("active-state", "2026-04-07T00:05:00.000Z"), {
+      state: "active-state",
+      provider: "demo",
+      returnTo: "/devices",
+      metadata: {
+        intent: "connect",
+      },
+      createdAt: "2026-04-07T00:00:00.000Z",
+      expiresAt: "2026-04-07T00:10:00.000Z",
+    });
+    assert.equal(store.consumeOAuthState("active-state", "2026-04-07T00:05:01.000Z"), null);
+  } finally {
+    store.close();
+    await rm(tempDir, {
+      force: true,
+      recursive: true,
+    });
+  }
+});
+
+test("device sync store hydrates new hosted accounts, guards token updates, and respects running-job ownership", async () => {
+  const tempDir = await makeTempDirectory("murph-device-syncd-store-hosted-insert");
+  const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));
+
+  try {
+    const hydrated = store.hydrateHostedAccount({
+      clearTokens: true,
+      connection: {
+        connectedAt: "2026-04-07T00:00:00.000Z",
+        displayName: "Hosted Insert",
+        externalAccountId: "hosted-insert",
+        metadata: {
+          providerHint: "hosted",
+        },
+        provider: "demo",
+        scopes: ["offline", "sleep"],
+        status: "active",
+        updatedAt: "2026-04-07T01:00:00.000Z",
+      },
+      hostedObservedTokenVersion: 7,
+      hostedObservedUpdatedAt: "2026-04-07T01:00:00.000Z",
+      localState: {
+        lastErrorCode: "OLD_ERROR",
+        lastErrorMessage: "old",
+        lastSyncCompletedAt: "2026-04-07T00:30:00.000Z",
+        lastSyncErrorAt: "2026-04-07T00:20:00.000Z",
+        lastSyncStartedAt: "2026-04-07T00:10:00.000Z",
+        lastWebhookAt: "2026-04-07T00:05:00.000Z",
+        nextReconcileAt: "2026-04-07T02:00:00.000Z",
+      },
+      tokens: {
+        accessToken: "hosted-access",
+        accessTokenEncrypted: "enc:hosted-access",
+        accessTokenExpiresAt: "2026-04-07T03:00:00.000Z",
+      },
+    });
+
+    assert.ok(hydrated);
+    assert.equal(hydrated?.accessTokenEncrypted, "enc:hosted-access");
+    assert.equal(hydrated?.refreshTokenEncrypted, null);
+    assert.equal(hydrated?.accessTokenExpiresAt, "2026-04-07T03:00:00.000Z");
+    assert.equal(hydrated?.hostedObservedTokenVersion, 7);
+    assert.equal(hydrated?.updatedAt, "2026-04-07T01:00:00.000Z");
+    assert.deepEqual(hydrated?.metadata, {
+      providerHint: "hosted",
+    });
+
+    assert.throws(
+      () => store.patchAccount("missing-account", {}),
+      /Unknown account missing-account/u,
+    );
+    assert.equal(
+      store.updateAccountTokens(
+        hydrated!.id,
+        {
+          accessToken: "stale",
+          accessTokenEncrypted: "enc:stale",
+        },
+        hydrated!.disconnectGeneration + 1,
+      ),
+      null,
+    );
+    assert.equal(
+      store.markSyncSucceeded("missing-account", "2026-04-07T04:00:00.000Z"),
+      false,
+    );
+
+    const job = store.enqueueJob({
+      accountId: hydrated!.id,
+      availableAt: "2026-04-07T01:00:00.000Z",
+      kind: "hosted-sync",
+      payload: {},
+      provider: "demo",
+    });
+    const claimed = store.claimDueJob("worker-a", "2026-04-07T01:00:00.000Z", 60_000);
+
+    assert.equal(claimed?.id, job.id);
+    assert.equal(store.completeJobIfOwned(job.id, "worker-b", "2026-04-07T01:00:30.000Z"), false);
+    assert.equal(store.readNextJobWakeAt(), "2026-04-07T01:01:00.000Z");
+
+    const reclaimed = store.claimDueJob("worker-b", "2026-04-07T01:01:01.000Z", 60_000);
+    assert.equal(reclaimed?.id, job.id);
+    assert.equal(reclaimed?.leaseOwner, "worker-b");
+  } finally {
+    store.close();
+    await rm(tempDir, {
+      force: true,
+      recursive: true,
+    });
+  }
+});
+
+test("device sync store updates existing accounts and rejects stale success writes", async () => {
+  const tempDir = await makeTempDirectory("murph-device-syncd-store-update-existing");
+  const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));
+
+  try {
+    const created = store.upsertAccount({
+      provider: "demo",
+      externalAccountId: "demo-existing",
+      displayName: "Original",
+      scopes: ["offline"],
+      tokens: {
+        accessToken: "original-access",
+        accessTokenEncrypted: "enc:original-access",
+        refreshToken: "original-refresh",
+        refreshTokenEncrypted: "enc:original-refresh",
+      },
+      metadata: {
+        original: true,
+      },
+      connectedAt: "2026-04-07T00:00:00.000Z",
+      nextReconcileAt: "2026-04-07T02:00:00.000Z",
+    });
+
+    const updated = store.upsertAccount({
+      provider: "demo",
+      externalAccountId: "demo-existing",
+      displayName: "Updated",
+      status: "reauthorization_required",
+      scopes: ["sleep"],
+      tokens: {
+        accessToken: "updated-access",
+        accessTokenEncrypted: "enc:updated-access",
+        accessTokenExpiresAt: "2026-04-07T03:00:00.000Z",
+      },
+      metadata: {
+        fresh: true,
+      },
+      connectedAt: "2026-04-07T01:00:00.000Z",
+      nextReconcileAt: "2026-04-07T04:00:00.000Z",
+    });
+
+    assert.equal(updated.id, created.id);
+    assert.equal(updated.displayName, "Updated");
+    assert.equal(updated.status, "reauthorization_required");
+    assert.deepEqual(updated.scopes, ["sleep"]);
+    assert.deepEqual(updated.metadata, {
+      fresh: true,
+    });
+    assert.equal(updated.accessTokenEncrypted, "enc:updated-access");
+    assert.equal(updated.refreshTokenEncrypted, null);
+    assert.equal(updated.accessTokenExpiresAt, "2026-04-07T03:00:00.000Z");
+    assert.equal(updated.nextReconcileAt, "2026-04-07T04:00:00.000Z");
+
+    const reactivated = store.patchAccount(updated.id, {
+      status: "active",
+    });
+    assert.equal(reactivated.status, "active");
+
+    const refreshed = store.updateAccountTokens(
+      updated.id,
+      {
+        accessToken: "fresh-access",
+        accessTokenEncrypted: "enc:fresh-access",
+        refreshToken: "fresh-refresh",
+        refreshTokenEncrypted: "enc:fresh-refresh",
+        accessTokenExpiresAt: "2026-04-07T05:00:00.000Z",
+      },
+      updated.disconnectGeneration,
+    );
+
+    assert.equal(refreshed?.accessTokenEncrypted, "enc:fresh-access");
+    assert.equal(refreshed?.refreshTokenEncrypted, "enc:fresh-refresh");
+    assert.equal(
+      store.markSyncSucceeded(updated.id, "2026-04-07T06:00:00.000Z", updated.disconnectGeneration + 1),
+      false,
+    );
   } finally {
     store.close();
     await rm(tempDir, {

@@ -361,6 +361,218 @@ test("public ingress reuses shared OAuth callback logic independently of the loc
   assert.deepEqual(seenStates, [begin.state]);
 });
 
+test("public ingress describes providers and rejects providers without OAuth callbacks", () => {
+  const descriptorOnlyProvider = createFakeProvider({
+    provider: "descriptor-only",
+    descriptor: {
+      provider: "descriptor-only",
+      displayName: "Descriptor Only",
+      transportModes: ["scheduled_poll"],
+      webhook: null,
+      normalization: {
+        metricFamilies: ["activity"],
+        snapshotParser: "schema",
+      },
+      sourcePriorityHints: {
+        defaultPriority: 50,
+        metricFamilies: {
+          activity: 50,
+        },
+      },
+    },
+  });
+  const ingress = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    registry: createDeviceSyncRegistry([createFakeProvider()]),
+    store: new InMemoryPublicIngressStore(),
+  });
+  const descriptorOnlyIngress = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    registry: createDeviceSyncRegistry([descriptorOnlyProvider]),
+    store: new InMemoryPublicIngressStore(),
+  });
+
+  assert.deepEqual(
+    ingress.describeProviders(),
+    [
+      {
+        provider: "demo",
+        callbackPath: "/oauth/demo/callback",
+        callbackUrl: "https://sync.example.test/device-sync/oauth/demo/callback",
+        webhookPath: "/webhooks/demo",
+        webhookUrl: "https://sync.example.test/device-sync/webhooks/demo",
+        supportsWebhooks: true,
+        defaultScopes: ["offline", "read:data"],
+      },
+    ],
+  );
+  assert.throws(
+    () => descriptorOnlyIngress.describeProvider(descriptorOnlyProvider),
+    (error: unknown) =>
+      error instanceof DeviceSyncError
+      && error.code === "OAUTH_NOT_SUPPORTED"
+      && error.httpStatus === 500,
+  );
+});
+
+test("public ingress validates OAuth callback state ownership and required parameters", async () => {
+  const alternateProvider = createFakeProvider({
+    provider: "alt",
+    descriptor: {
+      provider: "alt",
+      displayName: "Alt",
+      transportModes: ["oauth_callback", "scheduled_poll"],
+      oauth: {
+        callbackPath: "/oauth/alt/callback",
+        defaultScopes: ["offline", "read:alt"],
+      },
+      webhook: null,
+      normalization: {
+        metricFamilies: ["activity"],
+        snapshotParser: "schema",
+      },
+      sourcePriorityHints: {
+        defaultPriority: 50,
+        metricFamilies: {
+          activity: 50,
+        },
+      },
+    },
+  });
+  const ingress = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    registry: createDeviceSyncRegistry([
+      createFakeProvider(),
+      alternateProvider,
+    ]),
+    store: new InMemoryPublicIngressStore(),
+  });
+
+  await assert.rejects(
+    () =>
+      ingress.handleOAuthCallback({
+        provider: "demo",
+        code: "abc",
+        state: "   ",
+      }),
+    (error: unknown) =>
+      error instanceof DeviceSyncError
+      && error.code === "OAUTH_STATE_MISSING"
+      && error.httpStatus === 400,
+  );
+
+  await assert.rejects(
+    () =>
+      ingress.handleOAuthCallback({
+        provider: "demo",
+        code: "abc",
+        state: "missing-state",
+      }),
+    (error: unknown) =>
+      error instanceof DeviceSyncError
+      && error.code === "OAUTH_STATE_INVALID"
+      && error.httpStatus === 400,
+  );
+
+  const mismatchedState = await ingress.startConnection({ provider: "demo" });
+  await assert.rejects(
+    () =>
+      ingress.handleOAuthCallback({
+        provider: "alt",
+        code: "abc",
+        state: mismatchedState.state,
+      }),
+    (error: unknown) =>
+      error instanceof DeviceSyncError
+      && error.code === "OAUTH_PROVIDER_MISMATCH"
+      && error.httpStatus === 400,
+  );
+
+  const missingCodeState = await ingress.startConnection({ provider: "demo" });
+  await assert.rejects(
+    () =>
+      ingress.handleOAuthCallback({
+        provider: "demo",
+        state: missingCodeState.state,
+      }),
+    (error: unknown) =>
+      error instanceof DeviceSyncError
+      && error.code === "OAUTH_CODE_MISSING"
+      && error.httpStatus === 400,
+  );
+});
+
+test("public ingress falls back to granted scopes when the provider omits scopes", async () => {
+  const ingress = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    registry: createDeviceSyncRegistry([
+      createFakeProvider({
+        async exchangeAuthorizationCode() {
+          return {
+            externalAccountId: "demo-abc",
+            displayName: "Demo abc",
+            metadata: {},
+            tokens: {
+              accessToken: "access-token",
+            } satisfies ProviderAuthTokens,
+          };
+        },
+      }),
+    ]),
+    store: new InMemoryPublicIngressStore(),
+  });
+
+  const begin = await ingress.startConnection({ provider: "demo" });
+  const connected = await ingress.handleOAuthCallback({
+    provider: "demo",
+    state: begin.state,
+    code: "abc",
+    scope: " offline   read:data  ",
+  });
+
+  assert.deepEqual(connected.account.scopes, ["offline", "read:data"]);
+});
+
+test("public ingress rejects webhook deliveries for providers without webhook handlers", async () => {
+  const ingress = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    registry: createDeviceSyncRegistry([
+      createFakeProvider({
+        descriptor: {
+          provider: "demo",
+          displayName: "Demo",
+          transportModes: ["oauth_callback", "scheduled_poll"],
+          oauth: {
+            callbackPath: "/oauth/demo/callback",
+            defaultScopes: ["offline", "read:data"],
+          },
+          webhook: null,
+          normalization: {
+            metricFamilies: ["activity"],
+            snapshotParser: "schema",
+          },
+          sourcePriorityHints: {
+            defaultPriority: 50,
+            metricFamilies: {
+              activity: 50,
+            },
+          },
+        },
+        verifyAndParseWebhook: undefined,
+      }),
+    ]),
+    store: new InMemoryPublicIngressStore(),
+  });
+
+  await assert.rejects(
+    () => ingress.handleWebhook("demo", new Headers(), Buffer.from("{}")),
+    (error: unknown) =>
+      error instanceof DeviceSyncError
+      && error.code === "WEBHOOKS_NOT_SUPPORTED"
+      && error.httpStatus === 404,
+  );
+});
+
 test("public ingress dedupes unknown-account webhook deliveries before rerunning unknown hooks", async () => {
   const store = new InMemoryPublicIngressStore();
   const unknownWebhooks: string[] = [];
