@@ -3,7 +3,7 @@ import {
   resolveDeviceProviderDescriptor,
   resolveDeviceProviderSourcePriority,
   type DeviceProviderMetricFamily,
-} from "@murphai/importers";
+} from "@murphai/importers/device-providers/provider-descriptors";
 
 import {
   ACTIVITY_METRIC_KEYS,

@@ -1,4 +1,4 @@
-import type { DeviceProviderMetricFamily } from "@murphai/importers";
+import type { DeviceProviderMetricFamily } from "@murphai/importers/device-providers/provider-descriptors";
 
 export type WearableConfidenceLevel = "none" | "low" | "medium" | "high";
 export type WearableCandidateSourceFamily = "event" | "sample" | "derived";
