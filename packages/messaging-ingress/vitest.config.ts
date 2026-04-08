@@ -36,7 +36,6 @@ export default defineConfig({
     coverage: createMurphVitestCoverage({
       customProviderModule: resolveMurphVitestCoverageProviderModule(packageDir),
       include: ["src/**/*.ts"],
-      exclude: ["src/index.ts"],
       thresholds: {
         ...murphVitestCoverageThresholds,
       },
