@@ -5,7 +5,7 @@ import { pathToFileURL } from "node:url";
 import {
   buildHostedWorkerSecretsPayload,
   resolveCloudflareDeployPaths,
-} from "../src/deploy-automation.js";
+} from "./deploy-automation.js";
 
 const DEPLOY_SECRET_DIRECTORY_MODE = 0o700;
 const DEPLOY_SECRET_FILE_MODE = 0o600;

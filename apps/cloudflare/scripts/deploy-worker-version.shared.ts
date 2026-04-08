@@ -4,8 +4,8 @@ import {
   formatHostedWorkerDeploymentVersionSpecs,
   resolveHostedWorkerGradualDeploymentSupport,
   resolveHostedWorkerDeploymentTraffic,
-} from "../src/deploy-automation/deployment-traffic.js";
-import { normalizeOptionalString } from "../src/deploy-automation/shared.js";
+} from "./deploy-automation/deployment-traffic.ts";
+import { normalizeOptionalString } from "./deploy-automation/shared.ts";
 
 type EnvSource = Readonly<Record<string, string | undefined>>;
 

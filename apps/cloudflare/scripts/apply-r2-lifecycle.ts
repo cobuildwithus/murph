@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import {
   buildHostedLifecycleWranglerArgs,
   resolveHostedLifecycleBucketNames,
-} from "../src/r2-lifecycle.js";
+} from "./r2-lifecycle.js";
 import { runWranglerLogged } from "./wrangler-runner.js";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));

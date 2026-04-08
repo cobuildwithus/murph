@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildHostedLifecycleWranglerArgs,
   resolveHostedLifecycleBucketNames,
-} from "../src/r2-lifecycle.js";
+} from "../scripts/r2-lifecycle.js";
 
 describe("r2 lifecycle helpers", () => {
   it("requires at least one configured bundles bucket", () => {

@@ -3,7 +3,7 @@ import path from "node:path";
 import {
   parseHostedContainerImageListOutput,
   selectHostedContainerImageTagsForCleanup,
-} from "../src/deploy-automation/container-images.js";
+} from "./deploy-automation/container-images.ts";
 import { runWranglerJson, runWranglerLogged } from "./wrangler-runner.js";
 
 const cliArgs = parseCliArgs(process.argv.slice(2));

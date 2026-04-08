@@ -77,6 +77,9 @@ describe("hosted runner container image contract", () => {
     expect(bundleAssemblyScript).toContain(
       'removeBundlePathIfPresent(path.join(bundleDir, "LICENSE"))',
     );
+    expect(bundleAssemblyScript).toContain(
+      'entryName === ".pnpm-workspace-state-v1.json"',
+    );
     expect(bundleAssemblyScript).toContain('entryName === ".modules.yaml"');
     expect(bundleAssemblyScript).toContain('entryName === "pnpm-lock.yaml"');
     expect(bundleAssemblyScript).toContain('entryPath.endsWith(".d.ts")');
@@ -126,6 +129,19 @@ describe("hosted runner container image contract", () => {
 
     expect(Object.keys(packageJson.dependencies ?? {}).sort()).toEqual(
       [...hostedRunnerWorkerDependencyNames].sort(),
+    );
+  });
+
+  it("prunes pnpm workspace metadata recursively from the staged runner bundle", async () => {
+    const bundleAssemblyScript = await readFile(
+      new URL("../scripts/assemble-runner-bundle.ts", import.meta.url),
+      "utf8",
+    );
+
+    expect(bundleAssemblyScript).toContain("await pruneNonRuntimeFiles(bundleDir);");
+    expect(bundleAssemblyScript).toContain("await walkBundleFiles(rootDir, async (entryPath) => {");
+    expect(bundleAssemblyScript).toContain(
+      'entryName === ".pnpm-workspace-state-v1.json"',
     );
   });
 
@@ -187,13 +203,20 @@ describe("hosted runner container image contract", () => {
       "@murphai/inbox-services",
       "@murphai/inboxd",
       "@murphai/messaging-ingress",
-      "@murphai/murph",
       "@murphai/operator-config",
       "@murphai/parsers",
       "@murphai/query",
       "@murphai/runtime-state",
       "@murphai/vault-usecases",
+      "@murphai/murph",
     ]);
+    expect(new Set(hostedRunnerBuildPackageNames)).toEqual(
+      new Set([
+        ...hostedRunnerWorkspacePackageNames,
+        ...runnerVaultCliArtifactWorkspacePackageNames,
+        "@murphai/murph",
+      ]),
+    );
     expect(runtimePackageJson).toEqual({
       name: "@murphai/cloudflare-runner",
       private: true,

@@ -498,6 +498,7 @@ async function pruneNonRuntimeFiles(rootDir: string): Promise<void> {
       const entryName = path.basename(entryPath);
 
       if (
+        entryName === ".pnpm-workspace-state-v1.json" ||
         entryName === ".modules.yaml" ||
         entryName === "pnpm-lock.yaml" ||
         entryPath.endsWith(".d.ts") ||

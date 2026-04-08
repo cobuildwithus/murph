@@ -1,6 +1,6 @@
 import path from "node:path";
 
-import { resolveCloudflareDeployPaths } from "../src/deploy-automation.js";
+import { resolveCloudflareDeployPaths } from "./deploy-automation.js";
 
 export function resolveDeployWorkerCliPaths(
   argv: string[],
