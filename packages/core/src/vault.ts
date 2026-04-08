@@ -44,6 +44,7 @@ import { VaultError } from "./errors.ts";
 import { parseFrontmatterDocument } from "./frontmatter.ts";
 import { generateVaultId } from "./ids.ts";
 import { readJsonlRecords } from "./jsonl.ts";
+import { stageMarkdownDocumentWrite } from "./markdown-documents.ts";
 import { normalizeVaultRoot, resolveVaultPath } from "./path-safety.ts";
 import {
   isTerminalWriteOperationStatus,
@@ -201,9 +202,17 @@ export async function initializeVault({
       await batch.stageTextWrite(VAULT_LAYOUT.metadata, `${JSON.stringify(metadata, null, 2)}\n`, {
         overwrite: false,
       });
-      await batch.stageTextWrite(VAULT_LAYOUT.coreDocument, coreDocument, {
-        overwrite: false,
-      });
+      await stageMarkdownDocumentWrite(
+        batch,
+        {
+          relativePath: VAULT_LAYOUT.coreDocument,
+          created: true,
+        },
+        coreDocument,
+        {
+          overwrite: false,
+        },
+      );
       const audit = await emitAuditRecord({
         vaultRoot: absoluteRoot,
         batch,

@@ -12,6 +12,7 @@ import { FRONTMATTER_SCHEMA_VERSIONS, ID_PREFIXES, VAULT_LAYOUT } from "../const
 import { emitAuditRecord } from "../audit.ts";
 import { VaultError } from "../errors.ts";
 import { parseFrontmatterDocument, stringifyFrontmatterDocument } from "../frontmatter.ts";
+import { stageMarkdownDocumentWrite } from "../markdown-documents.ts";
 import { readUtf8File } from "../fs.ts";
 import { generateRecordId } from "../ids.ts";
 import { toMonthlyShardRelativePath } from "../jsonl.ts";
@@ -295,7 +296,17 @@ export async function createExperiment({
     summary: `Create experiment ${safeSlug}`,
     occurredAt: startedTimestamp,
     mutate: async ({ batch }) => {
-      await batch.stageTextWrite(relativePath, markdown, { overwrite: false });
+      await stageMarkdownDocumentWrite(
+        batch,
+        {
+          relativePath,
+          created: true,
+        },
+        markdown,
+        {
+          overwrite: false,
+        },
+      );
       await batch.stageJsonlAppend(ledgerFile, `${JSON.stringify(event)}\n`);
       const audit = await emitAuditRecord({
         vaultRoot,
@@ -360,9 +371,17 @@ export async function updateExperiment(
     summary: `Update experiment ${nextAttributes.experimentId}`,
     occurredAt: new Date(),
     mutate: async ({ batch }) => {
-      await batch.stageTextWrite(input.relativePath, nextMarkdown, {
-        overwrite: true,
-      });
+      await stageMarkdownDocumentWrite(
+        batch,
+        {
+          relativePath: input.relativePath,
+          created: false,
+        },
+        nextMarkdown,
+        {
+          overwrite: true,
+        },
+      );
 
       return {
         experimentId: nextAttributes.experimentId,
@@ -425,9 +444,17 @@ async function appendExperimentLifecycleEvent(
     summary: `Append ${input.phase} lifecycle event for ${document.attributes.experimentId}`,
     occurredAt,
     mutate: async ({ batch }) => {
-      await batch.stageTextWrite(input.relativePath, nextMarkdown, {
-        overwrite: true,
-      });
+      await stageMarkdownDocumentWrite(
+        batch,
+        {
+          relativePath: input.relativePath,
+          created: false,
+        },
+        nextMarkdown,
+        {
+          overwrite: true,
+        },
+      );
       await batch.stageJsonlAppend(ledgerFile, `${JSON.stringify(eventRecord)}\n`);
 
       return {

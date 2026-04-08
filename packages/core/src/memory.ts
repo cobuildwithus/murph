@@ -1,5 +1,3 @@
-import path from "node:path";
-
 import {
   buildMemoryPromptBlock,
   createEmptyMemoryDocument,
@@ -17,11 +15,13 @@ import {
 } from "@murphai/contracts";
 
 import {
-  ensureVaultDirectory,
   pathExists,
   readUtf8File,
-  writeVaultTextFile,
 } from "./fs.ts";
+import {
+  resolveSingletonMarkdownDocumentTarget,
+  writeCanonicalMarkdownDocument,
+} from "./markdown-documents.ts";
 import { resolveVaultPath } from "./path-safety.ts";
 
 export type {
@@ -85,12 +85,16 @@ export async function upsertMemory(
 }> {
   const snapshot = await readMemoryDocument(vaultRoot);
   const next = upsertMemoryRecord(snapshot, input);
-  await ensureVaultDirectory(vaultRoot, path.posix.dirname(memoryDocumentRelativePath));
-  await writeVaultTextFile(
+  await writeCanonicalMarkdownDocument({
     vaultRoot,
-    memoryDocumentRelativePath,
-    renderMemoryDocument({ document: next.document }),
-  );
+    operationType: "memory_upsert",
+    summary: `Upsert memory record ${next.record.id}`,
+    target: resolveSingletonMarkdownDocumentTarget({
+      relativePath: memoryDocumentRelativePath,
+      created: !snapshot.exists,
+    }),
+    markdown: renderMemoryDocument({ document: next.document }),
+  });
 
   const nextSnapshot = await readMemoryDocument(vaultRoot);
 
@@ -119,9 +123,17 @@ export async function forgetMemory(
     };
   }
 
-  await ensureVaultDirectory(vaultRoot, path.posix.dirname(memoryDocumentRelativePath));
   const markdown = renderMemoryDocument({ document: next.document });
-  await writeVaultTextFile(vaultRoot, memoryDocumentRelativePath, markdown);
+  await writeCanonicalMarkdownDocument({
+    vaultRoot,
+    operationType: "memory_forget",
+    summary: `Forget memory record ${next.record.id}`,
+    target: resolveSingletonMarkdownDocumentTarget({
+      relativePath: memoryDocumentRelativePath,
+      created: !snapshot.exists,
+    }),
+    markdown,
+  });
   const nextSnapshot = await readMemoryDocument(vaultRoot);
 
   return {

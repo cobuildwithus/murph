@@ -2,12 +2,15 @@ import type { JournalDayFrontmatter } from "@murphai/contracts";
 import { journalDayFrontmatterSchema } from "@murphai/contracts";
 
 import { FRONTMATTER_SCHEMA_VERSIONS, VAULT_LAYOUT } from "../constants.ts";
-import { emitAuditRecord } from "../audit.ts";
 import { VaultError } from "../errors.ts";
 import { stringifyFrontmatterDocument } from "../frontmatter.ts";
-import { writeVaultTextFile } from "../fs.ts";
-import { loadVault } from "../vault.ts";
+import {
+  resolveDatedMarkdownDocumentTarget,
+  stageMarkdownDocumentWrite,
+  writeCanonicalMarkdownDocument,
+} from "../markdown-documents.ts";
 import { defaultTimeZone, toLocalDayKey } from "../time.ts";
+import { loadVault } from "../vault.ts";
 
 import {
   appendMarkdownParagraph,
@@ -102,8 +105,11 @@ export async function ensureJournalDay({
 }: EnsureJournalDayInput): Promise<EnsureJournalDayResult> {
   const vault = await loadVault({ vaultRoot });
   const day = toLocalDayKey(date, vault.metadata.timezone ?? defaultTimeZone(), "date");
-  const [year] = day.split("-");
-  const relativePath = `${VAULT_LAYOUT.journalDirectory}/${year}/${day}.md`;
+  const target = resolveDatedMarkdownDocumentTarget({
+    directory: VAULT_LAYOUT.journalDirectory,
+    dayKey: day,
+    created: true,
+  });
   const attributes = validateContract(
     journalDayFrontmatterSchema,
     {
@@ -118,40 +124,40 @@ export async function ensureJournalDay({
   );
 
   try {
-    await writeVaultTextFile(
+    const result = await writeCanonicalMarkdownDocument({
       vaultRoot,
-      relativePath,
-      stringifyFrontmatterDocument({
+      operationType: "journal_ensure",
+      summary: `Ensure journal page for ${day}`,
+      occurredAt: `${day}T00:00:00.000Z`,
+      target,
+      markdown: stringifyFrontmatterDocument({
         attributes: { ...attributes },
         body: `# ${day}\n\n## Summary\n\n`,
       }),
-      { overwrite: false },
-    );
+      overwrite: false,
+      audit: {
+        action: "journal_ensure",
+        commandName: "core.ensureJournalDay",
+        summary: `Ensured journal page for ${day}.`,
+        occurredAt: `${day}T00:00:00.000Z`,
+      },
+    });
+
+    return {
+      created: true,
+      relativePath: target.relativePath,
+      auditPath: result.auditPath ?? undefined,
+    };
   } catch (error) {
     if (error instanceof VaultError && error.code === "VAULT_FILE_EXISTS") {
       return {
         created: false,
-        relativePath,
+        relativePath: target.relativePath,
       };
     }
 
     throw error;
   }
-
-  const audit = await emitAuditRecord({
-    vaultRoot,
-    action: "journal_ensure",
-    commandName: "core.ensureJournalDay",
-    summary: `Ensured journal page for ${day}.`,
-    occurredAt: `${day}T00:00:00.000Z`,
-    files: [relativePath],
-  });
-
-  return {
-    created: true,
-    relativePath,
-    auditPath: audit.relativePath,
-  };
 }
 
 export async function appendJournal(input: AppendJournalInput): Promise<AppendJournalResult> {
@@ -174,9 +180,18 @@ export async function appendJournal(input: AppendJournalInput): Promise<AppendJo
     summary: `Append journal text for ${input.date}`,
     occurredAt: `${input.date}T00:00:00.000Z`,
     mutate: async ({ batch }) => {
-      await batch.stageTextWrite(ensured.relativePath, nextMarkdown, {
-        overwrite: true,
-      });
+      await stageMarkdownDocumentWrite(
+        batch,
+        resolveDatedMarkdownDocumentTarget({
+          directory: VAULT_LAYOUT.journalDirectory,
+          dayKey: input.date,
+          created: ensured.created,
+        }),
+        nextMarkdown,
+        {
+          overwrite: true,
+        },
+      );
 
       return {
         relativePath: ensured.relativePath,
@@ -198,7 +213,12 @@ async function mutateJournalLinks(
         })
       : null;
   const relativePath =
-    ensured?.relativePath ?? `${VAULT_LAYOUT.journalDirectory}/${input.date.slice(0, 4)}/${input.date}.md`;
+    ensured?.relativePath ??
+    resolveDatedMarkdownDocumentTarget({
+      directory: VAULT_LAYOUT.journalDirectory,
+      dayKey: input.date,
+      created: false,
+    }).relativePath;
 
   let document: {
     attributes: JournalDayFrontmatter;
@@ -249,9 +269,18 @@ async function mutateJournalLinks(
     summary: `${input.operation === "link" ? "Link" : "Unlink"} journal ${input.key} for ${input.date}`,
     occurredAt: `${input.date}T00:00:00.000Z`,
     mutate: async ({ batch }) => {
-      await batch.stageTextWrite(relativePath, nextMarkdown, {
-        overwrite: true,
-      });
+      await stageMarkdownDocumentWrite(
+        batch,
+        resolveDatedMarkdownDocumentTarget({
+          directory: VAULT_LAYOUT.journalDirectory,
+          dayKey: input.date,
+          created: ensured?.created ?? false,
+        }),
+        nextMarkdown,
+        {
+          overwrite: true,
+        },
+      );
 
       return {
         relativePath,

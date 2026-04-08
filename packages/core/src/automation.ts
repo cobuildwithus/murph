@@ -20,8 +20,8 @@ import {
   readRegistryRecord,
   resolveMarkdownRegistryUpsertTarget,
   selectExistingRegistryRecord,
+  writeMarkdownRegistryRecord,
 } from "./registry/markdown.ts";
-import { runCanonicalWrite } from "./operations/write-batch.ts";
 import { parseFrontmatterDocument, stringifyFrontmatterDocument } from "./frontmatter.ts";
 import {
   normalizeId,
@@ -531,29 +531,28 @@ export async function upsertAutomation(
     markdown: "",
   };
 
-  const markdown = buildAutomationMarkdown(record);
-
-  return runCanonicalWrite({
+  const { auditPath, record: writtenRecord } = await writeMarkdownRegistryRecord({
     vaultRoot: input.vaultRoot,
+    target,
+    attributes: buildAutomationFrontmatter(record),
+    body: record.prompt,
+    recordFromParts: parseAutomationRecord,
     operationType: "automation_upsert",
     summary: `Upsert automation ${record.automationId}`,
-    mutate: async ({ batch }) => {
-      await batch.stageTextWrite(target.relativePath, markdown);
-      if (target.previousRelativePath && target.previousRelativePath !== target.relativePath) {
-        await batch.stageDelete(target.previousRelativePath);
-      }
-
-      return {
-        auditPath: target.relativePath,
-        created: target.created,
-        record: {
-          ...record,
-          markdown,
-          relativePath: target.relativePath,
-        },
-      };
+    audit: {
+      action: "automation_upsert",
+      commandName: "core.upsertAutomation",
+      summary: `Upserted automation ${record.automationId}.`,
+      targetIds: [record.automationId],
+      occurredAt: updatedAt,
     },
   });
+
+  return {
+    auditPath,
+    created: target.created,
+    record: writtenRecord,
+  };
 }
 
 export function buildAutomationMarkdownPreview(

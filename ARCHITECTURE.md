@@ -34,6 +34,7 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
 
 - Canonical vault storage is file-native under the vault root.
 - Human-facing truth lives in Markdown documents such as `CORE.md`, journal pages, and experiment pages.
+- Canonical markdown writes now reduce to one shared `packages/core` document seam with three target shapes only: singleton documents (for example `CORE.md` and `bank/memory.md`), slugged documents (for example `bank/automations/*.md`, `bank/experiments/*.md`, and registry-backed bank records), and dated documents (for example `journal/YYYY/YYYY-MM-DD.md`).
 - Machine-facing truth lives in append-only JSONL ledgers for inbox captures, events, samples, and audit records, with inbox capture intake canonicalized first through `ledger/inbox-captures/**`.
 - Raw imported artifacts are immutable once copied into `raw/`, including document/meal/workout/measurement attachment directories with `manifest.json` sidecars and normalized device/provider API snapshots under `raw/integrations/**`.
 - Parser outputs under `derived/inbox/**` are rebuildable and never canonical health facts.

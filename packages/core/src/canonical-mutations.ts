@@ -12,6 +12,7 @@ import {
   readJournalDayFrontmatterDocument,
 } from "./domains/journal.ts";
 import { stringifyFrontmatterDocument } from "./frontmatter.ts";
+import { stageMarkdownDocumentWrite } from "./markdown-documents.ts";
 import { runCanonicalWrite } from "./operations/write-batch.ts";
 
 interface InboxPromotionCaptureAttachment {
@@ -281,9 +282,17 @@ export async function promoteInboxJournal(
       summary: `Promote inbox capture ${input.capture.captureId} into journal ${input.date}`,
       occurredAt: new Date(),
       mutate: async ({ batch }) => {
-        await batch.stageTextWrite(ensured.relativePath, nextDocument, {
-          overwrite: true,
-        });
+        await stageMarkdownDocumentWrite(
+          batch,
+          {
+            relativePath: ensured.relativePath,
+            created: ensured.created,
+          },
+          nextDocument,
+          {
+            overwrite: true,
+          },
+        );
         return undefined;
       },
     });
@@ -326,9 +335,17 @@ export async function promoteInboxExperimentNote(
       summary: `Promote inbox capture ${input.capture.captureId} into experiment ${document.attributes.experimentId}`,
       occurredAt: new Date(),
       mutate: async ({ batch }) => {
-        await batch.stageTextWrite(input.relativePath, nextDocument, {
-          overwrite: true,
-        });
+        await stageMarkdownDocumentWrite(
+          batch,
+          {
+            relativePath: input.relativePath,
+            created: false,
+          },
+          nextDocument,
+          {
+            overwrite: true,
+          },
+        );
         return undefined;
       },
     });
