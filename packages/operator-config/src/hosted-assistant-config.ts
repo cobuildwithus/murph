@@ -429,15 +429,17 @@ function resolveHostedAssistantSeedPlan(
     )
   }
 
-  if (
-    raw.zeroDataRetention !== null &&
-    !isAssistantVercelAIGatewayBaseUrl(baseUrl)
-  ) {
+  const usesVercelAIGateway = isAssistantVercelAIGatewayBaseUrl(baseUrl)
+
+  if (raw.zeroDataRetention !== null && !usesVercelAIGateway) {
     throw new HostedAssistantConfigurationError(
       'HOSTED_ASSISTANT_CONFIG_INVALID',
       `${HOSTED_ASSISTANT_ZERO_DATA_RETENTION_ENV} can be used only with Vercel AI Gateway.`,
     )
   }
+
+  const zeroDataRetention =
+    usesVercelAIGateway ? (raw.zeroDataRetention ?? true) : raw.zeroDataRetention
 
   return {
     providerConfig: {
@@ -447,7 +449,7 @@ function resolveHostedAssistantSeedPlan(
       model: raw.model,
       providerName: raw.providerName ?? providerSelection.presetProviderName,
       reasoningEffort: raw.reasoningEffort,
-      ...(raw.zeroDataRetention === true ? { zeroDataRetention: true } : {}),
+      ...(zeroDataRetention === true ? { zeroDataRetention: true } : {}),
     },
   }
 }

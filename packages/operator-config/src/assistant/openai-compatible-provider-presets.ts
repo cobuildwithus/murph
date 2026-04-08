@@ -74,7 +74,7 @@ const OPENAI_COMPATIBLE_PROVIDER_PRESETS: readonly OpenAICompatibleProviderPrese
       'vercel-ai',
       'ai-gateway',
     ],
-    envAliases: ['VERCEL_AI_API_KEY', 'AI_GATEWAY_API_KEY', 'VERCEL_OIDC_TOKEN'],
+    envAliases: ['VERCEL_AI_API_KEY'],
   },
   {
     id: 'openrouter',
