@@ -40,6 +40,8 @@
         "ledger/assessments/2026/2026-03.jsonl",
         "ledger/profile-snapshots/2026/2026-03.jsonl",
         "raw/README.md",
+        "raw/smoke/hosted-runner.pdf",
+        "raw/smoke/hosted-runner.wav",
         "audit/README.md",
         "exports/README.md"
       ]

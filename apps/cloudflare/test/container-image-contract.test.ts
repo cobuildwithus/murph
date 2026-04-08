@@ -43,6 +43,7 @@ describe("hosted runner container image contract", () => {
     );
 
     expect(bundleAssemblyScript).toContain("const runnerBundleDeployRoot = path.join(");
+    expect(bundleAssemblyScript).toContain('const shouldSkipBuild = process.argv.includes("--skip-build");');
     expect(bundleAssemblyScript).toContain(
       'import { resolveCloudflareDeployPaths } from "./deploy-automation.js";',
     );
@@ -50,6 +51,7 @@ describe("hosted runner container image contract", () => {
       '} from "./runner-bundle-contract.js";',
     );
     expect(bundleAssemblyScript).toContain("runnerBundleDirectoryName,");
+    expect(bundleAssemblyScript).toContain("if (!shouldSkipBuild) {");
     expect(bundleAssemblyScript).toContain(
       "await buildHostedRunnerWorkspaceArtifacts(hostedRunnerBuildPackageNames);",
     );
@@ -271,10 +273,13 @@ describe("hosted runner container image contract", () => {
     expect(dockerfile).toContain(
       "https://github.com/ggml-org/whisper.cpp/archive/refs/tags/${WHISPER_CPP_VERSION}.tar.gz",
     );
+    expect(dockerfile).toContain("-DGGML_NATIVE=OFF");
+    expect(dockerfile).toContain("-DGGML_CPU_ARM_ARCH=armv8-a");
     expect(dockerfile).toContain(
       "cmake --build build -j\"$(nproc)\" --config Release --target whisper-cli",
     );
-    expect(dockerfile).toContain("COPY --from=whisper-builder /opt/whisper/whisper-cli /usr/local/bin/whisper-cli");
+    expect(dockerfile).toContain("COPY --from=whisper-builder /opt/whisper/bin/whisper-cli /usr/local/bin/whisper-cli");
+    expect(dockerfile).toContain("COPY --from=whisper-builder /opt/whisper/lib/ /usr/local/lib/");
     expect(dockerfile).toContain(
       "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/${WHISPER_MODEL_FILE}",
     );
@@ -291,6 +296,7 @@ describe("hosted runner container image contract", () => {
     expect(dockerfile).toContain(
       "WHISPER_MODEL_PATH=/home/runner/.murph/models/whisper/${WHISPER_MODEL_FILE}",
     );
+    expect(dockerfile).toContain("RUN ldconfig");
     expect(dockerfile).toContain('CMD ["node", "dist/container-entrypoint.js"]');
   });
 
@@ -312,6 +318,10 @@ describe("hosted runner container image contract", () => {
     expect(packageJson.scripts?.["runner:docker:build"]).toBe(
       "pnpm runner:bundle && docker build -f ../../Dockerfile.cloudflare-hosted-runner -t murph-cloudflare-runner .",
     );
+    expect(packageJson.scripts?.["runner:bundle:assemble-only"]).toBe(
+      "pnpm --dir ../.. exec tsx --tsconfig apps/cloudflare/tsconfig.scripts.json apps/cloudflare/scripts/assemble-runner-bundle.ts --skip-build",
+    );
+    expect(packageJson.scripts?.["runner:docker:smoke:prepare"]).toContain("pnpm --filter @murphai/cloudflare-runner... run build && pnpm runner:bundle:assemble-only &&");
     expect(container.image).toBe("../../../Dockerfile.cloudflare-hosted-runner");
     expect(container.image_build_context).toBe("..");
   });

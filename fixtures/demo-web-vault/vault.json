@@ -1,4 +1,7 @@
 {
-  "vaultId": "vault_demo_web_01",
-  "owner": "demo"
+  "formatVersion": 1,
+  "vaultId": "vault_01JNV40W8VFYQ2H7CMJY5A9R4K",
+  "title": "Demo Web Vault",
+  "timezone": "America/Los_Angeles",
+  "createdAt": "2026-03-12T14:00:00Z"
 }
