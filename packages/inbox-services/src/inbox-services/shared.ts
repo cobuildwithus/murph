@@ -77,6 +77,13 @@ export function normalizeConnectorAccountId(
       return normalized
     case 'linq':
       return normalized ?? 'default'
+    default: {
+      const unsupportedSource: never = source
+      throw new VaultCliError(
+        'INBOX_SOURCE_UNSUPPORTED',
+        `Inbox source "${unsupportedSource}" is not supported.`,
+      )
+    }
   }
 }
 
