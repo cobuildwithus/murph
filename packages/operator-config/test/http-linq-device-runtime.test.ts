@@ -14,6 +14,7 @@ import {
   parseRetryAfterHeaderMs,
   waitForRetryDelay,
 } from '../src/http-retry.ts'
+import { createDeviceSyncClient } from '../src/device-sync-client.ts'
 import {
   createLinqChat,
   createLinqWebhookSubscription,
@@ -30,6 +31,14 @@ afterEach(() => {
   vi.unstubAllGlobals()
   vi.useRealTimers()
 })
+
+async function loadDeviceSyncClientWithMockedSpawn(
+  spawn: typeof import('node:child_process').spawn,
+): Promise<typeof import('../src/device-sync-client.ts')> {
+  vi.resetModules()
+  vi.doMock('node:child_process', () => ({ spawn }))
+  return await import('../src/device-sync-client.ts')
+}
 
 function createJsonResponse(body: unknown, init?: ResponseInit): Response {
   return new Response(JSON.stringify(body), {
@@ -545,7 +554,6 @@ test('linq runtime covers optional payload omissions, fallback http messages, an
 test('device sync client covers list, begin, and default browser open paths', async () => {
   const seenRequests: Array<{ method: string; url: string; body: string | null }> = []
   const openBrowser = vi.fn(async () => true)
-  const { createDeviceSyncClient } = await import('../src/device-sync-client.ts')
   const client = createDeviceSyncClient({
     baseUrl: 'http://127.0.0.1:8788',
     controlToken: 'token-123',
@@ -640,7 +648,6 @@ test('device sync client covers list, begin, and default browser open paths', as
     returnTo: 'https://murph.example.test/return',
   })
 
-  vi.resetModules()
   const spawn = vi.fn((_command: string, _args: string[]) => {
     const child = new EventEmitter() as EventEmitter & {
       unref(): void
@@ -651,8 +658,7 @@ test('device sync client covers list, begin, and default browser open paths', as
     })
     return child
   })
-  vi.doMock('node:child_process', () => ({ spawn }))
-  const dynamicModule = await import('../src/device-sync-client.ts')
+  const dynamicModule = await loadDeviceSyncClientWithMockedSpawn(spawn)
   const browserClient = dynamicModule.createDeviceSyncClient({
     baseUrl: 'http://127.0.0.1:8788',
     fetchImpl: async () =>
@@ -679,8 +685,6 @@ test('device sync client covers list, begin, and default browser open paths', as
 })
 
 test('device sync client wraps transport and http failures with control-plane context', async () => {
-  const { createDeviceSyncClient } = await import('../src/device-sync-client.ts')
-
   const unavailableClient = createDeviceSyncClient({
     baseUrl: 'http://127.0.0.1:8788',
     fetchImpl: async () => {
