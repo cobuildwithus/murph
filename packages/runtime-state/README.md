@@ -29,6 +29,7 @@ That assistant runtime root is intentionally not a product-state incubator. If a
 - every durable local JSON store should carry an explicit schema/schemaVersion envelope
 - every durable local SQLite store should carry an explicit `PRAGMA user_version` migration seam
 - hosted execution snapshots canonical `vault/**`, only the runtime-state paths explicitly marked `portable`, and the minimal operator-home hosted config needed for bootstrap; they do **not** snapshot `machine_local` runtime state such as device-sync control/token stores, inbox daemon config/state, parser toolchain overrides, rebuildable projections, caches, or tmp state
+- hosted execution also treats incur CLI config autodiscovery as local-only convenience: `~/.config/murph/config.json` is not part of the hosted bundle contract, and hosted assistant/provider turns explicitly opt out of reading it
 - operational portability lives in subsystem descriptor manifests aggregated by `@murphai/runtime-state`; unknown operational paths still fail closed to `machine_local`
 - large raw artifacts under `vault/raw/**` may be externalized into separate encrypted content-addressed objects and restored back onto disk during hosted execution
 - hosted per-user env overrides live in a separate encrypted object and are not folded into the workspace snapshot

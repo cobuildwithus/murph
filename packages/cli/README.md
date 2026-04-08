@@ -10,7 +10,7 @@ The repo implementation happens to live in `packages/cli`, but that is a maintai
 
 If you want a local, inspectable assistant that keeps durable truth in normal files you can read, this is the package you install.
 
-Runtime: Node `>= 22.16.0`.
+Runtime: Node `>= 24.14.1`.
 
 Supported host setup path: macOS and Linux. iMessage remains macOS-only.
 
@@ -100,6 +100,8 @@ If `pnpm` is not available yet, use:
 ## Config defaults
 
 The CLI supports incur's built-in config loading for command option defaults. By default it searches `~/.config/murph/config.json`.
+
+Those incur config defaults are local CLI convenience only. Hosted execution does not snapshot or honor `~/.config/murph/config.json`; portable runtime behavior must live in canonical vault state or typed operator config under `~/.murph/config.json`.
 
 - `murph --config <path> ...` selects an explicit config file
 - `murph --no-config ...` disables config loading for a single run

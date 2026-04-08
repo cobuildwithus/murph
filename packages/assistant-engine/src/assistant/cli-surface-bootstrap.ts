@@ -28,6 +28,7 @@ export function buildAssistantCliSurfaceBootstrapDocId(sessionId: string): strin
 
 export async function resolveAssistantCliSurfaceBootstrapContext(input: {
   cliEnv?: NodeJS.ProcessEnv
+  executionContext?: import('./execution-context.js').AssistantExecutionContext | null
   sessionId: string
   vault: string
   workingDirectory?: string | null
@@ -47,6 +48,7 @@ export async function resolveAssistantCliSurfaceBootstrapContext(input: {
 
   const contract = await loadAssistantCliSurfaceContract({
     cliEnv: input.cliEnv,
+    executionContext: input.executionContext,
     vault: input.vault,
     workingDirectory: input.workingDirectory,
   })
@@ -121,6 +123,7 @@ async function readPersistedAssistantCliSurfaceContract(
 
 async function loadAssistantCliSurfaceContract(input: {
   cliEnv?: NodeJS.ProcessEnv
+  executionContext?: import('./execution-context.js').AssistantExecutionContext | null
   vault: string
   workingDirectory?: string | null
 }): Promise<string | null> {
@@ -143,6 +146,7 @@ async function loadAssistantCliSurfaceContract(input: {
 
 async function generateAssistantCliSurfaceContract(input: {
   cliEnv?: NodeJS.ProcessEnv
+  executionContext?: import('./execution-context.js').AssistantExecutionContext | null
   vault: string
   workingDirectory?: string | null
 }): Promise<string | null> {
@@ -150,6 +154,7 @@ async function generateAssistantCliSurfaceContract(input: {
     const manifest = await readAssistantCliLlmsManifest({
       cliEnv: input.cliEnv,
       detail: 'full',
+      executionContext: input.executionContext,
       vault: input.vault,
       workingDirectory: input.workingDirectory,
     })
@@ -160,6 +165,7 @@ async function generateAssistantCliSurfaceContract(input: {
     const manifest = await readAssistantCliLlmsManifest({
       cliEnv: input.cliEnv,
       detail: 'compact',
+      executionContext: input.executionContext,
       vault: input.vault,
       workingDirectory: input.workingDirectory,
     })
