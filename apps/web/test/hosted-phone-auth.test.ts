@@ -123,6 +123,7 @@ describe("HostedPhoneAuth", () => {
         },
         code: "",
         disabled: false,
+        intent: "signup",
         manualEntryVisible: false,
         mode: "invite",
         pendingAction: null,
@@ -154,6 +155,7 @@ describe("HostedPhoneAuth", () => {
         activeAttempt: null,
         code: "",
         disabled: false,
+        intent: "signup",
         manualEntryVisible: false,
         mode: "invite",
         pendingAction: null,
@@ -186,6 +188,7 @@ describe("HostedPhoneAuth", () => {
         activeAttempt: null,
         code: "",
         disabled: false,
+        intent: "signup",
         manualEntryVisible: true,
         mode: "invite",
         pendingAction: null,
@@ -217,6 +220,7 @@ describe("HostedPhoneAuth", () => {
         activeAttempt: null,
         code: "",
         disabled: false,
+        intent: "signup",
         manualEntryVisible: true,
         mode: "invite",
         pendingAction: null,
@@ -274,6 +278,7 @@ describe("HostedPhoneAuth", () => {
         },
         code: "",
         disabled: false,
+        intent: "signup",
         mode: "public",
         pendingAction: null,
         phoneCountryOptions: [{ code: "US", dialCode: "+1", label: "United States", placeholder: "(415) 555-2671" }],
@@ -295,6 +300,64 @@ describe("HostedPhoneAuth", () => {
     assert.match(markup, /Use a different number/);
     assert.ok((markup.match(/h-14/g)?.length ?? 0) >= 3);
     assert.match(markup, /We texted the latest code to \*\*\* 2671\./);
+  });
+
+  it("switches the public homepage copy into sign-in language", async () => {
+    const { HostedPublicPhoneAuthFlow } = await import("@/src/components/hosted-onboarding/hosted-phone-auth-views");
+
+    const phoneEntryMarkup = renderToStaticMarkup(
+      React.createElement(HostedPublicPhoneAuthFlow, {
+        activeAttempt: null,
+        code: "",
+        disabled: false,
+        intent: "signin",
+        mode: "public",
+        pendingAction: null,
+        phoneCountryOptions: [{ code: "US", dialCode: "+1", label: "United States", placeholder: "(415) 555-2671" }],
+        phoneNumber: "4155552671",
+        sendCodeDisabled: false,
+        selectedPhoneCountry: { code: "US", dialCode: "+1", label: "United States", placeholder: "(415) 555-2671" },
+        onCodeChange() {},
+        onPhoneCountryChange() {},
+        onPhoneNumberChange() {},
+        onResendCode() {},
+        onSendCode() {},
+        onSubmitPhoneEntry() {},
+        onUseDifferentNumber() {},
+        onVerifyCode() {},
+      }),
+    );
+
+    const codeEntryMarkup = renderToStaticMarkup(
+      React.createElement(HostedPublicPhoneAuthFlow, {
+        activeAttempt: {
+          maskedPhoneNumber: "*** 2671",
+          phoneNumber: "+14155552671",
+        },
+        code: "",
+        disabled: false,
+        intent: "signin",
+        mode: "public",
+        pendingAction: null,
+        phoneCountryOptions: [{ code: "US", dialCode: "+1", label: "United States", placeholder: "(415) 555-2671" }],
+        phoneNumber: "4155552671",
+        sendCodeDisabled: false,
+        selectedPhoneCountry: { code: "US", dialCode: "+1", label: "United States", placeholder: "(415) 555-2671" },
+        onCodeChange() {},
+        onPhoneCountryChange() {},
+        onPhoneNumberChange() {},
+        onResendCode() {},
+        onSendCode() {},
+        onSubmitPhoneEntry() {},
+        onUseDifferentNumber() {},
+        onVerifyCode() {},
+      }),
+    );
+
+    assert.match(phoneEntryMarkup, /Phone number on your account/);
+    assert.match(phoneEntryMarkup, /Text me a sign-in code/);
+    assert.match(codeEntryMarkup, /We texted the latest sign-in code to \*\*\* 2671\./);
+    assert.match(codeEntryMarkup, />Sign in</);
   });
 
   it("builds the active verification attempt with a masked phone hint", async () => {
@@ -505,6 +568,33 @@ describe("HostedPhoneAuth", () => {
         showAuthenticatedRestartState: true,
       }),
       "loading",
+    );
+  });
+
+  it("sends active existing-account sign-ins straight to settings", async () => {
+    const { resolveHostedPrivyCompletionRedirectUrl } = await import("@/src/components/hosted-onboarding/hosted-phone-auth");
+
+    assert.equal(
+      resolveHostedPrivyCompletionRedirectUrl({
+        intent: "signin",
+        payload: {
+          inviteCode: "invite-code",
+          joinUrl: "/join/invite-code",
+          stage: "active",
+        },
+      }),
+      "/settings",
+    );
+    assert.equal(
+      resolveHostedPrivyCompletionRedirectUrl({
+        intent: "signup",
+        payload: {
+          inviteCode: "invite-code",
+          joinUrl: "/join/invite-code",
+          stage: "active",
+        },
+      }),
+      "/join/invite-code",
     );
   });
 });

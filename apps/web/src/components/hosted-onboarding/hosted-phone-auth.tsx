@@ -31,6 +31,7 @@ import {
   HostedAuthenticatedPhoneAuthState,
   HostedInvitePhoneAuthFlow,
   HostedPublicPhoneAuthFlow,
+  type HostedPhoneAuthIntent,
   type HostedAuthenticatedPhoneAuthView,
 } from "./hosted-phone-auth-views";
 import {
@@ -41,6 +42,7 @@ import { HostedPrivyProvider } from "./privy-provider";
 
 interface HostedPhoneAuthProps {
   inviteCode?: string | null;
+  intent?: HostedPhoneAuthIntent;
   mode: "invite" | "public";
   onCompleted?: (payload: HostedPrivyCompletionPayload) => Promise<void> | void;
   onSignOut?: () => Promise<void> | void;
@@ -116,6 +118,7 @@ export function HostedPhoneAuth({ privyAppId, privyClientId, wrapProvider = true
 
 function HostedPhoneAuthInner({
   inviteCode,
+  intent = "signup",
   mode,
   onCompleted,
   onSignOut,
@@ -133,6 +136,7 @@ function HostedPhoneAuthInner({
   const [phoneNumber, setPhoneNumber] = useState("");
   const [phoneVerificationAttempt, setPhoneVerificationAttempt] = useState<HostedPhoneVerificationAttempt | null>(null);
   const finalizationStateRef = useRef<HostedPrivyFinalizationState>("idle");
+  const effectiveIntent: HostedPhoneAuthIntent = mode === "public" ? intent : "signup";
 
   const selectedPhoneCountry = useMemo(
     () =>
@@ -166,9 +170,12 @@ function HostedPhoneAuthInner({
     showAuthenticatedManualResumeState,
     showAuthenticatedRestartState,
   });
-  const authenticatedLoadingTitle = "Finishing setup...";
+  const authenticatedLoadingTitle =
+    effectiveIntent === "signin" ? "Signing you in..." : "Finishing setup...";
   const authenticatedLoadingBody =
-    "Keep this tab open. We are verifying your number, preparing your account, and moving you to the next step.";
+    effectiveIntent === "signin"
+      ? "Keep this tab open. We are verifying your number and signing you into your account."
+      : "Keep this tab open. We are verifying your number, preparing your account, and moving you to the next step.";
 
   function updateFinalizationState(nextState: HostedPrivyFinalizationState) {
     finalizationStateRef.current = nextState;
@@ -380,6 +387,7 @@ function HostedPhoneAuthInner({
       finalize: async () => finalizeHostedPrivyVerification({
         createWallet,
         inviteCode,
+        intent: effectiveIntent,
         onCompleted,
         user,
       }),
@@ -406,6 +414,7 @@ function HostedPhoneAuthInner({
             ?? "Sign out and request a fresh code to continue."
           }
           disabled={flowDisabled}
+          intent={effectiveIntent}
           mode={mode}
           pendingAction={pendingAction}
           title={authenticatedLoadingTitle}
@@ -418,6 +427,7 @@ function HostedPhoneAuthInner({
           activeAttempt={phoneVerificationAttempt}
           code={code}
           disabled={flowDisabled}
+          intent={effectiveIntent}
           manualEntryVisible={manualEntryVisible}
           mode={mode}
           pendingAction={pendingAction}
@@ -444,6 +454,7 @@ function HostedPhoneAuthInner({
           activeAttempt={phoneVerificationAttempt}
           code={code}
           disabled={flowDisabled}
+          intent={effectiveIntent}
           mode={mode}
           pendingAction={pendingAction}
           phoneCountryOptions={HOSTED_PHONE_COUNTRY_OPTIONS}
@@ -567,6 +578,7 @@ export async function runHostedPrivyFinalizationAttempt({
 async function finalizeHostedPrivyVerification(input: {
   createWallet: () => Promise<unknown>;
   inviteCode?: string | null;
+  intent: HostedPhoneAuthIntent;
   onCompleted?: (payload: HostedPrivyCompletionPayload) => Promise<void> | void;
   user: { linkedAccounts?: unknown } | null;
 }) {
@@ -592,7 +604,21 @@ async function finalizeHostedPrivyVerification(input: {
     }
   }
 
-  window.location.assign(payload.joinUrl);
+  window.location.assign(resolveHostedPrivyCompletionRedirectUrl({
+    intent: input.intent,
+    payload,
+  }));
+}
+
+export function resolveHostedPrivyCompletionRedirectUrl(input: {
+  intent: HostedPhoneAuthIntent;
+  payload: HostedPrivyCompletionPayload;
+}): string {
+  if (input.intent === "signin" && input.payload.stage === "active") {
+    return "/settings";
+  }
+
+  return input.payload.joinUrl;
 }
 
 async function requestHostedPrivyCompletionWithRetry(

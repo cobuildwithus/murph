@@ -19,6 +19,7 @@ import { cn } from "@/lib/utils";
 import type { HostedPhoneVerificationAttempt } from "./hosted-phone-auth";
 
 export type HostedPhoneAuthMode = "invite" | "public";
+export type HostedPhoneAuthIntent = "signup" | "signin";
 export type HostedPhoneAuthPendingAction = "continue" | "logout" | "send-code" | "verify-code" | null;
 export type HostedAuthenticatedPhoneAuthView = "loading" | "manual-resume" | "restart" | null;
 
@@ -33,6 +34,7 @@ interface SharedFlowProps {
   activeAttempt: HostedPhoneVerificationAttempt | null;
   code: string;
   disabled: boolean;
+  intent: HostedPhoneAuthIntent;
   mode: HostedPhoneAuthMode;
   pendingAction: HostedPhoneAuthPendingAction;
   phoneCountryOptions: HostedPhoneCountryOption[];
@@ -58,6 +60,7 @@ interface AuthenticatedStateProps {
   body: string;
   description: string;
   disabled: boolean;
+  intent: HostedPhoneAuthIntent;
   mode: HostedPhoneAuthMode;
   pendingAction: HostedPhoneAuthPendingAction;
   title: string;
@@ -76,6 +79,7 @@ export function HostedInvitePhoneAuthFlow({
         verificationPhoneNumberHint={props.activeAttempt.maskedPhoneNumber}
         code={props.code}
         disabled={props.disabled}
+        intent={props.intent}
         mode={props.mode}
         pendingAction={props.pendingAction}
         onCodeChange={props.onCodeChange}
@@ -99,6 +103,7 @@ export function HostedInvitePhoneAuthFlow({
 
   return (
     <HostedPhoneEntryStep
+      intent={props.intent}
       mode={props.mode}
       pendingAction={props.pendingAction}
       phoneCountryOptions={props.phoneCountryOptions}
@@ -119,6 +124,7 @@ export function HostedPublicPhoneAuthFlow(props: SharedFlowProps) {
         verificationPhoneNumberHint={props.activeAttempt.maskedPhoneNumber}
         code={props.code}
         disabled={props.disabled}
+        intent={props.intent}
         mode={props.mode}
         pendingAction={props.pendingAction}
         onCodeChange={props.onCodeChange}
@@ -131,6 +137,7 @@ export function HostedPublicPhoneAuthFlow(props: SharedFlowProps) {
 
   return (
     <HostedPhoneEntryStep
+      intent={props.intent}
       mode={props.mode}
       pendingAction={props.pendingAction}
       phoneCountryOptions={props.phoneCountryOptions}
@@ -148,6 +155,7 @@ export function HostedAuthenticatedPhoneAuthState({
   body,
   description,
   disabled,
+  intent,
   mode,
   pendingAction,
   title,
@@ -168,7 +176,11 @@ export function HostedAuthenticatedPhoneAuthState({
   if (view === "manual-resume") {
     return (
       <Alert className="border-stone-200 bg-stone-50">
-        <AlertTitle>You already started signup in this browser.</AlertTitle>
+        <AlertTitle>
+          {intent === "signin"
+            ? "You already started signing in on this browser."
+            : "You already started signup in this browser."}
+        </AlertTitle>
         <AlertDescription>
           Keep going with this number, or sign out and use a different one.
         </AlertDescription>
@@ -179,7 +191,7 @@ export function HostedAuthenticatedPhoneAuthState({
             disabled={disabled}
             size="lg"
           >
-            Continue signup
+            {intent === "signin" ? "Continue sign in" : "Continue signup"}
           </Button>
           <HostedUseDifferentNumberButton
             disabled={disabled}
@@ -195,7 +207,11 @@ export function HostedAuthenticatedPhoneAuthState({
   if (view === "restart") {
     return (
       <Alert className="border-stone-200 bg-stone-50">
-        <AlertTitle>This browser needs a fresh phone sign-in.</AlertTitle>
+        <AlertTitle>
+          {intent === "signin"
+            ? "This browser needs a fresh phone sign-in."
+            : "This browser needs a fresh phone signup."}
+        </AlertTitle>
         <AlertDescription>{description}</AlertDescription>
         <div className="mt-3 flex flex-wrap gap-3">
           <HostedUseDifferentNumberButton
@@ -275,6 +291,7 @@ function HostedUseDifferentNumberButton({
 }
 
 function HostedPhoneEntryStep({
+  intent,
   mode,
   pendingAction,
   phoneCountryOptions,
@@ -285,6 +302,7 @@ function HostedPhoneEntryStep({
   onPhoneNumberChange,
   onSubmitPhoneEntry,
 }: {
+  intent: HostedPhoneAuthIntent;
   mode: HostedPhoneAuthMode;
   pendingAction: HostedPhoneAuthPendingAction;
   phoneCountryOptions: HostedPhoneCountryOption[];
@@ -299,7 +317,11 @@ function HostedPhoneEntryStep({
     <form className="space-y-3" onSubmit={onSubmitPhoneEntry}>
       <div className="space-y-3">
         <Label htmlFor={`hosted-phone-${mode}`}>
-          {mode === "invite" ? "Phone number" : "Your phone number"}
+          {mode === "invite"
+            ? "Phone number"
+            : intent === "signin"
+              ? "Phone number on your account"
+              : "Your phone number"}
         </Label>
         <div className="flex flex-col gap-3 sm:flex-row">
           <Combobox
@@ -350,11 +372,19 @@ function HostedPhoneEntryStep({
           <p className="text-sm text-stone-500">
             Enter the number that messaged Murph.
           </p>
+        ) : intent === "signin" ? (
+          <p className="text-sm text-stone-500">
+            Enter the phone number already linked to your Murph account.
+          </p>
         ) : null}
       </div>
       <div className="flex flex-wrap gap-3">
         <Button type="submit" disabled={sendCodeDisabled} size="lg" className="w-full">
-          {pendingAction === "send-code" ? "Sending code..." : "Text me a code"}
+          {pendingAction === "send-code"
+            ? "Sending code..."
+            : intent === "signin"
+              ? "Text me a sign-in code"
+              : "Text me a code"}
         </Button>
       </div>
     </form>
@@ -365,6 +395,7 @@ function HostedCodeEntryStep({
   verificationPhoneNumberHint,
   code,
   disabled,
+  intent,
   mode,
   pendingAction,
   onCodeChange,
@@ -375,6 +406,7 @@ function HostedCodeEntryStep({
   verificationPhoneNumberHint: string;
   code: string;
   disabled: boolean;
+  intent: HostedPhoneAuthIntent;
   mode: HostedPhoneAuthMode;
   pendingAction: HostedPhoneAuthPendingAction;
   onCodeChange: (value: string) => void;
@@ -411,7 +443,7 @@ function HostedCodeEntryStep({
           className="h-14 px-4 text-lg md:text-base"
         />
         <p className="text-sm text-stone-500">
-          We texted the latest code to {verificationPhoneNumberHint}.
+          We texted the latest {intent === "signin" ? "sign-in code" : "code"} to {verificationPhoneNumberHint}.
         </p>
       </div>
       <div className="flex flex-wrap gap-3">
@@ -422,7 +454,13 @@ function HostedCodeEntryStep({
           size="lg"
           className="w-full"
         >
-          {pendingAction === "verify-code" ? "Finishing setup..." : "Verify phone"}
+          {pendingAction === "verify-code"
+            ? intent === "signin"
+              ? "Signing in..."
+              : "Finishing setup..."
+            : intent === "signin"
+              ? "Sign in"
+              : "Verify phone"}
         </Button>
         <HostedUseDifferentNumberButton
           disabled={disabled}
