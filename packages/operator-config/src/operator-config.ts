@@ -4,7 +4,6 @@ import path from 'node:path'
 import { z } from 'zod'
 import {
   assistantProviderFailoverRouteSchema,
-  assistantSelfDeliveryTargetSchema,
   type AssistantSelfDeliveryTarget,
 } from './assistant-cli-contracts.js'
 import {
@@ -25,6 +24,17 @@ import {
   parseHostedAssistantConfig,
   type HostedAssistantConfig,
 } from './hosted-assistant-config.js'
+import {
+  applyAssistantSelfDeliveryTargetDefaults as applyAssistantSelfDeliveryTargetDefaultsFromModule,
+  assistantSelfDeliveryTargetMapSchema,
+  clearAssistantSelfDeliveryTargets as clearAssistantSelfDeliveryTargetsFromModule,
+  listAssistantSelfDeliveryTargets as listAssistantSelfDeliveryTargetsFromModule,
+  normalizeAssistantSelfDeliveryTargetMap,
+  normalizeUnknownAssistantSelfDeliveryTargets as normalizeUnknownAssistantSelfDeliveryTargetsFromModule,
+  resolveAssistantSelfDeliveryTarget as resolveAssistantSelfDeliveryTargetFromModule,
+  saveAssistantSelfDeliveryTarget as saveAssistantSelfDeliveryTargetFromModule,
+  type AssistantSelfDeliveryTargetLookupInput,
+} from './operator-config/self-delivery-targets.js'
 export {
   ROOT_OPTIONS_WITH_VALUES,
   resolveEffectiveTopLevelToken,
@@ -34,6 +44,7 @@ export {
   applyDefaultVaultToArgs,
   hasExplicitVaultOption,
 } from './operator-config/cli-vault-defaults.js'
+export type { AssistantSelfDeliveryTargetLookupInput } from './operator-config/self-delivery-targets.js'
 
 const OPERATOR_CONFIG_SCHEMA = 'murph.operator-config.v1'
 const OPERATOR_CONFIG_DIRECTORY = '.murph'
@@ -81,10 +92,7 @@ const assistantOperatorSharedFields = {
     .strict()
     .nullable()
     .optional(),
-  selfDeliveryTargets: z
-    .record(z.string().min(1), assistantSelfDeliveryTargetSchema)
-    .nullable()
-    .default(null),
+  selfDeliveryTargets: assistantSelfDeliveryTargetMapSchema.default(null),
 } as const
 
 const assistantOperatorDefaultsSchema = z.object({
@@ -112,12 +120,11 @@ export type AssistantOperatorDefaults = z.infer<
 >
 export type AssistantProviderDefaultsEntry = Omit<AssistantProviderConfig, 'provider'>
 type AssistantChatProviderValue = 'codex-cli' | 'openai-compatible'
-export interface AssistantSelfDeliveryTargetLookupInput {
-  channel?: string | null
-  deliveryTarget?: string | null
-  identityId?: string | null
-  participantId?: string | null
-  sourceThreadId?: string | null
+
+const assistantSelfDeliveryTargetDependencies = {
+  normalizeString: normalizeOperatorConfigString,
+  resolveDefaults: resolveAssistantOperatorDefaults,
+  saveDefaultsPatch: saveAssistantOperatorDefaultsPatch,
 }
 
 export function resolveOperatorHomeDirectory(
@@ -463,85 +470,43 @@ export function buildAssistantProviderDefaultsPatch(input: {
 export async function listAssistantSelfDeliveryTargets(
   homeDirectory = resolveOperatorHomeDirectory(),
 ): Promise<AssistantSelfDeliveryTarget[]> {
-  const defaults = await resolveAssistantOperatorDefaults(homeDirectory)
-  return sortAssistantSelfDeliveryTargets(defaults?.selfDeliveryTargets ?? null)
+  return listAssistantSelfDeliveryTargetsFromModule(
+    assistantSelfDeliveryTargetDependencies,
+    homeDirectory,
+  )
 }
 
 export async function resolveAssistantSelfDeliveryTarget(
   channel: string,
   homeDirectory = resolveOperatorHomeDirectory(),
 ): Promise<AssistantSelfDeliveryTarget | null> {
-  const normalizedChannel = normalizeOperatorConfigString(channel)?.toLowerCase()
-  if (!normalizedChannel) {
-    return null
-  }
-
-  const defaults = await resolveAssistantOperatorDefaults(homeDirectory)
-  return defaults?.selfDeliveryTargets?.[normalizedChannel] ?? null
+  return resolveAssistantSelfDeliveryTargetFromModule(
+    channel,
+    assistantSelfDeliveryTargetDependencies,
+    homeDirectory,
+  )
 }
 
 export async function saveAssistantSelfDeliveryTarget(
   target: AssistantSelfDeliveryTarget,
   homeDirectory = resolveOperatorHomeDirectory(),
 ): Promise<AssistantSelfDeliveryTarget> {
-  const normalizedTarget = normalizeAssistantSelfDeliveryTarget(target)
-  const existing = await resolveAssistantOperatorDefaults(homeDirectory)
-  const nextTargets = {
-    ...(existing?.selfDeliveryTargets ?? {}),
-    [normalizedTarget.channel]: normalizedTarget,
-  }
-
-  await saveAssistantOperatorDefaultsPatch(
-    {
-      selfDeliveryTargets: nextTargets,
-    },
+  return saveAssistantSelfDeliveryTargetFromModule(
+    target,
+    assistantSelfDeliveryTargetDependencies,
     homeDirectory,
   )
-
-  return normalizedTarget
 }
 
 export async function clearAssistantSelfDeliveryTargets(
   channel?: string | null,
   homeDirectory = resolveOperatorHomeDirectory(),
 ): Promise<string[]> {
-  const existing = await resolveAssistantOperatorDefaults(homeDirectory)
-  const currentTargets = {
-    ...(existing?.selfDeliveryTargets ?? {}),
-  }
-  const normalizedChannel = normalizeOperatorConfigString(channel)?.toLowerCase() ?? null
-
-  if (normalizedChannel) {
-    if (!currentTargets[normalizedChannel]) {
-      return []
-    }
-
-    delete currentTargets[normalizedChannel]
-    await saveAssistantOperatorDefaultsPatch(
-      {
-        selfDeliveryTargets:
-          Object.keys(currentTargets).length > 0 ? currentTargets : null,
-      },
-      homeDirectory,
-    )
-    return [normalizedChannel]
-  }
-
-  const clearedChannels = sortAssistantSelfDeliveryTargets(currentTargets).map(
-    (target) => target.channel,
-  )
-  if (clearedChannels.length === 0) {
-    return []
-  }
-
-  await saveAssistantOperatorDefaultsPatch(
-    {
-      selfDeliveryTargets: null,
-    },
+  return clearAssistantSelfDeliveryTargetsFromModule(
+    channel,
+    assistantSelfDeliveryTargetDependencies,
     homeDirectory,
   )
-
-  return clearedChannels
 }
 
 export async function applyAssistantSelfDeliveryTargetDefaults(
@@ -551,38 +516,12 @@ export async function applyAssistantSelfDeliveryTargetDefaults(
   },
   homeDirectory = resolveOperatorHomeDirectory(),
 ): Promise<AssistantSelfDeliveryTargetLookupInput> {
-  const normalizedChannel = normalizeOperatorConfigString(input.channel)?.toLowerCase() ?? null
-  const savedTarget = normalizedChannel
-    ? await resolveAssistantSelfDeliveryTarget(normalizedChannel, homeDirectory)
-    : options?.allowSingleSavedTargetFallback
-      ? await resolveSingleAssistantSelfDeliveryTarget(homeDirectory)
-      : null
-
-  if (!savedTarget) {
-    return {
-      channel: normalizedChannel,
-      identityId: normalizeOperatorConfigString(input.identityId),
-      participantId: normalizeOperatorConfigString(input.participantId),
-      sourceThreadId: normalizeOperatorConfigString(input.sourceThreadId),
-      deliveryTarget: normalizeOperatorConfigString(input.deliveryTarget),
-    }
-  }
-
-  return {
-    channel: normalizedChannel ?? savedTarget.channel,
-    identityId:
-      normalizeOperatorConfigString(input.identityId) ?? savedTarget.identityId ?? null,
-    participantId:
-      normalizeOperatorConfigString(input.participantId) ?? savedTarget.participantId ?? null,
-    sourceThreadId:
-      normalizeOperatorConfigString(input.sourceThreadId) ??
-      savedTarget.sourceThreadId ??
-      null,
-    deliveryTarget:
-      normalizeOperatorConfigString(input.deliveryTarget) ??
-      savedTarget.deliveryTarget ??
-      null,
-  }
+  return applyAssistantSelfDeliveryTargetDefaultsFromModule(
+    input,
+    assistantSelfDeliveryTargetDependencies,
+    options,
+    homeDirectory,
+  )
 }
 
 function mergeAssistantOperatorDefaults(
@@ -603,7 +542,10 @@ function mergeAssistantOperatorDefaults(
     account: 'account' in patch ? patch.account : existing?.account ?? null,
     selfDeliveryTargets:
       'selfDeliveryTargets' in patch
-        ? normalizeAssistantSelfDeliveryTargetMap(patch.selfDeliveryTargets ?? null)
+        ? normalizeAssistantSelfDeliveryTargetMap(
+            patch.selfDeliveryTargets ?? null,
+            normalizeOperatorConfigString,
+          )
         : existing?.selfDeliveryTargets ?? null,
   })
 }
@@ -631,8 +573,9 @@ function normalizeAssistantOperatorDefaults(
     identityId: normalizeUnknownAssistantIdentityId(record.identityId),
     failoverRoutes: normalizeUnknownAssistantFailoverRoutes(record.failoverRoutes),
     account: normalizeUnknownAssistantAccount(record.account),
-    selfDeliveryTargets: normalizeUnknownAssistantSelfDeliveryTargets(
+    selfDeliveryTargets: normalizeUnknownAssistantSelfDeliveryTargetsFromModule(
       record.selfDeliveryTargets,
+      normalizeOperatorConfigString,
     ),
   })
 }
@@ -653,53 +596,6 @@ function serializeAssistantOperatorDefaultsForWrite(
   }
 }
 
-function normalizeAssistantSelfDeliveryTargetMap(
-  targets: Record<string, AssistantSelfDeliveryTarget> | null,
-): Record<string, AssistantSelfDeliveryTarget> | null {
-  if (!targets || Object.keys(targets).length === 0) {
-    return null
-  }
-
-  return Object.fromEntries(
-    Object.values(targets).map((target) => {
-      const normalized = normalizeAssistantSelfDeliveryTarget(target)
-      return [normalized.channel, normalized]
-    }),
-  )
-}
-
-function normalizeAssistantSelfDeliveryTarget(
-  target: AssistantSelfDeliveryTarget,
-): AssistantSelfDeliveryTarget {
-  const channel = normalizeOperatorConfigString(target.channel)?.toLowerCase()
-  if (!channel) {
-    throw new Error('Assistant self delivery targets require a channel.')
-  }
-
-  return assistantSelfDeliveryTargetSchema.parse({
-    channel,
-    identityId: normalizeOperatorConfigString(target.identityId),
-    participantId: normalizeOperatorConfigString(target.participantId),
-    sourceThreadId: normalizeOperatorConfigString(target.sourceThreadId),
-    deliveryTarget: normalizeOperatorConfigString(target.deliveryTarget),
-  })
-}
-
-function sortAssistantSelfDeliveryTargets(
-  targets: Record<string, AssistantSelfDeliveryTarget> | null,
-): AssistantSelfDeliveryTarget[] {
-  return Object.values(targets ?? {}).sort((left, right) =>
-    left.channel.localeCompare(right.channel),
-  )
-}
-
-async function resolveSingleAssistantSelfDeliveryTarget(
-  homeDirectory = resolveOperatorHomeDirectory(),
-): Promise<AssistantSelfDeliveryTarget | null> {
-  const targets = await listAssistantSelfDeliveryTargets(homeDirectory)
-  return targets.length === 1 ? targets[0] ?? null : null
-}
-
 function normalizeOperatorConfigString(value: string | null | undefined): string | null {
   const trimmed = value?.trim()
   return trimmed && trimmed.length > 0 ? trimmed : null
@@ -715,6 +611,7 @@ function compactAssistantOperatorDefaults(
     account: defaults.account ?? null,
     selfDeliveryTargets: normalizeAssistantSelfDeliveryTargetMap(
       defaults.selfDeliveryTargets ?? null,
+      normalizeOperatorConfigString,
     ),
   })
 
@@ -760,16 +657,4 @@ function normalizeUnknownAssistantAccount(
   const schema = assistantOperatorDefaultsSchema.shape.account
   const parsed = schema.safeParse(value)
   return parsed.success ? parsed.data : null
-}
-
-function normalizeUnknownAssistantSelfDeliveryTargets(
-  value: unknown,
-): AssistantOperatorDefaults['selfDeliveryTargets'] {
-  const schema = z
-    .record(z.string().min(1), assistantSelfDeliveryTargetSchema)
-    .nullable()
-  const parsed = schema.safeParse(value)
-  return parsed.success
-    ? normalizeAssistantSelfDeliveryTargetMap(parsed.data)
-    : null
 }
