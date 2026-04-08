@@ -44,7 +44,9 @@ describe("parseHostedRunnerSmokeResult", () => {
       expectedPdfText: "fixture text",
       murphBin: "/app/node_modules/.bin/murph",
       normalizedTranscript: "hello murph smoke test",
+      normalizedTranscriptProviderId: "whisper.cpp",
       operatorHomeRoot: "/tmp/hosted-runner-smoke/home",
+      pdfProviderId: "pdftotext",
       pdfText: "fixture text",
       reportedVaultId: "vault_01JNV40W8VFYQ2H7CMJY5A9R4K",
       schema: HOSTED_RUNNER_SMOKE_RESULT_SCHEMA,
@@ -52,11 +54,14 @@ describe("parseHostedRunnerSmokeResult", () => {
       vaultRoot: "/tmp/hosted-runner-smoke/vault",
       vaultShowBytes: 128,
       wavTranscript: "hello murph smoke test",
+      wavTranscriptProviderId: "whisper.cpp",
     })).toMatchObject({
       murphBin: "/app/node_modules/.bin/murph",
+      pdfProviderId: "pdftotext",
       schema: HOSTED_RUNNER_SMOKE_RESULT_SCHEMA,
       reportedVaultId: "vault_01JNV40W8VFYQ2H7CMJY5A9R4K",
       vaultShowBytes: 128,
+      wavTranscriptProviderId: "whisper.cpp",
     });
   });
 
@@ -66,7 +71,9 @@ describe("parseHostedRunnerSmokeResult", () => {
       expectedPdfText: "fixture text",
       murphBin: "/app/node_modules/.bin/murph",
       normalizedTranscript: "hello",
+      normalizedTranscriptProviderId: "whisper.cpp",
       operatorHomeRoot: "/tmp/home",
+      pdfProviderId: "pdftotext",
       pdfText: "fixture text",
       reportedVaultId: "vault_01JNV40W8VFYQ2H7CMJY5A9R4K",
       schema: "bad-schema",
@@ -74,6 +81,7 @@ describe("parseHostedRunnerSmokeResult", () => {
       vaultRoot: "/tmp/vault",
       vaultShowBytes: 12,
       wavTranscript: "hello",
+      wavTranscriptProviderId: "whisper.cpp",
     })).toThrow(
       `Hosted runner smoke result.schema must be ${HOSTED_RUNNER_SMOKE_RESULT_SCHEMA}.`,
     );

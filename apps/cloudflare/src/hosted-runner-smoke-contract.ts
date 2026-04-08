@@ -14,7 +14,9 @@ export interface HostedRunnerSmokeResult {
   expectedPdfText: string;
   murphBin: string;
   normalizedTranscript: string;
+  normalizedTranscriptProviderId: string;
   operatorHomeRoot: string;
+  pdfProviderId: string;
   pdfText: string;
   reportedVaultId: string;
   schema: typeof HOSTED_RUNNER_SMOKE_RESULT_SCHEMA;
@@ -22,6 +24,7 @@ export interface HostedRunnerSmokeResult {
   vaultRoot: string;
   vaultShowBytes: number;
   wavTranscript: string;
+  wavTranscriptProviderId: string;
 }
 
 export function parseHostedRunnerSmokeInput(value: unknown): HostedRunnerSmokeInput {
@@ -72,9 +75,17 @@ export function parseHostedRunnerSmokeResult(value: unknown): HostedRunnerSmokeR
       record.normalizedTranscript,
       "Hosted runner smoke result.normalizedTranscript",
     ),
+    normalizedTranscriptProviderId: readNonEmptyString(
+      record.normalizedTranscriptProviderId,
+      "Hosted runner smoke result.normalizedTranscriptProviderId",
+    ),
     operatorHomeRoot: readNonEmptyString(
       record.operatorHomeRoot,
       "Hosted runner smoke result.operatorHomeRoot",
+    ),
+    pdfProviderId: readNonEmptyString(
+      record.pdfProviderId,
+      "Hosted runner smoke result.pdfProviderId",
     ),
     pdfText: readNonEmptyString(record.pdfText, "Hosted runner smoke result.pdfText"),
     reportedVaultId: readNonEmptyString(
@@ -94,6 +105,10 @@ export function parseHostedRunnerSmokeResult(value: unknown): HostedRunnerSmokeR
     wavTranscript: readNonEmptyString(
       record.wavTranscript,
       "Hosted runner smoke result.wavTranscript",
+    ),
+    wavTranscriptProviderId: readNonEmptyString(
+      record.wavTranscriptProviderId,
+      "Hosted runner smoke result.wavTranscriptProviderId",
     ),
   };
 }

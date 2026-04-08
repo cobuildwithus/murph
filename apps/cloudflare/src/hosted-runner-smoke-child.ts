@@ -9,9 +9,11 @@ import {
   restoreHostedExecutionContext,
 } from "@murphai/runtime-state/node";
 import type {
-  createPdfToTextProvider as createPdfToTextProviderType,
-  createWhisperCppProvider as createWhisperCppProviderType,
-  prepareAudioInput as prepareAudioInputType,
+  createDefaultParserRegistry as createDefaultParserRegistryType,
+  parseAttachment as parseAttachmentType,
+  ParserArtifactKind,
+  ParserArtifactRef,
+  ParserRegistry,
 } from "@murphai/parsers";
 
 import {
@@ -110,19 +112,23 @@ async function runSmokeChecks(input: {
   await assertPathExists(wavPath);
 
   const parserScratchRoot = path.join(input.workspaceRoot, "parser-scratch");
-  const pdfText = await parsePdf({
+  const parserRegistry = await createSmokeParserRegistry();
+  const pdfParse = await parsePdf({
     expectedText: input.expectedPdfText,
     pdfPath,
-    scratchDirectory: path.join(parserScratchRoot, "pdf"),
+    registry: parserRegistry,
+    scratchRoot: path.join(parserScratchRoot, "pdf"),
   });
-  const wavTranscript = await transcribeWave({
+  const wavParse = await transcribeWave({
     expectedSnippet: input.expectedTranscriptSnippet,
-    scratchDirectory: path.join(parserScratchRoot, "wav"),
+    registry: parserRegistry,
+    scratchRoot: path.join(parserScratchRoot, "wav"),
     wavPath,
   });
-  const normalizedTranscript = await transcribeNormalizedAudio({
+  const normalizedParse = await transcribeNormalizedAudio({
     expectedSnippet: input.expectedTranscriptSnippet,
-    scratchDirectory: path.join(parserScratchRoot, "normalized"),
+    registry: parserRegistry,
+    scratchRoot: path.join(parserScratchRoot, "normalized"),
     wavPath,
   });
 
@@ -130,39 +136,39 @@ async function runSmokeChecks(input: {
     childCwd: process.cwd(),
     expectedPdfText: input.expectedPdfText,
     murphBin,
-    normalizedTranscript,
+    normalizedTranscript: normalizedParse.text,
+    normalizedTranscriptProviderId: normalizedParse.providerId,
     operatorHomeRoot: process.env.HOME ?? "",
-    pdfText,
+    pdfProviderId: pdfParse.providerId,
+    pdfText: pdfParse.text,
     reportedVaultId,
     schema: HOSTED_RUNNER_SMOKE_RESULT_SCHEMA,
     vaultCliBin,
     vaultRoot: input.vaultRoot,
     vaultShowBytes: Buffer.byteLength(vaultShowOutput, "utf8"),
-    wavTranscript,
+    wavTranscript: wavParse.text,
+    wavTranscriptProviderId: wavParse.providerId,
   };
 }
 
 async function parsePdf(input: {
   expectedText: string;
   pdfPath: string;
-  scratchDirectory: string;
-}): Promise<string> {
-  await ensureScratchDirectory(input.scratchDirectory);
-  const { createPdfToTextProvider } = await loadParsersRuntime();
-  const provider = createPdfToTextProvider();
-  const result = await provider.run({
-    intent: "attachment_text",
-    artifact: {
+  registry: ParserRegistry;
+  scratchRoot: string;
+}): Promise<SmokeParseResult> {
+  const result = await parseSmokeAttachment({
+    artifact: createSmokeArtifact({
       absolutePath: input.pdfPath,
       attachmentId: "att_hosted_runner_pdf",
       captureId: "cap_hosted_runner_pdf",
-      fileName: path.basename(input.pdfPath),
       kind: "document",
       mime: "application/pdf",
       storedPath: "raw/smoke/hosted-runner.pdf",
-    },
-    inputPath: input.pdfPath,
-    scratchDirectory: input.scratchDirectory,
+    }),
+    expectedProviderId: "pdftotext",
+    registry: input.registry,
+    scratchRoot: input.scratchRoot,
   });
 
   if (!result.text.includes(input.expectedText)) {
@@ -171,46 +177,41 @@ async function parsePdf(input: {
     );
   }
 
-  return result.text;
+  return result;
 }
 
 async function transcribeWave(input: {
   expectedSnippet: string | null;
-  scratchDirectory: string;
+  registry: ParserRegistry;
+  scratchRoot: string;
   wavPath: string;
-}): Promise<string> {
-  await ensureScratchDirectory(input.scratchDirectory);
-  const { createWhisperCppProvider } = await loadParsersRuntime();
-  const provider = createWhisperCppProvider({
-    language: "en",
-  });
-  const result = await provider.run({
-    intent: "attachment_text",
-    artifact: {
+}): Promise<SmokeParseResult> {
+  const result = await parseSmokeAttachment({
+    artifact: createSmokeArtifact({
       absolutePath: input.wavPath,
       attachmentId: "att_hosted_runner_wav",
       captureId: "cap_hosted_runner_wav",
-      fileName: path.basename(input.wavPath),
       kind: "audio",
       mime: "audio/wav",
       storedPath: "raw/smoke/hosted-runner.wav",
-    },
-    inputPath: input.wavPath,
-    scratchDirectory: input.scratchDirectory,
+    }),
+    expectedProviderId: "whisper.cpp",
+    registry: input.registry,
+    scratchRoot: input.scratchRoot,
   });
 
   assertTranscriptSnippet(result.text, input.expectedSnippet, "WAV");
-  return result.text;
+  return result;
 }
 
 async function transcribeNormalizedAudio(input: {
   expectedSnippet: string | null;
-  scratchDirectory: string;
+  registry: ParserRegistry;
+  scratchRoot: string;
   wavPath: string;
-}): Promise<string> {
-  await ensureScratchDirectory(input.scratchDirectory);
-  const { createWhisperCppProvider, prepareAudioInput } = await loadParsersRuntime();
-  const mp3Path = path.join(input.scratchDirectory, "hosted-runner.mp3");
+}): Promise<SmokeParseResult> {
+  await ensureScratchDirectory(input.scratchRoot);
+  const mp3Path = path.join(input.scratchRoot, "hosted-runner.mp3");
   const ffmpegCommand = process.env.FFMPEG_COMMAND?.trim() || "ffmpeg";
   await runCommand(ffmpegCommand, [
     "-y",
@@ -223,39 +224,22 @@ async function transcribeNormalizedAudio(input: {
     mp3Path,
   ], { allowEmptyStdout: true });
 
-  const prepared = await prepareAudioInput({
-    artifact: {
+  const result = await parseSmokeAttachment({
+    artifact: createSmokeArtifact({
       absolutePath: mp3Path,
       attachmentId: "att_hosted_runner_mp3",
       captureId: "cap_hosted_runner_mp3",
-      fileName: path.basename(mp3Path),
       kind: "audio",
       mime: "audio/mpeg",
       storedPath: "raw/smoke/hosted-runner.mp3",
-    },
-    scratchDirectory: input.scratchDirectory,
-  });
-  const provider = createWhisperCppProvider({
-    language: "en",
-  });
-  const result = await provider.run({
-    intent: "attachment_text",
-    artifact: {
-      absolutePath: mp3Path,
-      attachmentId: "att_hosted_runner_mp3",
-      captureId: "cap_hosted_runner_mp3",
-      fileName: path.basename(mp3Path),
-      kind: "audio",
-      mime: "audio/mpeg",
-      storedPath: "raw/smoke/hosted-runner.mp3",
-    },
-    inputPath: prepared.inputPath,
-    preparedKind: prepared.preparedKind,
-    scratchDirectory: input.scratchDirectory,
+    }),
+    expectedProviderId: "whisper.cpp",
+    registry: input.registry,
+    scratchRoot: input.scratchRoot,
   });
 
   assertTranscriptSnippet(result.text, input.expectedSnippet, "normalized audio");
-  return result.text;
+  return result;
 }
 
 async function ensureScratchDirectory(directoryPath: string): Promise<void> {
@@ -330,17 +314,75 @@ async function runCommand(
 }
 
 async function loadParsersRuntime(): Promise<{
-  createPdfToTextProvider: typeof createPdfToTextProviderType;
-  createWhisperCppProvider: typeof createWhisperCppProviderType;
-  prepareAudioInput: typeof prepareAudioInputType;
+  createDefaultParserRegistry: typeof createDefaultParserRegistryType;
+  parseAttachment: typeof parseAttachmentType;
 }> {
   const parsers = await import("@murphai/parsers");
 
   return {
-    createPdfToTextProvider: parsers.createPdfToTextProvider,
-    createWhisperCppProvider: parsers.createWhisperCppProvider,
-    prepareAudioInput: parsers.prepareAudioInput,
+    createDefaultParserRegistry: parsers.createDefaultParserRegistry,
+    parseAttachment: parsers.parseAttachment,
   };
+}
+
+async function createSmokeParserRegistry(): Promise<ParserRegistry> {
+  const { createDefaultParserRegistry } = await loadParsersRuntime();
+
+  return createDefaultParserRegistry({
+    whisper: {
+      language: "en",
+    },
+  });
+}
+
+async function parseSmokeAttachment(input: {
+  artifact: ParserArtifactRef;
+  expectedProviderId: string;
+  registry: ParserRegistry;
+  scratchRoot: string;
+}): Promise<SmokeParseResult> {
+  await ensureScratchDirectory(input.scratchRoot);
+  const { parseAttachment } = await loadParsersRuntime();
+  const result = await parseAttachment({
+    artifact: input.artifact,
+    registry: input.registry,
+    scratchRoot: input.scratchRoot,
+  });
+
+  if (result.providerId !== input.expectedProviderId) {
+    throw new Error(
+      `Hosted runner smoke provider mismatch for ${input.artifact.attachmentId}: expected ${input.expectedProviderId}, got ${result.providerId}.`,
+    );
+  }
+
+  return {
+    providerId: result.providerId,
+    text: result.output.text,
+  };
+}
+
+function createSmokeArtifact(input: {
+  absolutePath: string;
+  attachmentId: string;
+  captureId: string;
+  kind: ParserArtifactKind;
+  mime: string;
+  storedPath: string;
+}): ParserArtifactRef {
+  return {
+    absolutePath: input.absolutePath,
+    attachmentId: input.attachmentId,
+    captureId: input.captureId,
+    fileName: path.basename(input.absolutePath),
+    kind: input.kind,
+    mime: input.mime,
+    storedPath: input.storedPath,
+  };
+}
+
+interface SmokeParseResult {
+  providerId: string;
+  text: string;
 }
 
 async function withSmokeProcessEnvironment<T>(input: {

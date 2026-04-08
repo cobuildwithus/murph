@@ -42,7 +42,9 @@ describe("runHostedRunnerSmokeDetailed", () => {
             expectedPdfText: "fixture text",
             murphBin: "/app/node_modules/.bin/murph",
             normalizedTranscript: "hello murph smoke test",
+            normalizedTranscriptProviderId: "whisper.cpp",
             operatorHomeRoot: "/tmp/home",
+            pdfProviderId: "pdftotext",
             pdfText: "fixture text",
             reportedVaultId: "vault_01JNV40W8VFYQ2H7CMJY5A9R4K",
             schema: "murph.cloudflare-hosted-runner-smoke.v1",
@@ -50,6 +52,7 @@ describe("runHostedRunnerSmokeDetailed", () => {
             vaultRoot: "/tmp/vault",
             vaultShowBytes: 128,
             wavTranscript: "hello murph smoke test",
+            wavTranscriptProviderId: "whisper.cpp",
           }),
         );
         child.emit("close", 0);
@@ -69,6 +72,8 @@ describe("runHostedRunnerSmokeDetailed", () => {
 
     expect(result.childCwd).toMatch(/hosted-runner-smoke-launch-/u);
     expect(result.murphBin).toContain("murph");
+    expect(result.pdfProviderId).toBe("pdftotext");
+    expect(result.wavTranscriptProviderId).toBe("whisper.cpp");
     expect(processKillSpy).toHaveBeenCalledWith(-5252, "SIGKILL");
   });
 });
