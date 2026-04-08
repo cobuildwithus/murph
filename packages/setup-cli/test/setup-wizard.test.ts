@@ -17,6 +17,15 @@ import {
   createSetupWizardCompletionController,
   wrapSetupWizardIndex,
 } from '../src/setup-wizard-core.js'
+import {
+  formatSetupChannel,
+  formatSetupScheduledUpdate,
+  formatSetupWearable,
+} from '../src/setup-wizard-options.ts'
+import {
+  formatSetupPublicUrlStrategy,
+  normalizeSetupWizardText,
+} from '../src/setup-wizard-public-url.ts'
 import { stripAnsi, withMockProcessTty } from './helpers.ts'
 
 async function waitForWizardText(
@@ -147,6 +156,20 @@ test('setup wizard exported defaults and wrapper controller keep platform-specif
   )
 })
 
+test('setup wizard extracted option and public-url helpers keep labels and trimming stable', () => {
+  assert.equal(formatSetupChannel('telegram'), 'Telegram')
+  assert.equal(formatSetupChannel('email'), 'Email')
+  assert.equal(formatSetupWearable('garmin'), 'Garmin')
+  assert.equal(formatSetupWearable('oura'), 'Oura')
+  assert.equal(formatSetupScheduledUpdate('environment-health-watch'), 'Environment health watch')
+  assert.equal(formatSetupScheduledUpdate('custom-update'), 'custom-update')
+  assert.equal(formatSetupPublicUrlStrategy('hosted'), 'Hosted web app')
+  assert.equal(formatSetupPublicUrlStrategy('tunnel'), 'Local tunnel')
+  assert.equal(normalizeSetupWizardText('  https://murph.example  '), 'https://murph.example')
+  assert.equal(normalizeSetupWizardText('   '), null)
+  assert.equal(normalizeSetupWizardText(undefined), null)
+})
+
 test.sequential('setup wizard uses endpoint-specific method copy and confirm review for named endpoints', async () => {
   await withMockProcessTty(async ({ flush, readOutput, writeInput }) => {
     const wizardResultPromise = runSetupWizard({
@@ -156,7 +179,8 @@ test.sequential('setup wizard uses endpoint-specific method copy and confirm rev
       vault: './wizard-endpoint-provider',
     })
 
-    await flush()
+    const introOutput = await waitForWizardText(flush, readOutput, /Before you start/u)
+    assert.match(introOutput, /Before you start/u)
     await writeInput('\r')
     await waitForWizardText(flush, readOutput, /How should Murph answer\?/u)
     await writeInput('\r')
