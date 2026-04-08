@@ -29,4 +29,3 @@ savePrefix: ''
 trustPolicy: no-downgrade
 # Ignore provenance-era drift for older releases that predate broad trusted publishing.
 trustPolicyIgnoreAfter: 259200
-verifyDepsBeforeRun: error
