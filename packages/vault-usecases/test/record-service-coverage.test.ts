@@ -93,6 +93,13 @@ import {
   upsertRecipeRecord,
 } from "../src/usecases/recipe.ts";
 import { importWithMocks, mockActualModule } from "./mock-import.ts";
+import * as helpersModule from "../src/helpers.ts";
+import * as indexModule from "../src/index.ts";
+import * as recordsModule from "../src/records.ts";
+import * as runtimeModule from "../src/runtime.ts";
+import * as testingModule from "../src/testing.ts";
+import * as vaultServicesModule from "../src/vault-services.ts";
+import * as workoutsModule from "../src/workouts.ts";
 
 type QueryRecord = Parameters<typeof toCommandShowEntity>[0];
 
@@ -442,15 +449,7 @@ describe("record patching and duration helpers", () => {
 });
 
 describe("public barrel exports", () => {
-  test("keep the package-level barrels wired to the owning modules", async () => {
-    const indexModule = await import("../src/index.ts");
-    const helpersModule = await import("../src/helpers.ts");
-    const recordsModule = await import("../src/records.ts");
-    const runtimeModule = await import("../src/runtime.ts");
-    const testingModule = await import("../src/testing.ts");
-    const vaultServicesModule = await import("../src/vault-services.ts");
-    const workoutsModule = await import("../src/workouts.ts");
-
+  test("keep the package-level barrels wired to the owning modules", () => {
     assert.equal(typeof indexModule.normalizeInputFileOption, "function");
     assert.equal(typeof helpersModule.applyRecordPatch, "function");
     assert.equal(typeof recordsModule.scaffoldFoodPayload, "function");
