@@ -113,6 +113,23 @@ export class FakeTtyStream extends PassThrough {
   unref(): void {}
 }
 
+export function createCapturedOutputStream(): {
+  output: PassThrough
+  readOutput: () => string
+} {
+  const output = new PassThrough()
+  let rendered = ''
+
+  output.on('data', (chunk) => {
+    rendered += chunk.toString()
+  })
+
+  return {
+    output,
+    readOutput: () => rendered,
+  }
+}
+
 export async function withMockProcessTty<TResult>(
   run: (context: {
     flush: () => Promise<void>
