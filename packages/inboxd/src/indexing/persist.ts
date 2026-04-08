@@ -887,10 +887,6 @@ function findMatchingInboxCaptureRecord(
   return selectMatchingInboxCaptureRecord(records, identityKey, envelope.captureId);
 }
 
-function isPlainRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 type PersistableInboundAttachment = Omit<InboundCapture["attachments"][number], "data">;
 
 function stripEphemeralAttachmentFields(

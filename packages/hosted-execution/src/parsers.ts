@@ -740,22 +740,6 @@ function readNullableStringValue(value: unknown, label: string): string | null {
   return value;
 }
 
-function readNullableIsoTimestamp(value: unknown, label: string): string | null {
-  if (value === null || value === undefined) {
-    return null;
-  }
-
-  return requireIsoTimestamp(value, label);
-}
-
-function readNullablePositiveInteger(value: unknown, label: string): number | null {
-  if (value === null || value === undefined) {
-    return null;
-  }
-
-  return requirePositiveInteger(value, label);
-}
-
 function parseHostedExecutionTelegramMessage(
   value: unknown,
 ): HostedExecutionTelegramMessageReceivedEvent["telegramMessage"] {

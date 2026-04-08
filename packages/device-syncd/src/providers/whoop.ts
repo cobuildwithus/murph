@@ -241,10 +241,6 @@ function buildDisplayName(profile: Record<string, unknown>): string {
   return [firstName, lastName].filter(Boolean).join(" ") || email || `WHOOP ${userId ?? "user"}`;
 }
 
-function hasWhoopScope(account: DeviceSyncAccount, scope: string): boolean {
-  return hasWhoopScopeValue(account.scopes, scope);
-}
-
 function hasWhoopScopeValue(scopes: readonly string[], scope: string): boolean {
   return scopes.includes(scope);
 }

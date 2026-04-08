@@ -555,14 +555,6 @@ function requireRecord(value: unknown, label: string): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
-function requireArray(value: unknown, label: string): unknown[] {
-  if (!Array.isArray(value)) {
-    throw new TypeError(`${label} must be an array.`);
-  }
-
-  return value;
-}
-
 function normalizeRequiredString(value: unknown, label: string): string {
   if (typeof value !== "string" || value.trim().length === 0) {
     throw new TypeError(`${label} must be a non-empty string.`);
