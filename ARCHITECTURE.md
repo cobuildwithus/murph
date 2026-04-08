@@ -6,6 +6,16 @@ Last verified: 2026-04-08
 
 Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-execution`, `@murphai/gateway-core`, `@murphai/murph`, and `@murphai/openclaw-plugin`. All other `packages/*` entries remain workspace-private owner packages. When a public package still needs one of those private workspace packages at runtime, the release flow bundles that private dependency into the public tarball instead of publishing it as a standalone npm package.
 
+## Package Boundary Rules
+
+- Treat each workspace package `package.json` as a small public contract, not as a mirror of the internal file tree.
+- Keep `exports` narrow and semantic. Prefer a few intentional entrypoints such as `"."`, `./runtime`, `./helpers`, or another owner-level seam over file-shaped paths like `./usecases/foo` or `./assistant/bar`.
+- If a package starts needing many unrelated subpath exports, split ownership into a new package or a clearer owner surface instead of growing a long `exports` list.
+- Compatibility shims are temporary migration tools only. Hard-cut them once callers move, and do not leave pass-through files or re-exports around as permanent API.
+- Do not re-export another package's broad surface just to make imports shorter. Callers should depend on the real owner package when that owner already exists.
+- Keep root barrels and public entrypoints behavior-oriented. Internal helper modules, test-only seams, and source-layout details should stay private unless there is a deliberate owner-level reason to publish them.
+- When tightening a package boundary, update the matching package-shape or boundary guard tests in the same change so future drift fails mechanically instead of relying on memory.
+
 - `packages/contracts`: canonical Zod contracts, shared event-envelope/lifecycle parse and revision-collapse helpers, TypeScript types, generated JSON Schema artifacts, and the shared vault-family registry/layout/query-source metadata consumed by core, query, and inboxd
 - `packages/hosted-execution`: shared hosted control-plane contracts, HMAC signing/verification helpers, vendor-neutral env readers, route builders, and side-effect codecs; it no longer owns Cloudflare worker-host topology or proxy-client inference, and app-local adapters now own deployment-specific transport, hostname, and token policy
 - `packages/runtime-state`: workspace-private shared hosted email/env/loopback/id helpers plus pure hosted bundle identity types/equality on the root package, with an explicit `@murphai/runtime-state/node` subpath for hosted bundle codec/materialization, explicit `.runtime` taxonomy/path resolution (`operations` vs `projections` vs `cache/tmp`), assistant runtime path/security helpers, process scoping, versioned JSON helpers, and SQLite-backed Node-only migration seams

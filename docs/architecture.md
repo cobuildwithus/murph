@@ -42,6 +42,9 @@ repo/
 
 ## Package Boundaries
 
+- Keep each package's `exports` map intentionally small and semantic. When a package starts wanting many file-shaped subpaths or compatibility wrappers, that is a signal to split ownership or add one clearer owner seam rather than turning `package.json` into a directory listing.
+- Re-export another package's surface only when this package is the real owner-level API. Otherwise callers should import from the true owner package directly.
+- Compatibility shims are temporary migration tools, not permanent architecture. Remove pass-through files and subpath aliases once callers have moved.
 - `packages/contracts` defines the shared language: canonical Zod contracts, TypeScript types, parse helpers, generated JSON Schema artifacts, and the shared vault-family registry/layout/query-source metadata consumed by core, query, and inboxd.
 - `packages/runtime-state` defines canonical local-state taxonomy and paths (`.runtime/operations/**`, `.runtime/projections/**`, `.runtime/cache/**`, `.runtime/tmp/**`), aggregates subsystem-owned operational descriptor manifests for portability policy, and provides shared JSON/SQLite versioning helpers and migration defaults.
 - `packages/core` owns vault bootstrap, filesystem primitives, domain mutations, audit emission, canonical write rules, and the ordered canonical `vault upgrade` registry for live-vault evolution; current-format canonical reads/writes fail closed until an outdated vault has been upgraded.
