@@ -400,6 +400,7 @@ async function materializeFinalRunnerBundle(
 ): Promise<void> {
   const finalParentDir = path.dirname(finalBundleDir);
   const finalBackupDir = `${finalBundleDir}.previous`;
+  await mkdir(finalParentDir, { recursive: true });
   const preparedParentDir = await mkdtemp(
     path.join(finalParentDir, ".runner-bundle-prepared-"),
   );
