@@ -209,6 +209,12 @@ readonly cli_verify_test_files=(
   "packages/cli/test/release-workflow-guards.test.ts"
 )
 
+load_diff_scope() {
+  local scope_shell
+  scope_shell="$(node "scripts/workspace-diff-scope.mjs" --format shell "$@")"
+  eval "$scope_shell"
+}
+
 check_shell_syntax() {
   bash -n "${shell_syntax_check_scripts[@]}"
 }
@@ -498,7 +504,7 @@ run_typecheck() {
   run_timed_step "Node syntax" check_node_syntax
   run_timed_step "Dependency policy" run_dependency_policy_check
   run_timed_step "Workspace boundary checks" run_workspace_boundary_check
-  run_timed_step "Repo TS tools typecheck" tsc -p "tsconfig.tools.json" --pretty false
+  run_timed_step "Repo TS tools typecheck" pnpm exec tsc -p "tsconfig.tools.json" --pretty false
   run_timed_step "Contracts build" pnpm --dir "packages/contracts" build
   run_timed_step "Workspace build" run_repo_build_with_retry
   run_timed_step "Workspace package/app typecheck" run_typecheck_packages
@@ -582,6 +588,79 @@ run_test_coverage() {
   fi
 }
 
+run_diff_repo_internal_fast_path() {
+  run_timed_step "Shell syntax" check_shell_syntax
+  run_timed_step "Node syntax" check_node_syntax
+  run_timed_step "Repo TS tools typecheck" pnpm exec tsc -p "tsconfig.tools.json" --pretty false
+}
+
+run_test_diff() {
+  if [[ "${1:-}" == "--" ]]; then
+    shift
+  fi
+
+  load_diff_scope "$@"
+  local typecheck_dirs=("${diff_typecheck_dirs[@]-}")
+  local test_dirs=("${diff_test_dirs[@]-}")
+  local affected_app_dirs=("${diff_affected_app_dirs[@]-}")
+
+  verify_log "diff scope: ${diff_summary}"
+
+  if [[ "$diff_no_changes" == "1" ]]; then
+    verify_log "no changed files detected; falling back to workspace typecheck"
+    run_typecheck
+    return 0
+  fi
+
+  if [[ "$diff_repo_internal_fast_path" == "1" ]]; then
+    verify_log "diff-aware verification selected the repo-internal fast path"
+    run_diff_repo_internal_fast_path
+    run_timed_step "Dependency policy" run_dependency_policy_check
+    return 0
+  fi
+
+  if [[ "$diff_has_non_workspace_files" == "1" || "$diff_global_root_change" == "1" ]]; then
+    run_diff_repo_internal_fast_path
+  fi
+
+  if [[ "$diff_has_non_workspace_files" == "1" || "$diff_global_root_change" == "1" || "$diff_run_verify_cli" == "1" || "${#typecheck_dirs[@]}" -gt 0 || "${#test_dirs[@]}" -gt 0 || "${#affected_app_dirs[@]}" -gt 0 ]]; then
+    run_timed_step "Dependency policy" run_dependency_policy_check
+  fi
+
+  if [[ "$diff_global_root_change" == "1" || "$diff_run_verify_cli" == "1" || "${#typecheck_dirs[@]}" -gt 0 || "${#test_dirs[@]}" -gt 0 || "${#affected_app_dirs[@]}" -gt 0 ]]; then
+    run_timed_step "Workspace boundary checks" run_workspace_boundary_check
+  fi
+
+  if [[ "$diff_run_verify_cli" == "1" ]]; then
+    run_timed_step "CLI targeted verification" run_verify_cli
+  fi
+
+  local package_dir
+
+  for package_dir in "${typecheck_dirs[@]}"; do
+    if [[ -z "$package_dir" ]]; then
+      continue
+    fi
+    run_timed_step "${package_dir} typecheck" run_package_command_with_retry "$package_dir" typecheck
+  done
+
+  for package_dir in "${test_dirs[@]}"; do
+    if [[ -z "$package_dir" ]]; then
+      continue
+    fi
+    run_timed_step "${package_dir} test" run_package_command_with_retry "$package_dir" test
+  done
+
+  local app_dir
+
+  for app_dir in "${affected_app_dirs[@]}"; do
+    if [[ -z "$app_dir" ]]; then
+      continue
+    fi
+    run_timed_step "${app_dir} verify" run_package_command_without_node_v8_coverage_with_retry "$app_dir" verify
+  done
+}
+
 run_verify_cli() {
   run_timed_step "Assistant CLI typecheck" pnpm --dir "packages/assistant-cli" typecheck
   run_timed_step "Setup CLI typecheck" pnpm --dir "packages/setup-cli" typecheck
@@ -617,15 +696,19 @@ main() {
     "test:coverage")
       run_test_coverage
       ;;
+    "test:diff")
+      shift
+      run_test_diff "$@"
+      ;;
     "verify:cli")
       run_verify_cli
       ;;
     *)
-      echo "Usage: bash scripts/workspace-verify.sh {typecheck|typecheck:packages|test|test:packages|test:apps|test:packages:coverage|test:coverage|verify:cli}" >&2
+      echo "Usage: bash scripts/workspace-verify.sh {typecheck|typecheck:packages|test|test:packages|test:apps|test:packages:coverage|test:coverage|test:diff [path ...]|verify:cli}" >&2
       exit 1
       ;;
   esac
 }
 
-main "${1:-}"
+main "$@"
 exit $?

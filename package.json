@@ -27,6 +27,7 @@
     "test:apps": "bash scripts/workspace-verify.sh test:apps",
     "test:packages:coverage": "bash scripts/workspace-verify.sh test:packages:coverage",
     "test:coverage": "bash scripts/workspace-verify.sh test:coverage",
+    "test:diff": "bash scripts/workspace-verify.sh test:diff",
     "test:smoke": "tsx e2e/smoke/verify-fixtures.ts",
     "verify:cli": "bash scripts/workspace-verify.sh verify:cli",
     "no-js": "pnpm clean:source-sidecars && tsx scripts/check-no-js.ts",
