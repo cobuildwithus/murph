@@ -1,0 +1,36 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "paths": {},
+    "rootDir": ".",
+    "composite": false,
+    "incremental": false
+  },
+  "references": [
+    {
+      "path": "../contracts/tsconfig.build.json"
+    },
+    {
+      "path": "../core/tsconfig.build.json"
+    },
+    {
+      "path": "../operator-config"
+    },
+    {
+      "path": "../importers"
+    },
+    {
+      "path": "../query"
+    },
+    {
+      "path": "../runtime-state"
+    }
+  ],
+  "include": [
+    "src/**/*.ts"
+  ],
+  "exclude": [
+    "dist"
+  ]
+}

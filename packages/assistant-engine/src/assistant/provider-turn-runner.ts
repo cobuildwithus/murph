@@ -49,7 +49,7 @@ import {
 import {
   appendAssistantTurnReceiptEvent,
 } from './turns.js'
-import { createIntegratedVaultServices } from '../vault-services.js'
+import { createIntegratedVaultServices } from '@murphai/vault-usecases/vault-services'
 import type { AssistantMessageInput } from './service-contracts.js'
 
 interface AssistantTurnSharedPlan {

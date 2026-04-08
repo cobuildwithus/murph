@@ -3,19 +3,20 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { initializeVault, readFood } from '@murphai/core'
-import { afterEach, test } from 'vitest'
-
-import {
-  addAssistantCronJob,
-  listAssistantCronJobs,
-  removeAssistantCronJob,
-} from '../src/assistant/cron.ts'
 import {
   addDailyFoodRecord,
   editFoodRecord,
   renameFoodRecord,
   upsertFoodRecord,
-} from '../src/usecases/food.ts'
+} from '@murphai/vault-usecases/usecases/food'
+import { afterEach, test } from 'vitest'
+
+import {
+  addAssistantCronJob,
+  createAssistantFoodAutoLogHooks,
+  listAssistantCronJobs,
+  removeAssistantCronJob,
+} from '../src/assistant-cron.ts'
 
 const cleanupPaths: string[] = []
 
@@ -39,6 +40,7 @@ test('editing a recurring food repairs a missing auto-log cron job', async () =>
 
   const created = await upsertFoodRecord({
     vault: vaultRoot,
+    hooks: createAssistantFoodAutoLogHooks(),
     payload: {
       title: 'Morning Smoothie',
       slug: 'morning-smoothie',
@@ -56,6 +58,7 @@ test('editing a recurring food repairs a missing auto-log cron job', async () =>
 
   await editFoodRecord({
     vault: vaultRoot,
+    hooks: createAssistantFoodAutoLogHooks(),
     lookup: created.lookupId,
     set: ['summary=Updated summary.'],
   })
@@ -77,12 +80,14 @@ test('food schedule retimes an existing recurring food instead of refusing on st
 
   await addDailyFoodRecord({
     vault: vaultRoot,
+    hooks: createAssistantFoodAutoLogHooks(),
     title: 'Morning Protein Drink',
     time: '08:00',
   })
 
   const updated = await addDailyFoodRecord({
     vault: vaultRoot,
+    hooks: createAssistantFoodAutoLogHooks(),
     title: 'Morning Protein Drink',
     time: '09:00',
   })
@@ -111,6 +116,7 @@ test('clearing recurring food auto-log removes the backing cron job', async () =
 
   const created = await upsertFoodRecord({
     vault: vaultRoot,
+    hooks: createAssistantFoodAutoLogHooks(),
     payload: {
       title: 'Daily Oats',
       slug: 'daily-oats',
@@ -124,6 +130,7 @@ test('clearing recurring food auto-log removes the backing cron job', async () =
 
   await editFoodRecord({
     vault: vaultRoot,
+    hooks: createAssistantFoodAutoLogHooks(),
     lookup: created.lookupId,
     clear: ['autoLogDaily'],
   })
@@ -145,6 +152,7 @@ test('editing a recurring food collapses duplicate auto-log jobs back to one can
 
   const created = await upsertFoodRecord({
     vault: vaultRoot,
+    hooks: createAssistantFoodAutoLogHooks(),
     payload: {
       title: 'Daily Oats',
       slug: 'daily-oats',
@@ -177,6 +185,7 @@ test('editing a recurring food collapses duplicate auto-log jobs back to one can
 
   await editFoodRecord({
     vault: vaultRoot,
+    hooks: createAssistantFoodAutoLogHooks(),
     lookup: created.lookupId,
     set: ['summary=Normalized recurring food.'],
   })
@@ -197,6 +206,7 @@ test('renaming a recurring food refreshes the derived cron job metadata', async 
 
   const created = await upsertFoodRecord({
     vault: vaultRoot,
+    hooks: createAssistantFoodAutoLogHooks(),
     payload: {
       title: 'Morning Smoothie',
       slug: 'morning-smoothie',
@@ -208,6 +218,7 @@ test('renaming a recurring food refreshes the derived cron job metadata', async 
 
   await renameFoodRecord({
     vault: vaultRoot,
+    hooks: createAssistantFoodAutoLogHooks(),
     lookup: created.lookupId,
     title: 'Morning Protein Drink',
     slug: 'morning-protein-drink',

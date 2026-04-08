@@ -11,24 +11,6 @@ on:
         options:
           - staging
           - production
-      deployment_mode:
-        description: Use gradual versions/deployments or a direct Wrangler deploy
-        required: true
-        default: gradual
-        type: choice
-        options:
-          - gradual
-          - direct
-      gradual_rollout_percentage:
-        description: Gradual deployment percentage for the candidate version (0-100)
-        required: true
-        default: "10"
-        type: string
-      existing_version_id:
-        description: Optional existing Worker version id to deploy instead of uploading a new version
-        required: false
-        default: ""
-        type: string
       sync_worker_secrets:
         description: Include the rendered Worker secrets file during upload or deploy
         required: true
@@ -180,21 +162,19 @@ jobs:
       - name: Show generated artifact paths
         run: ls -lah apps/cloudflare/.deploy
 
-      - name: Roll out Worker
-        id: rollout
+      - name: Deploy Worker
+        id: deploy
         if: ${{ inputs.deploy_worker }}
         env:
-          HOSTED_EXECUTION_DEPLOYMENT_MODE: ${{ inputs.deployment_mode }}
-          HOSTED_EXECUTION_GRADUAL_ROLLOUT_PERCENTAGE: ${{ inputs.gradual_rollout_percentage }}
+          HOSTED_EXECUTION_DEPLOYMENT_MODE: direct
           HOSTED_EXECUTION_DEPLOY_CONTEXT: ${{ inputs.environment }}
-          HOSTED_EXECUTION_DEPLOY_VERSION_ID: ${{ inputs.existing_version_id }}
           HOSTED_EXECUTION_INCLUDE_SECRETS: ${{ inputs.sync_worker_secrets }}
-        run: pnpm --dir apps/cloudflare deploy:rollout -- --config ./.deploy/wrangler.generated.jsonc
+        run: pnpm --dir apps/cloudflare deploy:worker -- --config ./.deploy/wrangler.generated.jsonc
 
       - name: Smoke test deployed endpoints
         if: ${{ inputs.deploy_worker }}
         env:
-          HOSTED_EXECUTION_SMOKE_VERSION_ID: ${{ steps.rollout.outputs.smoke_version_id }}
+          HOSTED_EXECUTION_SMOKE_VERSION_ID: ${{ steps.deploy.outputs.smoke_version_id }}
         run: pnpm --dir apps/cloudflare deploy:smoke
 
       - name: Publish deployment summary
@@ -204,14 +184,11 @@ jobs:
             echo "## Cloudflare hosted execution deploy"
             echo
             echo "- Environment: \`${{ inputs.environment }}\`"
-            echo "- Deployment mode: \`${{ inputs.deployment_mode }}\`"
-            echo "- Gradual rollout percentage: \`${{ inputs.gradual_rollout_percentage }}\`"
+            echo "- Deploy strategy: \`direct\`"
             echo "- Worker name: \`${CF_WORKER_NAME}\`"
             echo "- Worker URL: \`${CF_PUBLIC_BASE_URL:-not-set}\`"
             echo "- Container instance type: \`${CF_CONTAINER_INSTANCE_TYPE}\`"
             echo "- Native container image: Wrangler-built from \`Dockerfile.cloudflare-hosted-runner\` during deploy"
-            echo "- Uploaded version id: \`${{ steps.rollout.outputs.uploaded_version_id || 'not-created' }}\`"
-            echo "- Candidate version id: \`${{ steps.rollout.outputs.candidate_version_id || 'not-set' }}\`"
-            echo "- Final version traffic: \`${{ steps.rollout.outputs.final_version_traffic || 'not-deployed' }}\`"
+            echo "- Final version traffic: \`${{ steps.deploy.outputs.final_version_traffic || 'not-deployed' }}\`"
             echo "- Smoke user id: \`${{ inputs.smoke_user_id || 'not-set' }}\`"
           } >> "$GITHUB_STEP_SUMMARY"

@@ -5,13 +5,13 @@ import {
   type QueryRuntimeModule,
   type QueryVaultReadModel as QueryReadModel,
   type QueryCanonicalEntity as QueryRecord,
-} from '../query-runtime.js'
+} from '@murphai/vault-usecases/query-runtime'
 import { createRuntimeUnavailableError as buildRuntimeUnavailableError } from '@murphai/operator-config/runtime-errors'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   inferEntityKind,
   isQueryableRecordId,
-} from '../usecases/shared.js'
+} from '@murphai/vault-usecases/usecases/shared'
 
 type JsonObject = Record<string, unknown>
 export type { QueryReadModel, QueryRecord, QueryRuntimeModule }

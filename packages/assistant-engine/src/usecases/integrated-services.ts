@@ -14,7 +14,7 @@ import type {
 import type {
   CommandContext,
   JsonObject,
-} from "../health-cli-method-types.js"
+} from "@murphai/vault-usecases/health-cli-method-types"
 import type {
   CoreWriteServices,
   DeviceSyncServices,

@@ -30,9 +30,10 @@ import {
   type AssistantSession,
   type AssistantStatusResult,
   type RunAssistantAutomationInput,
-  createIntegratedInboxServices,
-  createIntegratedVaultServices,
+  createAssistantFoodAutoLogHooks,
 } from '@murphai/assistant-engine'
+import { createIntegratedInboxServices } from '@murphai/inbox-services'
+import { createIntegratedVaultServices } from '@murphai/vault-usecases/vault-services'
 import {
   assistantGatewayLocalMessageSender,
   assistantGatewayLocalProjectionSourceReader,
@@ -152,7 +153,9 @@ export function createAssistantLocalService(vaultRoot: string): AssistantLocalSe
   ensureAssistantDaemonClientDisabled()
 
   const inboxServices = createIntegratedInboxServices()
-  const vaultServices = createIntegratedVaultServices()
+  const vaultServices = createIntegratedVaultServices({
+    foodAutoLogHooks: createAssistantFoodAutoLogHooks(),
+  })
   const gateway = createLocalGatewayService(vaultRoot, {
     messageSender: assistantGatewayLocalMessageSender,
     sourceReader: assistantGatewayLocalProjectionSourceReader,

@@ -9,12 +9,12 @@ import {
 import {
   deleteEventRecord,
   editEventRecord,
-} from '@murphai/assistant-engine/usecases/event-record-mutations'
+} from '@murphai/vault-usecases/usecases/event-record-mutations'
 import {
   eventScaffoldKindSchema,
   showEventRecord,
-} from '@murphai/assistant-engine/usecases/provider-event'
-import type { VaultServices } from '@murphai/assistant-engine/vault-services'
+} from '@murphai/vault-usecases/usecases/provider-event'
+import type { VaultServices } from '@murphai/vault-usecases/vault-services'
 import { registerLedgerEventEntityGroup } from './health-command-factory.js'
 import {
   createEntityDeleteCommandConfig,

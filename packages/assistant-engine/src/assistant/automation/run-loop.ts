@@ -4,11 +4,11 @@ import {
 import type {
   InboxServices,
   InboxRunEvent,
-} from '../../inbox-services.js'
-import { createIntegratedInboxServices } from '../../inbox-services.js'
+} from '@murphai/inbox-services'
+import { createIntegratedInboxServices } from '@murphai/inbox-services'
 import type { AssistantModelSpec } from '../../model-harness.js'
-import type { VaultServices } from '../../vault-services.js'
-import { createIntegratedVaultServices } from '../../vault-services.js'
+import type { VaultServices } from '@murphai/vault-usecases/vault-services'
+import { createIntegratedVaultServices } from '@murphai/vault-usecases/vault-services'
 import { processDueAssistantCronJobsLocal as processDueAssistantCronJobs } from '../cron.js'
 import { recordAssistantDiagnosticEvent } from '../diagnostics.js'
 import type { AssistantExecutionContext } from '../execution-context.js'

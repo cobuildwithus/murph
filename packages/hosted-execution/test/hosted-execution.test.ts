@@ -402,5 +402,17 @@ describe("hosted execution coverage gaps", () => {
         getBearerToken: async () => "token-123",
       }),
     ).toThrow(/baseUrl must be configured/i);
+
+    expect(() =>
+      createHostedExecutionDispatchClient({
+        baseUrl: "https://dispatch.example.com",
+        fetchImpl: async () =>
+          new Response(JSON.stringify({}), {
+            headers: { "content-type": "application/json" },
+            status: 200,
+          }),
+        getBearerToken: undefined as unknown as () => Promise<string>,
+      }),
+    ).toThrow(/getBearerToken must be configured/i);
   });
 });

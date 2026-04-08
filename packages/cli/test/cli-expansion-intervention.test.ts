@@ -7,7 +7,7 @@ import { test } from 'vitest'
 import { incurErrorBridge } from '../src/incur-error-bridge.js'
 import { registerInterventionCommands } from '../src/commands/intervention.js'
 import { registerVaultCommands } from '../src/commands/vault.js'
-import { createIntegratedVaultServices } from '@murphai/assistant-engine/vault-services'
+import { createIntegratedVaultServices } from '@murphai/vault-usecases/vault-services'
 import { requireData, runCli } from './cli-test-helpers.js'
 
 interface SchemaEnvelope {

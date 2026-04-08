@@ -4,12 +4,12 @@ import {
   requestIdFromOptions,
   withBaseOptions,
 } from '@murphai/operator-config/command-helpers'
-import { normalizeRepeatableFlagOption } from '@murphai/assistant-engine/option-utils'
+import { normalizeRepeatableFlagOption } from '@murphai/vault-usecases/option-utils'
 import {
   localDateSchema,
   pathSchema,
 } from '@murphai/operator-config/vault-cli-contracts'
-import type { VaultServices } from '@murphai/assistant-engine/vault-services'
+import type { VaultServices } from '@murphai/vault-usecases/vault-services'
 
 const nullableTimestampSchema = z.string().min(1).nullable()
 const nullableTextSchema = z.string().min(1).nullable()

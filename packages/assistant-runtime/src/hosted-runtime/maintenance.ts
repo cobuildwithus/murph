@@ -10,8 +10,10 @@ import {
   createInboxParserService,
 } from "@murphai/parsers";
 import {
-  createIntegratedInboxServices,
+  createAssistantFoodAutoLogHooks,
 } from "@murphai/assistant-engine";
+import { createIntegratedInboxServices } from "@murphai/inbox-services";
+import { createIntegratedVaultServices } from "@murphai/vault-usecases/vault-services";
 import {
   getAssistantCronStatus,
   runAssistantAutomation,
@@ -211,6 +213,9 @@ export async function runHostedAssistantAutomation(
   executionContext: AssistantExecutionContext,
 ): Promise<void> {
   const inboxServices = createIntegratedInboxServices();
+  const vaultServices = createIntegratedVaultServices({
+    foodAutoLogHooks: createAssistantFoodAutoLogHooks(),
+  });
 
   try {
     await runAssistantAutomation({
@@ -218,6 +223,7 @@ export async function runHostedAssistantAutomation(
       drainOutbox: false,
       executionContext,
       inboxServices,
+      vaultServices,
       once: true,
       requestId,
       startDaemon: false,

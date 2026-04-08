@@ -34,7 +34,7 @@ import type {
   HealthQueryServiceMethods,
   JsonObject,
   UpsertRecordResult,
-} from "../health-cli-method-types.js"
+} from "@murphai/vault-usecases/health-cli-method-types"
 import type {
   QueryCanonicalEntity,
   QueryRuntimeModule as SharedQueryRuntimeModule,
@@ -44,9 +44,9 @@ import type {
   QueryWearableRecoverySummary,
   QueryWearableSleepSummary,
   QueryWearableSourceHealthSummary,
-} from "../query-runtime.js"
+} from "@murphai/vault-usecases/query-runtime"
 
-export type { CommandContext } from "../health-cli-method-types.js"
+export type { CommandContext } from "@murphai/vault-usecases/health-cli-method-types"
 
 export interface ProjectAssessmentInput extends CommandContext {
   assessmentId: string

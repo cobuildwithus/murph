@@ -1,0 +1,47 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "declaration": true,
+    "declarationMap": true,
+    "noEmit": false,
+    "paths": {},
+    "rootDir": "src",
+    "outDir": "dist",
+    "tsBuildInfoFile": "dist/.tsbuildinfo"
+  },
+  "include": [
+    "src/**/*.ts"
+  ],
+  "references": [
+    {
+      "path": "../../packages/assistant-runtime"
+    },
+    {
+      "path": "../../packages/cloudflare-hosted-control"
+    },
+    {
+      "path": "../../packages/core/tsconfig.build.json"
+    },
+    {
+      "path": "../../packages/device-syncd"
+    },
+    {
+      "path": "../../packages/gateway-core"
+    },
+    {
+      "path": "../../packages/hosted-execution"
+    },
+    {
+      "path": "../../packages/inboxd"
+    },
+    {
+      "path": "../../packages/parsers"
+    },
+    {
+      "path": "../../packages/runtime-state"
+    }
+  ],
+  "exclude": [
+    "dist"
+  ]
+}

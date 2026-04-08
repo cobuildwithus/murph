@@ -1,0 +1,139 @@
+{
+  "name": "@murphai/vault-usecases",
+  "version": "0.1.16",
+  "private": true,
+  "type": "module",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/cobuildwithus/murph"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./commands/query-record-command-helpers": {
+      "types": "./dist/commands/query-record-command-helpers.d.ts",
+      "default": "./dist/commands/query-record-command-helpers.js"
+    },
+    "./health-cli-descriptors": {
+      "types": "./dist/health-cli-descriptors.d.ts",
+      "default": "./dist/health-cli-descriptors.js"
+    },
+    "./health-cli-method-types": {
+      "types": "./dist/health-cli-method-types.d.ts",
+      "default": "./dist/health-cli-method-types.js"
+    },
+    "./json-input": {
+      "types": "./dist/json-input.d.ts",
+      "default": "./dist/json-input.js"
+    },
+    "./option-utils": {
+      "types": "./dist/option-utils.d.ts",
+      "default": "./dist/option-utils.js"
+    },
+    "./query-runtime": {
+      "types": "./dist/query-runtime.d.ts",
+      "default": "./dist/query-runtime.js"
+    },
+    "./runtime-import": {
+      "types": "./dist/runtime-import.d.ts",
+      "default": "./dist/runtime-import.js"
+    },
+    "./testing": {
+      "types": "./dist/testing.d.ts",
+      "default": "./dist/testing.js"
+    },
+    "./usecases/document-meal-read": {
+      "types": "./dist/usecases/document-meal-read.d.ts",
+      "default": "./dist/usecases/document-meal-read.js"
+    },
+    "./usecases/event-record-mutations": {
+      "types": "./dist/usecases/event-record-mutations.d.ts",
+      "default": "./dist/usecases/event-record-mutations.js"
+    },
+    "./usecases/food": {
+      "types": "./dist/usecases/food.d.ts",
+      "default": "./dist/usecases/food.js"
+    },
+    "./usecases/food-autolog": {
+      "types": "./dist/usecases/food-autolog.d.ts",
+      "default": "./dist/usecases/food-autolog.js"
+    },
+    "./usecases/intervention": {
+      "types": "./dist/usecases/intervention.d.ts",
+      "default": "./dist/usecases/intervention.js"
+    },
+    "./usecases/provider-event": {
+      "types": "./dist/usecases/provider-event.d.ts",
+      "default": "./dist/usecases/provider-event.js"
+    },
+    "./usecases/recipe": {
+      "types": "./dist/usecases/recipe.d.ts",
+      "default": "./dist/usecases/recipe.js"
+    },
+    "./usecases/runtime": {
+      "types": "./dist/usecases/runtime.d.ts",
+      "default": "./dist/usecases/runtime.js"
+    },
+    "./usecases/shared": {
+      "types": "./dist/usecases/shared.d.ts",
+      "default": "./dist/usecases/shared.js"
+    },
+    "./usecases/types": {
+      "types": "./dist/usecases/types.d.ts",
+      "default": "./dist/usecases/types.js"
+    },
+    "./usecases/vault-usecase-helpers": {
+      "types": "./dist/usecases/vault-usecase-helpers.d.ts",
+      "default": "./dist/usecases/vault-usecase-helpers.js"
+    },
+    "./usecases/workout": {
+      "types": "./dist/usecases/workout.d.ts",
+      "default": "./dist/usecases/workout.js"
+    },
+    "./usecases/workout-format": {
+      "types": "./dist/usecases/workout-format.d.ts",
+      "default": "./dist/usecases/workout-format.js"
+    },
+    "./usecases/workout-import": {
+      "types": "./dist/usecases/workout-import.d.ts",
+      "default": "./dist/usecases/workout-import.js"
+    },
+    "./usecases/workout-measurement": {
+      "types": "./dist/usecases/workout-measurement.d.ts",
+      "default": "./dist/usecases/workout-measurement.js"
+    },
+    "./usecases/workout-read": {
+      "types": "./dist/usecases/workout-read.d.ts",
+      "default": "./dist/usecases/workout-read.js"
+    },
+    "./vault-services": {
+      "types": "./dist/vault-services.d.ts",
+      "default": "./dist/vault-services.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "node ../../scripts/rm-paths.mjs dist && tsc -b tsconfig.json --force",
+    "typecheck": "tsc -p tsconfig.typecheck.json --pretty false"
+  },
+  "dependencies": {
+    "@murphai/contracts": "workspace:*",
+    "@murphai/core": "workspace:*",
+    "@murphai/importers": "workspace:*",
+    "@murphai/operator-config": "workspace:*",
+    "@murphai/query": "workspace:*",
+    "@murphai/runtime-state": "workspace:*",
+    "zod": "^4.1.8"
+  },
+  "engines": {
+    "node": ">=22.16.0"
+  }
+}

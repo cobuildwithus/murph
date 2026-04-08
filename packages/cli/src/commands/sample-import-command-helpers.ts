@@ -1,5 +1,5 @@
-import { loadRuntimeModule } from '@murphai/assistant-engine/runtime-import'
-import type { ImportersRuntimeModule } from '@murphai/assistant-engine/usecases/types'
+import { loadRuntimeModule } from '@murphai/vault-usecases/runtime-import'
+import type { ImportersRuntimeModule } from '@murphai/vault-usecases/usecases/types'
 import { createRuntimeUnavailableError } from '@murphai/operator-config/runtime-errors'
 
 export interface ImportCsvSamplesOptions {

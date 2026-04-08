@@ -14,14 +14,14 @@ import {
   createDefaultAssistantCapabilityRegistry,
   createDefaultAssistantToolCatalog,
   createInboxRoutingAssistantToolCatalog,
-} from '@murphai/assistant-engine/assistant-cli-tools'
+} from '@murphai/assistant-engine/assistant-provider'
 import { materializeInboxModelBundle } from '@murphai/assistant-engine/inbox-model-harness'
 import {
   CliBackedCapabilityHost,
   NativeLocalCapabilityHost,
 } from '@murphai/assistant-engine/model-harness'
-import type { InboxServices } from '@murphai/assistant-engine/inbox-services'
-import type { VaultServices } from '@murphai/assistant-engine/vault-services'
+import type { InboxServices } from '@murphai/inbox-services'
+import type { VaultServices } from '@murphai/vault-usecases/vault-services'
 import { resolveAssistantStatePaths } from '@murphai/runtime-state/node'
 
 const test = baseTest.sequential
@@ -1751,11 +1751,25 @@ test('createDefaultAssistantToolCatalog recipe upsert writes payload files and c
         vault: string
       }
     | undefined
+  let persistedPayload:
+    | {
+        title: string
+        status: string
+        ingredients: string[]
+      }
+    | undefined
 
   const vaultServices = createStubVaultServices({
     core: {
       upsertRecipe: async (input) => {
         recordedCall = input
+        persistedPayload = JSON.parse(
+          await readFile(input.inputFile, 'utf8'),
+        ) as {
+          title: string
+          status: string
+          ingredients: string[]
+        }
         return {
           vault: input.vault,
           lookupId: 'rcp_1',
@@ -1797,15 +1811,8 @@ test('createDefaultAssistantToolCatalog recipe upsert writes payload files and c
     assert.ok(recordedCall)
     assert.equal(recordedCall?.vault, vaultRoot)
     assert.equal(recordedCall?.requestId, 'req_recipe')
-    assert.match(recordedCall?.inputFile ?? '', /derived\/assistant\/payloads/u)
-
-    const persistedPayload = JSON.parse(
-      await readFile(recordedCall!.inputFile, 'utf8'),
-    ) as {
-      title: string
-      status: string
-      ingredients: string[]
-    }
+    assert.match(recordedCall?.inputFile ?? '', /\.runtime\/tmp\/assistant\/payloads/u)
+    assert.ok(persistedPayload)
 
     assert.deepEqual(persistedPayload, {
       title: 'Sheet Pan Salmon Bowls',
@@ -1826,11 +1833,25 @@ test('createDefaultAssistantToolCatalog food upsert writes payload files and cal
         vault: string
       }
     | undefined
+  let persistedPayload:
+    | {
+        title: string
+        status: string
+        vendor: string
+      }
+    | undefined
 
   const vaultServices = createStubVaultServices({
     core: {
       upsertFood: async (input) => {
         recordedCall = input
+        persistedPayload = JSON.parse(
+          await readFile(input.inputFile, 'utf8'),
+        ) as {
+          title: string
+          status: string
+          vendor: string
+        }
         return {
           vault: input.vault,
           lookupId: 'food_1',
@@ -1872,15 +1893,8 @@ test('createDefaultAssistantToolCatalog food upsert writes payload files and cal
     assert.ok(recordedCall)
     assert.equal(recordedCall?.vault, vaultRoot)
     assert.equal(recordedCall?.requestId, 'req_food')
-    assert.match(recordedCall?.inputFile ?? '', /derived\/assistant\/payloads/u)
-
-    const persistedPayload = JSON.parse(
-      await readFile(recordedCall!.inputFile, 'utf8'),
-    ) as {
-      title: string
-      status: string
-      vendor: string
-    }
+    assert.match(recordedCall?.inputFile ?? '', /\.runtime\/tmp\/assistant\/payloads/u)
+    assert.ok(persistedPayload)
 
     assert.deepEqual(persistedPayload, {
       title: 'Regular Acai Bowl',
@@ -2098,11 +2112,23 @@ test('createDefaultAssistantToolCatalog health upserts write payload files and c
         vault: string
       }
     | undefined
+  let persistedPayload:
+    | {
+        title: string
+        status: string
+      }
+    | undefined
 
   const vaultServices = createStubVaultServices({
     core: {
       upsertGoal: async (input) => {
         recordedCall = input
+        persistedPayload = JSON.parse(
+          await readFile(input.input, 'utf8'),
+        ) as {
+          title: string
+          status: string
+        }
         return {
           vault: input.vault,
           lookupId: 'goal_1',
@@ -2143,14 +2169,8 @@ test('createDefaultAssistantToolCatalog health upserts write payload files and c
     assert.ok(recordedCall)
     assert.equal(recordedCall?.vault, vaultRoot)
     assert.equal(recordedCall?.requestId, 'req_goal')
-    assert.match(recordedCall?.input ?? '', /derived\/assistant\/payloads/u)
-
-    const persistedPayload = JSON.parse(
-      await readFile(recordedCall!.input, 'utf8'),
-    ) as {
-      title: string
-      status: string
-    }
+    assert.match(recordedCall?.input ?? '', /\.runtime\/tmp\/assistant\/payloads/u)
+    assert.ok(persistedPayload)
 
     assert.deepEqual(persistedPayload, {
       title: 'Walk daily',

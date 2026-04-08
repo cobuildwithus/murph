@@ -40,13 +40,13 @@ import {
   materializeInboxModelBundle,
   routeInboxCaptureWithModel,
 } from '@murphai/assistant-engine/inbox-model-harness'
-import type { InboxServices } from '@murphai/assistant-engine/inbox-services'
+import type { InboxServices } from '@murphai/inbox-services'
 import {
   formatForegroundLogLine,
   formatInboxRunEventForTerminal,
   resolveForegroundTerminalLogOptions,
 } from '@murphai/assistant-cli/run-terminal-logging'
-import type { VaultServices } from '@murphai/assistant-engine/vault-services'
+import type { VaultServices } from '@murphai/vault-usecases/vault-services'
 
 const inboxInitOptionFields = {
   rebuild: z

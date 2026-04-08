@@ -13,6 +13,10 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { promisify } from 'node:util'
 import { test, vi } from 'vitest'
+import type {
+  InboxServices,
+  InboxSourceSetEnabledResult,
+} from '@murphai/inbox-services'
 import {
   buildSetupWizardPublicUrlReview,
   configureSetupScheduledUpdates,
@@ -55,7 +59,6 @@ import {
   resolveSetupChannelMissingEnv,
   resolveSetupWearableMissingEnv,
 } from '@murphai/operator-config/setup-runtime-env'
-import type { InboxSourceSetEnabledResult } from '@murphai/assistant-engine/inbox-app/types'
 import type { InboxConnectorConfig } from '@murphai/operator-config/inbox-cli-contracts'
 import type { SetupResult } from '@murphai/operator-config/setup-cli-contracts'
 import {
@@ -71,6 +74,12 @@ import {
 
 const execFileAsync = promisify(execFile)
 const SETUP_ALIAS_TIMEOUT_MS = 45_000
+
+type InboxBootstrapInput = Parameters<InboxServices['bootstrap']>[0]
+type InboxDoctorInput = Parameters<InboxServices['doctor']>[0]
+type InboxSourceAddInput = Parameters<InboxServices['sourceAdd']>[0]
+type InboxSourceListInput = Parameters<InboxServices['sourceList']>[0]
+type InboxSourceSetEnabledInput = Parameters<InboxServices['sourceSetEnabled']>[0]
 
 function buildFakeJwt(payload: Record<string, unknown>): string {
   const header = Buffer.from(JSON.stringify({ alg: 'none' }), 'utf8')
@@ -2153,7 +2162,7 @@ test.sequential('setup service configures Telegram and enables assistant auto-re
       async bootstrap() {
         return makeBootstrapResult(vaultRoot)
       },
-      async doctor(input) {
+      async doctor(input: InboxDoctorInput) {
         doctorCalls.push(input as unknown as Record<string, unknown>)
         return {
           vault: input.vault,
@@ -2177,7 +2186,7 @@ test.sequential('setup service configures Telegram and enables assistant auto-re
           parserToolchain: null,
         }
       },
-      async sourceAdd(input) {
+      async sourceAdd(input: InboxSourceAddInput) {
         sourceAddCalls.push(input as unknown as Record<string, unknown>)
         return {
           configPath: '.runtime/inboxd/config.json',
@@ -2192,7 +2201,7 @@ test.sequential('setup service configures Telegram and enables assistant auto-re
           vault: input.vault,
         }
       },
-      async sourceList(input) {
+      async sourceList(input: InboxSourceListInput) {
         return {
           configPath: '.runtime/inboxd/config.json',
           connectors: [],
@@ -2321,7 +2330,7 @@ test.sequential('setup service keeps Telegram configured but disables auto-reply
       async bootstrap() {
         return makeBootstrapResult(vaultRoot)
       },
-      async doctor(input) {
+      async doctor(input: InboxDoctorInput) {
         return {
           vault: input.vault,
           configPath: '.runtime/inboxd/config.json',
@@ -2344,7 +2353,7 @@ test.sequential('setup service keeps Telegram configured but disables auto-reply
           parserToolchain: null,
         }
       },
-      async sourceAdd(input) {
+      async sourceAdd(input: InboxSourceAddInput) {
         return {
           configPath: '.runtime/inboxd/config.json',
           connector: {
@@ -2358,7 +2367,7 @@ test.sequential('setup service keeps Telegram configured but disables auto-reply
           vault: input.vault,
         }
       },
-      async sourceList(input) {
+      async sourceList(input: InboxSourceListInput) {
         return {
           configPath: '.runtime/inboxd/config.json',
           connectors: [],
@@ -2541,7 +2550,7 @@ test.sequential('setup service provisions formulas, downloads the model, and boo
     env: () => ({ PATH: homebrewBin, SHELL: '/bin/zsh' }),
     getHomeDirectory: () => homeRoot,
     inboxServices: {
-      async bootstrap(input) {
+      async bootstrap(input: InboxBootstrapInput) {
         bootstrapCalls.push(input as unknown as Record<string, unknown>)
         return makeBootstrapResult(vaultRoot)
       },
@@ -3258,7 +3267,7 @@ test.sequential('setup service reuses an existing vault and still bootstraps inb
     env: () => ({ PATH: homebrewBin }),
     getHomeDirectory: () => homeRoot,
     inboxServices: {
-      async bootstrap(input) {
+      async bootstrap(input: InboxBootstrapInput) {
         bootstrapCalls.push(input as unknown as Record<string, unknown>)
         return makeBootstrapResult(vaultRoot)
       },
@@ -3846,7 +3855,7 @@ test.sequential('Linux setup reuses one apt update across declarative tool insta
     env: () => ({ PATH: binRoot, SHELL: '/bin/bash' }),
     getHomeDirectory: () => homeRoot,
     inboxServices: {
-      async bootstrap(input) {
+      async bootstrap(input: InboxBootstrapInput) {
         bootstrapCalls.push(input as unknown as Record<string, unknown>)
         return makeBootstrapResult(vaultRoot, {
           whisperCommand,
@@ -4036,7 +4045,7 @@ test.sequential('Linux setup preserves existing iMessage state while adding Tele
           whisperCommand,
         })
       },
-      async doctor(input) {
+      async doctor(input: InboxDoctorInput) {
         return {
           vault: input.vault,
           configPath: '.runtime/inboxd/config.json',
@@ -4059,7 +4068,7 @@ test.sequential('Linux setup preserves existing iMessage state while adding Tele
           parserToolchain: null,
         }
       },
-      async sourceAdd(input) {
+      async sourceAdd(input: InboxSourceAddInput) {
         sourceAddCalls.push({
           account: input.account,
           id: input.id,
@@ -4082,7 +4091,7 @@ test.sequential('Linux setup preserves existing iMessage state while adding Tele
           vault: input.vault,
         }
       },
-      async sourceList(input) {
+      async sourceList(input: InboxSourceListInput) {
         return {
           configPath: '.runtime/inboxd/config.json',
           connectors: connectors.map((connector) => ({
@@ -4092,7 +4101,7 @@ test.sequential('Linux setup preserves existing iMessage state while adding Tele
           vault: input.vault,
         }
       },
-      async sourceSetEnabled(input): Promise<InboxSourceSetEnabledResult> {
+      async sourceSetEnabled(input: InboxSourceSetEnabledInput): Promise<InboxSourceSetEnabledResult> {
         const connector = connectors.find((entry) => entry.id === input.connectorId)
         if (connector) {
           connector.enabled = input.enabled

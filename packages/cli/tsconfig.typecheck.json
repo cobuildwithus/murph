@@ -20,6 +20,12 @@
       "path": "../assistant-engine"
     },
     {
+      "path": "../inbox-services"
+    },
+    {
+      "path": "../vault-usecases"
+    },
+    {
       "path": "../operator-config"
     },
     {

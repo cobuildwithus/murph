@@ -20,9 +20,9 @@ import {
   type AssistantCronTrigger,
   type AssistantBindingDelivery,
 } from '../assistant-cli-contracts.ts'
-import { loadRuntimeModule } from '../runtime-import.ts'
-import { renderAutoLoggedFoodMealNote } from '../usecases/food-autolog.ts'
-import { loadImporterRuntime } from '../usecases/runtime.ts'
+import { loadRuntimeModule } from '@murphai/vault-usecases/runtime-import'
+import { renderAutoLoggedFoodMealNote } from '@murphai/vault-usecases/usecases/food-autolog'
+import { loadImporterRuntime } from '@murphai/vault-usecases/usecases/runtime'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { withAssistantCronWriteLock } from './cron/locking.ts'
 import {

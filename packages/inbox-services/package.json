@@ -1,0 +1,47 @@
+{
+  "name": "@murphai/inbox-services",
+  "version": "0.1.16",
+  "private": true,
+  "type": "module",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/cobuildwithus/murph"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./linq-endpoint": {
+      "types": "./dist/linq-endpoint.d.ts",
+      "default": "./dist/linq-endpoint.js"
+    },
+    "./testing": {
+      "types": "./dist/testing.d.ts",
+      "default": "./dist/testing.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "node ../../scripts/rm-paths.mjs dist && tsc -b tsconfig.json --force",
+    "typecheck": "tsc -p tsconfig.typecheck.json --pretty false"
+  },
+  "dependencies": {
+    "@murphai/contracts": "workspace:*",
+    "@murphai/core": "workspace:*",
+    "@murphai/inboxd": "workspace:*",
+    "@murphai/operator-config": "workspace:*",
+    "@murphai/runtime-state": "workspace:*",
+    "@murphai/vault-usecases": "workspace:*",
+    "zod": "^4.1.8"
+  },
+  "engines": {
+    "node": ">=22.16.0"
+  }
+}

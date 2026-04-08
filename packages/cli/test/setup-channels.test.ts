@@ -4,11 +4,16 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { test, vi } from 'vitest'
 import { readAssistantAutomationState } from '@murphai/assistant-engine/assistant-state'
+import type { InboxServices } from '@murphai/inbox-services'
 import {
   createSetupAgentmailSelectionResolver,
   configureSetupChannels,
 } from '@murphai/setup-cli/setup-cli'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+
+type InboxDoctorInput = Parameters<InboxServices['doctor']>[0]
+type InboxSourceAddInput = Parameters<InboxServices['sourceAdd']>[0]
+type InboxSourceSetEnabledInput = Parameters<InboxServices['sourceSetEnabled']>[0]
 
 test('configureSetupChannels enables Telegram auto-reply only after the doctor probe passes', async () => {
   const vault = await mkdtemp(path.join(tmpdir(), 'murph-setup-channels-'))
@@ -25,7 +30,7 @@ test('configureSetupChannels enables Telegram auto-reply only after the doctor p
         async bootstrap() {
           throw new Error('bootstrap should not be called in this test')
         },
-        async doctor(input) {
+        async doctor(input: InboxDoctorInput) {
           doctorCalls.push(input.sourceId ?? '')
           return {
             vault,
@@ -174,7 +179,7 @@ test('configureSetupChannels reuses a disabled Telegram connector and re-enables
         async bootstrap() {
           throw new Error('bootstrap should not be called in this test')
         },
-        async doctor(input) {
+        async doctor(input: InboxDoctorInput) {
           doctorCalls.push(input.sourceId ?? '')
           return {
             vault,
@@ -211,7 +216,7 @@ test('configureSetupChannels reuses a disabled Telegram connector and re-enables
             ],
           }
         },
-        async sourceSetEnabled(input) {
+        async sourceSetEnabled(input: InboxSourceSetEnabledInput) {
           sourceSetEnabledCalls.push({
             connectorId: input.connectorId,
             enabled: input.enabled,
@@ -271,7 +276,7 @@ test('configureSetupChannels adds a Linq connector and persists auto-reply when 
         async bootstrap() {
           throw new Error('bootstrap should not be called in this test')
         },
-        async doctor(input) {
+        async doctor(input: InboxDoctorInput) {
           doctorCalls.push(input.sourceId ?? '')
           return {
             vault,
@@ -290,7 +295,7 @@ test('configureSetupChannels adds a Linq connector and persists auto-reply when 
             target: input.sourceId ?? null,
           }
         },
-        async sourceAdd(input) {
+        async sourceAdd(input: InboxSourceAddInput) {
           sourceAddCalls.push(input as unknown as Record<string, unknown>)
           return {
             vault,
@@ -724,7 +729,7 @@ test('configureSetupChannels disables stale setup connectors that were not selec
         async sourceAdd() {
           throw new Error('sourceAdd should not be called when an email connector already exists')
         },
-        async sourceSetEnabled(input) {
+        async sourceSetEnabled(input: InboxSourceSetEnabledInput) {
           sourceSetEnabledCalls.push({
             connectorId: input.connectorId,
             enabled: input.enabled,
@@ -812,7 +817,7 @@ test('configureSetupChannels reuses a discovered AgentMail inbox during onboardi
             target: 'email:agentmail',
           }
         },
-        async sourceAdd(input) {
+        async sourceAdd(input: InboxSourceAddInput) {
           sourceAddCalls.push(input as unknown as Record<string, unknown>)
           return {
             vault,
