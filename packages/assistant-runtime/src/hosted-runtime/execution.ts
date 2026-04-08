@@ -92,7 +92,9 @@ export async function executeHostedDispatchForCommit(input: {
     }),
     vaultRoot: input.restored.vaultRoot,
   });
-  const committedSideEffects = await collectHostedExecutionSideEffects(input.restored.vaultRoot);
+  const committedAssistantDeliveryEffects = await collectHostedExecutionSideEffects(
+    input.restored.vaultRoot,
+  );
   const committedGatewayProjectionSnapshot = await exportGatewayProjectionSnapshotLocal(
     input.restored.vaultRoot,
     {
@@ -113,7 +115,8 @@ export async function executeHostedDispatchForCommit(input: {
         }),
       },
     },
-    committedSideEffects,
+    committedAssistantDeliveryEffects,
+    committedSideEffects: committedAssistantDeliveryEffects,
   };
 }
 
@@ -140,7 +143,9 @@ export async function completeHostedExecutionAfterCommit(input: {
     commit: input.commit,
     dispatch: input.dispatch,
     effectsPort: input.runtime.platform.effectsPort,
-    sideEffects: input.committedExecution.committedSideEffects,
+    sideEffects:
+      input.committedExecution.committedSideEffects
+      ?? input.committedExecution.committedAssistantDeliveryEffects,
     vaultRoot: input.restored.vaultRoot,
   });
   await exportHostedPendingAssistantUsage({

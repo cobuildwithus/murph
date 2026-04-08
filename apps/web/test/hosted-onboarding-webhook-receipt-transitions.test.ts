@@ -258,7 +258,6 @@ describe("hosted webhook receipt transitions", () => {
         receipt: persistedState.receipt,
         sideEffects: [{
           attemptCount: sideEffect.attemptCount,
-          dispatchPayloadJson: null,
           effectId: sideEffect.effectId,
           kind: sideEffect.kind,
           lastAttemptAt: null,
@@ -266,19 +265,11 @@ describe("hosted webhook receipt transitions", () => {
           lastErrorMessage: null,
           lastErrorName: null,
           lastErrorRetryable: null,
-          linqChatId: null,
-          linqInviteId: sideEffect.payload.inviteId,
-          linqReplyToMessageId: sideEffect.payload.replyToMessageId,
-          linqResultChatId: null,
-          linqResultMessageId: null,
-          linqTemplate: null,
-          revnetAmountPaid: null,
-          revnetChargeId: null,
-          revnetCurrency: null,
-          revnetInvoiceId: null,
-          revnetMemberId: null,
-          revnetPaymentIntentId: null,
-          revnetResultHandled: null,
+          payloadJson: {
+            inviteId: sideEffect.payload.inviteId,
+            replyToMessageId: sideEffect.payload.replyToMessageId,
+          },
+          resultJson: null,
           sentAt: null,
           status: sideEffect.status,
         }],
@@ -403,14 +394,15 @@ function normalizeSerializedSideEffectForRead(
   effectId: string,
   effect: ReturnType<typeof serializeHostedWebhookReceiptSideEffect>,
 ): NonNullable<Parameters<typeof readHostedWebhookReceiptState>[0]["sideEffects"]>[number] {
-  const dispatchPayloadJson: Prisma.InputJsonValue | null =
-    effect.dispatchPayloadJson === Prisma.DbNull
+  const resultJson: Prisma.InputJsonValue | null =
+    effect.resultJson === Prisma.DbNull
       ? null
-      : effect.dispatchPayloadJson as Prisma.InputJsonValue;
+      : effect.resultJson as Prisma.InputJsonValue;
 
   return {
     effectId,
     ...effect,
-    dispatchPayloadJson,
+    payloadJson: effect.payloadJson as Prisma.InputJsonValue,
+    resultJson,
   };
 }

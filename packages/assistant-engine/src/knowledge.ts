@@ -37,4 +37,4 @@ export type {
   KnowledgeSearchHit,
   KnowledgeSearchResult,
   KnowledgeUpsertResult,
-} from './knowledge/contracts.js'
+} from '@murphai/query'

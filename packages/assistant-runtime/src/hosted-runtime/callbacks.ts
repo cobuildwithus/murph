@@ -1,10 +1,10 @@
 import {
+  buildHostedAssistantDeliveryEffect,
   buildHostedAssistantDeliveryPreparedRecord,
   buildHostedAssistantDeliverySentRecord,
-  buildHostedAssistantDeliverySideEffect,
-  parseHostedAssistantDeliverySideEffects,
+  parseHostedAssistantDeliveryEffects,
   type HostedAssistantDeliveryRecord,
-  type HostedAssistantDeliverySideEffect,
+  type HostedAssistantDeliveryEffect,
   type HostedExecutionDispatchRequest,
   type HostedExecutionRunnerResult,
 } from "@murphai/hosted-execution";
@@ -28,11 +28,16 @@ import type {
   HostedRuntimeEffectsPort,
 } from "./platform.ts";
 
-const HOSTED_MAX_COMMITTED_SIDE_EFFECTS = 20;
+const HOSTED_MAX_COMMITTED_ASSISTANT_DELIVERY_EFFECTS = 20;
 
 export function resumeHostedCommittedExecution(
   request: HostedAssistantRuntimeJobRequest,
 ): HostedCommittedExecutionState {
+  const committedAssistantDeliveryEffects = parseHostedAssistantDeliveryEffects(
+    request.resume!.committedResult.assistantDeliveryEffects
+      ?? request.resume!.committedResult.sideEffects,
+  );
+
   return {
     committedGatewayProjectionSnapshot: {
       schema: "murph.gateway-projection-snapshot.v1",
@@ -45,9 +50,8 @@ export function resumeHostedCommittedExecution(
       bundle: request.bundle,
       result: request.resume!.committedResult.result,
     },
-    committedSideEffects: parseHostedAssistantDeliverySideEffects(
-      request.resume!.committedResult.sideEffects,
-    ),
+    committedAssistantDeliveryEffects,
+    committedSideEffects: committedAssistantDeliveryEffects,
   };
 }
 
@@ -57,20 +61,24 @@ export async function commitHostedExecutionResult(input: {
   effectsPort: HostedRuntimeEffectsPort;
   gatewayProjectionSnapshot?: GatewayProjectionSnapshot | null;
   result: HostedExecutionRunnerResult;
-  sideEffects: HostedAssistantDeliverySideEffect[];
+  assistantDeliveryEffects?: HostedAssistantDeliveryEffect[];
+  sideEffects?: HostedAssistantDeliveryEffect[];
 }): Promise<void> {
   if (!input.commit) {
     return;
   }
 
+  const assistantDeliveryEffects = input.assistantDeliveryEffects ?? input.sideEffects ?? [];
+
   try {
     await input.effectsPort.commit({
       eventId: input.dispatch.eventId,
       payload: {
+        assistantDeliveryEffects,
         currentBundleRef: input.commit.bundleRef,
         gatewayProjectionSnapshot: input.gatewayProjectionSnapshot ?? null,
         ...input.result,
-        sideEffects: input.sideEffects,
+        sideEffects: assistantDeliveryEffects,
       },
     });
   } catch (error) {
@@ -83,7 +91,7 @@ export async function commitHostedExecutionResult(input: {
 
 export async function collectHostedAssistantDeliverySideEffects(
   vaultRoot: string,
-): Promise<HostedAssistantDeliverySideEffect[]> {
+): Promise<HostedAssistantDeliveryEffect[]> {
   const now = new Date();
   const intents = await listAssistantOutboxIntents(vaultRoot);
 
@@ -91,9 +99,9 @@ export async function collectHostedAssistantDeliverySideEffects(
     .filter((intent: Awaited<ReturnType<typeof listAssistantOutboxIntents>>[number]) =>
       shouldDispatchAssistantOutboxIntent(intent, now),
     )
-    .slice(0, HOSTED_MAX_COMMITTED_SIDE_EFFECTS)
+    .slice(0, HOSTED_MAX_COMMITTED_ASSISTANT_DELIVERY_EFFECTS)
     .map((intent: Awaited<ReturnType<typeof listAssistantOutboxIntents>>[number]) =>
-      buildHostedAssistantDeliverySideEffect({
+      buildHostedAssistantDeliveryEffect({
         dedupeKey: intent.dedupeKey,
         intentId: intent.intentId,
       }),
@@ -102,34 +110,40 @@ export async function collectHostedAssistantDeliverySideEffects(
 
 export const collectHostedExecutionSideEffects = collectHostedAssistantDeliverySideEffects;
 
-export async function drainHostedCommittedSideEffectsAfterCommit(input: {
+export async function drainHostedCommittedAssistantDeliveriesAfterCommit(input: {
   commit: HostedExecutionCommitCallback | null;
   dispatch: HostedExecutionDispatchRequest;
   effectsPort: HostedRuntimeEffectsPort;
-  sideEffects: HostedAssistantDeliverySideEffect[];
+  assistantDeliveryEffects?: HostedAssistantDeliveryEffect[];
+  sideEffects?: HostedAssistantDeliveryEffect[];
   vaultRoot: string;
 }): Promise<void> {
-  for (const sideEffect of input.sideEffects) {
-    await dispatchHostedCommittedSideEffect({
+  const assistantDeliveryEffects = input.assistantDeliveryEffects ?? input.sideEffects ?? [];
+
+  for (const assistantDeliveryEffect of assistantDeliveryEffects) {
+    await dispatchHostedCommittedAssistantDelivery({
       commit: input.commit,
       effectsPort: input.effectsPort,
-      sideEffect,
+      assistantDeliveryEffect,
       userId: input.dispatch.event.userId,
       vaultRoot: input.vaultRoot,
     });
   }
 }
 
-async function dispatchHostedCommittedSideEffect(input: {
+export const drainHostedCommittedSideEffectsAfterCommit =
+  drainHostedCommittedAssistantDeliveriesAfterCommit;
+
+async function dispatchHostedCommittedAssistantDelivery(input: {
   commit: HostedExecutionCommitCallback;
   effectsPort: HostedRuntimeEffectsPort;
-  sideEffect: HostedAssistantDeliverySideEffect;
+  assistantDeliveryEffect: HostedAssistantDeliveryEffect;
   userId: string;
   vaultRoot: string;
 } | {
   commit: null;
   effectsPort: HostedRuntimeEffectsPort;
-  sideEffect: HostedAssistantDeliverySideEffect;
+  assistantDeliveryEffect: HostedAssistantDeliveryEffect;
   userId: string;
   vaultRoot: string;
 }): Promise<void> {
@@ -145,7 +159,7 @@ async function dispatchHostedCommittedSideEffect(input: {
           userId: input.userId,
         })
       : undefined,
-    intentId: input.sideEffect.intentId,
+    intentId: input.assistantDeliveryEffect.intentId,
     vault: input.vaultRoot,
   });
 }
@@ -164,7 +178,7 @@ function createHostedAssistantDeliveryDispatchHooks(input: {
         commit: input.commit,
         effectsPort: input.effectsPort,
         method: "DELETE",
-        sideEffect: buildHostedAssistantDeliverySideEffect({
+        sideEffect: buildHostedAssistantDeliveryEffect({
           dedupeKey: intent.dedupeKey,
           intentId: intent.intentId,
         }),
@@ -204,7 +218,7 @@ function createHostedAssistantDeliveryDispatchHooks(input: {
       intent: AssistantOutboxIntent;
       vault: string;
     }) => {
-      const sideEffect = buildHostedAssistantDeliverySideEffect({
+      const sideEffect = buildHostedAssistantDeliveryEffect({
         dedupeKey: intent.dedupeKey,
         intentId: intent.intentId,
       });
@@ -314,7 +328,7 @@ async function callHostedAssistantDeliveryJournal(input:
       commit: HostedExecutionCommitCallback;
       effectsPort: HostedRuntimeEffectsPort;
       method: "DELETE" | "GET";
-      sideEffect: HostedAssistantDeliverySideEffect;
+      sideEffect: HostedAssistantDeliveryEffect;
       userId: string;
     }
   | {
@@ -325,7 +339,7 @@ async function callHostedAssistantDeliveryJournal(input:
       userId: string;
     }): Promise<HostedAssistantDeliveryRecord | null> {
   const sideEffect = input.method === "PUT"
-    ? buildHostedAssistantDeliverySideEffect({
+    ? buildHostedAssistantDeliveryEffect({
         dedupeKey: input.record.fingerprint,
         intentId: input.record.intentId,
       })
@@ -353,7 +367,7 @@ async function callHostedAssistantDeliveryJournal(input:
 
 async function deletePreparedAssistantDelivery(
   effectsPort: HostedRuntimeEffectsPort,
-  input: Pick<HostedAssistantDeliverySideEffect, "effectId" | "fingerprint">,
+  input: Pick<HostedAssistantDeliveryEffect, "effectId" | "fingerprint">,
 ): Promise<void> {
   const deletePrepared =
     effectsPort.deletePreparedAssistantDelivery ?? effectsPort.deletePreparedSideEffect;
@@ -367,7 +381,7 @@ async function deletePreparedAssistantDelivery(
 
 async function readAssistantDeliveryRecord(
   effectsPort: HostedRuntimeEffectsPort,
-  input: Pick<HostedAssistantDeliverySideEffect, "effectId" | "fingerprint">,
+  input: Pick<HostedAssistantDeliveryEffect, "effectId" | "fingerprint">,
 ): Promise<HostedAssistantDeliveryRecord | null> {
   const readRecord = effectsPort.readAssistantDeliveryRecord ?? effectsPort.readSideEffect;
 
@@ -438,7 +452,7 @@ function createHostedAssistantDeliveryJournalError(
   input:
     | {
         method: "DELETE" | "GET";
-        sideEffect: HostedAssistantDeliverySideEffect;
+        sideEffect: HostedAssistantDeliveryEffect;
         userId: string;
       }
     | {

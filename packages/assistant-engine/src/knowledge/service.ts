@@ -6,6 +6,14 @@ import { loadIntegratedRuntime } from '@murphai/vault-usecases/runtime'
 import {
   DERIVED_KNOWLEDGE_INDEX_PATH,
   DERIVED_KNOWLEDGE_LOG_PATH,
+  type KnowledgeGetResult,
+  type KnowledgeIndexRebuildResult,
+  type KnowledgeListResult,
+  type KnowledgeLogTailResult,
+  type KnowledgeLintProblem,
+  type KnowledgeLintResult,
+  type KnowledgeSearchResult,
+  type KnowledgeUpsertResult,
   normalizeKnowledgeSlug,
   normalizeKnowledgeTag,
   orderedUniqueStrings,
@@ -32,17 +40,6 @@ import {
   toKnowledgeMetadata,
   toKnowledgePage,
 } from './documents.js'
-import {
-  type KnowledgeGetResult,
-  type KnowledgeIndexRebuildResult,
-  type KnowledgeLogTailResult,
-  type KnowledgeLintProblem,
-  type KnowledgeLintResult,
-  type KnowledgeListResult,
-  type KnowledgeSearchResult,
-  type KnowledgeUpsertResult,
-} from './contracts.js'
-
 const DEFAULT_KNOWLEDGE_PAGE_TYPE = 'concept'
 const DEFAULT_KNOWLEDGE_STATUS = 'active'
 const FORBIDDEN_KNOWLEDGE_SOURCE_ROOTS = ['derived', '.runtime', 'assistant-state'] as const

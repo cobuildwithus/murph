@@ -176,6 +176,36 @@ export {
   summarizeKnowledgeBody,
 } from "./knowledge-model.ts";
 export {
+  knowledgeGetResultSchema,
+  knowledgeIndexRebuildResultSchema,
+  knowledgeLintProblemSchema,
+  knowledgeLintResultSchema,
+  knowledgeListResultSchema,
+  knowledgeLogEntrySchema,
+  knowledgeLogTailResultSchema,
+  knowledgePageMetadataSchema,
+  knowledgePageReferenceSchema,
+  knowledgePageSchema,
+  knowledgeSearchHitSchema,
+  knowledgeSearchResultSchema,
+  knowledgeUpsertResultSchema,
+} from "./knowledge-contracts.ts";
+export type {
+  KnowledgeGetResult,
+  KnowledgeIndexRebuildResult,
+  KnowledgeLintProblem,
+  KnowledgeLintResult,
+  KnowledgeListResult,
+  KnowledgeLogEntry,
+  KnowledgeLogTailResult,
+  KnowledgePage,
+  KnowledgePageMetadata,
+  KnowledgePageReference,
+  KnowledgeSearchHit,
+  KnowledgeSearchResult,
+  KnowledgeUpsertResult,
+} from "./knowledge-contracts.ts";
+export {
   renderKnowledgePageBody,
   stripGeneratedKnowledgeSections,
   stripKnowledgeLeadingHeading,

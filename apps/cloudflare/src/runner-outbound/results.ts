@@ -2,7 +2,7 @@ import { parseHostedEmailSendRequest } from "@murphai/assistant-runtime";
 import {
   HOSTED_EXECUTION_RUNNER_EMAIL_SEND_PATH,
   parseHostedAssistantDeliveryRecord,
-  parseHostedAssistantDeliverySideEffects,
+  parseHostedAssistantDeliveryEffects,
   parseHostedExecutionBundlePayload,
   parseHostedExecutionBundleRef,
   type HostedExecutionBundleRef,
@@ -281,7 +281,9 @@ function parseHostedExecutionCommitRequest(payload: Record<string, unknown>): Ho
       nextWakeAt: readOptionalString(result.nextWakeAt, "result.nextWakeAt"),
       summary: requireString(result.summary, "result.summary"),
     },
-    sideEffects: parseHostedAssistantDeliverySideEffects(payload.sideEffects),
+    assistantDeliveryEffects: parseHostedAssistantDeliveryEffects(
+      payload.assistantDeliveryEffects ?? payload.sideEffects,
+    ),
   };
 }
 

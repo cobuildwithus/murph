@@ -875,7 +875,32 @@ function readHostedWebhookSideEffectUpsertCalls(prisma: object | null | undefine
     };
   }).hostedWebhookReceiptSideEffect;
 
-  return (hostedWebhookReceiptSideEffect?.upsert?.mock?.calls ?? []).map(
-    (call) => ((call[0] as Record<string, unknown> | undefined) ?? {}),
+  return (hostedWebhookReceiptSideEffect?.upsert?.mock?.calls ?? []).map((call) =>
+    normalizeHostedWebhookSideEffectUpsertCall(
+      ((call[0] as Record<string, unknown> | undefined) ?? {}),
+    )
   );
+}
+
+function normalizeHostedWebhookSideEffectUpsertCall(
+  call: Record<string, unknown>,
+): Record<string, unknown> {
+  return {
+    ...call,
+    create: normalizeHostedWebhookSideEffectRecord(call.create),
+    update: normalizeHostedWebhookSideEffectRecord(call.update),
+  };
+}
+
+function normalizeHostedWebhookSideEffectRecord(value: unknown): Record<string, unknown> | unknown {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return value;
+  }
+
+  const record = value as Record<string, unknown>;
+
+  return {
+    ...record,
+    dispatchPayloadJson: record.kind === "hosted_execution_dispatch" ? record.payloadJson ?? null : null,
+  };
 }

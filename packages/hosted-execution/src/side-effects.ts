@@ -4,9 +4,14 @@ import {
 } from "@murphai/gateway-core";
 
 export const HOSTED_ASSISTANT_DELIVERY_KIND = "assistant.delivery" as const;
+export const HOSTED_ASSISTANT_DELIVERY_EFFECT_KIND =
+  HOSTED_ASSISTANT_DELIVERY_KIND;
 
 export const hostedAssistantDeliveryTargetKindValues =
   gatewayDeliveryTargetKindValues;
+export const HOSTED_ASSISTANT_DELIVERY_KINDS = [
+  HOSTED_ASSISTANT_DELIVERY_KIND,
+] as const;
 
 export const HOSTED_EXECUTION_SIDE_EFFECT_KINDS = [
   HOSTED_ASSISTANT_DELIVERY_KIND,
@@ -18,6 +23,8 @@ export const hostedAssistantDeliveryRecordStateValues = [
 ] as const;
 
 export const HOSTED_EXECUTION_SIDE_EFFECT_RECORD_STATES =
+  hostedAssistantDeliveryRecordStateValues;
+export const HOSTED_ASSISTANT_DELIVERY_RECORD_STATES =
   hostedAssistantDeliveryRecordStateValues;
 
 export type HostedAssistantDeliveryKind = typeof HOSTED_ASSISTANT_DELIVERY_KIND;
@@ -37,6 +44,7 @@ export interface HostedAssistantDeliverySideEffect {
   kind: HostedAssistantDeliveryKind;
 }
 
+export type HostedAssistantDeliveryEffect = HostedAssistantDeliverySideEffect;
 export type HostedExecutionSideEffect = HostedAssistantDeliverySideEffect;
 
 export interface HostedAssistantDeliveryReceipt {
@@ -50,6 +58,7 @@ export interface HostedAssistantDeliveryReceipt {
   targetKind: HostedAssistantDeliveryTargetKind;
 }
 
+export type HostedAssistantDelivery = HostedAssistantDeliveryReceipt;
 export type HostedExecutionAssistantDelivery = HostedAssistantDeliveryReceipt;
 
 interface HostedAssistantDeliveryRecordBase {
@@ -94,6 +103,9 @@ export function buildHostedAssistantDeliverySideEffect(input: {
     kind: HOSTED_ASSISTANT_DELIVERY_KIND,
   };
 }
+
+export const buildHostedAssistantDeliveryEffect =
+  buildHostedAssistantDeliverySideEffect;
 
 export function buildHostedAssistantDeliveryPreparedRecord(input: {
   dedupeKey: string;
@@ -233,6 +245,9 @@ export function parseHostedAssistantDeliverySideEffect(
   };
 }
 
+export const parseHostedAssistantDeliveryEffect =
+  parseHostedAssistantDeliverySideEffect;
+
 export function parseHostedAssistantDeliverySideEffects(
   value: unknown,
 ): HostedAssistantDeliverySideEffect[] {
@@ -242,6 +257,9 @@ export function parseHostedAssistantDeliverySideEffects(
 
   return value.map((entry) => parseHostedAssistantDeliverySideEffect(entry));
 }
+
+export const parseHostedAssistantDeliveryEffects =
+  parseHostedAssistantDeliverySideEffects;
 
 export function parseHostedAssistantDeliveryRecord(
   value: unknown,

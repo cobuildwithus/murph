@@ -509,6 +509,7 @@ describe("HostedUserRunner", () => {
       keyId: environment.platformEnvelopeKeyId,
     });
     const committedResult = {
+      assistantDeliveryEffects: [],
       bundleRef: null,
       committedAt: "2026-03-27T00:00:00.000Z",
       eventId: "evt_roundtrip",
@@ -1912,6 +1913,7 @@ describe("HostedUserRunner", () => {
         const requestBody = JSON.parse(String(init?.body));
         expect(readRunnerJobRequest(requestBody).resume).toEqual({
           committedResult: {
+            assistantDeliveryEffects: sideEffects,
             result: committedPayload.result,
             sideEffects,
           },

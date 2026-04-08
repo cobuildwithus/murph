@@ -45,7 +45,13 @@ export function resolveDeviceSyncDaemonBinPath(
 }
 
 export function resolveInstalledDeviceSyncPackageEntry(): string {
-  return resolveNodeRequire().resolve('@murphai/device-syncd')
+  try {
+    return resolveNodeRequire().resolve('@murphai/device-syncd')
+  } catch {
+    return createRequire(
+      new URL('../../../../package.json', import.meta.url),
+    ).resolve('@murphai/device-syncd')
+  }
 }
 
 function resolveNodeRequire(): NodeJS.Require {
