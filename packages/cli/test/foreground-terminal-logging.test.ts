@@ -13,7 +13,7 @@ import {
   formatInboxRunEventForTerminal,
   resolveForegroundTerminalLogOptions,
   UNSAFE_FOREGROUND_LOG_DETAILS_ENV,
-} from '@murphai/assistant-cli/run-terminal-logging'
+} from '../src/foreground-terminal-logging.js'
 
 function createCapture(
   overrides: Partial<RuntimeCaptureRecordInput> = {},
@@ -125,7 +125,7 @@ test('assistant reply events respect unsafe detail mode and provider progress su
         details: 'tool invocation in progress',
       }),
     ),
-    'reply-progress cap-01: tool invocation in progress',
+    'reply-progress cap-01: assistant provider turn is using tools',
   )
   assert.equal(
     formatAssistantRunEventForTerminal(
@@ -159,7 +159,7 @@ test('assistant terminal logging covers routed, failure, skipped, replied, and d
         details: 'provider rejected the turn',
       }),
     ),
-    'failed cap-fail',
+    'failed cap-fail: assistant processing failed',
   )
   assert.equal(
     formatAssistantRunEventForTerminal(
@@ -168,7 +168,7 @@ test('assistant terminal logging covers routed, failure, skipped, replied, and d
         captureId: 'cap-skip',
       }),
     ),
-    'skipped cap-skip',
+    'skipped cap-skip: assistant processing skipped',
   )
   assert.equal(
     formatAssistantRunEventForTerminal(
@@ -188,7 +188,7 @@ test('assistant terminal logging covers routed, failure, skipped, replied, and d
         details: 'lost inbox runtime lease',
       }),
     ),
-    'inbox daemon failed lost inbox runtime lease',
+    'inbox daemon failed: lost inbox runtime lease',
   )
 })
 
@@ -317,7 +317,7 @@ test('inbox imported-capture summaries handle attachment-only and empty payloads
         }),
       }),
     ),
-    'new agentmail capture imported: 1 attachment',
+    'new AgentMail capture imported: 1 attachment',
   )
   assert.equal(
     formatInboxRunEventForTerminal(

@@ -58,8 +58,8 @@ import {
   executeAssistantProviderTurnAttempt,
   executeAssistantProviderTurn,
   resolveAssistantProviderCapabilities,
-  prepareAssistantDirectCliEnv,
 } from '@murphai/assistant-engine/assistant-provider'
+import { prepareAssistantDirectCliEnv } from '@murphai/assistant-engine/assistant-cli-access'
 import {
   defaultDiscoverOpenAICompatibleModels,
   type AssistantModelDiscoveryResult,

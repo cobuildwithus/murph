@@ -47,6 +47,7 @@
     "gen:config-schema": "tsx ./scripts/generate-incur-config-schema.ts",
     "typecheck": "tsc -p tsconfig.typecheck.json --pretty false",
     "test": "pnpm --dir ../.. build:test-runtime:prepared && tsx ./scripts/verify-package-shape.ts && MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 pnpm --dir ../.. exec vitest run --config packages/cli/vitest.workspace.ts --no-coverage",
+    "test:coverage": "pnpm --dir ../.. build:test-runtime:prepared && tsx ./scripts/verify-package-shape.ts && MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 pnpm --dir ../.. exec vitest run --config packages/cli/vitest.workspace.ts --coverage",
     "prepack": "pnpm build"
   },
   "dependencies": {

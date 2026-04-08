@@ -19,7 +19,7 @@ import {
 } from '@murphai/operator-config/operator-config'
 import {
   createProviderTurnAssistantToolCatalog,
-} from '@murphai/assistant-engine/assistant-provider'
+} from '@murphai/assistant-engine/assistant-cli-tools'
 import {
   assistantMemoryTurnEnvKeys,
 } from '@murphai/assistant-engine/assistant/memory'
