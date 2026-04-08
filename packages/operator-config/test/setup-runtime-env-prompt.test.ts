@@ -6,8 +6,6 @@ import { importWithMocks } from './import-with-mocks.ts'
 
 afterEach(() => {
   vi.restoreAllMocks()
-  vi.resetModules()
-  vi.doUnmock('node:readline')
 })
 
 test('setup runtime resolver prompts for missing keys in deterministic order and skips blank answers', async () => {
