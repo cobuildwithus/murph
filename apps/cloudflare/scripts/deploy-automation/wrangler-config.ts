@@ -37,6 +37,7 @@ export function buildHostedWranglerDeployConfig(
       {
         class_name: "RunnerContainer",
         image: "../../../Dockerfile.cloudflare-hosted-runner",
+        image_build_context: "..",
         instance_type: environment.containerInstanceType,
         max_instances: environment.containerMaxInstances,
       },
