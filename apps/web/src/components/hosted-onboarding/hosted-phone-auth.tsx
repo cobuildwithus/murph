@@ -81,6 +81,13 @@ interface PendingInvitePhoneCodeMutation {
   sendAttemptId: string;
 }
 
+interface HostedPhoneAuthPhoneEntryVisibilityInput {
+  authenticated: boolean;
+  manualEntryVisible: boolean;
+  mode: HostedPhoneAuthProps["mode"];
+  step: "phone" | "code";
+}
+
 const HOSTED_PHONE_COUNTRY_OPTIONS: HostedPhoneCountryOption[] = [
   { code: "US", dialCode: "+1", label: "United States", placeholder: "(415) 555-2671" },
   { code: "CA", dialCode: "+1", label: "Canada", placeholder: "(416) 555-0123" },
@@ -148,6 +155,12 @@ function HostedPhoneAuthInner({
     showAuthenticatedLoadingState,
   });
   const showInviteSendCodeShortcut = !authenticated && mode === "invite" && step === "phone" && !manualEntryVisible;
+  const showPhoneNumberEntry = shouldShowHostedPhoneNumberEntry({
+    authenticated,
+    manualEntryVisible,
+    mode,
+    step,
+  });
   const authenticatedLoadingTitle =
     checkingAuthenticatedSession
       ? "Checking your setup..."
@@ -424,7 +437,7 @@ function HostedPhoneAuthInner({
         </div>
       ) : null}
 
-      {authenticated || showInviteSendCodeShortcut ? null : (
+      {showPhoneNumberEntry ? (
         <div className="space-y-3">
           <Label htmlFor={`hosted-phone-${mode}`}>
             {mode === "invite" ? "Phone number" : "Your phone number"}
@@ -479,7 +492,7 @@ function HostedPhoneAuthInner({
             </p>
           ) : null}
         </div>
-      )}
+      ) : null}
 
       {!authenticated && step === "code" ? (
         <div className="space-y-3">
@@ -587,6 +600,20 @@ function HostedPhoneAuthInner({
       )}
     </div>
   );
+}
+
+export function shouldShowHostedPhoneNumberEntry(
+  input: HostedPhoneAuthPhoneEntryVisibilityInput,
+): boolean {
+  if (input.authenticated) {
+    return false;
+  }
+
+  if (input.mode === "invite" && !input.manualEntryVisible) {
+    return input.step === "phone";
+  }
+
+  return true;
 }
 
 async function readLatestAuthenticatedSessionIssue(input: {
