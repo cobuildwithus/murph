@@ -29,6 +29,7 @@ import {
   withPrependedPath,
 } from '../src/setup-services/toolchain.ts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import { resolveAssistantStatePaths } from '@murphai/assistant-engine/assistant-state'
 import {
   listSetupPendingWearables,
   listSetupReadyWearables,
@@ -311,13 +312,7 @@ test('setup scheduling helpers respect terminal gating and launch routing', () =
 
 test('setup wizard initial channels reuse saved automation channels and fall back when none are saved', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'setup-cli-vault-'))
-  const automationStatePath = path.join(
-    vaultRoot,
-    '.runtime',
-    'operations',
-    'assistant',
-    'automation-state.json',
-  )
+  const automationStatePath = resolveAssistantStatePaths(vaultRoot).automationStatePath
 
   try {
     assert.deepEqual(
