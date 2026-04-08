@@ -109,7 +109,6 @@ test('device sync client covers non-loopback passthrough and browser-open failur
     (error) => error instanceof TypeError,
   )
 
-  vi.resetModules()
   const spawn = vi.fn(() => {
     throw new Error('missing browser launcher')
   })
