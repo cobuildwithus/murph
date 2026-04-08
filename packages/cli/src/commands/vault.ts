@@ -13,7 +13,7 @@ import {
   vaultUpgradeResultSchema,
   vaultValidateResultSchema,
 } from '@murphai/operator-config/vault-cli-contracts'
-import type { VaultServices } from '@murphai/assistant-engine/vault-services'
+import type { VaultServices } from '@murphai/vault-usecases/vault-services'
 
 const vaultShowResultSchema = z.object({
   vault: pathSchema,

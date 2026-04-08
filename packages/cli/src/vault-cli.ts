@@ -3,11 +3,12 @@ import { Cli } from 'incur'
 import {
   createIntegratedVaultServices,
   type VaultServices,
-} from '@murphai/assistant-engine/vault-services'
+} from '@murphai/vault-usecases/vault-services'
+import { createAssistantFoodAutoLogHooks } from '@murphai/assistant-engine/assistant-cron'
 import {
   createIntegratedInboxServices,
   type InboxServices,
-} from '@murphai/assistant-engine/inbox-services'
+} from '@murphai/inbox-services'
 import { incurErrorBridge } from './incur-error-bridge.js'
 import { registerVaultCliCommandDescriptors } from './vault-cli-command-manifest.js'
 
@@ -29,7 +30,9 @@ const CLI_CONFIG_FILES = [
 ] as const
 
 export function createVaultCli(
-  services: VaultServices = createIntegratedVaultServices(),
+  services: VaultServices = createIntegratedVaultServices({
+    foodAutoLogHooks: createAssistantFoodAutoLogHooks(),
+  }),
   inboxServices: InboxServices = createIntegratedInboxServices(),
 ): Cli.Cli {
   const cli = Cli.create('vault-cli', {

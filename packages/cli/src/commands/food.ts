@@ -8,12 +8,8 @@ import {
   pathSchema,
   showResultSchema,
 } from '@murphai/operator-config/vault-cli-contracts'
-import type { VaultServices } from '@murphai/assistant-engine/vault-services'
-import { dailyFoodTimeSchema } from '@murphai/assistant-engine/usecases/food-autolog'
-import {
-  deleteFoodRecord,
-  editFoodRecord,
-} from '@murphai/assistant-engine/usecases/food'
+import type { VaultServices } from '@murphai/vault-usecases/vault-services'
+import { dailyFoodTimeSchema } from '@murphai/vault-usecases/usecases/food-autolog'
 import { createRegistryDocEntityGroup } from './health-command-factory.js'
 import {
   createDirectEntityDeleteCommandDefinition,
@@ -205,8 +201,9 @@ export function registerFoodCommands(cli: Cli.Cli, services: VaultServices) {
     description:
       'Edit one food by merging a partial JSON patch or one or more path assignments into the saved record.',
     run(input) {
-      return editFoodRecord({
+      return services.core.editFood({
         vault: input.vault,
+        requestId: input.requestId,
         lookup: input.lookup,
         inputFile: input.inputFile,
         set: input.set,
@@ -222,8 +219,9 @@ export function registerFoodCommands(cli: Cli.Cli, services: VaultServices) {
     },
     description: 'Delete one remembered food Markdown record.',
     run(input) {
-      return deleteFoodRecord({
+      return services.core.deleteFood({
         vault: input.vault,
+        requestId: input.requestId,
         lookup: input.lookup,
       })
     },

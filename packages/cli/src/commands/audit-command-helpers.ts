@@ -10,9 +10,9 @@ import {
   toCommandShowEntity,
   type AuditCommandListItem,
   type CommandShowEntity,
-} from '@murphai/assistant-engine/commands/query-record-command-helpers'
+} from '@murphai/vault-usecases/commands/query-record-command-helpers'
 
-export type { AuditCommandListItem } from '@murphai/assistant-engine/commands/query-record-command-helpers'
+export type { AuditCommandListItem } from '@murphai/vault-usecases/commands/query-record-command-helpers'
 
 export type AuditSortOrder = 'asc' | 'desc'
 

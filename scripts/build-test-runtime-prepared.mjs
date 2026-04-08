@@ -7,30 +7,55 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const cliSourceRoot = path.join(repoRoot, "packages/cli/src");
-const requiredWorkspaceSmokeSubpathsByPackage = {
-  "operator-config": [
-    "command-helpers",
-    "vault-cli-contracts",
-    "vault-cli-errors",
-  ],
-  "assistant-engine": [
-    "inbox-services",
-    "knowledge",
-    "usecases/intervention",
-    "usecases/workout",
-    "usecases/workout-format",
-    "usecases/workout-import",
-    "usecases/workout-measurement",
-    "vault-services"
-  ],
-  "assistant-cli": [
-    "commands/assistant",
-    "run-terminal-logging",
-  ],
-  "setup-cli": [
-    "setup-cli",
-  ],
-};
+const workspaceSmokePackages = [
+  {
+    packageName: "operator-config",
+    requiredSubpaths: [
+      "command-helpers",
+      "vault-cli-contracts",
+      "vault-cli-errors",
+    ],
+  },
+  {
+    packageName: "assistant-engine",
+    requiredSubpaths: [
+      "assistant-cron",
+      "inbox-model-contracts",
+      "inbox-model-harness",
+      "knowledge",
+    ],
+  },
+  {
+    packageName: "vault-usecases",
+    requiredSubpaths: [
+      "option-utils",
+      "usecases/intervention",
+      "usecases/workout",
+      "usecases/workout-format",
+      "usecases/workout-import",
+      "usecases/workout-measurement",
+      "vault-services",
+    ],
+  },
+  {
+    packageName: "assistant-cli",
+    requiredSubpaths: [
+      "commands/assistant",
+      "run-terminal-logging",
+    ],
+  },
+  {
+    packageName: "setup-cli",
+    requiredSubpaths: [
+      "setup-cli",
+    ],
+  },
+  {
+    packageName: "inbox-services",
+    requiredSubpaths: [],
+    allowRootOnly: true,
+  },
+];
 const baseSmokeImportPaths = [
   "packages/contracts/dist/index.js",
   "packages/hosted-execution/dist/index.js",
@@ -50,13 +75,10 @@ const baseSmokeImportPaths = [
   "packages/cli/dist/index.js",
   "packages/cli/dist/cli-entry.js",
 ].map((relativePath) => path.join(repoRoot, relativePath));
-const ownerPackageSmokeImports = Object.entries(
-  requiredWorkspaceSmokeSubpathsByPackage,
-).map(([packageName, requiredSubpaths]) =>
+const ownerPackageSmokeImports = workspaceSmokePackages.map((input) =>
   collectWorkspacePackageSmokeImports({
-    packageName,
-    requiredSubpaths,
     sourceRoot: cliSourceRoot,
+    ...input,
   }),
 );
 const ownerPackageSmokeImportPaths = ownerPackageSmokeImports.flatMap(
@@ -141,6 +163,12 @@ function collectWorkspacePackageSmokeImports(input) {
   }
 
   if (subpaths.size === 0) {
+    if (input.allowRootOnly === true && workspacePackageAllowsRootSpecifier(packageJson)) {
+      return {
+        distImportPaths: [path.join(distRoot, "index.js")],
+        publishedImportSpecifiers: [`@murphai/${input.packageName}`],
+      };
+    }
     throw new Error(
       `Expected packages/cli/src to import at least one @murphai/${input.packageName} subpath.`,
     );

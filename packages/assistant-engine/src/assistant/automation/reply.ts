@@ -1,7 +1,7 @@
 import type { AssistantAutomationCursor } from '../../assistant-cli-contracts.js'
 import { createDefaultLocalAssistantModelTarget } from '@murphai/operator-config/assistant-backend'
 import type { InboxShowResult } from '@murphai/operator-config/inbox-cli-contracts'
-import type { InboxServices } from '../../inbox-services.js'
+import type { InboxServices } from '@murphai/inbox-services'
 import type { AssistantUserMessageContentPart } from '../../model-harness.js'
 import { getAssistantChannelAdapter } from '../channel-adapters.js'
 import { conversationRefFromCapture } from '../conversation-ref.js'

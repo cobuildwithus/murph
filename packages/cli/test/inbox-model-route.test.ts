@@ -4,7 +4,7 @@ import path from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, test, vi } from 'vitest'
 import type { InboxShowResult } from '@murphai/operator-config/inbox-cli-contracts'
-import type { InboxServices } from '@murphai/assistant-engine/inbox-services'
+import type { InboxServices } from '@murphai/inbox-services'
 
 const routeHarnessMocks = vi.hoisted(() => ({
   generateAssistantObject: vi.fn(),

@@ -23,6 +23,12 @@
       "path": "./packages/assistant-engine"
     },
     {
+      "path": "./packages/vault-usecases"
+    },
+    {
+      "path": "./packages/inbox-services"
+    },
+    {
       "path": "./packages/core/tsconfig.build.json"
     },
     {
@@ -42,6 +48,9 @@
     },
     {
       "path": "./packages/assistant-cli"
+    },
+    {
+      "path": "./packages/assistantd"
     },
     {
       "path": "./packages/setup-cli"

@@ -1,0 +1,52 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "paths": {
+      "@murphai/vault-usecases": [
+        "packages/vault-usecases/src/index.ts"
+      ],
+      "@murphai/vault-usecases/query-runtime": [
+        "packages/vault-usecases/src/query-runtime.ts"
+      ],
+      "@murphai/vault-usecases/runtime-import": [
+        "packages/vault-usecases/src/runtime-import.ts"
+      ],
+      "@murphai/vault-usecases/usecases/types": [
+        "packages/vault-usecases/src/usecases/types.ts"
+      ],
+      "@murphai/vault-usecases/usecases/vault-usecase-helpers": [
+        "packages/vault-usecases/src/usecases/vault-usecase-helpers.ts"
+      ],
+      "@murphai/vault-usecases/*": [
+        "packages/vault-usecases/src/*"
+      ]
+    },
+    "rootDir": "../..",
+    "composite": false,
+    "incremental": false
+  },
+  "references": [
+    {
+      "path": "../contracts/tsconfig.build.json"
+    },
+    {
+      "path": "../core/tsconfig.build.json"
+    },
+    {
+      "path": "../operator-config"
+    },
+    {
+      "path": "../runtime-state"
+    },
+    {
+      "path": "../inboxd"
+    }
+  ],
+  "include": [
+    "src/**/*.ts"
+  ],
+  "exclude": [
+    "dist"
+  ]
+}

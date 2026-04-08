@@ -18,7 +18,7 @@ import type {
   HealthListInput,
   HealthQueryServiceMethods,
   JsonFileInput,
-} from "../health-cli-method-types.js";
+} from "@murphai/vault-usecases/health-cli-method-types";
 import type {
   CoreRuntimeModule,
   CoreWriteServices,

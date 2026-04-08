@@ -12,13 +12,13 @@ import { VaultCliError } from "@murphai/operator-config/vault-cli-errors"
 import {
   inferHealthEntityKind,
   isHealthQueryableRecordId,
-} from "../health-cli-descriptors.js"
-import { loadJsonInputObject } from "../json-input.js"
+} from "@murphai/vault-usecases/health-cli-descriptors"
+import { loadJsonInputObject } from "@murphai/vault-usecases/json-input"
 import {
   describeQueryLookupConstraint,
   inferQueryIdEntityKind,
   isQueryableQueryLookupId,
-} from "../query-runtime.js"
+} from "@murphai/vault-usecases/query-runtime"
 import {
   applyRecordPatch,
   type JsonObject as RecordMutationJsonObject,
@@ -26,7 +26,7 @@ import {
 
 import type {
   HealthEntityEnvelope,
-} from "../health-cli-method-types.js"
+} from "@murphai/vault-usecases/health-cli-method-types"
 import type { VaultValidateResult } from "@murphai/operator-config/vault-cli-contracts"
 import type {
   QueryEntity,
@@ -220,6 +220,7 @@ export function requirePayloadObjectField(payload: JsonObject, fieldName: string
 
   return value
 }
+
 
 export function asEntityEnvelope(
   vault: string,

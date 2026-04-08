@@ -8,7 +8,7 @@ import type {
   EventDraftByKind,
 } from '@murphai/core'
 
-import { loadRuntimeModule } from '../runtime-import.js'
+import { loadRuntimeModule } from '@murphai/vault-usecases/runtime-import'
 
 export type ActivitySessionDraftInput = Omit<EventDraftByKind<'activity_session'>, 'kind'>
 export type BodyMeasurementDraftInput = Omit<EventDraftByKind<'body_measurement'>, 'kind'>

@@ -43,7 +43,7 @@ import {
   requestIdFromOptions,
   withBaseOptions,
 } from '@murphai/operator-config/command-helpers'
-import type { InboxServices } from '@murphai/assistant-engine/inbox-services'
+import type { InboxServices } from '@murphai/inbox-services'
 import {
   applyAssistantSelfDeliveryTargetDefaults,
   clearAssistantSelfDeliveryTargets,
@@ -58,7 +58,7 @@ import {
   resolveForegroundTerminalLogOptions,
 } from '../run-terminal-logging.js'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
-import type { VaultServices } from '@murphai/assistant-engine/vault-services'
+import type { VaultServices } from '@murphai/vault-usecases/vault-services'
 import { requestIdSchema } from '@murphai/operator-config/vault-cli-contracts'
 
 const assistantSessionOptionFields = {

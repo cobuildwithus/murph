@@ -1,10 +1,10 @@
 import type { AssistantAutomationCursor } from '../../assistant-cli-contracts.js'
 import type { InboxShowResult } from '@murphai/operator-config/inbox-cli-contracts'
-import type { InboxServices } from '../../inbox-services.js'
+import type { InboxServices } from '@murphai/inbox-services'
 import { routeInboxCaptureWithModel } from '../../inbox-model-harness.js'
 import { shouldBypassParserWaitForRouting } from '../../inbox-routing-vision.js'
 import type { AssistantModelSpec } from '../../model-harness.js'
-import type { VaultServices } from '../../vault-services.js'
+import type { VaultServices } from '@murphai/vault-usecases/vault-services'
 import { errorMessage } from '../shared.js'
 import { assistantResultArtifactExists } from './artifacts.js'
 import {

@@ -17,22 +17,19 @@ This repo now includes:
 - `apps/cloudflare/r2-bundles-lifecycle.json`
 - generated deploy artifacts under `apps/cloudflare/.deploy/`
 - a manual GitHub Actions deploy workflow at `.github/workflows/deploy-cloudflare-hosted.yml`
-- a rollout helper that can either:
-  - upload a new Worker version and create a gradual deployment, or
-  - fall back to a direct `wrangler deploy` for first deploys and Durable Object migrations
+- a deploy helper that drives a direct Worker deploy through the rendered config and secrets payload
 - scripts to render:
   - `wrangler.generated.jsonc`
   - `worker-secrets.json`
 - an R2 lifecycle helper that applies the checked-in transient cleanup rules to the configured bundles buckets
 - explicit Wrangler observability config for Workers Logs and Workers Traces
 - checked-in and generated Wrangler config that declares the four required runtime secrets through Wrangler's experimental `secrets.required` support
-- a smoke-test script that verifies worker health and, when configured with a user id, triggers one manual hosted run and waits for queue drain, `lastRunAt` advance, and durable bundle refs, pinned to the candidate version during gradual rollouts
+- a smoke-test script that verifies worker health and, when configured with a user id, triggers one manual hosted run and waits for queue drain, `lastRunAt` advance, and durable bundle refs
 
 ## What it does not automate yet
 
 - real Cloudflare account provisioning
 - bucket creation
-- automatic promotion from canary to 100% without an operator decision
 - post-deploy application-level smoke scenarios beyond one manual `/run`
 - broader hosted side-effect hardening beyond the current hosted assistant outbox path
 
@@ -55,11 +52,10 @@ Before your first deploy, you still need to do four one-time setup tasks in Clou
 
 The current worker stores only encrypted bundle blobs in R2 and only small coordination state in Durable Object storage.
 
-Cloudflare-specific rollout constraints still apply:
+Cloudflare-specific deploy constraints still apply:
 
 - first deploys must use `wrangler deploy`; `wrangler versions upload` cannot create the service for the first time
 - Durable Object migrations must use `wrangler deploy`; version uploads do not support DO migrations
-- gradual deployments only support one or two active versions, so finish or roll back an existing split before introducing another candidate
 
 ## Required GitHub environment variables and secrets
 
@@ -124,7 +120,7 @@ For Venice as the platform default hosted assistant, set these GitHub environmen
 
 You do not need to set `HOSTED_ASSISTANT_API_KEY_ENV` for that path because the Venice preset resolves it to `VENICE_API_KEY`.
 
-The default container image already installs `ffmpeg`, `pdftotext`, a pinned `whisper.cpp` `whisper-cli`, and the default `base.en` model, and it sets `FFMPEG_COMMAND`, `PDFTOTEXT_COMMAND`, `WHISPER_COMMAND`, and `WHISPER_MODEL_PATH` inside the image. Only set those vars in Worker config when you want to override the baked defaults.
+The default container image already installs `ffmpeg`, `pdftotext`, a pinned `whisper.cpp` `whisper-cli`, and the default `base.en` model, and it sets `FFMPEG_COMMAND`, `PDFTOTEXT_COMMAND`, `WHISPER_COMMAND`, and `WHISPER_MODEL_PATH` inside the image. The app itself is assembled into a built runtime bundle through `pnpm deploy` before the final image stage is copied into place. Only set those vars in Worker config when you want to override the baked defaults.
 
 ### Required environment secrets
 
@@ -264,20 +260,18 @@ pnpm --dir apps/cloudflare worker:deploy -- \
 
 `wrangler deploy` builds the native container image from `Dockerfile.cloudflare-hosted-runner`, pushes it through Cloudflare's deploy path, and deploys the worker. Docker needs to be available on the machine running that command.
 
-### Normal rollouts after the first deploy
+### Normal deploys
 
-Once the Worker already exists and no Durable Object migration is being applied, use the rollout helper so the version upload and deployment stay separate:
+Use the deploy helper so the rendered config, built runtime bundle, and secrets file stay aligned with the actual `wrangler deploy` call:
 
 ```bash
-export HOSTED_EXECUTION_DEPLOYMENT_MODE=gradual
-export HOSTED_EXECUTION_GRADUAL_ROLLOUT_PERCENTAGE=10
 export HOSTED_EXECUTION_INCLUDE_SECRETS=true
 
-pnpm --dir apps/cloudflare deploy:rollout -- --config ./.deploy/wrangler.generated.jsonc
+pnpm --dir apps/cloudflare deploy:worker -- --config ./.deploy/wrangler.generated.jsonc
 ```
 
-The rollout helper uploads a new Worker version, creates a gradual deployment, and writes a deployment result summary under `apps/cloudflare/.deploy/deployment-result.json`.
-It also fails fast if the rendered config introduces a newer Durable Object migration tag than the gradual rollout helper currently allows, so a migration rollout cannot accidentally take the versions/deployments path.
+The deploy helper writes a deployment result summary under `apps/cloudflare/.deploy/deployment-result.json`.
+The underlying script still understands version/deployment splits for manual recovery flows, but the normal operator path is now a direct cut.
 
 ## Cleaning up old container images
 
@@ -301,26 +295,15 @@ Notes:
 - the script keeps the newest tags per repository by reverse lexicographic tag order, so it works best with the default timestamp-style deploy tags
 - deleting an image tag that an older Worker version still references will break rollback to that version
 
-To promote an already-uploaded candidate instead of uploading a new version:
-
-```bash
-export HOSTED_EXECUTION_DEPLOYMENT_MODE=gradual
-export HOSTED_EXECUTION_DEPLOY_VERSION_ID=<candidate-version-id>
-export HOSTED_EXECUTION_GRADUAL_ROLLOUT_PERCENTAGE=100
-
-pnpm --dir apps/cloudflare deploy:rollout -- --config ./.deploy/wrangler.generated.jsonc
-```
-
 Then smoke test the deployed worker:
 
 ```bash
 export HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL=https://hosted-runner-staging.example.workers.dev
 export HOSTED_EXECUTION_SMOKE_USER_ID=member_test_123
-export HOSTED_EXECUTION_SMOKE_VERSION_ID=<candidate-version-id>
 pnpm --dir apps/cloudflare deploy:smoke
 ```
 
-If you do not want the script to trigger a manual hosted run, omit `HOSTED_EXECUTION_SMOKE_USER_ID`. If you are smoke testing a gradual rollout, set `HOSTED_EXECUTION_SMOKE_VERSION_ID` so the health check and manual run are pinned to the candidate version instead of the stable version. The smoke helper now polls `GET /internal/users/:id/status` after `POST /run` and fails if the queue never drains, `lastRunAt` does not advance, or no durable bundle refs exist.
+If you do not want the script to trigger a manual hosted run, omit `HOSTED_EXECUTION_SMOKE_USER_ID`. The smoke helper now polls `GET /internal/users/:id/status` after `POST /run` and fails if the queue never drains, `lastRunAt` does not advance, or no durable bundle refs exist.
 
 ## Using the GitHub Actions workflow
 
@@ -331,9 +314,6 @@ The workflow is intentionally manual (`workflow_dispatch`) so you do not acciden
 Open Actions, then `Deploy Cloudflare Hosted Execution`, and choose:
 
 - `environment`: `staging` or `production`
-- `deployment_mode`: `gradual` for normal rollouts, `direct` for first deploys and Durable Object migration rollouts
-- `gradual_rollout_percentage`: candidate-version traffic percentage for gradual deployments
-- `existing_version_id`: optional already-uploaded version id to promote instead of uploading a fresh version
 - `sync_worker_secrets`: whether to include the rendered Worker secrets file in the upload or deploy command
 - `deploy_worker`: whether to actually deploy the Worker
 - `smoke_user_id`: optional hosted user id to trigger one manual `/run` smoke test
@@ -343,11 +323,12 @@ The workflow does this in order:
 1. checks out the repo
 2. installs pnpm and Node 22
 3. installs workspace dependencies
-4. runs the focused `apps/cloudflare verify` path
-5. renders the generated deploy artifacts
-6. optionally uploads a new Worker version and creates a gradual deployment, or falls back to a direct `wrangler deploy` when `deployment_mode=direct`
-7. runs the worker health and smoke checks, pinning the candidate version during gradual rollouts
-8. writes the uploaded version id, candidate version id, and final traffic split into the GitHub Actions step summary
+4. validates the required deploy environment
+5. prebuilds the workspace and runs the focused `apps/cloudflare verify` path
+6. renders the generated deploy artifacts
+7. optionally runs a direct Worker deploy through the rendered config
+8. runs the worker health and smoke checks
+9. writes the final deployment traffic into the GitHub Actions step summary
 
 ## First production deploy checklist
 

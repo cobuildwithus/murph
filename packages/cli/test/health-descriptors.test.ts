@@ -8,14 +8,14 @@ import { test } from "vitest";
 
 import {
   findHealthDescriptorForLookup,
+  getHealthRegistryCommandMetadata,
   healthEntityDescriptorByKind,
   inferHealthEntityKind,
-} from "@murphai/assistant-engine/health-cli-descriptors";
-import { getHealthRegistryCommandMetadata } from "@murphai/assistant-engine/health-registry-command-metadata";
+} from "@murphai/vault-usecases/health-cli-descriptors";
 import {
   createExplicitHealthCoreServices,
   createExplicitHealthQueryServices,
-} from "@murphai/assistant-engine/usecases/explicit-health-family-services";
+} from "@murphai/vault-usecases/usecases/shared";
 
 test("CLI health descriptors reuse shared taxonomy lookup metadata and scaffold templates", () => {
   for (const definition of healthEntityDefinitions) {

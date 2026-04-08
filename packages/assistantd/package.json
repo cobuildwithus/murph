@@ -32,7 +32,9 @@
     "@murphai/assistant-engine": "workspace:*",
     "@murphai/gateway-core": "workspace:*",
     "@murphai/gateway-local": "workspace:*",
-    "@murphai/runtime-state": "workspace:*"
+    "@murphai/inbox-services": "workspace:*",
+    "@murphai/runtime-state": "workspace:*",
+    "@murphai/vault-usecases": "workspace:*"
   },
   "engines": {
     "node": ">=22.16.0"

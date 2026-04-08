@@ -13,7 +13,7 @@ import {
   showResultSchema,
   slugSchema,
 } from '@murphai/operator-config/vault-cli-contracts'
-import type { VaultServices } from '@murphai/assistant-engine/vault-services'
+import type { VaultServices } from '@murphai/vault-usecases/vault-services'
 import { registerLifecycleEntityGroup } from './health-command-factory.js'
 
 const experimentStatusSchema = z.enum(EXPERIMENT_STATUSES)

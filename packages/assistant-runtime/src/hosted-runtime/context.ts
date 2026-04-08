@@ -6,9 +6,10 @@ import {
   type HostedExecutionDispatchRequest,
 } from "@murphai/hosted-execution";
 import {
-  createIntegratedInboxServices,
-  createIntegratedVaultServices,
+  createAssistantFoodAutoLogHooks,
 } from "@murphai/assistant-engine";
+import { createIntegratedInboxServices } from "@murphai/inbox-services";
+import { createIntegratedVaultServices } from "@murphai/vault-usecases/vault-services";
 import {
   ensureHostedAssistantOperatorDefaults,
   resolveHostedAssistantOperatorDefaultsState,
@@ -76,7 +77,9 @@ export async function bootstrapHostedMemberContext(
   dispatch: HostedExecutionDispatchRequest,
 ): Promise<HostedMemberBootstrapResult> {
   const requestId = dispatch.eventId;
-  const vaultServices = createIntegratedVaultServices();
+  const vaultServices = createIntegratedVaultServices({
+    foodAutoLogHooks: createAssistantFoodAutoLogHooks(),
+  });
   const vaultMetadataPath = path.join(vaultRoot, "vault.json");
   const vaultCreated = !existsSync(vaultMetadataPath);
 

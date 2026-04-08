@@ -10,7 +10,7 @@ import {
   appendProfileSnapshot,
   readCurrentProfile,
 } from '@murphai/core'
-import { loadJsonInputObject } from '../json-input.js'
+import { loadJsonInputObject } from '@murphai/vault-usecases/json-input'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   compactObject,

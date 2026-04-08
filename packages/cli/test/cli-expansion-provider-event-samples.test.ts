@@ -17,7 +17,8 @@ import { registerSamplesCommands } from '../src/commands/samples.js'
 import { registerVaultCommands } from '../src/commands/vault.js'
 import { registerWearablesCommands } from '../src/commands/wearables.js'
 import { registerWorkoutCommands } from '../src/commands/workout.js'
-import { createIntegratedVaultServices } from '@murphai/assistant-engine/vault-services'
+import { createIntegratedVaultServices } from '@murphai/vault-usecases/vault-services'
+import { createAssistantFoodAutoLogHooks } from '@murphai/assistant-engine/assistant-cron'
 import type { CliEnvelope } from './cli-test-helpers.js'
 import { requireData } from './cli-test-helpers.js'
 
@@ -35,7 +36,9 @@ function createSliceCli() {
     version: '0.0.0-test',
   })
   cli.use(incurErrorBridge)
-  const services = createIntegratedVaultServices()
+  const services = createIntegratedVaultServices({
+    foodAutoLogHooks: createAssistantFoodAutoLogHooks(),
+  })
 
   registerVaultCommands(cli, services)
   registerReadCommands(cli, services)

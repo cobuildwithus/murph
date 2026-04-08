@@ -19,7 +19,7 @@ import {
 } from '@murphai/operator-config/operator-config'
 import {
   createProviderTurnAssistantToolCatalog,
-} from '@murphai/assistant-engine/assistant-cli-tools'
+} from '@murphai/assistant-engine/assistant-provider'
 import {
   assistantMemoryTurnEnvKeys,
 } from '@murphai/assistant-engine/assistant/memory'
@@ -28,7 +28,7 @@ import {
   resolveAssistantStatePaths,
 } from '@murphai/assistant-engine/assistant-state'
 import type { AssistantRunEvent } from '@murphai/assistant-engine/assistant/automation/shared'
-import { createIntegratedInboxServices } from '@murphai/assistant-engine/inbox-services'
+import { createIntegratedInboxServices } from '@murphai/inbox-services'
 import { formatAssistantRunEventForTerminal } from '@murphai/assistant-cli/run-terminal-logging'
 import { formatStructuredErrorMessage } from '@murphai/operator-config/text/shared'
 import type { SetupConfiguredAssistant } from '@murphai/operator-config/setup-cli-contracts'
@@ -40,7 +40,7 @@ import {
 } from '../src/vault-cli-command-manifest.js'
 import { registerModelCommands } from '../src/commands/model.js'
 import { createVaultCli } from '../src/vault-cli.js'
-import { createUnwiredVaultServices } from '@murphai/assistant-engine/vault-services'
+import { createUnwiredVaultServices } from '@murphai/vault-usecases/vault-services'
 import {
   requireData,
   runCli,

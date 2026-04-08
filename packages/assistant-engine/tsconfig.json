@@ -17,6 +17,9 @@
       "path": "../hosted-execution"
     },
     {
+      "path": "../inbox-services"
+    },
+    {
       "path": "../device-syncd"
     },
     {
@@ -42,6 +45,9 @@
     },
     {
       "path": "../query"
+    },
+    {
+      "path": "../vault-usecases"
     },
     {
       "path": "../parsers"

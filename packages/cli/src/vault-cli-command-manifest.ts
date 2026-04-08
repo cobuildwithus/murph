@@ -6,13 +6,13 @@ import {
   healthListResultSchema,
   healthShowResultSchema,
   type HealthCommandDescriptorEntry,
-} from '@murphai/assistant-engine/health-cli-descriptors'
+} from '@murphai/vault-usecases/health-cli-descriptors'
 import {
   listResultSchema,
   showResultSchema,
 } from '@murphai/operator-config/vault-cli-contracts'
-import type { InboxServices } from '@murphai/assistant-engine/inbox-services'
-import type { VaultServices } from '@murphai/assistant-engine/vault-services'
+import type { InboxServices } from '@murphai/inbox-services'
+import type { VaultServices } from '@murphai/vault-usecases/vault-services'
 import { registerAssistantCommands } from '@murphai/assistant-cli/commands/assistant'
 import { registerAuditCommands } from './commands/audit.js'
 import { registerAutomationCommands } from './commands/automation.js'

@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url'
 import type { AssistantOperatorDefaults } from '@murphai/operator-config/operator-config'
 import { resolveAssistantOperatorDefaults } from '@murphai/operator-config/operator-config'
 import { normalizeNullableString as normalizeOptionalText } from '@murphai/operator-config/text/shared'
-import { loadIntegratedRuntime } from '@murphai/assistant-engine/usecases/runtime'
+import { loadIntegratedRuntime } from '@murphai/vault-usecases/usecases/runtime'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
 export const DEFAULT_DEEPTHINK_MODEL = 'gpt-5.4-pro'

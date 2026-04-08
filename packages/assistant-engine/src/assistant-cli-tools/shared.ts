@@ -3,11 +3,11 @@ export interface AssistantToolContext {
   captureId?: string
   cliEnv?: NodeJS.ProcessEnv
   executionContext?: import('../assistant/execution-context.js').AssistantExecutionContext | null
-  inboxServices?: import('../inbox-services.js').InboxServices
+  inboxServices?: import('@murphai/inbox-services').InboxServices
   requestId?: string | null
   sessionId?: string | null
   vault: string
-  vaultServices?: import('../vault-services.js').VaultServices
+  vaultServices?: import('@murphai/vault-usecases/vault-services').VaultServices
   workingDirectory?: string | null
 }
 

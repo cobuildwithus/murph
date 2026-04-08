@@ -3,7 +3,7 @@ import { emptyArgsSchema, requestIdFromOptions, withBaseOptions } from '@murphai
 import {
   inputFileOptionSchema,
   normalizeInputFileOption,
-} from '@murphai/assistant-engine/json-input'
+} from '@murphai/vault-usecases/json-input'
 import {
   listItemSchema,
   localDateSchema,
@@ -11,7 +11,7 @@ import {
   showResultSchema,
   samplesImportCsvResultSchema,
 } from '@murphai/operator-config/vault-cli-contracts'
-import type { VaultServices } from '@murphai/assistant-engine/vault-services'
+import type { VaultServices } from '@murphai/vault-usecases/vault-services'
 import {
   importCsvSamples as importCsvSamplesWithArtifacts,
 } from './sample-import-command-helpers.js'
@@ -23,7 +23,7 @@ import {
   listSamples as listSamplesWithArtifacts,
   showSample as showSampleWithArtifacts,
 } from './sample-query-command-helpers.js'
-import { normalizeRepeatableFlagOption } from '@murphai/assistant-engine/option-utils'
+import { normalizeRepeatableFlagOption } from '@murphai/vault-usecases/option-utils'
 
 const sampleIdSchema = z
   .string()

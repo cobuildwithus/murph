@@ -32,14 +32,51 @@ vi.mock('@murphai/assistant-engine/assistant-codex', () => ({
   executeCodexPrompt: providerMocks.executeCodexPrompt,
 }))
 
-vi.mock('@murphai/assistant-engine/model-harness', () => ({
-  resolveAssistantLanguageModel: providerMocks.resolveAssistantLanguageModel,
-}))
+vi.mock('@murphai/assistant-engine/model-harness', async () => {
+  const actual = await vi.importActual<typeof import('@murphai/assistant-engine/model-harness')>(
+    '@murphai/assistant-engine/model-harness',
+  )
 
-vi.mock('@murphai/assistant-engine/assistant-cli-tools', () => ({
-  createDefaultAssistantToolCatalog: toolMocks.createDefaultAssistantToolCatalog,
-}))
+  return {
+    ...actual,
+    resolveAssistantLanguageModel: providerMocks.resolveAssistantLanguageModel,
+  }
+})
 
+vi.mock('@murphai/assistant-engine/assistant-provider', async () => {
+  const actual = await vi.importActual<typeof import('@murphai/assistant-engine/assistant-provider')>(
+    '@murphai/assistant-engine/assistant-provider',
+  )
+
+  return {
+    ...actual,
+    createDefaultAssistantToolCatalog: toolMocks.createDefaultAssistantToolCatalog,
+  }
+})
+
+import {
+  executeAssistantProviderTurnAttempt,
+  executeAssistantProviderTurn,
+  resolveAssistantProviderCapabilities,
+  prepareAssistantDirectCliEnv,
+} from '@murphai/assistant-engine/assistant-provider'
+import {
+  defaultDiscoverOpenAICompatibleModels,
+  type AssistantModelDiscoveryResult,
+  resolveAssistantModelCatalog,
+  resolveAssistantTargetCapabilities,
+} from '@murphai/assistant-engine/assistant-provider-catalog'
+import {
+  buildAssistantProviderDefaultsPatch,
+  resolveAssistantProviderDefaults,
+} from '@murphai/operator-config/operator-config'
+import {
+  serializeAssistantProviderSessionOptions,
+} from '@murphai/operator-config/assistant/provider-config'
+import {
+  createSetupAssistantResolver,
+  DEFAULT_SETUP_CODEX_REASONING_EFFORT,
+} from '@murphai/setup-cli/setup-assistant'
 vi.mock('node:readline/promises', () => ({
   default: {
     createInterface: () => ({
@@ -51,30 +88,6 @@ vi.mock('node:readline/promises', () => ({
     }),
   },
 }))
-
-import {
-  executeAssistantProviderTurnAttempt,
-  executeAssistantProviderTurn,
-  resolveAssistantProviderCapabilities,
-} from '@murphai/assistant-engine/assistant/provider-registry'
-import {
-  defaultDiscoverOpenAICompatibleModels,
-  type AssistantModelDiscoveryResult,
-  resolveAssistantModelCatalog,
-  resolveAssistantTargetCapabilities,
-} from '@murphai/assistant-engine/assistant-provider-catalog'
-import {
-  buildAssistantProviderDefaultsPatch,
-  resolveAssistantProviderDefaults,
-} from '@murphai/operator-config/operator-config'
-import { prepareAssistantDirectCliEnv } from '@murphai/assistant-engine/assistant-cli-access'
-import {
-  serializeAssistantProviderSessionOptions,
-} from '@murphai/operator-config/assistant/provider-config'
-import {
-  createSetupAssistantResolver,
-  DEFAULT_SETUP_CODEX_REASONING_EFFORT,
-} from '@murphai/setup-cli/setup-assistant'
 
 beforeEach(() => {
   providerMocks.executeCodexPrompt.mockReset()

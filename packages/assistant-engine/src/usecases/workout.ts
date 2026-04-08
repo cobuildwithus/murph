@@ -4,7 +4,7 @@ import {
   type WorkoutSession,
   workoutSessionSchema,
 } from '@murphai/contracts'
-import { loadJsonInputObject } from '../json-input.js'
+import { loadJsonInputObject } from '@murphai/vault-usecases/json-input'
 import { showWorkoutRecord } from './workout-read.js'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {

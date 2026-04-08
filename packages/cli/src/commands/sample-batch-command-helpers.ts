@@ -13,7 +13,7 @@ import {
   nullableString,
   numberOrNull,
   readJsonObject,
-} from '@murphai/assistant-engine/commands/query-record-command-helpers'
+} from '@murphai/vault-usecases/commands/query-record-command-helpers'
 
 type JsonObject = Record<string, unknown>
 

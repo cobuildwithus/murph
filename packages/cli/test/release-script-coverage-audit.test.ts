@@ -317,6 +317,7 @@ describe('monorepo release flow coverage audit', () => {
         '@murphai/device-syncd',
         '@murphai/gateway-local',
         '@murphai/importers',
+        '@murphai/inbox-services',
         '@murphai/inboxd',
         '@murphai/messaging-ingress',
         '@murphai/operator-config',
@@ -324,6 +325,7 @@ describe('monorepo release flow coverage audit', () => {
         '@murphai/query',
         '@murphai/runtime-state',
         '@murphai/setup-cli',
+        '@murphai/vault-usecases',
       ],
       name: '@murphai/murph',
     }))
@@ -433,6 +435,7 @@ describe('monorepo release flow coverage audit', () => {
     expect(cliPackageJson.dependencies?.['@murphai/gateway-local']).toBe('workspace:*')
     expect(cliPackageJson.dependencies?.['@murphai/messaging-ingress']).toBe('workspace:*')
     expect(cliPackageJson.bundleDependencies).toContain('@murphai/assistant-engine')
+    expect(cliPackageJson.bundleDependencies).toContain('@murphai/vault-usecases')
     expect(cliPackageJson.bundleDependencies).toContain('@murphai/gateway-local')
     expect(cliPackageJson.bundleDependencies).toContain('@murphai/messaging-ingress')
     expect(cliPackageJson.scripts?.['release:check']).toBeUndefined()

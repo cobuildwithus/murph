@@ -3,7 +3,7 @@ import { afterEach, test, vi } from 'vitest'
 
 import {
   createDefaultAssistantToolCatalog,
-} from '@murphai/assistant-engine/assistant-cli-tools'
+} from '@murphai/assistant-engine/assistant-provider'
 
 const assistantWebSearchEnvKeys = [
   'BRAVE_API_KEY',

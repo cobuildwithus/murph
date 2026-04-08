@@ -5,8 +5,8 @@ import {
   loadQueryRuntime,
   type QueryRuntimeModule,
   type QueryCanonicalEntity as QueryRecord,
-} from '../query-runtime.js'
-import { loadRuntimeModule } from '../runtime-import.js'
+} from '@murphai/vault-usecases/query-runtime'
+import { loadRuntimeModule } from '@murphai/vault-usecases/runtime-import'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   asListEnvelope,

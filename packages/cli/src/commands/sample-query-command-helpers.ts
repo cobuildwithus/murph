@@ -8,7 +8,7 @@ import {
   type CommandShowEntity,
   type QueryRecord,
   type SampleCommandListItem,
-} from '@murphai/assistant-engine/commands/query-record-command-helpers'
+} from '@murphai/vault-usecases/commands/query-record-command-helpers'
 
 export interface SampleListOptions {
   from?: string
