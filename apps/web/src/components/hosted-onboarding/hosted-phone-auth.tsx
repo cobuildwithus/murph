@@ -6,7 +6,7 @@ import {
   usePrivy,
   useUser,
 } from "@privy-io/react-auth";
-import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useEffect, useEffectEvent, useMemo, useRef, useState, type FormEvent } from "react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
@@ -134,6 +134,7 @@ function HostedPhoneAuthInner({
   const [phoneCountryCode, setPhoneCountryCode] = useState<string>(DEFAULT_HOSTED_PHONE_COUNTRY_CODE);
   const [phoneNumber, setPhoneNumber] = useState("");
   const [phoneVerificationAttempt, setPhoneVerificationAttempt] = useState<HostedPhoneVerificationAttempt | null>(null);
+  const lastAutoSubmittedCodeRef = useRef<string | null>(null);
   const finalizationStateRef = useRef<HostedPrivyFinalizationState>("idle");
   const effectiveIntent: HostedPhoneAuthIntent = mode === "public" ? intent : "signup";
 
@@ -146,6 +147,10 @@ function HostedPhoneAuthInner({
   const normalizedPhoneNumber = useMemo(
     () => normalizePhoneNumberForCountry(phoneNumber, selectedPhoneCountry.dialCode),
     [phoneNumber, selectedPhoneCountry.dialCode],
+  );
+  const normalizedVerificationCode = useMemo(
+    () => normalizeHostedPhoneVerificationCode(code),
+    [code],
   );
   const authenticatedSessionIssue = useMemo(
     () => resolveHostedPrivyClientSessionIssue(readHostedPrivyClientSessionState({ user })),
@@ -186,7 +191,9 @@ function HostedPhoneAuthInner({
     phoneNumber,
     sendCodeDisabled: phoneEntrySendCodeDisabled,
     selectedPhoneCountry,
-    onCodeChange: setCode,
+    onCodeChange: (value: string) => {
+      setCode(normalizeHostedPhoneVerificationCode(value));
+    },
     onPhoneCountryChange: setPhoneCountryCode,
     onPhoneNumberChange: setPhoneNumber,
     onResendCode: handleResendCode,
@@ -206,11 +213,33 @@ function HostedPhoneAuthInner({
     setManualEntryVisible(nextManualEntryVisible);
   }
 
+  const submitVerificationCodeEffect = useEffectEvent((submittedCode: string) => {
+    void handleVerifyCode(submittedCode);
+  });
+
   useEffect(() => {
     if (!authenticated) {
       updateFinalizationState("idle");
     }
   }, [authenticated]);
+
+  useEffect(() => {
+    if (!isHostedPhoneVerificationCodeComplete(normalizedVerificationCode)) {
+      lastAutoSubmittedCodeRef.current = null;
+      return;
+    }
+
+    if (
+      !phoneVerificationAttempt
+      || pendingAction !== null
+      || lastAutoSubmittedCodeRef.current === normalizedVerificationCode
+    ) {
+      return;
+    }
+
+    lastAutoSubmittedCodeRef.current = normalizedVerificationCode;
+    submitVerificationCodeEffect(normalizedVerificationCode);
+  }, [normalizedVerificationCode, pendingAction, phoneVerificationAttempt]);
 
   useEffect(() => {
     if (mode !== "invite" || !inviteCode) {
@@ -341,7 +370,7 @@ function HostedPhoneAuthInner({
     await handleSendCode();
   }
 
-  async function handleVerifyCode() {
+  async function handleVerifyCode(submittedCode = normalizedVerificationCode) {
     setErrorMessage(null);
 
     if (!phoneVerificationAttempt) {
@@ -349,7 +378,7 @@ function HostedPhoneAuthInner({
       return;
     }
 
-    if (!code.trim()) {
+    if (!submittedCode) {
       setErrorMessage("Enter the verification code we texted you.");
       return;
     }
@@ -357,7 +386,7 @@ function HostedPhoneAuthInner({
     setPendingAction("verify-code");
 
     try {
-      await loginWithCode({ code: code.trim() });
+      await loginWithCode({ code: submittedCode });
       await runHostedPrivyFinalization("verify-code");
     } catch (error) {
       setErrorMessage(toErrorMessage(error, "We could not verify that code."));
@@ -494,6 +523,14 @@ export function resolveHostedPhoneSubmission(input: {
     draftPhoneNumber,
     normalizedPhoneNumber: normalizePhoneNumberForCountry(draftPhoneNumber, input.countryDialCode),
   };
+}
+
+export function normalizeHostedPhoneVerificationCode(value: string): string {
+  return value.replace(/\D/g, "").slice(0, 6);
+}
+
+export function isHostedPhoneVerificationCodeComplete(value: string): boolean {
+  return value.length === 6;
 }
 
 export function resolveHostedPhoneResendTarget(input: {
