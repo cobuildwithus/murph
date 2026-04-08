@@ -2,6 +2,8 @@ import assert from 'node:assert/strict'
 import { PassThrough } from 'node:stream'
 import { afterEach, test, vi } from 'vitest'
 
+import { createSetupAgentmailPrompter } from '../src/setup-agentmail.ts'
+
 const readlineMockState = vi.hoisted(() => ({
   answers: [] as string[],
   prompts: [] as string[],
@@ -33,12 +35,10 @@ afterEach(() => {
   readlineMockState.answers = []
   readlineMockState.prompts = []
   readlineMockState.sigintHandler = null
-  vi.resetModules()
 })
 
 test('setup agentmail prompter loops on invalid inbox choices before selecting a valid inbox', async () => {
   readlineMockState.answers = ['9', '2']
-  const { createSetupAgentmailPrompter } = await import('../src/setup-agentmail.ts')
   const output = new PassThrough()
   let rendered = ''
   output.on('data', (chunk) => {
@@ -73,7 +73,6 @@ test('setup agentmail prompter loops on invalid inbox choices before selecting a
 
 test('setup agentmail prompter trims manual inbox ids and allows empty inbox selections', async () => {
   readlineMockState.answers = ['', '  inbox@example.com  ']
-  const { createSetupAgentmailPrompter } = await import('../src/setup-agentmail.ts')
   const prompter = createSetupAgentmailPrompter({
     input: new PassThrough(),
     output: new PassThrough(),

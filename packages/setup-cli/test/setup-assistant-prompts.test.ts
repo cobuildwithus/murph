@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { PassThrough } from 'node:stream'
 import { afterEach, test, vi } from 'vitest'
 import type { SetupCommandOptions } from '@murphai/operator-config/setup-cli-contracts'
+import { createSetupAssistantResolver } from '../src/setup-assistant.ts'
 
 const promptState = vi.hoisted(() => ({
   answers: [] as string[],
@@ -48,7 +49,6 @@ afterEach(() => {
   promptState.prompts = []
   promptState.discoveredCalls = []
   promptState.supportsReasoningEffort = true
-  vi.resetModules()
 })
 
 function createSetupOptions(
@@ -70,7 +70,6 @@ test('setup assistant prompt flow uses discovered models and numeric model selec
     rendered += chunk.toString()
   })
 
-  const { createSetupAssistantResolver } = await import('../src/setup-assistant.ts')
   const resolver = createSetupAssistantResolver({
     assistantAccount: {
       async resolve() {
@@ -134,7 +133,6 @@ test('setup assistant prompt flow retries required model entry and rejects unsup
     rendered += chunk.toString()
   })
 
-  const { createSetupAssistantResolver } = await import('../src/setup-assistant.ts')
   const resolver = createSetupAssistantResolver({
     assistantAccount: {
       async resolve() {

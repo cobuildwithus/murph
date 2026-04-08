@@ -58,6 +58,8 @@ type MockHttpResponse = {
   readJson(): unknown;
 };
 
+type NodeHttpCreateServer = typeof import("node:http")["createServer"];
+
 function createMockHttpRequest(input: {
   method: string;
   url: string;
@@ -113,6 +115,22 @@ function createMockHttpResponse(): MockHttpResponse {
       return JSON.parse(body.toString("utf8"));
     },
   };
+}
+
+async function loadDeviceSyncHttpModule(input: {
+  createServer: NodeHttpCreateServer;
+}): Promise<typeof import("../src/http.ts")> {
+  vi.resetModules();
+
+  vi.doMock("node:http", async () => {
+    const actual = await vi.importActual<typeof import("node:http")>("node:http");
+    return {
+      ...actual,
+      createServer: input.createServer,
+    };
+  });
+
+  return import("../src/http.ts");
 }
 
 afterEach(() => {
@@ -777,8 +795,6 @@ test("device sync http server requires both public listener fields together", as
 });
 
 test("device sync http server can start without a public listener and rejects missing control tokens", async () => {
-  vi.resetModules();
-
   class MockServer extends EventEmitter {
     private readonly host: string;
     private readonly port: number;
@@ -809,19 +825,13 @@ test("device sync http server can start without a public listener and rejects mi
   }
 
   const servers: MockServer[] = [];
-  vi.doMock("node:http", async () => {
-    const actual = await vi.importActual<typeof import("node:http")>("node:http");
-    return {
-      ...actual,
-      createServer() {
-        const server = new MockServer(43110, "127.0.0.1");
-        servers.push(server);
-        return server as unknown as import("node:http").Server;
-      },
-    };
+  const { startDeviceSyncHttpServer: startServer } = await loadDeviceSyncHttpModule({
+    createServer() {
+      const server = new MockServer(43110, "127.0.0.1");
+      servers.push(server);
+      return server as unknown as import("node:http").Server;
+    },
   });
-
-  const { startDeviceSyncHttpServer: startServer } = await import("../src/http.ts");
   const handle = await startServer({
     service: createStubService(),
     config: {
@@ -856,8 +866,6 @@ test("device sync http server can start without a public listener and rejects mi
 });
 
 test("device sync http server wires control and public listeners to the correct handler surfaces", async () => {
-  vi.resetModules();
-
   class MockServer extends EventEmitter {
     private readonly host: string;
     private readonly port: number;
@@ -893,23 +901,17 @@ test("device sync http server wires control and public listeners to the correct 
   }> = [];
 
   let nextPort = 43100;
-  vi.doMock("node:http", async () => {
-    const actual = await vi.importActual<typeof import("node:http")>("node:http");
-    return {
-      ...actual,
-      createServer(handler: (request: IncomingMessageLike, response: ServerResponseLike) => Promise<void>) {
-        const server = new MockServer(nextPort, "127.0.0.1");
-        nextPort += 1;
-        servers.push({
-          handler,
-          server,
-        });
-        return server as unknown as import("node:http").Server;
-      },
-    };
+  const { startDeviceSyncHttpServer: startServer } = await loadDeviceSyncHttpModule({
+    createServer(handler: (request: IncomingMessageLike, response: ServerResponseLike) => Promise<void>) {
+      const server = new MockServer(nextPort, "127.0.0.1");
+      nextPort += 1;
+      servers.push({
+        handler,
+        server,
+      });
+      return server as unknown as import("node:http").Server;
+    },
   });
-
-  const { startDeviceSyncHttpServer: startServer } = await import("../src/http.ts");
   const service = createStubService();
   const handle = await startServer({
     service,

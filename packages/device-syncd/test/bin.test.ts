@@ -6,6 +6,49 @@ async function flushMicrotasks(): Promise<void> {
   await Promise.resolve();
 }
 
+type DeviceSyncEnvironment = {
+  service: {
+    vaultRoot: string;
+  };
+  http: {
+    host: string;
+    port: number;
+  };
+};
+
+async function loadDeviceSyncBin(input: {
+  loadDeviceSyncEnvironment: () => DeviceSyncEnvironment;
+  service: {
+    start: () => unknown;
+    stop: () => unknown;
+    close: () => unknown;
+  };
+  server: {
+    close: () => Promise<void>;
+  };
+  formatDeviceSyncStartupError?: (error: unknown) => string;
+}): Promise<void> {
+  vi.resetModules();
+
+  vi.doMock("../src/config.ts", () => ({
+    loadDeviceSyncEnvironment: vi.fn(input.loadDeviceSyncEnvironment),
+  }));
+  vi.doMock("../src/service.ts", () => ({
+    createDeviceSyncService: vi.fn(() => input.service),
+  }));
+  vi.doMock("../src/http.ts", () => ({
+    startDeviceSyncHttpServer: vi.fn(async () => input.server),
+  }));
+  vi.doMock("../src/errors.ts", () => ({
+    formatDeviceSyncStartupError: vi.fn(
+      input.formatDeviceSyncStartupError ?? ((error: unknown) => String(error)),
+    ),
+  }));
+
+  await import("../src/bin.ts");
+  await flushMicrotasks();
+}
+
 afterEach(() => {
   vi.restoreAllMocks();
   vi.resetModules();
@@ -30,24 +73,14 @@ test("device-syncd bin boots the service and shuts it down on SIGINT", async () 
     return code as never;
   }) as typeof process.exit);
 
-  vi.doMock("../src/config.ts", () => ({
-    loadDeviceSyncEnvironment: vi.fn(() => ({
+  await loadDeviceSyncBin({
+    loadDeviceSyncEnvironment: () => ({
       service: { vaultRoot: "/tmp/device-syncd-vault" },
       http: { host: "127.0.0.1", port: 43110 },
-    })),
-  }));
-  vi.doMock("../src/service.ts", () => ({
-    createDeviceSyncService: vi.fn(() => service),
-  }));
-  vi.doMock("../src/http.ts", () => ({
-    startDeviceSyncHttpServer: vi.fn(async () => server),
-  }));
-  vi.doMock("../src/errors.ts", () => ({
-    formatDeviceSyncStartupError: vi.fn((error: unknown) => String(error)),
-  }));
-
-  await import("../src/bin.ts");
-  await flushMicrotasks();
+    }),
+    service,
+    server,
+  });
 
   assert.equal(service.start.mock.calls.length, 1);
   assert.equal(onceSpy.mock.calls.length, 2);
@@ -82,24 +115,14 @@ test("device-syncd bin shuts down on SIGTERM", async () => {
     return process;
   }) as typeof process.once);
 
-  vi.doMock("../src/config.ts", () => ({
-    loadDeviceSyncEnvironment: vi.fn(() => ({
+  await loadDeviceSyncBin({
+    loadDeviceSyncEnvironment: () => ({
       service: { vaultRoot: "/tmp/device-syncd-vault" },
       http: { host: "127.0.0.1", port: 43111 },
-    })),
-  }));
-  vi.doMock("../src/service.ts", () => ({
-    createDeviceSyncService: vi.fn(() => service),
-  }));
-  vi.doMock("../src/http.ts", () => ({
-    startDeviceSyncHttpServer: vi.fn(async () => server),
-  }));
-  vi.doMock("../src/errors.ts", () => ({
-    formatDeviceSyncStartupError: vi.fn((error: unknown) => String(error)),
-  }));
-
-  await import("../src/bin.ts");
-  await flushMicrotasks();
+    }),
+    service,
+    server,
+  });
 
   signalHandlers.get("SIGTERM")?.();
   await flushMicrotasks();
@@ -114,28 +137,27 @@ test("device-syncd bin formats startup failures and sets process exit code", asy
   const previousExitCode = process.exitCode;
   process.exitCode = undefined;
 
+  const service = {
+    start: vi.fn(),
+    stop: vi.fn(),
+    close: vi.fn(),
+  };
+  const server = {
+    close: vi.fn(async () => {}),
+  };
+
   const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
-  vi.doMock("../src/config.ts", () => ({
-    loadDeviceSyncEnvironment: vi.fn(() => {
-      throw new Error("startup failed");
-    }),
-  }));
-  vi.doMock("../src/service.ts", () => ({
-    createDeviceSyncService: vi.fn(),
-  }));
-  vi.doMock("../src/http.ts", () => ({
-    startDeviceSyncHttpServer: vi.fn(),
-  }));
-  vi.doMock("../src/errors.ts", () => ({
-    formatDeviceSyncStartupError: vi.fn((error: unknown) =>
-      error instanceof Error ? `formatted: ${error.message}` : "formatted",
-    ),
-  }));
-
   try {
-    await import("../src/bin.ts");
-    await flushMicrotasks();
+    await loadDeviceSyncBin({
+      loadDeviceSyncEnvironment: () => {
+        throw new Error("startup failed");
+      },
+      service,
+      server,
+      formatDeviceSyncStartupError: (error: unknown) =>
+        error instanceof Error ? `formatted: ${error.message}` : "formatted",
+    });
 
     assert.deepEqual(consoleErrorSpy.mock.calls, [["formatted: startup failed"]]);
     assert.equal(process.exitCode, 1);

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 
-import { beforeEach, test, vi } from 'vitest'
+import { test, vi } from 'vitest'
 
 const packageSurfaceMocks = vi.hoisted(() => ({
   formatForegroundLogLine: vi.fn(),
@@ -41,14 +41,10 @@ vi.mock('../src/assistant/status.js', () => ({}))
 vi.mock('../src/assistant/stop.js', () => ({}))
 vi.mock('../src/assistant/store.js', () => ({}))
 
-beforeEach(() => {
-  vi.resetModules()
-})
+import * as assistantChatInkSurface from '../src/assistant-chat-ink.js'
+import * as packageSurface from '../src/index.js'
 
-test('package surface re-exports the owned top-level seams from the root barrel', async () => {
-  const packageSurface = await import('../src/index.js')
-  const assistantChatInkSurface = await import('../src/assistant-chat-ink.js')
-
+test('package surface re-exports the owned top-level seams from the root barrel', () => {
   assert.equal(packageSurface.registerAssistantCommands, packageSurfaceMocks.registerAssistantCommands)
   assert.equal(packageSurface.runAssistantChat, packageSurfaceMocks.runAssistantChat)
   assert.equal(

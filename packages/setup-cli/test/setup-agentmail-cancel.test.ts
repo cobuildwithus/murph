@@ -2,6 +2,8 @@ import assert from 'node:assert/strict'
 import { PassThrough } from 'node:stream'
 import { afterEach, test, vi } from 'vitest'
 
+import { createSetupAgentmailPrompter } from '../src/setup-agentmail.ts'
+
 const readlineMockState = vi.hoisted(() => ({
   sigintHandler: null as null | (() => void),
 }))
@@ -23,11 +25,9 @@ vi.mock('node:readline', () => ({
 
 afterEach(() => {
   readlineMockState.sigintHandler = null
-  vi.resetModules()
 })
 
 test('setup agentmail prompter rejects with setup_cancelled on SIGINT', async () => {
-  const { createSetupAgentmailPrompter } = await import('../src/setup-agentmail.ts')
   const prompter = createSetupAgentmailPrompter({
     input: new PassThrough(),
     output: new PassThrough(),
