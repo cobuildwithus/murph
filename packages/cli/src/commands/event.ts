@@ -15,7 +15,7 @@ import {
   showEventRecord,
 } from '@murphai/vault-usecases/records'
 import type { VaultServices } from '@murphai/vault-usecases'
-import { registerLedgerEventEntityGroup } from './health-command-factory.js'
+import { registerLedgerEventEntityGroup } from './entity-command-groups.js'
 import {
   createEntityDeleteCommandConfig,
   createEventBackedEntityEditCommandConfig,

@@ -10,7 +10,7 @@ import {
 } from '@murphai/operator-config/vault-cli-contracts'
 import type { VaultServices } from '@murphai/vault-usecases'
 import { dailyFoodTimeSchema } from '@murphai/vault-usecases/records'
-import { createRegistryDocEntityGroup } from './health-command-factory.js'
+import { createRegistryDocEntityGroup } from './entity-command-groups.js'
 import {
   createDirectEntityDeleteCommandDefinition,
   createDirectEntityEditCommandDefinition,

@@ -7,8 +7,8 @@ import {
 } from "@murphai/vault-usecases"
 import {
   createRegistryDocEntityGroup,
-  suggestedCommandsCta,
-} from "./health-command-factory.js"
+} from "./entity-command-groups.js"
+import { suggestedCommandsCta } from "./command-factory-primitives.js"
 import { localDateSchema, pathSchema } from "@murphai/operator-config/vault-cli-contracts"
 import type { VaultServices } from "@murphai/vault-usecases"
 

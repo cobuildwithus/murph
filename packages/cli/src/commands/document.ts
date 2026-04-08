@@ -13,7 +13,7 @@ import {
   editDocumentRecord,
   rawImportManifestResultSchema,
 } from '@murphai/vault-usecases/records'
-import { registerArtifactBackedEntityGroup } from './health-command-factory.js'
+import { registerArtifactBackedEntityGroup } from './entity-command-groups.js'
 import {
   createEntityDeleteCommandConfig,
   createEventBackedEntityEditCommandConfig,

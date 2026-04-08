@@ -5,7 +5,7 @@ import type { VaultServices } from "@murphai/vault-usecases";
 import {
   createHealthEntityCrudGroup,
 } from "./health-entity-command-registry.js";
-import { suggestedCommandsCta } from "./health-command-factory.js";
+import { suggestedCommandsCta } from "./command-factory-primitives.js";
 
 const rebuildResultSchema = z.object({
   vault: pathSchema,
