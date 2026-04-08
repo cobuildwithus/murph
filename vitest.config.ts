@@ -1,12 +1,17 @@
 import assistantEngineProject from "./packages/assistant-engine/vitest.config.ts";
+import assistantCliProject from "./packages/assistant-cli/vitest.config.ts";
 import assistantRuntimeProject from "./packages/assistant-runtime/vitest.config.ts";
 import assistantdProject from "./packages/assistantd/vitest.config.ts";
+import cloudflareHostedControlProject from "./packages/cloudflare-hosted-control/vitest.config.ts";
 import coreProject from "./packages/core/vitest.config.ts";
 import deviceSyncdProject from "./packages/device-syncd/vitest.config.ts";
+import gatewayCoreProject from "./packages/gateway-core/vitest.config.ts";
+import gatewayLocalProject from "./packages/gateway-local/vitest.config.ts";
 import hostedExecutionProject from "./packages/hosted-execution/vitest.config.ts";
 import importersProject from "./packages/importers/vitest.config.ts";
 import inboxdProject from "./packages/inboxd/vitest.config.ts";
 import messagingIngressProject from "./packages/messaging-ingress/vitest.config.ts";
+import operatorConfigProject from "./packages/operator-config/vitest.config.ts";
 import {
   cliVitestProjectSpecs,
   createCliVitestProject,
@@ -14,6 +19,7 @@ import {
 import parsersProject from "./packages/parsers/vitest.config.ts";
 import queryProject from "./packages/query/vitest.config.ts";
 import runtimeStateProject from "./packages/runtime-state/vitest.config.ts";
+import setupCliProject from "./packages/setup-cli/vitest.config.ts";
 import {
   defineConfig,
   defineProject,
@@ -37,6 +43,10 @@ type RootRepoProject = {
 
 const ROOT_REPO_PROJECTS: RootRepoProject[] = [
   {
+    config: assistantCliProject,
+    include: ["packages/assistant-cli/test/**/*.test.ts"],
+  },
+  {
     config: assistantEngineProject,
     include: ["packages/assistant-engine/test/**/*.test.ts"],
   },
@@ -49,6 +59,10 @@ const ROOT_REPO_PROJECTS: RootRepoProject[] = [
     include: ["packages/assistantd/test/**/*.test.ts"],
   },
   {
+    config: cloudflareHostedControlProject,
+    include: ["packages/cloudflare-hosted-control/test/**/*.test.ts"],
+  },
+  {
     config: coreProject,
     include: ["packages/core/test/**/*.test.ts"],
   },
@@ -57,12 +71,24 @@ const ROOT_REPO_PROJECTS: RootRepoProject[] = [
     include: ["packages/device-syncd/test/**/*.test.ts"],
   },
   {
+    config: gatewayCoreProject,
+    include: ["packages/gateway-core/test/**/*.test.ts"],
+  },
+  {
+    config: gatewayLocalProject,
+    include: ["packages/gateway-local/test/**/*.test.ts"],
+  },
+  {
     config: hostedExecutionProject,
     include: ["packages/hosted-execution/test/**/*.test.ts"],
   },
   {
     config: messagingIngressProject,
     include: ["packages/messaging-ingress/test/**/*.test.ts"],
+  },
+  {
+    config: operatorConfigProject,
+    include: ["packages/operator-config/test/**/*.test.ts"],
   },
   {
     config: importersProject,
@@ -83,6 +109,10 @@ const ROOT_REPO_PROJECTS: RootRepoProject[] = [
   {
     config: runtimeStateProject,
     include: ["packages/runtime-state/test/**/*.test.ts"],
+  },
+  {
+    config: setupCliProject,
+    include: ["packages/setup-cli/test/**/*.test.ts"],
   },
 ];
 
