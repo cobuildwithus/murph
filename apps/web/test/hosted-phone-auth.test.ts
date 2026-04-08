@@ -112,6 +112,34 @@ describe("HostedPhoneAuth", () => {
     assert.doesNotMatch(markup, /Phone number that received this invite/);
   });
 
+  it("autofocuses and enlarges the verification code input", async () => {
+    const { HostedInvitePhoneAuthFlow } = await import("@/src/components/hosted-onboarding/hosted-phone-auth-views");
+
+    const markup = renderToStaticMarkup(
+      React.createElement(HostedInvitePhoneAuthFlow, {
+        code: "",
+        disabled: false,
+        manualEntryVisible: false,
+        mode: "invite",
+        pendingAction: null,
+        phoneCountryOptions: [{ code: "US", dialCode: "+1", label: "United States", placeholder: "(415) 555-2671" }],
+        phoneNumber: "",
+        selectedPhoneCountry: { code: "US", dialCode: "+1", label: "United States", placeholder: "(415) 555-2671" },
+        step: "code",
+        onCodeChange() {},
+        onPhoneCountryChange() {},
+        onPhoneNumberChange() {},
+        onResendCode() {},
+        onSendCode() {},
+        onUseDifferentNumber() {},
+        onVerifyCode() {},
+      }),
+    );
+
+    assert.match(markup, /autofocus=""/);
+    assert.match(markup, /class="[^"]*h-14[^"]*text-lg[^"]*"/);
+  });
+
   it("keeps the public homepage in a manual resume state for authenticated sessions", async () => {
     mocks.usePrivy.mockReturnValue({
       authenticated: true,
