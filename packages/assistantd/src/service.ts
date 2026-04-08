@@ -18,22 +18,8 @@ import {
   updateAssistantSessionOptions,
   createAssistantFoodAutoLogHooks,
 } from '@murphai/assistant-engine'
-import type {
-  AssistantAskResult,
-  AssistantCronJob,
-  AssistantCronProcessDueResult,
-  AssistantCronRunRecord,
-  AssistantCronStatusSnapshot,
-  AssistantCronTargetMutationResult,
-  AssistantCronTargetSnapshot,
-  AssistantMessageInput,
-  AssistantOutboxIntent,
-  AssistantRunResult,
-  AssistantSession,
-  AssistantStatusResult,
-} from '@murphai/operator-config/assistant-cli-contracts'
 import { createIntegratedInboxServices } from '@murphai/inbox-services'
-import { createIntegratedVaultServices } from '@murphai/vault-usecases'
+import { createIntegratedVaultServices } from '@murphai/vault-usecases/vault-services'
 import {
   assistantGatewayLocalMessageSender,
   assistantGatewayLocalProjectionSourceReader,
@@ -44,6 +30,21 @@ import { createLocalGatewayService } from '@murphai/gateway-local'
 import type { GatewayService } from '@murphai/gateway-core'
 
 const ASSISTANTD_DISABLE_CLIENT_ENV = 'MURPH_ASSISTANTD_DISABLE_CLIENT'
+
+type AssistantLocalOpenConversationInput = Omit<
+  Parameters<typeof openAssistantConversation>[0],
+  'vault'
+> & { vault?: string | null }
+type AssistantLocalOpenConversationResolved = Awaited<
+  ReturnType<typeof openAssistantConversation>
+>
+type AssistantLocalMessageInput = Omit<Parameters<typeof sendAssistantMessage>[0], 'vault'> & {
+  vault?: string | null
+}
+type AssistantLocalSessionOptionsInput = Omit<
+  Parameters<typeof updateAssistantSessionOptions>[0],
+  'vault'
+> & { vault?: string | null }
 
 export interface AssistantLocalAutomationRunInput {
   allowSelfAuthored?: boolean
@@ -60,8 +61,8 @@ export interface AssistantLocalAutomationRunInput {
 }
 
 export interface AssistantLocalOpenConversationResult {
-  created: boolean
-  session: AssistantSession
+  created: AssistantLocalOpenConversationResolved['created']
+  session: AssistantLocalOpenConversationResolved['session']
 }
 
 export interface AssistantLocalService {
@@ -74,22 +75,22 @@ export interface AssistantLocalService {
   getCronJob(input: {
     job: string
     vault?: string | null
-  }): Promise<AssistantCronJob>
+  }): ReturnType<typeof getAssistantCronJob>
   getCronTarget(input: {
     job: string
     vault?: string | null
-  }): Promise<AssistantCronTargetSnapshot>
+  }): ReturnType<typeof getAssistantCronJobTarget>
   getCronStatus(input?: {
     vault?: string | null
-  }): Promise<AssistantCronStatusSnapshot>
+  }): ReturnType<typeof getAssistantCronStatus>
   getOutboxIntent(input: {
     intentId: string
     vault?: string | null
-  }): Promise<AssistantOutboxIntent | null>
+  }): ReturnType<typeof readAssistantOutboxIntent>
   getSession(input: {
     sessionId: string
     vault?: string | null
-  }): Promise<AssistantSession>
+  }): ReturnType<typeof getAssistantSession>
   health(): Promise<{
     generatedAt: string
     ok: true
@@ -100,32 +101,27 @@ export interface AssistantLocalService {
     limit?: number
     sessionId?: string | null
     vault?: string | null
-  }): Promise<AssistantStatusResult>
+  }): ReturnType<typeof getAssistantStatus>
   listSessions(input?: {
     vault?: string | null
-  }): Promise<AssistantSession[]>
+  }): ReturnType<typeof listAssistantSessions>
   listCronJobs(input?: {
     vault?: string | null
-  }): Promise<AssistantCronJob[]>
+  }): ReturnType<typeof listAssistantCronJobs>
   listCronRuns(input: {
     job: string
     limit?: number
     vault?: string | null
-  }): Promise<{
-    jobId: string
-    runs: AssistantCronRunRecord[]
-  }>
+  }): ReturnType<typeof listAssistantCronRuns>
   listOutbox(input?: {
     vault?: string | null
-  }): Promise<AssistantOutboxIntent[]>
-  openConversation(
-    input: Omit<Parameters<typeof openAssistantConversation>[0], 'vault'> & { vault?: string | null },
-  ): Promise<AssistantLocalOpenConversationResult>
+  }): ReturnType<typeof listAssistantOutboxIntents>
+  openConversation(input: AssistantLocalOpenConversationInput): Promise<AssistantLocalOpenConversationResult>
   processDueCron(input?: {
     deliveryDispatchMode?: AssistantOutboxDispatchMode
     limit?: number
     vault?: string | null
-  }): Promise<AssistantCronProcessDueResult>
+  }): ReturnType<typeof processDueAssistantCronJobs>
   setCronTarget(input: {
     channel?: string | null
     deliveryTarget?: string | null
@@ -136,18 +132,14 @@ export interface AssistantLocalService {
     resetContinuity?: boolean
     sourceThreadId?: string | null
     vault?: string | null
-  }): Promise<AssistantCronTargetMutationResult>
+  }): ReturnType<typeof setAssistantCronJobTarget>
   runAutomationOnce(
     input?: AssistantLocalAutomationRunInput,
-  ): Promise<AssistantRunResult>
-  sendMessage(
-    input: Omit<AssistantMessageInput, 'vault'> & { vault?: string | null },
-  ): Promise<AssistantAskResult>
-  updateSessionOptions(
-    input: Omit<Parameters<typeof updateAssistantSessionOptions>[0], 'vault'> & {
-      vault?: string | null
-    },
-  ): ReturnType<typeof updateAssistantSessionOptions>
+  ): ReturnType<typeof runAssistantAutomation>
+  sendMessage(input: AssistantLocalMessageInput): ReturnType<typeof sendAssistantMessage>
+  updateSessionOptions(input: AssistantLocalSessionOptionsInput): ReturnType<
+    typeof updateAssistantSessionOptions
+  >
   vault: string
 }
 
