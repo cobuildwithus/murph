@@ -367,7 +367,8 @@ describe("HostedPhoneAuth", () => {
 
     assert.match(phoneEntryMarkup, /Phone number/);
     assert.doesNotMatch(phoneEntryMarkup, /Phone number on your account/);
-    assert.match(phoneEntryMarkup, /Text me a sign-in code/);
+    assert.match(phoneEntryMarkup, /Text me a code/);
+    assert.doesNotMatch(phoneEntryMarkup, /Text me a sign-in code/);
     assert.match(codeEntryMarkup, /We texted the latest sign-in code to \*\*\* 2671\./);
     assert.match(codeEntryMarkup, />Sign in</);
   });
