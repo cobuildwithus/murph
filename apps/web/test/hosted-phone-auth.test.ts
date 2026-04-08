@@ -587,6 +587,64 @@ describe("HostedPhoneAuth", () => {
       }),
       "/join/invite-code",
     );
+    assert.equal(
+      resolveHostedPrivyCompletionRedirectUrl({
+        intent: "signup",
+        payload: {
+          inviteCode: "invite-code",
+          joinUrl: "https://www.withmurph.ai/join/invite-code",
+          stage: "checkout",
+        },
+      }),
+      "/join/invite-code",
+    );
+  });
+
+  it("keeps checkout-stage homepage verification on the local join route", async () => {
+    vi.resetModules();
+
+    const ensureHostedPrivyPhoneReady = vi.fn().mockResolvedValue(undefined);
+    const requestHostedOnboardingJson = vi.fn().mockResolvedValue({
+      inviteCode: "invite-code",
+      joinUrl: "/join/invite-code",
+      stage: "checkout",
+    });
+    const assign = vi.fn();
+
+    vi.doMock("@/src/lib/hosted-onboarding/privy-client", () => ({
+      HOSTED_PRIVY_COMPLETION_RETRY_DELAYS_MS: [0],
+      ensureHostedPrivyPhoneReady,
+    }));
+    vi.doMock("@/src/components/hosted-onboarding/client-api", () => ({
+      HostedOnboardingApiError: class HostedOnboardingApiError extends Error {
+        code: string | null = null;
+        retryable = false;
+      },
+      requestHostedOnboardingJson,
+    }));
+    vi.stubGlobal("window", {
+      location: {
+        assign,
+      },
+    });
+
+    try {
+      const { finalizeHostedPrivyVerification } = await import("@/src/components/hosted-onboarding/hosted-phone-auth-support");
+
+      await finalizeHostedPrivyVerification({
+        createWallet: vi.fn(),
+        intent: "signup",
+        user: null,
+      });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+
+    assert.equal(ensureHostedPrivyPhoneReady.mock.calls.length, 1);
+    assert.equal(requestHostedOnboardingJson.mock.calls.length, 1);
+    assert.equal(requestHostedOnboardingJson.mock.calls[0]?.[0]?.url, "/api/hosted-onboarding/privy/complete");
+    assert.equal(assign.mock.calls.length, 1);
+    assert.equal(assign.mock.calls[0]?.[0], "/join/invite-code");
   });
 
   it("uses the invite shortcut route for the first invite send-code request", async () => {
