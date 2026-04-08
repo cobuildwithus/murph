@@ -1287,6 +1287,68 @@ test('changing presets does not leak saved defaults from a different backend ada
   })
 })
 
+test('model treats an explicit false OSS flag as a codex option when inferring the preset', async () => {
+  const homeRoot = await mkdtemp(path.join(tmpdir(), 'murph-model-oss-false-'))
+  cleanupPaths.push(homeRoot)
+
+  const resolveAssistant = vi.fn(
+    async ({ options, preset }): Promise<SetupConfiguredAssistant> => ({
+      preset,
+      enabled: true,
+      provider: 'codex-cli',
+      model: options.assistantModel ?? null,
+      baseUrl: options.assistantBaseUrl ?? null,
+      apiKeyEnv: options.assistantApiKeyEnv ?? null,
+      providerName: options.assistantProviderName ?? null,
+      codexCommand: options.assistantCodexCommand ?? null,
+      profile: options.assistantProfile ?? null,
+      reasoningEffort: options.assistantReasoningEffort ?? null,
+      sandbox: 'danger-full-access',
+      approvalPolicy: 'never',
+      oss: options.assistantOss ?? false,
+      account: null,
+      detail: 'saved codex backend',
+    }),
+  )
+  const assistantSetup: SetupAssistantResolver = {
+    resolve: resolveAssistant,
+  }
+
+  const cli = Cli.create('vault-cli')
+  registerModelCommands(cli, {
+    assistantSetup,
+    resolveHomeDirectory: () => homeRoot,
+    terminal: {
+      stdinIsTTY: false,
+      stderrIsTTY: false,
+    },
+  })
+
+  const result = await runRegisteredCliJson(cli, [
+    'model',
+    '--model',
+    'gpt-5.4',
+    '--no-oss',
+  ])
+
+  assert.equal(result.exitCode, null)
+  assert.equal(result.envelope.ok, true)
+  assert.equal(resolveAssistant.mock.calls.length, 1)
+  assert.deepEqual(resolveAssistant.mock.calls[0]?.[0], {
+    allowPrompt: false,
+    commandName: 'model',
+    options: {
+      vault: './vault',
+      strict: true,
+      whisperModel: 'base.en',
+      assistantPreset: 'codex',
+      assistantModel: 'gpt-5.4',
+      assistantOss: false,
+    },
+    preset: 'codex',
+  })
+})
+
 test('root status, doctor, and stop aliases reuse the assistant command schemas', () => {
   const cli = createVaultCli(
     createUnwiredVaultServices(),
