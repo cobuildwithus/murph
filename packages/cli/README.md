@@ -99,7 +99,7 @@ If `pnpm` is not available yet, use:
 
 ## Config defaults
 
-The CLI supports incur's built-in config loading for command option defaults. By default it searches `~/.config/murph/config.json` and then `~/.config/vault-cli/config.json`.
+The CLI supports incur's built-in config loading for command option defaults. By default it searches `~/.config/murph/config.json`.
 
 - `murph --config <path> ...` selects an explicit config file
 - `murph --no-config ...` disables config loading for a single run

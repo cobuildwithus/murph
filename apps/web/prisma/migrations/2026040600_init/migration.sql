@@ -1,22 +1,10 @@
--- Murph canonical v1 baseline generated from prisma/schema.prisma on 2026-04-06.
+-- Murph canonical v1 baseline generated from prisma/schema.prisma on 2026-04-08.
 
 -- CreateSchema
 CREATE SCHEMA IF NOT EXISTS "public";
 
 -- CreateEnum
-CREATE TYPE "HostedMemberStatus" AS ENUM ('invited', 'registered', 'suspended');
-
--- CreateEnum
-CREATE TYPE "HostedInviteStatus" AS ENUM ('pending', 'opened', 'authenticated', 'paid', 'expired');
-
--- CreateEnum
-CREATE TYPE "HostedBillingStatus" AS ENUM ('not_started', 'checkout_open', 'active', 'incomplete', 'past_due', 'canceled', 'unpaid', 'paused');
-
--- CreateEnum
-CREATE TYPE "HostedBillingMode" AS ENUM ('payment', 'subscription');
-
--- CreateEnum
-CREATE TYPE "HostedBillingCheckoutStatus" AS ENUM ('pending', 'open', 'completed', 'expired', 'failed', 'superseded');
+CREATE TYPE "HostedBillingStatus" AS ENUM ('not_started', 'active', 'incomplete', 'past_due', 'canceled', 'unpaid', 'paused');
 
 -- CreateEnum
 CREATE TYPE "HostedStripeEventStatus" AS ENUM ('pending', 'processing', 'completed', 'failed', 'poisoned');
@@ -168,9 +156,8 @@ CREATE TABLE "hosted_web_internal_request_nonce" (
 -- CreateTable
 CREATE TABLE "hosted_member" (
     "id" TEXT NOT NULL,
-    "status" "HostedMemberStatus" NOT NULL DEFAULT 'invited',
     "billing_status" "HostedBillingStatus" NOT NULL DEFAULT 'not_started',
-    "billing_mode" "HostedBillingMode",
+    "suspended_at" TIMESTAMP(3),
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMP(3) NOT NULL,
 
@@ -182,12 +169,19 @@ CREATE TABLE "hosted_member_identity" (
     "member_id" TEXT NOT NULL,
     "masked_phone_number_hint" TEXT NOT NULL,
     "phone_lookup_key" TEXT NOT NULL,
+    "phone_number_encrypted" TEXT,
     "phone_number_verified_at" TIMESTAMP(3),
-    "privy_user_id" TEXT,
-    "wallet_address" TEXT,
+    "privy_user_lookup_key" TEXT,
+    "privy_user_id_encrypted" TEXT,
+    "wallet_address_lookup_key" TEXT,
+    "wallet_address_encrypted" TEXT,
     "wallet_chain_type" TEXT,
     "wallet_provider" TEXT,
     "wallet_created_at" TIMESTAMP(3),
+    "signup_phone_number_encrypted" TEXT,
+    "signup_phone_code_sent_at" TIMESTAMP(3),
+    "signup_phone_code_send_attempt_id" TEXT,
+    "signup_phone_code_send_attempt_started_at" TIMESTAMP(3),
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMP(3) NOT NULL
 );
@@ -195,8 +189,10 @@ CREATE TABLE "hosted_member_identity" (
 -- CreateTable
 CREATE TABLE "hosted_member_routing" (
     "member_id" TEXT NOT NULL,
-    "linq_chat_id" TEXT,
+    "linq_chat_lookup_key" TEXT,
+    "linq_chat_id_encrypted" TEXT,
     "telegram_user_lookup_key" TEXT,
+    "telegram_user_id_encrypted" TEXT,
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMP(3) NOT NULL
 );
@@ -204,11 +200,10 @@ CREATE TABLE "hosted_member_routing" (
 -- CreateTable
 CREATE TABLE "hosted_member_billing_ref" (
     "member_id" TEXT NOT NULL,
-    "stripe_customer_id" TEXT,
-    "stripe_subscription_id" TEXT,
-    "stripe_latest_checkout_session_id" TEXT,
-    "stripe_latest_billing_event_created_at" TIMESTAMP(3),
-    "stripe_latest_billing_event_id" TEXT,
+    "stripe_customer_lookup_key" TEXT,
+    "stripe_customer_id_encrypted" TEXT,
+    "stripe_subscription_lookup_key" TEXT,
+    "stripe_subscription_id_encrypted" TEXT,
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMP(3) NOT NULL
 );
@@ -218,40 +213,13 @@ CREATE TABLE "hosted_invite" (
     "id" TEXT NOT NULL,
     "member_id" TEXT NOT NULL,
     "invite_code" TEXT NOT NULL,
-    "status" "HostedInviteStatus" NOT NULL DEFAULT 'pending',
     "channel" TEXT NOT NULL DEFAULT 'linq',
     "sent_at" TIMESTAMP(3),
-    "opened_at" TIMESTAMP(3),
-    "authenticated_at" TIMESTAMP(3),
-    "paid_at" TIMESTAMP(3),
     "expires_at" TIMESTAMP(3) NOT NULL,
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMP(3) NOT NULL,
 
     CONSTRAINT "hosted_invite_pkey" PRIMARY KEY ("id")
-);
-
--- CreateTable
-CREATE TABLE "hosted_billing_checkout" (
-    "id" TEXT NOT NULL,
-    "member_id" TEXT NOT NULL,
-    "invite_id" TEXT,
-    "has_share_context" BOOLEAN NOT NULL DEFAULT false,
-    "stripe_checkout_session_id" TEXT,
-    "stripe_customer_id" TEXT,
-    "stripe_subscription_id" TEXT,
-    "price_id" TEXT NOT NULL,
-    "mode" "HostedBillingMode" NOT NULL,
-    "status" "HostedBillingCheckoutStatus" NOT NULL DEFAULT 'pending',
-    "checkout_url" TEXT,
-    "amount_total" INTEGER,
-    "currency" TEXT,
-    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "completed_at" TIMESTAMP(3),
-    "expired_at" TIMESTAMP(3),
-    "superseded_at" TIMESTAMP(3),
-
-    CONSTRAINT "hosted_billing_checkout_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -267,13 +235,6 @@ CREATE TABLE "hosted_stripe_event" (
     "processed_at" TIMESTAMP(3),
     "last_error_code" TEXT,
     "last_error_message" TEXT,
-    "customer_id" TEXT,
-    "subscription_id" TEXT,
-    "invoice_id" TEXT,
-    "checkout_session_id" TEXT,
-    "charge_id" TEXT,
-    "payment_intent_id" TEXT,
-    "payload_json" JSONB NOT NULL,
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMP(3) NOT NULL,
 
@@ -315,7 +276,7 @@ CREATE TABLE "hosted_share_link" (
     "id" TEXT NOT NULL,
     "code_hash" TEXT NOT NULL,
     "sender_member_id" TEXT NOT NULL,
-    "preview_title" TEXT NOT NULL,
+    "preview_json" JSONB NOT NULL,
     "expires_at" TIMESTAMP(3) NOT NULL,
     "accepted_at" TIMESTAMP(3),
     "accepted_by_member_id" TEXT,
@@ -547,9 +508,6 @@ CREATE INDEX "hosted_web_internal_request_nonce_user_id_expires_at_idx" ON "host
 CREATE INDEX "hosted_web_internal_request_nonce_expires_at_idx" ON "hosted_web_internal_request_nonce"("expires_at");
 
 -- CreateIndex
-CREATE INDEX "hosted_member_status_idx" ON "hosted_member"("status");
-
--- CreateIndex
 CREATE INDEX "hosted_member_billing_status_idx" ON "hosted_member"("billing_status");
 
 -- CreateIndex
@@ -559,16 +517,16 @@ CREATE UNIQUE INDEX "hosted_member_identity_member_id_key" ON "hosted_member_ide
 CREATE UNIQUE INDEX "hosted_member_identity_phone_lookup_key_key" ON "hosted_member_identity"("phone_lookup_key");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "hosted_member_identity_privy_user_id_key" ON "hosted_member_identity"("privy_user_id");
+CREATE UNIQUE INDEX "hosted_member_identity_privy_user_lookup_key_key" ON "hosted_member_identity"("privy_user_lookup_key");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "hosted_member_identity_wallet_address_key" ON "hosted_member_identity"("wallet_address");
+CREATE UNIQUE INDEX "hosted_member_identity_wallet_address_lookup_key_key" ON "hosted_member_identity"("wallet_address_lookup_key");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "hosted_member_routing_member_id_key" ON "hosted_member_routing"("member_id");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "hosted_member_routing_linq_chat_id_key" ON "hosted_member_routing"("linq_chat_id");
+CREATE UNIQUE INDEX "hosted_member_routing_linq_chat_lookup_key_key" ON "hosted_member_routing"("linq_chat_lookup_key");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "hosted_member_routing_telegram_user_lookup_key_key" ON "hosted_member_routing"("telegram_user_lookup_key");
@@ -577,10 +535,10 @@ CREATE UNIQUE INDEX "hosted_member_routing_telegram_user_lookup_key_key" ON "hos
 CREATE UNIQUE INDEX "hosted_member_billing_ref_member_id_key" ON "hosted_member_billing_ref"("member_id");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "hosted_member_billing_ref_stripe_customer_id_key" ON "hosted_member_billing_ref"("stripe_customer_id");
+CREATE UNIQUE INDEX "hosted_member_billing_ref_stripe_customer_lookup_key_key" ON "hosted_member_billing_ref"("stripe_customer_lookup_key");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "hosted_member_billing_ref_stripe_subscription_id_key" ON "hosted_member_billing_ref"("stripe_subscription_id");
+CREATE UNIQUE INDEX "hosted_member_billing_ref_stripe_subscription_lookup_key_key" ON "hosted_member_billing_ref"("stripe_subscription_lookup_key");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "hosted_invite_invite_code_key" ON "hosted_invite"("invite_code");
@@ -592,21 +550,6 @@ CREATE INDEX "hosted_invite_member_id_created_at_idx" ON "hosted_invite"("member
 CREATE INDEX "hosted_invite_expires_at_idx" ON "hosted_invite"("expires_at");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "hosted_billing_checkout_stripe_checkout_session_id_key" ON "hosted_billing_checkout"("stripe_checkout_session_id");
-
--- CreateIndex
-CREATE INDEX "hosted_billing_checkout_member_id_created_at_idx" ON "hosted_billing_checkout"("member_id", "created_at");
-
--- CreateIndex
-CREATE INDEX "hosted_billing_checkout_invite_id_created_at_idx" ON "hosted_billing_checkout"("invite_id", "created_at");
-
--- CreateIndex
-CREATE INDEX "hosted_billing_checkout_stripe_customer_id_idx" ON "hosted_billing_checkout"("stripe_customer_id");
-
--- CreateIndex
-CREATE INDEX "hosted_billing_checkout_stripe_subscription_id_idx" ON "hosted_billing_checkout"("stripe_subscription_id");
-
--- CreateIndex
 CREATE INDEX "hosted_stripe_event_status_stripe_created_at_created_at_idx" ON "hosted_stripe_event"("status", "stripe_created_at", "created_at");
 
 -- CreateIndex
@@ -614,18 +557,6 @@ CREATE INDEX "hosted_stripe_event_status_next_attempt_at_stripe_created_a_idx" O
 
 -- CreateIndex
 CREATE INDEX "hosted_stripe_event_claim_expires_at_idx" ON "hosted_stripe_event"("claim_expires_at");
-
--- CreateIndex
-CREATE INDEX "hosted_stripe_event_customer_id_stripe_created_at_idx" ON "hosted_stripe_event"("customer_id", "stripe_created_at");
-
--- CreateIndex
-CREATE INDEX "hosted_stripe_event_subscription_id_stripe_created_at_idx" ON "hosted_stripe_event"("subscription_id", "stripe_created_at");
-
--- CreateIndex
-CREATE INDEX "hosted_stripe_event_invoice_id_stripe_created_at_idx" ON "hosted_stripe_event"("invoice_id", "stripe_created_at");
-
--- CreateIndex
-CREATE INDEX "hosted_stripe_event_checkout_session_id_stripe_created_at_idx" ON "hosted_stripe_event"("checkout_session_id", "stripe_created_at");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "hosted_revnet_issuance_idempotency_key_key" ON "hosted_revnet_issuance"("idempotency_key");
@@ -670,7 +601,7 @@ CREATE INDEX "hosted_share_link_consumed_by_member_id_consumed_at_idx" ON "hoste
 CREATE INDEX "hosted_webhook_receipt_first_received_at_idx" ON "hosted_webhook_receipt"("first_received_at");
 
 -- CreateIndex
-CREATE INDEX "hosted_webhook_receipt_status_claim_expires_at_first_received_a_idx" ON "hosted_webhook_receipt"("status", "claim_expires_at", "first_received_at");
+CREATE INDEX "hosted_webhook_receipt_status_claim_expires_at_first_receiv_idx" ON "hosted_webhook_receipt"("status", "claim_expires_at", "first_received_at");
 
 -- CreateIndex
 CREATE INDEX "hosted_webhook_receipt_side_effect_source_event_id_status_idx" ON "hosted_webhook_receipt_side_effect"("source", "event_id", "status");
@@ -739,22 +670,16 @@ ALTER TABLE "hosted_member_billing_ref" ADD CONSTRAINT "hosted_member_billing_re
 ALTER TABLE "hosted_invite" ADD CONSTRAINT "hosted_invite_member_id_fkey" FOREIGN KEY ("member_id") REFERENCES "hosted_member"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "hosted_billing_checkout" ADD CONSTRAINT "hosted_billing_checkout_member_id_fkey" FOREIGN KEY ("member_id") REFERENCES "hosted_member"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "hosted_billing_checkout" ADD CONSTRAINT "hosted_billing_checkout_invite_id_fkey" FOREIGN KEY ("invite_id") REFERENCES "hosted_invite"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-
--- AddForeignKey
 ALTER TABLE "hosted_revnet_issuance" ADD CONSTRAINT "hosted_revnet_issuance_member_id_fkey" FOREIGN KEY ("member_id") REFERENCES "hosted_member"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "hosted_webhook_receipt_side_effect" ADD CONSTRAINT "hosted_webhook_receipt_side_effect_source_event_id_fkey" FOREIGN KEY ("source", "event_id") REFERENCES "hosted_webhook_receipt"("source", "event_id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "hosted_ai_usage" ADD CONSTRAINT "hosted_ai_usage_member_id_fkey" FOREIGN KEY ("member_id") REFERENCES "hosted_member"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "hosted_linq_daily_state" ADD CONSTRAINT "hosted_linq_daily_state_member_id_fkey" FOREIGN KEY ("member_id") REFERENCES "hosted_member"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "hosted_webhook_receipt_side_effect" ADD CONSTRAINT "hosted_webhook_receipt_side_effect_source_event_id_fkey" FOREIGN KEY ("source", "event_id") REFERENCES "hosted_webhook_receipt"("source", "event_id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "linq_webhook_event" ADD CONSTRAINT "linq_webhook_event_binding_id_fkey" FOREIGN KEY ("binding_id") REFERENCES "linq_recipient_binding"("id") ON DELETE CASCADE ON UPDATE CASCADE;

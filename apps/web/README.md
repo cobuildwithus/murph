@@ -77,8 +77,9 @@ Hosted onboarding extras:
 - `HOSTED_ONBOARDING_SIGNUP_PHONE_NUMBER` to show a public `Text to start` CTA on `/`
 - `NEXT_PUBLIC_PRIVY_APP_ID`
 - `NEXT_PUBLIC_PRIVY_CLIENT_ID` if you want the hosted web app to select a specific Privy web client per environment
-- `PRIVY_CUSTOM_AUTH_DOMAIN` or `NEXT_PUBLIC_PRIVY_CUSTOM_AUTH_DOMAIN` when Privy uses a custom auth host such as `https://privy.example.com`; `apps/web` uses this to extend the CSP `connect-src` and `frame-src` allowlists for Privy's browser SDK
-- `PRIVY_BASE_DOMAIN` or `NEXT_PUBLIC_PRIVY_BASE_DOMAIN` as an optional fallback when the Privy custom host follows the `privy.<base-domain>` pattern
+- `PRIVY_CUSTOM_AUTH_DOMAIN` when Privy uses a custom auth host such as `https://privy.example.com`; `apps/web` uses this to extend the CSP `connect-src` and `frame-src` allowlists for Privy's browser SDK
+- `PRIVY_BASE_DOMAIN` as an optional fallback when the Privy custom host follows the `privy.<base-domain>` pattern
+- When neither `PRIVY_*` value is set, `apps/web` still derives the Privy CSP origin from the canonical hosted public origin (`HOSTED_ONBOARDING_PUBLIC_BASE_URL`, then `HOSTED_WEB_BASE_URL`, then Vercel's production URL)
 - `PRIVY_VERIFICATION_KEY`
 - enable Privy email login/linking in the dashboard so `/settings` can verify account email addresses
 - enable Privy identity tokens in the dashboard under `User management > Authentication > Advanced`
