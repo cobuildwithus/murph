@@ -295,7 +295,7 @@ export function buildScaffoldPayload(noun: string) {
 }
 
 export function buildEntityLinks(record: {
-  data: JsonObject
+  data: Record<string, unknown>
   relatedIds?: string[]
 }) {
   const linkIds = new Set<string>()
