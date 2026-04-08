@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises'
 import { test } from 'vitest'
 
 interface PackageManifest {
+  bundleDependencies?: string[]
   dependencies?: Record<string, string>
   exports?: Record<string, unknown>
 }
@@ -49,6 +50,8 @@ test('cli and split owner packages publish the expected owner dependencies', asy
   assert.equal(cliManifest.dependencies?.['@murphai/operator-config'], 'workspace:*')
   assert.equal(cliManifest.dependencies?.['@murphai/assistant-engine'], 'workspace:*')
   assert.equal(cliManifest.dependencies?.['@murphai/vault-usecases'], 'workspace:*')
+  assert.equal(cliManifest.dependencies?.['@murphai/inboxd-imessage'], 'workspace:*')
+  assert.equal(cliManifest.bundleDependencies?.includes('@murphai/inboxd-imessage'), true)
 
   assert.equal(assistantCliManifest.dependencies?.['@murphai/assistant-engine'], 'workspace:*')
   assert.equal(assistantCliManifest.dependencies?.['@murphai/operator-config'], 'workspace:*')
@@ -69,8 +72,8 @@ test('cli and split owner packages publish the expected owner dependencies', asy
   assert.equal(setupCliManifest.dependencies?.['@murphai/vault-inbox'], undefined)
   assert.equal(assistantEngineManifest.exports?.['./assistant-backend'], undefined)
   assert.equal(assistantEngineManifest.exports?.['./assistant-cli-contracts'], undefined)
-  assert.equal(assistantEngineManifest.exports?.['./assistant-cli-access'], undefined)
-  assert.equal(assistantEngineManifest.exports?.['./assistant-cli-tools'], undefined)
+  assert.equal(assistantEngineManifest.exports?.['./assistant-cli-access'] !== undefined, true)
+  assert.equal(assistantEngineManifest.exports?.['./assistant-cli-tools'] !== undefined, true)
   assert.equal(assistantEngineManifest.exports?.['./assistant/*'], undefined)
   assert.equal(assistantEngineManifest.exports?.['./commands/*'], undefined)
   assert.equal(assistantEngineManifest.exports?.['./commands/query-record-command-helpers'], undefined)
@@ -90,7 +93,7 @@ test('cli and split owner packages publish the expected owner dependencies', asy
   assert.equal(assistantEngineManifest.exports?.['./usecases/explicit-health-family-services'], undefined)
   assert.equal(assistantEngineManifest.exports?.['./usecases/record-mutations'], undefined)
   assert.equal(assistantEngineManifest.exports?.['./usecases/workout-artifacts'], undefined)
-  assert.equal(vaultUsecasesManifest.exports?.['./vault-services'], undefined)
+  assert.equal(vaultUsecasesManifest.exports?.['./vault-services'] !== undefined, true)
   assert.equal(vaultUsecasesManifest.exports?.['./usecases/runtime'], undefined)
   assert.equal(vaultUsecasesManifest.exports?.['./usecases/shared'], undefined)
   assert.equal(vaultUsecasesManifest.exports?.['./health-cli-descriptors'], undefined)

@@ -9,6 +9,14 @@ import {
   resolveRuntimePaths,
 } from '@murphai/runtime-state/node'
 import { test } from 'vitest'
+import type {
+  EmailDriver,
+  ImessageDriver,
+  InboxImessageRuntimeModule,
+  InboxRuntimeModule,
+  PollConnector,
+  TelegramDriver,
+} from '@murphai/inbox-services'
 
 import {
   instantiateConnector,
@@ -23,6 +31,16 @@ test('instantiateConnector delegates iMessage defaults through the connector fac
     id?: string
     includeOwnMessages?: boolean
   } | null = null
+  const inboxCoreModule = createStubInboxRuntimeModule()
+  const imessageModule = createStubInboxImessageRuntimeModule({
+    createImessageConnector(options) {
+      received = options
+      return createStubPollConnector({
+        id: options.id ?? 'imessage:self',
+        source: 'imessage',
+      })
+    },
+  })
 
   const connector = await instantiateConnector({
     connector: {
@@ -37,30 +55,13 @@ test('instantiateConnector delegates iMessage defaults through the connector fac
     },
     inputLimit: 7,
     async loadInbox() {
-      return {
-        createImessageConnector(options: {
-          accountId?: string | null
-          backfillLimit?: number
-          id?: string
-          includeOwnMessages?: boolean
-        }) {
-          received = options
-          return {
-            id: options.id ?? 'imessage:self',
-            source: 'imessage',
-            kind: 'poll',
-            capabilities: {
-              attachments: true,
-              backfill: true,
-              watch: true,
-              webhooks: false,
-            },
-          }
-        },
-      } as any
+      return inboxCoreModule
+    },
+    async loadInboxImessage() {
+      return imessageModule
     },
     async loadImessageDriver() {
-      return {} as any
+      return createUnreachableImessageDriver()
     },
     async loadTelegramDriver() {
       throw new Error('unreachable')
@@ -69,6 +70,7 @@ test('instantiateConnector delegates iMessage defaults through the connector fac
   })
 
   assert.equal(connector.id, 'imessage:self')
+  assert.equal('createImessageConnector' in inboxCoreModule, false)
   if (!received) {
     throw new Error('expected connector options to be captured')
   }
@@ -107,8 +109,8 @@ test('instantiateConnector delegates Linq webhook options through the connector 
     },
     linqWebhookSecret: 'secret-123',
     async loadInbox() {
-      return {
-        createLinqWebhookConnector(options: {
+      return createStubInboxRuntimeModule({
+        createLinqWebhookConnector: (options: {
           accountId?: string | null
           downloadAttachments?: boolean
           host?: string
@@ -116,7 +118,7 @@ test('instantiateConnector delegates Linq webhook options through the connector 
           path?: string
           port?: number
           webhookSecret: string
-        }) {
+        }) => {
           received = options
           return {
             id: options.id ?? 'linq:default',
@@ -136,7 +138,10 @@ test('instantiateConnector delegates Linq webhook options through the connector 
             async watch() {},
           }
         },
-      } as any
+      })
+    },
+    async loadInboxImessage() {
+      throw new Error('unreachable')
     },
     async loadImessageDriver() {
       throw new Error('unreachable')
@@ -180,12 +185,15 @@ test('instantiateConnector fails closed for Linq when the local webhook secret i
         },
         linqWebhookSecret: null,
         async loadInbox() {
-          return {
-            createLinqWebhookConnector() {
+          return createStubInboxRuntimeModule({
+            createLinqWebhookConnector: () => {
               created = true
               throw new Error('unreachable')
             },
-          } as any
+          })
+        },
+        async loadInboxImessage() {
+          throw new Error('unreachable')
         },
         async loadImessageDriver() {
           throw new Error('unreachable')
@@ -222,14 +230,14 @@ test('instantiateConnector delegates Telegram polling through the explicit takeo
     },
     inputLimit: 7,
     async loadInbox() {
-      return {
-        createTelegramPollConnector(options: {
+      return createStubInboxRuntimeModule({
+        createTelegramPollConnector: (options: {
           accountId?: string | null
           backfillLimit?: number
           downloadAttachments?: boolean
           id?: string
           transportMode?: 'take-over-webhook' | 'require-no-webhook'
-        }) {
+        }) => {
           received = options
           return {
             id: options.id ?? 'telegram:bot',
@@ -244,13 +252,16 @@ test('instantiateConnector delegates Telegram polling through the explicit takeo
             },
           }
         },
-      } as any
+      })
+    },
+    async loadInboxImessage() {
+      throw new Error('unreachable')
     },
     async loadImessageDriver() {
       throw new Error('unreachable')
     },
     async loadTelegramDriver() {
-      return {} as any
+      return createUnreachableTelegramDriver()
     },
     linqWebhookSecret: null,
   })
@@ -317,7 +328,7 @@ test.sequential('normalizeDaemonState rewrites stale daemon state records', asyn
     )
 
     const persisted = parseVersionedJsonStateEnvelope(
-      JSON.parse(await readFile(paths.inboxStatePath, 'utf8')) as unknown,
+      JSON.parse(await readFile(paths.inboxStatePath, 'utf8')),
       {
         label: 'Inbox daemon state',
         parseValue(value) {
@@ -340,6 +351,134 @@ test.sequential('normalizeDaemonState rewrites stale daemon state records', asyn
     await rm(vaultRoot, { recursive: true, force: true })
   }
 })
+
+function createStubPollConnector(input: {
+  id: string
+  source: string
+  accountId?: string | null
+}): PollConnector {
+  return {
+    id: input.id,
+    source: input.source,
+    accountId: input.accountId ?? null,
+    kind: 'poll',
+    capabilities: {
+      attachments: true,
+      backfill: true,
+      watch: true,
+      webhooks: false,
+    },
+  }
+}
+
+function createUnreachableImessageDriver(): ImessageDriver {
+  return {
+    async getMessages() {
+      throw new Error('unreachable')
+    },
+    async listChats() {
+      throw new Error('unreachable')
+    },
+  }
+}
+
+function createUnreachableTelegramDriver(): TelegramDriver {
+  return {
+    async getMe() {
+      throw new Error('unreachable')
+    },
+    async getMessages() {
+      throw new Error('unreachable')
+    },
+    async startWatching() {
+      throw new Error('unreachable')
+    },
+    async getFile() {
+      throw new Error('unreachable')
+    },
+    async downloadFile() {
+      throw new Error('unreachable')
+    },
+  }
+}
+
+function createUnreachableEmailDriver(): EmailDriver {
+  return {
+    inboxId: 'unreachable',
+    async listUnreadMessages() {
+      throw new Error('unreachable')
+    },
+    async markProcessed() {
+      throw new Error('unreachable')
+    },
+    async downloadAttachment() {
+      throw new Error('unreachable')
+    },
+  }
+}
+
+function createStubInboxImessageRuntimeModule(
+  overrides: Partial<InboxImessageRuntimeModule> = {},
+): InboxImessageRuntimeModule {
+  return {
+    createImessageConnector(input) {
+      return createStubPollConnector({
+        id: input.id ?? 'imessage:self',
+        source: 'imessage',
+        accountId: input.accountId ?? null,
+      })
+    },
+    async loadImessageKitDriver() {
+      return createUnreachableImessageDriver()
+    },
+    ...overrides,
+  }
+}
+
+function createStubInboxRuntimeModule(
+  overrides: Partial<InboxRuntimeModule> = {},
+): InboxRuntimeModule {
+  return {
+    async ensureInboxVault() {},
+    async openInboxRuntime() {
+      throw new Error('unreachable')
+    },
+    async createInboxPipeline() {
+      throw new Error('unreachable')
+    },
+    createTelegramPollConnector(input) {
+      return createStubPollConnector({
+        id: input.id ?? 'telegram:bot',
+        source: 'telegram',
+        accountId: input.accountId ?? null,
+      })
+    },
+    createEmailPollConnector(input) {
+      return createStubPollConnector({
+        id: input.id ?? 'email:default',
+        source: 'email',
+        accountId: input.accountId ?? null,
+      })
+    },
+    createLinqWebhookConnector(input) {
+      return createStubPollConnector({
+        id: input.id ?? 'linq:default',
+        source: 'linq',
+        accountId: input.accountId ?? null,
+      })
+    },
+    createTelegramBotApiPollDriver() {
+      return createUnreachableTelegramDriver()
+    },
+    createAgentmailApiPollDriver() {
+      return createUnreachableEmailDriver()
+    },
+    async rebuildRuntimeFromVault() {},
+    async runInboxDaemon() {},
+    async runInboxDaemonWithParsers() {},
+    ...overrides,
+  }
+}
 
 test.sequential('readPromotionsByCapture groups promotion entries by capture id', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-inbox-promo-'))
