@@ -106,10 +106,7 @@ async function waitForProcessTurnQueue(
   abortSignal?: AbortSignal,
 ): Promise<() => void> {
   const prior = processTurnQueues.get(assistantStateRoot) ?? Promise.resolve()
-  let releaseQueue!: () => void
-  const queued = new Promise<void>((resolve) => {
-    releaseQueue = resolve
-  })
+  const { promise: queued, resolve: releaseQueue } = Promise.withResolvers<void>()
   const tail = prior.then(
     () => queued,
     () => queued,
@@ -149,17 +146,16 @@ async function waitForPriorTurn(
   let onAbort: (() => void) | null = null
 
   try {
+    const abortDeferred = Promise.withResolvers<never>()
+    onAbort = () => {
+      abortDeferred.reject(createAssistantTurnAbortedError())
+    }
+    abortSignal.addEventListener('abort', onAbort, {
+      once: true,
+    })
     await Promise.race([
       prior.catch(() => undefined),
-      new Promise<never>((_, reject) => {
-        onAbort = () => {
-          reject(createAssistantTurnAbortedError())
-        }
-
-        abortSignal.addEventListener('abort', onAbort, {
-          once: true,
-        })
-      }),
+      abortDeferred.promise,
     ])
   } finally {
     if (onAbort) {
