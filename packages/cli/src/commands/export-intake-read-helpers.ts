@@ -8,7 +8,7 @@ import {
   loadQueryRuntime as loadBaseQueryRuntime,
   type QueryRuntimeModule,
   type QueryCanonicalEntity as AssessmentEntity,
-} from '@murphai/vault-usecases'
+} from '@murphai/vault-usecases/runtime'
 import { materializeExportPack, resolveVaultRelativePath } from '@murphai/vault-usecases/helpers'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { pathSchema } from '@murphai/operator-config/vault-cli-contracts'

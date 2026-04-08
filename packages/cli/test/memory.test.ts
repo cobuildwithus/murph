@@ -20,7 +20,7 @@ import {
 } from "@murphai/core";
 import { readMemoryDocument as readMemoryDocumentFromQuery } from "@murphai/query";
 
-import { createTempVaultContext } from "./cli-test-helpers.js";
+import { createTempVaultContext, runInProcessJsonCli } from "./cli-test-helpers.js";
 import { registerMemoryCommands } from "../src/commands/memory.js";
 
 const cleanupPaths: string[] = [];
@@ -103,6 +103,145 @@ test("memory command module registers without throwing", () => {
 
   registerMemoryCommands(cli);
   assert.ok(cli);
+});
+
+test("memory commands round-trip upsert, show, and forget through the registered CLI", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext("murph-memory-cli-");
+  cleanupPaths.push(parentRoot);
+
+  const cli = Cli.create("vault-cli", {
+    description: "memory test cli",
+    version: "0.0.0-test",
+  });
+
+  registerMemoryCommands(cli);
+
+  const upserted = await runInProcessJsonCli(cli, [
+    "memory",
+    "upsert",
+    "Remember the coverage seam is package-local.",
+    "--section",
+    "Context",
+    "--vault",
+    vaultRoot,
+  ]);
+  assert.equal(upserted.exitCode, null);
+  assert.equal(upserted.envelope.ok, true);
+
+  const createdMemoryId = (
+    upserted.envelope.data as {
+      memory: {
+        id: string;
+        section: string;
+      };
+      created: boolean;
+    }
+  );
+  assert.equal(createdMemoryId.created, true);
+  assert.equal(createdMemoryId.memory.section, "Context");
+
+  const shownDocument = await runInProcessJsonCli(cli, [
+    "memory",
+    "show",
+    "--vault",
+    vaultRoot,
+  ]);
+  assert.equal(shownDocument.exitCode, null);
+  assert.equal(shownDocument.envelope.ok, true);
+  assert.equal(
+    (
+      shownDocument.envelope.data as {
+        document: {
+          records: unknown[];
+        };
+        memory: unknown;
+      }
+    ).document.records.length,
+    1,
+  );
+  assert.equal(
+    (
+      shownDocument.envelope.data as {
+        document: {
+          records: unknown[];
+        };
+        memory: unknown;
+      }
+    ).memory,
+    null,
+  );
+
+  const shownRecord = await runInProcessJsonCli(cli, [
+    "memory",
+    "show",
+    createdMemoryId.memory.id,
+    "--vault",
+    vaultRoot,
+  ]);
+  assert.equal(shownRecord.exitCode, null);
+  assert.equal(shownRecord.envelope.ok, true);
+  assert.equal(
+    (
+      shownRecord.envelope.data as {
+        memory: {
+          id: string;
+        } | null;
+      }
+    ).memory?.id,
+    createdMemoryId.memory.id,
+  );
+
+  const forgotten = await runInProcessJsonCli(cli, [
+    "memory",
+    "forget",
+    createdMemoryId.memory.id,
+    "--vault",
+    vaultRoot,
+  ]);
+  assert.equal(forgotten.exitCode, null);
+  assert.equal(forgotten.envelope.ok, true);
+  assert.equal(
+    (
+      forgotten.envelope.data as {
+        existed: boolean;
+        memory: {
+          id: string;
+        } | null;
+        document: {
+          records: unknown[];
+        };
+      }
+    ).existed,
+    true,
+  );
+  assert.equal(
+    (
+      forgotten.envelope.data as {
+        existed: boolean;
+        memory: {
+          id: string;
+        } | null;
+        document: {
+          records: unknown[];
+        };
+      }
+    ).memory?.id,
+    createdMemoryId.memory.id,
+  );
+  assert.equal(
+    (
+      forgotten.envelope.data as {
+        existed: boolean;
+        memory: {
+          id: string;
+        } | null;
+        document: {
+          records: unknown[];
+        };
+      }
+    ).document.records.length,
+    0,
+  );
 });
 
 test("memory command module does not register a search subcommand", async () => {

@@ -499,6 +499,36 @@ run_owner_package_coverage() {
     pnpm --dir "packages/query" exec vitest run --config "vitest.config.ts" --coverage
 }
 
+run_rollout_package_coverage() {
+  run_timed_step \
+    "Assistant engine package coverage" \
+    pnpm --dir "packages/assistant-engine" exec vitest run --config "vitest.config.ts" --coverage
+  run_timed_step \
+    "Assistant runtime package coverage" \
+    pnpm --dir "packages/assistant-runtime" exec vitest run --config "vitest.config.ts" --coverage
+  run_timed_step \
+    "Assistantd package coverage" \
+    pnpm --dir "packages/assistantd" exec vitest run --config "vitest.config.ts" --coverage
+  run_timed_step \
+    "CLI package coverage" \
+    env MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 pnpm exec vitest run --config "packages/cli/vitest.workspace.ts" --coverage
+  run_timed_step \
+    "Contracts package coverage" \
+    pnpm --dir "packages/contracts" exec vitest run --config "vitest.config.ts" --coverage
+  run_timed_step \
+    "Device syncd package coverage" \
+    pnpm --dir "packages/device-syncd" exec vitest run --config "vitest.config.ts" --coverage
+  run_timed_step \
+    "Inboxd package coverage" \
+    pnpm --dir "packages/inboxd" exec vitest run --config "vitest.config.ts" --coverage
+  run_timed_step \
+    "Messaging ingress package coverage" \
+    pnpm --dir "packages/messaging-ingress" exec vitest run --config "vitest.config.ts" --coverage
+  run_timed_step \
+    "OpenClaw package coverage" \
+    pnpm --dir "packages/openclaw-plugin" exec vitest run --config "vitest.config.ts" --coverage
+}
+
 run_typecheck() {
   run_timed_step "Shell syntax" check_shell_syntax
   run_timed_step "Node syntax" check_node_syntax
@@ -558,6 +588,7 @@ run_test_packages_coverage() {
   fi
   run_timed_step "Repo Vitest" run_repo_vitest --no-coverage
   run_timed_step "Owner package coverage" run_owner_package_coverage
+  run_timed_step "Rollout package coverage" run_rollout_package_coverage
 }
 
 run_test_coverage() {

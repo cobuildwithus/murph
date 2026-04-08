@@ -687,6 +687,89 @@ test("public ingress preserves callback redirect context on OAuth callback failu
   );
 });
 
+test("public ingress preserves non-device-sync callback errors without wrapping them", async () => {
+  const expected = new Error("unexpected oauth exchange failure");
+  const ingress = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    registry: createDeviceSyncRegistry([
+      createFakeProvider({
+        async exchangeAuthorizationCode() {
+          throw expected;
+        },
+      }),
+    ]),
+    store: new InMemoryPublicIngressStore(),
+  });
+
+  const begin = await ingress.startConnection({ provider: "demo" });
+
+  await assert.rejects(
+    () =>
+      ingress.handleOAuthCallback({
+        provider: "demo",
+        state: begin.state,
+        code: "abc",
+      }),
+    (error: unknown) => error === expected,
+  );
+});
+
+test("public ingress rejects unknown providers before creating OAuth state", async () => {
+  const ingress = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    registry: createDeviceSyncRegistry([createFakeProvider()]),
+    store: new InMemoryPublicIngressStore(),
+  });
+
+  await assert.rejects(
+    () => ingress.startConnection({ provider: "missing-provider" }),
+    (error: unknown) =>
+      error instanceof DeviceSyncError &&
+      error.code === "PROVIDER_NOT_REGISTERED" &&
+      error.httpStatus === 404,
+  );
+});
+
+test("public ingress releases unknown-account webhook traces when the unknown hook fails", async () => {
+  const store = new InMemoryPublicIngressStore();
+  let unknownAttempts = 0;
+  const ingress = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    registry: createDeviceSyncRegistry([
+      createFakeProvider({
+        async verifyAndParseWebhook() {
+          return {
+            externalAccountId: "demo-late",
+            eventType: "demo.updated",
+            traceId: "trace-release-on-error",
+            jobs: [],
+          };
+        },
+      }),
+    ]),
+    store,
+    hooks: {
+      async onUnknownWebhook() {
+        unknownAttempts += 1;
+        throw new Error("transient unknown-account hook failure");
+      },
+    },
+  });
+
+  await assert.rejects(
+    () => ingress.handleWebhook("demo", new Headers(), Buffer.from("{}")),
+    /transient unknown-account hook failure/u,
+  );
+  await assert.rejects(
+    () => ingress.handleWebhook("demo", new Headers(), Buffer.from("{}")),
+    /transient unknown-account hook failure/u,
+  );
+
+  assert.equal(unknownAttempts, 2);
+  assert.equal(store.completedWebhookTraceCalls, 0);
+  assert.equal(store.lastRecordedWebhookTrace, null);
+});
+
 test("public ingress rejects protocol-relative, backslash-prefixed, and credential-bearing returnTo values", async () => {
   const ingress = createDeviceSyncPublicIngress({
     publicBaseUrl: "https://sync.example.test/device-sync",

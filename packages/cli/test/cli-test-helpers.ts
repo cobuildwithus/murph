@@ -5,6 +5,7 @@ import path from 'node:path'
 import { createInterface } from 'node:readline'
 import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
+import type { Cli } from 'incur'
 
 export interface CliSuccessEnvelope<TData = Record<string, unknown>> {
   ok: true
@@ -45,6 +46,11 @@ export interface CliErrorEnvelope {
 export type CliEnvelope<TData = Record<string, unknown>> =
   | CliSuccessEnvelope<TData>
   | CliErrorEnvelope
+
+export interface InProcessCliJsonResult<TData = unknown> {
+  exitCode: number | null
+  envelope: CliEnvelope<TData>
+}
 
 export const packageDir = fileURLToPath(new URL('../', import.meta.url))
 export const repoRoot = path.resolve(packageDir, '../..')
@@ -349,6 +355,32 @@ async function runRawCliAttempt(
     }
 
     throw error
+  }
+}
+
+export async function runInProcessJsonCli<TData = Record<string, unknown>>(
+  cli: Cli.Cli,
+  args: string[],
+  options?: {
+    env?: NodeJS.ProcessEnv
+  },
+): Promise<InProcessCliJsonResult<TData>> {
+  const output: string[] = []
+  let exitCode: number | null = null
+
+  await cli.serve([...args, '--format', 'json', '--verbose'], {
+    env: options?.env ?? process.env,
+    exit(code) {
+      exitCode = code
+    },
+    stdout(chunk) {
+      output.push(chunk)
+    },
+  })
+
+  return {
+    exitCode,
+    envelope: JSON.parse(output.join('').trim()) as CliEnvelope<TData>,
   }
 }
 

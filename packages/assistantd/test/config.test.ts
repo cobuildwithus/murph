@@ -97,3 +97,50 @@ test('loadAssistantdEnvFiles preserves exported shell variables over local env d
     await rm(cwd, { recursive: true, force: true })
   }
 })
+
+test('loadAssistantdEnvironment requires the bound vault and control token', () => {
+  assert.throws(
+    () =>
+      loadAssistantdEnvironment({
+        ASSISTANTD_CONTROL_TOKEN: 'secret-token',
+      }),
+    /ASSISTANTD_VAULT_ROOT is required/u,
+  )
+  assert.throws(
+    () =>
+      loadAssistantdEnvironment({
+        ASSISTANTD_VAULT_ROOT: '/tmp/vault',
+      }),
+    /ASSISTANTD_CONTROL_TOKEN is required/u,
+  )
+})
+
+test('loadAssistantdEnvironment validates the loopback host and numeric port', () => {
+  assert.throws(
+    () =>
+      loadAssistantdEnvironment({
+        ASSISTANTD_VAULT_ROOT: '/tmp/vault',
+        ASSISTANTD_CONTROL_TOKEN: 'secret-token',
+        ASSISTANTD_HOST: 'example.com',
+      }),
+    /loopback hostname or address/u,
+  )
+  assert.throws(
+    () =>
+      loadAssistantdEnvironment({
+        ASSISTANTD_VAULT_ROOT: '/tmp/vault',
+        ASSISTANTD_CONTROL_TOKEN: 'secret-token',
+        ASSISTANTD_PORT: '0',
+      }),
+    /ASSISTANTD_PORT must be an integer between 1 and 65535/u,
+  )
+  assert.throws(
+    () =>
+      loadAssistantdEnvironment({
+        ASSISTANTD_VAULT_ROOT: '/tmp/vault',
+        ASSISTANTD_CONTROL_TOKEN: 'secret-token',
+        ASSISTANTD_PORT: 'not-a-number',
+      }),
+    /ASSISTANTD_PORT must be an integer between 1 and 65535/u,
+  )
+})

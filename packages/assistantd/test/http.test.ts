@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict'
+import type { IncomingMessage, ServerResponse } from 'node:http'
+import { Readable } from 'node:stream'
 import { afterEach, test, vi } from 'vitest'
-import { startAssistantHttpServer } from '../src/http.js'
+import {
+  createAssistantHttpRequestHandler,
+  type AssistantHttpRequestHandler,
+} from '../src/http.js'
 import type { AssistantLocalService } from '../src/service.js'
 
 const TEST_SESSION = {
@@ -204,6 +209,85 @@ function createGatewayServiceMock(
     }),
     ...overrides,
   } as AssistantLocalService['gateway']
+}
+
+function createAssistantdTestFetch(
+  handler: AssistantHttpRequestHandler,
+  baseUrl: string,
+) {
+  return async (
+    input: string,
+    init?: RequestInit & { remoteAddress?: string },
+  ): Promise<Response> => {
+    const url = new URL(input, baseUrl)
+    const requestHeaders = new Headers(init?.headers)
+    if (!requestHeaders.has('host')) {
+      requestHeaders.set('host', url.host)
+    }
+
+    const requestBody = readAssistantdTestRequestBody(init?.body)
+    const request = Object.assign(
+      Readable.from(requestBody === undefined ? [] : [requestBody]),
+      {
+        headers: Object.fromEntries(requestHeaders.entries()),
+        method: init?.method ?? 'GET',
+        socket: {
+          remoteAddress: init?.remoteAddress ?? '127.0.0.1',
+        },
+        url: `${url.pathname}${url.search}`,
+      },
+    ) as IncomingMessage
+
+    let statusCode = 200
+    const responseHeaders = new Headers()
+    const responseChunks: Uint8Array[] = []
+    const responseLike: Pick<ServerResponse, 'end' | 'setHeader'> & {
+      statusCode: number
+    } = {
+      end(chunk?: string | Uint8Array) {
+        if (typeof chunk === 'string') {
+          responseChunks.push(Buffer.from(chunk, 'utf8'))
+        } else if (chunk) {
+          responseChunks.push(Buffer.from(chunk))
+        }
+      },
+      setHeader(name: string, value: number | string | readonly string[]) {
+        responseHeaders.set(
+          name,
+          Array.isArray(value) ? value.join(', ') : String(value),
+        )
+      },
+      get statusCode() {
+        return statusCode
+      },
+      set statusCode(value: number) {
+        statusCode = value
+      },
+    }
+
+    await handler(request, responseLike as ServerResponse)
+
+    return new Response(Buffer.concat(responseChunks), {
+      headers: responseHeaders,
+      status: statusCode,
+    })
+  }
+}
+
+function readAssistantdTestRequestBody(body: RequestInit['body']): string | undefined {
+  if (body === undefined || body === null) {
+    return undefined
+  }
+  if (typeof body === 'string') {
+    return body
+  }
+  if (body instanceof URLSearchParams) {
+    return body.toString()
+  }
+  if (body instanceof Uint8Array || body instanceof ArrayBuffer) {
+    return Buffer.from(body).toString('utf8')
+  }
+  throw new Error('Unsupported assistantd test request body.')
 }
 
 afterEach(() => {
@@ -417,8 +501,11 @@ test('assistantd http server enforces bearer auth, validates requests, and route
     sendMessage: gatewaySendMessage,
     waitForEvents: gatewayWaitForEvents,
   })
+  const drainOutbox = vi.fn(async () => ({ attempted: 0, sent: 0, failed: 0, queued: 0 }))
+  const processDueCron = vi.fn(async () => ({ failed: 0, processed: 0, succeeded: 0 } as any))
+  const updateSessionOptions = vi.fn(async () => TEST_SESSION as any)
   const service = {
-    drainOutbox: async () => ({ attempted: 0, sent: 0, failed: 0, queued: 0 }),
+    drainOutbox,
     getCronJob,
     getCronTarget,
     getCronStatus: async () => ({
@@ -449,7 +536,7 @@ test('assistantd http server enforces bearer auth, validates requests, and route
       created: true,
       session: TEST_SESSION as any,
     }),
-    processDueCron: async () => ({ failed: 0, processed: 0, succeeded: 0 } as any),
+    processDueCron,
     setCronTarget,
     runAutomationOnce: async () => ({
       vault: '/tmp/vault',
@@ -470,20 +557,38 @@ test('assistantd http server enforces bearer auth, validates requests, and route
       lastError: null,
     } as any),
     sendMessage,
-    updateSessionOptions: async () => TEST_SESSION as any,
+    updateSessionOptions,
     vault: '/tmp/vault',
   } as AssistantLocalService
 
-  const handle = await startAssistantHttpServer({
-    controlToken: 'secret-token',
-    host: '127.0.0.1',
-    port: 0,
-    service,
-  })
+  const baseUrl = 'http://127.0.0.1:50241'
+  const fetch = createAssistantdTestFetch(
+    createAssistantHttpRequestHandler({
+      controlToken: 'secret-token',
+      host: '127.0.0.1',
+      port: 0,
+      service,
+    }),
+    baseUrl,
+  )
+  const handle = {
+    address: {
+      baseUrl,
+    },
+    close: async () => undefined,
+  }
 
   try {
     const unauthorized = await fetch(`${handle.address.baseUrl}/healthz`)
     assert.equal(unauthorized.status, 401)
+
+    const forbidden = await fetch(`${handle.address.baseUrl}/healthz`, {
+      headers: {
+        Authorization: 'Bearer secret-token',
+      },
+      remoteAddress: '8.8.8.8',
+    })
+    assert.equal(forbidden.status, 403)
 
     const health = await fetch(`${handle.address.baseUrl}/healthz`, {
       headers: {
@@ -521,6 +626,23 @@ test('assistantd http server enforces bearer auth, validates requests, and route
       'accepted-inbound-message',
     )
 
+    const sessionOptions = await fetch(`${handle.address.baseUrl}/session-options`, {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer secret-token',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        providerOptions: {
+          model: 'gpt-5.4',
+        },
+        sessionId: TEST_SESSION.sessionId,
+        vault: '/tmp/vault',
+      }),
+    })
+    assert.equal(sessionOptions.status, 200)
+    assert.equal(updateSessionOptions.mock.calls[0]?.[0]?.sessionId, TEST_SESSION.sessionId)
+
     const openConversation = await fetch(`${handle.address.baseUrl}/open-conversation`, {
       method: 'POST',
       headers: {
@@ -553,6 +675,16 @@ test('assistantd http server enforces bearer auth, validates requests, and route
     assert.equal(status.status, 200)
     assert.equal(getStatus.mock.calls[0]?.[0]?.limit, 7)
     assert.equal(getStatus.mock.calls[0]?.[0]?.sessionId, TEST_SESSION.sessionId)
+
+    const sessions = await fetch(
+      `${handle.address.baseUrl}/sessions?vault=${encodeURIComponent('/tmp/vault')}`,
+      {
+        headers: {
+          Authorization: 'Bearer secret-token',
+        },
+      },
+    )
+    assert.equal(sessions.status, 200)
 
     const session = await fetch(
       `${handle.address.baseUrl}/sessions/${encodeURIComponent('session_http_route')}?vault=${encodeURIComponent('/tmp/vault')}`,
@@ -591,6 +723,21 @@ test('assistantd http server enforces bearer auth, validates requests, and route
     const outboxIntentPayload = await outboxIntent.json() as { intentId: string }
     assert.equal(outboxIntentPayload.intentId, 'outbox_http_route')
     assert.equal(getOutboxIntent.mock.calls[0]?.[0]?.intentId, 'outbox_http_route')
+
+    const outboxDrain = await fetch(`${handle.address.baseUrl}/outbox/drain`, {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer secret-token',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        limit: 3.8,
+        now: '2026-03-28T00:00:00.000Z',
+        vault: '/tmp/vault',
+      }),
+    })
+    assert.equal(outboxDrain.status, 200)
+    assert.equal(drainOutbox.mock.calls[0]?.[0]?.limit, 3)
 
     const gatewayList = await fetch(`${handle.address.baseUrl}/gateway/conversations/list`, {
       method: 'POST',
@@ -774,6 +921,121 @@ test('assistantd http server enforces bearer auth, validates requests, and route
     assert.equal(gatewayPermissionResponse.status, 200)
     assert.equal(gatewayRespondToPermission.mock.calls[0]?.[0]?.requestId, 'perm_http_test')
 
+    const invalidGatewayList = await fetch(`${handle.address.baseUrl}/gateway/conversations/list`, {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer secret-token',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        limit: 'bad',
+      }),
+    })
+    assert.equal(invalidGatewayList.status, 400)
+
+    const invalidGatewayConversation = await fetch(`${handle.address.baseUrl}/gateway/conversations/get`, {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer secret-token',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        sessionKey: '',
+      }),
+    })
+    assert.equal(invalidGatewayConversation.status, 400)
+
+    const invalidGatewayMessages = await fetch(`${handle.address.baseUrl}/gateway/messages/read`, {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer secret-token',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        sessionKey: 123,
+      }),
+    })
+    assert.equal(invalidGatewayMessages.status, 400)
+
+    const invalidGatewayAttachments = await fetch(`${handle.address.baseUrl}/gateway/attachments/fetch`, {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer secret-token',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        messageId: 123,
+      }),
+    })
+    assert.equal(invalidGatewayAttachments.status, 400)
+
+    const invalidGatewaySend = await fetch(`${handle.address.baseUrl}/gateway/messages/send`, {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer secret-token',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        sessionKey: TEST_GATEWAY_CONVERSATION.sessionKey,
+        text: '',
+      }),
+    })
+    assert.equal(invalidGatewaySend.status, 400)
+
+    const invalidGatewayPoll = await fetch(`${handle.address.baseUrl}/gateway/events/poll`, {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer secret-token',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        cursor: 'bad',
+      }),
+    })
+    assert.equal(invalidGatewayPoll.status, 400)
+
+    const invalidGatewayWait = await fetch(`${handle.address.baseUrl}/gateway/events/wait`, {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer secret-token',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        timeoutMs: 'bad',
+      }),
+    })
+    assert.equal(invalidGatewayWait.status, 400)
+
+    const invalidGatewayPermissions = await fetch(
+      `${handle.address.baseUrl}/gateway/permissions/list-open`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer secret-token',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          sessionKey: 123,
+        }),
+      },
+    )
+    assert.equal(invalidGatewayPermissions.status, 400)
+
+    const invalidGatewayPermissionResponse = await fetch(
+      `${handle.address.baseUrl}/gateway/permissions/respond`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer secret-token',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          decision: 'approve',
+        }),
+      },
+    )
+    assert.equal(invalidGatewayPermissionResponse.status, 400)
+
     const mismatchedGatewayVault = await fetch(
       `${handle.address.baseUrl}/gateway/conversations/list`,
       {
@@ -914,6 +1176,22 @@ test('assistantd http server enforces bearer auth, validates requests, and route
     const automationPayload = await automation.json() as { scans: number }
     assert.equal(automationPayload.scans, 1)
 
+    const processCron = await fetch(`${handle.address.baseUrl}/cron/process-due`, {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer secret-token',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        deliveryDispatchMode: 'queue-only',
+        limit: 9.7,
+        vault: '/tmp/vault',
+      }),
+    })
+    assert.equal(processCron.status, 200)
+    assert.equal(processDueCron.mock.calls[0]?.[0]?.deliveryDispatchMode, 'queue-only')
+    assert.equal(processDueCron.mock.calls[0]?.[0]?.limit, 9)
+
     const invalidAutomationDispatchMode = await fetch(`${handle.address.baseUrl}/automation/run-once`, {
       method: 'POST',
       headers: {
@@ -927,6 +1205,78 @@ test('assistantd http server enforces bearer auth, validates requests, and route
     assert.equal(invalidAutomationDispatchMode.status, 400)
     assert.match(await invalidAutomationDispatchMode.text(), /deliveryDispatchMode/u)
 
+    const invalidCronDispatchMode = await fetch(`${handle.address.baseUrl}/cron/process-due`, {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer secret-token',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        deliveryDispatchMode: 'later',
+      }),
+    })
+    assert.equal(invalidCronDispatchMode.status, 400)
+    assert.match(await invalidCronDispatchMode.text(), /deliveryDispatchMode/u)
+
+    const invalidPrompt = await fetch(`${handle.address.baseUrl}/message`, {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer secret-token',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        prompt: '   ',
+      }),
+    })
+    assert.equal(invalidPrompt.status, 400)
+    assert.match(await invalidPrompt.text(), /non-empty prompt/u)
+
+    const invalidSessionOptions = await fetch(`${handle.address.baseUrl}/session-options`, {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer secret-token',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        sessionId: TEST_SESSION.sessionId,
+      }),
+    })
+    assert.equal(invalidSessionOptions.status, 400)
+    assert.match(await invalidSessionOptions.text(), /providerOptions/u)
+
+    const malformedJson = await fetch(`${handle.address.baseUrl}/message`, {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer secret-token',
+        'Content-Type': 'application/json',
+      },
+      body: '{',
+    })
+    assert.equal(malformedJson.status, 400)
+
+    const invalidStatusLimit = await fetch(`${handle.address.baseUrl}/status?limit=oops`, {
+      headers: {
+        Authorization: 'Bearer secret-token',
+      },
+    })
+    assert.equal(invalidStatusLimit.status, 400)
+    assert.match(await invalidStatusLimit.text(), /query parameter limit/u)
+
+    const missingCronRunsJob = await fetch(`${handle.address.baseUrl}/cron/runs`, {
+      headers: {
+        Authorization: 'Bearer secret-token',
+      },
+    })
+    assert.equal(missingCronRunsJob.status, 400)
+    assert.match(await missingCronRunsJob.text(), /require a job query parameter/u)
+
+    const notFound = await fetch(`${handle.address.baseUrl}/nope`, {
+      headers: {
+        Authorization: 'Bearer secret-token',
+      },
+    })
+    assert.equal(notFound.status, 404)
+
     const invalidSession = await fetch(
       `${handle.address.baseUrl}/sessions/${encodeURIComponent('../outside')}`,
       {
@@ -937,6 +1287,14 @@ test('assistantd http server enforces bearer auth, validates requests, and route
     )
     assert.equal(invalidSession.status, 400)
     assert.match(await invalidSession.text(), /session id/u)
+
+    const missingSessionId = await fetch(`${handle.address.baseUrl}/sessions/`, {
+      headers: {
+        Authorization: 'Bearer secret-token',
+      },
+    })
+    assert.equal(missingSessionId.status, 400)
+    assert.match(await missingSessionId.text(), /requires an identifier/u)
 
     const invalidOutboxIntent = await fetch(
       `${handle.address.baseUrl}/outbox/${encodeURIComponent('../outside')}`,
@@ -1222,12 +1580,22 @@ test('assistantd http server preserves typed assistant error codes for invalid i
     vault: '/tmp/vault',
   } as AssistantLocalService
 
-  const handle = await startAssistantHttpServer({
-    controlToken: 'secret-token',
-    host: '127.0.0.1',
-    port: 0,
-    service,
-  })
+  const baseUrl = 'http://127.0.0.1:50241'
+  const fetch = createAssistantdTestFetch(
+    createAssistantHttpRequestHandler({
+      controlToken: 'secret-token',
+      host: '127.0.0.1',
+      port: 0,
+      service,
+    }),
+    baseUrl,
+  )
+  const handle = {
+    address: {
+      baseUrl,
+    },
+    close: async () => undefined,
+  }
 
   try {
     const invalidOutbox = await fetch(
@@ -1349,12 +1717,22 @@ test('assistantd http server does not reflect raw internal errors back to the cl
     vault: '/tmp/vault',
   } as AssistantLocalService
 
-  const handle = await startAssistantHttpServer({
-    controlToken: 'secret-token',
-    host: '127.0.0.1',
-    port: 0,
-    service,
-  })
+  const baseUrl = 'http://127.0.0.1:50241'
+  const fetch = createAssistantdTestFetch(
+    createAssistantHttpRequestHandler({
+      controlToken: 'secret-token',
+      host: '127.0.0.1',
+      port: 0,
+      service,
+    }),
+    baseUrl,
+  )
+  const handle = {
+    address: {
+      baseUrl,
+    },
+    close: async () => undefined,
+  }
 
   try {
     const response = await fetch(`${handle.address.baseUrl}/status`, {

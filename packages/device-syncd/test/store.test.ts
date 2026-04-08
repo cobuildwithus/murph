@@ -79,6 +79,136 @@ test("device sync store minimizes webhook trace payload retention without changi
   }
 });
 
+test("device sync store hosted hydration preserves existing tokens until disconnect and sanitizes mirrored metadata", async () => {
+  const tempDir = await makeTempDirectory("murph-device-syncd-store-hosted");
+  const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));
+
+  try {
+    assert.equal(
+      store.hydrateHostedAccount({
+        connection: {
+          connectedAt: "2026-04-07T00:00:00.000Z",
+          displayName: "Missing",
+          externalAccountId: "missing-account",
+          metadata: {},
+          provider: "oura",
+          scopes: ["daily"],
+          status: "active",
+          updatedAt: "2026-04-07T00:00:00.000Z",
+        },
+        hostedObservedTokenVersion: null,
+        hostedObservedUpdatedAt: null,
+        localState: {
+          lastErrorCode: null,
+          lastErrorMessage: null,
+          lastSyncCompletedAt: null,
+          lastSyncErrorAt: null,
+          lastSyncStartedAt: null,
+          lastWebhookAt: null,
+          nextReconcileAt: null,
+        },
+      }),
+      null,
+    );
+
+    const account = store.upsertAccount({
+      provider: "oura",
+      externalAccountId: "oura-user-1",
+      displayName: "Oura User",
+      scopes: ["daily"],
+      tokens: {
+        accessToken: "access-token",
+        accessTokenEncrypted: "enc:access-token",
+        refreshToken: "refresh-token",
+        refreshTokenEncrypted: "enc:refresh-token",
+      },
+      metadata: {
+        existing: "value",
+      },
+      connectedAt: "2026-04-07T00:00:00.000Z",
+    });
+
+    const hydrated = store.hydrateHostedAccount({
+      connection: {
+        connectedAt: "2026-04-07T00:00:00.000Z",
+        displayName: "Updated User",
+        externalAccountId: "oura-user-1",
+        metadata: {
+          "__proto__": "blocked",
+          attempts: 2,
+          nested: {
+            secret: "discarded",
+          },
+        },
+        provider: "oura",
+        scopes: ["daily", "sleep"],
+        status: "active",
+        updatedAt: "2026-04-07T01:00:00.000Z",
+      },
+      hostedObservedTokenVersion: 4,
+      hostedObservedUpdatedAt: "2026-04-07T01:00:00.000Z",
+      localState: {
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        lastSyncCompletedAt: "2026-04-07T00:30:00.000Z",
+        lastSyncErrorAt: null,
+        lastSyncStartedAt: "2026-04-07T00:20:00.000Z",
+        lastWebhookAt: "2026-04-07T00:10:00.000Z",
+        nextReconcileAt: "2026-04-07T02:00:00.000Z",
+      },
+    });
+
+    assert.equal(hydrated?.id, account.id);
+    assert.equal(hydrated?.accessTokenEncrypted, "enc:access-token");
+    assert.equal(hydrated?.refreshTokenEncrypted, "enc:refresh-token");
+    assert.deepEqual(hydrated?.metadata, {
+      attempts: 2,
+    });
+    assert.equal(hydrated?.hostedObservedTokenVersion, 4);
+    assert.equal(hydrated?.disconnectGeneration, 0);
+
+    const disconnected = store.hydrateHostedAccount({
+      connection: {
+        connectedAt: "2026-04-07T00:00:00.000Z",
+        displayName: "Updated User",
+        externalAccountId: "oura-user-1",
+        metadata: {
+          reason: "disconnect",
+        },
+        provider: "oura",
+        scopes: ["daily", "sleep"],
+        status: "disconnected",
+        updatedAt: "2026-04-07T03:00:00.000Z",
+      },
+      hostedObservedTokenVersion: null,
+      hostedObservedUpdatedAt: null,
+      localState: {
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        lastSyncCompletedAt: "2026-04-07T00:30:00.000Z",
+        lastSyncErrorAt: null,
+        lastSyncStartedAt: "2026-04-07T00:20:00.000Z",
+        lastWebhookAt: "2026-04-07T00:10:00.000Z",
+        nextReconcileAt: null,
+      },
+    });
+
+    assert.equal(disconnected?.accessTokenEncrypted, "");
+    assert.equal(disconnected?.refreshTokenEncrypted, null);
+    assert.equal(disconnected?.accessTokenExpiresAt, null);
+    assert.equal(disconnected?.disconnectGeneration, 1);
+    assert.deepEqual(disconnected?.metadata, {
+      reason: "disconnect",
+    });
+  } finally {
+    store.close();
+    await rm(tempDir, {
+      force: true,
+      recursive: true,
+    });
+  }
+});
+
 function readWebhookTraceRow(
   store: SqliteDeviceSyncStore,
   provider: string,

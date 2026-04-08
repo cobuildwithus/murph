@@ -1,7 +1,7 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { defineConfig, defineProject } from "vitest/config";
+import { defineConfig } from "vitest/config";
 
 import {
   resolveMurphVitestConcurrency,
@@ -41,6 +41,27 @@ const cliVitestRuntimeAliases = createVitestWorkspaceRuntimeAliases(
   resolveWorkspaceSourceEntries(packageDir, WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS),
 );
 
+export const cliVitestCoverage = {
+  provider: "custom" as const,
+  customProviderModule: path.resolve(packageDir, "../../config/vitest-coverage-provider.ts"),
+  reporter: ["text", "lcov"] as string[],
+  reportsDirectory: "./coverage",
+  include: [path.resolve(packageDir, "src/**/*.ts")],
+  exclude: [
+    "coverage/**",
+    "dist/**",
+    path.resolve(packageDir, "src/incur.generated.ts"),
+    "**/*.d.ts",
+  ],
+  thresholds: {
+    lines: 80,
+    functions: 70,
+    branches: 55,
+    statements: 80,
+  },
+  reportOnFailure: true,
+};
+
 type CliVitestProjectSpec = {
   readonly env?: Record<string, string>;
   readonly fileParallelism?: boolean;
@@ -53,9 +74,9 @@ function cliTestFile(fileName: string): string {
 }
 
 export function createCliVitestProject(name: string, fileNames: readonly string[]) {
-  const spec = cliVitestProjectSpecs.find((projectSpec) => projectSpec.name === name)
+  const spec = cliVitestProjectSpecs.find((projectSpec) => projectSpec.name === name);
 
-  return defineProject({
+  return defineConfig({
     resolve: {
       alias: cliVitestRuntimeAliases,
     },
@@ -68,6 +89,7 @@ export function createCliVitestProject(name: string, fileNames: readonly string[
         spec?.fileParallelism ?? cliVitestConcurrency.fileParallelism,
       env: spec?.env,
       include: fileNames.map(cliTestFile),
+      coverage: cliVitestCoverage,
     },
   });
 }
@@ -83,6 +105,7 @@ export const cliVitestProjectSpecs: readonly CliVitestProjectSpec[] = [
   {
     name: "cli-read-model",
     fileNames: [
+      "memory.test.ts",
       "search-runtime.test.ts",
       "list-surface.test.ts",
       "runtime.test.ts",
@@ -99,9 +122,14 @@ export const cliVitestProjectSpecs: readonly CliVitestProjectSpec[] = [
   {
     name: "cli-schemas-smoke",
     fileNames: [
+      "automation.test.ts",
+      "cli-entry.test.ts",
       "incur-smoke.test.ts",
       "inbox-incur-smoke.test.ts",
       "cli-test-helpers.test.ts",
+      "http-json-retry.test.ts",
+      "knowledge-cli-contracts.test.ts",
+      "knowledge-documents.test.ts",
       "wearables-schema.test.ts",
       "release-script-coverage-audit.test.ts",
       "release-workflow-guards.test.ts",
@@ -178,6 +206,7 @@ export default defineConfig({
   test: {
     ...murphVitestNoTimeouts,
     maxWorkers: cliVitestMaxWorkers,
+    coverage: cliVitestCoverage,
     projects: cliVitestProjects,
   },
 });
