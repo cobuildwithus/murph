@@ -3,7 +3,7 @@ import { Cli, z } from 'incur'
 import {
   inputFileOptionSchema,
   normalizeInputFileOption,
-} from './health-command-factory.js'
+} from '@murphai/vault-usecases'
 import {
   experimentCreateResultSchema,
   isoTimestampSchema,
@@ -14,7 +14,7 @@ import {
   slugSchema,
 } from '@murphai/operator-config/vault-cli-contracts'
 import type { VaultServices } from '@murphai/vault-usecases'
-import { registerLifecycleEntityGroup } from './health-command-factory.js'
+import { registerLifecycleEntityGroup } from './entity-command-groups.js'
 
 const experimentStatusSchema = z.enum(EXPERIMENT_STATUSES)
 
