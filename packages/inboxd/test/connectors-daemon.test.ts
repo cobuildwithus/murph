@@ -51,6 +51,25 @@ test("connector registry keeps distinct runtime ids under the same source family
   );
 });
 
+test("connector registry resolves unique source lookups and source-keyed connectors", () => {
+  const sourceKeyed = createStubPollConnector({
+    id: "   ",
+    source: "telegram",
+    accountId: "bot",
+  });
+  const unique = createStubPollConnector({
+    id: "email:agentmail",
+    source: "email",
+    accountId: "agentmail",
+  });
+  const registry = createConnectorRegistry([sourceKeyed, unique]);
+
+  assert.equal(registry.get("telegram")?.source, "telegram");
+  assert.equal(registry.requirePoll("telegram").accountId, "bot");
+  assert.equal(registry.get("email")?.id, "email:agentmail");
+  assert.equal(registry.requirePoll("email").accountId, "agentmail");
+});
+
 test("runPollConnector keeps cursor writes scoped to the connector account id", async () => {
   const cursorWrites: Array<string | null | undefined> = [];
 
