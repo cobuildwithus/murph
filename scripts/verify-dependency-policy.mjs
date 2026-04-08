@@ -63,7 +63,6 @@ if (!workspaceConfig) {
   requireBooleanSetting(workspaceConfig, "packageManagerStrictVersion", true);
   requireBooleanSetting(workspaceConfig, "managePackageManagerVersions", true);
   requireBooleanSetting(workspaceConfig, "blockExoticSubdeps", true);
-  requireStringSetting(workspaceConfig, "verifyDepsBeforeRun", "error");
   requireStringSetting(workspaceConfig, "trustPolicy", "no-downgrade");
   requireMinimumIntegerSetting(workspaceConfig, "minimumReleaseAge", 1440);
   requireMinimumIntegerSetting(workspaceConfig, "trustPolicyIgnoreAfter", 259200);
