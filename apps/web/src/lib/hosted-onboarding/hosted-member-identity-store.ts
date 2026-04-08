@@ -26,6 +26,7 @@ import {
 export interface HostedMemberIdentityState {
   maskedPhoneNumberHint: string;
   memberId: string;
+  phoneNumber: string | null;
   phoneLookupKey: string;
   signupPhoneCodeSendAttemptId: string | null;
   signupPhoneCodeSendAttemptStartedAt: Date | null;
@@ -230,6 +231,7 @@ export function projectHostedMemberIdentityState(
   return {
     maskedPhoneNumberHint: identity.maskedPhoneNumberHint,
     memberId: identity.memberId,
+    phoneNumber: privateState.phoneNumber,
     phoneLookupKey: identity.phoneLookupKey,
     signupPhoneCodeSendAttemptId: privateState.signupPhoneCodeSendAttemptId,
     signupPhoneCodeSendAttemptStartedAt: privateState.signupPhoneCodeSendAttemptStartedAt,

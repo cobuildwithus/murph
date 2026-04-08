@@ -12,7 +12,7 @@ interface ApiErrorPayload {
 const HOSTED_PRIVY_IDENTITY_TOKEN_HEADER_NAME = "x-privy-identity-token";
 const HOSTED_PRIVY_AUTH_RETRY_DELAYS_MS = [0, 250] as const;
 const HOSTED_PRIVY_AUTH_HEADER_CACHE_TTL_MS = 5_000;
-type HostedOnboardingAuthMode = "none" | "optional" | "required";
+export type HostedOnboardingAuthMode = "none" | "optional" | "required";
 
 let hostedOnboardingAuthHeaderCache:
   | { expiresAt: number; headers: Record<string, string> }
