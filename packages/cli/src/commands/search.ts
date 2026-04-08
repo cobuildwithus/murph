@@ -3,7 +3,7 @@ import { emptyArgsSchema, withBaseOptions } from '@murphai/operator-config/comma
 import {
   ALL_QUERY_ENTITY_FAMILIES,
   loadQueryRuntime,
-} from '@murphai/vault-usecases'
+} from '@murphai/vault-usecases/runtime'
 import {
   isoTimestampSchema,
   localDateSchema,

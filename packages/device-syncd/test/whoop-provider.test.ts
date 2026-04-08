@@ -570,6 +570,66 @@ test("WHOOP provider keeps the same synthetic trace id across retry deliveries w
   assert.equal(retry?.jobs[0]?.dedupeKey, first?.jobs[0]?.dedupeKey);
 });
 
+test("WHOOP provider accepts numeric-second timestamps and leaves unknown webhook events as no-op hints", async () => {
+  const provider = createWhoopDeviceSyncProvider({
+    clientId: "whoop-client-id",
+    clientSecret: "whoop-client-secret",
+  });
+  const now = "2026-03-16T10:00:00.000Z";
+  const rawBody = Buffer.from(
+    JSON.stringify({
+      user_id: "whoop-user-1",
+      type: "team.updated",
+      id: "resource-1",
+    }),
+    "utf8",
+  );
+  const timestamp = String(Math.floor(Date.parse(now) / 1000));
+  const expectedTraceId = sha256Text(
+    `whoop-user-1:team.updated:resource-1:${sha256Text(rawBody.toString("utf8"))}`,
+  );
+
+  const parsed = await provider.verifyAndParseWebhook?.({
+    headers: createWhoopWebhookHeaders("whoop-client-secret", rawBody, timestamp),
+    rawBody,
+    now,
+  });
+
+  assert.deepEqual(parsed, {
+    externalAccountId: "whoop-user-1",
+    eventType: "team.updated",
+    traceId: expectedTraceId,
+    occurredAt: now,
+    payload: {
+      eventType: "team.updated",
+    },
+    jobs: [],
+  });
+});
+
+test("WHOOP provider rejects non-object webhook payloads after signature verification succeeds", async () => {
+  const provider = createWhoopDeviceSyncProvider({
+    clientId: "whoop-client-id",
+    clientSecret: "whoop-client-secret",
+  });
+  const now = "2026-03-16T10:00:00.000Z";
+  const rawBody = Buffer.from('["not-an-object"]', "utf8");
+  const timestamp = String(Date.parse(now));
+
+  await assert.rejects(
+    () =>
+      provider.verifyAndParseWebhook?.({
+        headers: createWhoopWebhookHeaders("whoop-client-secret", rawBody, timestamp),
+        rawBody,
+        now,
+      }),
+    (error: unknown) =>
+      error instanceof DeviceSyncError &&
+      error.code === "WHOOP_WEBHOOK_INVALID_PAYLOAD" &&
+      error.httpStatus === 400,
+  );
+});
+
 test("WHOOP provider turns missing resource imports into the existing delete snapshot shape", async () => {
   const importedSnapshots: unknown[] = [];
   const provider = createWhoopDeviceSyncProvider({

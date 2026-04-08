@@ -1,8 +1,13 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { defineProject } from "vitest/config";
+import { defineConfig } from "vitest/config";
 
+import {
+  createMurphVitestCoverage,
+  murphVitestCoverageThresholds,
+  resolveMurphVitestCoverageProviderModule,
+} from "../../config/vitest-coverage.js";
 import { resolveMurphVitestConcurrency } from "../../config/vitest-parallelism.js";
 import { murphVitestNoTimeouts } from "../../config/vitest-timeouts.js";
 
@@ -17,10 +22,11 @@ const WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS = {
   "@murphai/core": "../core/src/index.ts",
   "@murphai/inboxd": "./src/index.ts",
   "@murphai/messaging-ingress": "../messaging-ingress/src/index.ts",
+  "@murphai/parsers": "../parsers/src/index.ts",
   "@murphai/runtime-state": "../runtime-state/src/index.ts",
 } as const;
 
-export default defineProject({
+export default defineConfig({
   resolve: {
     alias: createVitestWorkspaceRuntimeAliases(
       resolveWorkspaceSourceEntries(packageDir, WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS),
@@ -32,5 +38,16 @@ export default defineProject({
     environment: "node",
     ...resolveMurphVitestConcurrency(),
     include: ["test/**/*.test.ts"],
+    coverage: createMurphVitestCoverage({
+      customProviderModule: resolveMurphVitestCoverageProviderModule(packageDir),
+      include: ["src/**/*.ts"],
+      thresholds: {
+        ...murphVitestCoverageThresholds,
+        lines: 70,
+        functions: 70,
+        branches: 60,
+        statements: 70,
+      },
+    }),
   },
 });

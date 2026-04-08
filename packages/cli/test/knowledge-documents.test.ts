@@ -29,8 +29,9 @@ describe('matchesKnowledgeFilter', () => {
     expect(matchesKnowledgeFilter(' Concept ', null)).toBe(true)
   })
 
-  it('normalizes compared tags before matching', () => {
-    expect(matchesKnowledgeFilter('Concept', ' concept ')).toBe(true)
+  it('normalizes the value before comparing against the provided filter token', () => {
+    expect(matchesKnowledgeFilter(' Concept ', 'concept')).toBe(true)
+    expect(matchesKnowledgeFilter('Concept', ' concept ')).toBe(false)
     expect(matchesKnowledgeFilter('archived', 'active')).toBe(false)
   })
 })

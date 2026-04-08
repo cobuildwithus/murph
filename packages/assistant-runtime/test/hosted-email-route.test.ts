@@ -172,3 +172,52 @@ test("hosted email route reconciliation stays private when no hosted sender iden
     await cleanup();
   }
 });
+
+test("hosted email route reconciliation leaves the saved target unchanged when no verified email is available", async () => {
+  const { cleanup, operatorHomeRoot, vaultRoot } = await createHostedRuntimeWorkspace(
+    "hosted-runner-email-route-",
+  );
+
+  try {
+    await mkdir(vaultRoot, { recursive: true });
+
+    await reconcileHostedVerifiedEmailSelfTarget({
+      operatorHomeRoot,
+      source: {
+        HOSTED_EMAIL_FROM_ADDRESS: "assistant@mail.example.test",
+        HOSTED_USER_VERIFIED_EMAIL: "user@example.com",
+      },
+      vaultRoot,
+    });
+
+    const configPath = path.join(operatorHomeRoot, ".murph", "config.json");
+    const before = JSON.parse(await readFile(configPath, "utf8")) as {
+      assistant: {
+        selfDeliveryTargets: {
+          email: unknown;
+        };
+      };
+    };
+
+    const result = await reconcileHostedVerifiedEmailSelfTarget({
+      operatorHomeRoot,
+      source: {
+        HOSTED_EMAIL_FROM_ADDRESS: "assistant@mail.example.test",
+      },
+      vaultRoot,
+    });
+
+    assert.deepEqual(result, {
+      emailAddress: null,
+      identityId: null,
+      selfTargetUpdated: false,
+      status: "no-verified-email",
+    });
+    assert.deepEqual(
+      JSON.parse(await readFile(configPath, "utf8")),
+      before,
+    );
+  } finally {
+    await cleanup();
+  }
+});

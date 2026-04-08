@@ -1,4 +1,4 @@
-import { loadRuntimeModule } from '@murphai/vault-usecases'
+import { loadRuntimeModule } from '@murphai/vault-usecases/runtime'
 import { createRuntimeUnavailableError } from '@murphai/operator-config/runtime-errors'
 
 interface ImportersRuntimeModule {

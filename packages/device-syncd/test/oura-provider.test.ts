@@ -5,6 +5,7 @@ import { prepareDeviceProviderSnapshotImport } from "@murphai/importers";
 
 import { DeviceSyncError } from "../src/errors.ts";
 import { createOuraDeviceSyncProvider, resolveOuraWebhookVerificationChallenge } from "../src/providers/oura.ts";
+import { subtractDays } from "../src/shared.ts";
 import { createJsonResponse } from "./helpers.ts";
 
 import type { DeviceSyncAccount, DeviceSyncJobRecord, ProviderJobContext } from "../src/types.ts";
@@ -60,6 +61,15 @@ function createJob(kind: string, payload: Record<string, unknown>): DeviceSyncJo
 
 function createOuraWebhookSignature(secret: string, timestamp: string, rawBody: Buffer): string {
   return createHmac("sha256", secret).update(`${timestamp}${rawBody.toString("utf8")}`).digest("hex");
+}
+
+function createOuraWebhookEncodedSignature(
+  secret: string,
+  timestamp: string,
+  rawBody: Buffer,
+  encoding: "base64" | "base64url" | "hex",
+): string {
+  return createHmac("sha256", secret).update(`${timestamp}${rawBody.toString("utf8")}`).digest(encoding);
 }
 
 function createOuraWebhookHeaders(secret: string, timestamp: string, rawBody: Buffer): Headers {
@@ -531,6 +541,61 @@ test("Oura provider accepts uppercase hexadecimal webhook signatures", async () 
 
   assert.equal(parsed?.eventType, "daily_sleep.updated");
   assert.equal(parsed?.payload?.dataType, "daily_sleep");
+});
+
+test("Oura provider accepts base64 webhook signatures and falls back to the request time when event_time is absent", async () => {
+  const provider = createOuraDeviceSyncProvider({
+    clientId: "oura-client-id",
+    clientSecret: "oura-client-secret",
+  });
+  const rawBody = Buffer.from(
+    JSON.stringify({
+      event_type: "update",
+      data_type: "workout",
+      object_id: "workout-1",
+      user_id: "oura-user-1",
+    }),
+    "utf8",
+  );
+  const timestamp = "2026-03-16T09:58:10.000Z";
+  const now = "2026-03-16T10:00:00.000Z";
+  const reconcileDays = provider.descriptor.sync?.windows.reconcileDays ?? 0;
+
+  const parsed = await provider.verifyAndParseWebhook?.({
+    headers: new Headers({
+      "x-oura-signature": createOuraWebhookEncodedSignature("oura-client-secret", timestamp, rawBody, "base64"),
+      "x-oura-timestamp": timestamp,
+    }),
+    rawBody,
+    now,
+  });
+
+  assert.deepEqual(parsed, {
+    externalAccountId: "oura-user-1",
+    eventType: "workout.updated",
+    traceId: parsed?.traceId,
+    occurredAt: now,
+    payload: {
+      eventType: "workout.updated",
+      dataType: "workout",
+      operation: "update",
+    },
+    jobs: [
+      {
+        kind: "resource",
+        priority: 90,
+        dedupeKey: `oura-webhook:${parsed?.traceId}`,
+        payload: {
+          dataType: "workout",
+          objectId: "workout-1",
+          occurredAt: now,
+          windowStart: subtractDays(now, reconcileDays),
+          windowEnd: now,
+          includePersonalInfo: false,
+        },
+      },
+    ],
+  });
 });
 
 test("Oura webhook verification challenge helper returns the challenge only for the configured token", () => {

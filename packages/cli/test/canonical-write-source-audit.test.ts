@@ -22,7 +22,6 @@ const SOURCE_ROOTS = [
 ] as const
 
 const ALLOWED_NON_CORE_CANONICAL_MUTATORS = [
-  'packages/inboxd/src/indexing/persist.ts',
 ] as const
 
 const FS_MUTATION_PATTERNS = [

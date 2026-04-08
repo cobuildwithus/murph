@@ -30,7 +30,7 @@ export async function ingestHostedTelegramMessage(
 const DEFAULT_TELEGRAM_API_BASE_URL = "https://api.telegram.org";
 const DEFAULT_TELEGRAM_FILE_BASE_URL = "https://api.telegram.org/file";
 
-function createHostedTelegramAttachmentDownloadDriver(): TelegramAttachmentDownloadDriver | null {
+export function createHostedTelegramAttachmentDownloadDriver(): TelegramAttachmentDownloadDriver | null {
   const token = readHostedTelegramString("TELEGRAM_BOT_TOKEN");
   if (!token || typeof globalThis.fetch !== "function") {
     return null;

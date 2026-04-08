@@ -68,6 +68,11 @@ export interface AssistantHttpServerHandle {
   server: Server
 }
 
+export type AssistantHttpRequestHandler = (
+  request: IncomingMessage,
+  response: ServerResponse,
+) => Promise<void>
+
 type AssistantOpenConversationRequest = Parameters<AssistantLocalService['openConversation']>[0]
 type AssistantMessageRequest = Parameters<AssistantLocalService['sendMessage']>[0]
 type AssistantSessionOptionsRequest = Parameters<AssistantLocalService['updateSessionOptions']>[0]
@@ -109,9 +114,7 @@ type AssistantGatewayRespondToPermissionRequest = GatewayRespondToPermissionInpu
 export async function startAssistantHttpServer(
   input: CreateAssistantHttpServerInput,
 ): Promise<AssistantHttpServerHandle> {
-  const server = createServer(async (request, response) => {
-    await handleAssistantRequest(request, response, input)
-  })
+  const server = createServer(createAssistantHttpRequestHandler(input))
   const address = await listenAssistantServer(server, input.host, input.port)
 
   return {
@@ -126,6 +129,14 @@ export async function startAssistantHttpServer(
       })
     },
     server,
+  }
+}
+
+export function createAssistantHttpRequestHandler(
+  input: CreateAssistantHttpServerInput,
+): AssistantHttpRequestHandler {
+  return async (request, response) => {
+    await handleAssistantRequest(request, response, input)
   }
 }
 

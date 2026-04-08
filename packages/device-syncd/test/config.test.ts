@@ -1,8 +1,14 @@
 import assert from "node:assert/strict";
+import { Console } from "node:console";
 import { createHmac } from "node:crypto";
+import { Writable } from "node:stream";
 import { test } from "vitest";
 
-import { loadDeviceSyncEnvironment } from "../src/config.ts";
+import {
+  createConsoleDeviceSyncLogger,
+  loadDeviceSyncEnvironment,
+  readConfiguredOuraDeviceSyncProviderConfig,
+} from "../src/config.ts";
 import { computeRetryDelayMs } from "../src/shared.ts";
 import { createDeviceSyncEnv } from "./helpers.ts";
 
@@ -177,6 +183,66 @@ test("loadDeviceSyncEnvironment exposes the optional Oura webhook verification t
   });
 
   assert.equal(loaded.http.ouraWebhookVerificationToken, "verify-token-for-tests");
+});
+
+test("readConfiguredOuraDeviceSyncProviderConfig trims scopes and parses integer overrides", () => {
+  const config = readConfiguredOuraDeviceSyncProviderConfig({
+    OURA_CLIENT_ID: "oura-client-id",
+    OURA_CLIENT_SECRET: "oura-client-secret",
+    OURA_SCOPES: " daily:read , heartrate:read,  ",
+    OURA_BACKFILL_DAYS: "30",
+    OURA_RECONCILE_DAYS: "7",
+    OURA_RECONCILE_INTERVAL_MS: "60000",
+    OURA_WEBHOOK_TIMESTAMP_TOLERANCE_MS: "120000",
+    OURA_REQUEST_TIMEOUT_MS: "5000",
+  });
+
+  assert.deepEqual(config, {
+    clientId: "oura-client-id",
+    clientSecret: "oura-client-secret",
+    authBaseUrl: undefined,
+    apiBaseUrl: undefined,
+    scopes: ["daily:read", "heartrate:read"],
+    backfillDays: 30,
+    reconcileDays: 7,
+    reconcileIntervalMs: 60000,
+    webhookTimestampToleranceMs: 120000,
+    requestTimeoutMs: 5000,
+  });
+});
+
+test("readConfiguredOuraDeviceSyncProviderConfig rejects invalid integer overrides", () => {
+  assert.throws(
+    () =>
+      readConfiguredOuraDeviceSyncProviderConfig({
+        OURA_CLIENT_ID: "oura-client-id",
+        OURA_CLIENT_SECRET: "oura-client-secret",
+        OURA_BACKFILL_DAYS: "soon",
+      }),
+    /OURA_BACKFILL_DAYS must be an integer/u,
+  );
+});
+
+test("createConsoleDeviceSyncLogger forwards messages and defaults missing context to an empty object", () => {
+  const writes: string[] = [];
+  const sink = new Writable({
+    write(chunk, _encoding, callback) {
+      writes.push(String(chunk));
+      callback();
+    },
+  });
+  const logger = createConsoleDeviceSyncLogger(new Console({ stdout: sink, stderr: sink }));
+
+  logger.debug("debug message");
+  logger.info("info message", { connected: true });
+  logger.warn("warn message");
+  logger.error("error message", { retryable: false });
+
+  const output = writes.join("");
+  assert.match(output, /debug message \{\}/u);
+  assert.match(output, /info message \{ connected: true \}/u);
+  assert.match(output, /warn message \{\}/u);
+  assert.match(output, /error message \{ retryable: false \}/u);
 });
 
 test("loadDeviceSyncEnvironment wires Oura webhook timestamp tolerance into the provider", async () => {

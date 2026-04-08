@@ -64,9 +64,13 @@
   },
   "scripts": {
     "build": "node ../../scripts/rm-paths.mjs dist && tsc -b tsconfig.build.json --force --pretty false && tsc -p tsconfig.scripts.json --pretty false",
-    "typecheck": "tsc -p tsconfig.json --pretty false",
+    "typecheck": "tsc -p tsconfig.json --pretty false && tsc -p tsconfig.vitest.json --pretty false",
     "generate": "pnpm build && node ./dist/scripts/generate-json-schema.js",
-    "test": "pnpm build && node ./dist/scripts/verify.js",
+    "test:vitest": "vitest run --config vitest.config.ts",
+    "test:coverage:vitest": "vitest run --config vitest.config.ts --coverage",
+    "test:artifacts": "pnpm build && node ./dist/scripts/verify.js",
+    "test:coverage": "pnpm test:coverage:vitest && pnpm test:artifacts",
+    "test": "pnpm test:vitest && pnpm test:artifacts",
     "verify": "pnpm test"
   },
   "dependencies": {

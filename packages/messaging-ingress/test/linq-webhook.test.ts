@@ -4,9 +4,15 @@ import { createHmac } from "node:crypto";
 import { test } from "vitest";
 
 import {
+  assertLinqWebhookTimestampFresh,
+  isLinqWebhookPayloadError,
+  isLinqWebhookVerificationError,
   minimizeLinqMessageReceivedEvent,
   minimizeLinqWebhookEvent,
   parseCanonicalLinqMessageReceivedEvent,
+  parseLinqWebhookEvent,
+  readLinqWebhookHeader,
+  resolveLinqWebhookOccurredAt,
   summarizeLinqMessageReceivedEvent,
   verifyAndParseLinqWebhookRequest,
 } from "../src/index.ts";
@@ -184,6 +190,61 @@ test("verifyAndParseLinqWebhookRequest requires a configured webhook secret", ()
         webhookSecret: "",
       }),
     /Linq webhook secret is required/u,
+  );
+});
+
+test("verifyAndParseLinqWebhookRequest accepts array-backed headers and ArrayBuffer payloads", () => {
+  const payload = JSON.stringify(buildV2026MessageReceivedWebhook({
+    data: {
+      parts: [
+        {
+          type: "text",
+          value: "Hello from buffer",
+        },
+      ],
+    },
+    eventId: "evt_buffer",
+  }));
+  const timestamp = "1711360800";
+
+  const event = verifyAndParseLinqWebhookRequest({
+    headers: {
+      "X-Webhook-Signature": [signLinqWebhook("secret-123", payload, timestamp)],
+      "x-webhook-timestamp": [timestamp],
+    },
+    rawBody: new TextEncoder().encode(payload).buffer,
+    webhookSecret: "secret-123",
+  });
+
+  assert.equal(event.event_id, "evt_buffer");
+  assert.equal(
+    readLinqWebhookHeader({ "x-custom": [" value "] }, "X-Custom"),
+    "value",
+  );
+  assert.equal(readLinqWebhookHeader({}, "x-missing"), null);
+});
+
+test("parseLinqWebhookEvent surfaces payload errors through the exported type guards", () => {
+  assert.throws(() => parseLinqWebhookEvent("{"), (error: unknown) => {
+    assert.equal(isLinqWebhookPayloadError(error), true);
+    assert.equal(isLinqWebhookVerificationError(error), false);
+    assert.match(String(error), /must be valid JSON/u);
+    return true;
+  });
+
+  assert.throws(
+    () => parseLinqWebhookEvent("null"),
+    /Linq webhook payload must be an object/u,
+  );
+  assert.throws(
+    () => assertLinqWebhookTimestampFresh("1711360800", { toleranceMs: -1 }),
+    /non-negative finite number/u,
+  );
+  assert.doesNotThrow(() =>
+    assertLinqWebhookTimestampFresh("1711360800", {
+      now: 1711360800_000,
+      toleranceMs: 0,
+    }),
   );
 });
 
@@ -603,6 +664,165 @@ test("parseCanonicalLinqMessageReceivedEvent accepts audio media parts and prese
     partner_id: null,
     trace_id: "trace_123",
   });
+});
+
+test("parseCanonicalLinqMessageReceivedEvent infers canonical outbound direction and hosted link minimization", () => {
+  const event = parseCanonicalLinqMessageReceivedEvent({
+    api_version: "v3",
+    created_at: "2026-04-04T01:02:03.000Z",
+    data: {
+      chat: {
+        id: "chat_outbound",
+      },
+      chat_id: "chat_outbound",
+      from: "+15551230000",
+      is_from_me: true,
+      message: {
+        id: "msg_outbound",
+        parts: [
+          {
+            type: "link",
+            value: "https://withmurph.ai/outbound",
+          },
+        ],
+      },
+      sender_handle: {
+        handle: "+15551230000",
+        id: "sender_outbound",
+        service: "iMessage",
+      },
+    },
+    event_id: "evt_outbound",
+    event_type: "message.received",
+  });
+
+  assert.deepEqual(summarizeLinqMessageReceivedEvent(event), {
+    chatId: "chat_outbound",
+    isFromMe: true,
+    messageId: "msg_outbound",
+    phoneNumber: "+15551230000",
+    text: null,
+  });
+  assert.equal(resolveLinqWebhookOccurredAt(event), "2026-04-04T01:02:03.000Z");
+  assert.deepEqual(minimizeLinqMessageReceivedEvent(event), {
+    api_version: "v3",
+    created_at: "2026-04-04T01:02:03.000Z",
+    data: {
+      chat: {
+        id: "chat_outbound",
+      },
+      chat_id: "chat_outbound",
+      direction: "outbound",
+      from: "+15551230000",
+      from_handle: {
+        handle: "+15551230000",
+        id: "sender_outbound",
+        service: "iMessage",
+      },
+      is_from_me: true,
+      message: {
+        id: "msg_outbound",
+        parts: [
+          {
+            type: "link",
+            value: "https://withmurph.ai/outbound",
+          },
+        ],
+      },
+      received_at: "2026-04-04T01:02:03.000Z",
+      recipient_phone: null,
+      sender_handle: {
+        handle: "+15551230000",
+        id: "sender_outbound",
+        service: "iMessage",
+      },
+      service: "iMessage",
+    },
+    event_id: "evt_outbound",
+    event_type: "message.received",
+    partner_id: null,
+    trace_id: null,
+  });
+});
+
+test("parseCanonicalLinqMessageReceivedEvent rejects canonical snapshots missing required chat fields", () => {
+  assert.throws(
+    () =>
+      parseCanonicalLinqMessageReceivedEvent({
+        api_version: "v3",
+        created_at: "2026-04-04T01:02:03.000Z",
+        data: {
+          chat: null,
+          chat_id: "chat_missing",
+          from: "+15551230000",
+          is_from_me: false,
+          message: {
+            id: "msg_missing",
+            parts: [],
+          },
+          sender_handle: {
+            handle: "+15551230000",
+          },
+          service: "SMS",
+        },
+        event_id: "evt_missing_chat",
+        event_type: "message.received",
+      }),
+    /chat is required/u,
+  );
+
+  assert.throws(
+    () =>
+      parseCanonicalLinqMessageReceivedEvent({
+        api_version: "v3",
+        created_at: "2026-04-04T01:02:03.000Z",
+        data: {
+          chat: {
+            id: "chat_missing_sender",
+          },
+          chat_id: "chat_missing_sender",
+          from: "+15551230000",
+          is_from_me: false,
+          message: {
+            id: "msg_missing_sender",
+            parts: [],
+          },
+          service: "SMS",
+        },
+        event_id: "evt_missing_sender",
+        event_type: "message.received",
+      }),
+    /sender_handle is required/u,
+  );
+});
+
+test("minimizeLinqWebhookEvent preserves non-message events without forcing message parsing", () => {
+  assert.deepEqual(
+    minimizeLinqWebhookEvent({
+      api_version: "v3",
+      created_at: "2026-04-04T01:02:03.000Z",
+      data: {
+        note: "keep",
+      },
+      event_id: "evt_passthrough",
+      event_type: "conversation.updated",
+      partner_id: null,
+      trace_id: null,
+      webhook_version: "2026-02-03",
+    }),
+    {
+      api_version: "v3",
+      created_at: "2026-04-04T01:02:03.000Z",
+      data: {
+        note: "keep",
+      },
+      event_id: "evt_passthrough",
+      event_type: "conversation.updated",
+      partner_id: null,
+      trace_id: null,
+      webhook_version: "2026-02-03",
+    },
+  );
 });
 
 test("parseCanonicalLinqMessageReceivedEvent rejects unknown part types", () => {

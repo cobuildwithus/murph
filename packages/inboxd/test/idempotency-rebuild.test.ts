@@ -713,6 +713,7 @@ test("rebuildRuntimeFromVault rejects symlinked inbox roots", async () => {
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
   const runtime = await openInboxRuntime({ vaultRoot });
   await fs.mkdir(path.join(vaultRoot, "raw"), { recursive: true });
+  await fs.rm(path.join(vaultRoot, "raw", "inbox"), { recursive: true, force: true });
   await fs.symlink(outsideRoot, path.join(vaultRoot, "raw", "inbox"));
 
   try {
