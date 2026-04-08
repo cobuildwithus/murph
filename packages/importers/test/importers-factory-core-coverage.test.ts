@@ -13,11 +13,11 @@ import {
   importDocument,
   parseDelimitedRows,
   prepareCsvSampleImport,
+  prepareAssessmentResponseImport,
   prepareMealImport,
   resolveSampleImportConfig,
 } from "../src/index.ts";
 import type { DocumentImportPayload } from "../src/core-port.ts";
-import { prepareAssessmentResponseImport as prepareAssessmentResponseImportFromAssessmentBarrel } from "../src/assessment/index.ts";
 import { assertAssessmentImportPort } from "../src/assessment/core-port.ts";
 import { assertCanonicalWritePort } from "../src/core-port.ts";
 
@@ -96,16 +96,6 @@ test("createImporters builds default registries when options are omitted", () =>
 
   assert.equal(importers.presetRegistry.list().length, 0);
   assert.ok(importers.deviceProviderRegistry.list().length > 0);
-});
-
-test("package barrels re-export the covered importer helpers", async () => {
-  vi.resetModules();
-
-  const rootBarrel = await import("../src/index.ts");
-  const assessmentBarrel = await import("../src/assessment/index.ts");
-
-  assert.equal(typeof rootBarrel.createImporters, "function");
-  assert.equal(typeof assessmentBarrel.prepareAssessmentResponseImport, "function");
 });
 
 test("createImporters lazily delegates through the default core module proxy", async () => {
@@ -325,7 +315,7 @@ test("resolveSampleImportConfig rejects unknown presets and normalizes null meta
 test("prepareAssessmentResponseImport defaults the title from the file basename", async () => {
   const filePath = await createTempFile("sleep-survey.json", "{\"ok\":true}");
 
-  const payload = await prepareAssessmentResponseImportFromAssessmentBarrel({
+  const payload = await prepareAssessmentResponseImport({
     filePath: `  ${filePath}  `,
     vaultRoot: "  canonical-vault  ",
     source: "  manual  ",
