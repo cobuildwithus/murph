@@ -88,6 +88,10 @@ export async function instantiateConnector(input: {
         downloadAttachments: true,
       })
     }
+    default: {
+      const unsupportedSource: never = input.connector.source
+      throw new Error(`Unsupported inbox connector source: ${unsupportedSource}`)
+    }
   }
 }
 
