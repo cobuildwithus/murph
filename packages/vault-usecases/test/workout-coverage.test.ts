@@ -41,6 +41,7 @@ import {
   workoutImportManifestResultSchema,
   workoutLookupSchema,
 } from "../src/usecases/workout-read.ts";
+import { importWithMocks, mockActualModule } from "./mock-import.ts";
 
 const mockedModuleSpecifiers = [
   "../src/json-input.js",
@@ -67,17 +68,6 @@ async function withTempDir<T>(run: (tempDir: string) => Promise<T>): Promise<T> 
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }
-}
-
-async function importModule<TModule>(
-  moduleSpecifier: string,
-  mocks: Record<string, () => unknown | Promise<unknown>> = {},
-): Promise<TModule> {
-  vi.resetModules();
-  for (const [specifier, factory] of Object.entries(mocks)) {
-    vi.doMock(specifier, factory);
-  }
-  return import(moduleSpecifier) as Promise<TModule>;
 }
 
 function createWorkoutSession(): WorkoutSession {
@@ -403,7 +393,7 @@ describe("workout-core", () => {
       addBodyMeasurement: vi.fn(),
     };
 
-    const workoutCoreModule = await importModule<typeof import("../src/usecases/workout-core.ts")>(
+    const workoutCoreModule = await importWithMocks<typeof import("../src/usecases/workout-core.ts")>(
       "../src/usecases/workout-core.ts",
       {
         "../src/runtime-import.js": () => ({
@@ -536,7 +526,7 @@ describe("workout", () => {
       entity: { id: "evt_edited" },
     }));
 
-    const workoutModule = await importModule<typeof import("../src/usecases/workout.ts")>(
+    const workoutModule = await importWithMocks<typeof import("../src/usecases/workout.ts")>(
       "../src/usecases/workout.ts",
       {
         "../src/usecases/workout-core.js": () => ({
@@ -619,7 +609,7 @@ describe("workout-format", () => {
     }));
     const listWorkoutFormats = vi.fn(async () => [await readWorkoutFormat()]);
 
-    const workoutFormatModule = await importModule<typeof import("../src/usecases/workout-format.ts")>(
+    const workoutFormatModule = (await importWithMocks(
       "../src/usecases/workout-format.ts",
       {
         "@murphai/core": () => ({
@@ -629,7 +619,7 @@ describe("workout-format", () => {
           upsertWorkoutFormat,
         }),
       },
-    );
+    )) as typeof import("../src/usecases/workout-format.ts");
 
     const saved = await workoutFormatModule.saveWorkoutFormat({
       vault: "./vault",
@@ -669,7 +659,7 @@ describe("workout-format", () => {
       relativePath: "bank/workout-formats/full-body.md",
     }));
 
-    const workoutFormatModule = await importModule<typeof import("../src/usecases/workout-format.ts")>(
+    const workoutFormatModule = (await importWithMocks(
       "../src/usecases/workout-format.ts",
       {
         "@murphai/core": () => ({
@@ -678,18 +668,15 @@ describe("workout-format", () => {
           readWorkoutFormat,
           upsertWorkoutFormat: vi.fn(),
         }),
-        "../src/usecases/workout.js": async () => {
-          const actual = await vi.importActual<typeof import("../src/usecases/workout.js")>(
-            "../src/usecases/workout.js",
-          );
-
-          return {
+        "../src/usecases/workout.js": mockActualModule(
+          "../src/usecases/workout.js",
+          (actual) => ({
             ...actual,
             addWorkoutRecord,
-          };
-        },
+          }),
+        ),
       },
-    );
+    )) as typeof import("../src/usecases/workout-format.ts");
 
     const logged = await workoutFormatModule.logWorkoutFormat({
       vault: "./vault",
@@ -744,7 +731,7 @@ describe("workout-measurement", () => {
       addBodyMeasurement,
     }));
 
-    const workoutMeasurementModule = await importModule<typeof import("../src/usecases/workout-measurement.ts")>(
+    const workoutMeasurementModule = (await importWithMocks(
       "../src/usecases/workout-measurement.ts",
       {
         "@murphai/core": () => ({
@@ -756,7 +743,7 @@ describe("workout-measurement", () => {
           loadWorkoutCoreRuntime,
         }),
       },
-    );
+    )) as typeof import("../src/usecases/workout-measurement.ts");
 
     const added = await workoutMeasurementModule.addWorkoutMeasurementRecord({
       vault: "./vault",
@@ -812,7 +799,7 @@ describe("workout-import", () => {
         "utf8",
       );
 
-      const workoutImportModule = await importModule<typeof import("../src/usecases/workout-import.ts")>(
+      const workoutImportModule = (await importWithMocks(
         "../src/usecases/workout-import.ts",
         {
           "../src/usecases/workout-core.js": () => ({
@@ -835,7 +822,7 @@ describe("workout-import", () => {
             })),
           }),
         },
-      );
+      )) as typeof import("../src/usecases/workout-import.ts");
 
       const inspection = await workoutImportModule.inspectWorkoutCsvImport({
         vault: tempDir,

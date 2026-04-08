@@ -8,6 +8,7 @@ import {
 } from "../src/health-cli-descriptors.ts";
 import { createRuntimeUnavailableError } from "../src/runtime-errors.ts";
 import { loadRuntimeModule } from "../src/runtime-import.ts";
+import { importWithMocks } from "./mock-import.ts";
 
 function createAsyncFunctionRecord(names: readonly string[]) {
   return Object.fromEntries(names.map((name) => [name, vi.fn(async () => undefined)]));
@@ -50,16 +51,6 @@ function createQueryRuntimeStub() {
     summarizeWearableSourceHealth: vi.fn(async () => undefined),
     ...createAsyncFunctionRecord(healthQueryRuntimeMethodNames),
   };
-}
-
-async function importRuntimeUsecasesWithMock(
-  loadRuntimeModuleMock: (specifier: string) => Promise<unknown>,
-) {
-  vi.resetModules();
-  vi.doMock("../src/runtime-import.ts", () => ({
-    loadRuntimeModule: vi.fn(loadRuntimeModuleMock),
-  }));
-  return import("../src/usecases/runtime.ts");
 }
 
 afterEach(() => {
@@ -115,7 +106,14 @@ test("loadIntegratedRuntime validates module shape and caches the successful run
     throw new Error(`Unexpected specifier: ${specifier}`);
   });
 
-  const runtimeModule = await importRuntimeUsecasesWithMock(loadRuntimeModuleMock);
+  const runtimeModule = await importWithMocks<typeof import("../src/usecases/runtime.ts")>(
+    "../src/usecases/runtime.ts",
+    {
+      "../src/runtime-import.ts": () => ({
+        loadRuntimeModule: vi.fn(loadRuntimeModuleMock),
+      }),
+    },
+  );
   const firstRuntime = await runtimeModule.loadIntegratedRuntime();
   const secondRuntime = await runtimeModule.loadIntegratedRuntime();
 
@@ -141,7 +139,14 @@ test("loadIntegratedRuntime clears the cache after a shape mismatch and retries 
     throw new Error(`Unexpected specifier: ${specifier}`);
   });
 
-  const runtimeModule = await importRuntimeUsecasesWithMock(loadRuntimeModuleMock);
+  const runtimeModule = await importWithMocks<typeof import("../src/usecases/runtime.ts")>(
+    "../src/usecases/runtime.ts",
+    {
+      "../src/runtime-import.ts": () => ({
+        loadRuntimeModule: vi.fn(loadRuntimeModuleMock),
+      }),
+    },
+  );
 
   await assert.rejects(() => runtimeModule.loadIntegratedRuntime(), {
     name: "VaultCliError",
@@ -174,7 +179,14 @@ test("loadImporterRuntime validates the importer factory shape before creating s
     throw new Error(`Unexpected specifier: ${specifier}`);
   });
 
-  const runtimeModule = await importRuntimeUsecasesWithMock(loadRuntimeModuleMock);
+  const runtimeModule = await importWithMocks<typeof import("../src/usecases/runtime.ts")>(
+    "../src/usecases/runtime.ts",
+    {
+      "../src/runtime-import.ts": () => ({
+        loadRuntimeModule: vi.fn(loadRuntimeModuleMock),
+      }),
+    },
+  );
   const result = await runtimeModule.loadImporterRuntime();
 
   assert.equal(result, importersRuntime);
@@ -197,7 +209,14 @@ test("loadImporterRuntime reports invalid importer factory shapes through the sh
     throw new Error(`Unexpected specifier: ${specifier}`);
   });
 
-  const runtimeModule = await importRuntimeUsecasesWithMock(loadRuntimeModuleMock);
+  const runtimeModule = await importWithMocks<typeof import("../src/usecases/runtime.ts")>(
+    "../src/usecases/runtime.ts",
+    {
+      "../src/runtime-import.ts": () => ({
+        loadRuntimeModule: vi.fn(loadRuntimeModuleMock),
+      }),
+    },
+  );
 
   await assert.rejects(() => runtimeModule.loadImporterRuntime(), {
     name: "VaultCliError",

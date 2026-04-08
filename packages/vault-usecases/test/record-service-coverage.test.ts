@@ -92,6 +92,7 @@ import {
   scaffoldRecipePayload,
   upsertRecipeRecord,
 } from "../src/usecases/recipe.ts";
+import { importWithMocks, mockActualModule } from "./mock-import.ts";
 
 type QueryRecord = Parameters<typeof toCommandShowEntity>[0];
 
@@ -500,21 +501,21 @@ describe("record service seams", () => {
     const editEventRecord = vi.fn(async () => ({ lookupId: "doc_1" }));
     const deleteEventRecord = vi.fn(async () => ({ lookupId: "meal_1", deleted: true }));
 
-    vi.doMock("../src/commands/query-record-command-helpers.ts", async () => {
-      const actual = await vi.importActual<typeof import("../src/commands/query-record-command-helpers.ts")>(
+    const documentMeal = await importWithMocks<
+      typeof import("../src/usecases/document-meal-read.ts")
+    >("../src/usecases/document-meal-read.ts", {
+      "../src/commands/query-record-command-helpers.ts": mockActualModule(
         "../src/commands/query-record-command-helpers.ts",
-      );
-      return {
-        ...actual,
-        loadQueryRuntime: vi.fn(async () => queryRuntime),
-      };
+        (actual) => ({
+          ...actual,
+          loadQueryRuntime: vi.fn(async () => queryRuntime),
+        }),
+      ),
+      "../src/usecases/event-record-mutations.ts": () => ({
+        editEventRecord,
+        deleteEventRecord,
+      }),
     });
-    vi.doMock("../src/usecases/event-record-mutations.ts", () => ({
-      editEventRecord,
-      deleteEventRecord,
-    }));
-
-    const documentMeal = await import("../src/usecases/document-meal-read.ts");
 
     const shownDocument = await documentMeal.showDocumentRecord("./vault", "doc_1");
     assert.equal(shownDocument.vault, "./vault");
@@ -605,19 +606,23 @@ describe("record service seams", () => {
       listRecipes: vi.fn(async () => []),
     };
 
-    vi.doMock("../src/runtime-import.ts", async () => {
-      const actual = await vi.importActual<typeof import("../src/runtime-import.ts")>("../src/runtime-import.ts");
-      return {
-        ...actual,
-        loadRuntimeModule: vi.fn(async (specifier: string) => {
-          if (specifier === "@murphai/core") {
-            return providerCore;
-          }
-          throw new Error(`Unexpected specifier: ${specifier}`);
-        }),
-      };
-    });
-    const provider = await import("../src/usecases/provider-event.ts");
+    const provider = await importWithMocks<typeof import("../src/usecases/provider-event.ts")>(
+      "../src/usecases/provider-event.ts",
+      {
+        "../src/runtime-import.ts": mockActualModule(
+          "../src/runtime-import.ts",
+          (actual) => ({
+            ...actual,
+            loadRuntimeModule: vi.fn(async (specifier: string) => {
+              if (specifier === "@murphai/core") {
+                return providerCore;
+              }
+              throw new Error(`Unexpected specifier: ${specifier}`);
+            }),
+          }),
+        ),
+      },
+    );
     assert.deepEqual(await provider.upsertProviderRecord({
       vault: "./vault",
       payload: provider.scaffoldProviderPayload(),
@@ -631,20 +636,20 @@ describe("record service seams", () => {
     assert.equal(provider.parseProviderPayload(provider.scaffoldProviderPayload()).title, "Primary Care Clinic");
     assert.equal(provider.scaffoldEventPayload("note").kind, "note");
 
-    vi.resetModules();
-    vi.doMock("../src/runtime-import.ts", async () => {
-      const actual = await vi.importActual<typeof import("../src/runtime-import.ts")>("../src/runtime-import.ts");
-      return {
-        ...actual,
-        loadRuntimeModule: vi.fn(async (specifier: string) => {
-          if (specifier === "@murphai/core") {
-            return foodCore;
-          }
-          throw new Error(`Unexpected specifier: ${specifier}`);
-        }),
-      };
-    });
-    const food = await import("../src/usecases/food.ts");
+    const food = await importWithMocks<typeof import("../src/usecases/food.ts")>(
+      "../src/usecases/food.ts",
+      {
+        "../src/runtime-import.ts": mockActualModule("../src/runtime-import.ts", (actual) => ({
+          ...actual,
+          loadRuntimeModule: vi.fn(async (specifier: string) => {
+            if (specifier === "@murphai/core") {
+              return foodCore;
+            }
+            throw new Error(`Unexpected specifier: ${specifier}`);
+          }),
+        })),
+      },
+    );
     assert.deepEqual(await food.upsertFoodRecord({
       vault: "./vault",
       payload: food.scaffoldFoodPayload(),
@@ -657,20 +662,20 @@ describe("record service seams", () => {
     });
     assert.equal(typeof food.scaffoldFoodPayload, "function");
 
-    vi.resetModules();
-    vi.doMock("../src/runtime-import.ts", async () => {
-      const actual = await vi.importActual<typeof import("../src/runtime-import.ts")>("../src/runtime-import.ts");
-      return {
-        ...actual,
-        loadRuntimeModule: vi.fn(async (specifier: string) => {
-          if (specifier === "@murphai/core") {
-            return recipeCore;
-          }
-          throw new Error(`Unexpected specifier: ${specifier}`);
-        }),
-      };
-    });
-    const recipe = await import("../src/usecases/recipe.ts");
+    const recipe = await importWithMocks<typeof import("../src/usecases/recipe.ts")>(
+      "../src/usecases/recipe.ts",
+      {
+        "../src/runtime-import.ts": mockActualModule("../src/runtime-import.ts", (actual) => ({
+          ...actual,
+          loadRuntimeModule: vi.fn(async (specifier: string) => {
+            if (specifier === "@murphai/core") {
+              return recipeCore;
+            }
+            throw new Error(`Unexpected specifier: ${specifier}`);
+          }),
+        })),
+      },
+    );
     assert.deepEqual(await recipe.upsertRecipeRecord({
       vault: "./vault",
       payload: recipe.scaffoldRecipePayload(),
@@ -694,18 +699,21 @@ describe("record service seams", () => {
     const eventDelete = vi.fn(async () => ({ deleted: true }));
     const eventShow = vi.fn(async () => ({ vault: "./vault", entity: sampleQueryRecord({ entityId: "evt_1", primaryLookupId: "evt_1" }) }));
     const eventEdit = vi.fn(async () => ({ lookupId: "evt_1" }));
-    vi.doMock("../src/usecases/event-record-mutations.ts", () => ({
-      deleteEventRecord: eventDelete,
-      editEventRecord: eventEdit,
-    }));
-    vi.doMock("../src/usecases/provider-event.ts", () => ({
-      upsertEventRecord: eventUpsert,
-      deleteEventRecord: eventDelete,
-      showEventRecord: eventShow,
-      editEventRecord: eventEdit,
-    }));
-
-    const intervention = await import("../src/usecases/intervention.ts");
+    const intervention = await importWithMocks<typeof import("../src/usecases/intervention.ts")>(
+      "../src/usecases/intervention.ts",
+      {
+        "../src/usecases/event-record-mutations.ts": () => ({
+          deleteEventRecord: eventDelete,
+          editEventRecord: eventEdit,
+        }),
+        "../src/usecases/provider-event.ts": () => ({
+          upsertEventRecord: eventUpsert,
+          deleteEventRecord: eventDelete,
+          showEventRecord: eventShow,
+          editEventRecord: eventEdit,
+        }),
+      },
+    );
     const addedIntervention = await intervention.addInterventionRecord({
       vault: "./vault",
       text: "20 minute red light sauna session",
@@ -855,10 +863,10 @@ describe("record service seams", () => {
       showVaultStats: vi.fn(async () => ({ vault: "./vault" })),
     };
 
-    vi.resetModules();
-    vi.doMock("../src/runtime-import.ts", async () => {
-      const actual = await vi.importActual<typeof import("../src/runtime-import.ts")>("../src/runtime-import.ts");
-      return {
+    const journal = await importWithMocks<
+      typeof import("../src/usecases/experiment-journal-vault.ts")
+    >("../src/usecases/experiment-journal-vault.ts", {
+      "../src/runtime-import.ts": mockActualModule("../src/runtime-import.ts", (actual) => ({
         ...actual,
         loadRuntimeModule: vi.fn(async (specifier: string) => {
           if (specifier === "@murphai/core") {
@@ -866,17 +874,12 @@ describe("record service seams", () => {
           }
           throw new Error(`Unexpected specifier: ${specifier}`);
         }),
-      };
-    });
-    vi.doMock("../src/query-runtime.ts", async () => {
-      const actual = await vi.importActual<typeof import("../src/query-runtime.ts")>("../src/query-runtime.ts");
-      return {
+      })),
+      "../src/query-runtime.ts": mockActualModule("../src/query-runtime.ts", (actual) => ({
         ...actual,
         loadQueryRuntime: vi.fn(async () => journalQuery),
-      };
+      })),
     });
-
-    const journal = await import("../src/usecases/experiment-journal-vault.ts");
     assert.deepEqual(await journal.createExperimentRecord({ vault: "./vault", slug: "focus-sprint" }), {
       vault: "./vault",
       experimentId: "exp_1",
