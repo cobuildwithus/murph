@@ -172,9 +172,11 @@ export function HostedAuthenticatedPhoneAuthState({
           >
             Continue signup
           </Button>
-          <Button type="button" onClick={onUseDifferentNumber} disabled={disabled} variant="outline" size="xl">
-            {pendingAction === "logout" ? "Signing out..." : "Use a different number"}
-          </Button>
+          <HostedUseDifferentNumberButton
+            disabled={disabled}
+            pendingAction={pendingAction}
+            onClick={onUseDifferentNumber}
+          />
         </div>
       </Alert>
     );
@@ -186,9 +188,11 @@ export function HostedAuthenticatedPhoneAuthState({
         <AlertTitle>This browser needs a fresh phone sign-in.</AlertTitle>
         <AlertDescription>{description}</AlertDescription>
         <div className="mt-3 flex flex-wrap gap-3">
-          <Button type="button" onClick={onUseDifferentNumber} disabled={disabled} variant="outline" size="xl">
-            {pendingAction === "logout" ? "Signing out..." : "Use a different number"}
-          </Button>
+          <HostedUseDifferentNumberButton
+            disabled={disabled}
+            pendingAction={pendingAction}
+            onClick={onUseDifferentNumber}
+          />
         </div>
       </Alert>
     );
@@ -211,7 +215,7 @@ function HostedInviteShortcutStep({
   return (
     <div className="space-y-3">
       <p className="text-sm text-stone-600">
-        We&apos;ll text a verification code to the number that messaged Murph.
+        We&apos;ll text a verification code to your phone.
       </p>
       <div className="flex flex-wrap gap-3">
         <Button
@@ -223,17 +227,36 @@ function HostedInviteShortcutStep({
         >
           {pendingAction === "send-code" ? "Sending code..." : "Send me a code"}
         </Button>
-        <Button
-          type="button"
-          onClick={onUseDifferentNumber}
+        <HostedUseDifferentNumberButton
           disabled={disabled}
-          variant="outline"
-          size="xl"
-        >
-          Use a different number
-        </Button>
+          pendingAction={pendingAction}
+          onClick={onUseDifferentNumber}
+        />
       </div>
     </div>
+  );
+}
+
+function HostedUseDifferentNumberButton({
+  disabled,
+  onClick,
+  pendingAction,
+}: {
+  disabled: boolean;
+  onClick: () => void;
+  pendingAction: HostedPhoneAuthPendingAction;
+}) {
+  return (
+    <Button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      variant="link"
+      size="sm"
+      className="w-full"
+    >
+      {pendingAction === "logout" ? "Signing out..." : "Use a different number"}
+    </Button>
   );
 }
 
@@ -279,7 +302,7 @@ function HostedPhoneEntryStep({
               aria-label={`Country or region, ${selectedPhoneCountry.label} ${selectedPhoneCountry.dialCode}`}
               className={cn(
                 buttonVariants({ variant: "outline", size: "lg" }),
-                "h-12 w-auto shrink-0 justify-between px-4 text-left font-medium sm:min-w-28",
+                "w-auto shrink-0 justify-between px-4 text-left font-medium sm:min-w-28",
               )}
             >
               {selectedPhoneCountry.dialCode}
@@ -305,7 +328,7 @@ function HostedPhoneEntryStep({
             placeholder={selectedPhoneCountry.placeholder}
             value={phoneNumber}
             onChange={(event) => onPhoneNumberChange(event.currentTarget.value)}
-            className="h-12 px-4 text-base sm:flex-1 md:text-sm"
+            className="px-4 text-base sm:flex-1 md:text-sm"
           />
         </div>
         {mode === "invite" ? (
@@ -315,7 +338,7 @@ function HostedPhoneEntryStep({
         ) : null}
       </div>
       <div className="flex flex-wrap gap-3">
-        <Button type="button" onClick={onSendCode} disabled={disabled} size="xl">
+        <Button type="button" onClick={onSendCode} disabled={disabled} size="xl" className="w-full">
           {pendingAction === "send-code" ? "Sending code..." : "Text me a code"}
         </Button>
       </div>
@@ -381,15 +404,11 @@ function HostedCodeEntryStep({
         >
           {pendingAction === "verify-code" ? "Finishing setup..." : "Verify phone"}
         </Button>
-        <Button
-          type="button"
-          onClick={onUseDifferentNumber}
+        <HostedUseDifferentNumberButton
           disabled={disabled}
-          variant="link"
-          className="w-full"
-        >
-          Use a different number
-        </Button>
+          pendingAction={pendingAction}
+          onClick={onUseDifferentNumber}
+        />
       </div>
     </>
   );
