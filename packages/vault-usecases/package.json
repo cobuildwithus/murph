@@ -23,6 +23,10 @@
       "types": "./dist/helpers.d.ts",
       "default": "./dist/helpers.js"
     },
+    "./assistant-vault-paths": {
+      "types": "./dist/assistant-vault-paths.d.ts",
+      "default": "./dist/assistant-vault-paths.js"
+    },
     "./records": {
       "types": "./dist/records.d.ts",
       "default": "./dist/records.js"

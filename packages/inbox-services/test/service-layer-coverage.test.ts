@@ -5,6 +5,7 @@ import path from 'node:path'
 
 import {
   resolveRuntimePaths,
+  tryKillProcess,
   type RuntimePaths,
 } from '@murphai/runtime-state/node'
 import type {
@@ -69,12 +70,11 @@ import {
   writeConfig,
 } from '../src/inbox-services/state.ts'
 import { describeLinqConnectorEndpoint } from '../src/linq-endpoint.ts'
-import { tryKillProcess } from '../src/process-kill.ts'
 import {
   normalizeAssistantCaptureId,
   resolveAssistantInboxArtifactPath,
   resolveAssistantVaultPath,
-} from '../src/vault-paths.ts'
+} from '@murphai/vault-usecases/assistant-vault-paths'
 import type {
   EmailDriver,
   InboxImessageRuntimeModule,

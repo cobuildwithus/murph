@@ -95,9 +95,15 @@ vi.mock('../src/inbox-services/daemon.js', async () => {
   }
 })
 
-vi.mock('../src/process-kill.js', () => ({
-  tryKillProcess: processKillMocks.tryKillProcess,
-}))
+vi.mock('@murphai/runtime-state/node', async () => {
+  const actual = await vi.importActual<typeof import('@murphai/runtime-state/node')>(
+    '@murphai/runtime-state/node',
+  )
+  return {
+    ...actual,
+    tryKillProcess: processKillMocks.tryKillProcess,
+  }
+})
 
 vi.mock('@murphai/operator-config/linq-runtime', () => ({
   resolveLinqWebhookSecret: linqRuntimeMocks.resolveLinqWebhookSecret,

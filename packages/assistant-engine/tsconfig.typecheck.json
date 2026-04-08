@@ -2,7 +2,20 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "noEmit": true,
-    "paths": {},
+    "paths": {
+      "@murphai/runtime-state": [
+        "packages/runtime-state/src/index.ts"
+      ],
+      "@murphai/runtime-state/node": [
+        "packages/runtime-state/src/node/index.ts"
+      ],
+      "@murphai/vault-usecases": [
+        "packages/vault-usecases/src/index.ts"
+      ],
+      "@murphai/vault-usecases/*": [
+        "packages/vault-usecases/src/*"
+      ]
+    },
     "rootDir": ".",
     "composite": false,
     "incremental": false
