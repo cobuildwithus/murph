@@ -3,7 +3,7 @@ export {
   prepareAssessmentResponseImport,
   type AssessmentImporterExecutionOptions,
   type AssessmentResponseImportInput,
-} from "./assessment/index.ts";
+} from "./assessment/import-assessment-response.ts";
 export type { AssessmentImportPort, AssessmentResponseImportPayload } from "./assessment/core-port.ts";
 export {
   importCsvSamples,
