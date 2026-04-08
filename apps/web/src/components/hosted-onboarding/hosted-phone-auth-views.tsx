@@ -362,12 +362,13 @@ function HostedCodeEntryStep({
         </div>
         <Input
           id={`hosted-code-${mode}`}
+          autoFocus
           autoComplete="one-time-code"
           inputMode="numeric"
           placeholder="123456"
           value={code}
           onChange={(event) => onCodeChange(event.currentTarget.value)}
-          className="h-12 px-4 text-base md:text-sm"
+          className="h-14 px-4 text-lg md:text-base"
         />
       </div>
       <div className="flex flex-wrap gap-3">
