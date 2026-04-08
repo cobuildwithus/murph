@@ -2546,6 +2546,96 @@ describe("HostedUserRunner", () => {
     expect(sideEffects).toBe(1);
   });
 
+  it("reports duplicate pending events through the shared dispatch outcome surface", async () => {
+    const runner = new HostedUserRunner(storage.state, environment, bucket.api);
+    await runner.provisionManagedUserCrypto("member_123");
+    const dispatch = createDispatch("evt_duplicate_pending");
+    await seedRunnerQueueState({
+      bucket,
+      environment,
+      lastError: null,
+      pendingEvents: [{
+        attempts: 0,
+        availableAt: dispatch.occurredAt,
+        dispatch,
+        enqueuedAt: dispatch.occurredAt,
+        lastError: null,
+      }],
+      storage,
+      userId: "member_123",
+    });
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await runner.dispatchWithOutcome(dispatch);
+
+    expect(result.event).toEqual({
+      eventId: "evt_duplicate_pending",
+      lastError: null,
+      state: "duplicate_pending",
+      userId: "member_123",
+    });
+    expect(result.status.pendingEventCount).toBe(1);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("reports duplicate consumed events through the shared dispatch outcome surface", async () => {
+    const fetchMock = vi.fn(async (_url, init) => createCommittedRunnerSuccessResponse({
+      bucket,
+      environment,
+      init,
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const runner = new HostedUserRunner(storage.state, environment, bucket.api);
+    await runner.provisionManagedUserCrypto("member_123");
+    const dispatch = createDispatch("evt_duplicate_consumed");
+
+    const first = await runner.dispatchWithOutcome(dispatch);
+    const second = await runner.dispatchWithOutcome(dispatch);
+
+    expect(first.event.state).toBe("completed");
+    expect(second.event).toEqual({
+      eventId: "evt_duplicate_consumed",
+      lastError: null,
+      state: "duplicate_consumed",
+      userId: "member_123",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports poisoned events through the shared dispatch outcome surface without rerunning them", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-26T12:00:00.000Z"));
+    const failingFetch = vi.fn().mockResolvedValue(
+      new Response("runner failed", {
+        status: 503,
+      }),
+    );
+    vi.stubGlobal("fetch", failingFetch);
+    const runner = new HostedUserRunner(storage.state, environment, bucket.api);
+    await runner.provisionManagedUserCrypto("member_123");
+    const dispatch = createDispatch("evt_duplicate_poisoned");
+
+    await runner.dispatch(dispatch);
+    vi.setSystemTime(new Date("2026-03-26T12:00:10.000Z"));
+    await runner.alarm();
+    vi.setSystemTime(new Date("2026-03-26T12:00:30.000Z"));
+    await runner.alarm();
+
+    const replayFetch = vi.fn();
+    vi.stubGlobal("fetch", replayFetch);
+    const replayed = await runner.dispatchWithOutcome(dispatch);
+
+    expect(replayed.event).toEqual({
+      eventId: "evt_duplicate_poisoned",
+      lastError: "Hosted runner container returned an HTTP error.",
+      state: "poisoned",
+      userId: "member_123",
+    });
+    expect(replayed.status.poisonedEventIds).toContain("evt_duplicate_poisoned");
+    expect(replayFetch).not.toHaveBeenCalled();
+  });
+
   it("keeps an event pending when the runner returns 200 before the durable commit exists", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(

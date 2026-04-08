@@ -271,40 +271,92 @@ export type HostedExecutionDeviceSyncRuntimeConnectionSnapshot =
 export type HostedExecutionDeviceSyncRuntimeSnapshotResponse =
   DeviceSyncHostedExecutionDeviceSyncRuntimeSnapshotResponse;
 
-export interface HostedExecutionDispatchStateSnapshot {
-  backpressured: boolean;
-  consumed: boolean;
+export interface HostedExecutionDispatchOutcomeStatusSnapshot {
   lastError: string | null;
-  pending: boolean;
-  poisoned: boolean;
+  state: HostedExecutionEventDispatchState;
 }
 
 export const HOSTED_EXECUTION_DISPATCH_NOT_CONFIGURED_ERROR =
   "Hosted execution dispatch is not configured.";
 
+export function resolveHostedExecutionDispatchOutcome(input: {
+  eventId: string;
+  initialStatus: HostedExecutionDispatchOutcomeStatusSnapshot | null;
+  nextStatus: HostedExecutionDispatchOutcomeStatusSnapshot | null;
+  userId: string;
+}): HostedExecutionEventDispatchStatus {
+  const currentStatus = input.nextStatus ?? input.initialStatus;
+
+  if (input.nextStatus?.state === "poisoned") {
+    return {
+      eventId: input.eventId,
+      lastError: input.nextStatus.lastError,
+      state: "poisoned",
+      userId: input.userId,
+    };
+  }
+
+  if (input.nextStatus?.state === "backpressured") {
+    return {
+      eventId: input.eventId,
+      lastError: input.nextStatus.lastError,
+      state: "backpressured",
+      userId: input.userId,
+    };
+  }
+
+  if (
+    input.initialStatus?.state === "completed"
+    || input.initialStatus?.state === "duplicate_consumed"
+  ) {
+    return {
+      eventId: input.eventId,
+      lastError: currentStatus?.lastError ?? input.initialStatus.lastError,
+      state: "duplicate_consumed",
+      userId: input.userId,
+    };
+  }
+
+  if (
+    input.initialStatus?.state === "queued"
+    || input.initialStatus?.state === "duplicate_pending"
+  ) {
+    return {
+      eventId: input.eventId,
+      lastError: currentStatus?.lastError ?? input.initialStatus.lastError,
+      state: "duplicate_pending",
+      userId: input.userId,
+    };
+  }
+
+  if (
+    input.nextStatus?.state === "completed"
+    || input.nextStatus?.state === "duplicate_consumed"
+  ) {
+    return {
+      eventId: input.eventId,
+      lastError: input.nextStatus.lastError,
+      state: "completed",
+      userId: input.userId,
+    };
+  }
+
+  return {
+    eventId: input.eventId,
+    lastError: currentStatus?.lastError ?? null,
+    state: "queued",
+    userId: input.userId,
+  };
+}
+
 export function resolveHostedExecutionDispatchOutcomeState(input: {
-  initialState: HostedExecutionDispatchStateSnapshot;
-  nextState: HostedExecutionDispatchStateSnapshot;
+  initialStatus: HostedExecutionDispatchOutcomeStatusSnapshot | null;
+  nextStatus: HostedExecutionDispatchOutcomeStatusSnapshot | null;
 }): HostedExecutionDispatchResult["event"]["state"] {
-  if (input.nextState.poisoned) {
-    return "poisoned";
-  }
-
-  if (input.nextState.backpressured) {
-    return "backpressured";
-  }
-
-  if (input.initialState.consumed) {
-    return "duplicate_consumed";
-  }
-
-  if (input.initialState.pending) {
-    return "duplicate_pending";
-  }
-
-  if (input.nextState.consumed) {
-    return "completed";
-  }
-
-  return "queued";
+  return resolveHostedExecutionDispatchOutcome({
+    eventId: "__hosted-dispatch-outcome__",
+    initialStatus: input.initialStatus,
+    nextStatus: input.nextStatus,
+    userId: "__hosted-dispatch-outcome__",
+  }).state;
 }

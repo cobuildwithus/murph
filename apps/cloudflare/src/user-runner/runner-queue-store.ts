@@ -2,6 +2,7 @@ import {
   deriveHostedExecutionErrorCode,
   normalizeHostedExecutionOperatorMessage,
   summarizeHostedExecutionErrorCode,
+  type HostedExecutionEventDispatchStatus,
   type HostedExecutionDispatchRequest,
   type HostedExecutionRunLevel,
   type HostedExecutionRunPhase,
@@ -154,6 +155,14 @@ export class RunnerQueueStore {
       pending: pending !== null,
       poisoned: poisoned !== null,
     };
+  }
+
+  async readEventDispatchStatus(
+    eventId: string,
+  ): Promise<HostedExecutionEventDispatchStatus | null> {
+    await this.ready;
+    this.pruneExpiredConsumedEventsSync();
+    return this.readEventDispatchStatusSync(eventId);
   }
 
   async listPendingDispatches(): Promise<PendingDispatchRecord[]> {
@@ -869,6 +878,55 @@ export class RunnerQueueStore {
 
   private hasPendingDispatchSync(eventId: string): boolean {
     return this.readPendingDispatchMetaByEventIdSync(eventId) !== null;
+  }
+
+  private readEventDispatchStatusSync(
+    eventId: string,
+  ): HostedExecutionEventDispatchStatus | null {
+    const userId = this.tryResolveUserIdSync();
+    if (!userId) {
+      return null;
+    }
+
+    const poisoned = this.readPoisonedEventByIdSync(eventId);
+    if (poisoned) {
+      return {
+        eventId,
+        lastError: summarizeHostedExecutionErrorCode(poisoned.last_error_code),
+        state: "poisoned",
+        userId,
+      };
+    }
+
+    if (this.hasBackpressuredEventSync(eventId)) {
+      return {
+        eventId,
+        lastError: null,
+        state: "backpressured",
+        userId,
+      };
+    }
+
+    const pending = this.readPendingDispatchMetaByEventIdSync(eventId);
+    if (pending) {
+      return {
+        eventId,
+        lastError: pending.lastError,
+        state: "queued",
+        userId,
+      };
+    }
+
+    if (this.hasConsumedEventSync(eventId)) {
+      return {
+        eventId,
+        lastError: null,
+        state: "completed",
+        userId,
+      };
+    }
+
+    return null;
   }
 
   private hasConsumedEventSync(eventId: string): boolean {
