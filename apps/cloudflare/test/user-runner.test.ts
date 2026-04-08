@@ -70,7 +70,6 @@ describe("HostedUserRunner", () => {
     recoveryRecipientKeyId: TEST_RECOVERY_RECIPIENT_KEY_ID,
     recoveryRecipientPublicKey: TEST_RECOVERY_RECIPIENT_PUBLIC_JWK,
     retryDelayMs: 10_000,
-    runnerControlToken: "runner-token",
     runnerTimeoutMs: 60_000,
   };
 
@@ -2704,7 +2703,7 @@ describe("HostedUserRunner", () => {
     ).resolves.toBeNull();
   });
 
-  it("does not require an ambient runner control token because each invoke uses a per-run token", async () => {
+  it("does not require an ambient runner control token because the container shell manages its own supervisor token", async () => {
     vi.stubGlobal("fetch", vi.fn().mockImplementation(async (_url, init) => createCommittedRunnerSuccessResponse({
       bucket,
       environment,
@@ -2712,7 +2711,6 @@ describe("HostedUserRunner", () => {
     })));
     const runner = new HostedUserRunner(storage.state, {
       ...environment,
-      runnerControlToken: null,
     }, bucket.api);
     await runner.provisionManagedUserCrypto("member_123");
 

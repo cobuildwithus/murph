@@ -4,7 +4,7 @@ This document is the concrete deploy path for the current hosted architecture:
 
 - `apps/web` stays the public onboarding, billing, auth, and webhook control plane.
 - `apps/cloudflare` owns per-user orchestration, encrypted bundle persistence, and operator/internal control routes.
-- `UserRunnerDurableObject` now orchestrates per-user work while a companion `RunnerContainer` class handles the native Cloudflare container lifecycle, startup readiness, and per-run env injection before running the one-shot Murph job, recording the durable commit callback, and returning the fuller final result directly to the Durable Object for bundle finalization and outward-effect replay.
+- `UserRunnerDurableObject` now orchestrates per-user work while a companion `RunnerContainer` class handles the native Cloudflare container lifecycle, startup readiness, short idle warmth, and per-run env injection before running the one-shot Murph job inside an isolated child process, recording the durable commit callback, and returning the fuller final result directly to the Durable Object for bundle finalization and outward-effect replay.
 
 This deploy flow intentionally keeps the local-first agent largely unchanged. The hosted layer wraps the same filesystem-oriented runtime instead of inventing a second persistence model.
 
@@ -88,6 +88,7 @@ Optional tuning variables:
 - `CF_RETRY_DELAY_MS` (default `30000`)
 - `CF_RUNNER_TIMEOUT_MS` (default `120000`)
 - `CF_RUNNER_COMMIT_TIMEOUT_MS` (default `30000`)
+- `HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS` (default `120000`)
 - `CF_TRACE_HEAD_SAMPLING_RATE` (default `0.1`)
 - `CF_ALLOWED_USER_ENV_KEYS`
 - `HOSTED_ASSISTANT_PROVIDER`, `HOSTED_ASSISTANT_MODEL`, and the rest of the `HOSTED_ASSISTANT_*` seed vars when you want hosted member activation to persist one explicit platform-managed assistant profile into `~/.murph/config.json` instead of relying on runtime fallback
@@ -159,7 +160,7 @@ Optional hosted email bridge secrets:
 
 The checked-in scaffold and rendered deploy config declare the Cloudflare callback signing key, platform envelope key, automation recipient keypair, and recovery recipient public JWK in Wrangler's experimental `secrets.required` field, so `wrangler deploy` and `wrangler versions upload` fail early when any of them are missing from the Worker.
 
-The worker now authenticates `apps/web -> apps/cloudflare` dispatch/control traffic with Vercel OIDC bearer identity derived from the configured team slug, project name, and environment. For Cloudflare-owned callbacks back into `apps/web`, configure the matching Worker-side private key in `HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK` and keep `HOSTED_WEB_BASE_URL` plus the active callback key id aligned with the hosted-web contract documented in `apps/web/README.md`. Each native container invocation still gets its own one-shot runner control token injected at start time.
+The worker now authenticates `apps/web -> apps/cloudflare` dispatch/control traffic with Vercel OIDC bearer identity derived from the configured team slug, project name, and environment. For Cloudflare-owned callbacks back into `apps/web`, configure the matching Worker-side private key in `HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK` and keep `HOSTED_WEB_BASE_URL` plus the active callback key id aligned with the hosted-web contract documented in `apps/web/README.md`. The outer native container shell may now stay warm per user for a short idle TTL, but the worker still injects a supervisor-only runner control token into that shell, rotates the per-run outbound proxy token after every run, rejects concurrent internal run requests, keeps the actual Murph execution one-shot inside an isolated child process, and exits the warm shell fail-closed if any unexpected processes survive after cleanup.
 
 - missing `HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG` or `HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME` makes bearer-authenticated web dispatch/control requests fail closed
 - missing or misaligned hosted-web callback config (`HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK`, `HOSTED_WEB_BASE_URL`, or the active callback key id) breaks Cloudflare-owned callback routes into `apps/web`

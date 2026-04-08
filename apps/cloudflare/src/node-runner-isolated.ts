@@ -68,9 +68,12 @@ export async function runHostedExecutionJobIsolatedDetailed(
       stderrChunks.push(chunk);
     });
 
-    const abortHandler = () => {
+    const terminateChild = () => {
       terminateChildProcess(child.pid);
       child.kill("SIGKILL");
+    };
+    const abortHandler = () => {
+      terminateChild();
     };
     options?.signal?.addEventListener("abort", abortHandler, { once: true });
 
@@ -89,6 +92,7 @@ export async function runHostedExecutionJobIsolatedDetailed(
       return childResult.result;
     } finally {
       options?.signal?.removeEventListener("abort", abortHandler);
+      terminateChildProcess(child.pid);
     }
   } finally {
     await rm(launcherRoot, { force: true, recursive: true });

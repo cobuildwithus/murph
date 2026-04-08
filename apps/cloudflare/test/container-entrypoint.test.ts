@@ -9,11 +9,16 @@ import {
   classifyRunnerJobError,
   startHostedContainerEntrypoint,
 } from "../src/container-entrypoint.js";
+import {
+  setHostedExecutionIsolatedRunnerForTests,
+} from "../src/node-runner.js";
 import * as nodeRunner from "../src/node-runner.js";
 
 const servers: Array<Awaited<ReturnType<typeof startHostedContainerEntrypoint>>> = [];
 
 afterEach(async () => {
+  setHostedExecutionIsolatedRunnerForTests(null);
+  vi.restoreAllMocks();
   await Promise.all(servers.splice(0).map(async (server) => {
     server.closeAllConnections?.();
     server.close();
@@ -34,6 +39,7 @@ function buildJobBody(input: {
   };
 }) {
   return {
+    internalWorkerProxyToken: "proxy-token",
     job: {
       request: {
         bundle: null,
@@ -281,168 +287,77 @@ describe("startHostedContainerEntrypoint", () => {
     }
   });
 
-  it("allows concurrent hosted jobs inside one container process", async () => {
-    const started: string[] = [];
-    const finished: string[] = [];
-    let inFlight = 0;
-    let sawOverlap = false;
+  it("rejects concurrent run requests inside one warm container shell", async () => {
+    let releaseFirstRun: (() => void) | null = null;
+    let notifyFirstRunStarted: (() => void) | null = null;
+    const firstRunStarted = new Promise<void>((resolve) => {
+      notifyFirstRunStarted = resolve;
+    });
 
-    const spy = vi.spyOn(nodeRunner, "runHostedExecutionJob").mockImplementation(async (job: any) => {
-      started.push(job.request.dispatch.eventId);
-      inFlight += 1;
-
-      if (inFlight > 1) {
-        sawOverlap = true;
-      }
-
-      await new Promise((resolve) => setTimeout(resolve, 10));
-      inFlight -= 1;
-      finished.push(job.request.dispatch.eventId);
-
+    setHostedExecutionIsolatedRunnerForTests(async () => {
+      notifyFirstRunStarted?.();
+      await new Promise<void>((resolve) => {
+        releaseFirstRun = resolve;
+      });
       return {
-        bundles: { agentState: null, vault: null },
-        result: { eventsHandled: 1, summary: job.request.dispatch.eventId },
+        bundle: null,
+        result: {
+          eventsHandled: 1,
+          nextWakeAt: null,
+          summary: "ok",
+        },
       };
     });
 
-    try {
-      const server = await startHostedContainerEntrypoint({ controlToken: "runner-token", port: 0 });
-      servers.push(server);
-      const address = server.address();
+    const server = await startHostedContainerEntrypoint({ controlToken: "runner-token", port: 0 });
+    servers.push(server);
+    const address = server.address();
 
-      if (!address || typeof address === "string") {
-        throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
-      }
-
-      const url = `http://127.0.0.1:${address.port}/__internal/run`;
-      await Promise.all([
-        fetch(url, {
-          method: "POST",
-          headers: {
-            authorization: "Bearer runner-token",
-            "content-type": "application/json; charset=utf-8",
-          },
-          body: JSON.stringify(buildJobBody({
-            dispatch: {
-              event: { kind: "assistant.cron.tick", reason: "manual", userId: "u1" },
-              eventId: "evt_a",
-              occurredAt: "2026-03-26T12:00:00.000Z",
-            },
-          })),
-        }),
-        fetch(url, {
-          method: "POST",
-          headers: {
-            authorization: "Bearer runner-token",
-            "content-type": "application/json; charset=utf-8",
-          },
-          body: JSON.stringify(buildJobBody({
-            dispatch: {
-              event: { kind: "assistant.cron.tick", reason: "manual", userId: "u2" },
-              eventId: "evt_b",
-              occurredAt: "2026-03-26T12:00:00.000Z",
-            },
-          })),
-        }),
-      ]);
-
-      expect(sawOverlap).toBe(true);
-      expect(started).toEqual(["evt_a", "evt_b"]);
-      expect(finished).toHaveLength(2);
-      expect(new Set(finished)).toEqual(new Set(["evt_a", "evt_b"]));
-    } finally {
-      spy.mockRestore();
+    if (!address || typeof address === "string") {
+      throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
     }
-  });
 
-  it("does not block another hosted job when a concurrent job fails", async () => {
-    const started: string[] = [];
-    const finished: string[] = [];
-    let rejectFirstJob: ((error: Error) => void) | null = null;
+    const url = `http://127.0.0.1:${address.port}/__internal/run`;
+    const headers = {
+      authorization: "Bearer runner-token",
+      "content-type": "application/json; charset=utf-8",
+    };
+    const body = JSON.stringify(buildJobBody({
+      dispatch: {
+        event: { kind: "assistant.cron.tick", reason: "manual", userId: "u1" },
+        eventId: "evt_busy",
+        occurredAt: "2026-03-26T12:00:00.000Z",
+      },
+    }));
 
-    const firstJob = new Promise<never>((_, reject) => {
-      rejectFirstJob = reject;
+    const firstResponsePromise = fetch(url, {
+      body,
+      headers,
+      method: "POST",
     });
-    const spy = vi.spyOn(nodeRunner, "runHostedExecutionJob").mockImplementation(async (job: any) => {
-      started.push(job.request.dispatch.eventId);
+    await firstRunStarted;
 
-      if (job.request.dispatch.eventId === "evt_a") {
-        try {
-          await firstJob;
-          throw new Error("Expected the first hosted job to reject.");
-        } finally {
-          finished.push(job.request.dispatch.eventId);
-        }
-      }
-
-      finished.push(job.request.dispatch.eventId);
-      return {
-        bundles: { agentState: null, vault: null },
-        result: { eventsHandled: 1, summary: job.request.dispatch.eventId },
-      };
+    const secondResponse = await fetch(url, {
+      body,
+      headers,
+      method: "POST",
+    });
+    expect(secondResponse.status).toBe(409);
+    await expect(secondResponse.json()).resolves.toEqual({
+      error: "Hosted runner is busy.",
     });
 
-    try {
-      const server = await startHostedContainerEntrypoint({ controlToken: "runner-token", port: 0 });
-      servers.push(server);
-      const address = server.address();
-
-      if (!address || typeof address === "string") {
-        throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
-      }
-
-      const url = `http://127.0.0.1:${address.port}/__internal/run`;
-      const firstResponsePromise = fetch(url, {
-        method: "POST",
-        headers: {
-          authorization: "Bearer runner-token",
-          "content-type": "application/json; charset=utf-8",
-        },
-        body: JSON.stringify(buildJobBody({
-          dispatch: {
-            event: { kind: "assistant.cron.tick", reason: "manual", userId: "u1" },
-            eventId: "evt_a",
-            occurredAt: "2026-03-26T12:00:00.000Z",
-          },
-        })),
-      });
-      const secondResponsePromise = fetch(url, {
-        method: "POST",
-        headers: {
-          authorization: "Bearer runner-token",
-          "content-type": "application/json; charset=utf-8",
-        },
-        body: JSON.stringify(buildJobBody({
-          dispatch: {
-            event: { kind: "assistant.cron.tick", reason: "manual", userId: "u2" },
-            eventId: "evt_b",
-            occurredAt: "2026-03-26T12:00:00.000Z",
-          },
-        })),
-      });
-
-      await new Promise((resolve) => setTimeout(resolve, 10));
-      expect(started).toEqual(["evt_a", "evt_b"]);
-      rejectFirstJob?.(new Error("boom"));
-
-      const [firstResponse, secondResponse] = await Promise.all([
-        firstResponsePromise,
-        secondResponsePromise,
-      ]);
-
-      expect(started).toEqual(["evt_a", "evt_b"]);
-      expect(new Set(finished)).toEqual(new Set(["evt_a", "evt_b"]));
-      expect(firstResponse.status).toBe(500);
-      await expect(firstResponse.json()).resolves.toEqual({
-        error: "Internal error.",
-      });
-      expect(secondResponse.status).toBe(200);
-      await expect(secondResponse.json()).resolves.toMatchObject({
-        result: { summary: "evt_b" },
-      });
-    } finally {
-      spy.mockRestore();
-    }
+    releaseFirstRun?.();
+    const firstResponse = await firstResponsePromise;
+    expect(firstResponse.status).toBe(200);
+    await expect(firstResponse.json()).resolves.toEqual({
+      bundle: null,
+      result: {
+        eventsHandled: 1,
+        nextWakeAt: null,
+        summary: "ok",
+      },
+    });
   });
 
   it("aborts the hosted job when the client disconnects before the response completes", async () => {

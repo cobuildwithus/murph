@@ -475,7 +475,6 @@ export class RunnerDispatchProcessor {
     return invokeHostedExecutionContainerRunner({
       job,
       runnerContainerNamespace: this.dependencies.runnerContainerNamespace,
-      runnerControlToken: crypto.randomUUID(),
       timeoutMs: this.dependencies.env.runnerTimeoutMs,
       userId,
     });
