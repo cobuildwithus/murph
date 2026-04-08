@@ -1,53 +1,87 @@
 import assert from "node:assert/strict";
-import { afterEach, test, vi } from "vitest";
+import { setImmediate as waitForImmediate } from "node:timers/promises";
+import { afterEach, beforeEach, test, vi } from "vitest";
 
-async function flushMicrotasks(): Promise<void> {
-  await Promise.resolve();
-  await Promise.resolve();
-}
-
-type DeviceSyncEnvironment = {
-  service: {
-    vaultRoot: string;
+const mocks = vi.hoisted(() => {
+  const service = {
+    start: vi.fn(),
+    stop: vi.fn(),
+    close: vi.fn(),
   };
-  http: {
-    host: string;
-    port: number;
+  const server = {
+    close: vi.fn(async () => {}),
   };
-};
 
-async function loadDeviceSyncBin(input: {
-  loadDeviceSyncEnvironment: () => DeviceSyncEnvironment;
-  service: {
-    start: () => unknown;
-    stop: () => unknown;
-    close: () => unknown;
+  return {
+    service,
+    server,
+    loadDeviceSyncEnvironment: vi.fn(() => ({
+      service: { vaultRoot: "/tmp/device-syncd-vault" },
+      http: { host: "127.0.0.1", port: 43110 },
+    })),
+    createDeviceSyncService: vi.fn(() => service),
+    startDeviceSyncHttpServer: vi.fn(async () => server),
+    formatDeviceSyncStartupError: vi.fn((error: unknown) => String(error)),
   };
-  server: {
-    close: () => Promise<void>;
-  };
-  formatDeviceSyncStartupError?: (error: unknown) => string;
-}): Promise<void> {
-  vi.resetModules();
+});
 
-  vi.doMock("../src/config.ts", () => ({
-    loadDeviceSyncEnvironment: vi.fn(input.loadDeviceSyncEnvironment),
-  }));
-  vi.doMock("../src/service.ts", () => ({
-    createDeviceSyncService: vi.fn(() => input.service),
-  }));
-  vi.doMock("../src/http.ts", () => ({
-    startDeviceSyncHttpServer: vi.fn(async () => input.server),
-  }));
-  vi.doMock("../src/errors.ts", () => ({
-    formatDeviceSyncStartupError: vi.fn(
-      input.formatDeviceSyncStartupError ?? ((error: unknown) => String(error)),
-    ),
-  }));
+vi.mock("../src/config.ts", () => ({
+  loadDeviceSyncEnvironment: mocks.loadDeviceSyncEnvironment,
+}));
 
+vi.mock("../src/service.ts", () => ({
+  createDeviceSyncService: mocks.createDeviceSyncService,
+}));
+
+vi.mock("../src/http.ts", () => ({
+  startDeviceSyncHttpServer: mocks.startDeviceSyncHttpServer,
+}));
+
+vi.mock("../src/errors.ts", () => ({
+  formatDeviceSyncStartupError: mocks.formatDeviceSyncStartupError,
+}));
+
+async function loadDeviceSyncBin(): Promise<void> {
   await import("../src/bin.ts");
-  await flushMicrotasks();
+  await waitForImmediate();
 }
+
+async function triggerSignal(signalHandlers: Map<string, () => void>, signal: string): Promise<void> {
+  signalHandlers.get(signal)?.();
+  await waitForImmediate();
+}
+
+function assertShutdown(exitSpy: ReturnType<typeof vi.spyOn>): void {
+  assert.equal(mocks.service.stop.mock.calls.length, 1);
+  assert.equal(mocks.server.close.mock.calls.length, 1);
+  assert.equal(mocks.service.close.mock.calls.length, 1);
+  assert.deepEqual(exitSpy.mock.calls, [[0]]);
+}
+
+function mockProcessSignals() {
+  const signalHandlers = new Map<string, () => void>();
+  const onceSpy = vi.spyOn(process, "once").mockImplementation(((event, listener) => {
+    signalHandlers.set(String(event), listener as () => void);
+    return process;
+  }) as typeof process.once);
+  const exitSpy = vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
+    return code as never;
+  }) as typeof process.exit);
+
+  return { exitSpy, onceSpy, signalHandlers };
+}
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  vi.resetModules();
+  mocks.loadDeviceSyncEnvironment.mockImplementation(() => ({
+    service: { vaultRoot: "/tmp/device-syncd-vault" },
+    http: { host: "127.0.0.1", port: 43110 },
+  }));
+  mocks.createDeviceSyncService.mockImplementation(() => mocks.service);
+  mocks.startDeviceSyncHttpServer.mockImplementation(async () => mocks.server);
+  mocks.formatDeviceSyncStartupError.mockImplementation((error: unknown) => String(error));
+});
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -55,109 +89,43 @@ afterEach(() => {
 });
 
 test("device-syncd bin boots the service and shuts it down on SIGINT", async () => {
-  const signalHandlers = new Map<string | symbol, () => void>();
-  const service = {
-    start: vi.fn(),
-    stop: vi.fn(),
-    close: vi.fn(),
-  };
-  const server = {
-    close: vi.fn(async () => {}),
-  };
+  const { exitSpy, onceSpy, signalHandlers } = mockProcessSignals();
 
-  const onceSpy = vi.spyOn(process, "once").mockImplementation(((event, listener) => {
-    signalHandlers.set(event, listener as () => void);
-    return process;
-  }) as typeof process.once);
-  const exitSpy = vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
-    return code as never;
-  }) as typeof process.exit);
+  await loadDeviceSyncBin();
 
-  await loadDeviceSyncBin({
-    loadDeviceSyncEnvironment: () => ({
-      service: { vaultRoot: "/tmp/device-syncd-vault" },
-      http: { host: "127.0.0.1", port: 43110 },
-    }),
-    service,
-    server,
-  });
-
-  assert.equal(service.start.mock.calls.length, 1);
+  assert.equal(mocks.loadDeviceSyncEnvironment.mock.calls[0]?.[0], process.env);
+  assert.equal(mocks.service.start.mock.calls.length, 1);
   assert.equal(onceSpy.mock.calls.length, 2);
   assert.equal(typeof signalHandlers.get("SIGINT"), "function");
   assert.equal(typeof signalHandlers.get("SIGTERM"), "function");
 
-  signalHandlers.get("SIGINT")?.();
-  await flushMicrotasks();
-
-  assert.equal(service.stop.mock.calls.length, 1);
-  assert.equal(server.close.mock.calls.length, 1);
-  assert.equal(service.close.mock.calls.length, 1);
-  assert.deepEqual(exitSpy.mock.calls, [[0]]);
+  await triggerSignal(signalHandlers, "SIGINT");
+  assertShutdown(exitSpy);
 });
 
 test("device-syncd bin shuts down on SIGTERM", async () => {
-  const signalHandlers = new Map<string | symbol, () => void>();
-  const service = {
-    start: vi.fn(),
-    stop: vi.fn(),
-    close: vi.fn(),
-  };
-  const server = {
-    close: vi.fn(async () => {}),
-  };
+  const { exitSpy, signalHandlers } = mockProcessSignals();
 
-  const exitSpy = vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
-    return code as never;
-  }) as typeof process.exit);
-  vi.spyOn(process, "once").mockImplementation(((event, listener) => {
-    signalHandlers.set(event, listener as () => void);
-    return process;
-  }) as typeof process.once);
+  await loadDeviceSyncBin();
 
-  await loadDeviceSyncBin({
-    loadDeviceSyncEnvironment: () => ({
-      service: { vaultRoot: "/tmp/device-syncd-vault" },
-      http: { host: "127.0.0.1", port: 43111 },
-    }),
-    service,
-    server,
-  });
-
-  signalHandlers.get("SIGTERM")?.();
-  await flushMicrotasks();
-
-  assert.equal(service.stop.mock.calls.length, 1);
-  assert.equal(server.close.mock.calls.length, 1);
-  assert.equal(service.close.mock.calls.length, 1);
-  assert.deepEqual(exitSpy.mock.calls, [[0]]);
+  await triggerSignal(signalHandlers, "SIGTERM");
+  assertShutdown(exitSpy);
 });
 
 test("device-syncd bin formats startup failures and sets process exit code", async () => {
   const previousExitCode = process.exitCode;
   process.exitCode = undefined;
-
-  const service = {
-    start: vi.fn(),
-    stop: vi.fn(),
-    close: vi.fn(),
-  };
-  const server = {
-    close: vi.fn(async () => {}),
-  };
-
   const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
   try {
-    await loadDeviceSyncBin({
-      loadDeviceSyncEnvironment: () => {
-        throw new Error("startup failed");
-      },
-      service,
-      server,
-      formatDeviceSyncStartupError: (error: unknown) =>
-        error instanceof Error ? `formatted: ${error.message}` : "formatted",
+    mocks.loadDeviceSyncEnvironment.mockImplementationOnce(() => {
+      throw new Error("startup failed");
     });
+    mocks.formatDeviceSyncStartupError.mockImplementationOnce((error: unknown) =>
+      error instanceof Error ? `formatted: ${error.message}` : "formatted",
+    );
+
+    await loadDeviceSyncBin();
 
     assert.deepEqual(consoleErrorSpy.mock.calls, [["formatted: startup failed"]]);
     assert.equal(process.exitCode, 1);
