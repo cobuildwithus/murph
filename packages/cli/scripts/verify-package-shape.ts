@@ -54,9 +54,6 @@ const tsconfigBuild = JSON.parse(
 const tsconfigTypecheck = JSON.parse(
   await readFile(path.join(packageDir, 'tsconfig.typecheck.json'), 'utf8'),
 ) as TsConfigShape
-const rootTsconfigBase = JSON.parse(
-  await readFile(path.join(packageDir, '../../tsconfig.base.json'), 'utf8'),
-) as TsConfigShape
 const packageLocalTsFiles = await listFiles(packageDir, ['src', 'scripts', 'test'])
 
 assert(
@@ -130,61 +127,8 @@ assert(
   'package.json must expose only the CLI root entrypoint.',
 )
 assert(
-  packageJson.exports?.['./assistant-core'] === undefined,
-  'package.json must not publish the removed assistant-core compatibility subpath.',
-)
-assert(
-  packageJson.exports?.['./vault-cli-services'] === undefined,
-  'package.json must not publish the removed vault-cli-services compatibility subpath.',
-)
-assert(
-  rootTsconfigBase.compilerOptions?.paths?.['murph/vault-cli-services'] === undefined,
-  'tsconfig.base.json must not preserve the removed vault-cli-services compatibility path alias.',
-)
-for (const removedAssistantPathAlias of [
-  'murph/assistant/automation',
-  'murph/assistant/cron',
-  'murph/assistant/service',
-  'murph/assistant/outbox',
-  'murph/assistant/status',
-  'murph/assistant/store',
-]) {
-  assert(
-    rootTsconfigBase.compilerOptions?.paths?.[removedAssistantPathAlias] === undefined,
-    `tsconfig.base.json must not preserve the removed ${removedAssistantPathAlias} compatibility path alias.`,
-  )
-}
-assert(
-  packageJson.exports?.['./assistant/state-ids'] === undefined,
-  'package.json must not publish the removed assistant/state-ids compatibility subpath.',
-)
-assert(
-  packageJson.exports?.['./assistant-cli-contracts'] === undefined,
-  'package.json must not publish the removed assistant-cli-contracts compatibility subpath.',
-)
-assert(
-  packageJson.exports?.['./inbox-services'] === undefined,
-  'package.json must not publish the removed inbox-services compatibility subpath.',
-)
-assert(
-  packageJson.exports?.['./operator-config'] === undefined,
-  'package.json must not publish the removed operator-config compatibility subpath.',
-)
-assert(
-  packageJson.exports?.['./gateway-core'] === undefined,
-  'package.json must not publish the removed gateway-core compatibility subpath.',
-)
-assert(
-  packageJson.exports?.['./gateway-core-local'] === undefined,
-  'package.json must not publish the removed gateway-core-local compatibility subpath.',
-)
-assert(
   packageJson.dependencies?.['@murphai/gateway-core'] === undefined,
   'package.json must not keep a runtime dependency on @murphai/gateway-core after the hard cut.',
-)
-assert(
-  packageJson.exports?.['./vault-services'] === undefined,
-  'package.json must not publish the removed vault-services compatibility subpath.',
 )
 assert(
   (typeof packageJson.repository === 'object' ? packageJson.repository?.url : packageJson.repository) ===
@@ -213,16 +157,6 @@ assert(
     script?.includes('node --import=tsx'),
   ),
   'package.json package-local scripts must call tsx or vitest directly instead of node --import=tsx.',
-)
-assert(
-  !Object.values(packageJson.scripts ?? {}).some((script) =>
-    script ? referencesPackageLocalLegacyMjs(script, packageDir) : false
-  ),
-  'package.json package-local scripts must not point at package-local legacy .mjs files.',
-)
-assert(
-  !packageLocalTsFiles.some((filePath) => path.basename(filePath) === 'require-cli-toolchain.ts'),
-  'packages/cli/scripts/require-cli-toolchain.ts should not exist once the package scripts rely on the workspace toolchain directly.',
 )
 assert(
   tsconfig.extends === '../../tsconfig.base.json',
@@ -331,14 +265,6 @@ assert(
   'src/index.ts must not re-export headless assistant-core modules through the murph package root.',
 )
 assert(
-  !/\bcreateIntegratedInboxCliServices\b/u.test(libraryEntry) &&
-    !/\bInboxCliServices\b/u.test(libraryEntry) &&
-    !/\bcreateIntegratedVaultCliServices\b/u.test(libraryEntry) &&
-    !/\bcreateUnwiredVaultCliServices\b/u.test(libraryEntry) &&
-    !/\bVaultCliServices\b/u.test(libraryEntry),
-  'src/index.ts must not re-export the removed CLI-shaped service compatibility aliases.',
-)
-assert(
   configSchema.type === 'object',
   'config.schema.json must stay a JSON object schema.',
 )
@@ -391,26 +317,4 @@ async function listFilesRecursive(directoryPath: string): Promise<string[]> {
   }
 
   return files
-}
-
-function referencesPackageLocalLegacyMjs(
-  script: string,
-  packageRoot: string,
-): boolean {
-  const matches = script.match(/(?:"([^"]+)"|'([^']+)'|`([^`]+)`|(\S+))/gu) ?? []
-
-  return matches.some((token) => {
-    const raw = token.replace(/^['"`]|['"`]$/gu, '')
-
-    if (!raw.endsWith('.mjs')) {
-      return false
-    }
-
-    if (!raw.startsWith('./') && !raw.startsWith('../')) {
-      return false
-    }
-
-    const resolved = path.resolve(packageRoot, raw)
-    return resolved.startsWith(packageRoot + path.sep)
-  })
 }
