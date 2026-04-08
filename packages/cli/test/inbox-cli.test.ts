@@ -154,8 +154,12 @@ async function makeVaultFixture(prefix: string): Promise<{
   }
 }
 
+async function loadBuiltRuntime<T>(runtimeUrl: string): Promise<T> {
+  return (await import(runtimeUrl)) as T
+}
+
 async function loadBuiltCoreRuntime() {
-  return (await import(builtCoreRuntimeUrl)) as {
+  return loadBuiltRuntime<{
     initializeVault(input: {
       vaultRoot: string
       createdAt: string
@@ -174,19 +178,19 @@ async function loadBuiltCoreRuntime() {
       }
       manifestPath: string
     }>
-  }
+  }>(builtCoreRuntimeUrl)
 }
 
 async function loadBuiltInboxRuntime() {
-  return (await import(builtInboxRuntimeUrl)) as any
+  return loadBuiltRuntime<any>(builtInboxRuntimeUrl)
 }
 
 async function loadBuiltImportersRuntime() {
-  return (await import(builtImportersRuntimeUrl)) as any
+  return loadBuiltRuntime<any>(builtImportersRuntimeUrl)
 }
 
 async function loadBuiltParsersRuntime() {
-  return (await import(builtParsersRuntimeUrl)) as any
+  return loadBuiltRuntime<any>(builtParsersRuntimeUrl)
 }
 
 function inboxPaths(vaultRoot: string) {
