@@ -52,6 +52,7 @@ const runnerBundleDeployRoot = path.join(
 const runnerBundleDisplayRoot =
   path.relative(appDir, runnerBundleDeployRoot) || runnerBundleDeployRoot;
 const require = createRequire(import.meta.url);
+const shouldSkipBuild = process.argv.includes("--skip-build");
 
 await assembleRunnerBundle();
 
@@ -64,8 +65,10 @@ async function assembleRunnerBundle(): Promise<void> {
   const packedWorkspacePackageNames = [...hostedRunnerWorkspacePackageNames].sort();
 
   try {
-    await buildHostedRunnerWorkspaceArtifacts(hostedRunnerBuildPackageNames);
-    await runCommand(["build"], { cwd: appDir });
+    if (!shouldSkipBuild) {
+      await buildHostedRunnerWorkspaceArtifacts(hostedRunnerBuildPackageNames);
+      await runCommand(["build"], { cwd: appDir });
+    }
     await stageHostedRunnerRuntimeArtifact(stagingBundleDir);
     await mkdir(tarballsDir, { recursive: true });
     const tarballPaths = await packWorkspacePackageArtifacts(

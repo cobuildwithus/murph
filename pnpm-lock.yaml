@@ -53,6 +53,9 @@ importers:
       '@murphai/inboxd':
         specifier: workspace:*
         version: link:../../packages/inboxd
+      '@murphai/parsers':
+        specifier: workspace:*
+        version: link:../../packages/parsers
       '@murphai/runtime-state':
         specifier: workspace:*
         version: link:../../packages/runtime-state

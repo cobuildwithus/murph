@@ -37,8 +37,9 @@
     "deploy:secrets:render": "pnpm --dir ../.. exec tsx --tsconfig apps/cloudflare/tsconfig.scripts.json apps/cloudflare/scripts/render-worker-secrets.ts",
     "deploy:smoke": "pnpm --dir ../.. exec tsx --tsconfig apps/cloudflare/tsconfig.json apps/cloudflare/scripts/smoke-hosted-deploy.ts",
     "runner:bundle": "pnpm --dir ../.. exec tsx --tsconfig apps/cloudflare/tsconfig.scripts.json apps/cloudflare/scripts/assemble-runner-bundle.ts",
+    "runner:bundle:assemble-only": "pnpm --dir ../.. exec tsx --tsconfig apps/cloudflare/tsconfig.scripts.json apps/cloudflare/scripts/assemble-runner-bundle.ts --skip-build",
     "runner:docker:build": "pnpm runner:bundle && docker build -f ../../Dockerfile.cloudflare-hosted-runner -t murph-cloudflare-runner .",
-    "runner:docker:smoke:prepare": "pnpm build && pnpm --dir ../.. exec tsx --tsconfig apps/cloudflare/tsconfig.scripts.json apps/cloudflare/scripts/sync-smoke-runner-bundle.ts",
+    "runner:docker:smoke:prepare": "pnpm --filter @murphai/cloudflare-runner... run build && pnpm runner:bundle:assemble-only && node ../../scripts/rm-paths.mjs .deploy/smoke-dist && pnpm --dir ../.. exec tsc -p apps/cloudflare/tsconfig.smoke-build.json --pretty false && pnpm --dir ../.. exec tsx --tsconfig apps/cloudflare/tsconfig.scripts.json apps/cloudflare/scripts/sync-smoke-runner-bundle.ts",
     "runner:docker:smoke:built": "pnpm --dir ../.. exec tsx --tsconfig apps/cloudflare/tsconfig.scripts.json apps/cloudflare/scripts/runner-docker-smoke.ts",
     "runner:docker:smoke": "pnpm runner:docker:smoke:prepare && docker build -f ../../Dockerfile.cloudflare-hosted-runner -t murph-cloudflare-runner . && pnpm runner:docker:smoke:built",
     "worker:deploy:apply": "pnpm exec wrangler deploy",
@@ -59,6 +60,7 @@
     "@murphai/gateway-core": "workspace:*",
     "@murphai/hosted-execution": "workspace:*",
     "@murphai/inboxd": "workspace:*",
+    "@murphai/parsers": "workspace:*",
     "@murphai/runtime-state": "workspace:*",
     "jose": "^6.2.2"
   },

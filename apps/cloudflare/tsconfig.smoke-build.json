@@ -1,0 +1,29 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "declaration": false,
+    "declarationMap": false,
+    "noEmit": false,
+    "outDir": ".deploy/smoke-dist",
+    "paths": {},
+    "rootDir": "src",
+    "tsBuildInfoFile": ".deploy/smoke-dist/.tsbuildinfo"
+  },
+  "include": [
+    "src/hosted-runner-smoke-contract.ts",
+    "src/hosted-runner-smoke-child.ts",
+    "src/hosted-runner-smoke.ts"
+  ],
+  "references": [
+    {
+      "path": "../../packages/assistant-runtime"
+    },
+    {
+      "path": "../../packages/runtime-state"
+    }
+  ],
+  "exclude": [
+    ".deploy/smoke-dist",
+    "dist"
+  ]
+}

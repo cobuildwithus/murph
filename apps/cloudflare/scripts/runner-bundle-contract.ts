@@ -15,13 +15,13 @@ export const hostedRunnerRuntimeDependencyNames = [
   "@murphai/gateway-core",
   "@murphai/hosted-execution",
   "@murphai/inboxd",
+  "@murphai/parsers",
   "@murphai/runtime-state",
   "jose",
 ] as const;
 
 export const hostedRunnerBundleOnlyDependencyNames = [
   "@murphai/murph",
-  "@murphai/parsers",
 ] as const;
 
 export const hostedRunnerWorkspacePackageNames = [
