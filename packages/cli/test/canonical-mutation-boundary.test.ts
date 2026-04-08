@@ -10,12 +10,16 @@ import { createIntegratedInboxServices } from "@murphai/inbox-services";
 const builtCoreRuntimeUrl = new URL("../../core/dist/index.js", import.meta.url).href;
 const builtInboxRuntimeUrl = new URL("../../inboxd/dist/index.js", import.meta.url).href;
 
+async function loadBuiltRuntime<T>(runtimeUrl: string): Promise<T> {
+  return (await import(runtimeUrl)) as T;
+}
+
 async function loadBuiltCoreRuntime() {
-  return (await import(builtCoreRuntimeUrl)) as any;
+  return loadBuiltRuntime<any>(builtCoreRuntimeUrl);
 }
 
 async function loadBuiltInboxRuntime() {
-  return (await import(builtInboxRuntimeUrl)) as any;
+  return loadBuiltRuntime<any>(builtInboxRuntimeUrl);
 }
 
 function createFakeImessageDriver(input: {

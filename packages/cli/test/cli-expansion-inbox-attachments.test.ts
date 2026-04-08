@@ -42,8 +42,12 @@ async function makeVaultFixture(prefix: string): Promise<{
   }
 }
 
+async function loadBuiltRuntime<T>(runtimeUrl: string): Promise<T> {
+  return (await import(runtimeUrl)) as T
+}
+
 async function loadBuiltCoreRuntime() {
-  return (await import(builtCoreRuntimeUrl)) as {
+  return loadBuiltRuntime<{
     createExperiment(input: {
       vaultRoot: string
       slug: string
@@ -62,11 +66,11 @@ async function loadBuiltCoreRuntime() {
       vaultRoot: string
       createdAt: string
     }): Promise<void>
-  }
+  }>(builtCoreRuntimeUrl)
 }
 
 async function loadBuiltInboxRuntime() {
-  return (await import(builtInboxRuntimeUrl)) as {
+  return loadBuiltRuntime<{
     openInboxRuntime(input: { vaultRoot: string }): Promise<{
       close(): void
       getCapture(captureId: string): {
@@ -96,7 +100,7 @@ async function loadBuiltInboxRuntime() {
         extractedText?: string | null
       }): unknown
     }>
-  }
+  }>(builtInboxRuntimeUrl)
 }
 
 async function runInProcessInboxCli<TData>(
