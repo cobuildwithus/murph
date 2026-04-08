@@ -155,12 +155,12 @@ interface LinuxResolvedCommandContext {
 export function createSetupServices(
   dependencies: SetupServicesDependencies = {},
 ): SetupServices {
-  const getArch = dependencies.arch ?? (() => process.arch)
-  const getBaseEnv = dependencies.env ?? (() => ({ ...process.env }))
+  const getArch = dependencies.arch
+  const getBaseEnv = dependencies.env
   const fileExists = dependencies.fileExists ?? defaultFileExists
-  const getCwd = dependencies.getCwd ?? (() => process.cwd())
-  const getHomeDirectory = dependencies.getHomeDirectory ?? (() => os.homedir())
-  const getPlatform = dependencies.platform ?? (() => process.platform)
+  const getCwd = dependencies.getCwd
+  const getHomeDirectory = dependencies.getHomeDirectory
+  const getPlatform = dependencies.platform
   const log = dependencies.log ?? defaultLogger
   const resolveCliBinPath =
     dependencies.resolveCliBinPath ?? defaultResolveCliBinPath
@@ -175,28 +175,28 @@ export function createSetupServices(
     createSetupAgentmailSelectionResolver()
 
   async function setupHost(input: SetupInput): Promise<SetupResult> {
-    const platform = getPlatform()
+    const platform = getPlatform?.() ?? process.platform
     if (platform !== 'darwin' && platform !== 'linux') {
       throw unsupportedSetupPlatform(platform)
     }
 
-    const arch = getArch()
+    const arch = getArch?.() ?? process.arch
     const dryRun = input.dryRun ?? false
     const strict = input.strict ?? true
-    const vault = path.resolve(getCwd(), input.vault)
+    const vault = path.resolve(getCwd?.() ?? process.cwd(), input.vault)
     const requestId = input.requestId ?? null
     const whisperModel = input.whisperModel ?? 'base.en'
-    const homeDirectory = path.resolve(getHomeDirectory())
+    const homeDirectory = path.resolve(getHomeDirectory?.() ?? os.homedir())
     const cliBinPath = path.resolve(resolveCliBinPath())
     const defaultToolchainRoot = path.join(homeDirectory, DEFAULT_TOOLCHAIN_DIRECTORY)
     const toolchainRoot = path.resolve(
-      getCwd(),
+      getCwd?.() ?? process.cwd(),
       input.toolchainRoot ?? defaultToolchainRoot,
     )
     const notes: string[] = []
     const steps: SetupStepResult[] = []
     const effectiveEnv = {
-      ...getBaseEnv(),
+      ...(getBaseEnv?.() ?? { ...process.env }),
       ...(input.envOverrides ?? {}),
     }
 
@@ -417,7 +417,7 @@ export function createSetupServices(
   }
 
   async function setupMacos(input: SetupInput): Promise<SetupResult> {
-    const platform = getPlatform()
+    const platform = getPlatform?.() ?? process.platform
     if (platform !== 'darwin') {
       throw unsupportedSetupPlatform(platform, 'Murph setup currently supports macOS only through setupMacos(). Use setupHost() for Linux support.')
     }

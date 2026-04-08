@@ -141,7 +141,7 @@ type SetupChannelSpec = {
     context: SetupChannelContext,
     sourceAdd: NonNullable<SetupChannelInboxServices['sourceAdd']>,
   ): Promise<SetupChannelAddedResult>
-  describeMissingEnv?(input: {
+  describeMissingEnv(input: {
     existingConnector: SetupListedConnector | null
   }): SetupChannelMessages
   describeReused(input: {
@@ -289,6 +289,14 @@ const CHANNEL_SPECS = {
         source: 'imessage',
         vault: context.vault,
       })
+    },
+    describeMissingEnv() {
+      return {
+        stepDetail:
+          'Skipped iMessage because setup could not verify the local Messages connector state.',
+        detail:
+          'Skipped iMessage because setup could not verify the local Messages connector state.',
+      }
     },
     describeReused({ connector }) {
       return {
@@ -696,12 +704,6 @@ async function configureSetupChannel(
   const existingConnector = spec.findExistingConnector(listed.connectors)
 
   if (!plan.readyForSetup) {
-    if (!spec.describeMissingEnv) {
-      throw new Error(
-        `Missing environment message handler is required for ${spec.channel}.`,
-      )
-    }
-
     const messages = spec.describeMissingEnv({
       existingConnector,
     })

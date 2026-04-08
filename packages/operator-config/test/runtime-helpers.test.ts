@@ -20,11 +20,14 @@ import {
   requestJsonWithRetry,
 } from '../src/http-json-retry.ts'
 import {
+  createRuntimeUnavailableError,
+  RUNTIME_PACKAGES,
+} from '../src/runtime-errors.ts'
+import {
   resolveLinqApiBaseUrl,
   resolveLinqApiToken,
   resolveLinqWebhookSecret,
 } from '../src/linq-runtime.ts'
-import { createRuntimeUnavailableError, RUNTIME_PACKAGES } from '../src/runtime-errors.ts'
 import {
   resolveTelegramApiBaseUrl,
   resolveTelegramBotToken,
@@ -109,6 +112,24 @@ test('retry helpers parse retry-after headers and surface abort errors', async (
       },
     }),
     null,
+  )
+  assert.equal(
+    parseRetryAfterHeaderMs({
+      headers: {
+        'x-retry-after': '5',
+        'retry-after': 5,
+      },
+    }),
+    null,
+  )
+  assert.equal(
+    parseRetryAfterHeaderMs({
+      headers: {
+        'retry-after': 'Wed, 08 Apr 2026 00:00:04 GMT',
+      },
+      nowMs: Number.NEGATIVE_INFINITY,
+    }),
+    0,
   )
   assert.equal(createAbortError().name, 'AbortError')
 
@@ -272,24 +293,28 @@ test('fetchJsonResponse forwards the timeout signal and wraps transport failures
   )
 })
 
-test('runtime unavailable errors preserve the shared operator guidance payload', () => {
-  const error = createRuntimeUnavailableError(
-    'a local operator command',
-    new Error('module missing'),
-  )
-  const fallback = createRuntimeUnavailableError('a local operator command', 'module missing')
+test('runtime unavailable helpers preserve the public operator-config error contract', () => {
+  assert.deepEqual([...RUNTIME_PACKAGES], [
+    '@murphai/core',
+    '@murphai/importers',
+    '@murphai/query',
+    'incur',
+  ])
 
-  assert.ok(error instanceof VaultCliError)
-  assert.equal(error.code, 'runtime_unavailable')
-  assert.equal(
-    error.message,
-    'packages/cli can describe a local operator command, but local execution is blocked until the integrating workspace installs incur and links @murphai/core, @murphai/importers, and @murphai/query.',
+  const withCause = createRuntimeUnavailableError(
+    'samples import-csv',
+    new Error('missing runtime install'),
   )
-  assert.deepEqual(error.context, {
-    cause: 'module missing',
+  assert.ok(withCause instanceof VaultCliError)
+  assert.equal(withCause.code, 'runtime_unavailable')
+  assert.match(withCause.message, /samples import-csv/u)
+  assert.deepEqual(withCause.context, {
+    cause: 'missing runtime install',
     packages: [...RUNTIME_PACKAGES],
   })
-  assert.deepEqual(fallback.context, {
+
+  const withoutErrorCause = createRuntimeUnavailableError('assistant run', 'boom')
+  assert.deepEqual(withoutErrorCause.context, {
     packages: [...RUNTIME_PACKAGES],
   })
 })

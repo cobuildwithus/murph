@@ -125,6 +125,40 @@ test('setup agentmail selection lets the user choose from multiple inboxes', asy
   })
 })
 
+test('setup agentmail selection returns null when multiple inboxes exist but prompting is disabled', async () => {
+  const resolveSelection = createSetupAgentmailSelectionResolver({
+    createClient() {
+      return createAgentmailClientStub(async () => ({
+        count: 2,
+        inboxes: [
+          {
+            inbox_id: 'inbox-1',
+            email: 'one@example.com',
+            display_name: 'One',
+          },
+          {
+            inbox_id: 'inbox-2',
+            email: 'two@example.com',
+            display_name: 'Two',
+          },
+        ],
+        limit: null,
+        next_page_token: null,
+      }))
+    },
+  })
+
+  assert.equal(
+    await resolveSelection({
+      allowPrompt: false,
+      env: {
+        AGENTMAIL_API_KEY: 'agentmail-api-key',
+      },
+    }),
+    null,
+  )
+})
+
 test('setup agentmail selection falls back to manual entry for forbidden inbox discovery', async () => {
   const resolveSelection = createSetupAgentmailSelectionResolver({
     createClient() {
@@ -158,6 +192,88 @@ test('setup agentmail selection falls back to manual entry for forbidden inbox d
     emailAddress: null,
     mode: 'manual',
   })
+})
+
+test('setup agentmail selection returns null when manual fallback is unavailable or prompting is disabled', async () => {
+  const forbiddenError = new VaultCliError(
+    'AGENTMAIL_REQUEST_FAILED',
+    'Forbidden',
+    {
+      status: 403,
+      method: 'GET',
+      path: '/inboxes',
+    },
+  )
+  const resolveSelection = createSetupAgentmailSelectionResolver({
+    createClient() {
+      return createAgentmailClientStub(async () => {
+        throw forbiddenError
+      })
+    },
+    prompter: {
+      async chooseInbox() {
+        return null
+      },
+      async promptManualInboxId() {
+        return null
+      },
+    },
+  })
+
+  assert.equal(
+    await resolveSelection({
+      allowPrompt: false,
+      env: {
+        AGENTMAIL_API_KEY: 'agentmail-api-key',
+      },
+    }),
+    null,
+  )
+  assert.equal(
+    await resolveSelection({
+      allowPrompt: true,
+      env: {
+        AGENTMAIL_API_KEY: 'agentmail-api-key',
+      },
+    }),
+    null,
+  )
+})
+
+test('setup agentmail selection rethrows non-http failures and wraps non-Error throwables', async () => {
+  const rethrowSelection = createSetupAgentmailSelectionResolver({
+    createClient() {
+      return createAgentmailClientStub(async () => {
+        throw new Error('network down')
+      })
+    },
+  })
+  await assert.rejects(
+    rethrowSelection({
+      allowPrompt: true,
+      env: {
+        AGENTMAIL_API_KEY: 'agentmail-api-key',
+      },
+    }),
+    /network down/u,
+  )
+
+  const wrappedSelection = createSetupAgentmailSelectionResolver({
+    createClient() {
+      return createAgentmailClientStub(async () => {
+        throw 'boom'
+      })
+    },
+  })
+  await assert.rejects(
+    wrappedSelection({
+      allowPrompt: true,
+      env: {
+        AGENTMAIL_API_KEY: 'agentmail-api-key',
+      },
+    }),
+    /boom/u,
+  )
 })
 
 function createAgentmailClientStub(
