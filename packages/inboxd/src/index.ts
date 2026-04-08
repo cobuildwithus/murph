@@ -39,11 +39,6 @@ export {
   compareInboundCaptures,
   createInboundCaptureFromChatMessage,
 } from "./connectors/chat/message.ts";
-export {
-  normalizeTextValue,
-  sanitizeRawMetadata,
-  toIsoTimestamp,
-} from "./shared-runtime.ts";
 export type {
   ChatPollDriver,
   ChatPollWatcherHandle,

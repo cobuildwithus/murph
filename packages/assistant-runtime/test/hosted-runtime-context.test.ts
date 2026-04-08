@@ -1,10 +1,31 @@
 import assert from "node:assert/strict";
-import { access, readFile } from "node:fs/promises";
+import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-import { test } from "vitest";
+import { test, vi } from "vitest";
 
 import { resolveAssistantStatePaths } from "@murphai/runtime-state/node";
+
+vi.mock("@murphai/inbox-services", () => ({
+  createIntegratedInboxServices() {
+    return {
+      async init() {},
+    };
+  },
+}));
+
+vi.mock("@murphai/vault-usecases/vault-services", () => ({
+  createIntegratedVaultServices() {
+    return {
+      core: {
+        async init(input: { vault: string }) {
+          await mkdir(input.vault, { recursive: true });
+          await writeFile(path.join(input.vault, "vault.json"), "{}", "utf8");
+        },
+      },
+    };
+  },
+}));
 
 import {
   prepareHostedDispatchContext,

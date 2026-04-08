@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+
 import {
   normalizeAssistantWebSearchRequest,
   readRequiredAssistantWebSearchApiKey,
@@ -7,6 +9,7 @@ import {
   resolveAssistantSearxngBaseUrl,
   resolveAssistantWebSearchProvider,
 } from '../src/assistant/web-search/config.ts'
+import { requestAssistantWebSearchJson } from '../src/assistant/web-search/http.ts'
 import * as providers from '../src/assistant/web-search/providers.ts'
 import {
   applyDomainFilterToAssistantSearchResults,
@@ -15,9 +18,20 @@ import {
   parseAssistantWebSearchResults,
 } from '../src/assistant/web-search/results.ts'
 import { searchAssistantWeb } from '../src/assistant/web-search/search.ts'
+import {
+  firstAssistantString,
+  formatAssistantIsoDate,
+  formatAssistantUsDate,
+  readAssistantArray,
+  readAssistantHostname,
+  readAssistantNumberArray,
+  readAssistantRecord,
+  readAssistantStringArray,
+} from '../src/assistant/web-search/shared.ts'
 import type { AssistantWebSearchResult } from '../src/assistant/web-search/types.ts'
 
 afterEach(() => {
+  vi.useRealTimers()
   vi.restoreAllMocks()
 })
 
@@ -408,6 +422,153 @@ describe('assistant web-search helpers', () => {
         EXA_API_KEY: 'exa-key',
       }),
     ).toBe('exa')
+  })
+
+  it('normalizes shared helper accessors, hostnames, and date formatting', () => {
+    expect(readAssistantRecord({ count: 1 })).toEqual({ count: 1 })
+    expect(readAssistantRecord(['not-a-record'])).toBeNull()
+    expect(readAssistantArray(['a', 'b'])).toEqual(['a', 'b'])
+    expect(readAssistantArray('not-an-array')).toEqual([])
+    expect(readAssistantStringArray(['  one  ', '', 2, 'two'])).toEqual(['one', 'two'])
+    expect(readAssistantNumberArray([1, Number.POSITIVE_INFINITY, '2', 3])).toEqual([1, 3])
+    expect(firstAssistantString(null, '   ', ' value ')).toBe('value')
+    expect(readAssistantHostname('https://Example.com/path')).toBe('example.com')
+    expect(readAssistantHostname('not-a-url')).toBeNull()
+    expect(formatAssistantIsoDate(new Date(Date.UTC(2026, 3, 8)))).toBe('2026-04-08')
+    expect(formatAssistantUsDate('2026-04-08')).toBe('4/8/2026')
+  })
+
+  it('retries retryable HTTP failures and returns the eventual JSON payload', async () => {
+    const fetchImplementation = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ message: 'Provider unavailable' }), {
+          status: 503,
+          headers: {
+            'content-type': 'application/json',
+            'retry-after': '0',
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ results: [{ title: 'Hydration' }] }), {
+          status: 200,
+          headers: {
+            'content-type': 'application/json',
+          },
+        }),
+      )
+
+    await expect(
+      requestAssistantWebSearchJson({
+        fetchImplementation,
+        headers: {
+          authorization: 'Bearer test-key',
+        },
+        method: 'POST',
+        provider: 'brave',
+        timeoutMs: 1_000,
+        url: 'https://search.example.com/query',
+        body: {
+          q: 'hydration',
+        },
+      }),
+    ).resolves.toEqual({
+      results: [{ title: 'Hydration' }],
+    })
+
+    expect(fetchImplementation).toHaveBeenCalledTimes(2)
+    expect(fetchImplementation).toHaveBeenNthCalledWith(
+      1,
+      'https://search.example.com/query',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ q: 'hydration' }),
+      }),
+    )
+  })
+
+  it('surfaces non-retryable HTTP failures with raw response text when JSON parsing does not apply', async () => {
+    const fetchImplementation = vi.fn().mockResolvedValue(
+      new Response('Bad request from provider', {
+        status: 400,
+        headers: {
+          'content-type': 'text/plain',
+        },
+      }),
+    )
+
+    let thrown: unknown
+    try {
+      await requestAssistantWebSearchJson({
+        fetchImplementation,
+        headers: {},
+        method: 'GET',
+        provider: 'exa',
+        timeoutMs: 1_000,
+        url: 'https://search.example.com/query?q=hydration',
+      })
+    } catch (error) {
+      thrown = error
+    }
+
+    expect(fetchImplementation).toHaveBeenCalledTimes(1)
+    expect(thrown).toBeInstanceOf(VaultCliError)
+    expect(thrown).toMatchObject({
+      code: 'WEB_SEARCH_REQUEST_FAILED',
+      context: {
+        method: 'GET',
+        provider: 'exa',
+        retryable: false,
+        status: 400,
+        url: 'https://search.example.com/query?q=hydration',
+      },
+      message: 'Bad request from provider',
+    })
+  })
+
+  it('marks transport timeouts as retryable request failures with timeout context', async () => {
+    vi.useFakeTimers()
+    const fetchImplementation = vi.fn((_input: string, init: { signal?: AbortSignal }) => {
+      return new Promise<Response>((_resolve, reject) => {
+        init.signal?.addEventListener(
+          'abort',
+          () => reject(new Error('aborted by timeout')),
+          { once: true },
+        )
+      })
+    })
+
+    const requestPromise = requestAssistantWebSearchJson({
+      fetchImplementation,
+      headers: {},
+      method: 'GET',
+      provider: 'kagi',
+      timeoutMs: 5,
+      url: 'https://search.example.com/query?q=sleep',
+    })
+    const rejection = requestPromise.then(
+      () => {
+        throw new Error('Expected requestAssistantWebSearchJson to reject.')
+      },
+      (error) => error,
+    )
+    await vi.advanceTimersByTimeAsync(1_265)
+
+    expect(await rejection).toMatchObject({
+      code: 'WEB_SEARCH_REQUEST_FAILED',
+      context: {
+        method: 'GET',
+        provider: 'kagi',
+        retryable: true,
+        timedOut: true,
+        timeoutMs: 5,
+        transportError: 'aborted by timeout',
+        url: 'https://search.example.com/query?q=sleep',
+      },
+      message: 'web.search kagi request timed out after 5ms.',
+    })
+    expect(fetchImplementation).toHaveBeenCalledTimes(3)
   })
 })
 

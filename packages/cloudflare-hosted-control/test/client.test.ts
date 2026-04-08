@@ -7,7 +7,10 @@ import {
   parseHostedExecutionDispatchRequest,
 } from "@murphai/hosted-execution";
 
-import { createCloudflareHostedControlClient } from "../src/client.ts";
+import {
+  type CloudflareHostedControlClientOptions,
+  createCloudflareHostedControlClient,
+} from "../src/client.ts";
 
 describe("createCloudflareHostedControlClient", () => {
   it("rejects an unconfigured base URL before issuing a request", () => {
@@ -17,6 +20,19 @@ describe("createCloudflareHostedControlClient", () => {
         getBearerToken: async () => "token-123",
       }),
     ).toThrow("Hosted execution baseUrl must be configured.");
+  });
+
+  it("rejects a missing bearer token provider before issuing a request", () => {
+    const options = {
+      baseUrl: "https://runner.example.test",
+      getBearerToken: async () => "token-123",
+    } satisfies CloudflareHostedControlClientOptions;
+
+    Object.defineProperty(options, "getBearerToken", { value: undefined });
+
+    expect(() => createCloudflareHostedControlClient(options)).toThrow(
+      "Hosted execution getBearerToken must be configured.",
+    );
   });
 
   it("does not echo HTTP response bodies in thrown errors", async () => {

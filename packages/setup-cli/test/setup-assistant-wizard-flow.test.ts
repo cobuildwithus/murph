@@ -1,306 +1,235 @@
 import assert from 'node:assert/strict'
-import { afterEach, test, vi } from 'vitest'
+import { test } from 'vitest'
 
-import { runSetupAssistantWizard } from '../src/setup-assistant-wizard.ts'
+import { runSetupAssistantWizard } from '../src/setup-assistant-wizard.js'
+import { stripAnsi, withMockProcessTty } from './helpers.ts'
 
-type InputEvent = {
-  key?: Partial<{
-    ctrl: boolean
-    downArrow: boolean
-    escape: boolean
-    leftArrow: boolean
-    return: boolean
-    upArrow: boolean
-  }>
-  value?: string
+type SetupAssistantWizardInput = Parameters<typeof runSetupAssistantWizard>[0]
+
+async function waitForAssistantWizardText(
+  flush: () => Promise<void>,
+  readOutput: () => string,
+  pattern: RegExp,
+): Promise<string> {
+  for (let attempt = 0; attempt < 30; attempt += 1) {
+    const output = stripAnsi(readOutput())
+    if (pattern.test(output)) {
+      return output
+    }
+
+    await flush()
+  }
+
+  return stripAnsi(readOutput())
 }
 
-const inkState = vi.hoisted(() => ({
-  events: [] as InputEvent[],
-  exitCalls: 0,
-}))
+async function expectAssistantWizardCancellation(
+  input: SetupAssistantWizardInput,
+  triggerCancel: (context: {
+    flush: () => Promise<void>
+    readOutput: () => string
+    writeInput: (value: string) => Promise<void>
+  }) => Promise<void>,
+): Promise<void> {
+  await withMockProcessTty(async ({ flush, readOutput, writeInput }) => {
+    const wizardResultPromise = runSetupAssistantWizard(input)
+    const rejection = assert.rejects(
+      wizardResultPromise,
+      /Murph model selection was cancelled/u,
+    )
 
-vi.mock('react', async () => {
-  type HookContext = {
-    effects: Array<() => void>
-    index: number
-    pendingRerender: boolean
-    refs: unknown[]
-    rerender: (() => void) | null
-    states: unknown[]
-  }
+    await waitForAssistantWizardText(flush, readOutput, /How should Murph answer\?/u)
+    await triggerCancel({ flush, readOutput, writeInput })
 
-  const current = {
-    ctx: null as HookContext | null,
-  }
-
-  function requireContext(): HookContext {
-    if (!current.ctx) {
-      throw new Error('React hooks were used outside the mocked renderer.')
-    }
-    return current.ctx
-  }
-
-  const createElement = (
-    type: unknown,
-    props: Record<string, unknown> | null,
-    ...children: unknown[]
-  ) => ({
-    props: {
-      ...(props ?? {}),
-      children,
-    },
-    type,
+    await rejection
   })
-  const useEffect = (effect: () => void) => {
-    requireContext().effects.push(effect)
-  }
-  const useRef = <T,>(initialValue: T) => {
-    const ctx = requireContext()
-    const index = ctx.index++
-    if (ctx.refs[index] === undefined) {
-      ctx.refs[index] = { current: initialValue }
-    }
-    return ctx.refs[index] as { current: T }
-  }
-  const useState = <T,>(initialValue: T) => {
-    const ctx = requireContext()
-    const index = ctx.index++
-    if (ctx.states[index] === undefined) {
-      ctx.states[index] = initialValue
-    }
+}
 
-    return [
-      ctx.states[index] as T,
-      (next: T | ((value: T) => T)) => {
-        const resolved =
-          typeof next === 'function'
-            ? (next as (value: T) => T)(ctx.states[index] as T)
-            : next
-        if (!Object.is(ctx.states[index], resolved)) {
-          ctx.states[index] = resolved
-          ctx.pendingRerender = true
-        }
+test.sequential(
+  'assistant wizard walks the default OpenAI sign-in flow to a saved selection',
+  async () => {
+    await withMockProcessTty(async ({ flush, readOutput, writeInput }) => {
+      const wizardResultPromise = runSetupAssistantWizard({
+        initialAssistantPreset: 'codex',
+      })
+
+      await waitForAssistantWizardText(
+        flush,
+        readOutput,
+        /How should Murph answer\?/u,
+      )
+      await writeInput('\r')
+      await waitForAssistantWizardText(
+        flush,
+        readOutput,
+        /How should Murph connect to OpenAI\?/u,
+      )
+      await writeInput('\r')
+      await waitForAssistantWizardText(flush, readOutput, /Review/u)
+      await writeInput('\r')
+
+      assert.deepEqual(await wizardResultPromise, {
+        assistantApiKeyEnv: null,
+        assistantBaseUrl: null,
+        assistantOss: false,
+        assistantPreset: 'codex',
+        assistantProviderName: null,
+      })
+    })
+  },
+)
+
+test.sequential(
+  'assistant wizard can switch to a named compatible provider and finish the flow',
+  async () => {
+    await withMockProcessTty(async ({ flush, readOutput, writeInput }) => {
+      const wizardResultPromise = runSetupAssistantWizard({
+        initialAssistantApiKeyEnv: '  CUSTOM_KEY  ',
+        initialAssistantBaseUrl: ' https://example.test/v1 ',
+        initialAssistantPreset: 'openai-compatible',
+        initialAssistantProviderName: ' custom-provider ',
+      })
+
+      await waitForAssistantWizardText(
+        flush,
+        readOutput,
+        /How should Murph answer\?/u,
+      )
+      await writeInput('\u001B[B')
+      await writeInput('\u001B[B')
+      await writeInput('\r')
+      const reviewOutput = await waitForAssistantWizardText(
+        flush,
+        readOutput,
+        /Review/u,
+      )
+      assert.match(reviewOutput, /OpenRouter/u)
+      await writeInput('\r')
+
+      assert.deepEqual(await wizardResultPromise, {
+        assistantApiKeyEnv: 'OPENROUTER_API_KEY',
+        assistantBaseUrl: 'https://openrouter.ai/api/v1',
+        assistantOss: false,
+        assistantPreset: 'openai-compatible',
+        assistantProviderName: 'openrouter',
+      })
+    })
+  },
+)
+
+test.sequential(
+  'assistant wizard surfaces the cancellation error when the user quits from the provider step',
+  async () => {
+    await expectAssistantWizardCancellation(
+      {
+        initialAssistantPreset: 'codex',
       },
-    ] as const
-  }
-
-  const ReactMock = {
-    Children: {
-      toArray(children: unknown) {
-        return Array.isArray(children) ? children : [children]
+      async ({ writeInput }) => {
+        await writeInput('q')
       },
-    },
-    createElement,
-    useEffect,
-    useRef,
-    useState,
-    __setContext(ctx: HookContext | null) {
-      current.ctx = ctx
-    },
-  }
+    )
+  },
+)
 
-  return {
-    createElement,
-    default: ReactMock,
-    useEffect,
-    useRef,
-    useState,
-  }
-})
-
-vi.mock('ink', async () => {
-  const React = (await import('react')).default as unknown as {
-    __setContext: (ctx: unknown) => void
-    createElement: (...args: unknown[]) => unknown
-  }
-
-  let inputHandler:
-    | ((value: string, key: Record<string, boolean | undefined>) => void)
-    | null = null
-
-  function render(element: { type: () => unknown }) {
-    const ctx = {
-      effects: [] as Array<() => void>,
-      index: 0,
-      pendingRerender: false,
-      refs: [] as unknown[],
-      rerender: null as (() => void) | null,
-      states: [] as unknown[],
-    }
-
-    const runRender = () => {
-      do {
-        ctx.pendingRerender = false
-        ctx.effects = []
-        ctx.index = 0
-        React.__setContext(ctx)
-        element.type()
-        React.__setContext(null)
-        const effects = [...ctx.effects]
-        ctx.effects = []
-        for (const effect of effects) {
-          effect()
-        }
-      } while (ctx.pendingRerender)
-    }
-
-    ctx.rerender = runRender
-    runRender()
-
-    const waitUntilExit = (async () => {
-      for (const event of inkState.events) {
-        inputHandler?.(event.value ?? '', event.key ?? {})
-        ctx.rerender?.()
-      }
-    })()
-
-    return {
-      unmount() {},
-      waitUntilExit: async () => {
-        await waitUntilExit
+test.sequential(
+  'assistant wizard also cancels when escape is pressed on the provider step',
+  async () => {
+    await expectAssistantWizardCancellation(
+      {
+        initialAssistantPreset: 'codex',
       },
-    }
-  }
+      async ({ writeInput }) => {
+        await writeInput('\u001B')
+      },
+    )
+  },
+)
 
-  return {
-    Box(props: Record<string, unknown>) {
-      return React.createElement('box', props)
-    },
-    Text(props: Record<string, unknown>) {
-      return React.createElement('text', props)
-    },
-    render,
-    useApp() {
-      return {
-        exit() {
-          inkState.exitCalls += 1
-        },
-      }
-    },
-    useInput(handler: (value: string, key: Record<string, boolean | undefined>) => void) {
-      inputHandler = handler
-    },
-  }
-})
+test.sequential(
+  'assistant wizard can go back from review to the method step before saving',
+  async () => {
+    await withMockProcessTty(async ({ flush, readOutput, writeInput }) => {
+      const wizardResultPromise = runSetupAssistantWizard({
+        initialAssistantPreset: 'codex',
+      })
 
-afterEach(() => {
-  inkState.events = []
-  inkState.exitCalls = 0
-})
+      await waitForAssistantWizardText(
+        flush,
+        readOutput,
+        /How should Murph answer\?/u,
+      )
+      await writeInput('\r')
+      await waitForAssistantWizardText(
+        flush,
+        readOutput,
+        /How should Murph connect to OpenAI\?/u,
+      )
+      await writeInput('\u001B[B')
+      await writeInput('\r')
+      await waitForAssistantWizardText(flush, readOutput, /Review/u)
+      await writeInput('\u001B[D')
+      await waitForAssistantWizardText(
+        flush,
+        readOutput,
+        /How should Murph connect to OpenAI\?/u,
+      )
+      await writeInput('\r')
+      await waitForAssistantWizardText(flush, readOutput, /Review/u)
+      await writeInput('\r')
 
-test('assistant wizard walks the default OpenAI sign-in flow to a saved selection', async () => {
-  inkState.events = [
-    { key: { return: true } },
-    { key: { return: true } },
-    { key: { return: true } },
-  ]
+      assert.deepEqual(await wizardResultPromise, {
+        assistantApiKeyEnv: 'OPENAI_API_KEY',
+        assistantBaseUrl: 'https://api.openai.com/v1',
+        assistantOss: false,
+        assistantPreset: 'openai-compatible',
+        assistantProviderName: 'openai',
+      })
+    })
+  },
+)
 
-  const result = await runSetupAssistantWizard({
-    initialAssistantPreset: 'codex',
-  })
+test.sequential(
+  'assistant wizard lets the user back out of the method step and switch providers',
+  async () => {
+    await withMockProcessTty(async ({ flush, readOutput, writeInput }) => {
+      const wizardResultPromise = runSetupAssistantWizard({
+        initialAssistantPreset: 'codex',
+      })
 
-  assert.deepEqual(result, {
-    assistantApiKeyEnv: null,
-    assistantBaseUrl: null,
-    assistantOss: false,
-    assistantPreset: 'codex',
-    assistantProviderName: null,
-  })
-  assert.equal(inkState.exitCalls, 1)
-})
+      await waitForAssistantWizardText(
+        flush,
+        readOutput,
+        /How should Murph answer\?/u,
+      )
+      await writeInput('\r')
+      await waitForAssistantWizardText(
+        flush,
+        readOutput,
+        /How should Murph connect to OpenAI\?/u,
+      )
+      await writeInput('\u001B')
+      await waitForAssistantWizardText(
+        flush,
+        readOutput,
+        /How should Murph answer\?/u,
+      )
+      await writeInput('\u001B[B')
+      await writeInput('\r')
+      const reviewOutput = await waitForAssistantWizardText(
+        flush,
+        readOutput,
+        /Review/u,
+      )
+      assert.match(reviewOutput, /OpenRouter/u)
+      await writeInput('\r')
 
-test('assistant wizard can switch to a named compatible provider and finish the flow', async () => {
-  inkState.events = [
-    { key: { downArrow: true } },
-    { key: { downArrow: true } },
-    { key: { return: true } },
-    { key: { return: true } },
-    { key: { return: true } },
-  ]
-
-  const result = await runSetupAssistantWizard({
-    initialAssistantApiKeyEnv: '  CUSTOM_KEY  ',
-    initialAssistantBaseUrl: ' https://example.test/v1 ',
-    initialAssistantPreset: 'openai-compatible',
-    initialAssistantProviderName: ' custom-provider ',
-  })
-
-  assert.deepEqual(result, {
-    assistantApiKeyEnv: 'OPENROUTER_API_KEY',
-    assistantBaseUrl: 'https://openrouter.ai/api/v1',
-    assistantOss: false,
-    assistantPreset: 'openai-compatible',
-    assistantProviderName: 'openrouter',
-  })
-})
-
-test('assistant wizard surfaces the cancellation error when the user quits from the provider step', async () => {
-  inkState.events = [{ value: 'q' }]
-
-  await assert.rejects(
-    runSetupAssistantWizard({
-      initialAssistantPreset: 'codex',
-    }),
-    /Murph model selection was cancelled/u,
-  )
-})
-
-test('assistant wizard also cancels when escape is pressed on the provider step', async () => {
-  inkState.events = [{ key: { escape: true } }]
-
-  await assert.rejects(
-    runSetupAssistantWizard({
-      initialAssistantPreset: 'codex',
-    }),
-    /Murph model selection was cancelled/u,
-  )
-})
-
-test('assistant wizard can go back from review to the method step before saving', async () => {
-  inkState.events = [
-    { key: { return: true } },
-    { key: { downArrow: true } },
-    { key: { return: true } },
-    { key: { leftArrow: true } },
-    { key: { upArrow: true } },
-    { key: { return: true } },
-    { key: { return: true } },
-  ]
-
-  const result = await runSetupAssistantWizard({
-    initialAssistantPreset: 'codex',
-  })
-
-  assert.deepEqual(result, {
-    assistantApiKeyEnv: null,
-    assistantBaseUrl: null,
-    assistantOss: false,
-    assistantPreset: 'codex',
-    assistantProviderName: null,
-  })
-})
-
-test('assistant wizard lets the user back out of the method step and switch providers', async () => {
-  inkState.events = [
-    { key: { return: true } },
-    { key: { escape: true } },
-    { key: { downArrow: true } },
-    { key: { downArrow: true } },
-    { key: { return: true } },
-    { key: { return: true } },
-    { key: { return: true } },
-  ]
-
-  const result = await runSetupAssistantWizard({
-    initialAssistantPreset: 'codex',
-  })
-
-  assert.deepEqual(result, {
-    assistantApiKeyEnv: 'VENICE_API_KEY',
-    assistantBaseUrl: 'https://api.venice.ai/api/v1',
-    assistantOss: false,
-    assistantPreset: 'openai-compatible',
-    assistantProviderName: 'venice',
-  })
-})
+      assert.deepEqual(await wizardResultPromise, {
+        assistantApiKeyEnv: 'OPENROUTER_API_KEY',
+        assistantBaseUrl: 'https://openrouter.ai/api/v1',
+        assistantOss: false,
+        assistantPreset: 'openai-compatible',
+        assistantProviderName: 'openrouter',
+      })
+    })
+  },
+)

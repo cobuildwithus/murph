@@ -16,7 +16,7 @@ import {
 
 const packageDir = path.dirname(fileURLToPath(import.meta.url));
 const WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS = {
-  "@murphai/assistant-engine": "../assistant-engine/dist/index.js",
+  "@murphai/assistant-engine": "../assistant-engine/src/index.ts",
   "@murphai/assistant-runtime": "./src/index.ts",
   "@murphai/contracts": "../contracts/src/index.ts",
   "@murphai/core": "../core/src/index.ts",

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { mkdir, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
-import { afterEach, test } from 'vitest'
+import { afterEach, test, vi } from 'vitest'
 
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
@@ -223,6 +223,109 @@ test('assistant state document write locks surface held-lock metadata as a Vault
       assert.match(error.message, /pid=\d+/u)
       assert.match(error.message, /existing-state-writer/u)
       assert.match(error.message, /2026-04-08T12:34:56.000Z/u)
+      return true
+    },
+  )
+})
+
+test('assistant cron and state document locks fall back to generic held-lock details without metadata', async () => {
+  vi.resetModules()
+
+  let capturedCronMessage:
+    | ((metadata: import('../src/assistant/state-write-lock.ts').AssistantStateWriteLockMetadata | null) => string)
+    | null = null
+  let capturedStateMessage:
+    | ((metadata: import('../src/assistant/state-write-lock.ts').AssistantStateWriteLockMetadata | null) => string)
+    | null = null
+
+  vi.doMock('../src/assistant/state-write-lock.js', () => ({
+    createAssistantStateWriteLock: (options: {
+      heldLockErrorCode: string
+      formatHeldLockMessage(metadata: import('../src/assistant/state-write-lock.ts').AssistantStateWriteLockMetadata | null): string
+    }) => {
+      if (options.heldLockErrorCode === 'ASSISTANT_CRON_LOCKED') {
+        capturedCronMessage = options.formatHeldLockMessage
+      }
+      if (options.heldLockErrorCode === 'ASSISTANT_STATE_WRITE_LOCKED') {
+        capturedStateMessage = options.formatHeldLockMessage
+      }
+      return {
+        withWriteLock: async <TResult>(_: unknown, run: () => Promise<TResult>) =>
+          await run(),
+      }
+    },
+  }))
+
+  await Promise.all([
+    import('../src/assistant/cron/locking.ts'),
+    import('../src/assistant/state/locking.ts'),
+  ])
+
+  assert.equal(
+    capturedCronMessage?.(null),
+    'Assistant cron writes are already in progress.',
+  )
+  assert.equal(
+    capturedCronMessage?.({
+      command: 'assistant-cron',
+      pid: 123,
+      startedAt: '2026-04-08T12:34:56.000Z',
+    }),
+    'Assistant cron writes are already in progress (pid=123, startedAt=2026-04-08T12:34:56.000Z, command=assistant-cron).',
+  )
+  assert.equal(
+    capturedStateMessage?.(null),
+    'Assistant state document writes are already in progress.',
+  )
+})
+
+test('assistant cron and state document locks fall back to generic held-lock messages when metadata is missing', async () => {
+  vi.resetModules()
+  vi.doMock('../src/assistant/state-write-lock.ts', () => ({
+    createAssistantStateWriteLock: (options: {
+      formatHeldLockMessage(metadata: null): string
+      heldLockErrorCode: string
+      withWriteLock?: unknown
+    }) => ({
+      withWriteLock: vi.fn(async (_paths: unknown, _run: () => Promise<unknown>) => {
+        throw new VaultCliError(
+          options.heldLockErrorCode,
+          options.formatHeldLockMessage(null),
+        )
+      }),
+    }),
+  }))
+
+  const { withAssistantCronWriteLock: withMockedAssistantCronWriteLock } = await import(
+    '../src/assistant/cron/locking.ts'
+  )
+  const {
+    withAssistantStateDocumentWriteLock: withMockedAssistantStateDocumentWriteLock,
+  } = await import('../src/assistant/state/locking.ts')
+  const paths = resolveAssistantStatePaths('/tmp/assistant-state-doc-generic-lock')
+
+  await assert.rejects(
+    () => withMockedAssistantCronWriteLock(paths, async () => undefined),
+    (error) => {
+      assert.ok(error instanceof VaultCliError)
+      assert.equal(error.code, 'ASSISTANT_CRON_LOCKED')
+      assert.equal(
+        error.message,
+        'Assistant cron writes are already in progress.',
+      )
+      return true
+    },
+  )
+
+  await assert.rejects(
+    () => withMockedAssistantStateDocumentWriteLock(paths, async () => undefined),
+    (error) => {
+      assert.ok(error instanceof VaultCliError)
+      assert.equal(error.code, 'ASSISTANT_STATE_WRITE_LOCKED')
+      assert.equal(
+        error.message,
+        'Assistant state document writes are already in progress.',
+      )
       return true
     },
   )

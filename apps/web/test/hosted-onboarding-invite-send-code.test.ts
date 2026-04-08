@@ -71,6 +71,24 @@ describe("invite send-code lifecycle", () => {
     });
   });
 
+  it("falls back to the canonical stored phone after signup-only state has been cleared", async () => {
+    storeMocks.readHostedMemberIdentity.mockResolvedValue(makeIdentity({
+      phoneNumber: "+15557654321",
+      signupPhoneNumber: null,
+    }));
+
+    await expect(
+      prepareHostedInvitePhoneCode({
+        inviteCode: "invite-code",
+        now: new Date("2026-04-07T01:00:00.000Z"),
+        prisma: makeInvitePrisma(),
+      }),
+    ).resolves.toEqual({
+      phoneNumber: "+15557654321",
+      sendAttemptId: expect.stringMatching(/^hbpc_/),
+    });
+  });
+
   it("starts the durable cooldown on confirm and clears the temporary attempt markers", async () => {
     storeMocks.readHostedMemberIdentity.mockResolvedValue(makeIdentity({
       signupPhoneCodeSendAttemptId: "hbpc_confirm",
@@ -166,6 +184,7 @@ function makeInvitePrisma() {
 }
 
 function makeIdentity(input?: {
+  phoneNumber?: string | null;
   signupPhoneCodeSendAttemptId?: string | null;
   signupPhoneCodeSendAttemptStartedAt?: Date | null;
   signupPhoneCodeSentAt?: Date | null;
@@ -174,6 +193,7 @@ function makeIdentity(input?: {
   return {
     maskedPhoneNumberHint: "*** 4567",
     memberId: "member_123",
+    phoneNumber: input?.phoneNumber ?? null,
     phoneLookupKey: "hbidx:phone:v1:abc123",
     phoneNumberVerifiedAt: null,
     privyUserId: null,

@@ -18,7 +18,7 @@ import {
 const packageDir = path.dirname(fileURLToPath(import.meta.url));
 const WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS = {
   "@murphai/assistantd": "./src/index.ts",
-  "@murphai/assistant-engine": "../assistant-engine/dist/index.js",
+  "@murphai/assistant-engine": "../assistant-engine/src/index.ts",
   "@murphai/contracts": "../contracts/src/index.ts",
   "@murphai/core": "../core/src/index.ts",
   "@murphai/device-syncd": "../device-syncd/src/index.ts",
@@ -32,6 +32,7 @@ const WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS = {
   "@murphai/parsers": "../parsers/src/index.ts",
   "@murphai/query": "../query/src/index.ts",
   "@murphai/runtime-state": "../runtime-state/src/index.ts",
+  "@murphai/vault-usecases": "../vault-usecases/src/index.ts",
   murph: "../cli/src/index.ts",
 } as const;
 

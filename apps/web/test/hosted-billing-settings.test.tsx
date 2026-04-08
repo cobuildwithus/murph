@@ -40,6 +40,7 @@ describe("HostedBillingSettings", () => {
 
     assert.match(markup, /Subscription/);
     assert.match(markup, /Manage subscription/);
-    assert.match(markup, /Stripe handles plan changes, payment method updates, and cancellation in one place\./);
+    assert.match(markup, /View or update your plan and payment details\./);
+    assert.match(markup, /Change your plan, update payment methods, or cancel\./);
   });
 });

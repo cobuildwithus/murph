@@ -21,7 +21,6 @@ import type {
   HostedPhoneVerificationAttempt,
   HostedResolvedPhoneSubmission,
 } from "./hosted-phone-auth-types";
-import { logHostedPrivySessionDebug, sanitizeHostedPrivyDebugPath } from "./privy-session-debug";
 
 interface HostedPrivyFinalizationAttemptInput {
   action: "continue" | "verify-code";
@@ -137,16 +136,10 @@ export async function finalizeHostedPrivyVerification(input: {
     return;
   }
 
-  const redirectUrl = resolveHostedPrivyCompletionRedirectUrl({
+  window.location.assign(resolveHostedPrivyCompletionRedirectUrl({
     intent: input.intent,
     payload,
-  });
-  logHostedPrivySessionDebug("finalize:redirect", {
-    completionStage: payload.stage,
-    intent: input.intent,
-    redirectUrl: sanitizeHostedPrivyDebugPath(redirectUrl),
-  });
-  window.location.assign(redirectUrl);
+  }));
 }
 
 export function resolveHostedPrivyCompletionRedirectUrl(input: {

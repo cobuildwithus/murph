@@ -165,6 +165,9 @@ describe("HostedPhoneAuth", () => {
 
     assert.match(markup, /Send me a code/);
     assert.match(markup, /Use a different number/);
+    assert.match(markup, /By signing up, you agree to our/);
+    assert.match(markup, /https:\/\/docs\.co\.build\/legal\/terms/);
+    assert.match(markup, /https:\/\/docs\.co\.build\/legal\/privacy/);
     assert.match(markup, /underline-offset-4/);
     assert.equal(markup.match(/w-full/g)?.length ?? 0, 2);
   });
@@ -198,6 +201,7 @@ describe("HostedPhoneAuth", () => {
 
     assert.match(markup, /Phone number/);
     assert.match(markup, /Text me a code/);
+    assert.match(markup, /By signing up, you agree to our/);
     assert.match(markup, /disabled=""/);
   });
 
@@ -230,6 +234,7 @@ describe("HostedPhoneAuth", () => {
 
     assert.match(markup, /Phone number/);
     assert.match(markup, /Text me a code/);
+    assert.match(markup, /By signing up, you agree to our/);
     assert.doesNotMatch(markup, /disabled=""/);
   });
 

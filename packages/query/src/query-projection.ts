@@ -1,4 +1,3 @@
-import type { DatabaseSync } from "node:sqlite";
 import { rm } from "node:fs/promises";
 
 import {
@@ -35,6 +34,8 @@ import type {
   QueryProjectionStatus,
   RebuildQueryProjectionResult,
 } from "./query-projection-types.ts";
+
+type DatabaseSync = import("node:sqlite").DatabaseSync;
 
 export type {
   QueryProjectionStatus,

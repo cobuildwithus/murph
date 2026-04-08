@@ -18,6 +18,7 @@ import {
 const packageDir = path.dirname(fileURLToPath(import.meta.url));
 const WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS = {
   "@murphai/contracts": "../contracts/src/index.ts",
+  "@murphai/importers": "../importers/src/index.ts",
   "@murphai/query": "./src/index.ts",
   "@murphai/runtime-state": "../runtime-state/src/index.ts",
 } as const;

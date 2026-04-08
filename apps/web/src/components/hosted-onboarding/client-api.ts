@@ -1,11 +1,5 @@
 import { getAccessToken, getIdentityToken } from "@privy-io/react-auth";
 
-import {
-  logHostedPrivySessionDebug,
-  sanitizeHostedPrivyDebugError,
-  sanitizeHostedPrivyDebugPath,
-} from "./privy-session-debug";
-
 interface ApiErrorPayload {
   error: {
     code?: string;
@@ -78,12 +72,6 @@ export async function requestHostedOnboardingJson<T>(input: {
     authHeaders,
     response,
   })) {
-    logHostedPrivySessionDebug("client-api:retry-authenticated-request", {
-      authMode: mode,
-      hadAuthHeaders: Object.keys(authHeaders).length > 0,
-      status: response.status,
-      url: sanitizeHostedPrivyDebugPath(input.url),
-    });
     invalidateHostedOnboardingAuthHeaderCache();
     authHeaders = await resolveHostedOnboardingAuthHeaders(mode);
 
@@ -106,18 +94,6 @@ export async function requestHostedOnboardingJson<T>(input: {
   const errorPayload = readApiErrorPayload(data);
 
   if (!response.ok || errorPayload) {
-    logHostedPrivySessionDebug("client-api:response-error", {
-      authMode: mode,
-      error: errorPayload
-        ? {
-            code: errorPayload.code ?? null,
-            message: errorPayload.message,
-            retryable: errorPayload.retryable === true,
-          }
-        : null,
-      status: response.status,
-      url: sanitizeHostedPrivyDebugPath(input.url),
-    });
     throw new HostedOnboardingApiError({
       code: errorPayload?.code ?? null,
       details: errorPayload?.details ?? null,
@@ -208,16 +184,7 @@ async function buildHostedOnboardingAuthHeadersUncached(): Promise<Record<string
     }
 
     try {
-      logHostedPrivySessionDebug("client-api:token-read:start", {
-        attempt: delayMs,
-      });
       const [accessToken, identityToken] = await Promise.all([getAccessToken(), getIdentityToken()]);
-
-      logHostedPrivySessionDebug("client-api:token-read:success", {
-        attempt: delayMs,
-        hasAccessToken: Boolean(accessToken),
-        hasIdentityToken: Boolean(identityToken),
-      });
 
       if (!accessToken || !identityToken) {
         lastError = new HostedOnboardingApiError({
@@ -232,10 +199,6 @@ async function buildHostedOnboardingAuthHeadersUncached(): Promise<Record<string
         [HOSTED_PRIVY_IDENTITY_TOKEN_HEADER_NAME]: identityToken,
       };
     } catch (error) {
-      logHostedPrivySessionDebug("client-api:token-read:error", {
-        attempt: delayMs,
-        error: sanitizeHostedPrivyDebugError(error),
-      });
       lastError = error;
     }
   }

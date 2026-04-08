@@ -222,8 +222,35 @@ test("sendGatewayMessage forwards parsed input and service dependencies to the l
 });
 
 test("createLocalGatewayService forwards wrapper calls to the local store and sender seams", async () => {
-  const service = createLocalGatewayService("/vault/local");
+  const dependencies = {
+    dispatchMode: "queue-only" as const,
+    messageSender: { deliver: vi.fn() },
+    sourceReader: {
+      listOutboxSources: vi.fn(),
+      listSessionSources: vi.fn(),
+    },
+  };
+  const service = createLocalGatewayService("/vault/local", dependencies);
 
+  const conversation = await service.getConversation({
+    sessionKey: TEST_SESSION_KEY,
+  });
+  const conversations = await service.listConversations({
+    channel: "email",
+    limit: 10,
+  });
+  const messages = await service.readMessages({
+    afterMessageId: null,
+    limit: 10,
+    oldestFirst: false,
+    sessionKey: TEST_SESSION_KEY,
+  });
+  const attachments = await service.fetchAttachments({
+    messageId: createGatewayCaptureMessageId(
+      "gateway-local-route",
+      "capture-inbound-1",
+    ),
+  });
   const permissions = await service.listOpenPermissions({
     sessionKey: TEST_SESSION_KEY,
   });
@@ -240,29 +267,51 @@ test("createLocalGatewayService forwards wrapper calls to the local store and se
     limit: 5,
     timeoutMs: 10,
   });
+  const sendResult = await service.sendMessage({
+    clientRequestId: "request-2",
+    sessionKey: TEST_SESSION_KEY,
+    text: "service send",
+  });
 
   assert.deepEqual(listGatewayOpenPermissionsLocal.mock.calls[0], [
     "/vault/local",
     { sessionKey: TEST_SESSION_KEY },
-    {},
+    dependencies,
   ]);
   assert.deepEqual(respondToGatewayPermissionLocal.mock.calls[0], [
     "/vault/local",
     { requestId: "permission-1", decision: "approve" },
-    {},
+    dependencies,
   ]);
   assert.deepEqual(pollGatewayEventsLocal.mock.calls[0], [
     "/vault/local",
     { cursor: 0, kinds: [], limit: 5, sessionKey: null },
-    {},
+    dependencies,
   ]);
   assert.deepEqual(waitForGatewayEventsLocal.mock.calls[0], [
     "/vault/local",
     { cursor: 0, kinds: [], limit: 5, sessionKey: null, timeoutMs: 10 },
-    {},
+    dependencies,
   ]);
+  assert.deepEqual(sendGatewayMessageLocal.mock.calls[0], [
+    {
+      clientRequestId: "request-2",
+      dispatchMode: "queue-only",
+      messageSender: dependencies.messageSender,
+      replyToMessageId: null,
+      sessionKey: TEST_SESSION_KEY,
+      sourceReader: dependencies.sourceReader,
+      text: "service send",
+      vault: "/vault/local",
+    },
+  ]);
+  assert.equal(conversation?.sessionKey, TEST_SESSION_KEY);
+  assert.equal(conversations.conversations[0]?.sessionKey, TEST_SESSION_KEY);
+  assert.equal(messages.messages.length, 2);
+  assert.equal(attachments[0]?.fileName, "photo.jpg");
   assert.equal(permissions[0]?.requestId, "permission-1");
   assert.equal(permission.requestId, "permission-1");
   assert.equal(pollResult.nextCursor, 1);
   assert.equal(waitResult.nextCursor, 2);
+  assert.equal(sendResult.messageId, "gwm_gateway-local-route_sent");
 });

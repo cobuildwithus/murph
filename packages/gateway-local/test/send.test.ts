@@ -104,6 +104,18 @@ const TEST_LINQ_SNAPSHOT: GatewayProjectionSnapshot = {
   permissions: [],
 };
 
+function createSnapshot(
+  conversation: GatewayConversation | null,
+): GatewayProjectionSnapshot {
+  return {
+    schema: "murph.gateway-projection-snapshot.v1",
+    generatedAt: "2026-04-08T00:00:00.000Z",
+    conversations: conversation ? [conversation] : [],
+    messages: [],
+    permissions: [],
+  };
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   vi.restoreAllMocks();
@@ -125,6 +137,23 @@ test("sendGatewayMessageLocal rejects calls without a configured local sender", 
       "code" in error &&
       error.code === "ASSISTANT_GATEWAY_UNSUPPORTED_OPERATION" &&
       error.message.includes("configured local message sender"),
+  );
+
+  assert.equal(LocalGatewayProjectionStore.mock.calls.length, 0);
+});
+
+test("sendGatewayMessageLocal rejects invalid session ids before reading the store", async () => {
+  await assert.rejects(
+    sendGatewayMessageLocal({
+      messageSender: { deliver: vi.fn() },
+      sessionKey: "invalid-session-key",
+      text: "hello from local",
+      vault: "/vault/local",
+    }),
+    (error: unknown) =>
+      error instanceof Error &&
+      "code" in error &&
+      error.code === "ASSISTANT_INVALID_RUNTIME_ID",
   );
 
   assert.equal(LocalGatewayProjectionStore.mock.calls.length, 0);
@@ -223,6 +252,64 @@ test("sendGatewayMessageLocal shapes the delivery request and result payload", a
   );
 });
 
+test("sendGatewayMessageLocal marks direct threads as direct deliveries", async () => {
+  syncAndReadSnapshot.mockResolvedValue(
+    createSnapshot({
+      ...TEST_EMAIL_CONVERSATION,
+      route: {
+        ...TEST_EMAIL_CONVERSATION.route,
+        directness: "direct",
+      },
+    }),
+  );
+  const messageSender = {
+    deliver: vi.fn(async () => ({
+      delivery: null,
+      deliveryErrorMessage: null,
+      intentId: "intent-direct",
+      kind: "queued" as const,
+    })),
+  };
+
+  await sendGatewayMessageLocal({
+    messageSender,
+    sessionKey: TEST_SESSION_KEY,
+    text: "hello direct",
+    vault: "/vault/local",
+  });
+
+  assert.equal(messageSender.deliver.mock.calls[0]?.[0]?.threadIsDirect, true);
+});
+
+test("sendGatewayMessageLocal keeps thread directness nullable for unknown routes", async () => {
+  syncAndReadSnapshot.mockResolvedValue(
+    createSnapshot({
+      ...TEST_EMAIL_CONVERSATION,
+      route: {
+        ...TEST_EMAIL_CONVERSATION.route,
+        directness: "unknown",
+      },
+    }),
+  );
+  const messageSender = {
+    deliver: vi.fn(async () => ({
+      delivery: null,
+      deliveryErrorMessage: null,
+      intentId: "intent-unknown",
+      kind: "queued" as const,
+    })),
+  };
+
+  await sendGatewayMessageLocal({
+    messageSender,
+    sessionKey: TEST_SESSION_KEY,
+    text: "hello unknown",
+    vault: "/vault/local",
+  });
+
+  assert.equal(messageSender.deliver.mock.calls[0]?.[0]?.threadIsDirect, null);
+});
+
 test("sendGatewayMessageLocal resolves supported reply-to message ids through the store", async () => {
   syncAndReadSnapshot.mockResolvedValue(TEST_LINQ_SNAPSHOT);
   readMessageProviderReplyTarget.mockImplementation((messageId: string) => {
@@ -295,4 +382,276 @@ test("sendGatewayMessageLocal resolves supported reply-to message ids through th
     /^turn_[0-9a-f]{32}$/u,
   );
   assert.equal(result.messageId, createGatewayOutboxMessageId(TEST_ROUTE_TOKEN, "intent-456"));
+});
+
+test("sendGatewayMessageLocal rejects missing conversations", async () => {
+  syncAndReadSnapshot.mockResolvedValue(createSnapshot(null));
+
+  await assert.rejects(
+    sendGatewayMessageLocal({
+      messageSender: { deliver: vi.fn() },
+      sessionKey: TEST_SESSION_KEY,
+      text: "hello from local",
+      vault: "/vault/local",
+    }),
+    (error: unknown) =>
+      error instanceof Error &&
+      "code" in error &&
+      error.code === "ASSISTANT_GATEWAY_SESSION_NOT_FOUND" &&
+      error.message.includes(TEST_SESSION_KEY),
+  );
+
+  assert.equal(sync.mock.calls.length, 0);
+  assert.equal(close.mock.calls.length, 1);
+});
+
+test("sendGatewayMessageLocal rejects conversations without send permission", async () => {
+  syncAndReadSnapshot.mockResolvedValue(
+    createSnapshot({
+      ...TEST_EMAIL_CONVERSATION,
+      canSend: false,
+    }),
+  );
+
+  await assert.rejects(
+    sendGatewayMessageLocal({
+      messageSender: { deliver: vi.fn() },
+      sessionKey: TEST_SESSION_KEY,
+      text: "hello from local",
+      vault: "/vault/local",
+    }),
+    (error: unknown) =>
+      error instanceof Error &&
+      "code" in error &&
+      error.code === "ASSISTANT_GATEWAY_UNSUPPORTED_OPERATION" &&
+      error.message.includes("does not have a routable reply target"),
+  );
+
+  assert.equal(sync.mock.calls.length, 0);
+  assert.equal(close.mock.calls.length, 1);
+});
+
+test("sendGatewayMessageLocal rejects conversations missing a delivery target", async () => {
+  syncAndReadSnapshot.mockResolvedValue(
+    createSnapshot({
+      ...TEST_EMAIL_CONVERSATION,
+      route: {
+        channel: null,
+        identityId: null,
+        participantId: null,
+        threadId: null,
+        directness: "unknown",
+        reply: {
+          kind: null,
+          target: null,
+        },
+      },
+    }),
+  );
+
+  await assert.rejects(
+    sendGatewayMessageLocal({
+      messageSender: { deliver: vi.fn() },
+      sessionKey: TEST_SESSION_KEY,
+      text: "hello from local",
+      vault: "/vault/local",
+    }),
+    (error: unknown) =>
+      error instanceof Error &&
+      "code" in error &&
+      error.code === "ASSISTANT_GATEWAY_UNSUPPORTED_OPERATION" &&
+      error.message.includes("missing a delivery target"),
+  );
+
+  assert.equal(sync.mock.calls.length, 0);
+  assert.equal(close.mock.calls.length, 1);
+});
+
+test("sendGatewayMessageLocal surfaces delivery failures from the local sender", async () => {
+  const messageSender = {
+    deliver: vi.fn(async () => ({
+      delivery: null,
+      deliveryErrorMessage: "provider delivery failed",
+      intentId: "intent-failed",
+      kind: "failed" as const,
+    })),
+  };
+
+  await assert.rejects(
+    sendGatewayMessageLocal({
+      messageSender,
+      sessionKey: TEST_SESSION_KEY,
+      text: "hello from local",
+      vault: "/vault/local",
+    }),
+    (error: unknown) =>
+      error instanceof Error &&
+      "code" in error &&
+      error.code === "ASSISTANT_GATEWAY_UNSUPPORTED_OPERATION" &&
+      error.message === "provider delivery failed",
+  );
+
+  assert.equal(sync.mock.calls.length, 0);
+  assert.equal(close.mock.calls.length, 1);
+});
+
+test("sendGatewayMessageLocal falls back to a default delivery failure message", async () => {
+  const messageSender = {
+    deliver: vi.fn(async () => ({
+      delivery: null,
+      deliveryErrorMessage: null,
+      intentId: "intent-failed",
+      kind: "failed" as const,
+    })),
+  };
+
+  await assert.rejects(
+    sendGatewayMessageLocal({
+      messageSender,
+      sessionKey: TEST_SESSION_KEY,
+      text: "hello from local",
+      vault: "/vault/local",
+    }),
+    (error: unknown) =>
+      error instanceof Error &&
+      "code" in error &&
+      error.code === "ASSISTANT_GATEWAY_UNSUPPORTED_OPERATION" &&
+      error.message === "Gateway delivery failed.",
+  );
+});
+
+test("sendGatewayMessageLocal returns successfully when the post-delivery sync fails", async () => {
+  sync.mockRejectedValueOnce(new Error("sync failed after send"));
+  const messageSender = {
+    deliver: vi.fn(async () => ({
+      delivery: null,
+      deliveryErrorMessage: null,
+      intentId: "intent-queued",
+      kind: "queued" as const,
+    })),
+  };
+
+  const result = await sendGatewayMessageLocal({
+    messageSender,
+    sessionKey: TEST_SESSION_KEY,
+    text: "hello from local",
+    vault: "/vault/local",
+  });
+
+  assert.equal(result.messageId, createGatewayOutboxMessageId(TEST_ROUTE_TOKEN, "intent-queued"));
+  assert.equal(result.queued, true);
+  assert.equal(result.delivery, null);
+  assert.equal(sync.mock.calls.length, 1);
+  assert.equal(close.mock.calls.length, 1);
+});
+
+test("sendGatewayMessageLocal rejects reply-to on unsupported channels", async () => {
+  await assert.rejects(
+    sendGatewayMessageLocal({
+      messageSender: { deliver: vi.fn() },
+      replyToMessageId: TEST_REPLY_TO_MESSAGE_ID,
+      sessionKey: TEST_SESSION_KEY,
+      text: "hello from local",
+      vault: "/vault/local",
+    }),
+    (error: unknown) =>
+      error instanceof Error &&
+      "code" in error &&
+      error.code === "ASSISTANT_GATEWAY_UNSUPPORTED_OPERATION" &&
+      error.message.includes("reply-to is not supported for email"),
+  );
+
+  assert.equal(readMessageProviderReplyTarget.mock.calls.length, 0);
+});
+
+test("sendGatewayMessageLocal rejects reply-to when the route channel is missing", async () => {
+  syncAndReadSnapshot.mockResolvedValue(
+    createSnapshot({
+      ...TEST_EMAIL_CONVERSATION,
+      route: {
+        ...TEST_EMAIL_CONVERSATION.route,
+        channel: null,
+      },
+    }),
+  );
+
+  await assert.rejects(
+    sendGatewayMessageLocal({
+      messageSender: { deliver: vi.fn() },
+      replyToMessageId: TEST_REPLY_TO_MESSAGE_ID,
+      sessionKey: TEST_SESSION_KEY,
+      text: "hello from local",
+      vault: "/vault/local",
+    }),
+    (error: unknown) =>
+      error instanceof Error &&
+      "code" in error &&
+      error.code === "ASSISTANT_GATEWAY_UNSUPPORTED_OPERATION" &&
+      error.message.includes("reply-to is not supported for this channel"),
+  );
+
+  assert.equal(readMessageProviderReplyTarget.mock.calls.length, 0);
+});
+
+test("sendGatewayMessageLocal rejects invalid reply-to ids", async () => {
+  syncAndReadSnapshot.mockResolvedValue(TEST_LINQ_SNAPSHOT);
+
+  await assert.rejects(
+    sendGatewayMessageLocal({
+      messageSender: { deliver: vi.fn() },
+      replyToMessageId: "invalid-message-id",
+      sessionKey: TEST_SESSION_KEY,
+      text: "hello from local",
+      vault: "/vault/local",
+    }),
+    (error: unknown) =>
+      error instanceof Error &&
+      "code" in error &&
+      error.code === "ASSISTANT_INVALID_RUNTIME_ID",
+  );
+
+  assert.equal(readMessageProviderReplyTarget.mock.calls.length, 0);
+});
+
+test("sendGatewayMessageLocal rejects reply-to ids from other sessions", async () => {
+  const otherReplyToMessageId = createGatewayOutboxMessageId("another-route", "seed-intent");
+  syncAndReadSnapshot.mockResolvedValue(TEST_LINQ_SNAPSHOT);
+
+  await assert.rejects(
+    sendGatewayMessageLocal({
+      messageSender: { deliver: vi.fn() },
+      replyToMessageId: otherReplyToMessageId,
+      sessionKey: TEST_SESSION_KEY,
+      text: "hello from local",
+      vault: "/vault/local",
+    }),
+    (error: unknown) =>
+      error instanceof Error &&
+      "code" in error &&
+      error.code === "ASSISTANT_INVALID_RUNTIME_ID" &&
+      error.message.includes("did not belong to the requested session key"),
+  );
+
+  assert.equal(readMessageProviderReplyTarget.mock.calls.length, 0);
+});
+
+test("sendGatewayMessageLocal rejects reply-to ids without a stable provider target", async () => {
+  syncAndReadSnapshot.mockResolvedValue(TEST_LINQ_SNAPSHOT);
+
+  await assert.rejects(
+    sendGatewayMessageLocal({
+      messageSender: { deliver: vi.fn() },
+      replyToMessageId: TEST_REPLY_TO_MESSAGE_ID,
+      sessionKey: TEST_SESSION_KEY,
+      text: "hello from local",
+      vault: "/vault/local",
+    }),
+    (error: unknown) =>
+      error instanceof Error &&
+      "code" in error &&
+      error.code === "ASSISTANT_GATEWAY_UNSUPPORTED_OPERATION" &&
+      error.message.includes("stable provider message id"),
+  );
+
+  assert.deepEqual(readMessageProviderReplyTarget.mock.calls[0], [TEST_REPLY_TO_MESSAGE_ID]);
 });

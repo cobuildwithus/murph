@@ -24,6 +24,9 @@ import type {
 
 export { HostedCodeEntryStep } from "./hosted-phone-auth-code-entry-step";
 
+const HOSTED_TERMS_URL = "https://docs.co.build/legal/terms";
+const HOSTED_PRIVACY_URL = "https://docs.co.build/legal/privacy";
+
 export function HostedInviteShortcutStep({
   disabled,
   pendingAction,
@@ -57,6 +60,7 @@ export function HostedInviteShortcutStep({
           onClick={onUseDifferentNumber}
         />
       </div>
+      <HostedPassiveConsentNotice />
     </div>
   );
 }
@@ -152,6 +156,23 @@ export function HostedPhoneEntryStep({
             : "Text me a code"}
         </Button>
       </div>
+      {intent === "signup" ? <HostedPassiveConsentNotice /> : null}
     </form>
+  );
+}
+
+function HostedPassiveConsentNotice() {
+  return (
+    <p className="text-xs leading-relaxed text-stone-500">
+      By signing up, you agree to our{" "}
+      <a href={HOSTED_TERMS_URL} target="_blank" rel="noreferrer" className="hover:underline hover:underline-offset-4">
+        Terms
+      </a>{" "}
+      and{" "}
+      <a href={HOSTED_PRIVACY_URL} target="_blank" rel="noreferrer" className="hover:underline hover:underline-offset-4">
+        Privacy Policy
+      </a>
+      .
+    </p>
   );
 }

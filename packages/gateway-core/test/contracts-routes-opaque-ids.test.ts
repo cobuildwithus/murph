@@ -47,6 +47,9 @@ import {
 } from '../src/routes.ts'
 import { isoTimestampSchema, normalizeNullableString } from '../src/shared.ts'
 
+const encodeOpaqueEnvelope = (prefix: string, envelope: unknown): string =>
+  `${prefix}${Buffer.from(JSON.stringify(envelope), 'utf8').toString('base64url')}`
+
 test('shared helpers normalize nullable strings and ISO timestamps', () => {
   assert.equal(normalizeNullableString('  hello world  '), 'hello world')
   assert.equal(normalizeNullableString('   '), null)
@@ -344,6 +347,332 @@ test('route helpers preserve normalized conversation state and reply inference',
   )
 })
 
+test('route helpers cover reply merge fallthrough and scope inference edge cases', () => {
+  assert.deepEqual(
+    normalizeGatewayConversationRoute({
+      channel: ' email ',
+      directness: ' side-channel ' as 'direct',
+      identityId: ' acct_edge ',
+      participantId: ' actor_edge ',
+      reply: {
+        kind: 'participant',
+        target: ' actor_edge ',
+      },
+    }),
+    {
+      channel: 'email',
+      directness: null,
+      identityId: 'acct_edge',
+      participantId: 'actor_edge',
+      reply: {
+        kind: 'participant',
+        target: 'actor_edge',
+      },
+      threadId: null,
+    },
+  )
+
+  assert.deepEqual(
+    mergeGatewayConversationRoutes(
+      {
+        channel: 'telegram',
+        participantId: 'actor_merge',
+        reply: {
+          kind: 'participant',
+          target: 'actor_merge',
+        },
+      },
+      {
+        reply: {
+          target: 'actor_override',
+        },
+      },
+    ),
+    {
+      channel: 'telegram',
+      directness: null,
+      identityId: null,
+      participantId: 'actor_merge',
+      reply: {
+        kind: 'participant',
+        target: 'actor_override',
+      },
+      threadId: null,
+    },
+  )
+
+  assert.deepEqual(
+    mergeGatewayConversationRoutes(
+      {
+        channel: 'telegram',
+        participantId: 'actor_clear',
+        reply: {
+          kind: 'participant',
+          target: 'actor_clear',
+        },
+      },
+      {
+        reply: {
+          kind: null,
+        },
+      },
+    ),
+    {
+      channel: 'telegram',
+      directness: null,
+      identityId: null,
+      participantId: 'actor_clear',
+      reply: {
+        kind: null,
+        target: 'actor_clear',
+      },
+      threadId: null,
+    },
+  )
+
+  assert.equal(
+    resolveGatewayConversationRouteKey({
+      channel: 'telegram',
+      directness: 'group',
+      participantId: 'actor_missing_thread',
+    }),
+    null,
+  )
+  assert.equal(
+    resolveGatewayConversationRouteKey({
+      channel: 'telegram',
+      directness: 'side-channel' as 'direct',
+      threadId: 'thread_scope',
+    }),
+    'channel:telegram|thread:thread_scope',
+  )
+
+  assert.deepEqual(
+    gatewayBindingDeliveryFromRoute({
+      channel: 'email',
+      participantId: 'actor_email',
+    }),
+    {
+      kind: 'participant',
+      target: 'actor_email',
+    },
+  )
+  assert.deepEqual(
+    gatewayBindingDeliveryFromRoute({
+      channel: 'custom',
+      directness: 'direct',
+      participantId: 'actor_custom',
+      threadId: 'thread_custom',
+    }),
+    {
+      kind: 'participant',
+      target: 'actor_custom',
+    },
+  )
+  assert.deepEqual(
+    gatewayBindingDeliveryFromRoute({
+      channel: 'custom',
+      participantId: 'actor_explicit',
+      reply: {
+        kind: 'thread',
+        target: 'thread_explicit',
+      },
+    }),
+    {
+      kind: 'thread',
+      target: 'thread_explicit',
+    },
+  )
+  assert.deepEqual(
+    gatewayBindingDeliveryFromRoute({
+      channel: 'custom',
+      threadId: 'thread_only',
+    }),
+    {
+      kind: 'thread',
+      target: 'thread_only',
+    },
+  )
+  assert.equal(
+    gatewayBindingDeliveryFromRoute({
+      channel: 'linq',
+      participantId: 'actor_no_thread',
+    }),
+    null,
+  )
+})
+
+test('route helpers cover fallback delivery inference, merge defaults, and send guards', () => {
+  assert.deepEqual(mergeGatewayConversationRoutes(undefined, undefined), {
+    channel: null,
+    directness: null,
+    identityId: null,
+    participantId: null,
+    reply: {
+      kind: null,
+      target: null,
+    },
+    threadId: null,
+  })
+
+  assert.deepEqual(
+    gatewayConversationRouteFromCapture({
+      actor: {},
+      source: 'custom',
+      thread: {
+        id: 'thread_capture_unknown',
+      },
+    }),
+    {
+      channel: 'custom',
+      directness: null,
+      identityId: null,
+      participantId: null,
+      reply: {
+        kind: null,
+        target: null,
+      },
+      threadId: 'thread_capture_unknown',
+    },
+  )
+
+  assert.deepEqual(
+    gatewayBindingDeliveryFromRoute({
+      channel: 'custom',
+      directness: 'group',
+      participantId: 'actor_group',
+      reply: {
+        kind: 'participant',
+        target: '   ',
+      },
+      threadId: 'thread_group',
+    }),
+    {
+      kind: 'thread',
+      target: 'thread_group',
+    },
+  )
+
+  assert.deepEqual(
+    gatewayBindingDeliveryFromRoute({
+      channel: 'custom',
+      directness: 'direct',
+      participantId: 'actor_direct',
+      threadId: 'thread_direct',
+    }),
+    {
+      kind: 'participant',
+      target: 'actor_direct',
+    },
+  )
+
+  assert.deepEqual(
+    mergeGatewayConversationRoutes(
+      {
+        channel: 'custom',
+        participantId: 'actor_merge_thread',
+        reply: {
+          kind: 'thread',
+          target: 'thread_old',
+        },
+        threadId: 'thread_old',
+      },
+      {
+        directness: 'group',
+        reply: {},
+        threadId: 'thread_new',
+      },
+    ),
+    {
+      channel: 'custom',
+      directness: 'group',
+      identityId: null,
+      participantId: 'actor_merge_thread',
+      reply: {
+        kind: 'thread',
+        target: 'thread_new',
+      },
+      threadId: 'thread_new',
+    },
+  )
+
+  assert.deepEqual(
+    mergeGatewayConversationRoutes(undefined, {
+      channel: ' custom ',
+      directness: 'direct',
+      identityId: ' acct_new ',
+      participantId: ' actor_new ',
+      reply: {
+        kind: 'participant',
+        target: ' actor_new ',
+      },
+      threadId: ' thread_new ',
+    }),
+    {
+      channel: 'custom',
+      directness: 'direct',
+      identityId: 'acct_new',
+      participantId: 'actor_new',
+      reply: {
+        kind: 'participant',
+        target: 'actor_new',
+      },
+      threadId: 'thread_new',
+    },
+  )
+
+  assert.equal(
+    resolveGatewayConversationRouteKey({
+      channel: 'telegram',
+      directness: 'direct',
+      participantId: 'actor_direct_scope',
+      threadId: 'thread_unused',
+    }),
+    'channel:telegram|actor:actor_direct_scope',
+  )
+  assert.equal(
+    resolveGatewayConversationRouteKey({
+      channel: 'telegram',
+      directness: 'direct',
+      threadId: 'thread_direct_scope',
+    }),
+    'channel:telegram|thread:thread_direct_scope',
+  )
+  assert.equal(
+    resolveGatewayConversationRouteKey({
+      participantId: 'actor_without_channel',
+      threadId: 'thread_unused',
+    }),
+    null,
+  )
+
+  assert.equal(
+    gatewayConversationRouteCanSend({
+      channel: 'email',
+      participantId: 'actor_email_only',
+      reply: {
+        kind: 'participant',
+        target: 'actor_email_only',
+      },
+    }),
+    false,
+  )
+  assert.equal(
+    gatewayConversationRouteCanSend({
+      participantId: 'actor_missing_channel',
+      threadId: 'thread_missing_channel',
+    }),
+    false,
+  )
+  assert.equal(
+    gatewayConversationRouteCanSend({
+      channel: 'custom',
+      directness: 'group',
+    }),
+    false,
+  )
+})
+
 test('opaque id helpers preserve route tokens and reject malformed envelopes', () => {
   const routeKey = 'channel:telegram|identity:acct_1|actor:actor_1'
   const sessionKey = createGatewayConversationSessionKey(routeKey)
@@ -379,19 +708,137 @@ test('opaque id helpers preserve route tokens and reject malformed envelopes', (
   assert.equal(assertGatewayAttachmentId(attachmentId), attachmentId)
   assert.equal(assertGatewayMessageId(outboxMessageId), outboxMessageId)
 
-  const malformedAttachmentEnvelope = `gwca_${Buffer.from(
-    JSON.stringify({
-      kind: 'conversation',
-      routeToken: 'route-token-1',
-      sourceToken: 'source-token',
-      version: 2,
-    }),
-    'utf8',
-  ).toString('base64url')}`
+  const malformedAttachmentEnvelope = encodeOpaqueEnvelope('gwca_', {
+    kind: 'conversation',
+    routeToken: 'route-token-1',
+    sourceToken: 'source-token',
+    version: 2,
+  })
 
   assert.throws(
     () => readGatewayAttachmentId(malformedAttachmentEnvelope),
     /Gateway attachment id is invalid\./u,
+  )
+})
+
+test('opaque id helpers normalize route tokens and reject invalid envelopes', () => {
+  const routeKey = 'channel:custom|identity:acct_norm|actor:actor_norm'
+  const normalizedRouteToken = readGatewayConversationSessionToken(
+    createGatewayConversationSessionKey(routeKey),
+  )
+
+  assert.equal(
+    readGatewayConversationSessionToken(createGatewayConversationSessionKey('route-token-plain')),
+    'route-token-plain',
+  )
+  assert.equal(normalizedRouteToken.includes(':'), false)
+  assert.equal(normalizedRouteToken.includes('|'), false)
+  assert.equal(
+    readGatewayMessageRouteToken(createGatewayCaptureMessageId(routeKey, 'capture-route-key')),
+    normalizedRouteToken,
+  )
+  assert.equal(
+    sameGatewayConversationSession(createGatewayConversationSessionKey(routeKey), 'not-a-session-key'),
+    false,
+  )
+
+  assert.throws(
+    () =>
+      readGatewayConversationSessionToken(
+        encodeOpaqueEnvelope('gwcs_', {
+          routeToken: 'route-token-1',
+          version: 2,
+        }),
+      ),
+    /Gateway opaque id was missing the kind field\./u,
+  )
+
+  assert.throws(
+    () =>
+      readGatewayMessageRouteToken(
+        encodeOpaqueEnvelope('gwcm_', {
+          kind: 'capture-message',
+          version: 2,
+        }),
+      ),
+    /Gateway opaque id was missing the route token\./u,
+  )
+
+  assert.throws(
+    () =>
+      readGatewayAttachmentId(
+        encodeOpaqueEnvelope('gwca_', {
+          kind: 'attachment',
+          routeToken: 'route-token-1',
+          version: 2,
+        }),
+      ),
+    /Gateway attachment id was missing the attachment reference\./u,
+  )
+
+  assert.throws(
+    () => createGatewayConversationSessionKey(''),
+    /Gateway route token input is invalid\./u,
+  )
+  assert.throws(
+    () => createGatewayCaptureMessageId('', 'capture-2'),
+    /Gateway route token input is invalid\./u,
+  )
+
+  assert.throws(
+    () => assertGatewayConversationSessionKey('gwcs_'),
+    /Gateway opaque id is invalid\./u,
+  )
+  assert.throws(
+    () =>
+      assertGatewayConversationSessionKey(
+        `gwcs_${Buffer.from('not-json', 'utf8').toString('base64url')}`,
+      ),
+    /Gateway opaque id is invalid\./u,
+  )
+  assert.throws(
+    () =>
+      assertGatewayConversationSessionKey(
+        encodeOpaqueEnvelope('gwcs_', ['not', 'an', 'object']),
+      ),
+    /Gateway opaque id is invalid\./u,
+  )
+  assert.throws(
+    () =>
+      assertGatewayConversationSessionKey(
+        encodeOpaqueEnvelope('gwcs_', {
+          kind: 'conversation',
+          routeToken: 'route-token-1',
+          version: 1,
+        }),
+      ),
+    /Gateway opaque id version is unsupported\./u,
+  )
+  assert.throws(
+    () =>
+      assertGatewayConversationSessionKey(
+        encodeOpaqueEnvelope('gwcs_', {
+          kind: 'outbox-message',
+          routeToken: 'route-token-1',
+          version: 2,
+        }),
+      ),
+    /Gateway session key is invalid\./u,
+  )
+  assert.throws(
+    () =>
+      assertGatewayMessageId(
+        encodeOpaqueEnvelope('gwcm_', {
+          kind: 'attachment',
+          routeToken: 'route-token-1',
+          version: 2,
+        }),
+      ),
+    /Gateway message id is invalid\./u,
+  )
+  assert.throws(
+    () => assertGatewayAttachmentId('gwcm_invalid'),
+    /Gateway opaque id is invalid\./u,
   )
 })
 

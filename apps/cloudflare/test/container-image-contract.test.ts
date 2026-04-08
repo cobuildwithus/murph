@@ -7,6 +7,7 @@ import {
 import {
   buildHostedRunnerRuntimeArtifactPackageJson,
   hostedRunnerBuildPackageNames,
+  hostedRunnerBundleOnlyDependencyNames,
   hostedRunnerRuntimeDependencyNames,
   hostedRunnerWorkspacePackageNames,
   publishedMurphBundledWorkspacePackageNames,
@@ -131,15 +132,13 @@ describe("hosted runner container image contract", () => {
     ).rejects.toThrow();
   });
 
-  it("declares the published @murphai/murph package as a leaf bundle dependency", async () => {
+  it("keeps only the runtime leaf dependencies in the published package manifest", async () => {
     const packageJson = JSON.parse(await readFile(
       new URL("../package.json", import.meta.url),
       "utf8",
     )) as {
       dependencies?: Record<string, string>;
     };
-
-    expect(packageJson.dependencies).toHaveProperty("@murphai/murph");
 
     for (const dependencyName of hostedRunnerRuntimeDependencyNames) {
       expect(packageJson.dependencies).toHaveProperty(dependencyName);
@@ -165,11 +164,15 @@ describe("hosted runner container image contract", () => {
 
   it("describes the runtime artifact and explicit build/runtime closures", () => {
     const runtimeDependencies = Object.fromEntries(
-      hostedRunnerRuntimeDependencyNames.map((dependencyName) => [
+      [...hostedRunnerRuntimeDependencyNames, ...hostedRunnerBundleOnlyDependencyNames].map((dependencyName) => [
         dependencyName,
         "1.2.3",
       ]),
-    ) as Record<(typeof hostedRunnerRuntimeDependencyNames)[number], string>;
+    ) as Record<
+      | (typeof hostedRunnerRuntimeDependencyNames)[number]
+      | (typeof hostedRunnerBundleOnlyDependencyNames)[number],
+      string
+    >;
     const runtimePackageJson = buildHostedRunnerRuntimeArtifactPackageJson({
       dependencies: runtimeDependencies,
       engines: {
@@ -185,7 +188,7 @@ describe("hosted runner container image contract", () => {
 
     expect(runnerBundleDirectoryName).toBe("runner-bundle");
     expect(Object.keys(runtimeDependencies).sort()).toEqual(
-      [...hostedRunnerRuntimeDependencyNames].sort(),
+      [...hostedRunnerRuntimeDependencyNames, ...hostedRunnerBundleOnlyDependencyNames].sort(),
     );
     expect(hostedRunnerWorkspacePackageNames).toEqual([
       "@murphai/assistant-engine",

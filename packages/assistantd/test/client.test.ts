@@ -245,6 +245,57 @@ test('gateway daemon client is inert when assistantd client config is absent', a
   assert.equal(permissionResponse, undefined)
 })
 
+test('remaining gateway daemon helpers short-circuit before fetch when config is absent', async () => {
+  assistantdFetchMock.mockClear()
+
+  const messages = await maybeReadGatewayMessagesViaDaemon(
+    {
+      sessionKey: TEST_GATEWAY_CONVERSATION.sessionKey,
+      vault: '/tmp/unused',
+    },
+    {
+      MURPH_ASSISTANTD_BASE_URL: 'http://127.0.0.1:50241',
+    },
+  )
+  const attachments = await maybeFetchGatewayAttachmentsViaDaemon(
+    {
+      messageId: TEST_GATEWAY_MESSAGE.messageId,
+      vault: '/tmp/unused',
+    },
+    {
+      MURPH_ASSISTANTD_CONTROL_TOKEN: 'secret-token',
+    },
+  )
+  const sendResult = await maybeSendGatewayMessageViaDaemon(
+    {
+      sessionKey: TEST_GATEWAY_CONVERSATION.sessionKey,
+      text: 'follow up',
+      vault: '/tmp/unused',
+    },
+    {
+      MURPH_ASSISTANTD_DISABLE_CLIENT: '1',
+      MURPH_ASSISTANTD_BASE_URL: 'http://127.0.0.1:50241',
+      MURPH_ASSISTANTD_CONTROL_TOKEN: 'secret-token',
+    },
+  )
+  const pollResult = await maybePollGatewayEventsViaDaemon(
+    {
+      cursor: 7,
+      vault: '/tmp/unused',
+    },
+    {
+      MURPH_ASSISTANTD_BASE_URL: 'http://127.0.0.1:50241',
+      MURPH_ASSISTANTD_CONTROL_TOKEN: '   ',
+    },
+  )
+
+  assert.equal(messages, null)
+  assert.equal(attachments, null)
+  assert.equal(sendResult, null)
+  assert.equal(pollResult, null)
+  assert.equal(assistantdFetchMock.mock.calls.length, 0)
+})
+
 test('gateway daemon client posts parsed gateway requests to assistantd', async () => {
   const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       assert.equal(
