@@ -1,3 +1,5 @@
+import * as coreRuntime from "@murphai/core";
+
 import type { SamplePresetRegistry } from "./preset-registry.ts";
 import { importAssessmentResponse } from "./assessment/import-assessment-response.ts";
 import { importCsvSamples } from "./csv-sample-importer.ts";
@@ -18,41 +20,6 @@ export interface CreateImportersOptions {
   deviceProviderRegistry?: DeviceProviderRegistry;
 }
 
-let defaultCorePortPromise: Promise<unknown> | null = null
-
-async function loadDefaultCorePort() {
-  if (!defaultCorePortPromise) {
-    defaultCorePortPromise = import("@murphai/core")
-  }
-
-  return defaultCorePortPromise
-}
-
-function createDefaultCorePortProxy() {
-  return {
-    async importDocument(payload: unknown) {
-      const corePort = await loadDefaultCorePort() as Record<string, (...args: unknown[]) => unknown>
-      return corePort.importDocument(payload)
-    },
-    async addMeal(payload: unknown) {
-      const corePort = await loadDefaultCorePort() as Record<string, (...args: unknown[]) => unknown>
-      return corePort.addMeal(payload)
-    },
-    async importSamples(payload: unknown) {
-      const corePort = await loadDefaultCorePort() as Record<string, (...args: unknown[]) => unknown>
-      return corePort.importSamples(payload)
-    },
-    async importDeviceBatch(payload: unknown) {
-      const corePort = await loadDefaultCorePort() as Record<string, (...args: unknown[]) => unknown>
-      return corePort.importDeviceBatch(payload)
-    },
-    async importAssessmentResponse(payload: unknown) {
-      const corePort = await loadDefaultCorePort() as Record<string, (...args: unknown[]) => unknown>
-      return corePort.importAssessmentResponse(payload)
-    },
-  }
-}
-
 export function createImporters({
   corePort,
   presetRegistry,
@@ -60,7 +27,7 @@ export function createImporters({
 }: CreateImportersOptions = {}) {
   const registry = presetRegistry ?? createSamplePresetRegistry();
   const providers = deviceProviderRegistry ?? createDeviceProviderRegistry(defaultDeviceProviderAdapters);
-  const writer = corePort ?? createDefaultCorePortProxy();
+  const writer = corePort ?? coreRuntime;
 
   return {
     presetRegistry: registry,

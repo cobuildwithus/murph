@@ -1,15 +1,10 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "vitest";
 
 import * as coreRuntime from "@murphai/core";
-import type {
-  DocumentImportPayload,
-  MealImportPayload,
-  SampleImportPayload,
-} from "../src/index.ts";
 import {
   addMeal,
   createSamplePresetRegistry,
@@ -19,45 +14,8 @@ import {
   prepareCsvSampleImport,
   prepareMealImport,
 } from "../src/index.ts";
-
-async function createTempFile(name: string, contents: string): Promise<string> {
-  const directory = await mkdtemp(join(tmpdir(), "murph-importers-"));
-  const filePath = join(directory, name);
-  await writeFile(filePath, contents);
-  return filePath;
-}
-
-interface CorePortSpyCalls {
-  documents: DocumentImportPayload[];
-  meals: MealImportPayload[];
-  samples: SampleImportPayload[];
-}
-
-function createCorePortSpy() {
-  const calls: CorePortSpyCalls = {
-    documents: [],
-    meals: [],
-    samples: [],
-  };
-
-  return {
-    calls,
-    corePort: {
-      async importDocument(payload: DocumentImportPayload) {
-        calls.documents.push(payload);
-        return { ok: true, kind: "document" as const };
-      },
-      async addMeal(payload: MealImportPayload) {
-        calls.meals.push(payload);
-        return { ok: true, kind: "meal" as const };
-      },
-      async importSamples(payload: SampleImportPayload) {
-        calls.samples.push(payload);
-        return { ok: true, kind: "samples" as const };
-      },
-    },
-  };
-}
+import type { DocumentImportPayload } from "../src/index.ts";
+import { createCorePortSpy, createTempFile } from "./test-helpers.ts";
 
 test("importDocument delegates a core-shaped document payload", async () => {
   const filePath = await createTempFile("labs.pdf", "pdf-placeholder");
