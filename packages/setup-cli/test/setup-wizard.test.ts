@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { test } from 'vitest'
+import { test, vi } from 'vitest'
 import {
   buildSetupWizardPublicUrlReview,
   createSetupWizardCompletionController as createSetupWizardController,
@@ -26,6 +26,13 @@ import {
   formatSetupPublicUrlStrategy,
   normalizeSetupWizardText,
 } from '../src/setup-wizard-public-url.ts'
+import {
+  buildSetupWizardRuntimeBadges,
+  describeSetupWizardRuntimeStatus,
+  normalizeSetupWizardRuntimeStatus,
+  resolveSetupWizardChannelStatus,
+  resolveSetupWizardWearableStatus,
+} from '../src/setup-wizard-runtime-status.ts'
 import { stripAnsi, withMockProcessTty } from './helpers.ts'
 
 async function waitForWizardText(
@@ -156,6 +163,73 @@ test('setup wizard exported defaults and wrapper controller keep platform-specif
   )
 })
 
+test.sequential('setup wizard wrapper rejects when Ink render throws before initialization completes', async () => {
+  const renderError = new Error('render failed')
+
+  vi.resetModules()
+  vi.doMock('ink', async () => {
+    const actual = await vi.importActual<typeof import('ink')>('ink')
+    return {
+      ...actual,
+      render() {
+        throw renderError
+      },
+    }
+  })
+
+  try {
+    const { runSetupWizard: runMockedSetupWizard } = await import(
+      '../src/setup-wizard.ts'
+    )
+
+    await assert.rejects(
+      runMockedSetupWizard({
+        vault: './wizard-render-failure',
+      }),
+      /render failed/u,
+    )
+  } finally {
+    vi.doUnmock('ink')
+    vi.resetModules()
+  }
+})
+
+test.sequential('setup wizard wrapper rejects when Ink exits with an error after rendering', async () => {
+  const exitError = new Error('terminal crashed')
+
+  vi.resetModules()
+  vi.doMock('ink', async () => {
+    const actual = await vi.importActual<typeof import('ink')>('ink')
+    return {
+      ...actual,
+      render() {
+        return {
+          unmount() {},
+          waitUntilExit() {
+            return Promise.reject(exitError)
+          },
+        }
+      },
+    }
+  })
+
+  try {
+    const { runSetupWizard: runMockedSetupWizard } = await import(
+      '../src/setup-wizard.ts'
+    )
+
+    await assert.rejects(
+      runMockedSetupWizard({
+        vault: './wizard-exit-failure',
+      }),
+      /terminal crashed/u,
+    )
+  } finally {
+    vi.doUnmock('ink')
+    vi.resetModules()
+  }
+})
+
 test('setup wizard extracted option and public-url helpers keep labels and trimming stable', () => {
   assert.equal(formatSetupChannel('telegram'), 'Telegram')
   assert.equal(formatSetupChannel('email'), 'Email')
@@ -168,6 +242,61 @@ test('setup wizard extracted option and public-url helpers keep labels and trimm
   assert.equal(normalizeSetupWizardText('  https://murph.example  '), 'https://murph.example')
   assert.equal(normalizeSetupWizardText('   '), null)
   assert.equal(normalizeSetupWizardText(undefined), null)
+})
+
+test('setup wizard runtime-status helpers preserve defaulting, detail copy, and badge tones', () => {
+  const defaultStatus = normalizeSetupWizardRuntimeStatus(undefined)
+  assert.deepEqual(defaultStatus, {
+    badge: 'optional',
+    detail: '',
+    missingEnv: [],
+    ready: true,
+  })
+  assert.equal(
+    describeSetupWizardRuntimeStatus(defaultStatus),
+    'Ready to connect now.',
+  )
+  assert.deepEqual(buildSetupWizardRuntimeBadges(defaultStatus), [
+    { label: 'optional', tone: 'success' },
+  ])
+
+  const needsEnvStatus = resolveSetupWizardChannelStatus(
+    {
+      linq: {
+        badge: 'needs env',
+        detail: 'Missing webhook credentials.',
+        missingEnv: ['LINQ_API_TOKEN', 'LINQ_WEBHOOK_SECRET'],
+        ready: false,
+      },
+    },
+    'linq',
+  )
+  assert.equal(
+    describeSetupWizardRuntimeStatus(needsEnvStatus),
+    'Needs LINQ_API_TOKEN, LINQ_WEBHOOK_SECRET before this can connect.',
+  )
+  assert.deepEqual(buildSetupWizardRuntimeBadges(needsEnvStatus), [
+    { label: 'needs env', tone: 'warn' },
+  ])
+
+  const macosStatus = resolveSetupWizardWearableStatus(
+    {
+      whoop: {
+        badge: 'macOS only',
+        detail: 'Unavailable on Linux.',
+        missingEnv: [],
+        ready: false,
+      },
+    },
+    'whoop',
+  )
+  assert.equal(
+    describeSetupWizardRuntimeStatus(macosStatus),
+    'Only available on macOS.',
+  )
+  assert.deepEqual(buildSetupWizardRuntimeBadges(macosStatus), [
+    { label: 'macOS only', tone: 'accent' },
+  ])
 })
 
 test.sequential('setup wizard uses endpoint-specific method copy and confirm review for named endpoints', async () => {
