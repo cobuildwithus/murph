@@ -77,22 +77,22 @@ export function buildTimeline(
         continue;
       }
 
-      const date = journal.date ?? extractDate(journal.occurredAt);
-      if (!date) {
+      const occurrence = resolveTimelineOccurrence(journal, "12:00:00Z");
+      if (!occurrence) {
         continue;
       }
 
       entries.push({
         id: journal.entityId,
         entryType: "journal",
-        occurredAt: journal.occurredAt ?? `${date}T12:00:00Z`,
-        date,
+        occurredAt: occurrence.occurredAt,
+        date: occurrence.date,
         title: journal.title ?? journal.entityId,
         kind: journalKind,
         stream: null,
         experimentSlug: journal.experimentSlug,
         path: journal.path,
-        relatedIds: timelineRelatedIds(journal),
+        relatedIds: entityRelationTargetIds(journal),
         tags: journal.tags,
         data: journal.attributes,
       });
@@ -115,24 +115,22 @@ export function buildTimeline(
         continue;
       }
 
-      const date = event.date ?? extractDate(event.occurredAt);
-      const occurredAt = event.occurredAt ?? (date ? `${date}T00:00:00Z` : "");
-
-      if (!date || !occurredAt) {
+      const occurrence = resolveTimelineOccurrence(event, "00:00:00Z");
+      if (!occurrence || !occurrence.occurredAt) {
         continue;
       }
 
       entries.push({
         id: event.entityId,
         entryType: "event",
-        occurredAt,
-        date,
+        occurredAt: occurrence.occurredAt,
+        date: occurrence.date,
         title: event.title ?? eventKind,
         kind: eventKind,
         stream: event.stream,
         experimentSlug: event.experimentSlug,
         path: event.path,
-        relatedIds: timelineRelatedIds(event),
+        relatedIds: entityRelationTargetIds(event),
         tags: event.tags,
         data: event.attributes,
       });
@@ -150,18 +148,16 @@ export function buildTimeline(
         continue;
       }
 
-      const date = assessment.date ?? extractDate(assessment.occurredAt);
-      const occurredAt = assessment.occurredAt ?? (date ? `${date}T12:00:00Z` : "");
-
-      if (!date || !occurredAt) {
+      const occurrence = resolveTimelineOccurrence(assessment, "12:00:00Z");
+      if (!occurrence || !occurrence.occurredAt) {
         continue;
       }
 
       entries.push({
         id: assessment.entityId,
         entryType: "assessment",
-        occurredAt,
-        date,
+        occurredAt: occurrence.occurredAt,
+        date: occurrence.date,
         title:
           assessment.title ??
           stringData(assessment.attributes.assessmentType) ??
@@ -170,7 +166,7 @@ export function buildTimeline(
         stream: null,
         experimentSlug: null,
         path: assessment.path,
-        relatedIds: timelineRelatedIds(assessment),
+        relatedIds: entityRelationTargetIds(assessment),
         tags: assessment.tags,
         data: assessment.attributes,
       });
@@ -188,24 +184,22 @@ export function buildTimeline(
         continue;
       }
 
-      const date = history.date ?? extractDate(history.occurredAt);
-      const occurredAt = history.occurredAt ?? (date ? `${date}T00:00:00Z` : "");
-
-      if (!date || !occurredAt) {
+      const occurrence = resolveTimelineOccurrence(history, "00:00:00Z");
+      if (!occurrence || !occurrence.occurredAt) {
         continue;
       }
 
       entries.push({
         id: history.entityId,
         entryType: "history",
-        occurredAt,
-        date,
+        occurredAt: occurrence.occurredAt,
+        date: occurrence.date,
         title: history.title ?? historyKind,
         kind: historyKind,
         stream: null,
         experimentSlug: null,
         path: history.path,
-        relatedIds: timelineRelatedIds(history),
+        relatedIds: entityRelationTargetIds(history),
         tags: history.tags,
         data: history.attributes,
       });
@@ -223,24 +217,22 @@ export function buildTimeline(
         continue;
       }
 
-      const date = snapshot.date ?? extractDate(snapshot.occurredAt);
-      const occurredAt = snapshot.occurredAt ?? (date ? `${date}T12:00:00Z` : "");
-
-      if (!date || !occurredAt) {
+      const occurrence = resolveTimelineOccurrence(snapshot, "12:00:00Z");
+      if (!occurrence || !occurrence.occurredAt) {
         continue;
       }
 
       entries.push({
         id: snapshot.entityId,
         entryType: "profile_snapshot",
-        occurredAt,
-        date,
+        occurredAt: occurrence.occurredAt,
+        date: occurrence.date,
         title: snapshot.title ?? snapshot.entityId,
         kind: snapshotKind,
         stream: null,
         experimentSlug: null,
         path: snapshot.path,
-        relatedIds: timelineRelatedIds(snapshot),
+        relatedIds: entityRelationTargetIds(snapshot),
         tags: snapshot.tags,
         data: snapshot.attributes,
       });
@@ -273,8 +265,27 @@ export function buildTimeline(
     .slice(0, normalizeLimit(filters.limit));
 }
 
-function timelineRelatedIds(entity: Parameters<typeof entityRelationTargetIds>[0]): string[] {
-  return entityRelationTargetIds(entity);
+interface TimelineOccurrence {
+  date: string;
+  occurredAt: string;
+}
+
+function resolveTimelineOccurrence(
+  entry: {
+    date?: string | null;
+    occurredAt?: string | null;
+  },
+  fallbackTime: "00:00:00Z" | "12:00:00Z",
+): TimelineOccurrence | null {
+  const date = entry.date ?? extractDate(entry.occurredAt);
+  if (!date) {
+    return null;
+  }
+
+  return {
+    date,
+    occurredAt: entry.occurredAt ?? `${date}T${fallbackTime}`,
+  };
 }
 
 function summaryToTimelineEntry(summary: DailySampleSummary): TimelineEntry {

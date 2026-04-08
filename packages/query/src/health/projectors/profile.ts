@@ -22,10 +22,6 @@ import {
   type MarkdownDocumentRecord,
 } from "../shared.ts";
 
-function normalizeTags(value: unknown): string[] {
-  return normalizeUniqueStringArray(value);
-}
-
 export function extractProfileTopGoalIds(profile: unknown): string[] {
   const profileObject = asObject(profile);
   if (!profileObject) {
@@ -117,7 +113,11 @@ export function projectProfileSnapshotEntity(
     relatedIds: linkTargetIds(links),
     stream: null,
     experimentSlug: null,
-    tags: uniqueStrings(["profile_snapshot", status, ...normalizeTags(source.tags)]),
+    tags: uniqueStrings([
+      "profile_snapshot",
+      status,
+      ...normalizeUniqueStringArray(source.tags),
+    ]),
   };
 }
 
@@ -298,7 +298,10 @@ export function projectCurrentProfileEntity(
     relatedIds: linkTargetIds(links),
     stream: null,
     experimentSlug: null,
-    tags: uniqueStrings(["current_profile", ...normalizeTags(attributes.tags)]),
+    tags: uniqueStrings([
+      "current_profile",
+      ...normalizeUniqueStringArray(attributes.tags),
+    ]),
   };
 }
 

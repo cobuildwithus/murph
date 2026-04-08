@@ -13,10 +13,6 @@ import {
   firstString,
 } from "../shared.ts";
 
-function normalizeTags(value: unknown): string[] {
-  return normalizeUniqueStringArray(value);
-}
-
 export function projectAssessmentEntity(
   value: unknown,
   relativePath: string,
@@ -61,6 +57,6 @@ export function projectAssessmentEntity(
     relatedIds: linkTargetIds(links),
     stream: null,
     experimentSlug: null,
-    tags: normalizeTags(source.tags),
+    tags: normalizeUniqueStringArray(source.tags),
   };
 }
