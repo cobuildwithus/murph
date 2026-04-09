@@ -121,11 +121,6 @@ export interface CommandNounCapabilityDefinition {
 const checkedCommandNounCapabilities = [
   {
     bundles: ["payloadCrud"],
-    noun: "profile",
-    additionalCapabilities: ["rebuild"],
-  },
-  {
-    bundles: ["payloadCrud"],
     noun: "goal",
   },
   {
@@ -140,10 +135,6 @@ const checkedCommandNounCapabilities = [
     bundles: ["payloadCrud"],
     noun: "protocol",
     additionalCapabilities: ["stop"],
-  },
-  {
-    bundles: ["payloadCrud"],
-    noun: "history",
   },
   {
     bundles: ["payloadCrud"],

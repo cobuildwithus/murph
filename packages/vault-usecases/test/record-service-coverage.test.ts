@@ -253,7 +253,7 @@ describe("shared and vault helper functions", () => {
       },
     ]);
     assert.equal(inferEntityKind("goal_sleep"), "goal");
-    assert.equal(inferEntityKind("current"), "entity");
+    assert.equal(inferEntityKind("current"), "core");
     assert.equal(inferEntityKind("prov_01JNV422Y2M5ZBV64ZP4N1DRB1"), "provider");
     assert.equal(isQueryableRecordId("goal_sleep"), true);
     assert.equal(isVaultQueryableRecordId("goal_sleep"), true);
@@ -304,19 +304,19 @@ describe("shared and vault helper functions", () => {
     );
 
     const entity = sampleQueryRecord({
-      family: "profile_snapshot",
-      kind: "snapshot",
-      entityId: "snap_1",
+      family: "goal",
+      kind: "goal",
+      entityId: "goal_1",
       attributes: { relatedIds: ["goal_1"] },
       relatedIds: ["goal_1"],
     });
-    assert.equal(toGenericShowEntity(entity).kind, "profile");
-    assert.equal(toGenericListItem(entity).kind, "profile");
+    assert.equal(toGenericShowEntity(entity).kind, "goal");
+    assert.equal(toGenericListItem(entity).kind, "goal");
     assert.equal(
       Array.isArray(toGenericShowEntity(entity).links),
       true,
     );
-    assert.equal(matchesGenericKindFilter(entity, "profile"), true);
+    assert.equal(matchesGenericKindFilter(entity, "profile"), false);
 
     const tempDir = await mkdtemp(path.join(tmpdir(), "vault-usecases-export-pack-"));
     try {
@@ -831,13 +831,10 @@ describe("record service seams", () => {
         samples: [],
         audits: [],
         assessments: [],
-        profileSnapshots: [],
-        currentProfile: null,
         goals: [],
         conditions: [],
         allergies: [],
         protocols: [],
-        history: [],
         familyMembers: [],
         geneticVariants: [],
         foods: [],

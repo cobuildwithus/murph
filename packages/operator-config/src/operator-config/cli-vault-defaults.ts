@@ -96,8 +96,6 @@ const COMMAND_GROUP_PATHS_REQUIRING_SUBCOMMAND = new Set([
   'knowledge index',
   'memory',
   'meal',
-  'profile',
-  'profile current',
   'query',
   'query projection',
   'provider',

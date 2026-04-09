@@ -430,7 +430,7 @@ export function registerHealthCrudCommands<
               .min(1)
               .optional()
               .describe(
-                'Optional history event kind filter such as encounter, procedure, test, adverse_effect, or exposure.',
+                'Optional event kind filter such as encounter, procedure, test, adverse_effect, or exposure.',
               )
           : undefined,
         limit: limitOptionSchema,
@@ -451,4 +451,3 @@ export function registerHealthCrudCommands<
     }),
   )
 }
-

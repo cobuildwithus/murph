@@ -3,7 +3,6 @@ import { z } from "zod";
 
 import * as contracts from "../src/index.ts";
 import { bankEntityDefinitionByKind } from "../src/bank-entities.ts";
-import { buildCurrentProfileDocument } from "../src/current-profile.ts";
 import {
   collapseEventRevisions,
   compareEventRevisionPriority,
@@ -47,6 +46,10 @@ describe("@murphai/contracts public entrypoint", () => {
     expect(contracts.healthEntityDefinitionByKind).toBe(healthEntityDefinitionByKind);
     expect(contracts.parseFrontmatterDocument).toBe(parseFrontmatterDocument);
     expect(contracts.hasHealthEntityRegistry).toBe(hasHealthEntityRegistry);
+    expect(
+      contracts.healthEntityDefinitions.map((definition) => String(definition.kind)),
+    ).not.toContain("history");
+    expect(contracts.healthEntityDefinitionByKind.has("blood_test")).toBe(true);
   });
 
   it("exposes representative package surfaces through the root module", () => {
@@ -62,32 +65,11 @@ describe("@murphai/contracts public entrypoint", () => {
   });
 
   it("covers the contracts helper seams exposed through the public package", () => {
-    const snapshotId = "psnap_0123456789ABCDEFGHJKMNPQRS";
-    const assessmentId = "asmt_0123456789ABCDEFGHJKMNPQRS";
-    const eventId = "evt_0123456789ABCDEFGHJKMNPQRS";
-    const currentProfile = buildCurrentProfileDocument({
-      snapshotId,
+    expect(createEmptyPreferencesDocument(new Date("2026-04-08T10:11:12.000Z"))).toEqual({
+      schemaVersion: 1,
       updatedAt: "2026-04-08T10:11:12.000Z",
-      source: "derived",
-      sourceAssessmentIds: [assessmentId],
-      sourceEventIds: [eventId],
-      profile: {
-        goals: null,
-        status: "active",
-        unitPreferences: {},
-      },
+      workoutUnitPreferences: {},
     });
-
-    expect(currentProfile.attributes.snapshotId).toBe(snapshotId);
-    expect(currentProfile.body).toContain("status: active");
-    expect(() =>
-      buildCurrentProfileDocument({
-        snapshotId: "bad",
-        updatedAt: "2026-04-08T10:11:12.000Z",
-        source: "manual",
-        profile: {},
-      }),
-    ).toThrow(/snapshotId/);
 
     expect(isStrictIsoDateTime("2026-04-08T10:11:12.000Z")).toBe(true);
     expect(normalizeStrictIsoTimestamp(new Date("2026-04-08T10:11:12.000Z"))).toBe(

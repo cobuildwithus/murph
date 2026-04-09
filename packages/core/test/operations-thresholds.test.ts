@@ -874,18 +874,12 @@ test("repairVault is a no-op on healthy vaults and recreates missing required di
   assert.equal(repaired.metadataFile, "vault.json");
 });
 
-test("repairVault falls back when profile snapshots cannot be listed", async () => {
+test("repairVault recreates missing required directories", async () => {
   const vaultRoot = await makeTempDirectory("murph-core-operations-thresholds-repair-throws");
   await initializeVault({ vaultRoot });
 
-  const brokenSnapshotPath = path.join(
-    vaultRoot,
-    VAULT_LAYOUT.profileSnapshotsDirectory,
-    "2026-04.jsonl",
-  );
   const missingDirectory = path.join(vaultRoot, VAULT_LAYOUT.providersDirectory);
 
-  await fs.writeFile(brokenSnapshotPath, "{\n", "utf8");
   await fs.rm(missingDirectory, {
     recursive: true,
     force: true,

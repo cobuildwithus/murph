@@ -2811,7 +2811,7 @@
                                   ]
                                 },
                                 "recordedAt": {
-                                  "description": "Optional profile-snapshot timestamp override in ISO 8601 form.",
+                                  "description": "Optional preferences update timestamp override in ISO 8601 form.",
                                   "type": "string",
                                   "format": "date-time",
                                   "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
@@ -5178,7 +5178,7 @@
                   "maxLength": 128
                 },
                 "recordType": {
-                  "description": "Optional query record families such as event, journal, assessment, profile_snapshot, current_profile, goal, condition, allergy, protocol, history, family, genetics, food, recipe, provider, or sample.",
+                  "description": "Optional query record families such as event, journal, assessment, goal, condition, allergy, protocol, history, family, genetics, food, recipe, provider, or sample.",
                   "type": "array",
                   "items": {
                     "type": "string",
@@ -5269,7 +5269,7 @@
                           "minLength": 1
                         },
                         "recordType": {
-                          "description": "Optional record families. Repeat --record-type for multiple values: core, experiment, journal, event, sample, audit, assessment, profile_snapshot, current_profile, goal, condition, allergy, protocol, history, family, genetics.",
+                          "description": "Optional record families. Repeat --record-type for multiple values: core, experiment, journal, event, sample, audit, assessment, goal, condition, allergy, protocol, family, genetics.",
                           "type": "array",
                           "items": {
                             "type": "string",
@@ -5451,7 +5451,7 @@
                   }
                 },
                 "entryType": {
-                  "description": "Optional entry types: journal, event, assessment, history, profile_snapshot, sample_summary. Repeat --entry-type for multiple values.",
+                  "description": "Optional entry types: journal, event, assessment, sample_summary. Repeat --entry-type for multiple values.",
                   "type": "array",
                   "items": {
                     "type": "string",
@@ -7138,165 +7138,6 @@
             }
           }
         },
-        "profile": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "commands": {
-              "type": "object",
-              "additionalProperties": false,
-              "properties": {
-                "scaffold": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "properties": {
-                    "options": {
-                      "type": "object",
-                      "additionalProperties": false,
-                      "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
-                        "requestId": {
-                          "description": "Optional caller-supplied request id for audit correlation.",
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 128
-                        }
-                      }
-                    }
-                  }
-                },
-                "upsert": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "properties": {
-                    "options": {
-                      "type": "object",
-                      "additionalProperties": false,
-                      "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
-                        "requestId": {
-                          "description": "Optional caller-supplied request id for audit correlation.",
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 128
-                        },
-                        "input": {
-                          "type": "string",
-                          "description": "Payload input in @file.json form or - for stdin."
-                        }
-                      }
-                    }
-                  }
-                },
-                "show": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "properties": {
-                    "options": {
-                      "type": "object",
-                      "additionalProperties": false,
-                      "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
-                        "requestId": {
-                          "description": "Optional caller-supplied request id for audit correlation.",
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 128
-                        }
-                      }
-                    }
-                  }
-                },
-                "list": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "properties": {
-                    "options": {
-                      "type": "object",
-                      "additionalProperties": false,
-                      "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
-                        "requestId": {
-                          "description": "Optional caller-supplied request id for audit correlation.",
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 128
-                        },
-                        "from": {
-                          "description": "Optional inclusive lower date bound in YYYY-MM-DD form.",
-                          "type": "string",
-                          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
-                        },
-                        "to": {
-                          "description": "Optional inclusive upper date bound in YYYY-MM-DD form.",
-                          "type": "string",
-                          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
-                        },
-                        "limit": {
-                          "default": 50,
-                          "type": "integer",
-                          "exclusiveMinimum": 0,
-                          "maximum": 200
-                        }
-                      }
-                    }
-                  }
-                },
-                "current": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "properties": {
-                    "commands": {
-                      "type": "object",
-                      "additionalProperties": false,
-                      "properties": {
-                        "rebuild": {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "properties": {
-                            "options": {
-                              "type": "object",
-                              "additionalProperties": false,
-                              "properties": {
-                                "vault": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "description": "Vault root to operate against."
-                                },
-                                "requestId": {
-                                  "description": "Optional caller-supplied request id for audit correlation.",
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "maxLength": 128
-                                }
-                              }
-                            }
-                          }
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        },
         "goal": {
           "type": "object",
           "additionalProperties": false,
@@ -7639,140 +7480,6 @@
                           "description": "Optional allergy status to filter by.",
                           "type": "string",
                           "minLength": 1
-                        },
-                        "limit": {
-                          "default": 50,
-                          "type": "integer",
-                          "exclusiveMinimum": 0,
-                          "maximum": 200
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        },
-        "history": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "commands": {
-              "type": "object",
-              "additionalProperties": false,
-              "properties": {
-                "scaffold": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "properties": {
-                    "options": {
-                      "type": "object",
-                      "additionalProperties": false,
-                      "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
-                        "requestId": {
-                          "description": "Optional caller-supplied request id for audit correlation.",
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 128
-                        }
-                      }
-                    }
-                  }
-                },
-                "upsert": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "properties": {
-                    "options": {
-                      "type": "object",
-                      "additionalProperties": false,
-                      "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
-                        "requestId": {
-                          "description": "Optional caller-supplied request id for audit correlation.",
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 128
-                        },
-                        "input": {
-                          "type": "string",
-                          "description": "Payload input in @file.json form or - for stdin."
-                        }
-                      }
-                    }
-                  }
-                },
-                "show": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "properties": {
-                    "options": {
-                      "type": "object",
-                      "additionalProperties": false,
-                      "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
-                        "requestId": {
-                          "description": "Optional caller-supplied request id for audit correlation.",
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 128
-                        }
-                      }
-                    }
-                  }
-                },
-                "list": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "properties": {
-                    "options": {
-                      "type": "object",
-                      "additionalProperties": false,
-                      "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
-                        "requestId": {
-                          "description": "Optional caller-supplied request id for audit correlation.",
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 128
-                        },
-                        "status": {
-                          "description": "Optional health-event status to filter by.",
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "kind": {
-                          "description": "Optional history event kind filter such as encounter, procedure, test, adverse_effect, or exposure.",
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "from": {
-                          "description": "Optional inclusive lower date bound in YYYY-MM-DD form.",
-                          "type": "string",
-                          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
-                        },
-                        "to": {
-                          "description": "Optional inclusive upper date bound in YYYY-MM-DD form.",
-                          "type": "string",
-                          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
                         },
                         "limit": {
                           "default": 50,

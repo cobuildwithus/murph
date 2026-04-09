@@ -2,8 +2,7 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "noEmit": true,
-    "paths": {},
-    "rootDir": ".",
+    "rootDir": "../..",
     "composite": false,
     "incremental": true,
     "tsBuildInfoFile": "typecheck.tsbuildinfo"
@@ -29,6 +28,8 @@
     }
   ],
   "include": [
+    "*.ts",
+    "test/**/*.ts",
     "src/**/*.ts"
   ],
   "exclude": [

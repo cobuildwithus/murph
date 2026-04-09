@@ -76,6 +76,8 @@ Shared event envelope fields include `note`, `tags`, canonical `links[]`, `rawRe
 
 `test` events may also carry optional structured lab payloads. When `testCategory` is `blood`, the canonical `test` event may include `specimenType`, `labName`, `labPanelId`, `collectedAt`, `reportedAt`, `fastingStatus`, and `results`. Each `results[]` entry stores `analyte`, optional `slug`, optional numeric `value` or textual `textValue`, optional `comparator`, optional `unit`, optional `flag`, optional `biomarkerSlug`, optional `note`, and an optional `referenceRange` with numeric `low`, numeric `high`, and/or textual `text` boundaries.
 
+Blood tests do not define a separate canonical record family. `blood-test` remains the user-facing noun/view over canonical `kind: "test"` event-ledger records.
+
 `activity_session` also carries a required nested `workout` payload as the canonical structured workout/session detail. Top-level `activityType`, `durationMinutes`, and optional `distanceKm` stay as query-friendly summaries, while exercises, sets, loads, session notes, source ids, and workout media descriptors live under `workout`.
 
 `intervention_session` may also include optional `durationMinutes` when the session length is known and optional `protocolId` when the intervention should stay linked back to one therapy or habit protocol.

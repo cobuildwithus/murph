@@ -4,7 +4,6 @@
   "vaultFixture": "fixtures/minimal-vault",
   "inputs": [
     "fixtures/health-extensions/vault-overlay/ledger/assessments/2026/2026-03.jsonl",
-    "fixtures/health-extensions/payloads/profile-upsert.json",
     "fixtures/health-extensions/payloads/goal-upsert.json",
     "fixtures/health-extensions/payloads/condition-upsert.json",
     "fixtures/health-extensions/payloads/allergy-upsert.json",
@@ -14,5 +13,5 @@
     "fixtures/health-extensions/payloads/genetics-upsert.json"
   ],
   "goldenOutput": "fixtures/golden-outputs/show",
-  "purpose": "Documents deterministic proposal projection from one assessment into profile, goal, condition, allergy, protocol, history, family, and genetics payloads."
+  "purpose": "Documents deterministic proposal projection from one assessment into goal, condition, allergy, protocol, history, family, and genetics payloads."
 }

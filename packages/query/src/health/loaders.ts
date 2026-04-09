@@ -265,6 +265,18 @@ export async function readOptionalMarkdownDocument(
   return outcome.document;
 }
 
+export function readMarkdownDocumentSync(
+  vaultRoot: string,
+  relativePath: string,
+): MarkdownDocumentRecord {
+  const outcome = readMarkdownDocumentOutcomeSync(vaultRoot, relativePath);
+  if (!outcome.ok) {
+    throw toStrictParseError(outcome);
+  }
+
+  return outcome.document;
+}
+
 export async function readOptionalMarkdownDocumentOutcome(
   vaultRoot: string,
   relativePath: string,
@@ -327,6 +339,27 @@ export async function readJsonlRecords(
   relativeRoot: string,
 ): Promise<Array<{ relativePath: string; value: unknown }>> {
   const outcomes = await readJsonlRecordOutcomes(vaultRoot, relativeRoot);
+  const records: Array<{ relativePath: string; value: unknown }> = [];
+
+  for (const outcome of outcomes) {
+    if (!outcome.ok) {
+      throw toStrictParseError(outcome);
+    }
+
+    records.push({
+      relativePath: outcome.relativePath,
+      value: outcome.value,
+    });
+  }
+
+  return records;
+}
+
+export function readJsonlRecordsSync(
+  vaultRoot: string,
+  relativeRoot: string,
+): Array<{ relativePath: string; value: unknown }> {
+  const outcomes = readJsonlRecordOutcomesSync(vaultRoot, relativeRoot);
   const records: Array<{ relativePath: string; value: unknown }> = [];
 
   for (const outcome of outcomes) {

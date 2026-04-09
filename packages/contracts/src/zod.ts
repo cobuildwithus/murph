@@ -27,7 +27,6 @@ import {
   GOAL_HORIZONS,
   GOAL_STATUSES,
   ID_PREFIXES,
-  PROFILE_SNAPSHOT_SOURCES,
   RAW_ASSET_OWNER_KINDS,
   RAW_IMPORT_KINDS,
   RECIPE_STATUSES,
@@ -73,7 +72,6 @@ export type ConditionVerificationStatus = (typeof CONDITION_VERIFICATION_STATUSE
 export type ConditionSeverity = (typeof CONDITION_SEVERITIES)[number];
 export type AllergyStatus = (typeof ALLERGY_STATUSES)[number];
 export type AllergyCriticality = (typeof ALLERGY_CRITICALITIES)[number];
-export type ProfileSnapshotSource = (typeof PROFILE_SNAPSHOT_SOURCES)[number];
 export type FoodStatus = (typeof FOOD_STATUSES)[number];
 export type RecipeStatus = (typeof RECIPE_STATUSES)[number];
 export type ProtocolKind = (typeof PROTOCOL_KINDS)[number];
@@ -1087,61 +1085,6 @@ export const rawImportManifestSchema = z
   })
   .strict();
 
-export const profileSnapshotNarrativeSchema = z
-  .object({
-    summary: boundedString(1, 4000).optional(),
-    highlights: uniqueArray(boundedString(1, 240), { maxItems: 25, uniqueItems: true }).optional(),
-  })
-  .strict();
-
-export const profileSnapshotGoalsSchema = z
-  .object({
-    topGoalIds: uniqueArray(idSchema(ID_PREFIXES.goal), { uniqueItems: true }).optional(),
-  })
-  .strict();
-
-export const profileSnapshotProfileSchema = z
-  .object({
-    narrative: profileSnapshotNarrativeSchema.optional(),
-    goals: profileSnapshotGoalsSchema.optional(),
-    unitPreferences: profileUnitPreferencesSchema.optional(),
-    custom: jsonObjectSchema.optional(),
-  })
-  .strict();
-
-export const profileSnapshotSchema = withContractMetadata(
-  z
-    .object({
-      schemaVersion: z.literal(CONTRACT_SCHEMA_VERSION.profileSnapshot),
-      id: idSchema(ID_PREFIXES.profileSnapshot),
-      recordedAt: isoDateTimeString(),
-      source: z.enum(PROFILE_SNAPSHOT_SOURCES),
-      sourceAssessmentIds: uniqueArray(idSchema(ID_PREFIXES.assessment), { uniqueItems: true }).optional(),
-      sourceEventIds: uniqueArray(idSchema(ID_PREFIXES.event), { uniqueItems: true }).optional(),
-      profile: profileSnapshotProfileSchema,
-    })
-    .strict(),
-  "@murphai/contracts/profile-snapshot.schema.json",
-  "Murph Profile Snapshot",
-);
-
-export const profileCurrentFrontmatterSchema = withContractMetadata(
-  z
-    .object({
-      schemaVersion: z.literal(CONTRACT_SCHEMA_VERSION.profileCurrentFrontmatter),
-      docType: z.literal(FRONTMATTER_DOC_TYPES.profileCurrent),
-      snapshotId: idSchema(ID_PREFIXES.profileSnapshot),
-      updatedAt: isoDateTimeString(),
-      sourceAssessmentIds: uniqueArray(idSchema(ID_PREFIXES.assessment), { uniqueItems: true }).optional(),
-      sourceEventIds: uniqueArray(idSchema(ID_PREFIXES.event), { uniqueItems: true }).optional(),
-      topGoalIds: uniqueArray(idSchema(ID_PREFIXES.goal), { uniqueItems: true }).optional(),
-      unitPreferences: profileUnitPreferencesSchema.optional(),
-    })
-    .strict(),
-  "@murphai/contracts/frontmatter-profile-current.schema.json",
-  "Murph Profile Current Frontmatter",
-);
-
 export const goalFrontmatterSchema = withContractMetadata(
   z
     .object({
@@ -1365,11 +1308,6 @@ export type WorkoutFormatFrontmatter = z.infer<typeof workoutFormatFrontmatterSc
 export type AssessmentResponseRecord = z.infer<typeof assessmentResponseSchema>;
 export type RawImportManifestArtifact = z.infer<typeof rawImportManifestArtifactSchema>;
 export type RawImportManifest = z.infer<typeof rawImportManifestSchema>;
-export type ProfileSnapshotNarrative = z.infer<typeof profileSnapshotNarrativeSchema>;
-export type ProfileSnapshotGoals = z.infer<typeof profileSnapshotGoalsSchema>;
-export type ProfileSnapshotProfile = z.infer<typeof profileSnapshotProfileSchema>;
-export type ProfileSnapshotRecord = z.infer<typeof profileSnapshotSchema>;
-export type ProfileCurrentFrontmatter = z.infer<typeof profileCurrentFrontmatterSchema>;
 export type GoalFrontmatter = z.infer<typeof goalFrontmatterSchema>;
 export type ConditionFrontmatter = z.infer<typeof conditionFrontmatterSchema>;
 export type AllergyFrontmatter = z.infer<typeof allergyFrontmatterSchema>;

@@ -405,20 +405,6 @@ function createIntegratedCoreServices(
       const { core } = await loadIntegratedRuntime()
       return { core }
     }),
-    async rebuildCurrentProfile(input: CommandContext) {
-      const { vault } = input
-      const { core } = await loadIntegratedRuntime()
-      const result = await core.rebuildCurrentProfile({
-        vaultRoot: vault,
-      })
-
-      return {
-        vault,
-        profilePath: result.relativePath,
-        snapshotId: result.snapshot?.id ?? null,
-        updated: result.updated,
-      }
-    },
   } satisfies CoreWriteServices
 }
 

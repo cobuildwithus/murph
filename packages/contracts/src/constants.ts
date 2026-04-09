@@ -14,8 +14,6 @@ export const CONTRACT_SCHEMA_VERSION = Object.freeze({
   journalDayFrontmatter: "murph.frontmatter.journal-day.v1",
   memoryFrontmatter: "murph.frontmatter.memory.v1",
   coreFrontmatter: "murph.frontmatter.core.v1",
-  profileCurrentFrontmatter: "murph.frontmatter.profile-current.v1",
-  profileSnapshot: "murph.profile-snapshot.v1",
   providerFrontmatter: "murph.frontmatter.provider.v1",
   recipeFrontmatter: "murph.frontmatter.recipe.v1",
   workoutFormatFrontmatter: "murph.frontmatter.workout-format.v1",
@@ -45,7 +43,6 @@ export const ID_PREFIXES = Object.freeze({
   meal: "meal",
   memory: "mem",
   pack: "pack",
-  profileSnapshot: "psnap",
   provider: "prov",
   recipe: "rcp",
   protocol: "prot",
@@ -129,8 +126,6 @@ export const RAW_ASSET_OWNER_KINDS = Object.freeze([
   "workout_batch",
 ] as const);
 
-export const PROFILE_SNAPSHOT_SOURCES = Object.freeze(["assessment_projection", "manual", "derived"] as const);
-
 export const GOAL_STATUSES = Object.freeze(["active", "paused", "completed", "abandoned"] as const);
 
 export const GOAL_HORIZONS = Object.freeze(["short_term", "medium_term", "long_term", "ongoing"] as const);
@@ -194,8 +189,6 @@ export const AUDIT_ACTIONS = Object.freeze([
   "export_pack",
   "food_upsert",
   "provider_upsert",
-  "profile_current_rebuild",
-  "profile_snapshot_add",
   "recipe_upsert",
   "protocol_stop",
   "protocol_upsert",
@@ -224,7 +217,6 @@ export const FRONTMATTER_DOC_TYPES = Object.freeze({
   goal: "goal",
   journalDay: "journal_day",
   memory: "memory",
-  profileCurrent: "profile_current",
   provider: "provider",
   recipe: "recipe",
   protocol: "protocol",

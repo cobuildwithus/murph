@@ -20,11 +20,6 @@ export {
   showBloodTest,
 } from "./blood-tests.ts";
 export {
-  listHistoryEvents,
-  readHistoryEvent,
-  showHistoryEvent,
-} from "./history.ts";
-export {
   listFamilyMembers,
   readFamilyMember,
   showFamilyMember,
@@ -59,11 +54,6 @@ export type {
   BloodTestListOptions,
   BloodTestQueryRecord,
 } from "./blood-tests.ts";
-export type {
-  HealthHistoryKind,
-  HistoryListOptions,
-  HistoryQueryRecord,
-} from "./history.ts";
 export type {
   SupplementCompoundListOptions,
   SupplementCompoundQueryRecord,

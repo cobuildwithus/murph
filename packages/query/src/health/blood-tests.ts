@@ -2,6 +2,8 @@ import {
   BLOOD_TEST_CATEGORY,
   BLOOD_TEST_SPECIMEN_TYPES,
 } from "@murphai/contracts";
+import type { CanonicalEntity } from "../canonical-entities.ts";
+import { listEntities, readVault, type VaultReadModel } from "../model.ts";
 import {
   applyLimit,
   asObject,
@@ -12,8 +14,6 @@ import {
   matchesText,
 } from "./shared.ts";
 import { compareByOccurredAtDescThenId } from "./comparators.ts";
-import { listHistoryEvents } from "./history.ts";
-import { toHistoryRecord, type HistoryQueryRecord } from "./projections.ts";
 
 const BLOOD_TEST_SPECIMEN_TYPE_SET = new Set<string>(BLOOD_TEST_SPECIMEN_TYPES);
 
@@ -56,36 +56,40 @@ function isBloodTestData(data: Record<string, unknown>): boolean {
   );
 }
 
-function bloodTestRecordFromHistory(
-  record: HistoryQueryRecord,
+function bloodTestRecordFromEventEntity(
+  entity: CanonicalEntity,
 ): BloodTestQueryRecord | null {
-  if (record.kind !== "test") {
+  if (
+    entity.family !== "event" ||
+    entity.kind !== "test" ||
+    !entity.occurredAt
+  ) {
     return null;
   }
 
-  const data = asObject(record.data);
+  const data = asObject(entity.attributes);
   if (!data || !isBloodTestData(data)) {
     return null;
   }
 
   return {
-    id: record.id,
+    id: entity.entityId,
     kind: "blood_test",
-    occurredAt: record.occurredAt,
-    recordedAt: record.recordedAt,
+    occurredAt: entity.occurredAt,
+    recordedAt: firstString(data, ["recordedAt"]),
     collectedAt: firstString(data, ["collectedAt"]),
     reportedAt: firstString(data, ["reportedAt"]),
-    source: record.source,
-    title: record.title,
+    source: firstString(data, ["source"]),
+    title: entity.title ?? entity.entityId,
     testName: firstString(data, ["testName"]),
     status: firstString(data, ["resultStatus", "status"]),
     labName: firstString(data, ["labName"]),
     labPanelId: firstString(data, ["labPanelId"]),
     specimenType: firstString(data, ["specimenType"]),
     fastingStatus: firstString(data, ["fastingStatus"]),
-    tags: record.tags,
-    relatedIds: record.relatedIds,
-    relativePath: record.relativePath,
+    tags: entity.tags,
+    relatedIds: entity.relatedIds,
+    relativePath: entity.path,
     data,
   };
 }
@@ -94,8 +98,36 @@ export function toBloodTestRecord(
   value: unknown,
   relativePath: string,
 ): BloodTestQueryRecord | null {
-  const historyRecord = toHistoryRecord(value, relativePath);
-  return historyRecord ? bloodTestRecordFromHistory(historyRecord) : null;
+  const data = asObject(value);
+  if (!data) {
+    return null;
+  }
+
+  return bloodTestRecordFromEventEntity({
+    entityId: firstString(data, ["id"]) ?? "",
+    primaryLookupId: firstString(data, ["id"]) ?? "",
+    lookupIds: [firstString(data, ["id"]) ?? ""].filter(Boolean),
+    family: "event",
+    recordClass: "ledger",
+    kind: firstString(data, ["kind"]) ?? "",
+    status: firstString(data, ["resultStatus", "status"]),
+    occurredAt: firstString(data, ["occurredAt"]),
+    date: firstString(data, ["dayKey"]),
+    path: relativePath,
+    title: firstString(data, ["title"]),
+    body: firstString(data, ["note", "summary"]),
+    attributes: data,
+    frontmatter: null,
+    links: [],
+    relatedIds: Array.isArray(data.relatedIds)
+      ? data.relatedIds.filter((entry): entry is string => typeof entry === "string")
+      : [],
+    stream: null,
+    experimentSlug: null,
+    tags: Array.isArray(data.tags)
+      ? data.tags.filter((entry): entry is string => typeof entry === "string")
+      : [],
+  });
 }
 
 export function compareBloodTests(
@@ -135,26 +167,30 @@ function matchesBloodTestOptions(
   );
 }
 
-export async function listBloodTests(
-  vaultRoot: string,
+function selectProjectedBloodTests(
+  vault: VaultReadModel,
   options: BloodTestListOptions = {},
-): Promise<BloodTestQueryRecord[]> {
-  const historyRecords = await listHistoryEvents(vaultRoot, {
+): BloodTestQueryRecord[] {
+  const records = listEntities(vault, {
+    families: ["event"],
+    kinds: ["test"],
     from: options.from,
-    kind: "test",
-    limit: undefined,
-    status: undefined,
-    text: undefined,
     to: options.to,
-  });
-  const records = historyRecords
-    .map(bloodTestRecordFromHistory)
+  })
+    .map(bloodTestRecordFromEventEntity)
     .filter(isBloodTestRecord)
     .filter((record) => matchesDateRange(record.occurredAt, options.from, options.to))
     .filter((record) => matchesBloodTestOptions(record, options))
     .sort(compareBloodTests);
 
   return applyLimit(records, options.limit);
+}
+
+export async function listBloodTests(
+  vaultRoot: string,
+  options: BloodTestListOptions = {},
+): Promise<BloodTestQueryRecord[]> {
+  return selectProjectedBloodTests(await readVault(vaultRoot), options);
 }
 
 export async function readBloodTest(

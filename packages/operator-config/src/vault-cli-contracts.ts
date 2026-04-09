@@ -372,7 +372,7 @@ export const listFilterSchema = z.object({
     .array(z.string().min(1))
     .optional()
     .describe(
-      'Optional query record families such as event, journal, assessment, profile_snapshot, current_profile, goal, condition, allergy, protocol, history, family, genetics, food, recipe, provider, or sample.',
+      'Optional query record families such as event, journal, assessment, goal, condition, allergy, protocol, history, family, genetics, food, recipe, provider, or sample.',
     ),
   kind: z
     .string()

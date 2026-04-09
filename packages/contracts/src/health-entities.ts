@@ -1,7 +1,7 @@
 import type { ZodTypeAny } from "zod";
 import type { JsonObject } from "./zod.ts";
 
-import { HEALTH_HISTORY_EVENT_KINDS, ID_PREFIXES } from "./constants.ts";
+import { ID_PREFIXES } from "./constants.ts";
 import {
   applyRegistryMetadataDefaults,
   extractRegistryLinks,
@@ -31,12 +31,10 @@ import {
 
 export type HealthEntityKind =
   | "assessment"
-  | "profile"
   | "goal"
   | "condition"
   | "allergy"
   | "protocol"
-  | "history"
   | "blood_test"
   | "family"
   | "genetics";
@@ -221,21 +219,6 @@ const checkedHealthEntityDefinitions = [
     noun: "assessment",
     plural: "assessments",
     prefixes: [`${ID_PREFIXES.assessment}_`],
-  },
-  {
-    kind: "profile",
-    listKinds: ["profile"],
-    lookupAliases: ["current"],
-    noun: "profile",
-    plural: "profiles",
-    prefixes: [`${ID_PREFIXES.profileSnapshot}_`],
-    scaffoldTemplate: {
-      source: "manual",
-      profile: {
-        domains: [],
-        topGoalIds: [],
-      },
-    },
   },
   defineRegistryEntity({
     kind: "goal",
@@ -469,19 +452,6 @@ const checkedHealthEntityDefinitions = [
       statusKeys: ["status"],
     },
   }),
-  {
-    kind: "history",
-    listKinds: HEALTH_HISTORY_EVENT_KINDS,
-    noun: "history",
-    plural: "history",
-    scaffoldTemplate: {
-      kind: "encounter",
-      occurredAt: "2026-03-12T09:00:00.000Z",
-      title: "Primary care visit",
-      encounterType: "office_visit",
-      location: "Primary care clinic",
-    },
-  },
   {
     kind: "blood_test",
     listKinds: ["blood_test"],

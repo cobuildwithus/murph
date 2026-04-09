@@ -6,13 +6,10 @@ import {
 } from "../canonical-entities.ts";
 import { projectAssessmentEntity } from "./projectors/assessment.ts";
 import {
-  collapseEventLedgerEntities,
-  projectHistoryEntity,
-} from "./projectors/history.ts";
-import {
   readJsonlRecordOutcomes,
   readJsonlRecordOutcomesSync,
   readJsonlRecords,
+  readJsonlRecordsSync,
   type JsonlRecordOutcome,
   type ParseFailure,
 } from "./loaders.ts";
@@ -28,20 +25,23 @@ export async function readAssessmentEntitiesStrict(
   return readJsonlEntitiesStrict(vaultRoot, VAULT_LAYOUT.assessmentLedgerDirectory, projectAssessmentEntity);
 }
 
-export async function readHistoryEntitiesStrict(
-  vaultRoot: string,
-): Promise<CanonicalEntity[]> {
-  return collapseEventLedgerEntities(
-    await readJsonlEntitiesStrict(vaultRoot, VAULT_LAYOUT.eventLedgerDirectory, projectHistoryEntity),
-  );
-}
-
 export async function readJsonlEntitiesStrict(
   vaultRoot: string,
   relativeRoot: string,
   project: (value: unknown, relativePath: string) => CanonicalEntity | null,
 ): Promise<CanonicalEntity[]> {
   return (await readJsonlRecords(vaultRoot, relativeRoot))
+    .map((entry) => project(entry.value, entry.relativePath))
+    .filter((entity): entity is CanonicalEntity => entity !== null)
+    .sort(compareCanonicalEntities);
+}
+
+export function readJsonlEntitiesStrictSync(
+  vaultRoot: string,
+  relativeRoot: string,
+  project: (value: unknown, relativePath: string) => CanonicalEntity | null,
+): CanonicalEntity[] {
+  return readJsonlRecordsSync(vaultRoot, relativeRoot)
     .map((entry) => project(entry.value, entry.relativePath))
     .filter((entity): entity is CanonicalEntity => entity !== null)
     .sort(compareCanonicalEntities);

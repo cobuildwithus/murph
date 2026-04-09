@@ -315,7 +315,6 @@ function createVaultServicesStub(): VaultServices {
       upsertEvent: async () => ({ eventId: 'event-1' }),
       addSamples: async () => ({ sampleCount: 1 }),
       projectAssessment: async () => ({ projected: true }),
-      rebuildCurrentProfile: async () => ({ rebuilt: true }),
       stopProtocol: async () => ({ protocolId: 'prot-1' }),
     },
     devices: {},

@@ -85,17 +85,15 @@ This patch:
 **Main refactor risk:** gateway-core should stay the owner only for the shared route-kind vocabulary.
 Do not pull hosted-execution side-effect policy or channel-specific send rules into that package just to chase total dedupe.
 
-### 6. Keep profile snapshot record ownership in contracts
+### 6. Keep workout unit preferences owned by the canonical preferences document
 
-**Seam:** `packages/contracts/src/zod.ts`, `packages/core/src/profile/types.ts`
+**Seam:** `packages/contracts/src/preferences.ts`, `packages/core/src/preferences.ts`, `packages/vault-usecases/src/usecases/workout-measurement.ts`
 
-`packages/core/src/profile/types.ts` still restated `ProfileSnapshotRecord` even though the contracts package already exports the canonical persisted profile snapshot record.
+The hard cut removed the old profile snapshot surface. Machine-facing defaults now live in one narrow canonical preferences document, while workout flows consume that document through a thin usecase adapter instead of inventing a second owner.
 
-This patch aliases the core type to the contract type instead of keeping a second record definition.
+**Why this is simpler:** contracts own the persisted shape, core owns canonical reads and writes, and workout/usecase code only translates that data into operator-facing measurement behavior.
 
-**Why this is simpler:** the canonical profile snapshot write shape now has one nominal owner again, matching the assessment-response cleanup already done in core.
-
-**Main refactor risk:** if core later needs richer operational wrappers around a snapshot, add a separate wrapper type rather than widening the canonical persisted record.
+**Main refactor risk:** keep this surface narrow. If future user-facing narrative context needs to be stored, put it in memory or the wiki instead of widening the preferences document into a new profile substitute.
 
 ### 7. Keep workout as a workflow façade over explicit primitive record families
 
@@ -363,18 +361,16 @@ Web does not redefine inline-vs-reference payload semantics; it just adapts the 
 
 **Main failure mode if changed poorly:** moving the payload model back into web or letting Prisma types leak into the shared hosted-execution package would recreate a cross-layer contract fork and make Cloudflare/web rollouts harder to keep aligned.
 
-#### C. Keep current-profile document ownership in contracts, canonical materialization in core, and fallback resolution in query
+#### C. Keep the canonical preferences document owned by contracts/core with thin workflow adapters
 
-**Seam:** `packages/contracts/src/current-profile.ts` (`buildCurrentProfileDocument`, `CurrentProfileDocument`), `packages/core/src/profile/storage.ts` (`buildCurrentProfileMarkdown`, `stageCurrentProfileMaterialization`), `packages/query/src/health/current-profile-resolution.ts` (`resolveCurrentProfileDocument`, `resolveCurrentProfileProjection`), `packages/query/src/health/projectors/profile.ts` (`materializeCurrentProfileDocumentFromSnapshotEntity`)
+**Seam:** `packages/contracts/src/preferences.ts`, `packages/core/src/preferences.ts`, `packages/vault-usecases/src/usecases/workout-measurement.ts`
 
-This seam is already layered in a composable way.
-Contracts own the current-profile document/frontmatter contract, core owns writing and rebuilding the canonical `bank/profile/current.md` materialization from the latest snapshot, and query owns the stale-document fallback logic it needs when the materialized file lags behind the latest snapshot.
-Those are three different responsibilities, but they currently point at one document owner instead of restating the same record shape.
+This seam stays intentionally narrow after the profile hard cut.
+Contracts own the canonical `bank/preferences.json` document contract, core owns reading and updating that singleton, and workout-oriented usecases adapt those machine-facing defaults into unit-selection behavior.
 
-**Why keep it:** the current split preserves the canonical-write boundary while still letting query fall back to snapshot-derived materialization without becoming a second document owner.
-It is a good example of a layered model seam where the owner and the adapters are already clear.
+**Why keep it:** the write boundary stays explicit and typed, while memory and wiki remain freeform human-facing surfaces instead of becoming machine-facing settings stores.
 
-**Main failure mode if changed poorly:** moving fallback logic into core or letting query redefine the current-profile document shape would blur the write/read boundary and reintroduce parallel representations of the same document contract.
+**Main failure mode if changed poorly:** widening preferences into a narrative profile replacement would blur the boundary between operator-readable context and programmatic defaults and re-create the same mixed-responsibility surface the hard cut removed.
 
 #### D. Keep hosted execution event, builder, and parser ownership in `@murphai/hosted-execution`
 

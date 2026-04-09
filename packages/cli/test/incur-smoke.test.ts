@@ -291,7 +291,6 @@ test('root help lists the simple health CRUD command groups', async () => {
   const help = await runRawCli(['--help'])
 
   const commands = [
-    'profile',
     'goal',
     'condition',
     'allergy',
@@ -299,7 +298,6 @@ test('root help lists the simple health CRUD command groups', async () => {
     'recipe',
     'supplement',
     'protocol',
-    'history',
     'blood-test',
     'family',
     'genetics',
@@ -1028,30 +1026,29 @@ test('food help exposes schedule and no longer exposes add-daily', async () => {
   assert.doesNotMatch(help, /add-daily/u)
 })
 
-test('profile show help exposes only the global format flag', async () => {
-  const help = await runRawCli(['profile', 'show', '--help'])
+test('goal show help exposes only the global format flag', async () => {
+  const help = await runRawCli(['goal', 'show', '--help'])
 
-  assert.match(help, /Usage: vault-cli profile show <id> \[options\]/u)
+  assert.match(help, /Usage: vault-cli goal show <id> \[options\]/u)
   assert.doesNotMatch(help, /Options:[\s\S]*--format <json\|md>/u)
   assert.match(help, /Global Options:[\s\S]*--format <toon\|json\|yaml\|md\|jsonl>/u)
 })
 
 test('health command help surfaces examples and hints through Incur metadata', async () => {
-  const profileUpsertHelp = await runRawCli(['profile', 'upsert', '--help'])
+  const goalUpsertHelp = await runRawCli(['goal', 'upsert', '--help'])
   const foodRenameHelp = await runRawCli(['food', 'rename', '--help'])
   const supplementUpsertHelp = await runRawCli(['supplement', 'upsert', '--help'])
   const supplementRenameHelp = await runRawCli(['supplement', 'rename', '--help'])
   const supplementCompoundListHelp = await runRawCli(['supplement', 'compound', 'list', '--help'])
-  const profileRebuildHelp = await runRawCli(['profile', 'current', 'rebuild', '--help'])
   const protocolStopHelp = await runRawCli(['protocol', 'stop', '--help'])
 
   assert.match(
-    profileUpsertHelp,
-    /vault-cli profile upsert --input @profile-snapshot\.json --vault \.\/vault/u,
+    goalUpsertHelp,
+    /vault-cli goal upsert --input @goal\.json --vault \.\/vault/u,
   )
   assert.match(
-    profileUpsertHelp,
-    /--input accepts @file\.json or - so the CLI can load the structured profile payload from disk or stdin\./u,
+    goalUpsertHelp,
+    /--input accepts @file\.json or - so the CLI can load the structured goal payload from disk or stdin\./u,
   )
   assert.match(
     foodRenameHelp,
@@ -1068,10 +1065,6 @@ test('health command help surfaces examples and hints through Incur metadata', a
   assert.match(
     supplementCompoundListHelp,
     /The compound ledger defaults to active supplements so overlapping ingredients sum into a single canonical row\./u,
-  )
-  assert.match(
-    profileRebuildHelp,
-    /Run this after accepting a snapshot if you need to refresh the generated current profile document immediately\./u,
   )
   assert.match(
     protocolStopHelp,
@@ -1116,7 +1109,7 @@ test('command schema reflects only domain-specific options', async () => {
 
 test('health command schema remains JSON-Schema-safe', async () => {
   const schema = JSON.parse(
-    await runRawCli(['profile', 'upsert', '--schema', '--format', 'json']),
+    await runRawCli(['goal', 'upsert', '--schema', '--format', 'json']),
   ) as {
     options: {
       properties: Record<string, unknown>
@@ -1146,13 +1139,13 @@ test('health command metadata exposes Incur-native CTA suggestions', async () =>
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-incur-'))
 
   try {
-    const result = await runCli<{ noun: string }>(['profile', 'scaffold', '--vault', vaultRoot])
+    const result = await runCli<{ noun: string }>(['goal', 'scaffold', '--vault', vaultRoot])
 
     assert.equal(result.ok, true)
-    assert.equal(requireData(result).noun, 'profile')
+    assert.equal(requireData(result).noun, 'goal')
     assert.equal(
       result.meta.cta?.commands.some((command) =>
-        command.command.includes('vault-cli profile upsert'),
+        command.command.includes('vault-cli goal upsert'),
       ),
       true,
     )
@@ -1173,7 +1166,7 @@ test('compact llms json manifest remains available', async () => {
   assert.equal(manifest.commands.some((command) => command.name === 'init'), true)
   assert.equal(manifest.commands.some((command) => command.name === 'chat'), true)
   assert.equal(
-    manifest.commands.some((command) => command.name === 'profile show'),
+    manifest.commands.some((command) => command.name === 'goal show'),
     true,
   )
   assert.equal(
@@ -1201,7 +1194,7 @@ test('full llms json manifest remains available for schema-rich commands', async
   }
 
   assert.equal(
-    manifest.commands.some((command) => command.name === 'profile upsert'),
+    manifest.commands.some((command) => command.name === 'goal upsert'),
     true,
   )
   assert.equal(
@@ -1241,7 +1234,7 @@ test('goal scaffold help surfaces factory-provided example and hint text', async
   )
 })
 
-test('profile scaffold exposes a success CTA in the verbose json envelope', async () => {
+test('goal scaffold exposes a success CTA in the verbose json envelope', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-incur-cta-'))
 
   try {
@@ -1252,15 +1245,15 @@ test('profile scaffold exposes a success CTA in the verbose json envelope', asyn
     const scaffoldResult = await runCli<{
       noun: string
       payload: Record<string, unknown>
-    }>(['profile', 'scaffold', '--vault', vaultRoot])
+    }>(['goal', 'scaffold', '--vault', vaultRoot])
 
     assert.equal(scaffoldResult.ok, true)
-    assert.equal(scaffoldResult.meta.command, 'profile scaffold')
-    assert.equal(requireData(scaffoldResult).noun, 'profile')
+    assert.equal(scaffoldResult.meta.command, 'goal scaffold')
+    assert.equal(requireData(scaffoldResult).noun, 'goal')
     assert.deepEqual(scaffoldResult.meta.cta?.commands, [
       {
-        command: 'vault-cli profile upsert --input @profile-snapshot.json --vault <vault>',
-        description: 'Apply the edited profile payload.',
+        command: 'vault-cli goal upsert --input @goal.json --vault <vault>',
+        description: 'Apply the edited goal payload.',
       },
     ])
   } finally {

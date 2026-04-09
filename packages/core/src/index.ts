@@ -50,7 +50,6 @@ export {
   appendJournal,
   appendHistoryEvent,
   appendJsonlRecord,
-  appendProfileSnapshot,
   checkpointExperiment,
   copyRawArtifact,
   createExperiment,
@@ -70,7 +69,6 @@ export {
   promoteInboxJournal,
   repairVault,
   upgradeVault,
-  rebuildCurrentProfile,
   stopExperiment,
   stopProtocolItem,
   unlinkJournalEventIds,
@@ -144,10 +142,6 @@ export {
   ASSESSMENT_LEDGER_DIRECTORY,
   ASSESSMENT_RESPONSE_SCHEMA_VERSION,
 } from "./assessment/index.ts";
-export {
-  listProfileSnapshots,
-  readCurrentProfile,
-} from "./profile/storage.ts";
 export type {
   AllergyProposal,
   AssessmentProposalSource,
@@ -159,11 +153,9 @@ export type {
   GoalProposal,
   HistoryEventProposal,
   ImportAssessmentResponseInput,
-  ProfileSnapshotProposal,
   ProtocolProposal,
 } from "./assessment/index.ts";
 export * from "./bank/index.ts";
-export * from "./profile/index.ts";
 export * from "./history/index.ts";
 export * from "./family/index.ts";
 export * from "./genetics/index.ts";

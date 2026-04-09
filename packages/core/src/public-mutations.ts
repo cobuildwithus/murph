@@ -54,10 +54,6 @@ import {
   upsertEvent as upsertEventInternal,
 } from "./domains/events.ts";
 import { updateVaultSummary as updateVaultSummaryInternal } from "./domains/vault-summary.ts";
-import {
-  appendProfileSnapshot as appendProfileSnapshotInternal,
-  rebuildCurrentProfile as rebuildCurrentProfileInternal,
-} from "./profile/storage.ts";
 import { updateWorkoutUnitPreferences as updateWorkoutUnitPreferencesInternal } from "./preferences.ts";
 import { VaultError } from "./errors.ts";
 import {
@@ -447,18 +443,6 @@ export async function importAssessmentResponse(
   input: Parameters<typeof importAssessmentResponseInternal>[0],
 ): ReturnType<typeof importAssessmentResponseInternal> {
   return withCanonicalInputWriteLock(input, importAssessmentResponseInternal);
-}
-
-export async function appendProfileSnapshot(
-  input: Parameters<typeof appendProfileSnapshotInternal>[0],
-): ReturnType<typeof appendProfileSnapshotInternal> {
-  return withCanonicalInputWriteLock(input, appendProfileSnapshotInternal);
-}
-
-export async function rebuildCurrentProfile(
-  input: Parameters<typeof rebuildCurrentProfileInternal>[0],
-): ReturnType<typeof rebuildCurrentProfileInternal> {
-  return withCanonicalInputWriteLock(input, rebuildCurrentProfileInternal);
 }
 
 export async function updateWorkoutUnitPreferences(

@@ -7,24 +7,12 @@
     "incremental": true,
     "tsBuildInfoFile": "typecheck.tsbuildinfo"
   },
-  "references": [
-    {
-      "path": "../contracts/tsconfig.build.json"
-    },
-    {
-      "path": "../runtime-state"
-    },
-    {
-      "path": "../importers"
-    }
-  ],
   "include": [
     "*.ts",
-    "src/**/*.ts",
-    "test/**/*.ts"
+    "test/**/*.ts",
+    "src/**/*.ts"
   ],
   "exclude": [
-    "dist",
-    ".test-dist"
+    "dist"
   ]
 }

@@ -34,8 +34,6 @@
         "export_pack",
         "food_upsert",
         "provider_upsert",
-        "profile_current_rebuild",
-        "profile_snapshot_add",
         "recipe_upsert",
         "protocol_stop",
         "protocol_upsert",
@@ -80,7 +78,7 @@
       "type": "array",
       "items": {
         "type": "string",
-        "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
+        "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
       },
       "uniqueItems": true
     },

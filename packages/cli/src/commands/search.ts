@@ -21,9 +21,7 @@ const recordTypeValues = ALL_QUERY_ENTITY_FAMILIES
 
 const timelineEntryTypeValues = [
   'assessment',
-  'history',
   'journal',
-  'profile_snapshot',
   'event',
   'sample_summary',
 ] as const
@@ -134,7 +132,7 @@ export function registerSearchCommands(
       recordType: z
         .array(z.string().min(1))
         .optional()
-        .describe('Optional record families. Repeat --record-type for multiple values: core, experiment, journal, event, sample, audit, assessment, profile_snapshot, current_profile, goal, condition, allergy, protocol, history, family, genetics.'),
+        .describe('Optional record families. Repeat --record-type for multiple values: core, experiment, journal, event, sample, audit, assessment, goal, condition, allergy, protocol, family, genetics.'),
       kind: z
         .array(z.string().min(1))
         .optional()
@@ -173,10 +171,10 @@ export function registerSearchCommands(
         },
       },
       {
-        description: 'Search only profile and protocol records for insulin sensitivity mentions.',
+        description: 'Search only assessment, event, and protocol records for insulin sensitivity mentions.',
         options: {
           text: 'insulin sensitivity',
-          recordType: ['profile_snapshot', 'current_profile', 'protocol'],
+          recordType: ['assessment', 'event', 'protocol'],
           vault: './vault',
         },
       },
@@ -312,7 +310,7 @@ export function registerSearchCommands(
         entryType: z
           .array(z.string().min(1))
           .optional()
-          .describe('Optional entry types: journal, event, assessment, history, profile_snapshot, sample_summary. Repeat --entry-type for multiple values.'),
+          .describe('Optional entry types: journal, event, assessment, sample_summary. Repeat --entry-type for multiple values.'),
         limit: z
           .number()
           .int()
@@ -341,7 +339,7 @@ export function registerSearchCommands(
         },
       ],
       hint:
-        'Use `timeline` when you need chronology across journals, events, assessments, profile snapshots, and sample summaries. Drill into `show` or family-specific reads after you find the relevant entries.',
+        'Use `timeline` when you need chronology across journals, events, assessments, and sample summaries. Drill into `show` or family-specific reads after you find the relevant entries.',
       output: timelineResultSchema,
       async run({ options }) {
         const kinds = normalizeRepeatableFlagOption(options.kind, 'kind') ?? []
@@ -364,10 +362,6 @@ export function registerSearchCommands(
           includeJournal: entryTypeSet ? entryTypeSet.has('journal') : true,
           includeEvents: entryTypeSet ? entryTypeSet.has('event') : true,
           includeAssessments: entryTypeSet ? entryTypeSet.has('assessment') : true,
-          includeHistory: entryTypeSet ? entryTypeSet.has('history') : true,
-          includeProfileSnapshots: entryTypeSet
-            ? entryTypeSet.has('profile_snapshot')
-            : true,
           includeDailySampleSummaries: entryTypeSet
             ? entryTypeSet.has('sample_summary')
             : true,

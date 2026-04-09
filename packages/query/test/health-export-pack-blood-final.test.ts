@@ -6,8 +6,8 @@ import path from "node:path";
 import { afterEach, test, vi } from "vitest";
 
 import {
+  buildHealthContextFromVault,
   readHealthContext,
-  readHealthContextTolerant,
 } from "../src/export-pack-health.ts";
 import { type CanonicalEntity, resolveCanonicalRecordClass } from "../src/canonical-entities.ts";
 import * as canonicalCollector from "../src/health/canonical-collector.ts";
@@ -18,11 +18,13 @@ import {
   showBloodTest,
   toBloodTestRecord,
 } from "../src/health/blood-tests.ts";
+import { createVaultReadModel } from "../src/model.ts";
+import * as model from "../src/model.ts";
 
 const createdVaultRoots: string[] = [];
 
 afterEach(async () => {
-  vi.clearAllMocks();
+  vi.restoreAllMocks();
 
   await Promise.all(
     createdVaultRoots.splice(0).map(async (vaultRoot) => {
@@ -148,10 +150,10 @@ function buildHealthCollection(): CanonicalHealthEntityCollection {
     ),
   ];
 
-  const history = [
+  const healthEvents = [
     createEntity(
       "evt_gamma",
-      "history",
+      "event",
       "encounter",
       "ledger/events/2026/2026-03.jsonl",
       {
@@ -169,7 +171,7 @@ function buildHealthCollection(): CanonicalHealthEntityCollection {
     ),
     createEntity(
       "evt_alpha",
-      "history",
+      "event",
       "encounter",
       "ledger/events/2026/2026-03.jsonl",
       {
@@ -187,7 +189,7 @@ function buildHealthCollection(): CanonicalHealthEntityCollection {
     ),
     createEntity(
       "evt_before",
-      "history",
+      "event",
       "encounter",
       "ledger/events/2026/2026-03.jsonl",
       {
@@ -202,7 +204,7 @@ function buildHealthCollection(): CanonicalHealthEntityCollection {
     ),
     createEntity(
       "evt_invalid",
-      "history",
+      "event",
       "encounter",
       "ledger/events/2026/2026-03.jsonl",
       {
@@ -347,7 +349,6 @@ function buildHealthCollection(): CanonicalHealthEntityCollection {
 
   return {
     assessments,
-    history,
     goals,
     conditions,
     allergies,
@@ -360,7 +361,7 @@ function buildHealthCollection(): CanonicalHealthEntityCollection {
     workoutFormats: [],
     entities: [
       ...assessments,
-      ...history,
+      ...healthEvents,
       ...goals,
       ...conditions,
       ...allergies,
@@ -380,17 +381,23 @@ function buildHealthCollection(): CanonicalHealthEntityCollection {
   };
 }
 
-test("export pack health strips transient fields, sorts deterministically, and respects date windows", () => {
+test("export pack health strips transient fields, sorts deterministically, and respects date windows", async () => {
   const collectCanonicalEntitiesMock = vi.spyOn(
     canonicalCollector,
     "collectCanonicalEntities",
   );
+  const readVaultMock = vi.spyOn(model, "readVault");
   const collection = buildHealthCollection();
+  const vault = createVaultReadModel({
+    vaultRoot: "/virtual/vault",
+    entities: collection.entities,
+  });
 
   // @ts-expect-error Vitest infers the async overload for the spied collector.
   collectCanonicalEntitiesMock.mockReturnValueOnce(collection);
+  readVaultMock.mockResolvedValueOnce(vault);
 
-  const healthRead = readHealthContext("/virtual/vault", {
+  const healthRead = await readHealthContext("/virtual/vault", {
     from: "2026-03-01",
     to: "2026-03-31",
     experimentSlug: null,
@@ -399,7 +406,7 @@ test("export pack health strips transient fields, sorts deterministically, and r
   // @ts-expect-error Vitest infers the async overload for the spied collector.
   collectCanonicalEntitiesMock.mockReturnValueOnce(collection);
 
-  const tolerantHealth = readHealthContextTolerant("/virtual/vault", {
+  const projectedHealth = buildHealthContextFromVault(vault, {
     from: "2026-03-01",
     to: "2026-03-31",
     experimentSlug: null,
@@ -411,10 +418,10 @@ test("export pack health strips transient fields, sorts deterministically, and r
   );
   assert.equal(healthRead.health.assessments[1]?.recordedAt, "2026-03-12T09:00:00Z");
   assert.deepEqual(
-    healthRead.health.historyEvents.map((record) => record.id),
+    healthRead.health.healthEvents.map((record) => record.id),
     ["evt_gamma", "evt_alpha"],
   );
-  assert.equal(healthRead.health.historyEvents[0]?.kind, "encounter");
+  assert.equal(healthRead.health.healthEvents[0]?.kind, "encounter");
   assert.equal(healthRead.health.goals[0]?.slug, "improve-sleep");
   assert.equal(healthRead.health.conditions[0]?.slug, "cond_alpha");
   assert.equal(healthRead.health.allergies[0]?.slug, "penicillin");
@@ -422,7 +429,7 @@ test("export pack health strips transient fields, sorts deterministically, and r
   assert.equal(healthRead.health.familyMembers[0]?.slug, "mother");
   assert.equal(healthRead.health.geneticVariants[0]?.slug, "mthfr-c677t");
   assert.deepEqual(healthRead.failures, collection.failures);
-  assert.deepEqual(tolerantHealth.goals.map((record) => record.slug), ["improve-sleep"]);
+  assert.deepEqual(projectedHealth.goals.map((record) => record.slug), ["improve-sleep"]);
 });
 
 test("blood test helpers keep only blood-like records and support deterministic lookups", async () => {

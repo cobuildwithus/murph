@@ -43,7 +43,7 @@
     "node": ">=24.14.1"
   },
   "scripts": {
-    "build": "node ../../scripts/rm-paths.mjs dist && tsc -b tsconfig.build.json",
+    "build": "node ../../scripts/rm-paths.mjs dist && tsc -b tsconfig.build.json --force",
     "gen:config-schema": "tsx ./scripts/generate-incur-config-schema.ts",
     "typecheck": "tsc -p tsconfig.typecheck.json --pretty false",
     "test": "pnpm test:source",

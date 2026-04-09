@@ -16,7 +16,7 @@
         "packages/vault-usecases/src/*"
       ]
     },
-    "rootDir": ".",
+    "rootDir": "../..",
     "composite": false,
     "incremental": true,
     "tsBuildInfoFile": "typecheck.tsbuildinfo"
@@ -69,6 +69,8 @@
     }
   ],
   "include": [
+    "*.ts",
+    "test/**/*.ts",
     "src/**/*.ts"
   ],
   "exclude": [

@@ -1175,7 +1175,6 @@ function createVaultServicesStub(input: {
     upsertEvent: makeCoreMethod('upsertEvent'),
     addSamples: makeCoreMethod('addSamples'),
     projectAssessment: makeCoreMethod('projectAssessment'),
-    rebuildCurrentProfile: makeCoreMethod('rebuildCurrentProfile'),
     stopProtocol: makeCoreMethod('stopProtocol'),
   } as Record<string, ReturnType<typeof vi.fn>>
 

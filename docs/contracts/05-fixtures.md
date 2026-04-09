@@ -20,7 +20,7 @@ The fixture lane owns the actual corpus under `fixtures/`, but this doc freezes 
   - intake import returning an `asmt_*` id and intake project returning deterministic proposal payloads
   - memory, wiki, and preferences reads using the durable split between freeform memory, derived knowledge, and the typed preferences singleton
   - noun flows for `scaffold`, `upsert --input`, `show`, `list`, `food schedule`, and `protocol stop`
-  - history writes for `encounter`, `procedure`, `test`, `adverse_effect`, and `exposure`
+  - event-ledger writes for `encounter`, `procedure`, `test`, `adverse_effect`, and `exposure`, with blood-test reads staying available through the dedicated projected noun
   - experiment creation idempotence via `created: false`
   - validation issue accumulation for malformed markdown frontmatter
   - show/list lookup rules for queryable vs non-queryable related ids

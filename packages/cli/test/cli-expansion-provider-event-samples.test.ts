@@ -319,7 +319,7 @@ test('generic read and semantic summary help surfaces explain when to use them',
   )
   assert.match(
     timelineHelp,
-    /Use `timeline` when you need chronology across journals, events, assessments, profile snapshots, and sample summaries\./u,
+    /Use `timeline` when you need chronology across journals, events, assessments, and sample summaries\./u,
   )
   assert.match(
     wearablesDayHelp,

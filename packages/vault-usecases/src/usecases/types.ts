@@ -73,13 +73,6 @@ export interface AssessmentImportResult {
   ledgerFile?: string
 }
 
-export interface RebuildCurrentProfileResult {
-  vault: string
-  profilePath: string
-  snapshotId: string | null
-  updated: boolean
-}
-
 export interface ProviderScaffoldResult {
   vault: string
   noun: "provider"
@@ -329,12 +322,10 @@ export interface VaultStatsResult {
     samples: number
     audits: number
     assessments: number
-    profileSnapshots: number
     goals: number
     conditions: number
     allergies: number
     protocols: number
-    history: number
     familyMembers: number
     geneticVariants: number
   }
@@ -600,9 +591,6 @@ export interface CoreWriteServices extends HealthCoreServiceMethods {
   projectAssessment(
     input: ProjectAssessmentInput,
   ): Promise<AssessmentProjectionResult>
-  rebuildCurrentProfile(
-    input: CommandContext,
-  ): Promise<RebuildCurrentProfileResult>
   scaffoldSupplement(
     input: CommandContext,
   ): Promise<{
@@ -1002,15 +990,6 @@ export interface CoreRuntimeModule extends HealthCoreRuntimeMethods {
   projectAssessmentResponse(input: {
     assessmentResponse: JsonObject
   }): Promise<JsonObject>
-  rebuildCurrentProfile(input: {
-    vaultRoot: string
-  }): Promise<{
-    relativePath: string
-    snapshot?: {
-      id: string
-    } | null
-    updated: boolean
-  }>
   stopProtocolItem(input: {
     vaultRoot: string
     protocolId: string

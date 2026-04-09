@@ -21,10 +21,7 @@ import {
 } from "./canonical-entities.ts";
 import { collectCanonicalEntities } from "./health/canonical-collector.ts";
 import { walkRelativeFiles } from "./health/loaders.ts";
-import {
-  HEALTH_HISTORY_KINDS,
-  collapseEventLedgerEntities,
-} from "./health/projectors/history.ts";
+import { collapseEventLedgerEntities } from "./health/projectors/history.ts";
 import { deriveVaultRecordIdentity } from "./id-families.ts";
 import { parseMarkdownDocument } from "./markdown.ts";
 
@@ -381,10 +378,6 @@ async function readJsonlRecordFamily(
               "kind",
               `${recordType} record at ${sourcePath}:${lineNumber}`,
             );
-
-      if (recordType === "event" && HEALTH_HISTORY_KINDS.has(kind as never)) {
-        return null;
-      }
 
       const rawRecordId = requireCanonicalString(
         payload,

@@ -14,8 +14,6 @@ import type {
   GoalFrontmatter,
   InboxCaptureRecord,
   JournalDayFrontmatter,
-  ProfileCurrentFrontmatter,
-  ProfileSnapshotRecord,
   ProviderFrontmatter,
   RecipeFrontmatter,
   ProtocolFrontmatter,
@@ -40,7 +38,6 @@ type HealthFrontmatterExamples = {
   familyMember: FamilyMemberFrontmatter;
   geneticVariant: GeneticVariantFrontmatter;
   goal: GoalFrontmatter;
-  profileCurrent: ProfileCurrentFrontmatter;
   protocol: ProtocolFrontmatter;
 };
 
@@ -593,43 +590,6 @@ export const exampleAssessmentResponses: readonly Readonly<AssessmentResponseRec
   },
 ]);
 
-export const exampleProfileSnapshots: readonly Readonly<ProfileSnapshotRecord>[] = Object.freeze([
-  {
-    schemaVersion: "murph.profile-snapshot.v1",
-    id: "psnap_01JNV42F34M22V2PE9Q4KQ7H1X",
-    recordedAt: "2026-03-12T13:05:00Z",
-    source: "assessment_projection",
-    sourceAssessmentIds: ["asmt_01JNV40W8VFYQ2H7CMJY5A9R4K"],
-    sourceEventIds: ["evt_01JNV46VFEV8Q05M8NSEJ2MZXG"],
-    profile: {
-      narrative: {
-        summary: "Sleep is a primary concern and caffeine load is likely contributing.",
-        highlights: ["Sleep latency is elevated", "Caffeine use remains high"],
-      },
-      goals: {
-        topGoalIds: ["goal_01JNV43AK9SK58T6GX3DWRZH9Q"],
-      },
-      unitPreferences: {
-        weight: "lb",
-        distance: "mi",
-        bodyMeasurement: "in",
-      },
-      custom: {
-        sleep: {
-          averageHours: 6.5,
-          difficultyFallingAsleep: true,
-        },
-        nutrition: {
-          pattern: "omnivore",
-        },
-        substances: {
-          caffeine: "3 servings daily",
-        },
-      },
-    },
-  },
-]);
-
 export const exampleFrontmatterObjects: Readonly<FrontmatterExamples> = Object.freeze({
   core: {
     schemaVersion: "murph.frontmatter.core.v1",
@@ -776,20 +736,6 @@ export const exampleFrontmatterObjects: Readonly<FrontmatterExamples> = Object.f
 });
 
 export const exampleHealthFrontmatterObjects: Readonly<HealthFrontmatterExamples> = Object.freeze({
-  profileCurrent: {
-    schemaVersion: "murph.frontmatter.profile-current.v1",
-    docType: "profile_current",
-    snapshotId: "psnap_01JNV42F34M22V2PE9Q4KQ7H1X",
-    updatedAt: "2026-03-12T13:05:00Z",
-    sourceAssessmentIds: ["asmt_01JNV40W8VFYQ2H7CMJY5A9R4K"],
-    sourceEventIds: ["evt_01JNV46VFEV8Q05M8NSEJ2MZXG"],
-    topGoalIds: ["goal_01JNV43AK9SK58T6GX3DWRZH9Q"],
-    unitPreferences: {
-      weight: "lb",
-      distance: "mi",
-      bodyMeasurement: "in",
-    },
-  },
   goal: {
     schemaVersion: "murph.frontmatter.goal.v1",
     docType: "goal",

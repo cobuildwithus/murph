@@ -30,14 +30,11 @@ import {
   experimentFrontmatterSchema,
   inboxCaptureRecordSchema,
   journalDayFrontmatterSchema,
-  profileCurrentFrontmatterSchema,
-  profileSnapshotSchema,
   sampleRecordSchema,
   vaultMetadataSchema,
 } from "./zod.ts";
 
 export const BANK_DIRECTORY = "bank" as const;
-export const PROFILE_DIRECTORY = "bank/profile" as const;
 export const LEDGER_DIRECTORY = "ledger" as const;
 export const RAW_DIRECTORY = "raw" as const;
 export const EXPORTS_DIRECTORY = "exports" as const;
@@ -47,10 +44,8 @@ export const CORE_DOCUMENT_RELATIVE_PATH = "CORE.md" as const;
 export const AUTOMATIONS_DIRECTORY = "bank/automations" as const;
 export const EXPERIMENTS_DIRECTORY = "bank/experiments" as const;
 export const JOURNAL_DIRECTORY = "journal" as const;
-export const PROFILE_CURRENT_DOCUMENT_RELATIVE_PATH = "bank/profile/current.md" as const;
 export const ASSESSMENT_LEDGER_DIRECTORY = "ledger/assessments" as const;
 export const EVENT_LEDGER_DIRECTORY = "ledger/events" as const;
-export const PROFILE_SNAPSHOTS_LEDGER_DIRECTORY = "ledger/profile-snapshots" as const;
 export const SAMPLE_LEDGER_DIRECTORY = "ledger/samples" as const;
 export const AUDIT_DIRECTORY = "audit" as const;
 export const INBOX_CAPTURE_LEDGER_DIRECTORY = "ledger/inbox-captures" as const;
@@ -72,7 +67,6 @@ export const VAULT_FAMILY_IDS = Object.freeze({
   automations: "automations",
   experiments: "experiments",
   journal: "journal",
-  currentProfileDocument: "currentProfileDocument",
   goals: "goals",
   conditions: "conditions",
   allergies: "allergies",
@@ -85,7 +79,6 @@ export const VAULT_FAMILY_IDS = Object.freeze({
   workoutFormats: "workoutFormats",
   assessments: "assessments",
   events: "events",
-  profileSnapshots: "profileSnapshots",
   samples: "samples",
   audits: "audits",
   inboxCaptures: "inboxCaptures",
@@ -287,21 +280,6 @@ const vaultFamilyDescriptors = [
     },
   },
   {
-    id: VAULT_FAMILY_IDS.currentProfileDocument,
-    description: "Current profile materialization markdown.",
-    owner: "core",
-    storageKind: "singleton-file",
-    fileFormat: "markdown",
-    relativePath: PROFILE_CURRENT_DOCUMENT_RELATIVE_PATH,
-    querySource: "optional-file",
-    validation: {
-      kind: "frontmatter",
-      issueCode: "FRONTMATTER_INVALID",
-      optional: true,
-      schema: profileCurrentFrontmatterSchema,
-    },
-  },
-  {
     id: VAULT_FAMILY_IDS.goals,
     description: "Goal registry markdown documents.",
     owner: "core",
@@ -479,21 +457,6 @@ const vaultFamilyDescriptors = [
       kind: "jsonl",
       issueCode: "EVENT_INVALID",
       schema: eventRecordSchema,
-    },
-  },
-  {
-    id: VAULT_FAMILY_IDS.profileSnapshots,
-    description: "Profile snapshot ledger shards.",
-    owner: "core",
-    storageKind: "jsonl-directory",
-    directory: PROFILE_SNAPSHOTS_LEDGER_DIRECTORY,
-    fileExtension: ".jsonl",
-    shardPattern: "ledger/profile-snapshots/YYYY/YYYY-MM.jsonl",
-    querySource: "jsonl-root",
-    validation: {
-      kind: "jsonl",
-      issueCode: "CONTRACT_INVALID",
-      schema: profileSnapshotSchema,
     },
   },
   {
@@ -814,8 +777,6 @@ export const VAULT_LAYOUT = Object.freeze({
   foodsDirectory: foodBankEntityDefinition.registry.directory,
   geneticsDirectory: geneticsBankEntityDefinition.registry.directory,
   goalsDirectory: goalBankEntityDefinition.registry.directory,
-  profileDirectory: PROFILE_DIRECTORY,
-  profileCurrentDocument: PROFILE_CURRENT_DOCUMENT_RELATIVE_PATH,
   providersDirectory: providerBankEntityDefinition.registry.directory,
   recipesDirectory: recipeBankEntityDefinition.registry.directory,
   workoutFormatsDirectory: workoutFormatBankEntityDefinition.registry.directory,
@@ -823,7 +784,6 @@ export const VAULT_LAYOUT = Object.freeze({
   ledgerDirectory: LEDGER_DIRECTORY,
   assessmentLedgerDirectory: ASSESSMENT_LEDGER_DIRECTORY,
   eventLedgerDirectory: EVENT_LEDGER_DIRECTORY,
-  profileSnapshotsDirectory: PROFILE_SNAPSHOTS_LEDGER_DIRECTORY,
   sampleLedgerDirectory: SAMPLE_LEDGER_DIRECTORY,
   inboxCaptureLedgerDirectory: INBOX_CAPTURE_LEDGER_DIRECTORY,
   rawDirectory: RAW_DIRECTORY,
@@ -843,7 +803,6 @@ export const VAULT_LAYOUT = Object.freeze({
 export const VAULT_SHARDS = Object.freeze({
   assessments: getVaultShardPattern(VAULT_FAMILY_IDS.assessments),
   events: getVaultShardPattern(VAULT_FAMILY_IDS.events),
-  profileSnapshots: getVaultShardPattern(VAULT_FAMILY_IDS.profileSnapshots),
   samples: getVaultShardPattern(VAULT_FAMILY_IDS.samples),
   audit: getVaultShardPattern(VAULT_FAMILY_IDS.audits),
   inboxCaptures: getVaultShardPattern(VAULT_FAMILY_IDS.inboxCaptures),

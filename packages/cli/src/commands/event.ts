@@ -83,7 +83,7 @@ export function registerEventCommands(cli: Cli.Cli, services: VaultServices) {
       },
     },
     show: {
-      description: 'Show one canonical non-history event by event id.',
+      description: 'Show one canonical event by event id.',
       argName: 'id',
       argSchema: eventIdSchema.describe('Canonical event id such as evt_<ULID>.'),
       output: showResultSchema,
@@ -96,7 +96,7 @@ export function registerEventCommands(cli: Cli.Cli, services: VaultServices) {
       },
     },
     list: {
-      description: 'List canonical non-history events with kind, date, tag, and experiment filters.',
+      description: 'List canonical events with kind, date, tag, and experiment filters.',
       kindOption: z.string().min(1).optional(),
       tagOption: z
         .array(z.string().min(1))

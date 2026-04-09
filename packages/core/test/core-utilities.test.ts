@@ -40,14 +40,6 @@ import {
   sanitizeFileName,
   sanitizePathSegment,
 } from "../src/path-safety.ts";
-import {
-  appendProfileSnapshot,
-  buildCurrentProfileMarkdown,
-  readCurrentProfileMarkdown,
-  readCurrentProfile,
-  rebuildCurrentProfile,
-  stageCurrentProfileMaterialization,
-} from "../src/profile/storage.ts";
 import * as markdownDocuments from "../src/markdown-documents.ts";
 import { createMarkdownRegistryApi } from "../src/registry/api.ts";
 import {
@@ -561,58 +553,6 @@ test("registry and profile helpers materialize, read, update, and delete markdow
   assert.equal(deleted.record.slug, "alpha");
   await assert.rejects(() => fs.access(path.join(vaultRoot, "library/records/alpha.md")));
 
-  const initialCurrent = await readCurrentProfileMarkdown(vaultRoot);
-  assert.equal(initialCurrent.exists, false);
-  assert.equal(initialCurrent.markdown, null);
-
-  const emptyBatch = await WriteBatch.create({
-    vaultRoot,
-    operationType: "profile_current_rebuild",
-    summary: "Profile current materialization without snapshots",
-    occurredAt: "2026-04-08T10:15:30.000Z",
-  });
-  const emptyMaterialization = await stageCurrentProfileMaterialization(emptyBatch, initialCurrent, null);
-  assert.equal(emptyMaterialization.updated, false);
-  assert.equal(emptyMaterialization.markdown, null);
-  assert.equal(emptyMaterialization.rebuildAudit.summary, "Profile current rebuild found no snapshots to materialize.");
-
-  const appended = await appendProfileSnapshot({
-    vaultRoot,
-    recordedAt: "2026-04-08T10:15:30.000Z",
-    source: "manual",
-    profile: {},
-  });
-  const currentAfterAppend = await readCurrentProfileMarkdown(vaultRoot);
-  const expectedMarkdown = buildCurrentProfileMarkdown(appended.snapshot);
-  assert.equal(currentAfterAppend.exists, true);
-  assert.equal(currentAfterAppend.markdown, expectedMarkdown);
-
-  const deleteBatch = await WriteBatch.create({
-    vaultRoot,
-    operationType: "profile_current_rebuild",
-    summary: "Profile current deletion branch",
-    occurredAt: "2026-04-08T10:15:31.000Z",
-  });
-  const deleteMaterialization = await stageCurrentProfileMaterialization(deleteBatch, currentAfterAppend, null);
-  assert.equal(deleteMaterialization.updated, true);
-  assert.equal(deleteMaterialization.markdown, null);
-  assert.deepEqual(deleteMaterialization.rebuildAudit.changes, [
-    {
-      path: "bank/profile/current.md",
-      op: "update",
-    },
-  ]);
-
-  const sameBatch = await WriteBatch.create({
-    vaultRoot,
-    operationType: "profile_current_rebuild",
-    summary: "Profile current unchanged branch",
-    occurredAt: "2026-04-08T10:15:32.000Z",
-  });
-  const sameMaterialization = await stageCurrentProfileMaterialization(sameBatch, currentAfterAppend, appended.snapshot);
-  assert.equal(sameMaterialization.updated, false);
-  assert.equal(sameMaterialization.markdown, expectedMarkdown);
-  assert.deepEqual(sameMaterialization.rebuildAudit.changes, []);
 });
 
 test("markdown registry wrappers and profile reads cover the remaining branch seams", async () => {
@@ -781,81 +721,6 @@ test("markdown registry wrappers and profile reads cover the remaining branch se
     markdownWriteSpy.mockRestore();
     frontmatterWriteSpy.mockRestore();
   }
-});
-
-test("profile helpers preserve source fallbacks and read/rebuild current profile state", async () => {
-  const vaultRoot = await makeTempRoot();
-
-  const emptyRead = await readCurrentProfile({ vaultRoot });
-  assert.equal(emptyRead.exists, false);
-  assert.equal(emptyRead.markdown, null);
-  assert.equal(emptyRead.snapshot, null);
-  assert.equal(emptyRead.profile, null);
-
-  const emptyRebuild = await rebuildCurrentProfile({ vaultRoot });
-  assert.equal(emptyRebuild.exists, false);
-  assert.equal(emptyRebuild.markdown, null);
-  assert.equal(emptyRebuild.snapshot, null);
-  assert.equal(emptyRebuild.profile, null);
-  assert.equal(emptyRebuild.updated, false);
-
-  const appended = await appendProfileSnapshot({
-    vaultRoot,
-    recordedAt: "2026-04-08T10:15:30.000Z",
-    source: "import" as never,
-    sourceAssessmentIds: [
-      "asmt_01JNV40W8VFYQ2H7CMJY5A9R4K",
-      "asmt_01JNV40W8VFYQ2H7CMJY5A9R4K",
-    ],
-    sourceEventIds: [
-      "evt_01JNV46VFEV8Q05M8NSEJ2MZXG",
-      "evt_01JNV46VFEV8Q05M8NSEJ2MZXG",
-    ],
-    profile: {
-      narrative: {
-        summary: "Sleep is a primary concern and caffeine load is likely contributing.",
-        highlights: ["Sleep latency is elevated", "Caffeine use remains high"],
-      },
-      goals: {
-        topGoalIds: ["goal_01JNV43AK9SK58T6GX3DWRZH9Q"],
-      },
-      unitPreferences: {
-        weight: "lb",
-        distance: "mi",
-        bodyMeasurement: "in",
-      },
-      custom: {
-        sleep: {
-          averageHours: 6.5,
-          difficultyFallingAsleep: true,
-        },
-        nutrition: {
-          pattern: "omnivore",
-        },
-        substances: {
-          caffeine: "3 servings daily",
-        },
-      },
-    },
-  });
-
-  assert.equal(appended.snapshot.source, "manual");
-  assert.deepEqual(appended.snapshot.sourceAssessmentIds, [
-    "asmt_01JNV40W8VFYQ2H7CMJY5A9R4K",
-  ]);
-  assert.deepEqual(appended.snapshot.sourceEventIds, ["evt_01JNV46VFEV8Q05M8NSEJ2MZXG"]);
-
-  const populatedRead = await readCurrentProfile({ vaultRoot });
-  assert.equal(populatedRead.exists, true);
-  assert.equal(populatedRead.snapshot?.id, appended.snapshot.id);
-  assert.deepEqual(populatedRead.profile, appended.snapshot.profile);
-  assert.equal(populatedRead.markdown, appended.currentProfile.markdown);
-
-  const populatedRebuild = await rebuildCurrentProfile({ vaultRoot });
-  assert.equal(populatedRebuild.exists, true);
-  assert.equal(populatedRebuild.snapshot?.id, appended.snapshot.id);
-  assert.equal(populatedRebuild.updated, false);
-  assert.equal(populatedRebuild.markdown, appended.currentProfile.markdown);
 });
 
 test("event link canonicalization dedupes links, falls back from related ids, and reports invalid shapes", () => {
