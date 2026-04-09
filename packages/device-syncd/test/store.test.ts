@@ -381,6 +381,8 @@ test("device sync store rejects legacy schemas and consumes missing or expired O
   const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));
 
   try {
+    assert.equal(store.deleteExpiredOAuthStates("2026-04-07T00:00:00.000Z"), 0);
+
     store.createOAuthState({
       state: "expired-state",
       provider: "demo",
@@ -389,9 +391,24 @@ test("device sync store rejects legacy schemas and consumes missing or expired O
       createdAt: "2026-04-07T00:00:00.000Z",
       expiresAt: "2026-04-07T00:00:10.000Z",
     });
+    store.createOAuthState({
+      state: "defaulted-state",
+      provider: "demo",
+      returnTo: null,
+      createdAt: "2026-04-07T00:00:00.000Z",
+      expiresAt: "2026-04-07T00:02:00.000Z",
+    });
 
     assert.equal(store.consumeOAuthState("missing-state", "2026-04-07T00:01:00.000Z"), null);
     assert.equal(store.consumeOAuthState("expired-state", "2026-04-07T00:01:00.000Z"), null);
+    assert.deepEqual(store.consumeOAuthState("defaulted-state", "2026-04-07T00:01:00.000Z"), {
+      state: "defaulted-state",
+      provider: "demo",
+      returnTo: null,
+      metadata: {},
+      createdAt: "2026-04-07T00:00:00.000Z",
+      expiresAt: "2026-04-07T00:02:00.000Z",
+    });
   } finally {
     store.close();
     await rm(tempDir, {

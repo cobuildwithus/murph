@@ -407,6 +407,9 @@ test('sendAssistantMessageLocal skips typing indicators when delivery is not req
 })
 
 test('sendAssistantMessageLocal falls back to session defaults and not-requested delivery state when no route is resolved', async () => {
+  vi.useFakeTimers()
+  vi.setSystemTime(new Date('2026-04-08T16:30:00.000Z'))
+
   const session = createAssistantSession({
     sessionId: 'session-fallbacks',
   })
@@ -454,6 +457,8 @@ test('sendAssistantMessageLocal falls back to session defaults and not-requested
     String(mocks.appendAssistantTurnReceiptEvent.mock.calls[0]?.[0]?.at),
     /^2026-04-08T/u,
   )
+
+  vi.useRealTimers()
 })
 
 test('sendAssistantMessageLocal records fallback failure metadata when persistence fails before a user turn exists', async () => {
