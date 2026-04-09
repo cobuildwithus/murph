@@ -1118,8 +1118,7 @@ describe('assistant system prompt seam', () => {
     const prompt = buildAssistantSystemPrompt({
       allowSensitiveHealthContext: true,
       assistantCliContract: 'CLI contract block.',
-      assistantCliExecutorAvailable: true,
-      assistantCronToolsAvailable: true,
+      assistantCommandAccessMode: 'bound-tools',
       assistantHostedDeviceConnectAvailable: true,
       assistantKnowledgeToolsAvailable: true,
       channel: null,
@@ -1176,8 +1175,7 @@ describe('assistant system prompt seam', () => {
     const prompt = buildAssistantSystemPrompt({
       allowSensitiveHealthContext: false,
       assistantCliContract: null,
-      assistantCliExecutorAvailable: false,
-      assistantCronToolsAvailable: false,
+      assistantCommandAccessMode: 'none',
       assistantHostedDeviceConnectAvailable: false,
       assistantKnowledgeToolsAvailable: false,
       channel: 'telegram',
@@ -1207,6 +1205,40 @@ describe('assistant system prompt seam', () => {
       'When you reference evidence from the vault in local chat, mention relative file paths when practical.',
     )
     expect(prompt).not.toContain('CLI contract block.')
+  })
+
+  it('renders direct CLI guidance for privileged local routes without bound tools', () => {
+    const prompt = buildAssistantSystemPrompt({
+      allowSensitiveHealthContext: true,
+      assistantCliContract: null,
+      assistantCommandAccessMode: 'direct-cli',
+      assistantHostedDeviceConnectAvailable: false,
+      assistantKnowledgeToolsAvailable: false,
+      channel: null,
+      cliAccess: {
+        rawCommand: 'vault-cli',
+        setupCommand: 'murph',
+      },
+      currentLocalDate: '2026-04-08',
+      currentTimeZone: 'America/Los_Angeles',
+      firstTurnCheckIn: false,
+    })
+
+    expect(prompt).toContain(
+      'Inspect or change Murph vault/runtime state directly through `vault-cli` in this privileged local route.',
+    )
+    expect(prompt).toContain(
+      'Use `vault-cli` directly with exact command semantics instead of guessing command shapes.',
+    )
+    expect(prompt).toContain(
+      'Scheduled assistant automation commands are available directly through `vault-cli automation ...` in this privileged local route.',
+    )
+    expect(prompt).not.toContain(
+      'Scheduled assistant automation commands are not exposed in this session.',
+    )
+    expect(prompt).not.toContain(
+      'Scheduled assistant automation commands are exposed in this session through `murph.cli.run`.',
+    )
   })
 })
 

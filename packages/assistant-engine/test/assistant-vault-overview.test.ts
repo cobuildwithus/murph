@@ -234,8 +234,7 @@ it('injects the overview block into the system prompt only when provided', () =>
   const prompt = buildAssistantSystemPrompt({
     allowSensitiveHealthContext: true,
     assistantCliContract: null,
-    assistantCliExecutorAvailable: true,
-    assistantCronToolsAvailable: true,
+    assistantCommandAccessMode: 'bound-tools',
     assistantHostedDeviceConnectAvailable: true,
     assistantKnowledgeToolsAvailable: true,
     channel: null,
@@ -255,8 +254,7 @@ it('injects the overview block into the system prompt only when provided', () =>
   const promptWithoutOverview = buildAssistantSystemPrompt({
     allowSensitiveHealthContext: true,
     assistantCliContract: null,
-    assistantCliExecutorAvailable: true,
-    assistantCronToolsAvailable: true,
+    assistantCommandAccessMode: 'bound-tools',
     assistantHostedDeviceConnectAvailable: true,
     assistantKnowledgeToolsAvailable: true,
     channel: null,

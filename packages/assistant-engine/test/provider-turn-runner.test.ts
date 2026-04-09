@@ -225,6 +225,7 @@ describe('executeProviderTurnWithRecovery', () => {
     runnerMocks.resolveAssistantProviderExecutionCapabilities
       .mockReset()
       .mockReturnValue({
+        murphCommandAccess: 'bound-tools',
         supportsNativeResume: false,
         supportsToolRuntime: true,
       })
@@ -321,8 +322,7 @@ describe('executeProviderTurnWithRecovery', () => {
     expect(runnerMocks.buildAssistantSystemPrompt).toHaveBeenCalledWith(
       expect.objectContaining({
         assistantCliContract: 'cli-bootstrap',
-        assistantCliExecutorAvailable: true,
-        assistantCronToolsAvailable: true,
+        assistantCommandAccessMode: 'bound-tools',
         assistantHostedDeviceConnectAvailable: true,
         assistantKnowledgeToolsAvailable: true,
         channel: 'chat',
@@ -383,6 +383,7 @@ describe('executeProviderTurnWithRecovery', () => {
     })
 
     runnerMocks.resolveAssistantProviderExecutionCapabilities.mockReturnValue({
+      murphCommandAccess: 'direct-cli',
       supportsNativeResume: true,
       supportsToolRuntime: false,
     })
@@ -437,8 +438,7 @@ describe('executeProviderTurnWithRecovery', () => {
     expect(runnerMocks.buildAssistantSystemPrompt).toHaveBeenCalledWith(
       expect.objectContaining({
         assistantCliContract: null,
-        assistantCliExecutorAvailable: false,
-        assistantCronToolsAvailable: false,
+        assistantCommandAccessMode: 'direct-cli',
         assistantHostedDeviceConnectAvailable: false,
         assistantKnowledgeToolsAvailable: false,
         currentLocalDate: '2026-04-08',

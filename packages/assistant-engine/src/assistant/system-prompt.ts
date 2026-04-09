@@ -2,14 +2,14 @@ import {
   buildAssistantCliGuidanceText,
   type AssistantCliAccessContext,
 } from "../assistant-cli-access.js";
+import type { AssistantMurphCommandAccessMode } from "./providers/types.js";
 import { isAssistantUserFacingChannel } from "./channel-presentation.js";
 import { ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE } from "./first-contact-welcome.js";
 
 export interface AssistantSystemPromptInput {
   assistantCliContract: string | null;
   allowSensitiveHealthContext: boolean;
-  assistantCliExecutorAvailable: boolean;
-  assistantCronToolsAvailable: boolean;
+  assistantCommandAccessMode: AssistantMurphCommandAccessMode;
   assistantHostedDeviceConnectAvailable?: boolean;
   assistantKnowledgeToolsAvailable?: boolean;
   channel: string | null;
@@ -32,7 +32,7 @@ export function buildAssistantSystemPrompt(
     buildAssistantProductPrinciplesText(),
     buildAssistantHealthReasoningText(),
     buildAssistantVaultNavigationText({
-      assistantCliExecutorAvailable: input.assistantCliExecutorAvailable,
+      assistantCommandAccessMode: input.assistantCommandAccessMode,
       assistantHostedDeviceConnectAvailable:
         input.assistantHostedDeviceConnectAvailable ?? false,
     }),
@@ -41,14 +41,14 @@ export function buildAssistantSystemPrompt(
     buildAssistantEvidenceAndReplyStyleText(input.channel),
     buildAssistantFirstTurnCheckInGuidanceText(input.firstTurnCheckIn),
     buildAssistantKnowledgeGuidanceText({
-      assistantCliExecutorAvailable: input.assistantCliExecutorAvailable,
+      assistantCommandAccessMode: input.assistantCommandAccessMode,
       assistantKnowledgeToolsAvailable:
         input.assistantKnowledgeToolsAvailable ?? false,
       rawCommand: input.cliAccess.rawCommand,
     }),
     buildAssistantCronGuidanceText({
+      assistantCommandAccessMode: input.assistantCommandAccessMode,
       rawCommand: input.cliAccess.rawCommand,
-      assistantCronToolsAvailable: input.assistantCronToolsAvailable,
     }),
     buildAssistantCliGuidanceText(input.cliAccess),
     buildAssistantCliContractText(input.assistantCliContract),
@@ -105,20 +105,27 @@ function buildAssistantHealthReasoningText(): string {
 }
 
 function buildAssistantVaultNavigationText(input: {
-  assistantCliExecutorAvailable: boolean;
+  assistantCommandAccessMode: AssistantMurphCommandAccessMode;
   assistantHostedDeviceConnectAvailable: boolean;
 }): string {
+  const usesBoundTools = input.assistantCommandAccessMode === "bound-tools";
+  const usesDirectCli = input.assistantCommandAccessMode === "direct-cli";
+
   return [
     "This assistant runtime is for Murph vault and assistant operations, not repo coding work.",
     input.assistantHostedDeviceConnectAvailable
       ? "- When the user wants help connecting a hosted wearable provider such as WHOOP, Oura, or Garmin, use `murph.device.connect` first so you can return a clickable hosted authorization link. Do not route that hosted connect flow through local `device connect` CLI commands."
       : null,
-    input.assistantCliExecutorAvailable
+    usesBoundTools
       ? "- Inspect or change Murph vault/runtime state through `murph.cli.run`. That tool shells out to the real local `vault-cli`, so treat it as the primary Murph runtime surface for provider turns."
-      : "- Inspect or change Murph vault/runtime state through `vault-cli` semantics when the direct CLI executor is unavailable.",
-    input.assistantCliExecutorAvailable
+      : usesDirectCli
+        ? "- Inspect or change Murph vault/runtime state directly through `vault-cli` in this privileged local route."
+        : "- Inspect or change Murph vault/runtime state through `vault-cli` semantics when no bound Murph command surface is exposed in this route.",
+    usesBoundTools
       ? "- Use `murph.cli.run` with exact `vault-cli` semantics instead of guessing command shapes."
-      : "- Use exact `vault-cli` semantics instead of guessing command shapes.",
+      : usesDirectCli
+        ? "- Use `vault-cli` directly with exact command semantics instead of guessing command shapes."
+        : "- Use exact `vault-cli` semantics instead of guessing command shapes.",
     "- Use canonical query surfaces as the source of truth for health data.",
     "- When you already know one exact canonical record to inspect, start with `vault-cli show`.",
     "- When you need filtered recent records by family, kind, status, stream, tag, or date range, start with `vault-cli list`.",
@@ -222,16 +229,19 @@ function buildAssistantCliContractText(contract: string | null): string | null {
 }
 
 function buildAssistantCronGuidanceText(input: {
-  assistantCronToolsAvailable: boolean;
+  assistantCommandAccessMode: AssistantMurphCommandAccessMode;
   rawCommand: "vault-cli";
 }): string {
-  return buildAssistantToolAccessGuidanceText({
-    preferredAccessAvailable: input.assistantCronToolsAvailable,
-    preferredAccessLines: [
+  const sharedLines = [
+    "Prefer digest-style or summary-style automation over nagging coaching. Default to weekly or daily summaries unless the user clearly asks for a higher-frequency nudge.",
+    "Before asking the user to repeat phone, Telegram, or email routing details for an automation route, inspect saved local self-targets. If the needed route is not already saved, ask for the missing details explicitly instead of guessing.",
+  ];
+
+  if (input.assistantCommandAccessMode === "bound-tools") {
+    return [
       "Scheduled assistant automation commands are exposed in this session through `murph.cli.run`. Use `vault-cli automation ...` there rather than editing assistant runtime files directly.",
       "Use `vault-cli automation scaffold` to start a canonical automation payload, then `vault-cli automation upsert` to create or update it.",
-      "Prefer digest-style or summary-style automation over nagging coaching. Default to weekly or daily summaries unless the user clearly asks for a higher-frequency nudge.",
-      "Before asking the user to repeat phone, Telegram, or email routing details for an automation route, inspect saved local self-targets. If the needed route is not already saved, ask for the missing details explicitly instead of guessing.",
+      ...sharedLines,
       "Inspect existing canonical automations with `vault-cli automation list` and `vault-cli automation show` before changing one.",
       "Automation schedules execute while `vault-cli assistant run` is active for the vault.",
       "When a user or cron prompt asks for research on a complex topic or a broad current-evidence scan, default to `research` so the tool runs `review:gpt --deep-research --send --wait`. Use `deepthink` only when the task is a GPT Pro synthesis without Deep Research.",
@@ -239,21 +249,36 @@ function buildAssistantCronGuidanceText(input: {
       "`--timeout` is the normal control. `--wait-timeout` is only for the uncommon case where you want the assistant-response wait cap different from the overall timeout.",
       "Automation prompts may explicitly tell you to use the research tool. In that case, run `research` for Deep Research or `deepthink` for GPT Pro before composing the final automation reply.",
       "Both research commands wait for completion and save a markdown note under `research/` inside the vault.",
-    ],
-    unavailableLines: [
+    ].join("\n\n");
+  }
+
+  if (input.assistantCommandAccessMode === "direct-cli") {
+    return [
+      "Scheduled assistant automation commands are available directly through `vault-cli automation ...` in this privileged local route.",
+      "Use `vault-cli automation scaffold` to start a canonical automation payload, then `vault-cli automation upsert` to create or update it.",
+      ...sharedLines,
+      "Inspect existing canonical automations with `vault-cli automation list` and `vault-cli automation show` before changing one.",
+      "Automation schedules execute while `vault-cli assistant run` is active for the vault.",
+      "When a user or cron prompt asks for research on a complex topic or a broad current-evidence scan, default to `research` so the tool runs `review:gpt --deep-research --send --wait`. Use `deepthink` only when the task is a GPT Pro synthesis without Deep Research.",
+      "Deep Research can legitimately take 10 to 60 minutes, sometimes longer, so keep waiting on the tool unless it actually errors or times out. Murph defaults the overall timeout to 40m.",
+      "`--timeout` is the normal control. `--wait-timeout` is only for the uncommon case where you want the assistant-response wait cap different from the overall timeout.",
+      "Automation prompts may explicitly tell you to use the research tool. In that case, run `research` for Deep Research or `deepthink` for GPT Pro before composing the final automation reply.",
+      "Both research commands wait for completion and save a markdown note under `research/` inside the vault.",
+    ].join("\n\n");
+  }
+
+  return [
       "Scheduled assistant automation commands are not exposed in this session.",
       `Use \`${input.rawCommand} automation ...\` when you need to inspect or change scheduled automation and the bound tools are unavailable.`,
       "Use `automation scaffold` to start a canonical automation payload and `automation upsert` to save it.",
-      "Prefer digest-style or summary-style automation over nagging coaching. Default to weekly or daily summaries unless the user clearly asks for a higher-frequency nudge.",
-      "Before asking the user to repeat phone, Telegram, or email routing details for an automation route, inspect saved local self-targets. If the needed route is not already saved, ask for the missing details explicitly instead of guessing.",
+      ...sharedLines,
       "Do not claim you created, changed, or inspected an automation in this session unless a real tool call happened.",
       "Automation schedules execute while `assistant run` is active for the vault.",
-    ],
-  });
+  ].join("\n\n");
 }
 
 function buildAssistantKnowledgeGuidanceText(input: {
-  assistantCliExecutorAvailable: boolean;
+  assistantCommandAccessMode: AssistantMurphCommandAccessMode;
   assistantKnowledgeToolsAvailable: boolean;
   rawCommand: "vault-cli";
 }): string {
@@ -261,7 +286,7 @@ function buildAssistantKnowledgeGuidanceText(input: {
     input.assistantKnowledgeToolsAvailable
       ? "For wiki work, prefer the dedicated knowledge surface for this route over generic CLI execution."
       : `For wiki work, use \`${input.rawCommand} knowledge ...\` directly in this turn rather than assuming a dedicated knowledge surface is callable.`,
-    input.assistantCliExecutorAvailable
+    input.assistantCommandAccessMode === "bound-tools"
       ? "If you need the operator-facing CLI surface itself, use `murph.cli.run` for knowledge work only when you truly need `vault-cli knowledge ...` semantics such as `vault-cli knowledge log tail`."
       : null,
     "Murph's knowledge system has two layers: `bank/library` is the stable reference layer, while `derived/knowledge` is the user's compiled wiki.",
@@ -276,16 +301,4 @@ function buildAssistantKnowledgeGuidanceText(input: {
     "Every knowledge upsert appends an entry to `derived/knowledge/log.md`, so durable wiki writes should be meaningful and reusable.",
     "Use vault-relative source files, or absolute source files that still resolve inside the selected vault, and never use `derived/**` or `.runtime/**` files as knowledge sources.",
   ].join("\n\n");
-}
-
-function buildAssistantToolAccessGuidanceText(input: {
-  preferredAccessAvailable: boolean;
-  preferredAccessLines: readonly string[];
-  unavailableLines: readonly string[];
-}): string {
-  if (input.preferredAccessAvailable) {
-    return input.preferredAccessLines.join("\n\n");
-  }
-
-  return input.unavailableLines.join("\n\n");
 }

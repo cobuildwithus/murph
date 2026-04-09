@@ -17,6 +17,7 @@ import type { AssistantProviderDefinition } from './types.js'
 
 export const codexCliProviderDefinition: AssistantProviderDefinition = {
   capabilities: {
+    murphCommandAccess: 'direct-cli',
     requestFormat: 'flat-prompt',
     supportsModelDiscovery: false,
     supportsNativeResume: true,
