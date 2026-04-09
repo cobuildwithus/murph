@@ -4,9 +4,13 @@ import { afterEach, expect, it } from 'vitest'
 
 import {
   addActivitySession,
+  addBodyMeasurement,
   addMeal,
   createExperiment,
   initializeVault,
+  upsertAllergy,
+  upsertCondition,
+  upsertGoal,
   upsertProtocolItem,
 } from '@murphai/core'
 
@@ -57,11 +61,52 @@ it('builds a navigation-only overview from canonical, raw, and source-root cover
       },
     },
   })
+  await addBodyMeasurement({
+    vaultRoot,
+    draft: {
+      measurements: [{
+        type: 'weight',
+        unit: 'lb',
+        value: 180,
+      }],
+      occurredAt: '2026-04-06T08:00:00.000Z',
+      source: 'manual',
+      title: 'Weight check-in',
+    },
+  })
   await createExperiment({
     vaultRoot,
     slug: 'magnesium-trial',
     startedOn: '2026-04-04T09:00:00.000Z',
     title: 'Magnesium trial',
+  })
+  const goal = await upsertGoal({
+    vaultRoot,
+    title: 'Improve sleep consistency',
+    window: {
+      startAt: '2026-04-01',
+    },
+  })
+  const condition = await upsertCondition({
+    assertedOn: '2024-05-01',
+    bodySites: ['head'],
+    clinicalStatus: 'active',
+    note: 'Likely worsened by sleep disruption.',
+    relatedGoalIds: [goal.record.entity.goalId],
+    title: 'Migraine',
+    vaultRoot,
+    verificationStatus: 'confirmed',
+  })
+  await upsertAllergy({
+    criticality: 'high',
+    note: 'Avoid until formally reviewed.',
+    reaction: 'rash',
+    recordedOn: '2018-04-10',
+    relatedConditionIds: [condition.record.entity.conditionId],
+    status: 'active',
+    substance: 'penicillin',
+    title: 'Penicillin allergy',
+    vaultRoot,
   })
   await upsertProtocolItem({
     vaultRoot,
@@ -118,10 +163,13 @@ it('builds a navigation-only overview from canonical, raw, and source-root cover
     'Vault overview for navigation only:',
   )
   expect(overview).toContain(
-    'Canonical coverage includes 2 meal events, 1 workout/activity session, and 1 experiment.',
+    'Canonical coverage includes 2 meal events, 1 workout/activity session, 1 body measurement, and 1 experiment.',
   )
   expect(overview).toContain(
     'Wearable coverage is present via WHOOP.',
+  )
+  expect(overview).toContain(
+    'Saved health context includes 1 goal, 1 condition, and 1 allergy.',
   )
   expect(overview).toContain(
     'Raw meal import coverage includes 2 manifests under `raw/meals`.',
@@ -133,7 +181,7 @@ it('builds a navigation-only overview from canonical, raw, and source-root cover
     'Other source roots present: 1 research note, raw inbox evidence, and derived inbox artifacts.',
   )
   expect(overview).toContain(
-    'Treat `vault-cli profile show current` and relevant wiki/knowledge reads as the synthesized truth surfaces.',
+    'Treat `vault-cli memory show`, relevant wiki/knowledge reads, and the canonical preferences surface as the synthesized truth surfaces.',
   )
 })
 
