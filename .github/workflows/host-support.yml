@@ -12,11 +12,11 @@ permissions:
 env:
   # CI must still run apps/web verify, but this workflow does not have the hosted
   # onboarding secret set that production deploy surfaces carry. The contact-privacy
-  # keyring, public Privy app id, and verification key are deterministic CI-only
-  # placeholders so the client provider still sees the same valid app identifier
-  # during dev-smoke and build in every GitHub workflow.
+  # keyring and verification key are deterministic CI-only placeholders, while the
+  # Privy app id comes from a public GitHub Actions variable so the client provider
+  # still sees a valid app identifier during dev-smoke and build.
   HOSTED_CONTACT_PRIVACY_KEYS: v1:BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc
-  NEXT_PUBLIC_PRIVY_APP_ID: cm_app_hosted_web_verify
+  NEXT_PUBLIC_PRIVY_APP_ID: ${{ vars.HOSTED_WEB_VERIFY_PRIVY_APP_ID }}
   PRIVY_VERIFICATION_KEY: ci-hosted-web-verification-key
 
 jobs:

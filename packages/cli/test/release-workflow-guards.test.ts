@@ -22,7 +22,7 @@ describe('release workflow guards', () => {
     const workflow = readFileSync(releaseWorkflowPath, 'utf8')
 
     expect(workflow).toContain('HOSTED_CONTACT_PRIVACY_KEYS: v1:BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc')
-    expect(workflow).toContain('NEXT_PUBLIC_PRIVY_APP_ID: cm_app_hosted_web_verify')
+    expect(workflow).toContain('NEXT_PUBLIC_PRIVY_APP_ID: ${{ vars.HOSTED_WEB_VERIFY_PRIVY_APP_ID }}')
     expect(workflow).toContain('PRIVY_VERIFICATION_KEY: ci-hosted-web-verification-key')
     expect(workflow).toContain('- name: Run release checks')
     expect(workflow).toContain('MURPH_TEST_LANES_PARALLEL: "1"')

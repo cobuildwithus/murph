@@ -10,11 +10,11 @@ permissions:
 
 env:
   # Keep the release workflow on the truthful hosted-web verify path. The
-  # contact-privacy keyring, public Privy app id, and verification key are
-  # deterministic CI-only placeholders so hosted-web smoke/build still boot
-  # with the same minimal env contract in every workflow.
+  # contact-privacy keyring and verification key are deterministic CI-only
+  # placeholders, while the public Privy app id comes from a GitHub variable so
+  # hosted-web smoke/build still boot with a valid client identifier.
   HOSTED_CONTACT_PRIVACY_KEYS: v1:BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc
-  NEXT_PUBLIC_PRIVY_APP_ID: cm_app_hosted_web_verify
+  NEXT_PUBLIC_PRIVY_APP_ID: ${{ vars.HOSTED_WEB_VERIFY_PRIVY_APP_ID }}
   PRIVY_VERIFICATION_KEY: ci-hosted-web-verification-key
 
 jobs:
