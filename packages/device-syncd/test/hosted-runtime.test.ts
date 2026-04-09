@@ -5,6 +5,7 @@ import {
   buildHostedExecutionUserDeviceSyncRuntimePath,
   normalizeHostedDeviceSyncJobHints,
   parseHostedExecutionDeviceSyncConnectLinkResponse,
+  parseHostedExecutionDeviceSyncWakeHint,
   parseHostedExecutionDeviceSyncRuntimeApplyRequest,
   parseHostedExecutionDeviceSyncRuntimeApplyResponse,
   parseHostedExecutionDeviceSyncRuntimeSnapshotRequest,
@@ -563,5 +564,96 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
       objectId: "sleep_123",
     });
     expect(normalizeHostedDeviceSyncJobHints(null)).toEqual([]);
+  });
+
+  it("parses the hosted wake hint owner shape once", () => {
+    const parsed = parseHostedExecutionDeviceSyncWakeHint({
+      eventType: "sleep.updated",
+      jobs: [
+        {
+          availableAt: "2026-04-09T00:00:00Z",
+          dedupeKey: null,
+          kind: "resource",
+          maxAttempts: 3,
+          payload: {
+            dataType: "sleep",
+          },
+          priority: 10,
+        },
+      ],
+      nextReconcileAt: null,
+      occurredAt: "2026-04-09T00:01:00Z",
+      reason: "webhook_hint",
+      resourceCategory: "sleep",
+      revokeWarning: {
+        code: "TOKEN_REVOKED",
+        message: "Token was revoked.",
+      },
+      scopes: ["sleep"],
+      traceId: "trace-123",
+    });
+
+    expect(parsed).toEqual({
+      eventType: "sleep.updated",
+      jobs: [
+        {
+          availableAt: "2026-04-09T00:00:00Z",
+          dedupeKey: null,
+          kind: "resource",
+          maxAttempts: 3,
+          payload: {
+            dataType: "sleep",
+          },
+          priority: 10,
+        },
+      ],
+      nextReconcileAt: null,
+      occurredAt: "2026-04-09T00:01:00Z",
+      reason: "webhook_hint",
+      resourceCategory: "sleep",
+      revokeWarning: {
+        code: "TOKEN_REVOKED",
+        message: "Token was revoked.",
+      },
+      scopes: ["sleep"],
+      traceId: "trace-123",
+    });
+  });
+
+  it("feeds the parsed owner shape into job-hint normalization", () => {
+    const hint = parseHostedExecutionDeviceSyncWakeHint({
+      jobs: [
+        {
+          availableAt: "2026-04-09T00:00:00Z",
+          kind: "resource",
+          payload: {
+            resourceId: "abc",
+          },
+        },
+      ],
+    });
+
+    expect(normalizeHostedDeviceSyncJobHints(hint)).toEqual([
+      {
+        availableAt: "2026-04-09T00:00:00Z",
+        kind: "resource",
+        payload: {
+          resourceId: "abc",
+        },
+      },
+    ]);
+  });
+
+  it("rejects invalid hosted wake job payloads", () => {
+    expect(() =>
+      parseHostedExecutionDeviceSyncWakeHint({
+        jobs: [
+          {
+            kind: "resource",
+            payload: ["not", "an", "object"],
+          },
+        ],
+      })
+    ).toThrow(/payload/i);
   });
 });

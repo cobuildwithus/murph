@@ -1,11 +1,13 @@
 import { assertContract, sharePackSchema } from "@murphai/contracts";
-import { parseHostedExecutionDeviceSyncRuntimeSnapshotResponse as parseOwnedHostedExecutionDeviceSyncRuntimeSnapshotResponse } from "@murphai/device-syncd/hosted-runtime";
+import {
+  parseHostedExecutionDeviceSyncRuntimeSnapshotResponse as parseOwnedHostedExecutionDeviceSyncRuntimeSnapshotResponse,
+  parseHostedExecutionDeviceSyncWakeHint as parseOwnedHostedExecutionDeviceSyncWakeHint,
+} from "@murphai/device-syncd/hosted-runtime";
 import { parseHostedExecutionBundleRef as parseRuntimeHostedExecutionBundleRef } from "@murphai/runtime-state";
 
 import type {
   HostedExecutionAssistantCronTickEvent,
   HostedExecutionBundleRef,
-  HostedExecutionDeviceSyncJobHint,
   HostedExecutionEventDispatchStatus,
   HostedExecutionDeviceSyncRuntimeSnapshotResponse,
   HostedExecutionDeviceSyncWakeEvent,
@@ -362,7 +364,7 @@ export function parseHostedExecutionEvent(value: unknown): HostedExecutionEvent 
         ...(record.hint === undefined
           ? {}
           : {
-              hint: parseHostedExecutionDeviceSyncWakeHint(record.hint),
+              hint: parseOwnedHostedExecutionDeviceSyncWakeHint(record.hint),
             }),
         kind,
         ...(record.provider === undefined
@@ -494,167 +496,6 @@ function parseHostedExecutionEventDispatchState(
   }
 
   throw new TypeError(`Unsupported hosted execution event dispatch state: ${state}`);
-}
-
-function parseHostedExecutionDeviceSyncWakeHint(
-  value: unknown,
-): HostedExecutionDeviceSyncWakeEvent["hint"] {
-  if (value === null) {
-    return null;
-  }
-
-  const record = requireObject(value, "Hosted execution device-sync.wake hint");
-  const jobsValue = record.jobs;
-
-  return {
-    ...(record.eventType === undefined
-      ? {}
-      : {
-          eventType: readNullableString(
-            record.eventType,
-            "Hosted execution device-sync.wake hint eventType",
-          ),
-        }),
-    ...(jobsValue === undefined
-      ? {}
-      : {
-          jobs: requireArray(
-            jobsValue,
-            "Hosted execution device-sync.wake hint jobs",
-          ).map((entry, index) => parseHostedExecutionDeviceSyncJobHint(entry, index)),
-        }),
-    ...(record.nextReconcileAt === undefined
-      ? {}
-      : {
-          nextReconcileAt: readNullableString(
-            record.nextReconcileAt,
-            "Hosted execution device-sync.wake hint nextReconcileAt",
-          ),
-        }),
-    ...(record.occurredAt === undefined
-      ? {}
-      : {
-          occurredAt: readNullableString(
-            record.occurredAt,
-            "Hosted execution device-sync.wake hint occurredAt",
-          ),
-        }),
-    ...(record.reason === undefined
-      ? {}
-      : {
-          reason: readNullableString(
-            record.reason,
-            "Hosted execution device-sync.wake hint reason",
-          ),
-        }),
-    ...(record.resourceCategory === undefined
-      ? {}
-      : {
-          resourceCategory: readNullableString(
-            record.resourceCategory,
-            "Hosted execution device-sync.wake hint resourceCategory",
-          ),
-        }),
-    ...(record.revokeWarning === undefined
-      ? {}
-      : {
-          revokeWarning: parseHostedExecutionDeviceSyncRevokeWarning(record.revokeWarning),
-        }),
-    ...(record.scopes === undefined
-      ? {}
-      : {
-          scopes: requireStringArray(
-            record.scopes,
-            "Hosted execution device-sync.wake hint scopes",
-          ),
-        }),
-    ...(record.traceId === undefined
-      ? {}
-      : {
-          traceId: readNullableString(
-            record.traceId,
-            "Hosted execution device-sync.wake hint traceId",
-          ),
-        }),
-  };
-}
-
-function parseHostedExecutionDeviceSyncJobHint(
-  value: unknown,
-  index: number,
-): HostedExecutionDeviceSyncJobHint {
-  const record = requireObject(
-    value,
-    `Hosted execution device-sync.wake hint jobs[${index}]`,
-  );
-
-  return {
-    ...(record.availableAt === undefined
-      ? {}
-      : {
-          availableAt: requireString(
-            record.availableAt,
-            `Hosted execution device-sync.wake hint jobs[${index}].availableAt`,
-          ),
-        }),
-    ...(record.dedupeKey === undefined
-      ? {}
-      : {
-          dedupeKey: readNullableString(
-            record.dedupeKey,
-            `Hosted execution device-sync.wake hint jobs[${index}].dedupeKey`,
-          ),
-        }),
-    kind: requireString(
-      record.kind,
-      `Hosted execution device-sync.wake hint jobs[${index}].kind`,
-    ),
-    ...(record.maxAttempts === undefined
-      ? {}
-      : {
-          maxAttempts: requireNumber(
-            record.maxAttempts,
-            `Hosted execution device-sync.wake hint jobs[${index}].maxAttempts`,
-          ),
-        }),
-    ...(record.payload === undefined
-      ? {}
-      : {
-          payload: requireObject(
-            record.payload,
-            `Hosted execution device-sync.wake hint jobs[${index}].payload`,
-          ),
-        }),
-    ...(record.priority === undefined
-      ? {}
-      : {
-          priority: requireNumber(
-            record.priority,
-            `Hosted execution device-sync.wake hint jobs[${index}].priority`,
-          ),
-        }),
-  } satisfies HostedExecutionDeviceSyncJobHint;
-}
-
-function parseHostedExecutionDeviceSyncRevokeWarning(
-  value: unknown,
-): NonNullable<HostedExecutionDeviceSyncWakeEvent["hint"]>["revokeWarning"] {
-  if (value === null) {
-    return null;
-  }
-
-  const record = requireObject(value, "Hosted execution device-sync.wake hint revokeWarning");
-
-  return {
-    code: requireString(
-      record.code,
-      "Hosted execution device-sync.wake hint revokeWarning.code",
-    ),
-    message: requireString(
-      record.message,
-      "Hosted execution device-sync.wake hint revokeWarning.message",
-    ),
-  };
 }
 
 function parseCronReason(value: unknown): HostedExecutionAssistantCronTickEvent["reason"] {

@@ -318,6 +318,27 @@ This patch:
 **Main refactor risk:** keep queue-local observability and retry mechanics app-local.
 If future edits collapse those back into the shared outcome union, the boundary will blur again and duplicate-pending versus duplicate-consumed semantics will get harder to preserve.
 
+### 18. Keep device-sync wake hint subshapes with the device-sync runtime owner
+
+**Seam:** `packages/device-syncd/src/hosted-runtime.ts`, `packages/hosted-execution/src/{contracts.ts,parsers.ts}`, `apps/web/src/lib/device-sync/hosted-dispatch.ts`
+
+The `HostedExecutionDeviceSyncJobHint` / `HostedExecutionDeviceSyncWakeHint` record family was split across two owners.
+`packages/device-syncd/src/hosted-runtime.ts` already owned the live runtime snapshot and wake-hint normalization logic, but `packages/hosted-execution/src/contracts.ts` restated the same hint records and `packages/hosted-execution/src/parsers.ts` carried a second hand-written parser.
+The web signal bridge then had to cast `signalPayload` straight to `HostedExecutionDeviceSyncWakeEvent["hint"]` because there was no single boundary parser for that nested shape.
+
+This patch:
+
+- makes `packages/device-syncd/src/hosted-runtime.ts` the shared owner of `HostedExecutionDeviceSyncJobHint`, `HostedExecutionDeviceSyncWakeHint`, and `parseHostedExecutionDeviceSyncWakeHint(...)`
+- turns the hosted-execution contract types into aliases of that device-sync owner instead of parallel interface copies
+- has `packages/hosted-execution/src/parsers.ts` delegate nested wake-hint parsing to the device-sync runtime owner while keeping the outer hosted dispatch event parser in `@murphai/hosted-execution`
+- replaces the raw cast in `apps/web/src/lib/device-sync/hosted-dispatch.ts` with the shared owner parser so signals, dispatch parsing, and runtime normalization now consume one hint shape
+
+**Why this is simpler:** one more wake-hint field or job-hint attribute now lands in one device-sync owner instead of requiring coordinated edits across device-syncd, hosted-execution contracts, hosted-execution parsers, and the hosted web signal bridge.
+The hosted-execution package still owns the outer dispatch event; it just stops pretending to own the device-sync-specific nested payload too.
+
+**Main refactor risk:** keep the shared ownership limited to the nested wake-hint subshape.
+Do not move hosted dispatch ids, event kinds, or transport policy into `device-syncd`, or the hosted execution boundary will blur in the other direction.
+
 ## Current targeted review findings
 
 The notes below are the remaining review-only pass after the simplifications landed above.
