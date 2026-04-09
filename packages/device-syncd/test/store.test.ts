@@ -666,12 +666,28 @@ function readWebhookTraceRow(
   provider: string,
   traceId: string,
 ): WebhookTraceRow | null {
-  return store.database.prepare(`
+  const row = store.database.prepare(`
     select payload_json, processing_expires_at, status
     from webhook_trace
     where provider = ?
       and trace_id = ?
-  `).get(provider, traceId) as WebhookTraceRow | null;
+  `).get(provider, traceId);
+
+  if (
+    !row
+    || typeof row !== "object"
+    || typeof row.payload_json !== "string"
+    || (row.processing_expires_at !== null && typeof row.processing_expires_at !== "string")
+    || typeof row.status !== "string"
+  ) {
+    return null;
+  }
+
+  return {
+    payload_json: row.payload_json,
+    processing_expires_at: row.processing_expires_at,
+    status: row.status,
+  };
 }
 
 function normalizeWebhookTraceRow(row: WebhookTraceRow | null): WebhookTraceRow | null {

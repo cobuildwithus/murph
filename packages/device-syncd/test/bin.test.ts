@@ -15,7 +15,7 @@ const mocks = vi.hoisted(() => {
   return {
     service,
     server,
-    loadDeviceSyncEnvironment: vi.fn(() => ({
+    loadDeviceSyncEnvironment: vi.fn((_env: NodeJS.ProcessEnv | undefined = process.env) => ({
       service: { vaultRoot: "/tmp/device-syncd-vault" },
       http: { host: "127.0.0.1", port: 43110 },
     })),
@@ -60,7 +60,7 @@ function assertShutdown(exitSpy: ReturnType<typeof vi.spyOn>): void {
 
 function mockProcessSignals() {
   const signalHandlers = new Map<string, () => void>();
-  const onceSpy = vi.spyOn(process, "once").mockImplementation(((event, listener) => {
+  const onceSpy = vi.spyOn(process, "once").mockImplementation(((event: Parameters<typeof process.once>[0], listener: Parameters<typeof process.once>[1]) => {
     signalHandlers.set(String(event), listener as () => void);
     return process;
   }) as typeof process.once);
@@ -93,7 +93,9 @@ test("device-syncd bin boots the service and shuts it down on SIGINT", async () 
 
   await loadDeviceSyncBin();
 
-  assert.equal(mocks.loadDeviceSyncEnvironment.mock.calls[0]?.[0], process.env);
+  const loadEnvironmentCall = mocks.loadDeviceSyncEnvironment.mock.calls[0];
+  assert.ok(loadEnvironmentCall);
+  assert.equal(loadEnvironmentCall[0], process.env);
   assert.equal(mocks.service.start.mock.calls.length, 1);
   assert.equal(onceSpy.mock.calls.length, 2);
   assert.equal(typeof signalHandlers.get("SIGINT"), "function");

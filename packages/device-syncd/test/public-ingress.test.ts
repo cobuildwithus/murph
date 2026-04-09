@@ -207,6 +207,15 @@ function completeWebhookAcceptDurably(
   store.completeWebhookTrace(account.provider, traceId);
 }
 
+function requireCallback(callback: (() => void) | null, message: string): () => void {
+  assert.ok(callback, message);
+  return callback;
+}
+
+function readRecordedWebhookTrace(store: InMemoryPublicIngressStore): DeviceSyncWebhookTraceRecord | null {
+  return store.lastRecordedWebhookTrace;
+}
+
 function createFakeProvider(overrides: Partial<DeviceSyncProvider> = {}): DeviceSyncProvider {
   const baseProvider: DeviceSyncProvider = {
     provider: "demo",
@@ -369,7 +378,7 @@ test("public ingress describes providers and rejects providers without OAuth cal
       provider: "descriptor-only",
       displayName: "Descriptor Only",
       transportModes: ["scheduled_poll"],
-      webhook: null,
+      webhook: undefined,
       normalization: {
         metricFamilies: ["activity"],
         snapshotParser: "schema",
@@ -427,7 +436,7 @@ test("public ingress validates OAuth callback state ownership and required param
         callbackPath: "/oauth/alt/callback",
         defaultScopes: ["offline", "read:alt"],
       },
-      webhook: null,
+      webhook: undefined,
       normalization: {
         metricFamilies: ["activity"],
         snapshotParser: "schema",
@@ -547,7 +556,7 @@ test("public ingress rejects webhook deliveries for providers without webhook ha
             callbackPath: "/oauth/demo/callback",
             defaultScopes: ["offline", "read:data"],
           },
-          webhook: null,
+          webhook: undefined,
           normalization: {
             metricFamilies: ["activity"],
             snapshotParser: "schema",
@@ -709,7 +718,9 @@ test("public ingress leaves the webhook trace retryable when the durable accepta
   assert.equal(retry.duplicate, false);
   assert.equal(attempts, 2);
   assert.equal(successes, 1);
-  assert.equal(store.lastRecordedWebhookTrace?.traceId, "trace-retryable");
+  const recordedRetryableTrace = readRecordedWebhookTrace(store);
+  assert.ok(recordedRetryableTrace);
+  assert.equal(recordedRetryableTrace.traceId, "trace-retryable");
 
   const duplicate = await ingress.handleWebhook("demo", new Headers(), Buffer.from("{}"));
   assert.equal(duplicate.duplicate, true);
@@ -925,7 +936,7 @@ test("public ingress rejects overlapping active webhook deliveries until the fir
       && error.retryable === true,
   );
 
-  unblockProcessing?.();
+  requireCallback(unblockProcessing, "processing gate was not initialized")();
   const firstResult = await firstWebhook;
 
   assert.equal(firstResult.accepted, true);

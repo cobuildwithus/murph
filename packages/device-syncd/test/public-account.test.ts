@@ -7,8 +7,10 @@ import {
   toRedactedPublicDeviceSyncAccount,
 } from "../src/public-account.ts";
 
+import type { PublicDeviceSyncAccount } from "../src/types.ts";
+
 test("public-account helpers always drop metadata while preserving the public account shape", () => {
-  const account = {
+  const account: PublicDeviceSyncAccount = {
     id: "dsa_123",
     provider: "oura",
     externalAccountId: "oura-user-1",
@@ -32,7 +34,7 @@ test("public-account helpers always drop metadata while preserving the public ac
     nextReconcileAt: "2026-04-07T02:00:00.000Z",
     createdAt: "2026-04-07T00:00:00.000Z",
     updatedAt: "2026-04-07T00:00:00.000Z",
-  } as const;
+  };
 
   const redacted = toRedactedPublicDeviceSyncAccount(account);
 

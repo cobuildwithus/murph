@@ -23,6 +23,8 @@ import {
   startDeviceSyncHttpServer,
 } from "../src/http.ts";
 import { createOuraDeviceSyncProvider } from "../src/providers/oura.ts";
+import { createDeviceSyncRegistry } from "../src/registry.ts";
+import { withIncomingHeader } from "./helpers.ts";
 
 import type { DeviceSyncService } from "../src/service.ts";
 
@@ -297,9 +299,7 @@ test("assertDeviceSyncControlRequest rejects non-loopback callers", () => {
 test("assertDeviceSyncControlRequest accepts loopback callers with a single-value authorization header array", () => {
   assert.doesNotThrow(() =>
     assertDeviceSyncControlRequest({
-      headers: {
-        authorization: [CONTROL_AUTHORIZATION],
-      },
+      headers: withIncomingHeader("authorization", [CONTROL_AUTHORIZATION]),
       remoteAddress: " ::Ffff:127.0.0.1 ",
       controlToken: CONTROL_TOKEN,
     }),
@@ -1227,18 +1227,12 @@ test("device sync http handler renders callback errors when no returnTo is avail
 test("device sync http handler serves the Oura webhook verification challenge on the public listener", async () => {
   const response = await invokeHandler({
     service: createStubService({
-      registry: {
-        get(provider) {
-          if (provider !== "oura") {
-            return undefined;
-          }
-
-          return createOuraDeviceSyncProvider({
-            clientId: "oura-client-id",
-            clientSecret: "oura-client-secret",
-          });
-        },
-      },
+      registry: createDeviceSyncRegistry([
+        createOuraDeviceSyncProvider({
+          clientId: "oura-client-id",
+          clientSecret: "oura-client-secret",
+        }),
+      ]),
     }),
     method: "GET",
     url: "/device-sync/webhooks/oura?verification_token=verify-token-for-tests&challenge=random-challenge",
@@ -1258,16 +1252,12 @@ test("device sync http handler serves the Oura webhook verification challenge on
 test("device sync http handler returns the shared Oura mismatch error on the public verification route", async () => {
   const response = await invokeHandler({
     service: createStubService({
-      registry: {
-        get(provider) {
-          return provider === "oura"
-            ? createOuraDeviceSyncProvider({
-                clientId: "oura-client-id",
-                clientSecret: "oura-client-secret",
-              })
-            : undefined;
-        },
-      },
+      registry: createDeviceSyncRegistry([
+        createOuraDeviceSyncProvider({
+          clientId: "oura-client-id",
+          clientSecret: "oura-client-secret",
+        }),
+      ]),
     }),
     method: "GET",
     url: "/device-sync/webhooks/oura?verification_token=wrong-token&challenge=random-challenge",
@@ -1291,16 +1281,12 @@ test("device sync http handler returns the shared Oura mismatch error on the pub
 test("device sync http handler returns the shared Oura missing-token error on the public verification route", async () => {
   const response = await invokeHandler({
     service: createStubService({
-      registry: {
-        get(provider) {
-          return provider === "oura"
-            ? createOuraDeviceSyncProvider({
-                clientId: "oura-client-id",
-                clientSecret: "oura-client-secret",
-              })
-            : undefined;
-        },
-      },
+      registry: createDeviceSyncRegistry([
+        createOuraDeviceSyncProvider({
+          clientId: "oura-client-id",
+          clientSecret: "oura-client-secret",
+        }),
+      ]),
     }),
     method: "GET",
     url: "/device-sync/webhooks/oura?verification_token=verify-token-for-tests&challenge=random-challenge",
