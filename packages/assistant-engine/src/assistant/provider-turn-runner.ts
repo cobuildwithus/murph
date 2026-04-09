@@ -5,6 +5,12 @@ import type {
   AssistantSession,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import {
+  normalizeIanaTimeZone,
+  resolveSystemTimeZone,
+  toLocalDayKey,
+} from '@murphai/contracts'
+import { loadVault } from '@murphai/core'
+import {
   resolveAssistantCliAccessContext,
 } from '../assistant-cli-access.js'
 import {
@@ -84,6 +90,11 @@ interface AssistantPromptCapabilityAvailability {
   assistantKnowledgeToolsAvailable: boolean
 }
 
+interface AssistantPromptTimeContext {
+  currentLocalDate: string
+  currentTimeZone: string
+}
+
 export interface ExecutedAssistantProviderTurnResult
   extends AssistantProviderTurnExecutionResult {
   attemptCount: number
@@ -102,6 +113,7 @@ interface AssistantProviderTurnExecutionPlan {
   input: AssistantMessageInput
   memoryTurnEnv: NodeJS.ProcessEnv
   primaryRoute: ResolvedAssistantFailoverRoute | null
+  promptTimeContext: AssistantPromptTimeContext
   toolCatalog: ReturnType<typeof createProviderTurnAssistantToolCatalog>
   routes: readonly ResolvedAssistantFailoverRoute[]
   sharedPlan: AssistantTurnSharedPlan
@@ -155,7 +167,7 @@ export async function executeProviderTurnWithRecovery(input: {
   turnCreatedAt: string
   turnId: string
 }): Promise<AssistantProviderTurnRecoveryOutcome> {
-  const executionPlan = buildAssistantProviderTurnExecutionPlan(input)
+  const executionPlan = await buildAssistantProviderTurnExecutionPlan(input)
   let failoverState = await readAssistantFailoverState(input.input.vault)
   const attemptedRouteIds = new Set<string>()
   let lastRetriableFailure: unknown = null
@@ -217,14 +229,14 @@ export async function executeProviderTurnWithRecovery(input: {
   }
 }
 
-function buildAssistantProviderTurnExecutionPlan(input: {
+async function buildAssistantProviderTurnExecutionPlan(input: {
   input: AssistantMessageInput
   plan: AssistantTurnSharedPlan
   resolvedSession: AssistantSession
   routes: readonly ResolvedAssistantFailoverRoute[]
   turnCreatedAt: string
   turnId: string
-}): AssistantProviderTurnExecutionPlan {
+}): Promise<AssistantProviderTurnExecutionPlan> {
   const executionContext = normalizeAssistantExecutionContext(input.input.executionContext)
   const memoryTurnEnv = createAssistantMemoryTurnContextEnv({
     allowSensitiveHealthContext: input.plan.allowSensitiveHealthContext,
@@ -245,11 +257,13 @@ function buildAssistantProviderTurnExecutionPlan(input: {
     }),
     workingDirectory: input.plan.requestedWorkingDirectory,
   })
+  const promptTimeContext = await resolveAssistantPromptTimeContext(input.input.vault)
 
   return {
     input: input.input,
     memoryTurnEnv,
     primaryRoute: input.routes[0] ?? null,
+    promptTimeContext,
     toolCatalog,
     routes: input.routes,
     sharedPlan: input.plan,
@@ -285,6 +299,7 @@ async function resolveAssistantProviderAttemptPlan(input: {
     route,
     routePlan: await resolveAssistantRouteTurnPlan({
       input: input.executionPlan.input,
+      promptTimeContext: input.executionPlan.promptTimeContext,
       route,
       session: input.session,
       sharedPlan: input.executionPlan.sharedPlan,
@@ -297,6 +312,7 @@ async function resolveAssistantProviderAttemptPlan(input: {
 async function resolveAssistantRouteTurnPlan(input: {
   toolCatalog: ReturnType<typeof createProviderTurnAssistantToolCatalog>
   input: AssistantMessageInput
+  promptTimeContext: AssistantPromptTimeContext
   route: ResolvedAssistantFailoverRoute
   session: AssistantSession
   sharedPlan: AssistantTurnSharedPlan
@@ -372,8 +388,32 @@ async function resolveAssistantRouteTurnPlan(input: {
         promptCapabilityAvailability.assistantKnowledgeToolsAvailable,
       cliAccess: input.sharedPlan.cliAccess,
       channel: resolvedChannel,
+      currentLocalDate: input.promptTimeContext.currentLocalDate,
+      currentTimeZone: input.promptTimeContext.currentTimeZone,
       firstTurnCheckIn: shouldInjectFirstTurnCheckIn,
     }),
+  }
+}
+
+async function resolveAssistantPromptTimeContext(
+  vaultRoot: string,
+): Promise<AssistantPromptTimeContext> {
+  const fallbackTimeZone = resolveSystemTimeZone()
+  let currentTimeZone = fallbackTimeZone
+
+  try {
+    const loadedVault = await loadVault({
+      vaultRoot,
+    })
+    currentTimeZone =
+      normalizeIanaTimeZone(loadedVault.metadata.timezone) ?? fallbackTimeZone
+  } catch {
+    // Prompt time context is best-effort and should not block the turn.
+  }
+
+  return {
+    currentLocalDate: toLocalDayKey(new Date(), currentTimeZone),
+    currentTimeZone,
   }
 }
 

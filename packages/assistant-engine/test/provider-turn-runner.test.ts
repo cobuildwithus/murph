@@ -20,6 +20,7 @@ const runnerMocks = vi.hoisted(() => ({
   executeAssistantProviderTurnAttempt: vi.fn(),
   getAssistantFailoverCooldownUntil: vi.fn(),
   isAssistantFailoverRouteCoolingDown: vi.fn(),
+  loadVault: vi.fn(),
   listAssistantTranscriptEntries: vi.fn(),
   maybeThrowInjectedAssistantFault: vi.fn(),
   normalizeAssistantExecutionContext: vi.fn(),
@@ -44,6 +45,10 @@ vi.mock('../src/assistant-cli-access.ts', () => ({
 vi.mock('../src/assistant-cli-tools.ts', () => ({
   createProviderTurnAssistantToolCatalog:
     runnerMocks.createProviderTurnAssistantToolCatalog,
+}))
+
+vi.mock('@murphai/core', () => ({
+  loadVault: runnerMocks.loadVault,
 }))
 
 vi.mock('../src/assistant-provider.ts', () => ({
@@ -138,6 +143,8 @@ describe('executeProviderTurnWithRecovery', () => {
   }
 
   beforeEach(() => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T14:30:00.000Z'))
     runnerMocks.appendAssistantTurnReceiptEvent.mockReset().mockResolvedValue(undefined)
     runnerMocks.attachRecoveredAssistantSession.mockReset()
     runnerMocks.buildAssistantSystemPrompt
@@ -172,6 +179,11 @@ describe('executeProviderTurnWithRecovery', () => {
     runnerMocks.executeAssistantProviderTurnAttempt.mockReset()
     runnerMocks.getAssistantFailoverCooldownUntil.mockReset().mockReturnValue(null)
     runnerMocks.isAssistantFailoverRouteCoolingDown.mockReset().mockReturnValue(false)
+    runnerMocks.loadVault.mockReset().mockResolvedValue({
+      metadata: {
+        timezone: 'America/Los_Angeles',
+      },
+    })
     runnerMocks.listAssistantTranscriptEntries.mockReset().mockResolvedValue([])
     runnerMocks.maybeThrowInjectedAssistantFault.mockReset()
     runnerMocks.normalizeAssistantExecutionContext
@@ -220,6 +232,7 @@ describe('executeProviderTurnWithRecovery', () => {
 
   afterEach(() => {
     vi.clearAllMocks()
+    vi.useRealTimers()
   })
 
   it('skips a cooling primary route, injects bootstrap context, and succeeds on the backup route', async () => {
@@ -293,6 +306,9 @@ describe('executeProviderTurnWithRecovery', () => {
       vault: '/tmp/test-vault',
       workingDirectory: '/tmp/provider-turn-runner-tests',
     })
+    expect(runnerMocks.loadVault).toHaveBeenCalledWith({
+      vaultRoot: '/tmp/test-vault',
+    })
     expect(runnerMocks.buildAssistantSystemPrompt).toHaveBeenCalledWith(
       expect.objectContaining({
         assistantCliContract: 'cli-bootstrap',
@@ -301,6 +317,8 @@ describe('executeProviderTurnWithRecovery', () => {
         assistantHostedDeviceConnectAvailable: true,
         assistantKnowledgeToolsAvailable: true,
         channel: 'chat',
+        currentLocalDate: '2026-04-08',
+        currentTimeZone: 'America/Los_Angeles',
         firstTurnCheckIn: true,
       }),
     )
@@ -398,6 +416,9 @@ describe('executeProviderTurnWithRecovery', () => {
       },
     })
     expect(runnerMocks.resolveAssistantCliSurfaceBootstrapContext).not.toHaveBeenCalled()
+    expect(runnerMocks.loadVault).toHaveBeenCalledWith({
+      vaultRoot: '/tmp/test-vault',
+    })
     expect(runnerMocks.buildAssistantSystemPrompt).toHaveBeenCalledWith(
       expect.objectContaining({
         assistantCliContract: null,
@@ -405,6 +426,8 @@ describe('executeProviderTurnWithRecovery', () => {
         assistantCronToolsAvailable: false,
         assistantHostedDeviceConnectAvailable: false,
         assistantKnowledgeToolsAvailable: false,
+        currentLocalDate: '2026-04-08',
+        currentTimeZone: 'America/Los_Angeles',
         firstTurnCheckIn: false,
       }),
     )

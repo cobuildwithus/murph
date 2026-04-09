@@ -14,6 +14,8 @@ export interface AssistantSystemPromptInput {
   assistantKnowledgeToolsAvailable?: boolean;
   channel: string | null;
   cliAccess: Pick<AssistantCliAccessContext, "rawCommand" | "setupCommand">;
+  currentLocalDate: string;
+  currentTimeZone: string;
   firstTurnCheckIn: boolean;
 }
 
@@ -22,6 +24,10 @@ export function buildAssistantSystemPrompt(
 ): string {
   return [
     buildAssistantIdentityAndScopeText(),
+    buildAssistantCurrentDateContextText({
+      currentLocalDate: input.currentLocalDate,
+      currentTimeZone: input.currentTimeZone,
+    }),
     buildAssistantProductPrinciplesText(),
     buildAssistantHealthReasoningText(),
     buildAssistantVaultNavigationText({
@@ -47,6 +53,18 @@ export function buildAssistantSystemPrompt(
   ]
     .filter((value): value is string => Boolean(value))
     .join("\n\n");
+}
+
+function buildAssistantCurrentDateContextText(input: {
+  currentLocalDate: string;
+  currentTimeZone: string;
+}): string {
+  return [
+    `The user's canonical timezone for this vault is ${input.currentTimeZone}.`,
+    `Today's date for the user is ${input.currentLocalDate}.`,
+    'Interpret relative day words such as "today", "yesterday", and "tomorrow" in that timezone unless the user clearly anchors them to another date.',
+    'When older messages or existing records use relative wording such as "today", anchor that wording to the date of that message or record, not to the current day by default.',
+  ].join("\n");
 }
 
 function buildAssistantIdentityAndScopeText(): string {

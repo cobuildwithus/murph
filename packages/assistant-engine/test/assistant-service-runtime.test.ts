@@ -1127,9 +1127,18 @@ describe('assistant system prompt seam', () => {
         rawCommand: 'vault-cli',
         setupCommand: 'murph',
       },
+      currentLocalDate: '2026-04-08',
+      currentTimeZone: 'America/Los_Angeles',
       firstTurnCheckIn: true,
     })
 
+    expect(prompt).toContain(
+      "The user's canonical timezone for this vault is America/Los_Angeles.",
+    )
+    expect(prompt).toContain('Today\'s date for the user is 2026-04-08.')
+    expect(prompt).toContain(
+      'When older messages or existing records use relative wording such as "today", anchor that wording to the date of that message or record, not to the current day by default.',
+    )
     expect(prompt).toContain(
       'When the user wants help connecting a hosted wearable provider such as WHOOP, Oura, or Garmin, use `murph.device.connect` first',
     )
@@ -1167,6 +1176,8 @@ describe('assistant system prompt seam', () => {
         rawCommand: 'vault-cli',
         setupCommand: 'murph',
       },
+      currentLocalDate: '2026-04-08',
+      currentTimeZone: 'America/Los_Angeles',
       firstTurnCheckIn: false,
     })
 
