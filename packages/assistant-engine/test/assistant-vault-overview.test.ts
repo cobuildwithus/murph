@@ -1,10 +1,11 @@
-import { mkdir, rm, writeFile } from 'node:fs/promises'
+import { appendFile, mkdir, rm, writeFile } from 'node:fs/promises'
 
 import { afterEach, expect, it } from 'vitest'
 
 import {
   addActivitySession,
   addMeal,
+  createExperiment,
   initializeVault,
   upsertProtocolItem,
 } from '@murphai/core'
@@ -56,6 +57,12 @@ it('builds a navigation-only overview from canonical, raw, and source-root cover
       },
     },
   })
+  await createExperiment({
+    vaultRoot,
+    slug: 'magnesium-trial',
+    startedOn: '2026-04-04T09:00:00.000Z',
+    title: 'Magnesium trial',
+  })
   await upsertProtocolItem({
     vaultRoot,
     title: 'Magnesium glycinate',
@@ -83,6 +90,27 @@ it('builds a navigation-only overview from canonical, raw, and source-root cover
     `${vaultRoot}/derived/inbox/imessage/self/2026/04/cap_01/summary.md`,
     '# Parsed\n',
   )
+  await appendFile(
+    `${vaultRoot}/ledger/events/2026/2026-04.jsonl`,
+    `${JSON.stringify({
+      schemaVersion: 'murph.event.v1',
+      id: 'evt_sleep_01',
+      kind: 'sleep_session',
+      occurredAt: '2026-04-05T21:30:00.000Z',
+      recordedAt: '2026-04-06T05:45:00.000Z',
+      dayKey: '2026-04-05',
+      durationMinutes: 495,
+      endAt: '2026-04-06T05:45:00.000Z',
+      externalRef: {
+        resourceId: 'sleep_01',
+        resourceType: 'sleep_session',
+        system: 'whoop',
+      },
+      source: 'device',
+      startAt: '2026-04-05T21:30:00.000Z',
+      title: 'Overnight sleep',
+    })}\n`,
+  )
 
   const overview = await buildAssistantVaultOverviewBlock(vaultRoot)
 
@@ -90,7 +118,10 @@ it('builds a navigation-only overview from canonical, raw, and source-root cover
     'Vault overview for navigation only:',
   )
   expect(overview).toContain(
-    'Canonical coverage includes 2 meal events and 1 activity session.',
+    'Canonical coverage includes 2 meal events, 1 activity session, and 1 experiment.',
+  )
+  expect(overview).toContain(
+    'Wearable coverage is present via WHOOP.',
   )
   expect(overview).toContain(
     'Raw meal import coverage includes 2 manifests under `raw/meals`.',

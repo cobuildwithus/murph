@@ -1,7 +1,11 @@
 import { readdir } from 'node:fs/promises'
 
 import { resolveVaultPath, VAULT_LAYOUT, walkVaultFiles } from '@murphai/core'
-import { readVault, type VaultReadModel } from '@murphai/query'
+import {
+  listWearableSourceHealth,
+  readVault,
+  type VaultReadModel,
+} from '@murphai/query'
 
 const RESEARCH_ROOT = 'research'
 const DERIVED_INBOX_ROOT = 'derived/inbox'
@@ -19,6 +23,7 @@ export async function buildAssistantVaultOverviewBlock(
     ])
 
   const canonicalCoverage = summarizeCanonicalCoverage(vault)
+  const wearableCoverage = summarizeWearableCoverage(vault)
   const rawCoverage = summarizeRawCoverage(rawMealManifestPaths.length)
   const bankCoverage = summarizeBankCoverage(vault)
   const otherSources = summarizeOtherSources({
@@ -31,6 +36,7 @@ export async function buildAssistantVaultOverviewBlock(
     'Vault overview for navigation only:',
     '- This is a compact orientation snapshot, not canonical evidence.',
     canonicalCoverage,
+    wearableCoverage,
     rawCoverage,
     bankCoverage,
     otherSources,
@@ -48,6 +54,7 @@ function summarizeCanonicalCoverage(vault: VaultReadModel): string | null {
       countEventsOfKind(vault, 'activity_session'),
       'activity session',
     ),
+    summarizePositiveCount(vault.experiments.length, 'experiment'),
   ].filter((value): value is string => Boolean(value))
 
   if (parts.length === 0) {
@@ -55,6 +62,19 @@ function summarizeCanonicalCoverage(vault: VaultReadModel): string | null {
   }
 
   return `- Canonical coverage includes ${joinWithAnd(parts)}.`
+}
+
+function summarizeWearableCoverage(vault: VaultReadModel): string | null {
+  const sourceHealth = listWearableSourceHealth(vault)
+  if (sourceHealth.length === 0) {
+    return null
+  }
+
+  const providerNames = sourceHealth
+    .map((entry) => entry.providerDisplayName)
+    .filter((value, index, values) => values.indexOf(value) === index)
+
+  return `- Wearable coverage is present via ${joinWithAnd(providerNames)}.`
 }
 
 function summarizeRawCoverage(rawMealManifestCount: number): string | null {
