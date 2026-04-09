@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import os from "node:os";
 import path from "node:path";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 
 import { afterEach, test } from "vitest";
 
@@ -76,4 +76,28 @@ test("reads and writes canonical workout unit preferences from the singleton pre
 
   const validation = await validateVault({ vaultRoot });
   assert.equal(validation.valid, true);
+});
+
+test("reads legacy preference documents that still carry the removed distance key", async () => {
+  const vaultRoot = await createTempVault();
+  await writeFile(
+    path.join(vaultRoot, "bank/preferences.json"),
+    `${JSON.stringify({
+      schemaVersion: 1,
+      updatedAt: "2026-04-08T10:00:00.000Z",
+      workoutUnitPreferences: {
+        weight: "kg",
+        distance: "mi",
+        bodyMeasurement: "cm",
+      },
+    }, null, 2)}\n`,
+    "utf8",
+  );
+
+  const document = await readPreferencesDocument(vaultRoot);
+  assert.equal(document.exists, true);
+  assert.deepEqual(document.workoutUnitPreferences, {
+    weight: "kg",
+    bodyMeasurement: "cm",
+  });
 });

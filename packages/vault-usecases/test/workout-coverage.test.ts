@@ -701,7 +701,6 @@ describe("workout-measurement", () => {
         updatedAt: "2026-04-08T10:00:00.000Z",
         workoutUnitPreferences: {
           weight: "lb",
-          distance: "mi",
           bodyMeasurement: "cm",
         },
       });
@@ -714,7 +713,6 @@ describe("workout-measurement", () => {
         updatedAt: "2026-04-08T12:00:00.000Z",
         workoutUnitPreferences: {
           weight: "kg",
-          distance: "mi",
           bodyMeasurement: "cm",
         },
       },
@@ -774,7 +772,6 @@ describe("workout-measurement", () => {
     const noChange = await workoutMeasurementModule.setWorkoutUnitPreferences({
       vault: "./vault",
       weight: "lb",
-      distance: "mi",
       bodyMeasurement: "cm",
     });
     assert.equal(noChange.updated, false);

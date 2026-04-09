@@ -374,7 +374,7 @@ export function registerWorkoutCommands(
 
   const units = Cli.create('units', {
     description:
-      'Canonical workout unit preferences used by workout and body-measurement capture flows.',
+      'Canonical weight and body-measurement unit preferences used by measurement capture flows.',
   })
 
   units.command('show', {
@@ -392,7 +392,6 @@ export function registerWorkoutCommands(
     args: z.object({}),
     options: withBaseOptions({
       weight: z.enum(['lb', 'kg']).optional(),
-      distance: z.enum(['km', 'mi']).optional(),
       bodyMeasurement: z
         .enum(['cm', 'in'])
         .optional()
@@ -406,7 +405,6 @@ export function registerWorkoutCommands(
       return setWorkoutUnitPreferences({
         vault: options.vault,
         weight: typeof options.weight === 'string' ? options.weight : undefined,
-        distance: typeof options.distance === 'string' ? options.distance : undefined,
         bodyMeasurement:
           typeof options.bodyMeasurement === 'string'
             ? options.bodyMeasurement

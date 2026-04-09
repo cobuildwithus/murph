@@ -1,5 +1,4 @@
 import {
-  createEmptyPreferencesDocument,
   preferencesDocumentRelativePath,
   preferencesDocumentSchema,
   preferencesDocumentSchemaVersion,
@@ -13,6 +12,7 @@ import {
 } from "./fs.ts";
 import { runCanonicalWrite } from "./operations/write-batch.ts";
 import { resolveVaultPath } from "./path-safety.ts";
+import { isPlainRecord } from "./types.ts";
 
 export type {
   PreferencesDocument,
@@ -29,23 +29,42 @@ export function resolvePreferencesDocumentPath(vaultRoot: string): string {
   return resolveVaultPath(vaultRoot, preferencesDocumentRelativePath).absolutePath;
 }
 
+function normalizePreferencesDocumentForRead(value: unknown): unknown {
+  if (!isPlainRecord(value)) {
+    return value;
+  }
+
+  const workoutUnitPreferences = value.workoutUnitPreferences;
+  if (!isPlainRecord(workoutUnitPreferences) || !("distance" in workoutUnitPreferences)) {
+    return value;
+  }
+
+  const { distance: _removedDistance, ...normalizedWorkoutUnitPreferences } = workoutUnitPreferences;
+  return {
+    ...value,
+    workoutUnitPreferences: normalizedWorkoutUnitPreferences,
+  };
+}
+
 export async function readPreferencesDocument(
   vaultRoot: string,
 ): Promise<PreferencesDocumentSnapshot> {
   const resolved = resolveVaultPath(vaultRoot, preferencesDocumentRelativePath);
 
   if (!(await pathExists(resolved.absolutePath))) {
-    const document = createEmptyPreferencesDocument();
     return {
-      ...document,
       exists: false,
+      schemaVersion: preferencesDocumentSchemaVersion,
       sourcePath: resolved.relativePath,
       updatedAt: null,
+      workoutUnitPreferences: {},
     };
   }
 
   const document = preferencesDocumentSchema.parse(
-    await readJsonFile(vaultRoot, resolved.relativePath),
+    normalizePreferencesDocumentForRead(
+      await readJsonFile(vaultRoot, resolved.relativePath),
+    ),
   );
 
   return {

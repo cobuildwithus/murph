@@ -73,7 +73,7 @@ test("listCanonicalSourceManifest uses shared vault family inclusion rules", asy
   await writeVaultFile(
     vaultRoot,
     VAULT_LAYOUT.preferencesDocument,
-    '{"schemaVersion":1,"updatedAt":"2026-04-08T00:00:00.000Z","workoutUnitPreferences":{"distance":"km"}}\n',
+    '{"schemaVersion":1,"updatedAt":"2026-04-08T00:00:00.000Z","workoutUnitPreferences":{"weight":"kg"}}\n',
   );
   await writeVaultFile(
     vaultRoot,

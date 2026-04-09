@@ -2795,13 +2795,6 @@
                                     "kg"
                                   ]
                                 },
-                                "distance": {
-                                  "type": "string",
-                                  "enum": [
-                                    "km",
-                                    "mi"
-                                  ]
-                                },
                                 "bodyMeasurement": {
                                   "description": "Preferred circumference/body-measurement unit.",
                                   "type": "string",

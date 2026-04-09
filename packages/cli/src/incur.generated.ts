@@ -217,7 +217,7 @@ declare module 'incur' {
       'workout measurement manifest': { args: { id: string }; options: { vault: string; requestId?: string } }
       'workout measurement show': { args: { id: string }; options: { vault: string; requestId?: string } }
       'workout show': { args: { id: string }; options: { vault: string; requestId?: string } }
-      'workout units set': { args: {}; options: { vault: string; requestId?: string; weight?: "lb" | "kg"; distance?: "km" | "mi"; bodyMeasurement?: "cm" | "in"; recordedAt?: string } }
+      'workout units set': { args: {}; options: { vault: string; requestId?: string; weight?: "lb" | "kg"; bodyMeasurement?: "cm" | "in"; recordedAt?: string } }
       'workout units show': { args: {}; options: { vault: string; requestId?: string } }
     }
   }
