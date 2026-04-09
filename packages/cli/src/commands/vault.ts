@@ -78,7 +78,7 @@ export function registerVaultCommands(cli: Cli.Cli, services: VaultServices) {
   cli.command(
     'init',
     {
-      description: 'Create the baseline vault layout through the core write path.',
+      description: 'Create the current vault layout through the core write path.',
       args: emptyArgsSchema,
       options: withBaseOptions({
         timezone: timeZoneSchema.optional().describe('Optional IANA timezone for the new vault. Defaults to the local system timezone.'),
@@ -160,7 +160,7 @@ export function registerVaultCommands(cli: Cli.Cli, services: VaultServices) {
 
   vaultGroup.command('repair', {
     description:
-      'Repair scaffold-only drift on current-format vaults such as missing required directories. Legacy formatVersion vaults should run upgrade first.',
+      'Repair missing required directories on current-format vaults. Older formatVersion vaults fail closed and are not auto-migrated.',
     args: emptyArgsSchema,
     options: withBaseOptions(),
     output: vaultRepairResultSchema,
@@ -174,10 +174,10 @@ export function registerVaultCommands(cli: Cli.Cli, services: VaultServices) {
 
   vaultGroup.command('upgrade', {
     description:
-      'Plan or apply ordered canonical vault upgrades. Rebuildable .runtime projection stores stay separate.',
+      'Run the reserved canonical vault-upgrade seam. Today it confirms current-format vaults and fails closed on older formatVersion values because no upgrade steps are registered.',
     args: emptyArgsSchema,
     options: withBaseOptions({
-      dryRun: z.boolean().default(false).describe('Preview the upgrade plan without writing canonical files.'),
+      dryRun: z.boolean().default(false).describe('Preview the current-format check without writing canonical files.'),
     }),
     output: vaultUpgradeResultSchema,
     async run({ options }) {

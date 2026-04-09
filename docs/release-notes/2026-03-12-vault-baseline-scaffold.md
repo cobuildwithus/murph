@@ -1,20 +1,20 @@
-# 2026-03-12 Vault Baseline Scaffold
+# 2026-03-12 Vault Baseline Foundation
 
 ## Summary
 
-Established the Murph baseline scaffold for the file-native vault architecture, then reconciled the first downstream integration pass across the executable runtime packages.
+Recorded the initial file-native vault contract foundation, then reconciled the first downstream integration pass across the executable runtime packages.
 
 ## What changed
 
-- Froze the baseline package names:
+- Froze the initial package names:
   - `@murph/contracts`
   - `@murph/core`
   - `@murph/cli`
   - `@murph/importers`
   - `@murph/query`
-- Froze `vault-cli` as the only public command namespace for the baseline.
+- Froze `vault-cli` as the only public command namespace for the vault contract.
 - Documented the safe extension rules for package boundaries, canonical write authority, immutable `raw/`, append-only ledgers, and out-of-vault assistant state.
-- Added release-note scaffolding for future implementation-lane drops.
+- Added the dated release-note lane for later operator-visible or contract-visible changes.
 - Aligned `packages/core` write paths with the frozen contract shapes for vault metadata, frontmatter, events, samples, and audits.
 - Reconciled `packages/importers` and `packages/query` against the contract-shaped core outputs.
 - Wired the CLI service layer to real package functions in source instead of placeholder service stubs.

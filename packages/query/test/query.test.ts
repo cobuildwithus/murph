@@ -872,10 +872,19 @@ test(
       assert.equal(documentRecord?.entityId, "doc_01JNV4DOC0000000000000001");
       assert.equal(documentRecord?.primaryLookupId, "doc_01JNV4DOC0000000000000001");
       assert.equal(documentRecord?.attributes.documentId, "doc_01JNV4DOC0000000000000001");
-      assert.equal(
-        documentRecord?.attributes.documentPath,
+      assert.deepEqual(documentRecord?.attributes.rawRefs, [
         "raw/documents/2026/03/doc_01JNV4DOC0000000000000001/lab-report.pdf",
-      );
+      ]);
+      assert.deepEqual(documentRecord?.attributes.attachments, [
+        {
+          role: "source_document",
+          kind: "document",
+          relativePath: "raw/documents/2026/03/doc_01JNV4DOC0000000000000001/lab-report.pdf",
+          mediaType: "application/pdf",
+          sha256: "3".repeat(64),
+          originalFileName: "lab-report.pdf",
+        },
+      ]);
       assert.equal(documentRecord?.attributes.mimeType, "application/pdf");
 
       const legacyJournal = getJournalEntry(vault, "2026-03-11");
@@ -2017,7 +2026,7 @@ test("searchVaultSafe omits raw path terms and path fields by construction", () 
     title: "Quiet Probe",
     body: "Ordinary notes without the filename token.",
     data: {
-      documentPath: "raw/documents/path-only-token-probe.pdf",
+      rawRefs: ["raw/documents/path-only-token-probe.pdf"],
     },
   });
   const visible = createRecord({
@@ -2805,8 +2814,17 @@ Light walk and early bedtime.
         note: "Eggs and avocado lunch.",
         tags: ["meal", "nutrition"],
         mealId: "meal_01JNV4MEAL00000000000001",
-        photoPaths: ["raw/meals/2026/03/meal_01JNV4MEAL00000000000001/photo-lunch.jpg"],
-        audioPaths: [],
+        rawRefs: ["raw/meals/2026/03/meal_01JNV4MEAL00000000000001/photo-lunch.jpg"],
+        attachments: [
+          {
+            role: "photo",
+            kind: "photo",
+            relativePath: "raw/meals/2026/03/meal_01JNV4MEAL00000000000001/photo-lunch.jpg",
+            mediaType: "image/jpeg",
+            sha256: "2".repeat(64),
+            originalFileName: "photo-lunch.jpg",
+          },
+        ],
       }),
       JSON.stringify({
         schemaVersion: "murph.event.v1",
@@ -2828,10 +2846,20 @@ Light walk and early bedtime.
         dayKey: "2026-03-12",
         source: "import",
         title: "Lab report",
-        relatedIds: ["doc_01JNV4DOC0000000000000001"],
+        links: [{ type: "related_to", targetId: "doc_01JNV4DOC0000000000000001" }],
+        rawRefs: ["raw/documents/2026/03/doc_01JNV4DOC0000000000000001/lab-report.pdf"],
+        attachments: [
+          {
+            role: "source_document",
+            kind: "document",
+            relativePath:
+              "raw/documents/2026/03/doc_01JNV4DOC0000000000000001/lab-report.pdf",
+            mediaType: "application/pdf",
+            sha256: "3".repeat(64),
+            originalFileName: "lab-report.pdf",
+          },
+        ],
         documentId: "doc_01JNV4DOC0000000000000001",
-        documentPath:
-          "raw/documents/2026/03/doc_01JNV4DOC0000000000000001/lab-report.pdf",
         mimeType: "application/pdf",
       }),
       "",

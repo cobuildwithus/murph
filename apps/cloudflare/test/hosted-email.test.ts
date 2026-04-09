@@ -216,7 +216,7 @@ describe("hosted email routing and transport", () => {
     })).resolves.toBeNull();
   });
 
-  it("does not resolve removed legacy verified-owner records and rewrites them on sync", async () => {
+  it("fails closed on legacy verified-owner records instead of rewriting them on sync", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
     const verifiedEmailAddress = "owner@example.com";
     const senderKey = await deriveVerifiedSenderKey(TEST_CONFIG.signingSecret!, verifiedEmailAddress);
@@ -253,9 +253,9 @@ describe("hosted email routing and transport", () => {
       key: TEST_KEY,
       keyId: TEST_KEY_ID,
       to: TEST_CONFIG.fromAddress!,
-    })).resolves.toBeNull();
+    })).rejects.toThrow("Hosted email verified sender route schema is invalid.");
 
-    await reconcileHostedEmailVerifiedSenderRoute({
+    await expect(reconcileHostedEmailVerifiedSenderRoute({
       bucket,
       config: TEST_CONFIG,
       key: TEST_KEY,
@@ -263,7 +263,7 @@ describe("hosted email routing and transport", () => {
       nextVerifiedEmailAddress: verifiedEmailAddress,
       previousVerifiedEmailAddress: null,
       userId: "legacy-user",
-    });
+    })).rejects.toThrow("Hosted email verified sender route schema is invalid.");
 
     expect(await readStoredVerifiedSenderRoute({
       bucket,
@@ -273,23 +273,10 @@ describe("hosted email routing and transport", () => {
       verifiedEmailAddress,
     })).toMatchObject({
       identityId: TEST_CONFIG.fromAddress,
-      schema: "murph.hosted-email-verified-sender-route.v2",
-      senderHash: await deriveVerifiedSenderHash(TEST_CONFIG.signingSecret!, verifiedEmailAddress),
+      schema: "murph.hosted-email-verified-sender-route.v1",
       senderKey,
       userId: "legacy-user",
-    });
-
-    await expect(resolveHostedEmailIngressRoute({
-      bucket,
-      config: TEST_CONFIG,
-      envelopeFrom: verifiedEmailAddress,
-      hasRepeatedHeaderFrom: false,
-      headerFrom: "Owner <owner@example.com>",
-      key: TEST_KEY,
-      keyId: TEST_KEY_ID,
-      to: TEST_CONFIG.fromAddress!,
-    })).resolves.toMatchObject({
-      userId: "legacy-user",
+      verifiedEmailAddress,
     });
   });
 

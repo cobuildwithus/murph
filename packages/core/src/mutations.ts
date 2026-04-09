@@ -37,8 +37,6 @@ import {
 } from "./constants.ts";
 import { emitAuditRecord } from "./audit.ts";
 import {
-  buildAttachmentCompatibilityProjections,
-  buildAttachmentPathCompatibilityProjections,
   prepareEventAttachments,
   stagePreparedEventAttachmentsInBatch,
 } from "./event-attachments.ts";
@@ -364,7 +362,6 @@ interface NormalizedEventSeed<K extends EventKind> {
   note?: string;
   tags?: string[];
   links?: EventLinkInput[];
-  relatedIds?: string[];
   rawRefs?: string[];
   externalRef?: ExternalRef;
   fields: LooseRecord;
@@ -648,28 +645,10 @@ function deterministicContractId(prefix: string, seed: string): string {
 function buildPreparedAttachmentState(
   preparedAttachments: readonly PreparedEventAttachment[],
 ): {
-  projections: {
-    audioPaths: string[];
-    documentPath: string | null;
-    photoPaths: string[];
-    rawRefs: string[];
-  };
+  rawRefs: string[];
 } {
-  const projections = buildAttachmentPathCompatibilityProjections(
-    preparedAttachments.map((attachment) => ({
-      role: attachment.role,
-      kind: attachment.kind ?? "other",
-      relativePath: attachment.raw.relativePath,
-    })),
-  );
-
   return {
-    projections: {
-      audioPaths: projections.audioPaths,
-      documentPath: projections.documentPath,
-      photoPaths: projections.photoPaths,
-      rawRefs: projections.rawRefs,
-    },
+    rawRefs: [...new Set(preparedAttachments.map((attachment) => attachment.raw.relativePath))],
   };
 }
 
@@ -729,7 +708,6 @@ function buildNormalizedEventSeed<K extends EventKind>({
     note: typeof note === "string" && note.trim() ? note.trim() : undefined,
     tags: trimStringList(tags),
     links: canonicalRelations.links,
-    relatedIds: canonicalRelations.relatedIds,
     rawRefs: trimStringList(rawRefs),
     externalRef: normalizeExternalRef(externalRef),
     fields: normalizedFields,
@@ -757,7 +735,6 @@ function buildEventContractInput<K extends EventKind>(
     note: seed.note,
     tags: seed.tags,
     links: seed.links?.length ? seed.links : undefined,
-    relatedIds: seed.relatedIds,
     rawRefs: seed.rawRefs,
     externalRef: seed.externalRef,
     ...seed.fields,
@@ -1455,11 +1432,10 @@ export async function importDocument({
     source,
     title: String(title ?? raw.originalFileName).trim(),
     note,
-    relatedIds: [documentId],
-    rawRefs: pendingAttachmentState.projections.rawRefs,
+    links: [{ type: "related_to", targetId: documentId }],
+    rawRefs: pendingAttachmentState.rawRefs,
     fields: {
       documentId,
-      documentPath: pendingAttachmentState.projections.documentPath,
       mimeType: raw.mediaType,
     },
   });
@@ -1491,7 +1467,6 @@ export async function importDocument({
       if (!stagedAttachments) {
         throw new VaultError("EVENT_ATTACHMENTS_MISSING", "Document import expected one staged attachment.");
       }
-      const projections = buildAttachmentCompatibilityProjections(stagedAttachments.attachments);
       const event = prepareStoredEventLedgerEntry(
         {
           ...eventSeed,
@@ -1499,7 +1474,6 @@ export async function importDocument({
           fields: {
             ...eventSeed.fields,
             attachments: stagedAttachments.attachments,
-            documentPath: projections.documentPath ?? raw.relativePath,
           },
         },
         eventId,
@@ -1591,12 +1565,10 @@ export async function addMeal({
     source,
     title: "Meal",
     note,
-    relatedIds: [mealId],
-    rawRefs: pendingAttachmentState.projections.rawRefs,
+    links: [{ type: "related_to", targetId: mealId }],
+    rawRefs: pendingAttachmentState.rawRefs,
     fields: {
       mealId,
-      photoPaths: pendingAttachmentState.projections.photoPaths,
-      audioPaths: pendingAttachmentState.projections.audioPaths,
     },
   });
   return runCanonicalWrite({
@@ -1625,15 +1597,10 @@ export async function addMeal({
       });
       let rawRefs = eventSeed.rawRefs;
       let attachments: EventAttachment[] | undefined;
-      let photoPaths = eventSeed.fields.photoPaths as string[];
-      let audioPaths = eventSeed.fields.audioPaths as string[];
 
       if (stagedAttachments) {
-        const projections = buildAttachmentCompatibilityProjections(stagedAttachments.attachments);
-        rawRefs = projections.rawRefs;
+        rawRefs = stagedAttachments.rawRefs;
         attachments = stagedAttachments.attachments;
-        photoPaths = projections.photoPaths;
-        audioPaths = projections.audioPaths;
       }
       const manifestPath = stagedAttachments
         ? stagedAttachments.manifestPath
@@ -1666,8 +1633,6 @@ export async function addMeal({
           fields: {
             ...eventSeed.fields,
             attachments,
-            photoPaths,
-            audioPaths,
           },
         },
         eventId,

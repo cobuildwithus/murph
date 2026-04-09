@@ -225,14 +225,6 @@
           },
           "uniqueItems": true
         },
-        "relatedIds": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
-          },
-          "uniqueItems": true
-        },
         "rawRefs": {
           "type": "array",
           "items": {
@@ -357,10 +349,6 @@
           "type": "string",
           "pattern": "^doc_[0-9A-HJKMNP-TV-Z]{26}$"
         },
-        "documentPath": {
-          "type": "string",
-          "pattern": "^raw\\/documents\\/[A-Za-z0-9._/-]+$"
-        },
         "mimeType": {
           "type": "string",
           "minLength": 3,
@@ -381,7 +369,6 @@
         "title",
         "kind",
         "documentId",
-        "documentPath",
         "mimeType"
       ],
       "additionalProperties": false
@@ -607,14 +594,6 @@
                 "additionalProperties": false
               }
             ]
-          },
-          "uniqueItems": true
-        },
-        "relatedIds": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
           },
           "uniqueItems": true
         },
@@ -990,14 +969,6 @@
           },
           "uniqueItems": true
         },
-        "relatedIds": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
-          },
-          "uniqueItems": true
-        },
         "rawRefs": {
           "type": "array",
           "items": {
@@ -1122,21 +1093,6 @@
           "type": "string",
           "pattern": "^meal_[0-9A-HJKMNP-TV-Z]{26}$"
         },
-        "photoPaths": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "pattern": "^raw\\/meals\\/[A-Za-z0-9._/-]+$"
-          },
-          "uniqueItems": true
-        },
-        "audioPaths": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "pattern": "^raw\\/meals\\/[A-Za-z0-9._/-]+$"
-          }
-        },
         "ingredients": {
           "maxItems": 100,
           "type": "array",
@@ -1156,9 +1112,7 @@
         "source",
         "title",
         "kind",
-        "mealId",
-        "photoPaths",
-        "audioPaths"
+        "mealId"
       ],
       "additionalProperties": false
     },
@@ -1383,14 +1337,6 @@
                 "additionalProperties": false
               }
             ]
-          },
-          "uniqueItems": true
-        },
-        "relatedIds": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
           },
           "uniqueItems": true
         },
@@ -1763,14 +1709,6 @@
           },
           "uniqueItems": true
         },
-        "relatedIds": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
-          },
-          "uniqueItems": true
-        },
         "rawRefs": {
           "type": "array",
           "items": {
@@ -2131,14 +2069,6 @@
                 "additionalProperties": false
               }
             ]
-          },
-          "uniqueItems": true
-        },
-        "relatedIds": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
           },
           "uniqueItems": true
         },
@@ -2510,14 +2440,6 @@
                 "additionalProperties": false
               }
             ]
-          },
-          "uniqueItems": true
-        },
-        "relatedIds": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
           },
           "uniqueItems": true
         },
@@ -2897,14 +2819,6 @@
           },
           "uniqueItems": true
         },
-        "relatedIds": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
-          },
-          "uniqueItems": true
-        },
         "rawRefs": {
           "type": "array",
           "items": {
@@ -3278,14 +3192,6 @@
           },
           "uniqueItems": true
         },
-        "relatedIds": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
-          },
-          "uniqueItems": true
-        },
         "rawRefs": {
           "type": "array",
           "items": {
@@ -3652,14 +3558,6 @@
                 "additionalProperties": false
               }
             ]
-          },
-          "uniqueItems": true
-        },
-        "relatedIds": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
           },
           "uniqueItems": true
         },
@@ -4033,14 +3931,6 @@
                 "additionalProperties": false
               }
             ]
-          },
-          "uniqueItems": true
-        },
-        "relatedIds": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
           },
           "uniqueItems": true
         },
@@ -4538,14 +4428,6 @@
                 "additionalProperties": false
               }
             ]
-          },
-          "uniqueItems": true
-        },
-        "relatedIds": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
           },
           "uniqueItems": true
         },
@@ -5124,14 +5006,6 @@
           },
           "uniqueItems": true
         },
-        "relatedIds": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
-          },
-          "uniqueItems": true
-        },
         "rawRefs": {
           "type": "array",
           "items": {
@@ -5580,14 +5454,6 @@
           },
           "uniqueItems": true
         },
-        "relatedIds": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
-          },
-          "uniqueItems": true
-        },
         "rawRefs": {
           "type": "array",
           "items": {
@@ -5960,14 +5826,6 @@
           },
           "uniqueItems": true
         },
-        "relatedIds": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
-          },
-          "uniqueItems": true
-        },
         "rawRefs": {
           "type": "array",
           "items": {
@@ -6335,14 +6193,6 @@
                 "additionalProperties": false
               }
             ]
-          },
-          "uniqueItems": true
-        },
-        "relatedIds": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
           },
           "uniqueItems": true
         },
@@ -6721,14 +6571,6 @@
                 "additionalProperties": false
               }
             ]
-          },
-          "uniqueItems": true
-        },
-        "relatedIds": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "pattern": "^(?:alg|asmt|aud|automation|cond|doc|evt|exp|fam|food|goal|meal|mem|pack|psnap|prov|rcp|prot|smp|xfm|var|vault|wfmt)_[0-9A-HJKMNP-TV-Z]{26}$"
           },
           "uniqueItems": true
         },

@@ -333,13 +333,11 @@ export function getVaultEntities(vault: VaultReadModel): CanonicalEntity[] {
 }
 
 export function entityRelationTargetIds(
-  entity: Pick<CanonicalEntity, "links" | "relatedIds" | "lookupIds">,
+  entity: Pick<CanonicalEntity, "links" | "lookupIds">,
 ): string[] {
   return entity.links.length > 0
     ? linkTargetIds(entity.links)
-    : entity.relatedIds.length > 0
-      ? entity.relatedIds
-      : entity.lookupIds;
+    : entity.lookupIds;
 }
 
 export function lookupEntityById(

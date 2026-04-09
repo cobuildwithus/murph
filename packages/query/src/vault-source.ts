@@ -60,10 +60,6 @@ class QueryVaultSourceError extends Error {
   }
 }
 
-function relatedIdsToLinks(...groups: readonly unknown[]) {
-  return relatedToLinks(groups.flatMap((group) => normalizeUniqueStringArray(group)));
-}
-
 function explicitCanonicalLinks(value: unknown) {
   if (!Array.isArray(value)) {
     return [];
@@ -86,17 +82,6 @@ function explicitCanonicalLinks(value: unknown) {
       return [{ type, targetId }];
     }),
   );
-}
-
-function relationFieldsToLinks(
-  explicitLinks: unknown,
-  ...legacyGroups: readonly unknown[]
-) {
-  if (Array.isArray(explicitLinks)) {
-    return explicitCanonicalLinks(explicitLinks);
-  }
-
-  return relatedIdsToLinks(...legacyGroups);
 }
 
 export async function readVaultSourceStrict(
@@ -302,7 +287,7 @@ async function readExperimentEntities(vaultRoot: string): Promise<CanonicalEntit
         pickString(attributes, ["title"]) ??
         extractMarkdownHeading(document.body) ??
         slug;
-      const links = relationFieldsToLinks(attributes.links, attributes.relatedIds, attributes.eventIds);
+      const links: CanonicalEntity["links"] = [];
 
       return {
         entityId: id,
@@ -348,7 +333,7 @@ async function readJournalEntities(vaultRoot: string): Promise<CanonicalEntity[]
       extractMarkdownHeading(document.body) ??
       date;
     const id = `journal:${date}`;
-    const links = relationFieldsToLinks(attributes.links, attributes.relatedIds, attributes.eventIds);
+    const links = relatedToLinks(normalizeUniqueStringArray(attributes.eventIds));
 
     pages.push({
       entityId: id,
@@ -412,7 +397,7 @@ async function readJsonlRecordFamily(
         `${recordType} record at ${sourcePath}:${lineNumber}`,
       );
       const identity = deriveVaultRecordIdentity(recordType, payload, rawRecordId);
-      const links = relationFieldsToLinks(payload.links, payload.relatedIds, payload.eventIds);
+      const links = explicitCanonicalLinks(payload.links);
       const relatedIds = linkTargetIds(links);
 
       return {
@@ -473,7 +458,7 @@ async function readSampleEntities(vaultRoot: string): Promise<CanonicalEntity[]>
         "stream",
         `sample record at ${sourcePath}:${lineNumber}`,
       );
-      const links = relationFieldsToLinks(payload.links, payload.relatedIds);
+      const links: CanonicalEntity["links"] = [];
 
       return {
         entityId: rawRecordId,
@@ -643,16 +628,20 @@ function normalizeFrontmatterAttributes(
         "experimentSlug",
         "experiment_slug",
         "started_on",
+        "relatedIds",
+        "related_ids",
+        "eventIds",
+        "event_ids",
         "updated_at",
       ]);
       normalizeArrayField(normalized, "tags");
-      normalizeArrayField(normalized, "relatedIds");
-      normalizeArrayField(normalized, "eventIds");
       return normalized;
     case "journal":
       removeKeys(normalized, [
         "day_key",
         "date",
+        "relatedIds",
+        "related_ids",
         "event_ids",
         "sample_streams",
         "experiment_slug",
@@ -661,7 +650,6 @@ function normalizeFrontmatterAttributes(
       normalizeArrayField(normalized, "tags");
       normalizeArrayField(normalized, "eventIds");
       normalizeArrayField(normalized, "sampleStreams");
-      normalizeArrayField(normalized, "relatedIds");
       return normalized;
     default:
       return normalized;
@@ -686,19 +674,20 @@ function normalizeJsonRecordPayload(
     "mime_type",
     "meal_id",
     "transform_id",
+    "relatedIds",
     "related_ids",
     "raw_refs",
+    "eventIds",
     "event_ids",
+    "documentPath",
+    "photoPaths",
+    "audioPaths",
     "photo_paths",
     "audio_paths",
   ]);
   normalizeArrayField(normalized, "tags");
   normalizeObjectArrayField(normalized, "attachments");
-  normalizeArrayField(normalized, "relatedIds");
   normalizeArrayField(normalized, "rawRefs");
-  normalizeArrayField(normalized, "eventIds");
-  normalizeArrayField(normalized, "photoPaths");
-  normalizeArrayField(normalized, "audioPaths");
 
   return normalized;
 }
@@ -721,9 +710,6 @@ function normalizeRecordData(
       ...normalizeUniqueStringArray(data.eventIds),
       rawRecordId,
     ]);
-    data.relatedIds = uniqueStrings(normalizeUniqueStringArray(data.relatedIds)).filter(
-      (relatedId) => relatedId !== displayId,
-    );
   }
 
   return data;

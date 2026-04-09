@@ -83,32 +83,23 @@ export function createHostedEmailRouteStore(input: HostedEmailRouteStoreInput): 
 
     async readVerifiedSenderRoute(senderKey) {
       const key = await hostedEmailVerifiedSenderRouteObjectKey(input.key, senderKey);
-
-      try {
-        return await readEncryptedR2Json({
-          aad: buildHostedStorageAad({
-            key,
-            purpose: "email-route",
-            routeKind: "verified-sender",
-            senderKey,
-          }),
-          bucket: input.bucket,
-          cryptoKey: input.key,
-          cryptoKeysById: input.keysById,
-          expectedKeyId: input.keyId,
+      return readEncryptedR2Json({
+        aad: buildHostedStorageAad({
           key,
-          parse(value) {
-            return parseHostedEmailVerifiedSenderRouteRecord(value);
-          },
-          scope: "email-route",
-        });
-      } catch (error) {
-        if (!(error instanceof TypeError)) {
-          throw error;
-        }
-      }
-
-      return null;
+          purpose: "email-route",
+          routeKind: "verified-sender",
+          senderKey,
+        }),
+        bucket: input.bucket,
+        cryptoKey: input.key,
+        cryptoKeysById: input.keysById,
+        expectedKeyId: input.keyId,
+        key,
+        parse(value) {
+          return parseHostedEmailVerifiedSenderRouteRecord(value);
+        },
+        scope: "email-route",
+      });
     },
 
     async deleteVerifiedSenderRoute(senderKey) {

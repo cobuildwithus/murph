@@ -96,7 +96,7 @@ Hosted onboarding extras:
 
 Hosted web now mounts one app-level Privy provider from `app/layout.tsx`. Hosted pages assume the full hosted Privy phone-auth config is present and fail fast at render time when it is missing instead of carrying page-local fallback UI branches.
 
-Hosted onboarding private state is now local to `apps/web`: blind lookup keys stay queryable in Postgres, while recoverable raw member ids and the raw source values needed to re-derive those lookup keys are encrypted into the owning Prisma rows instead of being mirrored into Cloudflare. Blind-index rotation follows one simple model: write one current version, read any configured keyring versions, backfill the owner tables in place, and only then remove the old version from the contact-privacy keyring. Drain lookup-bearing hosted execution outbox events before a write-mode rotation backfill so staged payload refs do not preserve stale lookup identities.
+Hosted onboarding private state is now local to `apps/web`: blind lookup keys stay queryable in Postgres, while recoverable raw member ids and the raw source values needed to re-derive those lookup keys are encrypted into the owning Prisma rows instead of being mirrored into Cloudflare. Contact privacy keeps the future rotation seam at the keyring layer: writes use the current key version and read paths can derive candidates from every configured version without widening the current schema or adding launch-time backfill tooling to the main operator workflow.
 
 Optional hosted AI usage metering:
 
@@ -173,7 +173,8 @@ pnpm --dir apps/web prisma:generate
 pnpm --dir apps/web prisma:migrate:deploy
 ```
 
-The hosted device-sync SQL hard-cut is currently greenfield/reset-only. Until a deployed hosted Postgres environment needs an in-place rollout, the repo keeps that hard-cut folded into the initial migration instead of carrying a separate forward migration for the removed raw-id/JSON columns.
+The hosted device-sync SQL hard-cut is still a pre-launch baseline change. Until a deployed hosted Postgres environment needs in-place preservation, the repo keeps that hard-cut folded into the initial migration instead of carrying a separate follow-up migration for the removed raw-id or JSON columns.
+The hosted Prisma schema is still a pre-launch baseline. `2026040600_init` already includes the current hosted-member owner tables, normalized webhook side-effect JSON columns, and `execution_outbox.dispatch_state`; until there is a live hosted Postgres database to preserve, cleanup changes to that baseline should be folded back into the init migration instead of shipped as separate cleanup follow-ups.
 
 ## Local verification
 

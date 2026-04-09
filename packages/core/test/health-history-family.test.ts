@@ -140,7 +140,6 @@ test("history links round-trip through write, storage, read, and list surfaces",
   assert.deepEqual(appended.record.links, [
     { type: "related_to", targetId: "prov_01JNW7YJ7MNE7M9Q2QWQK4Z3F8" },
   ]);
-  assert.deepEqual(appended.record.relatedIds, ["prov_01JNW7YJ7MNE7M9Q2QWQK4Z3F8"]);
   assert.deepEqual(listed[0]?.links, [
     { type: "related_to", targetId: "prov_01JNW7YJ7MNE7M9Q2QWQK4Z3F8" },
   ]);
@@ -150,7 +149,6 @@ test("history links round-trip through write, storage, read, and list surfaces",
   assert.deepEqual(storedRecord?.links, [
     { type: "related_to", targetId: "prov_01JNW7YJ7MNE7M9Q2QWQK4Z3F8" },
   ]);
-  assert.deepEqual(storedRecord?.relatedIds, ["prov_01JNW7YJ7MNE7M9Q2QWQK4Z3F8"]);
 });
 
 test("health history writes store the vault-local dayKey and timezone when UTC crosses midnight", async () => {

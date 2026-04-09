@@ -268,7 +268,7 @@ test("attachment-free and attachment-backed event writes stay honest and deleteE
   assert.deepEqual(deleted.retainedPaths, [retainedPath]);
 });
 
-test("document deletes retain compatibility paths and repeated deletes reject missing events", async () => {
+test("document deletes retain canonical attachment paths and repeated deletes reject missing events", async () => {
   const vaultRoot = await makeTempDirectory("murph-core-document-delete-thresholds");
   const sourceRoot = await makeTempDirectory("murph-core-document-delete-thresholds-source");
   await initializeVault({ vaultRoot });
@@ -281,7 +281,7 @@ test("document deletes retain compatibility paths and repeated deletes reject mi
     note: "Document import for deletion coverage.",
   });
 
-  assert.ok(document.event.documentPath);
+  assert.deepEqual(document.event.rawRefs, [document.raw.relativePath]);
 
   const deleted = await deleteEvent({
     vaultRoot,
@@ -290,7 +290,7 @@ test("document deletes retain compatibility paths and repeated deletes reject mi
 
   assert.equal(deleted.deleted, true);
   assert.equal(deleted.kind, "document");
-  assert.ok(deleted.retainedPaths.includes(document.event.documentPath));
+  assert.ok(deleted.retainedPaths.includes(document.raw.relativePath));
 
   await assert.rejects(
     () =>
@@ -311,7 +311,7 @@ test("document deletes retain compatibility paths and repeated deletes reject mi
   );
 });
 
-test("specialized event rewrites reject cross-kind updates and meal deletes retain all compatibility paths", async () => {
+test("specialized event rewrites reject cross-kind updates and meal deletes retain canonical attachment paths", async () => {
   const vaultRoot = await makeTempDirectory("murph-core-event-rewrite-thresholds");
   const sourceRoot = await makeTempDirectory("murph-core-event-rewrite-thresholds-source");
   await initializeVault({ vaultRoot });
@@ -368,13 +368,9 @@ test("specialized event rewrites reject cross-kind updates and meal deletes reta
   const expectedRetainedPaths = [...new Set([
     ...mealAttachmentPaths,
     ...(meal.event.rawRefs ?? []),
-    ...(meal.event.photoPaths ?? []),
-    ...(meal.event.audioPaths ?? []),
   ])].sort((left, right) => left.localeCompare(right));
 
   assert.equal(meal.event.attachments?.length, 2);
-  assert.equal(meal.event.photoPaths?.length, 1);
-  assert.equal(meal.event.audioPaths?.length, 1);
   assert.equal(meal.event.rawRefs?.length, 2);
 
   const deleted = await deleteEvent({

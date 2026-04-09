@@ -673,26 +673,6 @@ async function validateEventRecordReferences(
     }
   }
 
-  if (typeof record.documentPath === "string") {
-    referencedPaths.add(record.documentPath);
-  }
-
-  if (Array.isArray(record.photoPaths)) {
-    for (const photoPath of record.photoPaths) {
-      if (typeof photoPath === "string") {
-        referencedPaths.add(photoPath);
-      }
-    }
-  }
-
-  if (Array.isArray(record.audioPaths)) {
-    for (const audioPath of record.audioPaths) {
-      if (typeof audioPath === "string") {
-        referencedPaths.add(audioPath);
-      }
-    }
-  }
-
   const mediaLists = [
     Array.isArray((record as { media?: unknown }).media)
       ? ((record as { media: unknown[] }).media)

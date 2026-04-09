@@ -44,6 +44,11 @@ interface ShowEnvelope {
     title: string | null
     occurredAt: string | null
     data: Record<string, unknown>
+    links: Array<{
+      id: string
+      kind: string
+      queryable: boolean
+    }>
   }
 }
 
@@ -221,7 +226,7 @@ test.sequential(
         requireData(showHbot).entity.data.protocolId,
         'prot_01JNV422Y2M5ZBV64ZP4N1DRB1',
       )
-      assert.deepEqual(requireData(showHbot).entity.data.relatedIds, [
+      assert.deepEqual(requireData(showHbot).entity.links.map((link) => link.id), [
         'prot_01JNV422Y2M5ZBV64ZP4N1DRB1',
       ])
 

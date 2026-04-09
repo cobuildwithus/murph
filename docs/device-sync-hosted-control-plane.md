@@ -374,9 +374,9 @@ If the local agent lets its bearer expire, the hosted app rejects export/refresh
 
 That preserves a local-first data plane without requiring every sync request to transit the hosted app.
 
-## Current rollout note
+## Current baseline note
 
-The hosted device-sync SQL hard-cut is currently treated as a greenfield/reset-only schema change. Until there is a live hosted rollout to migrate, the repo intentionally rewrites the initial Prisma migration instead of layering a forward migration over a deployed legacy schema.
+The hosted device-sync SQL hard-cut is currently treated as a pre-launch schema baseline. Until there is a live hosted Postgres deployment to preserve, the repo rewrites the initial Prisma migration to the current shape instead of layering separate cleanup migrations over a legacy hosted schema.
 
 ## Sparse synchronization model
 
@@ -385,7 +385,7 @@ To avoid constant hosted chatter:
 - hosted app never proxies normal provider data payloads
 - hosted app is only consulted for control-plane events: pending signals, token export, token refresh, disconnect state, explicit session revoke, and bearer rotation/renewal through export or refresh
 
-## Migration path
+## Implementation phases
 
 ### Phase 1
 - extract reusable callback/webhook core from `device-syncd`

@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
 
@@ -63,11 +63,15 @@ const HOSTED_MEMBER_RELATION_TYPES = new Set([
 
 describe("hosted Prisma baseline migration", () => {
   it("starts from the current split-table hosted-member shape", () => {
+    const migrationEntries = readdirSync(new URL("../prisma/migrations/", import.meta.url))
+      .filter((entry) => !entry.startsWith("."))
+      .sort();
     const baselineMigrationSql = readFileSync(
       new URL("../prisma/migrations/2026040600_init/migration.sql", import.meta.url),
       "utf8",
     );
 
+    expect(migrationEntries).toEqual(["2026040600_init", "migration_lock.toml"]);
     expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_member_identity"');
     expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_member_routing"');
     expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_member_billing_ref"');
@@ -75,12 +79,18 @@ describe("hosted Prisma baseline migration", () => {
     expect(baselineMigrationSql).toContain('"masked_phone_number_hint" TEXT NOT NULL');
     expect(baselineMigrationSql).toContain('"phone_lookup_key" TEXT NOT NULL');
     expect(baselineMigrationSql).toContain('"telegram_user_lookup_key" TEXT');
+    expect(baselineMigrationSql).toContain('"payload_json" JSONB NOT NULL');
+    expect(baselineMigrationSql).toContain('"result_json" JSONB');
+    expect(baselineMigrationSql).toContain('"dispatch_state" TEXT NOT NULL DEFAULT \'queued\'');
     expect(baselineMigrationSql).not.toContain('CREATE TABLE "hosted_session"');
     expect(baselineMigrationSql).not.toContain('"phone_number" TEXT');
     expect(baselineMigrationSql).not.toContain('"normalized_phone_number" TEXT');
     expect(baselineMigrationSql).not.toContain('"telegram_username" TEXT');
     expect(baselineMigrationSql).not.toContain('"webauthn_user_id" TEXT');
     expect(baselineMigrationSql).not.toContain('"email" TEXT');
+    expect(baselineMigrationSql).not.toContain('"dispatch_payload_json" JSONB');
+    expect(baselineMigrationSql).not.toContain('"linq_chat_id" TEXT');
+    expect(baselineMigrationSql).not.toContain('"revnet_amount_paid" INTEGER');
   });
 
   it("keeps hosted-member models on the reviewed owner-table set", () => {

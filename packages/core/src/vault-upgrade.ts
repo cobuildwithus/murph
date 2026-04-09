@@ -81,6 +81,8 @@ async function planVaultUpgrade(input: {
   }
 
   if (fromFormatVersion < CURRENT_VAULT_FORMAT_VERSION) {
+    // The canonical upgrade seam is reserved, but no historical steps are
+    // registered yet, so older vaults intentionally fail closed here.
     throw new VaultError(
       "VAULT_UPGRADE_UNSUPPORTED",
       `No vault upgrade migration is registered for formatVersion ${fromFormatVersion}.`,
