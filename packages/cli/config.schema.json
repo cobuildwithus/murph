@@ -5178,7 +5178,7 @@
                   "maxLength": 128
                 },
                 "recordType": {
-                  "description": "Optional query record families such as event, journal, assessment, goal, condition, allergy, protocol, history, family, genetics, food, recipe, provider, or sample.",
+                  "description": "Optional query record families such as event, journal, assessment, goal, condition, allergy, protocol, family, genetics, food, recipe, provider, or sample.",
                   "type": "array",
                   "items": {
                     "type": "string",
