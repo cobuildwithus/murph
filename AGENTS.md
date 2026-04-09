@@ -25,23 +25,21 @@ Always read these before repo code/docs/test/config work:
 
 ## Task Router
 
-| Task | Also read | Notes |
-| --- | --- | --- |
-| Vault-only data under `vault/**` | `agent-docs/operations/verification-and-runtime.md` | No repo ledger or repo-wide checks by default. |
-| Review-only repo inspection with no file edits planned | `agent-docs/operations/verification-and-runtime.md` | No repo ledger or repo-wide checks by default unless the user asks for runtime proof. |
-| Docs/process-only | `agent-docs/operations/verification-and-runtime.md` | No audit subagents by default. |
-| Repo code/test/config | `agent-docs/operations/completion-workflow.md`, `agent-docs/operations/verification-and-runtime.md` | Use the task classes in the workflow-routing doc. When that workflow requires audit subagents, spawn them; repo policy already authorizes those passes. |
-| Auth, secrets, trust boundaries, external runtime surfaces | `agent-docs/SECURITY.md` | Treat as higher-risk by default. |
-| Retries, queues, cron, concurrency, failure handling | `agent-docs/RELIABILITY.md` | Capture direct proof for operational changes. |
-| Test selection or verification changes | `agent-docs/references/testing-ci-map.md` | Keep test coverage and doc claims aligned. |
-| Product behavior or UX tradeoffs | `agent-docs/PRODUCT_SENSE.md`, `agent-docs/PRODUCT_CONSTITUTION.md` | Prefer repo-local durable specs over chat memory. |
-| Marketing, positioning, copy, or experiment library work | `agent-docs/product-marketing-context.md` | Product marketing context with positioning, differentiation, customer language, and brand voice. |
+| If the task is about...                                       | Also read                                                                                           | Notes                                                                                                                               |
+| ------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| Review-only inspection with no planned file edits             | `agent-docs/operations/verification-and-runtime.md`                                                 | No repo ledger or repo-wide checks by default. Only add runtime proof when the user asks for it or static inspection is not enough. |
+| Docs or process only                                          | `agent-docs/operations/verification-and-runtime.md`                                                 | No audit subagents by default.                                                                                                      |
+| Repo code, tests, or config                                   | `agent-docs/operations/completion-workflow.md`, `agent-docs/operations/verification-and-runtime.md` | Follow the task classes in the workflow-routing doc. Spawn required audit subagents when that workflow calls for them.              |
+| Auth, secrets, trust boundaries, or external runtime surfaces | `agent-docs/SECURITY.md`                                                                            | Treat as higher risk by default.                                                                                                    |
+| Retries, queues, cron, concurrency, or failure handling       | `agent-docs/RELIABILITY.md`                                                                         | Capture direct proof for operational changes.                                                                                       |
+| Test selection or verification changes                        | `agent-docs/references/testing-ci-map.md`                                                           | Keep test coverage and doc claims aligned.                                                                                          |
+| Product behavior or UX tradeoffs                              | `agent-docs/PRODUCT_SENSE.md`, `agent-docs/PRODUCT_CONSTITUTION.md`                                 | Prefer repo-local durable specs over chat memory.                                                                                   |
+| Marketing, positioning, copy, or experiment library work      | `agent-docs/product-marketing-context.md`                                                           | Use the repo marketing context for positioning, differentiation, customer language, and brand voice.                                |
 
 ## Hard Rules (Non-Negotiable)
 
 - Treat `.env` and `.env*` as sensitive. Never print, commit, or otherwise expose their contents.
 - Never print or commit secrets, raw credentials, or full `Authorization` headers.
-- Do not introduce new `HB_`, `HEALTHYBOB_`, or similar branded prefixes unless the user explicitly asks for them.
 - Import sibling workspace packages by package name through declared public entrypoints only. Do not reach into another package's `src/` or `dist/`.
 - Workspace package dependencies must remain one-way and acyclic. Do not make package `A` depend on package `B` while `B` depends on `A`, whether directly, through public subpaths, or through compatibility shims.
 - Compatibility shims must be temporary and legacy-facing only. Keep the shim on the old path pointing at the new owner; never make the owning package depend on the legacy package to provide the same surface.
@@ -63,6 +61,7 @@ Always read these before repo code/docs/test/config work:
 - Repo code/docs/test/config work uses `agent-docs/exec-plans/active/COORDINATION_LEDGER.md`; vault-only data work does not by default.
 - Review-only repo inspection with no file edits does not require default test or typecheck runs; use direct file readback unless the user asks for runtime proof or the review question cannot be resolved statically.
 - Preserve unrelated worktree edits. Do not overwrite, discard, or revert work you did not make.
+- If verification or build commands introduce tracked edits outside the intended task scope, check `agent-docs/exec-plans/active/COORDINATION_LEDGER.md` before removing or reverting them. If another active row plausibly owns those files, stop and coordinate instead of cleaning them up unilaterally.
 - Use an execution plan for multi-file or high-risk work. Narrow supplied-patch landings may stay ledger-only when they remain bounded and single-turn.
 - If architecture-significant behavior changes, update `ARCHITECTURE.md` and the matching durable docs.
 - Required completion-workflow audit subagent passes are part of the repo workflow once the user has asked for repo work. That standing repo instruction is already sufficient permission to spawn those required audit subagents, so do not wait for or ask for an extra explicit "use subagents" message.
