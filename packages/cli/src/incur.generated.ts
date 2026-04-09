@@ -177,7 +177,7 @@ declare module 'incur' {
       'samples import-csv': { args: { file: string }; options: { vault: string; requestId?: string; preset?: string; stream?: string; tsColumn?: string; valueColumn?: string; unit?: string; delimiter?: string; metadataColumns?: string[]; source?: string } }
       'samples list': { args: {}; options: { vault: string; requestId?: string; stream?: string; from?: string; to?: string; quality?: string; limit: number } }
       'samples show': { args: { id: string }; options: { vault: string; requestId?: string } }
-      'search query': { args: {}; options: { vault: string; requestId?: string; text?: string; recordType?: string[]; kind?: string[]; stream?: string[]; experiment?: string; from?: string; to?: string; tag?: string[]; limit: number } }
+      'search query': { args: {}; options: { vault: string; requestId?: string; text: string; recordType?: string[]; kind?: string[]; stream?: string[]; experiment?: string; from?: string; to?: string; tag?: string[]; limit: number } }
       'show': { args: { id: string }; options: { vault: string; requestId?: string } }
       'status': { args: {}; options: { vault: string; requestId?: string; session?: string; limit: number } }
       'stop': { args: {}; options: { vault: string; requestId?: string } }
@@ -187,7 +187,7 @@ declare module 'incur' {
       'supplement rename': { args: { lookup: string }; options: { vault: string; requestId?: string; title: string; slug?: string } }
       'supplement scaffold': { args: {}; options: { vault: string; requestId?: string } }
       'supplement show': { args: { id: string }; options: { vault: string; requestId?: string } }
-      'supplement stop': { args: { protocolId: string }; options: { vault: string; requestId?: string; stoppedOn?: string } }
+      'supplement stop': { args: { id: string }; options: { vault: string; requestId?: string; stoppedOn?: string } }
       'supplement upsert': { args: {}; options: { vault: string; requestId?: string; input: string } }
       'timeline': { args: {}; options: { vault: string; requestId?: string; from?: string; to?: string; experiment?: string; kind?: string[]; stream?: string[]; entryType?: string[]; limit: number } }
       'validate': { args: {}; options: { vault: string; requestId?: string } }
@@ -202,7 +202,7 @@ declare module 'incur' {
       'wearables recovery list': { args: {}; options: { vault: string; requestId?: string; date?: string; from?: string; to?: string; provider?: string[]; limit: number } }
       'wearables sleep list': { args: {}; options: { vault: string; requestId?: string; date?: string; from?: string; to?: string; provider?: string[]; limit: number } }
       'wearables sources list': { args: {}; options: { vault: string; requestId?: string; date?: string; from?: string; to?: string; provider?: string[]; limit: number } }
-      'workout add': { args: { text: string }; options: { vault: string; requestId?: string; input?: string; duration?: number; type?: string; distanceKm?: number; occurredAt?: string; source?: "manual" | "import" | "device" | "derived"; media?: string[] } }
+      'workout add': { args: { text?: string }; options: { vault: string; requestId?: string; input?: string; duration?: number; type?: string; distanceKm?: number; occurredAt?: string; source?: "manual" | "import" | "device" | "derived"; media?: string[] } }
       'workout delete': { args: { id: string }; options: { vault: string; requestId?: string } }
       'workout edit': { args: { id: string }; options: { vault: string; requestId?: string; input?: string; set?: string[]; clear?: string[]; dayKeyPolicy?: "keep" | "recompute" } }
       'workout format list': { args: {}; options: { vault: string; requestId?: string; limit: number } }

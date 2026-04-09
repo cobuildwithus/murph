@@ -94,6 +94,34 @@ test.sequential('device daemon commands stay in the generated CLI schema', async
     assert.equal('vault' in schema.options.properties, true)
     assert.equal('baseUrl' in schema.options.properties, true)
     assert.deepEqual(schema.options.required, ['vault'])
+
+    const connectSchema = JSON.parse(
+      await runRawCli([
+        'device',
+        'connect',
+        'whoop',
+        '--vault',
+        vaultRoot,
+        '--schema',
+        '--format',
+        'json',
+      ], {
+        env: {
+          MURPH_CLI_TEST_PERSISTENT_HARNESS: '0',
+        },
+      }),
+    ) as {
+      options: {
+        properties: Record<string, {
+          description?: string
+        }>
+      }
+    }
+
+    assert.match(
+      String(connectSchema.options.properties.returnTo?.description ?? ''),
+      /root-relative path/u,
+    )
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })
   }
@@ -259,7 +287,7 @@ deviceControlPlaneTest(
             '--vault',
             vaultRoot,
             '--return-to',
-            'http://127.0.0.1:3000/devices',
+            '/devices',
           ],
           { env },
         ),
@@ -269,7 +297,7 @@ deviceControlPlaneTest(
       assert.equal(connect.authorizationUrl.includes('state_01'), true)
       assert.equal(connect.openedBrowser, false)
       assert.deepEqual(state.lastConnectBody, {
-        returnTo: 'http://127.0.0.1:3000/devices',
+        returnTo: '/devices',
       })
 
       const accounts = requireData(

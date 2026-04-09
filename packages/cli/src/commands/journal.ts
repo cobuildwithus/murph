@@ -12,6 +12,10 @@ import {
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import type { VaultServices } from '@murphai/vault-usecases'
 import { normalizeRepeatableFlagOption } from '@murphai/vault-usecases'
+import {
+  commonDateRangeOptionDescriptions,
+  commonListLimitOptionSchema,
+} from './command-factory-primitives.js'
 
 export const journalMutationResultSchema = z.object({
   vault: z.string().min(1),
@@ -37,11 +41,15 @@ const journalReferenceOptionsSchema = withBaseOptions({
   eventId: z
     .array(z.string().min(1))
     .optional()
-    .describe('Optional event ids to mutate. Repeat --event-id for multiple values.'),
+    .describe(
+      'Optional event ids to mutate. Repeat --event-id for multiple values. Mutually exclusive with --stream.',
+    ),
   stream: z
     .array(z.string().min(1))
     .optional()
-    .describe('Optional sample streams to mutate. Repeat --stream for multiple values.'),
+    .describe(
+      'Optional sample streams to mutate. Repeat --stream for multiple values. Mutually exclusive with --event-id.',
+    ),
 })
 
 export function registerJournalCommands(cli: Cli.Cli, _services: VaultServices) {
@@ -89,9 +97,13 @@ export function registerJournalCommands(cli: Cli.Cli, _services: VaultServices) 
     description: 'List journal documents over an optional date range.',
     args: z.object({}),
     options: withBaseOptions({
-      from: localDateSchema.optional().describe('Inclusive lower date bound.'),
-      to: localDateSchema.optional().describe('Inclusive upper date bound.'),
-      limit: z.number().int().positive().max(200).default(50),
+      from: localDateSchema
+        .optional()
+        .describe(commonDateRangeOptionDescriptions.from),
+      to: localDateSchema
+        .optional()
+        .describe(commonDateRangeOptionDescriptions.to),
+      limit: commonListLimitOptionSchema,
     }),
     output: listResultSchema,
     async run({ options }) {
@@ -126,10 +138,12 @@ export function registerJournalCommands(cli: Cli.Cli, _services: VaultServices) 
   })
 
   journal.command('link', {
-    description: 'Link event ids and/or sample streams into the journal day frontmatter.',
+    description: 'Link either event ids or sample streams into the journal day frontmatter.',
     args: z.object({
       date: localDateSchema.describe('Journal day to mutate.'),
     }),
+    hint:
+      'Choose exactly one target type per command: repeat --event-id for events or repeat --stream for sample streams.',
     options: journalReferenceOptionsSchema,
     output: journalLinkResultSchema,
     async run({ args, options }) {
@@ -145,10 +159,12 @@ export function registerJournalCommands(cli: Cli.Cli, _services: VaultServices) 
   })
 
   journal.command('unlink', {
-    description: 'Remove event ids and/or sample streams from the journal day frontmatter.',
+    description: 'Remove either event ids or sample streams from the journal day frontmatter.',
     args: z.object({
       date: localDateSchema.describe('Journal day to mutate.'),
     }),
+    hint:
+      'Choose exactly one target type per command: repeat --event-id for events or repeat --stream for sample streams.',
     options: journalReferenceOptionsSchema,
     output: journalLinkResultSchema,
     async run({ args, options }) {

@@ -96,13 +96,37 @@ export function registerEventCommands(cli: Cli.Cli, services: VaultServices) {
       },
     },
     list: {
-      description: 'List canonical events with kind, date, tag, and experiment filters.',
-      kindOption: z.string().min(1).optional(),
+      description: 'List canonical events with optional kind, date, tag, and experiment filters.',
+      examples: [
+        {
+          description: 'List tagged test events in one date window.',
+          options: {
+            from: '2026-03-01',
+            kind: 'test',
+            tag: ['follow-up'],
+            to: '2026-03-31',
+            vault: './vault',
+          },
+        },
+      ],
+      hint:
+        'Combine --kind, repeatable --tag, --experiment <slug>, and --from/--to to narrow the event read model.',
+      kindOption: z
+        .string()
+        .min(1)
+        .optional()
+        .describe(
+          'Optional canonical event kind filter such as encounter, procedure, test, adverse_effect, or exposure.',
+        ),
       tagOption: z
         .array(z.string().min(1))
         .optional()
-        .describe('Optional tag filter. Repeat --tag for multiple values.'),
-      experimentOption: slugSchema.optional(),
+        .describe(
+          'Optional tag filter. Repeat --tag to match any listed tag.',
+        ),
+      experimentOption: slugSchema
+        .optional()
+        .describe('Optional experiment slug filter for events linked to one experiment.'),
       output: eventListResultSchema,
       async run(input) {
         return services.query.listEvents({

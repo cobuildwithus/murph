@@ -1,7 +1,12 @@
 import { readdir, readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { configSchemaPath, generateIncurConfigSchema } from './incur-config-schema.js'
+import {
+  configSchemaPath,
+  generateIncurConfigSchema,
+  generateIncurTypes,
+  incurGeneratedTypesPath,
+} from './incur-config-schema.js'
 
 interface PackageJsonShape {
   name?: string
@@ -273,6 +278,7 @@ for (const filePath of packageLocalTsFiles) {
 }
 
 const libraryEntry = await readFile(path.join(packageDir, 'src/index.ts'), 'utf8')
+const generatedTypes = await readFile(incurGeneratedTypesPath, 'utf8')
 const configSchema = JSON.parse(
   await readFile(configSchemaPath, 'utf8'),
 ) as {
@@ -301,8 +307,13 @@ assert(
   'config.schema.json must cover the nested vault and assistant command groups.',
 )
 assert(
-  JSON.stringify(configSchema) === JSON.stringify(JSON.parse(await generateIncurConfigSchema())),
+  JSON.stringify(configSchema)
+    === JSON.stringify(JSON.parse(await generateIncurConfigSchema({ rebuildCli: false }))),
   'config.schema.json must stay in sync with the current built CLI entrypoint. Run pnpm --dir packages/cli gen:config-schema after CLI config-surface changes.',
+)
+assert(
+  generatedTypes === await generateIncurTypes({ rebuildCli: false }),
+  'src/incur.generated.ts must stay in sync with the current built CLI entrypoint. Regenerate it from the built CLI after command topology changes.',
 )
 
 console.log('packages/cli package shape verified.')

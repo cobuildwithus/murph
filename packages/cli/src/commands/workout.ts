@@ -53,6 +53,10 @@ import {
   createDirectEntityDeleteCommandDefinition,
   createDirectEventBackedEntityEditCommandDefinition,
 } from './record-mutation-command-helpers.js'
+import {
+  commonDateRangeOptionDescriptions,
+  commonListLimitOptionSchema,
+} from './command-factory-primitives.js'
 
 const eventSourceSchema = z.enum(['manual', 'import', 'device', 'derived'])
 
@@ -73,8 +77,9 @@ export function registerWorkoutCommands(
         .string()
         .min(1)
         .max(4000)
+        .optional()
         .describe(
-          'Freeform workout text such as "Went for a 30-minute run."',
+          'Optional freeform workout text such as "Went for a 30-minute run." Omit it when using --input.',
         ),
     }),
     examples: [
@@ -97,7 +102,7 @@ export function registerWorkoutCommands(
       },
     ],
     hint:
-      'Use freeform text for lightweight logging, or pass --input @workout.json to store a rich nested workout payload with exercises, sets, notes, grouping, and source metadata.',
+      'Use freeform text for lightweight logging, or omit the positional text and pass --input @workout.json to store a rich nested workout payload with exercises, sets, notes, grouping, and source metadata.',
     options: withBaseOptions({
       input: inputFileOptionSchema
         .optional()
@@ -182,9 +187,17 @@ export function registerWorkoutCommands(
     description: 'List workout sessions with optional date bounds.',
     args: z.object({}),
     options: withBaseOptions({
-      from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u).optional(),
-      to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u).optional(),
-      limit: z.number().int().positive().max(200).default(50),
+      from: z
+        .string()
+        .regex(/^\d{4}-\d{2}-\d{2}$/u)
+        .optional()
+        .describe(commonDateRangeOptionDescriptions.from),
+      to: z
+        .string()
+        .regex(/^\d{4}-\d{2}-\d{2}$/u)
+        .optional()
+        .describe(commonDateRangeOptionDescriptions.to),
+      limit: commonListLimitOptionSchema,
     }),
     output: listResultSchema,
     async run({ options }) {

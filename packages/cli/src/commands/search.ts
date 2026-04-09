@@ -18,6 +18,8 @@ import {
 import type { VaultServices } from '@murphai/vault-usecases'
 
 const recordTypeValues = ALL_QUERY_ENTITY_FAMILIES
+const recordTypeDescription =
+  `Optional query record families. Repeat --record-type for multiple values: ${recordTypeValues.join(', ')}.`
 
 const timelineEntryTypeValues = [
   'assessment',
@@ -127,12 +129,13 @@ export function registerSearchCommands(
       text: z
         .string()
         .min(1)
-        .optional()
-        .describe('Search text to run across titles, notes, tags, ids, and record payloads.'),
+        .describe(
+          'Required search text to run across titles, notes, tags, ids, and record payloads.',
+        ),
       recordType: z
         .array(z.string().min(1))
         .optional()
-        .describe('Optional record families. Repeat --record-type for multiple values: core, experiment, journal, event, sample, audit, assessment, goal, condition, allergy, protocol, family, genetics.'),
+        .describe(recordTypeDescription),
       kind: z
         .array(z.string().min(1))
         .optional()

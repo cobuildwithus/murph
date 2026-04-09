@@ -16,12 +16,12 @@ import type {
 } from '@murphai/vault-usecases'
 import {
   type CommandExamples,
+  commonDateRangeOptionDescriptions,
+  commonListLimitOptionSchema,
   createCommonListCommand,
   registerFactoryCommand,
   suggestedCommandsCta,
 } from './command-factory-primitives.js'
-
-const limitOptionSchema = z.number().int().positive().max(200).default(50)
 const statusOptionSchema = z.string().min(1).optional()
 
 interface CrudDescriptions {
@@ -133,6 +133,7 @@ interface CrudServiceMethodNames<
 }
 
 interface CrudPresentationContext {
+  groupName: string
   noun: string
   payloadFile: string
   pluralNoun: string
@@ -199,10 +200,10 @@ const defaultHintsByCommand: Partial<
     return 'Use --limit to cap results.'
   },
   scaffold(config) {
-    return `Edit the emitted payload, save it as ${config.payloadFile}, then pass it back with --input @${config.payloadFile} or pipe it to --input -.`
+    return `Edit the emitted payload, save it as ${config.payloadFile}, then pass it back with --input @${config.payloadFile} or pipe it to --input -. The scaffold output is the current canonical field shape for this command.`
   },
   upsert(config) {
-    return `--input accepts @file.json or - so the CLI can load the structured ${config.noun} payload from disk or stdin.`
+    return `--input accepts @file.json or - so the CLI can load the structured ${config.noun} payload from disk or stdin. Run ${config.groupName} scaffold first if you need the current canonical field shape.`
   },
 }
 
@@ -420,7 +421,7 @@ export function registerHealthCrudCommands<
       options: {
         from: config.listFilterCapabilities?.includes('date-range')
           ? {
-              description: 'Optional inclusive lower date bound in YYYY-MM-DD form.',
+              description: commonDateRangeOptionDescriptions.from,
               name: 'from',
             }
           : undefined,
@@ -433,13 +434,13 @@ export function registerHealthCrudCommands<
                 'Optional event kind filter such as encounter, procedure, test, adverse_effect, or exposure.',
               )
           : undefined,
-        limit: limitOptionSchema,
+        limit: commonListLimitOptionSchema,
         status: config.listStatusDescription
           ? statusOptionSchema.describe(config.listStatusDescription)
           : undefined,
         to: config.listFilterCapabilities?.includes('date-range')
           ? {
-              description: 'Optional inclusive upper date bound in YYYY-MM-DD form.',
+              description: commonDateRangeOptionDescriptions.to,
               name: 'to',
             }
           : undefined,

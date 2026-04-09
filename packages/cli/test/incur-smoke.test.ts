@@ -210,6 +210,22 @@ test('published config schema artifact covers nested config defaults', async () 
     properties?: {
       commands?: {
         properties?: {
+          chat?: {
+            description?: string
+            'x-incur-canonical-command'?: string
+          }
+          run?: {
+            'x-incur-canonical-command'?: string
+          }
+          status?: {
+            'x-incur-canonical-command'?: string
+          }
+          doctor?: {
+            'x-incur-canonical-command'?: string
+          }
+          stop?: {
+            'x-incur-canonical-command'?: string
+          }
           vault?: {
             properties?: {
               commands?: {
@@ -232,6 +248,8 @@ test('published config schema artifact covers nested config defaults', async () 
               commands?: {
                 properties?: {
                   chat?: {
+                    description?: string
+                    'x-incur-hint'?: string
                     properties?: {
                       options?: {
                         properties?: {
@@ -239,6 +257,9 @@ test('published config schema artifact covers nested config defaults', async () 
                         }
                       }
                     }
+                  }
+                  deliver?: {
+                    'x-incur-examples'?: unknown[]
                   }
                 }
               }
@@ -255,6 +276,44 @@ test('published config schema artifact covers nested config defaults', async () 
   )
   assert.ok(
     schema.properties?.commands?.properties?.assistant?.properties?.commands?.properties?.chat?.properties?.options?.properties?.model,
+  )
+  assert.equal(
+    schema.properties?.commands?.properties?.chat?.['x-incur-canonical-command'],
+    'assistant chat',
+  )
+  assert.equal(
+    schema.properties?.commands?.properties?.run?.['x-incur-canonical-command'],
+    'assistant run',
+  )
+  assert.equal(
+    schema.properties?.commands?.properties?.status?.['x-incur-canonical-command'],
+    'assistant status',
+  )
+  assert.equal(
+    schema.properties?.commands?.properties?.doctor?.['x-incur-canonical-command'],
+    'assistant doctor',
+  )
+  assert.equal(
+    schema.properties?.commands?.properties?.stop?.['x-incur-canonical-command'],
+    'assistant stop',
+  )
+  assert.match(
+    schema.properties?.commands?.properties?.chat?.description ?? '',
+    /assistant chat/u,
+  )
+  assert.match(
+    schema.properties?.commands?.properties?.assistant?.properties?.commands?.properties?.chat?.[
+      'x-incur-hint'
+    ] ?? '',
+    /Type \/exit/u,
+  )
+  assert.equal(
+    (
+      schema.properties?.commands?.properties?.assistant?.properties?.commands?.properties?.deliver?.[
+        'x-incur-examples'
+      ] ?? []
+    ).length > 0,
+    true,
   )
 })
 
@@ -379,7 +438,9 @@ test('search query schema exposes retrieval-specific filters', async () => {
     await runRawCli(['search', 'query', '--schema', '--format', 'json']),
   ) as {
     options: {
-      properties: Record<string, unknown>
+      properties: Record<string, {
+        description?: string
+      }>
       required?: string[]
     }
   }
@@ -392,7 +453,71 @@ test('search query schema exposes retrieval-specific filters', async () => {
   assert.equal('dateFrom' in schema.options.properties, false)
   assert.equal('dateTo' in schema.options.properties, false)
   assert.equal('entryType' in schema.options.properties, false)
-  assert.deepEqual(schema.options.required, ['vault', 'limit'])
+  assert.match(
+    String(schema.options.properties.text?.description ?? ''),
+    /Required search text/u,
+  )
+  assert.match(
+    String(schema.options.properties.recordType?.description ?? ''),
+    /workout_format/u,
+  )
+  assert.doesNotMatch(
+    String(schema.options.properties.recordType?.description ?? ''),
+    /history/u,
+  )
+  assert.deepEqual(schema.options.required, ['vault', 'text', 'limit'])
+})
+
+test('audit list schema describes its filters and sort controls', async () => {
+  const schema = JSON.parse(
+    await runRawCli(['audit', 'list', '--schema', '--format', 'json']),
+  ) as {
+    options: {
+      properties: Record<string, {
+        description?: string
+      }>
+      required?: string[]
+    }
+  }
+
+  assert.match(
+    String(schema.options.properties.action?.description ?? ''),
+    /audit action filter/u,
+  )
+  assert.match(
+    String(schema.options.properties.sort?.description ?? ''),
+    /ascending or descending/u,
+  )
+  assert.match(
+    String(schema.options.properties.limit?.description ?? ''),
+    /Maximum number of audit records/u,
+  )
+  assert.deepEqual(schema.options.required, ['vault', 'sort', 'limit'])
+})
+
+test('model schema explains preset-gated non-interactive updates', async () => {
+  const schema = JSON.parse(
+    await runRawCli(['model', '--schema', '--format', 'json']),
+  ) as {
+    options: {
+      properties: Record<string, {
+        description?: string
+      }>
+    }
+  }
+
+  assert.match(
+    String(schema.options.properties.preset?.description ?? ''),
+    /Required for non-interactive updates/u,
+  )
+  assert.match(
+    String(schema.options.properties.providerPreset?.description ?? ''),
+    /Only applies with `--preset openai-compatible`/u,
+  )
+  assert.match(
+    String(schema.options.properties.profile?.description ?? ''),
+    /Only applies with `--preset codex`/u,
+  )
 })
 
 test('blood-test list schema stays scoped to shared date-range and status filters', async () => {
@@ -893,7 +1018,9 @@ test('memory upsert schema exposes create-only canonical memory fields', async (
     await runRawCli(['memory', 'upsert', '--schema', '--format', 'json']),
   ) as {
     args: {
-      properties: Record<string, unknown>
+      properties: Record<string, {
+        description?: string
+      }>
       required?: string[]
     }
     options: {
@@ -903,6 +1030,10 @@ test('memory upsert schema exposes create-only canonical memory fields', async (
   }
 
   assert.equal('text' in schema.args.properties, true)
+  assert.match(
+    String(schema.args.properties.text?.description ?? ''),
+    /Memory text to store/u,
+  )
   assert.deepEqual(schema.args.required, ['text'])
   assert.equal('section' in schema.options.properties, true)
   assert.deepEqual(schema.options.required, ['vault', 'section'])
@@ -913,7 +1044,9 @@ test('memory update schema requires a memory id and text, with an optional repla
     await runRawCli(['memory', 'update', '--schema', '--format', 'json']),
   ) as {
     args: {
-      properties: Record<string, unknown>
+      properties: Record<string, {
+        description?: string
+      }>
       required?: string[]
     }
     options: {
@@ -924,6 +1057,10 @@ test('memory update schema requires a memory id and text, with an optional repla
 
   assert.equal('memoryId' in schema.args.properties, true)
   assert.equal('text' in schema.args.properties, true)
+  assert.match(
+    String(schema.args.properties.memoryId?.description ?? ''),
+    /Canonical memory record id/u,
+  )
   assert.deepEqual(schema.args.required, ['memoryId', 'text'])
   assert.equal('section' in schema.options.properties, true)
   assert.deepEqual(schema.options.required, ['vault'])
@@ -934,7 +1071,9 @@ test('memory show schema accepts an optional memory id', async () => {
     await runRawCli(['memory', 'show', '--schema', '--format', 'json']),
   ) as {
     args: {
-      properties: Record<string, unknown>
+      properties: Record<string, {
+        description?: string
+      }>
       required?: string[]
     }
     options: {
@@ -944,6 +1083,10 @@ test('memory show schema accepts an optional memory id', async () => {
   }
 
   assert.equal('memoryId' in schema.args.properties, true)
+  assert.match(
+    String(schema.args.properties.memoryId?.description ?? ''),
+    /omit to return the whole memory document/u,
+  )
   assert.deepEqual(schema.args.required ?? [], [])
   assert.deepEqual(schema.options.required, ['vault'])
 }, INCUR_SCHEMA_TIMEOUT_MS)
@@ -1056,8 +1199,10 @@ test('goal show help exposes only the global format flag', async () => {
 
 test('health command help surfaces examples and hints through Incur metadata', async () => {
   const goalUpsertHelp = await runRawCli(['goal', 'upsert', '--help'])
+  const journalLinkHelp = await runRawCli(['journal', 'link', '--help'])
   const foodRenameHelp = await runRawCli(['food', 'rename', '--help'])
   const supplementUpsertHelp = await runRawCli(['supplement', 'upsert', '--help'])
+  const supplementStopHelp = await runRawCli(['supplement', 'stop', '--help'])
   const supplementRenameHelp = await runRawCli(['supplement', 'rename', '--help'])
   const supplementCompoundListHelp = await runRawCli(['supplement', 'compound', 'list', '--help'])
   const protocolStopHelp = await runRawCli(['protocol', 'stop', '--help'])
@@ -1071,12 +1216,33 @@ test('health command help surfaces examples and hints through Incur metadata', a
     /--input accepts @file\.json or - so the CLI can load the structured goal payload from disk or stdin\./u,
   )
   assert.match(
+    goalUpsertHelp,
+    /Run goal scaffold first if you need the current canonical field shape\./u,
+  )
+  assert.match(
+    journalLinkHelp,
+    /Link either event ids or sample streams into the journal day frontmatter\./u,
+  )
+  assert.match(
+    journalLinkHelp,
+    /Choose exactly one target type per command: repeat --event-id for events or repeat --stream for sample streams\./u,
+  )
+  assert.match(
     foodRenameHelp,
     /The previous food title is kept as an alias automatically so older operator language still resolves in the saved record\./u,
   )
   assert.match(
     supplementUpsertHelp,
     /--input accepts @file\.json or - so the CLI can load a supplement payload with product metadata and ingredients\./u,
+  )
+  assert.match(
+    supplementStopHelp,
+    /Usage: vault-cli supplement stop <id> \[options\]/u,
+  )
+  assert.doesNotMatch(supplementStopHelp, /<protocolId>/u)
+  assert.match(
+    supplementStopHelp,
+    /--stopped-on <string>\s+Optional calendar day when the supplement stopped\. Defaults to today\./u,
   )
   assert.match(
     supplementRenameHelp,
@@ -1106,11 +1272,44 @@ test('health list help preserves command-family option shapes', async () => {
   assert.match(eventHelp, /^\s+--to\b/mu)
   assert.match(eventHelp, /^\s+--tag\b/mu)
   assert.match(eventHelp, /^\s+--experiment\b/mu)
+  assert.match(
+    eventHelp,
+    /--kind <string>\s+Optional canonical event kind filter such as encounter, procedure, test, adverse_effect, or exposure\./u,
+  )
+  assert.match(
+    eventHelp,
+    /--tag <array>\s+Optional tag filter\. Repeat --tag to match any listed tag\./u,
+  )
+  assert.match(
+    eventHelp,
+    /--experiment <string>\s+Optional experiment slug filter for events linked to one experiment\./u,
+  )
 
   assert.match(documentHelp, /^\s+--from\b/mu)
   assert.match(documentHelp, /^\s+--to\b/mu)
   assert.doesNotMatch(documentHelp, /^\s+--status\b/mu)
   assert.doesNotMatch(documentHelp, /^\s+--limit\b/mu)
+}, INCUR_HELP_TIMEOUT_MS)
+
+test('owned date-range list help reuses consistent date and limit descriptions', async () => {
+  const journalListHelp = await runRawCli(['journal', 'list', '--help'])
+  const workoutListHelp = await runRawCli(['workout', 'list', '--help'])
+  const eventListHelp = await runRawCli(['event', 'list', '--help'])
+
+  for (const help of [journalListHelp, workoutListHelp, eventListHelp]) {
+    assert.match(
+      help,
+      /--from <string>\s+Optional inclusive lower date bound in YYYY-MM-DD form\./u,
+    )
+    assert.match(
+      help,
+      /--to <string>\s+Optional inclusive upper date bound in YYYY-MM-DD form\./u,
+    )
+    assert.match(
+      help,
+      /--limit <number>\s+Maximum number of results to return\./u,
+    )
+  }
 }, INCUR_HELP_TIMEOUT_MS)
 
 test('command schema reflects only domain-specific options', async () => {
@@ -1251,6 +1450,10 @@ test('goal scaffold help surfaces factory-provided example and hint text', async
   assert.match(
     help,
     /Edit the emitted payload, save it as goal\.json, then pass it back with --input @goal\.json or pipe it to --input -\./u,
+  )
+  assert.match(
+    help,
+    /The scaffold output is the current canonical field shape for this command\./u,
   )
 })
 

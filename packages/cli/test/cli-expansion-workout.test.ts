@@ -19,6 +19,10 @@ import type { CliEnvelope } from './cli-test-helpers.js'
 import { requireData, runCli } from './cli-test-helpers.js'
 
 interface SchemaEnvelope {
+  args: {
+    properties: Record<string, unknown>
+    required?: string[]
+  }
   options: {
     properties: Record<string, unknown>
     required?: string[]
@@ -221,6 +225,8 @@ test('workout add schema exposes the freeform workout capture surface', async ()
     await runSliceCliRaw(['workout', 'add', '--schema']),
   ) as SchemaEnvelope
 
+  assert.equal('text' in schema.args.properties, true)
+  assert.deepEqual(schema.args.required ?? [], [])
   assert.equal('duration' in schema.options.properties, true)
   assert.equal('type' in schema.options.properties, true)
   assert.equal('distanceKm' in schema.options.properties, true)
@@ -245,10 +251,14 @@ test('workout edit/delete schemas expose shared record mutation options', async 
   assert.deepEqual(deleteSchema.options.required, ['vault'])
 })
 
-test('workout add help uses a positional text argument', async () => {
+test('workout add help keeps the positional text optional for structured input', async () => {
   const help = await runSliceCliRaw(['workout', 'add', '--help'])
 
-  assert.match(help, /Usage: vault-cli workout add <text> \[options\]/u)
+  assert.match(help, /Usage: vault-cli workout add \[text\] \[options\]/u)
+  assert.match(
+    help,
+    /Optional freeform workout text such as "Went for a 30-minute run\." Omit it when using --input\./u,
+  )
 })
 
 test('workout format save help keeps name and text optional when using structured input', async () => {

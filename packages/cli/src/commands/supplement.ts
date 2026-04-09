@@ -8,11 +8,13 @@ import {
 import {
   createRegistryDocEntityGroup,
 } from "./entity-command-groups.js"
-import { suggestedCommandsCta } from "./command-factory-primitives.js"
+import {
+  commonListLimitOptionSchema,
+  suggestedCommandsCta,
+} from "./command-factory-primitives.js"
 import { localDateSchema, pathSchema } from "@murphai/operator-config/vault-cli-contracts"
 import type { VaultServices } from "@murphai/vault-usecases"
 
-const limitOptionSchema = z.number().int().positive().max(200).default(50)
 const supplementSlugSchema = z
   .string()
   .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/u, 'Expected a lowercase kebab-case slug.')
@@ -74,7 +76,7 @@ const compoundRecordSchema = z.object({
 
 const compoundFiltersSchema = z.object({
   status: z.string().min(1),
-  limit: z.number().int().positive().max(200).optional(),
+  limit: commonListLimitOptionSchema.optional(),
 })
 
 const compoundShowResultSchema = z.object({
@@ -183,13 +185,13 @@ export function registerSupplementCommands(
 
   supplement.command('stop', {
     args: z.object({
-      protocolId: z.string().min(1),
+      id: z.string().min(1).describe('Canonical supplement id to stop.'),
     }),
     description: 'Stop one supplement while preserving its canonical id.',
     examples: [
       {
         args: {
-          protocolId: '<supplement-id>',
+          id: '<supplement-id>',
         },
         description: 'Stop a supplement today.',
         options: {
@@ -198,7 +200,7 @@ export function registerSupplementCommands(
       },
       {
         args: {
-          protocolId: '<supplement-id>',
+          id: '<supplement-id>',
         },
         description: 'Stop a supplement on a specific calendar day.',
         options: {
@@ -209,12 +211,14 @@ export function registerSupplementCommands(
     ],
     hint: 'Use the canonical supplement id so the stop event is attached to the existing supplement record.',
     options: withBaseOptions({
-      stoppedOn: localDateSchema.optional(),
+      stoppedOn: localDateSchema
+        .optional()
+        .describe('Optional calendar day when the supplement stopped. Defaults to today.'),
     }),
     output: stopResultSchema,
     async run(context) {
       const result = await services.core.stopSupplement({
-        protocolId: context.args.protocolId,
+        protocolId: context.args.id,
         stoppedOn: context.options.stoppedOn,
         vault: context.options.vault,
         requestId: requestIdFromOptions(context.options),
@@ -225,7 +229,7 @@ export function registerSupplementCommands(
           {
             command: 'supplement show',
             args: {
-              id: context.args.protocolId,
+              id: context.args.id,
             },
             description: 'Show the stopped supplement record.',
             options: {
@@ -306,7 +310,7 @@ export function registerSupplementCommands(
     ],
     hint: 'The compound ledger defaults to active supplements so overlapping ingredients sum into a single canonical row.',
     options: withBaseOptions({
-      limit: limitOptionSchema,
+      limit: commonListLimitOptionSchema,
       status: compoundStatusOptionSchema,
     }),
     output: compoundListResultSchema,

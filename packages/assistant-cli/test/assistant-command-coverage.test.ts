@@ -188,6 +188,9 @@ function readCommand(
 ): {
   description?: string
   hint?: string
+  options?: {
+    shape: Record<string, { description?: string } | undefined>
+  }
   outputPolicy?: string
   run: (context: Record<string, unknown>) => Promise<unknown>
 } {
@@ -195,6 +198,9 @@ function readCommand(
     | {
         description?: string
         hint?: string
+        options?: {
+          shape: Record<string, { description?: string } | undefined>
+        }
         outputPolicy?: string
         run: (context: Record<string, unknown>) => Promise<unknown>
       }
@@ -203,6 +209,17 @@ function readCommand(
     throw new Error(`Expected command ${name} to be registered.`)
   }
   return command
+}
+
+function readOptionDescription(
+  command: {
+    options?: {
+      shape: Record<string, { description?: string } | undefined>
+    }
+  },
+  optionName: string,
+): string | undefined {
+  return command.options?.shape[optionName]?.description
 }
 
 beforeEach(() => {
@@ -733,6 +750,67 @@ test('self-target commands normalize channels, enforce email identity, and surfa
     participantId: null,
     sourceThreadId: null,
   })
+})
+
+test('assistant command help describes routing shapes and flat header JSON inputs', () => {
+  const commands = createAssistantCli()
+  const assistant = readCommandGroup(commands, 'assistant')
+  const ask = readCommand(assistant.commands, 'ask')
+  const deliver = readCommand(assistant.commands, 'deliver')
+  const run = readCommand(assistant.commands, 'run')
+  const selfTargetSet = readCommand(
+    readCommandGroup(assistant.commands, 'self-target').commands,
+    'set',
+  )
+
+  assert.equal(
+    readOptionDescription(ask, 'participant')?.includes(
+      'transport-native participant value',
+    ),
+    true,
+  )
+  assert.equal(
+    readOptionDescription(ask, 'sourceThread')?.includes(
+      '<chatId>:topic:<messageThreadId>',
+    ),
+    true,
+  )
+  assert.equal(
+    readOptionDescription(deliver, 'deliveryTarget')?.includes(
+      'transport-native send format',
+    ),
+    true,
+  )
+  assert.equal(
+    readOptionDescription(ask, 'headersJson')?.includes(
+      'flat JSON object of extra HTTP headers with string values',
+    ),
+    true,
+  )
+  assert.equal(
+    readOptionDescription(run, 'headersJson')?.includes(
+      'flat JSON object of extra HTTP headers with string values',
+    ),
+    true,
+  )
+  assert.equal(
+    selfTargetSet.description?.includes(
+      'Provide at least one of --participant, --sourceThread, or --deliveryTarget',
+    ),
+    true,
+  )
+  assert.equal(
+    selfTargetSet.hint?.includes(
+      'Saved email targets also require --identity with the configured AgentMail inbox id.',
+    ),
+    true,
+  )
+  assert.equal(
+    readOptionDescription(selfTargetSet, 'identity')?.includes(
+      'Email targets require the configured AgentMail inbox id here.',
+    ),
+    true,
+  )
 })
 
 test('session commands return redacted state paths and session payloads', async () => {
