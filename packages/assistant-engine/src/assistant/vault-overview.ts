@@ -24,6 +24,7 @@ export async function buildAssistantVaultOverviewBlock(
 
   const canonicalCoverage = summarizeCanonicalCoverage(vault)
   const wearableCoverage = summarizeWearableCoverage(vault)
+  const healthContextCoverage = summarizeHealthContextCoverage(vault)
   const rawCoverage = summarizeRawCoverage(rawMealManifestPaths.length)
   const bankCoverage = summarizeBankCoverage(vault)
   const otherSources = summarizeOtherSources({
@@ -37,10 +38,11 @@ export async function buildAssistantVaultOverviewBlock(
     '- This is a compact orientation snapshot, not canonical evidence.',
     canonicalCoverage,
     wearableCoverage,
+    healthContextCoverage,
     rawCoverage,
     bankCoverage,
     otherSources,
-    '- Treat `vault-cli profile show current` and relevant wiki/knowledge reads as the synthesized truth surfaces.',
+    '- Treat `vault-cli memory show`, relevant wiki/knowledge reads, and the canonical preferences surface as the synthesized truth surfaces.',
     '- Query the vault before making factual claims, especially about current state, dates, or counts.',
   ].filter((value): value is string => Boolean(value))
 
@@ -53,6 +55,10 @@ function summarizeCanonicalCoverage(vault: VaultReadModel): string | null {
     summarizePositiveCount(
       countEventsOfKind(vault, 'activity_session'),
       'workout/activity session',
+    ),
+    summarizePositiveCount(
+      countEventsOfKind(vault, 'body_measurement'),
+      'body measurement',
     ),
     summarizePositiveCount(vault.experiments.length, 'experiment'),
   ].filter((value): value is string => Boolean(value))
@@ -75,6 +81,20 @@ function summarizeWearableCoverage(vault: VaultReadModel): string | null {
     .filter((value, index, values) => values.indexOf(value) === index)
 
   return `- Wearable coverage is present via ${joinWithAnd(providerNames)}.`
+}
+
+function summarizeHealthContextCoverage(vault: VaultReadModel): string | null {
+  const parts = [
+    summarizePositiveCount(vault.goals.length, 'goal'),
+    summarizePositiveCount(vault.conditions.length, 'condition'),
+    summarizePositiveCount(vault.allergies.length, 'allergy'),
+  ].filter((value): value is string => Boolean(value))
+
+  if (parts.length === 0) {
+    return null
+  }
+
+  return `- Saved health context includes ${joinWithAnd(parts)}.`
 }
 
 function summarizeRawCoverage(rawMealManifestCount: number): string | null {
