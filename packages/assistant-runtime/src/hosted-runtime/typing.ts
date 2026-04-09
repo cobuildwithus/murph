@@ -110,85 +110,34 @@ function startHostedLinqDispatchTypingIndicator(input: {
     return null;
   }
 
-  let active = false;
-  let stopRequested = false;
-  let stopPromise: Promise<void> | null = null;
-
-  const runStop = () => {
-    if (!stopPromise) {
-      stopPromise = stopLinqChatTypingIndicator(
+  return createAsyncHostedTypingIndicator({
+    channelLabel: "Linq",
+    dispatch: input.dispatch,
+    run: input.run,
+    start: async () => {
+      await startLinqChatTypingIndicator(
         {
           chatId,
         },
         {
           env,
         },
-      )
-        .catch((error) => {
-          emitHostedExecutionStructuredLog({
-            component: "runtime",
-            dispatch: input.dispatch,
-            error,
-            level: "warn",
-            message: "Hosted Linq typing indicator could not be stopped.",
-            phase: "side-effects.draining",
-            run: input.run,
-          });
-        })
-        .finally(() => {
-          active = false;
-        });
-    }
+      );
 
-    return stopPromise;
-  };
-
-  const startPromise = startLinqChatTypingIndicator(
-    {
-      chatId,
+      return {
+        async stop() {
+          await stopLinqChatTypingIndicator(
+            {
+              chatId,
+            },
+            {
+              env,
+            },
+          );
+        },
+      };
     },
-    {
-      env,
-    },
-  )
-    .then(async () => {
-      active = true;
-      if (stopRequested) {
-        await runStop();
-      }
-    })
-    .catch((error) => {
-      emitHostedExecutionStructuredLog({
-        component: "runtime",
-        dispatch: input.dispatch,
-        error,
-        level: "warn",
-        message: "Hosted Linq typing indicator could not be started.",
-        phase: "dispatch.running",
-        run: input.run,
-      });
-    });
-
-  return {
-    channelLabel: "Linq",
-    async stop() {
-      if (stopRequested) {
-        await (stopPromise ?? startPromise);
-        return;
-      }
-
-      stopRequested = true;
-      if (active) {
-        await runStop();
-        return;
-      }
-
-      await startPromise;
-      if (active) {
-        await runStop();
-      }
-    },
-  };
+  });
 }
 
 function startHostedTelegramDispatchTypingIndicator(input: {
@@ -200,7 +149,7 @@ function startHostedTelegramDispatchTypingIndicator(input: {
   };
   runtimeEnv: Readonly<Record<string, string>>;
   run: HostedAssistantRuntimeJobInput["request"]["run"] | null;
-}): HostedDispatchTypingIndicator {
+}): HostedDispatchTypingIndicator | null {
   const env = input.runtimeEnv as NodeJS.ProcessEnv;
   const token = resolveTelegramBotToken(env);
   const fetchImplementation = globalThis.fetch?.bind(globalThis);
@@ -215,86 +164,24 @@ function startHostedTelegramDispatchTypingIndicator(input: {
       phase: "dispatch.running",
       run: input.run,
     });
-    return {
-      channelLabel: "Telegram",
-      async stop() {},
-    };
+    return null;
   }
 
   const baseUrl = (resolveTelegramApiBaseUrl(env) ?? HOSTED_TELEGRAM_API_BASE_URL).replace(
     /\/$/u,
     "",
   );
-  let activeIndicator: HostedTypingHandle | null = null;
-  let stopRequested = false;
-
-  const stopActiveIndicator = async (indicator: HostedTypingHandle) => {
-    try {
-      await indicator.stop();
-    } catch (error) {
-      emitHostedExecutionStructuredLog({
-        component: "runtime",
-        dispatch: input.dispatch,
-        error,
-        level: "warn",
-        message: "Hosted Telegram typing indicator could not be stopped.",
-        phase: "side-effects.draining",
-        run: input.run,
-      });
-    }
-  };
-
-  const startPromise = createHostedTelegramTypingHandle({
-    baseUrl,
-    fetchImplementation,
-    target,
-    token,
-  })
-    .then(async (indicator: HostedTypingHandle) => {
-      if (stopRequested) {
-        await stopActiveIndicator(indicator);
-        return null;
-      }
-
-      activeIndicator = indicator;
-      return indicator;
-    })
-    .catch((error: unknown) => {
-      emitHostedExecutionStructuredLog({
-        component: "runtime",
-        dispatch: input.dispatch,
-        error,
-        level: "warn",
-        message: "Hosted Telegram typing indicator could not be started.",
-        phase: "dispatch.running",
-        run: input.run,
-      });
-      return null;
-    });
-
-  return {
+  return createAsyncHostedTypingIndicator({
     channelLabel: "Telegram",
-    async stop() {
-      if (stopRequested) {
-        await startPromise;
-        return;
-      }
-
-      stopRequested = true;
-      if (activeIndicator) {
-        const indicator = activeIndicator;
-        activeIndicator = null;
-        await stopActiveIndicator(indicator);
-        return;
-      }
-
-      const indicator = await startPromise;
-      if (indicator) {
-        activeIndicator = null;
-        await stopActiveIndicator(indicator);
-      }
-    },
-  };
+    dispatch: input.dispatch,
+    run: input.run,
+    start: () => createHostedTelegramTypingHandle({
+      baseUrl,
+      fetchImplementation,
+      target,
+      token,
+    }),
+  });
 }
 
 function isHostedLinqMessageReceivedDispatch(
@@ -317,6 +204,79 @@ function isHostedTelegramMessageReceivedDispatch(
   >;
 } {
   return dispatch.event.kind === "telegram.message.received";
+}
+
+function createAsyncHostedTypingIndicator(input: {
+  channelLabel: HostedDispatchTypingIndicator["channelLabel"];
+  dispatch: HostedAssistantRuntimeJobInput["request"]["dispatch"];
+  run: HostedAssistantRuntimeJobInput["request"]["run"] | null;
+  start(): Promise<HostedTypingHandle>;
+}): HostedDispatchTypingIndicator {
+  let activeIndicator: HostedTypingHandle | null = null;
+  let stopRequested = false;
+  let stopPromise: Promise<void> | null = null;
+
+  const stopActiveIndicator = (indicator: HostedTypingHandle) => {
+    if (!stopPromise) {
+      stopPromise = indicator.stop().catch((error) => {
+        emitHostedExecutionStructuredLog({
+          component: "runtime",
+          dispatch: input.dispatch,
+          error,
+          level: "warn",
+          message: `Hosted ${input.channelLabel} typing indicator could not be stopped.`,
+          phase: "side-effects.draining",
+          run: input.run,
+        });
+      });
+    }
+
+    return stopPromise;
+  };
+
+  const startPromise = input.start()
+    .then(async (indicator) => {
+      activeIndicator = indicator;
+      if (stopRequested) {
+        await stopActiveIndicator(indicator);
+      }
+    })
+    .catch((error: unknown) => {
+      emitHostedExecutionStructuredLog({
+        component: "runtime",
+        dispatch: input.dispatch,
+        error,
+        level: "warn",
+        message: `Hosted ${input.channelLabel} typing indicator could not be started.`,
+        phase: "dispatch.running",
+        run: input.run,
+      });
+    });
+
+  return {
+    channelLabel: input.channelLabel,
+    async stop() {
+      if (stopRequested) {
+        await (stopPromise ?? startPromise);
+        return;
+      }
+
+      stopRequested = true;
+      if (activeIndicator) {
+        const indicator = activeIndicator;
+        activeIndicator = null;
+        await stopActiveIndicator(indicator);
+        return;
+      }
+
+      await startPromise;
+      if (activeIndicator) {
+        const indicator = activeIndicator;
+        activeIndicator = null;
+        await stopActiveIndicator(indicator);
+      }
+    },
+  };
 }
 
 async function createHostedTelegramTypingHandle(input: {
