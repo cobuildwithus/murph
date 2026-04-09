@@ -19,9 +19,9 @@ Last verified: 2026-04-09
 
 ## Current CI Workflows
 
-- `.github/workflows/host-support.yml` runs a host-support matrix on `ubuntu-latest` and `macos-latest`, installing with `pnpm install --frozen-lockfile`, building the workspace, preparing `pnpm build:test-runtime:prepared`, and then exercising the focused built-runtime CLI host-support suite (`packages/cli/test/setup-cli.test.ts` plus `packages/cli/test/inbox-cli.test.ts`) with `MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1` on both hosts.
+- `.github/workflows/host-support.yml` runs a host-support matrix on `ubuntu-latest` and `macos-latest`, installing with `pnpm install --frozen-lockfile`, building the workspace, preparing `pnpm build:test-runtime:prepared`, and then exercising the focused built-runtime CLI host-support suite (`packages/cli/test/setup-cli.test.ts` plus `packages/cli/test/inbox-cli.test.ts`) with `MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1` on both hosts. The workflow also carries deterministic CI-only hosted-web build placeholders for `DATABASE_URL`, `DEVICE_SYNC_ENCRYPTION_KEY`, `DEVICE_SYNC_ENCRYPTION_KEY_VERSION`, contact-privacy, and the public Privy app id so its Linux `pnpm release:check` lane can finish `apps/web verify` without inheriting production secrets.
 - The same workflow also runs `pnpm release:check` on `ubuntu-latest` so Linux bootstrap and release packaging stay exercised in CI in addition to the local repo commands above.
-- `.github/workflows/release.yml` installs once, runs `pnpm release:check` with `MURPH_TEST_LANES_PARALLEL=1`, `MURPH_APP_VERIFY_PARALLEL=1`, and `MURPH_VERIFY_STEP_PARALLEL=1` so the release verification lane overlaps package coverage, app verification, and scenario-manifest checks even in CI, then packs the publishable tarballs once for upload/publication.
+- `.github/workflows/release.yml` installs once, runs `pnpm release:check` with `MURPH_TEST_LANES_PARALLEL=1`, `MURPH_APP_VERIFY_PARALLEL=1`, and `MURPH_VERIFY_STEP_PARALLEL=1` so the release verification lane overlaps package coverage, app verification, and scenario-manifest checks even in CI, while the same deterministic hosted-web build placeholders keep `apps/web verify` on its truthful build path without injecting production DB or device-sync secrets, then packs the publishable tarballs once for upload/publication.
 
 ## Current Gaps
 
