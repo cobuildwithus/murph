@@ -2,6 +2,32 @@
 
 All notable changes to `@murphai/murph` will be documented in this file.
 
+## [0.2.2] - 2026-04-09
+
+### Fixed
+- tighten workspace dependency boundary checks
+- serialize workspace artifact writers
+- scrub oauth callback state
+- wake automation loop for next-turn batching
+- align incur command-surface descriptors
+
+### Changed
+- clean coordination ledger
+- restore hosted web build env placeholders
+- bump review-gpt to 0.5.52
+- prepare built cli runtime artifacts
+- restore hosted web verify env plumbing
+- commit current worktree updates
+- unify health registry family seams
+- split parser helpers
+- remove dead vault upgrade seam
+- centralize hosted wake hint parsing
+- simplify deploy scripts
+- clean ledger and restore green verification
+- use native incur config schema output
+- simplify incur surface helpers
+- require gpt-5.4-mini coverage audit
+
 ## [0.2.1] - 2026-04-09
 
 ### Added
