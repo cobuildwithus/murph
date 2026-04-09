@@ -32,7 +32,7 @@ import {
 } from "vitest/config";
 
 import { resolveMurphVitestConcurrency } from "./config/vitest-parallelism.js";
-import { murphVitestNoTimeouts } from "./config/vitest-timeouts.js";
+import { murphVitestStandardTimeouts } from "./config/vitest-timeouts.js";
 
 const rootRepoVitestConcurrency = resolveMurphVitestConcurrency();
 
@@ -166,7 +166,7 @@ const rootRepoCliProjects: UserWorkspaceConfig[] = cliVitestProjectSpecs.map(
 
 export default defineConfig({
   test: {
-    ...murphVitestNoTimeouts,
+    ...murphVitestStandardTimeouts,
     // apps/web and apps/cloudflare stay in their dedicated verify lanes so the
     // root multi-project run does not execute them twice.
     projects: [
