@@ -2,6 +2,113 @@
 
 All notable changes to `@murphai/murph` will be documented in this file.
 
+## [0.2.1] - 2026-04-09
+
+### Added
+- add hosted telegram typing feedback
+- add hosted linq typing feedback
+- add blood-test bootstrap overview signal
+- add automation overview signal
+- add journal and document overview signals
+- add more user-centric overview signals
+- add experiment and wearable overview signals
+- add bootstrap vault overview prompt
+- batch adjacent chat auto-replies
+- add vercel ai gateway support
+
+### Fixed
+- unblock app verification and acceptance
+- stabilize cron handling and prompt guidance
+- split memory create and update commands
+- stabilize profile hard-cut follow-ups
+- make prompt access mode explicit
+- update Murph identity prompt copy
+- restore release check assertions
+- skip local first-contact intro
+- inject user-local day into system prompt
+- recover safe auto-replies on startup
+- load prisma env.local for prisma cli
+- recover stale codex resume sessions
+- link setup runtime modules
+- point hosted auth legal links at bundled pdfs
+- restore green verification
+- clean smoke bundle build output
+- default hosted vercel gateway zdr
+- add gateway-core source alias
+- canonicalize cloudflare dispatch outcomes
+- split hosted execution outbox outcome state
+- ignore local incur config in hosted cli runs
+- land residual review seams
+- remove query boundary leak
+- simplify assistant wizard flow test
+
+### Changed
+- stabilize cli and setup coverage harnesses
+- restore audit prompt references
+- trim completion workflow duplication
+- stabilize package coverage lane
+- share workspace source import resolution
+- require owner coverage verification
+- add coverage seam regression suite
+- lower shared per-file thresholds
+- generalize vitest tooling coverage
+- keep typecheck package-local
+- widen typecheck coverage
+- Update first-contact-welcome.ts
+- update system prompt
+- simplify prompt helper wiring
+- simplify murph prompt guidance
+- rename bound vault cli tool
+- centralize telegram typing transport
+- clarify blood-test prompt wording
+- trim dead unit preference state
+- share hosted typing lifecycle
+- extract hosted typing orchestration
+- clean history prompt wording
+- fix widened typecheck failures
+- drop dead history helper
+- hard-cut history into projected events
+- hard-cut profile into preferences and memory
+- clean prompt access surface copy
+- simplify vault overview aggregation
+- simplify local verification lanes
+- centralize build cleanup paths
+- align acceptance command docs
+- sync verification command docs
+- drop profile query and assistant surfaces
+- clarify smoke integrity lane
+- restore sane shared timeouts
+- default app verifies to serial
+- add explicit acceptance alias
+- split local and acceptance verification scripts
+- speed up local typecheck harness
+- hard-cut unit preferences to canonical singleton
+- relabel activity overview as workout
+- finalize
+- aggregate package coverage failures
+- add optional coverage-write audit pass
+- simplify startup auto-reply recovery
+- trim duplicate web verify work
+- raise local coverage parallelism
+- stabilize coverage verification
+- remove greenfield compatibility baggage
+- restore inbox loader ownership
+- speed up coverage lane
+- fix telegram env ownership
+- cache package no-emit state
+- stabilize release-check regressions
+- extract next review seams
+- simplify hosted smoke parser proof
+- extract follow-up review seams
+- add hosted runner image smoke
+- clear hosted cleanup coordination row
+- finish greenfield lookup and dispatch seams
+- extract setup and operator helper seams
+- finalize hosted legal pdfs
+- upgrade Node baseline to 24.14.1
+- forbid docs-only data-model patches
+- clear remaining repo acceptance blockers
+
 ## [0.2.0] - 2026-04-08
 
 ### Added
