@@ -10,9 +10,12 @@ permissions:
 
 env:
   # Keep the release workflow on the truthful hosted-web verify path. The
-  # contact-privacy keyring and verification key are deterministic CI-only
+  # database/device-sync/contact-privacy values are deterministic CI-only
   # placeholders, while the public Privy app id comes from a GitHub variable so
-  # hosted-web smoke/build still boot with a valid client identifier.
+  # hosted-web smoke/build still boot without inheriting production secrets.
+  DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:1/murph_test
+  DEVICE_SYNC_ENCRYPTION_KEY: 0101010101010101010101010101010101010101010101010101010101010101
+  DEVICE_SYNC_ENCRYPTION_KEY_VERSION: v1
   HOSTED_CONTACT_PRIVACY_KEYS: v1:BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc
   NEXT_PUBLIC_PRIVY_APP_ID: ${{ vars.HOSTED_WEB_VERIFY_PRIVY_APP_ID }}
   PRIVY_VERIFICATION_KEY: ci-hosted-web-verification-key

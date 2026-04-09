@@ -11,10 +11,13 @@ permissions:
 
 env:
   # CI must still run apps/web verify, but this workflow does not have the hosted
-  # onboarding secret set that production deploy surfaces carry. The contact-privacy
-  # keyring and verification key are deterministic CI-only placeholders, while the
-  # Privy app id comes from a public GitHub Actions variable so the client provider
-  # still sees a valid app identifier during dev-smoke and build.
+  # onboarding or hosted device-sync secrets that production deploy surfaces carry.
+  # The database/device-sync/contact-privacy values below are deterministic CI-only
+  # placeholders that let hosted-web routes boot for build/smoke without wiring the
+  # real production control-plane secrets into GitHub Actions.
+  DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:1/murph_test
+  DEVICE_SYNC_ENCRYPTION_KEY: 0101010101010101010101010101010101010101010101010101010101010101
+  DEVICE_SYNC_ENCRYPTION_KEY_VERSION: v1
   HOSTED_CONTACT_PRIVACY_KEYS: v1:BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc
   NEXT_PUBLIC_PRIVY_APP_ID: ${{ vars.HOSTED_WEB_VERIFY_PRIVY_APP_ID }}
   PRIVY_VERIFICATION_KEY: ci-hosted-web-verification-key
