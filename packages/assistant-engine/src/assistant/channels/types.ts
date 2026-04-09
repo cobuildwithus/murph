@@ -3,6 +3,7 @@ import type {
 } from '@murphai/operator-config/agentmail-runtime'
 import type { InboxShowResult } from '@murphai/operator-config/inbox-cli-contracts'
 import type { LinqFetch } from '@murphai/operator-config/linq-runtime'
+import type { TelegramFetchImplementation } from '@murphai/operator-config/telegram-runtime'
 import {
   assistantChannelDeliverySchema,
   type AssistantBindingDelivery,
@@ -23,29 +24,13 @@ export interface ImessageRuntimeDependencies {
   probeMessagesDb?: (targetPath: string) => Promise<void>
 }
 
-export interface FetchLikeResponse {
-  json: () => Promise<unknown>
-  ok: boolean
-  status: number
-}
-
 export interface AssistantChannelActivityHandle {
   stop: () => Promise<void>
 }
 
-export type FetchLike = (
-  input: string,
-  init: {
-    body?: string
-    headers?: Record<string, string>
-    method: string
-    signal?: AbortSignal
-  },
-) => Promise<FetchLikeResponse>
-
 export interface TelegramRuntimeDependencies {
   env?: NodeJS.ProcessEnv
-  fetchImplementation?: FetchLike
+  fetchImplementation?: TelegramFetchImplementation
 }
 
 export interface EmailRuntimeDependencies {

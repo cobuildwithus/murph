@@ -32,6 +32,7 @@ import {
   resolveTelegramApiBaseUrl,
   resolveTelegramBotToken,
   resolveTelegramFileBaseUrl,
+  startTelegramTypingSession,
 } from '../src/telegram-runtime.ts'
 import { VaultCliError } from '../src/vault-cli-errors.ts'
 
@@ -174,6 +175,66 @@ test('createTimeoutAbortController aborts on timeout and can be cleaned up first
   assert.equal(cleanedController.timedOut(), false)
 })
 
+test('startTelegramTypingSession stops a pending refresh request cleanly', async () => {
+  vi.useFakeTimers()
+
+  const seenSignals: AbortSignal[] = []
+  const fetchImplementation = vi.fn(async (_url: string, init: {
+    body?: string
+    headers?: Record<string, string>
+    method: 'POST'
+    signal?: AbortSignal
+  }) => {
+    seenSignals.push(init.signal ?? new AbortController().signal)
+
+    if (seenSignals.length === 1) {
+      return {
+        async json() {
+          return { ok: true }
+        },
+        ok: true,
+        status: 200,
+      }
+    }
+
+    return await new Promise<{
+      json(): Promise<unknown>
+      ok: boolean
+      status: number
+    }>((resolve) => {
+      init.signal?.addEventListener('abort', () => {
+        resolve({
+          async json() {
+            return { ok: true }
+          },
+          ok: true,
+          status: 200,
+        })
+      }, { once: true })
+    })
+  })
+
+  const handle = await startTelegramTypingSession(
+    {
+      target: '123',
+    },
+    {
+      env: {
+        TELEGRAM_BOT_TOKEN: 'bot-token',
+      },
+      fetchImplementation,
+    },
+  )
+
+  await vi.advanceTimersByTimeAsync(4_000)
+  assert.equal(fetchImplementation.mock.calls.length, 2)
+  assert.equal(seenSignals[1]?.aborted, false)
+
+  await handle.stop()
+
+  assert.equal(seenSignals[1]?.aborted, true)
+})
+
 test('http-json helpers preserve error text and retry retryable response failures', async () => {
   const plainTextResult = await readJsonErrorResponse(
     createSingleUseTextResponse('gateway unavailable'),
@@ -227,7 +288,10 @@ test('http-json helpers preserve error text and retry retryable response failure
     maxAttempts: 3,
     parseResponse: async (response) => (await response.json()) as { value: number },
     waitForRetryDelay: async (_attempt, _signal, headers) => {
-      lastRetryAfter = headers?.get('retry-after') ?? null
+      lastRetryAfter =
+        headers && typeof headers.get === 'function'
+          ? headers.get('retry-after')
+          : null
     },
   })
 

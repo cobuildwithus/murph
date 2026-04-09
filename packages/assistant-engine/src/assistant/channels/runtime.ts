@@ -21,6 +21,9 @@ import {
 import {
   resolveTelegramApiBaseUrl,
   resolveTelegramBotToken,
+  type TelegramFetchImplementation,
+  type TelegramFetchResponse,
+  startTelegramTypingSession,
 } from '@murphai/operator-config/telegram-runtime'
 import { createTimeoutAbortController } from '@murphai/operator-config/http-retry'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
@@ -28,8 +31,6 @@ import type {
   AssistantChannelActivityHandle,
   AssistantDeliveryCandidate,
   EmailRuntimeDependencies,
-  FetchLike,
-  FetchLikeResponse,
   ImessageSdkLike,
   ImessageRuntimeDependencies,
   LinqRuntimeDependencies,
@@ -40,7 +41,6 @@ import { normalizeOptionalText } from './helpers.js'
 const TELEGRAM_MAX_TEXT_LENGTH = 4096
 const TELEGRAM_MAX_DELIVERY_ATTEMPTS = 3
 const TELEGRAM_SEND_TIMEOUT_MS = 30_000
-const TELEGRAM_TYPING_REFRESH_MS = 4_000
 const IMESSAGE_KIT_MODULE_PARTS = ['@photon-ai', 'imessage-kit'] as const
 
 type TelegramParsedTarget = TelegramThreadTarget
@@ -53,7 +53,7 @@ type TelegramSendAttemptResult =
   | {
       kind: 'response'
       payload: unknown
-      response: FetchLikeResponse
+      response: TelegramFetchResponse
     }
 
 type TelegramSendAttemptOutcome =
@@ -193,61 +193,15 @@ export async function startTelegramTypingIndicator(
   },
   dependencies: TelegramRuntimeDependencies = {},
 ): Promise<AssistantChannelActivityHandle> {
-  const env = dependencies.env ?? process.env
-  const token = resolveTelegramBotToken(env)
-  if (!token) {
-    throw new VaultCliError(
-      'ASSISTANT_TELEGRAM_TOKEN_REQUIRED',
-      'Outbound Telegram delivery requires TELEGRAM_BOT_TOKEN.',
-    )
-  }
-
-  const fetchImplementation =
-    dependencies.fetchImplementation ?? globalThis.fetch?.bind(globalThis)
-  if (typeof fetchImplementation !== 'function') {
-    throw new VaultCliError(
-      'ASSISTANT_TELEGRAM_UNAVAILABLE',
-      'Outbound Telegram delivery requires fetch support in the current Node.js runtime.',
-    )
-  }
-
-  const baseUrl = (resolveTelegramApiBaseUrl(env) ?? 'https://api.telegram.org').replace(
-    /\/$/u,
-    '',
-  )
-  let target = parseTelegramTargetOrThrow(input.target)
-  const stopController = new AbortController()
-
-  target = await sendTelegramTypingIndicatorOnce({
-    baseUrl,
-    fetchImplementation,
-    target,
-    targetLabel: serializeTelegramThreadTarget(target),
-    token,
-  })
-
-  let failure: unknown = null
-  const running = keepTelegramTypingIndicatorAlive({
-    baseUrl,
-    fetchImplementation,
-    signal: stopController.signal,
-    target,
-    token,
-  }).catch((error) => {
-    if (!stopController.signal.aborted) {
-      failure = error
-    }
-  })
-
-  return {
-    async stop() {
-      stopController.abort()
-      await running
-      if (failure) {
-        throw failure
-      }
+  return startTelegramTypingSession(
+    {
+      target: input.target,
     },
-  }
+    {
+      env: dependencies.env,
+      fetchImplementation: dependencies.fetchImplementation,
+    },
+  )
 }
 
 export async function startLinqTypingIndicator(
@@ -505,7 +459,7 @@ function mapImessageRuntimeError(error: unknown): VaultCliError {
 
 async function sendTelegramTextChunk(input: {
   baseUrl: string
-  fetchImplementation: FetchLike
+  fetchImplementation: TelegramFetchImplementation
   replyToMessageId: string | null
   target: TelegramParsedTarget
   targetLabel: string
@@ -562,7 +516,7 @@ async function sendTelegramTextChunk(input: {
 }
 
 async function readTelegramResponsePayload(
-  response: FetchLikeResponse,
+  response: TelegramFetchResponse,
 ): Promise<unknown> {
   try {
     return await response.json()
@@ -624,13 +578,13 @@ function extractTelegramErrorContext(value: unknown): {
 
 async function sendTelegramBotApiRequest(input: {
   baseUrl: string
-  fetchImplementation: FetchLike
+  fetchImplementation: TelegramFetchImplementation
   method: 'POST'
   operation: 'sendChatAction' | 'sendMessage'
   payload: Record<string, unknown>
   signal?: AbortSignal
   token: string
-}): Promise<FetchLikeResponse> {
+}): Promise<TelegramFetchResponse> {
   const timeout = createTimeoutAbortController(
     input.signal,
     TELEGRAM_SEND_TIMEOUT_MS,
@@ -660,99 +614,6 @@ function buildTelegramTargetPayload(target: TelegramParsedTarget): Record<string
     direct_messages_topic_id: target.directMessagesTopicId ?? undefined,
     message_thread_id: target.messageThreadId ?? undefined,
   }
-}
-
-async function keepTelegramTypingIndicatorAlive(input: {
-  baseUrl: string
-  fetchImplementation: FetchLike
-  signal: AbortSignal
-  target: TelegramParsedTarget
-  token: string
-}): Promise<void> {
-  let target = input.target
-
-  while (!input.signal.aborted) {
-    await waitForTelegramActivityRefresh(TELEGRAM_TYPING_REFRESH_MS, input.signal)
-    if (input.signal.aborted) {
-      return
-    }
-
-    target = await sendTelegramTypingIndicatorOnce({
-      baseUrl: input.baseUrl,
-      fetchImplementation: input.fetchImplementation,
-      signal: input.signal,
-      target,
-      targetLabel: serializeTelegramThreadTarget(target),
-      token: input.token,
-    })
-  }
-}
-
-async function sendTelegramTypingIndicatorOnce(input: {
-  baseUrl: string
-  fetchImplementation: FetchLike
-  signal?: AbortSignal
-  target: TelegramParsedTarget
-  targetLabel: string
-  token: string
-}): Promise<TelegramParsedTarget> {
-  let response: FetchLikeResponse
-
-  try {
-    response = await sendTelegramBotApiRequest({
-      baseUrl: input.baseUrl,
-      fetchImplementation: input.fetchImplementation,
-      method: 'POST',
-      operation: 'sendChatAction',
-      payload: {
-        ...buildTelegramTargetPayload(input.target),
-        action: 'typing',
-      },
-      signal: input.signal,
-      token: input.token,
-    })
-  } catch (error) {
-    if (input.signal?.aborted) {
-      return input.target
-    }
-
-    throw new VaultCliError(
-      'ASSISTANT_TELEGRAM_ACTIVITY_FAILED',
-      'Telegram typing indicator failed while calling the Bot API.',
-      {
-        error: describeUnknownError(error),
-        target: input.targetLabel,
-      },
-    )
-  }
-
-  const payload = await readTelegramResponsePayload(response)
-  if (response.ok && isTelegramSuccessResponse(payload)) {
-    return input.target
-  }
-
-  const errorContext = extractTelegramErrorContext(payload)
-  if (
-    errorContext.migrateToChatId &&
-    errorContext.migrateToChatId !== input.target.chatId
-  ) {
-    return {
-      ...input.target,
-      chatId: errorContext.migrateToChatId,
-    }
-  }
-
-  throw new VaultCliError(
-    'ASSISTANT_TELEGRAM_ACTIVITY_FAILED',
-    errorContext.description ??
-      `Telegram Bot API sendChatAction failed with HTTP ${response.status}.`,
-    {
-      errorCode: errorContext.errorCode,
-      migrateToChatId: errorContext.migrateToChatId,
-      status: response.status,
-      target: input.targetLabel,
-    },
-  )
 }
 
 function splitTelegramMessageText(message: string): string[] {
@@ -836,31 +697,6 @@ async function waitForTelegramRetryDelay(
   await new Promise((resolve) => setTimeout(resolve, retryAfterMs))
 }
 
-async function waitForTelegramActivityRefresh(
-  delayMs: number,
-  signal?: AbortSignal,
-): Promise<void> {
-  if (signal?.aborted) {
-    return
-  }
-
-  await new Promise<void>((resolve) => {
-    const timeout = setTimeout(() => {
-      cleanup()
-      resolve()
-    }, delayMs)
-
-    const onAbort = () => {
-      clearTimeout(timeout)
-      cleanup()
-      resolve()
-    }
-
-    const cleanup = () => signal?.removeEventListener('abort', onAbort)
-    signal?.addEventListener('abort', onAbort, { once: true })
-  })
-}
-
 function parseTelegramTargetOrThrow(target: string): TelegramParsedTarget {
   const parsed = parseTelegramThreadTarget(target)
   if (parsed) {
@@ -886,7 +722,7 @@ function parseTelegramTargetOrThrow(target: string): TelegramParsedTarget {
 
 async function sendTelegramTextChunkOnce(input: {
   baseUrl: string
-  fetchImplementation: FetchLike
+  fetchImplementation: TelegramFetchImplementation
   replyToMessageId: string | null
   target: TelegramParsedTarget
   targetLabel: string
