@@ -30,9 +30,9 @@ import type {
 } from './types.js'
 import {
   loadQueryRuntime,
-  loadRuntimeModule,
   type ImportersFactoryRuntimeModule,
 } from '@murphai/vault-usecases/runtime'
+import { loadRuntimeModule } from '../runtime-import.js'
 
 import { normalizeNullableString } from '../inbox-services/shared.js'
 

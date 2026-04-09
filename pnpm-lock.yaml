@@ -568,12 +568,21 @@ importers:
       '@murphai/core':
         specifier: workspace:*
         version: link:../core
+      '@murphai/importers':
+        specifier: workspace:*
+        version: link:../importers
       '@murphai/inboxd':
         specifier: workspace:*
         version: link:../inboxd
+      '@murphai/inboxd-imessage':
+        specifier: workspace:*
+        version: link:../inboxd-imessage
       '@murphai/operator-config':
         specifier: workspace:*
         version: link:../operator-config
+      '@murphai/parsers':
+        specifier: workspace:*
+        version: link:../parsers
       '@murphai/runtime-state':
         specifier: workspace:*
         version: link:../runtime-state
@@ -707,18 +716,9 @@ importers:
       '@murphai/importers':
         specifier: workspace:*
         version: link:../importers
-      '@murphai/inboxd':
-        specifier: workspace:*
-        version: link:../inboxd
-      '@murphai/inboxd-imessage':
-        specifier: workspace:*
-        version: link:../inboxd-imessage
       '@murphai/operator-config':
         specifier: workspace:*
         version: link:../operator-config
-      '@murphai/parsers':
-        specifier: workspace:*
-        version: link:../parsers
       '@murphai/query':
         specifier: workspace:*
         version: link:../query
