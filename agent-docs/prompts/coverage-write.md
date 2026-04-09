@@ -1,5 +1,5 @@
 ---
-description: Required mini-model coverage/proof authoring pass for a dedicated write-capable worker subagent when a task uses owner-level coverage verification
+description: Required `gpt-5.4-mini` coverage/proof authoring pass for a dedicated write-capable worker subagent when a task uses owner-level coverage verification
 action: narrow test-authoring
 ---
 
@@ -11,7 +11,8 @@ Goal:
 Use the provided coverage-bearing command and its current output to add the smallest high-value tests or direct-proof scaffolding needed to get that lane passing or materially closer without widening the implementation.
 
 Model/Scope expectation:
-- This pass is meant to run on `gpt-5.4-mini`.
+- This pass must run on `gpt-5.4-mini`.
+- Do not silently substitute regular `gpt-5.4` for this pass unless the parent agent has also updated the durable workflow docs in the same landing.
 - Keep the write scope narrow: tests, fixtures, or direct-proof scaffolding only.
 - Do not widen into production refactors, cleanup work, or architecture changes.
 - If the coverage lane already passes and no meaningful missing proof is found, return that conclusion and do not churn test files.
