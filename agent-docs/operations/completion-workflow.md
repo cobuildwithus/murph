@@ -18,12 +18,12 @@ Use `agent-docs/operations/verification-and-runtime.md` to choose the truthful v
    - repo code/test/config changes whose verification lane includes owner-level coverage or truthful `pnpm test:diff <path ...>` coverage require the dedicated `coverage-write` pass
    - ordinary repo code/test/config changes then run `task-finish-review`
    - add `simplify` only when the conditions below are met
-5. When `simplify` applies, run it before coverage or final review, then land only behavior-preserving reductions.
+5. When `simplify` applies, spawn a dedicated audit subagent, hand it `agent-docs/prompts/simplify.md` plus the audit handoff packet below, and run it before coverage or final review. Land only behavior-preserving reductions from that pass.
 6. Once implementation is stable enough to produce a truthful signal, run the coverage-bearing verification command chosen from the verification doc. Prefer `pnpm test:diff <path ...>` when it already covers the touched owner truthfully; otherwise run the edited owner package/app coverage command required there.
-7. When step 6 uses an owner-coverage or truthful diff-coverage lane, run the required `coverage-write` pass after any simplify pass. Keep its write scope limited to tests or direct-proof scaffolding for already-landed behavior.
+7. When step 6 uses an owner-coverage or truthful diff-coverage lane, run the required `coverage-write` pass after any simplify pass. Hand that worker `agent-docs/prompts/coverage-write.md` plus the audit handoff packet below, and keep its write scope limited to tests or direct-proof scaffolding for already-landed behavior.
 8. For user-visible, persisted-state, operational, or trust-boundary changes, capture at least one direct scenario check in addition to scripted tests and record the exact evidence.
 9. Run or re-run the required checks after the implementation is stable, after any simplify updates, after any required coverage pass lands, and after any later review-driven fixes.
-10. Run the final completion review. Use the tiny repo-internal fast path below only when it applies; otherwise run `task-finish-review`.
+10. Run the final completion review. Use the tiny repo-internal fast path below only when it applies; otherwise spawn a dedicated audit subagent and hand it `agent-docs/prompts/task-finish-review.md` plus the audit handoff packet below.
 11. Treat that final review as the last audit of remaining coverage and proof gaps too. If it finds meaningful missing tests or boundary-level verification, add the smallest high-impact proof before handoff instead of creating another default coverage pass.
 12. Resolve high-severity findings before final handoff and re-run affected required checks after any post-review fixes.
 13. Do not automatically spawn another workflow audit subagent after the first final review. One extra final-review rerun is allowed only when the first review forced a large or high-risk follow-up diff; otherwise finish locally after the post-fix checks.
@@ -57,6 +57,7 @@ It does not skip `coverage-write` when the task's verification lane already incl
 - Prefer a fresh non-forked handoff packet over inheriting the full implementation thread. Widen context only when a specific review question cannot be answered from the narrowed packet.
 - Use a fresh subagent per required pass unless the user explicitly instructs otherwise.
 - When waiting on audit subagents, prefer a patient wait window over repeated short polling. A realistic default is 5 to 10 minutes for medium or large diffs.
+- Do not cancel or close an audit subagent early just because it has been running for under 10 minutes unless there is concrete evidence that it is stuck or operating on the wrong scope.
 - Close audit subagents promptly after they return, time out, or are judged stuck.
 - If subagent tooling is unavailable in the current environment, stop and escalate instead of silently downgrading a required audit pass to local review.
 
