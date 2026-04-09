@@ -5,8 +5,7 @@ import { vaultMetadataSchema, type JsonObject, type VaultMetadata } from "./zod.
 export interface VaultMetadataValidationFailure {
   code:
     | "VAULT_INVALID_METADATA"
-    | "VAULT_UPGRADE_REQUIRED"
-    | "VAULT_UPGRADE_UNSUPPORTED";
+    | "VAULT_UNSUPPORTED_FORMAT";
   message: string;
   details: JsonObject;
 }
@@ -114,31 +113,16 @@ export function validateCurrentVaultMetadata(
   }
 
   const { storedFormatVersion } = formatVersionResult;
-  if (storedFormatVersion > CURRENT_VAULT_FORMAT_VERSION) {
+  if (storedFormatVersion !== CURRENT_VAULT_FORMAT_VERSION) {
     return {
       success: false,
       error: buildVaultMetadataValidationFailure(
-        "VAULT_UPGRADE_UNSUPPORTED",
-        `Vault formatVersion ${storedFormatVersion} is newer than supported formatVersion ${CURRENT_VAULT_FORMAT_VERSION}.`,
+        "VAULT_UNSUPPORTED_FORMAT",
+        `Vault formatVersion ${storedFormatVersion} is unsupported; expected formatVersion ${CURRENT_VAULT_FORMAT_VERSION}.`,
         options.relativePath,
         {
           storedFormatVersion,
           supportedFormatVersion: CURRENT_VAULT_FORMAT_VERSION,
-        },
-      ),
-    };
-  }
-
-  if (storedFormatVersion < CURRENT_VAULT_FORMAT_VERSION) {
-    return {
-      success: false,
-      error: buildVaultMetadataValidationFailure(
-        "VAULT_UPGRADE_REQUIRED",
-        `Vault formatVersion ${storedFormatVersion} must be upgraded to ${CURRENT_VAULT_FORMAT_VERSION} before current-format operations can continue. Run "vault upgrade" first.`,
-        options.relativePath,
-        {
-          storedFormatVersion,
-          targetFormatVersion: CURRENT_VAULT_FORMAT_VERSION,
         },
       ),
     };

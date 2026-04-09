@@ -10,7 +10,6 @@ import {
   pathSchema,
   timeZoneSchema,
   vaultInitResultSchema,
-  vaultUpgradeResultSchema,
   vaultValidateResultSchema,
 } from '@murphai/operator-config/vault-cli-contracts'
 import type { VaultServices } from '@murphai/vault-usecases'
@@ -166,23 +165,6 @@ export function registerVaultCommands(cli: Cli.Cli, services: VaultServices) {
       return services.core.repairVault({
         vault: options.vault,
         requestId: requestIdFromOptions(options),
-      })
-    },
-  })
-
-  vaultGroup.command('upgrade', {
-    description:
-      'Run the reserved canonical vault-upgrade seam. Today it confirms current-format vaults and fails closed on older formatVersion values because no upgrade steps are registered.',
-    args: emptyArgsSchema,
-    options: withBaseOptions({
-      dryRun: z.boolean().default(false).describe('Preview the current-format check without writing canonical files.'),
-    }),
-    output: vaultUpgradeResultSchema,
-    async run({ options }) {
-      return services.core.upgradeVault({
-        vault: options.vault,
-        requestId: requestIdFromOptions(options),
-        dryRun: options.dryRun,
       })
     },
   })

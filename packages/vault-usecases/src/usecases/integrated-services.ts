@@ -101,10 +101,7 @@ import {
   unlinkJournalEventIds,
   unlinkJournalStreams,
 } from "./experiment-journal-vault.js"
-import {
-  toVaultCliError,
-  toVaultUpgradeCliError,
-} from "./vault-usecase-helpers.js"
+import { toVaultCliError } from "./vault-usecase-helpers.js"
 
 interface IntegratedVaultServiceDependencies {
   foodAutoLogHooks?: FoodAutoLogHooks
@@ -152,37 +149,6 @@ function createIntegratedCoreServices(
         createdDirectories: result.createdDirectories,
         updated: result.updated,
         auditPath: result.auditPath,
-      }
-    },
-    async upgradeVault(
-      input: CommandContext & {
-        dryRun?: boolean
-      },
-    ) {
-      const { vault } = input
-      const { core } = await loadIntegratedRuntime()
-      try {
-        const result = await core.upgradeVault({
-          vaultRoot: vault,
-          dryRun: input.dryRun,
-        })
-
-        return {
-          vault,
-          metadataFile: result.metadataFile,
-          title: result.title,
-          timezone: result.timezone,
-          fromFormatVersion: result.fromFormatVersion,
-          toFormatVersion: result.toFormatVersion,
-          steps: result.steps,
-          affectedFiles: result.affectedFiles,
-          rebuildableProjectionStores: result.rebuildableProjectionStores,
-          updated: result.updated,
-          dryRun: result.dryRun,
-          auditPath: result.auditPath,
-        }
-      } catch (error) {
-        throw toVaultUpgradeCliError(error)
       }
     },
     async addMeal(input: CommandContext & {

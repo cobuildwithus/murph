@@ -62,7 +62,6 @@ import {
   repairVault as repairVaultInternal,
   validateVault as validateVaultInternal,
 } from "./vault.ts";
-import { upgradeVault as upgradeVaultInternal } from "./vault-upgrade.ts";
 
 import type { DateInput, ValidationIssue } from "./types.ts";
 
@@ -413,12 +412,6 @@ export async function repairVault(
   input: Parameters<typeof repairVaultInternal>[0] = {},
 ): ReturnType<typeof repairVaultInternal> {
   return withCanonicalWriteLock(input.vaultRoot, () => repairVaultInternal(input));
-}
-
-export async function upgradeVault(
-  input: Parameters<typeof upgradeVaultInternal>[0] = {},
-): ReturnType<typeof upgradeVaultInternal> {
-  return withCanonicalWriteLock(input.vaultRoot, () => upgradeVaultInternal(input));
 }
 
 export async function promoteInboxJournal(

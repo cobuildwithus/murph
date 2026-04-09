@@ -10,7 +10,6 @@ import {
   initializeVault,
   loadVault,
   repairVault,
-  upgradeVault,
   validateVault,
 } from "../src/index.ts";
 
@@ -42,7 +41,7 @@ function hasVaultErrorCode(error: unknown, expectedCode: string): boolean {
   );
 }
 
-test("validateVault classifies explicit older format versions as upgrade required", async () => {
+test("validateVault treats explicit older format versions as unsupported", async () => {
   const vaultRoot = await createTempVaultRoot("murph-vault-upgrade-required");
 
   try {
@@ -58,7 +57,7 @@ test("validateVault classifies explicit older format versions as upgrade require
     assert.ok(
       result.issues.some(
         (issue) =>
-          issue.code === "VAULT_UPGRADE_REQUIRED" &&
+          issue.code === "VAULT_UNSUPPORTED_FORMAT" &&
           issue.severity === "error" &&
           issue.path === "vault.json",
       ),
@@ -78,11 +77,11 @@ test("loadVault and repairVault reject explicit older format versions", async ()
 
     await assert.rejects(
       () => loadVault({ vaultRoot }),
-      (error) => hasVaultErrorCode(error, "VAULT_UPGRADE_REQUIRED"),
+      (error) => hasVaultErrorCode(error, "VAULT_UNSUPPORTED_FORMAT"),
     );
     await assert.rejects(
       () => repairVault({ vaultRoot }),
-      (error) => hasVaultErrorCode(error, "VAULT_UPGRADE_REQUIRED"),
+      (error) => hasVaultErrorCode(error, "VAULT_UNSUPPORTED_FORMAT"),
     );
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
@@ -106,62 +105,10 @@ test("validateVault surfaces unsupported future vault formats as hard errors", a
     assert.ok(
       result.issues.some(
         (issue) =>
-          issue.code === "VAULT_UPGRADE_UNSUPPORTED" &&
+          issue.code === "VAULT_UNSUPPORTED_FORMAT" &&
           issue.severity === "error" &&
           issue.path === "vault.json",
       ),
-    );
-  } finally {
-    await rm(vaultRoot, { recursive: true, force: true });
-  }
-});
-
-test("upgradeVault returns a no-op result for current-format vaults", async () => {
-  const vaultRoot = await createTempVaultRoot("murph-vault-upgrade-noop");
-
-  try {
-    await initializeVault({ vaultRoot, timezone: "America/New_York" });
-    const result = await upgradeVault({ vaultRoot, dryRun: true });
-
-    assert.equal(result.updated, false);
-    assert.equal(result.dryRun, true);
-    assert.equal(result.auditPath, null);
-    assert.equal(result.fromFormatVersion, CURRENT_VAULT_FORMAT_VERSION);
-    assert.equal(result.toFormatVersion, CURRENT_VAULT_FORMAT_VERSION);
-    assert.deepEqual(result.steps, []);
-    assert.deepEqual(result.affectedFiles, []);
-    assert.deepEqual(result.rebuildableProjectionStores, []);
-  } finally {
-    await rm(vaultRoot, { recursive: true, force: true });
-  }
-});
-
-test("upgradeVault rejects future format versions as unsupported", async () => {
-  const vaultRoot = await createTempVaultRoot("murph-vault-upgrade-future");
-
-  try {
-    await initializeVault({ vaultRoot, timezone: "America/New_York" });
-    await rewriteVaultMetadataWithFormatVersion(vaultRoot, CURRENT_VAULT_FORMAT_VERSION + 1);
-
-    await assert.rejects(
-      () => upgradeVault({ vaultRoot }),
-      (error) => hasVaultErrorCode(error, "VAULT_UPGRADE_UNSUPPORTED"),
-    );
-  } finally {
-    await rm(vaultRoot, { recursive: true, force: true });
-  }
-});
-
-test("upgradeVault rejects older format versions when no migration is registered", async () => {
-  const vaultRoot = await createTempVaultRoot("murph-vault-upgrade-unsupported-old");
-
-  try {
-    await initializeVault({ vaultRoot, timezone: "America/New_York" });
-    await rewriteVaultMetadataWithFormatVersion(vaultRoot, 0);
-
-    await assert.rejects(
-      () => upgradeVault({ vaultRoot }),
-      (error) => hasVaultErrorCode(error, "VAULT_UPGRADE_UNSUPPORTED"),
     );
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
