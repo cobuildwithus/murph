@@ -94,8 +94,10 @@ readonly app_verify_parallel_default="$([[ -n "${CI:-}" ]] && echo 0 || echo 1)"
 readonly app_verify_parallel="${MURPH_APP_VERIFY_PARALLEL:-$app_verify_parallel_default}"
 readonly test_lane_parallel_default="$([[ -n "${CI:-}" ]] && echo 0 || echo 1)"
 readonly test_lane_parallel="${MURPH_TEST_LANES_PARALLEL:-$test_lane_parallel_default}"
-readonly package_coverage_concurrency_default="$([[ -n "${CI:-}" ]] && echo 1 || echo 2)"
+readonly package_coverage_concurrency_default="$([[ -n "${CI:-}" ]] && echo 1 || echo 4)"
 readonly package_coverage_concurrency_limit="$(normalize_positive_integer "${MURPH_PACKAGE_COVERAGE_CONCURRENCY:-$package_coverage_concurrency_default}" "$package_coverage_concurrency_default")"
+readonly package_coverage_vitest_max_workers_default="$([[ -n "${CI:-}" ]] && echo 50% || echo 100%)"
+readonly package_coverage_vitest_max_workers="${MURPH_PACKAGE_COVERAGE_VITEST_MAX_WORKERS:-$package_coverage_vitest_max_workers_default}"
 readonly typecheck_workspace_concurrency_default="$([[ -n "${CI:-}" ]] && echo 2 || echo 4)"
 readonly typecheck_workspace_concurrency="$(normalize_positive_integer "${MURPH_TYPECHECK_WORKSPACE_CONCURRENCY:-$typecheck_workspace_concurrency_default}" "$typecheck_workspace_concurrency_default")"
 readonly verify_retry_count="$(normalize_non_negative_integer "${MURPH_VERIFY_RETRY_COUNT:-0}" "0")"
@@ -490,11 +492,13 @@ run_workspace_package_coverage() {
   if [[ "$package_dir" == "packages/cli" ]]; then
     run_timed_step \
       "$label" \
-      env MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 pnpm exec vitest run --config "packages/cli/vitest.workspace.ts" --coverage
+      env MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 MURPH_VITEST_MAX_WORKERS="$package_coverage_vitest_max_workers" pnpm exec vitest run --config "packages/cli/vitest.workspace.ts" --coverage
     return 0
   fi
 
-  run_timed_step "$label" pnpm --dir "$package_dir" test:coverage
+  run_timed_step \
+    "$label" \
+    env MURPH_VITEST_MAX_WORKERS="$package_coverage_vitest_max_workers" pnpm --dir "$package_dir" test:coverage
 }
 
 run_all_package_coverage() {
