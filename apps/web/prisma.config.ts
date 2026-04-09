@@ -1,8 +1,15 @@
+import path from "node:path";
 import process from "node:process";
+import { fileURLToPath } from "node:url";
 
 import { defineConfig } from "prisma/config";
 
-loadEnvFileIfPresent(".env");
+const CONFIG_DIR = path.dirname(fileURLToPath(import.meta.url));
+
+loadEnvFiles([
+  path.join(CONFIG_DIR, ".env.local"),
+  path.join(CONFIG_DIR, ".env"),
+]);
 
 const DATABASE_URL =
   process.env.DATABASE_URL ?? "postgresql://postgres:postgres@localhost:5432/murph_device_sync";
@@ -16,6 +23,12 @@ export default defineConfig({
     url: DATABASE_URL,
   },
 });
+
+function loadEnvFiles(filePaths: string[]): void {
+  for (const filePath of filePaths) {
+    loadEnvFileIfPresent(filePath);
+  }
+}
 
 function loadEnvFileIfPresent(filePath: string): void {
   try {

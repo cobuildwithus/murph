@@ -157,10 +157,10 @@ The hosted control plane consumes each assertion nonce once, so replayed asserti
 
 ## Secret hygiene and rotation
 
-- Keep real hosted values in an untracked local `.env` for development or in the platform secret manager for deployed environments. The committed `.env.example` file must stay placeholder-only.
-- A raw filesystem archive of a repo clone is still an exposure when ignored local `apps/web/.env`, `.next`, `.next-dev`, or `.next-smoke` output exists, even when git has no tracked secret diff. Use the guarded `pnpm zip:src` / `scripts/package-audit-context.sh` flow for source sharing instead of archiving the clone directly; that path stages git-visible files, now includes the tracked `config/workspace-source-resolution.ts` helper, and filters blocked local residue from the bundle.
-- Treat `DATABASE_URL`, `DEVICE_SYNC_ENCRYPTION_KEY`, `GARMIN_CLIENT_SECRET`, `WHOOP_CLIENT_SECRET`, `OURA_CLIENT_SECRET`, and `OURA_WEBHOOK_VERIFICATION_TOKEN` as rotation-required if a real hosted `.env` or deploy secret was ever exposed.
-- Treat a leaked raw clone/archive that included the local hosted `.env` the same way as a direct secret exposure.
+- Keep real hosted values in an untracked local `apps/web/.env.local` or `.env` for development, or in the platform secret manager for deployed environments. The committed `.env.example` file must stay placeholder-only.
+- A raw filesystem archive of a repo clone is still an exposure when ignored local `apps/web/.env.local`, `apps/web/.env`, `.next`, `.next-dev`, or `.next-smoke` output exists, even when git has no tracked secret diff. Use the guarded `pnpm zip:src` / `scripts/package-audit-context.sh` flow for source sharing instead of archiving the clone directly; that path stages git-visible files, now includes the tracked `config/workspace-source-resolution.ts` helper, and filters blocked local residue from the bundle.
+- Treat `DATABASE_URL`, `DEVICE_SYNC_ENCRYPTION_KEY`, `GARMIN_CLIENT_SECRET`, `WHOOP_CLIENT_SECRET`, `OURA_CLIENT_SECRET`, and `OURA_WEBHOOK_VERIFICATION_TOKEN` as rotation-required if a real hosted `.env.local`, `.env`, or deploy secret was ever exposed.
+- Treat a leaked raw clone/archive that included the local hosted `.env.local` or `.env` the same way as a direct secret exposure.
 - Rotate `DEVICE_SYNC_ENCRYPTION_KEY_VERSION` whenever you rotate `DEVICE_SYNC_ENCRYPTION_KEY`, but do not assume the version field alone gives backwards-compatible reads. The current hosted control plane still uses this key for device-sync control-plane secrecy such as opaque browser connection ids and key-versioned audit metadata.
 - Canonical decryptable provider tokens no longer live in Postgres. The Cloudflare runtime store now owns token escrow under the user root key, so escrow rotation or revocation must follow the hosted-execution/Cloudflare key path rather than the removed `device_connection_secret` table.
 
