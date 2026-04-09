@@ -6,7 +6,9 @@ import {
   addActivitySession,
   addBodyMeasurement,
   addMeal,
+  appendJournal,
   createExperiment,
+  importDocument,
   initializeVault,
   upsertAllergy,
   upsertCondition,
@@ -156,6 +158,22 @@ it('builds a navigation-only overview from canonical, raw, and source-root cover
       title: 'Overnight sleep',
     })}\n`,
   )
+  await appendJournal({
+    date: '2026-04-06',
+    text: 'Energy was steadier after breakfast.',
+    vaultRoot,
+  })
+  const documentSourcePath = `${parentRoot}/document-source.md`
+  await writeFile(
+    documentSourcePath,
+    '# Lab report\n\nFasted lipid panel.\n',
+  )
+  await importDocument({
+    note: 'Imported lab report.',
+    sourcePath: documentSourcePath,
+    title: 'Lab report',
+    vaultRoot,
+  })
 
   const overview = await buildAssistantVaultOverviewBlock(vaultRoot)
 
@@ -170,6 +188,9 @@ it('builds a navigation-only overview from canonical, raw, and source-root cover
   )
   expect(overview).toContain(
     'Saved health context includes 1 goal, 1 condition, and 1 allergy.',
+  )
+  expect(overview).toContain(
+    'Additional user records include 1 journal day and 1 document.',
   )
   expect(overview).toContain(
     'Raw meal import coverage includes 2 manifests under `raw/meals`.',

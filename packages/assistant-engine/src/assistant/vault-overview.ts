@@ -25,6 +25,7 @@ export async function buildAssistantVaultOverviewBlock(
   const canonicalCoverage = summarizeCanonicalCoverage(vault)
   const wearableCoverage = summarizeWearableCoverage(vault)
   const healthContextCoverage = summarizeHealthContextCoverage(vault)
+  const journalAndDocumentCoverage = summarizeJournalAndDocumentCoverage(vault)
   const rawCoverage = summarizeRawCoverage(rawMealManifestPaths.length)
   const bankCoverage = summarizeBankCoverage(vault)
   const otherSources = summarizeOtherSources({
@@ -39,6 +40,7 @@ export async function buildAssistantVaultOverviewBlock(
     canonicalCoverage,
     wearableCoverage,
     healthContextCoverage,
+    journalAndDocumentCoverage,
     rawCoverage,
     bankCoverage,
     otherSources,
@@ -95,6 +97,19 @@ function summarizeHealthContextCoverage(vault: VaultReadModel): string | null {
   }
 
   return `- Saved health context includes ${joinWithAnd(parts)}.`
+}
+
+function summarizeJournalAndDocumentCoverage(vault: VaultReadModel): string | null {
+  const parts = [
+    summarizePositiveCount(vault.journalEntries.length, 'journal day'),
+    summarizePositiveCount(countEventsOfKind(vault, 'document'), 'document'),
+  ].filter((value): value is string => Boolean(value))
+
+  if (parts.length === 0) {
+    return null
+  }
+
+  return `- Additional user records include ${joinWithAnd(parts)}.`
 }
 
 function summarizeRawCoverage(rawMealManifestCount: number): string | null {
