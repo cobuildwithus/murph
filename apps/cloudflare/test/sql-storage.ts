@@ -1,4 +1,5 @@
 import { DatabaseSync } from "node:sqlite";
+import type { SQLInputValue } from "node:sqlite";
 
 type SqlStorageValue = ArrayBuffer | string | number | null;
 
@@ -15,7 +16,7 @@ interface SqlCursorLike<T extends Record<string, SqlStorageValue>> extends Itera
 export interface TestSqlStorageLike {
   exec<T extends Record<string, SqlStorageValue>>(
     query: string,
-    ...bindings: unknown[]
+    ...bindings: SqlStorageValue[]
   ): SqlCursorLike<T>;
   reset(): void;
 }
@@ -25,11 +26,14 @@ export function createTestSqlStorage(): TestSqlStorageLike {
   initializeSchema(database);
 
   return {
-    exec<T extends Record<string, SqlStorageValue>>(query: string, ...bindings: unknown[]): SqlCursorLike<T> {
+    exec<T extends Record<string, SqlStorageValue>>(
+      query: string,
+      ...bindings: SqlStorageValue[]
+    ): SqlCursorLike<T> {
       const trimmed = query.trim().toLowerCase();
       if (trimmed.startsWith("select") || trimmed.startsWith("pragma")) {
         const statement = database.prepare(query);
-        const rows = statement.all(...bindings) as T[];
+        const rows = statement.all(...bindings as SQLInputValue[]) as T[];
         return createCursor(rows, {
           rowsRead: rows.length,
           rowsWritten: 0,
@@ -45,7 +49,7 @@ export function createTestSqlStorage(): TestSqlStorageLike {
       }
 
       const statement = database.prepare(query);
-      const result = statement.run(...bindings);
+      const result = statement.run(...bindings as SQLInputValue[]);
       return createCursor([], {
         rowsRead: 0,
         rowsWritten: Number(result.changes ?? 0),

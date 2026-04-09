@@ -353,7 +353,14 @@ test("createLinqWebhookConnector waits for successful attachment downloads that 
   });
   assert.equal(emitCalled, false);
 
-  resolveDownload?.({
+  const completeDownload = (response: Response) => {
+    if (!resolveDownload) {
+      throw new Error("expected delayed Linq download resolver");
+    }
+
+    resolveDownload(response);
+  };
+  completeDownload({
     ok: true,
     status: 200,
     arrayBuffer: async () => Uint8Array.from([4, 3, 2, 1]).buffer,
@@ -684,7 +691,7 @@ test("createLinqWebhookConnector handles pre-aborted startup, server errors, and
     controller.abort();
 
     await assert.rejects(() => watchPromise, /close failed/u);
-    await connector.close();
+    await connector.close?.();
   }
 });
 

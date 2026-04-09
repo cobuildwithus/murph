@@ -529,10 +529,10 @@ describe('assistant runtime state service', () => {
     await expect(
       service.diagnostics.recordEvent({
         component: 'assistant',
-        entityId: 'turn-1',
-        entityType: 'turn',
+        kind: 'runtime-state-service-test',
         level: 'info',
         message: 'diagnostic',
+        turnId: 'turn-1',
       }),
     ).resolves.toBeUndefined()
     await expect(

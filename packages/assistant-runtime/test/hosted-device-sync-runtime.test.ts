@@ -25,6 +25,7 @@ import type { HostedRuntimeDeviceSyncPort } from "../src/hosted-runtime/platform
 import { createHostedRuntimeWorkspace } from "./hosted-runtime-test-helpers.ts";
 
 const DEVICE_SYNC_SECRET = "secret-for-tests";
+type ApplyUpdatesRequest = Parameters<HostedRuntimeDeviceSyncPort["applyUpdates"]>[0];
 
 function createFakeProvider(overrides: Partial<DeviceSyncProvider> = {}): DeviceSyncProvider {
   const baseProvider: DeviceSyncProvider = {
@@ -214,6 +215,21 @@ function buildRuntimeSnapshot(input: {
   };
 }
 
+function buildEmptyRuntimeSnapshot(): HostedExecutionDeviceSyncRuntimeSnapshotResponse {
+  return {
+    connections: [],
+    generatedAt: "2026-04-04T09:10:00.000Z",
+    userId: "member_123",
+  };
+}
+
+function requireApplyUpdatesRequest(
+  request: ApplyUpdatesRequest | null,
+): ApplyUpdatesRequest {
+  assert.ok(request);
+  return request;
+}
+
 function readJobsForAccount(service: ReturnType<typeof createDeviceSyncService>, accountId: string) {
   return service.store.database.prepare(`
     select
@@ -282,13 +298,13 @@ describe("hosted device-sync runtime", () => {
       async applyUpdates() {
         throw new Error("applyUpdates should not be called during sync");
       },
-      async createConnectLink() {
-        throw new Error("createConnectLink should not be called during sync");
-      },
-      async fetchSnapshot() {
-        fetchSnapshotCalls += 1;
-        return null;
-      },
+        async createConnectLink() {
+          throw new Error("createConnectLink should not be called during sync");
+        },
+        async fetchSnapshot() {
+          fetchSnapshotCalls += 1;
+          return buildEmptyRuntimeSnapshot();
+        },
     };
 
     try {
@@ -301,7 +317,7 @@ describe("hosted device-sync runtime", () => {
       });
 
       assert.equal(fetchSnapshotCalls, 1);
-      assert.equal(state.snapshot, null);
+      assert.deepEqual(state.snapshot, buildEmptyRuntimeSnapshot());
       assert.equal(state.hostedToLocalAccountIds.size, 0);
       assert.equal(state.localToHostedAccountIds.size, 0);
       assert.equal(state.observedTokenVersions.size, 0);
@@ -1269,17 +1285,7 @@ describe("hosted device-sync runtime", () => {
           tokenVersion: 7,
         },
       });
-      let appliedRequest: {
-        occurredAt?: string | null;
-        updates: ReadonlyArray<{
-          connection?: Record<string, unknown>;
-          connectionId: string;
-          localState?: Record<string, unknown>;
-          observedTokenVersion?: number | null;
-          observedUpdatedAt?: string | null;
-          tokenBundle?: Record<string, unknown> | null;
-        }>;
-      } | null = null;
+      let appliedRequest: ApplyUpdatesRequest | null = null;
       const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
         async applyUpdates(input): Promise<HostedExecutionDeviceSyncRuntimeApplyResponse> {
           appliedRequest = input;
@@ -1354,10 +1360,10 @@ describe("hosted device-sync runtime", () => {
         timeoutMs: null,
       });
 
-      assert.ok(appliedRequest);
-      assert.equal(appliedRequest.occurredAt, "2026-04-02T13:10:00.000Z");
-      assert.equal(appliedRequest.updates.length, 1);
-      assert.deepEqual(appliedRequest.updates[0], {
+      const request = requireApplyUpdatesRequest(appliedRequest);
+      assert.equal(request.occurredAt, "2026-04-02T13:10:00.000Z");
+      assert.equal(request.updates.length, 1);
+      assert.deepEqual(request.updates[0], {
         connection: {
           displayName: "Local Demo",
           metadata: {
@@ -1415,7 +1421,7 @@ describe("hosted device-sync runtime", () => {
             throw new Error("createConnectLink should not be called during reconciliation");
           },
           async fetchSnapshot() {
-            return null;
+            return buildEmptyRuntimeSnapshot();
           },
         },
         dispatch: buildCronDispatch("2026-04-06T10:10:00.000Z"),
@@ -1461,10 +1467,7 @@ describe("hosted device-sync runtime", () => {
     await mkdir(vaultRoot, { recursive: true });
 
     const service = createDeviceSyncServiceForVault(vaultRoot);
-    let appliedRequest: {
-      occurredAt?: string | null;
-      updates: ReadonlyArray<unknown>;
-    } | null = null;
+    let appliedRequest: ApplyUpdatesRequest | null = null;
 
     try {
       await reconcileHostedDeviceSyncControlPlaneState({
@@ -1481,7 +1484,7 @@ describe("hosted device-sync runtime", () => {
             throw new Error("createConnectLink should not be called during reconciliation");
           },
           async fetchSnapshot() {
-            return null;
+            return buildEmptyRuntimeSnapshot();
           },
         },
         dispatch: buildCronDispatch("2026-04-06T10:10:00.000Z"),
@@ -1499,7 +1502,7 @@ describe("hosted device-sync runtime", () => {
         timeoutMs: null,
       });
 
-      assert.deepEqual(appliedRequest, {
+      assert.deepEqual(requireApplyUpdatesRequest(appliedRequest), {
         occurredAt: "2026-04-06T10:10:00.000Z",
         updates: [],
       });
@@ -1522,13 +1525,10 @@ describe("hosted device-sync runtime", () => {
         connectionId: "hosted_conn_disconnect_after_sync",
         externalAccountId: "demo-disconnect-after-sync",
       });
-      let appliedRequest: {
-        occurredAt?: string | null;
-        updates: ReadonlyArray<Record<string, unknown>>;
-      } | null = null;
+      let appliedRequest: ApplyUpdatesRequest | null = null;
       const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
         async applyUpdates(input): Promise<HostedExecutionDeviceSyncRuntimeApplyResponse> {
-          appliedRequest = input as typeof appliedRequest;
+          appliedRequest = input;
           return {
             appliedAt: "2026-04-06T10:10:01.000Z",
             updates: [],
@@ -1564,7 +1564,7 @@ describe("hosted device-sync runtime", () => {
         timeoutMs: null,
       });
 
-      assert.deepEqual(appliedRequest?.updates[0], {
+      assert.deepEqual(requireApplyUpdatesRequest(appliedRequest).updates[0], {
         connection: {
           status: "disconnected",
         },
@@ -1590,13 +1590,10 @@ describe("hosted device-sync runtime", () => {
         connectionId: "hosted_conn_error_delta",
         externalAccountId: "demo-error-delta",
       });
-      let appliedRequest: {
-        occurredAt?: string | null;
-        updates: ReadonlyArray<Record<string, unknown>>;
-      } | null = null;
+      let appliedRequest: ApplyUpdatesRequest | null = null;
       const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
         async applyUpdates(input): Promise<HostedExecutionDeviceSyncRuntimeApplyResponse> {
-          appliedRequest = input as typeof appliedRequest;
+          appliedRequest = input;
           return {
             appliedAt: "2026-04-06T10:10:01.000Z",
             updates: [],
@@ -1638,7 +1635,7 @@ describe("hosted device-sync runtime", () => {
         timeoutMs: null,
       });
 
-      assert.deepEqual(appliedRequest?.updates[0], {
+      assert.deepEqual(requireApplyUpdatesRequest(appliedRequest).updates[0], {
         connection: {
           status: "reauthorization_required",
         },
@@ -1675,13 +1672,10 @@ describe("hosted device-sync runtime", () => {
           tokenVersion: 4,
         },
       });
-      let appliedRequest: {
-        occurredAt?: string | null;
-        updates: ReadonlyArray<Record<string, unknown>>;
-      } | null = null;
+      let appliedRequest: ApplyUpdatesRequest | null = null;
       const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
         async applyUpdates(input): Promise<HostedExecutionDeviceSyncRuntimeApplyResponse> {
-          appliedRequest = input as typeof appliedRequest;
+          appliedRequest = input;
           return {
             appliedAt: "2026-04-06T10:10:01.000Z",
             updates: [],
@@ -1722,7 +1716,7 @@ describe("hosted device-sync runtime", () => {
         timeoutMs: null,
       });
 
-      assert.deepEqual(appliedRequest?.updates[0], {
+      assert.deepEqual(requireApplyUpdatesRequest(appliedRequest).updates[0], {
         connectionId: "hosted_conn_clear_tokens",
         observedTokenVersion: 4,
         observedUpdatedAt: "2026-04-04T09:05:00.000Z",
@@ -1760,10 +1754,7 @@ describe("hosted device-sync runtime", () => {
           tokenVersion: 4,
         },
       });
-      let appliedRequest: {
-        occurredAt?: string | null;
-        updates: ReadonlyArray<unknown>;
-      } | null = null;
+      let appliedRequest: ApplyUpdatesRequest | null = null;
       const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
         async applyUpdates(input): Promise<HostedExecutionDeviceSyncRuntimeApplyResponse> {
           appliedRequest = input;
@@ -1804,7 +1795,7 @@ describe("hosted device-sync runtime", () => {
         timeoutMs: null,
       });
 
-      assert.deepEqual(appliedRequest, {
+      assert.deepEqual(requireApplyUpdatesRequest(appliedRequest), {
         occurredAt: "2026-04-06T10:10:00.000Z",
         updates: [],
       });
@@ -1829,10 +1820,7 @@ describe("hosted device-sync runtime", () => {
         status: "disconnected",
         tokenBundle: null,
       });
-      let appliedRequest: {
-        occurredAt?: string | null;
-        updates: ReadonlyArray<unknown>;
-      } | null = null;
+      let appliedRequest: ApplyUpdatesRequest | null = null;
       const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
         async applyUpdates(input): Promise<HostedExecutionDeviceSyncRuntimeApplyResponse> {
           appliedRequest = input;
@@ -1867,7 +1855,7 @@ describe("hosted device-sync runtime", () => {
         timeoutMs: null,
       });
 
-      assert.deepEqual(appliedRequest, {
+      assert.deepEqual(requireApplyUpdatesRequest(appliedRequest), {
         occurredAt: "2026-04-06T10:10:00.000Z",
         updates: [],
       });
@@ -1903,10 +1891,7 @@ describe("hosted device-sync runtime", () => {
           tokenVersion: 4,
         },
       });
-      let appliedRequest: {
-        occurredAt?: string | null;
-        updates: ReadonlyArray<unknown>;
-      } | null = null;
+      let appliedRequest: ApplyUpdatesRequest | null = null;
       const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
         async applyUpdates(input): Promise<HostedExecutionDeviceSyncRuntimeApplyResponse> {
           appliedRequest = input;
@@ -1941,7 +1926,7 @@ describe("hosted device-sync runtime", () => {
         timeoutMs: null,
       });
 
-      assert.deepEqual(appliedRequest, {
+      assert.deepEqual(requireApplyUpdatesRequest(appliedRequest), {
         occurredAt: "2026-04-06T10:10:00.000Z",
         updates: [],
       });

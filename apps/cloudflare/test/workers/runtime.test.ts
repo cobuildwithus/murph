@@ -1,3 +1,5 @@
+/// <reference types="@cloudflare/vitest-pool-workers/types" />
+
 import { createPublicKey, generateKeyPairSync, sign } from "node:crypto";
 import { env, exports } from "cloudflare:workers";
 import { runDurableObjectAlarm } from "cloudflare:test";
@@ -33,11 +35,11 @@ const TEST_VERCEL_OIDC_PUBLIC_JWK = {
 };
 
 import type {
-  HostedExecutionDispatchResult,
-  HostedExecutionDispatchRequest,
   HostedExecutionBundleRef,
+  HostedExecutionDispatchRequest,
+  HostedExecutionDispatchResult,
   HostedExecutionUserStatus,
-} from "@murphai/runtime-state";
+} from "@murphai/hosted-execution";
 
 interface UserRunnerRpcStub {
   bootstrapUser(userId: string): Promise<{ userId: string }>;
@@ -53,6 +55,11 @@ interface UserRunnerRpcStub {
 }
 
 const describe = baseDescribe.sequential;
+const worker = (exports as {
+  default: {
+    fetch(input: Request): Promise<Response>;
+  };
+}).default;
 
 describe("cloudflare worker runtime suite", () => {
   afterEach(() => {
@@ -64,7 +71,7 @@ describe("cloudflare worker runtime suite", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-03-26T12:00:00.000Z"));
 
-    const response = await exports.default.fetch(
+    const response = await worker.fetch(
       await createSignedDispatchRequest("/internal/dispatch", createDispatch("evt_invalid"), {
         sub: `owner:${TEST_VERCEL_OIDC_TEAM_SLUG}:project:wrong-project:environment:production`,
       }),
@@ -88,7 +95,7 @@ describe("cloudflare worker runtime suite", () => {
 
     const dispatch = createDispatch("evt_signed_runtime", "member_signed_runtime");
     await resolveHostedUserCryptoContext(dispatch.event.userId);
-    const response = await exports.default.fetch(
+    const response = await worker.fetch(
       await createSignedDispatchRequest("/internal/dispatch", dispatch),
     );
 
@@ -120,7 +127,7 @@ describe("cloudflare worker runtime suite", () => {
     vi.setSystemTime(new Date("2026-03-26T12:00:00.000Z"));
     const userId = "member_removed_alias";
 
-    const response = await exports.default.fetch(
+    const response = await worker.fetch(
       await createSignedDispatchRequest("/internal/events", createDispatch("evt_removed_alias", userId)),
     );
 

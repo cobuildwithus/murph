@@ -16,7 +16,7 @@ export {
 export const DEFAULT_GATEWAY_EVENT_POLL_INTERVAL_MS = 250
 
 export async function waitForGatewayEventsByPolling(
-  poll: (input?: GatewayPollEventsInput) => Promise<GatewayPollEventsResult>,
+  poll: (input: GatewayPollEventsInput) => Promise<GatewayPollEventsResult>,
   input?: GatewayWaitForEventsInput,
   options?: {
     intervalMs?: number

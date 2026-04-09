@@ -7,6 +7,7 @@ import {
   assertLinqWebhookTimestampFresh,
   isLinqWebhookPayloadError,
   isLinqWebhookVerificationError,
+  type LinqWebhookEvent,
   minimizeLinqMessageReceivedEvent,
   minimizeLinqWebhookEvent,
   parseCanonicalLinqMessageReceivedEvent,
@@ -779,6 +780,7 @@ test("parseCanonicalLinqMessageReceivedEvent falls back to sender and sent times
 
   assert.equal(event.data.direction, "outbound");
   assert.equal(event.data.received_at, "2026-04-04T01:01:59.000Z");
+  assert.ok(event.data.from_handle);
   assert.equal(event.data.from_handle.handle, "+15557654321");
   assert.equal(event.data.from_handle.id, "sender_sparse");
   assert.equal(event.data.from_handle.service, "SMS");
@@ -1070,7 +1072,7 @@ function buildV2026MessageReceivedWebhook(input: {
   data?: Record<string, unknown>;
   eventId?: string;
   traceId?: string | null;
-} = {}): Record<string, unknown> {
+} = {}): LinqWebhookEvent {
   return {
     api_version: "v3",
     created_at: input.createdAt ?? "2026-03-25T10:00:00.000Z",

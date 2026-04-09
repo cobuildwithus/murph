@@ -59,6 +59,7 @@ describe("hosted runtime callbacks", () => {
       },
       resume: {
         committedResult: {
+          assistantDeliveryEffects: [sideEffect],
           result: {
             eventsHandled: 1,
             nextWakeAt: null,

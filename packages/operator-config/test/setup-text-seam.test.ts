@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { PassThrough } from 'node:stream'
 
 import { afterEach, test, vi } from 'vitest'
 
@@ -25,25 +26,27 @@ test('setup prompt input enables interactive streams safely and tolerates minima
   let rawModeValue: boolean | null = null
   let refCalled = false
   let resumeCalled = false
-
-  prepareSetupPromptInput({
+  const interactiveInput = Object.assign(new PassThrough(), {
     isTTY: true,
     ref() {
       refCalled = true
     },
     resume() {
       resumeCalled = true
+      return this
     },
     setRawMode(value: boolean) {
       rawModeValue = value
     },
-  } as NodeJS.ReadableStream)
+  })
+
+  prepareSetupPromptInput(interactiveInput)
 
   assert.equal(rawModeValue, false)
   assert.equal(refCalled, true)
   assert.equal(resumeCalled, true)
 
-  assert.doesNotThrow(() => prepareSetupPromptInput({} as NodeJS.ReadableStream))
+  assert.doesNotThrow(() => prepareSetupPromptInput(new PassThrough()))
 })
 
 test('setup runtime resolver clones process env and surfaces ready channel and wearable states', async () => {

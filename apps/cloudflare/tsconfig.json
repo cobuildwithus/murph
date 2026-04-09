@@ -17,10 +17,13 @@
     "sourceMap": false,
     "types": [
       "node",
-      "@cloudflare/workers-types"
+      "@cloudflare/workers-types",
+      "@cloudflare/vitest-pool-workers/types"
     ]
   },
   "include": [
+    "*.ts",
+    "test/**/*.ts",
     "scripts/**/*.ts",
     "src/**/*.ts"
   ]

@@ -4,16 +4,11 @@ import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
-import * as queryModule from '@murphai/query'
 import {
   resolveRuntimePaths,
   writeVersionedJsonStateFile,
   type RuntimePaths,
 } from '@murphai/runtime-state/node'
-import type {
-  ImportersFactoryRuntimeModule,
-  QueryRuntimeModule,
-} from '@murphai/vault-usecases/runtime'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { afterEach, test } from 'vitest'
 
@@ -36,10 +31,12 @@ import {
 } from '../src/inbox-services/promotions.ts'
 import type {
   CoreRuntimeModule,
+  ImportersFactoryRuntimeModule,
   InboxAppEnvironment,
   InboxImessageRuntimeModule,
   InboxRuntimeModule,
   ParsersRuntimeModule,
+  QueryRuntimeModule,
   RuntimeAttachmentRecord,
   RuntimeCaptureRecord,
   RuntimeStore,
@@ -247,7 +244,6 @@ function createQueryRuntimeModule(
   }>,
 ): QueryRuntimeModule {
   return {
-    ...queryModule,
     async readVault() {
       return {} as Awaited<ReturnType<QueryRuntimeModule['readVault']>>
     },

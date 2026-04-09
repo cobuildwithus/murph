@@ -15,7 +15,7 @@ import {
   createHostedAssistantDeliveryJournalStore,
 } from "../src/side-effect-journal.ts";
 
-import { MemoryEncryptedR2Bucket } from "./test-helpers";
+import { MemoryEncryptedR2Bucket } from "./test-helpers.js";
 
 describe("createHostedAssistantDeliveryJournalStore", () => {
   it("reads side-effect records stored at the authoritative effect key", async () => {

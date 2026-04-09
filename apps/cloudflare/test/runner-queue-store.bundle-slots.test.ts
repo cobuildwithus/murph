@@ -1,4 +1,5 @@
 import { DatabaseSync } from "node:sqlite";
+import type { SQLInputValue } from "node:sqlite";
 
 import {
   serializeHostedExecutionBundleRef,
@@ -71,7 +72,7 @@ class SqliteDurableObjectSqlStorage {
 
   exec<T extends Record<string, DurableObjectSqlValue>>(
     query: string,
-    ...bindings: unknown[]
+    ...bindings: DurableObjectSqlValue[]
   ): DurableObjectSqlCursorLike<T> {
     const statement = this.db.prepare(query);
     const normalized = query.trimStart().toUpperCase();
@@ -81,13 +82,13 @@ class SqliteDurableObjectSqlStorage {
       || normalized.startsWith("PRAGMA")
       || normalized.startsWith("WITH")
     ) {
-      const rows = statement.all(...bindings) as T[];
+      const rows = statement.all(...bindings as SQLInputValue[]) as T[];
       const columnNames = statement.columns().map((column) => column.name);
       return new SqliteCursor(rows, columnNames, rows.length, 0);
     }
 
-    const result = statement.run(...bindings);
-    return new SqliteCursor([], [], 0, result.changes);
+    const result = statement.run(...bindings as SQLInputValue[]);
+    return new SqliteCursor([], [], 0, Number(result.changes));
   }
 }
 

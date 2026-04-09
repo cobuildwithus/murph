@@ -33,7 +33,11 @@ afterEach(() => {
 })
 
 async function loadDeviceSyncClientWithMockedSpawn(
-  spawn: typeof import('node:child_process').spawn,
+  spawn: (
+    command: string,
+    args: string[],
+    options: import('node:child_process').SpawnOptions,
+  ) => EventEmitter & { unref(): void },
 ): Promise<typeof import('../src/device-sync-client.ts')> {
   vi.resetModules()
   vi.doMock('node:child_process', () => ({ spawn }))
@@ -636,7 +640,7 @@ test('device sync client covers list, begin, and browser open paths', async () =
   })
 
   assert.equal(openBrowser.mock.calls.length, 1)
-  assert.equal(openBrowser.mock.calls[0]?.[0], 'https://example.test/oauth')
+  assert.equal(openBrowser.mock.calls.at(0)?.at(0), 'https://example.test/oauth')
   assert.deepEqual(seenRequests.map(({ method, url }) => ({ method, url })), [
     { method: 'GET', url: 'http://127.0.0.1:8788/providers' },
     { method: 'POST', url: 'http://127.0.0.1:8788/providers/oura/connect' },
@@ -684,7 +688,7 @@ test('device sync client covers list, begin, and browser open paths', async () =
         : 'xdg-open',
   )
 
-  const failingSpawn = vi.fn(() => {
+  const failingSpawn = vi.fn((_command: string, _args: string[]) => {
     throw new Error('missing browser launcher')
   })
   const failureModule = await loadDeviceSyncClientWithMockedSpawn(failingSpawn)

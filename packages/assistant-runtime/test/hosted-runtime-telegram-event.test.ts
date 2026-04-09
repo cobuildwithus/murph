@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { buildHostedExecutionTelegramMessageReceivedDispatch } from "@murphai/hosted-execution";
+import {
+  buildHostedExecutionTelegramMessageReceivedDispatch,
+  type HostedExecutionDispatchRequest,
+} from "@murphai/hosted-execution";
 
 const mocks = vi.hoisted(() => ({
   normalizeHostedTelegramMessage: vi.fn(),
@@ -21,6 +24,10 @@ import {
   createHostedTelegramAttachmentDownloadDriver,
   ingestHostedTelegramMessage,
 } from "../src/hosted-runtime/events/telegram.ts";
+
+type HostedTelegramDispatch = HostedExecutionDispatchRequest & {
+  event: Extract<HostedExecutionDispatchRequest["event"], { kind: "telegram.message.received" }>;
+}
 
 const originalFetch = globalThis.fetch;
 const originalTelegramBotToken = process.env.TELEGRAM_BOT_TOKEN;
@@ -87,7 +94,10 @@ describe("ingestHostedTelegramMessage", () => {
         threadId: "chat_123",
       },
       userId: "member_123",
-    });
+    }) as HostedTelegramDispatch;
+    if (dispatch.event.kind !== "telegram.message.received") {
+      throw new Error("Expected Telegram message dispatch.");
+    }
     const capture = {
       source: "telegram",
     };
@@ -98,7 +108,10 @@ describe("ingestHostedTelegramMessage", () => {
       processCapture,
     }));
 
-    await ingestHostedTelegramMessage("/tmp/assistant-runtime-telegram", dispatch);
+    await ingestHostedTelegramMessage("/tmp/assistant-runtime-telegram", {
+      ...dispatch,
+      event: dispatch.event,
+    });
 
     expect(mocks.normalizeHostedTelegramMessage).toHaveBeenCalledWith({
       accountId: "bot",

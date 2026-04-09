@@ -84,11 +84,25 @@ import type {
 function createPaths() {
   return {
     absoluteVaultRoot: '/vault',
+    cacheRoot: '/vault/.runtime/cache',
+    deviceSyncDbPath: '/vault/.runtime/operations/device-sync/state.sqlite',
+    deviceSyncLauncherStatePath: '/vault/.runtime/operations/device-sync/launcher.json',
+    deviceSyncRuntimeRoot: '/vault/.runtime/operations/device-sync',
+    deviceSyncStderrLogPath: '/vault/.runtime/operations/device-sync/stderr.log',
+    deviceSyncStdoutLogPath: '/vault/.runtime/operations/device-sync/stdout.log',
+    gatewayDbPath: '/vault/.runtime/projections/gateway.sqlite',
     runtimeRoot: '/vault/.runtime',
+    operationalRoot: '/vault/.runtime/operations',
+    projectionsRoot: '/vault/.runtime/projections',
     inboxRuntimeRoot: '/vault/.runtime/operations/inbox',
     inboxDbPath: '/vault/.runtime/projections/inboxd.sqlite',
     inboxConfigPath: '/vault/.runtime/operations/inbox/config.json',
+    inboxStatePath: '/vault/.runtime/operations/inbox/state.json',
+    inboxPromotionsPath: '/vault/.runtime/operations/inbox/promotions.json',
+    parserRuntimeRoot: '/vault/.runtime/operations/parsers',
     parserToolchainConfigPath: '/vault/.runtime/operations/parsers/toolchain.json',
+    queryDbPath: '/vault/.runtime/projections/query.sqlite',
+    tempRoot: '/vault/.runtime/tmp',
   }
 }
 

@@ -13,6 +13,10 @@ import {
 import { assistantTurnReceiptSchema } from '@murphai/operator-config/assistant-cli-contracts'
 import type { InboxServices } from '@murphai/inbox-services'
 
+function toSnapshotRecord<T extends object>(value: T): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(value))
+}
+
 const routingMocks = vi.hoisted(() => ({
   assistantResultArtifactExists: vi.fn(),
   routeInboxCaptureWithModel: vi.fn(),
@@ -1072,7 +1076,7 @@ describe('assistant inbox routing', () => {
         cursorUpdates.push(cursor)
       },
       onEvent: (event) => {
-        events.push(event as Record<string, unknown>)
+        events.push(toSnapshotRecord(event))
         if (event.type === 'capture.routed') {
           signalController.abort()
         }
@@ -1121,7 +1125,7 @@ describe('assistant inbox routing', () => {
     routing.applyRoutingOutcome({
       captureId: 'capture-failed',
       onEvent: (event) => {
-        events.push(event as Record<string, unknown>)
+        events.push(toSnapshotRecord(event))
       },
       outcome: {
         advanceCursor: true,
@@ -1133,7 +1137,7 @@ describe('assistant inbox routing', () => {
     routing.applyRoutingOutcome({
       captureId: 'capture-noop',
       onEvent: (event) => {
-        events.push(event as Record<string, unknown>)
+        events.push(toSnapshotRecord(event))
       },
       outcome: {
         advanceCursor: true,
@@ -1145,7 +1149,7 @@ describe('assistant inbox routing', () => {
     routing.applyRoutingOutcome({
       captureId: 'capture-skipped',
       onEvent: (event) => {
-        events.push(event as Record<string, unknown>)
+        events.push(toSnapshotRecord(event))
       },
       outcome: {
         advanceCursor: false,
@@ -1235,7 +1239,7 @@ describe('assistant automation scanner', () => {
     const result = await scanner.scanAssistantAutomationOnce({
       inboxServices,
       onEvent: (event) => {
-        events.push(event as Record<string, unknown>)
+        events.push(toSnapshotRecord(event))
       },
       onStateProgress: async (next) => {
         stateUpdates.push({
@@ -1323,7 +1327,7 @@ describe('assistant automation scanner', () => {
     const result = await scanner.scanAssistantAutomationOnce({
       inboxServices,
       onEvent: (event) => {
-        events.push(event as Record<string, unknown>)
+        events.push(toSnapshotRecord(event))
       },
       state: createAutomationState({
         autoReplyChannels: ['telegram'],
@@ -1519,10 +1523,10 @@ describe('assistant auto-reply runtime', () => {
       enabledChannels: ['telegram'],
       inboxServices,
       onEvent: (event) => {
-        events.push(event as Record<string, unknown>)
+        events.push(toSnapshotRecord(event))
       },
       onStateProgress: async (state) => {
-        stateUpdates.push(state as Record<string, unknown>)
+        stateUpdates.push(toSnapshotRecord(state))
       },
       vault: '/tmp/assistant-automation-vault',
     })
@@ -1566,10 +1570,10 @@ describe('assistant auto-reply runtime', () => {
       enabledChannels: ['telegram'],
       inboxServices,
       onEvent: (event) => {
-        events.push(event as Record<string, unknown>)
+        events.push(toSnapshotRecord(event))
       },
       onStateProgress: async (state) => {
-        stateUpdates.push(state as Record<string, unknown>)
+        stateUpdates.push(toSnapshotRecord(state))
       },
       vault: '/tmp/assistant-automation-vault',
     })
@@ -1611,7 +1615,7 @@ describe('assistant auto-reply runtime', () => {
       enabledChannels: ['telegram'],
       inboxServices,
       onStateProgress: async (state) => {
-        stateUpdates.push(state as Record<string, unknown>)
+        stateUpdates.push(toSnapshotRecord(state))
       },
       vault: '/tmp/assistant-automation-vault',
     })
@@ -1672,10 +1676,10 @@ describe('assistant auto-reply runtime', () => {
       enabledChannels: ['telegram'],
       inboxServices,
       onEvent: (event) => {
-        events.push(event as Record<string, unknown>)
+        events.push(toSnapshotRecord(event))
       },
       onStateProgress: async (state) => {
-        stateUpdates.push(state as Record<string, unknown>)
+        stateUpdates.push(toSnapshotRecord(state))
       },
       vault: '/tmp/assistant-automation-vault',
     })
@@ -1724,7 +1728,7 @@ describe('assistant auto-reply runtime', () => {
       enabledChannels: ['telegram'],
       inboxServices,
       onStateProgress: async (state) => {
-        stateUpdates.push(state as Record<string, unknown>)
+        stateUpdates.push(toSnapshotRecord(state))
       },
       vault: '/tmp/assistant-automation-vault',
     })
@@ -1763,7 +1767,7 @@ describe('assistant auto-reply runtime', () => {
       enabledChannels: ['telegram'],
       inboxServices,
       onStateProgress: async (state) => {
-        stateUpdates.push(state as Record<string, unknown>)
+        stateUpdates.push(toSnapshotRecord(state))
       },
       signal: signalController.signal,
       vault: '/tmp/assistant-automation-vault',
@@ -1936,7 +1940,7 @@ describe('assistant auto-reply runtime', () => {
       enabledChannels: ['telegram'],
       inboxServices: createInboxServices(),
       onEvent: (event) => {
-        events.push(event as Record<string, unknown>)
+        events.push(toSnapshotRecord(event))
       },
       requestId: null,
       sessionMaxAgeMs: null,
@@ -2176,7 +2180,7 @@ describe('assistant auto-reply runtime', () => {
       enabledChannels: ['telegram'],
       inboxServices,
       onEvent: (event) => {
-        events.push(event as Record<string, unknown>)
+        events.push(toSnapshotRecord(event))
       },
       requestId: null,
       sessionMaxAgeMs: null,
@@ -2294,7 +2298,7 @@ describe('assistant auto-reply runtime', () => {
       enabledChannels: ['telegram'],
       inboxServices,
       onEvent: (event) => {
-        events.push(event as Record<string, unknown>)
+        events.push(toSnapshotRecord(event))
       },
       requestId: null,
       sessionMaxAgeMs: null,
@@ -3116,7 +3120,7 @@ describe('assistant auto-reply startup recovery', () => {
       enabledChannels: ['telegram'],
       inboxServices,
       onEvent: (event) => {
-        events.push(event as Record<string, unknown>)
+        events.push(toSnapshotRecord(event))
       },
       scanCursor: {
         captureId: 'capture-1',
@@ -3472,7 +3476,7 @@ describe('assistant automation run loop', () => {
       inboxServices,
       once: false,
       onEvent: (event) => {
-        events.push(event as Record<string, unknown>)
+        events.push(toSnapshotRecord(event))
       },
       startDaemon: true,
       vault: '/tmp/assistant-automation-vault',

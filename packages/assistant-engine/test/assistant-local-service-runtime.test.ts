@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { afterEach, test, vi } from 'vitest'
 
 import type { AssistantSession } from '@murphai/operator-config/assistant-cli-contracts'
+import type { AssistantTurnSharedPlan } from '../src/assistant/service-contracts.ts'
 
 type Deferred<T> = {
   promise: Promise<T>
@@ -50,8 +51,7 @@ test('sendAssistantMessageLocal completes a successful turn, persists usage, and
   const result = await sendAssistantMessageLocal({
     deliverResponse: true,
     executionContext: {
-      kind: 'command',
-      requestId: 'req-1',
+      hosted: null,
     },
     prompt: 'Summarize my inbox',
     receiptMetadata: {
@@ -419,12 +419,16 @@ test('sendAssistantMessageLocal falls back to session defaults and not-requested
 
   const plan = createSharedPlan()
   plan.conversationPolicy.audience = {
+    actorId: null,
     bindingDelivery: null,
     channel: null,
     deliveryPolicy: 'binding-target-only',
     effectiveThreadIsDirect: false,
     explicitTarget: null,
     identityId: null,
+    replyToMessageId: null,
+    threadId: null,
+    threadIsDirect: null,
   }
 
   const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
@@ -476,7 +480,7 @@ test('sendAssistantMessageLocal records fallback failure metadata when persisten
       sendAssistantMessageLocal({
         deliverResponse: false,
         prompt: 'Persist this later',
-        turnTrigger: 'scheduled',
+        turnTrigger: 'automation-cron',
         vault: '/vaults/test',
       }),
     /transcript persistence failed/u,
@@ -632,27 +636,56 @@ async function loadLocalServiceModule(input?: {
         },
       ],
     ),
-    appendAssistantTurnReceiptEvent: vi.fn(async () => undefined),
-    createAssistantTurnReceipt: vi.fn(async () => ({
-      turnId: 'turn-1',
-    })),
+    appendAssistantTurnReceiptEvent: vi.fn(
+      async (
+        _input: Parameters<
+          typeof import('../src/assistant/turns.js').appendAssistantTurnReceiptEvent
+        >[0],
+      ) => undefined,
+    ),
+    createAssistantTurnReceipt: vi.fn(
+      async (
+        _input: Parameters<
+          typeof import('../src/assistant/turns.js').createAssistantTurnReceipt
+        >[0],
+      ) => ({
+        turnId: 'turn-1',
+      }),
+    ),
     dispatchAssistantReply: vi.fn(async () => deliveryOutcome),
     executeProviderTurnWithRecovery: vi.fn(async () => providerOutcome),
     extractRecoveredAssistantSession: vi.fn(() => input?.recoveredSession ?? null),
     finalizeAssistantTurnArtifacts: vi.fn(async () => session),
-    finalizeAssistantTurnReceipt: vi.fn(async () => undefined),
+    finalizeAssistantTurnReceipt: vi.fn(
+      async (
+        _input: Parameters<
+          typeof import('../src/assistant/turns.js').finalizeAssistantTurnReceipt
+        >[0],
+      ) => undefined,
+    ),
     finalizeDeliveredAssistantTurn: vi.fn(async () => undefined),
-    getAssistantChannelAdapter: vi.fn(() => input?.adapter ?? null),
+    getAssistantChannelAdapter: vi.fn((_channel: string | null) => input?.adapter ?? null),
     normalizeAssistantAskResultForReturn: vi.fn((value) => value),
     normalizeAssistantDeliveryError: vi.fn((error: Error) => ({
       code: 'ASSISTANT_DELIVERY_FAILED',
       message: error.message,
-      retryable: false,
     })),
     normalizeAssistantExecutionContext: vi.fn((value) => value ?? null),
-    persistFailedAssistantPromptAttempt: vi.fn(async () => undefined),
+    persistFailedAssistantPromptAttempt: vi.fn(
+      async (
+        _input: Parameters<
+          typeof import('../src/assistant/prompt-attempts.js').persistFailedAssistantPromptAttempt
+        >[0],
+      ) => undefined,
+    ),
     persistPendingAssistantUsageEvent: vi.fn(async () => undefined),
-    recordAssistantDiagnosticEvent: vi.fn(async () => undefined),
+    recordAssistantDiagnosticEvent: vi.fn(
+      async (
+        _input: Parameters<
+          typeof import('../src/assistant/diagnostics.js').recordAssistantDiagnosticEvent
+        >[0],
+      ) => undefined,
+    ),
     redactAssistantDisplayPath: vi.fn(() => '<redacted-vault>'),
     refreshAssistantStatusSnapshotLocal: vi.fn(async () => undefined),
     saveAssistantSession: vi.fn(),
@@ -783,7 +816,12 @@ function createAssistantSession(input?: {
     providerOptions: {
       apiKeyEnv: 'OPENAI_API_KEY',
       model: 'gpt-5.4',
+      oss: false,
+      profile: null,
       providerName: 'OpenAI',
+      reasoningEffort: null,
+      sandbox: null,
+      approvalPolicy: null,
     },
     resumeState: null,
     schema: 'murph.assistant-session.v4',
@@ -791,30 +829,40 @@ function createAssistantSession(input?: {
     target: {
       adapter: 'openai-compatible',
       apiKeyEnv: 'OPENAI_API_KEY',
+      endpoint: null,
+      headers: null,
       model: 'gpt-5.4',
       providerName: 'OpenAI',
+      reasoningEffort: null,
     },
     turnCount: 0,
     updatedAt: '2026-04-08T00:00:00.000Z',
   }
 }
 
-function createSharedPlan() {
+function createSharedPlan(): AssistantTurnSharedPlan {
   return {
     allowSensitiveHealthContext: false,
     cliAccess: {
-      available: false,
-      reason: 'not-needed',
+      env: {},
+      rawCommand: 'vault-cli',
+      setupCommand: 'murph',
     },
     conversationPolicy: {
       audience: {
+        actorId: null,
         bindingDelivery: null,
         channel: 'telegram',
         deliveryPolicy: 'binding-target-only',
         effectiveThreadIsDirect: false,
         explicitTarget: 'thread-1',
         identityId: 'identity-1',
+        replyToMessageId: null,
+        threadId: 'thread-1',
+        threadIsDirect: false,
       },
+      allowSensitiveHealthContext: false,
+      operatorAuthority: 'direct-operator',
     },
     firstTurnCheckInEligible: false,
     firstTurnCheckInStateDocIds: ['doc-1'],

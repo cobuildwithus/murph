@@ -13,7 +13,7 @@ import {
   type HostedUserKeyAuditRecord,
 } from "../src/user-key-store.js";
 
-import { MemoryEncryptedR2Bucket } from "./test-helpers";
+import { MemoryEncryptedR2Bucket } from "./test-helpers.js";
 
 const PLATFORM_ENVELOPE_KEY = Uint8Array.from(Array.from({ length: 32 }, (_, index) => index + 1));
 const PLATFORM_ENVELOPE_KEY_ID = "platform:v1";

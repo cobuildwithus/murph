@@ -27,6 +27,10 @@ vi.mock('../src/inbox-services/state.ts', () => ({
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
 import { createInboxSourceOps } from '../src/inbox-app/sources.ts'
+import type {
+  InboxAppEnvironment,
+  InboxConnectorConfig,
+} from '../src/inbox-app/types.ts'
 
 function createPaths() {
   return {
@@ -35,16 +39,57 @@ function createPaths() {
   }
 }
 
-function createConfig(connectors: Array<Record<string, unknown>> = []) {
+function createConfig(connectors: InboxConnectorConfig[] = []) {
   return {
     connectors: [...connectors],
   }
 }
 
-function createEnv(overrides: Record<string, unknown> = {}) {
+function createEnv(
+  overrides: Partial<InboxAppEnvironment> = {},
+): InboxAppEnvironment {
   return {
+    clock: () => new Date('2026-04-08T00:00:00.000Z'),
+    createConfiguredAgentmailClient() {
+      throw new Error('not used in source tests')
+    },
+    enableAssistantAutoReplyChannel: vi.fn(
+      async (_vault: string, _channel: InboxConnectorConfig['source']) => false,
+    ),
+    ensureConfiguredImessageReady: async () => undefined,
+    getEnvironment: () => ({}),
+    getHomeDirectory: () => '/tmp',
+    getPid: () => 123,
     getPlatform: () => 'darwin',
-    loadInbox: async () => ({ kind: 'inboxd' }),
+    journalPromotionEnabled: true,
+    killProcess() {},
+    loadCore: async () => {
+      throw new Error('not used in source tests')
+    },
+    loadConfiguredEmailDriver: async () => {
+      throw new Error('not used in source tests')
+    },
+    loadConfiguredImessageDriver: async () => {
+      throw new Error('not used in source tests')
+    },
+    loadConfiguredTelegramDriver: async () => {
+      throw new Error('not used in source tests')
+    },
+    loadImporters: async () => {
+      throw new Error('not used in source tests')
+    },
+    loadInbox: async () => {
+      throw new Error('not used in source tests')
+    },
+    loadInboxImessage: async () => {
+      throw new Error('not used in source tests')
+    },
+    loadParsers: async () => {
+      throw new Error('not used in source tests')
+    },
+    loadQuery: async () => {
+      throw new Error('not used in source tests')
+    },
     provisionOrRecoverAgentmailInbox: async () => ({
       accountId: 'mailbox-1',
       emailAddress: 'user@example.com',
@@ -57,13 +102,25 @@ function createEnv(overrides: Record<string, unknown> = {}) {
       },
       reusedMailbox: null,
     }),
+    requireParsers: async () => {
+      throw new Error('not used in source tests')
+    },
+    sleep: async () => undefined,
     tryResolveAgentmailInboxAddress: async ({
       emailAddress,
     }: {
       emailAddress: string | null
     }) => emailAddress ?? 'resolved@example.com',
-    enableAssistantAutoReplyChannel: vi.fn(async () => undefined),
+    usesInjectedEmailDriver: false,
+    usesInjectedTelegramDriver: false,
     ...overrides,
+  }
+}
+
+function commandContext() {
+  return {
+    requestId: null,
+    vault: '/vault',
   }
 }
 
@@ -96,7 +153,7 @@ test('sourceAdd rejects duplicate connector ids', async () => {
   await assert.rejects(
     () =>
       ops.sourceAdd({
-        vault: '/vault',
+        ...commandContext(),
         id: 'email:primary',
         source: 'email',
         account: 'mailbox-2',
@@ -127,7 +184,7 @@ test('sourceAdd blocks iMessage on non-macOS hosts', async () => {
   await assert.rejects(
     () =>
       ops.sourceAdd({
-        vault: '/vault',
+        ...commandContext(),
         id: 'imessage:self',
         source: 'imessage',
         account: 'self',
@@ -154,7 +211,7 @@ test('sourceAdd requires an email account when provisioning is disabled', async 
   await assert.rejects(
     () =>
       ops.sourceAdd({
-        vault: '/vault',
+        ...commandContext(),
         id: 'email:primary',
         source: 'email',
         account: '   ',
@@ -197,7 +254,7 @@ test('sourceAdd rejects conflicting Linq webhook endpoints', async () => {
   await assert.rejects(
     () =>
       ops.sourceAdd({
-        vault: '/vault',
+        ...commandContext(),
         id: 'linq:secondary',
         source: 'linq',
         account: null,
@@ -219,7 +276,9 @@ test('sourceAdd rejects conflicting Linq webhook endpoints', async () => {
 })
 
 test('sourceAdd provisions email connectors and enables auto reply when requested', async () => {
-  const enableAssistantAutoReplyChannel = vi.fn(async () => undefined)
+  const enableAssistantAutoReplyChannel = vi.fn(
+    async (_vault: string, _channel: InboxConnectorConfig['source']) => true,
+  )
   const provisionOrRecoverAgentmailInbox = vi.fn(async () => ({
     accountId: 'mailbox-9',
     emailAddress: 'provisioned@example.com',
@@ -228,7 +287,7 @@ test('sourceAdd provisions email connectors and enables auto reply when requeste
       emailAddress: 'provisioned@example.com',
       displayName: 'Provisioned Inbox',
       clientId: 'client-9',
-      provider: 'agentmail',
+      provider: 'agentmail' as const,
     },
     reusedMailbox: null,
   }))
@@ -245,7 +304,7 @@ test('sourceAdd provisions email connectors and enables auto reply when requeste
   )
 
   const result = await ops.sourceAdd({
-    vault: '/vault',
+    ...commandContext(),
     id: 'email:primary',
     source: 'email',
     account: null,
@@ -279,7 +338,7 @@ test('sourceAdd normalizes Linq webhook settings before writing config', async (
   const ops = createInboxSourceOps(createEnv())
 
   const result = await ops.sourceAdd({
-    vault: '/vault',
+    ...commandContext(),
     id: 'linq:primary',
     source: 'linq',
     account: null,
@@ -312,7 +371,7 @@ test('sourceList returns the current config connectors', async () => {
   )
 
   const ops = createInboxSourceOps(createEnv())
-  const result = await ops.sourceList({ vault: '/vault' })
+  const result = await ops.sourceList(commandContext())
 
   assert.equal(result.connectors.length, 1)
   assert.equal(result.configPath, '.inbox/config.json')
@@ -322,7 +381,7 @@ test('sourceRemove rejects unknown connector ids', async () => {
   const ops = createInboxSourceOps(createEnv())
 
   await assert.rejects(
-    () => ops.sourceRemove({ vault: '/vault', connectorId: 'missing' }),
+    () => ops.sourceRemove({ ...commandContext(), connectorId: 'missing' }),
     (error: unknown) => {
       assert.ok(error instanceof VaultCliError)
       assert.equal(error.code, 'INBOX_SOURCE_NOT_FOUND')
@@ -345,7 +404,7 @@ test('sourceRemove deletes the matching connector and writes config', async () =
 
   const ops = createInboxSourceOps(createEnv())
   const result = await ops.sourceRemove({
-    vault: '/vault',
+    ...commandContext(),
     connectorId: 'telegram:bot',
   })
 
@@ -360,7 +419,7 @@ test('sourceSetEnabled rejects unknown connector ids', async () => {
   await assert.rejects(
     () =>
       ops.sourceSetEnabled({
-        vault: '/vault',
+        ...commandContext(),
         connectorId: 'missing',
         enabled: true,
       }),
@@ -393,7 +452,7 @@ test('sourceSetEnabled blocks enabling iMessage on unsupported hosts', async () 
   await assert.rejects(
     () =>
       ops.sourceSetEnabled({
-        vault: '/vault',
+        ...commandContext(),
         connectorId: 'imessage:self',
         enabled: true,
       }),
@@ -419,7 +478,7 @@ test('sourceSetEnabled updates connector state and persists config', async () =>
 
   const ops = createInboxSourceOps(createEnv())
   const result = await ops.sourceSetEnabled({
-    vault: '/vault',
+    ...commandContext(),
     connectorId: 'telegram:bot',
     enabled: true,
   })

@@ -20,7 +20,7 @@ describe('assistant conversation references', () => {
       conversation: {
         alias: ' nested alias ',
         channel: '  ',
-        directness: ' unknown ',
+        directness: 'unknown',
         identityId: ' identity-123 ',
         participantId: ' participant-123 ',
         threadId: ' nested-thread ',

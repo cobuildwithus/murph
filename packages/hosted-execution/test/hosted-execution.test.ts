@@ -279,8 +279,10 @@ describe("hosted execution coverage gaps", () => {
       },
     };
 
-    let observedRequest: { init?: RequestInit; url: string } | null = null;
+    let observedRequest!: { init?: RequestInit; url: string };
+    let observedRequestSeen = false;
     const fetchImpl: typeof fetch = async (url, init) => {
+      observedRequestSeen = true;
       observedRequest = { init, url: String(url) };
       return new Response(JSON.stringify(successfulResponse), {
         headers: { "content-type": "application/json; charset=utf-8" },
@@ -302,20 +304,23 @@ describe("hosted execution coverage gaps", () => {
     });
 
     await expect(client.dispatch(dispatch)).resolves.toEqual(successfulResponse);
-    expect(observedRequest).not.toBeNull();
-    expect(observedRequest?.url).toBe(
+    if (!observedRequestSeen) {
+      throw new Error("Expected dispatch client to issue a fetch request.");
+    }
+
+    expect(observedRequest.url).toBe(
       "https://dispatch.example.com/root/internal/dispatch",
     );
-    expect(observedRequest?.init?.method).toBe("POST");
-    expect(observedRequest?.init?.redirect).toBe("error");
-    expect(observedRequest?.init?.signal).toBeInstanceOf(AbortSignal);
-    expect(new Headers(observedRequest?.init?.headers).get("authorization")).toBe(
+    expect(observedRequest.init?.method).toBe("POST");
+    expect(observedRequest.init?.redirect).toBe("error");
+    expect(observedRequest.init?.signal).toBeInstanceOf(AbortSignal);
+    expect(new Headers(observedRequest.init?.headers).get("authorization")).toBe(
       "Bearer token-123",
     );
-    expect(new Headers(observedRequest?.init?.headers).get("content-type")).toBe(
+    expect(new Headers(observedRequest.init?.headers).get("content-type")).toBe(
       "application/json; charset=utf-8",
     );
-    expect(observedRequest?.init?.body).toBe(JSON.stringify(dispatch));
+    expect(observedRequest.init?.body).toBe(JSON.stringify(dispatch));
 
     const blankTokenClient = createHostedExecutionDispatchClient({
       baseUrl: "https://dispatch.example.com",

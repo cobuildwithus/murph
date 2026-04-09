@@ -61,7 +61,53 @@ import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
 import { createInboxAppEnvironment } from '../src/inbox-app/environment.ts'
 import { describeLinqConnectorEndpoint } from '../src/inbox-app/linq-endpoint.ts'
-import type { InboxConnectorConfig } from '../src/inbox-app/types.ts'
+import type {
+  EmailDriver,
+  ImessageDriver,
+  InboxConnectorConfig,
+  InboxImessageRuntimeModule,
+} from '../src/inbox-app/types.ts'
+
+function createImessageDriver(
+  overrides: Partial<ImessageDriver> = {},
+): ImessageDriver {
+  return {
+    async getMessages() {
+      return []
+    },
+    ...overrides,
+  }
+}
+
+function createEmailDriver(
+  overrides: Partial<EmailDriver> = {},
+): EmailDriver {
+  return {
+    async downloadAttachment() {
+      return null
+    },
+    inboxId: 'mailbox-1',
+    async listUnreadMessages() {
+      return []
+    },
+    async markProcessed() {},
+    ...overrides,
+  }
+}
+
+function createInboxImessageModule(
+  overrides: Partial<InboxImessageRuntimeModule> = {},
+): InboxImessageRuntimeModule {
+  return {
+    createImessageConnector() {
+      throw new Error('not used in threshold tests')
+    },
+    async loadImessageKitDriver() {
+      return createImessageDriver()
+    },
+    ...overrides,
+  }
+}
 
 const IMESSAGE_CONNECTOR = {
   accountId: 'imessage-account',
@@ -150,8 +196,10 @@ test('default helper methods expose live process values and the no-op auto-reply
 })
 
 test('loadConfiguredImessageDriver returns an injected driver without loading runtime modules', async () => {
-  const expectedDriver = { kind: 'imessage-driver' }
-  const loadImessageDriver = vi.fn(async () => expectedDriver)
+  const expectedDriver = createImessageDriver()
+  const loadImessageDriver = vi.fn(
+    async (_config: InboxConnectorConfig) => expectedDriver,
+  )
   const env = createInboxAppEnvironment({
     loadImessageDriver,
   })
@@ -185,11 +233,11 @@ test('loadConfiguredImessageDriver preserves runtime_unavailable failures from l
 
 test('loadConfiguredImessageDriver wraps runtime driver failures with connector-specific context', async () => {
   const env = createInboxAppEnvironment({
-    inboxImessageModule: {
+    inboxImessageModule: createInboxImessageModule({
       loadImessageKitDriver() {
         throw new Error('driver boot failed')
       },
-    },
+    }),
   })
 
   await assert.rejects(
@@ -232,8 +280,10 @@ test('requireParsers wraps non-Error runtime failures with parser package guidan
 })
 
 test('loadConfiguredEmailDriver prefers an injected driver when present', async () => {
-  const expectedDriver = { kind: 'email-driver' }
-  const loadEmailDriver = vi.fn(async () => expectedDriver)
+  const expectedDriver = createEmailDriver()
+  const loadEmailDriver = vi.fn(
+    async (_config: InboxConnectorConfig) => expectedDriver,
+  )
   const env = createInboxAppEnvironment({
     loadEmailDriver,
   })

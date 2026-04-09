@@ -6,12 +6,12 @@ import {
   buildHostedExecutionGatewayMessageSendDispatch,
   buildHostedExecutionMemberActivatedDispatch,
   buildHostedExecutionVaultShareAcceptedDispatch,
-} from "../src/builders";
+} from "../src/builders.js";
 import {
   buildHostedExecutionOutboxPayload,
   readHostedExecutionOutboxPayload,
   resolveHostedExecutionDispatchPayloadStorage,
-} from "../src/outbox-payload";
+} from "../src/outbox-payload.js";
 const occurredAt = "2026-04-04T00:00:00.000Z";
 
 describe("resolveHostedExecutionDispatchPayloadStorage", () => {

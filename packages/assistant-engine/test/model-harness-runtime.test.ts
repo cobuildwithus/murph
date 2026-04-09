@@ -1,8 +1,10 @@
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
+import type { Mock } from 'vitest'
 import { z } from 'zod'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import type { InboxServices } from '@murphai/inbox-services'
 import type { InboxShowResult } from '@murphai/operator-config/inbox-cli-contracts'
 import type { AssistantToolSpec } from '../src/inbox-model-contracts.ts'
 
@@ -128,6 +130,23 @@ describe('model harness runtime helpers', () => {
     const model = resolveAssistantLanguageModel({
       model: 'murph-mini',
     })
+    const previewTools = createAssistantToolCatalogFromCapabilities(
+      [
+        defineAssistantCapability({
+          description: 'Echo input.',
+          executionBindings: {
+            'native-local': async ({ value }: { value: string }) => ({
+              value,
+            }),
+          },
+          inputSchema: z.object({
+            value: z.string(),
+          }),
+          name: 'echo',
+        }),
+      ],
+      [new NativeLocalCapabilityHost()],
+    ).createAiSdkTools('preview')
     harnessMocks.generateText.mockResolvedValue({
       output: {
         status: 'ok',
@@ -140,11 +159,7 @@ describe('model harness runtime helpers', () => {
         model,
         prompt: 'Summarize the bundle.',
         schema,
-        tools: {
-          echo: {
-            description: 'Echo input.',
-          },
-        },
+        tools: previewTools,
       }),
     ).resolves.toEqual({
       status: 'ok',
@@ -158,11 +173,7 @@ describe('model harness runtime helpers', () => {
           kind: 'step-count',
           count: 3,
         },
-        tools: {
-          echo: {
-            description: 'Echo input.',
-          },
-        },
+        tools: previewTools,
       }),
     )
     expect(harnessMocks.OutputObject).toHaveBeenCalledWith({
@@ -226,7 +237,9 @@ describe('model harness runtime helpers', () => {
   })
 
   it('injects OpenAI responses compaction metadata on compatible responses requests', async () => {
-    const fetchMock = vi.fn(async () => new Response('{}'))
+    const fetchMock: Mock<
+      (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => Promise<Response>
+    > = vi.fn(async () => new Response('{}'))
     vi.stubGlobal('fetch', fetchMock)
     process.env.ASSISTANT_API_KEY = 'openai-secret'
 
@@ -259,7 +272,9 @@ describe('model harness runtime helpers', () => {
       method: 'POST',
     })
 
-    const injectedBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))
+    const firstFetchCall = fetchMock.mock.calls[0]
+    expect(firstFetchCall).toBeTruthy()
+    const injectedBody = JSON.parse(String(firstFetchCall?.[1]?.body))
     expect(injectedBody).toMatchObject({
       input: 'hello',
     })
@@ -513,9 +528,16 @@ describe('model harness runtime helpers', () => {
     })
 
     await expect(
-      previewTools['vault.cli.run']?.execute?.({
-        value: 'hello',
-      }),
+      Reflect.apply(
+        previewTools['vault.cli.run']!.execute!,
+        previewTools['vault.cli.run'],
+        [
+          {
+            value: 'hello',
+          },
+          {},
+        ],
+      ),
     ).resolves.toEqual({
       input: {
         value: 'hello',
@@ -568,9 +590,16 @@ describe('model harness runtime helpers', () => {
     })
 
     await expect(
-      applyTools['assistant.note.fail']?.execute?.({
-        value: 'boom',
-      }),
+      Reflect.apply(
+        applyTools['assistant.note.fail']!.execute!,
+        applyTools['assistant.note.fail'],
+        [
+          {
+            value: 'boom',
+          },
+          {},
+        ],
+      ),
     ).rejects.toThrow('tool exploded')
 
     await expect(
@@ -1641,10 +1670,10 @@ function createShowResult(
   }
 }
 
-function createInboxServicesStub(result: InboxShowResult) {
-  return {
+function createInboxServicesStub(result: InboxShowResult): InboxServices {
+  return assumeInboxServices({
     show: vi.fn(async () => result),
-  }
+  })
 }
 
 function createToolCatalogStub(input?: {
@@ -1695,6 +1724,10 @@ function createToolSpec(): AssistantToolSpec {
     riskClass: 'high',
     selectedHostKind: 'native-local',
   }
+}
+
+function assumeInboxServices(value: Record<string, unknown>): InboxServices {
+  return Object.assign({} as InboxServices, value)
 }
 
 async function writeVaultJson(

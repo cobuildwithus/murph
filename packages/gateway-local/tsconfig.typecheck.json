@@ -9,16 +9,19 @@
   },
   "references": [
     {
-      "path": "../contracts/tsconfig.build.json"
+      "path": "../gateway-core"
     },
     {
-      "path": "../core/tsconfig.build.json"
+      "path": "../inboxd"
+    },
+    {
+      "path": "../runtime-state"
     }
   ],
   "include": [
     "*.ts",
-    "src/**/*.ts",
-    "test/**/*.ts"
+    "test/**/*.ts",
+    "src/**/*.ts"
   ],
   "exclude": [
     "dist"

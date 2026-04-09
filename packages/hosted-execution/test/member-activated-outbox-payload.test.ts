@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { buildHostedExecutionMemberActivatedDispatch } from "../src/builders";
-import { buildHostedExecutionOutboxPayload } from "../src/outbox-payload";
+import { buildHostedExecutionMemberActivatedDispatch } from "../src/builders.js";
+import { buildHostedExecutionOutboxPayload } from "../src/outbox-payload.js";
 
 describe("member.activated outbox payload", () => {
   it("keeps the stored inline payload self-contained when first contact is omitted", () => {

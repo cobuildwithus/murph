@@ -2,8 +2,7 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "noEmit": true,
-    "paths": {},
-    "rootDir": ".",
+    "rootDir": "../..",
     "composite": false,
     "incremental": true,
     "tsBuildInfoFile": "typecheck.tsbuildinfo"
@@ -16,10 +15,15 @@
       "path": "../runtime-state"
     },
     {
+      "path": "../inboxd"
+    },
+    {
       "path": "../core/tsconfig.build.json"
     }
   ],
   "include": [
+    "*.ts",
+    "test/**/*.ts",
     "src/**/*.ts"
   ],
   "exclude": [

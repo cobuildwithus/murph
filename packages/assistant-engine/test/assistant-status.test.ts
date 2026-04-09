@@ -548,6 +548,7 @@ describe('assistant service-result seam', () => {
   it('normalizes ask results for return by redacting session secrets', () => {
     const result = normalizeAssistantAskResultForReturn({
       vault: '/tmp/assistant-vault',
+      status: 'completed',
       prompt: 'Hello',
       response: 'Hi there',
       session: parseAssistantSessionRecord({

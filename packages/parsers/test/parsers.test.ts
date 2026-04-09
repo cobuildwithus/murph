@@ -7,9 +7,12 @@ import { test } from "vitest";
 import { initializeVault } from "@murphai/core";
 import { createVersionedJsonStateEnvelope } from "@murphai/runtime-state/node";
 import {
+  type Cursor,
   createParsedInboxPipeline,
   createInboxPipeline,
+  type EmitCapture,
   openInboxRuntime,
+  type PollConnector,
   rebuildRuntimeFromVault,
   runInboxDaemonWithParsers,
   type InboxRuntimeStore,
@@ -31,7 +34,9 @@ import {
   runAttachmentParseWorker,
   writeParserArtifacts,
   writeParserToolchainConfig,
+  type AttachmentParseJobClaimFilters,
   type ParserProvider,
+  type RequeueAttachmentParseJobsInput,
 } from "../src/index.js";
 import {
   describeExecutableAvailability,
@@ -825,7 +830,7 @@ test("parseAttachment rejects unsafe or malformed attachment IDs before using sc
       id: "fake-image",
       locality: "local",
       openness: "open_source",
-      runtime: "embedded",
+      runtime: "node",
       priority: 100,
       async discover() {
         return {
@@ -1241,7 +1246,7 @@ test("attachment parse worker fails closed on malformed attachment IDs", async (
     completeAttachmentParseJob() {
       throw new Error("worker should not complete malformed attachment IDs");
     },
-    failAttachmentParseJob(input) {
+    failAttachmentParseJob(input: Parameters<InboxRuntimeStore["failAttachmentParseJob"]>[0]) {
       job = {
         ...job,
         state: "failed",
@@ -1262,7 +1267,7 @@ test("attachment parse worker fails closed on malformed attachment IDs", async (
     searchCaptures() {
       return [];
     },
-    getCapture(captureId) {
+    getCapture(captureId: string) {
       return captureId === capture.captureId ? (capture as unknown) : null;
     },
   } as unknown as InboxRuntimeStore;
@@ -1275,7 +1280,7 @@ test("attachment parse worker fails closed on malformed attachment IDs", async (
         id: "unexpected-success-provider",
         locality: "local",
         openness: "open_source",
-        runtime: "embedded",
+        runtime: "node",
         priority: 100,
         async discover() {
           return {
@@ -1460,9 +1465,9 @@ test("stale running parser attempts do not overwrite a requeued rerun", async ()
   });
 
   let runCount = 0;
-  let releaseFirstRun: (() => void) | null = null;
+  let releaseFirstRun: (() => void) | undefined;
   const firstRunStarted = new Promise<void>((resolve) => {
-    releaseFirstRun = resolve;
+    releaseFirstRun = () => resolve();
   });
 
   const registry = createParserRegistry([
@@ -1557,14 +1562,14 @@ test("stale running parser attempts do not overwrite a requeued rerun", async ()
 });
 
 test("parser service forwards scoped drain and requeue filters to the runtime", async () => {
-  const claimFilters: Array<Record<string, unknown> | undefined> = [];
-  const requeueFilters: Array<Record<string, unknown> | undefined> = [];
+  const claimFilters: Array<AttachmentParseJobClaimFilters | undefined> = [];
+  const requeueFilters: Array<RequeueAttachmentParseJobsInput | undefined> = [];
   const runtime = {
-    claimNextAttachmentParseJob(filters) {
+    claimNextAttachmentParseJob(filters?: AttachmentParseJobClaimFilters) {
       claimFilters.push(filters);
       return null;
     },
-    requeueAttachmentParseJobs(filters) {
+    requeueAttachmentParseJobs(filters?: RequeueAttachmentParseJobsInput) {
       requeueFilters.push(filters);
       return 2;
     },
@@ -1874,7 +1879,7 @@ test("daemon with parsers drains pending jobs before connector watch work begins
 
   const daemonRuntime = await openInboxRuntime({ vaultRoot });
   const controller = new AbortController();
-  const connector = {
+  const connector: PollConnector = {
     id: "noop-imessage",
     source: "imessage",
     accountId: "self",
@@ -1886,7 +1891,10 @@ test("daemon with parsers drains pending jobs before connector watch work begins
       watch: true,
       webhooks: false,
     },
-    async watch(_cursor, _emit, signal) {
+    async backfill(cursor: Cursor | null) {
+      return cursor;
+    },
+    async watch(_cursor: Cursor | null, _emit: EmitCapture, signal: AbortSignal) {
       if (signal.aborted) {
         return;
       }
@@ -1997,6 +2005,10 @@ test("daemon with parsers skips startup drain when the signal is already aborted
           watch: false,
           webhooks: false,
         },
+        async backfill(cursor: Cursor | null) {
+          return cursor;
+        },
+        async watch(_cursor: Cursor | null, _emit: EmitCapture, _signal: AbortSignal) {},
         async close() {
           closeCount += 1;
         },
@@ -2145,6 +2157,7 @@ test("daemon with parsers still rejects connector failures after cleanup", async
           async backfill() {
             throw new Error("daemon blew up");
           },
+          async watch(_cursor: Cursor | null, _emit: EmitCapture, _signal: AbortSignal) {},
           async close() {},
         },
       ],
@@ -2173,22 +2186,25 @@ test("daemon with parsers can keep healthy connectors running after one connecto
     runtime,
     registry: createParserRegistry([]),
     connectors: [
-      {
-        id: "healthy-email",
-        source: "email",
+        {
+          id: "healthy-email",
+          source: "email",
         accountId: "agentmail",
         kind: "poll" as const,
-        capabilities: {
-          attachments: true,
-          backfill: false,
-          ownMessages: false,
-          watch: true,
-          webhooks: false,
-        },
-        async watch(_cursor, _emit, signal) {
-          if (signal.aborted) {
-            healthyConnectorAborted = true;
-            return;
+          capabilities: {
+            attachments: true,
+            backfill: false,
+            ownMessages: false,
+            watch: true,
+            webhooks: false,
+          },
+          async backfill(cursor: Cursor | null) {
+            return cursor;
+          },
+          async watch(_cursor: Cursor | null, _emit: EmitCapture, signal: AbortSignal) {
+            if (signal.aborted) {
+              healthyConnectorAborted = true;
+              return;
           }
 
           await new Promise<void>((resolve) => {
@@ -2206,21 +2222,24 @@ test("daemon with parsers can keep healthy connectors running after one connecto
           healthyConnectorClosed += 1;
         },
       },
-      {
-        id: "failing-imessage",
-        source: "imessage",
+        {
+          id: "failing-imessage",
+          source: "imessage",
         accountId: "self",
         kind: "poll" as const,
-        capabilities: {
-          attachments: true,
-          backfill: false,
-          ownMessages: false,
-          watch: true,
-          webhooks: false,
-        },
-        async watch() {
-          throw new Error("daemon blew up");
-        },
+          capabilities: {
+            attachments: true,
+            backfill: false,
+            ownMessages: false,
+            watch: true,
+            webhooks: false,
+          },
+          async backfill(cursor: Cursor | null) {
+            return cursor;
+          },
+          async watch(_cursor: Cursor | null, _emit: EmitCapture, _signal: AbortSignal) {
+            throw new Error("daemon blew up");
+          },
         async close() {
           sawFailingConnectorClose = true;
           resolveFailingConnectorClose?.();

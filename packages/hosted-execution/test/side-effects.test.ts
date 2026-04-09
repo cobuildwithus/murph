@@ -47,6 +47,10 @@ describe("hosted assistant delivery contracts", () => {
     });
 
     expect(record.state).toBe("sent");
+    if (record.state !== "sent") {
+      throw new Error("Expected a sent assistant delivery record.");
+    }
+
     expect(record.delivery.targetKind).toBe("participant");
   });
 });

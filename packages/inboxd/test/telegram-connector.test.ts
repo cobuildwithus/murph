@@ -16,8 +16,8 @@ import type {
   PersistedCapture,
   TelegramApiClient,
   TelegramPollDriver,
-  TelegramUpdateLike,
 } from "../src/index.ts";
+import type { TelegramUpdateLike } from "@murphai/messaging-ingress/telegram-webhook";
 
 const test = baseTest.sequential;
 
@@ -30,6 +30,28 @@ function createPersistedCapture(capture: InboundCapture): PersistedCapture {
     createdAt: capture.occurredAt,
     deduped: false,
   };
+}
+
+function assertWatcherHandle(
+  watcher: Awaited<ReturnType<TelegramPollDriver["startWatching"]>>,
+): asserts watcher is { done: Promise<void>; close: () => Promise<void> | void } {
+  if (!watcher || typeof watcher === "function") {
+    throw new TypeError("Expected Telegram watcher handle object.");
+  }
+  assert.equal(typeof watcher.close, "function");
+  assert.ok(watcher.done instanceof Promise);
+}
+
+function readMessages(
+  page: Awaited<ReturnType<TelegramPollDriver["getMessages"]>>,
+): TelegramUpdateLike[] {
+  return Array.isArray(page) ? page : page.messages;
+}
+
+function readNextCursor(
+  page: Awaited<ReturnType<TelegramPollDriver["getMessages"]>>,
+) {
+  return Array.isArray(page) ? undefined : page.nextCursor;
 }
 
 test("normalizeTelegramUpdate builds thread-aware captures and hydrates downloadable attachments", async () => {
@@ -472,7 +494,9 @@ test("createTelegramPollConnector backfills in update order and emits Telegram u
       };
     },
     async startWatching(input) {
-      watcher = input.onMessage as typeof watcher;
+      watcher = async (update) => {
+        await input.onMessage(update);
+      };
       return {
         async close() {
           closeCount += 1;
@@ -524,7 +548,14 @@ test("createTelegramPollConnector backfills in update order and emits Telegram u
   }, controller.signal);
 
   await new Promise((resolve) => setTimeout(resolve, 0));
-  await watcher?.({
+  const emitUpdate = async (update: TelegramUpdateLike) => {
+    if (!watcher) {
+      throw new Error("expected Telegram watcher callback");
+    }
+
+    await watcher(update);
+  };
+  await emitUpdate({
     update_id: 7,
     message: {
       message_id: 201,
@@ -567,7 +598,7 @@ test("createTelegramApiPollDriver delegates Bot API calls through the grammY Api
           username: "murph_bot",
         };
       },
-      async getUpdates(input) {
+      async getUpdates(input: Record<string, unknown> | undefined) {
         updateCalls.push(input ?? {});
         return [
           {
@@ -589,7 +620,7 @@ test("createTelegramApiPollDriver delegates Bot API calls through the grammY Api
           },
         ];
       },
-      async getFile(fileId) {
+      async getFile(fileId: string) {
         getFileCalls += 1;
         assert.equal(fileId, "file-1");
         return {
@@ -597,7 +628,7 @@ test("createTelegramApiPollDriver delegates Bot API calls through the grammY Api
           file_path: "docs/file.txt",
         };
       },
-      async deleteWebhook(input) {
+      async deleteWebhook(input: Record<string, unknown> | undefined) {
         deleteWebhookCalls.push(input ?? {});
         return true;
       },
@@ -622,8 +653,8 @@ test("createTelegramApiPollDriver delegates Bot API calls through the grammY Api
     cursor: { updateId: 42 },
     limit: 1,
   });
-  assert.deepEqual(updates.messages.map((update) => update.update_id), [43]);
-  assert.deepEqual(updates.nextCursor, { updateId: 43 });
+  assert.deepEqual(readMessages(updates).map((update) => update.update_id), [43]);
+  assert.deepEqual(readNextCursor(updates), { updateId: 43 });
   assert.deepEqual(updateCalls, [
     {
       offset: 43,
@@ -705,6 +736,7 @@ test("createTelegramApiPollDriver retries transient polling failures before resu
     },
     signal: controller.signal,
   });
+  assertWatcherHandle(watcher);
 
   try {
     await vi.advanceTimersByTimeAsync(1000);
@@ -745,6 +777,7 @@ test("createTelegramApiPollDriver stops retrying fatal 4xx polling failures", as
     },
     signal: new AbortController().signal,
   });
+  assertWatcherHandle(watcher);
 
   await assert.rejects(
     watcher.done,
@@ -1044,7 +1077,7 @@ test("createTelegramApiPollDriver reads local Bot API file paths directly", asyn
         async getUpdates() {
           return [];
         },
-        async getFile(fileId) {
+        async getFile(fileId: string) {
           assert.equal(fileId, "file-1");
           return {
             file_id: fileId,
@@ -1085,7 +1118,7 @@ test("createTelegramApiPollDriver rejects local Bot API file paths from untruste
         async getUpdates() {
           return [];
         },
-        async getFile(fileId) {
+        async getFile(fileId: string) {
           assert.equal(fileId, "file-1");
           return {
             file_id: fileId,

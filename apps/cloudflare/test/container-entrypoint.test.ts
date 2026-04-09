@@ -231,8 +231,11 @@ describe("startHostedContainerEntrypoint", () => {
 
   it("passes the hosted run context through request parsing into the node runner", async () => {
     const spy = vi.spyOn(nodeRunner, "runHostedExecutionJob").mockResolvedValue({
-      bundles: { agentState: null, vault: null },
-      result: { eventsHandled: 1, summary: "ok" },
+      finalGatewayProjectionSnapshot: null,
+      result: {
+        bundle: null,
+        result: { eventsHandled: 1, summary: "ok" },
+      },
     });
 
     try {
@@ -288,7 +291,9 @@ describe("startHostedContainerEntrypoint", () => {
   });
 
   it("rejects concurrent run requests inside one warm container shell", async () => {
-    let releaseFirstRun: (() => void) | null = null;
+    let releaseFirstRun: () => void = () => {
+      throw new Error("Expected the first run to register a release callback.");
+    };
     let notifyFirstRunStarted: (() => void) | null = null;
     const firstRunStarted = new Promise<void>((resolve) => {
       notifyFirstRunStarted = resolve;
@@ -300,11 +305,14 @@ describe("startHostedContainerEntrypoint", () => {
         releaseFirstRun = resolve;
       });
       return {
-        bundle: null,
+        finalGatewayProjectionSnapshot: null,
         result: {
-          eventsHandled: 1,
-          nextWakeAt: null,
-          summary: "ok",
+          bundle: null,
+          result: {
+            eventsHandled: 1,
+            nextWakeAt: null,
+            summary: "ok",
+          },
         },
       };
     });
@@ -347,15 +355,18 @@ describe("startHostedContainerEntrypoint", () => {
       error: "Hosted runner is busy.",
     });
 
-    releaseFirstRun?.();
+    releaseFirstRun();
     const firstResponse = await firstResponsePromise;
     expect(firstResponse.status).toBe(200);
     await expect(firstResponse.json()).resolves.toEqual({
-      bundle: null,
+      finalGatewayProjectionSnapshot: null,
       result: {
-        eventsHandled: 1,
-        nextWakeAt: null,
-        summary: "ok",
+        bundle: null,
+        result: {
+          eventsHandled: 1,
+          nextWakeAt: null,
+          summary: "ok",
+        },
       },
     });
   });
@@ -420,7 +431,12 @@ describe("startHostedContainerEntrypoint", () => {
       await aborted;
 
       expect(spy).toHaveBeenCalledTimes(1);
-      expect(abortSignal?.aborted).toBe(true);
+      const signal = abortSignal;
+      expect(
+        typeof signal === "object"
+        && signal !== null
+        && Object.hasOwn(signal, "aborted"),
+      ).toBe(true);
       expect(abortReason).toBeInstanceOf(Error);
       expect((abortReason as Error).message).toContain("aborted");
     } finally {

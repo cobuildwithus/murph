@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import type { BigIntStats, PathLike, StatOptions, Stats } from "node:fs";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -184,10 +185,18 @@ test("findStoredCaptureEnvelope tolerates unsafe-envelope quarantine races when 
 
 test("findStoredCaptureEnvelope surfaces quarantine exhaustion when every suffix is already occupied", async () => {
   const actualFs = await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises");
-  const statMock = vi.fn(async () => await actualFs.stat(os.tmpdir()));
+  let statCalls = 0;
+
+  function statOverride(_targetPath: PathLike, options?: StatOptions & { bigint?: false }): Promise<Stats>;
+  function statOverride(_targetPath: PathLike, options: StatOptions & { bigint: true }): Promise<BigIntStats>;
+  function statOverride(_targetPath: PathLike, options?: StatOptions): Promise<Stats | BigIntStats>;
+  function statOverride(_targetPath: PathLike, options?: StatOptions): Promise<Stats | BigIntStats> {
+    statCalls += 1;
+    return actualFs.stat(os.tmpdir(), options as never);
+  }
 
   const { findStoredCaptureEnvelope } = await importPersistWithMockedFsPromises(() => ({
-    stat: statMock,
+    stat: statOverride,
   }));
   const vaultRoot = await makeTempDirectory("murph-inbox-quarantine-exhaustion");
   const input = createCapture();
@@ -202,7 +211,7 @@ test("findStoredCaptureEnvelope surfaces quarantine exhaustion when every suffix
     }),
     /Unable to quarantine stored inbox envelope/u,
   );
-  assert.equal(statMock.mock.calls.length, 1000);
+  assert.equal(statCalls, 1000);
 });
 
 test("findStoredCaptureEnvelope returns null when the source account directory does not exist", async () => {
@@ -359,8 +368,13 @@ test("findStoredCaptureEnvelope surfaces unexpected quarantine rename failures",
 });
 
 test("findStoredCaptureEnvelope surfaces unexpected quarantine stat failures", async () => {
-  const { findStoredCaptureEnvelope } = await importPersistWithMockedFsPromises((actualFs) => ({
-    stat: vi.fn(async (targetPath: string | Buffer | URL) => {
+  function statOverride(
+    actualFs: typeof import("node:fs/promises"),
+  ) {
+    function stat(targetPath: PathLike, options?: StatOptions & { bigint?: false }): Promise<Stats>;
+    function stat(targetPath: PathLike, options: StatOptions & { bigint: true }): Promise<BigIntStats>;
+    function stat(targetPath: PathLike, options?: StatOptions): Promise<Stats | BigIntStats>;
+    function stat(targetPath: PathLike, options?: StatOptions): Promise<Stats | BigIntStats> {
       const target = String(targetPath);
       if (target.includes("quarantined-invalid-capture-id")) {
         const error = new Error("permission denied") as NodeJS.ErrnoException;
@@ -368,8 +382,14 @@ test("findStoredCaptureEnvelope surfaces unexpected quarantine stat failures", a
         throw error;
       }
 
-      return actualFs.stat(targetPath);
-    }),
+      return actualFs.stat(targetPath, options as never);
+    }
+
+    return stat;
+  }
+
+  const { findStoredCaptureEnvelope } = await importPersistWithMockedFsPromises((actualFs) => ({
+    stat: statOverride(actualFs),
   }));
   const vaultRoot = await makeTempDirectory("murph-inbox-quarantine-stat-failure");
   const input = createCapture({

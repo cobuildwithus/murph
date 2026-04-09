@@ -63,6 +63,97 @@ import {
   createInboxAppEnvironment,
   IMESSAGE_MESSAGES_DB_RELATIVE_PATH,
 } from '../src/inbox-app/environment.ts'
+import type {
+  CoreRuntimeModule,
+  EmailDriver,
+  InboxRuntimeModule,
+  TelegramDriver,
+} from '../src/inbox-app/types.ts'
+
+function createTelegramDriver(
+  overrides: Partial<TelegramDriver> = {},
+): TelegramDriver {
+  return {
+    async downloadFile() {
+      return new Uint8Array()
+    },
+    async getFile() {
+      return {}
+    },
+    async getMe() {
+      return {}
+    },
+    async getMessages() {
+      return []
+    },
+    async startWatching() {},
+    ...overrides,
+  }
+}
+
+function createEmailDriver(
+  overrides: Partial<EmailDriver> = {},
+): EmailDriver {
+  return {
+    async downloadAttachment() {
+      return null
+    },
+    inboxId: 'mailbox-1',
+    async listUnreadMessages() {
+      return []
+    },
+    async markProcessed() {},
+    ...overrides,
+  }
+}
+
+function createInboxModule(
+  overrides: Partial<InboxRuntimeModule> = {},
+): InboxRuntimeModule {
+  return {
+    async createInboxPipeline() {
+      throw new Error('unused')
+    },
+    createAgentmailApiPollDriver() {
+      return createEmailDriver()
+    },
+    createEmailPollConnector() {
+      throw new Error('unused')
+    },
+    createLinqWebhookConnector() {
+      throw new Error('unused')
+    },
+    createTelegramBotApiPollDriver() {
+      return createTelegramDriver()
+    },
+    createTelegramPollConnector() {
+      throw new Error('unused')
+    },
+    async ensureInboxVault() {},
+    async openInboxRuntime() {
+      throw new Error('unused')
+    },
+    async rebuildRuntimeFromVault() {},
+    async runInboxDaemon() {},
+    async runInboxDaemonWithParsers() {},
+    ...overrides,
+  }
+}
+
+function createCoreModule(
+  overrides: Partial<CoreRuntimeModule> = {},
+): CoreRuntimeModule {
+  return {
+    async addMeal() {
+      return {
+        event: { id: 'event-1' },
+        manifestPath: 'derived/meals/meal-1.json',
+        mealId: 'meal-1',
+      }
+    },
+    ...overrides,
+  }
+}
 
 beforeEach(() => {
   createAgentmailApiClientMock.mockReset()
@@ -101,7 +192,7 @@ test('createInboxAppEnvironment exposes runtime loaders and helper defaults', as
 })
 
 test('loadConfiguredTelegramDriver prefers an injected driver', async () => {
-  const expectedDriver = { kind: 'telegram-driver' }
+  const expectedDriver = createTelegramDriver()
   const env = createInboxAppEnvironment({
     loadTelegramDriver: async () => expectedDriver,
   })
@@ -120,10 +211,13 @@ test('loadConfiguredTelegramDriver prefers an injected driver', async () => {
 })
 
 test('loadConfiguredTelegramDriver requires a bot token when not injected', async () => {
-  const createTelegramBotApiPollDriver = vi.fn()
+  const createTelegramBotApiPollDriver = vi.fn(
+    (input: { token: string; apiBaseUrl?: string; fileBaseUrl?: string }) =>
+      createTelegramDriver(),
+  )
   const env = createInboxAppEnvironment({
     getEnvironment: () => ({ TELEGRAM_BOT_TOKEN: '' }),
-    loadInboxModule: async () => ({
+    loadInboxModule: async () => createInboxModule({
       createTelegramBotApiPollDriver,
     }),
   })
@@ -147,15 +241,17 @@ test('loadConfiguredTelegramDriver requires a bot token when not injected', asyn
 })
 
 test('loadConfiguredTelegramDriver builds the inboxd driver with shared runtime env values', async () => {
-  const expectedDriver = { kind: 'telegram-driver' }
-  const createTelegramBotApiPollDriver = vi.fn(() => expectedDriver)
+  const expectedDriver = createTelegramDriver()
+  const createTelegramBotApiPollDriver = vi.fn(
+    (input: { token: string; apiBaseUrl?: string; fileBaseUrl?: string }) => expectedDriver,
+  )
   resolveTelegramBotTokenMock.mockReturnValue('telegram-token')
   resolveTelegramApiBaseUrlMock.mockReturnValue('https://telegram.example/api')
   resolveTelegramFileBaseUrlMock.mockReturnValue('https://telegram.example/file')
 
   const env = createInboxAppEnvironment({
     getEnvironment: () => ({ TELEGRAM_BOT_TOKEN: 'telegram-token' }),
-    loadInboxModule: async () => ({
+    loadInboxModule: async () => createInboxModule({
       createTelegramBotApiPollDriver,
     }),
   })
@@ -246,11 +342,13 @@ test('loadConfiguredEmailDriver resolves the inbox address and creates the drive
   resolveAgentmailApiKeyMock.mockReturnValue('env-key')
   resolveAgentmailBaseUrlMock.mockReturnValue('https://agentmail.example')
 
-  const expectedDriver = { kind: 'email-driver' }
-  const createAgentmailApiPollDriver = vi.fn(() => expectedDriver)
+  const expectedDriver = createEmailDriver()
+  const createAgentmailApiPollDriver = vi.fn(
+    (input: { apiKey: string; inboxId: string; baseUrl?: string }) => expectedDriver,
+  )
   const env = createInboxAppEnvironment({
     getEnvironment: () => ({ AGENTMAIL_API_KEY: 'env-key' }),
-    loadInboxModule: async () => ({
+    loadInboxModule: async () => createInboxModule({
       createAgentmailApiPollDriver,
     }),
   })
@@ -467,7 +565,7 @@ test('ensureConfiguredImessageReady forwards the expected messages-db probe deta
   const env = createInboxAppEnvironment({
     getHomeDirectory: () => '/tmp/home',
     getPlatform: () => 'darwin',
-    probeImessageMessagesDb: async () => true,
+    probeImessageMessagesDb: async () => undefined,
   })
 
   await env.ensureConfiguredImessageReady()
@@ -492,7 +590,7 @@ test('journalPromotionEnabled honours explicit dependency overrides', () => {
   assert.equal(
     createInboxAppEnvironment({
       enableJournalPromotion: true,
-      loadCoreModule: async () => ({ kind: 'core' }),
+      loadCoreModule: async () => createCoreModule(),
     }).journalPromotionEnabled,
     true,
   )

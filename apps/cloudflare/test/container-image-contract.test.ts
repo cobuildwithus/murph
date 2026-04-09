@@ -165,6 +165,9 @@ describe("hosted runner container image contract", () => {
   });
 
   it("describes the runtime artifact and explicit build/runtime closures", () => {
+    const hostedRunnerWorkspacePackageNameSet = new Set<string>(
+      hostedRunnerWorkspacePackageNames,
+    );
     const runtimeDependencies = Object.fromEntries(
       [...hostedRunnerRuntimeDependencyNames, ...hostedRunnerBundleOnlyDependencyNames].map((dependencyName) => [
         dependencyName,
@@ -216,7 +219,7 @@ describe("hosted runner container image contract", () => {
     expect(hostedRunnerBuildPackageNames).toEqual([
       ...hostedRunnerWorkspacePackageNames,
       ...publishedMurphBundledWorkspacePackageNames.filter(
-        (packageName) => !hostedRunnerWorkspacePackageNames.includes(packageName),
+        (packageName) => !hostedRunnerWorkspacePackageNameSet.has(packageName),
       ),
     ]);
     expect(new Set(hostedRunnerBuildPackageNames)).toEqual(

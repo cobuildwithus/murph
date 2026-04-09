@@ -51,6 +51,7 @@ vi.mock("../src/hosted-runtime/events/telegram.ts", () => ({
 }));
 
 import { executeHostedDispatchEvent } from "../src/hosted-runtime/events.ts";
+import { createHostedRuntimeEffectsPortStub } from "./hosted-runtime-test-helpers.ts";
 
 function createRuntime() {
   return {
@@ -63,20 +64,7 @@ function createRuntime() {
         async put() {},
       },
       deviceSyncPort: null,
-      effectsPort: {
-        async commit() {},
-        async deletePreparedSideEffect() {},
-        async readRawEmailMessage() {
-          return null;
-        },
-        async readSideEffect() {
-          return null;
-        },
-        async sendEmail() {},
-        async writeSideEffect(record: unknown) {
-          return record;
-        },
-      },
+      effectsPort: createHostedRuntimeEffectsPortStub(),
       usageExportPort: null,
     },
     userEnv: {},
@@ -124,13 +112,13 @@ describe("hosted runtime event coverage", () => {
     const cronDispatch = buildHostedExecutionAssistantCronTickDispatch({
       eventId: "evt_cron",
       occurredAt: "2026-04-08T00:05:00.000Z",
-      reason: "scheduled",
+      reason: "alarm",
       userId: "member_123",
     });
     const wakeDispatch = buildHostedExecutionDeviceSyncWakeDispatch({
       eventId: "evt_wake",
       occurredAt: "2026-04-08T00:10:00.000Z",
-      reason: "manual-refresh",
+      reason: "webhook_hint",
       userId: "member_123",
     });
 
@@ -177,6 +165,12 @@ describe("hosted runtime event coverage", () => {
     });
     const sharePack = {
       ownerUserId: "member_sender",
+      pack: {
+        createdAt: "2026-04-08T00:15:00.000Z",
+        entities: [],
+        schemaVersion: "murph.share-pack.v1" as const,
+        title: "Shared export",
+      },
       shareId: "share_123",
     };
 

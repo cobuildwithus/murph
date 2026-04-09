@@ -6,18 +6,18 @@ import { readHostedExecutionEnvironment } from "../../src/env.ts";
 import type { HostedExecutionContainerNamespaceLike } from "../../src/runner-container.js";
 import { HostedUserRunner } from "../../src/user-runner.ts";
 import { parseHostedUserEnvUpdate } from "../../src/user-env.ts";
+import type { WorkerEnvironmentSource } from "../../src/worker-routes/shared.ts";
+import type { WorkerUserRunnerCommitInput } from "../../src/worker-contracts.ts";
 
 import type {
-  HostedExecutionBundleRef,
-  HostedExecutionDispatchResult,
   HostedExecutionDispatchRequest,
+  HostedExecutionDispatchResult,
   HostedExecutionUserStatus,
-} from "@murphai/runtime-state";
+} from "@murphai/hosted-execution";
 
-interface TestWorkerEnvironment extends Readonly<Record<string, string | undefined>> {
-  BUNDLES: R2BucketLike;
+type TestWorkerEnvironment = WorkerEnvironmentSource & {
   RUNNER_CONTAINER: HostedExecutionContainerNamespaceLike;
-}
+};
 
 export class VitestUserRunnerDurableObject extends DurableObject {
   private readonly runner: HostedUserRunner;
@@ -25,8 +25,8 @@ export class VitestUserRunnerDurableObject extends DurableObject {
   constructor(ctx: DurableObjectState, env: TestWorkerEnvironment) {
     super(ctx, env);
     this.runner = new HostedUserRunner(
-      ctx,
-      readHostedExecutionEnvironment(env),
+      ctx as unknown as import("../../src/user-runner.ts").DurableObjectStateLike,
+      readHostedExecutionEnvironment(env as unknown as Readonly<Record<string, string | undefined>>),
       env.BUNDLES,
       env,
       env.RUNNER_CONTAINER,
@@ -45,21 +45,7 @@ export class VitestUserRunnerDurableObject extends DurableObject {
     return this.runner.dispatchWithOutcome(input);
   }
 
-  async commit(input: {
-    eventId: string;
-    payload: {
-      bundle: {
-        agentState: string | null;
-        vault: string | null;
-      };
-      currentBundleRef: HostedExecutionBundleRef | null;
-      result: {
-        eventsHandled: number;
-        nextWakeAt?: string | null;
-        summary: string;
-      };
-    };
-  }) {
+  async commit(input: WorkerUserRunnerCommitInput) {
     return this.runner.commit(input);
   }
 

@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { buildHostedExecutionLinqMessageReceivedDispatch } from "@murphai/hosted-execution";
+import {
+  buildHostedExecutionLinqMessageReceivedDispatch,
+  type HostedExecutionDispatchRequest,
+} from "@murphai/hosted-execution";
 
 const mocks = vi.hoisted(() => ({
   normalizeLinqWebhookEvent: vi.fn(),
@@ -27,6 +30,10 @@ import {
   ingestHostedLinqMessage,
   normalizeHostedLinqAttachmentUrl,
 } from "../src/hosted-runtime/events/linq.ts";
+
+type HostedLinqDispatch = HostedExecutionDispatchRequest & {
+  event: Extract<HostedExecutionDispatchRequest["event"], { kind: "linq.message.received" }>;
+}
 
 const originalFetch = globalThis.fetch;
 
@@ -62,7 +69,10 @@ describe("ingestHostedLinqMessage", () => {
       occurredAt: "2026-04-08T00:00:00.000Z",
       phoneLookupKey: "15551234567",
       userId: "member_123",
-    });
+    }) as HostedLinqDispatch;
+    if (dispatch.event.kind !== "linq.message.received") {
+      throw new Error("Expected Linq message dispatch.");
+    }
     const parsedEvent = {
       parsed: true,
     };
@@ -77,7 +87,10 @@ describe("ingestHostedLinqMessage", () => {
       processCapture,
     }));
 
-    await ingestHostedLinqMessage("/tmp/assistant-runtime-linq", dispatch);
+    await ingestHostedLinqMessage("/tmp/assistant-runtime-linq", {
+      ...dispatch,
+      event: dispatch.event,
+    });
 
     expect(mocks.parseLinqWebhookEvent).toHaveBeenCalledWith(JSON.stringify(dispatch.event.linqEvent));
     expect(mocks.normalizeLinqWebhookEvent).toHaveBeenCalledWith({

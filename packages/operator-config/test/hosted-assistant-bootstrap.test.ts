@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { afterEach, test, vi } from 'vitest'
 
 import {
+  type HostedAssistantConfig,
   createHostedAssistantConfig,
   createHostedAssistantProfile,
 } from '../src/assistant/hosted-config.ts'
@@ -12,14 +13,20 @@ afterEach(() => {
 })
 
 async function loadHostedAssistantModule(options?: {
-  readOperatorConfigResult?: unknown
-  saveHostedAssistantConfigImpl?: (config: unknown, homeDirectory: string | undefined) => Promise<unknown>
+  readOperatorConfigResult?: {
+    hostedAssistant?: HostedAssistantConfig | null
+    hostedAssistantInvalid?: boolean
+  } | null
+  saveHostedAssistantConfigImpl?: (
+    config: HostedAssistantConfig | null,
+    homeDirectory: string | undefined,
+  ) => Promise<{ hostedAssistant: HostedAssistantConfig | null }>
 }) {
   vi.resetModules()
   const readOperatorConfig = vi.fn(async () => options?.readOperatorConfigResult ?? null)
   const saveHostedAssistantConfig = vi.fn(
     options?.saveHostedAssistantConfigImpl ??
-      (async (config: unknown) => ({ hostedAssistant: config })),
+      (async (config: HostedAssistantConfig | null) => ({ hostedAssistant: config })),
   )
 
   vi.doMock('../src/operator-config.ts', () => ({
@@ -140,7 +147,7 @@ test('hosted assistant config parsing and readiness helpers normalize expected s
     configured: true,
     provider: 'openai-compatible',
   })
-  assert.deepEqual(resolveHostedAssistantOperatorDefaultsState({ profiles: 'bad' }), {
+  assert.deepEqual(resolveHostedAssistantOperatorDefaultsState(null), {
     configured: false,
     provider: null,
   })

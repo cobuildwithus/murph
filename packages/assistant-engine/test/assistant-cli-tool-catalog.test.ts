@@ -110,17 +110,21 @@ describe('assistant CLI tool catalogs', () => {
       ...toolContext,
       executionContext: {
         hosted: {
+          memberId: 'member-1',
+          userEnvKeys: [],
           issueDeviceConnectLink: async ({ provider }) => ({
+            authorizationUrl: `https://example.com/connect/${provider}`,
+            expiresAt: '2026-04-09T00:00:00.000Z',
             provider,
-            url: `https://example.com/connect/${provider}`,
+            providerLabel: provider,
           }),
-          issueShareLink: async ({ recipientPhoneNumber }) => ({
-            shareId: 'share_123',
+          issueShareLink: async () => ({
+            shareCode: 'share_123',
+            shareUrl: 'https://example.com/share/share_123',
             url: 'https://example.com/share/share_123',
-            recipientPhoneNumber: recipientPhoneNumber ?? null,
           }),
         },
-      } as NonNullable<AssistantToolContext['executionContext']>,
+      } satisfies NonNullable<AssistantToolContext['executionContext']>,
     }).map((tool) => tool.name)
     expect(outwardNames).toEqual([
       'murph.device.connect',
@@ -303,7 +307,7 @@ function createEchoSchema() {
 }
 
 function createVaultServicesStub(): VaultServices {
-  return {
+  return assumeVaultServices({
     core: {
       addMeal: async () => ({ mealId: 'meal-1' }),
       ensureJournal: async () => ({ created: true }),
@@ -336,14 +340,22 @@ function createVaultServicesStub(): VaultServices {
       showRecipe: async () => ({ id: 'recipe-1' }),
       showWearableDay: async () => ({ date: '2026-04-08' }),
     },
-  } as VaultServices
+  })
 }
 
 function createInboxServicesStub(): InboxServices {
-  return {
+  return assumeInboxServices({
     promoteDocument: async () => ({ ok: true }),
     promoteExperimentNote: async () => ({ ok: true }),
     promoteJournal: async () => ({ ok: true }),
     promoteMeal: async () => ({ ok: true }),
-  } as InboxServices
+  })
+}
+
+function assumeVaultServices(value: Record<string, unknown>): VaultServices {
+  return Object.assign({} as VaultServices, value)
+}
+
+function assumeInboxServices(value: Record<string, unknown>): InboxServices {
+  return Object.assign({} as InboxServices, value)
 }

@@ -5,7 +5,14 @@ import {
 } from "@murphai/runtime-state";
 import { normalizeHostedTelegramMessage } from "../src/connectors/telegram/normalize.ts";
 
-import type { InboundAttachment, InboundCapture, ParsedEmailMessage, TelegramPollDriver } from "../src/index.ts";
+import type {
+  ChatPollDriver,
+  InboundAttachment,
+  InboundCapture,
+  ParsedEmailMessage,
+  PersistedCapture,
+  TelegramPollDriver,
+} from "../src/index.ts";
 import {
   compareInboundCaptures,
   createAgentmailApiPollDriver,
@@ -48,6 +55,17 @@ function buildCapture(input: {
     raw: {
       externalId: input.externalId,
     },
+  };
+}
+
+function createPersistedCapture(capture: InboundCapture): PersistedCapture {
+  return {
+    captureId: `cap-${capture.externalId}`,
+    eventId: `evt-${capture.externalId}`,
+    auditId: `aud-${capture.externalId}`,
+    envelopePath: `raw/inbox/${capture.source}/${capture.externalId}.json`,
+    createdAt: capture.occurredAt,
+    deduped: false,
   };
 }
 
@@ -132,9 +150,15 @@ test("createInboundCaptureFromChatMessage preserves nullable chat fields and com
 });
 
 test("createNormalizedChatPollConnector backfill sorts captures, skips duplicate checkpoints, and reuses loaded context", async () => {
+  type TestChatMessage = {
+    id: string;
+    occurredAt: string;
+  };
+  type TestChatDriver = ChatPollDriver<TestChatMessage>;
+
   const loadContext = vi.fn(async () => ({ label: "loaded" }));
   const getMessages = vi
-    .fn<Parameters<TelegramPollDriver["getMessages"]>, ReturnType<TelegramPollDriver["getMessages"]>>()
+    .fn<TestChatDriver["getMessages"]>()
     .mockImplementationOnce(async ({ cursor, includeOwnMessages, limit }) => {
       assert.deepEqual(cursor, { messageId: "msg-2" });
       assert.equal(includeOwnMessages, false);
@@ -155,7 +179,10 @@ test("createNormalizedChatPollConnector backfill sorts captures, skips duplicate
       return [];
     });
 
-  const normalize = vi.fn(async ({ message, context }) =>
+  const normalize = vi.fn(async ({ message, context }: {
+    message: TestChatMessage;
+    context: { label: string } | null;
+  }) =>
     buildCapture({
       externalId: message.id,
       occurredAt: message.occurredAt,
@@ -191,6 +218,7 @@ test("createNormalizedChatPollConnector backfill sorts captures, skips duplicate
       externalId: capture.externalId,
       checkpoint,
     });
+    return createPersistedCapture(capture);
   });
 
   assert.equal(connector.capabilities.attachments, false);
@@ -210,21 +238,31 @@ test("createNormalizedChatPollConnector backfill sorts captures, skips duplicate
 });
 
 test("createNormalizedChatPollConnector watch stops stop-only watchers and ignores messages after abort", async () => {
-  let onMessage: ((message: { id: string; occurredAt: string }) => Promise<void>) | null = null;
+  type TestChatMessage = {
+    id: string;
+    occurredAt: string;
+  };
+  type TestChatDriver = ChatPollDriver<TestChatMessage>;
+
+  let onMessage: ((message: TestChatMessage) => Promise<void>) | null = null;
   const stop = vi.fn(async () => undefined);
 
-  const connector = createNormalizedChatPollConnector({
-    driver: {
-      async getMessages() {
-        return [];
-      },
-      async startWatching(input) {
-        onMessage = input.onMessage;
-        return {
-          stop,
-        };
-      },
+  const driver: TestChatDriver = {
+    async getMessages() {
+      return [];
     },
+    async startWatching(input: Parameters<TestChatDriver["startWatching"]>[0]) {
+      onMessage = async (message) => {
+        await input.onMessage(message);
+      };
+      return {
+        stop,
+      };
+    },
+  };
+
+  const connector = createNormalizedChatPollConnector<TestChatMessage, TestChatDriver>({
+    driver,
     id: "chat-watch",
     source: "chat",
     checkpoint: ({ message }) => ({
@@ -241,19 +279,27 @@ test("createNormalizedChatPollConnector watch stops stop-only watchers and ignor
   const controller = new AbortController();
   const watchPromise = connector.watch(null, async (capture) => {
     emitted.push(capture.externalId);
+    return createPersistedCapture(capture);
   }, controller.signal);
 
   await vi.waitFor(() => {
     assert.ok(onMessage);
   });
 
-  await onMessage?.({
+  const emitMessage = async (message: TestChatMessage) => {
+    if (!onMessage) {
+      throw new Error("expected chat watcher callback");
+    }
+
+    await onMessage(message);
+  };
+  await emitMessage({
     id: "msg-1",
     occurredAt: "2026-04-08T10:00:01.000Z",
   });
   controller.abort();
   await watchPromise;
-  await onMessage?.({
+  await emitMessage({
     id: "msg-2",
     occurredAt: "2026-04-08T10:00:02.000Z",
   });
@@ -530,7 +576,7 @@ test("createEmailPollConnector watch falls back to the driver inbox account, reu
     backfillLimit: 2,
     driver: {
       inboxId: "inbox-coverage",
-      async listUnreadMessages({ limit }) {
+      async listUnreadMessages({ limit } = {}) {
         unreadCalls += 1;
         assert.equal(limit, 2);
 
@@ -624,7 +670,7 @@ test("createTelegramPollConnector fails closed when an active webhook exists but
   });
 
   await assert.rejects(
-    () => connector.backfill(null, async () => undefined),
+    () => connector.backfill(null, async (capture) => createPersistedCapture(capture)),
     /requires deleteWebhook support/u,
   );
 });
@@ -996,7 +1042,13 @@ test("createLinqWebhookConnector normalizes constructor inputs and keeps backfil
     attachments: true,
     ownMessages: true,
   });
-  assert.deepEqual(await connector.backfill({ seen: "cursor-1" }), { seen: "cursor-1" });
+  assert.deepEqual(
+    await connector.backfill(
+      { seen: "cursor-1" },
+      async (capture) => createPersistedCapture(capture),
+    ),
+    { seen: "cursor-1" },
+  );
 });
 
 test("normalizeLinqWebhookEvent keeps voice attachments when downloads fail", async () => {

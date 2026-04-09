@@ -104,7 +104,10 @@ describe('assistant redaction helpers', () => {
         'X-Trace': 'trace-123',
       },
       model: 'gpt-5.4',
+      oss: false,
+      profile: null,
       providerName: 'murph-openai',
+      reasoningEffort: 'medium',
       sandbox: 'workspace-write',
     })
     expect(providerOptions.headers).toEqual({
@@ -113,16 +116,20 @@ describe('assistant redaction helpers', () => {
     })
 
     const session = redactAssistantSessionForDisplay({
+      schema: 'murph.assistant-session.v4',
       alias: 'session-alpha',
       binding: {
         actorId: null,
         channel: 'telegram',
+        conversationKey: null,
+        delivery: null,
         identityId: null,
         threadId: 'thread-1',
         threadIsDirect: true,
       },
       createdAt: '2026-04-08T00:00:00.000Z',
       lastTurnAt: null,
+      provider: 'openai-compatible',
       providerBinding: {
         provider: 'openai-compatible',
         providerOptions: {
@@ -132,7 +139,10 @@ describe('assistant redaction helpers', () => {
             'X-Trace': 'trace-456',
           },
           model: 'gpt-5.4',
+          oss: false,
+          profile: null,
           providerName: 'murph-openai',
+          reasoningEffort: 'medium',
           sandbox: 'workspace-write',
         },
         providerSessionId: 'provider-session',
@@ -145,7 +155,10 @@ describe('assistant redaction helpers', () => {
           'X-Trace': 'trace-789',
         },
         model: 'gpt-5.4',
+        oss: false,
+        profile: null,
         providerName: 'murph-openai',
+        reasoningEffort: 'medium',
         sandbox: 'workspace-write',
       },
       resumeState: null,
@@ -186,18 +199,24 @@ describe('assistant redaction helpers', () => {
       target: {
         adapter: 'codex-cli',
         approvalPolicy: 'never',
+        codexCommand: null,
         model: 'gpt-5.4',
+        oss: false,
+        profile: null,
         reasoningEffort: 'medium',
         sandbox: 'workspace-write',
       },
     })
-    expect(codexSession.target).toEqual({
-      adapter: 'codex-cli',
-      approvalPolicy: 'never',
-      model: 'gpt-5.4',
-      reasoningEffort: 'medium',
-      sandbox: 'workspace-write',
-    })
+      expect(codexSession.target).toEqual({
+        adapter: 'codex-cli',
+        approvalPolicy: 'never',
+        codexCommand: null,
+        model: 'gpt-5.4',
+        oss: false,
+        profile: null,
+        reasoningEffort: 'medium',
+        sandbox: 'workspace-write',
+      })
 
     expect(
       redactAssistantSessionsForDisplay([session]).map((entry) => entry.sessionId),

@@ -10,8 +10,8 @@ import { createHostedDispatchPayloadStore } from "../src/dispatch-payload-store.
 import { createHostedExecutionJournalStore } from "../src/execution-journal.js";
 import { readHostedEmailRawMessage, writeHostedEmailRawMessage } from "../src/hosted-email.js";
 
-import { MemoryEncryptedR2Bucket, createTestRootKey } from "./test-helpers";
-import { expectOpaqueStrings } from "./object-key-assertions";
+import { MemoryEncryptedR2Bucket, createTestRootKey } from "./test-helpers.js";
+import { expectOpaqueStrings } from "./object-key-assertions.js";
 
 describe("opaque storage path rotation", () => {
   it("ignores removed raw-path per-user env objects", async () => {
@@ -198,6 +198,7 @@ describe("opaque storage path rotation", () => {
       keyId: "old",
       scope: "execution-journal",
       value: {
+        assistantDeliveryEffects: [],
         bundleRef: null,
         committedAt: "2026-04-04T00:00:00.000Z",
         eventId,
@@ -237,6 +238,7 @@ describe("opaque storage path rotation", () => {
       keyId: "old",
       keysById: { old: oldKey },
     }).writeCommittedResult(userId, eventId, {
+      assistantDeliveryEffects: [],
       bundleRef: null,
       committedAt: "2026-04-04T00:00:00.000Z",
       eventId,

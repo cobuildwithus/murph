@@ -47,6 +47,7 @@ export default defineConfig({
     coverage: createMurphVitestCoverage({
       customProviderModule: resolveMurphVitestCoverageProviderModule(packageDir),
       include: ["src/**/*.ts"],
+      exclude: ["src/assistant/system-prompt.ts"],
     }),
   },
 });

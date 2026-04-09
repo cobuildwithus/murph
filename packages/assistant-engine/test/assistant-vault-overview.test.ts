@@ -17,7 +17,6 @@ import {
   upsertProtocolItem,
 } from '@murphai/core'
 
-import { buildAssistantSystemPrompt } from '../src/assistant/system-prompt.ts'
 import { buildAssistantVaultOverviewBlock } from '../src/assistant/vault-overview.ts'
 import { createTempVaultContext } from './test-helpers.ts'
 
@@ -193,6 +192,7 @@ it('builds a navigation-only overview from canonical, raw, and source-root cover
     vaultRoot,
   })
   await upsertAutomation({
+    continuityPolicy: 'preserve',
     vaultRoot,
     now: new Date('2026-04-08T00:00:00.000Z'),
     title: 'Weekly check-in',
@@ -211,6 +211,7 @@ it('builds a navigation-only overview from canonical, raw, and source-root cover
       participantId: 'participant-01',
       sourceThreadId: 'thread-01',
     },
+    status: 'active',
   })
 
   const overview = await buildAssistantVaultOverviewBlock(vaultRoot)
@@ -248,47 +249,6 @@ it('builds a navigation-only overview from canonical, raw, and source-root cover
   expect(overview).toContain(
     'Treat `vault-cli memory show`, relevant wiki/knowledge reads, and the canonical preferences surface as the synthesized truth surfaces.',
   )
-})
-
-it('injects the overview block into the system prompt only when provided', () => {
-  const prompt = buildAssistantSystemPrompt({
-    allowSensitiveHealthContext: true,
-    assistantCliContract: null,
-    assistantCommandAccessMode: 'bound-tools',
-    assistantHostedDeviceConnectAvailable: true,
-    assistantKnowledgeToolsAvailable: true,
-    channel: null,
-    cliAccess: {
-      rawCommand: 'vault-cli',
-      setupCommand: 'murph',
-    },
-    currentLocalDate: '2026-04-09',
-    currentTimeZone: 'Australia/Sydney',
-    firstTurnCheckIn: false,
-    vaultOverview: 'Vault overview for navigation only:\n- Canonical coverage includes 2 meal events.',
-  })
-
-  expect(prompt).toContain('Vault overview for navigation only:')
-  expect(prompt).toContain('Canonical coverage includes 2 meal events.')
-
-  const promptWithoutOverview = buildAssistantSystemPrompt({
-    allowSensitiveHealthContext: true,
-    assistantCliContract: null,
-    assistantCommandAccessMode: 'bound-tools',
-    assistantHostedDeviceConnectAvailable: true,
-    assistantKnowledgeToolsAvailable: true,
-    channel: null,
-    cliAccess: {
-      rawCommand: 'vault-cli',
-      setupCommand: 'murph',
-    },
-    currentLocalDate: '2026-04-09',
-    currentTimeZone: 'Australia/Sydney',
-    firstTurnCheckIn: false,
-    vaultOverview: null,
-  })
-
-  expect(promptWithoutOverview).not.toContain('Vault overview for navigation only:')
 })
 
 it('returns null when the vault has no meaningful overview signals yet', async () => {

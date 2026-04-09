@@ -147,7 +147,7 @@ test("snapshot state reads stored events and exposes empty projections when meta
           schema: "murph.gateway-event.v1",
           createdAt: "2026-04-08T00:00:00.000Z",
           cursor: 3,
-          kind: "snapshot-rebuilt",
+          kind: "conversation.updated",
           messageId: null,
           permissionRequestId: null,
           sessionKey: "session-a",
@@ -157,7 +157,7 @@ test("snapshot state reads stored events and exposes empty projections when meta
           schema: "murph.gateway-event.v1",
           createdAt: "2026-04-08T00:01:00.000Z",
           cursor: 9,
-          kind: "permission-requested",
+          kind: "permission.requested",
           messageId: null,
           permissionRequestId: "permission-1",
           sessionKey: "session-b",
@@ -177,8 +177,8 @@ test("snapshot state reads stored events and exposes empty projections when meta
         kind: event.kind,
       })),
       [
-        { cursor: 3, kind: "snapshot-rebuilt" },
-        { cursor: 9, kind: "permission-requested" },
+        { cursor: 3, kind: "conversation.updated" },
+        { cursor: 9, kind: "permission.requested" },
       ],
     );
     assert.equal(hasGatewaySnapshotState(database), false);

@@ -144,7 +144,7 @@ describe('assistant cron automation runtime store seams', () => {
   })
 
   it('creates records, upserts them in sorted order, and removes entries by automation id', () => {
-    const store = {
+    const store: Awaited<ReturnType<typeof readAssistantCronAutomationRuntimeStore>> = {
       automations: [],
       version: 1 as const,
     }

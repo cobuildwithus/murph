@@ -1,7 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { tool } from 'ai'
 import { normalizeAssistantProviderConfig } from '@murphai/operator-config/assistant/provider-config'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import { z } from 'zod'
+import type {
+  AssistantCreateAiSdkToolsOptions,
+  AssistantToolCatalog,
+  AssistantToolExecutionMode,
+} from '../src/model-harness.ts'
 
 const providerMocks = vi.hoisted(() => ({
   executeCodexPrompt: vi.fn(),
@@ -224,50 +231,51 @@ describe('openAiCompatibleProviderDefinition.executeTurn', () => {
 
     const onEvent = vi.fn()
     const onTraceEvent = vi.fn()
-    const toolCatalog = {
-      createAiSdkTools: vi.fn(
-        (
-          _mode: string,
-          callbacks: {
-            onToolEvent(event: {
-              errorCode?: string | null
-              errorMessage?: string | null
-              input?: Record<string, unknown>
-              kind: 'failed' | 'previewed' | 'started'
-              mode: 'apply'
-              tool: string
-            }): void
-          },
-        ) => {
-          callbacks.onToolEvent({
-            kind: 'previewed',
-            mode: 'apply',
-            tool: 'web.search',
-          })
-          callbacks.onToolEvent({
-            input: {
-              query: 'murph',
-            },
-            kind: 'started',
-            mode: 'apply',
-            tool: 'web.search',
-          })
-          callbacks.onToolEvent({
-            errorCode: 'DENIED',
-            errorMessage: 'Refused',
-            input: {
-              path: 'journal/today.md',
-            },
-            kind: 'failed',
-            mode: 'apply',
-            tool: 'vault.write',
-          })
-
-          return {
-            webSearch: {},
-          }
+    const createAiSdkTools: AssistantToolCatalog['createAiSdkTools'] = (
+      _mode: AssistantToolExecutionMode = 'preview',
+      callbacks: AssistantCreateAiSdkToolsOptions = {},
+    ) => {
+      callbacks.onToolEvent?.({
+        input: {},
+        kind: 'previewed',
+        mode: 'apply',
+        tool: 'web.search',
+      })
+      callbacks.onToolEvent?.({
+        input: {
+          query: 'murph',
         },
-      ),
+        kind: 'started',
+        mode: 'apply',
+        tool: 'web.search',
+      })
+      callbacks.onToolEvent?.({
+        errorCode: 'DENIED',
+        errorMessage: 'Refused',
+        input: {
+          path: 'journal/today.md',
+        },
+        kind: 'failed',
+        mode: 'apply',
+        tool: 'vault.write',
+      })
+
+      return {
+        webSearch: tool({
+          description: 'Mock web search tool',
+          execute: async () => ({}),
+          inputSchema: z.object({
+            query: z.string().optional(),
+          }),
+        }),
+      }
+    }
+
+    const toolCatalog: AssistantToolCatalog = {
+      createAiSdkTools: vi.fn(createAiSdkTools),
+      executeCalls: vi.fn(),
+      hasTool: vi.fn(),
+      listTools: vi.fn(),
     }
 
     const result = await openAiCompatibleProviderDefinition.executeTurn({
@@ -634,7 +642,13 @@ describe('openAiCompatibleProviderDefinition.executeTurn', () => {
 
 describe('codexCliProviderDefinition', () => {
   it('reports model discovery as unsupported from the CLI adapter', async () => {
-    await expect(codexCliProviderDefinition.discoverModels()).resolves.toEqual({
+    await expect(
+      codexCliProviderDefinition.discoverModels({
+        config: normalizeAssistantProviderConfig({
+          provider: 'codex-cli',
+        }),
+      }),
+    ).resolves.toEqual({
       message: 'Codex model discovery is not available from the local CLI adapter.',
       models: [],
       status: 'unsupported',

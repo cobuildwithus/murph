@@ -1,0 +1,21 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "allowImportingTsExtensions": true,
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "rootDir": "../..",
+    "tsBuildInfoFile": "typecheck.tsbuildinfo",
+    "types": [
+      "node",
+      "@cloudflare/workers-types",
+      "@cloudflare/vitest-pool-workers"
+    ]
+  },
+  "include": [
+    "*.ts",
+    "test/**/*.ts",
+    "scripts/**/*.ts",
+    "src/**/*.ts"
+  ]
+}

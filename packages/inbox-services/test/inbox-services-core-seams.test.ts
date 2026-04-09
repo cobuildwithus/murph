@@ -9,6 +9,7 @@ import { test } from 'vitest'
 
 import type {
   InboxRuntimeConfig,
+  RuntimeAttachmentParseJobRecord,
   RuntimeAttachmentRecord,
   RuntimeCaptureRecord,
   RuntimeStore,
@@ -149,7 +150,7 @@ function createPollConnector(id: string) {
 }
 
 test('shared utility helpers normalize inbox metadata and paths', async () => {
-  assert.equal(runtimeNamespaceAccountId({ accountId: undefined }), null)
+  assert.equal(runtimeNamespaceAccountId({ accountId: null }), null)
   assert.equal(connectorNamespaceKey({ source: 'telegram', accountId: null }), 'telegram::default')
   assert.equal(normalizeConnectorAccountId('imessage', undefined), 'self')
   assert.equal(normalizeConnectorAccountId('telegram', undefined), 'bot')
@@ -874,7 +875,9 @@ test('parser helpers build service context, summarize drains, and enforce runtim
     },
   ])
 
-  const listAttachmentParseJobs = ({ attachmentId, limit }: { attachmentId?: string; limit?: number } = {}) => {
+  const listAttachmentParseJobs = (
+    { attachmentId, limit }: { attachmentId?: string; limit?: number } = {},
+  ): RuntimeAttachmentParseJobRecord[] => {
     assert.equal(attachmentId, 'attachment-1')
     assert.equal(limit, 20)
     return [

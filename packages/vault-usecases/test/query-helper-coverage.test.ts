@@ -30,9 +30,9 @@ import {
 } from "../src/query-runtime.ts";
 import { importWithMocks } from "./mock-import.ts";
 
-import type { QueryRecord } from "../src/query-runtime.ts";
+import type { QueryEntity } from "../src/query-runtime.ts";
 
-function createQueryRecord(overrides: Partial<QueryRecord> = {}): QueryRecord {
+function createQueryRecord(overrides: Partial<QueryEntity> = {}): QueryEntity {
   return {
     entityId: "evt_default",
     primaryLookupId: "evt_default",

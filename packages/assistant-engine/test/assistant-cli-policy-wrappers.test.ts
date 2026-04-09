@@ -2,8 +2,6 @@ import { readFile, rm } from 'node:fs/promises'
 
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
-
 import {
   appendAssistantCliOutputChunk,
   prepareAssistantCliExecutionRequest,
@@ -31,7 +29,7 @@ describe('assistant CLI policy wrappers', () => {
         args: ['status', '--vault', '/tmp/override'],
         vault: '/tmp/active-vault',
       }),
-    ).rejects.toMatchObject<VaultCliError>({
+    ).rejects.toMatchObject({
       code: 'ASSISTANT_CLI_COMMAND_BLOCKED',
       message:
         'The provider-turn CLI executor does not allow an explicit `--vault` override.',
@@ -42,7 +40,7 @@ describe('assistant CLI policy wrappers', () => {
         args: ['--format', 'json', 'assistant', 'run'],
         vault: '/tmp/active-vault',
       }),
-    ).rejects.toMatchObject<VaultCliError>({
+    ).rejects.toMatchObject({
       code: 'ASSISTANT_CLI_COMMAND_BLOCKED',
       context: {
         commandPath: 'assistant run',
@@ -54,7 +52,7 @@ describe('assistant CLI policy wrappers', () => {
         args: ['run'],
         vault: '/tmp/active-vault',
       }),
-    ).rejects.toMatchObject<VaultCliError>({
+    ).rejects.toMatchObject({
       code: 'ASSISTANT_CLI_COMMAND_BLOCKED',
       context: {
         commandPath: 'run',

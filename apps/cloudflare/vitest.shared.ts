@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import {
   createVitestWorkspaceRuntimeAliases,
   resolveWorkspaceSourceEntries,
-} from "../../config/workspace-source-resolution";
+} from "../../config/workspace-source-resolution.ts";
 
 export const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 

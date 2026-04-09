@@ -675,6 +675,9 @@ describe('executeProviderTurnWithRecovery', () => {
     })
 
     expect(outcome.kind).toBe('failed_terminal')
+    if (outcome.kind !== 'failed_terminal') {
+      throw new Error('Expected provider turn recovery to fail terminally.')
+    }
     expect(outcome.session).toBe(session)
     expect(outcome.error).toBeInstanceOf(Error)
     expect((outcome.error as Error).message).toBe(
@@ -754,6 +757,9 @@ describe('executeProviderTurnWithRecovery', () => {
     })
 
     expect(outcome.kind).toBe('failed_terminal')
+    if (outcome.kind !== 'failed_terminal') {
+      throw new Error('Expected provider turn recovery to fail terminally.')
+    }
     expect(outcome.error).toBeInstanceOf(Error)
     expect((outcome.error as Error).message).toBe(
       'Assistant provider routes were exhausted.',
@@ -763,9 +769,19 @@ describe('executeProviderTurnWithRecovery', () => {
 })
 
 function extractReceiptKinds(): string[] {
-  return runnerMocks.appendAssistantTurnReceiptEvent.mock.calls.map(
-    ([event]: [{ kind: string }]) => event.kind,
-  )
+  return runnerMocks.appendAssistantTurnReceiptEvent.mock.calls.map((call) => {
+    const event = call[0]
+    if (
+      !event ||
+      typeof event !== 'object' ||
+      !('kind' in event) ||
+      typeof event.kind !== 'string'
+    ) {
+      throw new Error('Expected receipt event kind to be present.')
+    }
+
+    return event.kind
+  })
 }
 
 function createFailedAttemptResult(input: {
@@ -866,8 +882,8 @@ function createTurnPlan(input: {
       env: {
         CLI_TOKEN: 'test-cli-token',
       },
-      rawCommand: 'vault-cli',
-      setupCommand: 'murph',
+      rawCommand: 'vault-cli' as const,
+      setupCommand: 'murph' as const,
     },
     firstTurnCheckInEligible: input.firstTurnCheckInEligible ?? false,
     requestedWorkingDirectory: '/tmp/provider-turn-runner-tests',

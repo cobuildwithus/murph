@@ -64,8 +64,9 @@ async function createTempVault(prefix: string): Promise<string> {
 function createFileDependencies() {
   return {
     chmod: async (filePath: string, mode: number) => await chmod(filePath, mode),
-    mkdir: async (directoryPath: string) =>
-      await mkdir(directoryPath, { recursive: true }),
+    mkdir: async (directoryPath: string) => {
+      await mkdir(directoryPath, { recursive: true })
+    },
     readFile: async (filePath: string) => await readFile(filePath, 'utf8'),
     removeFile: async (filePath: string) => await rm(filePath, { force: true }),
     writeFile: async (filePath: string, text: string) =>
@@ -584,7 +585,7 @@ test('managed device-daemon lifecycle helpers cover explicit, status, start, and
   const managedPid = 9001
   const livePids = new Set<number>()
   let healthAttempt = 0
-  let spawnedEnv: NodeJS.ProcessEnv | null = null
+  let spawnedVaultRoot: string | undefined
 
   const started = await startManagedDeviceSyncDaemon({
     vault: managedVault,
@@ -602,7 +603,7 @@ test('managed device-daemon lifecycle helpers cover explicit, status, start, and
         livePids.delete(pid)
       },
       spawnProcess: async (input) => {
-        spawnedEnv = input.env
+        spawnedVaultRoot = input.env.DEVICE_SYNC_VAULT_ROOT
         livePids.add(managedPid)
         return { pid: managedPid }
       },
@@ -614,10 +615,7 @@ test('managed device-daemon lifecycle helpers cover explicit, status, start, and
   assert.equal(started.managed, true)
   assert.equal(started.pid, managedPid)
   assert.match(resolveManagedControlToken(resolveDeviceDaemonPaths(managedVault)) ?? '', /^[a-f0-9]{48}$/u)
-  assert.equal(
-    spawnedEnv?.DEVICE_SYNC_VAULT_ROOT,
-    managedVault,
-  )
+  assert.equal(spawnedVaultRoot, managedVault)
 
   const ensuredManaged = await ensureManagedDeviceSyncControlPlane({
     vault: managedVault,

@@ -414,7 +414,7 @@ describe("runHostedDeviceSyncPass", () => {
           event: {
             hint: null,
             kind: "device-sync.wake",
-            reason: "manual",
+            reason: "webhook_hint",
             runtimeSnapshot: null,
             userId: "member_123",
           },
@@ -457,7 +457,7 @@ describe("runHostedDeviceSyncPass", () => {
           event: {
             hint: null,
             kind: "device-sync.wake",
-            reason: "manual",
+            reason: "webhook_hint",
             runtimeSnapshot: null,
             userId: "member_123",
           },
