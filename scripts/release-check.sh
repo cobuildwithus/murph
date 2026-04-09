@@ -10,6 +10,5 @@ node --check scripts/verify-release-target.mjs
 node --check scripts/pack-publishables.mjs
 node --check scripts/publish-publishables.mjs
 node scripts/verify-release-target.mjs
-corepack pnpm typecheck
 corepack pnpm build:workspace:clean
-corepack pnpm test:coverage
+corepack pnpm verify:acceptance

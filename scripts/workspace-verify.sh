@@ -436,14 +436,14 @@ run_repo_acceptance_guards() {
 }
 
 run_fixture_smoke_verification() {
-  pnpm exec tsx "e2e/smoke/verify-fixtures.ts" "$@"
+  pnpm exec tsx "e2e/smoke/verify-scenario-integrity.ts" "$@"
 }
 
 run_repo_vitest() {
   # Keep worker selection centralized in the Vitest configs so local runs use
   # the faster 75% default while CI stays at 50%, with the same env override
   # path (`MURPH_VITEST_MAX_WORKERS`) for both lanes.
-  MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 pnpm exec vitest run --config "vitest.config.ts" "$@"
+  pnpm exec vitest run --config "vitest.config.ts" "$@"
 }
 
 run_workspace_package_coverage() {
@@ -629,7 +629,6 @@ run_test() {
     local test_packages_pid
     local smoke_pid
 
-    run_timed_step "Prepared runtime artifacts" prepare_repo_vitest_runtime_artifacts
     run_timed_step "Repo Vitest" run_repo_vitest --no-coverage &
     test_packages_pid="$!"
     register_background_pid "$test_packages_pid"
@@ -639,16 +638,13 @@ run_test() {
 
     wait_for_background_jobs "$test_packages_pid" "$smoke_pid"
   else
-    run_timed_step "Prepared runtime artifacts" prepare_repo_vitest_runtime_artifacts
     run_timed_step "Repo Vitest" run_repo_vitest --no-coverage
     run_timed_step "Fixture smoke verification" run_fixture_smoke_verification
   fi
 }
 
 run_test_packages() {
-  run_timed_step "Tracked artifact hygiene" pnpm no-js
   run_timed_step "Package behavior prerequisites" run_test_packages_common
-  run_timed_step "Prepared runtime artifacts" prepare_repo_vitest_runtime_artifacts
   run_timed_step "Repo Vitest" run_repo_vitest --no-coverage
 }
 
