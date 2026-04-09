@@ -324,14 +324,15 @@ function buildAssistantAutoReplyContextLines(
 function resolveGroupedTelegramMediaGroupId(
   captures: readonly AssistantAutoReplyPromptCapture[],
 ): string | null {
-  const firstMediaGroupId = captures[0]?.telegramMetadata?.mediaGroupId ?? null
+  const mediaGroupIds = captures
+    .map((capture) => capture.telegramMetadata?.mediaGroupId ?? null)
+    .filter((mediaGroupId): mediaGroupId is string => mediaGroupId !== null)
+  const firstMediaGroupId = mediaGroupIds[0] ?? null
   if (!firstMediaGroupId) {
     return null
   }
 
-  return captures.every(
-    (capture) => capture.telegramMetadata?.mediaGroupId === firstMediaGroupId,
-  )
+  return mediaGroupIds.every((mediaGroupId) => mediaGroupId === firstMediaGroupId)
     ? firstMediaGroupId
     : null
 }

@@ -50,6 +50,25 @@ describe("assertHostedOnboardingMutationOrigin", () => {
       )
     ).not.toThrow();
   });
+
+  it("falls back to the request host when no canonical public origin is configured", async () => {
+    mocks.getHostedOnboardingEnvironment.mockReturnValue(createHostedOnboardingEnvironment({
+      publicBaseUrl: null,
+    }));
+
+    const { assertHostedOnboardingMutationOrigin } = await import("@/src/lib/hosted-onboarding/csrf");
+
+    expect(() =>
+      assertHostedOnboardingMutationOrigin(
+        new Request("https://preview.example.test/api/hosted-onboarding/invites", {
+          method: "POST",
+          headers: {
+            origin: "https://preview.example.test",
+          },
+        }),
+      )
+    ).not.toThrow();
+  });
 });
 
 function createHostedOnboardingEnvironment(

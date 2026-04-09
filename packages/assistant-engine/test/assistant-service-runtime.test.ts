@@ -1137,7 +1137,7 @@ describe('assistant system prompt seam', () => {
     )
     expect(prompt).toContain('Today\'s date for the user is 2026-04-08.')
     expect(prompt).toContain(
-      'When older messages or existing records use relative wording such as "today", anchor that wording to the date of that message or record, not to the current day by default.',
+      'Interpret relative day words such as "today", "yesterday", and "tomorrow" in that timezone unless the user clearly anchors them to another date.',
     )
     expect(prompt).toContain(
       'When the user wants help connecting a hosted wearable provider such as WHOOP, Oura, or Garmin, use `murph.device.connect` first',
