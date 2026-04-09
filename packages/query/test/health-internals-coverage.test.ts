@@ -5,6 +5,8 @@ import path from "node:path";
 
 import { afterEach, test, vi } from "vitest";
 
+import { CURRENT_VAULT_FORMAT_VERSION } from "@murphai/contracts";
+
 import { type CanonicalEntity, resolveCanonicalRecordClass } from "../src/canonical-entities.ts";
 import { buildExportPack } from "../src/export-pack.ts";
 import {
@@ -213,6 +215,10 @@ test("health loaders and entity slices cover strict and tolerant file handling",
     null,
   );
   assert.equal(
+    await readOptionalMarkdownDocument(vaultRoot, "docs/missing.md"),
+    null,
+  );
+  assert.equal(
     readOptionalMarkdownDocumentOutcomeSync(vaultRoot, "docs/missing.md"),
     null,
   );
@@ -253,6 +259,10 @@ test("health loaders and entity slices cover strict and tolerant file handling",
   await assert.rejects(
     () => readMarkdownDocumentOutcome(vaultRoot, "docs/missing.md"),
     /Missing markdown document at docs\/missing\.md/u,
+  );
+  await assert.rejects(
+    () => readOptionalMarkdownDocumentOutcome(vaultRoot, "docs"),
+    /EISDIR|illegal operation on a directory/u,
   );
   assert.throws(
     () => readMarkdownDocumentOutcomeSync(vaultRoot, "docs/missing.md"),
@@ -619,6 +629,7 @@ test("health shared helpers normalize primitive accessors and matching logic", (
 
 test("health library and canonical collector use fallback node metadata and tolerant issue capture", async () => {
   const vaultRoot = await createVaultRoot("murph-query-health-library-");
+  const strictVaultRoot = await createVaultRoot("murph-query-health-library-strict-");
 
   await writeVaultFile(
     vaultRoot,
@@ -784,11 +795,53 @@ test("health library and canonical collector use fallback node metadata and tole
       title: "Collected assessment",
     }),
   );
+  await writeVaultFile(
+    strictVaultRoot,
+    "bank/library/resting-heart-rate.md",
+    [
+      "---",
+      "slug: resting-heart-rate",
+      "entityType: biomarker",
+      "---",
+      "",
+      "# Resting heart rate",
+      "",
+      `Stable biomarker guidance ${"detail ".repeat(50)}`,
+    ].join("\n"),
+  );
+  await writeVaultFile(
+    strictVaultRoot,
+    "bank/goals/sleep-depth.md",
+    [
+      "---",
+      "schemaVersion: hv/goal@v1",
+      "goalId: goal_sleep_depth",
+      "slug: sleep-depth",
+      "title: Sleep Depth",
+      "status: active",
+      "---",
+      "# Sleep Depth",
+      "",
+    ].join("\n"),
+  );
+  await writeVaultFile(
+    strictVaultRoot,
+    "ledger/assessments/2026/2026-04.jsonl",
+    JSON.stringify({
+      id: "asmt_collected",
+      recordedAt: "2026-04-10T09:00:00Z",
+      title: "Collected assessment",
+    }),
+  );
 
   await assert.rejects(
     () => readHealthLibraryGraph(vaultRoot),
     /Failed to parse frontmatter/u,
   );
+  const strictGraph = await readHealthLibraryGraph(strictVaultRoot);
+  assert.equal(strictGraph.nodes.length, 1);
+  assert.equal(strictGraph.nodes[0]?.title, "Resting Heart Rate");
+  assert.equal(strictGraph.nodes[0]?.summary?.endsWith("..."), true);
 
   const graphWithIssues = await readHealthLibraryGraphWithIssues(vaultRoot);
   assert.equal(graphWithIssues.graph.nodes.length, 1);
@@ -796,6 +849,12 @@ test("health library and canonical collector use fallback node metadata and tole
 
   const tolerantCollection = await collectCanonicalEntities(vaultRoot, {
     mode: "tolerant-async",
+  });
+  const strictCollectionAsync = await collectCanonicalEntities(strictVaultRoot, {
+    mode: "strict-async",
+  });
+  const strictCollectionSync = collectCanonicalEntities(strictVaultRoot, {
+    mode: "strict-sync",
   });
   const tolerantSyncCollection = collectCanonicalEntities(vaultRoot, {
     mode: "tolerant-sync",
@@ -807,6 +866,8 @@ test("health library and canonical collector use fallback node metadata and tole
     tolerantCollection.markdownByPath.get("bank/goals/sleep-depth.md")?.includes("Sleep Depth"),
     true,
   );
+  assert.equal(strictCollectionAsync.goals.length, 1);
+  assert.equal(strictCollectionSync.goals.length, 1);
 });
 
 test("supplement queries aggregate active compounds and support flexible lookup paths", async () => {
@@ -973,6 +1034,81 @@ test("supplement queries aggregate active compounds and support flexible lookup 
       .some((record) => record.lookupId === "magnesium"),
     true,
   );
+});
+
+test("blood test readers cover specimen detection, sorting, and lookup helpers", async () => {
+  const vaultRoot = await createVaultRoot("murph-query-blood-tests-");
+
+  await writeVaultFile(
+    vaultRoot,
+    "vault.json",
+    `${JSON.stringify({
+      formatVersion: CURRENT_VAULT_FORMAT_VERSION,
+      vaultId: "vault_01K9MGQX75Q5WF9G3HKR1CCX6Q",
+      createdAt: "2026-04-01T00:00:00.000Z",
+      title: "Blood test vault",
+      timezone: "UTC",
+    })}\n`,
+  );
+  await writeVaultFile(
+    vaultRoot,
+    "CORE.md",
+    "---\ntitle: Core\n---\n# Core\n",
+  );
+  await writeVaultFile(
+    vaultRoot,
+    "ledger/events/2026/2026-04.jsonl",
+    [
+      JSON.stringify({
+        id: "evt_blood",
+        kind: "test",
+        occurredAt: "2026-04-10T08:00:00.000Z",
+        title: "Ferritin",
+        testCategory: "blood",
+        resultStatus: "final",
+        labPanelId: "panel-1",
+        relatedIds: ["goal_sleep", 5],
+        tags: ["lab", 2],
+      }),
+      JSON.stringify({
+        id: "evt_specimen",
+        kind: "test",
+        occurredAt: "2026-04-09T08:00:00.000Z",
+        title: "CBC",
+        specimenType: "serum",
+      }),
+      JSON.stringify({
+        id: "evt_skip",
+        kind: "test",
+        occurredAt: "2026-04-08T08:00:00.000Z",
+        title: "Not blood",
+      }),
+    ].join("\n"),
+  );
+
+  assert.equal(toBloodTestRecord(null, "ledger/events/2026/2026-04.jsonl"), null);
+  assert.deepEqual(
+    toBloodTestRecord(
+      {
+        id: "evt_panel",
+        kind: "test",
+        occurredAt: "2026-04-11T08:00:00.000Z",
+        title: "Quarterly panel",
+        specimenType: "serum",
+        relatedIds: ["goal_sleep_depth", 4],
+        tags: ["lab", 7],
+      },
+      "ledger/events/2026/2026-04.jsonl",
+    )?.relatedIds,
+    ["goal_sleep_depth"],
+  );
+
+  assert.deepEqual(
+    (await listBloodTests(vaultRoot)).map((record) => record.id),
+    ["evt_blood", "evt_specimen"],
+  );
+  assert.equal((await readBloodTest(vaultRoot, "evt_blood"))?.labPanelId, "panel-1");
+  assert.equal((await showBloodTest(vaultRoot, " ferritin "))?.id, "evt_blood");
 });
 
 test("export pack, overview, and timeline cover health prompts and fallback rendering", () => {

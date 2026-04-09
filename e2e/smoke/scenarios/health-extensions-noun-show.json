@@ -1,6 +1,6 @@
 {
   "id": "health-extensions-noun-show",
-  "command": "vault-cli <noun> show <id> --vault <path> [--format json|md] [--request-id <id>]",
+  "command": "vault-cli <noun> show <id|current> --vault <path> [--request-id <id>]",
   "vaultFixture": "fixtures/minimal-vault",
   "inputs": [
     "fixtures/health-extensions/vault-overlay/bank/goals/improve-sleep.md",
