@@ -183,7 +183,11 @@ function readHostedWorkerMigrationTags(config: Record<string, unknown>): string[
       return [];
     }
 
-    const tag = "tag" in entry ? normalizeOptionalString(String(entry.tag)) : null;
+    const tag = readHostedWorkerMigrationTag(entry);
     return tag ? [tag] : [];
   });
+}
+
+function readHostedWorkerMigrationTag(entry: Record<string, unknown>): string | null {
+  return typeof entry.tag === "string" ? normalizeOptionalString(entry.tag) : null;
 }

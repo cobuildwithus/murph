@@ -9,7 +9,6 @@ export function resolveDeployWorkerCliPaths(
   } = {},
 ): {
   configPath: string;
-  deployPaths: ReturnType<typeof resolveCloudflareDeployPaths>;
   resultPath: string;
   secretsFilePath: string;
 } {
@@ -45,7 +44,6 @@ export function resolveDeployWorkerCliPaths(
 
   return {
     configPath,
-    deployPaths,
     resultPath,
     secretsFilePath,
   };

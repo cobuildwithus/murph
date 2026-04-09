@@ -8,6 +8,15 @@ on:
 permissions:
   contents: read
 
+env:
+  # Keep the release workflow on the truthful hosted-web verify path. The
+  # contact-privacy keyring, public Privy app id, and verification key are
+  # deterministic CI-only placeholders so hosted-web smoke/build still boot
+  # with the same minimal env contract in every workflow.
+  HOSTED_CONTACT_PRIVACY_KEYS: v1:BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc
+  NEXT_PUBLIC_PRIVY_APP_ID: cm_app_hosted_web_verify
+  PRIVY_VERIFICATION_KEY: ci-hosted-web-verification-key
+
 jobs:
   tag-check:
     runs-on: ubuntu-latest

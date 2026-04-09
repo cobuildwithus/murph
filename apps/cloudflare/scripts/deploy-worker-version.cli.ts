@@ -7,7 +7,11 @@ import {
   type DeploymentStatusPayload,
   type HostedWorkerDeploymentResult,
 } from "./deploy-worker-version.shared.js";
-import { parseJsonValue, requireConfiguredString } from "./deploy-automation/shared.ts";
+import {
+  isObjectRecord,
+  parseJsonValue,
+  requireConfiguredString,
+} from "./deploy-automation/shared.ts";
 import { resolveDeployWorkerCliPaths } from "./deploy-worker-version-paths.js";
 import { runWranglerJson, runWranglerLogged } from "./wrangler-runner.js";
 
@@ -154,7 +158,7 @@ async function readWranglerOutputFile(
       continue;
     }
 
-    const entry = parseJsonValue<Record<string, unknown>>(
+    const entry = parseJsonRecord(
       line,
       `Wrangler output entry in ${outputFilePath} at line ${index + 1}`,
     );
@@ -170,15 +174,22 @@ async function readWranglerOutputFile(
 async function readRenderedDeployConfig(configFilePath: string): Promise<Record<string, unknown>> {
   const content = await readFile(configFilePath, "utf8");
 
-  try {
-    return JSON.parse(content) as Record<string, unknown>;
-  } catch {
-    throw new Error(
-      `Expected a rendered JSON deploy config at ${configFilePath}. Re-run deploy:config:render before deploying.`,
-    );
-  }
+  return parseJsonRecord(
+    content,
+    `Rendered deploy config ${configFilePath}`,
+  );
 }
 
 function isWranglerNoDeploymentsError(error: unknown): boolean {
   return error instanceof Error && error.message.includes("has no deployments");
+}
+
+function parseJsonRecord(value: string, label: string): Record<string, unknown> {
+  const parsed = parseJsonValue<unknown>(value, label);
+
+  if (!isObjectRecord(parsed)) {
+    throw new Error(`${label} must be a JSON object.`);
+  }
+
+  return parsed;
 }

@@ -12,13 +12,5 @@
   "exclude": [
     "dist",
     ".test-dist"
-  ],
-  "references": [
-    {
-      "path": "../runtime-state"
-    },
-    {
-      "path": "../contracts/tsconfig.build.json"
-    }
   ]
 }

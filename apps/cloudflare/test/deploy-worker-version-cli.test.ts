@@ -1,5 +1,5 @@
 import path from "node:path";
-import { writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -232,5 +232,30 @@ describe("runDeployWorkerVersionCli", () => {
         },
       ),
     ).rejects.toThrow(/Wrangler output entry in .* at line 2 must be valid JSON:/);
+  });
+
+  it("rejects a non-object rendered deploy config before reading deployments", async () => {
+    const deployRoot = path.join("/tmp", "repo", "apps", "cloudflare");
+    const configPath = path.join(deployRoot, ".deploy", "wrangler.generated.jsonc");
+
+    await mkdir(path.dirname(configPath), { recursive: true });
+    await writeFile(configPath, "[]", "utf8");
+
+    await expect(
+      runDeployWorkerVersionCli(
+        ["--config", "./.deploy/wrangler.generated.jsonc"],
+        {
+          deployRoot,
+          env: {
+            CF_WORKER_NAME: "hosted-worker",
+            HOSTED_EXECUTION_DEPLOYMENT_MODE: "gradual",
+          },
+          log: false,
+        },
+      ),
+    ).rejects.toThrow(`Rendered deploy config ${configPath} must be a JSON object.`);
+
+    expect(wranglerMocks.runWranglerJson).not.toHaveBeenCalled();
+    expect(wranglerMocks.runWranglerLogged).not.toHaveBeenCalled();
   });
 });

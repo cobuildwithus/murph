@@ -21,6 +21,9 @@ describe('release workflow guards', () => {
   it('runs root release checks and packs all publishable tarballs with pnpm', () => {
     const workflow = readFileSync(releaseWorkflowPath, 'utf8')
 
+    expect(workflow).toContain('HOSTED_CONTACT_PRIVACY_KEYS: v1:BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc')
+    expect(workflow).toContain('NEXT_PUBLIC_PRIVY_APP_ID: cm_app_hosted_web_verify')
+    expect(workflow).toContain('PRIVY_VERIFICATION_KEY: ci-hosted-web-verification-key')
     expect(workflow).toContain('- name: Run release checks')
     expect(workflow).toContain('MURPH_TEST_LANES_PARALLEL: "1"')
     expect(workflow).toContain('MURPH_APP_VERIFY_PARALLEL: "1"')
