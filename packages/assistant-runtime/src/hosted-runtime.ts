@@ -14,8 +14,16 @@ import {
   emitHostedExecutionStructuredLog,
 } from "@murphai/hosted-execution";
 import {
+  parseCanonicalLinqMessageReceivedEvent,
+  parseLinqWebhookEvent,
+} from "@murphai/messaging-ingress/linq-webhook";
+import {
   HostedAssistantConfigurationError,
 } from "@murphai/operator-config/hosted-assistant-config";
+import {
+  startLinqChatTypingIndicator,
+  stopLinqChatTypingIndicator,
+} from "@murphai/operator-config/linq-runtime";
 import type { AssistantExecutionContext } from "@murphai/assistant-engine";
 
 import {
@@ -131,77 +139,91 @@ export async function runHostedAssistantRuntimeJobInProcessDetailed(
         vaultRoot: restored.vaultRoot,
       },
       async () => {
-        const committedExecution = input.request.resume?.committedResult
-          ? resumeHostedCommittedExecution(input.request)
-          : await executeHostedDispatchForCommit({
-              artifactMaterializer: incomingBundle
-                ? async (relativePaths) => {
-                    const pendingPaths = [...new Set(relativePaths)]
-                      .filter((relativePath) => !materializedArtifactPaths.has(relativePath));
-                    if (pendingPaths.length === 0) {
-                      return;
-                    }
+        const typingIndicator = startHostedDispatchTypingIndicator({
+          dispatch: input.request.dispatch,
+          runtimeEnv,
+          run: input.request.run ?? null,
+        });
 
-                    await materializeHostedExecutionArtifacts({
-                      artifactResolver,
-                      bundle: incomingBundle,
-                      shouldRestoreArtifact: ({ path: artifactPath, root }) => (
-                        root === "vault" && pendingPaths.includes(artifactPath)
-                      ),
-                      workspaceRoot,
-                    });
-                    for (const relativePath of pendingPaths) {
-                      materializedArtifactPaths.add(relativePath);
+        try {
+          const committedExecution = input.request.resume?.committedResult
+            ? resumeHostedCommittedExecution(input.request)
+            : await executeHostedDispatchForCommit({
+                artifactMaterializer: incomingBundle
+                  ? async (relativePaths) => {
+                      const pendingPaths = [...new Set(relativePaths)]
+                        .filter((relativePath) => !materializedArtifactPaths.has(relativePath));
+                      if (pendingPaths.length === 0) {
+                        return;
+                      }
+
+                      await materializeHostedExecutionArtifacts({
+                        artifactResolver,
+                        bundle: incomingBundle,
+                        shouldRestoreArtifact: ({ path: artifactPath, root }) => (
+                          root === "vault" && pendingPaths.includes(artifactPath)
+                        ),
+                        workspaceRoot,
+                      });
+                      for (const relativePath of pendingPaths) {
+                        materializedArtifactPaths.add(relativePath);
+                      }
                     }
-                  }
-                : null,
-              materializedArtifactPaths,
-              request: input.request,
-              restored,
-              runtime,
-              executionContext,
-              runtimeEnv,
+                  : null,
+                materializedArtifactPaths,
+                request: input.request,
+                restored,
+                runtime,
+                executionContext,
+                runtimeEnv,
+              });
+
+          if (!input.request.resume?.committedResult) {
+            await commitHostedExecutionResult({
+              commit: input.request.commit ?? null,
+              dispatch: input.request.dispatch,
+              effectsPort: runtime.platform.effectsPort,
+              gatewayProjectionSnapshot: committedExecution.committedGatewayProjectionSnapshot,
+              result: committedExecution.committedResult,
+              sideEffects:
+                committedExecution.committedSideEffects
+                ?? committedExecution.committedAssistantDeliveryEffects,
             });
+            emitHostedExecutionStructuredLog({
+              component: "runtime",
+              dispatch: input.request.dispatch,
+              message: "Hosted runtime recorded a durable commit callback.",
+              phase: "commit.recorded",
+              run: input.request.run ?? null,
+            });
+          }
 
-        if (!input.request.resume?.committedResult) {
-          await commitHostedExecutionResult({
+          const finalResult = await completeHostedExecutionAfterCommit({
             commit: input.request.commit ?? null,
             dispatch: input.request.dispatch,
-            effectsPort: runtime.platform.effectsPort,
-            gatewayProjectionSnapshot: committedExecution.committedGatewayProjectionSnapshot,
-            result: committedExecution.committedResult,
-            sideEffects:
-              committedExecution.committedSideEffects
-              ?? committedExecution.committedAssistantDeliveryEffects,
+            materializedArtifactPaths,
+            run: input.request.run ?? null,
+            runtime,
+            restored,
+            committedExecution,
           });
+
           emitHostedExecutionStructuredLog({
             component: "runtime",
             dispatch: input.request.dispatch,
-            message: "Hosted runtime recorded a durable commit callback.",
-            phase: "commit.recorded",
+            message: "Hosted runtime completed.",
+            phase: "completed",
+            run: input.request.run ?? null,
+          });
+
+          return finalResult;
+        } finally {
+          await stopHostedDispatchTypingIndicator({
+            dispatch: input.request.dispatch,
+            typingIndicator,
             run: input.request.run ?? null,
           });
         }
-
-        const finalResult = await completeHostedExecutionAfterCommit({
-          commit: input.request.commit ?? null,
-          dispatch: input.request.dispatch,
-          materializedArtifactPaths,
-          run: input.request.run ?? null,
-          runtime,
-          restored,
-          committedExecution,
-        });
-
-        emitHostedExecutionStructuredLog({
-          component: "runtime",
-          dispatch: input.request.dispatch,
-          message: "Hosted runtime completed.",
-          phase: "completed",
-          run: input.request.run ?? null,
-        });
-
-        return finalResult;
       },
     );
   } catch (error) {
@@ -237,4 +259,142 @@ function createHostedDeviceConnectLinkIssuer(input: {
       provider,
     });
   };
+}
+
+type HostedDispatchTypingIndicator = {
+  stop(): Promise<void>;
+};
+
+function startHostedDispatchTypingIndicator(input: {
+  dispatch: HostedAssistantRuntimeJobInput["request"]["dispatch"];
+  runtimeEnv: Readonly<Record<string, string>>;
+  run: HostedAssistantRuntimeJobInput["request"]["run"] | null;
+}): HostedDispatchTypingIndicator | null {
+  if (input.dispatch.event.kind !== "linq.message.received") {
+    return null;
+  }
+
+  const env = input.runtimeEnv as NodeJS.ProcessEnv;
+
+  let chatId: string;
+  try {
+    const event = parseCanonicalLinqMessageReceivedEvent(
+      parseLinqWebhookEvent(JSON.stringify(input.dispatch.event.linqEvent)),
+    );
+    chatId = event.data.chat_id;
+  } catch (error) {
+    emitHostedExecutionStructuredLog({
+      component: "runtime",
+      dispatch: input.dispatch,
+      error,
+      level: "warn",
+      message: "Hosted Linq typing indicator could not be started.",
+      phase: "dispatch.running",
+      run: input.run,
+    });
+    return null;
+  }
+
+  let active = false;
+  let stopRequested = false;
+  let stopPromise: Promise<void> | null = null;
+
+  const runStop = () => {
+    if (!stopPromise) {
+      stopPromise = stopLinqChatTypingIndicator(
+        {
+          chatId,
+        },
+        {
+          env,
+        },
+      )
+        .catch((error) => {
+          emitHostedExecutionStructuredLog({
+            component: "runtime",
+            dispatch: input.dispatch,
+            error,
+            level: "warn",
+            message: "Hosted Linq typing indicator could not be stopped.",
+            phase: "side-effects.draining",
+            run: input.run,
+          });
+        })
+        .finally(() => {
+          active = false;
+        });
+    }
+
+    return stopPromise;
+  };
+
+  const startPromise = startLinqChatTypingIndicator(
+    {
+      chatId,
+    },
+    {
+      env,
+    },
+  )
+    .then(async () => {
+      active = true;
+      if (stopRequested) {
+        await runStop();
+      }
+    })
+    .catch((error) => {
+      emitHostedExecutionStructuredLog({
+        component: "runtime",
+        dispatch: input.dispatch,
+        error,
+        level: "warn",
+        message: "Hosted Linq typing indicator could not be started.",
+        phase: "dispatch.running",
+        run: input.run,
+      });
+    });
+
+  return {
+    async stop() {
+      if (stopRequested) {
+        await (stopPromise ?? startPromise);
+        return;
+      }
+
+      stopRequested = true;
+      if (active) {
+        await runStop();
+        return;
+      }
+
+      await startPromise;
+      if (active) {
+        await runStop();
+      }
+    },
+  };
+}
+
+async function stopHostedDispatchTypingIndicator(input: {
+  dispatch: HostedAssistantRuntimeJobInput["request"]["dispatch"];
+  typingIndicator: HostedDispatchTypingIndicator | null;
+  run: HostedAssistantRuntimeJobInput["request"]["run"] | null;
+}): Promise<void> {
+  if (!input.typingIndicator) {
+    return;
+  }
+
+  try {
+    await input.typingIndicator.stop();
+  } catch (error) {
+    emitHostedExecutionStructuredLog({
+      component: "runtime",
+      dispatch: input.dispatch,
+      error,
+      level: "warn",
+      message: "Hosted Linq typing indicator could not be stopped.",
+      phase: "side-effects.draining",
+      run: input.run,
+    });
+  }
 }
