@@ -9,6 +9,8 @@
   },
   "include": [
     "config/**/*.ts",
+    "packages/cli/vitest.config.ts",
+    "packages/cli/vitest.workspace.ts",
     "e2e/**/*.ts",
     "scripts/**/*.ts",
     "vitest.config.ts"
