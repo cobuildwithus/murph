@@ -1,6 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+repo_root="$(cd -- "$script_dir/../../.." && pwd)"
+
+if [[ "${MURPH_WORKSPACE_ARTIFACT_LOCK_HELD:-0}" != "1" ]]; then
+  exec node "$repo_root/scripts/run-with-workspace-artifact-lock.mjs" "apps/cloudflare verify" -- \
+    bash "$script_dir/verify-fast.sh" "$@"
+fi
+
 verify_step_parallel="${MURPH_VERIFY_STEP_PARALLEL:-0}"
 tracked_background_pids=()
 

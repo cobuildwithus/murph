@@ -5,6 +5,11 @@ script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd -- "$script_dir/../../.." && pwd)"
 sqlite_warning_filter_option="--require=$repo_root/config/sqlite-warning-filter.cjs"
 
+if [[ "${MURPH_WORKSPACE_ARTIFACT_LOCK_HELD:-0}" != "1" ]]; then
+  exec node "$repo_root/scripts/run-with-workspace-artifact-lock.mjs" "apps/web verify" -- \
+    bash "$script_dir/verify-fast.sh" "$@"
+fi
+
 compose_node_options_with_sqlite_warning_filter() {
   local node_options="${NODE_OPTIONS:-}"
 

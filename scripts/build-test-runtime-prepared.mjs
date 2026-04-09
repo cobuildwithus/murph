@@ -5,7 +5,34 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const scriptPath = fileURLToPath(import.meta.url);
+const repoRoot = path.resolve(path.dirname(scriptPath), "..");
+
+if (process.env.MURPH_WORKSPACE_ARTIFACT_LOCK_HELD !== "1") {
+  const result = spawnSync(
+    process.execPath,
+    [
+      path.join(repoRoot, "scripts", "run-with-workspace-artifact-lock.mjs"),
+      "build:test-runtime:prepared",
+      "--",
+      process.execPath,
+      scriptPath,
+      ...process.argv.slice(2),
+    ],
+    {
+      cwd: repoRoot,
+      env: process.env,
+      stdio: "inherit",
+    },
+  );
+
+  if (result.error) {
+    throw result.error;
+  }
+
+  process.exit(result.status ?? 1);
+}
+
 const cliSourceRoot = path.join(repoRoot, "packages/cli/src");
 const workspaceSmokePackages = [
   {
