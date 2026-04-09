@@ -40,7 +40,7 @@ const MODEL_DISCOVERY_TIMEOUT_MS = 2_500
 
 export const openAiCompatibleProviderDefinition: AssistantProviderDefinition = {
   capabilities: {
-    murphCommandAccess: 'bound-tools',
+    murphCommandSurface: 'bound-tools',
     requestFormat: 'messages',
     supportsModelDiscovery: true,
     supportsNativeResume: true,

@@ -225,7 +225,7 @@ describe('executeProviderTurnWithRecovery', () => {
     runnerMocks.resolveAssistantProviderExecutionCapabilities
       .mockReset()
       .mockReturnValue({
-        murphCommandAccess: 'bound-tools',
+        murphCommandSurface: 'bound-tools',
         supportsNativeResume: false,
         supportsToolRuntime: true,
       })
@@ -383,7 +383,7 @@ describe('executeProviderTurnWithRecovery', () => {
     })
 
     runnerMocks.resolveAssistantProviderExecutionCapabilities.mockReturnValue({
-      murphCommandAccess: 'direct-cli',
+      murphCommandSurface: 'direct-cli',
       supportsNativeResume: true,
       supportsToolRuntime: false,
     })

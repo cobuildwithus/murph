@@ -474,7 +474,7 @@ function resolveAssistantCommandAccessMode(input: {
   providerCapabilities: ReturnType<typeof resolveAssistantProviderExecutionCapabilities>
   toolCatalog: ReturnType<typeof createProviderTurnAssistantToolCatalog>
 }): AssistantMurphCommandAccessMode {
-  switch (input.providerCapabilities.murphCommandAccess) {
+  switch (input.providerCapabilities.murphCommandSurface) {
     case 'bound-tools':
       return hasRouteToolRuntimeAccess({
         providerCapabilities: input.providerCapabilities,
