@@ -16,11 +16,13 @@ const providerMocks = vi.hoisted(() => ({
   prepareAssistantDirectCliEnv: vi.fn(),
   resolveAssistantLanguageModel: vi.fn(),
   stepCountIs: vi.fn(),
+  tool: vi.fn((definition) => definition),
 }))
 
 vi.mock('ai', () => ({
   generateText: providerMocks.generateText,
   stepCountIs: providerMocks.stepCountIs,
+  tool: providerMocks.tool,
 }))
 
 vi.mock('../src/model-harness.ts', () => ({
@@ -418,7 +420,7 @@ describe('openAiCompatibleProviderDefinition.executeTurn', () => {
       model: 'gpt-4.1-mini',
       providerName: 'OpenAI',
     })
-    expect(providerMocks.generateText).toHaveBeenCalledWith({
+    expect(providerMocks.generateText.mock.calls[0]?.[0]).toMatchObject({
       abortSignal: undefined,
       maxRetries: 0,
       messages: [
@@ -447,9 +449,11 @@ describe('openAiCompatibleProviderDefinition.executeTurn', () => {
       },
       system: 'You are concise.',
       timeout: 600000,
-      tools: {
-        webSearch: {},
-      },
+      tools: expect.objectContaining({
+        webSearch: expect.objectContaining({
+          description: 'Mock web search tool',
+        }),
+      }),
     })
     expect(onEvent).toHaveBeenCalledTimes(3)
     expect(onEvent).toHaveBeenNthCalledWith(
@@ -587,6 +591,204 @@ describe('openAiCompatibleProviderDefinition.executeTurn', () => {
       system: undefined,
       timeout: 600000,
     })
+  })
+
+  it('emits succeeded tool progress and omits previousResponseId when no resumed session is available', async () => {
+    providerMocks.generateText.mockResolvedValue({
+      text: 'Finished tool work',
+      totalUsage: {
+        input_tokens: 4,
+        output_tokens: 6,
+        total_tokens: 10,
+      },
+      response: {
+        id: 'response-openai-2',
+        model: 'gpt-4.1-mini-2026-04-01',
+      },
+    })
+
+    const onEvent = vi.fn()
+    const onTraceEvent = vi.fn()
+    const toolCatalog: AssistantToolCatalog = {
+      createAiSdkTools: vi.fn(
+        (
+          _mode: AssistantToolExecutionMode = 'preview',
+          callbacks: AssistantCreateAiSdkToolsOptions = {},
+        ) => {
+          callbacks.onToolEvent?.({
+            input: {},
+            kind: 'succeeded',
+            mode: 'apply',
+            tool: 'web.search',
+          })
+
+          return {
+            webSearch: tool({
+              description: 'Mock web search tool',
+              execute: async () => ({}),
+              inputSchema: z.object({
+                query: z.string().optional(),
+              }),
+            }),
+          }
+        },
+      ),
+      executeCalls: vi.fn(),
+      hasTool: vi.fn(),
+      listTools: vi.fn(),
+    }
+
+    const result = await openAiCompatibleProviderDefinition.executeTurn({
+      onEvent,
+      onTraceEvent,
+      providerConfig: normalizeAssistantProviderConfig({
+        provider: 'openai-compatible',
+        baseUrl: 'https://api.openai.com/v1',
+        model: 'gpt-4.1-mini',
+        providerName: 'OpenAI',
+        reasoningEffort: 'medium',
+      }),
+      resumeProviderSessionId: '   ',
+      toolRuntime: {
+        toolCatalog,
+        vault: '/tmp/test-vault',
+      },
+      userPrompt: 'Run the tool and summarize the result.',
+      workingDirectory: WORKING_DIRECTORY,
+    })
+
+    expect(result).toEqual({
+      metadata: {
+        activityLabels: [],
+        executedToolCount: 0,
+        rawToolEvents: [
+          {
+            mode: 'apply',
+            sequence: 1,
+            tool: 'web.search',
+            type: 'assistant.tool.succeeded',
+          },
+        ],
+      },
+      ok: true,
+      result: {
+        provider: 'openai-compatible',
+        providerSessionId: 'response-openai-2',
+        rawEvents: [
+          {
+            mode: 'apply',
+            sequence: 1,
+            tool: 'web.search',
+            type: 'assistant.tool.succeeded',
+          },
+        ],
+        response: 'Finished tool work',
+        stderr: '',
+        stdout: '',
+        usage: {
+          apiKeyEnv: null,
+          baseUrl: 'https://api.openai.com/v1',
+          cacheWriteTokens: null,
+          cachedInputTokens: null,
+          inputTokens: 4,
+          outputTokens: 6,
+          providerMetadataJson: null,
+          providerName: 'OpenAI',
+          providerRequestId: 'response-openai-2',
+          rawUsageJson: {
+            input_tokens: 4,
+            output_tokens: 6,
+            total_tokens: 10,
+          },
+          reasoningTokens: null,
+          requestedModel: 'gpt-4.1-mini',
+          servedModel: 'gpt-4.1-mini-2026-04-01',
+          totalTokens: 10,
+        },
+      },
+    })
+
+    expect(providerMocks.generateText.mock.calls[0]?.[0]).toMatchObject({
+      abortSignal: undefined,
+      maxRetries: 0,
+      messages: [
+        {
+          content: 'Run the tool and summarize the result.',
+          role: 'user',
+        },
+      ],
+      model: {
+        provider: 'mock-language-model',
+      },
+      providerOptions: {
+        openai: {
+          reasoningEffort: 'medium',
+          store: false,
+        },
+      },
+      stopWhen: {
+        count: 8,
+        kind: 'step-count',
+      },
+      system: undefined,
+      timeout: 600000,
+      tools: expect.objectContaining({
+        webSearch: expect.objectContaining({
+          description: 'Mock web search tool',
+        }),
+      }),
+    })
+    expect(onEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'tool-1',
+        kind: 'tool',
+        safeLabel: 'web.search',
+        state: 'completed',
+        text: 'Finished web.search.',
+      }),
+    )
+    expect(onTraceEvent).toHaveBeenCalledWith({
+      providerSessionId: null,
+      rawEvent: {
+        mode: 'apply',
+        sequence: 1,
+        tool: 'web.search',
+        type: 'assistant.tool.succeeded',
+      },
+      updates: [
+        {
+          kind: 'status',
+          text: 'Finished web.search.',
+        },
+      ],
+    })
+  })
+
+  it('returns a failed provider result when generateText throws', async () => {
+    providerMocks.generateText.mockRejectedValueOnce(new Error('gateway timeout'))
+
+    const result = await openAiCompatibleProviderDefinition.executeTurn({
+      providerConfig: normalizeAssistantProviderConfig({
+        provider: 'openai-compatible',
+        baseUrl: 'https://api.openai.com/v1',
+        model: 'gpt-4.1-mini',
+      }),
+      prompt: 'Retry this request',
+      workingDirectory: WORKING_DIRECTORY,
+    })
+
+    expect(result).toMatchObject({
+      metadata: {
+        activityLabels: [],
+        executedToolCount: 0,
+        rawToolEvents: [],
+      },
+      ok: false,
+    })
+    if (result.ok) {
+      throw new Error('Expected the provider execution to fail.')
+    }
+    expect(result.error).toEqual(new Error('gateway timeout'))
   })
 
   it('routes Vercel AI Gateway zero-data-retention through gateway provider options', async () => {

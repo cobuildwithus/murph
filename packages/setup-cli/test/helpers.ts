@@ -130,6 +130,8 @@ export function createCapturedOutputStream(): {
   }
 }
 
+let ttyHarnessLock: Promise<void> = Promise.resolve()
+
 export async function withMockProcessTty<TResult>(
   run: (context: {
     flush: () => Promise<void>
@@ -139,6 +141,13 @@ export async function withMockProcessTty<TResult>(
     writeInput: (value: string) => Promise<void>
   }) => Promise<TResult>,
 ): Promise<TResult> {
+  const waitForPreviousHarness = ttyHarnessLock
+  let releaseHarness = () => {}
+  ttyHarnessLock = new Promise<void>((resolve) => {
+    releaseHarness = resolve
+  })
+  await waitForPreviousHarness
+
   const stdinDescriptor = Object.getOwnPropertyDescriptor(process, 'stdin')
   const stderrDescriptor = Object.getOwnPropertyDescriptor(process, 'stderr')
   const stdin = new FakeTtyStream()
@@ -183,6 +192,7 @@ export async function withMockProcessTty<TResult>(
     if (stderrDescriptor) {
       Object.defineProperty(process, 'stderr', stderrDescriptor)
     }
+    releaseHarness()
   }
 }
 
@@ -204,7 +214,8 @@ export async function waitForRenderedText(
   while (Date.now() < deadline) {
     const output = stripAnsi(readOutput())
     if (pattern.test(output)) {
-      return output
+      await flush()
+      return stripAnsi(readOutput())
     }
 
     await flush()

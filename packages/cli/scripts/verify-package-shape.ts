@@ -149,7 +149,7 @@ assert(
     packageJson.scripts?.build ===
       'node ../../scripts/rm-paths.mjs dist && tsc -b tsconfig.build.json --force' &&
     packageJson.scripts?.['verify:package-shape'] ===
-      'pnpm build && tsx ./scripts/verify-package-shape.ts' &&
+      'pnpm build && node --import=tsx ./scripts/verify-package-shape.ts' &&
     packageJson.scripts?.['test:built-runtime'] ===
       'MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 pnpm --dir ../.. exec vitest run --config packages/cli/vitest.workspace.ts --no-coverage' &&
     packageJson.scripts?.['test:built-runtime:coverage'] ===
@@ -179,10 +179,11 @@ assert(
   'package.json must not keep package-local release scripts once the monorepo release flow is root-owned.',
 )
 assert(
-  !Object.values(packageJson.scripts ?? {}).some((script) =>
-    script?.includes('node --import=tsx'),
+  Object.entries(packageJson.scripts ?? {}).every(
+    ([name, script]) =>
+      name === 'verify:package-shape' || script?.includes('node --import=tsx') !== true,
   ),
-  'package.json package-local scripts must call tsx or vitest directly instead of node --import=tsx.',
+  'package.json must reserve node --import=tsx for the verify:package-shape acceptance script only.',
 )
 assert(
   tsconfig.extends === '../../tsconfig.base.json',

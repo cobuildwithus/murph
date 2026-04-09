@@ -455,7 +455,8 @@ export async function rebuildCliRuntimeArtifacts(): Promise<void> {
 
   await execWorkspaceCommand([
     'exec',
-    'tsx',
+    'node',
+    '--import=tsx',
     'packages/cli/scripts/verify-package-shape.ts',
   ])
 }

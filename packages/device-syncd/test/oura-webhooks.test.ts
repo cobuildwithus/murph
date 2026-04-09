@@ -296,6 +296,66 @@ test("Oura webhook subscription ensure re-lists after create and prunes stale ma
   ]);
 });
 
+test("Oura webhook subscription ensure retains current subscriptions when renewals and duplicate pruning are disabled", async () => {
+  const callbackUrl = "https://sync.example.test/api/device-sync/webhooks/oura";
+  const requests: string[] = [];
+  const retainedExpiration = new Date(Date.now() + 60_000).toISOString();
+  const client = createOuraWebhookSubscriptionClient({
+    clientId: "oura-client-id",
+    clientSecret: "oura-client-secret",
+    fetchImpl: async (input, init) => {
+      const url = resolveUrl(input);
+      const method = init?.method ?? "GET";
+      requests.push(`${method} ${url}`);
+
+      if (url === "https://api.ouraring.com/v2/webhook/subscription" && method === "GET") {
+        return createJsonResponse({
+          data: [
+            {
+              id: "sub-primary",
+              callback_url: callbackUrl,
+              event_type: "create",
+              data_type: "daily_sleep",
+              expiration_time: retainedExpiration,
+            },
+            {
+              id: "sub-duplicate",
+              callback_url: callbackUrl,
+              event_type: "create",
+              data_type: "daily_sleep",
+              expiration_time: null,
+            },
+          ],
+        });
+      }
+
+      throw new Error(`Unexpected request: ${method} ${url}`);
+    },
+  });
+
+  const result = await client.ensure({
+    callbackUrl,
+    verificationToken: "verify-token-for-tests",
+    desired: [{ eventType: "create", dataType: "daily_sleep" }],
+    pruneDuplicates: false,
+    renewIfExpiringWithinMs: 0,
+  });
+
+  assert.deepEqual(result.created, []);
+  assert.deepEqual(result.renewed, []);
+  assert.deepEqual(result.deleted, []);
+  assert.deepEqual(result.retained, [
+    {
+      id: "sub-primary",
+      callbackUrl,
+      dataType: "daily_sleep",
+      eventType: "create",
+      expirationTime: retainedExpiration,
+    },
+  ]);
+  assert.deepEqual(requests, ["GET https://api.ouraring.com/v2/webhook/subscription"]);
+});
+
 test("Oura webhook subscription ensure does not prune managed subscriptions on a different callback path", async () => {
   const callbackUrl = "https://sync.example.test/api/device-sync/webhooks/oura";
   const otherPathCallbackUrl = "https://sync.example.test/api/device-sync/webhooks/oura-preview";

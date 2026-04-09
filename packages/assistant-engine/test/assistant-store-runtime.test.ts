@@ -633,10 +633,10 @@ describe('assistant runtime state service', () => {
 
     expect(diagnosticsMocks.recordAssistantDiagnosticEvent).toHaveBeenCalledWith({
       component: 'assistant',
-      entityId: 'turn-1',
-      entityType: 'turn',
+      kind: 'runtime-state-service-test',
       level: 'info',
       message: 'diagnostic',
+      turnId: 'turn-1',
       vault,
     })
     expect(outboxMocks.dispatchAssistantOutboxIntent).toHaveBeenCalledWith({

@@ -38,9 +38,60 @@ function runNodeScript(...args: string[]) {
   })
 }
 
+function isSandboxedTsxPipeFailure(result: { stderr: string; stdout: string }) {
+  return (
+    result.stderr.includes('listen EPERM: operation not permitted') &&
+    result.stderr.includes('/tsx-') &&
+    result.stderr.includes('.pipe')
+  )
+}
+
+function runAuditToolDirectly(scriptName: string, outDir: string, prefix: string) {
+  const fullBundle = scriptName === 'package-audit-context-full.sh'
+  const bootstrap = fullBundle
+    ? `
+source scripts/repo-tools.config.sh
+export COBUILD_AUDIT_CONTEXT_INCLUDE_TESTS_DEFAULT='1'
+export COBUILD_AUDIT_CONTEXT_INCLUDE_DOCS_DEFAULT='1'
+export COBUILD_AUDIT_CONTEXT_INCLUDE_CI_DEFAULT='1'
+export COBUILD_AUDIT_CONTEXT_EXCLUDE_GLOBS=''
+repo_tools_join_lines COBUILD_AUDIT_CONTEXT_SCAN_SPECS \
+  "config" \
+  "packages" \
+  "src" \
+  "app" \
+  "apps" \
+  "contracts" \
+  "scripts" \
+  "docs"
+`
+    : 'source scripts/repo-tools.config.sh'
+
+  return spawnSync(
+    'bash',
+    [
+      '-lc',
+      `set -euo pipefail
+${bootstrap}
+exec "$(cobuild_repo_tool_bin cobuild-package-audit-context)" "$@"`,
+      'audit-context',
+      '--zip',
+      '--out-dir',
+      outDir,
+      '--name',
+      prefix,
+    ],
+    {
+      cwd: repoRoot,
+      encoding: 'utf8',
+      env: withoutNodeV8Coverage(),
+    },
+  )
+}
+
 function createAuditZip(scriptName: string, prefix: string) {
   const outDir = mkdtempSync(path.join(os.tmpdir(), `${prefix}-`))
-  const result = spawnSync(
+  const initialResult = spawnSync(
     'bash',
     [path.join(repoRoot, 'scripts', scriptName), '--zip', '--out-dir', outDir, '--name', prefix],
     {
@@ -49,6 +100,10 @@ function createAuditZip(scriptName: string, prefix: string) {
       env: withoutNodeV8Coverage(),
     },
   )
+  const result =
+    initialResult.status !== 0 && isSandboxedTsxPipeFailure(initialResult)
+      ? runAuditToolDirectly(scriptName, outDir, prefix)
+      : initialResult
 
   if (result.status !== 0) {
     throw new Error(
@@ -211,21 +266,17 @@ describe('monorepo release flow coverage audit', () => {
 
     expect(releaseCheck).toContain('bash -n scripts/release-check.sh scripts/release.sh scripts/update-changelog.sh scripts/generate-release-notes.sh')
     expect(releaseCheck).toContain('node scripts/verify-release-target.mjs')
-    expect(releaseCheck).toContain('corepack pnpm typecheck')
     expect(releaseCheck).toContain('corepack pnpm build:workspace:clean')
-    expect(releaseCheck).toContain('corepack pnpm test:coverage')
+    expect(releaseCheck).toContain('corepack pnpm verify:acceptance')
     expect(releaseCheck).not.toContain('pnpm install --frozen-lockfile')
     expect(releaseCheck).not.toContain('pnpm verify:repo')
     expect(releaseCheck).not.toContain('--out-dir "$temp_dir/tarballs"')
 
     expect(releaseCheck.indexOf('node scripts/verify-release-target.mjs')).toBeLessThan(
-      releaseCheck.indexOf('corepack pnpm typecheck'),
-    )
-    expect(releaseCheck.indexOf('corepack pnpm typecheck')).toBeLessThan(
       releaseCheck.indexOf('corepack pnpm build:workspace:clean'),
     )
     expect(releaseCheck.indexOf('corepack pnpm build:workspace:clean')).toBeLessThan(
-      releaseCheck.indexOf('corepack pnpm test:coverage'),
+      releaseCheck.indexOf('corepack pnpm verify:acceptance'),
     )
   })
 

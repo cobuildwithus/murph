@@ -32,7 +32,7 @@ test('buildAssistantCliGuidanceText keeps only non-duplicative CLI guidance', ()
   assert.match(guidance, /setup entrypoint/u)
   assert.match(guidance, /same top-level `chat` and `run` aliases/u)
   assert.match(guidance, /Do not edit canonical vault files directly/u)
-  assert.match(guidance, /matching `vault-cli` write surface/u)
+  assert.match(guidance, /matching canonical CLI command/u)
   assert.doesNotMatch(guidance, /vault-cli <command> --help/u)
   assert.doesNotMatch(guidance, /vault-cli <command> --schema --format json/u)
   assert.doesNotMatch(guidance, /vault-cli --llms-full/u)
@@ -46,10 +46,10 @@ test('buildAssistantCliGuidanceText falls back to exact command suggestions when
 
   assert.match(
     guidance,
-    /prefer the bound assistant tools first and otherwise map the request onto the canonical CLI surface instead of improvising from raw files/u,
+    /Prefer the bound assistant tools when they are available/u,
   )
   assert.match(
     guidance,
-    /instead of pretending it already ran/u,
+    /Otherwise use the matching canonical CLI command/u,
   )
 })

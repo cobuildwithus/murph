@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { spawnSync } from 'node:child_process'
 import { createServer } from 'node:http'
 import { once } from 'node:events'
 import { mkdtemp, rm } from 'node:fs/promises'
@@ -40,6 +41,30 @@ const connectedAccount = {
   updatedAt: '2026-03-17T12:00:00.000Z',
 } as const
 
+const supportsLoopbackListen = (() => {
+  const probe = spawnSync(
+    process.execPath,
+    [
+      '--input-type=module',
+      '-e',
+      `
+        import { createServer } from 'node:http'
+
+        const server = createServer()
+        server.once('error', () => process.exit(1))
+        server.listen(0, '127.0.0.1', () => {
+          server.close(() => process.exit(0))
+        })
+      `,
+    ],
+    {
+      encoding: 'utf8',
+    },
+  )
+
+  return probe.status === 0
+})()
+
 test.sequential('device daemon commands stay in the generated CLI schema', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-device-cli-'))
 
@@ -54,7 +79,11 @@ test.sequential('device daemon commands stay in the generated CLI schema', async
         '--schema',
         '--format',
         'json',
-      ]),
+      ], {
+        env: {
+          MURPH_CLI_TEST_PERSISTENT_HARNESS: '0',
+        },
+      }),
     ) as {
       options: {
         properties: Record<string, unknown>
@@ -70,7 +99,9 @@ test.sequential('device daemon commands stay in the generated CLI schema', async
   }
 })
 
-test.sequential(
+const deviceControlPlaneTest = supportsLoopbackListen ? test.sequential : test.skip
+
+deviceControlPlaneTest(
   'device CLI commands route through the local device sync control plane',
   async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-device-cli-'))

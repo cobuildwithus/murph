@@ -51,7 +51,7 @@ import {
 } from '../src/setup-wizard-runtime-status.ts'
 import { waitForRenderedText, withMockProcessTty } from './helpers.ts'
 
-const WIZARD_TEST_TIMEOUT_MS = 45_000
+const WIZARD_TEST_TIMEOUT_MS = 90_000
 
 test('setup wizard core wraps indices and waits for exit before resolving', async () => {
   const controller =

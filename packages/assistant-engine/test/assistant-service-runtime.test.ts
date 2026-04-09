@@ -72,13 +72,20 @@ vi.mock("../src/assistant/execution-plan.js", () => ({
   resolveAssistantExecutionPlan: seamMocks.resolveAssistantExecutionPlan,
 }));
 
-vi.mock("@murphai/runtime-state/node", () => ({
-  ASSISTANT_USAGE_SCHEMA: "murph.assistant-usage.v1",
-  createAssistantUsageId: seamMocks.createAssistantUsageId,
-  resolveAssistantUsageCredentialSource:
-    seamMocks.resolveAssistantUsageCredentialSource,
-  writePendingAssistantUsageRecord: seamMocks.writePendingAssistantUsageRecord,
-}));
+vi.mock("@murphai/runtime-state/node", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("@murphai/runtime-state/node")
+  >();
+
+  return {
+    ...actual,
+    ASSISTANT_USAGE_SCHEMA: "murph.assistant-usage.v1",
+    createAssistantUsageId: seamMocks.createAssistantUsageId,
+    resolveAssistantUsageCredentialSource:
+      seamMocks.resolveAssistantUsageCredentialSource,
+    writePendingAssistantUsageRecord: seamMocks.writePendingAssistantUsageRecord,
+  };
+});
 
 vi.mock("../src/assistant/first-contact.js", () => ({
   markAssistantFirstContactSeen: seamMocks.markAssistantFirstContactSeen,
@@ -470,19 +477,19 @@ describe("assistant service turn routes", () => {
     ).toEqual({
       providerOverride: {
         apiKeyEnv: backup.providerOptions.apiKeyEnv,
-        approvalPolicy: "never",
-        baseUrl: null,
+        approvalPolicy: backup.providerOptions.approvalPolicy ?? null,
+        baseUrl: backup.providerOptions.baseUrl ?? null,
         codexCommand: undefined,
-        codexHome: null,
-        headers: null,
-        model: "gpt-5-codex",
+        codexHome: backup.providerOptions.codexHome ?? null,
+        headers: backup.providerOptions.headers ?? null,
+        model: backup.providerOptions.model ?? null,
         oss: false,
-        profile: "ops",
+        profile: backup.providerOptions.profile ?? null,
         provider: "codex-cli",
-        providerName: null,
-        reasoningEffort: "high",
-        sandbox: "danger-full-access",
-        zeroDataRetention: null,
+        providerName: backup.providerOptions.providerName ?? null,
+        reasoningEffort: backup.providerOptions.reasoningEffort ?? null,
+        sandbox: backup.providerOptions.sandbox ?? null,
+        zeroDataRetention: backup.providerOptions.zeroDataRetention ?? null,
       },
       route: backup,
     });
@@ -779,9 +786,14 @@ describe("assistant delivery orchestration seam", () => {
       })
     ).resolves.toEqual({
       delivery: {
+        channel: "telegram",
         idempotencyKey: "idem-1",
+        messageLength: 10,
         providerMessageId: "provider-1",
+        providerThreadId: null,
         sentAt: "2026-04-08T11:00:00.000Z",
+        target: "explicit-audience-target",
+        targetKind: "explicit",
       },
       intentId: "intent-1",
       kind: "sent",

@@ -595,7 +595,7 @@ test('sendAssistantMessage keeps older local history in raw transcript files wit
   assert.equal(providerCalls[0]?.continuityContext, null)
   assert.match(
     providerCalls[0]?.systemPrompt ?? '',
-    /This assistant runtime is for Murph vault and assistant operations/u,
+    /Use `vault-cli` directly as the canonical Murph runtime surface in this privileged local route/u,
   )
   const latestProviderCall = providerCalls.at(-1)
   assert.equal(latestProviderCall?.continuityContext, null)
