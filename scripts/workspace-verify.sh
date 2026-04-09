@@ -485,34 +485,104 @@ run_workspace_package_coverage() {
   local package_dir="$1"
   local label="$2"
 
+  if [[ "$package_dir" == "packages/cli" ]]; then
+    run_timed_step \
+      "$label" \
+      env MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 pnpm exec vitest run --config "packages/cli/vitest.workspace.ts" --coverage
+    return 0
+  fi
+
   run_timed_step "$label" pnpm --dir "$package_dir" test:coverage
 }
 
 run_all_package_coverage() {
-  run_workspace_package_coverage "packages/assistant-cli" "Assistant CLI package coverage"
-  run_workspace_package_coverage "packages/assistant-engine" "Assistant engine package coverage"
-  run_workspace_package_coverage "packages/assistant-runtime" "Assistant runtime package coverage"
-  run_workspace_package_coverage "packages/assistantd" "Assistantd package coverage"
-  run_workspace_package_coverage "packages/cli" "CLI package coverage"
-  run_workspace_package_coverage "packages/cloudflare-hosted-control" "Cloudflare hosted control package coverage"
-  run_workspace_package_coverage "packages/contracts" "Contracts package coverage"
-  run_workspace_package_coverage "packages/core" "Core owner coverage"
-  run_workspace_package_coverage "packages/device-syncd" "Device syncd package coverage"
-  run_workspace_package_coverage "packages/gateway-core" "Gateway core package coverage"
-  run_workspace_package_coverage "packages/gateway-local" "Gateway local package coverage"
-  run_workspace_package_coverage "packages/hosted-execution" "Hosted execution owner coverage"
-  run_workspace_package_coverage "packages/importers" "Importers owner coverage"
-  run_workspace_package_coverage "packages/inbox-services" "Inbox services package coverage"
-  run_workspace_package_coverage "packages/inboxd" "Inboxd package coverage"
-  run_workspace_package_coverage "packages/inboxd-imessage" "Inboxd iMessage package coverage"
-  run_workspace_package_coverage "packages/messaging-ingress" "Messaging ingress package coverage"
-  run_workspace_package_coverage "packages/openclaw-plugin" "OpenClaw package coverage"
-  run_workspace_package_coverage "packages/operator-config" "Operator config package coverage"
-  run_workspace_package_coverage "packages/parsers" "Parsers package coverage"
-  run_workspace_package_coverage "packages/query" "Query owner coverage"
-  run_workspace_package_coverage "packages/runtime-state" "Runtime state package coverage"
-  run_workspace_package_coverage "packages/setup-cli" "Setup CLI package coverage"
-  run_workspace_package_coverage "packages/vault-usecases" "Vault usecases package coverage"
+  local package_coverage_dirs=(
+    "packages/assistant-cli"
+    "packages/assistant-engine"
+    "packages/assistant-runtime"
+    "packages/assistantd"
+    "packages/cli"
+    "packages/cloudflare-hosted-control"
+    "packages/contracts"
+    "packages/core"
+    "packages/device-syncd"
+    "packages/gateway-core"
+    "packages/gateway-local"
+    "packages/hosted-execution"
+    "packages/importers"
+    "packages/inbox-services"
+    "packages/inboxd"
+    "packages/inboxd-imessage"
+    "packages/messaging-ingress"
+    "packages/openclaw-plugin"
+    "packages/operator-config"
+    "packages/parsers"
+    "packages/query"
+    "packages/runtime-state"
+    "packages/setup-cli"
+    "packages/vault-usecases"
+  )
+  local package_coverage_labels=(
+    "Assistant CLI package coverage"
+    "Assistant engine package coverage"
+    "Assistant runtime package coverage"
+    "Assistantd package coverage"
+    "CLI package coverage"
+    "Cloudflare hosted control package coverage"
+    "Contracts package coverage"
+    "Core owner coverage"
+    "Device syncd package coverage"
+    "Gateway core package coverage"
+    "Gateway local package coverage"
+    "Hosted execution owner coverage"
+    "Importers owner coverage"
+    "Inbox services package coverage"
+    "Inboxd package coverage"
+    "Inboxd iMessage package coverage"
+    "Messaging ingress package coverage"
+    "OpenClaw package coverage"
+    "Operator config package coverage"
+    "Parsers package coverage"
+    "Query owner coverage"
+    "Runtime state package coverage"
+    "Setup CLI package coverage"
+    "Vault usecases package coverage"
+  )
+  local package_count="${#package_coverage_dirs[@]}"
+  local package_coverage_concurrency="$package_count"
+  local package_index=0
+
+  if [[ -n "${CI:-}" ]]; then
+    package_coverage_concurrency=$(((package_count + 1) / 2))
+  fi
+
+  if [[ "$package_coverage_concurrency" -le 1 ]]; then
+    while [[ "$package_index" -lt "$package_count" ]]; do
+      run_workspace_package_coverage \
+        "${package_coverage_dirs[$package_index]}" \
+        "${package_coverage_labels[$package_index]}"
+      package_index=$((package_index + 1))
+    done
+    return 0
+  fi
+
+  while [[ "$package_index" -lt "$package_count" ]]; do
+    local batch_pids=()
+    local batch_slots=0
+
+    while [[ "$package_index" -lt "$package_count" && "$batch_slots" -lt "$package_coverage_concurrency" ]]; do
+      run_workspace_package_coverage \
+        "${package_coverage_dirs[$package_index]}" \
+        "${package_coverage_labels[$package_index]}" &
+      local coverage_pid="$!"
+      batch_pids+=("$coverage_pid")
+      register_background_pid "$coverage_pid"
+      package_index=$((package_index + 1))
+      batch_slots=$((batch_slots + 1))
+    done
+
+    wait_for_background_jobs "${batch_pids[@]}"
+  done
 }
 
 run_typecheck() {
@@ -568,11 +638,10 @@ run_test_packages_coverage() {
   run_timed_step \
     "Coverage cleanup" \
     node "scripts/rm-paths.mjs" "coverage" "packages/*/coverage"
-  run_timed_step "Package smoke prerequisites" run_test_packages_common
+  run_timed_step "Tracked artifact hygiene" pnpm no-js
   if [[ "$artifacts_prepared" != "1" ]]; then
     run_timed_step "Prepared runtime artifacts" prepare_repo_vitest_runtime_artifacts
   fi
-  run_timed_step "Repo Vitest" run_repo_vitest --no-coverage
   run_timed_step "All package coverage" run_all_package_coverage
 }
 
@@ -585,8 +654,9 @@ run_test_coverage() {
     local smoke_pid
 
     # Coverage and app verify both depend on the prepared runtime artifacts.
-    # Keep coverage and fixture smoke parallel, but wait to start app verify
-    # until the repo Vitest lane has released Prisma/client and app-test resources.
+    # Keep package coverage and fixture smoke parallel, but wait to start app
+    # verify until the package-coverage suite has released shared app-test
+    # resources such as Prisma/client generation.
     run_timed_step "Prepared runtime artifacts" prepare_repo_vitest_runtime_artifacts
     run_timed_step "Package coverage suite" run_test_packages_coverage 1 &
     coverage_pid="$!"
