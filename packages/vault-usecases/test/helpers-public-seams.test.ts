@@ -47,7 +47,6 @@ import {
   toEventUpsertVaultCliError,
   toVaultCliError,
   toVaultMetadataCliError,
-  toVaultUpgradeCliError,
   uniqueStrings,
 } from "../src/usecases/vault-usecase-helpers.ts";
 import type { QueryEntity } from "../src/query-runtime.ts";
@@ -355,7 +354,7 @@ describe("helper barrel exports", () => {
       toVaultCliError(
         Object.assign(new Error("Need upgrade"), {
           name: "VaultError",
-          code: "VAULT_UPGRADE_REQUIRED",
+          code: "VAULT_UNSUPPORTED_FORMAT",
           details: { severity: "high" },
         }),
       ),
@@ -363,7 +362,7 @@ describe("helper barrel exports", () => {
       expect.objectContaining({
         code: "vault_error",
         context: expect.objectContaining({
-          vaultCode: "VAULT_UPGRADE_REQUIRED",
+          vaultCode: "VAULT_UNSUPPORTED_FORMAT",
           severity: "high",
         }),
       }),
@@ -400,13 +399,13 @@ describe("helper barrel exports", () => {
     ).toEqual(expect.objectContaining({ code: "invalid_metadata" }));
 
     expect(
-      toVaultUpgradeCliError(
+      toVaultMetadataCliError(
         Object.assign(new Error("Need upgrade"), {
           name: "VaultError",
-          code: "VAULT_UPGRADE_UNSUPPORTED",
+          code: "VAULT_UNSUPPORTED_FORMAT",
         }),
       ),
-    ).toEqual(expect.objectContaining({ code: "upgrade_unsupported" }));
+    ).toEqual(expect.objectContaining({ code: "unsupported_format" }));
   });
 
   it("covers the public helper payload branches and generic entity rendering helpers", async () => {

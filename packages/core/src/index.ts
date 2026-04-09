@@ -68,7 +68,6 @@ export {
   promoteInboxExperimentNote,
   promoteInboxJournal,
   repairVault,
-  upgradeVault,
   stopExperiment,
   stopProtocolItem,
   unlinkJournalEventIds,

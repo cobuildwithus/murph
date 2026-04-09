@@ -945,7 +945,7 @@ test("readVault rejects explicit older vault format versions", async () => {
 
     await assert.rejects(
       () => readVault(vaultRoot),
-      (error) => hasErrorCode(error, "VAULT_UPGRADE_REQUIRED"),
+      (error) => hasErrorCode(error, "VAULT_UNSUPPORTED_FORMAT"),
     );
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
@@ -963,7 +963,7 @@ test("searchVaultRuntime rejects explicit newer vault format versions before reb
 
     await assert.rejects(
       () => searchVaultRuntime(vaultRoot, "lab report"),
-      (error) => hasErrorCode(error, "VAULT_UPGRADE_UNSUPPORTED"),
+      (error) => hasErrorCode(error, "VAULT_UNSUPPORTED_FORMAT"),
     );
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });

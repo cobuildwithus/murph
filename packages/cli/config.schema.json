@@ -166,34 +166,6 @@
                       }
                     }
                   }
-                },
-                "upgrade": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "properties": {
-                    "options": {
-                      "type": "object",
-                      "additionalProperties": false,
-                      "properties": {
-                        "vault": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Vault root to operate against."
-                        },
-                        "requestId": {
-                          "description": "Optional caller-supplied request id for audit correlation.",
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 128
-                        },
-                        "dryRun": {
-                          "default": false,
-                          "description": "Preview the current-format check without writing canonical files.",
-                          "type": "boolean"
-                        }
-                      }
-                    }
-                  }
                 }
               }
             }

@@ -122,12 +122,12 @@ describe("vault metadata validation", () => {
     expect(validateCurrentVaultMetadata({ ...VALID_METADATA, formatVersion: 0 })).toEqual({
       success: false,
       error: {
-        code: "VAULT_UPGRADE_REQUIRED",
+        code: "VAULT_UNSUPPORTED_FORMAT",
         message:
-          `Vault formatVersion 0 must be upgraded to ${CURRENT_VAULT_FORMAT_VERSION} before current-format operations can continue. Run "vault upgrade" first.`,
+          `Vault formatVersion 0 is unsupported; expected formatVersion ${CURRENT_VAULT_FORMAT_VERSION}.`,
         details: {
           storedFormatVersion: 0,
-          targetFormatVersion: CURRENT_VAULT_FORMAT_VERSION,
+          supportedFormatVersion: CURRENT_VAULT_FORMAT_VERSION,
         },
       },
     });
@@ -135,9 +135,9 @@ describe("vault metadata validation", () => {
     expect(validateCurrentVaultMetadata({ ...VALID_METADATA, formatVersion: CURRENT_VAULT_FORMAT_VERSION + 1 })).toEqual({
       success: false,
       error: {
-        code: "VAULT_UPGRADE_UNSUPPORTED",
+        code: "VAULT_UNSUPPORTED_FORMAT",
         message:
-          `Vault formatVersion ${CURRENT_VAULT_FORMAT_VERSION + 1} is newer than supported formatVersion ${CURRENT_VAULT_FORMAT_VERSION}.`,
+          `Vault formatVersion ${CURRENT_VAULT_FORMAT_VERSION + 1} is unsupported; expected formatVersion ${CURRENT_VAULT_FORMAT_VERSION}.`,
         details: {
           storedFormatVersion: CURRENT_VAULT_FORMAT_VERSION + 1,
           supportedFormatVersion: CURRENT_VAULT_FORMAT_VERSION,
