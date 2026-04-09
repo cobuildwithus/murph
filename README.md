@@ -200,7 +200,7 @@ murph device daemon start --vault ./vault
 ```bash
 pnpm typecheck
 pnpm test
-pnpm test:coverage
+pnpm verify:acceptance
 pnpm --dir apps/web dev
 pnpm --dir apps/cloudflare verify
 ```
@@ -210,7 +210,7 @@ The repo verification baseline for docs/process-only and ordinary repo work rema
 ```bash
 pnpm typecheck
 pnpm test
-pnpm test:coverage
+pnpm verify:acceptance
 ```
 
 ## Maintainer helpers

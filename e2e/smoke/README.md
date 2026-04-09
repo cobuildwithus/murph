@@ -10,8 +10,9 @@ Each scenario manifest maps one documented baseline command to:
 - a golden-output directory documenting the current expected contract shape
 
 `verify-scenario-integrity.ts` is the real verifier for that contract.
-`verify-fixtures.ts` remains as a compatibility wrapper because the root
-`pnpm test:smoke` alias is outside this task's ownership.
+`verify-fixtures.ts` remains as a compatibility wrapper for older call sites,
+while the root command surface now exposes the honest `pnpm test:scenario-integrity`
+name alongside the historical `pnpm test:smoke` alias.
 
 If this directory grows a true executable smoke lane later, keep it separate
 from manifest integrity and keep it to a tiny representative command set.
