@@ -38,7 +38,6 @@ import {
   searchVault,
   searchVaultSafe,
   searchVaultRuntime,
-  summarizeCurrentOverviewProfile,
   summarizeDailySamples,
   summarizeOverviewExperiments,
   summarizeRecentOverviewJournals,
@@ -52,9 +51,7 @@ import {
   normalizeCanonicalLinks,
   resolveCanonicalRecordClass,
 } from "../src/canonical-entities.ts";
-import { projectProfileSnapshotEntity } from "../src/health/projectors/profile.ts";
 import { ALL_QUERY_ENTITY_FAMILIES } from "../src/model.ts";
-import { profileSnapshotRecordFromEntity } from "../src/health/projections.ts";
 import { parseFrontmatterDocument as parseHealthFrontmatterDocument } from "../src/health/shared.ts";
 import { parseMarkdownDocument } from "../src/markdown.ts";
 import {
@@ -1716,34 +1713,6 @@ test("searchVault includes sample rows when the caller scopes by sample record t
 
 test("overview selectors move cleanly onto the query read model", () => {
   const vault = createEmptyReadModel();
-  const goal = createRecord({
-    id: "goal_sleep_01",
-    recordType: "goal",
-    sourcePath: "bank/goals/protect-sleep.md",
-    title: "Protect sleep consistency",
-  });
-  const currentProfile = createRecord({
-    id: "profile_current_01",
-    recordType: "current_profile",
-    sourcePath: "bank/profile/current.md",
-    occurredAt: "2026-03-12T14:00:00Z",
-    title: "Current Profile",
-    body: "# Current Profile\n- Sleep steadier and the evening routine is holding.",
-    data: {},
-  });
-  const latestSnapshot = createRecord({
-    id: "psnap_01",
-    recordType: "profile_snapshot",
-    sourcePath: "ledger/profile-snapshots/2026/2026-03.jsonl",
-    occurredAt: "2026-03-12T13:55:00Z",
-    data: {
-      profile: {
-        goals: {
-          topGoalIds: ["goal_sleep_01"],
-        },
-      },
-    },
-  });
   const journalNewer = createRecord({
     id: "journal:2026-03-12",
     recordType: "journal",
@@ -1785,15 +1754,9 @@ test("overview selectors move cleanly onto the query read model", () => {
     body: "Finished and documented.",
   });
 
-  vault.currentProfile = currentProfile;
-  vault.profileSnapshots = [latestSnapshot];
-  vault.goals = [goal];
   vault.journalEntries = [journalOlder, journalNewer];
   vault.experiments = [completedExperiment, activeExperiment];
   vault.entities = [
-    goal,
-    currentProfile,
-    latestSnapshot,
     journalOlder,
     journalNewer,
     completedExperiment,
@@ -1804,26 +1767,14 @@ test("overview selectors move cleanly onto the query read model", () => {
   assert.deepEqual(
     buildOverviewMetrics(vault).map((metric) => [metric.label, metric.value]),
     [
-      ["entities", 7],
+      ["entities", 4],
       ["events", 0],
       ["samples", 0],
       ["journal days", 2],
       ["experiments", 2],
-      ["registries", 1],
+      ["registries", 0],
     ],
   );
-  assert.deepEqual(summarizeCurrentOverviewProfile(vault), {
-    id: "profile_current_01",
-    recordedAt: "2026-03-12T14:00:00Z",
-    summary: "Sleep steadier and the evening routine is holding.",
-    title: "Current Profile",
-    topGoals: [
-      {
-        id: "goal_sleep_01",
-        title: "Protect sleep consistency",
-      },
-    ],
-  });
   assert.deepEqual(
     summarizeRecentOverviewJournals(vault).map((entry) => ({
       date: entry.date,
@@ -1858,33 +1809,6 @@ test("overview selectors move cleanly onto the query read model", () => {
         title: "Completed Trial",
       },
     ],
-  );
-});
-
-test("profile snapshot query projections keep nested typed summary fields", () => {
-  const entity = projectProfileSnapshotEntity(
-    {
-      id: "psnap_01",
-      recordedAt: "2026-03-12T13:55:00Z",
-      source: "manual",
-      profile: {
-        narrative: {
-          summary: "Sleep steadier and the evening routine is holding.",
-        },
-        goals: {
-          topGoalIds: ["goal_sleep_01"],
-        },
-      },
-    },
-    "ledger/profile-snapshots/2026/2026-03.jsonl",
-  );
-
-  assert.ok(entity);
-  assert.equal(entity.title, "Sleep steadier and the evening routine is holding.");
-  assert.equal(entity.body, "Sleep steadier and the evening routine is holding.");
-  assert.equal(
-    profileSnapshotRecordFromEntity(entity)?.summary,
-    "Sleep steadier and the evening routine is holding.",
   );
 });
 

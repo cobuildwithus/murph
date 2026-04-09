@@ -496,7 +496,6 @@ describe('assistant CLI tool capability seam', () => {
     await executeTool(writeTools, 'vault.intake.project', {
       assessmentId: 'asmt_example',
     })
-    await executeTool(writeTools, 'vault.profile.rebuildCurrent', {})
     await executeTool(writeTools, 'vault.protocol.stop', {
       protocolId: 'prot_example',
       stoppedOn: '2026-04-08',
@@ -580,7 +579,6 @@ describe('assistant CLI tool capability seam', () => {
     await executeTool(nullRequestWriteTools, 'vault.intake.project', {
       assessmentId: 'asmt_null',
     })
-    await executeTool(nullRequestWriteTools, 'vault.profile.rebuildCurrent', {})
     await executeTool(nullRequestWriteTools, 'vault.protocol.stop', {
       protocolId: 'prot_null',
     })
@@ -591,9 +589,6 @@ describe('assistant CLI tool capability seam', () => {
     })
     expect(findLastCall(coreCalls, 'projectAssessment')).toMatchObject({
       assessmentId: 'asmt_null',
-      requestId: null,
-    })
-    expect(findLastCall(coreCalls, 'rebuildCurrentProfile')).toMatchObject({
       requestId: null,
     })
     expect(findLastCall(coreCalls, 'stopProtocol')).toMatchObject({

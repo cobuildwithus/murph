@@ -12,12 +12,10 @@ export type CanonicalEntityFamily =
   | "assessment"
   | "audit"
   | "core"
-  | "current_profile"
   | "event"
   | "experiment"
   | "history"
   | "journal"
-  | "profile_snapshot"
   | "sample";
 
 export interface CanonicalEntity {
@@ -71,8 +69,6 @@ export function resolveCanonicalRecordClass(
       return "sample";
     case "assessment":
     case "core":
-    case "current_profile":
-    case "profile_snapshot":
       return "snapshot";
     case "audit":
     case "event":

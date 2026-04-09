@@ -9,42 +9,21 @@ import {
 } from "./health/comparators.ts";
 import {
   assessmentRecordFromEntity,
-  currentProfileRecordFromEntity,
   historyRecordFromEntity,
-  profileSnapshotRecordFromEntity,
 } from "./health/projections.ts";
 
 import type { FrontmatterObject } from "./health/shared.ts";
 import type {
   ExportPackAssessmentRecord,
   ExportPackBankPage,
-  ExportPackCurrentProfile,
   ExportPackFilters,
   ExportPackHealthContext,
   ExportPackHistoryRecord,
-  ExportPackProfileSnapshotRecord,
 } from "./export-pack-health-types.ts";
 
 export interface ExportPackHealthReadResult {
   health: ExportPackHealthContext;
   failures: ParseFailure[];
-}
-
-function exportPackProfileSnapshotRecordFromEntity(
-  entity: CanonicalEntity,
-): ExportPackProfileSnapshotRecord | null {
-  const record = profileSnapshotRecordFromEntity(entity);
-  if (!record) {
-    return null;
-  }
-
-  const {
-    capturedAt: _capturedAt,
-    status: _status,
-    summary: _summary,
-    ...exportRecord
-  } = record;
-  return exportRecord;
 }
 
 function exportPackHistoryRecordFromEntity(
@@ -58,21 +37,6 @@ function exportPackHistoryRecordFromEntity(
   return {
     ...record,
     kind: record.kind,
-  };
-}
-
-function currentProfileFromEntity(
-  entity: CanonicalEntity,
-  markdown: string | null,
-): ExportPackCurrentProfile | null {
-  const currentProfile = currentProfileRecordFromEntity(entity, markdown);
-  if (!currentProfile) {
-    return null;
-  }
-
-  const { id: _id, ...record } = currentProfile;
-  return {
-    ...record,
   };
 }
 
@@ -101,20 +65,6 @@ function mapBankPages(
   );
 }
 
-function compareSnapshots(
-  left: ExportPackProfileSnapshotRecord,
-  right: ExportPackProfileSnapshotRecord,
-): number {
-  const leftTimestamp = left.recordedAt ?? "";
-  const rightTimestamp = right.recordedAt ?? "";
-
-  if (leftTimestamp !== rightTimestamp) {
-    return rightTimestamp.localeCompare(leftTimestamp);
-  }
-
-  return left.id.localeCompare(right.id);
-}
-
 export function readHealthContext(
   vaultRoot: string,
   filters: ExportPackFilters,
@@ -128,22 +78,11 @@ export function readHealthContext(
         .filter((entry): entry is ExportPackAssessmentRecord => entry !== null)
         .filter((entry) => matchesDateWindow(entry.recordedAt ?? entry.importedAt, filters))
         .sort(compareByRecordedOrImportedAtDescThenId),
-      profileSnapshots: collected.profileSnapshots
-        .map(exportPackProfileSnapshotRecordFromEntity)
-        .filter((entry): entry is ExportPackProfileSnapshotRecord => entry !== null)
-        .filter((entry) => matchesDateWindow(entry.recordedAt, filters))
-        .sort(compareSnapshots),
       historyEvents: collected.history
         .map(exportPackHistoryRecordFromEntity)
         .filter((entry): entry is ExportPackHistoryRecord => entry !== null)
         .filter((entry) => matchesDateWindow(entry.occurredAt, filters))
         .sort(compareByOccurredAtDescThenId),
-      currentProfile: collected.currentProfile
-        ? currentProfileFromEntity(
-            collected.currentProfile,
-            collected.markdownByPath.get(collected.currentProfile.path) ?? null,
-          )
-        : null,
       goals: mapBankPages(collected.goals, collected.markdownByPath),
       conditions: mapBankPages(collected.conditions, collected.markdownByPath),
       allergies: mapBankPages(collected.allergies, collected.markdownByPath),

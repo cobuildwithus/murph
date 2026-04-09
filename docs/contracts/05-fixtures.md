@@ -9,7 +9,7 @@ The fixture lane owns the actual corpus under `fixtures/`, but this doc freezes 
 - One minimal vault scaffold with stable locations for `CORE.md`, journal pages, experiment pages, and the raw/ledger/audit/export directories referenced by smoke scenarios.
 - Sample-import inputs for document import, meal add, and CSV sample import flows. Workout capture does not require a separate file fixture because it records one freeform text argument directly.
 - Assessment-import inputs with stable `raw/assessments/YYYY/MM/<assessmentId>/source.json` locations and matching `ledger/assessments/YYYY/YYYY-MM.jsonl` shards.
-- Profile snapshot fixtures that rebuild a deterministic `bank/profile/current.md`.
+- Durable current-state fixtures for `bank/memory.md`, `bank/preferences.json`, and `derived/knowledge/**`.
 - One Markdown fixture each for goals, conditions, allergies, protocols, family members, and genetic variants.
 - One golden-output directory per documented baseline command.
 - Smoke expectations that describe:
@@ -18,7 +18,7 @@ The fixture lane owns the actual corpus under `fixtures/`, but this doc freezes 
   - intervention quick capture returning one queryable `evt_*` id for an `intervention_session` event while preserving the freeform note text plus any inferred or explicit intervention type, duration, and protocol linkage
   - sample imports returning `lookupIds` plus an `xfm_*` batch id
   - intake import returning an `asmt_*` id and intake project returning deterministic proposal payloads
-  - profile snapshot append plus `profile current rebuild`
+  - memory, wiki, and preferences reads using the durable split between freeform memory, derived knowledge, and the typed preferences singleton
   - noun flows for `scaffold`, `upsert --input`, `show`, `list`, `food schedule`, and `protocol stop`
   - history writes for `encounter`, `procedure`, `test`, `adverse_effect`, and `exposure`
   - experiment creation idempotence via `created: false`
@@ -32,7 +32,7 @@ The fixture lane owns the actual corpus under `fixtures/`, but this doc freezes 
 - Reuse the frozen ID policy from `docs/contracts/02-record-schemas.md`.
 - Keep timestamps within the March 2026 baseline so shard paths stay deterministic.
 - Keep all stored paths relative and vault-local.
-- Keep health noun fixtures deterministic by pinning ids to the frozen `asmt`, `psnap`, `goal`, `cond`, `alg`, `prot`, `fam`, and `var` prefixes.
+- Keep health noun fixtures deterministic by pinning ids to the frozen `asmt`, `mem`, `goal`, `cond`, `alg`, `prot`, `fam`, and `var` prefixes.
 - Treat `xfm_*` values as import-batch identifiers only; do not require standalone transform records in the fixture corpus.
 
 ## Reference Set

@@ -82,9 +82,7 @@ function createEntity(
   };
 }
 
-function buildHealthCollection(
-  currentProfile: CanonicalEntity | null,
-): CanonicalHealthEntityCollection {
+function buildHealthCollection(): CanonicalHealthEntityCollection {
   const assessments = [
     createEntity(
       "asmt_imported_only",
@@ -145,146 +143,6 @@ function buildHealthCollection(
           assessmentType: "follow-up",
           recordedAt: "2026-04-01T09:00:00Z",
           source: "import",
-        },
-      },
-    ),
-  ];
-
-  const profileSnapshots = [
-    createEntity(
-      "psnap_gamma",
-      "profile_snapshot",
-      "profile_snapshot",
-      "ledger/profile-snapshots/2026/2026-03.jsonl",
-      {
-        title: "Gamma summary",
-        attributes: {
-          recordedAt: "2026-03-14T14:00:00Z",
-          source: "assessment_projection",
-          sourceAssessmentIds: ["asmt_valid"],
-          sourceEventIds: ["evt_gamma"],
-          summary: "Gamma summary",
-          profile: {
-            narrative: {
-              summary: "Gamma summary",
-            },
-            goals: {
-              topGoalIds: ["goal_alpha"],
-            },
-          },
-        },
-      },
-    ),
-    createEntity(
-      "psnap_alpha",
-      "profile_snapshot",
-      "profile_snapshot",
-      "ledger/profile-snapshots/2026/2026-03.jsonl",
-      {
-        title: "Alpha summary",
-        attributes: {
-          recordedAt: "2026-03-13T14:00:00Z",
-          source: "manual",
-          sourceAssessmentIds: ["asmt_imported_only"],
-          sourceEventIds: ["evt_alpha"],
-          profile: {
-            narrative: {
-              summary: "Alpha summary",
-            },
-            goals: {
-              topGoalIds: ["goal_alpha"],
-            },
-          },
-        },
-      },
-    ),
-    createEntity(
-      "psnap_beta",
-      "profile_snapshot",
-      "profile_snapshot",
-      "ledger/profile-snapshots/2026/2026-03.jsonl",
-      {
-        title: "Beta summary",
-        attributes: {
-          recordedAt: "2026-03-13T14:00:00Z",
-          source: "manual",
-          sourceAssessmentIds: ["asmt_valid"],
-          sourceEventIds: ["evt_beta"],
-          profile: {
-            narrative: {
-              summary: "Beta summary",
-            },
-            goals: {
-              topGoalIds: ["goal_beta"],
-            },
-          },
-        },
-      },
-    ),
-    createEntity(
-      "psnap_before",
-      "profile_snapshot",
-      "profile_snapshot",
-      "ledger/profile-snapshots/2026/2026-03.jsonl",
-      {
-        title: "Before window",
-        attributes: {
-          recordedAt: "2026-02-28T14:00:00Z",
-          source: "manual",
-          profile: {
-            narrative: {
-              summary: "Before window",
-            },
-          },
-        },
-      },
-    ),
-    createEntity(
-      "psnap_captured_only",
-      "profile_snapshot",
-      "profile_snapshot",
-      "ledger/profile-snapshots/2026/2026-03.jsonl",
-      {
-        title: "Captured only",
-        attributes: {
-          capturedAt: "2026-03-12T14:00:00Z",
-          source: "manual",
-          profile: {
-            narrative: {
-              summary: "Captured only",
-            },
-          },
-        },
-      },
-    ),
-    createEntity(
-      "psnap_invalid",
-      "profile_snapshot",
-      "profile_snapshot",
-      "ledger/profile-snapshots/2026/2026-03.jsonl",
-      {
-        title: "Invalid date",
-        attributes: {
-          recordedAt: "not-a-date",
-          source: "manual",
-          profile: {
-            narrative: {
-              summary: "Invalid date",
-            },
-          },
-        },
-      },
-    ),
-    createEntity(
-      "psnap_invalid_family",
-      "assessment",
-      "assessment",
-      "ledger/profile-snapshots/2026/2026-03.jsonl",
-      {
-        title: "Invalid family snapshot",
-        attributes: {
-          recordedAt: "2026-03-12T14:00:00Z",
-          source: "manual",
         },
       },
     ),
@@ -485,16 +343,10 @@ function buildHealthCollection(
       "bank/genetics/mthfr-c677t.md",
       "---\nvariantId: var_alpha\nslug: mthfr-c677t\n---\n# MTHFR C677T\n",
     ],
-    [
-      "bank/profile/current.md",
-      "---\nsnapshotId: psnap_gamma\nupdatedAt: 2026-03-14T15:00:00Z\n---\n# Current Profile\n",
-    ],
   ]);
 
   return {
     assessments,
-    profileSnapshots,
-    currentProfile,
     history,
     goals,
     conditions,
@@ -508,8 +360,6 @@ function buildHealthCollection(
     workoutFormats: [],
     entities: [
       ...assessments,
-      ...profileSnapshots,
-      ...(currentProfile ? [currentProfile] : []),
       ...history,
       ...goals,
       ...conditions,
@@ -535,38 +385,10 @@ test("export pack health strips transient fields, sorts deterministically, and r
     canonicalCollector,
     "collectCanonicalEntities",
   );
-  const collectionWithCurrent = buildHealthCollection(
-    createEntity("current", "current_profile", "current_profile", "bank/profile/current.md", {
-      lookupIds: ["current", "psnap_gamma"],
-      title: "Current profile",
-      body: "# Current Profile\n\nLatest profile body.",
-      attributes: {
-        snapshotId: "psnap_gamma",
-        updatedAt: "2026-03-14T15:00:00Z",
-        sourceAssessmentIds: ["asmt_valid"],
-        sourceEventIds: ["evt_gamma"],
-        topGoalIds: ["goal_alpha"],
-      },
-    }),
-  );
-  const collectionWithoutCurrent = buildHealthCollection(null);
-  const collectionWithInvalidCurrentProfile = buildHealthCollection(
-    createEntity("current_invalid", "profile_snapshot", "profile_snapshot", "bank/profile/current.md", {
-      lookupIds: ["current_invalid", "psnap_gamma"],
-      title: "Current profile",
-      body: "# Current Profile\n\nLatest profile body.",
-      attributes: {
-        snapshotId: "psnap_gamma",
-        updatedAt: "2026-03-14T15:00:00Z",
-        sourceAssessmentIds: ["asmt_valid"],
-        sourceEventIds: ["evt_gamma"],
-        topGoalIds: ["goal_alpha"],
-      },
-    }),
-  );
+  const collection = buildHealthCollection();
 
   // @ts-expect-error Vitest infers the async overload for the spied collector.
-  collectCanonicalEntitiesMock.mockReturnValueOnce(collectionWithCurrent);
+  collectCanonicalEntitiesMock.mockReturnValueOnce(collection);
 
   const healthRead = readHealthContext("/virtual/vault", {
     from: "2026-03-01",
@@ -575,7 +397,7 @@ test("export pack health strips transient fields, sorts deterministically, and r
   });
 
   // @ts-expect-error Vitest infers the async overload for the spied collector.
-  collectCanonicalEntitiesMock.mockReturnValueOnce(collectionWithoutCurrent);
+  collectCanonicalEntitiesMock.mockReturnValueOnce(collection);
 
   const tolerantHealth = readHealthContextTolerant("/virtual/vault", {
     from: "2026-03-01",
@@ -589,37 +411,17 @@ test("export pack health strips transient fields, sorts deterministically, and r
   );
   assert.equal(healthRead.health.assessments[1]?.recordedAt, "2026-03-12T09:00:00Z");
   assert.deepEqual(
-    healthRead.health.profileSnapshots.map((record) => record.id),
-    ["psnap_gamma", "psnap_alpha", "psnap_beta", "psnap_captured_only"],
-  );
-  assert.equal("capturedAt" in (healthRead.health.profileSnapshots[0] ?? {}), false);
-  assert.equal("status" in (healthRead.health.profileSnapshots[0] ?? {}), false);
-  assert.equal(healthRead.health.profileSnapshots[3]?.recordedAt, "2026-03-12T14:00:00Z");
-  assert.deepEqual(
     healthRead.health.historyEvents.map((record) => record.id),
     ["evt_gamma", "evt_alpha"],
   );
   assert.equal(healthRead.health.historyEvents[0]?.kind, "encounter");
-  assert.equal(healthRead.health.currentProfile?.snapshotId, "psnap_gamma");
-  assert.equal("id" in (healthRead.health.currentProfile ?? {}), false);
-  assert.equal(healthRead.health.currentProfile?.markdown?.includes("Current Profile"), true);
-  assert.equal(healthRead.health.currentProfile?.body?.includes("Latest profile body."), true);
   assert.equal(healthRead.health.goals[0]?.slug, "improve-sleep");
   assert.equal(healthRead.health.conditions[0]?.slug, "cond_alpha");
   assert.equal(healthRead.health.allergies[0]?.slug, "penicillin");
   assert.equal(healthRead.health.protocols[0]?.slug, "magnesium-glycinate");
   assert.equal(healthRead.health.familyMembers[0]?.slug, "mother");
   assert.equal(healthRead.health.geneticVariants[0]?.slug, "mthfr-c677t");
-  assert.deepEqual(healthRead.failures, collectionWithCurrent.failures);
-  // @ts-expect-error Vitest infers the async overload for the spied collector.
-  collectCanonicalEntitiesMock.mockReturnValueOnce(collectionWithInvalidCurrentProfile);
-  const invalidCurrentProfileHealth = readHealthContext("/virtual/vault", {
-    from: "2026-03-01",
-    to: "2026-03-31",
-    experimentSlug: null,
-  });
-  assert.equal(invalidCurrentProfileHealth.health.currentProfile, null);
-  assert.equal(tolerantHealth.currentProfile, null);
+  assert.deepEqual(healthRead.failures, collection.failures);
   assert.deepEqual(tolerantHealth.goals.map((record) => record.slug), ["improve-sleep"]);
 });
 

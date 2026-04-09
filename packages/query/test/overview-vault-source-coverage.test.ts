@@ -18,7 +18,6 @@ import { createVaultReadModel } from "../src/model.ts";
 import {
   buildOverviewMetrics,
   buildOverviewWeeklyStats,
-  summarizeCurrentOverviewProfile,
   summarizeOverviewExperiments,
   summarizeRecentOverviewJournals,
 } from "../src/overview.ts";
@@ -35,7 +34,7 @@ afterEach(async () => {
   );
 });
 
-test("overview helpers use snapshot goal fallbacks and normalize journal and experiment summaries", () => {
+test("overview helpers normalize journal and experiment summaries", () => {
   const vault = createVaultReadModel({
     vaultRoot: "/tmp/query-overview",
     entities: [
@@ -44,34 +43,6 @@ test("overview helpers use snapshot goal fallbacks and normalize journal and exp
       }),
       createEntity("goal", "goal_recovery", {
         title: "Recovery",
-      }),
-      createEntity("current_profile", "current_profile_01", {
-        occurredAt: "2026-04-10T08:00:00.000Z",
-        title: "Current profile",
-        body: "# Heading\n\n- Calm nights\n- Better mornings\n",
-        attributes: {
-          profile: {},
-        },
-      }),
-      createEntity("profile_snapshot", "psnap_01", {
-        occurredAt: "2026-04-01T08:00:00.000Z",
-        attributes: {
-          profile: {
-            goals: {
-              topGoalIds: [],
-            },
-          },
-        },
-      }),
-      createEntity("profile_snapshot", "psnap_02", {
-        occurredAt: "2026-04-12T08:00:00.000Z",
-        attributes: {
-          profile: {
-            goals: {
-              topGoalIds: ["goal_sleep", "goal_missing"],
-            },
-          },
-        },
       }),
       createEntity("journal", "journal:2026-04-11", {
         date: "2026-04-11",
@@ -113,7 +84,7 @@ test("overview helpers use snapshot goal fallbacks and normalize journal and exp
   assert.deepEqual(
     buildOverviewMetrics(vault).map((entry) => [entry.label, entry.value]),
     [
-      ["entities", 11],
+      ["entities", 8],
       ["events", 1],
       ["samples", 1],
       ["journal days", 2],
@@ -121,17 +92,6 @@ test("overview helpers use snapshot goal fallbacks and normalize journal and exp
       ["registries", 2],
     ],
   );
-
-  assert.deepEqual(summarizeCurrentOverviewProfile(vault), {
-    id: "current_profile_01",
-    recordedAt: "2026-04-10T08:00:00.000Z",
-    summary: "Calm nights Better mornings",
-    title: "Current profile",
-    topGoals: [
-      { id: "goal_sleep", title: "Improve sleep" },
-      { id: "goal_missing", title: "goal_missing" },
-    ],
-  });
 
   assert.deepEqual(summarizeRecentOverviewJournals(vault, NaN), [
     {
@@ -173,33 +133,10 @@ test("overview helpers use snapshot goal fallbacks and normalize journal and exp
 });
 
 test("overview helpers handle empty inputs, limit coercion, truncation, and sunday week windows", () => {
-  const emptyVault = createVaultReadModel({
-    vaultRoot: "/tmp/query-overview-empty",
-    entities: [],
-  });
-  assert.equal(summarizeCurrentOverviewProfile(emptyVault), null);
-
   const longBody = `# Heading\n\n${"steady ".repeat(40)}progress`;
   const vault = createVaultReadModel({
     vaultRoot: "/tmp/query-overview-branches",
     entities: [
-      createEntity("goal", "goal_alias", {
-        title: "Alias goal",
-        primaryLookupId: "goal_alias_primary",
-        lookupIds: ["goal_alias", "goal_alias_slug"],
-      }),
-      createEntity("current_profile", "current_profile_long", {
-        title: null,
-        body: longBody,
-        attributes: {
-          topGoalIds: [],
-          profile: {
-            goals: {
-              topGoalIds: ["goal_alias_slug"],
-            },
-          },
-        },
-      }),
       createEntity("journal", "journal:undated", {
         occurredAt: null,
         title: null,
@@ -253,12 +190,6 @@ test("overview helpers handle empty inputs, limit coercion, truncation, and sund
     ],
   });
 
-  const currentProfile = summarizeCurrentOverviewProfile(vault);
-  assert.equal(currentProfile?.title, "current_profile_long");
-  assert.equal(currentProfile?.summary?.endsWith("..."), true);
-  assert.deepEqual(currentProfile?.topGoals, [{ id: "goal_alias_slug", title: "Alias goal" }]);
-  const expectedTruncatedSummary = currentProfile?.summary ?? null;
-
   assert.deepEqual(summarizeRecentOverviewJournals(vault, 0), [
     {
       date: "Undated",
@@ -269,17 +200,15 @@ test("overview helpers handle empty inputs, limit coercion, truncation, and sund
     },
   ]);
 
-  assert.deepEqual(summarizeOverviewExperiments(vault, 0), [
-    {
-      id: "exp_uppercase",
-      slug: "exp-uppercase",
-      startedOn: "Undated",
-      status: " ACTIVE ",
-      summary: expectedTruncatedSummary,
-      tags: ["focus"],
-      title: "exp_uppercase",
-    },
-  ]);
+  const experiments = summarizeOverviewExperiments(vault, 0);
+  assert.equal(experiments.length, 1);
+  assert.deepEqual(experiments[0]?.id, "exp_uppercase");
+  assert.deepEqual(experiments[0]?.slug, "exp-uppercase");
+  assert.deepEqual(experiments[0]?.startedOn, "Undated");
+  assert.deepEqual(experiments[0]?.status, " ACTIVE ");
+  assert.deepEqual(experiments[0]?.tags, ["focus"]);
+  assert.deepEqual(experiments[0]?.title, "exp_uppercase");
+  assert.equal(experiments[0]?.summary?.endsWith("..."), true);
 
   vi.useFakeTimers();
   vi.setSystemTime(new Date("2026-04-12T12:00:00.000Z"));

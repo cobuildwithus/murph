@@ -23,7 +23,6 @@ export interface TimelineFilters {
   includeEvents?: boolean;
   includeAssessments?: boolean;
   includeHistory?: boolean;
-  includeProfileSnapshots?: boolean;
   includeDailySampleSummaries?: boolean;
   limit?: number;
 }
@@ -35,7 +34,6 @@ export interface TimelineEntry {
     | "event"
     | "history"
     | "journal"
-    | "profile_snapshot"
     | "sample_summary";
   occurredAt: string;
   date: string;
@@ -59,7 +57,6 @@ export function buildTimeline(
   const includeEvents = filters.includeEvents ?? true;
   const includeAssessments = filters.includeAssessments ?? true;
   const includeHistory = filters.includeHistory ?? true;
-  const includeProfileSnapshots = filters.includeProfileSnapshots ?? true;
   const includeDailySampleSummaries =
     filters.includeDailySampleSummaries ?? true;
 
@@ -202,39 +199,6 @@ export function buildTimeline(
         relatedIds: entityRelationTargetIds(history),
         tags: history.tags,
         data: history.attributes,
-      });
-    }
-  }
-
-  if (includeProfileSnapshots) {
-    for (const snapshot of listEntities(vault, {
-      families: ["profile_snapshot"],
-      from: filters.from,
-      to: filters.to,
-    })) {
-      const snapshotKind = snapshot.kind || "profile_snapshot";
-      if (kindSet && !kindSet.has(snapshotKind)) {
-        continue;
-      }
-
-      const occurrence = resolveTimelineOccurrence(snapshot, "12:00:00Z");
-      if (!occurrence || !occurrence.occurredAt) {
-        continue;
-      }
-
-      entries.push({
-        id: snapshot.entityId,
-        entryType: "profile_snapshot",
-        occurredAt: occurrence.occurredAt,
-        date: occurrence.date,
-        title: snapshot.title ?? snapshot.entityId,
-        kind: snapshotKind,
-        stream: null,
-        experimentSlug: null,
-        path: snapshot.path,
-        relatedIds: entityRelationTargetIds(snapshot),
-        tags: snapshot.tags,
-        data: snapshot.attributes,
       });
     }
   }

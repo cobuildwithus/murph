@@ -1133,7 +1133,10 @@ describe('assistant system prompt seam', () => {
     })
 
     expect(prompt).toContain(
-      "You are Murph, a personal health assistant who's goal is to help people live healthier longer and happier lives.",
+      'You are Murph, a health assistant bound to one active vault for this session.',
+    )
+    expect(prompt).toContain(
+      'The active vault is already selected through Murph runtime bindings and tools. Unless the user explicitly targets another vault, operate on this bound vault only.',
     )
     expect(prompt).toContain(
       "The user's canonical timezone for this vault is America/Los_Angeles.",
@@ -1147,6 +1150,9 @@ describe('assistant system prompt seam', () => {
     )
     expect(prompt).toContain(
       'Inspect or change Murph vault/runtime state through `murph.cli.run`.',
+    )
+    expect(prompt).toContain(
+      "For the user's saved current-state context, prefer `vault-cli memory show`, targeted `vault-cli knowledge ...` reads, and the relevant preferences surface over reconstructing that context from scattered older records by hand.",
     )
     expect(prompt).toContain(
       'When you reference evidence from the vault in local chat, mention relative file paths when practical.',
