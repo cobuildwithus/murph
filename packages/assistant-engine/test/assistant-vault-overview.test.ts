@@ -159,6 +159,23 @@ it('builds a navigation-only overview from canonical, raw, and source-root cover
       title: 'Overnight sleep',
     })}\n`,
   )
+  await appendFile(
+    `${vaultRoot}/ledger/events/2026/2026-04.jsonl`,
+    `${JSON.stringify({
+      schemaVersion: 'murph.event.v1',
+      id: 'evt_blood_01',
+      kind: 'test',
+      occurredAt: '2026-04-04T08:30:00.000Z',
+      recordedAt: '2026-04-04T11:00:00.000Z',
+      source: 'import',
+      title: 'Fasted lipid panel',
+      testCategory: 'blood',
+      specimenType: 'venous_blood',
+      resultStatus: 'final',
+      labName: 'Function Health',
+      testName: 'Lipid panel',
+    })}\n`,
+  )
   await appendJournal({
     date: '2026-04-06',
     text: 'Energy was steadier after breakfast.',
@@ -209,6 +226,9 @@ it('builds a navigation-only overview from canonical, raw, and source-root cover
   )
   expect(overview).toContain(
     'Saved health context includes 1 goal, 1 condition, and 1 allergy.',
+  )
+  expect(overview).toContain(
+    'Blood test records are present.',
   )
   expect(overview).toContain(
     'Additional user records include 1 journal day and 1 document.',
