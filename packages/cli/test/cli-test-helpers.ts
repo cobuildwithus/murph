@@ -93,8 +93,6 @@ const requiredRuntimeArtifactPaths = [
   path.join(repoRoot, 'packages/core/dist/index.d.ts'),
   path.join(repoRoot, 'packages/core/dist/public-mutations.js'),
   path.join(repoRoot, 'packages/core/dist/public-mutations.d.ts'),
-  path.join(repoRoot, 'packages/core/dist/vault-upgrade.js'),
-  path.join(repoRoot, 'packages/core/dist/vault-upgrade.d.ts'),
   path.join(repoRoot, 'packages/importers/dist/index.js'),
   path.join(repoRoot, 'packages/importers/dist/index.d.ts'),
   path.join(repoRoot, 'packages/importers/dist/core-port.js'),
