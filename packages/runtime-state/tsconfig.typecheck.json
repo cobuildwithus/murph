@@ -13,7 +13,8 @@
     },
     "rootDir": ".",
     "composite": false,
-    "incremental": false
+    "incremental": true,
+    "tsBuildInfoFile": "typecheck.tsbuildinfo"
   },
   "include": [
     "src/**/*.ts",

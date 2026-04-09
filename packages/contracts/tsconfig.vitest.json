@@ -1,7 +1,8 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
-    "rootDir": "../.."
+    "rootDir": "../..",
+    "tsBuildInfoFile": "typecheck.vitest.tsbuildinfo"
   },
   "include": [
     "src/**/*.ts",
