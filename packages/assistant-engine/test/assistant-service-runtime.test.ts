@@ -1133,6 +1133,9 @@ describe('assistant system prompt seam', () => {
     })
 
     expect(prompt).toContain(
+      "You are Murph, a personal health assistant who's goal is to help people live healthier longer and happier lives.",
+    )
+    expect(prompt).toContain(
       "The user's canonical timezone for this vault is America/Los_Angeles.",
     )
     expect(prompt).toContain('Today\'s date for the user is 2026-04-08.')
