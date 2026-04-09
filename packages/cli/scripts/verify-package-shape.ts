@@ -138,9 +138,33 @@ assert(
 assert(
   packageJson.scripts?.build &&
     packageJson.scripts?.typecheck &&
-    packageJson.scripts?.test &&
+    packageJson.scripts?.test === 'pnpm test:source' &&
+    packageJson.scripts?.['test:source'] ===
+      'pnpm --dir ../.. exec vitest run --config packages/cli/vitest.workspace.ts --no-coverage' &&
+    packageJson.scripts?.['test:coverage'] === 'pnpm test:source:coverage' &&
+    packageJson.scripts?.['test:source:coverage'] ===
+      'pnpm --dir ../.. exec vitest run --config packages/cli/vitest.workspace.ts --coverage' &&
+    packageJson.scripts?.['verify:prepared-runtime'] ===
+      'pnpm --dir ../.. build:test-runtime:prepared' &&
+    packageJson.scripts?.['verify:package-shape'] ===
+      'pnpm build && tsx ./scripts/verify-package-shape.ts' &&
+    packageJson.scripts?.['test:built-runtime'] ===
+      'MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 pnpm --dir ../.. exec vitest run --config packages/cli/vitest.workspace.ts --no-coverage' &&
+    packageJson.scripts?.['test:built-runtime:coverage'] ===
+      'MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 pnpm --dir ../.. exec vitest run --config packages/cli/vitest.workspace.ts --coverage' &&
+    packageJson.scripts?.verify ===
+      'pnpm verify:prepared-runtime && pnpm verify:package-shape && pnpm test:built-runtime' &&
+    packageJson.scripts?.['verify:coverage'] ===
+      'pnpm verify:prepared-runtime && pnpm verify:package-shape && pnpm test:built-runtime:coverage' &&
     packageJson.scripts?.prepack === 'pnpm build',
-  'package.json must define build/test/typecheck plus prepack.',
+  'package.json must keep source-local test scripts separate from explicit built-runtime/package-shape verification scripts.',
+)
+assert(
+  !packageJson.scripts?.test?.includes('build:test-runtime:prepared') &&
+    !packageJson.scripts?.test?.includes('verify-package-shape') &&
+    !packageJson.scripts?.['test:coverage']?.includes('build:test-runtime:prepared') &&
+    !packageJson.scripts?.['test:coverage']?.includes('verify-package-shape'),
+  'package.json local test scripts must not block on prepared-runtime or package-shape acceptance gates.',
 )
 assert(
   !packageJson.scripts?.['verify:release-target'] &&

@@ -91,6 +91,20 @@ pnpm install --frozen-lockfile
 pnpm onboard --vault ./vault
 ```
 
+For package-local CLI iteration, use the source-first test lane:
+
+```bash
+pnpm --dir packages/cli test
+```
+
+For the explicit built-runtime and package-shape acceptance lane, use:
+
+```bash
+pnpm --dir packages/cli verify
+# or the repo-composed CLI acceptance entrypoint
+pnpm verify:cli
+```
+
 If `pnpm` is not available yet, use:
 
 ```bash
