@@ -124,19 +124,21 @@ trap 'handle_termination_signal TERM' TERM
 trap 'handle_termination_signal HUP' HUP
 
 pnpm prisma:generate
-pnpm typecheck:prepared
-pnpm lint
 
 if [[ "$verify_step_parallel" == "1" ]]; then
   pnpm test &
   test_pid="$!"
   register_background_pid "$test_pid"
+  pnpm lint &
+  lint_pid="$!"
+  register_background_pid "$lint_pid"
   pnpm dev:smoke
   next_build_node_options="$(compose_node_options_with_sqlite_warning_filter)"
   NODE_OPTIONS="$next_build_node_options" next build
-  wait_for_background_jobs "$test_pid"
+  wait_for_background_jobs "$test_pid" "$lint_pid"
 else
   pnpm test
+  pnpm lint
   pnpm dev:smoke
   next_build_node_options="$(compose_node_options_with_sqlite_warning_filter)"
   NODE_OPTIONS="$next_build_node_options" next build
