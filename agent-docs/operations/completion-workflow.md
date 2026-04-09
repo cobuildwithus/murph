@@ -1,6 +1,6 @@
 # Completion Workflow
 
-Last verified: 2026-04-06
+Last verified: 2026-04-09
 
 This workflow applies to repo code/docs/test/config changes.
 Vault-only data tasks under `vault/**` skip this workflow unless the user explicitly asks for repo/process work.
@@ -14,26 +14,28 @@ Vault-only data tasks under `vault/**` skip this workflow unless the user explic
 4. Classify the change path before audits:
    - docs/process-only and vault-only data tasks skip audit subagents unless the user explicitly asks for them
    - tiny repo-internal workflow/tooling changes that meet the fast-path criteria below may use local final review instead of an audit subagent
-   - other repo code/test/config changes run `task-finish-review` by default
+   - repo code/test/config changes that verify through `pnpm test:diff <path ...>` or package/app coverage commands require the dedicated `coverage-write` pass
+   - other repo code/test/config changes run `task-finish-review` by default after the coverage pass when that pass applies
    - add a `simplify` pass when the change was developed locally rather than landed from an applied patch file, the implementation diff reaches 200 or more changed lines, and it would materially benefit from an explicit behavior-preserving simplification review before final review
 5. When the exceptional `simplify` condition applies, spawn a dedicated audit subagent for that pass and hand it `agent-docs/prompts/simplify.md` plus the audit handoff packet below. Expect this audit to take about 5 to 10 minutes on non-trivial diffs; do not rush it or cancel it early just because it has not answered in the first minute.
 6. Apply behavior-preserving simplifications from that pass, with explicit attention to missed existing helpers, duplicated logic, and abstractions that do not earn their keep immediately.
-7. If the user explicitly asks for a write-capable coverage/proof pass, spawn a dedicated `worker` subagent after any simplify pass using `gpt-5.4-mini` and hand it `agent-docs/prompts/coverage-write.md` plus the audit handoff packet below. Run this optional pass in parallel with the final completion audit, keep its write scope limited to tests or direct-proof scaffolding for the already-implemented behavior, and treat it as additive rather than authoritative over the main implementation.
-8. For user-visible, persisted-state, operational, or trust-boundary changes, capture at least one direct scenario check in addition to scripted tests and record the exact evidence. Examples: built CLI command, focused manual flow, browser inspection, or a narrow end-to-end path.
-9. Run or re-run the required checks after the implementation is stable, after any simplify updates, after any write-capable coverage pass lands, and after any later review-driven fixes.
-10. For normal repo code/test/config changes, spawn a dedicated audit subagent for the final completion review and hand it `agent-docs/prompts/task-finish-review.md` plus the audit handoff packet below. For the tiny repo-internal fast path below, do an explicit local final review instead.
-11. Treat that final review, whether local or delegated, as the audit of remaining coverage and proof gaps too. If it finds meaningful missing tests or boundary-level verification, add the smallest high-impact proof before handoff instead of creating an additional default coverage-audit pass.
-12. Resolve high-severity findings before final handoff and re-run affected required checks after any post-review fixes.
-13. Do not automatically spawn another workflow audit subagent after that first final review. One extra audit rerun is allowed only when the first review forces a large or high-risk follow-up diff; otherwise finish locally after the post-fix checks.
-14. If the task used an active execution plan and the task is done or abandoned, close that plan before commit or handoff. Prefer `bash scripts/finish-task <active-plan-path> "type(scope): summary" <path> [path ...]` when the task is ready to commit.
+7. When the task touches packages/apps, run the coverage-bearing verification command chosen from `agent-docs/operations/verification-and-runtime.md` once the implementation is stable enough to produce a truthful signal. Prefer `pnpm test:diff <path ...>` when it already covers the touched owner truthfully; otherwise run the edited owner package/app coverage command required by that doc.
+8. When step 7 applies, spawn a dedicated `worker` subagent after any simplify pass using `gpt-5.4-mini` and hand it `agent-docs/prompts/coverage-write.md` plus the audit handoff packet below. This coverage-focused pass is required for repo code/test/config changes that rely on owner-level coverage commands or diff-aware coverage verification. Keep its write scope limited to tests or direct-proof scaffolding for the already-implemented behavior, and have it use the current coverage-command output to get the lane passing or materially closer.
+9. For user-visible, persisted-state, operational, or trust-boundary changes, capture at least one direct scenario check in addition to scripted tests and record the exact evidence. Examples: built CLI command, focused manual flow, browser inspection, or a narrow end-to-end path.
+10. Run or re-run the required checks after the implementation is stable, after any simplify updates, after any required coverage pass lands, and after any later review-driven fixes.
+11. For normal repo code/test/config changes, spawn a dedicated audit subagent for the final completion review and hand it `agent-docs/prompts/task-finish-review.md` plus the audit handoff packet below. For the tiny repo-internal fast path below, do an explicit local final review instead.
+12. Treat that final review, whether local or delegated, as the audit of remaining coverage and proof gaps too. If it finds meaningful missing tests or boundary-level verification, add the smallest high-impact proof before handoff instead of creating an additional default coverage-audit pass.
+13. Resolve high-severity findings before final handoff and re-run affected required checks after any post-review fixes.
+14. Do not automatically spawn another workflow audit subagent after that first final review. One extra audit rerun is allowed only when the first review forces a large or high-risk follow-up diff; otherwise finish locally after the post-fix checks.
+15. If the task used an active execution plan and the task is done or abandoned, close that plan before commit or handoff. Prefer `bash scripts/finish-task <active-plan-path> "type(scope): summary" <path> [path ...]` when the task is ready to commit.
     `scripts/finish-task` is the plan-aware wrapper: it only accepts a plan that still lives under `agent-docs/exec-plans/active/`, resolves the provided file/directory inputs into exact changed file paths before any plan move, closes that plan, then calls `scripts/committer` with the completed-plan artifact plus those resolved paths.
     If the task is ledger-only, or the plan was already moved out of `active/`, use `scripts/committer` directly instead of trying to force `finish-task`.
-15. Final handoff must report required-check results plus any direct scenario evidence; green required checks remain the default completion bar.
-16. If a required check fails for a credibly unrelated pre-existing reason, commit your exact touched files and hand off with the failing command, failing target, and why your diff did not cause it. If you cannot defend that separation, treat the failure as blocking.
+16. Final handoff must report required-check results plus any direct scenario evidence; green required checks remain the default completion bar.
+17. If a required check fails for a credibly unrelated pre-existing reason, commit your exact touched files and hand off with the failing command, failing target, and why your diff did not cause it. If you cannot defend that separation, treat the failure as blocking.
 
 ## When To Add Simplify
 
-The default repo audit path is a single required `task-finish-review` pass.
+The default repo audit path is `coverage-write` when the verification lane already includes owner-level coverage, followed by the required `task-finish-review` pass.
 Add a `simplify` pass before final review only when all of the following are true:
 
 1. The implementation diff is 200 or more changed lines so a dedicated cut-back pass is likely to remove real maintenance cost.
@@ -45,32 +47,34 @@ If those conditions are not met, skip `simplify` and proceed directly to `task-f
 
 ## Tiny Repo-Internal Fast Path
 
-Use local final review instead of a mandatory audit subagent only when all of the following are true:
+Use local final review instead of a mandatory final-review audit subagent only when all of the following are true:
 
 1. The implementation diff is under roughly 120 changed lines.
 2. The touched files stay within repo-internal docs/process/verification tooling such as `agent-docs/**`, `docs/**`, `scripts/**`, `AGENTS.md`, `ARCHITECTURE.md`, `README.md`, `vitest.config.ts`, or root `tsconfig*.json`.
 3. The change does not touch package/app runtime logic, product behavior, persisted-state logic, auth/trust boundaries, or deploy surfaces.
 4. The verification path is the low-risk fast path from `agent-docs/operations/verification-and-runtime.md`, centered on `pnpm typecheck` plus direct touched-file checks.
 
+This fast path only replaces `task-finish-review`. It does not skip `coverage-write` when the task's verification lane already includes a package/app coverage command.
+
 If any of those conditions fail, use the normal audit path.
 
 ## Required Audit Delegation
 
-- The default audit path is one mandatory subagent pass, `task-finish-review`.
-- The only standing exception is the tiny repo-internal fast path above, which uses explicit local final review instead of a spawned audit subagent.
+- The default audit path for repo code/test/config changes is a mandatory `coverage-write` pass whenever the verification lane already includes owner-level coverage, plus `task-finish-review`.
+- The only standing exception is the tiny repo-internal fast path above, which uses explicit local final review instead of a spawned final-review audit subagent. It does not skip `coverage-write` when that pass applies.
 - `simplify` is an exceptional extra pass for locally developed non-patch changes at 200 or more changed lines, not the repo default.
-- A write-capable coverage/proof pass is optional and only runs when the user explicitly asks for it.
 - Use explicitly spawned subagents for every required audit pass.
-- Treat audit subagents as review-only unless the user explicitly asks for an audit worker that can patch code; when that happens, keep the worker's write scope narrow and pre-declared.
+- Treat `coverage-write` as the default write-capable audit worker, with a narrow pre-declared scope limited to tests or direct-proof scaffolding.
+- Treat other audit subagents as review-only unless the user explicitly asks for another audit worker that can patch code; when that happens, keep the worker's write scope narrow and pre-declared.
 - The default audit response contract is plain-text findings with recommended fixes, not patch attachments and not prompts for additional agents.
 - Review-mode audit subagents must not edit files, run `scripts/committer`, run `scripts/finish-task`, invoke `git commit`, or otherwise create commits.
 - Prefer a fresh non-forked review handoff packet over inheriting the full implementation thread. Only widen context when a specific review question cannot be answered from the narrowed packet.
-- The final completion review owns remaining coverage/proof-gap review; an optional write-capable coverage pass may run in parallel when the user asks for it, but it does not replace that final review.
+- The final completion review owns remaining coverage/proof-gap review after any required `coverage-write` pass; the coverage pass does not replace final review.
 - Treat the main implementation agent as the integrator of audit findings, not the auditor of record.
 - Within this repo, required audit passes are standing-authorized by repo policy. `AGENTS.md` plus this workflow count as standing permission to spawn the required audit subagent passes once the user has asked for repo work that reaches this workflow, so do not stop only to ask for a second explicit "use subagents" instruction.
 - When the current environment supports spawned agents, run those required audit passes directly as part of task completion instead of treating them as optional follow-up delegation.
 - Use a fresh subagent per pass unless the user explicitly instructs otherwise.
-- When the optional write-capable coverage pass is requested, start it after simplify (if any) and in parallel with `task-finish-review` rather than serializing both behind one another.
+- Start `coverage-write` after simplify (if any) and before the final completion review so that later review sees the post-coverage state.
 - After the first final-review pass, do not spawn another workflow audit subagent by default. One extra rerun is the maximum, and only when the first pass produced a large or high-risk repair diff that materially changed the review surface.
 - When waiting on these audit subagents, prefer a patient wait window over repeated short polling. A realistic default is 5 to 10 minutes for each pass on medium or large diffs.
 - Do not cancel or close an audit subagent early just because it has been running for under 10 minutes unless you have concrete evidence that it is stuck or operating on the wrong scope.
@@ -115,11 +119,12 @@ For each required audit subagent, provide:
 - An explicit `review only` instruction covering no file edits, no commit helpers, and no commits.
 - Instruction to read `COORDINATION_LEDGER.md`, honor any explicit exclusive/refactor notes, and otherwise work carefully on top of overlapping rows.
 
-For the optional write-capable coverage/proof pass, also provide:
+For the required `coverage-write` pass, also provide:
 
+- The exact coverage-bearing command(s) required for the task plus the current pass/fail status or the most relevant failing output summary.
 - The exact write scope, limited to tests or proof scaffolding for already-landed behavior.
 - An explicit instruction not to modify production code unless the parent agent separately widens that scope.
-- The intended model choice, `gpt-5.4-mini`, so the write-capable coverage pass stays cheap and narrow.
+- The intended model choice, `gpt-5.4-mini`, so the coverage pass stays cheap and narrow.
 
 ## Safety Rules
 
