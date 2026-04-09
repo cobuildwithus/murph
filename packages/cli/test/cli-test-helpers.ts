@@ -516,9 +516,19 @@ async function execCliProcess(
   },
 ) {
   const commandEnv = buildCliExecutionEnv(options?.env)
+  const executionMode = resolveCliProcessExecutionMode(options)
 
-  if (resolveCliProcessExecutionMode(options) === 'harness') {
-    return execCliProcessThroughHarness(args, commandEnv)
+  if (executionMode === 'harness') {
+    try {
+      return await execCliProcessThroughHarness(args, commandEnv)
+    } catch (error) {
+      if (shouldRetryCliExecution(error) && (await waitForCliRuntimeArtifacts())) {
+        resetCliCommandHarnessPool()
+        return await execCliProcessThroughHarness(args, commandEnv)
+      }
+
+      throw error
+    }
   }
 
   return execCliProcessIsolated(args, {
@@ -790,6 +800,10 @@ function installCliCommandHarnessProcessExitCleanup(): void {
   }
 
   process.once('exit', cleanup)
+}
+
+function resetCliCommandHarnessPool(): void {
+  cliCommandHarnessPoolPromise = null
 }
 
 function registerCliCommandHarnessChild(
