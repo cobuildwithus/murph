@@ -436,7 +436,7 @@ test("Oura webhook subscription client validates invalid inputs and malformed re
         callbackUrl: "https://sync.example.test/api/device-sync/webhooks/oura",
         verificationToken: "verify-token-for-tests",
         desired: [
-          { eventType: " ", dataType: "daily_sleep" },
+          { eventType: "create", dataType: " " },
         ],
       }),
     /targets require non-empty eventType and dataType values/u,

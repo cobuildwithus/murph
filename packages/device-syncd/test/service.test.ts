@@ -146,6 +146,11 @@ function createFakeProvider(overrides: Partial<DeviceSyncProvider> = {}): Device
   };
 }
 
+function requireCallback(callback: (() => void) | null, message: string): () => void {
+  assert.ok(callback, message);
+  return callback;
+}
+
 test("device sync service connects, imports, and deduplicates webhook traces", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd");
   const imports: unknown[] = [];
@@ -423,7 +428,10 @@ test("device sync service scheduler queues due active jobs and skips unsupported
     select count(*) as total
     from device_job
     where account_id = ?
-  `).get(service.store.getAccountByExternalAccount("unsupported", "unsupported-1")?.id) as { total: number };
+  `);
+  const unsupportedAccount = service.store.getAccountByExternalAccount("unsupported", "unsupported-1");
+  assert.ok(unsupportedAccount);
+  const unsupportedJobCount = unsupportedJobs.get(unsupportedAccount.id) as { total: number };
   const disconnectedJobs = service.store.database.prepare(`
     select count(*) as total
     from device_job
@@ -432,7 +440,7 @@ test("device sync service scheduler queues due active jobs and skips unsupported
 
   assert.deepEqual(scheduledJobs.map((job) => job.kind), ["scheduled-refresh"]);
   assert.equal(service.store.getAccountById(dueActive.id)?.nextReconcileAt, "2026-03-17T12:30:00.000Z");
-  assert.equal(unsupportedJobs.total, 0);
+  assert.equal(unsupportedJobCount.total, 0);
   assert.equal(disconnectedJobs.total, 0);
 
   service.close();
@@ -1269,7 +1277,7 @@ test("device sync service fences in-flight jobs after disconnect", async () => {
   const disconnected = await service.disconnectAccount(connected.account.id);
   assert.equal(disconnected.account.status, "disconnected");
 
-  releaseProviderResolve?.();
+  requireCallback(releaseProviderResolve, "provider release callback was not initialized")();
   await workerPromise;
 
   const storedAccount = service.store.getAccountById(connected.account.id);

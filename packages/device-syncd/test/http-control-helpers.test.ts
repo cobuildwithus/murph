@@ -9,6 +9,7 @@ import {
   isLoopbackRemoteAddress,
   renderCallbackHtml,
 } from "../src/http.ts";
+import { withIncomingHeader } from "./helpers.ts";
 
 test("isLoopbackRemoteAddress accepts localhost forms and rejects non-loopback values", () => {
   assert.equal(isLoopbackRemoteAddress("127.0.0.1"), true);
@@ -33,9 +34,7 @@ test("assertDeviceSyncControlRequest accepts valid loopback bearer auth and reje
   assert.throws(
     () =>
       assertDeviceSyncControlRequest({
-        headers: {
-          authorization: ["Bearer control-token-for-tests", "Bearer duplicate"],
-        },
+        headers: withIncomingHeader("authorization", ["Bearer control-token-for-tests", "Bearer duplicate"]),
         remoteAddress: "127.0.0.1",
         controlToken: "control-token-for-tests",
       }),

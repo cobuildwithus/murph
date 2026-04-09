@@ -144,7 +144,7 @@ test("client JSON helpers normalize payload parsing and auth headers", () => {
 
 test("requestDeviceSyncJson merges defaults, attaches auth, and returns parsed objects", async () => {
   let recordedUrl = "";
-  let recordedHeaders: Headers | null = null;
+  let recordedHeaders: Headers | undefined;
   let recordedMethod = "";
   const requestJson = createDeviceSyncJsonRequester({
     baseUrl: "http://127.0.0.1:8788",
@@ -185,9 +185,10 @@ test("requestDeviceSyncJson merges defaults, attaches auth, and returns parsed o
 
   assert.equal(recordedUrl, "http://127.0.0.1:8788/providers");
   assert.equal(recordedMethod, "POST");
-  assert.equal(recordedHeaders?.get("accept"), "application/json");
-  assert.equal(recordedHeaders?.get("content-type"), "application/json");
-  assert.equal(recordedHeaders?.get("authorization"), "Bearer control-token");
+  assert.ok(recordedHeaders);
+  assert.equal(recordedHeaders.get("accept"), "application/json");
+  assert.equal(recordedHeaders.get("content-type"), "application/json");
+  assert.equal(recordedHeaders.get("authorization"), "Bearer control-token");
   assert.deepEqual(response, {
     ok: true,
     provider: "oura",
