@@ -349,7 +349,7 @@ test("readVaultSourceTolerant keeps sparse vault layouts but hard-cuts legacy re
         id: "aud_shadow",
         kind: "encounter",
         occurredAt: "2026-04-08T09:00:00.000Z",
-        title: "Health history encounter",
+        title: "Health encounter",
       }),
     ].join("\n"),
   );
