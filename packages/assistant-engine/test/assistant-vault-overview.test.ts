@@ -11,6 +11,7 @@ import {
   importDocument,
   initializeVault,
   upsertAllergy,
+  upsertAutomation,
   upsertCondition,
   upsertGoal,
   upsertProtocolItem,
@@ -174,6 +175,26 @@ it('builds a navigation-only overview from canonical, raw, and source-root cover
     title: 'Lab report',
     vaultRoot,
   })
+  await upsertAutomation({
+    vaultRoot,
+    now: new Date('2026-04-08T00:00:00.000Z'),
+    title: 'Weekly check-in',
+    summary: 'Send a weekly summary.',
+    prompt: 'Send a weekly summary.',
+    schedule: {
+      kind: 'cron',
+      expression: '0 9 * * 1',
+      timeZone: 'Australia/Sydney',
+    },
+    route: {
+      channel: 'telegram',
+      deliverResponse: false,
+      deliveryTarget: 'self',
+      identityId: 'identity-01',
+      participantId: 'participant-01',
+      sourceThreadId: 'thread-01',
+    },
+  })
 
   const overview = await buildAssistantVaultOverviewBlock(vaultRoot)
 
@@ -191,6 +212,9 @@ it('builds a navigation-only overview from canonical, raw, and source-root cover
   )
   expect(overview).toContain(
     'Additional user records include 1 journal day and 1 document.',
+  )
+  expect(overview).toContain(
+    'Scheduled assistant automations are present.',
   )
   expect(overview).toContain(
     'Raw meal import coverage includes 2 manifests under `raw/meals`.',

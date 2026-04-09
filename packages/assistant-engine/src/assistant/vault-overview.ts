@@ -2,6 +2,7 @@ import { readdir } from 'node:fs/promises'
 
 import { resolveVaultPath, VAULT_LAYOUT, walkVaultFiles } from '@murphai/core'
 import {
+  listAutomations,
   listWearableSourceHealth,
   readVault,
   type VaultReadModel,
@@ -13,9 +14,17 @@ const DERIVED_INBOX_ROOT = 'derived/inbox'
 export async function buildAssistantVaultOverviewBlock(
   vaultRoot: string,
 ): Promise<string | null> {
-  const [vault, rawMealManifestPaths, researchNotePaths, rawInboxPresent, derivedInboxPresent] =
+  const [
+    vault,
+    automations,
+    rawMealManifestPaths,
+    researchNotePaths,
+    rawInboxPresent,
+    derivedInboxPresent,
+  ] =
     await Promise.all([
       readVault(vaultRoot),
+      listAutomations(vaultRoot),
       listRawMealManifestPaths(vaultRoot),
       walkVaultFiles(vaultRoot, RESEARCH_ROOT, { extension: '.md' }),
       directoryHasEntries(vaultRoot, VAULT_LAYOUT.rawInboxDirectory),
@@ -26,6 +35,7 @@ export async function buildAssistantVaultOverviewBlock(
   const wearableCoverage = summarizeWearableCoverage(vault)
   const healthContextCoverage = summarizeHealthContextCoverage(vault)
   const journalAndDocumentCoverage = summarizeJournalAndDocumentCoverage(vault)
+  const automationCoverage = summarizeAutomationCoverage(automations.length)
   const rawCoverage = summarizeRawCoverage(rawMealManifestPaths.length)
   const bankCoverage = summarizeBankCoverage(vault)
   const otherSources = summarizeOtherSources({
@@ -41,6 +51,7 @@ export async function buildAssistantVaultOverviewBlock(
     wearableCoverage,
     healthContextCoverage,
     journalAndDocumentCoverage,
+    automationCoverage,
     rawCoverage,
     bankCoverage,
     otherSources,
@@ -110,6 +121,12 @@ function summarizeJournalAndDocumentCoverage(vault: VaultReadModel): string | nu
   }
 
   return `- Additional user records include ${joinWithAnd(parts)}.`
+}
+
+function summarizeAutomationCoverage(automationCount: number): string | null {
+  return automationCount > 0
+    ? '- Scheduled assistant automations are present.'
+    : null
 }
 
 function summarizeRawCoverage(rawMealManifestCount: number): string | null {
