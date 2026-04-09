@@ -118,7 +118,7 @@ it('builds a navigation-only overview from canonical, raw, and source-root cover
     'Vault overview for navigation only:',
   )
   expect(overview).toContain(
-    'Canonical coverage includes 2 meal events, 1 activity session, and 1 experiment.',
+    'Canonical coverage includes 2 meal events, 1 workout/activity session, and 1 experiment.',
   )
   expect(overview).toContain(
     'Wearable coverage is present via WHOOP.',
