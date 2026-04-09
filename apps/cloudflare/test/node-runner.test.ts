@@ -55,6 +55,12 @@ import {
 
 const describe = baseDescribe.sequential;
 const initialGlobalFetch = global.fetch;
+const HOSTED_DEVICE_SYNC_ENV_PREFIXES = [
+  "DEVICE_SYNC_",
+  "GARMIN_",
+  "OURA_",
+  "WHOOP_",
+] as const;
 
 type NodeRunnerTestInput =
   Pick<
@@ -222,11 +228,16 @@ function installHostedFetchBaseUrlProxy(input: {
 
 describe("runHostedExecutionJob", () => {
   const cleanupPaths: string[] = [];
+  let previousHostedDeviceSyncEnv: Record<string, string | undefined> = {};
 
   beforeEach(async () => {
     vi.restoreAllMocks();
     setHostedExecutionIsolatedRunnerForTests(null);
     setHostedExecutionRunModeForTests("in-process");
+    previousHostedDeviceSyncEnv = captureEnvVarsWithPrefixes(HOSTED_DEVICE_SYNC_ENV_PREFIXES);
+    for (const key of Object.keys(previousHostedDeviceSyncEnv)) {
+      restoreEnvVar(key, undefined);
+    }
     const actualAssistantCore = await vi.importActual<typeof import("@murphai/assistant-engine")>(
       "@murphai/assistant-engine",
     );
@@ -240,6 +251,7 @@ describe("runHostedExecutionJob", () => {
     setHostedExecutionIsolatedRunnerForTests(null);
     setHostedExecutionRunModeForTests(null);
     setHostedExecutionRunStartHookForTests(null);
+    restoreEnvVars(previousHostedDeviceSyncEnv);
     if (initialGlobalFetch) {
       global.fetch = initialGlobalFetch;
     } else {
@@ -2688,6 +2700,14 @@ function clearHostedAssistantSeedEnv(): Record<string, string | undefined> {
 
 function captureEnvVars(keys: readonly string[]): Record<string, string | undefined> {
   return Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+}
+
+function captureEnvVarsWithPrefixes(prefixes: readonly string[]): Record<string, string | undefined> {
+  return Object.fromEntries(
+    Object.keys(process.env)
+      .filter((key) => prefixes.some((prefix) => key.startsWith(prefix)))
+      .map((key) => [key, process.env[key]]),
+  );
 }
 
 function restoreEnvVars(values: Record<string, string | undefined>): void {
