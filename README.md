@@ -4,7 +4,7 @@ Murph is your personal health assistant.
 
 Think OpenClaw, but built specifically to help you live longer and healthier.
 
-Underneath that assistant, Murph keeps durable human-reviewed truth in Markdown, append-only machine history in JSONL, and layers a typed CLI, local daemons, and hosted control/execution surfaces on top of that vault.
+Underneath that assistant, Murph keeps durable human-reviewed truth in Markdown, append-only machine event ledgers in JSONL, and layers a typed CLI, local daemons, and hosted control/execution surfaces on top of that vault.
 
 The main installable product entrypoint is `@murphai/murph`, which gives you the `murph` command.
 
@@ -98,6 +98,7 @@ Murph is opinionated about storage boundaries:
 
 - Markdown is the human-facing source of truth for durable documents such as `CORE.md`, journals, memory, goals, conditions, protocols, registries, and the derived personal wiki.
 - JSONL ledgers are the machine-facing source of truth for append-only records such as events, samples, assessments, and audit entries.
+- Blood tests remain user-facing reads over canonical `kind: "test"` event-ledger records; they do not introduce a second storage family.
 - Imported source artifacts are copied into `raw/**` and treated as immutable.
 - Derived parser output and compiled knowledge pages live under `derived/**` and stay rebuildable. For the knowledge wiki specifically, `derived/knowledge/index.md` is the content catalog, `derived/knowledge/log.md` is the append-only write log, and `derived/knowledge/pages/*.md` are the assistant-authored personal synthesis pages.
 - Local machine state lives under `.runtime/**`, with durable non-canonical operational state in `.runtime/operations/**`, rebuildable projections in `.runtime/projections/**`, and ephemeral scratch state in `.runtime/cache/**` plus `.runtime/tmp/**`.
