@@ -208,7 +208,6 @@ describe("hosted runner container image contract", () => {
       "@murphai/importers",
       "@murphai/inbox-services",
       "@murphai/inboxd",
-      "@murphai/inboxd-imessage",
       "@murphai/messaging-ingress",
       "@murphai/murph",
       "@murphai/operator-config",

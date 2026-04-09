@@ -44,6 +44,9 @@
       "path": "./packages/inboxd"
     },
     {
+      "path": "./packages/inboxd-imessage"
+    },
+    {
       "path": "./packages/parsers"
     },
     {
