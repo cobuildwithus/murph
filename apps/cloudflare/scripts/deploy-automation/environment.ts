@@ -1,3 +1,4 @@
+import { readHostedAssistantApiKeyEnvName } from "@murphai/assistant-runtime/hosted-assistant-env";
 import { isAllowedHostedAssistantReferencedRunnerEnvKey } from "../../src/hosted-env-policy.ts";
 
 import {
@@ -183,13 +184,7 @@ function normalizePositiveInteger(
     return fallback;
   }
 
-  const parsed = Number.parseInt(normalized, 10);
-
-  if (!Number.isInteger(parsed) || parsed < 1) {
-    throw new Error(`${label} must be a positive integer.`);
-  }
-
-  return parsed;
+  return parsePositiveInteger(normalized, label, "positive integer");
 }
 
 function normalizeContainerInstanceType(
@@ -244,13 +239,7 @@ function normalizePositiveIntegerString(
   label: string,
 ): string {
   const normalized = normalizeOptionalString(value) ?? fallback;
-  const parsed = Number.parseInt(normalized, 10);
-
-  if (!Number.isInteger(parsed) || parsed < 1) {
-    throw new Error(`${label} must be a positive integer string.`);
-  }
-
-  return String(parsed);
+  return String(parsePositiveInteger(normalized, label, "positive integer string"));
 }
 
 function normalizeSamplingRate(
@@ -273,11 +262,23 @@ function normalizeSamplingRate(
   return parsed;
 }
 
+function parsePositiveInteger(value: string, label: string, description: string): number {
+  const parsed = Number.parseInt(value, 10);
+
+  if (!Number.isInteger(parsed) || parsed < 1) {
+    throw new Error(`${label} must be a ${description}.`);
+  }
+
+  return parsed;
+}
+
 function resolveHostedWorkerVar(
   source: EnvSource,
   key: typeof HOSTED_WORKER_OPTIONAL_VAR_NAMES[number],
 ): string | null {
-  const value = normalizeOptionalString(source[key]);
+  const value = key === "HOSTED_ASSISTANT_API_KEY_ENV"
+    ? readHostedAssistantApiKeyEnvName(source)
+    : normalizeOptionalString(source[key]);
 
   if (
     key === "HOSTED_ASSISTANT_API_KEY_ENV"
@@ -287,15 +288,7 @@ function resolveHostedWorkerVar(
     return null;
   }
 
-  if (value) {
-    return value;
-  }
-
-  if (key === "MURPH_WEB_FETCH_ENABLED") {
-    return "true";
-  }
-
-  return null;
+  return value ?? (key === "MURPH_WEB_FETCH_ENABLED" ? "true" : null);
 }
 
 function requirePositiveNumber(value: unknown, label: string): number {

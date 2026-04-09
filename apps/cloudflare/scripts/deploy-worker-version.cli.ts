@@ -7,7 +7,7 @@ import {
   type DeploymentStatusPayload,
   type HostedWorkerDeploymentResult,
 } from "./deploy-worker-version.shared.js";
-import { requireConfiguredString } from "./deploy-automation/shared.ts";
+import { parseJsonValue, requireConfiguredString } from "./deploy-automation/shared.ts";
 import { resolveDeployWorkerCliPaths } from "./deploy-worker-version-paths.js";
 import { runWranglerJson, runWranglerLogged } from "./wrangler-runner.js";
 
@@ -20,11 +20,11 @@ export async function runDeployWorkerVersionCli(
     runHostedWorkerDeployment?: typeof runHostedWorkerDeployment;
   } = {},
 ): Promise<HostedWorkerDeploymentResult> {
-  const { configPath, deployPaths, resultPath, secretsFilePath } = resolveDeployWorkerCliPaths(argv, {
+  const { configPath, resultPath, secretsFilePath } = resolveDeployWorkerCliPaths(argv, {
     deployRoot: options.deployRoot,
   });
   const env = options.env ?? process.env;
-  const workerName = requireEnv("CF_WORKER_NAME", env);
+  const workerName = requireConfiguredString(env.CF_WORKER_NAME, "CF_WORKER_NAME");
 
   const result = await (options.runHostedWorkerDeployment ?? runHostedWorkerDeployment)({
     configPath,
@@ -181,18 +181,4 @@ async function readRenderedDeployConfig(configFilePath: string): Promise<Record<
 
 function isWranglerNoDeploymentsError(error: unknown): boolean {
   return error instanceof Error && error.message.includes("has no deployments");
-}
-
-function parseJsonValue<T>(value: string, label: string): T {
-  try {
-    return JSON.parse(value) as T;
-  } catch (error) {
-    throw new Error(
-      `${label} must be valid JSON: ${error instanceof Error ? error.message : String(error)}`,
-    );
-  }
-}
-
-function requireEnv(name: string, env: Readonly<Record<string, string | undefined>>): string {
-  return requireConfiguredString(env[name], name);
 }

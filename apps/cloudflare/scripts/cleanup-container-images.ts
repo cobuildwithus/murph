@@ -17,6 +17,8 @@ if (!cliArgs.repositoryFilter) {
   throw new Error("Pass --filter with a repository regex so image cleanup stays intentionally scoped.");
 }
 
+const wranglerConfigArgs = cliArgs.configPath ? ["--config", cliArgs.configPath] : [];
+
 const rawList = await runWranglerJson([
   "containers",
   "images",
@@ -24,7 +26,7 @@ const rawList = await runWranglerJson([
   "--json",
   "--filter",
   cliArgs.repositoryFilter,
-  ...(cliArgs.configPath ? ["--config", cliArgs.configPath] : []),
+  ...wranglerConfigArgs,
 ]);
 const images = parseHostedContainerImageListOutput(rawList);
 const tagsToDelete = selectHostedContainerImageTagsForCleanup({
@@ -53,7 +55,7 @@ for (const entry of tagsToDelete) {
     "images",
     "delete",
     entry.image,
-    ...(cliArgs.configPath ? ["--config", cliArgs.configPath] : []),
+    ...wranglerConfigArgs,
   ]);
 }
 

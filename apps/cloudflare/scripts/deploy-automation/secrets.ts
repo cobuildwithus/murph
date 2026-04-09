@@ -1,3 +1,4 @@
+import { readHostedAssistantApiKeyEnvName } from "@murphai/assistant-runtime/hosted-assistant-env";
 import { isAllowedHostedAssistantReferencedRunnerEnvKey } from "../../src/hosted-env-policy.ts";
 
 import { normalizeOptionalString, requireConfiguredString } from "./shared.ts";
@@ -62,7 +63,7 @@ export function buildHostedWorkerSecretsPayload(
 function readHostedAssistantReferencedSecret(
   source: EnvSource,
 ): Record<string, string> {
-  const envName = normalizeOptionalString(source.HOSTED_ASSISTANT_API_KEY_ENV);
+  const envName = readHostedAssistantApiKeyEnvName(source);
 
   if (!envName || !isAllowedHostedAssistantReferencedRunnerEnvKey(envName)) {
     return {};
