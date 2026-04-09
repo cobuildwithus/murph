@@ -158,40 +158,43 @@ export async function withMockProcessTty<TResult>(
     rendered += chunk.toString()
   })
 
-  Object.defineProperty(process, 'stdin', {
-    configurable: true,
-    value: stdin,
-  })
-  Object.defineProperty(process, 'stderr', {
-    configurable: true,
-    value: stderr,
-  })
-
   const flush = async () => {
     await new Promise((resolve) => setTimeout(resolve, 10))
   }
 
   try {
-    return await run({
-      flush,
-      readOutput: () => rendered,
-      stderr,
-      stdin,
-      writeInput: async (value) => {
-        stdin.write(value)
-        await flush()
-      },
-    })
-  } finally {
-    stdin.end()
-    stderr.end()
+    try {
+      Object.defineProperty(process, 'stdin', {
+        configurable: true,
+        value: stdin,
+      })
+      Object.defineProperty(process, 'stderr', {
+        configurable: true,
+        value: stderr,
+      })
 
-    if (stdinDescriptor) {
-      Object.defineProperty(process, 'stdin', stdinDescriptor)
+      return await run({
+        flush,
+        readOutput: () => rendered,
+        stderr,
+        stdin,
+        writeInput: async (value) => {
+          stdin.write(value)
+          await flush()
+        },
+      })
+    } finally {
+      stdin.end()
+      stderr.end()
+
+      if (stdinDescriptor) {
+        Object.defineProperty(process, 'stdin', stdinDescriptor)
+      }
+      if (stderrDescriptor) {
+        Object.defineProperty(process, 'stderr', stderrDescriptor)
+      }
     }
-    if (stderrDescriptor) {
-      Object.defineProperty(process, 'stderr', stderrDescriptor)
-    }
+  } finally {
     releaseHarness()
   }
 }
