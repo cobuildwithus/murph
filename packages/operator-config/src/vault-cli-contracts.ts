@@ -32,9 +32,12 @@ function resolveQueryRecordTypeValues(): readonly string[] {
   }
 }
 
+function describeQueryRecordTypes(values: readonly string[]): string {
+  return `Optional query record families. Repeat --record-type for multiple values: ${values.join(', ')}.`
+}
+
 const queryRecordTypeValues = resolveQueryRecordTypeValues()
-const queryRecordTypeDescription =
-  `Optional query record families. Repeat --record-type for multiple values: ${queryRecordTypeValues.join(', ')}.`
+const queryRecordTypeDescription = describeQueryRecordTypes(queryRecordTypeValues)
 
 export const isoTimestampSchema = z
   .string()

@@ -2292,7 +2292,7 @@
                   ]
                 },
                 "providerPreset": {
-                  "description": "Optional named OpenAI-compatible provider preset. Only applies with `--preset openai-compatible`; seeds endpoint defaults for prompts or non-interactive saves.",
+                  "description": "Optional named OpenAI-compatible provider preset. Only applies with `--preset openai-compatible`. Seeds endpoint defaults for prompts or non-interactive saves.",
                   "type": "string",
                   "enum": [
                     "openai",
@@ -2339,7 +2339,7 @@
                   "type": "boolean"
                 },
                 "codexCommand": {
-                  "description": "Optional Codex CLI executable path. Only applies with `--preset codex`; defaults to `codex`.",
+                  "description": "Optional Codex CLI executable path. Only applies with `--preset codex`. Defaults to `codex`.",
                   "type": "string",
                   "minLength": 1
                 },

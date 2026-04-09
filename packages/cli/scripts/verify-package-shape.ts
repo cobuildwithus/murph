@@ -3,8 +3,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
   configSchemaPath,
-  generateIncurConfigSchema,
-  generateIncurTypes,
+  generateIncurArtifacts,
   incurGeneratedTypesPath,
 } from './incur-config-schema.js'
 
@@ -278,7 +277,6 @@ for (const filePath of packageLocalTsFiles) {
 }
 
 const libraryEntry = await readFile(path.join(packageDir, 'src/index.ts'), 'utf8')
-const generatedTypes = await readFile(incurGeneratedTypesPath, 'utf8')
 const configSchema = JSON.parse(
   await readFile(configSchemaPath, 'utf8'),
 ) as {
@@ -289,32 +287,9 @@ const configSchema = JSON.parse(
     }
   }
 }
-assert(
-  !/\.serve\(\)/u.test(libraryEntry),
-  'src/index.ts must stay import-safe and avoid serving the CLI on package import.',
-)
-assert(
-  !/@murph(?:ai)?\/assistant-core\//u.test(libraryEntry),
-  'src/index.ts must not re-export headless assistant-core modules through the murph package root.',
-)
-assert(
-  configSchema.type === 'object',
-  'config.schema.json must stay a JSON object schema.',
-)
-assert(
-  typeof configSchema.properties?.commands?.properties?.vault === 'object' &&
-    typeof configSchema.properties?.commands?.properties?.assistant === 'object',
-  'config.schema.json must cover the nested vault and assistant command groups.',
-)
-assert(
-  JSON.stringify(configSchema)
-    === JSON.stringify(JSON.parse(await generateIncurConfigSchema({ rebuildCli: false }))),
-  'config.schema.json must stay in sync with the current built CLI entrypoint. Run pnpm --dir packages/cli gen:config-schema after CLI config-surface changes.',
-)
-assert(
-  generatedTypes === await generateIncurTypes({ rebuildCli: false }),
-  'src/incur.generated.ts must stay in sync with the current built CLI entrypoint. Regenerate it from the built CLI after command topology changes.',
-)
+assertImportSafeLibraryEntry(libraryEntry)
+assertConfigSchemaSmoke(configSchema)
+await assertGeneratedArtifactsFresh(configSchema)
 
 console.log('packages/cli package shape verified.')
 
@@ -322,6 +297,51 @@ function assert(condition: unknown, message: string): asserts condition {
   if (!condition) {
     throw new Error(message)
   }
+}
+
+function assertImportSafeLibraryEntry(libraryEntry: string): void {
+  assert(
+    !/\.serve\(\)/u.test(libraryEntry),
+    'src/index.ts must stay import-safe and avoid serving the CLI on package import.',
+  )
+  assert(
+    !/@murph(?:ai)?\/assistant-core\//u.test(libraryEntry),
+    'src/index.ts must not re-export headless assistant-core modules through the murph package root.',
+  )
+}
+
+function assertConfigSchemaSmoke(configSchema: {
+  type?: string
+  properties?: {
+    commands?: {
+      properties?: Record<string, unknown>
+    }
+  }
+}): void {
+  assert(
+    configSchema.type === 'object',
+    'config.schema.json must stay a JSON object schema.',
+  )
+  assert(
+    typeof configSchema.properties?.commands?.properties?.vault === 'object' &&
+      typeof configSchema.properties?.commands?.properties?.assistant === 'object',
+    'config.schema.json must cover the nested vault and assistant command groups.',
+  )
+}
+
+async function assertGeneratedArtifactsFresh(configSchema: object): Promise<void> {
+  const generatedTypes = await readFile(incurGeneratedTypesPath, 'utf8')
+  const generatedArtifacts = await generateIncurArtifacts({ rebuildCli: false })
+
+  assert(
+    JSON.stringify(configSchema)
+      === JSON.stringify(JSON.parse(generatedArtifacts.configSchema)),
+    'config.schema.json must stay in sync with the current built CLI entrypoint. Run pnpm --dir packages/cli gen:config-schema after CLI config-surface changes.',
+  )
+  assert(
+    generatedTypes === generatedArtifacts.types,
+    'src/incur.generated.ts must stay in sync with the current built CLI entrypoint. Regenerate it from the built CLI after command topology changes.',
+  )
 }
 
 async function listFiles(
