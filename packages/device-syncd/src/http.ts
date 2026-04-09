@@ -226,9 +226,9 @@ const DEVICE_SYNC_HTTP_ROUTES = [
 
         if (result.returnTo) {
           const destination = new URL(result.returnTo);
+          resetDeviceSyncCallbackParams(destination);
           destination.searchParams.set("deviceSyncStatus", "connected");
           destination.searchParams.set("deviceSyncProvider", result.account.provider);
-          destination.searchParams.set("deviceSyncAccountId", result.account.id);
           redirect(response, destination.toString());
           return;
         }
@@ -238,7 +238,7 @@ const DEVICE_SYNC_HTTP_ROUTES = [
           200,
           renderCallbackHtml({
             title: `${formatProviderLabel(result.account.provider)} connected`,
-            body: `Connected ${formatProviderLabel(result.account.provider)} account ${result.account.id} successfully.`,
+            body: `Connected ${formatProviderLabel(result.account.provider)} successfully.`,
           }),
         );
       } catch (error) {
@@ -688,11 +688,19 @@ export function buildCallbackErrorRedirectLocation(input: {
   }
 
   const destination = new URL(input.returnTo);
-  destination.searchParams.delete("deviceSyncErrorMessage");
+  resetDeviceSyncCallbackParams(destination);
   destination.searchParams.set("deviceSyncStatus", "error");
   destination.searchParams.set("deviceSyncProvider", input.provider);
   destination.searchParams.set("deviceSyncError", input.errorCode);
   return destination.toString();
+}
+
+function resetDeviceSyncCallbackParams(destination: URL): void {
+  destination.searchParams.delete("deviceSyncStatus");
+  destination.searchParams.delete("deviceSyncProvider");
+  destination.searchParams.delete("deviceSyncAccountId");
+  destination.searchParams.delete("deviceSyncError");
+  destination.searchParams.delete("deviceSyncErrorMessage");
 }
 
 function sendCallbackErrorResponse(response: ServerResponse, fallbackProvider: string, error: DeviceSyncError): void {

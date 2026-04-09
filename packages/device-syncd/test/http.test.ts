@@ -467,7 +467,8 @@ test("device sync http handler routes control and public requests without socket
   assert.equal(callbackSuccess.statusCode, 200);
   assert.equal(callbackSuccess.headers["content-type"], "text/html; charset=utf-8");
   assert.match(callbackSuccess.readText(), /Demo connected/u);
-  assert.match(callbackSuccess.readText(), /acct_demo_01/u);
+  assert.match(callbackSuccess.readText(), /Connected Demo successfully\./u);
+  assert.doesNotMatch(callbackSuccess.readText(), /acct_demo_01/u);
 
   const reconcile = await invokeHandler({
     service,
@@ -778,7 +779,8 @@ test("device sync http handler redirects successful callbacks and renders callba
             id: "acct_redirect",
             provider: "demo",
           },
-          returnTo: "https://app.example.test/settings/devices?deviceSyncErrorMessage=stale",
+          returnTo:
+            "https://app.example.test/settings/devices?deviceSyncErrorMessage=stale&deviceSyncStatus=error&deviceSyncProvider=old&deviceSyncAccountId=acct_stale&deviceSyncError=OLD_ERROR",
         };
       },
     }),
@@ -787,10 +789,15 @@ test("device sync http handler redirects successful callbacks and renders callba
     surface: "public",
   });
   assert.equal(redirected.statusCode, 302);
-  assert.equal(
-    redirected.headers.location,
-    "https://app.example.test/settings/devices?deviceSyncErrorMessage=stale&deviceSyncStatus=connected&deviceSyncProvider=demo&deviceSyncAccountId=acct_redirect",
-  );
+  assert.ok(redirected.headers.location);
+  const redirectedDestination = new URL(redirected.headers.location);
+  assert.equal(redirectedDestination.origin, "https://app.example.test");
+  assert.equal(redirectedDestination.pathname, "/settings/devices");
+  assert.equal(redirectedDestination.searchParams.get("deviceSyncStatus"), "connected");
+  assert.equal(redirectedDestination.searchParams.get("deviceSyncProvider"), "demo");
+  assert.equal(redirectedDestination.searchParams.get("deviceSyncAccountId"), null);
+  assert.equal(redirectedDestination.searchParams.get("deviceSyncError"), null);
+  assert.equal(redirectedDestination.searchParams.get("deviceSyncErrorMessage"), null);
 
   const failed = await invokeHandler({
     service: createStubService({
@@ -1194,6 +1201,7 @@ test("device sync http handler redirects OAuth callback errors back to the origi
   assert.equal(destination.searchParams.get("deviceSyncStatus"), "error");
   assert.equal(destination.searchParams.get("deviceSyncProvider"), "demo");
   assert.equal(destination.searchParams.get("deviceSyncError"), "OAUTH_CALLBACK_REJECTED");
+  assert.equal(destination.searchParams.get("deviceSyncAccountId"), null);
   assert.equal(destination.searchParams.get("deviceSyncErrorMessage"), null);
 });
 
