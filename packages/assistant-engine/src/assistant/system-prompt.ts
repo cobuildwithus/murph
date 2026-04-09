@@ -234,11 +234,11 @@ function buildAssistantCronGuidanceText(input: {
 function buildAssistantAvailableAutomationGuidanceText(
   accessLine: string
 ): string {
-  return `${accessLine}
-
-${buildAssistantSharedAutomationActionText("vault-cli assistant run")}
-
-${buildAssistantSharedAutomationResearchText()}`;
+  return joinPromptSections(
+    accessLine,
+    buildAssistantSharedAutomationActionText("vault-cli assistant run"),
+    buildAssistantSharedAutomationResearchText()
+  );
 }
 
 function buildAssistantSharedAutomationActionText(
