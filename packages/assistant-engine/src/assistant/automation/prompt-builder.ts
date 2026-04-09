@@ -306,7 +306,7 @@ function buildAssistantAutoReplyContextLines(
     return []
   }
 
-  const mediaGroupId = captures[0]?.telegramMetadata?.mediaGroupId ?? null
+  const mediaGroupId = resolveGroupedTelegramMediaGroupId(captures)
   return [
     `Source: ${firstCapture.source}`,
     `Occurred at: ${
@@ -319,6 +319,21 @@ function buildAssistantAutoReplyContextLines(
     captures.length > 1 ? `Grouped captures: ${captures.length}` : null,
     mediaGroupId ? `Telegram media group: ${mediaGroupId}` : null,
   ]
+}
+
+function resolveGroupedTelegramMediaGroupId(
+  captures: readonly AssistantAutoReplyPromptCapture[],
+): string | null {
+  const firstMediaGroupId = captures[0]?.telegramMetadata?.mediaGroupId ?? null
+  if (!firstMediaGroupId) {
+    return null
+  }
+
+  return captures.every(
+    (capture) => capture.telegramMetadata?.mediaGroupId === firstMediaGroupId,
+  )
+    ? firstMediaGroupId
+    : null
 }
 
 function buildAssistantAutoReplyPromptText(

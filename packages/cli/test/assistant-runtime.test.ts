@@ -4266,6 +4266,154 @@ test('scanAssistantAutoReplyOnce coalesces same-thread email backlog into one re
   ])
 })
 
+test('scanAssistantAutoReplyOnce anchors grouped linq replies to the newest grouped message', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-linq-batch-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  runtimeMocks.executeAssistantProviderTurn.mockResolvedValue({
+    provider: 'codex-cli',
+    providerSessionId: 'thread-linq-batch',
+    response: 'linq reply',
+    stderr: '',
+    stdout: '',
+    rawEvents: [],
+  })
+  runtimeMocks.deliverAssistantMessageOverBinding.mockImplementation(async (input: any) => ({
+    message: input.message,
+    session: createMockCodexRuntimeSession({
+      binding: {
+        conversationKey: 'channel:linq|thread:linq-thread-1',
+        channel: 'linq',
+        identityId: null,
+        actorId: 'linq-user-1',
+        threadId: 'linq-thread-1',
+        threadIsDirect: true,
+        delivery: {
+          kind: 'participant',
+          target: 'linq-user-1',
+        },
+      },
+      createdAt: '2026-03-18T00:00:00.000Z',
+      lastTurnAt: '2026-03-18T00:00:01.000Z',
+      providerBinding: {
+        provider: 'codex-cli',
+        providerSessionId: 'thread-linq-batch',
+        providerState: null,
+        providerOptions: {
+          model: null,
+          reasoningEffort: null,
+          sandbox: 'read-only',
+          approvalPolicy: 'never',
+          profile: null,
+          oss: false,
+        },
+      },
+      sessionId: input.sessionId,
+      turnCount: 1,
+      updatedAt: '2026-03-18T00:00:01.000Z',
+    }),
+    delivery: {
+      channel: 'linq',
+      target: 'linq-user-1',
+      targetKind: 'participant',
+      sentAt: '2026-03-18T00:00:01.000Z',
+      messageLength: input.message.length,
+    },
+  }))
+
+  const inboxServices = {
+    async list() {
+      return {
+        items: [
+          {
+            captureId: 'cap-linq-1',
+            source: 'linq',
+            accountId: 'linq-account-1',
+            externalId: 'linq:5001',
+            threadId: 'linq-thread-1',
+            threadTitle: null,
+            actorId: 'linq-user-1',
+            actorName: 'Linq User',
+            actorIsSelf: false,
+            occurredAt: '2026-03-18T09:00:00Z',
+            receivedAt: null,
+            text: 'First linq message',
+            attachmentCount: 0,
+            envelopePath: 'raw/inbox/linq-1.json',
+            eventId: 'evt-linq-1',
+            promotions: [],
+          },
+          {
+            captureId: 'cap-linq-2',
+            source: 'linq',
+            accountId: 'linq-account-1',
+            externalId: 'linq:5002',
+            threadId: 'linq-thread-1',
+            threadTitle: null,
+            actorId: 'linq-user-1',
+            actorName: 'Linq User',
+            actorIsSelf: false,
+            occurredAt: '2026-03-18T09:00:10Z',
+            receivedAt: null,
+            text: 'Second linq message',
+            attachmentCount: 0,
+            envelopePath: 'raw/inbox/linq-2.json',
+            eventId: 'evt-linq-2',
+            promotions: [],
+          },
+        ],
+      }
+    },
+    async show(input: any) {
+      const first = input.captureId === 'cap-linq-1'
+      return {
+        capture: {
+          captureId: input.captureId,
+          source: 'linq',
+          accountId: 'linq-account-1',
+          externalId: first ? 'linq:5001' : 'linq:5002',
+          threadId: 'linq-thread-1',
+          threadTitle: null,
+          threadIsDirect: true,
+          actorId: 'linq-user-1',
+          actorName: 'Linq User',
+          actorIsSelf: false,
+          occurredAt: first ? '2026-03-18T09:00:00Z' : '2026-03-18T09:00:10Z',
+          receivedAt: null,
+          text: first ? 'First linq message' : 'Second linq message',
+          attachmentCount: 0,
+          envelopePath: first ? 'raw/inbox/linq-1.json' : 'raw/inbox/linq-2.json',
+          eventId: first ? 'evt-linq-1' : 'evt-linq-2',
+          createdAt: first ? '2026-03-18T09:00:00Z' : '2026-03-18T09:00:10Z',
+          promotions: [],
+          attachments: [],
+        },
+      }
+    },
+  } as any
+
+  const result = await scanAssistantAutoReplyOnce({
+    afterCursor: null,
+    autoReplyPrimed: true,
+    enabledChannels: ['linq'],
+    inboxServices,
+    vault: vaultRoot,
+  })
+
+  assert.deepEqual(result, {
+    considered: 2,
+    failed: 0,
+    replied: 1,
+    skipped: 0,
+  })
+  assert.equal(runtimeMocks.executeAssistantProviderTurn.mock.calls.length, 1)
+  assert.equal(runtimeMocks.deliverAssistantMessageOverBinding.mock.calls.length, 1)
+  const deliveryCall = runtimeMocks.deliverAssistantMessageOverBinding.mock.calls[0]?.[0]
+  assert.equal(deliveryCall?.replyToMessageId, '5002')
+})
+
 test('scanAssistantAutoReplyOnce can use self-authored attachment prompts and suppress recent assistant echoes', async () => {
   vi.useFakeTimers()
   vi.setSystemTime(new Date('2026-03-18T00:00:00.000Z'))
