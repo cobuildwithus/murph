@@ -54,7 +54,10 @@
     "@murphai/contracts": "workspace:*",
     "@murphai/core": "workspace:*",
     "@murphai/importers": "workspace:*",
+    "@murphai/inboxd": "workspace:*",
+    "@murphai/inboxd-imessage": "workspace:*",
     "@murphai/operator-config": "workspace:*",
+    "@murphai/parsers": "workspace:*",
     "@murphai/query": "workspace:*",
     "@murphai/runtime-state": "workspace:*",
     "zod": "^4.1.8"
