@@ -195,7 +195,7 @@ describe("helper barrel exports", () => {
       },
     ]);
 
-    expect(inferEntityKind("current")).toBe("entity");
+    expect(inferEntityKind("current")).toBe("core");
     expect(inferEntityKind("prov_01JNV422Y2M5ZBV64ZP4N1DRB1")).toBe("provider");
     expect(inferEntityKind("xfm_01JNV422Y2M5ZBV64ZP4N1DRB1")).toBe("transform");
     expect(inferEntityKind("unknown_lookup")).toBe("entity");
@@ -441,24 +441,24 @@ describe("helper barrel exports", () => {
       await rm(tempDir, { recursive: true, force: true });
     }
 
-    const profileSnapshot = createQueryRecord({
-      entityId: "prof_1",
-      primaryLookupId: "prof_1",
-      lookupIds: ["prof_1"],
-      family: "profile_snapshot",
-      recordClass: "snapshot",
-      kind: "profile_snapshot",
-      path: "profile/current.json",
-      attributes: { snapshotId: "core" },
+    const goalRecord = createQueryRecord({
+      entityId: "goal_1",
+      primaryLookupId: "goal_1",
+      lookupIds: ["goal_1"],
+      family: "goal",
+      recordClass: "bank",
+      kind: "goal",
+      path: "bank/goals/goal-1.md",
+      attributes: { goalId: "goal_1" },
     });
     const bloodTest = createQueryRecord({
       entityId: "evt_1",
       primaryLookupId: "evt_1",
       lookupIds: ["evt_1"],
-      family: "history",
+      family: "event",
       recordClass: "ledger",
       kind: "test",
-      path: "history/test.md",
+      path: "ledger/events/2026/2026-04.jsonl",
       attributes: {
         testCategory: "blood",
         relatedIds: ["goal_1"],
@@ -475,12 +475,12 @@ describe("helper barrel exports", () => {
       path: "audit/entry.md",
     });
 
-    expect(toGenericShowEntity(profileSnapshot).kind).toBe("profile");
-    expect(toGenericListItem(profileSnapshot).kind).toBe("profile");
+    expect(toGenericShowEntity(goalRecord).kind).toBe("goal");
+    expect(toGenericListItem(goalRecord).kind).toBe("goal");
     expect(toGenericShowEntity(bloodTest).kind).toBe("blood_test");
-    expect(matchesGenericKindFilter(profileSnapshot)).toBe(true);
+    expect(matchesGenericKindFilter(goalRecord)).toBe(true);
     expect(matchesGenericKindFilter(audit)).toBe(false);
-    expect(matchesGenericKindFilter(profileSnapshot, "profile")).toBe(true);
+    expect(matchesGenericKindFilter(goalRecord, "goal")).toBe(true);
     expect(matchesGenericKindFilter(bloodTest, "blood_test")).toBe(true);
     expect(matchesGenericKindFilter(audit, "audit")).toBe(true);
     expect(toJournalLookupId("2026-04-08")).toBe("journal:2026-04-08");
@@ -523,10 +523,10 @@ describe("helper barrel exports", () => {
       entityId: "evt_99",
       primaryLookupId: "evt_99",
       lookupIds: ["evt_99"],
-      family: "history",
+      family: "event",
       recordClass: "ledger",
       kind: "symptom",
-      path: "history/symptom.md",
+      path: "ledger/events/2026/2026-04.jsonl",
       body: "Tracked symptoms",
       attributes: {
         parentGoalId: "goal_sleep",
@@ -539,7 +539,7 @@ describe("helper barrel exports", () => {
       kind: "symptom",
       title: "Goal A",
       occurredAt: "2026-04-08T00:00:00Z",
-      path: "history/symptom.md",
+      path: "ledger/events/2026/2026-04.jsonl",
       markdown: "Tracked symptoms",
       data: {
         parentGoalId: "goal_sleep",
@@ -547,7 +547,7 @@ describe("helper barrel exports", () => {
       links: [
         {
           id: "current",
-          kind: "entity",
+          kind: "core",
           queryable: true,
         },
         {
@@ -562,7 +562,7 @@ describe("helper barrel exports", () => {
       false,
     );
     expect(matchesGenericKindFilter(symptomEntity, "symptom")).toBe(true);
-    expect(matchesGenericKindFilter(symptomEntity, "history")).toBe(true);
+    expect(matchesGenericKindFilter(symptomEntity, "event")).toBe(true);
 
     expect(normalizeIsoTimestamp("2026-04-08T12:34:56+10:00")).toBe(
       "2026-04-08T12:34:56+10:00",

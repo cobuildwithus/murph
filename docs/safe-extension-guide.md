@@ -87,8 +87,8 @@ Treat the health model as a contract-first extension. Until the health updates l
 Storage and authority rules for this extension:
 
 - Keep curated current state split by purpose: freeform durable memory in `bank/memory.md`, typed machine-readable defaults in `bank/preferences.json`, and the assistant-authored compiled personal wiki under `derived/knowledge/**`.
-- Keep append-only machine history in JSONL. Assessments, timed history, samples, and audit records stay ledger-backed rather than becoming mutable Markdown truth.
-- Keep timed history in the existing `ledger/events` family. New health history kinds such as `encounter`, `procedure`, `test`, `adverse_effect`, and `exposure` extend that ledger instead of creating a second event timeline.
+- Keep append-only machine ledgers in JSONL. Assessments, timed health events, samples, and audit records stay ledger-backed rather than becoming mutable Markdown truth.
+- Keep timed health events in the existing `ledger/events` family. New health event kinds such as `encounter`, `procedure`, `test`, `adverse_effect`, and `exposure` extend that ledger instead of creating a second event timeline. Blood tests remain user-facing projected views over canonical `test` events rather than a separate storage or query family.
 - Keep assessment provenance split across immutable `raw/assessments` inputs and append-only assessment ledgers. Intake projection may return typed proposals, but noun-specific upserts still own canonical writes.
 
 CLI and package-boundary rules for this extension:
@@ -111,7 +111,7 @@ Downstream follow-up stays blocked until the source lanes publish the frozen hea
 - Contract docs still describe the new behavior truthfully.
 - Package ownership remains one-way: `contracts` -> `core`/`importers`/`query`/`cli`, with canonical writes only through core.
 - New paths under the vault root preserve Markdown truth, append-only JSONL, and immutable `raw/`, including provider snapshots under `raw/integrations/**`.
-- Health-extension changes keep Markdown for curated current state and JSONL for append-only assessments, snapshots, timed history, samples, and audit.
+- Health-extension changes keep Markdown for curated current state and JSONL for append-only assessments, event-ledger health records, samples, and audit.
 - Device/provider connectors keep upstream provenance on canonical records via shared `externalRef` metadata rather than implicit importer-only state.
 - Fixtures and smoke flows cover the new behavior at the public surface, not just internals.
 - Verification docs and package scripts are updated if runtime expectations change.

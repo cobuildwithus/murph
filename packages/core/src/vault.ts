@@ -42,12 +42,6 @@ import {
   readStoredWriteOperation,
   runCanonicalWrite,
 } from "./operations/write-batch.ts";
-import {
-  buildCurrentProfileMarkdown,
-  listProfileSnapshots,
-  readCurrentProfileMarkdown,
-  stageCurrentProfileMaterialization,
-} from "./profile/storage.ts";
 import { toIsoTimestamp } from "./time.ts";
 import { buildVaultCoreDocument } from "./vault-core-document.ts";
 import {
@@ -261,23 +255,7 @@ export async function repairVault({ vaultRoot }: LoadVaultInput = {}): Promise<R
     "Vault metadata failed contract validation.",
   );
   const createdDirectories = await ensureMissingRequiredDirectories(absoluteRoot);
-  const currentState = await readCurrentProfileMarkdown(absoluteRoot);
-  let latestSnapshot: Awaited<ReturnType<typeof listProfileSnapshots>>[number] | null | undefined;
-
-  try {
-    latestSnapshot = (await listProfileSnapshots({ vaultRoot: absoluteRoot })).at(-1) ?? null;
-  } catch {
-    latestSnapshot = undefined;
-  }
-
-  const currentProfileNeedsRepair =
-    latestSnapshot === undefined
-      ? false
-      : latestSnapshot === null
-        ? currentState.exists
-        : currentState.markdown !== buildCurrentProfileMarkdown(latestSnapshot);
-
-  if (createdDirectories.length === 0 && !currentProfileNeedsRepair) {
+  if (createdDirectories.length === 0) {
     return {
       metadataFile: VAULT_LAYOUT.metadata,
       title: metadata.title,
@@ -303,30 +281,6 @@ export async function repairVault({ vaultRoot }: LoadVaultInput = {}): Promise<R
 
       if (createdDirectories.length > 0) {
         repairSummaries.push("Created missing required scaffold directories.");
-      }
-
-      if (latestSnapshot !== undefined) {
-        const materialized = await stageCurrentProfileMaterialization(
-          batch,
-          currentState,
-          latestSnapshot,
-        );
-
-        if (materialized.updated) {
-          const rebuildAudit = materialized.rebuildAudit;
-          const rebuildChanges = rebuildAudit.changes ?? [];
-          const rebuildTargetIds = rebuildAudit.targetIds ?? [];
-
-          repairSummaries.push(
-            rebuildAudit.summary ?? "Rebuilt current profile from snapshot.",
-          );
-          if (rebuildChanges.length > 0) {
-            repairFiles.push(...rebuildChanges.map((change) => change.path));
-          }
-          if (rebuildTargetIds.length > 0) {
-            repairTargetIds.push(...rebuildTargetIds);
-          }
-        }
       }
 
       const audit = await emitAuditRecord({
@@ -921,67 +875,6 @@ async function validateRawImportManifests(vaultRoot: string): Promise<Validation
   return issues;
 }
 
-async function validateCurrentProfileConsistency(vaultRoot: string): Promise<ValidationIssue[]> {
-  let snapshots;
-
-  try {
-    snapshots = await listProfileSnapshots({ vaultRoot });
-  } catch {
-    return [];
-  }
-
-  const latestSnapshot = snapshots.at(-1) ?? null;
-  const currentProfilePath = resolveVaultPath(vaultRoot, VAULT_LAYOUT.profileCurrentDocument);
-  const exists = await pathExists(currentProfilePath.absolutePath);
-
-  if (!latestSnapshot) {
-    return exists
-      ? [
-          validationIssue(
-            "PROFILE_CURRENT_STALE",
-            "Current profile exists even though no profile snapshots are present.",
-            VAULT_LAYOUT.profileCurrentDocument,
-          ),
-        ]
-      : [];
-  }
-
-  if (!exists) {
-    return [
-      validationIssue(
-        "PROFILE_CURRENT_STALE",
-        "Current profile is missing for the latest profile snapshot.",
-        VAULT_LAYOUT.profileCurrentDocument,
-      ),
-    ];
-  }
-
-  try {
-    const currentMarkdown = await readUtf8File(vaultRoot, VAULT_LAYOUT.profileCurrentDocument);
-    const expectedMarkdown = buildCurrentProfileMarkdown(latestSnapshot);
-
-    if (currentMarkdown !== expectedMarkdown) {
-      return [
-        validationIssue(
-          "PROFILE_CURRENT_STALE",
-          "Current profile markdown does not match the latest profile snapshot.",
-          VAULT_LAYOUT.profileCurrentDocument,
-        ),
-      ];
-    }
-  } catch (error) {
-    return [
-      validationIssue(
-        error instanceof VaultError ? error.code : "PROFILE_CURRENT_STALE",
-        error instanceof Error ? error.message : String(error),
-        VAULT_LAYOUT.profileCurrentDocument,
-      ),
-    ];
-  }
-
-  return [];
-}
-
 async function validateWriteOperations(vaultRoot: string): Promise<ValidationIssue[]> {
   const operationPaths = await listWriteOperationMetadataPaths(vaultRoot);
   const issues: ValidationIssue[] = [];
@@ -1075,7 +968,6 @@ export async function validateVault({ vaultRoot }: LoadVaultInput = {}): Promise
   }
 
   issues.push(...(await validateRawImportManifests(absoluteRoot)));
-  issues.push(...(await validateCurrentProfileConsistency(absoluteRoot)));
   issues.push(...(await validateWriteOperations(absoluteRoot)));
 
   return {

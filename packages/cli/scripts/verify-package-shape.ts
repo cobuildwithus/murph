@@ -146,6 +146,8 @@ assert(
       'pnpm --dir ../.. exec vitest run --config packages/cli/vitest.workspace.ts --coverage' &&
     packageJson.scripts?.['verify:prepared-runtime'] ===
       'pnpm --dir ../.. build:test-runtime:prepared' &&
+    packageJson.scripts?.build ===
+      'node ../../scripts/rm-paths.mjs dist && tsc -b tsconfig.build.json --force' &&
     packageJson.scripts?.['verify:package-shape'] ===
       'pnpm build && tsx ./scripts/verify-package-shape.ts' &&
     packageJson.scripts?.['test:built-runtime'] ===

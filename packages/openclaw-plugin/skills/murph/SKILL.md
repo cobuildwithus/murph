@@ -29,7 +29,7 @@ Read-command chooser:
 - `vault-cli list ...` for structured filters.
 - `vault-cli search query --text "<query>"` for fuzzy recall.
 - `vault-cli timeline ...` for chronological questions.
-- `vault-cli profile show current` for the current synthesized profile.
+- `vault-cli memory show` plus `vault-cli knowledge ...` reads for saved user context.
 - `vault-cli wearables day ...` or other `wearables ... list` commands for wearable summaries.
 - family `manifest` commands such as `meal manifest`, `document manifest`, `intake manifest`, and `workout manifest` for immutable import provenance.
 

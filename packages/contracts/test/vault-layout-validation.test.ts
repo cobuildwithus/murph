@@ -18,8 +18,6 @@ import {
   EXPERIMENTS_DIRECTORY,
   INBOX_CAPTURE_LEDGER_DIRECTORY,
   JOURNAL_DIRECTORY,
-  PROFILE_CURRENT_DOCUMENT_RELATIVE_PATH,
-  PROFILE_DIRECTORY,
   RAW_ASSESSMENTS_DIRECTORY,
   RAW_DIRECTORY,
   RAW_DOCUMENTS_DIRECTORY,
@@ -245,7 +243,6 @@ describe("vault layout exports", () => {
       AUTOMATIONS_DIRECTORY,
       EXPERIMENTS_DIRECTORY,
       JOURNAL_DIRECTORY,
-      PROFILE_DIRECTORY,
       "bank/goals",
       "bank/conditions",
       "bank/allergies",
@@ -259,7 +256,6 @@ describe("vault layout exports", () => {
       "ledger",
       ASSESSMENT_LEDGER_DIRECTORY,
       EVENT_LEDGER_DIRECTORY,
-      "ledger/profile-snapshots",
       SAMPLE_LEDGER_DIRECTORY,
       AUDIT_DIRECTORY,
       INBOX_CAPTURE_LEDGER_DIRECTORY,
@@ -279,7 +275,7 @@ describe("vault layout exports", () => {
 
   it("publishes stable query-source targets, layout aliases, and shard patterns", () => {
     expect(VAULT_QUERY_SOURCE).toEqual({
-      optionalFiles: [VAULT_METADATA_FILE, CORE_DOCUMENT_RELATIVE_PATH, PROFILE_CURRENT_DOCUMENT_RELATIVE_PATH],
+      optionalFiles: [VAULT_METADATA_FILE, CORE_DOCUMENT_RELATIVE_PATH],
       markdownRoots: [
         EXPERIMENTS_DIRECTORY,
         JOURNAL_DIRECTORY,
@@ -297,7 +293,6 @@ describe("vault layout exports", () => {
       jsonlRoots: [
         ASSESSMENT_LEDGER_DIRECTORY,
         EVENT_LEDGER_DIRECTORY,
-        "ledger/profile-snapshots",
         SAMPLE_LEDGER_DIRECTORY,
         AUDIT_DIRECTORY,
       ],
@@ -318,8 +313,6 @@ describe("vault layout exports", () => {
       foodsDirectory: "bank/foods",
       geneticsDirectory: "bank/genetics",
       goalsDirectory: "bank/goals",
-      profileDirectory: PROFILE_DIRECTORY,
-      profileCurrentDocument: PROFILE_CURRENT_DOCUMENT_RELATIVE_PATH,
       providersDirectory: "bank/providers",
       recipesDirectory: "bank/recipes",
       workoutFormatsDirectory: "bank/workout-formats",
@@ -327,7 +320,6 @@ describe("vault layout exports", () => {
       ledgerDirectory: "ledger",
       assessmentLedgerDirectory: ASSESSMENT_LEDGER_DIRECTORY,
       eventLedgerDirectory: EVENT_LEDGER_DIRECTORY,
-      profileSnapshotsDirectory: "ledger/profile-snapshots",
       sampleLedgerDirectory: SAMPLE_LEDGER_DIRECTORY,
       inboxCaptureLedgerDirectory: INBOX_CAPTURE_LEDGER_DIRECTORY,
       rawDirectory: RAW_DIRECTORY,
@@ -347,7 +339,6 @@ describe("vault layout exports", () => {
     expect(VAULT_SHARDS).toEqual({
       assessments: "ledger/assessments/YYYY/YYYY-MM.jsonl",
       events: "ledger/events/YYYY/YYYY-MM.jsonl",
-      profileSnapshots: "ledger/profile-snapshots/YYYY/YYYY-MM.jsonl",
       samples: "ledger/samples/<stream>/YYYY/YYYY-MM.jsonl",
       audit: "audit/YYYY/YYYY-MM.jsonl",
       inboxCaptures: "ledger/inbox-captures/YYYY/YYYY-MM.jsonl",

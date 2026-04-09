@@ -14,7 +14,6 @@ export type CanonicalEntityFamily =
   | "core"
   | "event"
   | "experiment"
-  | "history"
   | "journal"
   | "sample";
 
@@ -72,7 +71,6 @@ export function resolveCanonicalRecordClass(
       return "snapshot";
     case "audit":
     case "event":
-    case "history":
     case "journal":
       return "ledger";
   }

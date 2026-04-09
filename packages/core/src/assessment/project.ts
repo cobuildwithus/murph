@@ -1,7 +1,4 @@
-import {
-  profileSnapshotProfileSchema,
-  safeParseContract,
-} from "@murphai/contracts";
+import { safeParseContract } from "@murphai/contracts";
 
 import { emitAuditRecord } from "../audit.ts";
 import { toIsoTimestamp } from "../time.ts";
@@ -19,7 +16,6 @@ import type {
   GeneticVariantProposal,
   GoalProposal,
   HistoryEventProposal,
-  ProfileSnapshotProposal,
   ProtocolProposal,
 } from "./types.ts";
 import { readAssessmentResponse } from "./storage.ts";
@@ -383,30 +379,6 @@ function normalizeGeneticVariantProposal(
   };
 }
 
-function normalizeProfileSnapshotProposal(
-  value: unknown,
-  source: AssessmentProposalSource,
-): ProfileSnapshotProposal | null {
-  if (!isPlainRecord(value)) {
-    return null;
-  }
-
-  const nestedProfile = isPlainRecord(value.profile) ? value.profile : null;
-  const profile = nestedProfile ?? value;
-  const parsedProfile = safeParseContract(profileSnapshotProfileSchema, profile);
-  if (!parsedProfile.success) {
-    return null;
-  }
-
-  return {
-    source:
-      source.importedFrom === "derived" ? "derived" :
-      source.assessmentId ? "assessment_projection" : "manual",
-    sourceAssessmentIds: source.assessmentId ? [source.assessmentId] : undefined,
-    profile: parsedProfile.data,
-  };
-}
-
 async function resolveAssessmentResponse(
   input: ProjectAssessmentResponseInput,
 ): Promise<AssessmentResponseRecord | undefined> {
@@ -447,15 +419,6 @@ export async function projectAssessmentResponse(
 
   const containers = resolveProjectionContainers(response);
 
-  const profileSnapshots = readCategoryEntries(containers, [
-    "profile",
-    "profileSnapshot",
-    "profileSnapshots",
-    "currentProfile",
-  ])
-    .map((entry) => normalizeProfileSnapshotProposal(entry.value, buildSource(assessmentResponse, entry.pointer)))
-    .filter((entry): entry is ProfileSnapshotProposal => entry !== null);
-
   const goals = readCategoryEntries(containers, ["goals", "goal"])
     .map((entry) => normalizeGoalProposal(entry.value, buildSource(assessmentResponse, entry.pointer)))
     .filter((entry): entry is GoalProposal => entry !== null);
@@ -492,7 +455,6 @@ export async function projectAssessmentResponse(
   const proposal: AssessmentResponseProposal = {
     assessmentId: assessmentResponse.id,
     sourcePath: assessmentResponse.rawPath,
-    profileSnapshots,
     goals,
     conditions,
     allergies,

@@ -1,10 +1,10 @@
-import { readHealthContextTolerant } from "./export-pack-health.ts";
+import { buildHealthContextFromVault } from "./export-pack-health.ts";
 import type {
   ExportPackAssessmentRecord,
   ExportPackBankPage,
   ExportPackFilters,
+  ExportPackHealthEventRecord,
   ExportPackHealthContext,
-  ExportPackHistoryRecord,
 } from "./export-pack-health-types.ts";
 import type { CanonicalEntity } from "./canonical-entities.ts";
 import { getExperiment, listEntities, listJournalEntries } from "./model.ts";
@@ -16,8 +16,8 @@ export type {
   ExportPackAssessmentRecord,
   ExportPackBankPage,
   ExportPackFilters,
+  ExportPackHealthEventRecord,
   ExportPackHealthContext,
-  ExportPackHistoryRecord,
 } from "./export-pack-health-types.ts";
 
 export interface ExportPackFile {
@@ -32,7 +32,7 @@ export interface ExportPackManifest {
   journalCount: number;
   sampleSummaryCount: number;
   assessmentCount: number;
-  historyEventCount: number;
+  healthEventCount: number;
   bankPageCount: number;
   questionCount: number;
   fileCount: number;
@@ -163,7 +163,7 @@ export function buildExportPack(
   };
 
   const entities = listEntities(vault, {
-    families: ["audit", "core", "event", "experiment", "history", "journal", "sample"],
+    families: ["audit", "core", "event", "experiment", "journal", "sample"],
     from: filters.from ?? undefined,
     to: filters.to ?? undefined,
     experimentSlug: filters.experimentSlug ?? undefined,
@@ -189,7 +189,7 @@ export function buildExportPack(
     journalCount: journalEntries.length,
     sampleSummaryCount: dailySampleSummaries.length,
     assessmentCount: health.assessments.length,
-    historyEventCount: health.historyEvents.length,
+    healthEventCount: health.healthEvents.length,
     bankPageCount: countHealthBankPages(health),
     questionCount: 0,
     fileCount: 0,
@@ -373,9 +373,9 @@ function renderAssistantContext(input: QuestionPack): string {
     lines.push("");
   }
 
-  if (context.health.historyEvents.length > 0) {
-    lines.push("## Health History", "");
-    for (const event of context.health.historyEvents.slice(0, 25)) {
+  if (context.health.healthEvents.length > 0) {
+    lines.push("## Health Events", "");
+    for (const event of context.health.healthEvents.slice(0, 25)) {
       lines.push(`- ${event.occurredAt} | ${event.kind} | ${event.title}`);
     }
     lines.push("");
@@ -485,9 +485,9 @@ function buildPromptQuestions(input: {
     );
   }
 
-  if (health.historyEvents.length > 0) {
+  if (health.healthEvents.length > 0) {
     questions.push(
-      "Which medical history events or exposures most change the interpretation of the other records?",
+      "Which time-stamped health events most change the interpretation of the other records?",
     );
   }
 
@@ -556,7 +556,7 @@ function toStringArray(value: unknown): string[] {
 function summarizeHealthManifest(health: ExportPackHealthContext) {
   return {
     assessmentCount: health.assessments.length,
-    historyEventCount: health.historyEvents.length,
+    healthEventCount: health.healthEvents.length,
     bankPageCount: countHealthBankPages(health),
   };
 }
@@ -592,5 +592,5 @@ function buildHealthContext(
   vault: VaultReadModel,
   filters: ExportPackFilters,
 ): ExportPackHealthContext {
-  return readHealthContextTolerant(vault.vaultRoot, filters);
+  return buildHealthContextFromVault(vault, filters);
 }

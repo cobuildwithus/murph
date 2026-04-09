@@ -31,15 +31,6 @@ export function createHealthUpsertResultSchema(
 ) {
   const baseShape = createHealthUpsertResultBaseShape(descriptor);
 
-  if (hasHealthProfileResultCapability(descriptor)) {
-    return z.object({
-      ...baseShape,
-      ledgerFile: pathSchema.optional(),
-      currentProfilePath: pathSchema.optional(),
-      profile: healthPayloadSchema.optional(),
-    });
-  }
-
   if (healthCoreHasResultCapability(descriptor, "ledger-file")) {
     return z.object({
       ...baseShape,
@@ -62,15 +53,6 @@ function createHealthUpsertResultBaseShape(
     lookupId: z.string().min(1),
     created: z.boolean(),
   };
-}
-
-function hasHealthProfileResultCapability(
-  descriptor: HealthCommandDescriptorEntry,
-) {
-  return (
-    healthCoreHasResultCapability(descriptor, "current-profile-path") ||
-    healthCoreHasResultCapability(descriptor, "profile-payload")
-  );
 }
 
 function bindCrudServices(

@@ -57,8 +57,8 @@ When you need to read from the vault, use this chooser:
 - `vault-cli show <id>` for one exact canonical read id, including stable family ids such as `meal_*` or `doc_*`
 - `vault-cli list` for structured filtering by family, kind, status, stream, tag, or date range
 - `vault-cli search query --text "..."` for fuzzy recall or remembered phrases
-- `vault-cli timeline` for chronology across journals, events, assessments, profile snapshots, and sample summaries
-- `vault-cli profile show current` for the current synthesized profile
+- `vault-cli timeline` for chronology across journals, events, assessments, and sample summaries
+- `vault-cli memory show` plus targeted `vault-cli knowledge ...` reads for saved user context
 - `vault-cli wearables day` or `wearables ... list` for semantic wearable summaries
 - family `manifest` commands for immutable import provenance
 

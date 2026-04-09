@@ -547,13 +547,6 @@ test("assessment projections normalize alternate field names and source modes", 
         proposal: {
           structured: {
             data: {
-              profileSnapshot: {
-                profile: {
-                  goals: {
-                    topGoalIds: [goalId],
-                  },
-                },
-              },
               goals: [
                 "Morning cadence",
                 {
@@ -614,14 +607,6 @@ test("assessment projections normalize alternate field names and source modes", 
 
   assert.equal(derivedProjection.assessmentId, baseAssessmentResponse.id);
   assert.deepEqual(
-    derivedProjection.profileSnapshots.map((snapshot) => snapshot.source),
-    ["derived"],
-  );
-  assert.deepEqual(
-    derivedProjection.profileSnapshots.map((snapshot) => snapshot.sourceAssessmentIds),
-    [[baseAssessmentResponse.id]],
-  );
-  assert.deepEqual(
     derivedProjection.goals.map((goal) => goal.title),
     ["Morning cadence", "Build pace"],
   );
@@ -635,15 +620,7 @@ test("assessment projections normalize alternate field names and source modes", 
   assert.equal(derivedProjection.historyEvents[0]?.occurredAt, "2024-02-03T04:05:06.000Z");
   assert.equal(derivedProjection.familyMembers[0]?.name, "Sister");
   assert.equal(derivedProjection.geneticVariants[0]?.variant, "APOE e4");
-
-  assert.deepEqual(
-    manualProjection.profileSnapshots.map((snapshot) => snapshot.source),
-    ["manual"],
-  );
-  assert.deepEqual(
-    manualProjection.profileSnapshots.map((snapshot) => snapshot.sourceAssessmentIds),
-    [undefined],
-  );
+  assert.equal(manualProjection.assessmentId, undefined);
 });
 
 test("assessment import rejects invalid JSON and non-object roots", async () => {

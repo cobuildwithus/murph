@@ -40,7 +40,10 @@ const DEFAULT_GENERIC_LIST_EXCLUDED_FAMILIES = new Set([
 const BLOOD_TEST_SPECIMEN_TYPE_SET = new Set<string>(BLOOD_TEST_SPECIMEN_TYPES)
 
 function isBloodTestEntity(entity: QueryEntity) {
-  if (entity.family !== "history" || entity.kind !== "test") {
+  if (
+    entity.family !== "event" ||
+    (entity.kind !== "test" && entity.kind !== "blood_test")
+  ) {
     return false
   }
 
@@ -126,7 +129,6 @@ const RESERVED_PAYLOAD_KEYS = new Set([
   "ledgerPath",
   "lookupId",
   "created",
-  "currentProfilePath",
 ])
 
 export async function readJsonPayload(
@@ -358,10 +360,6 @@ export function buildEntityLinks(record: {
 }
 
 function normalizeGenericEntityKind(entity: QueryEntity) {
-  if (entity.family === "current_profile" || entity.family === "profile_snapshot") {
-    return "profile"
-  }
-
   if (isBloodTestEntity(entity)) {
     return "blood_test"
   }

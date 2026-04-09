@@ -31,7 +31,6 @@ import { registerIntakeCommands } from './commands/intake.js'
 import { registerJournalCommands } from './commands/journal.js'
 import { registerMemoryCommands } from './commands/memory.js'
 import { registerMealCommands } from './commands/meal.js'
-import { registerProfileCommands } from './commands/profile.js'
 import { registerRecipeCommands } from './commands/recipe.js'
 import { registerProviderCommands } from './commands/provider.js'
 import { registerFoodCommands } from './commands/food.js'
@@ -120,7 +119,6 @@ const genericHealthRootCommandNames = [
   'goal',
   'condition',
   'allergy',
-  'history',
   'blood-test',
   'family',
   'genetics',
@@ -452,11 +450,11 @@ export const vaultCliCommandDescriptors = [
       },
       {
         path: ['workout', 'units', 'show'],
-        description: 'Show the saved workout unit preferences from the current profile snapshot.',
+        description: 'Show the saved workout unit preferences from the canonical preferences document.',
       },
       {
         path: ['workout', 'units', 'set'],
-        description: 'Set one or more workout unit preferences on the current profile snapshot.',
+        description: 'Set one or more workout unit preferences on the canonical preferences document.',
       },
       {
         path: ['workout', 'import', 'inspect'],
@@ -951,15 +949,6 @@ export const vaultCliCommandDescriptors = [
       registerInboxCommands(cli, inboxServices, services)
     },
   },
-  buildHealthCommandManifestDescriptor({
-    commandName: 'profile',
-    additionalVaultServiceBindings: {
-      core: ['rebuildCurrentProfile'],
-    },
-    register({ cli, services }) {
-      registerProfileCommands(cli, services)
-    },
-  }),
   ...genericHealthCommandDescriptors,
   {
     id: 'supplement',

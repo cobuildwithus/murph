@@ -27,7 +27,6 @@ function createCoreRuntimeStub() {
     ensureJournalDay: vi.fn(async () => undefined),
     readAssessmentResponse: vi.fn(async () => null),
     projectAssessmentResponse: vi.fn(async () => null),
-    rebuildCurrentProfile: vi.fn(async () => undefined),
     stopProtocolItem: vi.fn(async () => undefined),
     ...createAsyncFunctionRecord(healthCoreRuntimeMethodNames),
   };

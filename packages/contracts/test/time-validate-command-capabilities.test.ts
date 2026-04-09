@@ -4,6 +4,7 @@ import { z } from "zod";
 import {
   commandCapabilityBundles,
   commandNounCapabilityByNoun,
+  commandNounCapabilities,
 } from "../src/command-capabilities.ts";
 import {
   addDaysToIsoDate,
@@ -180,6 +181,11 @@ describe("command capability definitions", () => {
       noun: "vault",
       bundles: ["readable", "derivedAdmin"],
       additionalCapabilities: ["update", "repair"],
+    });
+    expect(commandNounCapabilities.map((entry) => String(entry.noun))).not.toContain("history");
+    expect(commandNounCapabilityByNoun.get("blood_test")).toEqual({
+      noun: "blood_test",
+      bundles: ["payloadCrud"],
     });
   });
 });

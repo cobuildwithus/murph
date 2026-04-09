@@ -8,7 +8,6 @@ import {
   exampleFrontmatterObjects,
   exampleHealthFrontmatterObjects,
   exampleInboxCaptureRecords,
-  exampleProfileSnapshots,
   exampleSampleRecords,
   exampleVaultMetadata,
 } from "../src/examples.ts";
@@ -29,12 +28,9 @@ import {
   goalFrontmatterSchema as goalFrontmatterContract,
   inboxCaptureRecordSchema as inboxCaptureRecordContract,
   journalDayFrontmatterSchema as journalDayFrontmatterContract,
-  profileCurrentFrontmatterSchema as profileCurrentFrontmatterContract,
-  profileSnapshotSchema as profileSnapshotContract,
   protocolFrontmatterSchema as protocolFrontmatterContract,
   providerFrontmatterSchema as providerFrontmatterContract,
   recipeFrontmatterSchema as recipeFrontmatterContract,
-  profileSnapshotNarrativeSchema as profileSnapshotNarrativeContract,
   rawAssetOwnerSchema as rawAssetOwnerContract,
   rawImportManifestArtifactSchema as rawImportManifestArtifactContract,
   rawImportManifestSchema as rawImportManifestContract,
@@ -58,8 +54,6 @@ import {
   goalFrontmatterSchema,
   inboxCaptureRecordSchema,
   journalDayFrontmatterSchema,
-  profileCurrentFrontmatterSchema,
-  profileSnapshotSchema,
   protocolFrontmatterSchema,
   providerFrontmatterSchema,
   recipeFrontmatterSchema,
@@ -83,12 +77,10 @@ const schemaFixtures = [
   ["frontmatter-genetic-variant", geneticVariantFrontmatterSchema, geneticVariantFrontmatterContract],
   ["frontmatter-goal", goalFrontmatterSchema, goalFrontmatterContract],
   ["frontmatter-journal-day", journalDayFrontmatterSchema, journalDayFrontmatterContract],
-  ["frontmatter-profile-current", profileCurrentFrontmatterSchema, profileCurrentFrontmatterContract],
   ["frontmatter-provider", providerFrontmatterSchema, providerFrontmatterContract],
   ["frontmatter-protocol", protocolFrontmatterSchema, protocolFrontmatterContract],
   ["frontmatter-recipe", recipeFrontmatterSchema, recipeFrontmatterContract],
   ["frontmatter-workout-format", workoutFormatFrontmatterSchema, workoutFormatFrontmatterContract],
-  ["profile-snapshot", profileSnapshotSchema, profileSnapshotContract],
   ["sample-record", sampleRecordSchema, sampleRecordContract],
   ["vault-metadata", vaultMetadataSchema, vaultMetadataContract],
 ] as const;
@@ -100,7 +92,6 @@ const recordExamples = [
   ["sample records", sampleRecordContract, exampleSampleRecords],
   ["audit records", auditRecordContract, exampleAuditRecords],
   ["assessment responses", assessmentResponseContract, exampleAssessmentResponses],
-  ["profile snapshots", profileSnapshotContract, exampleProfileSnapshots],
 ] as const;
 
 const frontmatterObjectExamples = [
@@ -111,7 +102,6 @@ const frontmatterObjectExamples = [
   ["provider", providerFrontmatterContract, exampleFrontmatterObjects.provider],
   ["recipe", recipeFrontmatterContract, exampleFrontmatterObjects.recipe],
   ["workout format", workoutFormatFrontmatterContract, exampleFrontmatterObjects.workoutFormat],
-  ["profile current", profileCurrentFrontmatterContract, exampleHealthFrontmatterObjects.profileCurrent],
   ["goal", goalFrontmatterContract, exampleHealthFrontmatterObjects.goal],
   ["condition", conditionFrontmatterContract, exampleHealthFrontmatterObjects.condition],
   ["allergy", allergyFrontmatterContract, exampleHealthFrontmatterObjects.allergy],
@@ -377,16 +367,6 @@ describe("schema catalog and example seam", () => {
       errors: [
         '$.value: Blood-test results require either a numeric value or a textValue.',
       ],
-    });
-    expect(safeParseContract(profileSnapshotNarrativeContract, {
-      summary: " concise summary ",
-      highlights: [" sleep ", "recovery"],
-    })).toEqual({
-      success: true,
-      data: {
-        summary: " concise summary ",
-        highlights: [" sleep ", "recovery"],
-      },
     });
   });
 });

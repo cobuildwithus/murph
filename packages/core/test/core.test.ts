@@ -32,7 +32,6 @@ import {
   addMeal,
   applyCanonicalWriteBatch,
   appendJournal,
-  appendProfileSnapshot,
   appendJsonlRecord,
   buildActivitySessionEventDraft,
   buildPublicEventRecord,
@@ -101,7 +100,6 @@ import {
   FILE_CHANGE_OPERATIONS as CORE_FILE_CHANGE_OPERATIONS,
   FRONTMATTER_SCHEMA_VERSIONS as CORE_FRONTMATTER_SCHEMA_VERSIONS,
   ID_PREFIXES as CORE_ID_PREFIXES,
-  PROFILE_SNAPSHOT_SCHEMA_VERSION as CORE_PROFILE_SNAPSHOT_SCHEMA_VERSION,
   SAMPLE_QUALITIES as CORE_SAMPLE_QUALITIES,
   SAMPLE_SCHEMA_VERSION as CORE_SAMPLE_SCHEMA_VERSION,
   SAMPLE_SOURCES as CORE_SAMPLE_SOURCES,
@@ -138,7 +136,6 @@ test("core constants stay aligned with canonical contracts constants", () => {
     geneticVariant: CONTRACT_SCHEMA_VERSION.geneticVariantFrontmatter,
     goal: CONTRACT_SCHEMA_VERSION.goalFrontmatter,
     journalDay: CONTRACT_SCHEMA_VERSION.journalDayFrontmatter,
-    profileCurrent: CONTRACT_SCHEMA_VERSION.profileCurrentFrontmatter,
     recipe: CONTRACT_SCHEMA_VERSION.recipeFrontmatter,
     protocol: CONTRACT_SCHEMA_VERSION.protocolFrontmatter,
     workoutFormat: CONTRACT_SCHEMA_VERSION.workoutFormatFrontmatter,
@@ -146,7 +143,6 @@ test("core constants stay aligned with canonical contracts constants", () => {
   assert.equal(Object.isFrozen(CORE_FRONTMATTER_SCHEMA_VERSIONS), true);
   assert.equal(CORE_ASSESSMENT_RESPONSE_SCHEMA_VERSION, CONTRACT_SCHEMA_VERSION.assessmentResponse);
   assert.equal(CORE_EVENT_SCHEMA_VERSION, CONTRACT_SCHEMA_VERSION.event);
-  assert.equal(CORE_PROFILE_SNAPSHOT_SCHEMA_VERSION, CONTRACT_SCHEMA_VERSION.profileSnapshot);
   assert.equal(CORE_SAMPLE_SCHEMA_VERSION, CONTRACT_SCHEMA_VERSION.sample);
   assert.equal(CORE_AUDIT_SCHEMA_VERSION, CONTRACT_SCHEMA_VERSION.audit);
   assert.equal(CORE_ID_PREFIXES, CONTRACT_ID_PREFIXES);
@@ -639,34 +635,20 @@ test("repairVault returns a no-op result when metadata and directories are alrea
   assert.deepEqual(operationPathsAfterRepair, operationPathsBeforeRepair);
 });
 
-test("repairVault rebuilds the generated current profile when it is missing", async () => {
+test("repairVault recreates missing required directories", async () => {
   const vaultRoot = await makeTempDirectory("murph-vault");
   await initializeVault({ vaultRoot });
 
-  const appended = await appendProfileSnapshot({
-    vaultRoot,
-    recordedAt: "2026-03-12T11:00:00.000Z",
-    source: "manual",
-    profile: {
-      goals: {
-        topGoalIds: [],
-      },
-      custom: {
-        domains: ["sleep"],
-      },
-    },
-  });
-  const currentProfilePath = path.join(vaultRoot, "bank/profile/current.md");
-  await fs.rm(currentProfilePath, { force: true });
+  const missingDirectory = path.join(vaultRoot, "bank/providers");
+  await fs.rm(missingDirectory, { recursive: true, force: true });
 
   const repaired = await repairVault({ vaultRoot });
-  const repairedCurrent = await fs.readFile(currentProfilePath, "utf8");
+  const repairedDirectory = await fs.stat(missingDirectory);
 
   assert.equal(repaired.updated, true);
-  assert.deepEqual(repaired.createdDirectories, []);
+  assert.deepEqual(repaired.createdDirectories, ["bank/providers"]);
   assert.equal(typeof repaired.auditPath, "string");
-  assert.match(repairedCurrent, /^---\n/u);
-  assert.match(repairedCurrent, new RegExp(`Snapshot ID: \`${appended.snapshot.id}\``,"u"));
+  assert.equal(repairedDirectory.isDirectory(), true);
 
   const validation = await validateVault({ vaultRoot });
   assert.equal(validation.valid, true);
@@ -1133,7 +1115,6 @@ test("assessment imports append contract-shaped records and emit intake audits",
     1,
   );
   assert.equal(projected.assessmentId, imported.assessment.id);
-  assert.equal(projected.profileSnapshots.length, 1);
 
   const validation = await validateVault({ vaultRoot });
   assert.equal(validation.valid, true);
@@ -1219,16 +1200,6 @@ test("assessment imports and projections normalize rich nested proposals across 
         proposal: {
           structured: {
             data: {
-              profileSnapshot: {
-                profile: {
-                  goals: {
-                    topGoalIds: [secondaryGoalId],
-                  },
-                  custom: {
-                    domains: ["nutrition"],
-                  },
-                },
-              },
               goal: {
                 name: "Build base",
                 note: "Nested goal.",
@@ -1292,7 +1263,6 @@ test("assessment imports and projections normalize rich nested proposals across 
   assert.deepEqual(imported.assessment.relatedIds, [goalId, secondaryGoalId]);
   assert.equal(projected.assessmentId, imported.assessment.id);
   assert.equal(projected.sourcePath, imported.assessment.rawPath);
-  assert.equal(projected.profileSnapshots.length, 2);
   assert.equal(projected.goals.length, 2);
   assert.equal(projected.conditions.length, 2);
   assert.equal(projected.allergies.length, 2);
@@ -1300,14 +1270,6 @@ test("assessment imports and projections normalize rich nested proposals across 
   assert.equal(projected.historyEvents.length, 2);
   assert.equal(projected.familyMembers.length, 2);
   assert.equal(projected.geneticVariants.length, 2);
-  assert.deepEqual(
-    projected.profileSnapshots.map((snapshot) => snapshot.sourceAssessmentIds),
-    [[imported.assessment.id], [imported.assessment.id]],
-  );
-  assert.deepEqual(
-    projected.profileSnapshots.map((snapshot) => snapshot.source),
-    ["assessment_projection", "assessment_projection"],
-  );
 
   const nestedGoal = projected.goals.find((goal) => goal.title === "Build base");
   const nestedCondition = projected.conditions.find((condition) => condition.name === "Hypertension");
@@ -1387,7 +1349,7 @@ test("assessment projection drops legacy flat profile blobs after the hard cutov
     assessmentId: imported.assessment.id,
   });
 
-  assert.equal(projected.profileSnapshots.length, 0);
+  assert.equal(projected.goals.length, 0);
 });
 
 test("importAssessmentResponse rejects non-object assessment payloads", async () => {
@@ -1796,21 +1758,15 @@ test("validateVault accumulates missing directory and malformed event issues", a
   );
 });
 
-test("validateVault covers health ledgers, registries, and the derived current profile page", async () => {
+test("validateVault covers health ledgers and registries", async () => {
   const vaultRoot = await makeTempDirectory("murph-vault");
   await initializeVault({ vaultRoot });
 
   await fs.mkdir(path.join(vaultRoot, "ledger/assessments/2026"), { recursive: true });
-  await fs.mkdir(path.join(vaultRoot, "ledger/profile-snapshots/2026"), { recursive: true });
 
   await fs.writeFile(
     path.join(vaultRoot, "ledger/assessments/2026/2026-03.jsonl"),
     `${JSON.stringify({ schemaVersion: "murph.assessment-response.v1", id: "asmt_invalid" })}\n`,
-    "utf8",
-  );
-  await fs.writeFile(
-    path.join(vaultRoot, "ledger/profile-snapshots/2026/2026-03.jsonl"),
-    `${JSON.stringify({ schemaVersion: "murph.profile-snapshot.v1", id: "psnap_invalid" })}\n`,
     "utf8",
   );
   await fs.writeFile(
@@ -1831,33 +1787,16 @@ test("validateVault covers health ledgers, registries, and the derived current p
     ].join("\n"),
     "utf8",
   );
-  await fs.writeFile(
-    path.join(vaultRoot, "bank/profile/current.md"),
-    [
-      "---",
-      "schemaVersion: murph.frontmatter.profile-current.v1",
-      "docType: profile_current",
-      "snapshotId: psnap_invalid",
-      "updatedAt: not-a-timestamp",
-      "---",
-      "",
-      "# Current Profile",
-      "",
-    ].join("\n"),
-    "utf8",
-  );
 
   const validation = await validateVault({ vaultRoot });
   const issuePaths = new Set(validation.issues.map((issue) => issue.path));
 
   assert.equal(validation.valid, false);
   assert.ok(issuePaths.has("ledger/assessments/2026/2026-03.jsonl"));
-  assert.ok(issuePaths.has("ledger/profile-snapshots/2026/2026-03.jsonl"));
   assert.ok(issuePaths.has("bank/family/father.md"));
-  assert.ok(issuePaths.has("bank/profile/current.md"));
 });
 
-test("validateVault checks raw manifests, referenced artifacts, and current-profile consistency", async () => {
+test("validateVault checks raw manifests and referenced artifacts", async () => {
   const vaultRoot = await makeTempDirectory("murph-vault");
   const sourceRoot = await makeTempDirectory("murph-source");
   await initializeVault({ vaultRoot });
@@ -1869,23 +1808,9 @@ test("validateVault checks raw manifests, referenced artifacts, and current-prof
     occurredAt: "2026-03-12T10:00:00.000Z",
     title: "Visit summary",
   });
-  await appendProfileSnapshot({
-    vaultRoot,
-    recordedAt: "2026-03-12T11:00:00.000Z",
-    source: "manual",
-    profile: {
-      goals: {
-        topGoalIds: [],
-      },
-      custom: {
-        domains: ["sleep"],
-      },
-    },
-  });
 
   await fs.rm(path.join(vaultRoot, documentImport.raw.relativePath), { force: true });
   await fs.rm(path.join(vaultRoot, documentImport.manifestPath), { force: true });
-  await fs.appendFile(path.join(vaultRoot, "bank/profile/current.md"), "\nStale view\n", "utf8");
 
   const validation = await validateVault({ vaultRoot });
 
@@ -1902,13 +1827,6 @@ test("validateVault checks raw manifests, referenced artifacts, and current-prof
       (issue) =>
         issue.code === "RAW_MANIFEST_INVALID" &&
         issue.path === documentImport.manifestPath,
-    ),
-  );
-  assert.ok(
-    validation.issues.some(
-      (issue) =>
-        issue.code === "PROFILE_CURRENT_STALE" &&
-        issue.path === "bank/profile/current.md",
     ),
   );
 });
@@ -3482,57 +3400,6 @@ test("validateVault preserves unresolved write-operation error messages and vaul
         issue.code === "OPERATION_INVALID" &&
         issue.path === ".runtime/operations/op-invalid-shape.json" &&
         issue.message === "Write operation metadata has an unexpected shape.",
-    ),
-  );
-});
-
-test("validateVault covers current profile success, missing-file, and unreadable-file branches", async () => {
-  const vaultRoot = await makeTempDirectory("murph-vault");
-  await initializeVault({ vaultRoot });
-
-  await appendProfileSnapshot({
-    vaultRoot,
-    recordedAt: "2026-03-12T11:00:00.000Z",
-    source: "manual",
-    profile: {
-      goals: {
-        topGoalIds: [],
-      },
-      custom: {
-        domains: ["sleep"],
-      },
-    },
-  });
-
-  const validState = await validateVault({ vaultRoot });
-  assert.equal(validState.valid, true);
-  assert.ok(
-    validState.issues.every((issue) => issue.code !== "PROFILE_CURRENT_STALE"),
-  );
-
-  const currentProfilePath = path.join(vaultRoot, "bank/profile/current.md");
-  await fs.rm(currentProfilePath, { force: true });
-
-  const missingCurrent = await validateVault({ vaultRoot });
-  assert.equal(missingCurrent.valid, false);
-  assert.ok(
-    missingCurrent.issues.some(
-      (issue) =>
-        issue.code === "PROFILE_CURRENT_STALE" &&
-        issue.message.includes("Current profile is missing") &&
-        issue.path === "bank/profile/current.md",
-    ),
-  );
-
-  await fs.mkdir(currentProfilePath, { recursive: true });
-
-  const unreadableCurrent = await validateVault({ vaultRoot });
-  assert.equal(unreadableCurrent.valid, false);
-  assert.ok(
-    unreadableCurrent.issues.some(
-      (issue) =>
-        issue.code === "PROFILE_CURRENT_STALE" &&
-        issue.path === "bank/profile/current.md",
     ),
   );
 });

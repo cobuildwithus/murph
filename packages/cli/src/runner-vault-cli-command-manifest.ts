@@ -19,7 +19,6 @@ import { registerJournalCommands } from './commands/journal.js'
 import { registerKnowledgeCommands } from './commands/knowledge.js'
 import { registerMemoryCommands } from './commands/memory.js'
 import { registerMealCommands } from './commands/meal.js'
-import { registerProfileCommands } from './commands/profile.js'
 import { registerProtocolCommands } from './commands/protocol.js'
 import { registerProviderCommands } from './commands/provider.js'
 import { registerReadCommands } from './commands/read.js'
@@ -36,7 +35,6 @@ const GENERIC_HEALTH_COMMAND_NAMES = [
   'goal',
   'condition',
   'allergy',
-  'history',
   'blood-test',
   'family',
   'genetics',
@@ -72,7 +70,6 @@ export function registerRunnerVaultCliCommandDescriptors(input: {
   registerExportCommands(cli, services)
   registerIntakeCommands(cli, services)
   registerInboxCommands(cli, inboxServices, services)
-  registerProfileCommands(cli, services)
 
   for (const commandName of GENERIC_HEALTH_COMMAND_NAMES) {
     registerHealthEntityCrudGroup(cli, services, commandName)

@@ -14,8 +14,6 @@ import {
   inboxCaptureRecordSchema as inboxCaptureRecordContract,
   goalFrontmatterSchema as goalFrontmatterContract,
   journalDayFrontmatterSchema as journalDayFrontmatterContract,
-  profileCurrentFrontmatterSchema as profileCurrentFrontmatterContract,
-  profileSnapshotSchema as profileSnapshotContract,
   providerFrontmatterSchema as providerFrontmatterContract,
   recipeFrontmatterSchema as recipeFrontmatterContract,
   protocolFrontmatterSchema as protocolFrontmatterContract,
@@ -42,8 +40,6 @@ export const journalDayFrontmatterSchema = toJsonSchema(journalDayFrontmatterCon
 export const experimentFrontmatterSchema = toJsonSchema(experimentFrontmatterContract);
 export const foodFrontmatterSchema = toJsonSchema(foodFrontmatterContract);
 export const assessmentResponseSchema = toJsonSchema(assessmentResponseContract);
-export const profileSnapshotSchema = toJsonSchema(profileSnapshotContract);
-export const profileCurrentFrontmatterSchema = toJsonSchema(profileCurrentFrontmatterContract);
 export const providerFrontmatterSchema = toJsonSchema(providerFrontmatterContract);
 export const recipeFrontmatterSchema = toJsonSchema(recipeFrontmatterContract);
 export const workoutFormatFrontmatterSchema = toJsonSchema(workoutFormatFrontmatterContract);
@@ -68,12 +64,10 @@ export const schemaCatalog = Object.freeze({
   "frontmatter-genetic-variant": geneticVariantFrontmatterSchema,
   "frontmatter-goal": goalFrontmatterSchema,
   "frontmatter-journal-day": journalDayFrontmatterSchema,
-  "frontmatter-profile-current": profileCurrentFrontmatterSchema,
   "frontmatter-provider": providerFrontmatterSchema,
   "frontmatter-recipe": recipeFrontmatterSchema,
   "frontmatter-protocol": protocolFrontmatterSchema,
   "frontmatter-workout-format": workoutFormatFrontmatterSchema,
-  "profile-snapshot": profileSnapshotSchema,
   "sample-record": sampleRecordSchema,
   "vault-metadata": vaultMetadataSchema,
 });

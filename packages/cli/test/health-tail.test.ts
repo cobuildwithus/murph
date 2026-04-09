@@ -1467,145 +1467,6 @@ test("protocol commands keep noun-specific and generic reads aligned", async () 
   }
 });
 
-test("history descriptor wiring preserves the shared history-ledger upsert result shape", async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
-  const payloadPath = path.join(vaultRoot, "history.json");
-
-  try {
-    await runCli(["init", "--vault", vaultRoot]);
-    await writeFile(
-      payloadPath,
-      JSON.stringify({
-        kind: "encounter",
-        occurredAt: "2026-03-12T13:00:00.000Z",
-        title: "Primary care follow-up",
-        encounterType: "office_visit",
-        location: "Primary care clinic",
-      }),
-      "utf8",
-    );
-
-    const upsertResult = await runCli<{
-      eventId: string;
-      lookupId: string;
-      ledgerFile: string;
-      created: boolean;
-    }>([
-      "history",
-      "upsert",
-      "--input",
-      `@${payloadPath}`,
-      "--vault",
-      vaultRoot,
-    ]);
-    const eventId = requireData(upsertResult).eventId;
-    const showResult = await runCli<{
-      entity: {
-        id: string;
-        kind: string;
-        data: Record<string, unknown>;
-      };
-    }>([
-      "history",
-      "show",
-      eventId,
-      "--vault",
-      vaultRoot,
-    ]);
-    const genericShow = await runCli<{
-      entity: {
-        id: string;
-        kind: string;
-        data: Record<string, unknown>;
-      };
-    }>([
-      "show",
-      eventId,
-      "--vault",
-      vaultRoot,
-    ]);
-
-    assert.equal(upsertResult.ok, true);
-    assert.match(eventId, /^evt_/u);
-    assert.equal(requireData(upsertResult).lookupId, eventId);
-    assert.equal(requireData(upsertResult).created, true);
-    assert.equal(
-      requireData(upsertResult).ledgerFile,
-      "ledger/events/2026/2026-03.jsonl",
-    );
-    assert.equal(showResult.ok, true);
-    assert.equal(genericShow.ok, true);
-    assert.equal(requireData(showResult).entity.id, eventId);
-    assert.equal(requireData(showResult).entity.kind, "encounter");
-    assert.equal(requireData(showResult).entity.data.encounterType, "office_visit");
-    assert.equal(requireData(genericShow).entity.id, eventId);
-    assert.equal(requireData(genericShow).entity.kind, "encounter");
-    assert.equal(requireData(genericShow).entity.data.encounterType, "office_visit");
-  } finally {
-    await rm(vaultRoot, { recursive: true, force: true });
-  }
-});
-
-test("history list keeps canonical kind/data and echoes shared filters", async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
-  const encounterPayloadPath = path.join(vaultRoot, "history-encounter.json");
-
-  try {
-    await runCli(["init", "--vault", vaultRoot]);
-    await writeFile(
-      encounterPayloadPath,
-      JSON.stringify({
-        kind: "encounter",
-        occurredAt: "2026-03-12T13:00:00.000Z",
-        title: "Primary care follow-up",
-        encounterType: "office_visit",
-        location: "Primary care clinic",
-      }),
-      "utf8",
-    );
-
-    await runCli([
-      "history",
-      "upsert",
-      "--input",
-      `@${encounterPayloadPath}`,
-      "--vault",
-      vaultRoot,
-    ]);
-    const listResult = await runCli<{
-      count: number;
-      filters: Record<string, unknown>;
-      nextCursor: string | null;
-      items: Array<{
-        id: string;
-        kind: string;
-        data: Record<string, unknown>;
-      }>;
-    }>([
-      "history",
-      "list",
-      "--kind",
-      "encounter",
-      "--limit",
-      "5",
-      "--vault",
-      vaultRoot,
-    ]);
-
-    assert.equal(listResult.ok, true);
-    assert.equal(requireData(listResult).filters.kind, "encounter");
-    assert.equal("from" in requireData(listResult).filters, false);
-    assert.equal("to" in requireData(listResult).filters, false);
-    assert.equal(requireData(listResult).filters.limit, 5);
-    assert.equal(requireData(listResult).count, 1);
-    assert.equal(requireData(listResult).nextCursor, null);
-    assert.equal(requireData(listResult).items[0]?.kind, "encounter");
-    assert.equal(requireData(listResult).items[0]?.data.encounterType, "office_visit");
-  } finally {
-    await rm(vaultRoot, { recursive: true, force: true });
-  }
-});
-
 test("blood-test descriptor wiring exposes a dedicated noun while preserving the shared event id", async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
   const payloadPath = path.join(vaultRoot, "blood-test.json");
@@ -1665,19 +1526,6 @@ test("blood-test descriptor wiring exposes a dedicated noun while preserving the
       "--vault",
       vaultRoot,
     ]);
-    const historyShow = await runCli<{
-      entity: {
-        id: string;
-        kind: string;
-        data: Record<string, unknown>;
-      };
-    }>([
-      "history",
-      "show",
-      eventId,
-      "--vault",
-      vaultRoot,
-    ]);
     const genericShow = await runCli<{
       entity: {
         id: string;
@@ -1700,15 +1548,12 @@ test("blood-test descriptor wiring exposes a dedicated noun while preserving the
       "ledger/events/2026/2026-03.jsonl",
     );
     assert.equal(nounShow.ok, true);
-    assert.equal(historyShow.ok, true);
     assert.equal(genericShow.ok, true);
     assert.equal(requireData(nounShow).entity.id, eventId);
     assert.equal(requireData(nounShow).entity.kind, "blood_test");
     assert.equal(requireData(nounShow).entity.data.testCategory, "blood");
     assert.equal(requireData(nounShow).entity.data.labName, "Function Health");
     assert.equal(Array.isArray(requireData(nounShow).entity.data.results), true);
-    assert.equal(requireData(historyShow).entity.kind, "test");
-    assert.equal(requireData(historyShow).entity.data.resultStatus, "mixed");
     assert.equal(requireData(genericShow).entity.kind, "blood_test");
     assert.equal(requireData(genericShow).entity.data.resultStatus, "mixed");
   } finally {
@@ -1809,77 +1654,10 @@ test("blood-test list echoes shared filters and generic list kind routing", asyn
   }
 });
 
-test("profile current lookup stays wired for both noun-specific and generic show", async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
-  const payloadPath = path.join(vaultRoot, "profile.json");
 
-  try {
-    await runCli(["init", "--vault", vaultRoot]);
-    await writeFile(
-      payloadPath,
-      JSON.stringify({
-        source: "manual",
-        profile: {
-          goals: {
-            topGoalIds: [],
-          },
-        },
-      }),
-      "utf8",
-    );
-
-    const upsertResult = await runCli([
-      "profile",
-      "upsert",
-      "--input",
-      `@${payloadPath}`,
-      "--vault",
-      vaultRoot,
-    ]);
-    const nounShow = await runCli<{
-      entity: {
-        id: string;
-        kind: string;
-        data: Record<string, unknown>;
-        links: Array<{ id: string }>;
-      };
-    }>([
-      "profile",
-      "show",
-      "current",
-      "--vault",
-      vaultRoot,
-    ]);
-    const genericShow = await runCli<{
-      entity: {
-        kind: string;
-      };
-    }>([
-      "show",
-      "current",
-      "--vault",
-      vaultRoot,
-    ]);
-
-    assert.equal(upsertResult.ok, true);
-    assert.equal(nounShow.ok, true);
-    assert.equal(genericShow.ok, true);
-    assert.equal(requireData(genericShow).entity.kind, "profile");
-    assert.equal(requireData(nounShow).entity.id, "current");
-    assert.equal(requireData(nounShow).entity.kind, "profile");
-    assert.deepEqual(requireData(nounShow).entity.data.topGoalIds, []);
-    assert.equal(requireData(nounShow).entity.links.length >= 1, true);
-  } finally {
-    await rm(vaultRoot, { recursive: true, force: true });
-  }
-});
-
-test("profile list and current show preserve canonical links and strip reserved fields", async () => {
+test("goal list and show preserve canonical links and strip reserved fields", async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
   const goalPayloadPath = path.join(vaultRoot, "goal-linked.json");
-  const profilePayloadPath = path.join(vaultRoot, "profile-linked.json");
-  const assessmentId = "asmt_01JNY0B2W4VG5C2A0G9S8M7R6Q";
-  const eventId = "evt_01JNY0B2W4VG5C2A0G9S8M7R6R";
 
   try {
     await runCli(["init", "--vault", vaultRoot]);
@@ -1906,70 +1684,7 @@ test("profile list and current show preserve canonical links and strip reserved 
     ]);
     const goalId = requireData(goalUpsert).goalId;
 
-    await mkdir(path.join(vaultRoot, "ledger/assessments/2026"), {
-      recursive: true,
-    });
-    await writeFile(
-      path.join(vaultRoot, "ledger/assessments/2026/2026-03.jsonl"),
-      `${JSON.stringify({
-        schemaVersion: "murph.assessment-response.v1",
-        id: assessmentId,
-        assessmentType: "full-intake",
-        recordedAt: "2026-03-12T13:00:00Z",
-        source: "manual",
-        title: "Linked assessment",
-        responses: {
-          sleep: {
-            averageHours: 7,
-          },
-        },
-      })}\n`,
-      "utf8",
-    );
-    await mkdir(path.join(vaultRoot, "ledger/events/2026"), {
-      recursive: true,
-    });
-    await writeFile(
-      path.join(vaultRoot, "ledger/events/2026/2026-03.jsonl"),
-      `${JSON.stringify({
-        schemaVersion: "murph.event.v1",
-        id: eventId,
-        kind: "encounter",
-        occurredAt: "2026-03-12T12:45:00Z",
-        recordedAt: "2026-03-12T12:50:00Z",
-        source: "manual",
-        title: "Linked encounter",
-      })}\n`,
-      "utf8",
-    );
-    await writeFile(
-      profilePayloadPath,
-      JSON.stringify({
-        source: "manual",
-        sourceAssessmentIds: [assessmentId],
-        sourceEventIds: [eventId],
-        profile: {
-          goals: {
-            topGoalIds: [goalId],
-          },
-        },
-      }),
-      "utf8",
-    );
-
-    const profileUpsert = await runCli<{
-      snapshotId: string;
-    }>([
-      "profile",
-      "upsert",
-      "--input",
-      `@${profilePayloadPath}`,
-      "--vault",
-      vaultRoot,
-    ]);
-    const snapshotId = requireData(profileUpsert).snapshotId;
-
-    const profileList = await runCli<{
+    const goalList = await runCli<{
       count: number;
       nextCursor: string | null;
       items: Array<{
@@ -1980,12 +1695,12 @@ test("profile list and current show preserve canonical links and strip reserved 
         links: Array<{ id: string }>;
       }>;
     }>([
-      "profile",
+      "goal",
       "list",
       "--vault",
       vaultRoot,
     ]);
-    const currentProfile = await runCli<{
+    const goalShow = await runCli<{
       entity: {
         kind: string;
         title: string | null;
@@ -1995,111 +1710,79 @@ test("profile list and current show preserve canonical links and strip reserved 
         links: Array<{ id: string }>;
       };
     }>([
-      "profile",
       "show",
-      "current",
-      "--vault",
-      vaultRoot,
-    ]);
-    const genericCurrentProfile = await runCli<{
-      entity: {
-        kind: string;
-        title: string | null;
-        markdown: string | null;
-        links: Array<{ id: string }>;
-      };
-    }>([
-      "show",
-      "current",
+      goalId,
       "--vault",
       vaultRoot,
     ]);
 
-    assert.equal(profileUpsert.ok, true);
-    assert.equal(profileList.ok, true);
-    assert.equal(requireData(profileList).count, 1);
-    assert.equal(requireData(profileList).nextCursor, null);
-    assert.equal(requireData(profileList).items[0]?.kind, "profile");
-    assert.equal(requireData(profileList).items[0]?.title, snapshotId);
-    assert.equal(Boolean(requireData(profileList).items[0]?.path), true);
-    assert.deepEqual(
-      requireData(profileList).items[0]?.links.map((link) => link.id).sort(),
-      [assessmentId, eventId].sort(),
-    );
-    assert.equal("relativePath" in requireData(profileList).items[0]!.data, false);
-    assert.equal("body" in requireData(profileList).items[0]!.data, false);
+    assert.equal(goalList.ok, true);
+    assert.equal(requireData(goalList).count, 1);
+    assert.equal(requireData(goalList).nextCursor, null);
+    assert.equal(requireData(goalList).items[0]?.kind, "goal");
+    assert.equal(requireData(goalList).items[0]?.title, "Recover better");
+    assert.equal(Boolean(requireData(goalList).items[0]?.path), true);
+    assert.equal("relativePath" in requireData(goalList).items[0]!.data, false);
+    assert.equal("body" in requireData(goalList).items[0]!.data, false);
 
-    assert.equal(currentProfile.ok, true);
-    assert.equal(genericCurrentProfile.ok, true);
-    assert.equal(requireData(currentProfile).entity.kind, "profile");
-    assert.equal(requireData(currentProfile).entity.title, "Current profile");
+    assert.equal(goalShow.ok, true);
+    assert.equal(requireData(goalShow).entity.kind, "goal");
+    assert.equal(requireData(goalShow).entity.title, "Recover better");
+    assert.equal(Boolean(requireData(goalShow).entity.path), true);
     assert.equal(
-      requireData(currentProfile).entity.title,
-      requireData(genericCurrentProfile).entity.title,
+      requireData(goalShow).entity.links.some((link) => link.id === goalId),
+      false,
     );
-    assert.equal(
-      requireData(currentProfile).entity.markdown,
-      requireData(genericCurrentProfile).entity.markdown,
-    );
-    assert.equal(Boolean(requireData(currentProfile).entity.path), true);
-    assert.deepEqual(
-      requireData(currentProfile).entity.links.map((link) => link.id).sort(),
-      [assessmentId, eventId, goalId, snapshotId].sort(),
-    );
-    assert.equal("relativePath" in requireData(currentProfile).entity.data, false);
-    assert.equal("body" in requireData(currentProfile).entity.data, false);
+    assert.equal("relativePath" in requireData(goalShow).entity.data, false);
+    assert.equal("body" in requireData(goalShow).entity.data, false);
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }
 });
 
-test("profile list preserves date-range filters after explicit adapter migration", async () => {
+test("goal list preserves status filters after explicit adapter migration", async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
-  const inRangePath = path.join(vaultRoot, "profile-in-range.json");
-  const outOfRangePath = path.join(vaultRoot, "profile-out-of-range.json");
+  const activePath = path.join(vaultRoot, "goal-active.json");
+  const archivedPath = path.join(vaultRoot, "goal-archived.json");
 
   try {
     await runCli(["init", "--vault", vaultRoot]);
     await writeFile(
-      inRangePath,
+      activePath,
       JSON.stringify({
-        recordedAt: "2026-03-12T09:00:00Z",
-        profile: {
-          goals: {
-            topGoalIds: [],
-          },
-        },
+        title: "Active goal",
+        status: "active",
+        horizon: "long_term",
+        domains: ["sleep"],
       }),
       "utf8",
     );
     await writeFile(
-      outOfRangePath,
+      archivedPath,
       JSON.stringify({
-        recordedAt: "2026-03-20T09:00:00Z",
-        profile: {
-          goals: {
-            topGoalIds: [],
-          },
-        },
+        title: "Archived goal",
+        status: "archived",
+        horizon: "long_term",
+        domains: ["sleep"],
       }),
       "utf8",
     );
 
     const inRangeUpsert = await runCli<{
-      snapshotId: string;
+      goalId: string;
     }>([
-      "profile",
+      "goal",
       "upsert",
       "--input",
-      `@${inRangePath}`,
+      `@${activePath}`,
       "--vault",
       vaultRoot,
     ]);
     await runCli([
-      "profile",
+      "goal",
       "upsert",
       "--input",
-      `@${outOfRangePath}`,
+      `@${archivedPath}`,
       "--vault",
       vaultRoot,
     ]);
@@ -2111,23 +1794,20 @@ test("profile list preserves date-range filters after explicit adapter migration
         id: string;
       }>;
     }>([
-      "profile",
+      "goal",
       "list",
-      "--from",
-      "2026-03-12",
-      "--to",
-      "2026-03-12",
+      "--status",
+      "active",
       "--vault",
       vaultRoot,
     ]);
 
     assert.equal(listResult.ok, true);
-    assert.equal(requireData(listResult).filters.from, "2026-03-12");
-    assert.equal(requireData(listResult).filters.to, "2026-03-12");
+    assert.equal(requireData(listResult).filters.status, "active");
     assert.equal(requireData(listResult).count, 1);
     assert.equal(
       requireData(listResult).items[0]?.id,
-      requireData(inRangeUpsert).snapshotId,
+      requireData(inRangeUpsert).goalId,
     );
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
@@ -2490,33 +2170,32 @@ test("supplement rename moves the product record to the new slug while preservin
   }
 });
 
-test("profile upsert rejects malformed profile payloads instead of coercing them to {}", async () => {
+test("goal upsert rejects malformed payloads instead of coercing them into saved records", async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
-  const payloadPath = path.join(vaultRoot, "profile-invalid.json");
+  const payloadPath = path.join(vaultRoot, "goal-invalid.json");
 
   try {
     await runCli(["init", "--vault", vaultRoot]);
     await writeFile(
       payloadPath,
       JSON.stringify({
-        source: "manual",
-        profile: "oops",
+        title: 42,
       }),
       "utf8",
     );
 
     const upsertResult = await runCli([
-      "profile",
+      "goal",
       "upsert",
       "--input",
       `@${payloadPath}`,
       "--vault",
       vaultRoot,
     ]);
-    const profileList = await runCli<{
+    const goalList = await runCli<{
       items: Array<{ id: string }>;
     }>([
-      "profile",
+      "goal",
       "list",
       "--vault",
       vaultRoot,
@@ -2524,8 +2203,8 @@ test("profile upsert rejects malformed profile payloads instead of coercing them
 
     assert.equal(upsertResult.ok, false);
     assert.equal(upsertResult.error?.code, "invalid_payload");
-    assert.equal(profileList.ok, true);
-    assert.deepEqual(requireData(profileList).items, []);
+    assert.equal(goalList.ok, true);
+    assert.deepEqual(requireData(goalList).items, []);
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }

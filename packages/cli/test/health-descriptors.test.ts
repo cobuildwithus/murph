@@ -33,11 +33,11 @@ test("CLI health descriptors reuse shared taxonomy lookup metadata and scaffold 
 });
 
 test("generic CLI lookup inference stays anchored to shared aliases and prefixes", () => {
-  const profileDescriptor = findHealthDescriptorForLookup("current");
+  const goalDescriptor = findHealthDescriptorForLookup("goal_01JSHAREDLOOKUP000000000001");
   const goalKind = inferHealthEntityKind("goal_01JSHAREDLOOKUP000000000001");
   const protocolDescriptor = findHealthDescriptorForLookup("prot_01JSHAREDLOOKUP000000000001");
 
-  assert.equal(profileDescriptor?.kind, "profile");
+  assert.equal(goalDescriptor?.kind, "goal");
   assert.equal(goalKind, "goal");
   assert.equal(protocolDescriptor?.kind, "protocol");
 });

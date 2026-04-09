@@ -22,7 +22,6 @@ export interface TimelineFilters {
   includeJournal?: boolean;
   includeEvents?: boolean;
   includeAssessments?: boolean;
-  includeHistory?: boolean;
   includeDailySampleSummaries?: boolean;
   limit?: number;
 }
@@ -32,7 +31,6 @@ export interface TimelineEntry {
   entryType:
     | "assessment"
     | "event"
-    | "history"
     | "journal"
     | "sample_summary";
   occurredAt: string;
@@ -56,7 +54,6 @@ export function buildTimeline(
   const includeJournal = filters.includeJournal ?? true;
   const includeEvents = filters.includeEvents ?? true;
   const includeAssessments = filters.includeAssessments ?? true;
-  const includeHistory = filters.includeHistory ?? true;
   const includeDailySampleSummaries =
     filters.includeDailySampleSummaries ?? true;
 
@@ -166,39 +163,6 @@ export function buildTimeline(
         relatedIds: entityRelationTargetIds(assessment),
         tags: assessment.tags,
         data: assessment.attributes,
-      });
-    }
-  }
-
-  if (includeHistory) {
-    for (const history of listEntities(vault, {
-      families: ["history"],
-      from: filters.from,
-      to: filters.to,
-    })) {
-      const historyKind = history.kind || "history";
-      if (kindSet && !kindSet.has(historyKind)) {
-        continue;
-      }
-
-      const occurrence = resolveTimelineOccurrence(history, "00:00:00Z");
-      if (!occurrence || !occurrence.occurredAt) {
-        continue;
-      }
-
-      entries.push({
-        id: history.entityId,
-        entryType: "history",
-        occurredAt: occurrence.occurredAt,
-        date: occurrence.date,
-        title: history.title ?? historyKind,
-        kind: historyKind,
-        stream: null,
-        experimentSlug: null,
-        path: history.path,
-        relatedIds: entityRelationTargetIds(history),
-        tags: history.tags,
-        data: history.attributes,
       });
     }
   }

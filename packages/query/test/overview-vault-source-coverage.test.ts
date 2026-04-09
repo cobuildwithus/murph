@@ -377,7 +377,7 @@ test("readVaultSourceTolerant keeps sparse vault layouts but hard-cuts legacy re
   );
 
   const snapshot = await readVaultSourceTolerant(vaultRoot);
-  const families = snapshot.entities.map((entity) => entity.family);
+  const families = [...new Set(snapshot.entities.map((entity) => entity.family))];
 
   assert.equal(snapshot.metadata?.vaultId, "vault_01K5JZ6C0D9F5RSM6X1H0M2Q3A");
   assert.deepEqual(families.sort(), ["audit", "core", "event", "experiment", "journal", "sample"]);

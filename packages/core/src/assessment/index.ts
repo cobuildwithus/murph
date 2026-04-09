@@ -16,7 +16,6 @@ export type {
   GoalProposal,
   HistoryEventProposal,
   ImportAssessmentResponseInput,
-  ProfileSnapshotProposal,
   ProtocolProposal,
 } from "./types.ts";
 

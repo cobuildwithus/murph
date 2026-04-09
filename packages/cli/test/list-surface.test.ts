@@ -21,8 +21,7 @@ function listCliOptions() {
 
 test('list help and schemas no longer expose cursor pagination options', async () => {
   const help = await runRawSourceCli(['goal', 'list', '--help'], listCliOptions())
-  const profileHelp = await runRawSourceCli(['profile', 'list', '--help'], listCliOptions())
-  const historyHelp = await runRawSourceCli(['history', 'list', '--help'], listCliOptions())
+  const bloodTestHelp = await runRawSourceCli(['blood-test', 'list', '--help'], listCliOptions())
   const readSchema = JSON.parse(
     await runRawSourceCli(['list', '--schema', '--format', 'json'], listCliOptions()),
   ) as {
@@ -43,11 +42,9 @@ test('list help and schemas no longer expose cursor pagination options', async (
 
   assert.doesNotMatch(help, /--cursor/u)
   assert.doesNotMatch(help, /next-page token/u)
-  assert.match(profileHelp, /--from/u)
-  assert.match(profileHelp, /--to/u)
-  assert.match(historyHelp, /--kind/u)
-  assert.match(historyHelp, /--from/u)
-  assert.match(historyHelp, /--to/u)
+  assert.doesNotMatch(bloodTestHelp, /--kind/u)
+  assert.match(bloodTestHelp, /--from/u)
+  assert.match(bloodTestHelp, /--to/u)
   assert.equal('cursor' in readSchema.options.properties, false)
   assert.equal('recordType' in readSchema.options.properties, true)
   assert.equal('status' in readSchema.options.properties, true)

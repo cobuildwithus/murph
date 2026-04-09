@@ -1,9 +1,8 @@
 {
   "id": "health-extensions-noun-show",
-  "command": "vault-cli <noun> show <id|current> --vault <path> [--format json|md] [--request-id <id>]",
+  "command": "vault-cli <noun> show <id> --vault <path> [--format json|md] [--request-id <id>]",
   "vaultFixture": "fixtures/minimal-vault",
   "inputs": [
-    "fixtures/health-extensions/vault-overlay/bank/profile/current.md",
     "fixtures/health-extensions/vault-overlay/bank/goals/improve-sleep.md",
     "fixtures/health-extensions/vault-overlay/bank/conditions/insomnia-symptoms.md",
     "fixtures/health-extensions/vault-overlay/bank/allergies/penicillin.md",
@@ -12,5 +11,5 @@
     "fixtures/health-extensions/vault-overlay/bank/genetics/mthfr-c677t.md"
   ],
   "goldenOutput": "fixtures/golden-outputs/show",
-  "purpose": "Documents health noun show lookups for current profile, canonical ids, and slug-based registry reads."
+  "purpose": "Documents health noun show lookups for canonical ids and slug-based registry reads."
 }

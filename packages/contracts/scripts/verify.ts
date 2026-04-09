@@ -8,6 +8,7 @@ import {
   assessmentResponseSchema,
   auditRecordSchema,
   commandNounCapabilityByNoun,
+  commandNounCapabilities,
   conditionFrontmatterSchema,
   coreFrontmatterSchema,
   type ContractSchema,
@@ -23,12 +24,11 @@ import {
   foodFrontmatterSchema,
   geneticVariantFrontmatterSchema,
   goalFrontmatterSchema,
+  healthEntityDefinitionByKind,
+  healthEntityDefinitions,
   journalDayFrontmatterSchema,
-  exampleProfileSnapshots,
   exampleSampleRecords,
   exampleVaultMetadata,
-  profileCurrentFrontmatterSchema,
-  profileSnapshotSchema,
   providerFrontmatterSchema,
   recipeFrontmatterSchema,
   protocolFrontmatterSchema,
@@ -130,13 +130,11 @@ assert.deepEqual(Object.keys(schemaCatalog).sort(), [
   "frontmatter-genetic-variant",
   "frontmatter-goal",
   "frontmatter-journal-day",
-  "frontmatter-profile-current",
   "frontmatter-protocol",
   "frontmatter-provider",
   "frontmatter-recipe",
   "frontmatter-workout-format",
   "inbox-capture-record",
-  "profile-snapshot",
   "sample-record",
   "vault-metadata",
 ]);
@@ -144,6 +142,15 @@ assert.equal((schemaCatalog["event-record"] as { oneOf?: unknown[] }).oneOf?.len
 assert.equal((schemaCatalog["sample-record"] as { oneOf?: unknown[] }).oneOf?.length, 7);
 assert.deepEqual(commandNounCapabilityByNoun.get("food")?.bundles, ["payloadCrud"]);
 assert.deepEqual(commandNounCapabilityByNoun.get("food")?.additionalCapabilities ?? [], []);
+assert.equal(
+  commandNounCapabilities.map((entry) => String(entry.noun)).includes("history"),
+  false,
+);
+assert.equal(
+  healthEntityDefinitions.map((definition) => String(definition.kind)).includes("history"),
+  false,
+);
+assert.equal(healthEntityDefinitionByKind.has("blood_test"), true);
 assert.equal(
   (schemaCatalog["frontmatter-core"] as { additionalProperties?: unknown }).additionalProperties,
   false,
@@ -154,13 +161,6 @@ assert.equal(
       ?.priority
   )?.type,
   "integer",
-);
-assert.equal(
-  (
-    (schemaCatalog["frontmatter-profile-current"] as { properties?: Record<string, { format?: unknown }> }).properties
-      ?.updatedAt
-  )?.format,
-  "date-time",
 );
 assert.equal(
   (
@@ -198,9 +198,6 @@ exampleAssessmentResponses.forEach((record, index) =>
   assertNoErrors(`assessment response example ${index + 1}`, record, assessmentResponseSchema),
 );
 exampleEventRecords.forEach((record, index) => assertNoErrors(`event example ${index + 1}`, record, eventRecordSchema));
-exampleProfileSnapshots.forEach((record, index) =>
-  assertNoErrors(`profile snapshot example ${index + 1}`, record, profileSnapshotSchema),
-);
 exampleSampleRecords.forEach((record, index) => assertNoErrors(`sample example ${index + 1}`, record, sampleRecordSchema));
 exampleAuditRecords.forEach((record, index) => assertNoErrors(`audit example ${index + 1}`, record, auditRecordSchema));
 
@@ -215,7 +212,6 @@ assertNoErrors(
   exampleFrontmatterObjects.workoutFormat,
   workoutFormatFrontmatterSchema,
 );
-assertNoErrors("profile current frontmatter object", exampleHealthFrontmatterObjects.profileCurrent, profileCurrentFrontmatterSchema);
 assertNoErrors("goal frontmatter object", exampleHealthFrontmatterObjects.goal, goalFrontmatterSchema);
 assertNoErrors("condition frontmatter object", exampleHealthFrontmatterObjects.condition, conditionFrontmatterSchema);
 assertNoErrors("allergy frontmatter object", exampleHealthFrontmatterObjects.allergy, allergyFrontmatterSchema);
@@ -350,7 +346,6 @@ console.log(
     "Verified schema artifacts and examples.",
     `assessments=${exampleAssessmentResponses.length}`,
     `events=${exampleEventRecords.length}`,
-    `profileSnapshots=${exampleProfileSnapshots.length}`,
     `samples=${exampleSampleRecords.length}`,
     `audits=${exampleAuditRecords.length}`,
   ].join(" "),

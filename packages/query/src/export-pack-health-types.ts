@@ -20,7 +20,7 @@ export interface ExportPackAssessmentRecord {
   relativePath: string;
 }
 
-export interface ExportPackHistoryRecord {
+export interface ExportPackHealthEventRecord {
   id: string;
   kind: string;
   occurredAt: string;
@@ -47,7 +47,7 @@ export interface ExportPackBankPage {
 
 export interface ExportPackHealthContext {
   assessments: ExportPackAssessmentRecord[];
-  historyEvents: ExportPackHistoryRecord[];
+  healthEvents: ExportPackHealthEventRecord[];
   goals: ExportPackBankPage[];
   conditions: ExportPackBankPage[];
   allergies: ExportPackBankPage[];
