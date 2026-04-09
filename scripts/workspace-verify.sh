@@ -307,10 +307,6 @@ compose_node_options_with_sqlite_warning_filter() {
   printf '%s\n' "$sqlite_warning_filter_option"
 }
 
-run_repo_build_with_retry() {
-  run_command_with_retry "Workspace build" pnpm build:workspace:incremental
-}
-
 run_test_runtime_artifact_build_with_retry() {
   local filtered_node_options
   filtered_node_options="$(compose_node_options_with_sqlite_warning_filter)"
@@ -333,48 +329,6 @@ run_package_command_without_node_v8_coverage_with_retry() {
   run_command_with_retry \
     "Package command for ${package_dir} (${command})" \
     env -u NODE_V8_COVERAGE pnpm --dir "$package_dir" "$command"
-}
-
-is_repo_internal_fast_path_file() {
-  local file_path="$1"
-
-  case "$file_path" in
-    agent-docs/*|config/*|docs/*|scripts/*)
-      return 0
-      ;;
-    AGENTS.md|ARCHITECTURE.md|README.md|vitest.config.ts|tsconfig.json|tsconfig.*.json)
-      return 0
-      ;;
-    *)
-      return 1
-      ;;
-  esac
-}
-
-should_skip_app_verification() {
-  local changed_file
-  local saw_changed_file=0
-
-  while IFS= read -r changed_file; do
-    if [[ -z "$changed_file" ]]; then
-      continue
-    fi
-
-    saw_changed_file=1
-
-    if ! is_repo_internal_fast_path_file "$changed_file"; then
-      return 1
-    fi
-  done < <(
-    git diff --name-only --relative HEAD -- 2>/dev/null || true
-    git ls-files --others --exclude-standard 2>/dev/null || true
-  )
-
-  if [[ "$saw_changed_file" -eq 0 ]]; then
-    return 1
-  fi
-
-  return 0
 }
 
 wait_for_background_jobs() {
@@ -426,10 +380,6 @@ run_test_packages_common() {
   if [[ "$test_lane_parallel" == "1" ]]; then
     local pids=()
 
-    run_timed_step "Tracked artifact hygiene" pnpm no-js &
-    local no_js_pid="$!"
-    pids+=("$no_js_pid")
-    register_background_pid "$no_js_pid"
     run_timed_step "Contracts package test" pnpm --dir "packages/contracts" test &
     local contracts_test_pid="$!"
     pids+=("$contracts_test_pid")
@@ -446,19 +396,11 @@ run_test_packages_common() {
     return 0
   fi
 
-  run_timed_step "Tracked artifact hygiene" pnpm no-js
   run_timed_step "Contracts package test" pnpm --dir "packages/contracts" test
   run_timed_step "OpenClaw plugin test" pnpm --dir "packages/openclaw-plugin" test
 }
 
 run_test_apps() {
-  local mode="${1:-auto}"
-
-  if [[ "$mode" != "force" ]] && should_skip_app_verification; then
-    verify_log "skip app verification (repo-internal fast path: changed files are limited to docs/process/verification tooling)"
-    return 0
-  fi
-
   if [[ "$app_verify_parallel" == "1" ]]; then
     local pids=()
 
@@ -677,22 +619,16 @@ run_typecheck() {
   run_timed_step "Workspace boundary checks" run_workspace_boundary_check
   run_timed_step "Repo TS tools typecheck" pnpm exec tsc -p "tsconfig.tools.json" --pretty false
   run_timed_step "Contracts build" pnpm --dir "packages/contracts" build
-  run_timed_step "Workspace build" run_repo_build_with_retry
   run_timed_step "Workspace package/app typecheck" run_typecheck_packages
 }
 
 run_test() {
-  run_repo_acceptance_guards
-  run_timed_step "Package smoke prerequisites" run_test_packages_common
+  run_timed_step "Package behavior prerequisites" run_test_packages_common
 
   if [[ "$test_lane_parallel" == "1" ]]; then
     local test_packages_pid
     local smoke_pid
 
-    # The app verify lane imports built workspace artifacts, so a clean run must
-    # finish the shared prepared-artifact build before any app checks start.
-    # Keep repo Vitest and fixture smoke parallel, but do not overlap them with
-    # app verify because hosted-web verify also runs Vitest and Prisma generation.
     run_timed_step "Prepared runtime artifacts" prepare_repo_vitest_runtime_artifacts
     run_timed_step "Repo Vitest" run_repo_vitest --no-coverage &
     test_packages_pid="$!"
@@ -702,17 +638,16 @@ run_test() {
     register_background_pid "$smoke_pid"
 
     wait_for_background_jobs "$test_packages_pid" "$smoke_pid"
-    run_timed_step "App verification" run_test_apps
   else
     run_timed_step "Prepared runtime artifacts" prepare_repo_vitest_runtime_artifacts
     run_timed_step "Repo Vitest" run_repo_vitest --no-coverage
-    run_timed_step "App verification" run_test_apps
     run_timed_step "Fixture smoke verification" run_fixture_smoke_verification
   fi
 }
 
 run_test_packages() {
-  run_timed_step "Package smoke prerequisites" run_test_packages_common
+  run_timed_step "Tracked artifact hygiene" pnpm no-js
+  run_timed_step "Package behavior prerequisites" run_test_packages_common
   run_timed_step "Prepared runtime artifacts" prepare_repo_vitest_runtime_artifacts
   run_timed_step "Repo Vitest" run_repo_vitest --no-coverage
 }
@@ -859,7 +794,7 @@ main() {
       run_test_packages
       ;;
     "test:apps")
-      run_test_apps "force"
+      run_test_apps
       ;;
     "test:packages:coverage")
       run_test_packages_coverage

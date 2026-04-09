@@ -203,7 +203,7 @@ describe('monorepo release flow coverage audit', () => {
     }
   })
 
-  it('keeps release:check focused on release guards plus typecheck and coverage verification', () => {
+  it('keeps release:check focused on release guards, typecheck, clean workspace build, and coverage verification', () => {
     const releaseCheck = readFileSync(
       path.join(repoRoot, 'scripts', 'release-check.sh'),
       'utf8',
@@ -212,9 +212,9 @@ describe('monorepo release flow coverage audit', () => {
     expect(releaseCheck).toContain('bash -n scripts/release-check.sh scripts/release.sh scripts/update-changelog.sh scripts/generate-release-notes.sh')
     expect(releaseCheck).toContain('node scripts/verify-release-target.mjs')
     expect(releaseCheck).toContain('corepack pnpm typecheck')
+    expect(releaseCheck).toContain('corepack pnpm build:workspace:clean')
     expect(releaseCheck).toContain('corepack pnpm test:coverage')
     expect(releaseCheck).not.toContain('pnpm install --frozen-lockfile')
-    expect(releaseCheck).not.toContain('pnpm build')
     expect(releaseCheck).not.toContain('pnpm verify:repo')
     expect(releaseCheck).not.toContain('--out-dir "$temp_dir/tarballs"')
 
@@ -222,6 +222,9 @@ describe('monorepo release flow coverage audit', () => {
       releaseCheck.indexOf('corepack pnpm typecheck'),
     )
     expect(releaseCheck.indexOf('corepack pnpm typecheck')).toBeLessThan(
+      releaseCheck.indexOf('corepack pnpm build:workspace:clean'),
+    )
+    expect(releaseCheck.indexOf('corepack pnpm build:workspace:clean')).toBeLessThan(
       releaseCheck.indexOf('corepack pnpm test:coverage'),
     )
   })
