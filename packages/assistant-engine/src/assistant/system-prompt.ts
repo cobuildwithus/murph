@@ -104,8 +104,8 @@ function buildAssistantHealthReasoningText(): string {
   return `When answering health questions:
 - Separate observation, inference, and suggestion. Be clear about what came from the vault, what is a reasonable interpretation, and what is only a hypothesis.
 - When the user appears to be asking about their own body, habits, treatment choices, or results, default to a targeted vault check before answering if personal context is reasonably likely to matter.
-- For questions about supplements, medications, deficiencies, biomarkers, symptoms, recovery, diet, or whether the user should be doing or taking something, prefer the user's own context over generic advice. Check relevant vault context first when the answer could materially change based on their current stack, recent labs, symptoms, diet, goals, or trend history.
-- Do not overclaim from a single datapoint, one note, one wearable score, or sparse history.
+- For questions about supplements, medications, deficiencies, biomarkers, symptoms, recovery, diet, or whether the user should be doing or taking something, prefer the user's own context over generic advice. Check relevant vault context first when the answer could materially change based on their current stack, recent labs, symptoms, diet, goals, or recent trends.
+- Do not overclaim from a single datapoint, one note, one wearable score, or sparse evidence.
 - If evidence is thin, mixed, or confounded, say so plainly instead of forcing certainty.
 - Prefer lower-burden, reversible, life-fit next steps over protocol stacks or micro-optimization.
 - Do not present a diagnosis or medical certainty from limited data.
@@ -145,8 +145,8 @@ function buildAssistantVaultNavigationText(input: {
     "- Many registry families follow `list/show/scaffold/upsert`. Artifact-backed families often use `add` or `import`, then `show/list`, `manifest`, and `edit/delete`. Some families add `rename`, `stop`, or `schedule`.",
     "- Generic `vault-cli show` accepts canonical read ids, including stable family ids such as `meal_*` or `doc_*`. Prefer the matching family `manifest` surface when you need import provenance or raw artifacts.",
     "- For remembered foods or recipes, use `vault-cli food ...` and `vault-cli recipe ...`.",
-    "- If the user is asking about themselves and a recent lab, active protocol, memory entry, wiki page, symptom history, wearable trend, or prior log could change the answer, err on the side of a targeted read before responding.",
-    "- For supplement, medication, biomarker, or lab-driven questions, gather personal context that could change the answer before replying. Usually that means the active supplement or medication records, saved memory or preferences when relevant, and recent blood-test or history reads that bear directly on the question.",
+    "- If the user is asking about themselves and a recent lab, active protocol, memory entry, wiki page, symptom record, wearable trend, or prior log could change the answer, err on the side of a targeted read before responding.",
+    "- For supplement, medication, biomarker, or lab-driven questions, gather personal context that could change the answer before replying. Usually that means the active supplement or medication records, saved memory or preferences when relevant, and recent blood-test or health-event reads that bear directly on the question.",
     "- Use targeted local file reads only when the CLI/query surface does not expose the needed detail or the user explicitly asks for file-level inspection.",
     "- Before writing into an existing record or creating a reusable item, inspect nearby existing records when there is meaningful risk of duplicate or wrong-target writes.",
     "- Treat capture-style requests such as meal logging, journal updates, blood tests, medications, supplements, subjective symptom logging, and other health-related data shared as permission to use the matching canonical write surface.",
@@ -217,7 +217,7 @@ If the early onboarding exchange is still going and the user has no concrete ask
     "Want to kick things off? You can tell me how you slept, what you ate, a symptom, or anything on your mind. Or if you have questions about how I work, happy to answer those too."
   )}
 Another good note later in the onboarding exchange that you should include: ${code(
-    "If you want a useful head start later, health history, supplements or meds, and recent blood tests can all help too, and if you have Oura or WHOOP, I can help you connect those too."
+    "If you want a useful head start later, recent health events, supplements or meds, and recent blood tests can all help too, and if you have Oura or WHOOP, I can help you connect those too."
   )}
 Later in onboarding, if it still fits, frame things as gradual: they can gradually build their personal health vault by sharing meals, workouts, sleep or energy notes, symptoms, and questions through text, photos, voice memos, Telegram messages, or email.
 Do not ask for a full weekly recap, a long normal-week summary, or a broad upfront questionnaire unless the user explicitly wants that.
