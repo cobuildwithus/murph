@@ -1,13 +1,15 @@
-import { assertContract, sharePackSchema } from "@murphai/contracts";
+import {
+  assertContract,
+  sharePackSchema,
+  type SharePack,
+} from "@murphai/contracts";
 import {
   parseHostedExecutionDeviceSyncRuntimeSnapshotResponse as parseOwnedHostedExecutionDeviceSyncRuntimeSnapshotResponse,
-  parseHostedExecutionDeviceSyncWakeHint as parseOwnedHostedExecutionDeviceSyncWakeHint,
 } from "@murphai/device-syncd/hosted-runtime";
 import { parseHostedExecutionBundleRef as parseRuntimeHostedExecutionBundleRef } from "@murphai/runtime-state";
 
 import type {
   HostedExecutionAssistantCronTickEvent,
-  HostedExecutionBundleRef,
   HostedExecutionEventDispatchStatus,
   HostedExecutionDeviceSyncRuntimeSnapshotResponse,
   HostedExecutionDeviceSyncWakeEvent,
@@ -43,7 +45,24 @@ import {
   isHostedExecutionRunLevel,
   isHostedExecutionRunPhase,
 } from "./observability.ts";
-import type { SharePack } from "@murphai/contracts";
+import {
+  requireArray,
+  requireBoolean,
+  requireNumber,
+  requireObject,
+  requireString,
+  requireStringArray,
+  readNullableString,
+  readNullableStringValue,
+  readOptionalNullableString,
+  readOptionalStringArray,
+} from "./parsers/assertions.ts";
+import {
+  parseHostedExecutionCronReason,
+  parseHostedExecutionDeviceSyncReason,
+  parseHostedExecutionDeviceSyncWakeHint,
+} from "./parsers/device-sync.ts";
+import { parseHostedExecutionTelegramMessage } from "./parsers/telegram.ts";
 
 export function parseHostedExecutionDispatchRequest(value: unknown): HostedExecutionDispatchRequest {
   const record = requireObject(value, "Hosted execution dispatch request");
@@ -348,7 +367,7 @@ export function parseHostedExecutionEvent(value: unknown): HostedExecutionEvent 
     case "assistant.cron.tick":
       return {
         kind,
-        reason: parseCronReason(record.reason),
+        reason: parseHostedExecutionCronReason(record.reason),
         userId,
       } satisfies HostedExecutionAssistantCronTickEvent;
     case "device-sync.wake":
@@ -364,7 +383,7 @@ export function parseHostedExecutionEvent(value: unknown): HostedExecutionEvent 
         ...(record.hint === undefined
           ? {}
           : {
-              hint: parseOwnedHostedExecutionDeviceSyncWakeHint(record.hint),
+              hint: parseHostedExecutionDeviceSyncWakeHint(record.hint),
             }),
         kind,
         ...(record.provider === undefined
@@ -375,7 +394,7 @@ export function parseHostedExecutionEvent(value: unknown): HostedExecutionEvent 
                 "Hosted execution device-sync.wake provider",
               ),
             }),
-        reason: parseDeviceSyncReason(record.reason),
+        reason: parseHostedExecutionDeviceSyncReason(record.reason),
         ...(record.runtimeSnapshot === undefined
           ? {}
           : {
@@ -496,271 +515,4 @@ function parseHostedExecutionEventDispatchState(
   }
 
   throw new TypeError(`Unsupported hosted execution event dispatch state: ${state}`);
-}
-
-function parseCronReason(value: unknown): HostedExecutionAssistantCronTickEvent["reason"] {
-  const reason = requireString(value, "Hosted execution assistant.cron.tick reason");
-
-  if (reason === "alarm" || reason === "manual" || reason === "device-sync") {
-    return reason;
-  }
-
-  throw new TypeError(`Unsupported hosted execution assistant.cron.tick reason: ${reason}`);
-}
-
-function parseDeviceSyncReason(
-  value: unknown,
-): Extract<HostedExecutionEvent, { kind: "device-sync.wake" }>["reason"] {
-  const reason = requireString(value, "Hosted execution device-sync.wake reason");
-
-  if (
-    reason === "connected"
-    || reason === "webhook_hint"
-    || reason === "disconnected"
-    || reason === "reauthorization_required"
-  ) {
-    return reason;
-  }
-
-  throw new TypeError(`Unsupported hosted execution device-sync.wake reason: ${reason}`);
-}
-
-function requireObject(value: unknown, label: string): Record<string, unknown> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError(`${label} must be an object.`);
-  }
-
-  return value as Record<string, unknown>;
-}
-
-const ISO_8601_TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/;
-
-function requireString(value: unknown, label: string): string {
-  if (typeof value !== "string" || value.length === 0) {
-    throw new TypeError(`${label} must be a non-empty string.`);
-  }
-
-  return value;
-}
-
-function requireNumber(value: unknown, label: string): number {
-  if (typeof value !== "number" || !Number.isFinite(value)) {
-    throw new TypeError(`${label} must be a finite number.`);
-  }
-
-  return value;
-}
-
-function requirePositiveInteger(value: unknown, label: string): number {
-  const parsed = requireNumber(value, label);
-
-  if (!Number.isInteger(parsed) || parsed < 1) {
-    throw new TypeError(`${label} must be a positive integer.`);
-  }
-
-  return parsed;
-}
-
-function requireBoolean(value: unknown, label: string): boolean {
-  if (typeof value !== "boolean") {
-    throw new TypeError(`${label} must be a boolean.`);
-  }
-
-  return value;
-}
-
-function readNullableString(value: unknown, label: string): string | null {
-  if (value === null || value === undefined) {
-    return null;
-  }
-
-  return requireString(value, label);
-}
-
-function readNullableStringValue(value: unknown, label: string): string | null {
-  if (value === null || value === undefined) {
-    return null;
-  }
-
-  if (typeof value !== "string") {
-    throw new TypeError(`${label} must be a string or null.`);
-  }
-
-  return value;
-}
-
-function parseHostedExecutionTelegramMessage(
-  value: unknown,
-): HostedExecutionTelegramMessageReceivedEvent["telegramMessage"] {
-  const record = requireObject(value, "Hosted execution Telegram message telegramMessage");
-  const attachmentsValue = record.attachments;
-
-  return {
-    ...(attachmentsValue === undefined
-      ? {}
-      : {
-          attachments: requireArray(
-            attachmentsValue,
-            "Hosted execution Telegram message telegramMessage.attachments",
-          ).map((entry, index) =>
-            parseHostedExecutionTelegramAttachment(
-              entry,
-              `Hosted execution Telegram message telegramMessage.attachments[${index}]`,
-            ),
-          ),
-        }),
-    ...(record.mediaGroupId === undefined
-      ? {}
-      : {
-          mediaGroupId: readNullableStringValue(
-            record.mediaGroupId,
-            "Hosted execution Telegram message telegramMessage.mediaGroupId",
-          ),
-        }),
-    messageId: requireString(
-      record.messageId,
-      "Hosted execution Telegram message telegramMessage.messageId",
-    ),
-    schema: parseHostedExecutionTelegramMessageSchema(record.schema),
-    ...(record.text === undefined
-      ? {}
-      : {
-          text: readNullableStringValue(
-            record.text,
-            "Hosted execution Telegram message telegramMessage.text",
-          ),
-        }),
-    threadId: requireString(
-      record.threadId,
-      "Hosted execution Telegram message telegramMessage.threadId",
-    ),
-  };
-}
-
-function parseHostedExecutionTelegramAttachment(
-  value: unknown,
-  label: string,
-): NonNullable<HostedExecutionTelegramMessageReceivedEvent["telegramMessage"]["attachments"]>[number] {
-  const record = requireObject(value, label);
-
-  return {
-    fileId: requireString(record.fileId, `${label}.fileId`),
-    ...(record.fileName === undefined
-      ? {}
-      : {
-          fileName: readNullableStringValue(record.fileName, `${label}.fileName`),
-        }),
-    ...(record.fileSize === undefined
-      ? {}
-      : {
-          fileSize: readNullableNumber(record.fileSize, `${label}.fileSize`),
-        }),
-    ...(record.fileUniqueId === undefined
-      ? {}
-      : {
-          fileUniqueId: readNullableStringValue(record.fileUniqueId, `${label}.fileUniqueId`),
-        }),
-    ...(record.height === undefined
-      ? {}
-      : {
-          height: readNullableNumber(record.height, `${label}.height`),
-        }),
-    kind: parseHostedExecutionTelegramAttachmentKind(record.kind, `${label}.kind`),
-    ...(record.mimeType === undefined
-      ? {}
-      : {
-          mimeType: readNullableStringValue(record.mimeType, `${label}.mimeType`),
-        }),
-    ...(record.width === undefined
-      ? {}
-      : {
-          width: readNullableNumber(record.width, `${label}.width`),
-        }),
-  };
-}
-
-function parseHostedExecutionTelegramAttachmentKind(
-  value: unknown,
-  label: string,
-): NonNullable<HostedExecutionTelegramMessageReceivedEvent["telegramMessage"]["attachments"]>[number]["kind"] {
-  const kind = requireString(value, label);
-
-  if (
-    kind === "animation"
-    || kind === "audio"
-    || kind === "document"
-    || kind === "photo"
-    || kind === "sticker"
-    || kind === "video"
-    || kind === "video_note"
-    || kind === "voice"
-  ) {
-    return kind;
-  }
-
-  throw new TypeError(`${label} must be a supported hosted Telegram attachment kind.`);
-}
-
-function parseHostedExecutionTelegramMessageSchema(
-  value: unknown,
-): HostedExecutionTelegramMessageReceivedEvent["telegramMessage"]["schema"] {
-  const schema = requireString(value, "Hosted execution Telegram message telegramMessage.schema");
-
-  if (schema === "murph.hosted-telegram-message.v1") {
-    return schema;
-  }
-
-  throw new TypeError("Hosted execution Telegram message telegramMessage.schema is unsupported.");
-}
-
-function readNullableNumber(value: unknown, label: string): number | null {
-  if (value === null || value === undefined) {
-    return null;
-  }
-
-  return requireNumber(value, label);
-}
-
-function readOptionalNullableString(value: unknown, label: string): string | null | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-
-  return readNullableString(value, label);
-}
-
-function requireArray(value: unknown, label: string): unknown[] {
-  if (!Array.isArray(value)) {
-    throw new TypeError(`${label} must be an array.`);
-  }
-
-  return value;
-}
-
-function requireStringArray(value: unknown, label: string): string[] {
-  return requireArray(value, label).map((entry, index) => requireString(entry, `${label}[${index}]`));
-}
-
-function readOptionalStringArray(value: unknown, label: string): string[] | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-
-  return requireStringArray(value, label);
-}
-
-function requireIsoTimestamp(value: unknown, label: string): string {
-  const candidate = requireString(value, label);
-
-  if (!ISO_8601_TIMESTAMP_PATTERN.test(candidate)) {
-    throw new TypeError(`${label} must be an ISO-8601 timestamp.`);
-  }
-
-  const parsed = Date.parse(candidate);
-
-  if (!Number.isFinite(parsed)) {
-    throw new TypeError(`${label} must be an ISO-8601 timestamp.`);
-  }
-
-  return new Date(parsed).toISOString();
 }
