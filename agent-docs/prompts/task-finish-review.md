@@ -18,7 +18,7 @@ Runtime expectation:
 - Parent agent: allow the run to continue and do not cancel it early unless there is clear evidence the audit is stuck or off scope.
 
 Coverage/proof responsibility:
-- This final audit replaces any standalone `test-coverage-audit` pass.
+- This final audit owns the remaining coverage/proof review even when an optional write-capable coverage/proof pass is running in parallel.
 - Inspect modified production files and nearby tests to decide whether the change has direct proof at the highest stable behavior boundary available.
 - If meaningful proof is missing, recommend the smallest high-impact tests or direct scenario checks needed to close the gap.
 
