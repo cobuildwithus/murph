@@ -24,8 +24,8 @@ import type {
 
 export { HostedCodeEntryStep } from "./hosted-phone-auth-code-entry-step";
 
-const HOSTED_TERMS_URL = "https://docs.co.build/legal/terms";
-const HOSTED_PRIVACY_URL = "https://docs.co.build/legal/privacy";
+const HOSTED_TERMS_URL = "/legal/terms.pdf";
+const HOSTED_PRIVACY_URL = "/legal/privacy.pdf";
 
 export function HostedInviteShortcutStep({
   disabled,
