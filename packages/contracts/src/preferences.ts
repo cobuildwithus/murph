@@ -6,7 +6,6 @@ export const preferencesDocumentSchemaVersion = 1;
 export const workoutUnitPreferencesSchema = z
   .object({
     weight: z.enum(["lb", "kg"]).optional(),
-    distance: z.enum(["km", "mi"]).optional(),
     bodyMeasurement: z.enum(["cm", "in"]).optional(),
   })
   .strict();

@@ -76,9 +76,9 @@ test('workout measurement capture and unit preferences round-trip through the re
       await runWorkoutCli<{
         unitPreferences: {
           bodyMeasurement: string
-          distance: string
           weight: string
         }
+        preferencesPath: string
         updated: boolean
       }>(cli, [
         'workout',
@@ -88,8 +88,6 @@ test('workout measurement capture and unit preferences round-trip through the re
         vaultRoot,
         '--weight',
         'lb',
-        '--distance',
-        'mi',
         '--body-measurement',
         'in',
         '--recorded-at',
@@ -98,17 +96,17 @@ test('workout measurement capture and unit preferences round-trip through the re
     ).envelope,
   )
   assert.equal(updatedUnits.updated, true)
+  assert.equal(updatedUnits.preferencesPath, 'bank/preferences.json')
   assert.equal(updatedUnits.unitPreferences.weight, 'lb')
-  assert.equal(updatedUnits.unitPreferences.distance, 'mi')
   assert.equal(updatedUnits.unitPreferences.bodyMeasurement, 'in')
 
   const shownUnits = requireData(
     (
       await runWorkoutCli<{
+        preferencesPath: string
         updated: boolean
         unitPreferences: {
           bodyMeasurement: string
-          distance: string
           weight: string
         }
       }>(cli, [
@@ -121,6 +119,7 @@ test('workout measurement capture and unit preferences round-trip through the re
     ).envelope,
   )
   assert.equal(shownUnits.updated, false)
+  assert.equal(shownUnits.preferencesPath, 'bank/preferences.json')
   assert.equal(shownUnits.unitPreferences.bodyMeasurement, 'in')
 
   const rejectedUnitUpdate = await runWorkoutCli(cli, [

@@ -328,9 +328,8 @@ export const bodyMeasurementTypeSchema = z.enum([
   "calves",
 ]);
 export const bodyMeasurementUnitSchema = z.enum(["lb", "kg", "percent", "cm", "in"]);
-export const profileWeightUnitSchema = z.enum(["lb", "kg"]);
-export const profileDistanceUnitSchema = z.enum(["km", "mi"]);
-export const profileBodyMeasurementUnitSchema = z.enum(["cm", "in"]);
+export const workoutWeightUnitPreferenceValueSchema = z.enum(["lb", "kg"]);
+export const workoutBodyMeasurementUnitPreferenceValueSchema = z.enum(["cm", "in"]);
 
 export const storedMediaSchema = z
   .object({
@@ -442,11 +441,10 @@ export const bodyMeasurementEntrySchema = z
     }
   });
 
-export const profileUnitPreferencesSchema = z
+export const workoutUnitPreferenceValuesSchema = z
   .object({
-    weight: profileWeightUnitSchema.optional(),
-    distance: profileDistanceUnitSchema.optional(),
-    bodyMeasurement: profileBodyMeasurementUnitSchema.optional(),
+    weight: workoutWeightUnitPreferenceValueSchema.optional(),
+    bodyMeasurement: workoutBodyMeasurementUnitPreferenceValueSchema.optional(),
   })
   .strict();
 
@@ -1256,10 +1254,11 @@ export type RawAssetOwner = z.infer<typeof rawAssetOwnerSchema>;
 export type BodyMeasurementType = z.infer<typeof bodyMeasurementTypeSchema>;
 export type BodyMeasurementUnit = z.infer<typeof bodyMeasurementUnitSchema>;
 export type BodyMeasurementEntry = z.infer<typeof bodyMeasurementEntrySchema>;
-export type ProfileWeightUnit = z.infer<typeof profileWeightUnitSchema>;
-export type ProfileDistanceUnit = z.infer<typeof profileDistanceUnitSchema>;
-export type ProfileBodyMeasurementUnit = z.infer<typeof profileBodyMeasurementUnitSchema>;
-export type ProfileUnitPreferences = z.infer<typeof profileUnitPreferencesSchema>;
+export type WorkoutWeightUnitPreferenceValue = z.infer<typeof workoutWeightUnitPreferenceValueSchema>;
+export type WorkoutBodyMeasurementUnitPreferenceValue = z.infer<
+  typeof workoutBodyMeasurementUnitPreferenceValueSchema
+>;
+export type WorkoutUnitPreferenceValues = z.infer<typeof workoutUnitPreferenceValuesSchema>;
 export type WorkoutSet = z.infer<typeof workoutSetSchema>;
 export type WorkoutExercise = z.infer<typeof workoutExerciseSchema>;
 export type WorkoutSession = z.infer<typeof workoutSessionSchema>;

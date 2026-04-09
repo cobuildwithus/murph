@@ -146,9 +146,8 @@ const bodyMeasurementEntryResultSchema = z.object({
   note: z.string().min(1).optional(),
 })
 
-export const profileUnitPreferencesResultSchema = z.object({
+export const workoutUnitPreferenceValuesResultSchema = z.object({
   weight: z.enum(['lb', 'kg']).nullable(),
-  distance: z.enum(['km', 'mi']).nullable(),
   bodyMeasurement: z.enum(['cm', 'in']).nullable(),
 })
 
@@ -252,10 +251,10 @@ export const workoutMeasurementAddResultSchema = z.object({
 
 export const workoutUnitPreferencesResultSchema = z.object({
   vault: pathSchema,
-  snapshotId: z.string().min(1).nullable(),
+  preferencesPath: pathSchema,
   updated: z.boolean(),
   recordedAt: isoTimestampSchema.nullable(),
-  unitPreferences: profileUnitPreferencesResultSchema,
+  unitPreferences: workoutUnitPreferenceValuesResultSchema,
 })
 
 export const workoutImportInspectResultSchema = z.object({

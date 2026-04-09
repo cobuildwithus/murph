@@ -67,10 +67,9 @@ function formatSchemaIssues(issues: readonly { path: PropertyKey[]; message: str
 
 function normalizeUnitPreferences(
   value: WorkoutUnitPreferences | null | undefined,
-): { weight: 'lb' | 'kg' | null; distance: 'km' | 'mi' | null; bodyMeasurement: 'cm' | 'in' | null } {
+): { weight: 'lb' | 'kg' | null; bodyMeasurement: 'cm' | 'in' | null } {
   return {
     weight: value?.weight ?? null,
-    distance: value?.distance ?? null,
     bodyMeasurement: value?.bodyMeasurement ?? null,
   }
 }
@@ -286,7 +285,6 @@ export async function showWorkoutUnitPreferences(vault: string) {
 
   return {
     vault,
-    snapshotId: null,
     preferencesPath: preferences.sourcePath,
     updated: false,
     recordedAt: preferences.updatedAt,
@@ -297,13 +295,11 @@ export async function showWorkoutUnitPreferences(vault: string) {
 export async function setWorkoutUnitPreferences(input: {
   vault: string
   weight?: 'lb' | 'kg'
-  distance?: 'km' | 'mi'
   bodyMeasurement?: 'cm' | 'in'
   recordedAt?: string
 }) {
   const requested = compactObject({
     weight: input.weight,
-    distance: input.distance,
     bodyMeasurement: input.bodyMeasurement,
   }) as WorkoutUnitPreferences
 
@@ -323,7 +319,6 @@ export async function setWorkoutUnitPreferences(input: {
   if (JSON.stringify(currentNormalized) === JSON.stringify(nextNormalized)) {
     return {
       vault: input.vault,
-      snapshotId: null,
       preferencesPath: current.sourcePath,
       updated: false,
       recordedAt: current.updatedAt,
@@ -339,7 +334,6 @@ export async function setWorkoutUnitPreferences(input: {
 
   return {
     vault: input.vault,
-    snapshotId: null,
     preferencesPath: updated.document.sourcePath,
     updated: true,
     recordedAt: updated.document.updatedAt,
