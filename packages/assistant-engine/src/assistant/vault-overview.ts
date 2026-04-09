@@ -3,6 +3,7 @@ import { readdir } from 'node:fs/promises'
 import { resolveVaultPath, VAULT_LAYOUT, walkVaultFiles } from '@murphai/core'
 import {
   listAutomations,
+  listBloodTests,
   listWearableSourceHealth,
   readVault,
   type VaultReadModel,
@@ -17,6 +18,7 @@ export async function buildAssistantVaultOverviewBlock(
   const [
     vault,
     automations,
+    bloodTests,
     rawMealManifestPaths,
     researchNotePaths,
     rawInboxPresent,
@@ -25,6 +27,7 @@ export async function buildAssistantVaultOverviewBlock(
     await Promise.all([
       readVault(vaultRoot),
       listAutomations(vaultRoot, { limit: 1 }),
+      listBloodTests(vaultRoot, { limit: 1 }),
       listRawMealManifestPaths(vaultRoot),
       walkVaultFiles(vaultRoot, RESEARCH_ROOT, { extension: '.md' }),
       directoryHasEntries(vaultRoot, VAULT_LAYOUT.rawInboxDirectory),
@@ -35,6 +38,7 @@ export async function buildAssistantVaultOverviewBlock(
   const canonicalCoverage = summarizeCanonicalCoverage(vault, eventKindCounts)
   const wearableCoverage = summarizeWearableCoverage(vault)
   const healthContextCoverage = summarizeHealthContextCoverage(vault)
+  const bloodTestCoverage = summarizeBloodTestCoverage(bloodTests.length)
   const journalAndDocumentCoverage = summarizeJournalAndDocumentCoverage(
     vault,
     eventKindCounts,
@@ -54,6 +58,7 @@ export async function buildAssistantVaultOverviewBlock(
     canonicalCoverage,
     wearableCoverage,
     healthContextCoverage,
+    bloodTestCoverage,
     journalAndDocumentCoverage,
     automationCoverage,
     rawCoverage,
@@ -115,6 +120,10 @@ function summarizeHealthContextCoverage(vault: VaultReadModel): string | null {
   }
 
   return `- Saved health context includes ${joinWithAnd(parts)}.`
+}
+
+function summarizeBloodTestCoverage(bloodTestCount: number): string | null {
+  return bloodTestCount > 0 ? '- Blood test records are present.' : null
 }
 
 function summarizeJournalAndDocumentCoverage(
