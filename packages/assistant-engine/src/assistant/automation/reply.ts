@@ -911,7 +911,13 @@ function readAutoReplyDeliveryReplyToMessageId(
   }
 
   if (primaryCapture.source === 'linq') {
-    return readLinqReplyToMessageId(primaryCapture)
+    for (let index = captures.length - 1; index >= 0; index -= 1) {
+      const messageId = readLinqReplyToMessageId(captures[index]?.capture)
+      if (messageId) {
+        return messageId
+      }
+    }
+    return null
   }
 
   if (primaryCapture.source !== 'telegram') {

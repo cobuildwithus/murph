@@ -289,6 +289,40 @@ describe('buildAssistantAutoReplyPrompt', () => {
     expect(result.prompt).toContain('Extracted text:\nShort extracted text')
     expect(result.prompt).toContain('Capture 2:\nMessage text:\nSecond message')
   })
+
+  it('omits telegram media-group context when grouped captures span different albums', () => {
+    const result = buildAssistantAutoReplyPrompt([
+      createPromptCapture({
+        captureOverrides: {
+          text: 'First message',
+        },
+        telegramMetadata: {
+          mediaGroupId: 'media-group-7',
+          messageId: '123',
+          replyContext: null,
+        },
+      }),
+      createPromptCapture({
+        captureOverrides: {
+          captureId: 'capture-2',
+          occurredAt: '2026-04-08T10:03:00.000Z',
+          text: 'Second message',
+        },
+        telegramMetadata: {
+          mediaGroupId: 'media-group-8',
+          messageId: '124',
+          replyContext: null,
+        },
+      }),
+    ])
+
+    expect(result.kind).toBe('ready')
+    if (result.kind !== 'ready') {
+      throw new Error('Expected a ready prompt result.')
+    }
+    expect(result.prompt).toContain('Grouped captures: 2')
+    expect(result.prompt).not.toContain('Telegram media group:')
+  })
 })
 
 describe('prepareAssistantAutoReplyInput', () => {

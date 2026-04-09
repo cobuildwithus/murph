@@ -650,7 +650,44 @@ describe('assistant auto-reply grouping', () => {
     expect(result.items.every((item) => item.telegramMetadata === null)).toBe(true)
   })
 
-  it('groups telegram captures only while metadata and identity fields still match', async () => {
+  it('groups adjacent linq captures from the same conversation lane', async () => {
+    const result = await collectAssistantAutoReplyGroup({
+      captures: [
+        createListCapture({
+          captureId: 'linq-1',
+          source: 'linq',
+          accountId: 'linq-account-1',
+          externalId: 'linq:1001',
+          threadId: 'linq-thread-1',
+        }),
+        createListCapture({
+          captureId: 'linq-2',
+          source: 'linq',
+          accountId: 'linq-account-1',
+          externalId: 'linq:1002',
+          threadId: 'linq-thread-1',
+        }),
+        createListCapture({
+          captureId: 'linq-3',
+          source: 'linq',
+          accountId: 'linq-account-1',
+          externalId: 'linq:1003',
+          threadId: 'linq-thread-2',
+        }),
+      ],
+      startIndex: 0,
+      vault: '/tmp/automation-support-vault',
+    })
+
+    expect(result.endIndex).toBe(1)
+    expect(result.items.map((item) => item.summary.captureId)).toEqual([
+      'linq-1',
+      'linq-2',
+    ])
+    expect(result.items.every((item) => item.telegramMetadata === null)).toBe(true)
+  })
+
+  it('groups adjacent telegram captures from the same conversation even when album metadata differs', async () => {
     const { vaultRoot } = await createTempVault('assistant-automation-support-')
     const firstEnvelope = path.join(vaultRoot, 'inbox/telegram/capture-1.json')
     const secondEnvelope = path.join(vaultRoot, 'inbox/telegram/capture-2.json')
@@ -677,7 +714,7 @@ describe('assistant auto-reply grouping', () => {
         input: {
           raw: {
             schema: 'murph.telegram-capture.v1',
-            media_group_id: 'group-1',
+            media_group_id: 'group-2',
             message_id: '102',
           },
         },
@@ -710,6 +747,7 @@ describe('assistant auto-reply grouping', () => {
         }),
         createListCapture({
           captureId: 'capture-3',
+          actorId: 'actor-2',
           envelopePath: 'inbox/telegram/capture-3.json',
         }),
       ],
