@@ -22,7 +22,7 @@ Derived export-pack directories use a path-safe pack name and are not canonical 
 | provider | `prov` | provider page id |
 | food | `food` | regular-food page id |
 | assessment | `asmt` | assessment response id and raw-assessment path id |
-| profile snapshot | `psnap` | append-only profile snapshot id |
+| memory record | `mem` | record id stored inside `bank/memory.md` |
 | goal | `goal` | goal Markdown record id |
 | condition | `cond` | condition Markdown record id |
 | allergy | `alg` | allergy Markdown record id |
@@ -42,8 +42,10 @@ Derived export-pack directories use a path-safe pack name and are not canonical 
   `schemaVersion`, `id`, `action`, `status`, `occurredAt`, `actor`, `commandName`, `summary`, `changes`
 - Assessment response records:
   `schemaVersion`, `id`, `assessmentType`, `recordedAt`, `source`, `rawPath`, `responses`
-- Profile snapshot records:
-  `schemaVersion`, `id`, `recordedAt`, `sourceAssessmentIds`, `sourceEventIds`, `profile`
+- Memory document:
+  `docType`, `schemaVersion`, `title`, `updatedAt`, plus sectioned memory records under `Identity`, `Preferences`, `Instructions`, and `Context`
+- Preferences singleton:
+  `schemaVersion`, `updatedAt`, `workoutUnitPreferences`
 - Markdown frontmatter:
   `CORE.md`, journal day pages, experiment pages, provider pages, food pages, workout-format pages, and health registry pages each use a closed or explicitly documented frontmatter schema
 
@@ -106,8 +108,8 @@ Sample records may also carry optional `externalRef` provenance with the same sh
   `schemaVersion`, `docType`, `foodId`, `slug`, `title`, `status`, `kind`, `vendor`, `ingredients`, optional `autoLogDaily.time`
 - Workout-format frontmatter (vault-local saved defaults, not a canonical event family):
   `schemaVersion`, `docType`, `workoutFormatId`, `slug`, `title`, `status`, `activityType`, required `template`, optional `durationMinutes`, optional `distanceKm`, optional `templateText`
-- Profile current frontmatter:
-  `schemaVersion`, `docType`, `snapshotId`, `updatedAt`
+- Memory frontmatter:
+  `docType`, `schemaVersion`, `title`, `updatedAt`
 - Goal frontmatter:
   `schemaVersion`, `docType`, `goalId`, `slug`, `status`, `title`
 - Condition frontmatter:
@@ -135,8 +137,6 @@ Health artifact filenames are reserved here. They do not become valid generated 
 - `frontmatter-food.schema.json`
 - `frontmatter-provider.schema.json`
 - `assessment-response.schema.json`
-- `profile-snapshot.schema.json`
-- `frontmatter-profile-current.schema.json`
 - `frontmatter-goal.schema.json`
 - `frontmatter-condition.schema.json`
 - `frontmatter-allergy.schema.json`

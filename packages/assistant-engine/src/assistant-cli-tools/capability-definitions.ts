@@ -1096,18 +1096,6 @@ export function createCanonicalVaultWriteToolDefinitions(
           }),
       }),
       defineVaultServiceBackedTool({
-        name: 'vault.profile.rebuildCurrent',
-        description:
-          'Rebuild the derived current profile page from the latest accepted profile snapshot.',
-        inputSchema: z.object({}),
-        inputExample: {},
-        execute: () =>
-          input.vaultServices!.core.rebuildCurrentProfile({
-            vault: input.vault,
-            requestId: input.requestId ?? null,
-          }),
-      }),
-      defineVaultServiceBackedTool({
         name: 'vault.protocol.stop',
         description:
           'Stop an existing protocol while preserving its canonical id.',

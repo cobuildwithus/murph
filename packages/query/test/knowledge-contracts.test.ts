@@ -9,7 +9,7 @@ import {
   knowledgePageReferenceSchema,
   knowledgeSearchResultSchema,
   knowledgeUpsertResultSchema,
-} from "@murphai/query";
+} from "../src/index.ts";
 
 describe("knowledge contracts", () => {
   const reference = {

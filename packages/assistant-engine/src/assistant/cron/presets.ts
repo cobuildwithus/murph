@@ -88,10 +88,10 @@ const assistantCronPresetDefinitions: readonly AssistantCronPresetDefinition[] =
         key: 'location_context',
         label: 'Location context',
         description:
-          'Where to anchor the audit. The default tells Murph to use the saved current location from memory or profile state.',
+          'Where to anchor the audit. The default tells Murph to use the saved current location from memory, wiki context, or current-home details.',
         required: true,
         defaultValue:
-          'my current living location as stored in memory, profile context, or current-home details; if it is missing, say exactly what location detail I should save for future runs',
+          'my current living location as stored in memory, wiki context, or current-home details; if it is missing, say exactly what location detail I should save for future runs',
         example: 'Brisbane, Queensland, Australia',
       },
       {

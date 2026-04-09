@@ -10,34 +10,15 @@ import {
   projectHistoryEntity,
 } from "./projectors/history.ts";
 import {
-  fallbackCurrentProfileEntity,
-  materializeCurrentProfileDocumentFromSnapshotEntity,
-  projectCurrentProfileEntity,
-  projectProfileSnapshotEntity,
-} from "./projectors/profile.ts";
-import {
-  resolveCurrentProfileDocument,
-  selectLatestCurrentProfileSnapshot,
-  type CurrentProfileDocumentOutcome,
-  type CurrentProfileSnapshotSortFields,
-} from "./current-profile-resolution.ts";
-import {
   readJsonlRecordOutcomes,
   readJsonlRecordOutcomesSync,
   readJsonlRecords,
   type JsonlRecordOutcome,
-  type MarkdownDocumentOutcome,
   type ParseFailure,
 } from "./loaders.ts";
-import { firstString, type MarkdownDocumentRecord } from "./shared.ts";
 
 export interface EntityCollection {
   entities: CanonicalEntity[];
-  failures: ParseFailure[];
-}
-
-export interface CurrentProfileCollection {
-  entity: CanonicalEntity | null;
   failures: ParseFailure[];
 }
 
@@ -52,16 +33,6 @@ export async function readHistoryEntitiesStrict(
 ): Promise<CanonicalEntity[]> {
   return collapseEventLedgerEntities(
     await readJsonlEntitiesStrict(vaultRoot, VAULT_LAYOUT.eventLedgerDirectory, projectHistoryEntity),
-  );
-}
-
-export async function readProfileSnapshotEntitiesStrict(
-  vaultRoot: string,
-): Promise<CanonicalEntity[]> {
-  return readJsonlEntitiesStrict(
-    vaultRoot,
-    VAULT_LAYOUT.profileSnapshotsDirectory,
-    projectProfileSnapshotEntity,
   );
 }
 
@@ -95,38 +66,6 @@ export function readJsonlEntitiesTolerantSync(
   return projectJsonlOutcomes(readJsonlRecordOutcomesSync(vaultRoot, relativeRoot), project);
 }
 
-export async function readCurrentProfileCollectionAsync(
-  vaultRoot: string,
-  profileSnapshots: CanonicalEntity[],
-  markdownByPath: Map<string, string>,
-  readDocument: (
-    vaultRoot: string,
-    relativePath: string,
-  ) => Promise<MarkdownDocumentRecord | MarkdownDocumentOutcome | null>,
-): Promise<CurrentProfileCollection> {
-  return resolveCurrentProfileCollection(
-    profileSnapshots,
-    markdownByPath,
-    await readDocument(vaultRoot, VAULT_LAYOUT.profileCurrentDocument),
-  );
-}
-
-export function readCurrentProfileCollectionSync(
-  vaultRoot: string,
-  profileSnapshots: CanonicalEntity[],
-  markdownByPath: Map<string, string>,
-  readDocument: (
-    vaultRoot: string,
-    relativePath: string,
-  ) => MarkdownDocumentRecord | MarkdownDocumentOutcome | null,
-): CurrentProfileCollection {
-  return resolveCurrentProfileCollection(
-    profileSnapshots,
-    markdownByPath,
-    readDocument(vaultRoot, VAULT_LAYOUT.profileCurrentDocument),
-  );
-}
-
 function projectJsonlOutcomes(
   outcomes: JsonlRecordOutcome[],
   project: (value: unknown, relativePath: string) => CanonicalEntity | null,
@@ -150,120 +89,4 @@ function projectJsonlOutcomes(
     entities: entities.sort(compareCanonicalEntities),
     failures,
   };
-}
-
-function resolveCurrentProfileCollection(
-  profileSnapshots: CanonicalEntity[],
-  markdownByPath: Map<string, string>,
-  currentProfileDocumentInput: MarkdownDocumentRecord | MarkdownDocumentOutcome | null,
-): CurrentProfileCollection {
-  const latestSnapshot = selectLatestCurrentProfileSnapshot(
-    profileSnapshots,
-    canonicalProfileSnapshotSortFields,
-  );
-  const fallbackCurrentProfile = latestSnapshot
-    ? fallbackCurrentProfileEntity(latestSnapshot)
-    : null;
-  const fallbackCurrentProfileDocument = latestSnapshot
-    ? materializeCurrentProfileDocumentFromSnapshotEntity(latestSnapshot)
-    : null;
-  const resolution = {
-    latestSnapshotId: latestSnapshot?.entityId ?? null,
-    fallbackCurrentProfile,
-  };
-  const currentProfileDocument = buildCurrentProfileDocumentResolutionInput(
-    currentProfileDocumentInput,
-  );
-  const resolvedCurrentProfile = resolveCurrentProfileDocument(
-    resolution,
-    currentProfileDocument.documentOutcome,
-    currentProfileSnapshotId,
-    buildCurrentProfileRetainOptions(markdownByPath, currentProfileDocument.markdown),
-  );
-
-  if (
-    fallbackCurrentProfile &&
-    resolvedCurrentProfile.currentProfile === fallbackCurrentProfile &&
-    fallbackCurrentProfileDocument
-  ) {
-    markdownByPath.set(
-      fallbackCurrentProfile.path,
-      fallbackCurrentProfileDocument.markdown,
-    );
-  }
-
-  return {
-    entity: resolvedCurrentProfile.currentProfile,
-    failures: resolvedCurrentProfile.failures,
-  };
-}
-
-function buildCurrentProfileDocumentResolutionInput(
-  input: MarkdownDocumentRecord | MarkdownDocumentOutcome | null,
-): {
-  documentOutcome: CurrentProfileDocumentOutcome<CanonicalEntity, ParseFailure>;
-  markdown: string | null;
-} {
-  if (!input) {
-    return {
-      documentOutcome: { status: "missing" },
-      markdown: null,
-    };
-  }
-
-  if ("ok" in input) {
-    if (!input.ok) {
-      return {
-        documentOutcome: {
-          status: "parse-failed",
-          failure: input,
-        },
-        markdown: null,
-      };
-    }
-
-    return buildCurrentProfileDocumentResolutionInput(input.document);
-  }
-
-  return {
-    documentOutcome: {
-      status: "ok",
-      currentProfile: projectCurrentProfileEntity(input),
-    },
-    markdown: input.markdown,
-  };
-}
-
-function buildCurrentProfileRetainOptions(
-  markdownByPath: Map<string, string>,
-  markdown: string | null,
-):
-  | {
-      retainDocumentCurrentProfile: (currentProfile: CanonicalEntity) => void;
-    }
-  | undefined {
-  if (!markdown) {
-    return undefined;
-  }
-
-  return {
-    retainDocumentCurrentProfile: (currentProfile) => {
-      markdownByPath.set(currentProfile.path, markdown);
-    },
-  };
-}
-
-function canonicalProfileSnapshotSortFields(
-  snapshot: CanonicalEntity,
-): CurrentProfileSnapshotSortFields {
-  return {
-    snapshotId: snapshot.entityId,
-    snapshotTimestamp: snapshot.occurredAt ?? snapshot.date,
-  };
-}
-
-function currentProfileSnapshotId(
-  entity: CanonicalEntity,
-): string | null {
-  return firstString(entity.attributes, ["snapshotId"]);
 }

@@ -7,10 +7,10 @@ Recorded March planning assumptions for a future health storage extension. This 
 ## What changed
 
 - Recorded the intended hybrid storage model instead of replacing it:
-  - Markdown remains the curated current-state layer for profile and the bank registries.
-  - JSONL remains the append-only machine-history layer for assessments, profile snapshots, timed events, samples, and audit.
+  - Markdown remains the curated current-state layer for memory, the bank registries, and the derived personal wiki.
+  - JSONL remains the append-only machine-history layer for assessments, timed events, samples, and audit.
 - Captured the intended health seams from that planning pass:
-  - `bank/profile/current.md` stays derived from profile snapshots.
+  - `bank/memory.md`, `derived/knowledge/**`, and `bank/preferences.json` stay split by purpose instead of being collapsed into one catch-all current-state document.
   - timed health history extends `ledger/events` rather than creating a parallel history ledger.
   - intake provenance stays split between immutable `raw/assessments` inputs and append-only assessment ledgers.
 - Marked the downstream dependencies that still have to land before this note can be replaced by current examples:

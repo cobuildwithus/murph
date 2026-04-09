@@ -6,7 +6,7 @@ This directory stages the health cutover assets without mutating the baseline fi
 
 - `sample-imports/intake/initial-intake.json`: deterministic assessment-import source payload
 - `payloads/*.json`: payload-first command inputs for the new health noun commands
-- `vault-overlay/`: health-specific Markdown and JSONL records that document the intended post-cutover vault shape
+- `vault-overlay/`: health-specific memory, wiki, preferences, Markdown, and JSONL records that document the intended post-cutover vault shape
 
 ## Notes
 

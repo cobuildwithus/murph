@@ -41,16 +41,13 @@ export {
 export {
   buildOverviewMetrics,
   buildOverviewWeeklyStats,
-  summarizeCurrentOverviewProfile,
   summarizeOverviewExperiments,
   summarizeRecentOverviewJournals,
 } from "./overview.ts";
 export type {
   OverviewExperiment,
-  OverviewGoal,
   OverviewJournalEntry,
   OverviewMetric,
-  OverviewProfile,
   OverviewWeeklyStat,
 } from "./overview.ts";
 export {
@@ -116,13 +113,11 @@ export type {
   ExportPack,
   ExportPackAssessmentRecord,
   ExportPackBankPage,
-  ExportPackCurrentProfile,
   ExportPackFile,
   ExportPackFilters,
   ExportPackHealthContext,
   ExportPackHistoryRecord,
   ExportPackManifest,
-  ExportPackProfileSnapshotRecord,
   QuestionPack,
   QuestionPackContext,
   QuestionPackContextExperiment,

@@ -96,7 +96,7 @@ vault-cli vault stats
 
 Murph is opinionated about storage boundaries:
 
-- Markdown is the human-facing source of truth for durable documents such as `CORE.md`, journals, profile state, goals, conditions, protocols, and registries.
+- Markdown is the human-facing source of truth for durable documents such as `CORE.md`, journals, memory, goals, conditions, protocols, registries, and the derived personal wiki.
 - JSONL ledgers are the machine-facing source of truth for append-only records such as events, samples, assessments, and audit entries.
 - Imported source artifacts are copied into `raw/**` and treated as immutable.
 - Derived parser output and compiled knowledge pages live under `derived/**` and stay rebuildable. For the knowledge wiki specifically, `derived/knowledge/index.md` is the content catalog, `derived/knowledge/log.md` is the append-only write log, and `derived/knowledge/pages/*.md` are the assistant-authored personal synthesis pages.
@@ -174,7 +174,7 @@ The `knowledge` surface is intentionally narrow: use it to persist pages, inspec
 - Use `vault-cli list` when you need structured filtering by family, kind, status, stream, tag, or date range.
 - Use `vault-cli search query --text "..."` when the target is fuzzy, remembered by phrase, or buried across notes and record bodies.
 - Use `vault-cli timeline` when the question is chronological: what changed, what happened over a window, or what stood out over time.
-- Use `vault-cli profile show current` for the current synthesized profile instead of reconstructing it manually from older snapshots.
+- Use `vault-cli memory show`, targeted `vault-cli knowledge ...` reads, and the relevant preferences surface when you need the user's saved current-state context.
 - Use `vault-cli wearables day` or the `wearables ... list` commands for semantic wearable summaries before drilling into raw events or samples.
 - Use family `manifest` commands such as `meal manifest`, `document manifest`, `intake manifest`, and `workout manifest` when you need immutable import provenance or raw-source context.
 

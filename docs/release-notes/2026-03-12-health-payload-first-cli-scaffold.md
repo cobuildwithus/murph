@@ -8,7 +8,7 @@ Recorded March planning assumptions for a future payload-first health CLI surfac
 
 - Captured the planned payload-first operator surface for health nouns:
   - noun commands are expected to center on `scaffold`, `upsert --input`, `show`, and `list`
-  - special cases remain explicit for `intake import`, `intake project`, `profile current rebuild`, and `protocol stop`
+  - special cases remain explicit for `intake import`, `intake project`, and `protocol stop`
 - Recorded the intended boundary behavior for that future CLI extension:
   - structured command payloads remain the machine-facing source of truth
   - Markdown rendering remains a presentation mode rather than an alternate contract

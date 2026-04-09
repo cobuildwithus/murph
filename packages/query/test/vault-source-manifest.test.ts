@@ -40,11 +40,6 @@ test("listCanonicalSourceManifest uses shared vault family inclusion rules", asy
   await writeVaultFile(vaultRoot, VAULT_LAYOUT.coreDocument, "---\ntitle: Core\n---\n# Core\n");
   await writeVaultFile(
     vaultRoot,
-    VAULT_LAYOUT.profileCurrentDocument,
-    "---\ntitle: Current Profile\n---\n# Current\n",
-  );
-  await writeVaultFile(
-    vaultRoot,
     path.posix.join(VAULT_LAYOUT.experimentsDirectory, "test-experiment.md"),
     "---\nexperimentId: exp_test\nslug: test-experiment\n---\n# Experiment\n",
   );
@@ -77,6 +72,11 @@ test("listCanonicalSourceManifest uses shared vault family inclusion rules", asy
   await writeVaultFile(vaultRoot, VAULT_LAYOUT.memoryDocument, "---\ntitle: Memory\n---\n# Memory\n");
   await writeVaultFile(
     vaultRoot,
+    VAULT_LAYOUT.preferencesDocument,
+    '{"schemaVersion":1,"updatedAt":"2026-04-08T00:00:00.000Z","workoutUnitPreferences":{"distance":"km"}}\n',
+  );
+  await writeVaultFile(
+    vaultRoot,
     path.posix.join(VAULT_LAYOUT.inboxCaptureLedgerDirectory, "2026", "2026-04.jsonl"),
     '{"captureId":"capture_1"}\n',
   );
@@ -94,7 +94,6 @@ test("listCanonicalSourceManifest uses shared vault family inclusion rules", asy
     path.posix.join(VAULT_LAYOUT.auditDirectory, "2026", "2026-04.jsonl"),
     path.posix.join(VAULT_LAYOUT.experimentsDirectory, "test-experiment.md"),
     path.posix.join(VAULT_LAYOUT.goalsDirectory, "test-goal.md"),
-    VAULT_LAYOUT.profileCurrentDocument,
     path.posix.join(VAULT_LAYOUT.journalDirectory, "2026", "2026-04-08.md"),
     path.posix.join(VAULT_LAYOUT.eventLedgerDirectory, "2026", "2026-04.jsonl"),
     VAULT_LAYOUT.metadata,
@@ -104,6 +103,7 @@ test("listCanonicalSourceManifest uses shared vault family inclusion rules", asy
     false,
   );
   assert.equal(relativePaths.includes(VAULT_LAYOUT.memoryDocument), false);
+  assert.equal(relativePaths.includes(VAULT_LAYOUT.preferencesDocument), false);
   assert.equal(
     relativePaths.includes(path.posix.join(VAULT_LAYOUT.inboxCaptureLedgerDirectory, "2026", "2026-04.jsonl")),
     false,
