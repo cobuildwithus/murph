@@ -1,14 +1,7 @@
 import {
-  allergyRegistryEntityDefinition,
-  conditionRegistryEntityDefinition,
-  familyRegistryEntityDefinition,
-  geneticsRegistryEntityDefinition,
-  goalRegistryEntityDefinition,
   healthEntityDefinitionByKind,
-  protocolRegistryEntityDefinition,
   safeParseContract,
   type JsonObject,
-  type HealthEntityDefinitionWithRegistry,
 } from "@murphai/contracts";
 import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
 import type {
@@ -26,7 +19,11 @@ import type {
   QueryServices,
   StopProtocolInput,
 } from "./types.js";
-import { getHealthRegistryCommandMetadata } from "../health-registry-command-metadata.js";
+import {
+  healthRegistryFamilies,
+  type HealthRegistryFamily,
+  type HealthRegistryFamilyKind,
+} from "../health-registry-families.js";
 import {
   asEntityEnvelope,
   asListEnvelope,
@@ -39,13 +36,7 @@ import {
 } from "./shared.js";
 import { toVaultCliError } from "./vault-usecase-helpers.js";
 
-type RegistryDocFamilyKind =
-  | "goal"
-  | "condition"
-  | "allergy"
-  | "protocol"
-  | "family"
-  | "genetics";
+type RegistryDocFamilyKind = HealthRegistryFamilyKind;
 type ExplicitHealthCoreServiceMethodName = Extract<
   keyof HealthCoreServiceMethods,
   string
@@ -60,6 +51,7 @@ interface RegistryDocFamilyConfig<TIdField extends string> {
   idField: TIdField;
   kind: RegistryDocFamilyKind;
   listServiceMethod: ExplicitHealthQueryServiceMethodName;
+  readEntityIdKeys: readonly string[];
   notFoundLabel: string;
   parsePayload?: (payload: JsonObject) => JsonObject;
   scaffoldServiceMethod: ExplicitHealthCoreServiceMethodName;
@@ -79,15 +71,6 @@ interface RegistryDocFamilyConfig<TIdField extends string> {
     options: { limit?: number; status?: string },
   ): Promise<JsonObject[]>;
 }
-
-const REGISTRY_DOC_ENTITY_ID_KEYS: Readonly<Record<RegistryDocFamilyKind, readonly string[]>> = {
-  goal: ["id", "goalId"],
-  condition: ["id", "conditionId"],
-  allergy: ["id", "allergyId"],
-  protocol: ["id", "protocolId"],
-  family: ["id", "familyMemberId"],
-  genetics: ["id", "variantId"],
-};
 
 const REGISTRY_DOC_ENTITY_OMIT_KEYS = new Set([
   "id",
@@ -208,25 +191,19 @@ function callRegistryRuntimeList(
 }
 
 function buildSharedRegistryDocFamilyConfig(
-  definition: HealthEntityDefinitionWithRegistry & {
-    kind: RegistryDocFamilyKind;
-  },
+  family: HealthRegistryFamily,
 ): RegistryDocFamilyConfig<string> {
-  const command = getHealthRegistryCommandMetadata(definition.kind);
-  const idField = definition.registry.idField;
-
-  if (!idField) {
-    throw new Error(`Registry entity "${definition.kind}" is missing a canonical id field.`);
-  }
+  const { command, definition } = family;
 
   return {
-    idField,
+    idField: family.idField,
     kind: definition.kind,
     listServiceMethod: command.listServiceMethod as ExplicitHealthQueryServiceMethodName,
     notFoundLabel: definition.noun,
     parsePayload(payload) {
       return parseRegistryPayloadWithSharedSchema(definition.kind, payload);
     },
+    readEntityIdKeys: family.readEntityIdKeys,
     scaffoldServiceMethod: command.scaffoldServiceMethod as ExplicitHealthCoreServiceMethodName,
     showServiceMethod: command.showServiceMethod as ExplicitHealthQueryServiceMethodName,
     upsert(core, input) {
@@ -242,25 +219,8 @@ function buildSharedRegistryDocFamilyConfig(
   };
 }
 
-function narrowRegistryDocFamilyDefinition<TKind extends RegistryDocFamilyKind>(
-  definition: HealthEntityDefinitionWithRegistry,
-  kind: TKind,
-): HealthEntityDefinitionWithRegistry & { kind: TKind } {
-  if (definition.kind !== kind) {
-    throw new Error(`Expected registry entity "${kind}" but received "${definition.kind}".`);
-  }
-
-  return definition as HealthEntityDefinitionWithRegistry & { kind: TKind };
-}
-
-const registryDocFamilyConfigs: readonly RegistryDocFamilyConfig<string>[] = [
-  narrowRegistryDocFamilyDefinition(goalRegistryEntityDefinition, "goal"),
-  narrowRegistryDocFamilyDefinition(conditionRegistryEntityDefinition, "condition"),
-  narrowRegistryDocFamilyDefinition(allergyRegistryEntityDefinition, "allergy"),
-  narrowRegistryDocFamilyDefinition(protocolRegistryEntityDefinition, "protocol"),
-  narrowRegistryDocFamilyDefinition(familyRegistryEntityDefinition, "family"),
-  narrowRegistryDocFamilyDefinition(geneticsRegistryEntityDefinition, "genetics"),
-].map((definition) => buildSharedRegistryDocFamilyConfig(definition));
+const registryDocFamilyConfigs: readonly RegistryDocFamilyConfig<string>[] =
+  healthRegistryFamilies.map((family) => buildSharedRegistryDocFamilyConfig(family));
 
 function firstNonEmptyString(
   record: JsonObject,
@@ -332,14 +292,14 @@ function toRegistryDocEntityData(record: JsonObject) {
 }
 
 function toRegistryDocReadEntity(
-  kind: RegistryDocFamilyKind,
+  config: Pick<RegistryDocFamilyConfig<string>, "kind" | "readEntityIdKeys">,
   record: JsonObject,
 ) {
   const data = toRegistryDocEntityData(record);
   const entity = readRegistryRecordEntity(record);
   const document = readRegistryRecordDocument(record);
 
-  if (kind === "protocol") {
+  if (config.kind === "protocol") {
     const protocolKind = firstNonEmptyString(entity, ["kind"]);
     if (protocolKind) {
       data.kind = protocolKind;
@@ -347,8 +307,8 @@ function toRegistryDocReadEntity(
   }
 
   return {
-    id: firstNonEmptyString(entity, REGISTRY_DOC_ENTITY_ID_KEYS[kind]) ?? "",
-    kind,
+    id: firstNonEmptyString(entity, config.readEntityIdKeys) ?? "",
+    kind: config.kind,
     title: firstNonEmptyString(entity, ["title", "summary", "name", "label"]),
     occurredAt: null,
     path: firstNonEmptyString(document, ["relativePath", "path"]),
@@ -599,7 +559,7 @@ function createRegistryDocQueryServices(
 
       return asEntityEnvelope(
         input.vault,
-        record ? toRegistryDocReadEntity(config.kind, record) : null,
+        record ? toRegistryDocReadEntity(config, record) : null,
         `No ${config.notFoundLabel} found for "${input.id}".`,
       );
     };
@@ -617,7 +577,7 @@ function createRegistryDocQueryServices(
           limit: input.limit ?? 50,
           status: input.status,
         },
-        records.map((record) => toRegistryDocReadEntity(config.kind, record)),
+        records.map((record) => toRegistryDocReadEntity(config, record)),
       );
     };
   }

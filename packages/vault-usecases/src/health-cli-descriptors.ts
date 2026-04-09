@@ -1,17 +1,10 @@
 import {
-  allergyRegistryEntityDefinition,
   commandNounCapabilityByNoun,
-  conditionRegistryEntityDefinition,
-  familyRegistryEntityDefinition,
-  geneticsRegistryEntityDefinition,
-  goalRegistryEntityDefinition,
   healthEntityDefinitions,
-  protocolRegistryEntityDefinition,
   type JsonObject,
   type CommandCapability,
   type CommandCapabilityBundleId,
   type HealthEntityDefinition,
-  type HealthEntityDefinitionWithRegistry,
   type HealthEntityKind,
 } from "@murphai/contracts";
 import { z } from "zod";
@@ -32,9 +25,10 @@ import {
   showResultSchema,
 } from "@murphai/operator-config/vault-cli-contracts";
 import {
-  getHealthRegistryCommandMetadata,
-  type HealthRegistryCommandKind,
-} from "./health-registry-command-metadata.js";
+  getHealthRegistryFamily,
+  healthRegistryFamilies,
+  type HealthRegistryFamilyKind,
+} from "./health-registry-families.js";
 
 export type { JsonObject } from "./health-cli-method-types.js";
 export { getHealthRegistryCommandMetadata } from "./health-registry-command-metadata.js";
@@ -141,7 +135,7 @@ export const healthListResultSchema = z.object({
   nextCursor: z.string().min(1).nullable(),
 });
 
-type StatusFilteredRegistryDescriptorCommandName = HealthRegistryCommandKind;
+type StatusFilteredRegistryDescriptorCommandName = HealthRegistryFamilyKind;
 
 interface StatusFilteredRegistryDescriptorInput {
   commandDescription: string;
@@ -198,27 +192,20 @@ function buildStatusFilteredRegistryDescriptorExtension(
 }
 
 function buildSharedStatusFilteredRegistryDescriptorExtension(
-  definition: HealthEntityDefinitionWithRegistry & {
-    kind: StatusFilteredRegistryDescriptorCommandName;
-  },
+  kind: StatusFilteredRegistryDescriptorCommandName,
 ): HealthEntityDescriptorExtension {
-  const command = getHealthRegistryCommandMetadata(definition.kind);
-  const resultIdField = definition.registry.idField;
-  const supportsStatusFilter = definition.registry.statusKeys.length > 0;
-
-  if (!resultIdField) {
-    throw new Error(`Registry entity "${definition.kind}" is missing a canonical id field.`);
-  }
+  const family = getHealthRegistryFamily(kind);
+  const { command, definition } = family;
 
   const extension = buildStatusFilteredRegistryDescriptorExtension({
     commandDescription: command.commandDescription,
     commandName: command.commandName,
     listServiceMethod: command.listServiceMethod,
-    listStatusDescription: supportsStatusFilter ? command.listStatusDescription : undefined,
+    listStatusDescription: family.supportsStatusFilter ? command.listStatusDescription : undefined,
     noun: definition.noun,
     payloadFile: command.payloadFile,
     pluralNoun: definition.plural,
-    resultIdField,
+    resultIdField: family.idField,
     runtimeListMethod: command.runtimeListMethod,
     runtimeMethod: command.runtimeMethod,
     runtimeShowMethod: command.runtimeShowMethod,
@@ -228,7 +215,7 @@ function buildSharedStatusFilteredRegistryDescriptorExtension(
     upsertServiceMethod: command.upsertServiceMethod,
   });
 
-  if (supportsStatusFilter) {
+  if (family.supportsStatusFilter) {
     return extension;
   }
 
@@ -243,15 +230,16 @@ function buildSharedStatusFilteredRegistryDescriptorExtension(
   };
 }
 
-function narrowStatusFilteredRegistryDefinition<TKind extends StatusFilteredRegistryDescriptorCommandName>(
-  definition: HealthEntityDefinitionWithRegistry,
-  kind: TKind,
-): HealthEntityDefinitionWithRegistry & { kind: TKind } {
-  if (definition.kind !== kind) {
-    throw new Error(`Expected registry entity "${kind}" but received "${definition.kind}".`);
-  }
-
-  return definition as HealthEntityDefinitionWithRegistry & { kind: TKind };
+function buildSharedStatusFilteredRegistryDescriptorExtensions(): Record<
+  StatusFilteredRegistryDescriptorCommandName,
+  HealthEntityDescriptorExtension
+> {
+  return Object.fromEntries(
+    healthRegistryFamilies.map((family) => [
+      family.definition.kind,
+      buildSharedStatusFilteredRegistryDescriptorExtension(family.definition.kind),
+    ]),
+  ) as Record<StatusFilteredRegistryDescriptorCommandName, HealthEntityDescriptorExtension>;
 }
 
 const checkedHealthEntityDescriptorExtensions = {
@@ -265,18 +253,7 @@ const checkedHealthEntityDescriptorExtensions = {
       showServiceMethod: "showAssessment",
     },
   },
-  goal: buildSharedStatusFilteredRegistryDescriptorExtension(
-    narrowStatusFilteredRegistryDefinition(goalRegistryEntityDefinition, "goal"),
-  ),
-  condition: buildSharedStatusFilteredRegistryDescriptorExtension(
-    narrowStatusFilteredRegistryDefinition(conditionRegistryEntityDefinition, "condition"),
-  ),
-  allergy: buildSharedStatusFilteredRegistryDescriptorExtension(
-    narrowStatusFilteredRegistryDefinition(allergyRegistryEntityDefinition, "allergy"),
-  ),
-  protocol: buildSharedStatusFilteredRegistryDescriptorExtension(
-    narrowStatusFilteredRegistryDefinition(protocolRegistryEntityDefinition, "protocol"),
-  ),
+  ...buildSharedStatusFilteredRegistryDescriptorExtensions(),
   blood_test: {
     command: {
       commandName: "blood-test",
@@ -311,12 +288,6 @@ const checkedHealthEntityDescriptorExtensions = {
       showServiceMethod: "showBloodTest",
     },
   },
-  family: buildSharedStatusFilteredRegistryDescriptorExtension(
-    narrowStatusFilteredRegistryDefinition(familyRegistryEntityDefinition, "family"),
-  ),
-  genetics: buildSharedStatusFilteredRegistryDescriptorExtension(
-    narrowStatusFilteredRegistryDefinition(geneticsRegistryEntityDefinition, "genetics"),
-  ),
 } as const satisfies Record<HealthEntityKind, HealthEntityDescriptorExtension>;
 
 function requireScaffoldTemplate(definition: HealthEntityDefinition): JsonObject {
