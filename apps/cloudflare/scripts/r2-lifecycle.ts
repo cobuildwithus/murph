@@ -1,9 +1,11 @@
+import { normalizeOptionalString } from "./deploy-automation/shared.ts";
+
 type EnvSource = Readonly<Record<string, string | undefined>>;
 
 export function resolveHostedLifecycleBucketNames(source: EnvSource = process.env): string[] {
   const bucketNames = dedupe([
-    normalizeString(source.CF_BUNDLES_BUCKET),
-    normalizeString(source.CF_BUNDLES_PREVIEW_BUCKET),
+    normalizeOptionalString(source.CF_BUNDLES_BUCKET),
+    normalizeOptionalString(source.CF_BUNDLES_PREVIEW_BUCKET),
   ]);
 
   if (bucketNames.length === 0) {
@@ -26,11 +28,6 @@ export function buildHostedLifecycleWranglerArgs(input: {
     "--file",
     input.lifecycleConfigPath,
   ];
-}
-
-function normalizeString(value: string | undefined): string | null {
-  const normalized = value?.trim();
-  return normalized ? normalized : null;
 }
 
 function dedupe(values: Array<string | null>): string[] {

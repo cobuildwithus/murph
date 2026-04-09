@@ -1,6 +1,7 @@
 import {
   isObjectRecord,
   normalizeOptionalString,
+  parseJsonValue,
   requireConfiguredString,
 } from "./shared.ts";
 
@@ -18,17 +19,7 @@ export interface HostedContainerImageTagReference {
 export function parseHostedContainerImageListOutput(
   output: string,
 ): HostedContainerImageListing[] {
-  let parsed: unknown;
-
-  try {
-    parsed = JSON.parse(output) as unknown;
-  } catch (error) {
-    throw new Error(
-      `Cloudflare image list output must be valid JSON: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    );
-  }
+  const parsed = parseJsonValue<unknown>(output, "Cloudflare image list output");
 
   if (!Array.isArray(parsed)) {
     throw new Error("Cloudflare image list output must be an array.");
