@@ -4,7 +4,6 @@ import path from "node:path";
 
 import {
   decodeHostedBundleBase64,
-  materializeHostedExecutionArtifacts,
   restoreHostedExecutionContext,
 } from "@murphai/runtime-state/node";
 import type {
@@ -22,7 +21,10 @@ import {
   commitHostedExecutionResult,
   resumeHostedCommittedExecution,
 } from "./hosted-runtime/callbacks.ts";
-import { createHostedArtifactResolver } from "./hosted-runtime/artifacts.ts";
+import {
+  createHostedArtifactMaterializer,
+  createHostedArtifactResolver,
+} from "./hosted-runtime/artifacts.ts";
 import {
   normalizeHostedAssistantRuntimeConfig,
   withHostedProcessEnvironment,
@@ -146,25 +148,12 @@ export async function runHostedAssistantRuntimeJobInProcessDetailed(
             ? resumeHostedCommittedExecution(input.request)
             : await executeHostedDispatchForCommit({
                 artifactMaterializer: incomingBundle
-                  ? async (relativePaths) => {
-                      const pendingPaths = [...new Set(relativePaths)]
-                        .filter((relativePath) => !materializedArtifactPaths.has(relativePath));
-                      if (pendingPaths.length === 0) {
-                        return;
-                      }
-
-                      await materializeHostedExecutionArtifacts({
-                        artifactResolver,
-                        bundle: incomingBundle,
-                        shouldRestoreArtifact: ({ path: artifactPath, root }) => (
-                          root === "vault" && pendingPaths.includes(artifactPath)
-                        ),
-                        workspaceRoot,
-                      });
-                      for (const relativePath of pendingPaths) {
-                        materializedArtifactPaths.add(relativePath);
-                      }
-                    }
+                  ? createHostedArtifactMaterializer({
+                      artifactResolver,
+                      bundle: incomingBundle,
+                      materializedArtifactPaths,
+                      workspaceRoot,
+                    })
                   : null,
                 materializedArtifactPaths,
                 request: input.request,

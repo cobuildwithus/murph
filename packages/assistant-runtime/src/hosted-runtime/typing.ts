@@ -6,15 +6,11 @@ import {
   parseLinqWebhookEvent,
 } from "@murphai/messaging-ingress/linq-webhook";
 import {
-  parseTelegramThreadTarget,
-} from "@murphai/messaging-ingress/telegram-webhook";
-import {
   startLinqChatTypingIndicator,
   stopLinqChatTypingIndicator,
 } from "@murphai/operator-config/linq-runtime";
 import {
-  resolveTelegramApiBaseUrl,
-  resolveTelegramBotToken,
+  startTelegramTypingSession,
 } from "@murphai/operator-config/telegram-runtime";
 
 import type {
@@ -29,9 +25,6 @@ type HostedDispatchTypingIndicator = {
   channelLabel: "Linq" | "Telegram";
   stop(): Promise<void>;
 };
-
-const HOSTED_TELEGRAM_TYPING_REFRESH_MS = 4_000;
-const HOSTED_TELEGRAM_API_BASE_URL = "https://api.telegram.org";
 
 export function startHostedDispatchTypingIndicator(input: {
   dispatch: HostedAssistantRuntimeJobInput["request"]["dispatch"];
@@ -150,37 +143,18 @@ function startHostedTelegramDispatchTypingIndicator(input: {
   runtimeEnv: Readonly<Record<string, string>>;
   run: HostedAssistantRuntimeJobInput["request"]["run"] | null;
 }): HostedDispatchTypingIndicator | null {
-  const env = input.runtimeEnv as NodeJS.ProcessEnv;
-  const token = resolveTelegramBotToken(env);
-  const fetchImplementation = globalThis.fetch?.bind(globalThis);
-  const target = parseTelegramThreadTarget(input.dispatch.event.telegramMessage.threadId);
-  if (!token || typeof fetchImplementation !== "function" || !target) {
-    emitHostedExecutionStructuredLog({
-      component: "runtime",
-      dispatch: input.dispatch,
-      error: new Error("Hosted Telegram typing indicator prerequisites are unavailable."),
-      level: "warn",
-      message: "Hosted Telegram typing indicator could not be started.",
-      phase: "dispatch.running",
-      run: input.run,
-    });
-    return null;
-  }
-
-  const baseUrl = (resolveTelegramApiBaseUrl(env) ?? HOSTED_TELEGRAM_API_BASE_URL).replace(
-    /\/$/u,
-    "",
-  );
   return createAsyncHostedTypingIndicator({
     channelLabel: "Telegram",
     dispatch: input.dispatch,
     run: input.run,
-    start: () => createHostedTelegramTypingHandle({
-      baseUrl,
-      fetchImplementation,
-      target,
-      token,
-    }),
+    start: () => startTelegramTypingSession(
+      {
+        target: input.dispatch.event.telegramMessage.threadId,
+      },
+      {
+        env: input.runtimeEnv as NodeJS.ProcessEnv,
+      },
+    ),
   });
 }
 
@@ -193,17 +167,6 @@ function isHostedLinqMessageReceivedDispatch(
   >;
 } {
   return dispatch.event.kind === "linq.message.received";
-}
-
-function isHostedTelegramMessageReceivedDispatch(
-  dispatch: HostedAssistantRuntimeJobInput["request"]["dispatch"],
-): dispatch is HostedAssistantRuntimeJobInput["request"]["dispatch"] & {
-  event: Extract<
-    HostedAssistantRuntimeJobInput["request"]["dispatch"]["event"],
-    { kind: "telegram.message.received" }
-  >;
-} {
-  return dispatch.event.kind === "telegram.message.received";
 }
 
 function createAsyncHostedTypingIndicator(input: {
@@ -279,96 +242,13 @@ function createAsyncHostedTypingIndicator(input: {
   };
 }
 
-async function createHostedTelegramTypingHandle(input: {
-  baseUrl: string;
-  fetchImplementation: typeof globalThis.fetch;
-  target: NonNullable<ReturnType<typeof parseTelegramThreadTarget>>;
-  token: string;
-}): Promise<HostedTypingHandle> {
-  const stopController = new AbortController();
-
-  await sendHostedTelegramTypingIndicatorOnce({
-    ...input,
-    signal: stopController.signal,
-  });
-
-  const running = keepHostedTelegramTypingIndicatorAlive({
-    ...input,
-    signal: stopController.signal,
-  });
-
-  return {
-    async stop() {
-      stopController.abort();
-      await running;
-    },
-  };
-}
-
-async function keepHostedTelegramTypingIndicatorAlive(input: {
-  baseUrl: string;
-  fetchImplementation: typeof globalThis.fetch;
-  signal: AbortSignal;
-  target: NonNullable<ReturnType<typeof parseTelegramThreadTarget>>;
-  token: string;
-}): Promise<void> {
-  while (!input.signal.aborted) {
-    await waitForHostedTelegramTypingRefresh(input.signal);
-    if (input.signal.aborted) {
-      return;
-    }
-
-    await sendHostedTelegramTypingIndicatorOnce(input);
-  }
-}
-
-async function waitForHostedTelegramTypingRefresh(signal: AbortSignal): Promise<void> {
-  await new Promise<void>((resolve) => {
-    const timer = setTimeout(resolve, HOSTED_TELEGRAM_TYPING_REFRESH_MS);
-    signal.addEventListener("abort", () => {
-      clearTimeout(timer);
-      resolve();
-    }, { once: true });
-  });
-}
-
-async function sendHostedTelegramTypingIndicatorOnce(input: {
-  baseUrl: string;
-  fetchImplementation: typeof globalThis.fetch;
-  signal: AbortSignal;
-  target: NonNullable<ReturnType<typeof parseTelegramThreadTarget>>;
-  token: string;
-}): Promise<void> {
-  const response = await input.fetchImplementation(
-    `${input.baseUrl}/bot${input.token}/sendChatAction`,
-    {
-      body: JSON.stringify({
-        action: "typing",
-        business_connection_id: input.target.businessConnectionId ?? undefined,
-        chat_id: input.target.chatId,
-        direct_messages_topic_id: input.target.directMessagesTopicId ?? undefined,
-        message_thread_id: input.target.messageThreadId ?? undefined,
-      }),
-      headers: {
-        "content-type": "application/json",
-      },
-      method: "POST",
-      signal: input.signal,
-    },
-  );
-  if (!response.ok) {
-    throw new Error(
-      `Hosted Telegram typing indicator failed with ${response.status} ${response.statusText}.`,
-    );
-  }
-
-  const payload = await response.json() as {
-    description?: string;
-    ok?: boolean;
-  };
-  if (payload.ok !== true) {
-    throw new Error(
-      payload.description ?? "Hosted Telegram typing indicator returned an invalid response.",
-    );
-  }
+function isHostedTelegramMessageReceivedDispatch(
+  dispatch: HostedAssistantRuntimeJobInput["request"]["dispatch"],
+): dispatch is HostedAssistantRuntimeJobInput["request"]["dispatch"] & {
+  event: Extract<
+    HostedAssistantRuntimeJobInput["request"]["dispatch"]["event"],
+    { kind: "telegram.message.received" }
+  >;
+} {
+  return dispatch.event.kind === "telegram.message.received";
 }

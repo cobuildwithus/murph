@@ -55,9 +55,15 @@ vi.mock("../src/hosted-runtime/callbacks.ts", () => ({
   resumeHostedCommittedExecution: mocks.resumeHostedCommittedExecution,
 }));
 
-vi.mock("../src/hosted-runtime/artifacts.ts", () => ({
-  createHostedArtifactResolver: mocks.createHostedArtifactResolver,
-}));
+vi.mock("../src/hosted-runtime/artifacts.ts", async () => {
+  const actual = await vi.importActual<typeof import("../src/hosted-runtime/artifacts.ts")>(
+    "../src/hosted-runtime/artifacts.ts",
+  );
+  return {
+    ...actual,
+    createHostedArtifactResolver: mocks.createHostedArtifactResolver,
+  };
+});
 
 vi.mock("../src/hosted-runtime/environment.ts", async () => {
   const actual = await vi.importActual<typeof import("../src/hosted-runtime/environment.ts")>(
@@ -706,11 +712,12 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
       expect(mocks.completeHostedExecutionAfterCommit).toHaveBeenCalledTimes(1);
     });
     expect(typingSignal.aborted).toBe(false);
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1);
 
     resolveTypingStart();
     await runPromise;
 
-    expect(typingSignal.aborted).toBe(true);
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1);
     expect(steps).toEqual(["start", "execute", "complete"]);
   });
 
