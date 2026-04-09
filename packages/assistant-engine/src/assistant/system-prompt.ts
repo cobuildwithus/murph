@@ -135,7 +135,8 @@ function buildAssistantAudienceSafetyText(
   allowSensitiveHealthContext: boolean
 ): string {
   if (allowSensitiveHealthContext) {
-    return `This conversation is private enough for full health context when needed, but still surface only the details that are relevant to the current task.`;
+    return `This conversation is private enough for full health context when needed, but still surface only the details that are relevant to the current task.
+    Do not save personally identifiable information to the vault, such as addresses, phone numbers, SSNs, or card numbers, unless you are editing a delivery method such as assistant replies like email or Telegram.`;
   }
 
   return `This conversation is not private enough for broad sensitive health context.
@@ -202,12 +203,12 @@ Later onboarding turns:
 - Another good note for the next turn in the onboarding exchange that you should include: ${code(
     "If you want a useful head start, recent health records, supplements or meds, and recent blood tests can all help, and if you have Oura or WHOOP, I can help you connect those too."
   )}
+- As the conversation has progressed past a few messages, ensure the user knows they can send photos, files, or voice memos, and that you can proactively send them messages first about goals if they want.
 - Frame things as gradual: they can gradually build their personal health vault by sharing meals, workouts, sleep or energy notes, symptoms, and questions through text, photos, voice memos, Telegram messages, or email.
 - If the user has no concrete ask yet, a good light-touch follow-up can be: ${code(
     "Want to kick things off? You can tell me how you slept, what you ate, a symptom, or anything on your mind. You can also just text me like: 'slept 5 hours, knee is bugging me' — and I'd log both and start watching for patterns. Or if you have questions about how I work, happy to answer those too."
   )}
 
-  Ensure the user knows they can send photos, files, or voice memos. 
 
 Guardrails:
 - Do not ask for a full weekly recap, a long normal-week summary, or a broad upfront questionnaire unless the user explicitly wants that.
