@@ -25,6 +25,11 @@ type VitestAlias = {
   replacement: string;
 };
 
+export interface WorkspaceSourceImportExecOptions {
+  cwd: string;
+  env: NodeJS.ProcessEnv;
+}
+
 export function createWorkspaceSourcePackageNames<T extends WorkspaceSourceEntryRelativePaths>(
   entryRelativePaths: T,
 ): readonly (keyof T & string)[] {
@@ -41,6 +46,30 @@ export function resolveWorkspaceSourceEntries<T extends WorkspaceSourceEntryRela
       path.resolve(workspaceDir, relativeEntryPath),
     ]),
   ) as WorkspaceSourceEntries<T>;
+}
+
+export function resolveWorkspaceRepoRoot(workspaceDir: string): string {
+  return path.resolve(workspaceDir, "../..");
+}
+
+export function createWorkspaceSourceImportExecOptions(
+  workspaceDir: string,
+  env: NodeJS.ProcessEnv = process.env,
+): WorkspaceSourceImportExecOptions {
+  const repoRoot = resolveWorkspaceRepoRoot(workspaceDir);
+
+  return {
+    cwd: repoRoot,
+    env: {
+      HOME: env.HOME,
+      NODE_ENV: env.NODE_ENV,
+      PATH: env.PATH,
+      TEMP: env.TEMP,
+      TMP: env.TMP,
+      TMPDIR: env.TMPDIR,
+      TSX_TSCONFIG_PATH: path.join(repoRoot, "tsconfig.base.json"),
+    },
+  };
 }
 
 export function createVitestWorkspaceRuntimeAliases(
