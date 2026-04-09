@@ -119,7 +119,7 @@ Those incur config defaults are local CLI convenience only. Hosted execution doe
 
 - `murph --config <path> ...` selects an explicit config file
 - `murph --no-config ...` disables config loading for a single run
-- the published package now ships `config.schema.json` so editors can validate and autocomplete those config files
+- the published package now ships Incur's native `config.schema.json` so editors can validate and autocomplete those config files
 
 Config files only supply command `options`, following incur's nested `commands` shape. For example:
 
@@ -134,6 +134,8 @@ Config files only supply command `options`, following incur's nested `commands` 
   }
 }
 ```
+
+The shipped schema is the direct Incur output for config defaults only. Command help text, hints, examples, and agent-facing discovery stay on Incur's normal `--help` and `--llms` surfaces instead of a Murph-specific schema extension.
 
 To refresh the shipped schema artifact from the built CLI entrypoint during package work:
 

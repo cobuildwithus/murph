@@ -202,30 +202,16 @@ test('root config autodiscovery resolves ~/.config/murph/config.json', async () 
   }
 })
 
-test('published config schema artifact covers nested config defaults', async () => {
-  const schema = JSON.parse(
-    await readFile(new URL('../config.schema.json', import.meta.url), 'utf8'),
-  ) as {
+test('published config schema artifact stays on the native incur shape', async () => {
+  const schemaText = await readFile(
+    new URL('../config.schema.json', import.meta.url),
+    'utf8',
+  )
+  const schema = JSON.parse(schemaText) as {
     type?: string
     properties?: {
       commands?: {
         properties?: {
-          chat?: {
-            description?: string
-            'x-incur-canonical-command'?: string
-          }
-          run?: {
-            'x-incur-canonical-command'?: string
-          }
-          status?: {
-            'x-incur-canonical-command'?: string
-          }
-          doctor?: {
-            'x-incur-canonical-command'?: string
-          }
-          stop?: {
-            'x-incur-canonical-command'?: string
-          }
           vault?: {
             properties?: {
               commands?: {
@@ -248,8 +234,6 @@ test('published config schema artifact covers nested config defaults', async () 
               commands?: {
                 properties?: {
                   chat?: {
-                    description?: string
-                    'x-incur-hint'?: string
                     properties?: {
                       options?: {
                         properties?: {
@@ -257,9 +241,6 @@ test('published config schema artifact covers nested config defaults', async () 
                         }
                       }
                     }
-                  }
-                  deliver?: {
-                    'x-incur-examples'?: unknown[]
                   }
                 }
               }
@@ -277,44 +258,7 @@ test('published config schema artifact covers nested config defaults', async () 
   assert.ok(
     schema.properties?.commands?.properties?.assistant?.properties?.commands?.properties?.chat?.properties?.options?.properties?.model,
   )
-  assert.equal(
-    schema.properties?.commands?.properties?.chat?.['x-incur-canonical-command'],
-    'assistant chat',
-  )
-  assert.equal(
-    schema.properties?.commands?.properties?.run?.['x-incur-canonical-command'],
-    'assistant run',
-  )
-  assert.equal(
-    schema.properties?.commands?.properties?.status?.['x-incur-canonical-command'],
-    'assistant status',
-  )
-  assert.equal(
-    schema.properties?.commands?.properties?.doctor?.['x-incur-canonical-command'],
-    'assistant doctor',
-  )
-  assert.equal(
-    schema.properties?.commands?.properties?.stop?.['x-incur-canonical-command'],
-    'assistant stop',
-  )
-  assert.match(
-    schema.properties?.commands?.properties?.chat?.description ?? '',
-    /assistant chat/u,
-  )
-  assert.match(
-    schema.properties?.commands?.properties?.assistant?.properties?.commands?.properties?.chat?.[
-      'x-incur-hint'
-    ] ?? '',
-    /Type \/exit/u,
-  )
-  assert.equal(
-    (
-      schema.properties?.commands?.properties?.assistant?.properties?.commands?.properties?.deliver?.[
-        'x-incur-examples'
-      ] ?? []
-    ).length > 0,
-    true,
-  )
+  assert.equal(schemaText.includes('"x-incur-'), false)
 })
 
 test('VaultCliError remains a typed incur envelope through the CLI bridge', async () => {

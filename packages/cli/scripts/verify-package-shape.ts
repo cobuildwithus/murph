@@ -327,6 +327,10 @@ function assertConfigSchemaSmoke(configSchema: {
       typeof configSchema.properties?.commands?.properties?.assistant === 'object',
     'config.schema.json must cover the nested vault and assistant command groups.',
   )
+  assert(
+    JSON.stringify(configSchema).includes('"x-incur-') !== true,
+    'config.schema.json must stay on native incur output and avoid Murph-specific x-incur metadata.',
+  )
 }
 
 async function assertGeneratedArtifactsFresh(configSchema: object): Promise<void> {
