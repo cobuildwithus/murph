@@ -1965,11 +1965,33 @@
                             "Context"
                           ],
                           "description": "Memory section to write into."
-                        },
-                        "memoryId": {
-                          "description": "Optional existing memory id to update.",
+                        }
+                      }
+                    }
+                  }
+                },
+                "update": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "options": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "vault": {
                           "type": "string",
-                          "minLength": 1
+                          "minLength": 1,
+                          "description": "Vault root."
+                        },
+                        "section": {
+                          "description": "Optional replacement memory section. Defaults to the current section.",
+                          "type": "string",
+                          "enum": [
+                            "Identity",
+                            "Preferences",
+                            "Instructions",
+                            "Context"
+                          ]
                         }
                       }
                     }
@@ -5171,7 +5193,7 @@
                   "maxLength": 128
                 },
                 "recordType": {
-                  "description": "Optional query record families such as event, journal, assessment, goal, condition, allergy, protocol, family, genetics, food, recipe, provider, or sample.",
+                  "description": "Optional query record families such as event, journal, assessment, goal, condition, allergy, protocol, history, family, genetics, food, recipe, provider, or sample.",
                   "type": "array",
                   "items": {
                     "type": "string",

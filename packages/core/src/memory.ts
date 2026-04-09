@@ -19,9 +19,11 @@ import {
   readUtf8File,
 } from "./fs.ts";
 import {
+  stageMarkdownDocumentWrite,
   resolveSingletonMarkdownDocumentTarget,
   writeCanonicalMarkdownDocument,
 } from "./markdown-documents.ts";
+import { runCanonicalWrite } from "./operations/index.ts";
 import { resolveVaultPath } from "./path-safety.ts";
 
 export type {
@@ -32,6 +34,13 @@ export type {
   MemorySection,
   UpsertMemoryRecordInput,
 } from "@murphai/contracts";
+
+export interface UpdateMemoryInput {
+  now?: Date;
+  recordId: string;
+  section?: MemorySection | null;
+  text: string;
+}
 
 export function resolveMemoryDocumentPath(vaultRoot: string): string {
   return resolveVaultPath(vaultRoot, memoryDocumentRelativePath).absolutePath;
@@ -84,24 +93,57 @@ export async function upsertMemory(
   record: MemoryRecord;
 }> {
   const snapshot = await readMemoryDocument(vaultRoot);
-  const next = upsertMemoryRecord(snapshot, input);
-  await writeCanonicalMarkdownDocument({
-    vaultRoot,
-    operationType: "memory_upsert",
-    summary: `Upsert memory record ${next.record.id}`,
-    target: resolveSingletonMarkdownDocumentTarget({
-      relativePath: memoryDocumentRelativePath,
-      created: !snapshot.exists,
-    }),
-    markdown: renderMemoryDocument({ document: next.document }),
-  });
+  return persistUpsertMemory(vaultRoot, snapshot, input);
+}
 
+export async function updateMemory(
+  vaultRoot: string,
+  input: UpdateMemoryInput,
+): Promise<{
+  document: MemoryDocumentSnapshot;
+  record: MemoryRecord;
+}> {
+  const result = await runCanonicalWrite({
+    vaultRoot,
+    operationType: "memory_update",
+    summary: `Update memory record ${input.recordId}`,
+    occurredAt: input.now,
+    mutate: async ({ batch, vaultRoot: lockedVaultRoot }) => {
+      const snapshot = await readMemoryDocument(lockedVaultRoot);
+      const existing = snapshot.records.find((record) => record.id === input.recordId) ?? null;
+      if (existing === null) {
+        throw new Error(`Memory record "${input.recordId}" does not exist.`);
+      }
+
+      const next = upsertMemoryRecord(snapshot, {
+        now: input.now,
+        recordId: input.recordId,
+        section: input.section ?? existing.section,
+        text: input.text,
+      });
+      await stageMarkdownDocumentWrite(
+        batch,
+        resolveSingletonMarkdownDocumentTarget({
+          relativePath: memoryDocumentRelativePath,
+          created: !snapshot.exists,
+        }),
+        renderMemoryDocument({ document: next.document }),
+      );
+
+      return {
+        recordId: next.record.id,
+      };
+    },
+  });
   const nextSnapshot = await readMemoryDocument(vaultRoot);
+  const record = nextSnapshot.records.find((entry) => entry.id === result.recordId) ?? null;
+  if (record === null) {
+    throw new Error(`Memory record "${result.recordId}" was not found after update.`);
+  }
 
   return {
-    created: next.created,
     document: nextSnapshot,
-    record: nextSnapshot.records.find((record) => record.id === next.record.id) ?? next.record,
+    record,
   };
 }
 
@@ -145,4 +187,34 @@ export async function forgetMemory(
 
 export async function buildMemoryCorePromptBlock(vaultRoot: string): Promise<string | null> {
   return buildMemoryPromptBlock(await readMemoryDocument(vaultRoot));
+}
+
+async function persistUpsertMemory(
+  vaultRoot: string,
+  snapshot: MemoryDocumentSnapshot,
+  input: UpsertMemoryRecordInput,
+): Promise<{
+  created: boolean;
+  document: MemoryDocumentSnapshot;
+  record: MemoryRecord;
+}> {
+  const next = upsertMemoryRecord(snapshot, input);
+  await writeCanonicalMarkdownDocument({
+    vaultRoot,
+    operationType: "memory_upsert",
+    summary: `Upsert memory record ${next.record.id}`,
+    target: resolveSingletonMarkdownDocumentTarget({
+      relativePath: memoryDocumentRelativePath,
+      created: !snapshot.exists,
+    }),
+    markdown: renderMemoryDocument({ document: next.document }),
+  });
+
+  const nextSnapshot = await readMemoryDocument(vaultRoot);
+
+  return {
+    created: next.created,
+    document: nextSnapshot,
+    record: nextSnapshot.records.find((record) => record.id === next.record.id) ?? next.record,
+  };
 }

@@ -147,7 +147,8 @@ declare module 'incur' {
       'meal show': { args: { id: string }; options: { vault: string; requestId?: string } }
       'memory forget': { args: { memoryId: string }; options: { vault: string } }
       'memory show': { args: { memoryId?: string }; options: { vault: string } }
-      'memory upsert': { args: { text: string }; options: { vault: string; section: "Identity" | "Preferences" | "Instructions" | "Context"; memoryId?: string } }
+      'memory update': { args: { memoryId: string; text: string }; options: { vault: string; section?: "Identity" | "Preferences" | "Instructions" | "Context" } }
+      'memory upsert': { args: { text: string }; options: { vault: string; section: "Identity" | "Preferences" | "Instructions" | "Context" } }
       'model': { args: {}; options: { show?: boolean; preset?: "codex" | "openai-compatible"; providerPreset?: "openai" | "vercel-ai-gateway" | "openrouter" | "venice" | "deepseek" | "groq" | "together" | "fireworks" | "cerebras" | "xai" | "huggingface" | "nvidia" | "ollama" | "lm-studio" | "vllm" | "litellm" | "custom"; model?: string; baseUrl?: string; apiKeyEnv?: string; providerName?: string; zeroDataRetention?: boolean; codexCommand?: string; profile?: string; reasoningEffort?: "low" | "medium" | "high" | "xhigh"; oss?: boolean } }
       'protocol list': { args: {}; options: { vault: string; requestId?: string; status?: string; limit: number } }
       'protocol scaffold': { args: {}; options: { vault: string; requestId?: string } }

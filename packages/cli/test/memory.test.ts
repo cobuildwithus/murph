@@ -105,7 +105,7 @@ test("memory command module registers without throwing", () => {
   assert.ok(cli);
 });
 
-test("memory commands round-trip upsert, show, and forget through the registered CLI", async () => {
+test("memory commands round-trip upsert, update, show, and forget through the registered CLI", async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext("murph-memory-cli-");
   cleanupPaths.push(parentRoot);
 
@@ -139,6 +139,69 @@ test("memory commands round-trip upsert, show, and forget through the registered
   );
   assert.equal(createdMemoryId.created, true);
   assert.equal(createdMemoryId.memory.section, "Context");
+
+  const updated = await runInProcessJsonCli(cli, [
+    "memory",
+    "update",
+    createdMemoryId.memory.id,
+    "Keep answers concise and direct.",
+    "--vault",
+    vaultRoot,
+  ]);
+  assert.equal(updated.exitCode, null);
+  assert.equal(updated.envelope.ok, true);
+  assert.equal(
+    (
+      updated.envelope.data as {
+        created: boolean;
+        memory: {
+          id: string;
+          section: string;
+          text: string;
+        };
+      }
+    ).created,
+    false,
+  );
+  assert.equal(
+    (
+      updated.envelope.data as {
+        created: boolean;
+        memory: {
+          id: string;
+          section: string;
+          text: string;
+        };
+      }
+    ).memory.id,
+    createdMemoryId.memory.id,
+  );
+  assert.equal(
+    (
+      updated.envelope.data as {
+        created: boolean;
+        memory: {
+          id: string;
+          section: string;
+          text: string;
+        };
+      }
+    ).memory.section,
+    "Context",
+  );
+  assert.equal(
+    (
+      updated.envelope.data as {
+        created: boolean;
+        memory: {
+          id: string;
+          section: string;
+          text: string;
+        };
+      }
+    ).memory.text,
+    "Keep answers concise and direct.",
+  );
 
   const shownDocument = await runInProcessJsonCli(cli, [
     "memory",
@@ -185,10 +248,22 @@ test("memory commands round-trip upsert, show, and forget through the registered
       shownRecord.envelope.data as {
         memory: {
           id: string;
+          text: string;
         } | null;
       }
     ).memory?.id,
     createdMemoryId.memory.id,
+  );
+  assert.equal(
+    (
+      shownRecord.envelope.data as {
+        memory: {
+          id: string;
+          text: string;
+        } | null;
+      }
+    ).memory?.text,
+    "Keep answers concise and direct.",
   );
 
   const forgotten = await runInProcessJsonCli(cli, [
@@ -242,6 +317,30 @@ test("memory commands round-trip upsert, show, and forget through the registered
     ).document.records.length,
     0,
   );
+});
+
+test("memory update refuses missing record ids through the registered CLI", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext("murph-memory-cli-missing-");
+  cleanupPaths.push(parentRoot);
+
+  const cli = Cli.create("vault-cli", {
+    description: "memory test cli",
+    version: "0.0.0-test",
+  });
+
+  registerMemoryCommands(cli);
+
+  const updated = await runInProcessJsonCli(cli, [
+    "memory",
+    "update",
+    "mem_missing",
+    "Should fail",
+    "--vault",
+    vaultRoot,
+  ]);
+  assert.equal(updated.exitCode, 1);
+  assert.equal(updated.envelope.ok, false);
+  assert.equal(updated.envelope.error.message, 'Memory record "mem_missing" does not exist.');
 });
 
 test("memory command module does not register a search subcommand", async () => {

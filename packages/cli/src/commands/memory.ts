@@ -10,6 +10,7 @@ import {
   forgetMemory,
   getMemoryRecord,
   readMemoryDocument,
+  updateMemory,
   upsertMemory,
 } from "@murphai/core";
 
@@ -19,7 +20,12 @@ const vaultOptionSchema = z.object({
 
 const memoryUpsertOptionsSchema = vaultOptionSchema.extend({
   section: memorySectionSchema.describe("Memory section to write into."),
-  memoryId: z.string().min(1).optional().describe("Optional existing memory id to update."),
+});
+
+const memoryUpdateOptionsSchema = vaultOptionSchema.extend({
+  section: memorySectionSchema.optional().describe(
+    "Optional replacement memory section. Defaults to the current section.",
+  ),
 });
 
 const memoryShowResultSchema = z.object({
@@ -66,7 +72,7 @@ export function registerMemoryCommands(cli: Cli.Cli) {
   });
 
   memory.command("upsert", {
-    description: "Add or update one canonical memory record.",
+    description: "Add one new canonical memory record.",
     args: z.object({
       text: z.string().min(1),
     }),
@@ -74,13 +80,35 @@ export function registerMemoryCommands(cli: Cli.Cli) {
     output: memoryUpsertResultSchema,
     async run({ args, options }) {
       const result = await upsertMemory(options.vault, {
-        recordId: options.memoryId ?? null,
         section: options.section as MemorySection,
         text: args.text,
       });
       return {
         vault: options.vault,
         created: result.created,
+        document: result.document,
+        memory: result.record,
+      };
+    },
+  });
+
+  memory.command("update", {
+    description: "Update one existing canonical memory record by id.",
+    args: z.object({
+      memoryId: z.string().min(1),
+      text: z.string().min(1),
+    }),
+    options: memoryUpdateOptionsSchema,
+    output: memoryUpsertResultSchema,
+    async run({ args, options }) {
+      const result = await updateMemory(options.vault, {
+        recordId: args.memoryId,
+        section: options.section ?? null,
+        text: args.text,
+      });
+      return {
+        vault: options.vault,
+        created: false,
         document: result.document,
         memory: result.record,
       };
