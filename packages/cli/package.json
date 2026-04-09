@@ -46,8 +46,16 @@
     "build": "node ../../scripts/rm-paths.mjs dist && tsc -b tsconfig.build.json",
     "gen:config-schema": "tsx ./scripts/generate-incur-config-schema.ts",
     "typecheck": "tsc -p tsconfig.typecheck.json --pretty false",
-    "test": "pnpm --dir ../.. build:test-runtime:prepared && tsx ./scripts/verify-package-shape.ts && MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 pnpm --dir ../.. exec vitest run --config packages/cli/vitest.workspace.ts --no-coverage",
-    "test:coverage": "pnpm --dir ../.. build:test-runtime:prepared && tsx ./scripts/verify-package-shape.ts && MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 pnpm --dir ../.. exec vitest run --config packages/cli/vitest.workspace.ts --coverage",
+    "test": "pnpm test:source",
+    "test:source": "pnpm --dir ../.. exec vitest run --config packages/cli/vitest.workspace.ts --no-coverage",
+    "test:coverage": "pnpm test:source:coverage",
+    "test:source:coverage": "pnpm --dir ../.. exec vitest run --config packages/cli/vitest.workspace.ts --coverage",
+    "verify:prepared-runtime": "pnpm --dir ../.. build:test-runtime:prepared",
+    "verify:package-shape": "pnpm build && tsx ./scripts/verify-package-shape.ts",
+    "test:built-runtime": "MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 pnpm --dir ../.. exec vitest run --config packages/cli/vitest.workspace.ts --no-coverage",
+    "test:built-runtime:coverage": "MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 pnpm --dir ../.. exec vitest run --config packages/cli/vitest.workspace.ts --coverage",
+    "verify": "pnpm verify:prepared-runtime && pnpm verify:package-shape && pnpm test:built-runtime",
+    "verify:coverage": "pnpm verify:prepared-runtime && pnpm verify:package-shape && pnpm test:built-runtime:coverage",
     "prepack": "pnpm build"
   },
   "dependencies": {
