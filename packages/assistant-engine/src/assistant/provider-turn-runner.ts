@@ -19,6 +19,7 @@ import {
 import {
   executeAssistantProviderTurnAttempt,
   resolveAssistantProviderExecutionCapabilities,
+  type AssistantMurphCommandAccessMode,
   type AssistantProviderAttemptMetadata,
   type AssistantProviderTurnExecutionResult,
 } from '../assistant-provider.js'
@@ -85,8 +86,7 @@ interface AssistantRouteTurnPlan {
 }
 
 interface AssistantPromptCapabilityAvailability {
-  assistantCliExecutorAvailable: boolean
-  assistantCronToolsAvailable: boolean
+  assistantCommandAccessMode: AssistantMurphCommandAccessMode
   assistantHostedDeviceConnectAvailable: boolean
   assistantKnowledgeToolsAvailable: boolean
 }
@@ -382,10 +382,8 @@ async function resolveAssistantRouteTurnPlan(input: {
     systemPrompt: buildAssistantSystemPrompt({
       assistantCliContract,
       allowSensitiveHealthContext: input.sharedPlan.allowSensitiveHealthContext,
-      assistantCliExecutorAvailable:
-        promptCapabilityAvailability.assistantCliExecutorAvailable,
-      assistantCronToolsAvailable:
-        promptCapabilityAvailability.assistantCronToolsAvailable,
+      assistantCommandAccessMode:
+        promptCapabilityAvailability.assistantCommandAccessMode,
       assistantHostedDeviceConnectAvailable:
         promptCapabilityAvailability.assistantHostedDeviceConnectAvailable,
       assistantKnowledgeToolsAvailable:
@@ -436,15 +434,11 @@ function resolveAssistantPromptCapabilityAvailability(input: {
   providerCapabilities: ReturnType<typeof resolveAssistantProviderExecutionCapabilities>
   toolCatalog: ReturnType<typeof createProviderTurnAssistantToolCatalog>
 }): AssistantPromptCapabilityAvailability {
-  const assistantCliExecutorAvailable = hasRouteToolRuntimeAccess({
-    providerCapabilities: input.providerCapabilities,
-    toolCatalog: input.toolCatalog,
-    toolNames: ['murph.cli.run'],
-  })
-
   return {
-    assistantCliExecutorAvailable,
-    assistantCronToolsAvailable: assistantCliExecutorAvailable,
+    assistantCommandAccessMode: resolveAssistantCommandAccessMode({
+      providerCapabilities: input.providerCapabilities,
+      toolCatalog: input.toolCatalog,
+    }),
     assistantHostedDeviceConnectAvailable: hasRouteToolRuntimeAccess({
       providerCapabilities: input.providerCapabilities,
       toolCatalog: input.toolCatalog,
@@ -474,6 +468,26 @@ function hasRouteToolRuntimeAccess(input: {
     input.providerCapabilities.supportsToolRuntime &&
     input.toolNames.every((toolName) => input.toolCatalog.hasTool(toolName))
   )
+}
+
+function resolveAssistantCommandAccessMode(input: {
+  providerCapabilities: ReturnType<typeof resolveAssistantProviderExecutionCapabilities>
+  toolCatalog: ReturnType<typeof createProviderTurnAssistantToolCatalog>
+}): AssistantMurphCommandAccessMode {
+  switch (input.providerCapabilities.murphCommandAccess) {
+    case 'bound-tools':
+      return hasRouteToolRuntimeAccess({
+        providerCapabilities: input.providerCapabilities,
+        toolCatalog: input.toolCatalog,
+        toolNames: ['murph.cli.run'],
+      })
+        ? 'bound-tools'
+        : 'none'
+    case 'direct-cli':
+      return 'direct-cli'
+    default:
+      return 'none'
+  }
 }
 
 async function executeAssistantProviderAttempt(input: {

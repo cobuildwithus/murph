@@ -49,8 +49,14 @@ export interface AssistantProviderCapabilities {
   supportsRichUserMessageContent: boolean
 }
 
+export type AssistantMurphCommandAccessMode =
+  | 'bound-tools'
+  | 'direct-cli'
+  | 'none'
+
 export interface AssistantProviderExecutionCapabilities
   extends AssistantProviderCapabilities {
+  murphCommandAccess: AssistantMurphCommandAccessMode
   requestFormat: 'flat-prompt' | 'messages'
   supportsToolRuntime: boolean
 }
