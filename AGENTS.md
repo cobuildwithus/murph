@@ -66,7 +66,7 @@ Always read these before repo code/docs/test/config work:
 - Use an execution plan for multi-file or high-risk work. Narrow supplied-patch landings may stay ledger-only when they remain bounded and single-turn.
 - If architecture-significant behavior changes, update `ARCHITECTURE.md` and the matching durable docs.
 - Required completion-workflow audit subagent passes are part of the repo workflow once the user has asked for repo work. That standing repo instruction is already sufficient permission to spawn those required audit subagents, so do not wait for or ask for an extra explicit "use subagents" message.
-- Completion-workflow audit subagents default to one pass per task. Re-run at most one additional audit pass only when the first pass leads to a large or high-risk follow-up diff; otherwise finish locally without spawning another workflow audit subagent.
+- For repo code/test/config changes that rely on package/app coverage verification, completion-workflow audit subagents default to a required coverage-focused pass plus the final review pass. Re-run at most one additional final-review audit pass only when the first pass leads to a large or high-risk follow-up diff; otherwise finish locally without spawning another workflow audit subagent.
 - Same-turn task completion counts as acceptance unless the user says `review first` or `do not commit`.
 - If repo files changed and the user did not say `review first` or `do not commit`, create a scoped commit before final handoff.
 - Do not skip that commit because the worktree is dirty; commit only the exact touched paths with `scripts/finish-task` or `scripts/committer`.

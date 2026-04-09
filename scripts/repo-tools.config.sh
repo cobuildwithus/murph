@@ -40,6 +40,7 @@ required_files=(
   "agent-docs/references/testing-ci-map.md"
   "agent-docs/operations/verification-and-runtime.md"
   "agent-docs/operations/completion-workflow.md"
+  "agent-docs/prompts/coverage-write.md"
   "agent-docs/prompts/simplify.md"
   "agent-docs/prompts/task-finish-review.md"
   "agent-docs/generated/README.md"
