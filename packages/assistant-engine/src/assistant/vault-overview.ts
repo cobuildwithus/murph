@@ -24,17 +24,21 @@ export async function buildAssistantVaultOverviewBlock(
   ] =
     await Promise.all([
       readVault(vaultRoot),
-      listAutomations(vaultRoot),
+      listAutomations(vaultRoot, { limit: 1 }),
       listRawMealManifestPaths(vaultRoot),
       walkVaultFiles(vaultRoot, RESEARCH_ROOT, { extension: '.md' }),
       directoryHasEntries(vaultRoot, VAULT_LAYOUT.rawInboxDirectory),
       directoryHasEntries(vaultRoot, DERIVED_INBOX_ROOT),
     ])
 
-  const canonicalCoverage = summarizeCanonicalCoverage(vault)
+  const eventKindCounts = countEventKinds(vault)
+  const canonicalCoverage = summarizeCanonicalCoverage(vault, eventKindCounts)
   const wearableCoverage = summarizeWearableCoverage(vault)
   const healthContextCoverage = summarizeHealthContextCoverage(vault)
-  const journalAndDocumentCoverage = summarizeJournalAndDocumentCoverage(vault)
+  const journalAndDocumentCoverage = summarizeJournalAndDocumentCoverage(
+    vault,
+    eventKindCounts,
+  )
   const automationCoverage = summarizeAutomationCoverage(automations.length)
   const rawCoverage = summarizeRawCoverage(rawMealManifestPaths.length)
   const bankCoverage = summarizeBankCoverage(vault)
@@ -62,15 +66,18 @@ export async function buildAssistantVaultOverviewBlock(
   return lines.length > 4 ? lines.join('\n') : null
 }
 
-function summarizeCanonicalCoverage(vault: VaultReadModel): string | null {
+function summarizeCanonicalCoverage(
+  vault: VaultReadModel,
+  eventKindCounts: ReadonlyMap<string, number>,
+): string | null {
   const parts = [
-    summarizePositiveCount(countEventsOfKind(vault, 'meal'), 'meal event'),
+    summarizePositiveCount(eventKindCounts.get('meal') ?? 0, 'meal event'),
     summarizePositiveCount(
-      countEventsOfKind(vault, 'activity_session'),
+      eventKindCounts.get('activity_session') ?? 0,
       'workout/activity session',
     ),
     summarizePositiveCount(
-      countEventsOfKind(vault, 'body_measurement'),
+      eventKindCounts.get('body_measurement') ?? 0,
       'body measurement',
     ),
     summarizePositiveCount(vault.experiments.length, 'experiment'),
@@ -110,10 +117,13 @@ function summarizeHealthContextCoverage(vault: VaultReadModel): string | null {
   return `- Saved health context includes ${joinWithAnd(parts)}.`
 }
 
-function summarizeJournalAndDocumentCoverage(vault: VaultReadModel): string | null {
+function summarizeJournalAndDocumentCoverage(
+  vault: VaultReadModel,
+  eventKindCounts: ReadonlyMap<string, number>,
+): string | null {
   const parts = [
     summarizePositiveCount(vault.journalEntries.length, 'journal day'),
-    summarizePositiveCount(countEventsOfKind(vault, 'document'), 'document'),
+    summarizePositiveCount(eventKindCounts.get('document') ?? 0, 'document'),
   ].filter((value): value is string => Boolean(value))
 
   if (parts.length === 0) {
@@ -172,8 +182,14 @@ function summarizeOtherSources(input: {
   return `- Other source roots present: ${joinWithAnd(parts)}.`
 }
 
-function countEventsOfKind(vault: VaultReadModel, kind: string): number {
-  return vault.events.filter((event) => event.kind === kind).length
+function countEventKinds(vault: VaultReadModel): ReadonlyMap<string, number> {
+  const counts = new Map<string, number>()
+
+  for (const event of vault.events) {
+    counts.set(event.kind, (counts.get(event.kind) ?? 0) + 1)
+  }
+
+  return counts
 }
 
 function countSupplementProtocols(vault: VaultReadModel): number {
