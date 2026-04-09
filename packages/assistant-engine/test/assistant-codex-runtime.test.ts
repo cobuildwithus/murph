@@ -497,6 +497,42 @@ describe('assistant codex runtime', () => {
     })
   })
 
+  it('classifies stale resume failures from child close instead of surfacing stdin EPIPE', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-stale-resume-')
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+
+      queueMicrotask(() => {
+        const error = new Error('write EPIPE') as NodeJS.ErrnoException
+        error.code = 'EPIPE'
+        child.stdin.emit('error', error)
+        child.stderr.write(
+          'thread/resume failed: no rollout found for thread id stale-thread\n',
+        )
+        child.emit('close', 1, null)
+      })
+
+      return child
+    })
+
+    await expect(
+      executeCodexPrompt({
+        prompt: 'resume please',
+        resumeSessionId: 'stale-thread',
+        workingDirectory,
+      }),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_CODEX_RESUME_STALE',
+      context: {
+        providerSessionId: 'stale-thread',
+        retryable: true,
+        staleResume: true,
+      },
+      message: expect.stringContaining('no rollout found for thread id stale-thread'),
+    })
+  })
+
   it('formats non-connection Codex failures from the trailing stderr context', async () => {
     const workingDirectory = await createTempDir('assistant-codex-failure-')
 

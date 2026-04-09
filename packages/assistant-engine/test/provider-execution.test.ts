@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { normalizeAssistantProviderConfig } from '@murphai/operator-config/assistant/provider-config'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
 const providerMocks = vi.hoisted(() => ({
   executeCodexPrompt: vi.fn(),
@@ -856,5 +857,64 @@ describe('codexCliProviderDefinition', () => {
       sandbox: undefined,
       workingDirectory: WORKING_DIRECTORY,
     })
+  })
+
+  it('retries once without resume when Codex reports a stale provider session', async () => {
+    providerMocks.prepareAssistantDirectCliEnv.mockReturnValue({
+      PATH: '/prepared/bin',
+    })
+    providerMocks.executeCodexPrompt
+      .mockRejectedValueOnce(
+        new VaultCliError(
+          'ASSISTANT_CODEX_RESUME_STALE',
+          'Codex CLI could not resume the saved provider session.',
+          {
+            providerSessionId: 'stale-session',
+            retryable: true,
+            staleResume: true,
+          },
+        ),
+      )
+      .mockResolvedValueOnce({
+        finalMessage: 'Recovered with fresh session',
+        jsonEvents: [],
+        sessionId: 'codex-session-fresh',
+        stderr: '',
+        stdout: '',
+      })
+
+    await expect(
+      codexCliProviderDefinition.executeTurn({
+        env: {},
+        prompt: '  retry stale resume  ',
+        providerConfig: normalizeAssistantProviderConfig({
+          provider: 'codex-cli',
+          model: 'codex-mini',
+          oss: false,
+        }),
+        resumeProviderSessionId: 'stale-session',
+        workingDirectory: WORKING_DIRECTORY,
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      result: {
+        providerSessionId: 'codex-session-fresh',
+        response: 'Recovered with fresh session',
+      },
+    })
+
+    expect(providerMocks.executeCodexPrompt).toHaveBeenCalledTimes(2)
+    expect(providerMocks.executeCodexPrompt).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        resumeSessionId: 'stale-session',
+      }),
+    )
+    expect(providerMocks.executeCodexPrompt).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        resumeSessionId: undefined,
+      }),
+    )
   })
 })
