@@ -49,24 +49,9 @@ import {
   resolveSetupWizardChannelStatus,
   resolveSetupWizardWearableStatus,
 } from '../src/setup-wizard-runtime-status.ts'
-import { stripAnsi, withMockProcessTty } from './helpers.ts'
+import { waitForRenderedText, withMockProcessTty } from './helpers.ts'
 
-async function waitForWizardText(
-  flush: () => Promise<void>,
-  readOutput: () => string,
-  pattern: RegExp,
-): Promise<string> {
-  for (let attempt = 0; attempt < 120; attempt += 1) {
-    const output = stripAnsi(readOutput())
-    if (pattern.test(output)) {
-      return output
-    }
-
-    await flush()
-  }
-
-  return stripAnsi(readOutput())
-}
+const WIZARD_TEST_TIMEOUT_MS = 45_000
 
 test('setup wizard core wraps indices and waits for exit before resolving', async () => {
   const controller =
@@ -208,7 +193,7 @@ test.sequential('setup wizard wrapper rejects when Ink render throws before init
     vi.doUnmock('ink')
     vi.resetModules()
   }
-})
+}, WIZARD_TEST_TIMEOUT_MS)
 
 test.sequential('setup wizard wrapper rejects when Ink exits with an error after rendering', async () => {
   const exitError = new Error('terminal crashed')
@@ -244,7 +229,7 @@ test.sequential('setup wizard wrapper rejects when Ink exits with an error after
     vi.doUnmock('ink')
     vi.resetModules()
   }
-})
+}, WIZARD_TEST_TIMEOUT_MS)
 
 test('setup wizard extracted option and public-url helpers keep labels and trimming stable', () => {
   assert.equal(formatSetupChannel('telegram'), 'Telegram')
@@ -324,13 +309,13 @@ test.sequential('setup wizard uses endpoint-specific method copy and confirm rev
       vault: './wizard-endpoint-provider',
     })
 
-    const introOutput = await waitForWizardText(flush, readOutput, /Before you start/u)
+    const introOutput = await waitForRenderedText(flush, readOutput, /Before you start/u)
     assert.match(introOutput, /Before you start/u)
     await writeInput('\r')
-    await waitForWizardText(flush, readOutput, /How should Murph answer\?/u)
+    await waitForRenderedText(flush, readOutput, /How should Murph answer\?/u)
     await writeInput('\r')
 
-    const methodOutput = await waitForWizardText(
+    const methodOutput = await waitForRenderedText(
       flush,
       readOutput,
       /How should Murph connect to your endpoint\?/u,
@@ -341,14 +326,14 @@ test.sequential('setup wizard uses endpoint-specific method copy and confirm rev
     )
 
     await writeInput('\r')
-    await waitForWizardText(flush, readOutput, /Auto updates/u)
+    await waitForRenderedText(flush, readOutput, /Auto updates/u)
     await writeInput('\r')
-    await waitForWizardText(flush, readOutput, /Chat channels/u)
+    await waitForRenderedText(flush, readOutput, /Chat channels/u)
     await writeInput('\r')
-    await waitForWizardText(flush, readOutput, /Health data/u)
+    await waitForRenderedText(flush, readOutput, /Health data/u)
     await writeInput('\r')
 
-    const confirmOutput = await waitForWizardText(flush, readOutput, /Review/u)
+    const confirmOutput = await waitForRenderedText(flush, readOutput, /Review/u)
     assert.match(confirmOutput, /Review your setup/u)
     assert.match(confirmOutput, /Assistant: Custom endpoint · Compatible endpoint/u)
 
@@ -368,7 +353,7 @@ test.sequential('setup wizard uses endpoint-specific method copy and confirm rev
       wearables: [],
     })
   })
-})
+}, WIZARD_TEST_TIMEOUT_MS)
 
 test('setup wizard public URL guidance stays disabled when a public base URL is already set', () => {
   const review = buildSetupWizardPublicUrlReview({
@@ -531,20 +516,20 @@ test.sequential('setup wizard runs the public-link flow, preserves explicit opt-
 
     await flush()
     await writeInput('\r')
-    await waitForWizardText(flush, readOutput, /How should Murph answer\?/u)
+    await waitForRenderedText(flush, readOutput, /How should Murph answer\?/u)
     await writeInput('\r')
-    await waitForWizardText(flush, readOutput, /Auto updates/u)
+    await waitForRenderedText(flush, readOutput, /Auto updates/u)
     await writeInput('\r')
-    await waitForWizardText(flush, readOutput, /Chat channels/u)
+    await waitForRenderedText(flush, readOutput, /Chat channels/u)
     await writeInput('\u001B[A')
     await writeInput('\u001B[A')
     await writeInput(' ')
     await writeInput('\r')
-    await waitForWizardText(flush, readOutput, /Health data/u)
+    await waitForRenderedText(flush, readOutput, /Health data/u)
     await writeInput('\u001B[A')
     await writeInput(' ')
     await writeInput('\r')
-    const publicLinkOutput = await waitForWizardText(
+    const publicLinkOutput = await waitForRenderedText(
       flush,
       readOutput,
       /Public links/u,
@@ -558,11 +543,11 @@ test.sequential('setup wizard runs the public-link flow, preserves explicit opt-
     )
 
     await writeInput('\u001B')
-    await waitForWizardText(flush, readOutput, /Health data/u)
+    await waitForRenderedText(flush, readOutput, /Health data/u)
     await writeInput('\r')
-    await waitForWizardText(flush, readOutput, /Public links/u)
+    await waitForRenderedText(flush, readOutput, /Public links/u)
     await writeInput('\r')
-    await waitForWizardText(flush, readOutput, /Review your setup/u)
+    await waitForRenderedText(flush, readOutput, /Review your setup/u)
     await writeInput('\r')
 
     await assert.doesNotReject(wizardResultPromise)
@@ -577,7 +562,7 @@ test.sequential('setup wizard runs the public-link flow, preserves explicit opt-
       wearables: ['whoop'],
     })
   })
-})
+}, WIZARD_TEST_TIMEOUT_MS)
 
 test.sequential('setup wizard keeps assistant API-key defaults and review guidance when no public-link step is needed', async () => {
   const previousOpenAiApiKey = process.env.OPENAI_API_KEY
@@ -596,17 +581,17 @@ test.sequential('setup wizard keeps assistant API-key defaults and review guidan
 
       await flush()
       await writeInput('\r')
-      await waitForWizardText(flush, readOutput, /How should Murph answer\?/u)
+      await waitForRenderedText(flush, readOutput, /How should Murph answer\?/u)
       await writeInput('\r')
-      await waitForWizardText(flush, readOutput, /How should Murph connect to OpenAI\?/u)
+      await waitForRenderedText(flush, readOutput, /How should Murph connect to OpenAI\?/u)
       await writeInput('\r')
-      await waitForWizardText(flush, readOutput, /Auto updates/u)
+      await waitForRenderedText(flush, readOutput, /Auto updates/u)
       await writeInput('\r')
-      await waitForWizardText(flush, readOutput, /Chat channels/u)
+      await waitForRenderedText(flush, readOutput, /Chat channels/u)
       await writeInput('\r')
-      await waitForWizardText(flush, readOutput, /Health data/u)
+      await waitForRenderedText(flush, readOutput, /Health data/u)
       await writeInput('\r')
-      const confirmOutput = await waitForWizardText(
+      const confirmOutput = await waitForRenderedText(
         flush,
         readOutput,
         /Needs keys first/u,
@@ -624,9 +609,9 @@ test.sequential('setup wizard keeps assistant API-key defaults and review guidan
       )
 
       await writeInput('\u001B[D')
-      await waitForWizardText(flush, readOutput, /Health data/u)
+      await waitForRenderedText(flush, readOutput, /Health data/u)
       await writeInput('\r')
-      await waitForWizardText(flush, readOutput, /Review your setup/u)
+      await waitForRenderedText(flush, readOutput, /Review your setup/u)
       await writeInput('\r')
 
       assert.deepEqual(await wizardResultPromise, {
@@ -650,7 +635,7 @@ test.sequential('setup wizard keeps assistant API-key defaults and review guidan
       process.env.OPENAI_API_KEY = previousOpenAiApiKey
     }
   }
-})
+}, WIZARD_TEST_TIMEOUT_MS)
 
 test.sequential('setup wizard surfaces cancellation when the operator quits from the intro screen', async () => {
   await withMockProcessTty(async ({ flush, writeInput }) => {
@@ -667,7 +652,7 @@ test.sequential('setup wizard surfaces cancellation when the operator quits from
 
     await rejection
   })
-})
+}, WIZARD_TEST_TIMEOUT_MS)
 
 test.sequential('setup wizard surfaces cancellation when the operator presses escape on the intro screen', async () => {
   await withMockProcessTty(async ({ flush, writeInput }) => {
@@ -684,7 +669,7 @@ test.sequential('setup wizard surfaces cancellation when the operator presses es
 
     await rejection
   })
-})
+}, WIZARD_TEST_TIMEOUT_MS)
 
 test.sequential('setup wizard accepts wrapped selection navigation plus space-based public-link and confirm actions', async () => {
   await withMockProcessTty(async ({ flush, readOutput, writeInput }) => {
@@ -715,29 +700,29 @@ test.sequential('setup wizard accepts wrapped selection navigation plus space-ba
 
     await flush()
     await writeInput('\r')
-    await waitForWizardText(flush, readOutput, /How should Murph answer\?/u)
+    await waitForRenderedText(flush, readOutput, /How should Murph answer\?/u)
     await writeInput('\r')
-    await waitForWizardText(flush, readOutput, /Auto updates/u)
+    await waitForRenderedText(flush, readOutput, /Auto updates/u)
     await writeInput('\r')
-    await waitForWizardText(flush, readOutput, /Chat channels/u)
+    await waitForRenderedText(flush, readOutput, /Chat channels/u)
     await writeInput('\u001B[A')
     await writeInput('\u001B[B')
     await writeInput('\u001B[B')
     await writeInput('\u001B[B')
     await writeInput(' ')
     await writeInput('\r')
-    await waitForWizardText(flush, readOutput, /Health data/u)
+    await waitForRenderedText(flush, readOutput, /Health data/u)
     await writeInput('\u001B[B')
     await writeInput('\u001B[B')
     await writeInput(' ')
     await writeInput('\r')
-    await waitForWizardText(flush, readOutput, /Public links/u)
+    await waitForRenderedText(flush, readOutput, /Public links/u)
     await writeInput(' ')
-    await waitForWizardText(flush, readOutput, /Review your setup/u)
+    await waitForRenderedText(flush, readOutput, /Review your setup/u)
     await writeInput('\u001B')
-    await waitForWizardText(flush, readOutput, /Public links/u)
+    await waitForRenderedText(flush, readOutput, /Public links/u)
     await writeInput(' ')
-    await waitForWizardText(flush, readOutput, /Review your setup/u)
+    await waitForRenderedText(flush, readOutput, /Review your setup/u)
     await writeInput(' ')
 
     assert.deepEqual(await wizardResultPromise, {
@@ -751,4 +736,4 @@ test.sequential('setup wizard accepts wrapped selection navigation plus space-ba
       wearables: ['whoop'],
     })
   })
-})
+}, WIZARD_TEST_TIMEOUT_MS)

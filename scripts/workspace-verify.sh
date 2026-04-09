@@ -94,6 +94,8 @@ readonly app_verify_parallel_default="$([[ -n "${CI:-}" ]] && echo 0 || echo 1)"
 readonly app_verify_parallel="${MURPH_APP_VERIFY_PARALLEL:-$app_verify_parallel_default}"
 readonly test_lane_parallel_default="$([[ -n "${CI:-}" ]] && echo 0 || echo 1)"
 readonly test_lane_parallel="${MURPH_TEST_LANES_PARALLEL:-$test_lane_parallel_default}"
+readonly package_coverage_concurrency_default="$([[ -n "${CI:-}" ]] && echo 1 || echo 2)"
+readonly package_coverage_concurrency_limit="$(normalize_positive_integer "${MURPH_PACKAGE_COVERAGE_CONCURRENCY:-$package_coverage_concurrency_default}" "$package_coverage_concurrency_default")"
 readonly typecheck_workspace_concurrency_default="$([[ -n "${CI:-}" ]] && echo 2 || echo 4)"
 readonly typecheck_workspace_concurrency="$(normalize_positive_integer "${MURPH_TYPECHECK_WORKSPACE_CONCURRENCY:-$typecheck_workspace_concurrency_default}" "$typecheck_workspace_concurrency_default")"
 readonly verify_retry_count="$(normalize_non_negative_integer "${MURPH_VERIFY_RETRY_COUNT:-0}" "0")"
@@ -549,11 +551,13 @@ run_all_package_coverage() {
     "Vault usecases package coverage"
   )
   local package_count="${#package_coverage_dirs[@]}"
-  local package_coverage_concurrency="$package_count"
+  local package_coverage_concurrency="$package_coverage_concurrency_limit"
   local package_index=0
 
-  if [[ -n "${CI:-}" ]]; then
-    package_coverage_concurrency=$(((package_count + 1) / 2))
+  # Each package coverage command manages its own Vitest workers, so keep the
+  # outer package fanout bounded to avoid oversubscribing local machines.
+  if [[ "$package_coverage_concurrency" -gt "$package_count" ]]; then
+    package_coverage_concurrency="$package_count"
   fi
 
   if [[ "$package_coverage_concurrency" -le 1 ]]; then

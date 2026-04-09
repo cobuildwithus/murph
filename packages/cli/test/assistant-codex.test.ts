@@ -494,15 +494,21 @@ test('executeCodexPrompt does not misclassify MCP initialize failures as provide
       resumeSessionId: 'thread-existing',
     }),
     (error: any) => {
-      assert.equal(error.code, 'ASSISTANT_CODEX_FAILED')
+      assert.equal(error.code, 'ASSISTANT_CODEX_RESUME_STALE')
       assert.match(
         String(error.message),
         /required MCP servers failed to initialize/u,
       )
+      assert.match(
+        String(error.message),
+        /start a fresh provider session/u,
+      )
       assert.doesNotMatch(String(error.message), /lost its connection/u)
       assert.equal(error.context?.connectionLost, false)
       assert.equal(error.context?.recoverableConnectionLoss, false)
-      assert.equal(error.context?.providerSessionId, null)
+      assert.equal(error.context?.providerSessionId, 'thread-existing')
+      assert.equal(error.context?.retryable, true)
+      assert.equal(error.context?.staleResume, true)
       return true
     },
   )
