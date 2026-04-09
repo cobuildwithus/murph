@@ -3432,6 +3432,151 @@ describe('assistant automation run loop', () => {
     expect(release).toHaveBeenCalledOnce()
   })
 
+  it('wakes immediately on non-self imported captures instead of waiting for the scan interval', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-09T00:00:00.000Z'))
+
+    const externalAbort = new AbortController()
+    const scanStartedAt: number[] = []
+    const inboxServices = createInboxServices({
+      run: vi.fn().mockImplementation(
+        async (
+          _input: { requestId: string | null; vault: string },
+          options: {
+            onEvent?: (event: Record<string, unknown>) => void
+            signal: AbortSignal
+          },
+        ) => {
+          setTimeout(() => {
+            options.onEvent?.({
+              type: 'capture.imported',
+              connectorId: 'telegram',
+              source: 'telegram',
+              capture: {
+                actor: {
+                  isSelf: false,
+                },
+              },
+            })
+          }, 10)
+
+          await new Promise<void>((resolve) => {
+            options.signal.addEventListener('abort', () => resolve(), {
+              once: true,
+            })
+          })
+        },
+      ),
+    })
+    runLoopMocks.scanAssistantAutomationOnce.mockImplementation(async () => {
+      scanStartedAt.push(Date.now())
+      if (scanStartedAt.length === 2) {
+        externalAbort.abort()
+      }
+      return {
+        routing: {
+          considered: 0,
+          failed: 0,
+          noAction: 0,
+          routed: 0,
+          skipped: 0,
+        },
+        replies: {
+          considered: 0,
+          failed: 0,
+          replied: 0,
+          skipped: 0,
+        },
+      }
+    })
+    const runLoop = await vi.importActual<typeof import('../src/assistant/automation/run-loop.ts')>(
+      '../src/assistant/automation/run-loop.ts',
+    )
+
+    const resultPromise = runLoop.runAssistantAutomation({
+      inboxServices,
+      once: false,
+      scanIntervalMs: 1000,
+      signal: externalAbort.signal,
+      startDaemon: true,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    await vi.advanceTimersByTimeAsync(0)
+    expect(scanStartedAt).toHaveLength(1)
+
+    await vi.advanceTimersByTimeAsync(10)
+    const result = await resultPromise
+
+    expect(result.reason).toBe('signal')
+    expect(scanStartedAt).toHaveLength(2)
+    expect(scanStartedAt[1]! - scanStartedAt[0]!).toBe(10)
+  })
+
+  it('continues immediately when scan state progress is persisted', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-09T00:00:00.000Z'))
+
+    const externalAbort = new AbortController()
+    const scanStartedAt: number[] = []
+    runLoopMocks.scanAssistantAutomationOnce.mockImplementation(
+      async (input: {
+        onStateProgress: (next: {
+          autoReplyBacklogChannels: string[]
+          autoReplyPrimed: boolean
+          autoReplyScanCursor: AssistantAutomationCursor | null
+          inboxScanCursor: AssistantAutomationCursor | null
+        }) => Promise<void>
+      }) => {
+        scanStartedAt.push(Date.now())
+        if (scanStartedAt.length === 1) {
+          await input.onStateProgress({
+            autoReplyBacklogChannels: ['telegram'],
+            autoReplyPrimed: true,
+            autoReplyScanCursor: {
+              captureId: 'capture-auto-reply',
+              occurredAt: '2026-04-09T00:00:00.000Z',
+            },
+            inboxScanCursor: null,
+          })
+        } else {
+          externalAbort.abort()
+        }
+
+        return {
+          routing: {
+            considered: 0,
+            failed: 0,
+            noAction: 0,
+            routed: 0,
+            skipped: 0,
+          },
+          replies: {
+            considered: 0,
+            failed: 0,
+            replied: 0,
+            skipped: 0,
+          },
+        }
+      },
+    )
+    const runLoop = await vi.importActual<typeof import('../src/assistant/automation/run-loop.ts')>(
+      '../src/assistant/automation/run-loop.ts',
+    )
+
+    const result = await runLoop.runAssistantAutomation({
+      once: false,
+      scanIntervalMs: 1000,
+      signal: externalAbort.signal,
+      startDaemon: false,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(result.reason).toBe('signal')
+    expect(scanStartedAt).toHaveLength(2)
+    expect(scanStartedAt[1]! - scanStartedAt[0]!).toBe(0)
+  })
+
   it('includes the startup recovery summary before the normal scan result', async () => {
     runLoopMocks.readAssistantAutomationState.mockResolvedValue(
       createAutomationState({

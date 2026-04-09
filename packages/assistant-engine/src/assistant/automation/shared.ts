@@ -174,6 +174,65 @@ export function bridgeAbortSignals(
   }
 }
 
+export interface AssistantAutomationWakeController {
+  consumePendingWake(): boolean
+  requestWake(): void
+  waitForWakeOrTimeout(signal: AbortSignal, timeoutMs: number): Promise<void>
+}
+
+export function createAssistantAutomationWakeController(): AssistantAutomationWakeController {
+  let pendingWake = false
+  const waiters = new Set<() => void>()
+
+  const notifyWaiters = () => {
+    for (const waiter of waiters) {
+      waiter()
+    }
+    waiters.clear()
+  }
+
+  return {
+    consumePendingWake() {
+      const hadPendingWake = pendingWake
+      pendingWake = false
+      return hadPendingWake
+    },
+    requestWake() {
+      pendingWake = true
+      notifyWaiters()
+    },
+    async waitForWakeOrTimeout(signal, timeoutMs) {
+      if (signal.aborted || pendingWake) {
+        return
+      }
+
+      await new Promise<void>((resolve) => {
+        const onWake = () => {
+          cleanup()
+          resolve()
+        }
+        const onAbort = () => {
+          cleanup()
+          resolve()
+        }
+        const timer = setTimeout(() => {
+          cleanup()
+          resolve()
+        }, timeoutMs)
+
+        const cleanup = () => {
+          clearTimeout(timer)
+          waiters.delete(onWake)
+          signal.removeEventListener('abort', onAbort)
+        }
+
+        waiters.add(onWake)
+        signal.addEventListener('abort', onAbort, { once: true })
+      })
+    },
+  }
+}
+
 export async function waitForAbortOrTimeout(
   signal: AbortSignal,
   timeoutMs: number,

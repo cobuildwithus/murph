@@ -1,5 +1,6 @@
 import {
   assistantRunResultSchema,
+  type AssistantAutomationState,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import type {
   InboxServices,
@@ -33,15 +34,23 @@ import {
 } from '../shared.js'
 import {
   bridgeAbortSignals,
+  createAssistantAutomationWakeController,
   createEmptyAutoReplyScanResult,
   createEmptyInboxScanResult,
   normalizeScanInterval,
   type AssistantRunEvent,
-  waitForAbortOrTimeout,
 } from './shared.js'
 import { scanAssistantAutomationOnce } from './scanner.js'
 import { acquireAssistantAutomationRunLock } from './runtime-lock.js'
 import { recoverAssistantAutoRepliesOnStartup } from './startup-recovery.js'
+
+type AssistantAutomationLoopStateSnapshot = Pick<
+  AssistantAutomationState,
+  | 'autoReplyBacklogChannels'
+  | 'autoReplyPrimed'
+  | 'autoReplyScanCursor'
+  | 'inboxScanCursor'
+>
 
 export interface RunAssistantAutomationInput {
   allowSelfAuthored?: boolean
@@ -76,6 +85,7 @@ export async function runAssistantAutomation(
   })
   const aggregateRouting = createEmptyInboxScanResult()
   const aggregateReplies = createEmptyAutoReplyScanResult()
+  const wakeController = createAssistantAutomationWakeController()
   let scans = 0
   let lastError: string | null = null
   const daemonStarted = input.startDaemon ?? true
@@ -103,7 +113,15 @@ export async function runAssistantAutomation(
           requestId: input.requestId ?? null,
         },
         {
-          onEvent: input.onInboxEvent,
+          onEvent: (event) => {
+            if (
+              event.type === 'capture.imported' &&
+              event.capture?.actor?.isSelf !== true
+            ) {
+              wakeController.requestWake()
+            }
+            input.onInboxEvent?.(event)
+          },
           signal: controller.signal,
         },
       )
@@ -127,6 +145,7 @@ export async function runAssistantAutomation(
 
   try {
     while (!controller.signal.aborted) {
+      wakeController.consumePendingWake()
       scans += 1
       maybeThrowInjectedAssistantFault({
         component: 'automation',
@@ -164,6 +183,7 @@ export async function runAssistantAutomation(
         limit: input.maxPerScan,
       })
       let state = await readAssistantAutomationState(input.vault)
+      const stateBeforeScan = snapshotAssistantAutomationLoopState(state)
 
       if (startupRecoveryPending) {
         const startupRecovery = await recoverAssistantAutoRepliesOnStartup({
@@ -233,7 +253,16 @@ export async function runAssistantAutomation(
         break
       }
 
-      await waitForAbortOrTimeout(
+      const stateProgressed = didAssistantAutomationStateProgress(
+        stateBeforeScan,
+        state,
+      )
+      const wakeRequested = wakeController.consumePendingWake()
+      if (stateProgressed || wakeRequested) {
+        continue
+      }
+
+      await wakeController.waitForWakeOrTimeout(
         controller.signal,
         normalizeScanInterval(input.scanIntervalMs),
       )
@@ -295,4 +324,56 @@ export async function runAssistantAutomation(
       })
     })
   }
+}
+
+function snapshotAssistantAutomationLoopState(
+  state: AssistantAutomationLoopStateSnapshot,
+): AssistantAutomationLoopStateSnapshot {
+  return {
+    autoReplyBacklogChannels: [...state.autoReplyBacklogChannels],
+    autoReplyPrimed: state.autoReplyPrimed,
+    autoReplyScanCursor: state.autoReplyScanCursor,
+    inboxScanCursor: state.inboxScanCursor,
+  }
+}
+
+function didAssistantAutomationStateProgress(
+  before: AssistantAutomationLoopStateSnapshot,
+  after: AssistantAutomationLoopStateSnapshot,
+): boolean {
+  return (
+    before.autoReplyPrimed !== after.autoReplyPrimed ||
+    !sameAssistantAutomationCursor(
+      before.autoReplyScanCursor,
+      after.autoReplyScanCursor,
+    ) ||
+    !sameAssistantAutomationCursor(
+      before.inboxScanCursor,
+      after.inboxScanCursor,
+    ) ||
+    !sameStringArray(
+      before.autoReplyBacklogChannels,
+      after.autoReplyBacklogChannels,
+    )
+  )
+}
+
+function sameAssistantAutomationCursor(
+  left: AssistantAutomationLoopStateSnapshot['autoReplyScanCursor'],
+  right: AssistantAutomationLoopStateSnapshot['autoReplyScanCursor'],
+): boolean {
+  return (
+    left?.captureId === right?.captureId &&
+    left?.occurredAt === right?.occurredAt
+  )
+}
+
+function sameStringArray(
+  left: readonly string[],
+  right: readonly string[],
+): boolean {
+  return (
+    left.length === right.length &&
+    left.every((value, index) => value === right[index])
+  )
 }
