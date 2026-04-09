@@ -189,3 +189,26 @@ export async function withMockProcessTty<TResult>(
 export function stripAnsi(text: string): string {
   return text.replace(/\u001B\[[0-9;?]*[ -/]*[@-~]/gu, '')
 }
+
+export async function waitForRenderedText(
+  flush: () => Promise<void>,
+  readOutput: () => string,
+  pattern: RegExp,
+  options: {
+    timeoutMs?: number
+  } = {},
+): Promise<string> {
+  const timeoutMs = options.timeoutMs ?? 10_000
+  const deadline = Date.now() + timeoutMs
+
+  while (Date.now() < deadline) {
+    const output = stripAnsi(readOutput())
+    if (pattern.test(output)) {
+      return output
+    }
+
+    await flush()
+  }
+
+  return stripAnsi(readOutput())
+}

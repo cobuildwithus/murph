@@ -17,26 +17,10 @@ afterAll(() => {
 })
 
 import { runSetupAssistantWizard } from '../src/setup-assistant-wizard.js'
-import { stripAnsi, withMockProcessTty } from './helpers.ts'
+import { waitForRenderedText, withMockProcessTty } from './helpers.ts'
 
 type SetupAssistantWizardInput = Parameters<typeof runSetupAssistantWizard>[0]
-
-async function waitForAssistantWizardText(
-  flush: () => Promise<void>,
-  readOutput: () => string,
-  pattern: RegExp,
-): Promise<string> {
-  for (let attempt = 0; attempt < 120; attempt += 1) {
-    const output = stripAnsi(readOutput())
-    if (pattern.test(output)) {
-      return output
-    }
-
-    await flush()
-  }
-
-  return stripAnsi(readOutput())
-}
+const WIZARD_TEST_TIMEOUT_MS = 45_000
 
 async function expectAssistantWizardCancellation(
   input: SetupAssistantWizardInput,
@@ -53,7 +37,7 @@ async function expectAssistantWizardCancellation(
       /Murph model selection was cancelled/u,
     )
 
-    await waitForAssistantWizardText(flush, readOutput, /How should Murph answer\?/u)
+    await waitForRenderedText(flush, readOutput, /How should Murph answer\?/u)
     await triggerCancel({ flush, readOutput, writeInput })
 
     await rejection
@@ -68,19 +52,19 @@ test.sequential(
         initialAssistantPreset: 'codex',
       })
 
-      await waitForAssistantWizardText(
+      await waitForRenderedText(
         flush,
         readOutput,
         /How should Murph answer\?/u,
       )
       await writeInput('\r')
-      await waitForAssistantWizardText(
+      await waitForRenderedText(
         flush,
         readOutput,
         /How should Murph connect to OpenAI\?/u,
       )
       await writeInput('\r')
-      await waitForAssistantWizardText(flush, readOutput, /Review/u)
+      await waitForRenderedText(flush, readOutput, /Review/u)
       await writeInput('\r')
 
       assert.deepEqual(await wizardResultPromise, {
@@ -92,6 +76,7 @@ test.sequential(
       })
     })
   },
+  WIZARD_TEST_TIMEOUT_MS,
 )
 
 test.sequential(
@@ -103,13 +88,13 @@ test.sequential(
         initialAssistantProviderPreset: 'openrouter',
       })
 
-      await waitForAssistantWizardText(
+      await waitForRenderedText(
         flush,
         readOutput,
         /How should Murph answer\?/u,
       )
       await writeInput('\r')
-      const reviewOutput = await waitForAssistantWizardText(
+      const reviewOutput = await waitForRenderedText(
         flush,
         readOutput,
         /Review/u,
@@ -126,6 +111,7 @@ test.sequential(
       })
     })
   },
+  WIZARD_TEST_TIMEOUT_MS,
 )
 
 test.sequential(
@@ -140,6 +126,7 @@ test.sequential(
       },
     )
   },
+  WIZARD_TEST_TIMEOUT_MS,
 )
 
 test.sequential(
@@ -154,6 +141,7 @@ test.sequential(
       },
     )
   },
+  WIZARD_TEST_TIMEOUT_MS,
 )
 
 test.sequential(
@@ -164,28 +152,28 @@ test.sequential(
         initialAssistantPreset: 'codex',
       })
 
-      await waitForAssistantWizardText(
+      await waitForRenderedText(
         flush,
         readOutput,
         /How should Murph answer\?/u,
       )
       await writeInput('\r')
-      await waitForAssistantWizardText(
+      await waitForRenderedText(
         flush,
         readOutput,
         /How should Murph connect to OpenAI\?/u,
       )
       await writeInput('\u001B[B')
       await writeInput('\r')
-      await waitForAssistantWizardText(flush, readOutput, /Review/u)
+      await waitForRenderedText(flush, readOutput, /Review/u)
       await writeInput('\u001B[D')
-      await waitForAssistantWizardText(
+      await waitForRenderedText(
         flush,
         readOutput,
         /How should Murph connect to OpenAI\?/u,
       )
       await writeInput('\r')
-      await waitForAssistantWizardText(flush, readOutput, /Review/u)
+      await waitForRenderedText(flush, readOutput, /Review/u)
       await writeInput('\r')
 
       assert.deepEqual(await wizardResultPromise, {
@@ -197,6 +185,7 @@ test.sequential(
       })
     })
   },
+  WIZARD_TEST_TIMEOUT_MS,
 )
 
 test.sequential(
@@ -207,26 +196,26 @@ test.sequential(
         initialAssistantPreset: 'codex',
       })
 
-      await waitForAssistantWizardText(
+      await waitForRenderedText(
         flush,
         readOutput,
         /How should Murph answer\?/u,
       )
       await writeInput('\r')
-      await waitForAssistantWizardText(
+      await waitForRenderedText(
         flush,
         readOutput,
         /How should Murph connect to OpenAI\?/u,
       )
       await writeInput('\u001B')
-      await waitForAssistantWizardText(
+      await waitForRenderedText(
         flush,
         readOutput,
         /How should Murph answer\?/u,
       )
       await writeInput('\u001B[B')
       await writeInput('\r')
-      const reviewOutput = await waitForAssistantWizardText(
+      const reviewOutput = await waitForRenderedText(
         flush,
         readOutput,
         /Review/u,
@@ -243,4 +232,5 @@ test.sequential(
       })
     })
   },
+  WIZARD_TEST_TIMEOUT_MS,
 )
