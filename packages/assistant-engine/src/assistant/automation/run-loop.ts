@@ -41,6 +41,7 @@ import {
 } from './shared.js'
 import { scanAssistantAutomationOnce } from './scanner.js'
 import { acquireAssistantAutomationRunLock } from './runtime-lock.js'
+import { recoverAssistantAutoRepliesOnStartup } from './startup-recovery.js'
 
 export interface RunAssistantAutomationInput {
   allowSelfAuthored?: boolean
@@ -78,6 +79,7 @@ export async function runAssistantAutomation(
   let scans = 0
   let lastError: string | null = null
   const daemonStarted = input.startDaemon ?? true
+  let startupRecoveryPending = true
   let runLock: Awaited<
     ReturnType<typeof acquireAssistantAutomationRunLock>
   > | null = null
@@ -162,6 +164,28 @@ export async function runAssistantAutomation(
         limit: input.maxPerScan,
       })
       let state = await readAssistantAutomationState(input.vault)
+
+      if (startupRecoveryPending) {
+        const startupRecovery = await recoverAssistantAutoRepliesOnStartup({
+          allowSelfAuthored: input.allowSelfAuthored ?? false,
+          deliveryDispatchMode: input.deliveryDispatchMode,
+          enabledChannels: state.autoReplyChannels,
+          executionContext: input.executionContext,
+          inboxServices,
+          maxPerScan: input.maxPerScan,
+          onEvent: input.onEvent,
+          requestId: input.requestId,
+          scanCursor: state.autoReplyScanCursor,
+          signal: controller.signal,
+          sessionMaxAgeMs: input.sessionMaxAgeMs ?? null,
+          vault: input.vault,
+        })
+        aggregateReplies.considered += startupRecovery.considered
+        aggregateReplies.failed += startupRecovery.failed
+        aggregateReplies.replied += startupRecovery.replied
+        aggregateReplies.skipped += startupRecovery.skipped
+        startupRecoveryPending = false
+      }
 
       const scanResult = await scanAssistantAutomationOnce({
         allowSelfAuthored: input.allowSelfAuthored ?? false,

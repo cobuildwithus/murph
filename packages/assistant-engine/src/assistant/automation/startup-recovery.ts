@@ -1,0 +1,260 @@
+import type { AssistantAutomationCursor } from '@murphai/operator-config/assistant-cli-contracts'
+import type { AssistantTurnReceipt } from '@murphai/operator-config/assistant-cli-contracts'
+import type { InboxServices } from '@murphai/inbox-services'
+import type { AssistantExecutionContext } from '../execution-context.js'
+import type { AssistantOutboxDispatchMode } from '../outbox.js'
+import { listAssistantTurnReceipts } from '../receipts.js'
+import { assistantChatReplyArtifactExists } from './artifacts.js'
+import { collectAssistantAutoReplyGroup } from './grouping.js'
+import {
+  createAssistantAutoReplyGroupContext,
+  processAssistantAutoReplyGroup,
+} from './reply.js'
+import {
+  compareAssistantCaptureOrder,
+  createEmptyAutoReplyScanResult,
+  normalizeEnabledChannels,
+  normalizeScanLimit,
+  type AssistantAutoReplyScanResult,
+  type AssistantRunEvent,
+} from './shared.js'
+
+const AUTO_REPLY_RECEIPT_CAPTURE_ID_KEY = 'autoReplyCaptureId'
+const AUTO_REPLY_RECEIPT_CAPTURE_IDS_KEY = 'autoReplyCaptureIds'
+const STARTUP_RECOVERY_RECEIPT_LIMIT = 200
+const STARTUP_RECOVERY_CAPTURE_LIST_LIMIT = 200
+
+export interface RecoverAssistantAutoRepliesOnStartupInput {
+  allowSelfAuthored: boolean
+  deliveryDispatchMode?: AssistantOutboxDispatchMode
+  enabledChannels: readonly string[]
+  executionContext?: AssistantExecutionContext | null
+  inboxServices: InboxServices
+  maxPerScan?: number
+  onEvent?: (event: AssistantRunEvent) => void
+  providerHeartbeatMs?: number | null
+  providerLongRunningCommandStallTimeoutMs?: number | null
+  providerStallTimeoutMs?: number | null
+  requestId?: string | null
+  scanCursor?: AssistantAutomationCursor | null
+  signal?: AbortSignal
+  sessionMaxAgeMs?: number | null
+  vault: string
+}
+
+interface AutoReplyRecoveryCandidate {
+  captureIds: readonly string[]
+  latestReceipt: AssistantTurnReceipt
+  primaryCaptureId: string
+}
+
+export async function recoverAssistantAutoRepliesOnStartup(
+  input: RecoverAssistantAutoRepliesOnStartupInput,
+): Promise<AssistantAutoReplyScanResult> {
+  const enabledChannels = normalizeEnabledChannels(input.enabledChannels)
+  if (
+    enabledChannels.length === 0 ||
+    input.scanCursor === null ||
+    input.scanCursor === undefined ||
+    input.signal?.aborted
+  ) {
+    return createEmptyAutoReplyScanResult()
+  }
+
+  const groupLimit = Math.min(normalizeScanLimit(input.maxPerScan), 10)
+  const candidates = await listStartupRecoveryCandidates({
+    limit: groupLimit,
+    vault: input.vault,
+  })
+  if (candidates.length === 0 || input.signal?.aborted) {
+    return createEmptyAutoReplyScanResult()
+  }
+
+  const candidateIds = new Set(
+    candidates.map((candidate) => candidate.primaryCaptureId),
+  )
+  const listed = await input.inboxServices.list({
+    vault: input.vault,
+    requestId: input.requestId ?? null,
+    limit: Math.max(groupLimit * 10, STARTUP_RECOVERY_CAPTURE_LIST_LIMIT),
+    sourceId: null,
+    afterOccurredAt: null,
+    afterCaptureId: null,
+    oldestFirst: false,
+  })
+  const captures = [...listed.items].sort(compareAssistantCaptureOrder)
+  if (captures.length === 0) {
+    return createEmptyAutoReplyScanResult()
+  }
+
+  const summary = createEmptyAutoReplyScanResult()
+  let recoveredGroups = 0
+  input.onEvent?.({
+    type: 'reply.scan.started',
+    details: `retrying up to ${candidates.length} recent failed auto-reply capture(s) from a previous automation run`,
+  })
+
+  for (let index = 0; index < captures.length; index += 1) {
+    if (input.signal?.aborted || recoveredGroups >= groupLimit) {
+      break
+    }
+
+    const capture = captures[index]
+    if (!capture || !candidateIds.has(capture.captureId)) {
+      continue
+    }
+    if (compareAssistantCaptureOrder(capture, input.scanCursor) > 0) {
+      continue
+    }
+    if (!enabledChannels.includes(capture.source)) {
+      continue
+    }
+
+    const group = await collectAssistantAutoReplyGroup({
+      captures,
+      startIndex: index,
+      vault: input.vault,
+    })
+    index = group.endIndex
+
+    const context = createAssistantAutoReplyGroupContext(group.items)
+    if (!context || !candidateIds.has(context.firstCaptureId)) {
+      continue
+    }
+
+    summary.considered += context.captureCount
+    const result = await processAssistantAutoReplyGroup({
+      allowSelfAuthored: input.allowSelfAuthored,
+      context,
+      deliveryDispatchMode: input.deliveryDispatchMode,
+      enabledChannels,
+      executionContext: input.executionContext,
+      inboxServices: input.inboxServices,
+      onEvent: input.onEvent,
+      providerHeartbeatMs: input.providerHeartbeatMs,
+      providerLongRunningCommandStallTimeoutMs:
+        input.providerLongRunningCommandStallTimeoutMs,
+      providerStallTimeoutMs: input.providerStallTimeoutMs,
+      requestId: input.requestId ?? null,
+      signal: input.signal,
+      sessionMaxAgeMs: input.sessionMaxAgeMs ?? null,
+      vault: input.vault,
+    })
+    summary.failed += result.failed
+    summary.replied += result.replied
+    summary.skipped += result.skipped
+    recoveredGroups += 1
+
+    if (result.stopScanning) {
+      break
+    }
+  }
+
+  return summary
+}
+
+async function listStartupRecoveryCandidates(input: {
+  limit: number
+  vault: string
+}): Promise<AutoReplyRecoveryCandidate[]> {
+  if (input.limit <= 0) {
+    return []
+  }
+
+  const receipts = await listAssistantTurnReceipts(
+    input.vault,
+    STARTUP_RECOVERY_RECEIPT_LIMIT,
+  )
+  const candidateMap = new Map<string, AutoReplyRecoveryCandidate>()
+
+  for (const receipt of receipts) {
+    const metadata = readAutoReplyReceiptMetadata(receipt)
+    if (!metadata) {
+      continue
+    }
+
+    const existing = candidateMap.get(metadata.primaryCaptureId)
+    if (existing) {
+      continue
+    }
+
+    candidateMap.set(metadata.primaryCaptureId, {
+      captureIds: metadata.captureIds,
+      latestReceipt: receipt,
+      primaryCaptureId: metadata.primaryCaptureId,
+    })
+  }
+
+  const recoverable: AutoReplyRecoveryCandidate[] = []
+  for (const candidate of candidateMap.values()) {
+    if (candidate.latestReceipt.status !== 'failed') {
+      continue
+    }
+    if (hasUnsafeDeliveryEvidence(candidate.latestReceipt)) {
+      continue
+    }
+    if (await hasHandledReplyArtifacts(input.vault, candidate.captureIds)) {
+      continue
+    }
+
+    recoverable.push(candidate)
+    if (recoverable.length >= input.limit) {
+      break
+    }
+  }
+
+  return recoverable
+}
+
+function readAutoReplyReceiptMetadata(
+  receipt: AssistantTurnReceipt,
+): { captureIds: readonly string[]; primaryCaptureId: string } | null {
+  const startedEvent = receipt.timeline.find((event) => event.kind === 'turn.started')
+  if (!startedEvent) {
+    return null
+  }
+
+  const groupedCaptureIds = startedEvent.metadata[AUTO_REPLY_RECEIPT_CAPTURE_IDS_KEY]
+    ?.split(',')
+    .map((value) => value.trim())
+    .filter((value) => value.length > 0) ?? []
+  const primaryCaptureId =
+    startedEvent.metadata[AUTO_REPLY_RECEIPT_CAPTURE_ID_KEY]?.trim() ||
+    groupedCaptureIds[0] ||
+    null
+  if (!primaryCaptureId) {
+    return null
+  }
+
+  return {
+    captureIds:
+      groupedCaptureIds.length > 0 ? groupedCaptureIds : [primaryCaptureId],
+    primaryCaptureId,
+  }
+}
+
+function hasUnsafeDeliveryEvidence(receipt: AssistantTurnReceipt): boolean {
+  if (receipt.responsePreview !== null) {
+    return true
+  }
+
+  return receipt.timeline.some((event) =>
+    event.kind === 'delivery.attempt.started' ||
+    event.kind === 'delivery.failed' ||
+    event.kind === 'delivery.queued' ||
+    event.kind === 'delivery.retry-scheduled' ||
+    event.kind === 'delivery.sent',
+  )
+}
+
+async function hasHandledReplyArtifacts(
+  vault: string,
+  captureIds: readonly string[],
+): Promise<boolean> {
+  const existingArtifacts = await Promise.all(
+    captureIds.map((captureId) =>
+      assistantChatReplyArtifactExists(vault, captureId),
+    ),
+  )
+  return existingArtifacts.some(Boolean)
+}
