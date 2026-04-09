@@ -24,10 +24,8 @@ export function buildAssistantCliGuidanceText(
   access: Pick<AssistantCliAccessContext, 'rawCommand' | 'setupCommand'>,
 ): string {
   return [
-    `\`${access.rawCommand}\` is the canonical Murph CLI when you need to reference an exact command. \`${access.setupCommand}\` is the setup entrypoint and also exposes the same top-level \`chat\` and \`run\` aliases after setup.`,
-    'When the user asks you to inspect or operate through Murph, prefer the bound assistant tools first and otherwise map the request onto the canonical CLI surface instead of improvising from raw files.',
-    'If a needed CLI action is unavailable through the bound tools in this session, give the user the exact command instead of pretending it already ran.',
-    'Do not edit canonical vault files directly through shell or file tools. When Murph data needs to change, use the matching `vault-cli` write surface so validation and audit paths stay intact.',
+    `\`${access.rawCommand}\` is the canonical Murph CLI. \`${access.setupCommand}\` is the setup entrypoint and also exposes the same top-level \`chat\` and \`run\` aliases after setup.`,
+    'Prefer the bound assistant tools when they are available. Otherwise use the matching canonical CLI command. Do not edit canonical vault files directly through shell or file tools.',
   ].join('\n\n')
 }
 

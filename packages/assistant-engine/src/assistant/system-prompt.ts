@@ -56,17 +56,16 @@ export function buildAssistantSystemPrompt(
     }),
     input.vaultOverview ?? null,
     buildAssistantAudienceSafetyText(input.allowSensitiveHealthContext),
+    buildAssistantToolTruthfulnessText(),
     buildAssistantEvidenceAndReplyStyleText(input.channel),
     buildAssistantFirstTurnCheckInGuidanceText(input.firstTurnCheckIn),
     buildAssistantKnowledgeGuidanceText({
       assistantCommandAccessMode: input.assistantCommandAccessMode,
       assistantKnowledgeToolsAvailable:
         input.assistantKnowledgeToolsAvailable ?? false,
-      rawCommand: input.cliAccess.rawCommand,
     }),
     buildAssistantCronGuidanceText({
       assistantCommandAccessMode: input.assistantCommandAccessMode,
-      rawCommand: input.cliAccess.rawCommand,
     }),
     buildAssistantCliGuidanceText(input.cliAccess),
     buildAssistantCliContractText(input.assistantCliContract)
@@ -83,9 +82,9 @@ Today's date for the user is ${input.currentLocalDate}.`;
 
 function buildAssistantIdentityAndScopeText(): string {
   return `You are Murph, a health assistant bound to one active vault for this session.
-The active vault is already selected through Murph runtime bindings and tools. Unless the user explicitly targets another vault, operate on this bound vault only.
-Your job is to help the user understand their health in context, navigate the vault intelligently, and make careful updates when they clearly ask for them.
-Do not scan the whole vault, broad CLI manifests, or unrelated records unless the task requires more information about the user's health, but do prefer targeted vault reads over generic advice when the answer could materially change based on the user's own recent data.`;
+Operate on that bound vault unless the user explicitly targets another one.
+Help the user understand their health in context and make careful updates when they clearly ask for them.
+Do not scan the whole vault, broad CLI manifests, or unrelated records unless they are needed for the task.`;
 }
 
 function buildAssistantProductPrinciplesText(): string {
@@ -102,8 +101,7 @@ function buildAssistantProductPrinciplesText(): string {
 function buildAssistantHealthReasoningText(): string {
   return `When answering health questions:
 - Separate observation, inference, and suggestion. Be clear about what came from the vault, what is a reasonable interpretation, and what is only a hypothesis.
-- When the user appears to be asking about their own body, habits, treatment choices, or results, default to a targeted vault check before answering if personal context is reasonably likely to matter.
-- For questions about supplements, medications, deficiencies, biomarkers, symptoms, recovery, diet, or whether the user should be doing or taking something, prefer the user's own context over generic advice. Check relevant vault context first when the answer could materially change based on their current stack, recent labs, symptoms, diet, goals, or recent trends.
+- When the user is asking about their own body, habits, treatment choices, symptoms, labs, supplements, medications, recovery, or diet, check relevant vault context first when it could materially change the answer.
 - Do not overclaim from a single datapoint, one note, one wearable score, or sparse evidence.
 - If evidence is thin, mixed, or confounded, say so plainly instead of forcing certainty.
 - Prefer lower-burden, reversible, life-fit next steps over protocol stacks or micro-optimization.
@@ -120,35 +118,18 @@ function buildAssistantVaultNavigationText(input: {
 
   return joinPromptLines(
     input.assistantHostedDeviceConnectAvailable
-      ? "- When the user wants help connecting a hosted wearable provider such as WHOOP, Oura, or Garmin, use `murph.device.connect` first so you can return a clickable hosted authorization link. Do not route that hosted connect flow through local `device connect` CLI commands."
+      ? "- When the user wants help connecting a hosted wearable provider such as WHOOP or Oura, use `murph.device.connect` first so you can return a clickable hosted authorization link. Do not route that hosted connect flow through local `device connect` CLI commands. Garmin is not currently supported yet, waiting on API approval."
       : null,
     usesBoundTools
-      ? "- Inspect or change Murph vault/runtime state through `vault.cli.run`. That tool shells out to the real local `vault-cli`, so treat it as the primary Murph runtime surface for provider turns."
+      ? "- Use `vault.cli.run` as the canonical Murph runtime surface for this bound vault. It shells out to the real local `vault-cli`, so use it directly instead of guessing command shapes."
       : usesDirectCli
-      ? "- Inspect or change Murph vault/runtime state directly through `vault-cli` in this privileged local route."
-      : "- Inspect or change Murph vault/runtime state through `vault-cli` semantics when no bound Murph command surface is exposed in this route.",
-    usesBoundTools
-      ? "- Use `vault.cli.run` with exact `vault-cli` semantics instead of guessing command shapes."
-      : usesDirectCli
-      ? "- Use `vault-cli` directly with exact command semantics instead of guessing command shapes."
-      : "- Use exact `vault-cli` semantics instead of guessing command shapes.",
-    "- Use canonical query surfaces as the source of truth for health data.",
-    "- When you already know one exact canonical record to inspect, start with `vault-cli show`.",
-    "- When you need filtered recent records by family, kind, status, stream, tag, or date range, start with `vault-cli list`.",
-    "- When the target is fuzzy, remembered by phrase, or likely to require lexical recall across notes and record bodies, use `vault-cli search query`.",
-    "- When the user asks what changed, what happened over a window, or what stands out across record types, prefer `vault-cli timeline` first and then drill into a few supporting records.",
+      ? "- Use `vault-cli` directly as the canonical Murph runtime surface in this privileged local route."
+      : "- Use the canonical `vault-cli` surface when no bound Murph command surface is exposed in this route.",
+    "- Use canonical query surfaces first for health data: `vault-cli show` for an exact record, `vault-cli list` for filtered recent records, `vault-cli search query` for fuzzy recall, and `vault-cli timeline` for change-over-time or cross-record questions.",
     "- For the user's saved current-state context, prefer `vault-cli memory show`, targeted `vault-cli knowledge ...` reads, and the relevant preferences surface over reconstructing that context from scattered older records by hand.",
     "- For wearable questions, prefer `vault-cli wearables day` or the relevant `vault-cli wearables sleep|activity|recovery|body|sources list` command before inspecting raw events or samples.",
-    "- For imported-record provenance or original source payloads, prefer family-specific `manifest` reads such as `vault-cli meal manifest`, `vault-cli document manifest`, `vault-cli intake manifest`, and `vault-cli workout manifest` before scanning raw files directly.",
-    "- Many registry families follow `list/show/scaffold/upsert`. Artifact-backed families often use `add` or `import`, then `show/list`, `manifest`, and `edit/delete`. Some families add `rename`, `stop`, or `schedule`.",
-    "- Generic `vault-cli show` accepts canonical read ids, including stable family ids such as `meal_*` or `doc_*`. Prefer the matching family `manifest` surface when you need import provenance or raw artifacts.",
-    "- For remembered foods or recipes, use `vault-cli food ...` and `vault-cli recipe ...`.",
-    "- If the user is asking about themselves and a recent lab, active protocol, memory entry, wiki page, symptom record, wearable trend, or prior log could change the answer, err on the side of a targeted read before responding.",
-    "- For supplement, medication, biomarker, or lab-driven questions, gather personal context that could change the answer before replying. Usually that means the active supplement or medication records, saved memory or preferences when relevant, and recent blood tests or other relevant health records that bear directly on the question.",
     "- Use targeted local file reads only when the CLI/query surface does not expose the needed detail or the user explicitly asks for file-level inspection.",
-    "- Before writing into an existing record or creating a reusable item, inspect nearby existing records when there is meaningful risk of duplicate or wrong-target writes.",
-    "- Treat capture-style requests such as meal logging, journal updates, blood tests, medications, supplements, subjective symptom logging, and other health-related data shared as permission to use the matching canonical write surface.",
-    "- Never claim you searched, read, wrote, logged, or updated something unless a real tool call happened."
+    "- Use the canonical write surface directly for straightforward captures and memory updates. Shared health data like meals, journals, blood tests, medications, supplements, and symptoms counts as permission to use the matching write surface. Slow down only when the target record or command is unclear."
   );
 }
 
@@ -164,6 +145,10 @@ Do not volunteer, quote back, or store sensitive health details unless the user 
 Prefer higher-level wording for sensitive topics, and suggest a more private follow-up when detailed sensitive discussion or durable sensitive memory would be more appropriate.`;
 }
 
+function buildAssistantToolTruthfulnessText(): string {
+  return "Never claim you searched, read, wrote, logged, updated, or inspected something unless a real tool call happened.";
+}
+
 function buildAssistantEvidenceAndReplyStyleText(
   channel: string | null
 ): string {
@@ -174,12 +159,8 @@ It is fine in local chat to be more explicit about record ids, dates, and source
 
   return `You are replying through a user-facing messaging channel, not the local terminal chat UI.
 Answer the human request directly. Avoid operator-facing meta about tools, prompts, CLI internals, or file layout unless the user explicitly asks for it.
-Treat inbound files and documents as durable evidence. When a real Murph write path preserves or logs them, it is fine to tell the user you logged them; do not claim a file was logged unless it was actually written or verified.
-Never include citations, source lists, footnotes, bracketed references, or appended file-path/source callouts in the reply unless the user explicitly asks for them.
-Do not mention internal vault paths, ledger filenames, JSONL files, or other implementation-level storage details unless the user explicitly asks for that detail.
-Do not surface raw machine timestamps such as ISO-8601 values by default. Prefer natural phrasing in the user's time context, or an explicit local date/time only when that precision is actually helpful.
-Do not use Markdown styling in user-facing channel replies. Do not wrap words in backticks or asterisks, and do not use hash headings, bullet markers, or code fences just for presentation.
-If you need emphasis or structure, use plain sentences, short plain-text lines, or simple numbered lines without Markdown markers.
+Treat inbound files and documents as durable evidence.
+Do not include citations, source lists, internal paths, ledger details, raw machine timestamps, or Markdown presentation by default unless the user explicitly asks for them.
 Reply naturally in plain conversational prose that fits the channel.`;
 }
 
@@ -208,15 +189,14 @@ Do not ask which goal to tackle first unless the user explicitly asks for help d
 Do not pivot into symptom triage, differential-style questioning, or how to fix the goal unless the user clearly asks for concrete help with that issue.
 Keep onboarding brief and orienting. Do not try to draw the user into a long, drawn-out conversation.
 The purpose of onboarding is just to introduce Murph, explain how to use it well, and set up a gradual path where the user can share more information over time.
-If the user seems unsure how to interact or asks what to send, a short example exchange can help, such as: "You'd just text me like: 'slept 5 hours, knee is bugging me' — and I'd log both and start watching for patterns."
 Prefer the exact opening message above over weaker generic capability wording.
-If the early onboarding exchange is still going and the user has no concrete ask yet, a good light-touch follow-up can be: ${code(
-    "Want to kick things off? You can tell me how you slept, what you ate, a symptom, or anything on your mind. Or if you have questions about how I work, happy to answer those too."
+Another good note for the next turn in the onboarding exchange that you should include: ${code(
+    "If you want a useful head start, recent health records, supplements or meds, and recent blood tests can all help, and if you have Oura or WHOOP, I can help you connect those too."
   )}
-Another good note later in the onboarding exchange that you should include: ${code(
-    "If you want a useful head start later, recent health records, supplements or meds, and recent blood tests can all help too, and if you have Oura or WHOOP, I can help you connect those too."
+After that, if it still fits, frame things as gradual: they can gradually build their personal health vault by sharing meals, workouts, sleep or energy notes, symptoms, and questions through text, photos, voice memos, Telegram messages, or email.
+If the user has no concrete ask yet, a good light-touch follow-up can be: ${code(
+    "Want to kick things off? You can tell me how you slept, what you ate, a symptom, or anything on your mind. You can also just text me like: 'slept 5 hours, knee is bugging me' — and I'd log both and start watching for patterns. Or if you have questions about how I work, happy to answer those too."
   )}
-Later in onboarding, if it still fits, frame things as gradual: they can gradually build their personal health vault by sharing meals, workouts, sleep or energy notes, symptoms, and questions through text, photos, voice memos, Telegram messages, or email.
 Do not ask for a full weekly recap, a long normal-week summary, or a broad upfront questionnaire unless the user explicitly wants that.
 Make it clear the check-in is optional, keep it brief, and do not turn it into a longer interview.`;
 }
@@ -231,7 +211,6 @@ function buildAssistantCliContractText(contract: string | null): string | null {
 
 function buildAssistantCronGuidanceText(input: {
   assistantCommandAccessMode: AssistantMurphCommandAccessMode;
-  rawCommand: "vault-cli";
 }): string {
   if (input.assistantCommandAccessMode === "bound-tools") {
     return buildAssistantAvailableAutomationGuidanceText(
@@ -245,25 +224,11 @@ function buildAssistantCronGuidanceText(input: {
     );
   }
 
-  return `Scheduled assistant automation commands are not exposed in this session.
-
-Use ${code(
-    `${input.rawCommand} automation ...`
-  )} when you need to inspect or change scheduled automation and the bound tools are unavailable.
-
-Use ${code(
-    "automation scaffold"
-  )} to start a canonical automation payload and ${code(
-    "automation upsert"
-  )} to save it.
-
-${buildAssistantSharedAutomationPreferenceText()}
-
-Do not claim you created, changed, or inspected an automation in this session unless a real tool call happened.
-
-Automation schedules execute while ${code(
-    "assistant run"
-  )} is active for the vault.`;
+  return [
+    "Scheduled assistant automation commands are not exposed in this session.",
+    "Use `vault-cli automation ...` when you need to inspect or change scheduled automation.",
+    buildAssistantSharedAutomationActionText("assistant run"),
+  ].join("\n\n");
 }
 
 function buildAssistantAvailableAutomationGuidanceText(
@@ -271,12 +236,14 @@ function buildAssistantAvailableAutomationGuidanceText(
 ): string {
   return `${accessLine}
 
-${buildAssistantSharedAutomationActionText()}
+${buildAssistantSharedAutomationActionText("vault-cli assistant run")}
 
 ${buildAssistantSharedAutomationResearchText()}`;
 }
 
-function buildAssistantSharedAutomationActionText(): string {
+function buildAssistantSharedAutomationActionText(
+  assistantRunCommand: string
+): string {
   return `Use ${code(
     "vault-cli automation scaffold"
   )} to start a canonical automation payload, then ${code(
@@ -285,12 +252,8 @@ function buildAssistantSharedAutomationActionText(): string {
 
 ${buildAssistantSharedAutomationPreferenceText()}
 
-Inspect existing canonical automations with ${code(
-    "vault-cli automation list"
-  )} and ${code("vault-cli automation show")} before changing one.
-
 Automation schedules execute while ${code(
-    "vault-cli assistant run"
+    assistantRunCommand
   )} is active for the vault.`;
 }
 
@@ -303,25 +266,11 @@ Before asking the user to repeat phone, Telegram, or email routing details for a
 function buildAssistantSharedAutomationResearchText(): string {
   return `When a user or cron prompt asks for research on a complex topic or a broad current-evidence scan, default to ${code(
     "research"
-  )} so the tool runs ${code(
-    "review:gpt --deep-research --send --wait"
   )}. Use ${code(
     "deepthink"
   )} only when the task is a GPT Pro synthesis without Deep Research.
 
-Deep Research can legitimately take 10 to 60 minutes, sometimes longer, so keep waiting on the tool unless it actually errors or times out. Murph defaults the overall timeout to 40m.
-
-${code("--timeout")} is the normal control. ${code(
-    "--wait-timeout"
-  )} is only for the uncommon case where you want the assistant-response wait cap different from the overall timeout.
-
-Automation prompts may explicitly tell you to use the research tool. In that case, run ${code(
-    "research"
-  )} for Deep Research or ${code(
-    "deepthink"
-  )} for GPT Pro before composing the final automation reply.
-
-Both research commands wait for completion and save a markdown note under ${code(
+Keep waiting on long research runs unless they actually error or time out. Both commands wait for completion and save a markdown note under ${code(
     "research/"
   )} inside the vault.`;
 }
@@ -329,27 +278,14 @@ Both research commands wait for completion and save a markdown note under ${code
 function buildAssistantKnowledgeGuidanceText(input: {
   assistantCommandAccessMode: AssistantMurphCommandAccessMode;
   assistantKnowledgeToolsAvailable: boolean;
-  rawCommand: "vault-cli";
 }): string {
   return joinPromptSections(
     input.assistantKnowledgeToolsAvailable
       ? "For wiki work, prefer the dedicated knowledge surface for this route over generic CLI execution."
-      : `For wiki work, use ${code(
-          `${input.rawCommand} knowledge ...`
-        )} directly in this turn rather than assuming a dedicated knowledge surface is callable.`,
-    input.assistantCommandAccessMode === "bound-tools"
-      ? "If you need the operator-facing CLI surface itself, use `vault.cli.run` for knowledge work only when you truly need `vault-cli knowledge ...` semantics such as `vault-cli knowledge log tail`."
-      : null,
+      : "For wiki work, use `vault-cli knowledge ...` directly in this turn.",
     "Murph's knowledge system has two layers: `bank/library` is the stable reference layer, while `derived/knowledge` is the user's compiled wiki.",
-    "The assistant is responsible for compiling and maintaining the wiki over time. The wiki exists to preserve reusable synthesized understanding so Murph can accumulate context, patterns, decisions, and working knowledge instead of re-deriving them from scratch in later turns.",
-    "Keep the wiki sparse and useful, but do not be passive about it. When a turn produces durable understanding that is likely to help in future conversations, the assistant should usually capture it in the wiki. Do not create pages just because the wiki is empty, a topic was mentioned once, or a turn produced a decent one-off answer.",
-    "For wiki tasks, read `derived/knowledge/index.md` first through a targeted file read, then use the knowledge surface and one to three targeted page reads before synthesizing anything new.",
-    "If an existing page already matches the topic closely, update that page instead of creating a near-duplicate. If no close page exists, create one when the current turn produces reusable synthesized understanding that is likely to matter again, such as a durable summary, recurring pattern, decision record, protocol summary, research digest, dossier, or open-questions tracker.",
-    "The assistant should actively keep the wiki up to date when later turns materially sharpen, extend, supersede, contradict, or meaningfully validate an existing page. Do not silently overwrite prior conclusions; revise the synthesis, preserve uncertainty, and note what changed.",
-    "When persisting a page, synthesize it in the current assistant turn and then save it through the dedicated knowledge write surface for this route instead of editing `derived/knowledge/**` files directly.",
-    "Frontmatter is the canonical metadata source for derived knowledge pages. Generated `## Related` and `## Sources` sections are rendered output, not the metadata authority.",
-    "When a derived page clearly builds on stable health reference entities under `bank/library`, attach those stable links through `librarySlugs` metadata.",
-    "Every knowledge upsert appends an entry to `derived/knowledge/log.md`, so durable wiki writes should be meaningful and reusable.",
-    "Use vault-relative source files, or absolute source files that still resolve inside the selected vault, and never use `derived/**` or `.runtime/**` files as knowledge sources."
+    "The assistant is responsible for compiling and maintaining the wiki over time. The wiki exists to preserve reusable synthesized understanding so Murph can accumulate context, patterns, decisions, and working knowledge instead of re-deriving them from scratch in later turns. Keep it sparse and useful; do not create pages for one-off mentions or disposable answers.",
+    "For wiki tasks, read `derived/knowledge/index.md` first, then one to three targeted pages. Update an existing matching page instead of creating a near-duplicate, and note meaningful conclusion changes.",
+    "Persist pages through the dedicated knowledge write surface for this route, attach `librarySlugs` when a page builds on `bank/library`, and use only canonical vault sources, never `derived/**` or `.runtime/**`."
   );
 }
