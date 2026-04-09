@@ -206,6 +206,7 @@ describe("hosted deploy automation helpers", () => {
       HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
       OPENAI_API_KEY: "sk-user",
       TELEGRAM_BOT_TOKEN: "bot-token",
+      TELEGRAM_WEBHOOK_SECRET: "telegram-webhook-secret",
     })).toEqual({
       BRAVE_API_KEY: "brave-key",
       HOSTED_EMAIL_CLOUDFLARE_API_TOKEN: "email-cf-token",
