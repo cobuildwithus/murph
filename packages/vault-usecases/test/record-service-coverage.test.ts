@@ -261,9 +261,9 @@ describe("shared and vault helper functions", () => {
     assert.equal(describeLookupConstraint("journal:2026-04-08"), null);
     assert.equal(toJournalLookupId("2026-04-08"), "journal:2026-04-08");
 
-    assert.deepEqual(asEntityEnvelope("./vault", sampleQueryRecord(), "missing"), {
+    assert.deepEqual(asEntityEnvelope("./vault", toGenericShowEntity(sampleQueryRecord()), "missing"), {
       vault: "./vault",
-      entity: sampleQueryRecord(),
+      entity: toGenericShowEntity(sampleQueryRecord()),
     });
     assert.deepEqual(asListEnvelope("./vault", { limit: 2, status: null }, [1, 2]), {
       vault: "./vault",
@@ -283,7 +283,7 @@ describe("shared and vault helper functions", () => {
     assert.throws(() => buildScaffoldPayload("does-not-exist"), VaultCliError);
     assert.deepEqual(assertNoReservedPayloadKeys({ title: "ok" }), undefined);
     assert.throws(() => assertNoReservedPayloadKeys({ vault: "x" }), VaultCliError);
-    assert.deepEqual(optionalStringArray([" alpha ", "beta"]), ["alpha", "beta"]);
+    assert.deepEqual(optionalStringArray([" alpha ", "beta"], "field"), ["alpha", "beta"]);
     assert.throws(() => optionalStringArray(["", "beta"], "field"), VaultCliError);
     assert.deepEqual(requirePayloadObjectField({ payload: { ok: true } }, "payload"), { ok: true });
 
@@ -696,7 +696,19 @@ describe("record service seams", () => {
       created: true,
     }));
     const eventDelete = vi.fn(async () => ({ deleted: true }));
-    const eventShow = vi.fn(async () => ({ vault: "./vault", entity: sampleQueryRecord({ entityId: "evt_1", primaryLookupId: "evt_1" }) }));
+    const eventShow = vi.fn(async () => ({
+      vault: "./vault",
+      entity: {
+        id: "evt_1",
+        kind: "intervention_session",
+        title: "Edited",
+        occurredAt: null,
+        path: "events/evt_1.md",
+        markdown: null,
+        data: {},
+        links: [],
+      },
+    }));
     const eventEdit = vi.fn(async () => ({ lookupId: "evt_1" }));
     const intervention = await importWithMocks<typeof import("../src/usecases/intervention.ts")>(
       "../src/usecases/intervention.ts",
@@ -736,7 +748,7 @@ describe("record service seams", () => {
       set: ["title=Edited"],
     });
     assert.equal(editedIntervention.vault, "./vault");
-    assert.equal(editedIntervention.entity.entityId, "evt_1");
+    assert.equal(editedIntervention.entity.id, "evt_1");
     assert.deepEqual(await intervention.deleteInterventionRecord({ vault: "./vault", lookup: "evt_1" }), { deleted: true });
 
     const journalCore = {

@@ -492,7 +492,7 @@ describe("workout", () => {
   });
 
   test("adds, edits, and deletes workout records through the shared runtime seams", async () => {
-    const addActivitySession = vi.fn(async () => ({
+    const addActivitySession = vi.fn(async (_input: { vaultRoot: string }) => ({
       eventId: "evt_01ARZ3NDEKTSV4RRFFQ69G5FAV",
       ledgerFile: "journal/workout.md",
       created: true,
@@ -550,7 +550,11 @@ describe("workout", () => {
     });
     assert.equal(added.eventId, "evt_01ARZ3NDEKTSV4RRFFQ69G5FAV");
     assert.equal(addActivitySession.mock.calls.length, 1);
-    assert.equal(addActivitySession.mock.calls[0]?.[0].vaultRoot, "./vault");
+    const addActivitySessionFirstCall = addActivitySession.mock.calls.at(0);
+    assert.ok(addActivitySessionFirstCall);
+    const [addActivitySessionInput] = addActivitySessionFirstCall;
+    assert.ok(addActivitySessionInput);
+    assert.equal(addActivitySessionInput.vaultRoot, "./vault");
 
     const structuredAdded = await workoutModule.addWorkoutRecord({
       vault: "./vault",
@@ -715,7 +719,7 @@ describe("workout-measurement", () => {
         },
       },
     }));
-    const addBodyMeasurement = vi.fn(async () => ({
+    const addBodyMeasurement = vi.fn(async (_input: { draft: { title: string } }) => ({
       eventId: "evt_01ARZ3NDEKTSV4RRFFQ69G5FAV",
       ledgerFile: "journal/body-measurement.md",
       created: true,
@@ -757,7 +761,11 @@ describe("workout-measurement", () => {
     });
     assert.equal(added.eventId, "evt_01ARZ3NDEKTSV4RRFFQ69G5FAV");
     assert.equal(addBodyMeasurement.mock.calls.length, 1);
-    assert.equal(addBodyMeasurement.mock.calls[0]?.[0].draft.title, "Weight check-in");
+    const addBodyMeasurementFirstCall = addBodyMeasurement.mock.calls.at(0);
+    assert.ok(addBodyMeasurementFirstCall);
+    const [addBodyMeasurementInput] = addBodyMeasurementFirstCall;
+    assert.ok(addBodyMeasurementInput);
+    assert.equal(addBodyMeasurementInput.draft.title, "Weight check-in");
 
     const shown = await workoutMeasurementModule.showWorkoutUnitPreferences("./vault");
     assert.equal(shown.unitPreferences.weight, "lb");

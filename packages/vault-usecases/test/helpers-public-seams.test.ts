@@ -50,9 +50,9 @@ import {
   toVaultUpgradeCliError,
   uniqueStrings,
 } from "../src/usecases/vault-usecase-helpers.ts";
-import type { QueryRecord } from "../src/query-runtime.ts";
+import type { QueryEntity } from "../src/query-runtime.ts";
 
-function createQueryRecord(overrides: Partial<QueryRecord> = {}): QueryRecord {
+function createQueryRecord(overrides: Partial<QueryEntity> = {}): QueryEntity {
   return {
     entityId: "goal_a",
     primaryLookupId: "goal_a",
@@ -171,7 +171,7 @@ describe("helper barrel exports", () => {
     expect(
       normalizeIssues([
         {
-          code: 123,
+          code: "123",
           path: undefined,
           message: undefined,
           severity: "warning",
@@ -204,9 +204,11 @@ describe("helper barrel exports", () => {
     expect(describeLookupConstraint("prov_01JNV422Y2M5ZBV64ZP4N1DRB1")).toBeNull();
     expect(describeLookupConstraint("xfm_01JNV422Y2M5ZBV64ZP4N1DRB1")).toContain("import batch");
 
-    expect(asEntityEnvelope("./vault", createQueryRecord(), "missing entity")).toEqual({
+    expect(
+      asEntityEnvelope("./vault", toGenericShowEntity(createQueryRecord()), "missing entity"),
+    ).toEqual({
       vault: "./vault",
-      entity: createQueryRecord(),
+      entity: toGenericShowEntity(createQueryRecord()),
     });
     expect(() => asEntityEnvelope("./vault", null, "missing entity")).toThrowError(VaultCliError);
     expect(asListEnvelope("./vault", { limit: 10, status: "open" }, [1, 2, 3])).toEqual({
