@@ -20,7 +20,7 @@ Use `agent-docs/operations/verification-and-runtime.md` to choose the truthful v
    - add `simplify` only when the conditions below are met
 5. When `simplify` applies, spawn a dedicated audit subagent, hand it `agent-docs/prompts/simplify.md` plus the audit handoff packet below, and run it before coverage or final review. Land only behavior-preserving reductions from that pass.
 6. Once implementation is stable enough to produce a truthful signal, run the coverage-bearing verification command chosen from the verification doc. Prefer `pnpm test:diff <path ...>` when it already covers the touched owner truthfully; otherwise run the edited owner package/app coverage command required there.
-7. When step 6 uses an owner-coverage or truthful diff-coverage lane, run the required `coverage-write` pass after any simplify pass. Hand that worker `agent-docs/prompts/coverage-write.md` plus the audit handoff packet below, and keep its write scope limited to tests or direct-proof scaffolding for already-landed behavior.
+7. When step 6 uses an owner-coverage or truthful diff-coverage lane, run the required `coverage-write` pass on `gpt-5.4-mini` after any simplify pass. Hand that worker `agent-docs/prompts/coverage-write.md` plus the audit handoff packet below, and keep its write scope limited to tests or direct-proof scaffolding for already-landed behavior.
 8. For user-visible, persisted-state, operational, or trust-boundary changes, capture at least one direct scenario check in addition to scripted tests and record the exact evidence.
 9. Run or re-run the required checks after the implementation is stable, after any simplify updates, after any required coverage pass lands, and after any later review-driven fixes.
 10. Run the final completion review. Use the tiny repo-internal fast path below only when it applies; otherwise spawn a dedicated audit subagent and hand it `agent-docs/prompts/task-finish-review.md` plus the audit handoff packet below.
@@ -50,7 +50,7 @@ It does not skip `coverage-write` when the task's verification lane already incl
 
 ## Audit Worker Rules
 
-- `coverage-write` is the default write-capable audit pass and should stay narrowly scoped to tests or direct-proof scaffolding.
+- `coverage-write` is the default write-capable audit pass, must run on `gpt-5.4-mini`, and should stay narrowly scoped to tests or direct-proof scaffolding.
 - Other audit passes are review-only unless the user explicitly asks for a write-capable audit worker with a widened scope.
 - The default audit response contract is plain-text findings with recommended fixes, not patch attachments and not prompts for additional agents.
 - Review-mode audit subagents must not edit files, run `scripts/committer`, run `scripts/finish-task`, invoke `git commit`, or otherwise create commits.
@@ -80,7 +80,7 @@ For the required `coverage-write` pass, also provide:
 - The exact coverage-bearing command or commands required for the task plus the current pass/fail status or the most relevant failing-output summary.
 - The exact write scope, limited to tests or proof scaffolding for already-landed behavior.
 - An explicit instruction not to modify production code unless the parent agent separately widens that scope.
-- The intended model choice, `gpt-5.4-mini`, so the coverage pass stays cheap and narrow.
+- The required model choice, `gpt-5.4-mini`; do not silently substitute regular `gpt-5.4` for this pass.
 
 ## Safety Rules
 
