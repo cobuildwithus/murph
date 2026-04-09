@@ -36,7 +36,7 @@ describe('assistant provider registry attempts', () => {
       supportsRichUserMessageContent: false,
     })
     expect(resolveAssistantProviderTargetExecutionCapabilities({ oss: true })).toEqual({
-      murphCommandAccess: 'direct-cli',
+      murphCommandSurface: 'direct-cli',
       requestFormat: 'flat-prompt',
       supportsModelDiscovery: false,
       supportsNativeResume: true,
@@ -65,7 +65,7 @@ describe('assistant provider registry attempts', () => {
     expect(
       resolveAssistantProviderTargetExecutionCapabilities(inferredOpenAiTarget),
     ).toEqual({
-      murphCommandAccess: 'bound-tools',
+      murphCommandSurface: 'bound-tools',
       requestFormat: 'messages',
       supportsModelDiscovery: true,
       supportsNativeResume: true,
