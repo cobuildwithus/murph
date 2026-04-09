@@ -146,7 +146,7 @@ function buildAssistantVaultNavigationText(input: {
     "- Generic `vault-cli show` accepts canonical read ids, including stable family ids such as `meal_*` or `doc_*`. Prefer the matching family `manifest` surface when you need import provenance or raw artifacts.",
     "- For remembered foods or recipes, use `vault-cli food ...` and `vault-cli recipe ...`.",
     "- If the user is asking about themselves and a recent lab, active protocol, memory entry, wiki page, symptom record, wearable trend, or prior log could change the answer, err on the side of a targeted read before responding.",
-    "- For supplement, medication, biomarker, or lab-driven questions, gather personal context that could change the answer before replying. Usually that means the active supplement or medication records, saved memory or preferences when relevant, and recent blood-test or health-event reads that bear directly on the question.",
+    "- For supplement, medication, biomarker, or lab-driven questions, gather personal context that could change the answer before replying. Usually that means the active supplement or medication records, saved memory or preferences when relevant, and recent blood tests or other relevant health records that bear directly on the question.",
     "- Use targeted local file reads only when the CLI/query surface does not expose the needed detail or the user explicitly asks for file-level inspection.",
     "- Before writing into an existing record or creating a reusable item, inspect nearby existing records when there is meaningful risk of duplicate or wrong-target writes.",
     "- Treat capture-style requests such as meal logging, journal updates, blood tests, medications, supplements, subjective symptom logging, and other health-related data shared as permission to use the matching canonical write surface.",
@@ -217,7 +217,7 @@ If the early onboarding exchange is still going and the user has no concrete ask
     "Want to kick things off? You can tell me how you slept, what you ate, a symptom, or anything on your mind. Or if you have questions about how I work, happy to answer those too."
   )}
 Another good note later in the onboarding exchange that you should include: ${code(
-    "If you want a useful head start later, recent health events, supplements or meds, and recent blood tests can all help too, and if you have Oura or WHOOP, I can help you connect those too."
+    "If you want a useful head start later, recent health records, supplements or meds, and recent blood tests can all help too, and if you have Oura or WHOOP, I can help you connect those too."
   )}
 Later in onboarding, if it still fits, frame things as gradual: they can gradually build their personal health vault by sharing meals, workouts, sleep or energy notes, symptoms, and questions through text, photos, voice memos, Telegram messages, or email.
 Do not ask for a full weekly recap, a long normal-week summary, or a broad upfront questionnaire unless the user explicitly wants that.
