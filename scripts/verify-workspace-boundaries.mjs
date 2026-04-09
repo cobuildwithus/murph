@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const workspaceMemberPackageJsonCache = new Map();
 
 export async function main() {
   const failures = [];
@@ -305,10 +306,25 @@ async function verifyWorkspaceImports(failures) {
         continue;
       }
 
-      if (!allowedPatterns.some((pattern) => pattern.test(specifier))) {
+      const importsDeclaredPublicEntrypoint = allowedPatterns.some((pattern) => pattern.test(specifier));
+
+      if (!importsDeclaredPublicEntrypoint) {
         failures.push(
           `${path.relative(repoRoot, filePath)} imports ${JSON.stringify(specifier)}, which is not a declared public workspace entrypoint for ${packageName}.`,
         );
+        continue;
+      }
+
+      const dependencyDeclarationFailure = await verifyWorkspaceDependencyDeclaration({
+        filePath,
+        isTestFile,
+        packageName,
+        sourceMember,
+        specifier,
+      });
+
+      if (dependencyDeclarationFailure) {
+        failures.push(dependencyDeclarationFailure);
       }
     }
   }
@@ -370,6 +386,59 @@ function workspacePackageAllowsRootSpecifier(packageJson) {
   }
 
   return Object.hasOwn(exportsField, ".");
+}
+
+async function verifyWorkspaceDependencyDeclaration({
+  filePath,
+  isTestFile,
+  packageName,
+  sourceMember,
+  specifier,
+}) {
+  if (
+    isTestFile
+    || sourceMember === null
+    || sourceMember.startsWith("e2e/")
+  ) {
+    return null;
+  }
+
+  const sourcePackageJson = await readWorkspaceMemberPackageJson(sourceMember);
+
+  if (!sourcePackageJson || sourcePackageJson.name === packageName) {
+    return null;
+  }
+
+  if (workspacePackageDeclaresDependency(sourcePackageJson, packageName)) {
+    return null;
+  }
+
+  return `${path.relative(repoRoot, filePath)} imports ${JSON.stringify(specifier)}, but ${sourceMember}/package.json does not declare ${packageName} as a direct dependency. Add the direct workspace dependency so the package graph reflects the real owner boundary instead of relying on a transitive install.`;
+}
+
+async function readWorkspaceMemberPackageJson(workspaceMember) {
+  if (workspaceMemberPackageJsonCache.has(workspaceMember)) {
+    return workspaceMemberPackageJsonCache.get(workspaceMember);
+  }
+
+  const packageJsonPath = path.join(repoRoot, workspaceMember, "package.json");
+  const packageJson = await pathExists(packageJsonPath)
+    ? JSON.parse(await readFile(packageJsonPath, "utf8"))
+    : null;
+
+  workspaceMemberPackageJsonCache.set(workspaceMember, packageJson);
+  return packageJson;
+}
+
+function workspacePackageDeclaresDependency(packageJson, dependencyName) {
+  return [
+    packageJson.dependencies,
+    packageJson.devDependencies,
+    packageJson.peerDependencies,
+    packageJson.optionalDependencies,
+  ].some((dependencies) =>
+    Boolean(dependencies && typeof dependencies === "object" && dependencyName in dependencies)
+  );
 }
 
 function verifyWorkspaceImportPolicy({
