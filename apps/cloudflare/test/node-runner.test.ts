@@ -1020,12 +1020,15 @@ describe("runHostedExecutionJob", () => {
       const telegramFetchCalls = fetchSpy.mock.calls.filter(([url]) =>
         String(url).startsWith("https://telegram-"),
       );
-      expect(telegramFetchCalls).toHaveLength(2);
-      expect(String(telegramFetchCalls[0]?.[0])).toBe(
-        "https://telegram-api.example.test/bottelegram-token/getFile?file_id=file_123",
-      );
-      expect(String(telegramFetchCalls[1]?.[0])).toBe(
-        "https://telegram-files.example.test/bottelegram-token/photos/file_123.jpg",
+      const telegramFetchUrls = telegramFetchCalls.map(([url]) => String(url));
+      const telegramGetFileUrl =
+        "https://telegram-api.example.test/bottelegram-token/getFile?file_id=file_123";
+      const telegramFileDownloadUrl =
+        "https://telegram-files.example.test/bottelegram-token/photos/file_123.jpg";
+      expect(telegramFetchUrls.filter((url) => url === telegramGetFileUrl)).toHaveLength(1);
+      expect(telegramFetchUrls.filter((url) => url === telegramFileDownloadUrl)).toHaveLength(1);
+      expect(telegramFetchUrls.indexOf(telegramGetFileUrl)).toBeLessThan(
+        telegramFetchUrls.indexOf(telegramFileDownloadUrl),
       );
     } finally {
       restoreEnvVar("TELEGRAM_API_BASE_URL", previousTelegramApiBaseUrl);

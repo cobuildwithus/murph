@@ -310,16 +310,15 @@ describe("HostedGatewayProjectionStore", () => {
   });
 
   it("serializes snapshot writes and permission responses so newer projections are not clobbered", async () => {
-    let releaseSnapshotWrite: () => void = () => {
-      throw new Error("Expected the snapshot write lock to install a release callback.");
-    };
+    let releaseSnapshotWrite!: () => void;
+    let snapshotWriteBlocked = false;
     let markSnapshotWriteBlocked!: () => void;
     const snapshotWriteSeen = new Promise<void>((resolve) => {
       markSnapshotWriteBlocked = resolve;
     });
     const { store } = createStore({
       async onPut(key, value) {
-        if (key !== "gateway.state" || releaseSnapshotWrite !== null) {
+        if (key !== "gateway.state" || snapshotWriteBlocked) {
           return;
         }
 
@@ -345,6 +344,7 @@ describe("HostedGatewayProjectionStore", () => {
           const releasePromise = new Promise<void>((resolve) => {
             releaseSnapshotWrite = resolve;
           });
+          snapshotWriteBlocked = true;
           markSnapshotWriteBlocked();
           await releasePromise;
         }
@@ -452,6 +452,9 @@ describe("HostedGatewayProjectionStore", () => {
       note: "approved after refresh",
     });
 
+    if (!snapshotWriteBlocked) {
+      throw new Error("Expected the snapshot write lock to install a release callback.");
+    }
     releaseSnapshotWrite();
     await applyingSnapshot;
     await resolvingPermission;
