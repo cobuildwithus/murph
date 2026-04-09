@@ -10,6 +10,7 @@ import {
   getMemoryRecord,
   readMemoryDocument,
   resolveMemoryDocumentPath,
+  updateMemory,
   upsertMemory,
 } from "../src/memory.ts";
 import {
@@ -129,14 +130,13 @@ describe("core memory package wrapper", () => {
     });
     expect(await getMemoryRecord(vaultRoot, expectedRecordId)).toEqual(inserted.record);
 
-    const updated = await upsertMemory(vaultRoot, {
+    const updated = await updateMemory(vaultRoot, {
       now: updatedAt,
       recordId: inserted.record.id,
       section: "Identity",
       text: "Uses Murph daily",
     });
 
-    expect(updated.created).toBe(false);
     expect(updated.record).toMatchObject({
       createdAt: createdAt.toISOString(),
       id: expectedRecordId,
@@ -149,6 +149,39 @@ describe("core memory package wrapper", () => {
     expect(updated.document.records).toHaveLength(1);
     expect(updated.document.records[0]).toEqual(updated.record);
     expect(await getMemoryRecord(vaultRoot, expectedRecordId)).toEqual(updated.record);
+  });
+
+  test("updates preserve the existing section by default and reject missing ids", async () => {
+    const vaultRoot = await makeVaultRoot();
+    const createdAt = new Date("2026-04-08T01:00:00.000Z");
+    const updatedAt = new Date("2026-04-08T01:05:00.000Z");
+
+    const inserted = await upsertMemory(vaultRoot, {
+      now: createdAt,
+      section: "Identity",
+      text: "Preferred name is rocketman.",
+    });
+
+    const updated = await updateMemory(vaultRoot, {
+      now: updatedAt,
+      recordId: inserted.record.id,
+      text: "Preferred name is Rocketman.",
+    });
+
+    expect(updated.record).toMatchObject({
+      id: inserted.record.id,
+      section: "Identity",
+      text: "Preferred name is Rocketman.",
+      createdAt: createdAt.toISOString(),
+      updatedAt: updatedAt.toISOString(),
+    });
+
+    await expect(
+      updateMemory(vaultRoot, {
+        recordId: "mem_missing",
+        text: "Should fail",
+      }),
+    ).rejects.toThrow('Memory record "mem_missing" does not exist.');
   });
 
   test("forgets missing records as a no-op and deletes existing records from the persisted memory file", async () => {

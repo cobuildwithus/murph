@@ -46,7 +46,8 @@ vault-cli stop --vault <path> [--request-id <id>]
 vault-cli assistant session list --vault <path> [--request-id <id>]
 vault-cli assistant session show <sessionId> --vault <path> [--request-id <id>]
 vault-cli memory show [memoryId] --vault <path>
-vault-cli memory upsert <text> --vault <path> --section <section> [--memoryId <id>]
+vault-cli memory upsert <text> --vault <path> --section <section>
+vault-cli memory update <memoryId> <text> --vault <path> [--section <section>]
 vault-cli memory forget <memoryId> --vault <path>
 vault-cli automation scaffold --vault <path>
 vault-cli automation show <lookup> --vault <path>

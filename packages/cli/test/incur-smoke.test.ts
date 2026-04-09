@@ -888,7 +888,7 @@ test('automation show schema accepts an id-or-slug lookup', async () => {
   assert.deepEqual(schema.options.required, ['vault'])
 }, INCUR_SCHEMA_TIMEOUT_MS)
 
-test('memory upsert schema exposes canonical memory write fields', async () => {
+test('memory upsert schema exposes create-only canonical memory fields', async () => {
   const schema = JSON.parse(
     await runRawCli(['memory', 'upsert', '--schema', '--format', 'json']),
   ) as {
@@ -905,8 +905,28 @@ test('memory upsert schema exposes canonical memory write fields', async () => {
   assert.equal('text' in schema.args.properties, true)
   assert.deepEqual(schema.args.required, ['text'])
   assert.equal('section' in schema.options.properties, true)
-  assert.equal('memoryId' in schema.options.properties, true)
   assert.deepEqual(schema.options.required, ['vault', 'section'])
+}, INCUR_SCHEMA_TIMEOUT_MS)
+
+test('memory update schema requires a memory id and text, with an optional replacement section', async () => {
+  const schema = JSON.parse(
+    await runRawCli(['memory', 'update', '--schema', '--format', 'json']),
+  ) as {
+    args: {
+      properties: Record<string, unknown>
+      required?: string[]
+    }
+    options: {
+      properties: Record<string, unknown>
+      required?: string[]
+    }
+  }
+
+  assert.equal('memoryId' in schema.args.properties, true)
+  assert.equal('text' in schema.args.properties, true)
+  assert.deepEqual(schema.args.required, ['memoryId', 'text'])
+  assert.equal('section' in schema.options.properties, true)
+  assert.deepEqual(schema.options.required, ['vault'])
 }, INCUR_SCHEMA_TIMEOUT_MS)
 
 test('memory show schema accepts an optional memory id', async () => {
