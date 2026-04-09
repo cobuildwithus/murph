@@ -40,7 +40,7 @@ export const codexCliProviderDefinition: AssistantProviderDefinition = {
       )
     }
 
-    const result = await executeCodexPrompt({
+    const baseExecInput = {
       abortSignal: input.abortSignal,
       approvalPolicy: providerConfig.approvalPolicy ?? undefined,
       codexCommand: providerConfig.codexCommand ?? undefined,
@@ -56,10 +56,30 @@ export const codexCliProviderDefinition: AssistantProviderDefinition = {
       profile: providerConfig.profile ?? undefined,
       prompt: resolveAssistantProviderPrompt(input),
       reasoningEffort: providerConfig.reasoningEffort ?? undefined,
-      resumeSessionId: input.resumeProviderSessionId,
       sandbox: providerConfig.sandbox ?? undefined,
       workingDirectory: input.workingDirectory,
-    })
+    } as const
+
+    let result
+    try {
+      result = await executeCodexPrompt({
+        ...baseExecInput,
+        resumeSessionId: input.resumeProviderSessionId,
+      })
+    } catch (error) {
+      if (
+        input.resumeProviderSessionId &&
+        error instanceof VaultCliError &&
+        error.code === 'ASSISTANT_CODEX_RESUME_STALE'
+      ) {
+        result = await executeCodexPrompt({
+          ...baseExecInput,
+          resumeSessionId: undefined,
+        })
+      } else {
+        throw error
+      }
+    }
 
     return {
       metadata: {

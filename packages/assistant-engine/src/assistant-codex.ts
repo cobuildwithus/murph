@@ -155,6 +155,7 @@ export async function executeCodexPrompt(
 
       let settled = false
       let abortRequested = false
+      let deferredStdinError: NodeJS.ErrnoException | null = null
 
       const cleanupAbortListener = attachCodexAbortListener({
         abortSignal: input.abortSignal,
@@ -232,6 +233,14 @@ export async function executeCodexPrompt(
       })
 
       child.stdin.on('error', (error) => {
+        if (
+          input.resumeSessionId &&
+          (error as NodeJS.ErrnoException).code === 'EPIPE'
+        ) {
+          deferredStdinError = error as NodeJS.ErrnoException
+          return
+        }
+
         rejectOnce(error)
       })
       child.stdin.end(input.prompt)
@@ -264,10 +273,19 @@ export async function executeCodexPrompt(
                   code,
                   signal,
                   stderr,
-                  fallback: lastEventError,
+                  fallback:
+                    lastEventError ??
+                    (stderr.trim().length === 0
+                      ? deferredStdinError?.message ?? null
+                      : null),
                   providerSessionId: discoveredSessionId,
                 }),
           )
+          return
+        }
+
+        if (deferredStdinError) {
+          rejectOnce(deferredStdinError)
           return
         }
 
@@ -607,15 +625,25 @@ function buildCodexFailure(input: {
     normalizeStatusText(input.fallback ?? tailText(input.stderr)) ??
     input.fallback ??
     tailText(input.stderr)
+  const resumeStale = isCodexResumeStaleText(
+    [detail, input.stderr].filter((value): value is string => Boolean(value)).join('\n'),
+  )
   const connectionLost = isCodexConnectionLossText(
     [detail, input.stderr].filter((value): value is string => Boolean(value)).join('\n'),
   )
 
   return new VaultCliError(
-    connectionLost
-      ? 'ASSISTANT_CODEX_CONNECTION_LOST'
-      : 'ASSISTANT_CODEX_FAILED',
-    connectionLost
+    resumeStale
+      ? 'ASSISTANT_CODEX_RESUME_STALE'
+      : connectionLost
+        ? 'ASSISTANT_CODEX_CONNECTION_LOST'
+        : 'ASSISTANT_CODEX_FAILED',
+    resumeStale
+      ? buildCodexResumeStaleMessage({
+          ...input,
+          fallback: detail,
+        })
+      : connectionLost
       ? buildCodexConnectionFailureMessage({
           ...input,
           fallback: detail,
@@ -627,9 +655,11 @@ function buildCodexFailure(input: {
         }),
     {
       connectionLost,
-      providerSessionId: connectionLost ? input.providerSessionId : null,
+      providerSessionId:
+        connectionLost || resumeStale ? input.providerSessionId : null,
       recoverableConnectionLoss: connectionLost,
-      retryable: connectionLost,
+      retryable: connectionLost || resumeStale,
+      staleResume: resumeStale,
     },
   )
 }
@@ -748,6 +778,32 @@ function buildCodexFailureMessage(input: {
   return parts.join(' ')
 }
 
+function buildCodexResumeStaleMessage(input: {
+  code: number | null
+  fallback: string | null
+  providerSessionId: string | null
+  signal: NodeJS.Signals | null
+  stderr: string
+}): string {
+  const parts = ['Codex CLI could not resume the saved provider session.']
+
+  if (typeof input.code === 'number') {
+    parts.push(`exit code ${input.code}.`)
+  }
+
+  if (input.signal) {
+    parts.push(`signal ${input.signal}.`)
+  }
+
+  if (input.fallback) {
+    parts.push(input.fallback)
+  }
+
+  parts.push('Murph should start a fresh provider session for this turn.')
+
+  return parts.join(' ')
+}
+
 
 interface CodexDisplayConfig {
   defaultProfile: string | null
@@ -773,6 +829,18 @@ function tailText(value: string): string | null {
   }
 
   return lines.slice(-3).join(' ')
+}
+
+function isCodexResumeStaleText(value: string): boolean {
+  if (!value) {
+    return false
+  }
+
+  const normalized = value.toLowerCase()
+  return (
+    normalized.includes('thread/resume failed') ||
+    normalized.includes('no rollout found for thread id')
+  )
 }
 
 async function readOptionalNonBlankTextFile(
