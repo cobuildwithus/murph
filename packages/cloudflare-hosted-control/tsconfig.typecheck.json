@@ -9,16 +9,13 @@
   },
   "references": [
     {
-      "path": "../contracts/tsconfig.build.json"
-    },
-    {
-      "path": "../core/tsconfig.build.json"
+      "path": "../hosted-execution"
     }
   ],
   "include": [
     "*.ts",
-    "src/**/*.ts",
-    "test/**/*.ts"
+    "test/**/*.ts",
+    "src/**/*.ts"
   ],
   "exclude": [
     "dist"

@@ -20,7 +20,7 @@ import {
 import { shouldRejectHostedEmailIngressFailure } from "../src/hosted-email/ingress-policy.ts";
 import { sendHostedEmailMessage } from "../src/hosted-email/transport.ts";
 
-import { MemoryEncryptedR2Bucket } from "./test-helpers";
+import { MemoryEncryptedR2Bucket } from "./test-helpers.js";
 
 const TEST_CONFIG: HostedEmailConfig = {
   apiBaseUrl: "https://api.cloudflare.com/client/v4",
@@ -555,7 +555,7 @@ describe("hosted email routing and transport", () => {
     const legacyAddress = `${TEST_CONFIG.localPart}+${await createRouteToken({
       key: replyKey,
       scope: "thread",
-      secret: TEST_CONFIG.signingSecret,
+      secret: TEST_CONFIG.signingSecret!,
     })}@${TEST_CONFIG.domain}`;
     const route = await resolveHostedEmailInboundRoute({
       bucket,

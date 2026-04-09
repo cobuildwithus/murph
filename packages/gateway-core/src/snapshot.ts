@@ -409,7 +409,7 @@ function conversationPresentationForRequest(
         : deriveGatewayConversationDisplayTitle(
             snapshot,
             conversation,
-            input.includeDerivedTitles,
+            input.includeDerivedTitles ?? true,
           ),
     lastMessagePreview:
       input.includeLastMessage === false ? null : conversation.lastMessagePreview,

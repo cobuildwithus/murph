@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { createHostedShareStore } from "../src/share-store.js";
 import { hostedSharePackObjectKey } from "../src/storage-paths.js";
 
-import { createTestRootKey, MemoryEncryptedR2Bucket } from "./test-helpers";
+import { createTestRootKey, MemoryEncryptedR2Bucket } from "./test-helpers.js";
 
 const ROOT_KEY = Uint8Array.from(Array.from({ length: 32 }, (_, index) => index + 11));
 const ROOT_KEY_ID = "urk:test";
@@ -30,6 +30,8 @@ describe("createHostedShareStore", () => {
         {
           kind: "protocol",
           payload: {
+            kind: "supplement",
+            status: "active",
             title: "Shared protocol",
           },
           ref: "shared-protocol",
@@ -84,6 +86,8 @@ describe("createHostedShareStore", () => {
         {
           kind: "protocol",
           payload: {
+            kind: "supplement",
+            status: "active",
             title: "Rotated protocol",
           },
           ref: "rotated-protocol",
@@ -128,6 +132,8 @@ describe("createHostedShareStore", () => {
         {
           kind: "protocol",
           payload: {
+            kind: "supplement",
+            status: "active",
             title: "Delete protocol",
           },
           ref: "delete-protocol",

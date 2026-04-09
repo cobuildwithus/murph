@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 
+import type { HostedExecutionTelegramAttachment } from "../src/contracts.ts";
+
 import {
   buildHostedExecutionDispatchRef,
   readHostedExecutionDispatchRef,
@@ -69,6 +71,10 @@ describe("hosted execution builders", () => {
     linqEvent.delivery = "mutated";
 
     expect(dispatch.event.kind).toBe("linq.message.received");
+    if (dispatch.event.kind !== "linq.message.received") {
+      throw new Error("Expected a linq.message.received event.");
+    }
+
     expect(dispatch.event.linqEvent).toEqual({
       delivery: "incoming",
       nested: { traceId: "trace_123" },
@@ -78,7 +84,7 @@ describe("hosted execution builders", () => {
   });
 
   it("deep-copies telegram attachment arrays and attachment entries", () => {
-    const attachments = [
+    const attachments: HostedExecutionTelegramAttachment[] = [
       {
         fileId: "file_1",
         fileName: "photo.jpg",
@@ -104,6 +110,10 @@ describe("hosted execution builders", () => {
       kind: "document",
     });
 
+    if (dispatch.event.kind !== "telegram.message.received") {
+      throw new Error("Expected a telegram.message.received event.");
+    }
+
     expect(dispatch.event.telegramMessage.attachments).toEqual([
       {
         fileId: "file_1",
@@ -127,6 +137,10 @@ describe("hosted execution builders", () => {
       },
       userId: "user_123",
     });
+
+    if (dispatch.event.kind !== "telegram.message.received") {
+      throw new Error("Expected a telegram.message.received event.");
+    }
 
     expect(dispatch.event.telegramMessage).not.toHaveProperty("attachments");
   });

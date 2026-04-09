@@ -15,7 +15,6 @@ import {
   type InboxPromotionEntry,
   type InboxPreserveDocumentAttachmentsResult,
 } from '@murphai/operator-config/inbox-cli-contracts'
-import type { QueryRuntimeModule } from '@murphai/vault-usecases/runtime'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import type {
   CanonicalAttachmentPromotionResult,
@@ -28,6 +27,7 @@ import type {
   InboxRuntimeModule,
   PromotionStore,
   PromotionTarget,
+  QueryRuntimeModule,
   RuntimeAttachmentRecord,
   RuntimeCaptureRecord,
   RuntimeStore,
@@ -333,7 +333,7 @@ export async function readExperimentPromotionEntries(
         status:
           typeof entity.attributes.status === 'string'
             ? entity.attributes.status
-            : entity.status,
+            : entity.status ?? null,
       },
     }))
 }

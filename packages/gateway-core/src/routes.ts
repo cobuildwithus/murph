@@ -121,7 +121,7 @@ export function gatewayConversationRouteFromCapture(
 }
 
 export function mergeGatewayConversationRoutes(
-  base: GatewayConversationRoute | null | undefined,
+  base: GatewayConversationRouteInput | GatewayConversationRoute | null | undefined,
   patch: GatewayConversationRouteInput | null | undefined,
 ): GatewayConversationRoute {
   const merged = mergeGatewayConversationRefs(
@@ -137,7 +137,7 @@ export function mergeGatewayConversationRoutes(
 }
 
 export function resolveGatewayConversationRouteKey(
-  route: GatewayConversationRoute | null | undefined,
+  route: GatewayConversationRouteInput | GatewayConversationRoute | null | undefined,
 ): string | null {
   const normalized = normalizeGatewayConversationRoute(route)
   return resolveGatewayConversationKey({
@@ -150,7 +150,7 @@ export function resolveGatewayConversationRouteKey(
 }
 
 export function gatewayConversationRouteCanSend(
-  route: GatewayConversationRoute | null | undefined,
+  route: GatewayConversationRouteInput | GatewayConversationRoute | null | undefined,
 ): boolean {
   const normalized = normalizeGatewayConversationRoute(route)
   const inferredDelivery = inferGatewayBindingDelivery({
@@ -182,7 +182,7 @@ export function gatewayChannelSupportsReplyToMessage(
 }
 
 export function gatewayBindingDeliveryFromRoute(
-  route: GatewayConversationRoute | null | undefined,
+  route: GatewayConversationRouteInput | GatewayConversationRoute | null | undefined,
 ): { kind: GatewayReplyRouteKind; target: string } | null {
   const normalized = normalizeGatewayConversationRoute(route)
   return inferGatewayBindingDelivery({
@@ -323,7 +323,7 @@ function mergeGatewayConversationRefs(
 }
 
 function mergeGatewayReplyRoute(
-  base: GatewayConversationRoute['reply'] | null | undefined,
+  base: GatewayConversationRouteInput['reply'] | GatewayConversationRoute['reply'] | null | undefined,
   patch: GatewayConversationRouteInput['reply'] | null | undefined,
   mergedConversation: GatewayConversationRef,
 ): {

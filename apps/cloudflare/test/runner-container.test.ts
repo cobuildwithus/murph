@@ -1,7 +1,9 @@
+import type { HostedAssistantRuntimeJobResult } from "@murphai/assistant-runtime";
 import { describe, expect, it, vi } from "vitest";
 
 import {
   destroyHostedExecutionContainer,
+  type HostedExecutionContainerStubLike,
   invokeHostedExecutionContainerRunner,
   RunnerContainer,
 } from "../src/runner-container.ts";
@@ -326,7 +328,7 @@ describe("RunnerContainer", () => {
 
   it("posts the invoke envelope with the member routing key to the named runner container instance", async () => {
     const invoke = vi.fn(async () => createRunnerResult());
-    const getByName = vi.fn(() => ({
+    const getByName = vi.fn((_name: string): HostedExecutionContainerStubLike => ({
       async destroyInstance() {},
       invoke,
     }));
@@ -341,7 +343,11 @@ describe("RunnerContainer", () => {
     });
 
     expect(getByName).toHaveBeenCalledWith("member_123");
-    const body = invoke.mock.calls[0]?.[0] as Record<string, unknown>;
+    const firstCall = invoke.mock.calls[0];
+    if (!firstCall) {
+      throw new Error("Expected the runner container stub to be invoked.");
+    }
+    const [body] = firstCall as unknown as [Record<string, unknown>];
     expect(body).toMatchObject({
       job: {
         request: createRunnerRequest("evt_namespace"),
@@ -367,6 +373,7 @@ describe("RunnerContainer", () => {
       },
       resume: {
         committedResult: {
+          assistantDeliveryEffects: [],
           result: {
             eventsHandled: 1,
             summary: "already committed",
@@ -398,7 +405,10 @@ describe("RunnerContainer", () => {
       String(url).endsWith("/__internal/run")
     );
     expect(executeCall).toBeTruthy();
-    const forwarded = JSON.parse(executeCall?.[1]?.body as string) as Record<string, unknown>;
+    if (!executeCall?.[1]?.body || typeof executeCall[1].body !== "string") {
+      throw new Error("Expected the container double to forward a JSON request body.");
+    }
+    const forwarded = JSON.parse(executeCall[1].body) as Record<string, unknown>;
     expect(forwarded).toMatchObject({
       internalWorkerProxyToken: expect.any(String),
       job: {
@@ -440,7 +450,7 @@ describe("RunnerContainer", () => {
           return {
             destroyInstance,
             invoke: vi.fn(async () => createRunnerResult()),
-          };
+          } satisfies HostedExecutionContainerStubLike;
         },
       },
       userId: "member_123",
@@ -548,12 +558,15 @@ function createRunnerRequest(
   };
 }
 
-function createRunnerResult() {
+function createRunnerResult(): HostedAssistantRuntimeJobResult {
   return {
-    bundle: null,
+    finalGatewayProjectionSnapshot: null,
     result: {
-      eventsHandled: 1,
-      summary: "ok",
+      bundle: null,
+      result: {
+        eventsHandled: 1,
+        summary: "ok",
+      },
     },
   };
 }

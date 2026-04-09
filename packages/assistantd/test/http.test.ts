@@ -241,21 +241,29 @@ function createAssistantdTestFetch(
     let statusCode = 200
     const responseHeaders = new Headers()
     const responseChunks: Uint8Array[] = []
-    const responseLike: Pick<ServerResponse, 'end' | 'setHeader'> & {
+    let responseLike!: Pick<ServerResponse, 'end' | 'setHeader'> & {
       statusCode: number
-    } = {
-      end(chunk?: string | Uint8Array) {
-        if (typeof chunk === 'string') {
-          responseChunks.push(Buffer.from(chunk, 'utf8'))
-        } else if (chunk) {
-          responseChunks.push(Buffer.from(chunk))
+    }
+    responseLike = {
+      end(
+        chunk?: string | Uint8Array | (() => void),
+        encodingOrCb?: BufferEncoding | (() => void),
+        cb?: () => void,
+      ) {
+        const resolvedChunk = typeof chunk === 'function' ? undefined : chunk
+        if (typeof resolvedChunk === 'string') {
+          responseChunks.push(Buffer.from(resolvedChunk, 'utf8'))
+        } else if (resolvedChunk) {
+          responseChunks.push(Buffer.from(resolvedChunk))
         }
+        return responseLike as ServerResponse
       },
       setHeader(name: string, value: number | string | readonly string[]) {
         responseHeaders.set(
           name,
           Array.isArray(value) ? value.join(', ') : String(value),
         )
+        return responseLike as ServerResponse
       },
       get statusCode() {
         return statusCode
@@ -284,10 +292,31 @@ function readAssistantdTestRequestBody(body: RequestInit['body']): string | unde
   if (body instanceof URLSearchParams) {
     return body.toString()
   }
-  if (body instanceof Uint8Array || body instanceof ArrayBuffer) {
+  if (body instanceof Uint8Array) {
     return Buffer.from(body).toString('utf8')
   }
+  if (body instanceof ArrayBuffer) {
+    return Buffer.from(new Uint8Array(body)).toString('utf8')
+  }
+  if (ArrayBuffer.isView(body)) {
+    return Buffer.from(body.buffer, body.byteOffset, body.byteLength).toString(
+      'utf8',
+    )
+  }
   throw new Error('Unsupported assistantd test request body.')
+}
+
+function requireFirstCallArg<T>(
+  mock: {
+    mock: {
+      calls: ReadonlyArray<readonly unknown[]>
+    }
+  },
+  label: string,
+): T {
+  const firstArg = mock.mock.calls[0]?.[0]
+  assert.notEqual(firstArg, undefined, `${label} should be called with an argument`)
+  return firstArg as T
 }
 
 afterEach(() => {
@@ -641,7 +670,13 @@ test('assistantd http server enforces bearer auth, validates requests, and route
       }),
     })
     assert.equal(sessionOptions.status, 200)
-    assert.equal(updateSessionOptions.mock.calls[0]?.[0]?.sessionId, TEST_SESSION.sessionId)
+    assert.equal(
+      requireFirstCallArg<{ sessionId: string }>(
+        updateSessionOptions,
+        'updateSessionOptions',
+      ).sessionId,
+      TEST_SESSION.sessionId,
+    )
 
     const openConversation = await fetch(`${handle.address.baseUrl}/open-conversation`, {
       method: 'POST',
@@ -673,8 +708,12 @@ test('assistantd http server enforces bearer auth, validates requests, and route
       },
     )
     assert.equal(status.status, 200)
-    assert.equal(getStatus.mock.calls[0]?.[0]?.limit, 7)
-    assert.equal(getStatus.mock.calls[0]?.[0]?.sessionId, TEST_SESSION.sessionId)
+    const getStatusInput = requireFirstCallArg<{
+      limit?: number
+      sessionId?: string | null
+    }>(getStatus, 'getStatus')
+    assert.equal(getStatusInput.limit, 7)
+    assert.equal(getStatusInput.sessionId, TEST_SESSION.sessionId)
 
     const sessions = await fetch(
       `${handle.address.baseUrl}/sessions?vault=${encodeURIComponent('/tmp/vault')}`,
@@ -737,7 +776,10 @@ test('assistantd http server enforces bearer auth, validates requests, and route
       }),
     })
     assert.equal(outboxDrain.status, 200)
-    assert.equal(drainOutbox.mock.calls[0]?.[0]?.limit, 3)
+    assert.equal(
+      requireFirstCallArg<{ limit?: number }>(drainOutbox, 'drainOutbox').limit,
+      3,
+    )
 
     const gatewayList = await fetch(`${handle.address.baseUrl}/gateway/conversations/list`, {
       method: 'POST',
@@ -760,8 +802,12 @@ test('assistantd http server enforces bearer auth, validates requests, and route
       gatewayListPayload.conversations[0]?.sessionKey,
       TEST_GATEWAY_CONVERSATION.sessionKey,
     )
-    assert.equal(listGatewayConversations.mock.calls[0]?.[0]?.limit, 5)
-    assert.equal(listGatewayConversations.mock.calls[0]?.[0]?.search, 'lab')
+    const listGatewayConversationsInput = requireFirstCallArg<{
+      limit?: number
+      search?: string | null
+    }>(listGatewayConversations, 'listGatewayConversations')
+    assert.equal(listGatewayConversationsInput.limit, 5)
+    assert.equal(listGatewayConversationsInput.search, 'lab')
 
     const gatewayConversation = await fetch(`${handle.address.baseUrl}/gateway/conversations/get`, {
       method: 'POST',
@@ -783,7 +829,10 @@ test('assistantd http server enforces bearer auth, validates requests, and route
       TEST_GATEWAY_CONVERSATION.sessionKey,
     )
     assert.equal(
-      getGatewayConversation.mock.calls[0]?.[0]?.sessionKey,
+      requireFirstCallArg<{ sessionKey: string }>(
+        getGatewayConversation,
+        'getGatewayConversation',
+      ).sessionKey,
       TEST_GATEWAY_CONVERSATION.sessionKey,
     )
 
@@ -807,7 +856,13 @@ test('assistantd http server enforces bearer auth, validates requests, and route
       gatewayMessagesPayload.messages[0]?.messageId,
       TEST_GATEWAY_MESSAGE.messageId,
     )
-    assert.equal(readGatewayMessages.mock.calls[0]?.[0]?.oldestFirst, true)
+    assert.equal(
+      requireFirstCallArg<{ oldestFirst?: boolean }>(
+        readGatewayMessages,
+        'readGatewayMessages',
+      ).oldestFirst,
+      true,
+    )
 
     const gatewayAttachments = await fetch(`${handle.address.baseUrl}/gateway/attachments/fetch`, {
       method: 'POST',
@@ -829,7 +884,10 @@ test('assistantd http server enforces bearer auth, validates requests, and route
       TEST_GATEWAY_ATTACHMENT.attachmentId,
     )
     assert.equal(
-      fetchGatewayAttachments.mock.calls[0]?.[0]?.messageId,
+      requireFirstCallArg<{ messageId: string }>(
+        fetchGatewayAttachments,
+        'fetchGatewayAttachments',
+      ).messageId,
       TEST_GATEWAY_MESSAGE.messageId,
     )
 
@@ -866,7 +924,13 @@ test('assistantd http server enforces bearer auth, validates requests, and route
       }),
     })
     assert.equal(gatewayPoll.status, 200)
-    assert.equal(gatewayPollEvents.mock.calls[0]?.[0]?.cursor, 7)
+    assert.equal(
+      requireFirstCallArg<{ cursor?: number }>(
+        gatewayPollEvents,
+        'gatewayPollEvents',
+      ).cursor,
+      7,
+    )
 
     const gatewayWait = await fetch(`${handle.address.baseUrl}/gateway/events/wait`, {
       method: 'POST',
@@ -881,7 +945,13 @@ test('assistantd http server enforces bearer auth, validates requests, and route
       }),
     })
     assert.equal(gatewayWait.status, 200)
-    assert.equal(gatewayWaitForEvents.mock.calls[0]?.[0]?.timeoutMs, 100)
+    assert.equal(
+      requireFirstCallArg<{ timeoutMs?: number }>(
+        gatewayWaitForEvents,
+        'gatewayWaitForEvents',
+      ).timeoutMs,
+      100,
+    )
 
     const gatewayPermissions = await fetch(
       `${handle.address.baseUrl}/gateway/permissions/list-open`,
@@ -899,7 +969,10 @@ test('assistantd http server enforces bearer auth, validates requests, and route
     )
     assert.equal(gatewayPermissions.status, 200)
     assert.equal(
-      gatewayListOpenPermissions.mock.calls[0]?.[0]?.sessionKey,
+      requireFirstCallArg<{ sessionKey: string }>(
+        gatewayListOpenPermissions,
+        'gatewayListOpenPermissions',
+      ).sessionKey,
       TEST_GATEWAY_CONVERSATION.sessionKey,
     )
 
@@ -919,7 +992,13 @@ test('assistantd http server enforces bearer auth, validates requests, and route
       },
     )
     assert.equal(gatewayPermissionResponse.status, 200)
-    assert.equal(gatewayRespondToPermission.mock.calls[0]?.[0]?.requestId, 'perm_http_test')
+    assert.equal(
+      requireFirstCallArg<{ requestId: string }>(
+        gatewayRespondToPermission,
+        'gatewayRespondToPermission',
+      ).requestId,
+      'perm_http_test',
+    )
 
     const invalidGatewayList = await fetch(`${handle.address.baseUrl}/gateway/conversations/list`, {
       method: 'POST',
@@ -1189,8 +1268,12 @@ test('assistantd http server enforces bearer auth, validates requests, and route
       }),
     })
     assert.equal(processCron.status, 200)
-    assert.equal(processDueCron.mock.calls[0]?.[0]?.deliveryDispatchMode, 'queue-only')
-    assert.equal(processDueCron.mock.calls[0]?.[0]?.limit, 9)
+    const processDueCronInput = requireFirstCallArg<{
+      deliveryDispatchMode?: string
+      limit?: number
+    }>(processDueCron, 'processDueCron')
+    assert.equal(processDueCronInput.deliveryDispatchMode, 'queue-only')
+    assert.equal(processDueCronInput.limit, 9)
 
     const invalidAutomationDispatchMode = await fetch(`${handle.address.baseUrl}/automation/run-once`, {
       method: 'POST',

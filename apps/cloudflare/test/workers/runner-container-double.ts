@@ -5,7 +5,7 @@ import type {
 import type {
   HostedExecutionBundleRef,
   HostedExecutionRunnerRequest,
-} from "@murphai/runtime-state";
+} from "@murphai/hosted-execution";
 import { DurableObject } from "cloudflare:workers";
 
 import { handleRunnerOutboundRequest } from "../../src/runner-outbound.js";

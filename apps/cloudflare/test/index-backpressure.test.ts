@@ -2,11 +2,11 @@ import { createPublicKey, generateKeyPairSync, sign } from "node:crypto";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { HostedExecutionDispatchRequest } from "@murphai/runtime-state";
+import type { HostedExecutionDispatchRequest } from "@murphai/hosted-execution";
 import worker, { UserRunnerDurableObject } from "../src/index.ts";
 
 import { MAX_PENDING_EVENTS } from "../src/user-runner/types.js";
-import { createHostedExecutionTestEnv } from "./hosted-execution-fixtures";
+import { createHostedExecutionTestEnv } from "./hosted-execution-fixtures.js";
 import { createTestSqlStorage } from "./sql-storage.ts";
 
 const TEST_VERCEL_OIDC_TEAM_SLUG = "murph-team";
@@ -80,10 +80,9 @@ function createUserRunnerDurableObject(
   const bucket = createBucketStore();
   const storage = createStorage();
   const baseEnv = {
-    ...createHostedExecutionTestEnv({
-      BUNDLES: bucket.api,
-      RUNNER_CONTAINER: storage.runnerContainerNamespace,
-    }),
+    ...createHostedExecutionTestEnv(),
+    BUNDLES: bucket.api,
+    RUNNER_CONTAINER: storage.runnerContainerNamespace,
     ...overrides,
   };
   const durableObject = new UserRunnerDurableObject(storage.state, baseEnv as never);
@@ -150,7 +149,11 @@ function createBucketStore() {
 
         return {
           async arrayBuffer() {
-            return Buffer.from(value, "utf8");
+            const bytes = Buffer.from(value, "utf8");
+            return bytes.buffer.slice(
+              bytes.byteOffset,
+              bytes.byteOffset + bytes.byteLength,
+            );
           },
         };
       },

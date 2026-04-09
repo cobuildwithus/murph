@@ -68,7 +68,14 @@ function assertImessageSupportedOnHost(
 }
 
 export function createInboxSourceOps(
-  env: InboxAppEnvironment,
+  env: Pick<
+    InboxAppEnvironment,
+    | 'enableAssistantAutoReplyChannel'
+    | 'getPlatform'
+    | 'loadInbox'
+    | 'provisionOrRecoverAgentmailInbox'
+    | 'tryResolveAgentmailInboxAddress'
+  >,
 ): Pick<
   InboxServices,
   'sourceAdd' | 'sourceList' | 'sourceRemove' | 'sourceSetEnabled'

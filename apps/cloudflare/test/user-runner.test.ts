@@ -5,10 +5,14 @@ import path from "node:path";
 
 import { beforeEach, describe as baseDescribe, expect, it, vi } from "vitest";
 
-import { createGatewayConversationSessionKey } from "@murphai/gateway-core";
+import {
+  createGatewayConversationSessionKey,
+  type GatewayProjectionSnapshot,
+} from "@murphai/gateway-core";
 import {
   buildHostedExecutionGatewayMessageSendDispatch,
   deriveHostedExecutionErrorCode,
+  type HostedAssistantDeliveryEffect,
 } from "@murphai/hosted-execution";
 import {
   encodeHostedBundleBase64,
@@ -30,6 +34,12 @@ import {
   persistHostedExecutionFinalBundles,
 } from "../src/execution-journal.js";
 import { createHostedDispatchPayloadStore } from "../src/dispatch-payload-store.js";
+import {
+  type HostedExecutionEnvironment,
+} from "../src/env.ts";
+import {
+  createHostedExecutionVercelOidcValidationEnvironment,
+} from "../src/auth-adapter.ts";
 import { writeHostedEmailRawMessage } from "../src/hosted-email.js";
 import { hostedArtifactObjectKey } from "../src/storage-paths.js";
 import { createHostedPendingUsageStore } from "../src/usage-store.js";
@@ -41,7 +51,10 @@ import {
   TEST_AUTOMATION_RECIPIENT_PUBLIC_JWK,
   TEST_RECOVERY_RECIPIENT_KEY_ID,
   TEST_AUTOMATION_RECIPIENT_PUBLIC_JWK as TEST_RECOVERY_RECIPIENT_PUBLIC_JWK,
-} from "./hosted-execution-fixtures";
+  TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON,
+  TEST_TEE_AUTOMATION_RECIPIENT_KEY_ID,
+  TEST_TEE_AUTOMATION_RECIPIENT_PUBLIC_JWK,
+} from "./hosted-execution-fixtures.js";
 import { createTestSqlStorage } from "./sql-storage.js";
 
 const describe = baseDescribe.sequential;
@@ -49,9 +62,8 @@ const describe = baseDescribe.sequential;
 describe("HostedUserRunner", () => {
   const bucket = createBucket();
   const storage = createStorage();
-  const environment = {
+  const environment: HostedExecutionEnvironment = {
     allowedUserEnvKeys: null,
-    allowedUserEnvPrefixes: null,
     automationRecipientKeyId: TEST_AUTOMATION_RECIPIENT_KEY_ID,
     automationRecipientPrivateKey: TEST_AUTOMATION_RECIPIENT_PRIVATE_JWK,
     automationRecipientPrivateKeysById: {
@@ -63,14 +75,23 @@ describe("HostedUserRunner", () => {
     platformEnvelopeKeysById: {
       v1: Uint8Array.from({ length: 32 }, () => 7),
     },
-    controlToken: null,
     defaultAlarmDelayMs: 60_000,
-    dispatchSigningSecret: "dispatch-secret",
     maxEventAttempts: 3,
     recoveryRecipientKeyId: TEST_RECOVERY_RECIPIENT_KEY_ID,
     recoveryRecipientPublicKey: TEST_RECOVERY_RECIPIENT_PUBLIC_JWK,
+    teeAutomationRecipientKeyId: TEST_TEE_AUTOMATION_RECIPIENT_KEY_ID,
+    teeAutomationRecipientPublicKey: TEST_TEE_AUTOMATION_RECIPIENT_PUBLIC_JWK,
     retryDelayMs: 10_000,
     runnerTimeoutMs: 60_000,
+    vercelOidcValidation: createHostedExecutionVercelOidcValidationEnvironment({
+      environment: "production",
+      projectName: "murph-web",
+      teamSlug: "murph-team",
+    }),
+    webCallbackSigning: {
+      keyId: "v1",
+      privateKeyJwkJson: TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON,
+    },
   };
 
   beforeEach(() => {
@@ -207,16 +228,16 @@ describe("HostedUserRunner", () => {
       const previousVaultRef = await bundleStore.writeBundle("vault", previousVaultBundle!);
       const nextVaultRef = await bundleStore.writeBundle("vault", nextVaultBundle!);
       const previousAgentRef = await bundleStore.writeBundle(
-        "agent-state",
+        "vault",
         new TextEncoder().encode("agent-state-previous"),
       );
       const nextAgentRef = await bundleStore.writeBundle(
-        "agent-state",
+        "vault",
         new TextEncoder().encode("agent-state-next"),
       );
       const otherUserSharedVaultRef = await bundleStore.writeBundle("vault", previousVaultBundle!);
       const otherUserSharedAgentRef = await bundleStore.writeBundle(
-        "agent-state",
+        "vault",
         new TextEncoder().encode("agent-state-previous"),
       );
 
@@ -396,7 +417,7 @@ describe("HostedUserRunner", () => {
       });
       const previousAgentBytes = new TextEncoder().encode("agent-state-previous");
       const nextAgentBytes = new TextEncoder().encode("agent-state-next");
-      const previousAgentRef = await bundleStore.writeBundle("agent-state", previousAgentBytes);
+      const previousAgentRef = await bundleStore.writeBundle("vault", previousAgentBytes);
       const previousVaultRef = await bundleStore.writeBundle("vault", previousVaultBundle!);
 
       await seedRunnerQueueState({
@@ -685,6 +706,7 @@ describe("HostedUserRunner", () => {
             schema: "murph.gateway-conversation.v1",
             sessionKey,
             title: "Lab thread",
+            titleSource: "thread-title",
           }],
           generatedAt: "2026-03-26T12:00:00.000Z",
           messages: [{
@@ -747,6 +769,7 @@ describe("HostedUserRunner", () => {
             schema: "murph.gateway-conversation.v1",
             sessionKey,
             title: "Lab thread",
+            titleSource: "thread-title",
           }],
           generatedAt: "2026-03-26T12:05:00.000Z",
           messages: [{
@@ -870,6 +893,7 @@ describe("HostedUserRunner", () => {
       keyId: crypto.rootKeyId,
       keysById: crypto.keysById,
     }).writeCommittedResult("member_123", "evt_gateway_recovery", {
+      assistantDeliveryEffects: [],
       bundleRef: null,
       committedAt: "2026-03-26T12:00:01.000Z",
       eventId: "evt_gateway_recovery",
@@ -1029,6 +1053,7 @@ describe("HostedUserRunner", () => {
       keyId: crypto.rootKeyId,
       keysById: crypto.keysById,
     }).writeCommittedResult(dispatch.event.userId, dispatch.eventId, {
+      assistantDeliveryEffects: [],
       bundleRef: null,
       committedAt: "2026-03-26T12:00:01.000Z",
       eventId: dispatch.eventId,
@@ -1224,6 +1249,9 @@ describe("HostedUserRunner", () => {
     ).one().payload_key;
 
     expect(payload.storage).toBe("reference");
+    if (payload.storage !== "reference") {
+      throw new Error("Expected stored dispatch payload to use reference storage.");
+    }
     expect(payloadKey).toBe(payload.stagedPayloadId);
     expect(bucket.keys()).toContain(payload.stagedPayloadId);
     expect(bucket.keys().filter((key) => key.startsWith("transient/dispatch-payloads/"))).toEqual([
@@ -1334,6 +1362,7 @@ describe("HostedUserRunner", () => {
       keyId: crypto.rootKeyId,
       keysById: crypto.keysById,
     }).writeCommittedResult(userId, dispatch.eventId, {
+      assistantDeliveryEffects: [],
       bundleRef: null,
       committedAt: "2026-03-26T12:00:01.000Z",
       eventId: dispatch.eventId,
@@ -1474,7 +1503,7 @@ describe("HostedUserRunner", () => {
     vi.setSystemTime(new Date("2026-03-26T12:00:10.000Z"));
     await runner.alarm();
 
-    const status = await runner.status("member_123");
+    const status = await runner.status();
     expect(status.lastEventId).toMatch(/^alarm:/u);
     expect(status.nextWakeAt).not.toBe("2026-03-26T12:00:05.000Z");
     expect(status.nextWakeAt).toBe("2026-03-26T12:01:10.000Z");
@@ -1756,6 +1785,12 @@ describe("HostedUserRunner", () => {
       const previousVaultRef = await bundleStore.writeBundle("vault", previousVaultBundle!);
       const queueStore = new (await import("../src/user-runner/runner-queue-store.js")).RunnerQueueStore(
         storage.state,
+        createHostedDispatchPayloadStore({
+          bucket: bucket.api,
+          key: environment.platformEnvelopeKey,
+          keyId: environment.platformEnvelopeKeyId,
+          keysById: environment.platformEnvelopeKeysById,
+        }),
       );
       await queueStore.bootstrapUser("member_cleanup_failure");
       await queueStore.compareAndSwapBundleRefs({
@@ -1952,7 +1987,7 @@ describe("HostedUserRunner", () => {
     vi.setSystemTime(new Date("2026-03-26T12:00:11.000Z"));
     await runner.alarm();
 
-    const finalStatus = await runner.status("member_123");
+    const finalStatus = await runner.status();
     expect(finalStatus.pendingEventCount).toBe(0);
     expect(finalStatus.retryingEventId).toBeNull();
     expect(finalStatus.bundleRef).toMatchObject({
@@ -2123,7 +2158,7 @@ describe("HostedUserRunner", () => {
     vi.setSystemTime(new Date("2026-03-26T12:00:30.000Z"));
     await runner.alarm();
 
-    const final = await runner.status("member_123");
+    const final = await runner.status();
 
     expect(final.pendingEventCount).toBe(0);
     expect(final.poisonedEventIds).toEqual(["evt_retry_1"]);
@@ -2213,7 +2248,7 @@ describe("HostedUserRunner", () => {
     await runner.alarm();
 
     expect(readDispatchedEventIds(fetchMock)).toEqual(["evt_retry_head", "evt_tail"]);
-    await expect(runner.status("member_123")).resolves.toMatchObject({
+    await expect(runner.status()).resolves.toMatchObject({
       lastEventId: "evt_tail",
       pendingEventCount: 1,
       poisonedEventIds: [],
@@ -2261,7 +2296,7 @@ describe("HostedUserRunner", () => {
     expect(readDispatchedEventIds(fetchMock)).toEqual([
       ...Array.from({ length: 64 }, (_, index) => `evt_${index.toString().padStart(3, "0")}`),
     ]);
-    await expect(runner.status("member_123")).resolves.toMatchObject({
+    await expect(runner.status()).resolves.toMatchObject({
       backpressuredEventIds: ["evt_overflow"],
       lastEventId: "evt_063",
       pendingEventCount: 0,
@@ -2305,7 +2340,7 @@ describe("HostedUserRunner", () => {
     expect(readDispatchedEventIds(fetchMock)).toHaveLength(3);
     expect(readDispatchedEventIds(fetchMock)).toContain("evt_concurrent_a");
     expect(readDispatchedEventIds(fetchMock)).toContain("evt_concurrent_b");
-    await expect(runner.status("member_123")).resolves.toMatchObject({
+    await expect(runner.status()).resolves.toMatchObject({
       pendingEventCount: 0,
       poisonedEventIds: [],
     });
@@ -2344,7 +2379,7 @@ describe("HostedUserRunner", () => {
     expect(readDispatchedEventIds(fetchMock)).toHaveLength(2);
     expect(readDispatchedEventIds(fetchMock).filter((eventId) => eventId === "evt_idle_a")).toHaveLength(1);
     expect(readDispatchedEventIds(fetchMock).filter((eventId) => eventId === "evt_idle_b")).toHaveLength(1);
-    await expect(runner.status("member_123")).resolves.toMatchObject({
+    await expect(runner.status()).resolves.toMatchObject({
       pendingEventCount: 0,
       poisonedEventIds: [],
     });
@@ -2389,7 +2424,7 @@ describe("HostedUserRunner", () => {
     firstRun.resolve();
     await firstDispatch;
 
-    await expect(runner.status("member_123")).resolves.toMatchObject({
+    await expect(runner.status()).resolves.toMatchObject({
       backpressuredEventIds: ["evt_backpressured"],
       poisonedEventIds: [],
     });
@@ -2483,7 +2518,7 @@ describe("HostedUserRunner", () => {
 
     await runner.alarm();
 
-    await expect(runner.status("member_123")).resolves.toMatchObject({
+    await expect(runner.status()).resolves.toMatchObject({
       backpressuredEventIds: ["evt_fail_backpressured"],
       pendingEventCount: 1,
       poisonedEventIds: [],
@@ -2891,7 +2926,7 @@ describe("HostedUserRunner", () => {
     vi.setSystemTime(new Date("2026-04-26T12:00:01.000Z"));
     const restartedRunner = new HostedUserRunner(storage.state, environment, bucket.api);
 
-    await restartedRunner.status("member_123");
+    await restartedRunner.status();
     await restartedRunner.dispatch({
       event: {
         kind: "assistant.cron.tick",
@@ -2933,7 +2968,7 @@ describe("HostedUserRunner", () => {
     vi.setSystemTime(new Date("2026-03-26T12:00:30.000Z"));
     await runner.alarm();
 
-    expect((await runner.status("member_123")).poisonedEventIds).toContain("evt_poison_expiry");
+    expect((await runner.status()).poisonedEventIds).toContain("evt_poison_expiry");
 
     vi.stubGlobal("fetch", vi.fn().mockImplementation(async (_url, init) => createCommittedRunnerSuccessResponse({
       bucket,
@@ -2982,7 +3017,7 @@ describe("HostedUserRunner", () => {
       await userEnvObjectKeyForTest(crypto.rootKey, "member_123"),
       await userKeyEnvelopeObjectKeyForTest(environment.platformEnvelopeKey, "member_123"),
     ]));
-    await expect(runner.getUserEnvStatus("member_123")).resolves.toEqual({
+    await expect(runner.getUserEnvStatus()).resolves.toEqual({
       configuredUserEnvKeys: ["OPENAI_API_KEY", "XAI_API_KEY"],
       userId: "member_123",
     });
@@ -3065,7 +3100,7 @@ describe("HostedUserRunner", () => {
         },
       },
     ]);
-    await expect(runner.getUserEnvStatus("member_123")).resolves.toEqual({
+    await expect(runner.getUserEnvStatus()).resolves.toEqual({
       configuredUserEnvKeys: ["OPENAI_API_KEY"],
       userId: "member_123",
     });
@@ -3074,7 +3109,7 @@ describe("HostedUserRunner", () => {
   it("clears per-user env config without dropping unrelated agent-state bundle data", async () => {
     const initialAgentState = writeHostedBundleTextFile({
       bytes: null,
-      kind: "agent-state",
+      kind: "vault",
       path: "automation.json",
       root: "assistant-state",
       text: "{\"autoReplyChannels\":[\"linq\"]}\n",
@@ -3162,7 +3197,7 @@ describe("HostedUserRunner", () => {
       configuredUserEnvKeys: ["CUSTOM_API_KEY"],
       userId: "member_123",
     });
-    await expect(runner.getUserEnvStatus("member_123")).resolves.toEqual({
+    await expect(runner.getUserEnvStatus()).resolves.toEqual({
       configuredUserEnvKeys: ["CUSTOM_API_KEY"],
       userId: "member_123",
     });
@@ -3231,7 +3266,11 @@ function createBucket() {
 
         return {
           async arrayBuffer() {
-            return Buffer.from(value, "utf8");
+            const bytes = new TextEncoder().encode(value);
+            return bytes.buffer.slice(
+              bytes.byteOffset,
+              bytes.byteOffset + bytes.byteLength,
+            ) as ArrayBuffer;
           },
         };
       },
@@ -3365,15 +3404,7 @@ async function seedRunnerQueueState(
     runtimeBootstrapped?: boolean;
     backpressuredEventIds?: string[];
     bucket: ReturnType<typeof createBucket>;
-    environment: {
-      automationRecipientKeyId: string;
-      automationRecipientPrivateKey: JsonWebKey;
-      automationRecipientPrivateKeysById: Readonly<Record<string, JsonWebKey>>;
-      automationRecipientPublicKey: JsonWebKey;
-      platformEnvelopeKey: Uint8Array;
-      platformEnvelopeKeyId: string;
-      platformEnvelopeKeysById?: Readonly<Record<string, Uint8Array>>;
-    };
+    environment: HostedExecutionEnvironment;
     inFlight?: boolean;
     lastError?: string | null;
     lastErrorAt?: string | null;
@@ -3563,7 +3594,7 @@ function countRunnerContainerCalls(
 
 function expectHostedBundleKeys(
   keys: string[],
-  kinds: Array<"agent-state" | "vault">,
+  kinds: Array<"vault">,
 ): void {
   for (const kind of kinds) {
     expect(keys).toContainEqual(expect.stringMatching(
@@ -3610,7 +3641,7 @@ function createGatewayProjectionSnapshot(input: {
     text: string;
   }>;
   title: string;
-}) {
+}): GatewayProjectionSnapshot {
   const routeKey = "channel:email|identity:murph%40example.com|thread:thread-labs";
   const sessionKey = createGatewayConversationSessionKey(routeKey);
 
@@ -3634,6 +3665,7 @@ function createGatewayProjectionSnapshot(input: {
       schema: "murph.gateway-conversation.v1",
       sessionKey,
       title: input.title,
+      titleSource: "thread-title",
     }],
     generatedAt: input.generatedAt,
     messages: input.messages.map((message) => ({
@@ -3690,64 +3722,98 @@ function createDeferred<T>() {
   };
 }
 
-function createRunnerSuccessPayload(input: Partial<{
-  agentState: string | null;
-  eventsHandled: number;
-  gatewayProjectionSnapshot: Record<string, unknown> | null;
-  sideEffects: Array<{
-    effectId: string;
-    fingerprint: string;
-    intentId: string;
-    kind: "assistant.delivery";
-  }>;
-  summary: string;
-  vault: string | null;
-}> = {}) {
+interface RunnerSuccessPayload {
+  bundles: {
+    agentState: string | null;
+    vault: string | null;
+  };
+  gatewayProjectionSnapshot: GatewayProjectionSnapshot | null;
+  result: {
+    eventsHandled: number;
+    nextWakeAt?: string | null;
+    summary: string;
+  };
+  sideEffects: HostedAssistantDeliveryEffect[];
+}
+
+type RunnerSuccessPayloadLike = Partial<
+  Omit<RunnerSuccessPayload, "bundles" | "result">
+> & {
+  bundles?: Partial<RunnerSuccessPayload["bundles"]>;
+  result?: Partial<RunnerSuccessPayload["result"]>;
+};
+
+function normalizeRunnerSuccessPayload(
+  input: RunnerSuccessPayloadLike = {},
+): RunnerSuccessPayload {
+  const nextWakeAt = input.result?.nextWakeAt;
+
   return {
     bundles: {
-      agentState: input.agentState ?? null,
-      vault: input.vault ?? null,
-    },
-    result: {
-      eventsHandled: input.eventsHandled ?? 1,
-      summary: input.summary ?? "ok",
+      agentState: input.bundles?.agentState ?? null,
+      vault: input.bundles?.vault ?? null,
     },
     gatewayProjectionSnapshot: input.gatewayProjectionSnapshot ?? null,
+    result: {
+      eventsHandled: input.result?.eventsHandled ?? 1,
+      ...(nextWakeAt !== undefined ? { nextWakeAt } : {}),
+      summary: input.result?.summary ?? "ok",
+    },
     sideEffects: input.sideEffects ?? [],
   };
 }
 
+function createRunnerSuccessPayload(input: Partial<{
+  agentState: string | null;
+  eventsHandled: number;
+  gatewayProjectionSnapshot: GatewayProjectionSnapshot | null;
+  nextWakeAt: string | null;
+  sideEffects: HostedAssistantDeliveryEffect[];
+  summary: string;
+  vault: string | null;
+}> = {}): RunnerSuccessPayload {
+  return normalizeRunnerSuccessPayload({
+    bundles: {
+      agentState: input.agentState,
+      vault: input.vault,
+    },
+    gatewayProjectionSnapshot: input.gatewayProjectionSnapshot,
+    result: {
+      eventsHandled: input.eventsHandled,
+      nextWakeAt: input.nextWakeAt,
+      summary: input.summary,
+    },
+    sideEffects: input.sideEffects,
+  });
+}
+
 function serializeRunnerSuccessPayload(
-  payload: ReturnType<typeof createRunnerSuccessPayload>,
+  payload: RunnerSuccessPayloadLike,
 ): {
-  finalGatewayProjectionSnapshot: Record<string, unknown> | null;
+  finalGatewayProjectionSnapshot: GatewayProjectionSnapshot | null;
   result: {
     bundle: string | null;
-    result: {
-      eventsHandled: number;
-      summary: string;
-    };
+    result: RunnerSuccessPayload["result"];
   };
 } {
+  const normalized = normalizeRunnerSuccessPayload(payload);
+
   return {
-    finalGatewayProjectionSnapshot: payload.gatewayProjectionSnapshot,
+    finalGatewayProjectionSnapshot: normalized.gatewayProjectionSnapshot,
     result: {
-      bundle: payload.bundles.vault ?? payload.bundles.agentState,
-      result: payload.result,
+      bundle: normalized.bundles.vault ?? normalized.bundles.agentState,
+      result: normalized.result,
     },
   };
 }
 
 async function createCommittedRunnerSuccessResponse(input: {
   bucket: ReturnType<typeof createBucket>;
-  environment: {
-    platformEnvelopeKey: Uint8Array;
-    platformEnvelopeKeyId: string;
-  };
+  environment: HostedExecutionEnvironment;
   init?: RequestInit;
-  payload?: ReturnType<typeof createRunnerSuccessPayload>;
+  payload?: RunnerSuccessPayloadLike;
 }): Promise<Response> {
-  const payload = input.payload ?? createRunnerSuccessPayload();
+  const payload = normalizeRunnerSuccessPayload(input.payload);
 
   await commitResultForRunnerRequest({
     bucket: input.bucket,
@@ -3814,30 +3880,11 @@ function readRunnerJobRequest(value: unknown): {
 
 async function commitResultForRunnerRequest(input: {
   bucket: ReturnType<typeof createBucket>;
-  environment: {
-    platformEnvelopeKey: Uint8Array;
-    platformEnvelopeKeyId: string;
-    platformEnvelopeKeysById?: Readonly<Record<string, Uint8Array>>;
-  };
-  payload: {
-    bundles: {
-      agentState: string | null;
-      vault: string | null;
-    };
-    gatewayProjectionSnapshot?: Record<string, unknown> | null;
-    result: {
-      eventsHandled: number;
-      summary: string;
-    };
-    sideEffects?: Array<{
-      effectId: string;
-      fingerprint: string;
-      intentId: string;
-      kind: "assistant.delivery";
-    }>;
-  };
+  environment: HostedExecutionEnvironment;
+  payload: RunnerSuccessPayloadLike;
   requestBody: unknown;
 }): Promise<void> {
+  const payload = normalizeRunnerSuccessPayload(input.payload);
   const requestBody = readRunnerJobRequest(input.requestBody);
   const crypto = await resolveHostedUserCryptoContextForTest({
     bucket: input.bucket,
@@ -3852,10 +3899,11 @@ async function commitResultForRunnerRequest(input: {
     keyId: crypto.rootKeyId,
     keysById: crypto.keysById,
     payload: {
-      bundle: input.payload.bundles.vault ?? input.payload.bundles.agentState ?? null,
-      gatewayProjectionSnapshot: input.payload.gatewayProjectionSnapshot ?? null,
-      result: input.payload.result,
-      sideEffects: input.payload.sideEffects,
+      assistantDeliveryEffects: payload.sideEffects,
+      bundle: payload.bundles.vault ?? payload.bundles.agentState ?? null,
+      gatewayProjectionSnapshot: payload.gatewayProjectionSnapshot,
+      result: payload.result,
+      sideEffects: payload.sideEffects,
     },
     userId: requestBody.dispatch.event.userId,
   });
@@ -3863,26 +3911,11 @@ async function commitResultForRunnerRequest(input: {
 
 async function finalizeResultForRunnerRequest(input: {
   bucket: ReturnType<typeof createBucket>;
-  environment: {
-    platformEnvelopeKey: Uint8Array;
-    platformEnvelopeKeyId: string;
-    platformEnvelopeKeysById?: Readonly<Record<string, Uint8Array>>;
-  };
-  payload: {
-    bundles: {
-      agentState: string | null;
-      vault: string | null;
-    };
-    gatewayProjectionSnapshot?: Record<string, unknown> | null;
-    sideEffects?: Array<{
-      effectId: string;
-      fingerprint: string;
-      intentId: string;
-      kind: "assistant.delivery";
-    }>;
-  };
+  environment: HostedExecutionEnvironment;
+  payload: RunnerSuccessPayloadLike;
   requestBody: unknown;
 }): Promise<void> {
+  const payload = normalizeRunnerSuccessPayload(input.payload);
   const requestBody = readRunnerJobRequest(input.requestBody);
   const crypto = await resolveHostedUserCryptoContextForTest({
     bucket: input.bucket,
@@ -3896,8 +3929,8 @@ async function finalizeResultForRunnerRequest(input: {
     keyId: crypto.rootKeyId,
     keysById: crypto.keysById,
     payload: {
-      bundle: input.payload.bundles.vault ?? input.payload.bundles.agentState ?? null,
-      gatewayProjectionSnapshot: input.payload.gatewayProjectionSnapshot ?? null,
+      bundle: payload.bundles.vault ?? payload.bundles.agentState ?? null,
+      gatewayProjectionSnapshot: payload.gatewayProjectionSnapshot,
     },
     userId: requestBody.dispatch.event.userId,
   });
@@ -3905,11 +3938,7 @@ async function finalizeResultForRunnerRequest(input: {
 
 async function resolveHostedUserCryptoContextForTest(input: {
   bucket: ReturnType<typeof createBucket>;
-  environment: {
-    platformEnvelopeKey: Uint8Array;
-    platformEnvelopeKeyId: string;
-    platformEnvelopeKeysById?: Readonly<Record<string, Uint8Array>>;
-  };
+  environment: HostedExecutionEnvironment;
   userId: string;
 }) {
   return createHostedUserKeyStore({

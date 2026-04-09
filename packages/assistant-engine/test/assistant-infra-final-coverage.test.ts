@@ -38,6 +38,11 @@ import {
 import { createTempVaultContext } from './test-helpers.ts'
 
 const tempRoots: string[] = []
+type LookupImplementation = typeof import('node:dns/promises').lookup
+type MockLookupAddress = {
+  address: string
+  family: number
+}
 
 afterEach(async () => {
   vi.useRealTimers()
@@ -116,11 +121,14 @@ describe('assistant infra final coverage', () => {
     await expect(
       adapter.assistantGatewayLocalMessageSender.deliver({
         actorId: 'actor-1',
-        bindingDelivery: null,
+        bindingDelivery: {
+          kind: 'thread',
+          target: 'chat-1',
+        },
         channel: 'telegram',
         dedupeToken: 'dedupe-1',
         deliveryIdempotencyKey: 'delivery-1',
-        dispatchMode: 'auto',
+        dispatchMode: 'immediate',
         identityId: 'identity-1',
         message: 'hello',
         replyToMessageId: 'reply-1',
@@ -147,11 +155,14 @@ describe('assistant infra final coverage', () => {
     await expect(
       adapter.assistantGatewayLocalMessageSender.deliver({
         actorId: null,
-        bindingDelivery: null,
+        bindingDelivery: {
+          kind: 'participant',
+          target: 'participant-2',
+        },
         channel: null,
         dedupeToken: null,
         deliveryIdempotencyKey: null,
-        dispatchMode: 'auto',
+        dispatchMode: 'queue-only',
         identityId: null,
         message: 'retry later',
         replyToMessageId: null,
@@ -552,14 +563,14 @@ describe('assistant infra final coverage', () => {
     ]
 
     expect(applyDomainFilterToAssistantSearchResults(results, [])).toEqual(results)
-    expect(normalizeAssistantDomainFilters()).toEqual([])
+    expect(normalizeAssistantDomainFilters(undefined)).toEqual([])
     expect(
       normalizeAssistantDomainFilters(['   ', '.Example.com', 'not a valid url???']),
     ).toEqual(['.example.com', 'not a valid url???'])
   })
 
   it('covers web-fetch duplicate DNS address dedupe without widening runtime behavior', async () => {
-    const lookupImplementation = vi.fn(async () => [
+    const lookupImplementation = createLookupImplementation([
       {
         address: 'edge.example.test',
         family: 0,
@@ -731,7 +742,7 @@ type MockRequestStep =
 
 async function loadWebFetchModule(input?: {
   httpsSteps?: MockRequestStep[]
-  lookupImplementation?: typeof import('node:dns/promises').lookup
+  lookupImplementation?: LookupImplementation
 }): Promise<{
   httpsRequestMock: ReturnType<typeof vi.fn>
   module: WebFetchModule
@@ -817,4 +828,24 @@ function normalizeResponseChunks(
   return chunks.map((chunk) =>
     typeof chunk === 'string' ? encoder.encode(chunk) : chunk,
   )
+}
+
+function createLookupImplementation(
+  addresses: MockLookupAddress[],
+): LookupImplementation {
+  const fallback = addresses[0] ?? { address: '127.0.0.1', family: 4 }
+  const lookupImplementation = (async (
+    _hostname: string,
+    options?: number | { all?: boolean },
+  ) => {
+    if (typeof options === 'number') {
+      return fallback
+    }
+    if (options?.all) {
+      return addresses
+    }
+    return fallback
+  }) as LookupImplementation
+
+  return lookupImplementation
 }

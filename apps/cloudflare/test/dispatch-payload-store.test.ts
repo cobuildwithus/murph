@@ -66,6 +66,9 @@ describe("hosted dispatch payload store", () => {
     const payload = await store.writeStoredDispatch(dispatch);
 
     expect(payload.storage).toBe("reference");
+    if (payload.storage !== "reference") {
+      throw new Error("Expected device-sync dispatches to use reference payload storage.");
+    }
     expect(payload.stagedPayloadId).toBeTruthy();
     expect(bucket.objects.size).toBe(1);
     await expect(store.readStoredDispatch(payload)).resolves.toEqual(dispatch);

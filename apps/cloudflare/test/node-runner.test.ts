@@ -23,7 +23,9 @@ import { HOSTED_ASSISTANT_CONFIG_ENV_NAMES } from "@murphai/operator-config/host
 import type {
   HostedAssistantRuntimeConfig,
   HostedAssistantRuntimeJobInput,
+  HostedAssistantRuntimeJobResult,
 } from "@murphai/assistant-runtime";
+import type { HostedExecutionBundlePayload } from "@murphai/hosted-execution";
 
 const hostedCliMocks = vi.hoisted(() => ({
   dispatchAssistantOutboxIntent: vi.fn(),
@@ -60,7 +62,12 @@ type NodeRunnerTestInput =
     "forwardedEnv" | "userEnv"
   > & {
     internalWorkerProxyToken?: string | null;
-    bundles: HostedAssistantRuntimeJobInput["request"]["bundle"];
+    bundles:
+      | HostedAssistantRuntimeJobInput["request"]["bundle"]
+      | {
+        agentState: HostedExecutionBundlePayload;
+        vault: HostedExecutionBundlePayload;
+      };
     commit?: {
       bundleRef?: NonNullable<HostedAssistantRuntimeJobInput["request"]["commit"]>["bundleRef"] | null;
       bundleRefs?: {
@@ -121,7 +128,16 @@ async function runHostedExecutionJob(
   options?: {
     signal?: AbortSignal;
   },
-) {
+): Promise<{
+  finalGatewayProjectionSnapshot: HostedAssistantRuntimeJobResult["finalGatewayProjectionSnapshot"];
+  bundles: {
+    agentState: HostedExecutionBundlePayload;
+    vault: HostedExecutionBundlePayload;
+  };
+  gatewayProjectionSnapshot: HostedAssistantRuntimeJobResult["finalGatewayProjectionSnapshot"];
+  result: HostedAssistantRuntimeJobResult["result"]["result"];
+  runnerResult: HostedAssistantRuntimeJobResult["result"];
+}> {
   const {
     bundles,
     commit,
@@ -155,7 +171,7 @@ async function runHostedExecutionJob(
   });
 
   return {
-    ...result,
+    finalGatewayProjectionSnapshot: result.finalGatewayProjectionSnapshot,
     bundles: {
       agentState: result.result.bundle,
       vault: result.result.bundle,
@@ -612,8 +628,6 @@ describe("runHostedExecutionJob", () => {
       dispatch: {
         event: {
           kind: "member.activated",
-          linqChatId: "chat_email_fetch",
-          normalizedPhoneNumber: "+15551230001",
           userId: "member_email_fetch",
         },
         eventId: "evt_activation_email_fetch",
@@ -878,7 +892,7 @@ describe("runHostedExecutionJob", () => {
             return new Response("Not found", { status: 404 });
           }
 
-          return new Response(storedBytes, {
+          return new Response(Buffer.from(storedBytes), {
             headers: {
               "content-type": "application/octet-stream",
             },
@@ -2368,6 +2382,14 @@ describe("runHostedExecutionJob", () => {
       },
       resume: {
         committedResult: {
+          assistantDeliveryEffects: [
+            {
+              effectId: intentId,
+              fingerprint: "dedupe_hosted_resume",
+              intentId,
+              kind: "assistant.delivery",
+            },
+          ],
           result: {
             eventsHandled: 1,
             summary: "committed",

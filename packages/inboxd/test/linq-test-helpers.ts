@@ -1,4 +1,5 @@
 import { createHmac } from "node:crypto";
+import type { LinqWebhookEvent } from "@murphai/messaging-ingress/linq-webhook";
 
 export function signLinqWebhook(secret: string, payload: string, timestamp: string): string {
   const signature = createHmac("sha256", secret)
@@ -13,7 +14,7 @@ export function buildV2026LinqWebhookEvent(input: {
   eventId?: string;
   eventType?: string;
   traceId?: string | null;
-} = {}): Record<string, unknown> {
+} = {}): LinqWebhookEvent {
   return {
     api_version: "v3",
     created_at: input.createdAt ?? "2026-03-24T10:00:05.000Z",
@@ -43,5 +44,5 @@ export function buildV2026LinqWebhookEvent(input: {
     event_id: input.eventId ?? "evt_123",
     event_type: input.eventType ?? "message.received",
     trace_id: input.traceId ?? undefined,
-  };
+  } as LinqWebhookEvent;
 }

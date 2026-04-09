@@ -235,6 +235,7 @@ test("canonical inbox record builders sanitize attachment paths, truncate long n
   assert.equal(captureRecord.attachments[0]?.storedPath, "raw/inbox/telegram/bot/lab.pdf");
   assert.equal(captureRecord.attachments[1]?.storedPath ?? null, null);
 
+  assert.ok(eventRecord.note);
   assert.equal(eventRecord.note.length, 4_000);
   assert.equal(eventRecord.note.endsWith("..."), true);
   assert.deepEqual(eventRecord.tags, ["inbox", "source-telegram"]);

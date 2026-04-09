@@ -43,6 +43,7 @@ test('editing a recurring food repairs a missing auto-log cron job', async () =>
     vault: vaultRoot,
     hooks: createAssistantFoodAutoLogHooks(),
     payload: {
+      status: 'active',
       title: 'Morning Smoothie',
       slug: 'morning-smoothie',
       summary: 'Original summary.',
@@ -119,6 +120,7 @@ test('clearing recurring food auto-log removes the backing cron job', async () =
     vault: vaultRoot,
     hooks: createAssistantFoodAutoLogHooks(),
     payload: {
+      status: 'active',
       title: 'Daily Oats',
       slug: 'daily-oats',
       autoLogDaily: {
@@ -155,6 +157,7 @@ test('deleting a recurring food removes the backing cron job', async () => {
     vault: vaultRoot,
     hooks: createAssistantFoodAutoLogHooks(),
     payload: {
+      status: 'active',
       title: 'Daily Oats',
       slug: 'daily-oats',
       autoLogDaily: {
@@ -186,6 +189,7 @@ test('editing a recurring food collapses duplicate auto-log jobs back to one can
     vault: vaultRoot,
     hooks: createAssistantFoodAutoLogHooks(),
     payload: {
+      status: 'active',
       title: 'Daily Oats',
       slug: 'daily-oats',
       autoLogDaily: {
@@ -240,6 +244,7 @@ test('renaming a recurring food refreshes the derived cron job metadata', async 
     vault: vaultRoot,
     hooks: createAssistantFoodAutoLogHooks(),
     payload: {
+      status: 'active',
       title: 'Morning Smoothie',
       slug: 'morning-smoothie',
       autoLogDaily: {

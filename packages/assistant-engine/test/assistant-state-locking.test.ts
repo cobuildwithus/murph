@@ -18,6 +18,10 @@ import {
 } from '../src/assistant/store/paths.ts'
 import { createDeferred, createTempVaultContext } from './test-helpers.js'
 
+type AssistantStateWriteLockFormatter = (
+  metadata: import('../src/assistant/state-write-lock.ts').AssistantStateWriteLockMetadata | null,
+) => string
+
 const cleanupPaths: string[] = []
 
 afterEach(async () => {
@@ -231,12 +235,8 @@ test('assistant state document write locks surface held-lock metadata as a Vault
 test('assistant cron and state document locks fall back to generic held-lock details without metadata', async () => {
   vi.resetModules()
 
-  let capturedCronMessage:
-    | ((metadata: import('../src/assistant/state-write-lock.ts').AssistantStateWriteLockMetadata | null) => string)
-    | null = null
-  let capturedStateMessage:
-    | ((metadata: import('../src/assistant/state-write-lock.ts').AssistantStateWriteLockMetadata | null) => string)
-    | null = null
+  let capturedCronMessage: AssistantStateWriteLockFormatter | null = null
+  let capturedStateMessage: AssistantStateWriteLockFormatter | null = null
 
   vi.doMock('../src/assistant/state-write-lock.js', () => ({
     createAssistantStateWriteLock: (options: {
@@ -261,12 +261,26 @@ test('assistant cron and state document locks fall back to generic held-lock det
     import('../src/assistant/state/locking.ts'),
   ])
 
+  const cronMessage: (
+    metadata: import('../src/assistant/state-write-lock.ts').AssistantStateWriteLockMetadata | null,
+  ) => string =
+    capturedCronMessage ??
+    ((_metadata: import('../src/assistant/state-write-lock.ts').AssistantStateWriteLockMetadata | null) => {
+      throw new Error('Expected cron lock mock to capture formatHeldLockMessage.')
+    })
+  const stateMessage: (
+    metadata: import('../src/assistant/state-write-lock.ts').AssistantStateWriteLockMetadata | null,
+  ) => string =
+    capturedStateMessage ??
+    ((_metadata: import('../src/assistant/state-write-lock.ts').AssistantStateWriteLockMetadata | null) => {
+      throw new Error('Expected state lock mock to capture formatHeldLockMessage.')
+    })
   assert.equal(
-    capturedCronMessage?.(null),
+    cronMessage(null),
     'Assistant cron writes are already in progress.',
   )
   assert.equal(
-    capturedCronMessage?.({
+    cronMessage({
       command: 'assistant-cron',
       pid: 123,
       startedAt: '2026-04-08T12:34:56.000Z',
@@ -274,7 +288,7 @@ test('assistant cron and state document locks fall back to generic held-lock det
     'Assistant cron writes are already in progress (pid=123, startedAt=2026-04-08T12:34:56.000Z, command=assistant-cron).',
   )
   assert.equal(
-    capturedStateMessage?.(null),
+    stateMessage(null),
     'Assistant state document writes are already in progress.',
   )
 })

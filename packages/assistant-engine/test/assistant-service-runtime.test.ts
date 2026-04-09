@@ -2,10 +2,20 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type {
   AssistantDeliveryError,
+  AssistantBindingDelivery,
+  AssistantProviderFailoverRoute,
   AssistantProviderSessionOptions,
   AssistantSession,
 } from "@murphai/operator-config/assistant-cli-contracts";
+import { createAssistantModelTarget } from "@murphai/operator-config/assistant-backend";
+import { serializeAssistantProviderSessionOptions } from "@murphai/operator-config/assistant/provider-config";
+import { resolveAssistantStatePaths } from "@murphai/runtime-state/node";
 import type { ResolvedAssistantFailoverRoute } from "../src/assistant/failover.ts";
+import type { AssistantProviderUsage } from "../src/assistant/providers/types.ts";
+import type {
+  AssistantTurnSharedPlan,
+  ExecutedAssistantProviderTurnResult,
+} from "../src/assistant/service-contracts.ts";
 
 const seamMocks = vi.hoisted(() => ({
   buildAssistantCliGuidanceText: vi.fn(),
@@ -111,7 +121,6 @@ import {
   selectAssistantTurnRouteOverride,
 } from "../src/assistant/service-turn-routes.ts";
 import { persistPendingAssistantUsageEvent } from "../src/assistant/service-usage.ts";
-import { buildAssistantSystemPrompt } from "../src/assistant/system-prompt.ts";
 import { persistAssistantTurnAndSession } from "../src/assistant/turn-finalizer.ts";
 import { ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE } from "../src/assistant/first-contact-welcome.ts";
 
@@ -292,6 +301,8 @@ describe("assistant service turn routes", () => {
       selfDeliveryTargets: null,
     };
     const resolved = {
+      created: false,
+      paths: resolveAssistantStatePaths("/vault"),
       session: createAssistantSession({
         resumeState: {
           providerSessionId: "provider-session-existing",
@@ -299,14 +310,25 @@ describe("assistant service turn routes", () => {
         },
       }),
     };
+    const failoverRoutes: AssistantProviderFailoverRoute[] = [
+      {
+        apiKeyEnv: null,
+        approvalPolicy: "never",
+        cooldownMs: 60_000,
+        codexCommand: null,
+        codexHome: null,
+        headers: null,
+        provider: "codex-cli",
+        model: "gpt-5-codex",
+        name: "backup",
+        oss: false,
+        profile: null,
+        reasoningEffort: "medium",
+        sandbox: "danger-full-access",
+      },
+    ];
     const input = {
-      failoverRoutes: [
-        {
-          provider: "codex-cli",
-          model: "gpt-5-codex",
-          name: "backup",
-        },
-      ],
+      failoverRoutes,
       model: "gpt-5-mini",
       prompt: "Summarize today.",
       provider: "openai-compatible" as const,
@@ -697,7 +719,10 @@ describe("assistant delivery orchestration seam", () => {
         actorId: "binding-actor",
         channel: "local",
         conversationKey: "binding-key",
-        delivery: "binding-delivery",
+        delivery: {
+          kind: "participant",
+          target: "binding-delivery",
+        },
         identityId: "binding-identity",
         threadId: "binding-thread",
         threadIsDirect: true,
@@ -705,9 +730,14 @@ describe("assistant delivery orchestration seam", () => {
     });
     runtimeState.outbox.deliverMessage.mockResolvedValue({
       delivery: {
+        channel: "telegram",
         idempotencyKey: "idem-1",
+        messageLength: 10,
         providerMessageId: "provider-1",
+        providerThreadId: null,
         sentAt: "2026-04-08T11:00:00.000Z",
+        target: "explicit-audience-target",
+        targetKind: "explicit",
       },
       intent: {
         intentId: "intent-1",
@@ -732,7 +762,10 @@ describe("assistant delivery orchestration seam", () => {
           conversationPolicy: {
             audience: {
               actorId: "audience-actor",
-              bindingDelivery: "audience-delivery",
+              bindingDelivery: {
+                kind: "participant",
+                target: "audience-delivery",
+              },
               channel: "telegram",
               explicitTarget: "explicit-audience-target",
               identityId: "audience-identity",
@@ -761,7 +794,10 @@ describe("assistant delivery orchestration seam", () => {
     );
     expect(runtimeState.outbox.deliverMessage).toHaveBeenCalledWith({
       actorId: "audience-actor",
-      bindingDelivery: "audience-delivery",
+      bindingDelivery: {
+        kind: "participant",
+        target: "audience-delivery",
+      },
       channel: "telegram",
       dependencies: undefined,
       dispatchMode: "immediate",
@@ -907,9 +943,14 @@ describe("assistant delivery orchestration seam", () => {
         completedAt: "2026-04-08T12:00:00.000Z",
         outcome: {
           delivery: {
+            channel: "telegram",
             idempotencyKey: null,
+            messageLength: 5,
             providerMessageId: "provider-2",
+            providerThreadId: null,
             sentAt: "2026-04-08T12:00:00.000Z",
+            target: "thread-1",
+            targetKind: "thread",
           },
           intentId: "intent-sent",
           kind: "sent",
@@ -995,9 +1036,14 @@ describe("assistant delivery orchestration seam", () => {
       firstTurnCheckInStateDocIds: ["doc-1", "doc-2"],
       outcome: {
         delivery: {
+          channel: "telegram",
           idempotencyKey: null,
+          messageLength: 5,
           providerMessageId: "provider-3",
+          providerThreadId: null,
           sentAt: "2026-04-08T12:30:00.000Z",
+          target: "thread-1",
+          targetKind: "thread",
         },
         intentId: "intent-3",
         kind: "sent",
@@ -1106,132 +1152,6 @@ describe("assistant execution context normalization", () => {
         userEnvKeys: [],
       },
     });
-  });
-});
-
-describe("assistant system prompt seam", () => {
-  it("renders the local prompt variant with hosted device and first-turn guidance", () => {
-    const prompt = buildAssistantSystemPrompt({
-      allowSensitiveHealthContext: true,
-      assistantCliContract: "CLI contract block.",
-      assistantCommandAccessMode: "bound-tools",
-      assistantHostedDeviceConnectAvailable: true,
-      assistantKnowledgeToolsAvailable: true,
-      channel: null,
-      cliAccess: {
-        rawCommand: "vault-cli",
-        setupCommand: "murph",
-      },
-      currentLocalDate: "2026-04-08",
-      currentTimeZone: "America/Los_Angeles",
-      firstTurnCheckIn: true,
-    });
-
-    expect(prompt).toContain(
-      "You are Murph, a health assistant bound to one active vault for this session."
-    );
-    expect(prompt).toContain(
-      "The active vault is already selected through Murph runtime bindings and tools. Unless the user explicitly targets another vault, operate on this bound vault only."
-    );
-    expect(prompt).toContain(
-      "The user's canonical timezone for this vault is America/Los_Angeles."
-    );
-    expect(prompt).toContain("Today's date for the user is 2026-04-08.");
-    expect(prompt).toContain(
-      "When the user wants help connecting a hosted wearable provider such as WHOOP, Oura, or Garmin, use `murph.device.connect` first"
-    );
-    expect(prompt).toContain(
-      "Inspect or change Murph vault/runtime state through `vault.cli.run`."
-    );
-    expect(prompt).toContain(
-      "For the user's saved current-state context, prefer `vault-cli memory show`, targeted `vault-cli knowledge ...` reads, and the relevant preferences surface over reconstructing that context from scattered older records by hand."
-    );
-    expect(prompt).toContain(
-      "When you reference evidence from the vault in local chat, mention relative file paths when practical."
-    );
-    expect(prompt).toContain(ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE);
-    expect(prompt).toContain(
-      "For wiki work, prefer the dedicated knowledge surface for this route over generic CLI execution."
-    );
-    expect(prompt).toContain(
-      "Scheduled assistant automation commands are exposed in this session through `vault.cli.run`."
-    );
-    expect(prompt).toContain("CLI guidance block.");
-    expect(prompt).toContain("CLI contract block.");
-    expect(seamMocks.buildAssistantCliGuidanceText).toHaveBeenCalledWith({
-      rawCommand: "vault-cli",
-      setupCommand: "murph",
-    });
-  });
-
-  it("renders the user-facing prompt variant when local tools are unavailable", () => {
-    const prompt = buildAssistantSystemPrompt({
-      allowSensitiveHealthContext: false,
-      assistantCliContract: null,
-      assistantCommandAccessMode: "none",
-      assistantHostedDeviceConnectAvailable: false,
-      assistantKnowledgeToolsAvailable: false,
-      channel: "telegram",
-      cliAccess: {
-        rawCommand: "vault-cli",
-        setupCommand: "murph",
-      },
-      currentLocalDate: "2026-04-08",
-      currentTimeZone: "America/Los_Angeles",
-      firstTurnCheckIn: false,
-    });
-
-    expect(prompt).toContain(
-      "This conversation is not private enough for broad sensitive health context."
-    );
-    expect(prompt).toContain(
-      "You are replying through a user-facing messaging channel, not the local terminal chat UI."
-    );
-    expect(prompt).toContain(
-      "Scheduled assistant automation commands are not exposed in this session."
-    );
-    expect(prompt).toContain(
-      "For wiki work, use `vault-cli knowledge ...` directly in this turn rather than assuming a dedicated knowledge surface is callable."
-    );
-    expect(prompt).not.toContain(ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE);
-    expect(prompt).not.toContain(
-      "When you reference evidence from the vault in local chat, mention relative file paths when practical."
-    );
-    expect(prompt).not.toContain("CLI contract block.");
-  });
-
-  it("renders direct CLI guidance for privileged local routes without bound tools", () => {
-    const prompt = buildAssistantSystemPrompt({
-      allowSensitiveHealthContext: true,
-      assistantCliContract: null,
-      assistantCommandAccessMode: "direct-cli",
-      assistantHostedDeviceConnectAvailable: false,
-      assistantKnowledgeToolsAvailable: false,
-      channel: null,
-      cliAccess: {
-        rawCommand: "vault-cli",
-        setupCommand: "murph",
-      },
-      currentLocalDate: "2026-04-08",
-      currentTimeZone: "America/Los_Angeles",
-      firstTurnCheckIn: false,
-    });
-
-    expect(prompt).toContain(
-      "Inspect or change Murph vault/runtime state directly through `vault-cli` in this privileged local route."
-    );
-    expect(prompt).toContain(
-      "Use `vault-cli` directly with exact command semantics instead of guessing command shapes."
-    );
-    expect(prompt).toContain(
-      "Scheduled assistant automation commands are available directly through `vault-cli automation ...` in this privileged local route."
-    );
-    expect(prompt).not.toContain(
-      "Scheduled assistant automation commands are not exposed in this session."
-    );
-    expect(prompt).not.toContain(
-      "Scheduled assistant automation commands are exposed in this session through `vault.cli.run`."
-    );
   });
 });
 
@@ -1376,7 +1296,7 @@ describe("assistant turn finalizer seam", () => {
       adapter: "openai-compatible" as const,
       apiKeyEnv: null,
       endpoint: null,
-      headers: undefined,
+      headers: null,
       model: null,
       providerName: null,
       reasoningEffort: null,
@@ -1441,7 +1361,6 @@ function createDeliveryError(
   return {
     code: "ASSISTANT_DELIVERY_FAILED",
     message: "delivery failed",
-    retryable: false,
     ...overrides,
   };
 }
@@ -1449,20 +1368,17 @@ function createDeliveryError(
 function createProviderOptions(
   overrides: Partial<AssistantProviderSessionOptions> = {}
 ): AssistantProviderSessionOptions {
-  return {
+  return serializeAssistantProviderSessionOptions({
+    provider: "openai-compatible",
     apiKeyEnv: "OPENAI_API_KEY",
-    approvalPolicy: null,
     baseUrl: "https://api.example.test/v1",
-    codexHome: null,
     headers: null,
     model: "gpt-4.1",
-    oss: false,
-    profile: null,
     providerName: "murph-openai",
     reasoningEffort: "high",
-    sandbox: null,
+    zeroDataRetention: null,
     ...overrides,
-  };
+  });
 }
 
 function createRoute(input?: {
@@ -1489,18 +1405,34 @@ function createAssistantSession(input?: {
   turnCount?: number;
 }): AssistantSession {
   const providerOptions = input?.providerOptions ?? createProviderOptions();
-  const target = input?.target ?? {
-    adapter: "openai-compatible" as const,
-    apiKeyEnv: providerOptions.apiKeyEnv,
-    endpoint: providerOptions.baseUrl,
-    headers:
-      providerOptions.headers === null || providerOptions.headers === undefined
-        ? undefined
-        : providerOptions.headers,
-    model: providerOptions.model,
-    providerName: providerOptions.providerName,
-    reasoningEffort: providerOptions.reasoningEffort,
-  };
+  const target =
+    input?.target ??
+    createAssistantModelTarget({
+      provider:
+        providerOptions.baseUrl ||
+        providerOptions.apiKeyEnv ||
+        providerOptions.providerName ||
+        providerOptions.headers ||
+        providerOptions.zeroDataRetention === true
+          ? "openai-compatible"
+          : "codex-cli",
+      approvalPolicy: providerOptions.approvalPolicy,
+      apiKeyEnv: providerOptions.apiKeyEnv ?? null,
+      baseUrl: providerOptions.baseUrl ?? null,
+      codexHome: providerOptions.codexHome ?? null,
+      headers: providerOptions.headers ?? null,
+      model: providerOptions.model,
+      oss: providerOptions.oss,
+      profile: providerOptions.profile,
+      providerName: providerOptions.providerName ?? null,
+      reasoningEffort: providerOptions.reasoningEffort ?? null,
+      sandbox: providerOptions.sandbox,
+      zeroDataRetention: providerOptions.zeroDataRetention ?? null,
+    });
+
+  if (!target) {
+    throw new Error("Expected assistant session target.");
+  }
 
   return {
     alias: null,
@@ -1542,31 +1474,62 @@ function createAssistantSession(input?: {
 
 function createSharedPlan(input?: {
   conversationPolicy?: {
-    audience: {
+    audience: Partial<{
       actorId: string | null;
-      bindingDelivery: string | null;
+      bindingDelivery: AssistantBindingDelivery | null;
       channel: string | null;
+      deliveryPolicy: "binding-target-only" | "explicit-target-override" | "not-requested";
+      effectiveThreadIsDirect: boolean | null;
       explicitTarget: string | null;
       identityId: string | null;
       replyToMessageId: string | null;
       threadId: string | null;
       threadIsDirect: boolean | null;
-    } | null;
+    }> | null;
   };
   persistUserPromptOnFailure?: boolean;
-}) {
+}): AssistantTurnSharedPlan {
   return {
     allowSensitiveHealthContext: true,
     cliAccess: {
+      env: {},
       rawCommand: "vault-cli" as const,
       setupCommand: "murph",
     },
-    conversationPolicy: input?.conversationPolicy ?? {
-      audience: null,
+    conversationPolicy: {
+      allowSensitiveHealthContext: true,
+      audience:
+        input?.conversationPolicy?.audience
+          ? {
+              actorId: null,
+              bindingDelivery: null,
+              channel: null,
+              deliveryPolicy: "not-requested",
+              effectiveThreadIsDirect: null,
+              explicitTarget: null,
+              identityId: null,
+              replyToMessageId: null,
+              threadId: null,
+              threadIsDirect: null,
+              ...input.conversationPolicy.audience,
+            }
+          : {
+          actorId: null,
+          bindingDelivery: null,
+          channel: null,
+          deliveryPolicy: "not-requested",
+          effectiveThreadIsDirect: null,
+          explicitTarget: null,
+          identityId: null,
+          replyToMessageId: null,
+          threadId: null,
+          threadIsDirect: null,
+        },
+      operatorAuthority: "direct-operator",
     },
     firstTurnCheckInEligible: false,
     firstTurnCheckInStateDocIds: [],
-    operatorAuthority: "user",
+    operatorAuthority: "direct-operator",
     persistUserPromptOnFailure: input?.persistUserPromptOnFailure ?? false,
     requestedWorkingDirectory: "/tmp/assistant-service-runtime",
   };
@@ -1579,52 +1542,42 @@ function createProviderResult(input?: {
   response?: string;
   route?: ResolvedAssistantFailoverRoute;
   session?: AssistantSession;
-  usage?: {
-    apiKeyEnv?: string | null;
-    baseUrl?: string | null;
-    cacheWriteTokens?: number | null;
-    cachedInputTokens?: number | null;
-    inputTokens?: number | null;
-    outputTokens?: number | null;
-    providerMetadataJson?: string | null;
-    providerName?: string | null;
-    providerRequestId?: string | null;
-    rawUsageJson?: string | null;
-    reasoningTokens?: number | null;
-    requestedModel?: string | null;
-    servedModel?: string | null;
-    totalTokens?: number | null;
-  } | null;
-}) {
+  usage?: AssistantProviderUsage | null;
+}): ExecutedAssistantProviderTurnResult {
   const session = input?.session ?? createAssistantSession();
+  const defaultUsage: AssistantProviderUsage = {
+    apiKeyEnv: null,
+    baseUrl: null,
+    cacheWriteTokens: null,
+    cachedInputTokens: null,
+    inputTokens: 5,
+    outputTokens: 8,
+    providerMetadataJson: null,
+    providerName: null,
+    providerRequestId: null,
+    rawUsageJson: null,
+    reasoningTokens: null,
+    requestedModel: null,
+    servedModel: null,
+    totalTokens: 13,
+  };
   return {
-    activityLabels: [],
     attemptCount: input?.attemptCount ?? 1,
     provider: "openai-compatible" as const,
     providerOptions: input?.providerOptions ?? createProviderOptions(),
     providerSessionId: input?.providerSessionId ?? "provider-session-1",
+    rawEvents: [],
     response: input?.response ?? "provider response",
     route: input?.route ?? createRoute(),
     session,
+    stderr: "",
+    stdout: "",
     usage:
       input?.usage === undefined
-        ? {
-            apiKeyEnv: null,
-            baseUrl: null,
-            cacheWriteTokens: null,
-            cachedInputTokens: null,
-            inputTokens: 5,
-            outputTokens: 8,
-            providerMetadataJson: null,
-            providerName: null,
-            providerRequestId: null,
-            rawUsageJson: null,
-            reasoningTokens: null,
-            requestedModel: null,
-            servedModel: null,
-            totalTokens: 13,
-          }
-        : input.usage,
+        ? defaultUsage
+        : input.usage === null
+          ? null
+          : { ...defaultUsage, ...input.usage },
     workingDirectory: "/tmp/assistant-service-runtime",
   };
 }

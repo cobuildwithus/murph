@@ -93,7 +93,7 @@ function buildArtifact(overrides: Partial<ParserArtifactRef> = {}): ParserArtifa
 }
 
 function createRuntimeStore(
-  capture: ParserRuntimeStore["getCapture"] extends (...args: unknown[]) => infer T ? T : never,
+  capture: ReturnType<ParserRuntimeStore["getCapture"]>,
 ): ParserRuntimeStore {
   const appliedResult: AttachmentParseJobFinalizeResult = {
     applied: true,

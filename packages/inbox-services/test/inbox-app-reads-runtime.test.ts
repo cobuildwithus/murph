@@ -8,10 +8,15 @@ import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { afterEach, test, vi } from 'vitest'
 
 import type {
+  ConfiguredParserRegistryRuntime,
   InboxAppEnvironment,
+  InboxParserServiceRuntime,
   InboxConnectorConfig,
   InboxPaths,
   InboxRuntimeConfig,
+  InboxRuntimeModule,
+  ParserDoctorRuntimeReport,
+  ParserRuntimeDrainResult,
   ParsersRuntimeModule,
   PollConnector,
   RuntimeAttachmentParseJobRecord,
@@ -133,12 +138,13 @@ async function createTempPaths(): Promise<InboxPaths> {
 function createAttachment(
   overrides: Partial<RuntimeAttachmentRecord> & Pick<RuntimeAttachmentRecord, 'kind' | 'ordinal'>,
 ): RuntimeAttachmentRecord {
+  const { kind, ordinal, ...rest } = overrides
   return {
     attachmentId: 'attachment-1',
-    ordinal: overrides.ordinal,
-    kind: overrides.kind,
+    kind,
+    ordinal,
     parseState: null,
-    ...overrides,
+    ...rest,
   }
 }
 
@@ -245,16 +251,89 @@ function createRuntimeStore(input: {
 }
 
 function createParsersModule(
-  drain: ReturnType<typeof vi.fn>,
+  drain: (
+    input?: { attachmentId?: string; captureId?: string; maxJobs?: number },
+  ) => Promise<ParserRuntimeDrainResult[]>,
 ): ParsersRuntimeModule {
+  const doctor: ParserDoctorRuntimeReport = {
+    configPath: '/tmp/parser-toolchain.json',
+    discoveredAt: '2026-04-08T00:00:00.000Z',
+    tools: {
+      ffmpeg: {
+        available: true,
+        command: '/usr/bin/ffmpeg',
+        reason: 'configured',
+        source: 'config',
+      },
+      pdftotext: {
+        available: true,
+        command: '/usr/bin/pdftotext',
+        reason: 'configured',
+        source: 'config',
+      },
+      whisper: {
+        available: true,
+        command: '/usr/bin/whisper',
+        modelPath: '/tmp/model.bin',
+        reason: 'configured',
+        source: 'config',
+      },
+    },
+  }
+  const registry: ConfiguredParserRegistryRuntime = {
+    doctor,
+    ffmpeg: {
+      commandCandidates: ['/usr/bin/ffmpeg'],
+    },
+    registry: { id: 'registry' },
+  }
+  const service: InboxParserServiceRuntime = {
+    drain,
+  }
+
   return {
-    createConfiguredParserRegistry: vi.fn(async () => ({
-      ffmpeg: '/usr/bin/ffmpeg',
-      registry: { id: 'registry' },
+    createConfiguredParserRegistry: vi.fn(async () => registry),
+    createInboxParserService: vi.fn(() => service),
+    discoverParserToolchain: vi.fn(async () => doctor),
+    writeParserToolchainConfig: vi.fn(async (input: { vaultRoot: string }) => ({
+      config: {
+        updatedAt: '2026-04-08T00:00:00.000Z',
+      },
+      configPath: path.join(input.vaultRoot, 'derived', 'inbox', 'parser-toolchain.json'),
     })),
-    createInboxParserService: vi.fn(() => ({
-      drain,
-    })),
+  }
+}
+
+function createInboxModule(
+  overrides: Partial<InboxRuntimeModule> = {},
+): InboxRuntimeModule {
+  return {
+    async createInboxPipeline() {
+      throw new Error('not used in reads/runtime tests')
+    },
+    createAgentmailApiPollDriver() {
+      throw new Error('not used in reads/runtime tests')
+    },
+    createEmailPollConnector() {
+      throw new Error('not used in reads/runtime tests')
+    },
+    createLinqWebhookConnector() {
+      throw new Error('not used in reads/runtime tests')
+    },
+    createTelegramBotApiPollDriver() {
+      throw new Error('not used in reads/runtime tests')
+    },
+    createTelegramPollConnector() {
+      throw new Error('not used in reads/runtime tests')
+    },
+    async ensureInboxVault() {},
+    async openInboxRuntime() {
+      throw new Error('not used in reads/runtime tests')
+    },
+    async rebuildRuntimeFromVault() {},
+    async runInboxDaemon() {},
+    async runInboxDaemonWithParsers() {},
+    ...overrides,
   }
 }
 
@@ -371,14 +450,16 @@ test('read ops cover list, attachment, parse, reparse, show, and search flows', 
     jobs: parseJobs,
     requeueCount: 2,
   })
-  const parserDrain = vi.fn(async () => [
+  const parserDrain: (
+    input?: { attachmentId?: string; captureId?: string; maxJobs?: number },
+  ) => Promise<ParserRuntimeDrainResult[]> = vi.fn(async () => [
     {
-      errorCode: null,
-      errorMessage: null,
+      errorCode: undefined,
+      errorMessage: undefined,
       job: parseJobs[0],
       manifestPath: path.join(paths.absoluteVaultRoot, 'derived/inbox/job-1.json'),
       providerId: 'parser-1',
-      status: 'succeeded',
+      status: 'succeeded' as const,
     },
   ])
   const env = createEnv({
@@ -408,7 +489,6 @@ test('read ops cover list, attachment, parse, reparse, show, and search flows', 
   const listed = await ops.list({
     requestId: null,
     sourceId: 'telegram-main',
-    text: undefined,
     vault: paths.absoluteVaultRoot,
   })
   assert.equal(listed.items.length, 1)
@@ -630,19 +710,21 @@ test('runtime ops parse, requeue, status, and stop stay deterministic', async ()
     ],
     jobs: [parseJob],
   })
-  const parserDrain = vi.fn(async () => [
+  const parserDrain: (
+    input?: { attachmentId?: string; captureId?: string; maxJobs?: number },
+  ) => Promise<ParserRuntimeDrainResult[]> = vi.fn(async () => [
     {
       errorCode: 'PARSE_FAILED',
       errorMessage: 'bad input',
       job: parseJob,
-      manifestPath: null,
-      providerId: null,
-      status: 'failed',
+      manifestPath: undefined,
+      providerId: undefined,
+      status: 'failed' as const,
     },
   ])
-  const inboxModule = {
+  const inboxModule = createInboxModule({
     openInboxRuntime: vi.fn(async () => runtime),
-  }
+  })
   const env = createEnv({
     loadInbox: async () => inboxModule,
     requireParsers: vi.fn(async () => createParsersModule(parserDrain)),
@@ -837,21 +919,24 @@ test('runtime backfill imports captures, updates cursors, and drains parsers onl
   const pipeline = {
     close: vi.fn(),
     processCapture,
+    runtime,
   }
-  const parserDrain = vi.fn(async () => [
+  const parserDrain: (
+    input?: { attachmentId?: string; captureId?: string; maxJobs?: number },
+  ) => Promise<ParserRuntimeDrainResult[]> = vi.fn(async () => [
     {
-      errorCode: null,
-      errorMessage: null,
+      errorCode: undefined,
+      errorMessage: undefined,
       job: parseJob,
       manifestPath: path.join(paths.absoluteVaultRoot, 'derived/inbox/backfill.json'),
       providerId: 'parser-1',
-      status: 'succeeded',
+      status: 'succeeded' as const,
     },
   ])
-  const inboxModule = {
+  const inboxModule = createInboxModule({
     createInboxPipeline: vi.fn(async () => pipeline),
     openInboxRuntime: vi.fn(async () => runtime),
-  }
+  })
 
   stateMocks.ensureInitialized.mockResolvedValue(paths)
   stateMocks.readConfig.mockResolvedValue(createConfig([connector]))
@@ -935,10 +1020,11 @@ test('runtime run rejects empty connector sets before daemon startup', async () 
 
   const ops = createInboxRuntimeOps(
     createEnv({
-      loadInbox: async () => ({
-        openInboxRuntime: vi.fn(),
-        runInboxDaemonWithParsers: vi.fn(),
-      }),
+      loadInbox: async () =>
+        createInboxModule({
+          openInboxRuntime: vi.fn(),
+          runInboxDaemonWithParsers: vi.fn(),
+        }),
       requireParsers: vi.fn(async () => createParsersModule(vi.fn())),
     }),
   )
@@ -981,10 +1067,11 @@ test('runtime run rejects pre-existing daemon state owned by another pid', async
 
   const ops = createInboxRuntimeOps(
     createEnv({
-      loadInbox: async () => ({
-        openInboxRuntime: vi.fn(),
-        runInboxDaemonWithParsers: vi.fn(),
-      }),
+      loadInbox: async () =>
+        createInboxModule({
+          openInboxRuntime: vi.fn(),
+          runInboxDaemonWithParsers: vi.fn(),
+        }),
       requireParsers: vi.fn(async () => createParsersModule(vi.fn())),
     }),
   )
@@ -1037,10 +1124,11 @@ test('runtime run skips unsupported imessage connectors and surfaces no-supporte
   const ops = createInboxRuntimeOps(
     createEnv({
       getPlatform: () => 'linux',
-      loadInbox: async () => ({
-        openInboxRuntime: vi.fn(),
-        runInboxDaemonWithParsers: vi.fn(),
-      }),
+      loadInbox: async () =>
+        createInboxModule({
+          openInboxRuntime: vi.fn(),
+          runInboxDaemonWithParsers: vi.fn(),
+        }),
       requireParsers: vi.fn(async () => createParsersModule(vi.fn())),
     }),
   )
@@ -1068,12 +1156,12 @@ test('runtime run writes failed daemon state when the daemon surface throws', as
     source: 'telegram',
   })
   const cleanup = vi.fn()
-  const inboxModule = {
+  const inboxModule = createInboxModule({
     openInboxRuntime: vi.fn(async () => createRuntimeStore({ captures: [] }).runtime),
     runInboxDaemonWithParsers: vi.fn(async () => {
       throw new Error('daemon failed')
     }),
-  }
+  })
 
   stateMocks.ensureInitialized.mockResolvedValue(paths)
   stateMocks.readConfig.mockResolvedValue(createConfig([connector]))
@@ -1110,12 +1198,7 @@ test('runtime run writes failed daemon state when the daemon surface throws', as
   const ops = createInboxRuntimeOps(
     createEnv({
       loadInbox: async () => inboxModule,
-      requireParsers: vi.fn(async () => ({
-        createConfiguredParserRegistry: vi.fn(async () => ({
-          ffmpeg: '/usr/bin/ffmpeg',
-          registry: { id: 'registry' },
-        })),
-      })),
+      requireParsers: vi.fn(async () => createParsersModule(vi.fn(async () => []))),
     }),
   )
 
@@ -1143,23 +1226,23 @@ test('runtime run instruments connector backfill/watch events and records daemon
   const onEvent = vi.fn()
   const cleanup = vi.fn()
   const abortController = new AbortController()
-  const inboxModule = {
+  const inboxModule = createInboxModule({
     openInboxRuntime: vi.fn(async () => createRuntimeStore({ captures: [] }).runtime),
     runInboxDaemonWithParsers: vi.fn(async ({ connectors, signal }) => {
-      await connectors[0]?.backfill?.(null, async (capture) => ({
+      await connectors[0]?.backfill?.(null, async (capture: RuntimeCaptureRecordInput) => ({
         captureId: capture.externalId,
         deduped: capture.externalId === 'capture-deduped',
       }))
       await connectors[0]?.watch?.(
         null,
-        async (capture) => ({
+        async (capture: RuntimeCaptureRecordInput) => ({
           captureId: capture.externalId,
           deduped: false,
         }),
         signal,
       )
     }),
-  }
+  })
 
   stateMocks.ensureInitialized.mockResolvedValue(paths)
   stateMocks.readConfig.mockResolvedValue(createConfig([connector]))
@@ -1223,12 +1306,7 @@ test('runtime run instruments connector backfill/watch events and records daemon
   const ops = createInboxRuntimeOps(
     createEnv({
       loadInbox: async () => inboxModule,
-      requireParsers: vi.fn(async () => ({
-        createConfiguredParserRegistry: vi.fn(async () => ({
-          ffmpeg: '/usr/bin/ffmpeg',
-          registry: { id: 'registry' },
-        })),
-      })),
+      requireParsers: vi.fn(async () => createParsersModule(vi.fn(async () => []))),
     }),
   )
 
@@ -1264,12 +1342,12 @@ test('runtime run respects provided abort signals and records signal shutdown me
     source: 'telegram',
   })
   const abortController = new AbortController()
-  const inboxModule = {
+  const inboxModule = createInboxModule({
     openInboxRuntime: vi.fn(async () => createRuntimeStore({ captures: [] }).runtime),
     runInboxDaemonWithParsers: vi.fn(async () => {
       abortController.abort()
     }),
-  }
+  })
 
   stateMocks.ensureInitialized.mockResolvedValue(paths)
   stateMocks.readConfig.mockResolvedValue(createConfig([connector]))
@@ -1302,12 +1380,7 @@ test('runtime run respects provided abort signals and records signal shutdown me
   const ops = createInboxRuntimeOps(
     createEnv({
       loadInbox: async () => inboxModule,
-      requireParsers: vi.fn(async () => ({
-        createConfiguredParserRegistry: vi.fn(async () => ({
-          ffmpeg: '/usr/bin/ffmpeg',
-          registry: { id: 'registry' },
-        })),
-      })),
+      requireParsers: vi.fn(async () => createParsersModule(vi.fn(async () => []))),
     }),
   )
 

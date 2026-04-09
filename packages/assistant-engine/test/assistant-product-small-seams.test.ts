@@ -7,6 +7,8 @@ import type {
   AssistantProviderSessionOptions,
   AssistantSession,
 } from '@murphai/operator-config/assistant-cli-contracts'
+import { createAssistantModelTarget } from '@murphai/operator-config/assistant-backend'
+import { serializeAssistantProviderSessionOptions } from '@murphai/operator-config/assistant/provider-config'
 import {
   buildDailyFoodCronExpression,
   buildDailyFoodCronJobName,
@@ -124,6 +126,7 @@ describe('assistant product small seams', () => {
         binding: {
           actorId: 'actor-1',
           channel: 'email',
+          conversationKey: null,
           delivery: {
             kind: 'participant',
             target: 'actor-1',
@@ -162,6 +165,7 @@ describe('assistant product small seams', () => {
         binding: {
           actorId: 'actor-1',
           channel: 'telegram',
+          conversationKey: null,
           delivery: null,
           identityId: 'identity-1',
           threadId: 'group-thread',
@@ -222,6 +226,7 @@ describe('assistant product small seams', () => {
         binding: {
           actorId: ' actor-2 ',
           channel: ' email ',
+          conversationKey: null,
           delivery: {
             kind: 'participant',
             target: 'actor-2',
@@ -252,6 +257,7 @@ describe('assistant product small seams', () => {
         binding: {
           actorId: 'actor-3',
           channel: 'telegram',
+          conversationKey: null,
           delivery: {
             kind: 'thread',
             target: 'thread-3',
@@ -1549,20 +1555,17 @@ async function loadFirstContactWelcomeModule(input: {
 function createProviderOptions(
   overrides: Partial<AssistantProviderSessionOptions> = {},
 ): AssistantProviderSessionOptions {
-  return {
+  return serializeAssistantProviderSessionOptions({
+    provider: 'openai-compatible',
     apiKeyEnv: 'OPENAI_API_KEY',
-    approvalPolicy: null,
     baseUrl: 'https://api.example.test/v1',
-    codexHome: null,
     headers: null,
     model: 'gpt-4.1',
-    oss: false,
-    profile: null,
     providerName: 'murph-openai',
     reasoningEffort: 'high',
-    sandbox: null,
+    zeroDataRetention: null,
     ...overrides,
-  }
+  })
 }
 
 function createAssistantSession(input?: {
@@ -1574,18 +1577,35 @@ function createAssistantSession(input?: {
 }): AssistantSession {
   const providerOptions = input?.providerOptions ?? createProviderOptions()
   const target: AssistantSession['target'] =
-    input?.target ?? {
-      adapter: 'openai-compatible',
-      apiKeyEnv: providerOptions.apiKeyEnv,
-      endpoint: providerOptions.baseUrl,
-      headers:
-        providerOptions.headers === null || providerOptions.headers === undefined
-          ? undefined
-          : providerOptions.headers,
-      model: providerOptions.model,
-      providerName: providerOptions.providerName,
-      reasoningEffort: providerOptions.reasoningEffort,
-    }
+    input?.target ??
+    (() => {
+      const resolvedTarget = createAssistantModelTarget({
+        provider:
+          providerOptions.baseUrl ||
+          providerOptions.apiKeyEnv ||
+          providerOptions.providerName ||
+          providerOptions.headers ||
+          providerOptions.zeroDataRetention === true
+            ? 'openai-compatible'
+            : 'codex-cli',
+        approvalPolicy: providerOptions.approvalPolicy,
+        apiKeyEnv: providerOptions.apiKeyEnv ?? null,
+        baseUrl: providerOptions.baseUrl ?? null,
+        codexHome: providerOptions.codexHome ?? null,
+        headers: providerOptions.headers ?? null,
+        model: providerOptions.model,
+        oss: providerOptions.oss,
+        profile: providerOptions.profile,
+        providerName: providerOptions.providerName ?? null,
+        reasoningEffort: providerOptions.reasoningEffort ?? null,
+        sandbox: providerOptions.sandbox,
+        zeroDataRetention: providerOptions.zeroDataRetention ?? null,
+      })
+      if (!resolvedTarget) {
+        throw new Error('Expected assistant session target.')
+      }
+      return resolvedTarget
+    })()
 
   return {
     alias: null,
@@ -1618,7 +1638,6 @@ function createDeliveryError(
   return {
     code: 'ASSISTANT_DELIVERY_FAILED',
     message: 'delivery failed',
-    retryable: false,
     ...overrides,
   }
 }

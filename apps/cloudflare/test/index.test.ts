@@ -5,12 +5,13 @@ import path from "node:path";
 import { afterEach, describe as baseDescribe, expect, it, vi } from "vitest";
 
 import { ContainerProxy as PackageContainerProxy } from "@cloudflare/containers";
+import type { HostedExecutionDispatchRequest } from "@murphai/hosted-execution";
 import { buildHostedStorageAad, deriveHostedStorageOpaqueId } from "../src/crypto-context.ts";
 import {
   createHostedVerifiedEmailUserEnv,
   parseHostedEmailThreadTarget,
-  type HostedExecutionDispatchRequest,
 } from "@murphai/runtime-state";
+import type { HostedAssistantRuntimeJobResult } from "@murphai/assistant-runtime";
 import { createHostedUserEnvStore } from "../src/bundle-store.ts";
 import { writeEncryptedR2Json } from "../src/crypto.ts";
 import { readHostedExecutionEnvironment } from "../src/env.ts";
@@ -21,6 +22,11 @@ import { createHostedShareStore } from "../src/share-store.ts";
 import { hostedArtifactObjectKey } from "../src/storage-paths.ts";
 import { createHostedUserKeyStore } from "../src/user-key-store.ts";
 import { encodeHostedUserEnvPayload } from "../src/user-env.ts";
+import type {
+  UserRunnerDurableObjectStubLike,
+  WorkerEnvironmentSource,
+} from "../src/worker-routes/shared.ts";
+import type { HostedExecutionContainerNamespaceLike } from "../src/runner-container.ts";
 import { handleRunnerOutboundRequest } from "../src/runner-outbound.ts";
 import { createHostedExecutionTestEnv } from "./hosted-execution-fixtures";
 import { createTestSqlStorage } from "./sql-storage.ts";
@@ -1097,19 +1103,20 @@ describe("cloudflare worker routes", () => {
       lastMessagePreview: "Please send the latest PDF.",
       messageCount: 2,
       route: {
-        channel: "linq",
-        directness: "direct",
+        channel: "linq" as const,
+        directness: "direct" as const,
         identityId: "default",
         participantId: "contact:alex",
         reply: {
-          kind: "thread",
+          kind: "thread" as const,
           target: "chat_123",
         },
         threadId: "chat_123",
       },
-      schema: "murph.gateway-conversation.v1",
+      schema: "murph.gateway-conversation.v1" as const,
       sessionKey: createGatewayConversationSessionKeyForTests(routeToken),
       title: "Lab thread",
+      titleSource: "thread-title" as const,
     });
     const env = createWorkerEnv(stub, {
       HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
@@ -1160,19 +1167,20 @@ describe("cloudflare worker routes", () => {
       lastMessagePreview: "Please send the latest PDF.",
       messageCount: 2,
       route: {
-        channel: "linq",
-        directness: "direct",
+        channel: "linq" as const,
+        directness: "direct" as const,
         identityId: "default",
         participantId: "contact:alex",
         reply: {
-          kind: "thread",
+          kind: "thread" as const,
           target: "chat_123",
         },
         threadId: "chat_123",
       },
-      schema: "murph.gateway-conversation.v1",
+      schema: "murph.gateway-conversation.v1" as const,
       sessionKey: createGatewayConversationSessionKeyForTests(routeToken),
       title: "Lab thread",
+      titleSource: "thread-title" as const,
     });
     const env = createWorkerEnv(stub, {
       HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
@@ -1210,19 +1218,20 @@ describe("cloudflare worker routes", () => {
       lastMessagePreview: "Please send the latest PDF.",
       messageCount: 2,
       route: {
-        channel: "linq",
-        directness: "direct",
+        channel: "linq" as const,
+        directness: "direct" as const,
         identityId: "default",
         participantId: "contact:alex",
         reply: {
-          kind: "thread",
+          kind: "thread" as const,
           target: "chat_123",
         },
         threadId: "chat_123",
       },
-      schema: "murph.gateway-conversation.v1",
+      schema: "murph.gateway-conversation.v1" as const,
       sessionKey: createGatewayConversationSessionKeyForTests(routeToken),
       title: "Lab thread",
+      titleSource: "thread-title" as const,
     });
     const env = createWorkerEnv(stub, {
       HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
@@ -2170,35 +2179,34 @@ describe("cloudflare worker routes", () => {
 
 function createWorkerEnv(
   userRunnerStub: UserRunnerStub = createUserRunnerStub(),
-  overrides: Partial<Record<string, unknown>> = {},
-) {
+  overrides: Partial<WorkerEnvironmentSource & Record<string, unknown>> = {},
+): WorkerEnvironmentSource & { __bucketStore: ReturnType<typeof createBucketStore> } {
   const bucketStore = createBucketStore();
-  const defaultUserRunnerNamespace = {
+  const storage = createStorage();
+  const wrappedUserRunnerStubs = new Map<string, UserRunnerStub>();
+  const defaultUserRunnerNamespace: WorkerEnvironmentSource["USER_RUNNER"] = {
     getByName(userId: string) {
       return getOrCreateWrappedUserRunnerStub(userId, userRunnerStub);
     },
   };
-  const userRunnerNamespace = "USER_RUNNER" in overrides
-    ? overrides.USER_RUNNER
-    : defaultUserRunnerNamespace;
-  const wrappedUserRunnerStubs = new Map<string, UserRunnerStub>();
-  const env = {
+  const userRunnerNamespace: WorkerEnvironmentSource["USER_RUNNER"] = overrides.USER_RUNNER
+    ?? defaultUserRunnerNamespace;
+  const env: WorkerEnvironmentSource & {
+    __bucketStore: ReturnType<typeof createBucketStore>;
+  } & Record<string, unknown> = {
     __bucketStore: bucketStore,
-    ...createHostedExecutionTestEnv({
-      BUNDLES: bucketStore.api,
-      RUNNER_CONTAINER: createStorage().runnerContainerNamespace,
-    }),
+    ...createHostedExecutionTestEnv(),
+    BUNDLES: bucketStore.api,
+    RUNNER_CONTAINER: storage.runnerContainerNamespace,
     ...overrides,
-  };
-
-  return {
-    ...env,
     USER_RUNNER: {
       getByName(userId: string) {
-        return (userRunnerNamespace as { getByName(boundUserId: string): UserRunnerStub }).getByName(userId);
+        return userRunnerNamespace.getByName(userId);
       },
     },
   };
+
+  return env;
 
   function getOrCreateWrappedUserRunnerStub(userId: string, seedStub: UserRunnerStub): UserRunnerStub {
     const existing = wrappedUserRunnerStubs.get(userId);
@@ -2318,7 +2326,11 @@ function createBucketStore(input: {
 
         return {
           async arrayBuffer() {
-            return Buffer.from(value, "utf8");
+            const bytes = Buffer.from(value, "utf8");
+            return bytes.buffer.slice(
+              bytes.byteOffset,
+              bytes.byteOffset + bytes.byteLength,
+            );
           },
         };
       },
@@ -2362,7 +2374,7 @@ function createStorage() {
 
     return new Response("Not found", { status: 404 });
   });
-  const runnerContainerNamespace = {
+  const runnerContainerNamespace: HostedExecutionContainerNamespaceLike = {
     getByName() {
       return {
         async destroyInstance() {
@@ -2373,7 +2385,9 @@ function createStorage() {
             method: "POST",
           }));
         },
-        async invoke(payload: Record<string, unknown>) {
+        async invoke(
+          payload: Parameters<ReturnType<HostedExecutionContainerNamespaceLike["getByName"]>["invoke"]>[0],
+        ): Promise<HostedAssistantRuntimeJobResult> {
           const response = await runnerContainerFetch(new Request("https://runner.internal/internal/invoke", {
             body: JSON.stringify(payload),
             headers: {
@@ -2451,14 +2465,14 @@ function createDispatch(eventId: string): HostedExecutionDispatchRequest {
 
 function createRunnerSuccessPayload() {
   return {
-    bundles: {
-      agentState: null,
-      vault: null,
-    },
+    assistantDeliveryEffects: [],
+    bundle: null,
+    gatewayProjectionSnapshot: null,
     result: {
       eventsHandled: 1,
       summary: "ok",
     },
+    sideEffects: [],
   };
 }
 
@@ -2680,11 +2694,7 @@ function createUserRunnerDurableObject(
     durableObject: UserRunnerDurableObject;
     storage: ReturnType<typeof createStorage>;
   }>();
-  const env = createHostedExecutionTestEnv({
-    BUNDLES: bucket.api,
-    RUNNER_CONTAINER: createStorage().runnerContainerNamespace,
-    ...overrides,
-  }) as Record<string, unknown>;
+  let env!: WorkerEnvironmentSource & Record<string, unknown>;
 
   const getOrCreateRunnerHarness = (userId: string) => {
     const existing = runnerHarnesses.get(userId);
@@ -2705,20 +2715,24 @@ function createUserRunnerDurableObject(
     runnerHarnesses.set(userId, created);
     return created;
   };
+  env = {
+    ...createHostedExecutionTestEnv(),
+    BUNDLES: bucket.api,
+    RUNNER_CONTAINER: createStorage().runnerContainerNamespace,
+    USER_RUNNER: {
+      getByName(userId: string) {
+        return getOrCreateRunnerHarness(userId).durableObject;
+      },
+    },
+    ...overrides,
+  };
   const defaultHarness = getOrCreateRunnerHarness("member_123");
   env.RUNNER_CONTAINER = defaultHarness.storage.runnerContainerNamespace;
 
   return {
     bucket,
     durableObject: defaultHarness.durableObject,
-    env: {
-      ...env,
-      USER_RUNNER: {
-        getByName(userId: string) {
-          return getOrCreateRunnerHarness(userId).durableObject;
-        },
-      },
-    },
+    env,
     storage: defaultHarness.storage,
   };
 }
@@ -2749,17 +2763,23 @@ function createUserRunnerStub() {
       configuredUserEnvKeys: [],
       userId: "member_123",
     })),
+    deletePendingUsage: vi.fn(async () => {}),
+    deleteStoredDispatchPayload: vi.fn(async () => {}),
     commit: vi.fn(async (input: {
       eventId: string;
     }) => ({
+      assistantDeliveryEffects: [],
       bundleRef: null,
       committedAt: "2026-03-26T12:00:00.000Z",
       eventId: input.eventId,
       finalizedAt: null,
+      gatewayProjectionSnapshot: null,
       result: {
         eventsHandled: 1,
         summary: "ok",
       },
+      sideEffects: [],
+      userId: "member_123",
     })),
     dispatchWithOutcome: vi.fn(async (input: HostedExecutionDispatchRequest) =>
       buildDispatchResultFixture(input.event.userId, input.eventId)),
@@ -2776,70 +2796,78 @@ function createUserRunnerStub() {
       retryingEventId: null,
       userId: input.event.userId,
     })),
-    finalizeCommit: vi.fn(async (input: {
-      eventId: string;
-    }) => ({
-      bundleRef: null,
-      committedAt: "2026-03-26T12:00:00.000Z",
-      eventId: input.eventId,
-      finalizedAt: "2026-03-26T12:00:01.000Z",
-      result: {
-        eventsHandled: 1,
-        summary: "ok",
-      },
-    })),
-    gatewayFetchAttachments: vi.fn(async () => ([{
+    dispatchStoredPayload: vi.fn(async (input: {
+      payload: {
+        dispatch?: HostedExecutionDispatchRequest;
+        dispatchRef?: {
+          eventId: string;
+          userId: string;
+        };
+      };
+    }) => buildDispatchResultFixture(
+      input.payload.dispatch?.event.userId ?? input.payload.dispatchRef?.userId ?? "member_123",
+      input.payload.dispatch?.eventId ?? input.payload.dispatchRef?.eventId ?? "evt_stored",
+    )),
+    gatewayFetchAttachments: vi.fn(async (
+      _input: Parameters<NonNullable<UserRunnerDurableObjectStubLike["gatewayFetchAttachments"]>>[0],
+    ): Promise<Awaited<ReturnType<NonNullable<UserRunnerDurableObjectStubLike["gatewayFetchAttachments"]>>>> => ([{
       attachmentId: "gwca_worker_test",
       byteSize: 3,
       extractedText: null,
       fileName: "labs.pdf",
-      kind: "document",
+      kind: "document" as const,
       messageId: "gwcm_worker_test",
       mime: "application/pdf",
-      parseState: "pending",
-      schema: "murph.gateway-attachment.v1",
+      parseState: "pending" as const,
+      schema: "murph.gateway-attachment.v1" as const,
       transcriptText: null,
     }])),
-    gatewayGetConversation: vi.fn(async () => ({
+    gatewayGetConversation: vi.fn(async (
+      _input: Parameters<NonNullable<UserRunnerDurableObjectStubLike["gatewayGetConversation"]>>[0],
+    ): Promise<Awaited<ReturnType<NonNullable<UserRunnerDurableObjectStubLike["gatewayGetConversation"]>>>> => ({
       canSend: true,
       lastActivityAt: "2026-03-26T12:00:00.000Z",
       lastMessagePreview: "Please send the latest PDF.",
       messageCount: 2,
-      route: {
-        channel: "email",
-        directness: "group",
-        identityId: "murph@example.com",
-        participantId: "contact:alex",
-        reply: {
-          kind: "thread",
-          target: "thread-labs",
+        route: {
+          channel: "email" as const,
+          directness: "group" as const,
+          identityId: "murph@example.com",
+          participantId: "contact:alex",
+          reply: {
+            kind: "thread" as const,
+            target: "thread-labs",
+          },
+          threadId: "thread-labs",
         },
-        threadId: "thread-labs",
-      },
-      schema: "murph.gateway-conversation.v1",
+      schema: "murph.gateway-conversation.v1" as const,
       sessionKey: "gwcs_worker_test",
       title: "Lab thread",
+      titleSource: "thread-title" as const,
     })),
-    gatewayListConversations: vi.fn(async () => ({
+    gatewayListConversations: vi.fn(async (
+      _input?: Parameters<NonNullable<UserRunnerDurableObjectStubLike["gatewayListConversations"]>>[0],
+    ): Promise<Awaited<ReturnType<NonNullable<UserRunnerDurableObjectStubLike["gatewayListConversations"]>>>> => ({
       conversations: [{
         canSend: true,
         lastActivityAt: "2026-03-26T12:00:00.000Z",
         lastMessagePreview: "Please send the latest PDF.",
         messageCount: 2,
         route: {
-          channel: "email",
-          directness: "group",
+          channel: "email" as const,
+          directness: "group" as const,
           identityId: "murph@example.com",
           participantId: "contact:alex",
           reply: {
-            kind: "thread",
+            kind: "thread" as const,
             target: "thread-labs",
           },
           threadId: "thread-labs",
         },
-        schema: "murph.gateway-conversation.v1",
+        schema: "murph.gateway-conversation.v1" as const,
         sessionKey: "gwcs_worker_test",
         title: "Lab thread",
+        titleSource: "thread-title" as const,
       }],
       nextCursor: null,
     })),
@@ -2849,14 +2877,16 @@ function createUserRunnerStub() {
       live: true,
       nextCursor: input?.cursor ?? 0,
     })),
-    gatewayReadMessages: vi.fn(async () => ({
+    gatewayReadMessages: vi.fn(async (
+      _input: Parameters<NonNullable<UserRunnerDurableObjectStubLike["gatewayReadMessages"]>>[0],
+    ): Promise<Awaited<ReturnType<NonNullable<UserRunnerDurableObjectStubLike["gatewayReadMessages"]>>>> => ({
       messages: [{
         actorDisplayName: "Alex",
         attachments: [],
         createdAt: "2026-03-26T12:00:00.000Z",
-        direction: "inbound",
+        direction: "inbound" as const,
         messageId: "gwcm_worker_test",
-        schema: "murph.gateway-message.v1",
+        schema: "murph.gateway-message.v1" as const,
         sessionKey: "gwcs_worker_test",
         text: "Here is the latest lab PDF.",
       }],
@@ -2895,11 +2925,27 @@ function createUserRunnerStub() {
       retryingEventId: null,
       userId: "member_123",
     })),
+    provisionManagedUserCrypto: vi.fn(async (userId: string) => ({
+      recipientKinds: ["automation", "recovery", "tee-automation"],
+      rootKeyId: "v1",
+      userId,
+    })),
+    putPendingUsage: vi.fn(async (input: {
+      usage: readonly Record<string, unknown>[];
+    }) => ({
+      recorded: input.usage.length,
+      usageIds: input.usage.map((_, index) => `usage_${index}`),
+    })),
+    readPendingUsage: vi.fn(async () => []),
+    storeDispatchPayload: vi.fn(async (input: { dispatch: HostedExecutionDispatchRequest }) => ({
+      dispatch: input.dispatch,
+      storage: "inline" as const,
+    })),
     updateUserEnv: vi.fn(async (update: { env: Record<string, string | null> }) => ({
       configuredUserEnvKeys: Object.keys(update.env).sort(),
       userId: "member_123",
     })),
-  };
+  } satisfies UserRunnerDurableObjectStubLike;
 }
 
 function createGatewayConversationSessionKeyForTests(routeToken: string): string {

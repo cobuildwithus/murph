@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { resolveAssistantStatePaths } from "@murphai/runtime-state/node";
 
 const mocks = vi.hoisted(() => ({
   assistantGatewayLocalProjectionSourceReader: Symbol(
@@ -187,6 +188,7 @@ describe("executeHostedDispatchForCommit", () => {
         },
       },
       restored: {
+        assistantStateRoot: resolveAssistantStatePaths("/tmp/vault-root").assistantStateRoot,
         operatorHomeRoot: "/tmp/operator-home",
         vaultRoot: "/tmp/vault-root",
       },
@@ -315,6 +317,14 @@ describe("completeHostedExecutionAfterCommit", () => {
             summary: "completed summary",
           },
         },
+        committedAssistantDeliveryEffects: [
+          {
+            effectId: "intent_123",
+            fingerprint: "dedupe_123",
+            intentId: "intent_123",
+            kind: "assistant.delivery",
+          },
+        ],
         committedSideEffects: [
           {
             effectId: "intent_123",
@@ -335,6 +345,7 @@ describe("completeHostedExecutionAfterCommit", () => {
       },
       materializedArtifactPaths: new Set(["vault/raw/already-materialized.bin"]),
       restored: {
+        assistantStateRoot: resolveAssistantStatePaths("/tmp/vault-root").assistantStateRoot,
         operatorHomeRoot: "/tmp/operator-home",
         vaultRoot: "/tmp/vault-root",
       },

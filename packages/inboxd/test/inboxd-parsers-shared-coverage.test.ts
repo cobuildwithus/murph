@@ -507,7 +507,7 @@ function createParserRegistryStub(): ParserRegistry {
   };
 }
 
-function createRuntimeStoreStub(): InboxRuntimeStore {
+function createRuntimeStoreStub(): InboxRuntimeStore & { close: ReturnType<typeof vi.fn<() => void>> } {
   return {
     databasePath: "/tmp/inboxd.sqlite",
     close: vi.fn(),
@@ -591,10 +591,10 @@ function createRuntimeStoreStub(): InboxRuntimeStore {
 function createPollConnectorStub(
   id: string,
   options?: {
-    close?: ReturnType<typeof vi.fn>;
+    close?: ReturnType<typeof vi.fn<() => Promise<void>>>;
   },
 ): PollConnector & { close: ReturnType<typeof vi.fn> } {
-  const close = options?.close ?? vi.fn().mockResolvedValue(undefined);
+  const close = options?.close ?? vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
 
   return {
     id,

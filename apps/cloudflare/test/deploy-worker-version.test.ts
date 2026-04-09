@@ -292,17 +292,38 @@ function createDependencies(
   uploadVersion: ReturnType<typeof vi.fn>;
   writeFile: ReturnType<typeof vi.fn>;
 } {
+  const deployDirect = vi.fn(
+    overrides.deployDirect ?? (async () => {}),
+  );
+  const deployVersions = vi.fn(
+    overrides.deployVersions ?? (async () => {}),
+  );
+  const mkdir = vi.fn(
+    overrides.mkdir ?? (async () => {}),
+  );
+  const readCurrentDeployment = vi.fn(
+    overrides.readCurrentDeployment ?? (async () => null),
+  );
+  const readRenderedDeployConfig = vi.fn(
+    overrides.readRenderedDeployConfig
+    ?? (async () => ({
+      migrations: [{ tag: "v1" }, { tag: "v2" }],
+    })),
+  );
+  const uploadVersion = vi.fn(
+    overrides.uploadVersion ?? (async () => "uploaded-version"),
+  );
+  const writeFile = vi.fn(
+    overrides.writeFile ?? (async () => {}),
+  );
+
   return {
-    deployDirect: overrides.deployDirect ?? vi.fn(async () => {}),
-    deployVersions: overrides.deployVersions ?? vi.fn(async () => {}),
-    mkdir: overrides.mkdir ?? vi.fn(async () => {}),
-    readCurrentDeployment: overrides.readCurrentDeployment
-      ?? vi.fn(async () => null),
-    readRenderedDeployConfig: overrides.readRenderedDeployConfig
-      ?? vi.fn(async () => ({
-        migrations: [{ tag: "v1" }, { tag: "v2" }],
-      })),
-    uploadVersion: overrides.uploadVersion ?? vi.fn(async () => "uploaded-version"),
-    writeFile: overrides.writeFile ?? vi.fn(async () => {}),
+    deployDirect,
+    deployVersions,
+    mkdir,
+    readCurrentDeployment,
+    readRenderedDeployConfig,
+    uploadVersion,
+    writeFile,
   };
 }

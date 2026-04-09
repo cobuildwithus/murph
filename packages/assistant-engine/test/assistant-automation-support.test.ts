@@ -49,6 +49,10 @@ import { resolveAssistantInboxArtifactPath } from '@murphai/vault-usecases/assis
 import { resolveAssistantStatePaths } from '../src/assistant/store/paths.ts'
 import { createTempVaultContext } from './test-helpers.ts'
 
+function toSnapshotRecord<T extends object>(value: T): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(value))
+}
+
 const promptBuilderMocks = vi.hoisted(() => ({
   buildInboxModelAttachmentBundles: vi.fn(),
   hasInboxMultimodalAttachmentEvidenceCandidate: vi.fn(),
@@ -265,36 +269,35 @@ function createPromptCapture(input: {
   telegramMetadata?: TelegramAutoReplyMetadata | null
 } = {}): AssistantAutoReplyPromptCapture {
   const attachments = [...(input.attachments ?? [])]
+  const resolvedAttachments = input.captureOverrides?.attachments ?? attachments
+  const capture = {
+    captureId: 'capture-1',
+    source: 'telegram',
+    accountId: 'account-1',
+    externalId: 'external-1',
+    threadId: 'thread-1',
+    threadTitle: 'Family',
+    threadIsDirect: true,
+    actorId: 'actor-1',
+    actorName: 'Taylor',
+    actorIsSelf: false,
+    occurredAt: '2026-04-08T00:00:00.000Z',
+    receivedAt: null,
+    text: null,
+    envelopePath: 'inbox/telegram/capture-1.json',
+    eventId: 'event-1',
+    promotions: [],
+    createdAt: '2026-04-08T00:00:01.000Z',
+    ...input.captureOverrides,
+  }
   return {
     capture: inboxShowResultSchema.parse({
       vault: '/tmp/automation-support-vault',
       capture: {
-        captureId: 'capture-1',
-        source: 'telegram',
-        accountId: 'account-1',
-        externalId: 'external-1',
-        threadId: 'thread-1',
-        threadTitle: 'Family',
-        threadIsDirect: true,
-        actorId: 'actor-1',
-        actorName: 'Taylor',
-        actorIsSelf: false,
-        occurredAt: '2026-04-08T00:00:00.000Z',
-        receivedAt: null,
-        text: null,
-        attachmentCount: attachments.length,
-        envelopePath: 'inbox/telegram/capture-1.json',
-        eventId: 'event-1',
-        promotions: [],
-        createdAt: '2026-04-08T00:00:01.000Z',
-        attachments,
-        ...input.captureOverrides,
+        ...capture,
         attachmentCount:
-          input.captureOverrides?.attachmentCount ?? attachments.length,
-        attachments:
-          input.captureOverrides?.attachments !== undefined
-            ? input.captureOverrides.attachments
-            : attachments,
+          input.captureOverrides?.attachmentCount ?? resolvedAttachments.length,
+        attachments: resolvedAttachments,
       },
     }).capture,
     telegramMetadata: input.telegramMetadata ?? null,
@@ -773,7 +776,7 @@ describe('assistant provider watchdog', () => {
     const events: Array<Record<string, unknown>> = []
     const watchdog = createAssistantProviderWatchdog({
       onEvent: (event) => {
-        events.push(event as Record<string, unknown>)
+        events.push(toSnapshotRecord(event))
       },
       providerHeartbeatMs: 1_000,
       providerStallTimeoutMs: 3_000,
@@ -842,7 +845,7 @@ describe('assistant provider watchdog', () => {
     const events: Array<Record<string, unknown>> = []
     const watchdog = createAssistantProviderWatchdog({
       onEvent: (event) => {
-        events.push(event as Record<string, unknown>)
+        events.push(toSnapshotRecord(event))
       },
       providerHeartbeatMs: 1_000,
       providerStallTimeoutMs: 1_000,
@@ -885,7 +888,7 @@ describe('assistant provider watchdog', () => {
     const events: Array<Record<string, unknown>> = []
     const watchdog = createAssistantProviderWatchdog({
       onEvent: (event) => {
-        events.push(event as Record<string, unknown>)
+        events.push(toSnapshotRecord(event))
       },
       providerHeartbeatMs: 1_000,
       providerStallTimeoutMs: 2_000,
@@ -933,7 +936,7 @@ describe('assistant provider watchdog', () => {
     const events: Array<Record<string, unknown>> = []
     const watchdog = createAssistantProviderWatchdog({
       onEvent: (event) => {
-        events.push(event as Record<string, unknown>)
+        events.push(toSnapshotRecord(event))
       },
       providerHeartbeatMs: 1_000,
       providerStallTimeoutMs: 4_000,
@@ -983,7 +986,7 @@ describe('assistant provider watchdog', () => {
     const events: Array<Record<string, unknown>> = []
     const watchdog = createAssistantProviderWatchdog({
       onEvent: (event) => {
-        events.push(event as Record<string, unknown>)
+        events.push(toSnapshotRecord(event))
       },
       providerHeartbeatMs: 60_000,
       providerStallTimeoutMs: 5 * 60_000,
@@ -1024,7 +1027,7 @@ describe('assistant provider watchdog', () => {
     const laterEvents: Array<Record<string, unknown>> = []
     const laterWatchdog = createAssistantProviderWatchdog({
       onEvent: (event) => {
-        laterEvents.push(event as Record<string, unknown>)
+        laterEvents.push(toSnapshotRecord(event))
       },
       providerHeartbeatMs: 61_000,
       providerStallTimeoutMs: 5 * 61_000,

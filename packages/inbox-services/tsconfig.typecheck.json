@@ -3,14 +3,38 @@
   "compilerOptions": {
     "noEmit": true,
     "paths": {
+      "@murphai/importers": [
+        "packages/importers/src/index.ts"
+      ],
+      "@murphai/importers/*": [
+        "packages/importers/src/*"
+      ],
+      "@murphai/operator-config": [
+        "packages/operator-config/src/index.ts"
+      ],
+      "@murphai/operator-config/*": [
+        "packages/operator-config/src/*"
+      ],
+      "@murphai/query": [
+        "packages/query/src/index.ts"
+      ],
+      "@murphai/query/*": [
+        "packages/query/src/*"
+      ],
       "@murphai/runtime-state": [
         "packages/runtime-state/src/index.ts"
       ],
       "@murphai/runtime-state/node": [
         "packages/runtime-state/src/node/index.ts"
       ],
+      "@murphai/runtime-state/*": [
+        "packages/runtime-state/src/*"
+      ],
       "@murphai/vault-usecases": [
         "packages/vault-usecases/src/index.ts"
+      ],
+      "@murphai/vault-usecases/testing": [
+        "packages/vault-usecases/src/testing.ts"
       ],
       "@murphai/vault-usecases/*": [
         "packages/vault-usecases/src/*"
@@ -36,9 +60,23 @@
     },
     {
       "path": "../inboxd"
+    },
+    {
+      "path": "../vault-usecases"
+    },
+    {
+      "path": "../importers"
+    },
+    {
+      "path": "../query"
+    },
+    {
+      "path": "../parsers"
     }
   ],
   "include": [
+    "*.ts",
+    "test/**/*.ts",
     "src/**/*.ts"
   ],
   "exclude": [

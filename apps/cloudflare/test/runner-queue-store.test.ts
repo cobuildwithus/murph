@@ -5,8 +5,8 @@ import { createHostedDispatchPayloadStore } from "../src/dispatch-payload-store.
 import type { HostedExecutionCommittedResult } from "../src/execution-journal.js";
 import { RunnerQueueStore } from "../src/user-runner/runner-queue-store.js";
 import { createTestSqlStorage } from "./sql-storage.js";
-import { MemoryEncryptedR2Bucket, createTestRootKey } from "./test-helpers";
-import { expectOpaqueStrings } from "./object-key-assertions";
+import { MemoryEncryptedR2Bucket, createTestRootKey } from "./test-helpers.js";
+import { expectOpaqueStrings } from "./object-key-assertions.js";
 
 function createQueueHarness(state: { storage: { sql: ReturnType<typeof createTestSqlStorage> } }) {
   const bucket = new MemoryEncryptedR2Bucket();
@@ -84,7 +84,7 @@ describe("RunnerQueueStore", () => {
       state: "poisoned",
       userId: "member_123",
     });
-    expectOpaqueStrings([badEvent?.lastError ?? null], ["evt_bad"]);
+    expectOpaqueStrings(badEvent?.lastError ? [badEvent.lastError] : [], ["evt_bad"]);
   });
 
   it("classifies malformed pending rows as invalid requests", async () => {
@@ -228,7 +228,7 @@ describe("RunnerQueueStore", () => {
 
     const sql = state.storage.sql!;
     const originalExec = sql.exec.bind(sql);
-    sql.exec = ((query: string, ...bindings: unknown[]) => {
+    sql.exec = ((query: string, ...bindings: Array<ArrayBuffer | string | number | null>) => {
       if (query.includes("INSERT INTO pending_events")) {
         throw new Error("simulated enqueue failure");
       }
@@ -272,6 +272,9 @@ describe("RunnerQueueStore", () => {
 
     const storedPayload = await dispatchPayloadStore.writeStoredDispatch(dispatch);
     expect(storedPayload.storage).toBe("reference");
+    if (storedPayload.storage !== "reference") {
+      throw new Error("Expected device-sync wake payloads to use reference storage.");
+    }
     expect(bucket.objects.size).toBe(1);
 
     const result = await store.enqueueDispatch(dispatch, storedPayload.stagedPayloadId);
@@ -387,7 +390,10 @@ describe("RunnerQueueStore", () => {
       state: "queued",
       userId: "member_123",
     });
-    expectOpaqueStrings([eventState?.lastError ?? null], ["secret-token", "ops@example.com"]);
+    expectOpaqueStrings(
+      eventState?.lastError ? [eventState.lastError] : [],
+      ["secret-token", "ops@example.com"],
+    );
   });
 
   it("keeps runtime exception summaries generic in persisted retry state", async () => {
@@ -450,7 +456,10 @@ describe("RunnerQueueStore", () => {
       state: "queued",
       userId: "member_123",
     });
-    expectOpaqueStrings([eventState?.lastError ?? null], ["sk-live-secret"]);
+    expectOpaqueStrings(
+      eventState?.lastError ? [eventState.lastError] : [],
+      ["sk-live-secret"],
+    );
   });
 
   it("stores sanitized finalize-retry summaries for committed results", async () => {
@@ -468,6 +477,7 @@ describe("RunnerQueueStore", () => {
     });
 
     const committed: HostedExecutionCommittedResult = {
+      assistantDeliveryEffects: [],
       bundleRef: null,
       committedAt: "2026-03-29T10:00:00.000Z",
       eventId: "evt_secret_finalize",
@@ -498,7 +508,10 @@ describe("RunnerQueueStore", () => {
       state: "queued",
       userId: "member_123",
     });
-    expectOpaqueStrings([eventState?.lastError ?? null], ["secret-token", "ops@example.com"]);
+    expectOpaqueStrings(
+      eventState?.lastError ? [eventState.lastError] : [],
+      ["secret-token", "ops@example.com"],
+    );
   });
 
   it("clears stale last-error text when committed bundles are synchronized after a finalize retry", async () => {
@@ -515,6 +528,7 @@ describe("RunnerQueueStore", () => {
     );
 
     const committed: HostedExecutionCommittedResult = {
+      assistantDeliveryEffects: [],
       bundleRef: null,
       committedAt: "2026-03-29T10:00:00.000Z",
       eventId: "evt_finalize_cleared",

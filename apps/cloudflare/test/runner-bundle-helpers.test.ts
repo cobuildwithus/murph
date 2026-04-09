@@ -22,7 +22,7 @@ import { RunnerBundleSync } from "../src/user-runner/runner-bundle-sync.js";
 import { RunnerQueueStore } from "../src/user-runner/runner-queue-store.js";
 import { RunnerUserEnvService } from "../src/user-runner/runner-user-env.js";
 import { createTestSqlStorage } from "./sql-storage.js";
-import { MemoryEncryptedR2Bucket, createTestRootKey } from "./test-helpers";
+import { MemoryEncryptedR2Bucket, createTestRootKey } from "./test-helpers.js";
 
 describe("writeHostedBundleBytesIfChanged", () => {
   it("reuses the current ref when the payload identity is unchanged", async () => {
@@ -135,6 +135,10 @@ describe("hosted bundle reads", () => {
 describe("RunnerBundleSync", () => {
   const bundleKey = Uint8Array.from({ length: 32 }, () => 9);
   const hostedEmailConfig = {
+    apiBaseUrl: "https://api.cloudflare.com/client/v4",
+    cloudflareAccountId: null,
+    cloudflareApiToken: null,
+    defaultSubject: "Murph update",
     domain: "mail.example.test",
     fromAddress: "assistant@mail.example.test",
     localPart: "assistant",

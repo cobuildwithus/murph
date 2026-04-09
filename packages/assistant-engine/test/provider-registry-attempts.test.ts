@@ -154,10 +154,11 @@ describe('assistant provider registry attempts', () => {
           text: 'searching',
         })
 
-        return {
-          ok: true,
+        const attempt = {
+          metadata: createAttemptMetadata(),
+          ok: true as const,
           result: {
-            provider: 'codex-cli',
+            provider: 'codex-cli' as const,
             providerSessionId: null,
             rawEvents: [],
             response: 'ok',
@@ -166,6 +167,9 @@ describe('assistant provider registry attempts', () => {
             usage: null,
           },
         }
+
+        Reflect.deleteProperty(attempt, 'metadata')
+        return attempt
       },
     )
 
@@ -196,11 +200,18 @@ describe('assistant provider registry attempts', () => {
   })
 
   it('fills empty attempt metadata when provider definitions omit it', async () => {
-    vi.spyOn(codexCliProviderDefinition, 'executeTurn').mockResolvedValue({
-      error: new Error('missing metadata'),
-      metadata: null,
-      ok: false,
-    })
+    vi.spyOn(codexCliProviderDefinition, 'executeTurn').mockImplementation(
+      async () => {
+        const attempt = {
+          error: new Error('missing metadata'),
+          metadata: createAttemptMetadata(),
+          ok: false as const,
+        }
+
+        Reflect.set(attempt, 'metadata', null)
+        return attempt
+      },
+    )
 
     const attempt = await executeAssistantProviderTurnAttemptWithDefinition({
       providerConfig: normalizeAssistantProviderConfig({
@@ -246,10 +257,18 @@ describe('assistant provider registry attempts', () => {
   })
 
   it('fills default attempt metadata when a provider returns none', async () => {
-    vi.spyOn(openAiCompatibleProviderDefinition, 'executeTurn').mockResolvedValue({
-      error: new Error('missing metadata'),
-      ok: false,
-    })
+    vi.spyOn(openAiCompatibleProviderDefinition, 'executeTurn').mockImplementation(
+      async () => {
+        const attempt = {
+          error: new Error('missing metadata'),
+          metadata: createAttemptMetadata(),
+          ok: false as const,
+        }
+
+        Reflect.deleteProperty(attempt, 'metadata')
+        return attempt
+      },
+    )
 
     const attempt = await executeAssistantProviderTurnAttemptWithDefinition({
       providerConfig: normalizeAssistantProviderConfig({
@@ -315,16 +334,16 @@ describe('assistant provider registry attempts', () => {
       ok: true,
       result: executionResult,
     })
-    expect(capturedInput).not.toBeNull()
-    expect(capturedInput?.providerConfig).toEqual(
+    const executionInput = requireCapturedInput(capturedInput)
+    expect(executionInput.providerConfig).toEqual(
       normalizeAssistantProviderConfig({
         apiKeyEnv: 'OPENROUTER_API_KEY',
         baseUrl: 'https://openrouter.ai/api/v1',
         providerName: 'openrouter',
       }),
     )
-    expect(capturedInput?.prompt).toBe('summarize the latest changes')
-    expect(capturedInput?.resumeProviderSessionId).toBe('resume-1')
+    expect(executionInput.prompt).toBe('summarize the latest changes')
+    expect(executionInput.resumeProviderSessionId).toBe('resume-1')
   })
 
   it('returns successful execution results through executeAssistantProviderTurn', async () => {
@@ -363,30 +382,38 @@ describe('assistant provider registry attempts', () => {
     })
 
     expect(result).toEqual(executionResult)
-    expect(capturedInput).not.toBeNull()
-    expect(capturedInput?.providerConfig).toEqual(
+    const executionInput = requireCapturedInput(capturedInput)
+    expect(executionInput.providerConfig).toEqual(
       normalizeAssistantProviderConfig({
         oss: true,
       }),
     )
-    expect(capturedInput?.prompt).toBe('reply with the latest status')
-    expect(capturedInput?.resumeProviderSessionId).toBe('resume-2')
-    expect(capturedInput?.showThinkingTraces).toBe(true)
+    expect(executionInput.prompt).toBe('reply with the latest status')
+    expect(executionInput.resumeProviderSessionId).toBe('resume-2')
+    expect(executionInput.showThinkingTraces).toBe(true)
   })
 
   it('fills default attempt metadata when a provider definition omits it', async () => {
-    vi.spyOn(codexCliProviderDefinition, 'executeTurn').mockResolvedValue({
-      ok: true,
-      result: {
-        provider: 'codex-cli',
-        providerSessionId: 'provider-session-minimal',
-        rawEvents: [],
-        response: 'done',
-        stderr: '',
-        stdout: '',
-        usage: null,
+    vi.spyOn(codexCliProviderDefinition, 'executeTurn').mockImplementation(
+      async () => {
+        const attempt = {
+          metadata: createAttemptMetadata(),
+          ok: true as const,
+          result: {
+            provider: 'codex-cli' as const,
+            providerSessionId: 'provider-session-minimal',
+            rawEvents: [],
+            response: 'done',
+            stderr: '',
+            stdout: '',
+            usage: null,
+          },
+        }
+
+        Reflect.deleteProperty(attempt, 'metadata')
+        return attempt
       },
-    })
+    )
 
     await expect(
       executeAssistantProviderTurnAttemptWithDefinition({
@@ -416,3 +443,21 @@ describe('assistant provider registry attempts', () => {
     })
   })
 })
+
+function requireCapturedInput(
+  input: AssistantProviderTurnExecutionInput | null,
+): AssistantProviderTurnExecutionInput {
+  if (!input) {
+    throw new Error('Expected provider execution input to be captured.')
+  }
+
+  return input
+}
+
+function createAttemptMetadata() {
+  return {
+    activityLabels: [],
+    executedToolCount: 0,
+    rawToolEvents: [],
+  }
+}

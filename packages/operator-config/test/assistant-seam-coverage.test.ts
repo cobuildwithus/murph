@@ -59,9 +59,12 @@ import {
 import { isValidAssistantOpaqueId } from '../src/assistant/state-ids.ts'
 
 test('assistant shared and state-id helpers handle empty, invalid, and valid inputs', () => {
-  const nonStringEnv = {
-    OPENAI_API_KEY: 123,
-  } as NodeJS.ProcessEnv
+  const nonStringEnv = { ...process.env }
+  Object.defineProperty(nonStringEnv, 'OPENAI_API_KEY', {
+    configurable: true,
+    enumerable: true,
+    value: 123,
+  })
 
   assert.equal(readAssistantEnvString({ OPENAI_API_KEY: '  key  ' }, ' OPENAI_API_KEY '), 'key')
   assert.equal(readAssistantEnvString({ OPENAI_API_KEY: '' }, 'OPENAI_API_KEY'), null)
@@ -195,13 +198,20 @@ test('assistant backend helpers cover null, codex, and openai-compatible persist
   )
   assert.equal(
     assistantModelTargetsEqual(codexTarget, {
-      ...codexTarget,
+      adapter: 'codex-cli',
+      approvalPolicy: codexTarget.approvalPolicy,
+      codexCommand: codexTarget.codexCommand,
       codexHome: '/tmp/other-codex',
+      model: codexTarget.model,
+      oss: codexTarget.oss,
+      profile: codexTarget.profile,
+      reasoningEffort: codexTarget.reasoningEffort,
+      sandbox: codexTarget.sandbox,
     }),
     false,
   )
   assert.deepEqual(
-    sanitizeAssistantBackendTargetForPersistence({
+    normalizeAssistantModelTarget({
       adapter: 'openai-compatible',
       apiKeyEnv: 'OPENAI_API_KEY',
       endpoint: 'https://api.openai.com/v1',

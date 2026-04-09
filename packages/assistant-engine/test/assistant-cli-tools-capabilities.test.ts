@@ -74,31 +74,91 @@ describe('assistant CLI tool capability seam', () => {
   it('executes helper, CLI, native file, and configured web capability definitions', async () => {
     const { vaultRoot } = await createOwnedVaultContext('murph-assistant-cli-tools-runtime-')
     const context = createToolContext({ vault: vaultRoot })
+    const knowledgePage = {
+      compiledAt: '2026-04-08T00:00:00.000Z',
+      librarySlugs: ['sleep-architecture'],
+      pagePath: 'derived/knowledge/sleep-quality.md',
+      pageType: 'concept',
+      relatedSlugs: ['sleep'],
+      slug: 'sleep-quality',
+      sourcePaths: ['research/2026/04/sleep.md'],
+      status: 'draft',
+      summary: 'Sleep quality notes.',
+      title: 'Sleep quality',
+    }
 
     const knowledgeListSpy = vi.spyOn(knowledge, 'listKnowledgePages').mockResolvedValue({
-      pages: ['list'],
+      pageCount: 1,
+      pageType: 'concept',
+      pages: [knowledgePage],
+      status: 'draft',
+      vault: vaultRoot,
     })
     const knowledgeSearchSpy = vi.spyOn(knowledge, 'searchKnowledgePages').mockResolvedValue({
-      pages: ['search'],
+      format: 'murph.knowledge-search.v1',
+      hits: [
+        {
+          ...knowledgePage,
+          matchedTerms: ['sleep', 'magnesium'],
+          score: 0.98,
+          snippet: 'Sleep magnesium notes.',
+        },
+      ],
+      pageType: 'concept',
+      query: 'sleep magnesium',
+      status: 'draft',
+      total: 1,
+      vault: vaultRoot,
     })
     const knowledgeGetSpy = vi.spyOn(knowledge, 'getKnowledgePage').mockResolvedValue({
-      slug: 'sleep-quality',
+      page: {
+        ...knowledgePage,
+        body: '# Sleep quality',
+        markdown: '# Sleep quality',
+      },
+      vault: vaultRoot,
     })
     const knowledgeLintSpy = vi.spyOn(knowledge, 'lintKnowledgePages').mockResolvedValue({
       ok: true,
+      pageCount: 1,
+      problemCount: 0,
+      problems: [],
+      vault: vaultRoot,
     })
     const knowledgeUpsertSpy = vi.spyOn(knowledge, 'upsertKnowledgePage').mockResolvedValue({
-      slug: 'sleep-quality',
+      bodyLength: 15,
+      indexPath: 'derived/knowledge/index.json',
+      page: knowledgePage,
+      savedAt: '2026-04-08T00:00:00.000Z',
+      vault: vaultRoot,
     })
     const knowledgeRebuildSpy = vi.spyOn(knowledge, 'rebuildKnowledgeIndex').mockResolvedValue({
+      indexPath: 'derived/knowledge/index.json',
+      pageCount: 1,
+      pageTypes: ['concept'],
       rebuilt: true,
+      vault: vaultRoot,
     })
     const listTargetsSpy = vi
       .spyOn(operatorConfigModule, 'listAssistantSelfDeliveryTargets')
-      .mockResolvedValue([{ channel: 'telegram' }])
+      .mockResolvedValue([
+        {
+          channel: 'telegram',
+          deliveryTarget: null,
+          identityId: null,
+          participantId: null,
+          sourceThreadId: null,
+        },
+      ])
     const showTargetSpy = vi
       .spyOn(operatorConfigModule, 'resolveAssistantSelfDeliveryTarget')
-      .mockResolvedValue({ channel: 'telegram', target: '@murph' })
+      .mockResolvedValue({
+        channel: 'telegram',
+        deliveryTarget: '@murph',
+        identityId: null,
+        participantId: null,
+        sourceThreadId: null,
+      })
     const cliExecuteSpy = vi
       .spyOn(executionAdapters, 'executeAssistantCliCommand')
       .mockResolvedValue({
@@ -117,16 +177,52 @@ describe('assistant CLI tool capability seam', () => {
         truncated: false,
       })
     const webSearchSpy = vi.spyOn(webSearch, 'searchAssistantWeb').mockResolvedValue({
-      results: [{ title: 'Responses API' }],
+      filters: {
+        country: 'us',
+        dateAfter: '2026-04-01',
+        dateBefore: '2026-04-08',
+        domainFilter: ['platform.openai.com'],
+        freshness: 'week',
+        language: 'en',
+      },
+      provider: 'exa',
+      query: 'OpenAI Responses API',
+      resultCount: 1,
+      results: [
+        {
+          publishedAt: null,
+          score: 0.98,
+          snippet: 'Responses API docs.',
+          source: 'OpenAI',
+          title: 'Responses API',
+          url: 'https://platform.openai.com/docs/api-reference/responses',
+        },
+      ],
+      warnings: [],
     })
     const webFetchSpy = vi.spyOn(webFetch, 'fetchAssistantWeb').mockResolvedValue({
+      contentType: 'text/html',
+      extractMode: 'markdown',
+      extractor: 'readability',
+      fetchedAt: '2026-04-08T00:00:00.000Z',
+      finalUrl: 'https://example.com/page',
+      status: 200,
+      title: 'Example Page',
+      truncated: false,
       url: 'https://example.com/page',
       text: 'page',
+      warnings: [],
     })
     const webPdfSpy = vi.spyOn(webPdfRead, 'readAssistantWebPdf').mockResolvedValue({
+      contentType: 'application/pdf',
+      fetchedAt: '2026-04-08T00:00:00.000Z',
+      finalUrl: 'https://example.com/menu.pdf',
+      pageCount: 1,
+      status: 200,
+      truncated: false,
       url: 'https://example.com/menu.pdf',
       text: 'pdf',
-      pagesRead: 1,
+      warnings: [],
     })
 
     process.env.EXA_API_KEY = 'test-exa-key'
@@ -136,18 +232,39 @@ describe('assistant CLI tool capability seam', () => {
     expect(await executeTool(knowledgeReadTools, 'assistant.knowledge.list', {
       pageType: 'concept',
       status: 'draft',
-    })).toEqual({ pages: ['list'] })
+    })).toMatchObject({
+      pageCount: 1,
+      pages: [knowledgePage],
+      vault: vaultRoot,
+    })
     expect(await executeTool(knowledgeReadTools, 'assistant.knowledge.search', {
       query: 'sleep magnesium',
       limit: 3,
       pageType: 'concept',
       status: 'draft',
-    })).toEqual({ pages: ['search'] })
+    })).toMatchObject({
+      hits: [
+        expect.objectContaining({
+          slug: 'sleep-quality',
+          score: 0.98,
+        }),
+      ],
+      query: 'sleep magnesium',
+      total: 1,
+      vault: vaultRoot,
+    })
     expect(await executeTool(knowledgeReadTools, 'assistant.knowledge.get', {
       slug: 'sleep-quality',
-    })).toEqual({ slug: 'sleep-quality' })
-    expect(await executeTool(knowledgeReadTools, 'assistant.knowledge.lint', {})).toEqual({
+    })).toMatchObject({
+      page: expect.objectContaining({
+        slug: 'sleep-quality',
+      }),
+      vault: vaultRoot,
+    })
+    expect(await executeTool(knowledgeReadTools, 'assistant.knowledge.lint', {})).toMatchObject({
       ok: true,
+      problemCount: 0,
+      vault: vaultRoot,
     })
     expect(knowledgeListSpy).toHaveBeenCalledWith({
       vault: vaultRoot,
@@ -180,9 +297,16 @@ describe('assistant CLI tool capability seam', () => {
       librarySlugs: ['sleep-architecture'],
       relatedSlugs: ['sleep'],
       sourcePaths: ['research/2026/04/sleep.md'],
-    })).toEqual({ slug: 'sleep-quality' })
-    expect(await executeTool(knowledgeWriteTools, 'assistant.knowledge.rebuildIndex', {})).toEqual({
+    })).toMatchObject({
+      page: expect.objectContaining({
+        slug: 'sleep-quality',
+      }),
+      vault: vaultRoot,
+    })
+    expect(await executeTool(knowledgeWriteTools, 'assistant.knowledge.rebuildIndex', {})).toMatchObject({
       rebuilt: true,
+      pageCount: 1,
+      vault: vaultRoot,
     })
     expect(knowledgeUpsertSpy).toHaveBeenCalledWith({
       vault: vaultRoot,
@@ -204,11 +328,23 @@ describe('assistant CLI tool capability seam', () => {
       includeStatefulWriteTools: false,
     })
     expect(await executeTool(runtimeTools, 'assistant.selfTarget.list', {})).toEqual([
-      { channel: 'telegram' },
+      {
+        channel: 'telegram',
+        deliveryTarget: null,
+        identityId: null,
+        participantId: null,
+        sourceThreadId: null,
+      },
     ])
     expect(await executeTool(runtimeTools, 'assistant.selfTarget.show', {
       channel: 'telegram',
-    })).toEqual({ channel: 'telegram', target: '@murph' })
+    })).toEqual({
+      channel: 'telegram',
+      deliveryTarget: '@murph',
+      identityId: null,
+      participantId: null,
+      sourceThreadId: null,
+    })
     expect(listTargetsSpy).toHaveBeenCalledTimes(1)
     expect(showTargetSpy).toHaveBeenCalledWith('telegram')
 
@@ -256,25 +392,40 @@ describe('assistant CLI tool capability seam', () => {
       dateAfter: '2026-04-01',
       dateBefore: '2026-04-08',
       domainFilter: ['platform.openai.com'],
-    })).toEqual({
-      results: [{ title: 'Responses API' }],
+    })).toMatchObject({
+      provider: 'exa',
+      resultCount: 1,
+      results: [
+        expect.objectContaining({
+          title: 'Responses API',
+          url: 'https://platform.openai.com/docs/api-reference/responses',
+        }),
+      ],
     })
     expect(await executeTool(fetchTools, 'web.fetch', {
       url: 'https://example.com/page',
       extractMode: 'markdown',
       maxChars: 1000,
-    })).toEqual({
+    })).toMatchObject({
+      contentType: 'text/html',
+      extractMode: 'markdown',
+      finalUrl: 'https://example.com/page',
+      status: 200,
       url: 'https://example.com/page',
       text: 'page',
+      title: 'Example Page',
     })
     expect(await executeTool(pdfTools, 'web.pdf.read', {
       url: 'https://example.com/menu.pdf',
       maxChars: 1000,
       maxPages: 2,
-    })).toEqual({
+    })).toMatchObject({
+      contentType: 'application/pdf',
+      finalUrl: 'https://example.com/menu.pdf',
+      pageCount: 1,
+      status: 200,
       url: 'https://example.com/menu.pdf',
       text: 'pdf',
-      pagesRead: 1,
     })
     expect(webSearchSpy).toHaveBeenCalledWith({
       query: 'OpenAI Responses API',
@@ -327,7 +478,7 @@ describe('assistant CLI tool capability seam', () => {
     const coreCalls: Array<{ name: string; input: unknown }> = []
     const importerCalls: Array<{ name: string; input: unknown }> = []
 
-    const inboxServices = {
+    const inboxServices = assumeInboxServices({
       promoteDocument: vi.fn(async (input) => {
         inboxCalls.push({ name: 'promoteDocument', input })
         return { ok: true, kind: 'document' }
@@ -344,7 +495,7 @@ describe('assistant CLI tool capability seam', () => {
         inboxCalls.push({ name: 'promoteMeal', input })
         return { ok: true, kind: 'meal' }
       }),
-    } as InboxServices
+    })
 
     const vaultServices = createVaultServicesStub({
       coreCalls,
@@ -352,24 +503,30 @@ describe('assistant CLI tool capability seam', () => {
       queryCalls,
     })
     const buildSharePackSpy = vi.spyOn(coreModule, 'buildSharePackFromVault').mockResolvedValue({
-      packType: 'share',
+      createdAt: '2026-04-08T00:00:00.000Z',
+      entities: [],
+      schemaVersion: 'murph.share-pack.v1',
       title: 'Morning Smoothie',
     })
     const context = createToolContext({
       captureId: 'cap_123',
       executionContext: {
         hosted: {
+          memberId: 'member-1',
+          userEnvKeys: [],
           issueDeviceConnectLink: vi.fn(async ({ provider }) => ({
+            authorizationUrl: `https://example.com/connect/${provider}`,
+            expiresAt: '2026-04-09T00:00:00.000Z',
             provider,
-            url: `https://example.com/connect/${provider}`,
+            providerLabel: provider,
           })),
-          issueShareLink: vi.fn(async (input) => ({
-            ...input,
-            shareId: 'share_123',
+          issueShareLink: vi.fn(async () => ({
+            shareCode: 'share_123',
+            shareUrl: 'https://example.com/share/share_123',
             url: 'https://example.com/share/share_123',
           })),
         },
-      } as NonNullable<AssistantToolContext['executionContext']>,
+      } satisfies NonNullable<AssistantToolContext['executionContext']>,
       inboxServices,
       requestId: 'req_123',
       vault: vaultRoot,
@@ -606,8 +763,10 @@ describe('assistant CLI tool capability seam', () => {
     expect(await executeTool(outwardTools, 'murph.device.connect', {
       provider: 'whoop',
     })).toEqual({
+      authorizationUrl: 'https://example.com/connect/whoop',
+      expiresAt: '2026-04-09T00:00:00.000Z',
       provider: 'whoop',
-      url: 'https://example.com/connect/whoop',
+      providerLabel: 'whoop',
     })
     expect(await executeTool(outwardTools, 'vault.share.createLink', {
       title: 'Morning Smoothie',
@@ -622,7 +781,7 @@ describe('assistant CLI tool capability seam', () => {
       inviteCode: 'invite_123',
       expiresInHours: 12,
     })).toMatchObject({
-      shareId: 'share_123',
+      shareCode: 'share_123',
       url: 'https://example.com/share/share_123',
     })
     expect(buildSharePackSpy).toHaveBeenCalledWith({
@@ -651,12 +810,12 @@ describe('assistant CLI tool capability seam', () => {
     const { vaultRoot } = await createOwnedVaultContext('murph-assistant-cli-tools-registry-')
     const context = createToolContext({
       captureId: 'cap_123',
-      inboxServices: {
+      inboxServices: assumeInboxServices({
         promoteDocument: vi.fn(),
         promoteExperimentNote: vi.fn(),
         promoteJournal: vi.fn(),
         promoteMeal: vi.fn(),
-      } as InboxServices,
+      }),
       vault: vaultRoot,
       vaultServices: createVaultServicesStub({
         coreCalls: [],
@@ -902,9 +1061,9 @@ describe('assistant CLI execution adapters', () => {
         }),
       }
     })
-    const mockedExecutionAdapters = await import(
+    const mockedExecutionAdaptersSpecifier =
       '../src/assistant-cli-tools/execution-adapters.ts?missing-built-cli'
-    )
+    const mockedExecutionAdapters = await import(mockedExecutionAdaptersSpecifier)
     const missingHome = await createOwnedPathRoot('murph-assistant-cli-missing-home-')
     await expect(
       mockedExecutionAdapters.executeAssistantCliCommand({
@@ -937,8 +1096,10 @@ describe('assistant CLI execution adapters', () => {
         }),
       }
     })
-    const failingWriteExecutionAdapters = await import(
+    const failingWriteExecutionAdaptersSpecifier =
       '../src/assistant-cli-tools/execution-adapters.ts?payload-write-failure'
+    const failingWriteExecutionAdapters = await import(
+      failingWriteExecutionAdaptersSpecifier
     )
     await expect(
       failingWriteExecutionAdapters.withAssistantPayloadFile(
@@ -965,8 +1126,10 @@ describe('assistant CLI execution adapters', () => {
         isAbsolute: mockedIsAbsolute,
       }
     })
-    const absoluteExecutionAdapters = await import(
+    const absoluteExecutionAdaptersSpecifier =
       '../src/assistant-cli-tools/execution-adapters.ts?absolute-cli'
+    const absoluteExecutionAdapters = await import(
+      absoluteExecutionAdaptersSpecifier
     )
     await writeExecutable(
       path.join(pathRoot, 'vault-cli'),
@@ -1017,8 +1180,10 @@ describe('assistant CLI execution adapters', () => {
         }),
       }
     })
-    const brokenUrlExecutionAdapters = await import(
+    const brokenUrlExecutionAdaptersSpecifier =
       '../src/assistant-cli-tools/execution-adapters.ts?broken-import-meta'
+    const brokenUrlExecutionAdapters = await import(
+      brokenUrlExecutionAdaptersSpecifier
     )
     const brokenHome = await createOwnedPathRoot('murph-assistant-cli-broken-url-home-')
     await expect(
@@ -1184,7 +1349,7 @@ function createVaultServicesStub(input: {
     )
   }
 
-  return {
+  return assumeVaultServices({
     core,
     devices: {},
     importers: {
@@ -1205,15 +1370,17 @@ function createVaultServicesStub(input: {
       showRecipe: makeQueryMethod('showRecipe'),
       showWearableDay: makeQueryMethod('showWearableDay'),
     },
-  } as unknown as VaultServices
+  })
 }
 
-async function executeTool(
-  tools: Array<{
-    name: string
-    preferredHostKind: keyof NonNullable<unknown>
-    executionBindings: Record<string, ((input: Record<string, unknown>) => Promise<unknown>) | undefined>
-  }>,
+type ExecutableToolDefinition = {
+  executionBindings: object
+  name: string
+  preferredHostKind?: string
+}
+
+async function executeTool<T extends ExecutableToolDefinition>(
+  tools: readonly T[],
   toolName: string,
   toolInput: Record<string, unknown>,
 ) {
@@ -1225,16 +1392,21 @@ async function executeTool(
   return executeBoundTool(tool, toolInput)
 }
 
-async function executeBoundTool(
-  tool: {
-    preferredHostKind: string
-    executionBindings: Record<string, ((input: Record<string, unknown>) => Promise<unknown>) | undefined>
-  },
+async function executeBoundTool<T extends ExecutableToolDefinition>(
+  tool: T,
   toolInput: Record<string, unknown>,
 ) {
-  const executor = tool.executionBindings[tool.preferredHostKind]
+  const preferredHostKind = tool.preferredHostKind
+  if (!preferredHostKind) {
+    throw new Error(`Missing preferred host for ${tool.name}`)
+  }
+  const executor = (
+    tool.executionBindings as Partial<
+      Record<string, (input: Record<string, unknown>) => Promise<unknown>>
+    >
+  )[preferredHostKind]
   if (!executor) {
-    throw new Error(`Missing executor for ${tool.preferredHostKind}`)
+    throw new Error(`Missing executor for ${preferredHostKind}`)
   }
 
   return await executor(toolInput)
@@ -1262,4 +1434,12 @@ function findLastCall(
   }
 
   return match.input as Record<string, unknown>
+}
+
+function assumeVaultServices(value: Record<string, unknown>): VaultServices {
+  return Object.assign({} as VaultServices, value)
+}
+
+function assumeInboxServices(value: Record<string, unknown>): InboxServices {
+  return Object.assign({} as InboxServices, value)
 }

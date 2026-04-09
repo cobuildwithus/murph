@@ -11,6 +11,12 @@ import {
 } from '../src/assistant/cron/presets.ts'
 
 type WebFetchModule = typeof import('../src/assistant/web-fetch.ts')
+type LookupImplementation = typeof import('node:dns/promises').lookup
+type MockLookupAddress = {
+  address: string
+  family: number
+}
+type LinkedomMimeType = 'text/html' | 'image/svg+xml' | 'text/xml'
 
 type MockAutomationRecord = {
   automationId: string
@@ -674,7 +680,7 @@ describe('assistant cron runtime threshold coverage', () => {
 describe('assistant web-fetch threshold coverage', () => {
   it('uses the HTTP transport for IP hosts, preserves multi-value headers, and formats valid JSON', async () => {
     const { httpRequestMock, module } = await loadWebFetchModule({
-      lookupImplementation: vi.fn(async () => [
+      lookupImplementation: createLookupImplementation([
         {
           address: 'edge.example.test',
           family: 0,
@@ -750,7 +756,7 @@ describe('assistant web-fetch threshold coverage', () => {
     })
 
     const { module: binaryModule } = await loadWebFetchModule({
-      lookupImplementation: vi.fn(async () => [
+      lookupImplementation: createLookupImplementation([
         {
           address: 'edge.example.test',
           family: 0,
@@ -785,7 +791,7 @@ describe('assistant web-fetch threshold coverage', () => {
   })
 
   it('wraps aggregated request failures and surfaces timeout-specific errors', async () => {
-    const lookupImplementation = vi.fn(async () => [
+    const lookupImplementation = createLookupImplementation([
       {
         address: 'edge-a.test',
         family: 0,
@@ -832,7 +838,7 @@ describe('assistant web-fetch threshold coverage', () => {
           type: 'error',
         },
       ],
-      lookupImplementation: vi.fn(async () => [
+      lookupImplementation: createLookupImplementation([
         {
           address: 'edge-timeout.test',
           family: 0,
@@ -862,7 +868,7 @@ describe('assistant web-fetch threshold coverage', () => {
 
   it('falls back to a null title when readable html has no document title', async () => {
     const { module } = await loadWebFetchModule({
-      lookupImplementation: vi.fn(async () => [
+      lookupImplementation: createLookupImplementation([
         {
           address: 'edge.example.test',
           family: 0,
@@ -947,7 +953,7 @@ describe('assistant web-fetch threshold coverage', () => {
 
     const { module: matchingModule } = await loadWebFetchModule({
       httpsRequestImplementation: matchingHttpsRequest,
-      lookupImplementation: vi.fn(async () => [
+      lookupImplementation: createLookupImplementation([
         {
           address: '2606:4700:4700::1111',
           family: 6,
@@ -999,7 +1005,7 @@ describe('assistant web-fetch threshold coverage', () => {
 
     const { module: mismatchedModule } = await loadWebFetchModule({
       httpsRequestImplementation: mismatchedHttpsRequest,
-      lookupImplementation: vi.fn(async () => [
+      lookupImplementation: createLookupImplementation([
         {
           address: '2606:4700:4700::1111',
           family: 6,
@@ -1062,7 +1068,7 @@ describe('assistant web-fetch threshold coverage', () => {
 
     const { module: defaultFamilyModule } = await loadWebFetchModule({
       httpsRequestImplementation: defaultFamilyHttpsRequest,
-      lookupImplementation: vi.fn(async () => [
+      lookupImplementation: createLookupImplementation([
         {
           address: '2606:4700:4700::1111',
           family: 6,
@@ -1087,7 +1093,7 @@ describe('assistant web-fetch threshold coverage', () => {
 
   it('rejects empty DNS answers and falls back to markdown defaults when extract mode is invalid', async () => {
     const { module: dnsModule } = await loadWebFetchModule({
-      lookupImplementation: vi.fn(async () => []),
+      lookupImplementation: createLookupImplementation([]),
     })
 
     await expect(
@@ -1104,7 +1110,7 @@ describe('assistant web-fetch threshold coverage', () => {
     })
 
     const { module: invalidExtractModeModule } = await loadWebFetchModule({
-      lookupImplementation: vi.fn(async () => [
+      lookupImplementation: createLookupImplementation([
         {
           address: 'edge.example.test',
           family: 0,
@@ -1152,7 +1158,7 @@ describe('assistant web-fetch threshold coverage', () => {
         })
         return document
       },
-      lookupImplementation: vi.fn(async () => [
+      lookupImplementation: createLookupImplementation([
         {
           address: 'edge.example.test',
           family: 0,
@@ -1192,7 +1198,7 @@ describe('assistant web-fetch threshold coverage', () => {
 
   it('treats responses without a content-type header as plain text instead of binary content', async () => {
     const { module } = await loadWebFetchModule({
-      lookupImplementation: vi.fn(async () => [
+      lookupImplementation: createLookupImplementation([
         {
           address: 'edge.example.test',
           family: 0,
@@ -1249,7 +1255,7 @@ describe('assistant web-fetch threshold coverage', () => {
 
     const { module } = await loadWebFetchModule({
       httpsRequestImplementation: abortingHttpsRequest,
-      lookupImplementation: vi.fn(async () => [
+      lookupImplementation: createLookupImplementation([
         {
           address: 'edge.example.test',
           family: 0,
@@ -1262,7 +1268,7 @@ describe('assistant web-fetch threshold coverage', () => {
     await expect(
       module.fetchAssistantWebResponse({
         runtime: {
-          lookupImplementation: vi.fn(async () => [
+          lookupImplementation: createLookupImplementation([
             {
               address: 'edge.example.test',
               family: 0,
@@ -1295,7 +1301,7 @@ describe('assistant web-fetch threshold coverage', () => {
 
     const { module } = await loadWebFetchModule({
       httpsRequestImplementation: invalidHttpsRequest,
-      lookupImplementation: vi.fn(async () => [
+      lookupImplementation: createLookupImplementation([
         {
           address: 'edge.example.test',
           family: 0,
@@ -1358,7 +1364,7 @@ describe('assistant web-fetch threshold coverage', () => {
 
     const { module } = await loadWebFetchModule({
       httpsRequestImplementation: matchingHttpsRequest,
-      lookupImplementation: vi.fn(async () => [
+      lookupImplementation: createLookupImplementation([
         {
           address: '::ffff:c000:0201',
           family: 6,
@@ -1382,7 +1388,7 @@ describe('assistant web-fetch threshold coverage', () => {
 
   it('handles both dotted and malformed IPv4-mapped IPv6 lookup forms', async () => {
     const { module: dottedModule } = await loadWebFetchModule({
-      lookupImplementation: vi.fn(async () => [
+      lookupImplementation: createLookupImplementation([
         {
           address: '::ffff:8.8.8.8',
           family: 6,
@@ -1404,7 +1410,7 @@ describe('assistant web-fetch threshold coverage', () => {
     })
 
     const { module: malformedModule } = await loadWebFetchModule({
-      lookupImplementation: vi.fn(async () => [
+      lookupImplementation: createLookupImplementation([
         {
           address: '::ffff:not-an-ip',
           family: 6,
@@ -1429,7 +1435,7 @@ describe('assistant web-fetch threshold coverage', () => {
   it('treats oversized mapped IPv6 hex segments as invalid mapped IPv4 addresses', async () => {
     const hugeHex = 'f'.repeat(400)
     const { module } = await loadWebFetchModule({
-      lookupImplementation: vi.fn(async () => [
+      lookupImplementation: createLookupImplementation([
         {
           address: `::ffff:${hugeHex}:${hugeHex}`,
           family: 6,
@@ -1520,9 +1526,20 @@ async function loadWebFetchModule(input?: {
       const transform = input.linkedomDocumentTransform
       return {
         ...actual,
-        DOMParser: class extends actual.DOMParser {
-          override parseFromString(...args: Parameters<import('linkedom').DOMParser['parseFromString']>) {
-            return transform(super.parseFromString(...args))
+        DOMParser: class {
+          private readonly delegate = new actual.DOMParser()
+
+          parseFromString(
+            markupLanguage: string,
+            mimeType: LinkedomMimeType,
+            globals?: unknown,
+          ) {
+            const document = this.delegate.parseFromString(
+              markupLanguage,
+              mimeType,
+              globals,
+            )
+            return transform?.(document) ?? document
           }
         },
       }
@@ -1607,4 +1624,24 @@ function normalizeResponseChunks(
   return chunks.map((chunk) =>
     typeof chunk === 'string' ? encoder.encode(chunk) : chunk,
   )
+}
+
+function createLookupImplementation(
+  addresses: MockLookupAddress[],
+): LookupImplementation {
+  const fallback = addresses[0] ?? { address: '127.0.0.1', family: 4 }
+  const lookupImplementation = (async (
+    _hostname: string,
+    options?: number | { all?: boolean },
+  ) => {
+    if (typeof options === 'number') {
+      return fallback
+    }
+    if (options?.all) {
+      return addresses
+    }
+    return fallback
+  }) as LookupImplementation
+
+  return lookupImplementation
 }

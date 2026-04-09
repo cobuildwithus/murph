@@ -214,6 +214,7 @@ describe("HostedGatewayProjectionStore", () => {
         schema: "murph.gateway-conversation.v1",
         sessionKey: EMAIL_THREAD_SESSION_KEY,
         title: "Thread",
+        titleSource: "thread-title",
         lastMessagePreview: "newest message",
         lastActivityAt: "2026-03-30T21:05:00.000Z",
         messageCount: 1,
@@ -260,6 +261,7 @@ describe("HostedGatewayProjectionStore", () => {
         schema: "murph.gateway-conversation.v1",
         sessionKey: EMAIL_THREAD_SESSION_KEY,
         title: "Thread",
+        titleSource: "thread-title",
         lastMessagePreview: "older message",
         lastActivityAt: "2026-03-30T21:00:00.000Z",
         messageCount: 0,
@@ -308,7 +310,9 @@ describe("HostedGatewayProjectionStore", () => {
   });
 
   it("serializes snapshot writes and permission responses so newer projections are not clobbered", async () => {
-    let releaseSnapshotWrite: (() => void) | null = null;
+    let releaseSnapshotWrite: () => void = () => {
+      throw new Error("Expected the snapshot write lock to install a release callback.");
+    };
     let markSnapshotWriteBlocked!: () => void;
     const snapshotWriteSeen = new Promise<void>((resolve) => {
       markSnapshotWriteBlocked = resolve;
@@ -354,6 +358,7 @@ describe("HostedGatewayProjectionStore", () => {
         schema: "murph.gateway-conversation.v1",
         sessionKey: EMAIL_THREAD_SESSION_KEY,
         title: "Thread",
+        titleSource: "thread-title",
         lastMessagePreview: "older message",
         lastActivityAt: "2026-03-30T21:00:00.000Z",
         messageCount: 1,
@@ -400,6 +405,7 @@ describe("HostedGatewayProjectionStore", () => {
         schema: "murph.gateway-conversation.v1",
         sessionKey: EMAIL_THREAD_SESSION_KEY,
         title: "Thread",
+        titleSource: "thread-title",
         lastMessagePreview: "newest message",
         lastActivityAt: "2026-03-30T21:05:00.000Z",
         messageCount: 2,
@@ -446,7 +452,7 @@ describe("HostedGatewayProjectionStore", () => {
       note: "approved after refresh",
     });
 
-    releaseSnapshotWrite?.();
+    releaseSnapshotWrite();
     await applyingSnapshot;
     await resolvingPermission;
 

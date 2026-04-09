@@ -263,7 +263,7 @@ test("sendGatewayMessageLocal marks direct threads as direct deliveries", async 
     }),
   );
   const messageSender = {
-    deliver: vi.fn(async () => ({
+    deliver: vi.fn(async (_input: { threadIsDirect?: boolean | null }) => ({
       delivery: null,
       deliveryErrorMessage: null,
       intentId: "intent-direct",
@@ -292,7 +292,7 @@ test("sendGatewayMessageLocal keeps thread directness nullable for unknown route
     }),
   );
   const messageSender = {
-    deliver: vi.fn(async () => ({
+    deliver: vi.fn(async (_input: { threadIsDirect?: boolean | null }) => ({
       delivery: null,
       deliveryErrorMessage: null,
       intentId: "intent-unknown",

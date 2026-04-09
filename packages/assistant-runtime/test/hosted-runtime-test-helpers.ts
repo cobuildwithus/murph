@@ -5,6 +5,9 @@ import path from "node:path";
 import type {
   HostedWorkspaceArtifactPersistInput,
 } from "@murphai/runtime-state/node";
+import type {
+  HostedAssistantDeliveryRecord,
+} from "@murphai/hosted-execution";
 
 import type {
   HostedRuntimeEffectsPort,
@@ -87,11 +90,13 @@ export function createHostedRuntimeEffectsPortStub(
     async readRawEmailMessage() {
       return null;
     },
-    async readSideEffect() {
+    async readSideEffect(): Promise<HostedAssistantDeliveryRecord | null> {
       return null;
     },
     async sendEmail() {},
-    async writeSideEffect(record) {
+    async writeSideEffect(
+      record: HostedAssistantDeliveryRecord,
+    ): Promise<HostedAssistantDeliveryRecord> {
       return record;
     },
     ...overrides,
@@ -104,9 +109,11 @@ export function createHostedWorkspaceArtifactPersistInput(input: {
   root?: string;
   sha256: string;
 }): HostedWorkspaceArtifactPersistInput {
+  const relativePath = input.path ?? "vault/raw/example.bin";
   return {
+    absolutePath: path.join("/", relativePath),
     bytes: input.bytes,
-    path: input.path ?? "vault/raw/example.bin",
+    path: relativePath,
     ref: {
       byteSize: input.bytes.byteLength,
       sha256: input.sha256,

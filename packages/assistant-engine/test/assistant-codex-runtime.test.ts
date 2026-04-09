@@ -652,7 +652,8 @@ describe('assistant codex runtime', () => {
       },
     })
 
-    expect(child?.kill).toHaveBeenCalledWith('SIGINT')
+    const spawnedChild = requireMockChildProcess(child)
+    expect(spawnedChild.kill).toHaveBeenCalledWith('SIGINT')
   })
 })
 
@@ -1729,4 +1730,14 @@ function readOutputFilePath(args: readonly unknown[]): string {
   }
 
   return outputPath
+}
+
+function requireMockChildProcess(
+  child: MockChildProcess | null,
+): MockChildProcess {
+  expect(child).not.toBeNull()
+  if (!child) {
+    throw new Error('Expected Codex execution to spawn a child process.')
+  }
+  return child
 }

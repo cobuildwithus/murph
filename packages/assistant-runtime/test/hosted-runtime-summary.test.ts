@@ -160,26 +160,20 @@ describe("summarizeDispatch", () => {
         nextWakeAt: null,
         parserProcessed: 1,
         shareImportResult: {
-          foods: [
-            {
-              foodId: "food_123",
-              sourceRef: "food.breakfast",
-            },
-          ],
-          meal: {
-            mealEntryId: "meal_123",
-          },
+          foods: [],
+          meal: null,
           pack: {
             createdAt: "2026-04-08T00:00:00.000Z",
             entities: [],
             schemaVersion: "murph.share-pack.v1",
+            title: "Shared breakfast",
           },
           protocols: [],
           recipes: [],
         },
         shareImportTitle: null,
       }),
-      "Imported share pack \"share_123\" (1 foods, 0 protocols, 0 recipes). Logged one meal entry from the shared food. Parser jobs: 1. Device sync jobs: 0.",
+      "Imported share pack \"share_123\" (0 foods, 0 protocols, 0 recipes). Parser jobs: 1. Device sync jobs: 0.",
     );
   });
 
@@ -226,10 +220,10 @@ describe("summarizeDispatch", () => {
           eventId: "evt_telegram",
           occurredAt: "2026-04-08T00:00:00.000Z",
           telegramMessage: {
-            chatId: "chat_123",
-            messageId: 42,
-            receivedAt: "2026-04-08T00:00:00.000Z",
+            messageId: "42",
+            schema: "murph.hosted-telegram-message.v1",
             text: "hello",
+            threadId: "chat_123",
           },
           userId: "member_123",
         }),
@@ -248,20 +242,20 @@ describe("summarizeDispatch", () => {
       {
         dispatch: buildHostedExecutionAssistantCronTickDispatch({
           eventId: "evt_cron",
-          memberId: "member_123",
           occurredAt: "2026-04-08T00:00:00.000Z",
-          reason: "scheduled",
+          reason: "alarm",
+          userId: "member_123",
         }),
-        expected: "Processed assistant cron tick (scheduled) and ran the hosted maintenance loop. Parser jobs: 1. Device sync jobs: 2.",
+        expected: "Processed assistant cron tick (alarm) and ran the hosted maintenance loop. Parser jobs: 1. Device sync jobs: 2.",
       },
       {
         dispatch: buildHostedExecutionDeviceSyncWakeDispatch({
           eventId: "evt_wake",
-          memberId: "member_123",
           occurredAt: "2026-04-08T00:00:00.000Z",
-          reason: "manual-refresh",
+          reason: "connected",
+          userId: "member_123",
         }),
-        expected: "Processed device-sync wake (manual-refresh) and ran the hosted maintenance loop. Parser jobs: 1. Device sync jobs: 2.",
+        expected: "Processed device-sync wake (connected) and ran the hosted maintenance loop. Parser jobs: 1. Device sync jobs: 2.",
       },
     ];
 

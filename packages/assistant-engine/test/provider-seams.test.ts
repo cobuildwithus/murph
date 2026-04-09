@@ -5,10 +5,10 @@ import { afterEach, describe, expect, it } from 'vitest'
 import type {
   AssistantProviderBinding,
   AssistantProviderSessionOptions,
-  AssistantProviderProgressEvent,
   AssistantSession,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import {
+  type AssistantProviderProgressEvent,
   createAssistantProviderToolProgressEvent,
   mergeAssistantProviderActivityLabels,
   summarizeAssistantProviderActivityLabels,
@@ -393,6 +393,7 @@ describe('assistant provider seam helpers', () => {
         target: {
           adapter: 'codex-cli',
           approvalPolicy: 'never',
+          codexCommand: null,
           codexHome: '/tmp/codex-home',
           model: 'codex-pro',
           oss: true,

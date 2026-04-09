@@ -126,7 +126,14 @@ async function readImportAuditsForCapture(vaultRoot: string, storedAt: string) {
     throw error;
   }
 
-  return records.filter((record) => record.action === "intake_import");
+  return records.filter(
+    (record): record is { action: string } =>
+      typeof record === "object"
+      && record !== null
+      && "action" in record
+      && typeof record.action === "string"
+      && record.action === "intake_import",
+  );
 }
 
 async function findOperationByType(vaultRoot: string, operationType: string) {

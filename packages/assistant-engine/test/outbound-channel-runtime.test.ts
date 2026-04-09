@@ -95,6 +95,7 @@ function createSession(overrides: Record<string, unknown> = {}) {
     binding: {
       actorId: 'actor-1',
       channel: 'telegram',
+      conversationKey: null,
       delivery: {
         kind: 'thread',
         target: 'thread-1',
@@ -582,6 +583,7 @@ describe('outbound channel runtime', () => {
         binding: {
           actorId: 'actor-1',
           channel: 'telegram',
+          conversationKey: null,
           delivery: {
             kind: 'thread',
             target: 'thread-1',

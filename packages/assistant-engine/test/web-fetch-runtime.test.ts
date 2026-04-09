@@ -3,6 +3,12 @@ import { brotliCompressSync, gzipSync } from 'node:zlib'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 type WebFetchModule = typeof import('../src/assistant/web-fetch.ts')
+type LookupImplementation = typeof import('node:dns/promises').lookup
+type MockLookupAddress = {
+  address: string
+  family: number
+}
+type LinkedomMimeType = 'text/html' | 'image/svg+xml' | 'text/xml'
 
 type MockResponseDefinition = {
   body?: string | Uint8Array | Array<string | Uint8Array> | null
@@ -146,11 +152,8 @@ describe('assistant web-fetch runtime', () => {
     const { module } = await loadWebFetchModule()
     const signal = new AbortController().signal
     const runtime = {
-      lookupImplementation: vi.fn(async () => [
-        {
-          address: '8.8.8.8',
-          family: 4,
-        },
+      lookupImplementation: createLookupImplementation([
+        { address: '8.8.8.8', family: 4 },
       ]),
       maxRedirects: 2,
       maxResponseBytes: 1_000,
@@ -190,11 +193,8 @@ describe('assistant web-fetch runtime', () => {
       code: 'WEB_FETCH_PRIVATE_HOST_BLOCKED',
     })
 
-    const privateLookup = vi.fn(async () => [
-      {
-        address: '10.0.0.1',
-        family: 4,
-      },
+    const privateLookup = createLookupImplementation([
+      { address: '10.0.0.1', family: 4 },
     ])
     await expect(
       module.fetchAssistantWebResponse({
@@ -210,7 +210,7 @@ describe('assistant web-fetch runtime', () => {
       code: 'WEB_FETCH_PRIVATE_HOST_BLOCKED',
     })
 
-    const dnsFailure = vi.fn(async () => {
+    const dnsFailure: typeof import('node:dns/promises').lookup = vi.fn(async () => {
       throw new Error('lookup exploded')
     })
     await expect(
@@ -247,7 +247,7 @@ describe('assistant web-fetch runtime', () => {
         },
       ],
     })
-    const lookupImplementation = vi.fn(async () => [
+    const lookupImplementation = createLookupImplementation([
       {
         address: 'edge-a.test',
         family: 0,
@@ -307,7 +307,7 @@ describe('assistant web-fetch runtime', () => {
         },
       ],
     })
-    const lookupImplementation = vi.fn(async () => [
+    const lookupImplementation = createLookupImplementation([
       {
         address: 'edge-a.test',
         family: 0,
@@ -365,11 +365,8 @@ describe('assistant web-fetch runtime', () => {
 
     const redirected = await firstLoad.module.fetchAssistantWebResponse({
       runtime: {
-        lookupImplementation: vi.fn(async () => [
-          {
-            address: 'edge.example.test',
-            family: 0,
-          },
+        lookupImplementation: createLookupImplementation([
+          { address: 'edge.example.test', family: 0 },
         ]),
         maxRedirects: 1,
         maxResponseBytes: 1_000,
@@ -400,11 +397,8 @@ describe('assistant web-fetch runtime', () => {
     await expect(
       invalidLocationLoad.module.fetchAssistantWebResponse({
         runtime: {
-          lookupImplementation: vi.fn(async () => [
-            {
-              address: 'edge.example.test',
-              family: 0,
-            },
+          lookupImplementation: createLookupImplementation([
+            { address: 'edge.example.test', family: 0 },
           ]),
           maxRedirects: 1,
           maxResponseBytes: 1_000,
@@ -435,11 +429,8 @@ describe('assistant web-fetch runtime', () => {
     await expect(
       redirectLimitLoad.module.fetchAssistantWebResponse({
         runtime: {
-          lookupImplementation: vi.fn(async () => [
-            {
-              address: 'edge.example.test',
-              family: 0,
-            },
+          lookupImplementation: createLookupImplementation([
+            { address: 'edge.example.test', family: 0 },
           ]),
           maxRedirects: 0,
           maxResponseBytes: 1_000,
@@ -459,11 +450,8 @@ describe('assistant web-fetch runtime', () => {
     vi.setSystemTime(new Date('2026-04-08T01:02:03.456Z'))
 
     const { module } = await loadWebFetchModule({
-      lookupImplementation: vi.fn(async () => [
-        {
-          address: 'edge.example.test',
-          family: 0,
-        },
+      lookupImplementation: createLookupImplementation([
+        { address: 'edge.example.test', family: 0 },
       ]),
       httpsSteps: [
         {
@@ -511,11 +499,8 @@ describe('assistant web-fetch runtime', () => {
 
   it('extracts readability results and falls back to article text when markdown conversion is empty', async () => {
     const { module } = await loadWebFetchModule({
-      lookupImplementation: vi.fn(async () => [
-        {
-          address: 'edge.example.test',
-          family: 0,
-        },
+      lookupImplementation: createLookupImplementation([
+        { address: 'edge.example.test', family: 0 },
       ]),
       httpsSteps: [
         {
@@ -559,11 +544,8 @@ describe('assistant web-fetch runtime', () => {
 
   it('falls back to raw html markdown cleanup and rejects pdf responses', async () => {
     const fallbackLoad = await loadWebFetchModule({
-      lookupImplementation: vi.fn(async () => [
-        {
-          address: 'edge.example.test',
-          family: 0,
-        },
+      lookupImplementation: createLookupImplementation([
+        { address: 'edge.example.test', family: 0 },
       ]),
       httpsSteps: [
         {
@@ -612,11 +594,8 @@ describe('assistant web-fetch runtime', () => {
     ])
 
     const pdfLoad = await loadWebFetchModule({
-      lookupImplementation: vi.fn(async () => [
-        {
-          address: 'edge.example.test',
-          family: 0,
-        },
+      lookupImplementation: createLookupImplementation([
+        { address: 'edge.example.test', family: 0 },
       ]),
       httpsSteps: [
         {
@@ -648,11 +627,8 @@ describe('assistant web-fetch runtime', () => {
 
   it('decompresses gzip and brotli encoded responses before extraction', async () => {
     const gzipLoad = await loadWebFetchModule({
-      lookupImplementation: vi.fn(async () => [
-        {
-          address: 'edge.example.test',
-          family: 0,
-        },
+      lookupImplementation: createLookupImplementation([
+        { address: 'edge.example.test', family: 0 },
       ]),
       httpsSteps: [
         {
@@ -684,11 +660,8 @@ describe('assistant web-fetch runtime', () => {
     })
 
     const brotliLoad = await loadWebFetchModule({
-      lookupImplementation: vi.fn(async () => [
-        {
-          address: 'edge.example.test',
-          family: 0,
-        },
+      lookupImplementation: createLookupImplementation([
+        { address: 'edge.example.test', family: 0 },
       ]),
       httpsSteps: [
         {
@@ -731,11 +704,8 @@ describe('assistant web-fetch runtime', () => {
         })
         return document
       },
-      lookupImplementation: vi.fn(async () => [
-        {
-          address: 'edge.example.test',
-          family: 0,
-        },
+      lookupImplementation: createLookupImplementation([
+        { address: 'edge.example.test', family: 0 },
       ]),
       httpsSteps: [
         {
@@ -820,9 +790,20 @@ async function loadWebFetchModule(input?: {
       const transform = input.linkedomDocumentTransform
       return {
         ...actual,
-        DOMParser: class extends actual.DOMParser {
-          override parseFromString(...args: Parameters<import('linkedom').DOMParser['parseFromString']>) {
-            return transform(super.parseFromString(...args))
+        DOMParser: class {
+          private readonly delegate = new actual.DOMParser()
+
+          parseFromString(
+            markupLanguage: string,
+            mimeType: LinkedomMimeType,
+            globals?: unknown,
+          ) {
+            const document = this.delegate.parseFromString(
+              markupLanguage,
+              mimeType,
+              globals,
+            )
+            return transform?.(document) ?? document
           }
         },
       }
@@ -907,4 +888,24 @@ function normalizeResponseChunks(
   return chunks.map((chunk) =>
     typeof chunk === 'string' ? encoder.encode(chunk) : chunk,
   )
+}
+
+function createLookupImplementation(
+  addresses: MockLookupAddress[],
+): LookupImplementation {
+  const fallback = addresses[0] ?? { address: '127.0.0.1', family: 4 }
+  const lookupImplementation = (async (
+    _hostname: string,
+    options?: number | { all?: boolean },
+  ) => {
+    if (typeof options === 'number') {
+      return fallback
+    }
+    if (options?.all) {
+      return addresses
+    }
+    return fallback
+  }) as LookupImplementation
+
+  return lookupImplementation
 }

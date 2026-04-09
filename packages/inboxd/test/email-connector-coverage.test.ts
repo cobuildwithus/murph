@@ -236,8 +236,9 @@ test("createAgentmailApiPollDriver validates configuration and optional routes",
     ],
   );
 
+  assert.ok(driver.getMessage);
   await assert.rejects(
-    driver.getMessage?.({ messageId: "msg_error" }),
+    driver.getMessage({ messageId: "msg_error" }),
     /try again later/u,
   );
 });

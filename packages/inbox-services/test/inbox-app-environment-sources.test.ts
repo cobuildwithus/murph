@@ -13,10 +13,16 @@ import { createIntegratedInboxServices } from '../src/inbox-app/service.js'
 import { createInboxSourceOps } from '../src/inbox-app/sources.js'
 import type {
   AgentmailApiClient,
+  EmailDriver,
+  InboxRuntimeModule,
   InboxConnectorConfig,
+  ParsersRuntimeModule,
+  PollConnector,
+  RuntimeStore,
+  TelegramDriver,
 } from '../src/inbox-app/types.js'
 
-function createRuntimeStore() {
+function createRuntimeStore(): RuntimeStore {
   return {
     close() {},
     getCapture() {
@@ -35,59 +41,134 @@ function createRuntimeStore() {
   }
 }
 
-function createInboxRuntimeModule() {
+function createPollConnector(
+  source: InboxConnectorConfig['source'],
+  id: string,
+  webhooks: boolean,
+): PollConnector {
   return {
-    createAgentmailApiPollDriver(input: { apiKey: string; inboxId: string; baseUrl?: string }) {
-      return input
+    capabilities: {
+      attachments: true,
+      backfill: true,
+      watch: true,
+      webhooks,
+    },
+    id,
+    kind: 'poll',
+    source,
+  }
+}
+
+function createTelegramDriver(
+  overrides: Partial<TelegramDriver> = {},
+): TelegramDriver {
+  return {
+    async downloadFile() {
+      return new Uint8Array()
+    },
+    async getFile() {
+      return {}
+    },
+    async getMe() {
+      return {}
+    },
+    async getMessages() {
+      return []
+    },
+    async startWatching() {},
+    ...overrides,
+  }
+}
+
+function createEmailDriver(
+  overrides: Partial<EmailDriver> = {},
+): EmailDriver {
+  return {
+    async downloadAttachment() {
+      return null
+    },
+    inboxId: 'mailbox-1',
+    async listUnreadMessages() {
+      return []
+    },
+    async markProcessed() {},
+    ...overrides,
+  }
+}
+
+function createAgentmailClient(
+  overrides: Partial<AgentmailApiClient> = {},
+): AgentmailApiClient {
+  return {
+    apiKey: 'agentmail-key',
+    baseUrl: 'https://agentmail.test',
+    async createInbox() {
+      throw new Error('not used in this test')
+    },
+    async downloadUrl() {
+      return new Uint8Array()
+    },
+    async getAttachment() {
+      throw new Error('not used in this test')
+    },
+    async getInbox(inboxId: string) {
+      return {
+        email: 'agentmail@example.com',
+        inbox_id: inboxId,
+      }
+    },
+    async getMessage() {
+      throw new Error('not used in this test')
+    },
+    async getThread() {
+      throw new Error('not used in this test')
+    },
+    async listInboxes() {
+      return {
+        count: 0,
+        inboxes: [],
+      }
+    },
+    async listMessages() {
+      return {
+        count: 0,
+        messages: [],
+      }
+    },
+    async replyToMessage() {
+      throw new Error('not used in this test')
+    },
+    async sendMessage() {
+      throw new Error('not used in this test')
+    },
+    async updateMessage() {
+      throw new Error('not used in this test')
+    },
+    ...overrides,
+  }
+}
+
+function createInboxRuntimeModule(): InboxRuntimeModule {
+  return {
+    createAgentmailApiPollDriver(input) {
+      return createEmailDriver({
+        inboxId: input.inboxId,
+      })
     },
     async createInboxPipeline() {
       throw new Error('not used in this test')
     },
     createEmailPollConnector() {
-      return {
-        id: 'email:primary',
-        source: 'email',
-        kind: 'poll' as const,
-        capabilities: {
-          attachments: true,
-          backfill: true,
-          watch: true,
-          webhooks: false,
-        },
-      }
+      return createPollConnector('email', 'email:primary', false)
     },
     createLinqWebhookConnector() {
-      return {
-        id: 'linq:primary',
-        source: 'linq',
-        kind: 'poll' as const,
-        capabilities: {
-          attachments: true,
-          backfill: true,
-          watch: true,
-          webhooks: true,
-        },
-      }
+      return createPollConnector('linq', 'linq:primary', true)
     },
-    createTelegramBotApiPollDriver(input: {
-      token: string
-      apiBaseUrl?: string
-      fileBaseUrl?: string
-    }) {
-      return input
+    createTelegramBotApiPollDriver() {
+      return createTelegramDriver()
     },
     createTelegramPollConnector() {
-      return {
-        id: 'telegram:bot',
-        source: 'telegram',
-        kind: 'poll' as const,
-        capabilities: {
-          attachments: true,
-          backfill: true,
-          watch: true,
-          webhooks: false,
-        },
-      }
+      return createPollConnector('telegram', 'telegram:bot', false)
     },
     async ensureInboxVault() {},
     async openInboxRuntime() {
@@ -99,10 +180,42 @@ function createInboxRuntimeModule() {
   }
 }
 
-function createParserModule() {
+function createParserDoctor() {
+  return {
+    configPath: '/tmp/parser-toolchain.json',
+    discoveredAt: '2026-04-08T00:00:00.000Z',
+    tools: {
+      ffmpeg: {
+        available: true,
+        command: '/usr/bin/ffmpeg',
+        reason: 'configured',
+        source: 'config' as const,
+      },
+      pdftotext: {
+        available: true,
+        command: '/usr/bin/pdftotext',
+        reason: 'configured',
+        source: 'config' as const,
+      },
+      whisper: {
+        available: true,
+        command: '/usr/bin/whisper',
+        modelPath: '/tmp/model.bin',
+        reason: 'configured',
+        source: 'config' as const,
+      },
+    },
+  }
+}
+
+function createParserModule(): ParsersRuntimeModule {
   return {
     async createConfiguredParserRegistry() {
-      return { ffmpeg: undefined, registry: {} }
+      return {
+        doctor: createParserDoctor(),
+        ffmpeg: undefined,
+        registry: {},
+      }
     },
     createInboxParserService() {
       return {
@@ -112,31 +225,7 @@ function createParserModule() {
       }
     },
     async discoverParserToolchain() {
-      return {
-        configPath: '/tmp/parser-toolchain.json',
-        discoveredAt: '2026-04-08T00:00:00.000Z',
-        tools: {
-          ffmpeg: {
-            available: true,
-            command: '/usr/bin/ffmpeg',
-            source: 'config',
-            reason: 'configured',
-          },
-          pdftotext: {
-            available: true,
-            command: '/usr/bin/pdftotext',
-            source: 'config',
-            reason: 'configured',
-          },
-          whisper: {
-            available: true,
-            command: '/usr/bin/whisper',
-            modelPath: '/tmp/model.bin',
-            source: 'config',
-            reason: 'configured',
-          },
-        },
-      }
+      return createParserDoctor()
     },
     async writeParserToolchainConfig(input: { vaultRoot: string }) {
       return {
@@ -165,7 +254,7 @@ test('createInboxAppEnvironment builds an AgentMail client from injected setting
   const env = createInboxAppEnvironment({
     createAgentmailClient(input) {
       seen.push(input)
-      return client as AgentmailApiClient
+      return createAgentmailClient(client)
     },
     getEnvironment: () => ({
       AGENTMAIL_API_KEY: 'env-key',
@@ -189,9 +278,7 @@ test('createInboxAppEnvironment builds an AgentMail client from injected setting
 test('createInboxAppEnvironment recovers an existing AgentMail inbox after create is forbidden', async () => {
   const env = createInboxAppEnvironment({
     createAgentmailClient() {
-      return {
-        apiKey: 'agentmail-key',
-        baseUrl: 'https://agentmail.test',
+      return createAgentmailClient({
         async createInbox() {
           throw new VaultCliError(
             'AGENTMAIL_REQUEST_FAILED',
@@ -211,7 +298,7 @@ test('createInboxAppEnvironment recovers an existing AgentMail inbox after creat
             inbox_id: inboxId,
           }
         },
-      } as AgentmailApiClient
+      })
     },
     getEnvironment: () => ({
       AGENTMAIL_API_KEY: 'agentmail-key',

@@ -310,6 +310,7 @@ test("createLocalGatewayService forwards wrapper calls to the local store and se
   assert.equal(messages.messages.length, 2);
   assert.equal(attachments[0]?.fileName, "photo.jpg");
   assert.equal(permissions[0]?.requestId, "permission-1");
+  assert.ok(permission);
   assert.equal(permission.requestId, "permission-1");
   assert.equal(pollResult.nextCursor, 1);
   assert.equal(waitResult.nextCursor, 2);

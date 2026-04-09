@@ -15,8 +15,8 @@ import {
   encryptHostedBundle,
   readEncryptedR2Payload,
 } from "../src/crypto.js";
-import { MemoryEncryptedR2Bucket, createTestRootKey } from "./test-helpers";
-import { expectOpaqueStrings, findStoredObjectKey } from "./object-key-assertions";
+import { MemoryEncryptedR2Bucket, createTestRootKey } from "./test-helpers.js";
+import { expectOpaqueStrings, findStoredObjectKey } from "./object-key-assertions.js";
 
 describe("readEncryptedR2Payload", () => {
   it("reads older envelopes without rewriting them on read", async () => {
@@ -194,6 +194,7 @@ describe("hosted storage object keys", () => {
       keyId,
     });
     await journalStore.writeCommittedResult("user_journal_123", "evt_journal_1", {
+      assistantDeliveryEffects: [],
       bundleRef: null,
       committedAt: "2026-04-03T00:00:00.000Z",
       eventId: "evt_journal_1",

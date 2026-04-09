@@ -52,6 +52,15 @@ async function writePendingRecord(vaultRoot: string, turnId: string) {
   return usageId;
 }
 
+function readUsageId(record: object | undefined): string | null {
+  if (!record) {
+    return null;
+  }
+
+  const usageId = Reflect.get(record, "usageId");
+  return typeof usageId === "string" ? usageId : null;
+}
+
 test("hosted usage export retries failed batches one record at a time and warns", async () => {
   const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
   const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace("hosted-runtime-usage-");
@@ -72,7 +81,10 @@ test("hosted usage export retries failed batches one record at a time and warns"
 
           return {
             recorded: 1,
-            usageIds: [usage[0]?.usageId as string],
+            usageIds: (() => {
+              const usageId = readUsageId(usage[0]);
+              return usageId ? [usageId] : [];
+            })(),
           };
         },
       },

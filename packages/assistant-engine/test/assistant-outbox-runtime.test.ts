@@ -238,8 +238,10 @@ describe('assistant outbox runtime', () => {
         providerMessageId: 'provider-sent',
         sentAt: '2026-04-08T03:01:00.000Z',
       }),
+      deliveryDeduplicated: false,
       deliveryTransportIdempotent: false,
-      session: null,
+      outboxIntentId: null,
+      session: undefined,
     })
 
     const sent = await deliverAssistantOutboxMessage({
@@ -404,8 +406,10 @@ describe('assistant outbox runtime', () => {
         providerMessageId: 'provider-drain-sent',
         sentAt: '2026-04-08T05:20:00.000Z',
       }),
+      deliveryDeduplicated: false,
       deliveryTransportIdempotent: false,
-      session: null,
+      outboxIntentId: null,
+      session: undefined,
     })
     mockedDeliverAssistantMessageOverBinding.mockRejectedValueOnce(
       Object.assign(new Error('temporary network outage'), {

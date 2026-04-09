@@ -22,7 +22,11 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     });
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    const request = fetchMock.mock.calls[0]?.[0];
+    const firstCall = fetchMock.mock.calls[0];
+    if (!firstCall) {
+      throw new Error("Expected the effects port fetch to run.");
+    }
+    const [request] = firstCall as unknown as [RequestInfo | URL, RequestInit?];
     expect(request).toBeInstanceOf(Request);
     expect((request as Request).url).toBe("http://results.worker/events/evt_123/commit");
     expect((request as Request).headers.get("x-hosted-execution-runner-proxy-token")).toBe(
@@ -62,7 +66,11 @@ describe("buildHostedExecutionRuntimePlatform", () => {
 
     expect(snapshot.userId).toBe("member_123");
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    const request = fetchMock.mock.calls[0]?.[0];
+    const firstCall = fetchMock.mock.calls[0];
+    if (!firstCall) {
+      throw new Error("Expected the device-sync fetch to run.");
+    }
+    const [request] = firstCall as unknown as [RequestInfo | URL, RequestInit?];
     expect(request).toBeInstanceOf(URL);
     expect(String(request)).toBe("http://device-sync.worker/api/internal/device-sync/runtime/snapshot");
   });
@@ -107,16 +115,28 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       boundUserId: "member_123",
       fetchImpl: fetchMock as typeof fetch,
     });
+    const { effectsPort } = platform;
 
-    await platform.effectsPort.deletePreparedAssistantDelivery({
+    if (
+      !("deletePreparedAssistantDelivery" in effectsPort)
+      || !("readAssistantDeliveryRecord" in effectsPort)
+      || !("writeAssistantDeliveryRecord" in effectsPort)
+      || !effectsPort.deletePreparedAssistantDelivery
+      || !effectsPort.readAssistantDeliveryRecord
+      || !effectsPort.writeAssistantDeliveryRecord
+    ) {
+      throw new Error("Expected assistant-delivery journal methods to be available.");
+    }
+
+    await effectsPort.deletePreparedAssistantDelivery({
       effectId: "intent_123",
       fingerprint: "dedupe_123",
     });
-    const readRecord = await platform.effectsPort.readAssistantDeliveryRecord({
+    const readRecord = await effectsPort.readAssistantDeliveryRecord({
       effectId: "intent_123",
       fingerprint: "dedupe_123",
     });
-    const writtenRecord = await platform.effectsPort.writeAssistantDeliveryRecord(record);
+    const writtenRecord = await effectsPort.writeAssistantDeliveryRecord(record);
 
     expect(readRecord).toEqual(record);
     expect(writtenRecord).toEqual(record);

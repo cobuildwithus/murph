@@ -4,6 +4,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   buildHostedExecutionTelegramMessageReceivedDispatch,
 } from "@murphai/hosted-execution";
+import { resolveAssistantStatePaths } from "@murphai/runtime-state/node";
+import type {
+  HostedCommittedExecutionState,
+  HostedAssistantRuntimeJobResult,
+} from "../src/hosted-runtime/models.ts";
 
 const mocks = vi.hoisted(() => ({
   commitHostedExecutionResult: vi.fn(),
@@ -93,7 +98,15 @@ import {
 
 const incomingBundle = Uint8Array.from([1, 2, 3]);
 const originalFetch = globalThis.fetch;
-const committedExecution = {
+const deliveryEffects = [
+  {
+    effectId: "intent_123",
+    fingerprint: "dedupe_123",
+    intentId: "intent_123",
+    kind: "assistant.delivery" as const,
+  },
+];
+const committedExecution: HostedCommittedExecutionState = {
   committedGatewayProjectionSnapshot: {
     schema: "murph.gateway-projection-snapshot.v1",
     generatedAt: "2026-04-08T00:00:00.000Z",
@@ -109,16 +122,10 @@ const committedExecution = {
       summary: "committed summary",
     },
   },
-  committedSideEffects: [
-    {
-      effectId: "intent_123",
-      fingerprint: "dedupe_123",
-      intentId: "intent_123",
-      kind: "assistant.delivery",
-    },
-  ],
+  committedAssistantDeliveryEffects: deliveryEffects,
+  committedSideEffects: deliveryEffects,
 };
-const finalResult = {
+const finalResult: HostedAssistantRuntimeJobResult = {
   finalGatewayProjectionSnapshot: {
     schema: "murph.gateway-projection-snapshot.v1",
     generatedAt: "2026-04-08T00:05:00.000Z",
@@ -165,6 +172,7 @@ beforeEach(() => {
     },
   });
   mocks.restoreHostedExecutionContext.mockResolvedValue({
+    assistantStateRoot: resolveAssistantStatePaths("/tmp/vault-root").assistantStateRoot,
     operatorHomeRoot: "/tmp/operator-home",
     vaultRoot: "/tmp/vault-root",
   });
@@ -218,8 +226,10 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
     const deviceSyncPort = {
       applyUpdates: vi.fn(),
       createConnectLink: vi.fn(async ({ provider }: { provider: string }) => ({
+        authorizationUrl: `https://connect.example.test/${provider}`,
+        expiresAt: "2026-04-08T00:30:00.000Z",
         provider,
-        url: `https://connect.example.test/${provider}`,
+        providerLabel: provider.toUpperCase(),
       })),
       fetchSnapshot: vi.fn(),
     };
@@ -551,6 +561,8 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
           },
           resume: {
             committedResult: {
+              assistantDeliveryEffects:
+                committedExecution.committedAssistantDeliveryEffects,
               result: committedExecution.committedResult.result,
               sideEffects: committedExecution.committedSideEffects,
             },
@@ -847,6 +859,8 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
           },
           resume: {
             committedResult: {
+              assistantDeliveryEffects:
+                committedExecution.committedAssistantDeliveryEffects,
               result: committedExecution.committedResult.result,
               sideEffects: committedExecution.committedSideEffects,
             },

@@ -4,6 +4,10 @@ import { z } from 'zod'
 import type { AgentmailApiClient } from '@murphai/operator-config/agentmail-runtime'
 import { inboxPromotionStoreSchema } from '@murphai/operator-config/inbox-cli-contracts'
 import type {
+  QueryEntityFamily,
+  QueryVaultReadModel,
+} from '@murphai/vault-usecases/runtime'
+import type {
   InboxAttachmentListResult,
   InboxAttachmentParseResult,
   InboxAttachmentReparseResult,
@@ -36,10 +40,12 @@ import type {
   InboxSourceListResult,
   InboxSourceRemoveResult,
 } from '@murphai/operator-config/inbox-cli-contracts'
-import type {
-  ImportersFactoryRuntimeModule,
-  QueryRuntimeModule,
-} from '@murphai/vault-usecases/runtime'
+
+export type { AgentmailApiClient } from '@murphai/operator-config/agentmail-runtime'
+export type {
+  InboxConnectorConfig,
+  InboxRuntimeConfig,
+} from '@murphai/operator-config/inbox-cli-contracts'
 
 export interface RuntimeAttachmentRecord {
   attachmentId?: string | null
@@ -534,6 +540,47 @@ export interface CoreRuntimeModule {
   }>
 }
 
+export interface ImportersRuntimeModule {
+  importDocument(input: {
+    filePath: string
+    vaultRoot: string
+    title?: string
+    occurredAt?: string
+    note?: string
+    source?: string
+  }): Promise<{
+    documentId: string
+    event: {
+      id: string
+    }
+  }>
+}
+
+export interface ImportersFactoryRuntimeModule {
+  createImporters(input?: {
+    corePort?: CoreRuntimeModule
+  }): ImportersRuntimeModule
+}
+
+export interface QueryRuntimeModule {
+  readVault(vaultRoot: string): Promise<QueryVaultReadModel>
+  listEntities(
+    readModel: QueryVaultReadModel,
+    filters?: {
+      families?: QueryEntityFamily[]
+    },
+  ): Array<{
+    path: string
+    entityId: string
+    attributes: {
+      slug?: string
+      status?: string | null
+    }
+    experimentSlug?: string | null
+    status?: string | null
+  }>
+}
+
 export interface PromotionScope<TPrepared, TDerived> {
   input: PromoteInput
   paths: InboxPaths
@@ -730,7 +777,7 @@ export interface InboxServices {
   ): Promise<InboxAttachmentReparseResult>
   show(input: CommandContext & { captureId: string }): Promise<InboxShowResult>
   search(input: SearchInput): Promise<InboxSearchResult>
-  preserveDocumentAttachments?(
+  preserveDocumentAttachments(
     input: PromoteInput,
   ): Promise<InboxPreserveDocumentAttachmentsResult>
   promoteMeal(input: PromoteInput): Promise<InboxPromoteMealResult>

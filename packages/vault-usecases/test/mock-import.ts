@@ -1,6 +1,6 @@
 import { vi } from "vitest";
 
-export type ModuleMockFactory = () => unknown | Promise<unknown>;
+export type ModuleMockFactory = () => Record<string, unknown> | Promise<Record<string, unknown>>;
 
 export function mockActualModule<TModule extends Record<string, unknown>>(
   specifier: string,

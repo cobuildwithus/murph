@@ -112,36 +112,35 @@ function createPromptCapture(input: {
   telegramMetadata?: TelegramAutoReplyMetadata | null
 } = {}): AssistantAutoReplyPromptCapture {
   const attachments = [...(input.attachments ?? [])]
+  const resolvedAttachments = input.captureOverrides?.attachments ?? attachments
+  const capture = {
+    captureId: 'capture-1',
+    source: 'telegram',
+    accountId: null,
+    externalId: 'external-1',
+    threadId: 'thread-1',
+    threadTitle: 'Family',
+    threadIsDirect: true,
+    actorId: 'actor-1',
+    actorName: 'Taylor',
+    actorIsSelf: false,
+    occurredAt: '2026-04-08T00:00:00.000Z',
+    receivedAt: null,
+    text: null,
+    envelopePath: 'inbox/telegram/capture-1.json',
+    eventId: 'event-1',
+    promotions: [],
+    createdAt: '2026-04-08T00:00:01.000Z',
+    ...input.captureOverrides,
+  }
   return {
     capture: inboxShowResultSchema.parse({
       vault: '/tmp/assistant-engine-prompt-builder-vault',
       capture: {
-        captureId: 'capture-1',
-        source: 'telegram',
-        accountId: null,
-        externalId: 'external-1',
-        threadId: 'thread-1',
-        threadTitle: 'Family',
-        threadIsDirect: true,
-        actorId: 'actor-1',
-        actorName: 'Taylor',
-        actorIsSelf: false,
-        occurredAt: '2026-04-08T00:00:00.000Z',
-        receivedAt: null,
-        text: null,
-        attachmentCount: attachments.length,
-        envelopePath: 'inbox/telegram/capture-1.json',
-        eventId: 'event-1',
-        promotions: [],
-        createdAt: '2026-04-08T00:00:01.000Z',
-        attachments,
-        ...input.captureOverrides,
+        ...capture,
         attachmentCount:
-          input.captureOverrides?.attachmentCount ?? attachments.length,
-        attachments:
-          input.captureOverrides?.attachments !== undefined
-            ? input.captureOverrides.attachments
-            : attachments,
+          input.captureOverrides?.attachmentCount ?? resolvedAttachments.length,
+        attachments: resolvedAttachments,
       },
     }).capture,
     telegramMetadata: input.telegramMetadata ?? null,

@@ -21,17 +21,16 @@ import type {
   ImessageDriver,
   InboxAppEnvironment,
   InboxImessageRuntimeModule,
+  ImportersFactoryRuntimeModule,
   InboxServicesDependencies,
   InboxRuntimeModule,
   ParsersRuntimeModule,
   ProvisionedMailboxResolution,
+  QueryRuntimeModule,
   RecoveredProvisionedMailbox,
   TelegramDriver,
 } from './types.js'
-import {
-  loadQueryRuntime,
-  type ImportersFactoryRuntimeModule,
-} from '@murphai/vault-usecases/runtime'
+import { loadQueryRuntime } from '@murphai/vault-usecases/runtime'
 import { loadRuntimeModule } from '../runtime-import.js'
 
 import { normalizeNullableString } from '../inbox-services/shared.js'

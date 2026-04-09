@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { buildHostedExecutionEmailMessageReceivedDispatch } from "@murphai/hosted-execution";
+import {
+  buildHostedExecutionEmailMessageReceivedDispatch,
+  type HostedExecutionDispatchRequest,
+} from "@murphai/hosted-execution";
 
 const mocks = vi.hoisted(() => ({
   normalizeParsedEmailMessage: vi.fn(),
@@ -35,6 +38,10 @@ vi.mock("../src/hosted-runtime/events/inbox-pipeline.ts", () => ({
 
 import { ingestHostedEmailMessage } from "../src/hosted-runtime/events/email.ts";
 
+type HostedEmailDispatch = HostedExecutionDispatchRequest & {
+  event: Extract<HostedExecutionDispatchRequest["event"], { kind: "email.message.received" }>;
+}
+
 afterEach(() => {
   vi.clearAllMocks();
 });
@@ -47,12 +54,15 @@ describe("ingestHostedEmailMessage", () => {
       occurredAt: "2026-04-08T00:00:00.000Z",
       rawMessageKey: "raw_123",
       userId: "member_123",
-    });
+    }) as HostedEmailDispatch;
+    if (dispatch.event.kind !== "email.message.received") {
+      throw new Error("Expected email message dispatch.");
+    }
 
     await expect(
       ingestHostedEmailMessage(
         "/tmp/assistant-runtime-email",
-        dispatch,
+        { ...dispatch, event: dispatch.event },
         {
           async commit() {},
           async deletePreparedSideEffect() {},
@@ -84,7 +94,10 @@ describe("ingestHostedEmailMessage", () => {
       rawMessageKey: "raw_123",
       selfAddress: "user@example.com",
       userId: "member_123",
-    });
+    }) as HostedEmailDispatch;
+    if (dispatch.event.kind !== "email.message.received") {
+      throw new Error("Expected email message dispatch.");
+    }
     const rawMessage = Uint8Array.from([1, 2, 3, 4]);
     const parsedMessage = {
       subject: "hello",
@@ -106,7 +119,7 @@ describe("ingestHostedEmailMessage", () => {
 
     await ingestHostedEmailMessage(
       "/tmp/assistant-runtime-email",
-      dispatch,
+      { ...dispatch, event: dispatch.event },
       {
         async commit() {},
         async deletePreparedSideEffect() {},

@@ -60,9 +60,13 @@ async function resolveImportSpecifier(input: {
   const exportEntry = packageManifest.exports?.[input.exportKey];
 
   assert.ok(exportEntry, `expected ${input.exportKey} export entry`);
-  assert.equal(typeof exportEntry.default, "string");
+  const defaultExport = exportEntry.default;
+  assert.equal(typeof defaultExport, "string");
+  if (typeof defaultExport !== "string") {
+    throw new Error(`expected ${input.exportKey} default export path`);
+  }
 
-  const distPath = path.join(packageDir, exportEntry.default);
+  const distPath = path.join(packageDir, defaultExport);
   if (await pathExists(distPath)) {
     return input.packageImport;
   }

@@ -117,7 +117,9 @@ test("runPollConnector keeps cursor writes scoped to the connector account id", 
         findByExternalId() {
           return null;
         },
-        upsertCaptureIndex() {},
+        upsertCaptureIndex(input) {
+          return input.captureId;
+        },
         enqueueDerivedJobs() {},
         listAttachmentParseJobs() {
           return [];
@@ -203,7 +205,9 @@ test("runPollConnector uses connector-supplied checkpoints when emitting capture
         findByExternalId() {
           return null;
         },
-        upsertCaptureIndex() {},
+        upsertCaptureIndex(input) {
+          return input.captureId;
+        },
         enqueueDerivedJobs() {},
         listAttachmentParseJobs() {
           return [];
@@ -337,7 +341,9 @@ test("runPollConnector retries watch failures from the latest emitted cursor whe
         findByExternalId() {
           return null;
         },
-        upsertCaptureIndex() {},
+        upsertCaptureIndex(input) {
+          return input.captureId;
+        },
         enqueueDerivedJobs() {},
         listAttachmentParseJobs() {
           return [];
@@ -437,7 +443,9 @@ test("runInboxDaemon aborts sibling connectors and waits for their cleanup when 
             findByExternalId() {
               return null;
             },
-            upsertCaptureIndex() {},
+            upsertCaptureIndex(input) {
+              return input.captureId;
+            },
             enqueueDerivedJobs() {},
             listAttachmentParseJobs() {
               return [];
@@ -467,6 +475,7 @@ test("runInboxDaemon aborts sibling connectors and waits for their cleanup when 
           async processCapture(_input) {
             throw new Error("processCapture should not be called");
           },
+          close() {},
         },
         connectors: [runningConnector, failingConnector],
         signal: new AbortController().signal,
@@ -510,7 +519,9 @@ test("runInboxDaemon aggregates wrapped connector failures when multiple connect
             findByExternalId() {
               return null;
             },
-            upsertCaptureIndex() {},
+            upsertCaptureIndex(input) {
+              return input.captureId;
+            },
             enqueueDerivedJobs() {},
             listAttachmentParseJobs() {
               return [];
@@ -621,7 +632,9 @@ test("runInboxDaemon can keep sibling connectors alive after a connector failure
         findByExternalId() {
           return null;
         },
-        upsertCaptureIndex() {},
+        upsertCaptureIndex(input) {
+          return input.captureId;
+        },
         enqueueDerivedJobs() {},
         listAttachmentParseJobs() {
           return [];
@@ -818,7 +831,9 @@ test("runInboxDaemon still rejects when every connector fails in isolation mode"
             findByExternalId() {
               return null;
             },
-            upsertCaptureIndex() {},
+            upsertCaptureIndex(input) {
+              return input.captureId;
+            },
             enqueueDerivedJobs() {},
             listAttachmentParseJobs() {
               return [];
@@ -881,7 +896,9 @@ function createStubInboxPipeline(): InboxPipeline {
       findByExternalId() {
         return null;
       },
-      upsertCaptureIndex() {},
+      upsertCaptureIndex(input) {
+        return input.captureId;
+      },
       enqueueDerivedJobs() {},
       listAttachmentParseJobs() {
         return [];

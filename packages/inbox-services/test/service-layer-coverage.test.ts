@@ -152,6 +152,7 @@ function createCapture(
     eventId: 'event-1',
     externalId: 'external-1',
     occurredAt: '2025-01-01T00:00:00.000Z',
+    raw: {},
     receivedAt: '2025-01-01T00:00:01.000Z',
     source: 'telegram',
     text: 'hello',
@@ -175,11 +176,22 @@ function createRuntimeStore(
     getCursor() {
       return null
     },
-    listCaptures({ limit }) {
-      return captures.slice(0, limit)
+    listCaptures(filters) {
+      return captures.slice(0, filters?.limit)
     },
-    searchCaptures() {
-      return captures
+    searchCaptures(filters) {
+      return captures.slice(0, filters.limit).map((capture) => ({
+        accountId: capture.accountId ?? null,
+        captureId: capture.captureId,
+        envelopePath: capture.envelopePath,
+        occurredAt: capture.occurredAt,
+        score: 1,
+        snippet: capture.text ?? '',
+        source: capture.source,
+        text: capture.text,
+        threadId: capture.thread.id,
+        threadTitle: capture.thread.title ?? null,
+      }))
     },
     setCursor() {},
   }
@@ -408,7 +420,7 @@ test('service-layer helpers cover connector, query, state, daemon, and vault pat
     mime: 'image/png',
     ordinal: 0,
     originalPath: '/tmp/original',
-    parseState: 'parsed',
+    parseState: 'succeeded',
     parserProviderId: 'provider-1',
     sha256: 'abc',
     storedPath: 'derived/inbox/file.png',
@@ -442,7 +454,7 @@ test('service-layer helpers cover connector, query, state, daemon, and vault pat
     source: 'telegram',
   })
 
-  assert.equal(resolveAttachmentParseState(attachment), 'parsed')
+  assert.equal(resolveAttachmentParseState(attachment, []), 'succeeded')
   assert.equal(
     occurredDayFromCapture(detailedCapture),
     '2025-01-01',
@@ -494,7 +506,8 @@ test('service-layer helpers cover connector, query, state, daemon, and vault pat
           getCursor() {
             return null
           },
-          listCaptures({ limit }) {
+          listCaptures(filters) {
+            const limit = filters?.limit ?? 0
             const count = limit < 800 ? limit : 400
             return Array.from({ length: count }, () => createCapture())
           },
@@ -504,7 +517,27 @@ test('service-layer helpers cover connector, query, state, daemon, and vault pat
           setCursor() {},
         }
       },
+      async createInboxPipeline() {
+        throw new Error('unused')
+      },
+      createTelegramPollConnector() {
+        throw new Error('unused')
+      },
+      createEmailPollConnector() {
+        throw new Error('unused')
+      },
+      createLinqWebhookConnector() {
+        throw new Error('unused')
+      },
+      createTelegramBotApiPollDriver() {
+        throw new Error('unused')
+      },
+      createAgentmailApiPollDriver() {
+        throw new Error('unused')
+      },
       async rebuildRuntimeFromVault() {},
+      async runInboxDaemon() {},
+      async runInboxDaemonWithParsers() {},
     } as InboxRuntimeModule,
   )
   assert.equal(rebuildCount, 400)

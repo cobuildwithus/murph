@@ -10,6 +10,7 @@ import {
   buildHostedExecutionTelegramMessageReceivedDispatch,
   buildHostedExecutionVaultShareAcceptedDispatch,
 } from "@murphai/hosted-execution";
+import { createHostedRuntimeEffectsPortStub } from "./hosted-runtime-test-helpers.ts";
 
 const mocks = vi.hoisted(() => ({
   assistantGatewayLocalMessageSender: Symbol("assistantGatewayLocalMessageSender"),
@@ -71,20 +72,7 @@ function createRuntime(userEnv: Readonly<Record<string, string>> = {}) {
         async put() {},
       },
       deviceSyncPort: null,
-      effectsPort: {
-        async commit() {},
-        async deletePreparedSideEffect() {},
-        async readRawEmailMessage() {
-          return null;
-        },
-        async readSideEffect() {
-          return null;
-        },
-        async sendEmail() {},
-        async writeSideEffect(record) {
-          return record;
-        },
-      },
+      effectsPort: createHostedRuntimeEffectsPortStub(),
       usageExportPort: null,
     },
     userEnv: { ...userEnv },

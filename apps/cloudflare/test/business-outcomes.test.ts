@@ -56,7 +56,8 @@ describe("applyHostedWebBusinessOutcomeIfNeeded", () => {
   it("posts the signed share-import completion callback to hosted web", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-07T00:00:00.000Z"));
-    const fetchMock = vi.fn(async () => new Response("{}", { status: 200 }));
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
+      new Response("{}", { status: 200 }));
 
     await applyHostedWebBusinessOutcomeIfNeeded({
       dispatch: createShareDispatch(),
@@ -71,15 +72,16 @@ describe("applyHostedWebBusinessOutcomeIfNeeded", () => {
     });
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe("https://web.example.test/api/internal/hosted-execution/share-import/complete");
-    expect(init.method).toBe("POST");
-    expect(init.body).toBe(JSON.stringify({
+    const call = fetchMock.mock.calls[0];
+    expect(call).toBeDefined();
+    expect(call?.[0]).toBe("https://web.example.test/api/internal/hosted-execution/share-import/complete");
+    expect(call?.[1]?.method).toBe("POST");
+    expect(call?.[1]?.body).toBe(JSON.stringify({
       eventId: "evt_share",
       shareId: "share_123",
     }));
 
-    const headers = new Headers(init.headers);
+    const headers = new Headers(call?.[1]?.headers);
     expect(headers.get(HOSTED_EXECUTION_USER_ID_HEADER)).toBe("member_123");
     expect(headers.get(HOSTED_EXECUTION_SIGNING_KEY_ID_HEADER)).toBe("test-callback-key");
     expect(headers.get(HOSTED_EXECUTION_NONCE_HEADER)).toBeTruthy();
@@ -99,7 +101,8 @@ describe("applyHostedWebBusinessOutcomeIfNeeded", () => {
   });
 
   it("surfaces callback HTTP failures for the committed finalize retry lane", async () => {
-    const fetchMock = vi.fn(async () => new Response("not ready", { status: 503 }));
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
+      new Response("not ready", { status: 503 }));
 
     const promise = applyHostedWebBusinessOutcomeIfNeeded({
       dispatch: createShareDispatch(),
@@ -120,7 +123,8 @@ describe("applyHostedWebBusinessOutcomeIfNeeded", () => {
   it("posts the signed share-claim release callback to hosted web", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-07T00:00:00.000Z"));
-    const fetchMock = vi.fn(async () => new Response("{}", { status: 200 }));
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
+      new Response("{}", { status: 200 }));
 
     await releaseHostedWebShareClaim({
       dispatch: createShareDispatch(),
@@ -136,10 +140,11 @@ describe("applyHostedWebBusinessOutcomeIfNeeded", () => {
     });
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe("https://web.example.test/api/internal/hosted-execution/share-import/release");
-    expect(init.method).toBe("POST");
-    expect(init.body).toBe(JSON.stringify({
+    const call = fetchMock.mock.calls[0];
+    expect(call).toBeDefined();
+    expect(call?.[0]).toBe("https://web.example.test/api/internal/hosted-execution/share-import/release");
+    expect(call?.[1]?.method).toBe("POST");
+    expect(call?.[1]?.body).toBe(JSON.stringify({
       eventId: "evt_share",
       reason: "share pack missing",
       shareId: "share_123",
@@ -155,7 +160,8 @@ describe("applyHostedBusinessOutcomeIfNeeded", () => {
   });
 
   it("deletes the Linq source message after the hosted commit succeeds", async () => {
-    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
+      new Response(null, { status: 204 }));
 
     await applyHostedBusinessOutcomeIfNeeded({
       dispatch: createLinqDispatch(),
@@ -170,10 +176,11 @@ describe("applyHostedBusinessOutcomeIfNeeded", () => {
     });
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [url, init] = fetchMock.mock.calls[0] as [URL, RequestInit];
-    expect(String(url)).toBe("https://api.linqapp.com/api/partner/v3/messages/msg_123");
-    expect(init.method).toBe("DELETE");
-    expect(init.headers).toEqual({
+    const call = fetchMock.mock.calls[0];
+    expect(call).toBeDefined();
+    expect(String(call?.[0])).toBe("https://api.linqapp.com/api/partner/v3/messages/msg_123");
+    expect(call?.[1]?.method).toBe("DELETE");
+    expect(call?.[1]?.headers).toEqual({
       authorization: "Bearer linq-token",
     });
   });

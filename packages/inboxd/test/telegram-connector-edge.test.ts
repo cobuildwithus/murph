@@ -7,7 +7,31 @@ import {
   createTelegramPollConnector,
   readTelegramUpdateCheckpoint,
   type TelegramApiClient,
+  type TelegramPollDriver,
 } from "../src/index.ts";
+import type { TelegramUpdateLike } from "@murphai/messaging-ingress/telegram-webhook";
+
+function assertWatcherHandle(
+  watcher: Awaited<ReturnType<TelegramPollDriver["startWatching"]>>,
+): asserts watcher is { done: Promise<void>; close: () => Promise<void> | void } {
+  if (!watcher || typeof watcher === "function") {
+    throw new TypeError("Expected Telegram watcher handle object.");
+  }
+  assert.equal(typeof watcher.close, "function");
+  assert.ok(watcher.done instanceof Promise);
+}
+
+function readMessages(
+  page: Awaited<ReturnType<TelegramPollDriver["getMessages"]>>,
+): TelegramUpdateLike[] {
+  return Array.isArray(page) ? page : page.messages;
+}
+
+function readNextCursor(
+  page: Awaited<ReturnType<TelegramPollDriver["getMessages"]>>,
+) {
+  return Array.isArray(page) ? undefined : page.nextCursor;
+}
 
 test("createTelegramApiPollDriver handles absent webhook helpers and missing download tokens", async () => {
   const driver = createTelegramApiPollDriver({
@@ -22,7 +46,7 @@ test("createTelegramApiPollDriver handles absent webhook helpers and missing dow
       async getUpdates() {
         return [];
       },
-      async getFile(fileId) {
+      async getFile(fileId: string) {
         assert.equal(fileId, "file-1");
         return {
           file_id: fileId,
@@ -68,6 +92,7 @@ test("createTelegramApiPollDriver rewrites webhook conflicts before failing the 
     },
     signal: new AbortController().signal,
   });
+  assertWatcherHandle(watcher);
 
   await assert.rejects(
     watcher.done,
@@ -133,7 +158,7 @@ test("createTelegramApiPollDriver sorts message updates, filters non-message upd
           username: "murph_bot",
         };
       },
-      async getUpdates(input) {
+      async getUpdates(input: Record<string, unknown> | undefined) {
         requests.push(input as Record<string, unknown>);
         return [
           {
@@ -207,8 +232,8 @@ test("createTelegramApiPollDriver sorts message updates, filters non-message upd
     },
   ]);
   assert.equal(readTelegramUpdateCheckpoint({ updateId: 9.5 }), null);
-  assert.deepEqual(messages.messages.map((update) => update.update_id), [8, 9]);
-  assert.deepEqual(messages.nextCursor, { updateId: 9 });
+  assert.deepEqual(readMessages(messages).map((update) => update.update_id), [8, 9]);
+  assert.deepEqual(readNextCursor(messages), { updateId: 9 });
 });
 
 test("createTelegramApiPollDriver closes retry backoff cleanly for non-Error polling failures", async () => {
@@ -242,6 +267,7 @@ test("createTelegramApiPollDriver closes retry backoff cleanly for non-Error pol
       },
       signal: new AbortController().signal,
     });
+    assertWatcherHandle(watcher);
 
     await Promise.resolve();
     await watcher.close();
@@ -288,6 +314,7 @@ test("createTelegramApiPollDriver falls back to the default retry delay when ret
       },
       signal: controller.signal,
     });
+    assertWatcherHandle(watcher);
 
     await vi.advanceTimersByTimeAsync(1000);
     await watcher.done;
@@ -341,7 +368,7 @@ test("createTelegramApiPollDriver downloads remote files and surfaces HTTP failu
         async getUpdates() {
           return [];
         },
-        async getFile(fileId) {
+        async getFile(fileId: string) {
           return {
             file_id: fileId,
             file_path: fileId === "bad" ? "docs/bad.txt" : "docs/good.txt",
@@ -393,7 +420,7 @@ test("createTelegramApiPollDriver treats invalid file base URLs as untrusted for
         async getUpdates() {
           return [];
         },
-        async getFile(fileId) {
+        async getFile(fileId: string) {
           assert.equal(fileId, "file-1");
           return {
             file_id: fileId,

@@ -84,7 +84,7 @@ function createOpenAiTarget(
 
 function createCodexTarget(
   overrides: Partial<{
-    approvalPolicy: 'never' | 'on-failure' | 'on-request' | 'untrusted'
+    approvalPolicy: 'never' | 'on-request' | 'untrusted'
     codexHome: string
     model: string
     oss: boolean

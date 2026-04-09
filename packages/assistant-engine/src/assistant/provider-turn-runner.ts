@@ -19,10 +19,12 @@ import {
 import {
   executeAssistantProviderTurnAttempt,
   resolveAssistantProviderExecutionCapabilities,
-  type AssistantMurphCommandAccessMode,
   type AssistantProviderAttemptMetadata,
   type AssistantProviderTurnExecutionResult,
 } from '../assistant-provider.js'
+import type {
+  AssistantMurphCommandAccessMode,
+} from './providers/types.js'
 import { recordAssistantDiagnosticEvent } from './diagnostics.js'
 import { normalizeAssistantExecutionContext } from './execution-context.js'
 import { buildAssistantSystemPrompt } from './system-prompt.js'

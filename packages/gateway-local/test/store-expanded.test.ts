@@ -418,7 +418,7 @@ test("top-level local store helpers sync, read, respond, and wait with the runti
   const pollResult = await pollGatewayEventsLocal(vaultRoot, { cursor: 0 }, dependencies);
   const waited = await waitForGatewayEventsLocal(
     vaultRoot,
-    { cursor: pollResult.nextCursor - 1, waitMs: 0 },
+    { cursor: pollResult.nextCursor - 1, timeoutMs: 0 },
     dependencies,
   );
 
