@@ -20,6 +20,7 @@ import {
   renderMemoryDocument,
   upsertMemoryRecord,
 } from "../src/memory.ts";
+import { createEmptyPreferencesDocument } from "../src/preferences.ts";
 import {
   addDaysToIsoDate,
   extractIsoDatePrefix,
@@ -207,5 +208,12 @@ describe("@murphai/contracts public entrypoint", () => {
     expect(forgetMemoryRecord(inserted.document, { recordId: inserted.record.id }).record?.id).toBe(
       inserted.record.id,
     );
+
+    expect(createEmptyPreferencesDocument(new Date("2026-04-08T00:00:00.000Z"))).toEqual({
+      schemaVersion: 1,
+      updatedAt: "2026-04-08T00:00:00.000Z",
+      workoutUnitPreferences: {},
+    });
+    expect(contracts.VAULT_LAYOUT.preferencesDocument).toBe("bank/preferences.json");
   });
 });

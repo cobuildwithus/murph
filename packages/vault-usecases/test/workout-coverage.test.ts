@@ -688,26 +688,31 @@ describe("workout-format", () => {
 
 describe("workout-measurement", () => {
   test("adds measurements and manages unit preferences", async () => {
-    const readCurrentProfile = vi.fn(async () => ({
-      snapshot: {
-        id: "ps_1",
-        recordedAt: "2026-04-08T10:00:00.000Z",
-      },
-      profile: {
-        unitPreferences: {
+    const readPreferencesDocument = vi
+      .fn()
+      .mockResolvedValue({
+        exists: true,
+        sourcePath: "bank/preferences.json",
+        schemaVersion: 1,
+        updatedAt: "2026-04-08T10:00:00.000Z",
+        workoutUnitPreferences: {
           weight: "lb",
           distance: "mi",
           bodyMeasurement: "cm",
         },
-      },
-    }));
-    const appendProfileSnapshot = vi.fn(async (input: {
-      profile: { unitPreferences: { weight: "kg" } }
-    }) => ({
-      snapshot: {
-        id: "ps_2",
-        recordedAt: "2026-04-08T11:00:00.000Z",
-        profile: input.profile,
+      });
+    const updateWorkoutUnitPreferences = vi.fn(async () => ({
+      created: false,
+      document: {
+        exists: true,
+        sourcePath: "bank/preferences.json",
+        schemaVersion: 1,
+        updatedAt: "2026-04-08T12:00:00.000Z",
+        workoutUnitPreferences: {
+          weight: "kg",
+          distance: "mi",
+          bodyMeasurement: "cm",
+        },
       },
     }));
     const addBodyMeasurement = vi.fn(async () => ({
@@ -734,8 +739,8 @@ describe("workout-measurement", () => {
       {
         "@murphai/core": () => ({
           isVaultError: () => false,
-          readCurrentProfile,
-          appendProfileSnapshot,
+          readPreferencesDocument,
+          updateWorkoutUnitPreferences,
         }),
         "../src/usecases/workout-core.js": () => ({
           loadWorkoutCoreRuntime,
@@ -756,7 +761,7 @@ describe("workout-measurement", () => {
 
     const shown = await workoutMeasurementModule.showWorkoutUnitPreferences("./vault");
     assert.equal(shown.unitPreferences.weight, "lb");
-    assert.equal(shown.snapshotId, "ps_1");
+    assert.equal(shown.preferencesPath, "bank/preferences.json");
 
     const noChange = await workoutMeasurementModule.setWorkoutUnitPreferences({
       vault: "./vault",
@@ -765,7 +770,7 @@ describe("workout-measurement", () => {
       bodyMeasurement: "cm",
     });
     assert.equal(noChange.updated, false);
-    assert.equal(appendProfileSnapshot.mock.calls.length, 0);
+    assert.equal(updateWorkoutUnitPreferences.mock.calls.length, 0);
 
     const updated = await workoutMeasurementModule.setWorkoutUnitPreferences({
       vault: "./vault",
@@ -773,7 +778,7 @@ describe("workout-measurement", () => {
       recordedAt: "2026-04-08T12:00:00.000Z",
     });
     assert.equal(updated.updated, true);
-    assert.equal(appendProfileSnapshot.mock.calls.length, 1);
+    assert.equal(updateWorkoutUnitPreferences.mock.calls.length, 1);
   });
 });
 

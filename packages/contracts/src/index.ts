@@ -9,6 +9,7 @@ export * from "./health-entities.ts";
 export * from "./ids.ts";
 export * from "./automation.ts";
 export * from "./memory.ts";
+export * from "./preferences.ts";
 export * from "./relation-links.ts";
 export * from "./shares.ts";
 export * from "./time.ts";

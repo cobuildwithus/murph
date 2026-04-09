@@ -58,6 +58,7 @@ import {
   appendProfileSnapshot as appendProfileSnapshotInternal,
   rebuildCurrentProfile as rebuildCurrentProfileInternal,
 } from "./profile/storage.ts";
+import { updateWorkoutUnitPreferences as updateWorkoutUnitPreferencesInternal } from "./preferences.ts";
 import { VaultError } from "./errors.ts";
 import {
   initializeVault as initializeVaultInternal,
@@ -458,6 +459,12 @@ export async function rebuildCurrentProfile(
   input: Parameters<typeof rebuildCurrentProfileInternal>[0],
 ): ReturnType<typeof rebuildCurrentProfileInternal> {
   return withCanonicalInputWriteLock(input, rebuildCurrentProfileInternal);
+}
+
+export async function updateWorkoutUnitPreferences(
+  input: Parameters<typeof updateWorkoutUnitPreferencesInternal>[0],
+): ReturnType<typeof updateWorkoutUnitPreferencesInternal> {
+  return withCanonicalInputWriteLock(input, updateWorkoutUnitPreferencesInternal);
 }
 
 export async function appendHistoryEvent(
