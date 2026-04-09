@@ -35,7 +35,6 @@
     "@murphai/core": "workspace:*",
     "@murphai/importers": "workspace:*",
     "@murphai/inboxd": "workspace:*",
-    "@murphai/inboxd-imessage": "workspace:*",
     "@murphai/operator-config": "workspace:*",
     "@murphai/parsers": "workspace:*",
     "@murphai/runtime-state": "workspace:*",

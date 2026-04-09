@@ -37,7 +37,6 @@ export const hostedRunnerWorkspacePackageNames = [
   "@murphai/importers",
   "@murphai/inbox-services",
   "@murphai/inboxd",
-  "@murphai/inboxd-imessage",
   "@murphai/messaging-ingress",
   "@murphai/murph",
   "@murphai/operator-config",

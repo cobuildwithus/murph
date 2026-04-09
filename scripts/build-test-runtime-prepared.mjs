@@ -95,6 +95,7 @@ const baseSmokeImportPaths = [
   "packages/device-syncd/dist/index.js",
   "packages/query/dist/index.js",
   "packages/inboxd/dist/index.js",
+  "packages/inboxd-imessage/dist/index.js",
   "packages/parsers/dist/index.js",
   "packages/cli/dist/index.js",
   "packages/cli/dist/cli-entry.js",
