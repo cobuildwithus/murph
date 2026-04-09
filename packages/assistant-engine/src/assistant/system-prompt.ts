@@ -17,6 +17,7 @@ export interface AssistantSystemPromptInput {
   currentLocalDate: string;
   currentTimeZone: string;
   firstTurnCheckIn: boolean;
+  vaultOverview?: string | null;
 }
 
 export function buildAssistantSystemPrompt(
@@ -35,6 +36,7 @@ export function buildAssistantSystemPrompt(
       assistantHostedDeviceConnectAvailable:
         input.assistantHostedDeviceConnectAvailable ?? false,
     }),
+    input.vaultOverview ?? null,
     buildAssistantAudienceSafetyText(input.allowSensitiveHealthContext),
     buildAssistantEvidenceAndReplyStyleText(input.channel),
     buildAssistantFirstTurnCheckInGuidanceText(input.firstTurnCheckIn),

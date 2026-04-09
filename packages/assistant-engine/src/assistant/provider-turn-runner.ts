@@ -27,6 +27,7 @@ import { normalizeAssistantExecutionContext } from './execution-context.js'
 import { buildAssistantSystemPrompt } from './system-prompt.js'
 import { errorMessage } from './shared.js'
 import { resolveAssistantCliSurfaceBootstrapContext } from './cli-surface-bootstrap.js'
+import { buildAssistantVaultOverviewBlock } from './vault-overview.js'
 import {
   getAssistantFailoverCooldownUntil,
   isAssistantFailoverRouteCoolingDown,
@@ -361,6 +362,9 @@ async function resolveAssistantRouteTurnPlan(input: {
         workingDirectory,
       })
     : null
+  const vaultOverview = shouldInjectBootstrapContext
+    ? await resolveAssistantVaultOverviewBlock(input.input.vault)
+    : null
 
   return {
     assistantCliContract,
@@ -391,6 +395,7 @@ async function resolveAssistantRouteTurnPlan(input: {
       currentLocalDate: input.promptTimeContext.currentLocalDate,
       currentTimeZone: input.promptTimeContext.currentTimeZone,
       firstTurnCheckIn: shouldInjectFirstTurnCheckIn,
+      vaultOverview,
     }),
   }
 }
@@ -414,6 +419,16 @@ async function resolveAssistantPromptTimeContext(
   return {
     currentLocalDate: toLocalDayKey(new Date(), currentTimeZone),
     currentTimeZone,
+  }
+}
+
+async function resolveAssistantVaultOverviewBlock(
+  vaultRoot: string,
+): Promise<string | null> {
+  try {
+    return await buildAssistantVaultOverviewBlock(vaultRoot)
+  } catch {
+    return null
   }
 }
 

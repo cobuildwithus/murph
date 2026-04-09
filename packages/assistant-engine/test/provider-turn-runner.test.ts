@@ -12,6 +12,7 @@ const runnerMocks = vi.hoisted(() => ({
   appendAssistantTurnReceiptEvent: vi.fn(),
   attachRecoveredAssistantSession: vi.fn(),
   buildAssistantSystemPrompt: vi.fn(),
+  buildAssistantVaultOverviewBlock: vi.fn(),
   createAssistantFoodAutoLogHooks: vi.fn(),
   createAssistantMemoryTurnContextEnv: vi.fn(),
   createIntegratedVaultServices: vi.fn(),
@@ -68,6 +69,10 @@ vi.mock('../src/assistant/execution-context.ts', () => ({
 
 vi.mock('../src/assistant/system-prompt.ts', () => ({
   buildAssistantSystemPrompt: runnerMocks.buildAssistantSystemPrompt,
+}))
+
+vi.mock('../src/assistant/vault-overview.ts', () => ({
+  buildAssistantVaultOverviewBlock: runnerMocks.buildAssistantVaultOverviewBlock,
 }))
 
 vi.mock('../src/assistant/shared.ts', () => ({
@@ -153,9 +158,13 @@ describe('executeProviderTurnWithRecovery', () => {
         channel: string | null
         firstTurnCheckIn: boolean
         assistantCliContract: string | null
+        vaultOverview?: string | null
       }) =>
-        `prompt:${input.channel ?? 'none'}:${input.firstTurnCheckIn ? 'first' : 'later'}:${input.assistantCliContract ?? 'no-bootstrap'}`,
+        `prompt:${input.channel ?? 'none'}:${input.firstTurnCheckIn ? 'first' : 'later'}:${input.assistantCliContract ?? 'no-bootstrap'}:${input.vaultOverview ?? 'no-overview'}`,
       )
+    runnerMocks.buildAssistantVaultOverviewBlock
+      .mockReset()
+      .mockResolvedValue('Vault overview for navigation only:\n- Canonical coverage includes 1 meal event.')
     runnerMocks.createAssistantFoodAutoLogHooks.mockReset().mockReturnValue({
       kind: 'food-hooks',
     })
@@ -320,7 +329,12 @@ describe('executeProviderTurnWithRecovery', () => {
         currentLocalDate: '2026-04-08',
         currentTimeZone: 'America/Los_Angeles',
         firstTurnCheckIn: true,
+        vaultOverview:
+          'Vault overview for navigation only:\n- Canonical coverage includes 1 meal event.',
       }),
+    )
+    expect(runnerMocks.buildAssistantVaultOverviewBlock).toHaveBeenCalledWith(
+      '/tmp/test-vault',
     )
     expect(runnerMocks.executeAssistantProviderTurnAttempt).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -339,7 +353,8 @@ describe('executeProviderTurnWithRecovery', () => {
         sessionContext: {
           binding: session.binding,
         },
-        systemPrompt: 'prompt:chat:first:cli-bootstrap',
+        systemPrompt:
+          'prompt:chat:first:cli-bootstrap:Vault overview for navigation only:\n- Canonical coverage includes 1 meal event.',
         workingDirectory: '/tmp/provider-turn-runner-tests',
       }),
     )
@@ -429,8 +444,10 @@ describe('executeProviderTurnWithRecovery', () => {
         currentLocalDate: '2026-04-08',
         currentTimeZone: 'America/Los_Angeles',
         firstTurnCheckIn: false,
+        vaultOverview: null,
       }),
     )
+    expect(runnerMocks.buildAssistantVaultOverviewBlock).not.toHaveBeenCalled()
     expect(toolCatalog.hasTool).not.toHaveBeenCalled()
     expect(runnerMocks.executeAssistantProviderTurnAttempt).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -446,7 +463,56 @@ describe('executeProviderTurnWithRecovery', () => {
         ],
         resumeProviderSessionId: 'provider-session-primary',
         sessionContext: undefined,
-        systemPrompt: 'prompt:none:later:no-bootstrap',
+        systemPrompt: 'prompt:none:later:no-bootstrap:no-overview',
+      }),
+    )
+  })
+
+  it('keeps the turn moving when the vault overview helper fails', async () => {
+    const route = createRoute({
+      routeId: 'route-bootstrap-overview-failure',
+    })
+    const session = createAssistantSession()
+
+    runnerMocks.buildAssistantVaultOverviewBlock.mockRejectedValueOnce(
+      new Error('overview failed'),
+    )
+    runnerMocks.executeAssistantProviderTurnAttempt.mockResolvedValue(
+      createSuccessfulAttemptResult({
+        providerSessionId: 'provider-session-bootstrap',
+        response: 'Bootstrap answer',
+      }),
+    )
+
+    const outcome = await executeProviderTurnWithRecovery({
+      input: createMessageInput({
+        channel: 'chat',
+        prompt: 'What is already in here?',
+      }),
+      plan: createTurnPlan({
+        firstTurnCheckInEligible: true,
+      }),
+      resolvedSession: session,
+      routes: [route],
+      turnCreatedAt: '2026-04-08T00:00:00.000Z',
+      turnId: 'turn-bootstrap-overview-failure',
+    })
+
+    expect(outcome).toMatchObject({
+      kind: 'succeeded',
+      providerTurn: {
+        attemptCount: 1,
+        route,
+      },
+    })
+    expect(runnerMocks.buildAssistantSystemPrompt).toHaveBeenCalledWith(
+      expect.objectContaining({
+        vaultOverview: null,
+      }),
+    )
+    expect(runnerMocks.executeAssistantProviderTurnAttempt).toHaveBeenCalledWith(
+      expect.objectContaining({
+        systemPrompt: 'prompt:chat:first:cli-bootstrap:no-overview',
       }),
     )
   })
