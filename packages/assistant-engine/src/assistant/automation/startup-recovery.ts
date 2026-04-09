@@ -1,5 +1,7 @@
-import type { AssistantAutomationCursor } from '@murphai/operator-config/assistant-cli-contracts'
-import type { AssistantTurnReceipt } from '@murphai/operator-config/assistant-cli-contracts'
+import type {
+  AssistantAutomationCursor,
+  AssistantTurnReceipt,
+} from '@murphai/operator-config/assistant-cli-contracts'
 import type { InboxServices } from '@murphai/inbox-services'
 import type { AssistantExecutionContext } from '../execution-context.js'
 import type { AssistantOutboxDispatchMode } from '../outbox.js'
@@ -32,9 +34,6 @@ export interface RecoverAssistantAutoRepliesOnStartupInput {
   inboxServices: InboxServices
   maxPerScan?: number
   onEvent?: (event: AssistantRunEvent) => void
-  providerHeartbeatMs?: number | null
-  providerLongRunningCommandStallTimeoutMs?: number | null
-  providerStallTimeoutMs?: number | null
   requestId?: string | null
   scanCursor?: AssistantAutomationCursor | null
   signal?: AbortSignal
@@ -44,7 +43,6 @@ export interface RecoverAssistantAutoRepliesOnStartupInput {
 
 interface AutoReplyRecoveryCandidate {
   captureIds: readonly string[]
-  latestReceipt: AssistantTurnReceipt
   primaryCaptureId: string
 }
 
@@ -52,12 +50,7 @@ export async function recoverAssistantAutoRepliesOnStartup(
   input: RecoverAssistantAutoRepliesOnStartupInput,
 ): Promise<AssistantAutoReplyScanResult> {
   const enabledChannels = normalizeEnabledChannels(input.enabledChannels)
-  if (
-    enabledChannels.length === 0 ||
-    input.scanCursor === null ||
-    input.scanCursor === undefined ||
-    input.signal?.aborted
-  ) {
+  if (enabledChannels.length === 0 || input.scanCursor == null || input.signal?.aborted) {
     return createEmptyAutoReplyScanResult()
   }
 
@@ -131,10 +124,6 @@ export async function recoverAssistantAutoRepliesOnStartup(
       executionContext: input.executionContext,
       inboxServices: input.inboxServices,
       onEvent: input.onEvent,
-      providerHeartbeatMs: input.providerHeartbeatMs,
-      providerLongRunningCommandStallTimeoutMs:
-        input.providerLongRunningCommandStallTimeoutMs,
-      providerStallTimeoutMs: input.providerStallTimeoutMs,
       requestId: input.requestId ?? null,
       signal: input.signal,
       sessionMaxAgeMs: input.sessionMaxAgeMs ?? null,
@@ -165,39 +154,32 @@ async function listStartupRecoveryCandidates(input: {
     input.vault,
     STARTUP_RECOVERY_RECEIPT_LIMIT,
   )
-  const candidateMap = new Map<string, AutoReplyRecoveryCandidate>()
+  const seenCaptureIds = new Set<string>()
+  const recoverable: AutoReplyRecoveryCandidate[] = []
 
   for (const receipt of receipts) {
     const metadata = readAutoReplyReceiptMetadata(receipt)
     if (!metadata) {
       continue
     }
-
-    const existing = candidateMap.get(metadata.primaryCaptureId)
-    if (existing) {
+    if (seenCaptureIds.has(metadata.primaryCaptureId)) {
+      continue
+    }
+    seenCaptureIds.add(metadata.primaryCaptureId)
+    if (receipt.status !== 'failed') {
+      continue
+    }
+    if (hasUnsafeDeliveryEvidence(receipt)) {
+      continue
+    }
+    if (await hasHandledReplyArtifacts(input.vault, metadata.captureIds)) {
       continue
     }
 
-    candidateMap.set(metadata.primaryCaptureId, {
+    recoverable.push({
       captureIds: metadata.captureIds,
-      latestReceipt: receipt,
       primaryCaptureId: metadata.primaryCaptureId,
     })
-  }
-
-  const recoverable: AutoReplyRecoveryCandidate[] = []
-  for (const candidate of candidateMap.values()) {
-    if (candidate.latestReceipt.status !== 'failed') {
-      continue
-    }
-    if (hasUnsafeDeliveryEvidence(candidate.latestReceipt)) {
-      continue
-    }
-    if (await hasHandledReplyArtifacts(input.vault, candidate.captureIds)) {
-      continue
-    }
-
-    recoverable.push(candidate)
     if (recoverable.length >= input.limit) {
       break
     }
