@@ -41,6 +41,21 @@ import {
 
 const modelCommandPresetSchema = z.enum(['codex', 'openai-compatible'])
 
+function optionalNonEmptyStringOption(description: string) {
+  return z
+    .string()
+    .min(1)
+    .optional()
+    .describe(description)
+}
+
+function describePresetScopedOption(
+  description: string,
+  preset: z.infer<typeof modelCommandPresetSchema>,
+) {
+  return `${description} Only applies with \`--preset ${preset}\`.`
+}
+
 const modelCommandOptionsSchema = z.object({
   show: z
     .boolean()
@@ -54,52 +69,53 @@ const modelCommandOptionsSchema = z.object({
   providerPreset: setupAssistantProviderPresetSchema
     .optional()
     .describe(
-      'Optional named OpenAI-compatible provider preset. Only applies with `--preset openai-compatible`; seeds endpoint defaults for prompts or non-interactive saves.',
+      `${describePresetScopedOption(
+        'Optional named OpenAI-compatible provider preset.',
+        'openai-compatible',
+      )} Seeds endpoint defaults for prompts or non-interactive saves.`,
     ),
-  model: z
-    .string()
-    .min(1)
-    .optional()
-    .describe(
-      'Default model to save for the selected backend. In non-interactive mode, pair this with `--preset` unless Murph can reuse the currently saved backend.',
+  model: optionalNonEmptyStringOption(
+    'Default model to save for the selected backend. In non-interactive mode, pair this with `--preset` unless Murph can reuse the currently saved backend.',
+  ),
+  baseUrl: optionalNonEmptyStringOption(
+    describePresetScopedOption(
+      'OpenAI-compatible base URL to save, such as http://127.0.0.1:11434/v1.',
+      'openai-compatible',
     ),
-  baseUrl: z
-    .string()
-    .min(1)
-    .optional()
-    .describe(
-      'OpenAI-compatible base URL to save, such as http://127.0.0.1:11434/v1. Only applies with `--preset openai-compatible`.',
+  ),
+  apiKeyEnv: optionalNonEmptyStringOption(
+    describePresetScopedOption(
+      'Environment variable name that should hold the OpenAI-compatible API key.',
+      'openai-compatible',
     ),
-  apiKeyEnv: z
-    .string()
-    .min(1)
-    .optional()
-    .describe(
-      'Environment variable name that should hold the OpenAI-compatible API key. Only applies with `--preset openai-compatible`.',
+  ),
+  providerName: optionalNonEmptyStringOption(
+    describePresetScopedOption(
+      'Stable label for the saved OpenAI-compatible provider.',
+      'openai-compatible',
     ),
-  providerName: z
-    .string()
-    .min(1)
-    .optional()
-    .describe(
-      'Stable label for the saved OpenAI-compatible provider. Only applies with `--preset openai-compatible`.',
-    ),
+  ),
   zeroDataRetention: z
     .boolean()
     .optional()
     .describe(
-      'Request zero data retention on Vercel AI Gateway assistant turns. Only applies with `--preset openai-compatible`.',
+      describePresetScopedOption(
+        'Request zero data retention on Vercel AI Gateway assistant turns.',
+        'openai-compatible',
+      ),
     ),
-  codexCommand: z
-    .string()
-    .min(1)
-    .optional()
-    .describe('Optional Codex CLI executable path. Only applies with `--preset codex`; defaults to `codex`.'),
-  profile: z
-    .string()
-    .min(1)
-    .optional()
-    .describe('Optional Codex profile name to save. Only applies with `--preset codex`.'),
+  codexCommand: optionalNonEmptyStringOption(
+    `${describePresetScopedOption(
+      'Optional Codex CLI executable path.',
+      'codex',
+    )} Defaults to \`codex\`.`,
+  ),
+  profile: optionalNonEmptyStringOption(
+    describePresetScopedOption(
+      'Optional Codex profile name to save.',
+      'codex',
+    ),
+  ),
   reasoningEffort: z
     .enum(assistantReasoningEffortValues)
     .optional()
@@ -109,7 +125,12 @@ const modelCommandOptionsSchema = z.object({
   oss: z
     .boolean()
     .optional()
-    .describe('Save a local Codex OSS model target instead of the signed-in Codex cloud path. Only applies with `--preset codex`.'),
+    .describe(
+      describePresetScopedOption(
+        'Save a local Codex OSS model target instead of the signed-in Codex cloud path.',
+        'codex',
+      ),
+    ),
 })
 
 const modelCommandResultSchema = z

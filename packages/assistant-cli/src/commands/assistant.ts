@@ -76,39 +76,25 @@ const assistantOneSendDeliveryTargetRoutingDescription =
 const assistantSavedDeliveryTargetRoutingDescription =
   'Optional saved outbound destination in the transport-native send format. For iMessage use a phone number, email handle, or chat id; for Telegram use a chat id or `<chatId>:topic:<messageThreadId>`; for Linq use a chat id; for email use a recipient address.'
 
+function optionalNonEmptyStringOption(description: string) {
+  return z
+    .string()
+    .min(1)
+    .optional()
+    .describe(description)
+}
+
 const assistantSessionOptionFields = {
-  session: z
-    .string()
-    .min(1)
-    .optional()
-    .describe('Existing Murph assistant session id to resume.'),
-  alias: z
-    .string()
-    .min(1)
-    .optional()
-    .describe(
-      'Optional stable alias used to map an external conversation onto one assistant session.',
-    ),
-  channel: z
-    .string()
-    .min(1)
-    .optional()
-    .describe('Optional channel label such as imessage, telegram, linq, or email.'),
-  identity: z
-    .string()
-    .min(1)
-    .optional()
-    .describe(assistantIdentityRoutingDescription),
-  participant: z
-    .string()
-    .min(1)
-    .optional()
-    .describe(assistantParticipantRoutingDescription),
-  sourceThread: z
-    .string()
-    .min(1)
-    .optional()
-    .describe(assistantSourceThreadRoutingDescription),
+  session: optionalNonEmptyStringOption('Existing Murph assistant session id to resume.'),
+  alias: optionalNonEmptyStringOption(
+    'Optional stable alias used to map an external conversation onto one assistant session.',
+  ),
+  channel: optionalNonEmptyStringOption(
+    'Optional channel label such as imessage, telegram, linq, or email.',
+  ),
+  identity: optionalNonEmptyStringOption(assistantIdentityRoutingDescription),
+  participant: optionalNonEmptyStringOption(assistantParticipantRoutingDescription),
+  sourceThread: optionalNonEmptyStringOption(assistantSourceThreadRoutingDescription),
 }
 
 const assistantProviderOptionFields = {
@@ -118,44 +104,24 @@ const assistantProviderOptionFields = {
     .describe(
       'Chat provider adapter for the local assistant surface. The runtime is provider-backed even when only one adapter is installed.',
     ),
-  codexCommand: z
-    .string()
-    .min(1)
-    .optional()
-    .describe('Optional Codex CLI executable path. Defaults to `codex`.'),
-  model: z
-    .string()
-    .min(1)
-    .optional()
-    .describe('Optional provider model override for local chat turns.'),
-  baseUrl: z
-    .string()
-    .min(1)
-    .optional()
-    .describe(
-      'Optional OpenAI-compatible base URL for local assistant chat, such as http://127.0.0.1:11434/v1 for Ollama.',
-    ),
-  apiKeyEnv: z
-    .string()
-    .min(1)
-    .optional()
-    .describe(
-      'Optional environment variable name that stores the OpenAI-compatible API key for local assistant chat.',
-    ),
-  providerName: z
-    .string()
-    .min(1)
-    .optional()
-    .describe(
-      'Optional stable provider label for OpenAI-compatible local assistant chat sessions.',
-    ),
-  headersJson: z
-    .string()
-    .min(1)
-    .optional()
-    .describe(
-      'Optional flat JSON object of extra HTTP headers with string values for OpenAI-compatible local assistant chat sessions.',
-    ),
+  codexCommand: optionalNonEmptyStringOption(
+    'Optional Codex CLI executable path. Defaults to `codex`.',
+  ),
+  model: optionalNonEmptyStringOption(
+    'Optional provider model override for local chat turns.',
+  ),
+  baseUrl: optionalNonEmptyStringOption(
+    'Optional OpenAI-compatible base URL for local assistant chat, such as http://127.0.0.1:11434/v1 for Ollama.',
+  ),
+  apiKeyEnv: optionalNonEmptyStringOption(
+    'Optional environment variable name that stores the OpenAI-compatible API key for local assistant chat.',
+  ),
+  providerName: optionalNonEmptyStringOption(
+    'Optional stable provider label for OpenAI-compatible local assistant chat sessions.',
+  ),
+  headersJson: optionalNonEmptyStringOption(
+    'Optional flat JSON object of extra HTTP headers with string values for OpenAI-compatible local assistant chat sessions.',
+  ),
   sandbox: z
     .enum(assistantSandboxValues)
     .optional()
@@ -168,11 +134,7 @@ const assistantProviderOptionFields = {
     .describe(
       'Codex approval policy for local assistant chat. Defaults to never for the privileged local Codex adapter.',
     ),
-  profile: z
-    .string()
-    .min(1)
-    .optional()
-    .describe('Optional Codex config profile name.'),
+  profile: optionalNonEmptyStringOption('Optional Codex config profile name.'),
   oss: z
     .boolean()
     .optional()
@@ -188,36 +150,20 @@ const assistantDeliveryOptionFields = {
     .describe(
       'After generating a response, deliver it over the mapped outbound channel session when available.',
     ),
-  deliveryTarget: z
-    .string()
-    .min(1)
-    .optional()
-    .describe(assistantOneSendDeliveryTargetRoutingDescription),
+  deliveryTarget: optionalNonEmptyStringOption(
+    assistantOneSendDeliveryTargetRoutingDescription,
+  ),
 }
 
 const assistantSelfDeliveryTargetOptionFields = {
-  identity: z
-    .string()
-    .min(1)
-    .optional()
-    .describe(
-      'Optional local assistant identity id to reuse for this saved channel target. Email targets require the configured AgentMail inbox id here.',
-    ),
-  participant: z
-    .string()
-    .min(1)
-    .optional()
-    .describe(assistantParticipantRoutingDescription),
-  sourceThread: z
-    .string()
-    .min(1)
-    .optional()
-    .describe(assistantSourceThreadRoutingDescription),
-  deliveryTarget: z
-    .string()
-    .min(1)
-    .optional()
-    .describe(assistantSavedDeliveryTargetRoutingDescription),
+  identity: optionalNonEmptyStringOption(
+    'Optional local assistant identity id to reuse for this saved channel target. Email targets require the configured AgentMail inbox id here.',
+  ),
+  participant: optionalNonEmptyStringOption(assistantParticipantRoutingDescription),
+  sourceThread: optionalNonEmptyStringOption(assistantSourceThreadRoutingDescription),
+  deliveryTarget: optionalNonEmptyStringOption(
+    assistantSavedDeliveryTargetRoutingDescription,
+  ),
 }
 
 function assertAssistantSelfDeliveryTargetInput(input: {
@@ -474,6 +420,37 @@ async function resolveAssistantDeliveryRouteFromCli(input: {
       allowSingleSavedTargetFallback: input.allowSingleSavedTargetFallback,
     },
   )
+}
+
+async function resolveAssistantDeliveryInvocationFromCli(
+  options: AssistantConversationCliOptions & AssistantDeliveryCliOptions,
+  input: {
+    resolveSavedRoute: boolean
+  },
+) {
+  const deliveryOverrides = assistantDeliveryOverridesFromCli(options)
+  const savedRoute = input.resolveSavedRoute
+    ? await resolveAssistantDeliveryRouteFromCli({
+        allowSingleSavedTargetFallback: true,
+        channel: options.channel,
+        identity: options.identity,
+        participant: options.participant,
+        sourceThread: options.sourceThread,
+        deliveryTarget: deliveryOverrides.deliveryTarget,
+      })
+    : null
+
+  return {
+    conversationOptions: assistantConversationOptionsFromCli({
+      ...options,
+      channel: savedRoute?.channel ?? options.channel,
+      identity: savedRoute?.identityId ?? options.identity,
+      participant: savedRoute?.participantId ?? options.participant,
+      sourceThread: savedRoute?.sourceThreadId ?? options.sourceThread,
+    }),
+    deliveryOverrides,
+    resolvedDeliveryTarget: savedRoute?.deliveryTarget ?? deliveryOverrides.deliveryTarget,
+  }
 }
 
 async function runAssistantChatCommand(context: {
@@ -766,32 +743,22 @@ export function registerAssistantCommands(
       }),
       output: assistantAskResultSchema,
       async run(context) {
-        const deliveryOverrides = assistantDeliveryOverridesFromCli(context.options)
-        const savedRoute =
-          deliveryOverrides.deliverResponse && !context.options.session
-            ? await resolveAssistantDeliveryRouteFromCli({
-                allowSingleSavedTargetFallback: true,
-                channel: context.options.channel,
-                identity: context.options.identity,
-                participant: context.options.participant,
-                sourceThread: context.options.sourceThread,
-                deliveryTarget: deliveryOverrides.deliveryTarget,
-              })
-            : null
+        const delivery = await resolveAssistantDeliveryInvocationFromCli(
+          context.options,
+          {
+            resolveSavedRoute: Boolean(
+              context.options.deliverResponse && !context.options.session,
+            ),
+          },
+        )
 
         return sendAssistantMessage({
           vault: context.options.vault,
           prompt: context.args.prompt,
-          ...assistantConversationOptionsFromCli({
-            ...context.options,
-            channel: savedRoute?.channel ?? context.options.channel,
-            identity: savedRoute?.identityId ?? context.options.identity,
-            participant: savedRoute?.participantId ?? context.options.participant,
-            sourceThread: savedRoute?.sourceThreadId ?? context.options.sourceThread,
-          }),
+          ...delivery.conversationOptions,
           ...assistantProviderOverridesFromCli(context.options),
-          ...deliveryOverrides,
-          deliveryTarget: savedRoute?.deliveryTarget ?? deliveryOverrides.deliveryTarget,
+          ...delivery.deliveryOverrides,
+          deliveryTarget: delivery.resolvedDeliveryTarget,
         })
       },
     })
@@ -879,28 +846,17 @@ export function registerAssistantCommands(
       }),
       output: assistantDeliverResultSchema,
       async run(context) {
-        const deliveryOverrides = assistantDeliveryOverridesFromCli(context.options)
-        const savedRoute = context.options.session
-          ? null
-          : await resolveAssistantDeliveryRouteFromCli({
-              allowSingleSavedTargetFallback: true,
-              channel: context.options.channel,
-              identity: context.options.identity,
-              participant: context.options.participant,
-              sourceThread: context.options.sourceThread,
-              deliveryTarget: deliveryOverrides.deliveryTarget,
-            })
+        const delivery = await resolveAssistantDeliveryInvocationFromCli(
+          context.options,
+          {
+            resolveSavedRoute: !context.options.session,
+          },
+        )
         return deliverAssistantMessage({
           vault: context.options.vault,
           message: context.args.message,
-          ...assistantConversationOptionsFromCli({
-            ...context.options,
-            channel: savedRoute?.channel ?? context.options.channel,
-            identity: savedRoute?.identityId ?? context.options.identity,
-            participant: savedRoute?.participantId ?? context.options.participant,
-            sourceThread: savedRoute?.sourceThreadId ?? context.options.sourceThread,
-          }),
-          target: savedRoute?.deliveryTarget ?? deliveryOverrides.deliveryTarget,
+          ...delivery.conversationOptions,
+          target: delivery.resolvedDeliveryTarget,
         })
       },
     })

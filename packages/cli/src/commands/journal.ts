@@ -52,6 +52,13 @@ const journalReferenceOptionsSchema = withBaseOptions({
     ),
 })
 
+const journalReferenceArgsSchema = z.object({
+  date: localDateSchema.describe('Journal day to mutate.'),
+})
+
+const journalReferenceCommandHint =
+  'Choose exactly one target type per command: repeat --event-id for events or repeat --stream for sample streams.'
+
 export function registerJournalCommands(cli: Cli.Cli, _services: VaultServices) {
   const journal = Cli.create('journal', {
     description: 'Journal document commands routed through the core write API.',
@@ -137,47 +144,8 @@ export function registerJournalCommands(cli: Cli.Cli, _services: VaultServices) 
     },
   })
 
-  journal.command('link', {
-    description: 'Link either event ids or sample streams into the journal day frontmatter.',
-    args: z.object({
-      date: localDateSchema.describe('Journal day to mutate.'),
-    }),
-    hint:
-      'Choose exactly one target type per command: repeat --event-id for events or repeat --stream for sample streams.',
-    options: journalReferenceOptionsSchema,
-    output: journalLinkResultSchema,
-    async run({ args, options }) {
-      return mutateJournalReferences(_services, {
-        operation: 'link',
-        vault: options.vault,
-        requestId: requestIdFromOptions(options),
-        date: args.date,
-        eventIds: options.eventId,
-        sampleStreams: options.stream,
-      })
-    },
-  })
-
-  journal.command('unlink', {
-    description: 'Remove either event ids or sample streams from the journal day frontmatter.',
-    args: z.object({
-      date: localDateSchema.describe('Journal day to mutate.'),
-    }),
-    hint:
-      'Choose exactly one target type per command: repeat --event-id for events or repeat --stream for sample streams.',
-    options: journalReferenceOptionsSchema,
-    output: journalLinkResultSchema,
-    async run({ args, options }) {
-      return mutateJournalReferences(_services, {
-        operation: 'unlink',
-        vault: options.vault,
-        requestId: requestIdFromOptions(options),
-        date: args.date,
-        eventIds: options.eventId,
-        sampleStreams: options.stream,
-      })
-    },
-  })
+  journal.command('link', createJournalReferenceCommandDefinition(_services, 'link'))
+  journal.command('unlink', createJournalReferenceCommandDefinition(_services, 'unlink'))
 
   cli.command(journal)
 }
@@ -246,4 +214,33 @@ async function mutateJournalReferences(
     'command_failed',
     'Journal reference mutation requires normalized event ids or streams.',
   )
+}
+
+function createJournalReferenceCommandDefinition(
+  services: VaultServices,
+  operation: 'link' | 'unlink',
+) {
+  return {
+    description:
+      operation === 'link'
+        ? 'Link either event ids or sample streams into the journal day frontmatter.'
+        : 'Remove either event ids or sample streams from the journal day frontmatter.',
+    args: journalReferenceArgsSchema,
+    hint: journalReferenceCommandHint,
+    options: journalReferenceOptionsSchema,
+    output: journalLinkResultSchema,
+    async run({ args, options }: {
+      args: z.infer<typeof journalReferenceArgsSchema>
+      options: z.infer<typeof journalReferenceOptionsSchema>
+    }) {
+      return mutateJournalReferences(services, {
+        operation,
+        vault: options.vault,
+        requestId: requestIdFromOptions(options),
+        date: args.date,
+        eventIds: options.eventId,
+        sampleStreams: options.stream,
+      })
+    },
+  }
 }
