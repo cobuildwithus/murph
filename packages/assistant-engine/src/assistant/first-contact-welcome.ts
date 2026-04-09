@@ -1,7 +1,7 @@
-export const ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE = `Hey, I'm Murph. I'm your personal health assistant.
+export const ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE = `Hey, I'm Murph — your personal health assistant.
 
-You can send me things as they happen — meals, supplements, workouts, recipes, labs, symptoms, questions — and I keep building a picture over time so I can help you notice patterns, make better decisions, and work toward your goals. Whether you're managing a condition, chasing a fitness goal, or just trying to feel better.
+Just send me things as they happen: meals, workouts, supplements, labs, symptoms, whatever. I'll keep track of it all and help you spot patterns, answer questions, and stay on top of your goals.
 
-Everything here stays in your private vault. It's like having a private health team in your pocket.
+Your own private health team, whenever you need it.
 
 Ready to get started?`;
