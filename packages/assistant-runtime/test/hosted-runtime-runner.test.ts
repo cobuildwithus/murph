@@ -11,8 +11,12 @@ const mocks = vi.hoisted(() => ({
   executeHostedDispatchForCommit: vi.fn(),
   materializeHostedExecutionArtifacts: vi.fn(),
   normalizeHostedAssistantRuntimeConfig: vi.fn(),
+  parseCanonicalLinqMessageReceivedEvent: vi.fn(),
+  parseLinqWebhookEvent: vi.fn(),
   restoreHostedExecutionContext: vi.fn(),
   resumeHostedCommittedExecution: vi.fn(),
+  startLinqChatTypingIndicator: vi.fn(),
+  stopLinqChatTypingIndicator: vi.fn(),
   withHostedProcessEnvironment: vi.fn(),
 }));
 
@@ -31,6 +35,17 @@ vi.mock("@murphai/hosted-execution", async () => {
     emitHostedExecutionStructuredLog: mocks.emitHostedExecutionStructuredLog,
   };
 });
+
+vi.mock("@murphai/messaging-ingress/linq-webhook", () => ({
+  parseCanonicalLinqMessageReceivedEvent:
+    mocks.parseCanonicalLinqMessageReceivedEvent,
+  parseLinqWebhookEvent: mocks.parseLinqWebhookEvent,
+}));
+
+vi.mock("@murphai/operator-config/linq-runtime", () => ({
+  startLinqChatTypingIndicator: mocks.startLinqChatTypingIndicator,
+  stopLinqChatTypingIndicator: mocks.stopLinqChatTypingIndicator,
+}));
 
 vi.mock("../src/hosted-runtime/callbacks.ts", () => ({
   commitHostedExecutionResult: mocks.commitHostedExecutionResult,
@@ -121,6 +136,12 @@ beforeEach(() => {
     platform,
     userEnv: { ...(runtime?.userEnv ?? {}) },
   }));
+  mocks.parseLinqWebhookEvent.mockImplementation((rawBody: string) => JSON.parse(rawBody));
+  mocks.parseCanonicalLinqMessageReceivedEvent.mockReturnValue({
+    data: {
+      chat_id: "chat_123",
+    },
+  });
   mocks.restoreHostedExecutionContext.mockResolvedValue({
     operatorHomeRoot: "/tmp/operator-home",
     vaultRoot: "/tmp/vault-root",
@@ -136,6 +157,8 @@ beforeEach(() => {
   mocks.completeHostedExecutionAfterCommit.mockResolvedValue(finalResult);
   mocks.commitHostedExecutionResult.mockResolvedValue(undefined);
   mocks.materializeHostedExecutionArtifacts.mockResolvedValue(undefined);
+  mocks.startLinqChatTypingIndicator.mockResolvedValue(undefined);
+  mocks.stopLinqChatTypingIndicator.mockResolvedValue(undefined);
 });
 
 describe("hosted runtime child payload helpers", () => {
@@ -350,6 +373,101 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
     );
   });
 
+  it("does not block hosted execution while Linq typing startup is in flight and stops after committed delivery draining", async () => {
+    const steps: string[] = [];
+    let resolveTypingStart!: () => void;
+    mocks.startLinqChatTypingIndicator.mockImplementation(() => {
+      steps.push("start");
+      return new Promise<void>((resolve) => {
+        resolveTypingStart = resolve;
+      });
+    });
+    mocks.executeHostedDispatchForCommit.mockImplementation(async () => {
+      steps.push("execute");
+      return committedExecution;
+    });
+    mocks.completeHostedExecutionAfterCommit.mockImplementation(async () => {
+      steps.push("complete");
+      return finalResult;
+    });
+    mocks.stopLinqChatTypingIndicator.mockImplementation(async () => {
+      steps.push("stop");
+    });
+
+    const runPromise = runHostedAssistantRuntimeJobInProcessDetailed(
+      {
+        request: {
+          bundle: "incoming-bundle",
+          dispatch: {
+            event: {
+              kind: "linq.message.received",
+              linqEvent: {
+                data: {
+                  message: {
+                    parts: [],
+                  },
+                },
+                event_type: "message.received",
+              },
+              linqMessageId: "msg_123",
+              phoneLookupKey: "phone_123",
+              userId: "member_123",
+            },
+            eventId: "evt_linq_typing",
+            occurredAt: "2026-04-08T00:00:00.000Z",
+          },
+        },
+        runtime: {
+          forwardedEnv: {
+            LINQ_API_TOKEN: "linq-token",
+          },
+        },
+      },
+      {
+        platform: {
+          artifactStore: {
+            async get() {
+              return null;
+            },
+            async put() {},
+          },
+          effectsPort: createHostedRuntimeEffectsPortStub(),
+        },
+      },
+    );
+
+    await vi.waitFor(() => {
+      expect(mocks.executeHostedDispatchForCommit).toHaveBeenCalledTimes(1);
+      expect(mocks.completeHostedExecutionAfterCommit).toHaveBeenCalledTimes(1);
+    });
+    expect(mocks.stopLinqChatTypingIndicator).not.toHaveBeenCalled();
+
+    resolveTypingStart();
+    await runPromise;
+
+    expect(mocks.startLinqChatTypingIndicator).toHaveBeenCalledWith(
+      {
+        chatId: "chat_123",
+      },
+      {
+        env: {
+          LINQ_API_TOKEN: "linq-token",
+        },
+      },
+    );
+    expect(mocks.stopLinqChatTypingIndicator).toHaveBeenCalledWith(
+      {
+        chatId: "chat_123",
+      },
+      {
+        env: {
+          LINQ_API_TOKEN: "linq-token",
+        },
+      },
+    );
+    expect(steps).toEqual(["start", "execute", "complete", "stop"]);
+  });
+
   it("passes a null artifact materializer when the decoded bundle is absent", async () => {
     mocks.decodeHostedBundleBase64.mockReturnValueOnce(null);
 
@@ -434,6 +552,66 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
     expect(mocks.executeHostedDispatchForCommit).not.toHaveBeenCalled();
     expect(mocks.commitHostedExecutionResult).not.toHaveBeenCalled();
     expect(mocks.completeHostedExecutionAfterCommit).toHaveBeenCalledTimes(1);
+  });
+
+  it("swallows Linq typing startup failures and still completes the hosted run", async () => {
+    mocks.startLinqChatTypingIndicator.mockRejectedValueOnce(
+      new Error("typing start failed"),
+    );
+
+    const result = await runHostedAssistantRuntimeJobInProcessDetailed(
+      {
+        request: {
+          bundle: "incoming-bundle",
+          dispatch: {
+            event: {
+              kind: "linq.message.received",
+              linqEvent: {
+                data: {
+                  message: {
+                    parts: [],
+                  },
+                },
+                event_type: "message.received",
+              },
+              linqMessageId: "msg_123",
+              phoneLookupKey: "phone_123",
+              userId: "member_123",
+            },
+            eventId: "evt_linq_typing_start_failure",
+            occurredAt: "2026-04-08T00:00:00.000Z",
+          },
+        },
+        runtime: {
+          forwardedEnv: {
+            LINQ_API_TOKEN: "linq-token",
+          },
+        },
+      },
+      {
+        platform: {
+          artifactStore: {
+            async get() {
+              return null;
+            },
+            async put() {},
+          },
+          effectsPort: createHostedRuntimeEffectsPortStub(),
+        },
+      },
+    );
+
+    assert.deepEqual(result, finalResult);
+    expect(mocks.executeHostedDispatchForCommit).toHaveBeenCalledTimes(1);
+    expect(mocks.completeHostedExecutionAfterCommit).toHaveBeenCalledTimes(1);
+    expect(mocks.stopLinqChatTypingIndicator).not.toHaveBeenCalled();
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        level: "warn",
+        message: "Hosted Linq typing indicator could not be started.",
+        phase: "dispatch.running",
+      }),
+    );
   });
 
   it("fails closed when hosted device links are requested without a configured control plane", async () => {
