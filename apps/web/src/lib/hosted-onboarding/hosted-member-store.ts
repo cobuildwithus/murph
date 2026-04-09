@@ -1,7 +1,7 @@
 /**
  * Owns the core hosted_member row plus composed reads over the specialized
  * identity, routing, and billing store slices without flattening them back into
- * a pre-cutover wide row.
+ * one wide row.
  */
 import { type HostedMember, Prisma } from "@prisma/client";
 

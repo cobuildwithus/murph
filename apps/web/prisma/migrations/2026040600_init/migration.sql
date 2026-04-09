@@ -1,4 +1,4 @@
--- Murph canonical v1 baseline generated from prisma/schema.prisma on 2026-04-08.
+-- Murph hosted Prisma baseline generated from prisma/schema.prisma on 2026-04-09.
 
 -- CreateSchema
 CREATE SCHEMA IF NOT EXISTS "public";
@@ -326,20 +326,8 @@ CREATE TABLE "hosted_webhook_receipt_side_effect" (
     "last_error_message" TEXT,
     "last_error_name" TEXT,
     "last_error_retryable" BOOLEAN,
-    "dispatch_payload_json" JSONB,
-    "linq_chat_id" TEXT,
-    "linq_invite_id" TEXT,
-    "linq_reply_to_message_id" TEXT,
-    "linq_template" TEXT,
-    "linq_result_chat_id" TEXT,
-    "linq_result_message_id" TEXT,
-    "revnet_amount_paid" INTEGER,
-    "revnet_charge_id" TEXT,
-    "revnet_currency" TEXT,
-    "revnet_invoice_id" TEXT,
-    "revnet_member_id" TEXT,
-    "revnet_payment_intent_id" TEXT,
-    "revnet_result_handled" BOOLEAN,
+    "payload_json" JSONB NOT NULL,
+    "result_json" JSONB,
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMP(3) NOT NULL,
 
@@ -355,6 +343,7 @@ CREATE TABLE "execution_outbox" (
     "event_id" TEXT NOT NULL,
     "event_kind" TEXT NOT NULL,
     "payload_json" JSONB NOT NULL,
+    "dispatch_state" TEXT NOT NULL DEFAULT 'queued',
     "status" "ExecutionOutboxStatus" NOT NULL DEFAULT 'queued',
     "attempt_count" INTEGER NOT NULL DEFAULT 0,
     "last_attempt_at" TIMESTAMP(3),

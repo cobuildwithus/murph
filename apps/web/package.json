@@ -17,7 +17,6 @@
     "typecheck": "pnpm --dir ../.. exec tsx scripts/ensure-next-route-type-stubs.ts apps/web && prisma generate && tsc -p tsconfig.json --pretty false",
     "typecheck:prepared": "pnpm --dir ../.. exec tsx scripts/ensure-next-route-type-stubs.ts apps/web && tsc -p tsconfig.json --pretty false",
     "test": "pnpm --dir ../.. exec vitest run --config apps/web/vitest.workspace.ts --no-coverage",
-    "contact-privacy:backfill": "pnpm --dir ../.. exec tsx apps/web/scripts/backfill-hosted-contact-privacy.ts",
     "prisma:generate": "prisma generate",
     "prisma:migrate:deploy": "prisma migrate deploy",
     "prisma:migrate:dev": "prisma migrate dev",

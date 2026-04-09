@@ -1,6 +1,6 @@
 # Vault Layout
 
-Status: frozen baseline plus health extension fence
+Status: frozen current contract plus health extension fence
 
 ## Baseline Root
 
@@ -108,5 +108,5 @@ Generated artifact: `packages/contracts/generated/vault-metadata.schema.json`
 - `vault.json` uses `formatVersion` as its sole compatibility knob.
 - Stored documents and ledgers use explicit `schemaVersion` fields; raw import sidecars also carry a versioned manifest shape.
 - Published version strings are immutable.
-- Any incompatible change must mint a new version string and come with an explicit cutover decision: ship a one-time core migration or intentionally drop older read support.
-- `packages/core` owns migrations and versioned write behavior. Query/CLI paths may validate or branch on versions but must not keep legacy reads alive by silently rewriting stored records during reads.
+- Any incompatible change must mint a new version string and either ship an explicit core migration or fail closed until one exists.
+- `packages/core` owns the future migration seam and versioned write behavior. Current older-format vaults fail closed until an explicit upgrade step is registered, and query/CLI paths must not keep legacy reads alive by silently rewriting stored records during reads.

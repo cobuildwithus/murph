@@ -103,8 +103,6 @@ export interface JsonObject {
 
 const DAY_KEY_PATTERN = "^\\d{4}-\\d{2}-\\d{2}$";
 const RAW_PATH_PATTERN = "^raw/[A-Za-z0-9._/-]+$";
-const RAW_DOCUMENT_PATH_PATTERN = "^raw/documents/[A-Za-z0-9._/-]+$";
-const RAW_MEAL_PATH_PATTERN = "^raw/meals/[A-Za-z0-9._/-]+$";
 const RAW_ASSESSMENT_SOURCE_PATTERN = "^raw/assessments/[A-Za-z0-9._/-]+/source\\.json$";
 const RELATIVE_PATH_PATTERN = "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9._/-]+$";
 const SINGLE_PATH_SEGMENT_PATTERN = "^[A-Za-z0-9._-]+$";
@@ -546,7 +544,6 @@ const eventLifecycleSchema = z
 const baseEventOptionalShape = {
   tags: uniqueArray(patternedString(SLUG_PATTERN), { uniqueItems: true }).optional(),
   links: uniqueArray(eventRelationLinkSchema, { uniqueItems: true }).optional(),
-  relatedIds: uniqueArray(patternedString(GENERIC_CONTRACT_ID_PATTERN), { uniqueItems: true }).optional(),
   rawRefs: uniqueArray(patternedString(RAW_PATH_PATTERN), { uniqueItems: true }).optional(),
   attachments: uniqueArray(eventAttachmentSchema, { uniqueItems: true }).optional(),
   externalRef: externalRefSchema.optional(),
@@ -615,7 +612,6 @@ export const eventRecordSchema = withContractMetadata(
   z.discriminatedUnion("kind", [
     eventSchema("document", {
       documentId: idSchema(ID_PREFIXES.document),
-      documentPath: patternedString(RAW_DOCUMENT_PATH_PATTERN),
       mimeType: boundedString(3, 120),
       providerId: idSchema(ID_PREFIXES.provider).optional(),
     }),
@@ -626,8 +622,6 @@ export const eventRecordSchema = withContractMetadata(
     }),
     eventSchema("meal", {
       mealId: idSchema(ID_PREFIXES.meal),
-      photoPaths: uniqueArray(patternedString(RAW_MEAL_PATH_PATTERN), { uniqueItems: true }),
-      audioPaths: z.array(patternedString(RAW_MEAL_PATH_PATTERN)),
       ingredients: uniqueArray(boundedString(1, 4000), { maxItems: 100 }).optional(),
     }),
     eventSchema("symptom", {

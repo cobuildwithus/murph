@@ -246,7 +246,6 @@ test("high-level core provider, event, and summary mutation ports preserve canon
   assert.equal(providerDocument.attributes.title, "Labcorp West");
   assert.ok(eventRecord);
   assert.deepEqual(eventRecord.links, [{ type: "related_to", targetId: createdProvider.providerId }]);
-  assert.deepEqual(eventRecord.relatedIds, [createdProvider.providerId]);
 });
 
 test("high-level core experiment mutation ports reject invalid experiment statuses consistently", async () => {
@@ -393,10 +392,6 @@ test("high-level canonical mutation ports dedupe trimmed duplicate experiment an
   assert.deepEqual(eventRecord.links, [
     { type: "related_to", targetId: created.experiment.id },
     { type: "related_to", targetId: "goal_01JNW7YJ7MNE7M9Q2QWQK4Z3F8" },
-  ]);
-  assert.deepEqual(eventRecord.relatedIds, [
-    created.experiment.id,
-    "goal_01JNW7YJ7MNE7M9Q2QWQK4Z3F8",
   ]);
   assert.deepEqual(eventRecord.rawRefs, ["raw/documents/a.pdf", "raw/documents/b.pdf"]);
 });

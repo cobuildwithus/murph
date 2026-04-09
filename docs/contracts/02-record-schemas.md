@@ -53,8 +53,8 @@ Baseline does not define a standalone transform record family. `xfm_*` ids are b
 
 | Kind | Required contract fields |
 | --- | --- |
-| `document` | `documentId`, `documentPath`, `mimeType` |
-| `meal` | `mealId`, `photoPaths`, `audioPaths` |
+| `document` | `documentId`, `mimeType` |
+| `meal` | `mealId` |
 | `symptom` | `symptom`, `intensity` |
 | `note` | `note` |
 | `observation` | `metric`, `value`, `unit` |
@@ -70,9 +70,7 @@ Baseline does not define a standalone transform record family. `xfm_*` ids are b
 | `adverse_effect` | `substance`, `effect`, `severity` |
 | `exposure` | `exposureType`, `substance` |
 
-Shared event envelope fields include `note`, `tags`, canonical `links[]`, compatibility `relatedIds`, `rawRefs`, `attachments`, optional `lifecycle`, and `externalRef`. `links[]` is the canonical relation primitive; `relatedIds` remains a compatibility projection for legacy/read-side surfaces. `attachments[]` stores canonical file metadata as `role`, `kind`, `relativePath`, `mediaType`, `sha256`, and `originalFileName`. `lifecycle` carries append-only revision state and optional `"deleted"` tombstones. `externalRef` stores device/provider provenance as `system`, `resourceType`, `resourceId`, optional `version`, and optional `facet`.
-
-Legacy file-specific fields such as `documentPath`, `photoPaths`, `audioPaths`, `media`, and nested `workout.media` remain compatibility projections rather than independent sources of truth.
+Shared event envelope fields include `note`, `tags`, canonical `links[]`, `rawRefs`, `attachments`, optional `lifecycle`, and `externalRef`. `links[]` is the canonical relation primitive. `attachments[]` stores canonical file metadata as `role`, `kind`, `relativePath`, `mediaType`, `sha256`, and `originalFileName`, while `rawRefs[]` records the staged raw artifact paths referenced by the event. `lifecycle` carries append-only revision state and optional `"deleted"` tombstones. `externalRef` stores device/provider provenance as `system`, `resourceType`, `resourceId`, optional `version`, and optional `facet`.
 
 `test` events may also carry optional structured lab payloads. When `testCategory` is `blood`, the canonical `test` event may include `specimenType`, `labName`, `labPanelId`, `collectedAt`, `reportedAt`, `fastingStatus`, and `results`. Each `results[]` entry stores `analyte`, optional `slug`, optional numeric `value` or textual `textValue`, optional `comparator`, optional `unit`, optional `flag`, optional `biomarkerSlug`, optional `note`, and an optional `referenceRange` with numeric `low`, numeric `high`, and/or textual `text` boundaries.
 

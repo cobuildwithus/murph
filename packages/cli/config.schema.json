@@ -188,7 +188,7 @@
                         },
                         "dryRun": {
                           "default": false,
-                          "description": "Preview the upgrade plan without writing canonical files.",
+                          "description": "Preview the current-format check without writing canonical files.",
                           "type": "boolean"
                         }
                       }

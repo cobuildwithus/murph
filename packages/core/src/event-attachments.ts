@@ -190,7 +190,6 @@ export function buildAttachmentPathCompatibilityProjections(
   const rawRefs = [...new Set(attachments.map((attachment) => attachment.relativePath))];
   const documentPath =
     attachments.find((attachment) => attachment.kind === "document")?.relativePath
-    ?? attachments[0]?.relativePath
     ?? null;
   const photoPaths = [
     ...new Set(

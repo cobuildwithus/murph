@@ -125,7 +125,7 @@ export const exampleEventRecords: readonly Readonly<EventRecord>[] = Object.free
     source: "import",
     title: "Primary care visit summary",
     tags: ["clinic", "pdf"],
-    relatedIds: ["doc_01JNV41Q9MN0S1R6ZMW7FGD9DG"],
+    links: [{ type: "related_to", targetId: "doc_01JNV41Q9MN0S1R6ZMW7FGD9DG" }],
     rawRefs: ["raw/documents/2026/03/doc_01JNV41Q9MN0S1R6ZMW7FGD9DG/visit-summary.pdf"],
     attachments: [
       {
@@ -138,7 +138,6 @@ export const exampleEventRecords: readonly Readonly<EventRecord>[] = Object.free
       },
     ],
     documentId: "doc_01JNV41Q9MN0S1R6ZMW7FGD9DG",
-    documentPath: "raw/documents/2026/03/doc_01JNV41Q9MN0S1R6ZMW7FGD9DG/visit-summary.pdf",
     mimeType: "application/pdf",
     providerId: "prov_01JNV422Y2M5ZBV64ZP4N1DRB1",
   },
@@ -153,7 +152,7 @@ export const exampleEventRecords: readonly Readonly<EventRecord>[] = Object.free
     title: "Lunch bowl",
     note: "Chicken, rice, and avocado.",
     tags: ["meal", "lunch"],
-    relatedIds: ["meal_01JNV42NP0KH6JQXMZM1G0V6SE"],
+    links: [{ type: "related_to", targetId: "meal_01JNV42NP0KH6JQXMZM1G0V6SE" }],
     rawRefs: ["raw/meals/2026/03/meal_01JNV42NP0KH6JQXMZM1G0V6SE/photo-01.jpg"],
     attachments: [
       {
@@ -166,8 +165,6 @@ export const exampleEventRecords: readonly Readonly<EventRecord>[] = Object.free
       },
     ],
     mealId: "meal_01JNV42NP0KH6JQXMZM1G0V6SE",
-    photoPaths: ["raw/meals/2026/03/meal_01JNV42NP0KH6JQXMZM1G0V6SE/photo-01.jpg"],
-    audioPaths: [],
   },
   {
     schemaVersion: "murph.event.v1",
@@ -255,7 +252,7 @@ export const exampleEventRecords: readonly Readonly<EventRecord>[] = Object.free
     dayKey: "2026-03-12",
     source: "manual",
     title: "Magnesium trial started",
-    relatedIds: ["exp_01JNV4458HYPP53JDQCBP1QJFM"],
+    links: [{ type: "related_to", targetId: "exp_01JNV4458HYPP53JDQCBP1QJFM" }],
     experimentId: "exp_01JNV4458HYPP53JDQCBP1QJFM",
     experimentSlug: "magnesium-sleep",
     phase: "start",
@@ -446,7 +443,7 @@ export const exampleEventRecords: readonly Readonly<EventRecord>[] = Object.free
     source: "manual",
     title: "20-minute sauna",
     note: "20 min sauna after lifting.",
-    relatedIds: ["prot_01JNV422Y2M5ZBV64ZP4N1DRB1"],
+    links: [{ type: "related_to", targetId: "prot_01JNV422Y2M5ZBV64ZP4N1DRB1" }],
     interventionType: "sauna",
     durationMinutes: 20,
     protocolId: "prot_01JNV422Y2M5ZBV64ZP4N1DRB1",

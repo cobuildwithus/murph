@@ -305,7 +305,7 @@ test("overview helpers handle empty inputs, limit coercion, truncation, and sund
   }
 });
 
-test("readVaultSourceTolerant normalizes legacy aliases, relations, and sparse vault layouts", async () => {
+test("readVaultSourceTolerant keeps sparse vault layouts but hard-cuts legacy relation and file aliases", async () => {
   const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-query-vault-source-"));
   tempRoots.push(vaultRoot);
 
@@ -403,8 +403,12 @@ test("readVaultSourceTolerant normalizes legacy aliases, relations, and sparse v
         occurredAt: "2026-04-08T08:00:00.000Z",
         title: "Morning note",
         note: "Brief note.",
-        relatedIds: ["goal_sleep"],
-        eventIds: ["evt_related_alias"],
+        links: [
+          { type: "supports_goal", targetId: "goal_sleep" },
+          { type: "related_to", targetId: "evt_related_alias" },
+        ],
+        relatedIds: ["ignored_goal"],
+        eventIds: ["ignored_evt_alias"],
         related_ids: ["ignored_goal"],
         event_ids: ["ignored_evt"],
         raw_refs: ["raw/unused.json"],
@@ -456,21 +460,27 @@ test("readVaultSourceTolerant normalizes legacy aliases, relations, and sparse v
 
   const experiment = snapshot.entities.find((entity) => entity.family === "experiment");
   assert.equal(experiment?.date, "2026-04-03");
-  assert.deepEqual(experiment?.relatedIds, ["goal_sleep", "evt_note"]);
+  assert.deepEqual(experiment?.relatedIds, []);
   assert.deepEqual(experiment?.tags, ["sleep"]);
   assert.equal(experiment?.attributes.started_on, undefined);
+  assert.equal(experiment?.attributes.relatedIds, undefined);
+  assert.equal(experiment?.attributes.eventIds, undefined);
 
   const journal = snapshot.entities.find((entity) => entity.family === "journal");
   assert.equal(journal?.date, "2026-04-08");
-  assert.deepEqual(journal?.relatedIds, ["goal_sleep", "evt_note"]);
+  assert.deepEqual(journal?.relatedIds, ["evt_note"]);
   assert.deepEqual(journal?.attributes.sampleStreams, ["hrv"]);
   assert.equal(journal?.attributes.event_ids, undefined);
+  assert.equal(journal?.attributes.relatedIds, undefined);
 
   const event = snapshot.entities.find((entity) => entity.family === "event");
   assert.equal(event?.entityId, "evt_note");
   assert.deepEqual(event?.relatedIds, ["goal_sleep", "evt_related_alias"]);
   assert.equal(Array.isArray(event?.attributes.attachments), true);
   assert.equal(event?.attributes.audioPaths, undefined);
+  assert.equal(event?.attributes.photoPaths, undefined);
+  assert.equal(event?.attributes.relatedIds, undefined);
+  assert.equal(event?.attributes.eventIds, undefined);
   assert.equal(event?.attributes.related_ids, undefined);
 
   const audit = snapshot.entities.find((entity) => entity.family === "audit");

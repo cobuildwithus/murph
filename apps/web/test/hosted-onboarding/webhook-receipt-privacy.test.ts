@@ -73,7 +73,7 @@ import {
   type HostedWebhookSideEffect,
 } from "../../src/lib/hosted-onboarding/webhook-receipt-types";
 
-describe("hosted webhook receipt privacy cutover", () => {
+describe("hosted webhook receipt privacy baseline", () => {
   beforeEach(() => {
     vi.resetAllMocks();
   });

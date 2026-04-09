@@ -321,8 +321,6 @@ test("upsertEvent rejects specialized event kinds on the generic public boundary
           title: "Lunch bowl",
           note: "Chicken, rice, and avocado.",
           mealId: "meal_01JNV42NP0KH6JQXMZM1G0V6SE",
-          photoPaths: ["raw/meals/2026/03/meal_01JNV42NP0KH6JQXMZM1G0V6SE/photo-01.jpg"],
-          audioPaths: [],
         },
       }),
     (error: unknown) =>
@@ -750,7 +748,10 @@ test("copyRawArtifact enforces raw immutability and importDocument appends contr
   assert.equal(eventRecords.length, 1);
   assert.equal(documentEvent.kind, "document");
   assert.equal(documentEvent.documentId, imported.documentId);
-  assert.equal(documentEvent.documentPath, imported.raw.relativePath);
+  assert.deepEqual(documentEvent.links, [
+    { type: "related_to", targetId: imported.documentId },
+  ]);
+  assert.deepEqual(documentEvent.rawRefs, [imported.raw.relativePath]);
   assert.equal(documentEvent.attachments?.length, 1);
   assert.equal(documentEvent.attachments?.[0]?.relativePath, imported.raw.relativePath);
   assert.equal(documentEvent.attachments?.[0]?.kind, "document");
@@ -767,7 +768,7 @@ test("copyRawArtifact enforces raw immutability and importDocument appends contr
   assert.equal(latestAuditRecord.action, "document_import");
 });
 
-test("photo-only meals preserve an empty audioPaths array in the stored event", async () => {
+test("photo-only meals keep canonical attachments without legacy audio path projections", async () => {
   const vaultRoot = await makeTempDirectory("murph-vault");
   const sourceRoot = await makeTempDirectory("murph-source");
   await initializeVault({ vaultRoot });
@@ -790,7 +791,7 @@ test("photo-only meals preserve an empty audioPaths array in the stored event", 
   assert.equal(mealEvent.kind, "meal");
   assert.equal(mealEvent.attachments?.length, 1);
   assert.equal(mealEvent.attachments?.[0]?.kind, "photo");
-  assert.deepEqual(mealEvent.audioPaths, []);
+  assert.equal("audioPaths" in mealEvent, false);
   assert.equal(meal.audio, null);
 });
 
@@ -817,8 +818,6 @@ test("note-only meals stay first-class meal events without raw artifacts", async
 
   assert.equal(mealEvent.kind, "meal");
   assert.deepEqual(mealEvent.attachments ?? [], []);
-  assert.deepEqual(mealEvent.photoPaths, []);
-  assert.deepEqual(mealEvent.audioPaths, []);
   assert.deepEqual(mealEvent.rawRefs, [meal.manifestPath]);
   assert.equal(meal.photo, null);
   assert.equal(meal.audio, null);
@@ -874,8 +873,10 @@ test("meal, journal, experiment, and samples mutations write expected contract d
   assert.equal(meal.mealId, mealEvent.mealId);
   assert.equal(mealEvent.kind, "meal");
   assert.equal(mealEvent.attachments?.length, 2);
-  assert.equal(mealEvent.photoPaths.length, 1);
-  assert.equal(mealEvent.audioPaths.length, 1);
+  assert.deepEqual(mealEvent.rawRefs?.sort(), [
+    meal.photo?.relativePath,
+    meal.audio?.relativePath,
+  ].filter((value): value is string => Boolean(value)).sort());
 
   const firstJournal = await ensureJournalDay({
     vaultRoot,
@@ -1044,7 +1045,6 @@ test("createExperiment returns the existing experiment for idempotent retries", 
   assert.deepEqual(createdExperimentEvents[0]?.links, [
     { type: "related_to", targetId: first.experiment.id },
   ]);
-  assert.deepEqual(createdExperimentEvents[0]?.relatedIds, [first.experiment.id]);
   const operationPaths = await listWriteOperationMetadataPaths(vaultRoot);
   const operations = await Promise.all(
     operationPaths.map((relativePath) => readStoredWriteOperation(vaultRoot, relativePath)),
@@ -4019,7 +4019,6 @@ test("high-level canonical mutation ports own provider, event, and vault summary
   ) as EventRecord | undefined;
   assert.ok(eventRecord);
   assert.deepEqual(eventRecord.links, [{ type: "related_to", targetId: createdProvider.providerId }]);
-  assert.deepEqual(eventRecord.relatedIds, [createdProvider.providerId]);
   assert.equal(eventRecord.kind, "note");
 });
 

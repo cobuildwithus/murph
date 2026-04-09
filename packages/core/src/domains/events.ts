@@ -271,7 +271,6 @@ function buildBaseEventContractInput(
       note: normalizeOptionalText(valueAsString(draft.note)) ?? undefined,
       tags: uniqueTrimmedStringList(draft.tags) ?? undefined,
       links: draft.links,
-      relatedIds: draft.relatedIds,
       normalizeRelationIds: uniqueTrimmedStringList,
       rawRefs: uniqueTrimmedStringList(draft.rawRefs) ?? undefined,
       attachments: draft.attachments,
