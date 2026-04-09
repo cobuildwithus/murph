@@ -1203,15 +1203,20 @@ async function claimNextDueAssistantCronJob(
       readAssistantCronAutomationRuntimeStore(paths),
     ])
     const now = new Date().toISOString()
-    const projectedCanonicalJobs = canonicalRecords.map((automation) =>
-      projectCanonicalAssistantCronJob({
+    const canonicalEntries = canonicalRecords.map((automation) => {
+      const runtimeState = resolveCanonicalAutomationRuntimeState(automation, runtimeStore)
+      return {
         automation,
-        runtimeState: resolveCanonicalAutomationRuntimeState(automation, runtimeStore),
-      }),
-    )
+        runtimeState,
+        job: projectCanonicalAssistantCronJob({
+          automation,
+          runtimeState,
+        }),
+      }
+    })
     const candidate = sortAssistantCronJobs([
       ...store.jobs,
-      ...projectedCanonicalJobs,
+      ...canonicalEntries.map((entry) => entry.job),
     ]).find((job) =>
       isAssistantCronJobDue(job, now),
     )
@@ -1239,19 +1244,14 @@ async function claimNextDueAssistantCronJob(
       }
     }
 
-    const automation = canonicalRecords.find(
-      (record) => record.automationId === candidate.jobId,
-    )
-    if (!automation) {
-      return null
-    }
-
-    const runtimeState = resolveCanonicalAutomationRuntimeState(automation, runtimeStore)
+    const canonicalEntry = canonicalEntries.find(
+      (entry) => entry.automation.automationId === candidate.jobId,
+    )!
     const updatedRuntimeState: AssistantCronAutomationRuntimeRecord = {
-      ...runtimeState,
+      ...canonicalEntry.runtimeState,
       updatedAt: now,
       state: {
-        ...runtimeState.state,
+        ...canonicalEntry.runtimeState.state,
         runningAt: now,
         runningPid: process.pid,
       },
@@ -1261,10 +1261,10 @@ async function claimNextDueAssistantCronJob(
 
     return {
       kind: 'automation',
-      automation,
+      automation: canonicalEntry.automation,
       runtimeState: updatedRuntimeState,
       job: projectCanonicalAssistantCronJob({
-        automation,
+        automation: canonicalEntry.automation,
         runtimeState: updatedRuntimeState,
       }),
     }
@@ -1286,7 +1286,7 @@ async function executeClaimedAssistantCronJob(input: {
   let sessionId: string | null = null
   let response: string | null = null
   let errorText: string | null = null
-  let status: AssistantCronRunRecord['status'] = 'failed'
+  let status: 'failed' | 'succeeded' = 'failed'
 
   try {
     if (input.signal?.aborted) {
@@ -1366,7 +1366,10 @@ async function executeClaimedAssistantCronJob(input: {
         job: current,
         finishedAt,
         responseSessionId: sessionId,
-        run,
+        run: {
+          ...run,
+          status,
+        },
       })
       let removedAfterRun = false
 
@@ -1400,7 +1403,10 @@ async function executeClaimedAssistantCronJob(input: {
       finishedAt,
       responseSessionId:
         input.job.automation.continuityPolicy === 'preserve' ? sessionId : null,
-      run,
+      run: {
+        ...run,
+        status,
+      },
     })
     const updatedRuntimeState: AssistantCronAutomationRuntimeRecord = {
       ...currentRuntimeState,
@@ -1468,7 +1474,9 @@ function finalizeAssistantCronJobAfterRun(input: {
   finishedAt: string
   job: AssistantCronJob
   responseSessionId: string | null
-  run: AssistantCronRunRecord
+  run: AssistantCronRunRecord & {
+    status: 'failed' | 'succeeded'
+  }
 }): AssistantCronJob {
   const runningClearedState = {
     ...input.job.state,
@@ -1505,14 +1513,6 @@ function finalizeAssistantCronJobAfterRun(input: {
         lastError: null,
         consecutiveFailures: 0,
       },
-    })
-  }
-
-  if (input.run.status === 'skipped') {
-    return assistantCronJobSchema.parse({
-      ...input.job,
-      updatedAt: input.finishedAt,
-      state: runningClearedState,
     })
   }
 
