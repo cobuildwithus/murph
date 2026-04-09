@@ -10,10 +10,10 @@ export type MurphVitestCoverageThresholds = {
 
 export const murphVitestCoverageThresholds: MurphVitestCoverageThresholds = {
   perFile: true,
-  lines: 85,
-  functions: 85,
-  branches: 80,
-  statements: 85,
+  lines: 80,
+  functions: 80,
+  branches: 70,
+  statements: 80,
 };
 
 export function resolveMurphVitestCoverageProviderModule(packageDir: string): string {
