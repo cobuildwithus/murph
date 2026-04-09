@@ -46,11 +46,11 @@ const HOSTED_WORKER_OPTIONAL_VAR_NAMES = [
   "WHISPER_MODEL_PATH",
 ] as const;
 
-const DEFAULT_CONTAINER_INSTANCE_TYPE = "standard-1";
+const DEFAULT_CONTAINER_INSTANCE_TYPE: NamedContainerInstanceType = "standard-1";
 const DEFAULT_CONTAINER_MAX_INSTANCES = 50;
 const DEFAULT_LOG_HEAD_SAMPLING_RATE = 1;
 const DEFAULT_TRACE_HEAD_SAMPLING_RATE = 0.1;
-const NAMED_CONTAINER_INSTANCE_TYPES = new Set([
+const NAMED_CONTAINER_INSTANCE_TYPES = [
   "basic",
   "dev",
   "lite",
@@ -59,17 +59,10 @@ const NAMED_CONTAINER_INSTANCE_TYPES = new Set([
   "standard-2",
   "standard-3",
   "standard-4",
-] as const);
+] as const;
+const NAMED_CONTAINER_INSTANCE_TYPE_SET = new Set<string>(NAMED_CONTAINER_INSTANCE_TYPES);
 
-type NamedContainerInstanceType =
-  | "basic"
-  | "dev"
-  | "lite"
-  | "standard"
-  | "standard-1"
-  | "standard-2"
-  | "standard-3"
-  | "standard-4";
+type NamedContainerInstanceType = (typeof NAMED_CONTAINER_INSTANCE_TYPES)[number];
 
 type EnvSource = Readonly<Record<string, string | undefined>>;
 
@@ -187,6 +180,10 @@ function normalizePositiveInteger(
   return parsePositiveInteger(normalized, label, "positive integer");
 }
 
+function isNamedContainerInstanceType(value: string): value is NamedContainerInstanceType {
+  return NAMED_CONTAINER_INSTANCE_TYPE_SET.has(value);
+}
+
 function normalizeContainerInstanceType(
   value: string | undefined,
   fallback: HostedContainerInstanceType,
@@ -198,8 +195,8 @@ function normalizeContainerInstanceType(
     return fallback;
   }
 
-  if (NAMED_CONTAINER_INSTANCE_TYPES.has(normalized as NamedContainerInstanceType)) {
-    return normalized as NamedContainerInstanceType;
+  if (isNamedContainerInstanceType(normalized)) {
+    return normalized;
   }
 
   let parsed: unknown;
@@ -207,7 +204,7 @@ function normalizeContainerInstanceType(
     parsed = JSON.parse(normalized);
   } catch {
     throw new Error(
-      `${label} must be one of ${Array.from(NAMED_CONTAINER_INSTANCE_TYPES).join(", ")} or a JSON object with vcpu, memory_mib, and disk_mb.`,
+      `${label} must be one of ${NAMED_CONTAINER_INSTANCE_TYPES.join(", ")} or a JSON object with vcpu, memory_mib, and disk_mb.`,
     );
   }
 

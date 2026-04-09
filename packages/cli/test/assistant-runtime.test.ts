@@ -4416,7 +4416,7 @@ test('scanAssistantAutoReplyOnce anchors grouped linq replies to the newest grou
 
 test('scanAssistantAutoReplyOnce can use self-authored attachment prompts and suppress recent assistant echoes', async () => {
   vi.useFakeTimers()
-  vi.setSystemTime(new Date('2026-03-18T00:00:00.000Z'))
+  vi.setSystemTime(new Date('2026-03-18T00:00:20.000Z'))
 
   const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-self-auto-reply-'))
   const vaultRoot = path.join(parent, 'vault')

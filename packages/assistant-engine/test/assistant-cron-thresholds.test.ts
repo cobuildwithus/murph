@@ -85,10 +85,14 @@ vi.mock('@murphai/core', () => ({
   upsertAutomation: cronMocks.upsertAutomation,
 }))
 
-vi.mock('@murphai/query', () => ({
-  listAutomations: cronMocks.listCanonicalAutomations,
-  showAutomation: cronMocks.showCanonicalAutomation,
-}))
+vi.mock('@murphai/query', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@murphai/query')>()
+  return {
+    ...actual,
+    listAutomations: cronMocks.listCanonicalAutomations,
+    showAutomation: cronMocks.showCanonicalAutomation,
+  }
+})
 
 vi.mock('@murphai/vault-usecases/runtime', () => ({
   loadImporterRuntime: cronMocks.loadImporterRuntime,
