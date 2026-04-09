@@ -5,6 +5,16 @@ script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd -- "$script_dir/.." && pwd)"
 cd "$repo_root"
 
+workspace_artifact_lock_label="workspace-verify"
+if [[ "$#" -gt 0 ]]; then
+  workspace_artifact_lock_label+=" $1"
+fi
+
+if [[ "${MURPH_WORKSPACE_ARTIFACT_LOCK_HELD:-0}" != "1" ]]; then
+  exec node "$repo_root/scripts/run-with-workspace-artifact-lock.mjs" "$workspace_artifact_lock_label" -- \
+    bash "$repo_root/scripts/workspace-verify.sh" "$@"
+fi
+
 readonly shell_syntax_check_scripts=(
   "scripts/check-agent-docs-drift.sh"
   "scripts/doc-gardening.sh"
@@ -32,6 +42,7 @@ readonly shell_syntax_check_scripts=(
 
 readonly node_syntax_check_scripts=(
   "scripts/build-test-runtime-prepared.mjs"
+  "scripts/run-with-workspace-artifact-lock.mjs"
   "scripts/check-workspace-package-cycles.mjs"
   "scripts/release-helpers.mjs"
   "scripts/verify-release-target.mjs"
@@ -103,7 +114,7 @@ readonly package_coverage_concurrency_default="$([[ -n "${CI:-}" ]] && echo 1 ||
 readonly package_coverage_concurrency_limit="$(normalize_positive_integer "${MURPH_PACKAGE_COVERAGE_CONCURRENCY:-$package_coverage_concurrency_default}" "$package_coverage_concurrency_default")"
 readonly package_coverage_vitest_max_workers_default="$([[ -n "${CI:-}" ]] && echo 50% || echo 100%)"
 readonly package_coverage_vitest_max_workers="${MURPH_PACKAGE_COVERAGE_VITEST_MAX_WORKERS:-$package_coverage_vitest_max_workers_default}"
-readonly typecheck_workspace_concurrency_default="$([[ -n "${CI:-}" ]] && echo 2 || echo 4)"
+readonly typecheck_workspace_concurrency_default="2"
 readonly typecheck_workspace_concurrency="$(normalize_positive_integer "${MURPH_TYPECHECK_WORKSPACE_CONCURRENCY:-$typecheck_workspace_concurrency_default}" "$typecheck_workspace_concurrency_default")"
 readonly verify_retry_count="$(normalize_non_negative_integer "${MURPH_VERIFY_RETRY_COUNT:-0}" "0")"
 readonly sqlite_warning_filter_option="--require=$repo_root/config/sqlite-warning-filter.cjs"
