@@ -99,21 +99,12 @@ importers:
       '@murphai/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
-      '@murphai/core':
-        specifier: workspace:*
-        version: link:../../packages/core
       '@murphai/device-syncd':
         specifier: workspace:*
         version: link:../../packages/device-syncd
       '@murphai/hosted-execution':
         specifier: workspace:*
         version: link:../../packages/hosted-execution
-      '@murphai/importers':
-        specifier: workspace:*
-        version: link:../../packages/importers
-      '@murphai/inboxd':
-        specifier: workspace:*
-        version: link:../../packages/inboxd
       '@murphai/messaging-ingress':
         specifier: workspace:*
         version: link:../../packages/messaging-ingress
@@ -254,36 +245,18 @@ importers:
       '@murphai/core':
         specifier: workspace:*
         version: link:../core
-      '@murphai/device-syncd':
-        specifier: workspace:*
-        version: link:../device-syncd
       '@murphai/gateway-core':
         specifier: workspace:*
         version: link:../gateway-core
-      '@murphai/gateway-local':
-        specifier: workspace:*
-        version: link:../gateway-local
-      '@murphai/hosted-execution':
-        specifier: workspace:*
-        version: link:../hosted-execution
-      '@murphai/importers':
-        specifier: workspace:*
-        version: link:../importers
       '@murphai/inbox-services':
         specifier: workspace:*
         version: link:../inbox-services
-      '@murphai/inboxd':
-        specifier: workspace:*
-        version: link:../inboxd
       '@murphai/messaging-ingress':
         specifier: workspace:*
         version: link:../messaging-ingress
       '@murphai/operator-config':
         specifier: workspace:*
         version: link:../operator-config
-      '@murphai/parsers':
-        specifier: workspace:*
-        version: link:../parsers
       '@murphai/query':
         specifier: workspace:*
         version: link:../query
@@ -311,6 +284,9 @@ importers:
       '@murphai/assistant-engine':
         specifier: workspace:*
         version: link:../assistant-engine
+      '@murphai/contracts':
+        specifier: workspace:*
+        version: link:../contracts
       '@murphai/core':
         specifier: workspace:*
         version: link:../core
@@ -362,9 +338,6 @@ importers:
       '@murphai/inbox-services':
         specifier: workspace:*
         version: link:../inbox-services
-      '@murphai/operator-config':
-        specifier: workspace:*
-        version: link:../operator-config
       '@murphai/runtime-state':
         specifier: workspace:*
         version: link:../runtime-state

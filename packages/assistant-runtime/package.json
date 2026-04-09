@@ -34,6 +34,7 @@
   },
   "dependencies": {
     "@murphai/assistant-engine": "workspace:*",
+    "@murphai/contracts": "workspace:*",
     "@murphai/operator-config": "workspace:*",
     "@murphai/core": "workspace:*",
     "@murphai/device-syncd": "workspace:*",
