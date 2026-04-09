@@ -291,6 +291,153 @@ export function normalizeHostedDeviceSyncJobHints(
     : [];
 }
 
+export function parseHostedExecutionDeviceSyncWakeHint(
+  value: unknown,
+): HostedExecutionDeviceSyncWakeHint | null {
+  if (value === null) {
+    return null;
+  }
+
+  const record = requireObject(value, "Hosted execution device-sync.wake hint");
+  const next: HostedExecutionDeviceSyncWakeHint = {};
+
+  if (record.eventType !== undefined) {
+    next.eventType = readNullableStringValue(
+      record.eventType,
+      "Hosted execution device-sync.wake hint eventType",
+    );
+  }
+
+  if (record.jobs !== undefined) {
+    next.jobs = requireArray(
+      record.jobs,
+      "Hosted execution device-sync.wake hint jobs",
+    ).map((entry, index) => parseHostedExecutionDeviceSyncJobHint(entry, index));
+  }
+
+  if (record.nextReconcileAt !== undefined) {
+    next.nextReconcileAt = readNullableStringValue(
+      record.nextReconcileAt,
+      "Hosted execution device-sync.wake hint nextReconcileAt",
+    );
+  }
+
+  if (record.occurredAt !== undefined) {
+    next.occurredAt = readNullableStringValue(
+      record.occurredAt,
+      "Hosted execution device-sync.wake hint occurredAt",
+    );
+  }
+
+  if (record.reason !== undefined) {
+    next.reason = readNullableStringValue(
+      record.reason,
+      "Hosted execution device-sync.wake hint reason",
+    );
+  }
+
+  if (record.resourceCategory !== undefined) {
+    next.resourceCategory = readNullableStringValue(
+      record.resourceCategory,
+      "Hosted execution device-sync.wake hint resourceCategory",
+    );
+  }
+
+  if (record.revokeWarning !== undefined) {
+    next.revokeWarning = parseHostedExecutionDeviceSyncRevokeWarning(record.revokeWarning);
+  }
+
+  if (record.scopes !== undefined) {
+    next.scopes = requireStringArray(
+      record.scopes,
+      "Hosted execution device-sync.wake hint scopes",
+    );
+  }
+
+  if (record.traceId !== undefined) {
+    next.traceId = readNullableStringValue(
+      record.traceId,
+      "Hosted execution device-sync.wake hint traceId",
+    );
+  }
+
+  return next;
+}
+
+function parseHostedExecutionDeviceSyncJobHint(
+  value: unknown,
+  index: number,
+): HostedExecutionDeviceSyncJobHint {
+  const record = requireObject(
+    value,
+    `Hosted execution device-sync.wake hint jobs[${index}]`,
+  );
+  const next: HostedExecutionDeviceSyncJobHint = {
+    kind: requireString(
+      record.kind,
+      `Hosted execution device-sync.wake hint jobs[${index}].kind`,
+    ),
+  };
+
+  if (record.availableAt !== undefined) {
+    next.availableAt = requireString(
+      record.availableAt,
+      `Hosted execution device-sync.wake hint jobs[${index}].availableAt`,
+    );
+  }
+
+  if (record.dedupeKey !== undefined) {
+    next.dedupeKey = readNullableStringValue(
+      record.dedupeKey,
+      `Hosted execution device-sync.wake hint jobs[${index}].dedupeKey`,
+    );
+  }
+
+  if (record.maxAttempts !== undefined) {
+    next.maxAttempts = requireNumber(
+      record.maxAttempts,
+      `Hosted execution device-sync.wake hint jobs[${index}].maxAttempts`,
+    );
+  }
+
+  if (record.payload !== undefined) {
+    next.payload = requireObject(
+      record.payload,
+      `Hosted execution device-sync.wake hint jobs[${index}].payload`,
+    );
+  }
+
+  if (record.priority !== undefined) {
+    next.priority = requireNumber(
+      record.priority,
+      `Hosted execution device-sync.wake hint jobs[${index}].priority`,
+    );
+  }
+
+  return next;
+}
+
+function parseHostedExecutionDeviceSyncRevokeWarning(
+  value: unknown,
+): { code: string; message: string } | null {
+  if (value === null) {
+    return null;
+  }
+
+  const record = requireObject(value, "Hosted execution device-sync.wake hint revokeWarning");
+
+  return {
+    code: requireString(
+      record.code,
+      "Hosted execution device-sync.wake hint revokeWarning.code",
+    ),
+    message: requireString(
+      record.message,
+      "Hosted execution device-sync.wake hint revokeWarning.message",
+    ),
+  };
+}
+
 function parseHostedExecutionDeviceSyncRuntimeConnectionSnapshot(
   value: unknown,
   index: number,
@@ -708,6 +855,14 @@ function sanitizeHostedRuntimeErrorCode(value: string | null): string | null {
 
 function sanitizeHostedRuntimeErrorText(value: string | null): string | null {
   return sanitizeHostedRuntimeErrorString(value, HOSTED_RUNTIME_ERROR_TEXT_MAX_LENGTH);
+}
+
+function requireNumber(value: unknown, label: string): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new TypeError(`${label} must be a finite number.`);
+  }
+
+  return value;
 }
 
 function requirePositiveInteger(value: unknown, label: string): number {

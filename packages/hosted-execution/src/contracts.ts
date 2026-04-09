@@ -3,11 +3,13 @@ import type {
   HostedExecutionBundleRef as RuntimeHostedExecutionBundleRef,
 } from "@murphai/runtime-state";
 import type {
+  HostedExecutionDeviceSyncJobHint as DeviceSyncHostedExecutionDeviceSyncJobHint,
   HostedExecutionDeviceSyncRuntimeConnectionSnapshot as DeviceSyncHostedExecutionDeviceSyncRuntimeConnectionSnapshot,
   HostedExecutionDeviceSyncRuntimeConnectionStateSnapshot as DeviceSyncHostedExecutionDeviceSyncRuntimeConnectionStateSnapshot,
   HostedExecutionDeviceSyncRuntimeLocalStateSnapshot as DeviceSyncHostedExecutionDeviceSyncRuntimeLocalStateSnapshot,
   HostedExecutionDeviceSyncRuntimeSnapshotResponse as DeviceSyncHostedExecutionDeviceSyncRuntimeSnapshotResponse,
   HostedExecutionDeviceSyncRuntimeTokenBundle as DeviceSyncHostedExecutionDeviceSyncRuntimeTokenBundle,
+  HostedExecutionDeviceSyncWakeHint as DeviceSyncHostedExecutionDeviceSyncWakeHint,
 } from "@murphai/device-syncd/hosted-runtime";
 import type {
   HostedExecutionBundlePayload,
@@ -115,30 +117,6 @@ export interface HostedExecutionEmailMessageReceivedEvent extends HostedExecutio
 export interface HostedExecutionAssistantCronTickEvent extends HostedExecutionBaseEvent {
   kind: "assistant.cron.tick";
   reason: "alarm" | "manual" | "device-sync";
-}
-
-export interface HostedExecutionDeviceSyncJobHint {
-  availableAt?: string;
-  dedupeKey?: string | null;
-  kind: string;
-  maxAttempts?: number;
-  payload?: Record<string, unknown>;
-  priority?: number;
-}
-
-export interface HostedExecutionDeviceSyncWakeHint {
-  eventType?: string | null;
-  jobs?: HostedExecutionDeviceSyncJobHint[];
-  nextReconcileAt?: string | null;
-  occurredAt?: string | null;
-  reason?: string | null;
-  resourceCategory?: string | null;
-  revokeWarning?: {
-    code: string;
-    message: string;
-  } | null;
-  scopes?: string[];
-  traceId?: string | null;
 }
 
 export interface HostedExecutionDeviceSyncWakeEvent extends HostedExecutionBaseEvent {
@@ -255,6 +233,12 @@ export interface HostedExecutionDispatchResult {
 export const HOSTED_EXECUTION_USER_ID_HEADER = "x-hosted-execution-user-id";
 export const HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER =
   "x-hosted-execution-runner-proxy-token";
+
+export type HostedExecutionDeviceSyncJobHint =
+  DeviceSyncHostedExecutionDeviceSyncJobHint;
+
+export type HostedExecutionDeviceSyncWakeHint =
+  DeviceSyncHostedExecutionDeviceSyncWakeHint;
 
 export type HostedExecutionDeviceSyncRuntimeTokenBundle =
   DeviceSyncHostedExecutionDeviceSyncRuntimeTokenBundle;
