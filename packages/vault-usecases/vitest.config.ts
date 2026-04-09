@@ -86,6 +86,8 @@ export default defineConfig({
         "src/vault-services.ts",
         "src/workouts.ts",
         "src/health-cli-descriptors.ts",
+        "src/health-registry-command-metadata.ts",
+        "src/health-registry-families.ts",
         "src/health-cli-method-types.ts",
         "src/commands/command-helpers.ts",
         "src/commands/query-record-command-helpers.ts",

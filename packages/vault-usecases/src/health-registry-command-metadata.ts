@@ -13,8 +13,10 @@ import type {
   HealthQueryShowServiceMethodName,
 } from "./health-cli-method-types.js";
 
-export interface HealthRegistryCommandMetadata {
-  commandName: HealthRegistryCommandKind;
+export interface HealthRegistryCommandMetadata<
+  TKind extends HealthRegistryCommandKind = HealthRegistryCommandKind,
+> {
+  commandName: TKind;
   commandDescription: string;
   listServiceMethod: HealthQueryListServiceMethodName;
   listStatusDescription?: string;
@@ -42,10 +44,12 @@ const healthRegistryCommandMetadataByKind = {
   genetics: buildHealthRegistryCommandMetadata("genetics"),
 } as const satisfies Record<HealthRegistryCommandKind, HealthRegistryCommandMetadata>;
 
-export function getHealthRegistryCommandMetadata(
-  kind: HealthRegistryCommandKind,
-): HealthRegistryCommandMetadata {
-  return healthRegistryCommandMetadataByKind[kind];
+export function getHealthRegistryCommandMetadata<
+  TKind extends HealthRegistryCommandKind,
+>(
+  kind: TKind,
+): HealthRegistryCommandMetadata<TKind> {
+  return healthRegistryCommandMetadataByKind[kind] as HealthRegistryCommandMetadata<TKind>;
 }
 
 function buildHealthRegistryCommandMetadata(
