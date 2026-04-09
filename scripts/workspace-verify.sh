@@ -403,6 +403,25 @@ wait_for_background_jobs() {
   return 0
 }
 
+wait_for_background_jobs_allow_failures() {
+  local failed=0
+  local pid
+
+  for pid in "$@"; do
+    if ! wait "$pid"; then
+      failed=1
+    fi
+
+    unregister_background_pid "$pid"
+  done
+
+  if [[ "$failed" -ne 0 ]]; then
+    return 1
+  fi
+
+  return 0
+}
+
 run_test_packages_common() {
   if [[ "$test_lane_parallel" == "1" ]]; then
     local pids=()
@@ -557,6 +576,32 @@ run_all_package_coverage() {
   local package_count="${#package_coverage_dirs[@]}"
   local package_coverage_concurrency="$package_coverage_concurrency_limit"
   local package_index=0
+  local failed_package_labels=()
+  local saw_unreported_background_failure=0
+  local failure_dir
+  local failure_dir_quoted
+  failure_dir="$(mktemp -d "${TMPDIR:-/tmp}/murph-package-coverage-failures.XXXXXX")"
+  printf -v failure_dir_quoted '%q' "$failure_dir"
+
+  record_failed_package_coverage() {
+    local label="$1"
+    failed_package_labels+=("$label")
+  }
+
+  collect_failed_package_coverage_labels() {
+    local failure_file
+    local label
+
+    while IFS= read -r -d '' failure_file; do
+      if ! IFS= read -r label <"$failure_file"; then
+        continue
+      fi
+      [[ -n "$label" ]] || continue
+      record_failed_package_coverage "$label"
+    done < <(find "$failure_dir" -type f -print0 | sort -z)
+  }
+
+  trap "rm -rf -- $failure_dir_quoted" RETURN
 
   # Each package coverage command manages its own Vitest workers, so keep the
   # outer package fanout bounded to avoid oversubscribing local machines.
@@ -566,11 +611,17 @@ run_all_package_coverage() {
 
   if [[ "$package_coverage_concurrency" -le 1 ]]; then
     while [[ "$package_index" -lt "$package_count" ]]; do
-      run_workspace_package_coverage \
+      if ! run_workspace_package_coverage \
         "${package_coverage_dirs[$package_index]}" \
-        "${package_coverage_labels[$package_index]}"
+        "${package_coverage_labels[$package_index]}"; then
+        record_failed_package_coverage "${package_coverage_labels[$package_index]}"
+      fi
       package_index=$((package_index + 1))
     done
+    if [[ "${#failed_package_labels[@]}" -gt 0 ]]; then
+      verify_log "package coverage failures: ${failed_package_labels[*]}"
+      return 1
+    fi
     return 0
   fi
 
@@ -579,9 +630,15 @@ run_all_package_coverage() {
     local batch_slots=0
 
     while [[ "$package_index" -lt "$package_count" && "$batch_slots" -lt "$package_coverage_concurrency" ]]; do
-      run_workspace_package_coverage \
-        "${package_coverage_dirs[$package_index]}" \
-        "${package_coverage_labels[$package_index]}" &
+      local failure_file="$failure_dir/$package_index"
+      (
+        if ! run_workspace_package_coverage \
+          "${package_coverage_dirs[$package_index]}" \
+          "${package_coverage_labels[$package_index]}"; then
+          printf '%s\n' "${package_coverage_labels[$package_index]}" >"$failure_file"
+          exit 1
+        fi
+      ) &
       local coverage_pid="$!"
       batch_pids+=("$coverage_pid")
       register_background_pid "$coverage_pid"
@@ -589,8 +646,28 @@ run_all_package_coverage() {
       batch_slots=$((batch_slots + 1))
     done
 
-    wait_for_background_jobs "${batch_pids[@]}"
+    if ! wait_for_background_jobs_allow_failures "${batch_pids[@]}"; then
+      saw_unreported_background_failure=1
+    fi
   done
+
+  collect_failed_package_coverage_labels
+
+  if [[ "${#failed_package_labels[@]}" -gt 0 ]]; then
+    if [[ "$saw_unreported_background_failure" -ne 0 ]]; then
+      verify_log "package coverage failures: ${failed_package_labels[*]} plus an unreported background package coverage failure"
+      return 1
+    fi
+    verify_log "package coverage failures: ${failed_package_labels[*]}"
+    return 1
+  fi
+
+  if [[ "$saw_unreported_background_failure" -ne 0 ]]; then
+    verify_log "package coverage failures: unreported background package coverage failure"
+    return 1
+  fi
+
+  return 0
 }
 
 run_typecheck() {
