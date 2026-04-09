@@ -5,7 +5,8 @@
     "paths": {},
     "rootDir": ".",
     "composite": false,
-    "incremental": false
+    "incremental": true,
+    "tsBuildInfoFile": "typecheck.tsbuildinfo"
   },
   "references": [
     {
