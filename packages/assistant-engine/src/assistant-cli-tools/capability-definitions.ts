@@ -1131,7 +1131,7 @@ export function createOutwardSideEffectToolDefinitions(
       defineHostedApiBackedTool({
         name: 'murph.device.connect',
         description:
-          'Create a hosted wearable connection link for the requested provider and return a clickable authorization URL for the user. Prefer this over `murph.cli.run` when the user wants help connecting WHOOP, Oura, Garmin, or another hosted wearable integration in hosted assistant sessions.',
+          'Create a hosted wearable connection link for the requested provider and return a clickable authorization URL for the user. Prefer this over `vault.cli.run` when the user wants help connecting WHOOP, Oura, Garmin, or another hosted wearable integration in hosted assistant sessions.',
         inputSchema: z.object({
           provider: z.string().min(1),
         }),

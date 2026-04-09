@@ -213,7 +213,7 @@ describe('assistant CLI tool capability seam', () => {
     expect(showTargetSpy).toHaveBeenCalledWith('telegram')
 
     const cliTools = createAssistantCliExecutorToolDefinitions(context)
-    expect(await executeTool(cliTools, 'murph.cli.run', {
+    expect(await executeTool(cliTools, 'vault.cli.run', {
       args: ['device', 'provider', 'list'],
       stdin: '{"hello":true}',
       timeoutMs: 1000,
@@ -688,7 +688,7 @@ describe('assistant CLI tool capability seam', () => {
     const providerRegistry = createProviderTurnAssistantCapabilityRegistry(
       createToolContext({ vault: vaultRoot }),
     )
-    expect(providerRegistry.hasCapability('murph.cli.run')).toBe(true)
+    expect(providerRegistry.hasCapability('vault.cli.run')).toBe(true)
     expect(providerRegistry.hasCapability('web.fetch')).toBe(true)
 
     const providerCatalog = createProviderTurnAssistantToolCatalog(
@@ -697,8 +697,8 @@ describe('assistant CLI tool capability seam', () => {
     const providerRuntime = createProviderTurnAssistantCapabilityRuntime(
       createToolContext({ vault: vaultRoot }),
     )
-    expect(providerCatalog.hasTool('murph.cli.run')).toBe(true)
-    expect(providerRuntime.toolCatalog.hasTool('murph.cli.run')).toBe(true)
+    expect(providerCatalog.hasTool('vault.cli.run')).toBe(true)
+    expect(providerRuntime.toolCatalog.hasTool('vault.cli.run')).toBe(true)
   })
 })
 

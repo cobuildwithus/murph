@@ -654,22 +654,22 @@ test('executeAssistantProviderTurnAttempt collects provider-agnostic activity la
     input.onProgress?.({
       id: 'tool-1',
       kind: 'tool',
-      label: 'murph.cli.run',
+      label: 'vault.cli.run',
       rawEvent: { type: 'tool.call' },
-      safeLabel: 'murph.cli.run',
-      safeText: 'finished murph.cli.run',
+      safeLabel: 'vault.cli.run',
+      safeText: 'finished vault.cli.run',
       state: 'completed',
-      text: 'Tool murph.cli.run',
+      text: 'Tool vault.cli.run',
     })
     input.onProgress?.({
       id: 'tool-2',
       kind: 'tool',
-      label: 'murph.cli.run',
+      label: 'vault.cli.run',
       rawEvent: { type: 'tool.call' },
-      safeLabel: 'murph.cli.run',
-      safeText: 'using murph.cli.run',
+      safeLabel: 'vault.cli.run',
+      safeText: 'using vault.cli.run',
       state: 'running',
-      text: 'Tool murph.cli.run',
+      text: 'Tool vault.cli.run',
     })
 
     return {
@@ -694,7 +694,7 @@ test('executeAssistantProviderTurnAttempt collects provider-agnostic activity la
   }
   assert.deepEqual(result.metadata.activityLabels, [
     'memory show',
-    'murph.cli.run',
+    'vault.cli.run',
   ])
   assert.equal(onEvent.mock.calls.length, 3)
 })

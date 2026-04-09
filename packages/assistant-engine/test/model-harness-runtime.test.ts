@@ -282,7 +282,7 @@ describe('model harness runtime helpers', () => {
       inputSchema: z.object({
         command: z.string(),
       }),
-      name: 'murph.cli.run',
+      name: 'vault.cli.run',
     })
     const hostedCapability = defineAssistantCapability({
       description: 'Create a share link.',
@@ -456,7 +456,7 @@ describe('model harness runtime helpers', () => {
         inputSchema: z.object({
           value: z.string(),
         }),
-        name: 'murph.cli.run',
+        name: 'vault.cli.run',
         outputSchema: z.object({
           value: z.string(),
         }),
@@ -479,7 +479,7 @@ describe('model harness runtime helpers', () => {
       new NativeLocalCapabilityHost(),
     ])
 
-    expect(previewCatalog.hasTool('murph.cli.run')).toBe(true)
+    expect(previewCatalog.hasTool('vault.cli.run')).toBe(true)
     expect(previewCatalog.hasTool('assistant.note.peek')).toBe(true)
     expect(previewRegistry.listCapabilities()).toEqual(
       expect.arrayContaining([
@@ -487,7 +487,7 @@ describe('model harness runtime helpers', () => {
           inputExample: {
             value: 'example',
           },
-          name: 'murph.cli.run',
+          name: 'vault.cli.run',
           preferredHostKind: 'cli-backed',
           supportedHostKinds: ['cli-backed', 'native-local'],
         }),
@@ -496,7 +496,7 @@ describe('model harness runtime helpers', () => {
     expect(previewCatalog.listTools()).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          name: 'murph.cli.run',
+          name: 'vault.cli.run',
           selectedHostKind: 'native-local',
         }),
       ]),
@@ -513,7 +513,7 @@ describe('model harness runtime helpers', () => {
     })
 
     await expect(
-      previewTools['murph.cli.run']?.execute?.({
+      previewTools['vault.cli.run']?.execute?.({
         value: 'hello',
       }),
     ).resolves.toEqual({
@@ -521,7 +521,7 @@ describe('model harness runtime helpers', () => {
         value: 'hello',
       },
       preview: true,
-      tool: 'murph.cli.run',
+      tool: 'vault.cli.run',
     })
 
     const applyCatalog = createAssistantToolCatalogFromCapabilities(
@@ -656,7 +656,7 @@ describe('model harness runtime helpers', () => {
         },
         kind: 'started',
         mode: 'preview',
-        tool: 'murph.cli.run',
+        tool: 'vault.cli.run',
       },
     ])
     expect(successEvents).toEqual(
@@ -672,9 +672,9 @@ describe('model harness runtime helpers', () => {
               value: 'hello',
             },
             preview: true,
-            tool: 'murph.cli.run',
+            tool: 'vault.cli.run',
           },
-          tool: 'murph.cli.run',
+          tool: 'vault.cli.run',
         },
       ]),
     )
