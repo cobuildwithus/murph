@@ -1,9 +1,7 @@
 import type { Cli } from 'incur'
 import type { VaultServices } from '@murphai/vault-usecases'
-import { loadRuntimeModule } from '@murphai/vault-usecases/runtime'
 import {
   createIntegratedInboxServices,
-  type InboxImessageRuntimeModule,
   type InboxServices,
 } from '@murphai/inbox-services'
 import {
@@ -17,10 +15,7 @@ export { CLI_DESCRIPTION } from './vault-cli-bootstrap.js'
 
 export function createVaultCli(
   services: VaultServices = createDefaultVaultServices(),
-  inboxServices: InboxServices = createIntegratedInboxServices({
-    loadInboxImessageModule: () =>
-      loadRuntimeModule<InboxImessageRuntimeModule>('@murphai/inboxd-imessage'),
-  }),
+  inboxServices: InboxServices = createIntegratedInboxServices(),
 ): Cli.Cli {
   const cli = createVaultCliShell()
 

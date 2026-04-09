@@ -11,7 +11,6 @@ afterEach(async () => {
   vi.doUnmock('incur')
   vi.doUnmock('@murphai/operator-config/operator-config')
   vi.doUnmock('@murphai/vault-usecases')
-  vi.doUnmock('@murphai/vault-usecases/runtime')
   vi.doUnmock('@murphai/assistant-engine/assistant-cron')
   vi.doUnmock('@murphai/inbox-services')
   vi.doUnmock('./cli-entry.js')
@@ -192,20 +191,11 @@ test('runRunnerVaultCliEntrypoint forwards the exit hook into serve options', as
   assert.equal(registerRunnerVaultCliCommandDescriptors.mock.calls.length, 1)
 })
 
-test('createVaultCli invokes the default inbox iMessage loader when command registration needs it', async () => {
+test('createVaultCli uses the default integrated inbox services wiring', async () => {
   const fakeCli = {
     serve: vi.fn(async () => undefined),
     use: vi.fn(),
   }
-  const loadRuntimeModule = vi.fn(async (moduleId: string) => {
-    assert.equal(moduleId, '@murphai/inboxd-imessage')
-    return {
-      createImessageConnector: vi.fn(),
-      loadImessageKitDriver: vi.fn(async () => ({
-        id: 'mock-imessage-driver',
-      })),
-    }
-  })
   const createIntegratedVaultServices = vi.fn(() => ({
     core: {},
     importers: {},
@@ -243,16 +233,6 @@ test('createVaultCli invokes the default inbox iMessage loader when command regi
       createIntegratedVaultServices,
     }
   })
-  vi.doMock('@murphai/vault-usecases/runtime', async () => {
-    const actual = await vi.importActual<typeof import('@murphai/vault-usecases/runtime')>(
-      '@murphai/vault-usecases/runtime',
-    )
-
-    return {
-      ...actual,
-      loadRuntimeModule,
-    }
-  })
   vi.doMock('@murphai/assistant-engine/assistant-cron', async () => {
     const actual = await vi.importActual<
       typeof import('@murphai/assistant-engine/assistant-cron')
@@ -284,7 +264,7 @@ test('createVaultCli invokes the default inbox iMessage loader when command regi
 
   createVaultCliMocked()
 
-  assert.equal(loadRuntimeModule.mock.calls.length, 1)
+  assert.deepEqual(createIntegratedInboxServices.mock.calls, [[]])
   assert.equal(registerVaultCliCommandDescriptors.mock.calls.length, 1)
   assert.equal(fakeCli.use.mock.calls.length, 1)
 })

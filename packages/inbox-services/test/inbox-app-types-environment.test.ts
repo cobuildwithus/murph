@@ -52,6 +52,8 @@ vi.mock('@murphai/operator-config/telegram-runtime', () => ({
 
 vi.mock('@murphai/vault-usecases/runtime', () => ({
   loadQueryRuntime: loadQueryRuntimeMock,
+}))
+vi.mock('../src/runtime-import.ts', () => ({
   loadRuntimeModule: loadRuntimeModuleMock,
 }))
 
