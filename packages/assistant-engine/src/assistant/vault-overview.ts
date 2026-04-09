@@ -52,7 +52,7 @@ function summarizeCanonicalCoverage(vault: VaultReadModel): string | null {
     summarizePositiveCount(countEventsOfKind(vault, 'meal'), 'meal event'),
     summarizePositiveCount(
       countEventsOfKind(vault, 'activity_session'),
-      'activity session',
+      'workout/activity session',
     ),
     summarizePositiveCount(vault.experiments.length, 'experiment'),
   ].filter((value): value is string => Boolean(value))
