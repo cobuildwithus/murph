@@ -64,16 +64,11 @@ Always read these before repo code/docs/test/config work:
 - If verification or build commands introduce tracked edits outside the intended task scope, check `agent-docs/exec-plans/active/COORDINATION_LEDGER.md` before removing or reverting them. If another active row plausibly owns those files, stop and coordinate instead of cleaning them up unilaterally.
 - Use an execution plan for multi-file or high-risk work. Narrow supplied-patch landings may stay ledger-only when they remain bounded and single-turn.
 - If architecture-significant behavior changes, update `ARCHITECTURE.md` and the matching durable docs.
-- Required completion-workflow audit subagent passes are part of the repo workflow once the user has asked for repo work. That standing repo instruction is already sufficient permission to spawn those required audit subagents, so do not wait for or ask for an extra explicit "use subagents" message.
-- For repo code/test/config changes that rely on package/app coverage verification, completion-workflow audit subagents default to a required coverage-focused pass plus the final review pass. Re-run at most one additional final-review audit pass only when the first pass leads to a large or high-risk follow-up diff; otherwise finish locally without spawning another workflow audit subagent.
+- Completion mechanics live in `agent-docs/operations/completion-workflow.md`, and verification selection lives in `agent-docs/operations/verification-and-runtime.md`; follow those docs instead of re-deriving local process.
+- Required completion-workflow audit passes are pre-authorized by repo policy. Run the required coverage and final-review passes from the completion workflow when the classified task calls for them.
 - Same-turn task completion counts as acceptance unless the user says `review first` or `do not commit`.
-- If repo files changed and the user did not say `review first` or `do not commit`, create a scoped commit before final handoff.
-- Do not skip that commit because the worktree is dirty; commit only the exact touched paths with `scripts/finish-task` or `scripts/committer`.
-- If a touched file already had edits, that is still not a reason to skip the scoped commit; note it explicitly in handoff.
-- If required checks fail for a credibly unrelated pre-existing reason, commit the exact touched paths anyway and hand off with the failing command, failing target, and why your diff did not cause it.
-- `scripts/finish-task` is the higher-level helper for plan-bearing tasks: it requires the active plan path, resolves the file/directory paths you pass into exact changed file paths, closes that plan, then shells out to `scripts/committer` with the completed-plan artifact plus those resolved paths.
-- Use `scripts/finish-task` only while the plan still exists under `agent-docs/exec-plans/active/`; if the plan was already closed/moved, or the task was ledger-only, use `scripts/committer` directly.
-- `scripts/committer` is the path-scoped dirty-tree-safe commit tool; prefer it over hand-rolled `git commit` flows when unrelated staged or unstaged work is present.
+- If repo files changed and the user did not say `review first` or `do not commit`, create a scoped commit before handoff. Use `scripts/finish-task` while the active plan still exists under `agent-docs/exec-plans/active/`; otherwise use `scripts/committer`. In dirty trees, commit only the exact touched paths and note overlapping pre-existing edits in handoff.
+- If a required check fails for a credibly unrelated pre-existing reason, still commit the exact touched paths and hand off with the failing command, failing target, and why the current diff did not cause it.
 - Update `agent-docs/index.md` when durable docs are added, removed, moved, or materially repurposed.
 
 ## Notes
