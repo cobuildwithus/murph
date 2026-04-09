@@ -53,18 +53,15 @@ Always read these before repo code/docs/test/config work:
 - Do not use `as any` or lazy `as unknown` / `as unknown as T` casts to silence TypeScript errors; prove the type with control flow or helpers, or isolate the boundary with a narrow documented assertion.
 - Historical plan docs under `agent-docs/exec-plans/completed/` are immutable snapshots.
 - Do not invent compatibility, deployment, or runtime requirements. Document them in repo docs and scripts in the same change that introduces them.
-- Before landing new persisted state, classify it explicitly as canonical `vault/**`, durable local operational state under `.runtime/operations/**`, rebuildable local projection under `.runtime/projections/**`, or ephemeral cache/tmp state. Durable JSON state needs an explicit schema/schemaVersion seam, and durable SQLite state needs an explicit `user_version` migration seam.
-- If a datum is user-facing, queryable, or something future product features will build on, it must not land in assistant runtime or other local operational state first. Put it in canonical `vault/**`, or in explicit `derived/**` materializations when it is derived rather than authoritative. `vault/.runtime/operations/assistant/**` is execution residue only.
+- Follow the persisted-state placement gate in the workflow docs and `ARCHITECTURE.md`; do not put user-facing or queryable product truth in assistant runtime first.
 
 ## Workflow Defaults
 
 - Repo code/docs/test/config work uses `agent-docs/exec-plans/active/COORDINATION_LEDGER.md`; vault-only data work does not by default.
-- Review-only repo inspection with no file edits does not require default test or typecheck runs; use direct file readback unless the user asks for runtime proof or the review question cannot be resolved statically.
 - Preserve unrelated worktree edits. Do not overwrite, discard, or revert work you did not make.
 - If verification or build commands introduce tracked edits outside the intended task scope, check `agent-docs/exec-plans/active/COORDINATION_LEDGER.md` before removing or reverting them. If another active row plausibly owns those files, stop and coordinate instead of cleaning them up unilaterally.
-- Use an execution plan for multi-file or high-risk work. Narrow supplied-patch landings may stay ledger-only when they remain bounded and single-turn.
-- If architecture-significant behavior changes, update `ARCHITECTURE.md` and the matching durable docs.
-- Completion mechanics live in `agent-docs/operations/completion-workflow.md`, and verification selection lives in `agent-docs/operations/verification-and-runtime.md`; follow those docs instead of re-deriving local process.
+- Document architecture-significant changes in the matching durable docs.
+- Use the completion and verification docs for detailed workflow and command selection.
 - Required completion-workflow audit passes are pre-authorized by repo policy. When a repo task reaches that workflow, run the required coverage and final-review passes without waiting for or asking for an extra explicit "use subagents" instruction.
 - Same-turn task completion counts as acceptance unless the user says `review first` or `do not commit`.
 - If repo files changed and the user did not say `review first` or `do not commit`, create a scoped commit before handoff. Use `scripts/finish-task` while the active plan still exists under `agent-docs/exec-plans/active/`; otherwise use `scripts/committer`. In dirty trees, commit only the exact touched paths and note overlapping pre-existing edits in handoff.
