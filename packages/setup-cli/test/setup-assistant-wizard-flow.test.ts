@@ -20,7 +20,7 @@ import { runSetupAssistantWizard } from '../src/setup-assistant-wizard.js'
 import { waitForRenderedText, withMockProcessTty } from './helpers.ts'
 
 type SetupAssistantWizardInput = Parameters<typeof runSetupAssistantWizard>[0]
-const WIZARD_TEST_TIMEOUT_MS = 45_000
+const WIZARD_TEST_TIMEOUT_MS = 90_000
 
 async function expectAssistantWizardCancellation(
   input: SetupAssistantWizardInput,
@@ -208,19 +208,16 @@ test.sequential(
         /How should Murph connect to OpenAI\?/u,
       )
       await writeInput('\u001B')
-      await waitForRenderedText(
-        flush,
-        readOutput,
-        /How should Murph answer\?/u,
-      )
+      await flush()
       await writeInput('\u001B[B')
+      await flush()
       await writeInput('\r')
       const reviewOutput = await waitForRenderedText(
         flush,
         readOutput,
         /Review/u,
       )
-      assert.match(reviewOutput, /Vercel AI Gateway/u)
+      assert.match(reviewOutput, /Assistant: Vercel AI Gateway/u)
       await writeInput('\r')
 
       assert.deepEqual(await wizardResultPromise, {

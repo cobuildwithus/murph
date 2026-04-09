@@ -262,7 +262,9 @@ test('createInboxAppEnvironment builds an AgentMail client from injected setting
     }),
   })
 
-  assert.equal(env.createConfiguredAgentmailClient('explicit-key'), client)
+  const configuredClient = env.createConfiguredAgentmailClient('explicit-key')
+  assert.equal(configuredClient.apiKey, 'client-key')
+  assert.equal(configuredClient.baseUrl, 'https://agentmail.test')
   assert.deepEqual(seen, [
     {
       apiKey: 'explicit-key',

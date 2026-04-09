@@ -51,7 +51,7 @@
     "test:coverage": "pnpm test:source:coverage",
     "test:source:coverage": "pnpm --dir ../.. exec vitest run --config packages/cli/vitest.workspace.ts --coverage",
     "verify:prepared-runtime": "pnpm --dir ../.. build:test-runtime:prepared",
-    "verify:package-shape": "pnpm build && tsx ./scripts/verify-package-shape.ts",
+    "verify:package-shape": "pnpm build && node --import=tsx ./scripts/verify-package-shape.ts",
     "test:built-runtime": "MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 pnpm --dir ../.. exec vitest run --config packages/cli/vitest.workspace.ts --no-coverage",
     "test:built-runtime:coverage": "MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 pnpm --dir ../.. exec vitest run --config packages/cli/vitest.workspace.ts --coverage",
     "verify": "pnpm verify:prepared-runtime && pnpm verify:package-shape && pnpm test:built-runtime",

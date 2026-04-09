@@ -8,6 +8,7 @@ import { afterEach, test } from "vitest";
 import {
   initializeVault,
   readPreferencesDocument,
+  resolvePreferencesDocumentPath,
   updateWorkoutUnitPreferences,
   validateVault,
 } from "../src/index.ts";
@@ -44,6 +45,14 @@ test("reads and writes canonical workout unit preferences from the singleton pre
   assert.deepEqual(initial.workoutUnitPreferences, {});
   assert.equal(initial.updatedAt, null);
   assert.equal(initial.sourcePath, "bank/preferences.json");
+  assert.equal(
+    resolvePreferencesDocumentPath(vaultRoot),
+    path.join(vaultRoot, "bank/preferences.json"),
+  );
+  assert.equal(
+    resolvePreferencesDocumentPath(vaultRoot),
+    path.join(vaultRoot, "bank/preferences.json"),
+  );
 
   const updated = await updateWorkoutUnitPreferences({
     vaultRoot,
@@ -99,5 +108,23 @@ test("reads legacy preference documents that still carry the removed distance ke
   assert.deepEqual(document.workoutUnitPreferences, {
     weight: "kg",
     bodyMeasurement: "cm",
+  });
+});
+
+test("defaults updatedAt when writing new preferences without an explicit timestamp", async () => {
+  const vaultRoot = await createTempVault();
+
+  const updated = await updateWorkoutUnitPreferences({
+    vaultRoot,
+    preferences: {
+      weight: "kg",
+    },
+  });
+
+  assert.equal(updated.created, true);
+  assert.equal(updated.document.exists, true);
+  assert.equal(typeof updated.document.updatedAt, "string");
+  assert.deepEqual(updated.document.workoutUnitPreferences, {
+    weight: "kg",
   });
 });

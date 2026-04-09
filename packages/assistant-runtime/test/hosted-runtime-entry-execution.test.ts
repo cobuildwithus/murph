@@ -27,14 +27,20 @@ const mocks = vi.hoisted(() => ({
   withHostedProcessEnvironment: vi.fn(),
 }));
 
-vi.mock("@murphai/runtime-state/node", () => ({
-  decodeHostedBundleBase64: mocks.decodeHostedBundleBase64,
-  encodeHostedBundleBase64: mocks.encodeHostedBundleBase64,
-  listHostedBundleArtifacts: mocks.listHostedBundleArtifacts,
-  materializeHostedExecutionArtifacts: mocks.materializeHostedExecutionArtifacts,
-  restoreHostedExecutionContext: mocks.restoreHostedExecutionContext,
-  snapshotHostedExecutionContext: mocks.snapshotHostedExecutionContext,
-}));
+vi.mock("@murphai/runtime-state/node", async () => {
+  const actual = await vi.importActual<typeof import("@murphai/runtime-state/node")>(
+    "@murphai/runtime-state/node",
+  );
+  return {
+    ...actual,
+    decodeHostedBundleBase64: mocks.decodeHostedBundleBase64,
+    encodeHostedBundleBase64: mocks.encodeHostedBundleBase64,
+    listHostedBundleArtifacts: mocks.listHostedBundleArtifacts,
+    materializeHostedExecutionArtifacts: mocks.materializeHostedExecutionArtifacts,
+    restoreHostedExecutionContext: mocks.restoreHostedExecutionContext,
+    snapshotHostedExecutionContext: mocks.snapshotHostedExecutionContext,
+  };
+});
 
 vi.mock("@murphai/hosted-execution", async () => {
   const actual = await vi.importActual<typeof import("@murphai/hosted-execution")>(

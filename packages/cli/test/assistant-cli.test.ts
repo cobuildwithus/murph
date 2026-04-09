@@ -308,7 +308,7 @@ test.sequential(
     const statePaths = resolveAssistantStatePaths(vaultRoot)
 
     const listed = requireData(
-      await runCli<{
+      await runIsolatedCli<{
         stateRoot: string
         sessions: Array<{
           sessionId: string
@@ -326,7 +326,7 @@ test.sequential(
     )
 
     const shown = requireData(
-      await runCli<{
+      await runIsolatedCli<{
         session: {
           sessionId: string
           binding: {
@@ -376,7 +376,7 @@ test.sequential(
       )
 
       const listed = requireData(
-        await runCli<{
+        await runIsolatedCli<{
           stateRoot: string
           vault: string
         }>(['assistant', 'session', 'list', '--vault', vaultRoot]),
@@ -385,7 +385,7 @@ test.sequential(
       assert.equal(listed.stateRoot, expectedStateRoot)
 
       const shown = requireData(
-        await runCli<{
+        await runIsolatedCli<{
           stateRoot: string
           vault: string
           session: {
@@ -1693,5 +1693,36 @@ async function runSourceCli<TData = Record<string, unknown>>(
       ...process.env,
       ...options?.env,
     }),
+  })
+}
+
+async function runIsolatedCli<TData = Record<string, unknown>>(
+  args: string[],
+  options?: {
+    env?: NodeJS.ProcessEnv
+  },
+): Promise<{
+  ok: true
+  data: TData
+  meta: {
+    command: string
+    duration: string
+  }
+} | {
+  ok: false
+  error: {
+    code?: string
+    message?: string
+  }
+  meta: {
+    command: string
+    duration: string
+  }
+}> {
+  return runCli(args, {
+    env: {
+      ...options?.env,
+      MURPH_CLI_TEST_PERSISTENT_HARNESS: '0',
+    },
   })
 }

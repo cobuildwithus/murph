@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, describe, test } from "vitest";
+import { afterEach, describe, test, vi } from "vitest";
 
 import {
   defineLocalStateDirectoryDescriptor,
@@ -38,6 +38,7 @@ import {
 import {
   buildProcessCommand,
   fingerprintHost,
+  isProcessRunning,
   resolveSiblingLocalStateBucketRoot,
   toVaultRelativePath,
 } from "../src/shared.ts";
@@ -307,6 +308,30 @@ describe("runtime-state shared helpers", () => {
       toVaultRelativePath("/tmp/work/vault", "/tmp/work/vault/.runtime/operations/inbox/state.json"),
       path.join(".runtime", "operations", "inbox", "state.json"),
     );
+  });
+
+  test("treats missing processes as stopped and other kill errors as still running", () => {
+    const killSpy = vi.spyOn(process, "kill");
+    try {
+      killSpy.mockImplementationOnce(() => true as never);
+      assert.equal(isProcessRunning(123), true);
+
+      killSpy.mockImplementationOnce(() => {
+        const error = new Error("missing process") as NodeJS.ErrnoException;
+        error.code = "ESRCH";
+        throw error;
+      });
+      assert.equal(isProcessRunning(456), false);
+
+      killSpy.mockImplementationOnce(() => {
+        const error = new Error("permission denied") as NodeJS.ErrnoException;
+        error.code = "EPERM";
+        throw error;
+      });
+      assert.equal(isProcessRunning(789), true);
+    } finally {
+      killSpy.mockRestore();
+    }
   });
 });
 

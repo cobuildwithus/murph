@@ -38,6 +38,7 @@ import { VaultCliError } from '../src/vault-cli-errors.ts'
 
 afterEach(() => {
   vi.useRealTimers()
+  vi.unstubAllGlobals()
 })
 
 function createSingleUseTextResponse(body: string): { text(): Promise<string> } {
@@ -52,6 +53,23 @@ function createSingleUseTextResponse(body: string): { text(): Promise<string> } 
       consumed = true
       return body
     },
+  }
+}
+
+function createTelegramResponse(
+  payload: unknown,
+  status = 200,
+): {
+  json(): Promise<unknown>
+  ok: boolean
+  status: number
+} {
+  return {
+    async json() {
+      return payload
+    },
+    ok: status >= 200 && status < 300,
+    status,
   }
 }
 
@@ -233,6 +251,315 @@ test('startTelegramTypingSession stops a pending refresh request cleanly', async
   await handle.stop()
 
   assert.equal(seenSignals[1]?.aborted, true)
+})
+
+test('startTelegramTypingSession validates Telegram runtime prerequisites and target format', async () => {
+  vi.stubGlobal('fetch', undefined)
+
+  await assert.rejects(
+    () =>
+      startTelegramTypingSession(
+        {
+          target: '123',
+        },
+        {
+          env: {},
+        },
+      ),
+    (error) =>
+      error instanceof VaultCliError &&
+      error.code === 'ASSISTANT_TELEGRAM_TOKEN_REQUIRED' &&
+      error.message === 'Outbound Telegram delivery requires TELEGRAM_BOT_TOKEN.',
+  )
+
+  await assert.rejects(
+    () =>
+      startTelegramTypingSession(
+        {
+          target: '123',
+        },
+        {
+          env: {
+            TELEGRAM_BOT_TOKEN: 'bot-token',
+          },
+        },
+      ),
+    (error) =>
+      error instanceof VaultCliError &&
+      error.code === 'ASSISTANT_TELEGRAM_UNAVAILABLE' &&
+      error.message.includes('fetch support'),
+  )
+
+  await assert.rejects(
+    () =>
+      startTelegramTypingSession(
+        {
+          target: '   ',
+        },
+        {
+          env: {
+            TELEGRAM_BOT_TOKEN: 'bot-token',
+          },
+          fetchImplementation: async () => createTelegramResponse({ ok: true }),
+        },
+      ),
+    (error) =>
+      error instanceof VaultCliError &&
+      error.code === 'ASSISTANT_TELEGRAM_TARGET_INVALID' &&
+      error.message === 'Telegram delivery requires a non-empty chat id, username, or topic target.',
+  )
+
+  await assert.rejects(
+    () =>
+      startTelegramTypingSession(
+        {
+          target: '123:wat:456',
+        },
+        {
+          env: {
+            TELEGRAM_BOT_TOKEN: 'bot-token',
+          },
+          fetchImplementation: async () => createTelegramResponse({ ok: true }),
+        },
+      ),
+    (error) =>
+      error instanceof VaultCliError &&
+      error.code === 'ASSISTANT_TELEGRAM_TARGET_INVALID' &&
+      error.message.includes('Telegram targets must use') &&
+      error.context?.target === '123:wat:456',
+  )
+})
+
+test('startTelegramTypingSession applies migrated chat ids and preserves optional routing fields', async () => {
+  vi.useFakeTimers()
+
+  const requestBodies: Array<Record<string, unknown>> = []
+  const fetchImplementation = vi.fn(async (_url: string, init: {
+    body?: string
+    headers?: Record<string, string>
+    method: 'POST'
+    signal?: AbortSignal
+  }) => {
+    requestBodies.push(JSON.parse(init.body ?? '{}') as Record<string, unknown>)
+
+    if (requestBodies.length === 1) {
+      return createTelegramResponse(
+        {
+          description: 'group migrated',
+          error_code: 400,
+          ok: false,
+          parameters: {
+            migrate_to_chat_id: 456,
+          },
+        },
+        400,
+      )
+    }
+
+    return createTelegramResponse({ ok: true })
+  })
+
+  const handle = await startTelegramTypingSession(
+    {
+      target: '123:topic:99:business:biz-123',
+    },
+    {
+      env: {
+        TELEGRAM_BOT_TOKEN: 'bot-token',
+      },
+      fetchImplementation,
+    },
+  )
+
+  await vi.advanceTimersByTimeAsync(4_000)
+  await handle.stop()
+
+  assert.deepEqual(requestBodies[0], {
+    action: 'typing',
+    business_connection_id: 'biz-123',
+    chat_id: '123',
+    message_thread_id: 99,
+  })
+  assert.deepEqual(requestBodies[1], {
+    action: 'typing',
+    business_connection_id: 'biz-123',
+    chat_id: '456',
+    message_thread_id: 99,
+  })
+})
+
+test('startTelegramTypingSession wraps initial Telegram API transport and response failures', async () => {
+  await assert.rejects(
+    () =>
+      startTelegramTypingSession(
+        {
+          target: '123',
+        },
+        {
+          env: {
+            TELEGRAM_BOT_TOKEN: 'bot-token',
+          },
+          fetchImplementation: async () => {
+            throw new TypeError('socket hang up')
+          },
+        },
+      ),
+    (error) =>
+      error instanceof VaultCliError &&
+      error.code === 'ASSISTANT_TELEGRAM_ACTIVITY_FAILED' &&
+      error.message === 'Telegram typing indicator failed while calling the Bot API.' &&
+      (error.context?.error as { message?: string } | undefined)?.message === 'socket hang up',
+  )
+
+  await assert.rejects(
+    () =>
+      startTelegramTypingSession(
+        {
+          target: '123',
+        },
+        {
+          env: {
+            TELEGRAM_BOT_TOKEN: 'bot-token',
+          },
+          fetchImplementation: async () =>
+            createTelegramResponse(
+              {
+                description: 'chat unavailable',
+                error_code: 403,
+                ok: false,
+                parameters: {
+                  migrate_to_chat_id: '123',
+                },
+              },
+              403,
+            ),
+        },
+      ),
+    (error) =>
+      error instanceof VaultCliError &&
+      error.code === 'ASSISTANT_TELEGRAM_ACTIVITY_FAILED' &&
+      error.message === 'chat unavailable' &&
+      error.context?.status === 403 &&
+      error.context?.migrateToChatId === '123',
+  )
+
+  await assert.rejects(
+    () =>
+      startTelegramTypingSession(
+        {
+          target: '123',
+        },
+        {
+          env: {
+            TELEGRAM_BOT_TOKEN: 'bot-token',
+          },
+          fetchImplementation: async () => ({
+            async json() {
+              throw new Error('invalid json')
+            },
+            ok: false,
+            status: 502,
+          }),
+        },
+      ),
+    (error) =>
+      error instanceof VaultCliError &&
+      error.code === 'ASSISTANT_TELEGRAM_ACTIVITY_FAILED' &&
+      error.message === 'Telegram Bot API sendChatAction failed with HTTP 502.' &&
+      error.context?.status === 502,
+  )
+})
+
+test('startTelegramTypingSession rethrows background refresh failures on stop', async () => {
+  vi.useFakeTimers()
+
+  let requestCount = 0
+  const fetchImplementation = vi.fn(async () => {
+    requestCount += 1
+    if (requestCount === 1) {
+      return createTelegramResponse({ ok: true })
+    }
+
+    return createTelegramResponse(
+      {
+        description: 'refresh failed',
+        error_code: 500,
+        ok: false,
+      },
+      500,
+    )
+  })
+
+  const handle = await startTelegramTypingSession(
+    {
+      target: '123',
+    },
+    {
+      env: {
+        TELEGRAM_BOT_TOKEN: 'bot-token',
+      },
+      fetchImplementation,
+    },
+  )
+
+  await vi.advanceTimersByTimeAsync(4_000)
+
+  await assert.rejects(
+    () => handle.stop(),
+    (error) =>
+      error instanceof VaultCliError &&
+      error.code === 'ASSISTANT_TELEGRAM_ACTIVITY_FAILED' &&
+      error.message === 'refresh failed',
+  )
+})
+
+test('startTelegramTypingSession stops cleanly when aborted before the refresh wait settles', async () => {
+  vi.useFakeTimers()
+
+  const fetchImplementation = vi.fn(async () => createTelegramResponse({ ok: true }))
+
+  const handle = await startTelegramTypingSession(
+    {
+      target: '123',
+    },
+    {
+      env: {
+        TELEGRAM_BOT_TOKEN: 'bot-token',
+      },
+      fetchImplementation,
+      refreshMs: 25,
+    },
+  )
+
+  await handle.stop()
+  await vi.advanceTimersByTimeAsync(25)
+
+  assert.equal(fetchImplementation.mock.calls.length, 1)
+})
+
+test('startTelegramTypingSession wraps non-error transport failures with stringified details', async () => {
+  await assert.rejects(
+    () =>
+      startTelegramTypingSession(
+        {
+          target: '123',
+        },
+        {
+          env: {
+            TELEGRAM_BOT_TOKEN: 'bot-token',
+          },
+          fetchImplementation: async () => {
+            throw 'socket lost'
+          },
+        },
+      ),
+    (error) =>
+      error instanceof VaultCliError &&
+      error.code === 'ASSISTANT_TELEGRAM_ACTIVITY_FAILED' &&
+      error.message === 'Telegram typing indicator failed while calling the Bot API.' &&
+      (error.context?.error as { message?: string; name?: string } | undefined)?.message === 'socket lost' &&
+      (error.context?.error as { message?: string; name?: string } | undefined)?.name === 'Error',
+  )
 })
 
 test('http-json helpers preserve error text and retry retryable response failures', async () => {

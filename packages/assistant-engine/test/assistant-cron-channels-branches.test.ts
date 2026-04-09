@@ -1022,6 +1022,21 @@ describe('assistant cron helpers and wrappers', () => {
       kind: 'cron',
       timeZone: resolveSystemTimeZone(),
     })
+    await expect(
+      addAssistantCronJob({
+        channel: 'email',
+        deliveryTarget: 'team@example.com',
+        name: 'email-without-identity',
+        prompt: 'email route needs an identity',
+        schedule: {
+          expression: '0 9 * * *',
+          kind: 'cron',
+        },
+        vault: vaultRoot,
+      }),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_EMAIL_IDENTITY_REQUIRED',
+    })
 
     const canonicalRecords = getVaultAutomationStore(vaultRoot)
     expect(canonicalRecords).toHaveLength(2)
@@ -1072,7 +1087,13 @@ describe('assistant cron helpers and wrappers', () => {
       }),
     ).resolves.toMatchObject({
       jobId: fallbackTimeZoneJob.jobId,
-      runs: [],
+      runs: [
+        expect.objectContaining({
+          jobId: fallbackTimeZoneJob.jobId,
+          runId: 'cronrun_owned_branch',
+          status: 'succeeded',
+        }),
+      ],
     })
 
     await expect(

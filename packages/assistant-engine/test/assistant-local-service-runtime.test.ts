@@ -496,7 +496,7 @@ test('sendAssistantMessageLocal records fallback failure metadata when persisten
   )
   assert.equal(
     mocks.persistFailedAssistantPromptAttempt.mock.calls[0]?.[0]?.turnTrigger,
-    'scheduled',
+    'automation-cron',
   )
   assert.equal(
     mocks.finalizeAssistantTurnReceipt.mock.calls[0]?.[0]?.deliveryDisposition,

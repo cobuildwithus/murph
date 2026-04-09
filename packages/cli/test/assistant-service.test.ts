@@ -1362,15 +1362,11 @@ test('sendAssistantMessage adds no-citations formatting guidance for outbound ch
 
   assert.match(
     outboundCall?.systemPrompt ?? '',
-    /Never include citations, source lists, footnotes, bracketed references/u,
+    /Do not include citations, source lists, internal paths, ledger details, raw machine timestamps, or Markdown presentation by default/u,
   )
   assert.match(
     outboundCall?.systemPrompt ?? '',
-    /Do not mention internal vault paths, ledger filenames, JSONL files/u,
-  )
-  assert.match(
-    outboundCall?.systemPrompt ?? '',
-    /Do not surface raw machine timestamps such as ISO-8601 values by default/u,
+    /Reply naturally in plain conversational prose that fits the channel/u,
   )
   assert.match(
     outboundCall?.systemPrompt ?? '',
@@ -1378,11 +1374,7 @@ test('sendAssistantMessage adds no-citations formatting guidance for outbound ch
   )
   assert.doesNotMatch(
     localChatCall?.systemPrompt ?? '',
-    /Never include citations, source lists, footnotes, bracketed references/u,
-  )
-  assert.doesNotMatch(
-    localChatCall?.systemPrompt ?? '',
-    /Do not mention internal vault paths, ledger filenames, JSONL files/u,
+    /Do not include citations, source lists, internal paths, ledger details, raw machine timestamps, or Markdown presentation by default/u,
   )
   assert.doesNotMatch(
     localChatCall?.systemPrompt ?? '',
@@ -2155,7 +2147,7 @@ test('sendAssistantMessage gives OpenAI-compatible auto-reply turns the CLI-firs
     )
     assert.match(
       providerCall?.systemPrompt ?? '',
-      /If you need the operator-facing CLI surface itself, use `vault\.cli\.run` for knowledge work only when you truly need/u,
+      /Use `vault\.cli\.run` as the canonical Murph runtime surface for this bound vault/u,
     )
     assert.match(
       providerCall?.systemPrompt ?? '',
@@ -2163,7 +2155,7 @@ test('sendAssistantMessage gives OpenAI-compatible auto-reply turns the CLI-firs
     )
     assert.match(
       providerCall?.systemPrompt ?? '',
-      /When a turn produces durable understanding that is likely to help in future conversations, the assistant should usually capture it in the wiki/u,
+      /For wiki tasks, read `derived\/knowledge\/index\.md` first, then one to three targeted pages/u,
     )
     assert.match(
       providerCall?.systemPrompt ?? '',
@@ -2344,7 +2336,7 @@ test('sendAssistantMessage keeps murph.device.connect out of the prompt when the
     )
     assert.match(
       providerCall?.systemPrompt ?? '',
-      /For wiki work, use `vault-cli knowledge \.\.\.` directly in this turn rather than assuming a dedicated knowledge surface is callable/u,
+      /For wiki work, use `vault-cli knowledge \.\.\.` directly in this turn/u,
     )
     assert.match(
       providerCall?.systemPrompt ?? '',
@@ -2352,7 +2344,7 @@ test('sendAssistantMessage keeps murph.device.connect out of the prompt when the
     )
     assert.match(
       providerCall?.systemPrompt ?? '',
-      /The assistant should actively keep the wiki up to date when later turns materially sharpen, extend, supersede, contradict, or meaningfully validate an existing page/u,
+      /Update an existing matching page instead of creating a near-duplicate/u,
     )
     assert.match(
       providerCall?.systemPrompt ?? '',
@@ -2501,7 +2493,7 @@ test('sendAssistantMessage injects and persists a CLI surface bootstrap contract
   assert.equal(call?.continuityContext, null)
   assert.match(
     call?.systemPrompt ?? '',
-    /Inspect or change Murph vault\/runtime state directly through `vault-cli` in this privileged local route\./u,
+    /Use `vault-cli` directly as the canonical Murph runtime surface in this privileged local route\./u,
   )
 
   const snapshot = await readAssistantStateRecord(
