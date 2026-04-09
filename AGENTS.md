@@ -65,7 +65,7 @@ Always read these before repo code/docs/test/config work:
 - Use an execution plan for multi-file or high-risk work. Narrow supplied-patch landings may stay ledger-only when they remain bounded and single-turn.
 - If architecture-significant behavior changes, update `ARCHITECTURE.md` and the matching durable docs.
 - Completion mechanics live in `agent-docs/operations/completion-workflow.md`, and verification selection lives in `agent-docs/operations/verification-and-runtime.md`; follow those docs instead of re-deriving local process.
-- Required completion-workflow audit passes are pre-authorized by repo policy. Run the required coverage and final-review passes from the completion workflow when the classified task calls for them.
+- Required completion-workflow audit passes are pre-authorized by repo policy. When a repo task reaches that workflow, run the required coverage and final-review passes without waiting for or asking for an extra explicit "use subagents" instruction.
 - Same-turn task completion counts as acceptance unless the user says `review first` or `do not commit`.
 - If repo files changed and the user did not say `review first` or `do not commit`, create a scoped commit before handoff. Use `scripts/finish-task` while the active plan still exists under `agent-docs/exec-plans/active/`; otherwise use `scripts/committer`. In dirty trees, commit only the exact touched paths and note overlapping pre-existing edits in handoff.
 - If a required check fails for a credibly unrelated pre-existing reason, still commit the exact touched paths and hand off with the failing command, failing target, and why the current diff did not cause it.
