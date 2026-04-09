@@ -19,6 +19,19 @@ const localDateOptionSchema = z
   .string()
   .regex(/^\d{4}-\d{2}-\d{2}$/u, 'Expected YYYY-MM-DD.')
 
+export const commonListLimitOptionSchema = z
+  .number()
+  .int()
+  .positive()
+  .max(200)
+  .default(50)
+  .describe('Maximum number of results to return.')
+
+export const commonDateRangeOptionDescriptions = {
+  from: 'Optional inclusive lower date bound in YYYY-MM-DD form.',
+  to: 'Optional inclusive upper date bound in YYYY-MM-DD form.',
+} as const
+
 export type CommandExamples = Array<Record<string, unknown>>
 
 export interface SuggestedCommand {

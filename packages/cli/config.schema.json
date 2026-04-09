@@ -32,7 +32,8 @@
                 }
               }
             }
-          }
+          },
+          "description": "Create the current vault layout through the core write path."
         },
         "validate": {
           "type": "object",
@@ -55,7 +56,8 @@
                 }
               }
             }
-          }
+          },
+          "description": "Validate the vault through the core read/validation path."
         },
         "vault": {
           "type": "object",
@@ -86,7 +88,8 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Show stable vault metadata plus the current CORE.md summary."
                 },
                 "stats": {
                   "type": "object",
@@ -109,7 +112,8 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Summarize record-family counts from the current query read model."
                 },
                 "update": {
                   "type": "object",
@@ -142,7 +146,8 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Update stable vault metadata fields such as title and timezone."
                 },
                 "repair": {
                   "type": "object",
@@ -165,7 +170,8 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Repair missing required directories on current-format vaults. Older formatVersion vaults fail closed and are not auto-migrated."
                 },
                 "upgrade": {
                   "type": "object",
@@ -193,11 +199,13 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Run the reserved canonical vault-upgrade seam. Today it confirms current-format vaults and fails closed on older formatVersion values because no upgrade steps are registered."
                 }
               }
             }
-          }
+          },
+          "description": "Vault metadata, summary, and update commands."
         },
         "assistant": {
           "type": "object",
@@ -242,17 +250,17 @@
                           "minLength": 1
                         },
                         "identity": {
-                          "description": "Optional local assistant identity id for multi-user routing.",
+                          "description": "Optional local assistant identity id for multi-user routing. Email routes should use the configured AgentMail inbox id.",
                           "type": "string",
                           "minLength": 1
                         },
                         "participant": {
-                          "description": "Optional remote actor id for multi-user routing and direct-conversation binding.",
+                          "description": "Optional remote participant identifier when the transport addresses a person directly. Use the transport-native participant value, such as an iMessage phone number/email handle or an email correspondent; thread-addressed transports may rely on --sourceThread instead.",
                           "type": "string",
                           "minLength": 1
                         },
                         "sourceThread": {
-                          "description": "Optional upstream thread id from the source channel. Thread ids anchor stored conversation bindings when present.",
+                          "description": "Optional upstream thread identifier when the transport routes by thread/chat. Use the transport-native thread value, such as a Telegram chat id or `<chatId>:topic:<messageThreadId>` topic route; direct-recipient routes can often leave this unset.",
                           "type": "string",
                           "minLength": 1
                         },
@@ -290,7 +298,7 @@
                           "minLength": 1
                         },
                         "headersJson": {
-                          "description": "Optional JSON object of extra HTTP headers for OpenAI-compatible local assistant chat sessions.",
+                          "description": "Optional flat JSON object of extra HTTP headers with string values for OpenAI-compatible local assistant chat sessions.",
                           "type": "string",
                           "minLength": 1
                         },
@@ -326,13 +334,64 @@
                           "type": "boolean"
                         },
                         "deliveryTarget": {
-                          "description": "Optional one-send outbound target override. For iMessage this can be a phone number, email handle, or chat id; for Telegram it can be a chat id or <chatId>:topic:<messageThreadId>; for Linq it can be a chat id; for email it can be a recipient address while thread-bound sessions reply in place.",
+                          "description": "Optional one-send outbound destination in the transport-native send format. For iMessage use a phone number, email handle, or chat id; for Telegram use a chat id or `<chatId>:topic:<messageThreadId>`; for Linq use a chat id; for email use a recipient address. Reply-in-place sessions can often omit this and reuse the saved thread.",
                           "type": "string",
                           "minLength": 1
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Send one message through the local provider-backed assistant and persist session metadata plus a local transcript outside the canonical vault.",
+                  "x-incur-hint": "Murph persists a local transcript plus per-session metadata under `.runtime/operations/assistant/`, and still reuses provider-side history when available. Use --deliverResponse to send the assistant reply back out over a mapped channel such as iMessage, Telegram, or email.",
+                  "x-incur-examples": [
+                    {
+                      "args": {
+                        "prompt": "Summarize the latest documents in this vault."
+                      },
+                      "options": {
+                        "vault": "./vault"
+                      },
+                      "description": "Start a new local assistant session rooted at the vault directory."
+                    },
+                    {
+                      "args": {
+                        "prompt": "Send a quick check-in about lunch."
+                      },
+                      "options": {
+                        "vault": "./vault",
+                        "channel": "imessage",
+                        "participant": "+15551234567",
+                        "deliverResponse": true
+                      },
+                      "description": "Generate a reply locally and deliver it over iMessage."
+                    },
+                    {
+                      "args": {
+                        "prompt": "Reply that I can review the latest labs tonight."
+                      },
+                      "options": {
+                        "vault": "./vault",
+                        "channel": "telegram",
+                        "participant": "123456789",
+                        "sourceThread": "123456789",
+                        "deliverResponse": true
+                      },
+                      "description": "Generate a reply locally and deliver it back into a Telegram bot chat."
+                    },
+                    {
+                      "args": {
+                        "prompt": "Send today's summary by email."
+                      },
+                      "options": {
+                        "vault": "./vault",
+                        "channel": "email",
+                        "identity": "inbox_123",
+                        "participant": "you@example.com",
+                        "deliverResponse": true
+                      },
+                      "description": "Generate a reply locally and deliver it over AgentMail email."
+                    }
+                  ]
                 },
                 "chat": {
                   "type": "object",
@@ -369,17 +428,17 @@
                           "minLength": 1
                         },
                         "identity": {
-                          "description": "Optional local assistant identity id for multi-user routing.",
+                          "description": "Optional local assistant identity id for multi-user routing. Email routes should use the configured AgentMail inbox id.",
                           "type": "string",
                           "minLength": 1
                         },
                         "participant": {
-                          "description": "Optional remote actor id for multi-user routing and direct-conversation binding.",
+                          "description": "Optional remote participant identifier when the transport addresses a person directly. Use the transport-native participant value, such as an iMessage phone number/email handle or an email correspondent; thread-addressed transports may rely on --sourceThread instead.",
                           "type": "string",
                           "minLength": 1
                         },
                         "sourceThread": {
-                          "description": "Optional upstream thread id from the source channel. Thread ids anchor stored conversation bindings when present.",
+                          "description": "Optional upstream thread identifier when the transport routes by thread/chat. Use the transport-native thread value, such as a Telegram chat id or `<chatId>:topic:<messageThreadId>` topic route; direct-recipient routes can often leave this unset.",
                           "type": "string",
                           "minLength": 1
                         },
@@ -417,7 +476,7 @@
                           "minLength": 1
                         },
                         "headersJson": {
-                          "description": "Optional JSON object of extra HTTP headers for OpenAI-compatible local assistant chat sessions.",
+                          "description": "Optional flat JSON object of extra HTTP headers with string values for OpenAI-compatible local assistant chat sessions.",
                           "type": "string",
                           "minLength": 1
                         },
@@ -450,7 +509,9 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Open an Ink terminal chat UI backed by the chosen provider while Murph stores session metadata plus a local transcript outside the canonical vault.",
+                  "x-incur-hint": "Type /exit to close the chat loop or /session to print the current Murph session id."
                 },
                 "deliver": {
                   "type": "object",
@@ -487,28 +548,90 @@
                           "minLength": 1
                         },
                         "identity": {
-                          "description": "Optional local assistant identity id for multi-user routing.",
+                          "description": "Optional local assistant identity id for multi-user routing. Email routes should use the configured AgentMail inbox id.",
                           "type": "string",
                           "minLength": 1
                         },
                         "participant": {
-                          "description": "Optional remote actor id for multi-user routing and direct-conversation binding.",
+                          "description": "Optional remote participant identifier when the transport addresses a person directly. Use the transport-native participant value, such as an iMessage phone number/email handle or an email correspondent; thread-addressed transports may rely on --sourceThread instead.",
                           "type": "string",
                           "minLength": 1
                         },
                         "sourceThread": {
-                          "description": "Optional upstream thread id from the source channel. Thread ids anchor stored conversation bindings when present.",
+                          "description": "Optional upstream thread identifier when the transport routes by thread/chat. Use the transport-native thread value, such as a Telegram chat id or `<chatId>:topic:<messageThreadId>` topic route; direct-recipient routes can often leave this unset.",
                           "type": "string",
                           "minLength": 1
                         },
                         "deliveryTarget": {
-                          "description": "Optional one-send outbound target override. For iMessage this can be a phone number, email handle, or chat id; for Telegram it can be a chat id or <chatId>:topic:<messageThreadId>; for Linq it can be a chat id; for email it can be a recipient address while thread-bound sessions reply in place.",
+                          "description": "Optional one-send outbound destination in the transport-native send format. For iMessage use a phone number, email handle, or chat id; for Telegram use a chat id or `<chatId>:topic:<messageThreadId>`; for Linq use a chat id; for email use a recipient address. Reply-in-place sessions can often omit this and reuse the saved thread.",
                           "type": "string",
                           "minLength": 1
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Deliver one outbound assistant message without invoking the chat provider. iMessage, Telegram, Linq, and email all use the same stored assistant channel binding surface.",
+                  "x-incur-hint": "Use --deliveryTarget to override the stored delivery target for one send only. For iMessage that target can be a phone number, email handle, or chat id; for Telegram it can be a chat id or <chatId>:topic:<messageThreadId>; for Linq it can be a chat id; for email it can be a recipient address while thread-bound sessions reply in place.",
+                  "x-incur-examples": [
+                    {
+                      "args": {
+                        "message": "Here is your nutrition recap for lunch."
+                      },
+                      "options": {
+                        "vault": "./vault",
+                        "channel": "imessage",
+                        "participant": "+15551234567"
+                      },
+                      "description": "Send a direct iMessage to one participant."
+                    },
+                    {
+                      "args": {
+                        "message": "I saw the message and queued your follow-up."
+                      },
+                      "options": {
+                        "vault": "./vault",
+                        "channel": "linq",
+                        "sourceThread": "chat_123",
+                        "deliveryTarget": "chat_123"
+                      },
+                      "description": "Send a Linq reply back into the same direct chat."
+                    },
+                    {
+                      "args": {
+                        "message": "I imported that lab report and queued the parser."
+                      },
+                      "options": {
+                        "vault": "./vault",
+                        "channel": "telegram",
+                        "sourceThread": "-1001234567890:topic:42",
+                        "deliveryTarget": "-1001234567890:topic:42"
+                      },
+                      "description": "Send a Telegram reply into a specific chat topic."
+                    },
+                    {
+                      "args": {
+                        "message": "Your weekly summary is ready."
+                      },
+                      "options": {
+                        "vault": "./vault",
+                        "channel": "email",
+                        "identity": "inbox_123",
+                        "deliveryTarget": "you@example.com"
+                      },
+                      "description": "Send a one-off outbound summary email through an AgentMail inbox."
+                    },
+                    {
+                      "args": {
+                        "message": "I imported that lab report and queued the parser."
+                      },
+                      "options": {
+                        "vault": "./vault",
+                        "session": "asst_123",
+                        "deliveryTarget": "chat45e2b868"
+                      },
+                      "description": "Reuse an existing session and override the outbound target for one message."
+                    }
+                  ]
                 },
                 "run": {
                   "type": "object",
@@ -555,7 +678,7 @@
                           "minLength": 1
                         },
                         "headersJson": {
-                          "description": "Optional JSON object of extra HTTP headers for the routing endpoint.",
+                          "description": "Optional flat JSON object of extra HTTP headers with string values for the routing endpoint.",
                           "type": "string",
                           "minLength": 1
                         },
@@ -593,7 +716,37 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Start the local assistant automation loop that watches the inbox runtime, runs due automations, auto-replies over configured channels such as iMessage or Telegram, and optionally applies model-routed canonical promotions.",
+                  "x-incur-hint": "Use --baseUrl with a local OpenAI-compatible model endpoint such as Ollama when you also want canonical inbox triage. Channel auto-reply can run without a routing model, and due automations fire while this loop is active.",
+                  "x-incur-examples": [
+                    {
+                      "options": {
+                        "vault": "./vault",
+                        "model": "gpt-oss:20b",
+                        "baseUrl": "http://127.0.0.1:11434/v1"
+                      },
+                      "description": "Run the always-on inbox assistant against a local Ollama model."
+                    },
+                    {
+                      "options": {
+                        "vault": "./vault",
+                        "model": "gpt-oss:20b",
+                        "baseUrl": "http://127.0.0.1:11434/v1",
+                        "once": true,
+                        "skipDaemon": true
+                      },
+                      "description": "Run a single inbox scan without starting the foreground daemon."
+                    },
+                    {
+                      "options": {
+                        "vault": "./vault",
+                        "allowSelfAuthored": true,
+                        "sessionRolloverHours": 48
+                      },
+                      "description": "Run dedicated iMessage self-chat mode with two-day session rollover."
+                    }
+                  ]
                 },
                 "self-target": {
                   "type": "object",
@@ -619,7 +772,8 @@
                                 }
                               }
                             }
-                          }
+                          },
+                          "description": "List saved self-delivery targets from local operator config."
                         },
                         "show": {
                           "type": "object",
@@ -637,7 +791,8 @@
                                 }
                               }
                             }
-                          }
+                          },
+                          "description": "Show one saved self-delivery target for a specific outbound channel."
                         },
                         "set": {
                           "type": "object",
@@ -654,28 +809,30 @@
                                   "maxLength": 128
                                 },
                                 "identity": {
-                                  "description": "Optional local assistant identity id to reuse for this saved channel target.",
+                                  "description": "Optional local assistant identity id to reuse for this saved channel target. Email targets require the configured AgentMail inbox id here.",
                                   "type": "string",
                                   "minLength": 1
                                 },
                                 "participant": {
-                                  "description": "Optional remote actor id to reuse for this saved channel target.",
+                                  "description": "Optional remote participant identifier when the transport addresses a person directly. Use the transport-native participant value, such as an iMessage phone number/email handle or an email correspondent; thread-addressed transports may rely on --sourceThread instead.",
                                   "type": "string",
                                   "minLength": 1
                                 },
                                 "sourceThread": {
-                                  "description": "Optional upstream thread id to reuse for this saved channel target.",
+                                  "description": "Optional upstream thread identifier when the transport routes by thread/chat. Use the transport-native thread value, such as a Telegram chat id or `<chatId>:topic:<messageThreadId>` topic route; direct-recipient routes can often leave this unset.",
                                   "type": "string",
                                   "minLength": 1
                                 },
                                 "deliveryTarget": {
-                                  "description": "Optional explicit outbound destination to save for this channel target, such as a phone number, Telegram chat id, or email address.",
+                                  "description": "Optional saved outbound destination in the transport-native send format. For iMessage use a phone number, email handle, or chat id; for Telegram use a chat id or `<chatId>:topic:<messageThreadId>`; for Linq use a chat id; for email use a recipient address.",
                                   "type": "string",
                                   "minLength": 1
                                 }
                               }
                             }
-                          }
+                          },
+                          "description": "Save or replace the local default outbound target for one channel. Provide at least one of --participant, --sourceThread, or --deliveryTarget; saved email targets also require --identity with the configured AgentMail inbox id.",
+                          "x-incur-hint": "Provide at least one of --participant, --sourceThread, or --deliveryTarget. Saved email targets also require --identity with the configured AgentMail inbox id."
                         },
                         "clear": {
                           "type": "object",
@@ -693,11 +850,13 @@
                                 }
                               }
                             }
-                          }
+                          },
+                          "description": "Clear one saved self-delivery target or remove all of them."
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Manage local saved self-delivery targets for outbound assistant actions without storing them in the canonical vault."
                 },
                 "status": {
                   "type": "object",
@@ -732,7 +891,9 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Show a compact assistant runtime snapshot including recent turn receipts and the outbound outbox backlog.",
+                  "x-incur-hint": "Use this when the assistant feels stuck, duplicated a send, or you want the latest receipt timeline without opening the local runtime files under `.runtime/operations/assistant/`."
                 },
                 "doctor": {
                   "type": "object",
@@ -760,7 +921,9 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Run lightweight assistant runtime diagnostics for session files, receipts, transcripts, automation state, and the outbound outbox.",
+                  "x-incur-hint": "Use --repair to tighten local assistant runtime permissions in place."
                 },
                 "stop": {
                   "type": "object",
@@ -783,7 +946,9 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Stop the assistant automation loop for this vault and clear stale run-lock state when the recorded process is already gone.",
+                  "x-incur-hint": "Use this to recover from a stuck `assistant run` / `murph run`. Murph sends SIGTERM first, waits briefly, and only force-kills the recorded PID if it refuses to exit."
                 },
                 "session": {
                   "type": "object",
@@ -814,7 +979,8 @@
                                 }
                               }
                             }
-                          }
+                          },
+                          "description": "List known assistant sessions for one vault."
                         },
                         "show": {
                           "type": "object",
@@ -837,15 +1003,18 @@
                                 }
                               }
                             }
-                          }
+                          },
+                          "description": "Show one assistant session metadata record."
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Inspect Murph assistant session metadata stored outside the canonical vault."
                 }
               }
             }
-          }
+          },
+          "description": "Murph-native assistant runtime with provider-backed local chat sessions, Ink terminal chat, outbound delivery, and auto-routing inbox automation."
         },
         "chat": {
           "type": "object",
@@ -882,17 +1051,17 @@
                   "minLength": 1
                 },
                 "identity": {
-                  "description": "Optional local assistant identity id for multi-user routing.",
+                  "description": "Optional local assistant identity id for multi-user routing. Email routes should use the configured AgentMail inbox id.",
                   "type": "string",
                   "minLength": 1
                 },
                 "participant": {
-                  "description": "Optional remote actor id for multi-user routing and direct-conversation binding.",
+                  "description": "Optional remote participant identifier when the transport addresses a person directly. Use the transport-native participant value, such as an iMessage phone number/email handle or an email correspondent; thread-addressed transports may rely on --sourceThread instead.",
                   "type": "string",
                   "minLength": 1
                 },
                 "sourceThread": {
-                  "description": "Optional upstream thread id from the source channel. Thread ids anchor stored conversation bindings when present.",
+                  "description": "Optional upstream thread identifier when the transport routes by thread/chat. Use the transport-native thread value, such as a Telegram chat id or `<chatId>:topic:<messageThreadId>` topic route; direct-recipient routes can often leave this unset.",
                   "type": "string",
                   "minLength": 1
                 },
@@ -930,7 +1099,7 @@
                   "minLength": 1
                 },
                 "headersJson": {
-                  "description": "Optional JSON object of extra HTTP headers for OpenAI-compatible local assistant chat sessions.",
+                  "description": "Optional flat JSON object of extra HTTP headers with string values for OpenAI-compatible local assistant chat sessions.",
                   "type": "string",
                   "minLength": 1
                 },
@@ -963,7 +1132,10 @@
                 }
               }
             }
-          }
+          },
+          "description": "Open the same assistant chat UI as `assistant chat` directly from the CLI root.",
+          "x-incur-hint": "Shorthand for `assistant chat`. Type /exit to close the chat loop or /session to print the current Murph session id.",
+          "x-incur-canonical-command": "assistant chat"
         },
         "run": {
           "type": "object",
@@ -1010,7 +1182,7 @@
                   "minLength": 1
                 },
                 "headersJson": {
-                  "description": "Optional JSON object of extra HTTP headers for the routing endpoint.",
+                  "description": "Optional flat JSON object of extra HTTP headers with string values for the routing endpoint.",
                   "type": "string",
                   "minLength": 1
                 },
@@ -1048,7 +1220,38 @@
                 }
               }
             }
-          }
+          },
+          "description": "Start the same assistant automation loop as `assistant run` directly from the CLI root.",
+          "x-incur-hint": "Shorthand for `assistant run`. This starts the always-on automation loop, so it may watch inbox state, auto-reply over configured channels, and keep the terminal attached until you stop it.",
+          "x-incur-examples": [
+            {
+              "options": {
+                "vault": "./vault",
+                "model": "gpt-oss:20b",
+                "baseUrl": "http://127.0.0.1:11434/v1"
+              },
+              "description": "Run the always-on inbox assistant against a local Ollama model."
+            },
+            {
+              "options": {
+                "vault": "./vault",
+                "model": "gpt-oss:20b",
+                "baseUrl": "http://127.0.0.1:11434/v1",
+                "once": true,
+                "skipDaemon": true
+              },
+              "description": "Run a single inbox scan without starting the foreground daemon."
+            },
+            {
+              "options": {
+                "vault": "./vault",
+                "allowSelfAuthored": true,
+                "sessionRolloverHours": 48
+              },
+              "description": "Run dedicated iMessage self-chat mode with two-day session rollover."
+            }
+          ],
+          "x-incur-canonical-command": "assistant run"
         },
         "status": {
           "type": "object",
@@ -1083,7 +1286,10 @@
                 }
               }
             }
-          }
+          },
+          "description": "Show the same assistant runtime snapshot as `assistant status` directly from the CLI root.",
+          "x-incur-hint": "Shorthand for `assistant status`. Use this to inspect recent turn receipts, session freshness, and pending outbox work.",
+          "x-incur-canonical-command": "assistant status"
         },
         "doctor": {
           "type": "object",
@@ -1111,7 +1317,10 @@
                 }
               }
             }
-          }
+          },
+          "description": "Run the same assistant runtime diagnostics as `assistant doctor` directly from the CLI root.",
+          "x-incur-hint": "Shorthand for `assistant doctor`. Use this when debugging transcript corruption, missing receipts, or stale outbox intents.",
+          "x-incur-canonical-command": "assistant doctor"
         },
         "stop": {
           "type": "object",
@@ -1134,7 +1343,10 @@
                 }
               }
             }
-          }
+          },
+          "description": "Stop the same assistant automation loop as `assistant stop` directly from the CLI root.",
+          "x-incur-hint": "Shorthand for `assistant stop`. Use this when `murph run` is already active for the same vault and you need a recovery command instead of manual lock cleanup.",
+          "x-incur-canonical-command": "assistant stop"
         },
         "automation": {
           "type": "object",
@@ -1165,7 +1377,8 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Emit a canonical automation payload template for `automation upsert`."
                 },
                 "show": {
                   "type": "object",
@@ -1188,7 +1401,8 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Show one automation record by id or slug."
                 },
                 "list": {
                   "type": "object",
@@ -1234,7 +1448,8 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "List automation records with optional filters."
                 },
                 "upsert": {
                   "type": "object",
@@ -1261,11 +1476,13 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Create or update one automation record from a JSON payload."
                 }
               }
             }
-          }
+          },
+          "description": "Canonical automation registry commands."
         },
         "audit": {
           "type": "object",
@@ -1296,7 +1513,8 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Show one audit record by canonical audit id."
                 },
                 "list": {
                   "type": "object",
@@ -1318,29 +1536,33 @@
                           "maxLength": 128
                         },
                         "action": {
+                          "description": "Optional audit action filter such as validate, samples_import_csv, or goal_update.",
                           "type": "string",
                           "minLength": 1
                         },
                         "actor": {
+                          "description": "Optional audit actor filter such as cli, assistant, import, or system.",
                           "type": "string",
                           "minLength": 1
                         },
                         "status": {
+                          "description": "Optional audit status filter such as success, warning, or error.",
                           "type": "string",
                           "minLength": 1
                         },
                         "from": {
+                          "description": "Inclusive lower occurredAt date bound in YYYY-MM-DD form.",
                           "type": "string",
-                          "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
-                          "description": "Calendar date in YYYY-MM-DD form."
+                          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
                         },
                         "to": {
+                          "description": "Inclusive upper occurredAt date bound in YYYY-MM-DD form.",
                           "type": "string",
-                          "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
-                          "description": "Calendar date in YYYY-MM-DD form."
+                          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
                         },
                         "sort": {
                           "default": "desc",
+                          "description": "Sort audit records by occurredAt in ascending or descending order.",
                           "type": "string",
                           "enum": [
                             "asc",
@@ -1349,13 +1571,15 @@
                         },
                         "limit": {
                           "default": 50,
+                          "description": "Maximum number of audit records to return.",
                           "type": "integer",
                           "exclusiveMinimum": 0,
                           "maximum": 200
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "List audit records with optional action, actor, status, and date filters."
                 },
                 "tail": {
                   "type": "object",
@@ -1378,17 +1602,20 @@
                         },
                         "limit": {
                           "default": 20,
+                          "description": "Maximum number of recent audit records to return.",
                           "type": "integer",
                           "exclusiveMinimum": 0,
                           "maximum": 200
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Show the latest audit records in descending occurredAt order."
                 }
               }
             }
-          }
+          },
+          "description": "Audit inspection commands routed through the query read model."
         },
         "document": {
           "type": "object",
@@ -1445,7 +1672,8 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Copy a source document into the vault raw area and register it."
                 },
                 "show": {
                   "type": "object",
@@ -1468,7 +1696,8 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Show one imported document event by document id."
                 },
                 "list": {
                   "type": "object",
@@ -1490,18 +1719,19 @@
                           "maxLength": 128
                         },
                         "from": {
-                          "description": "Optional inclusive start date in YYYY-MM-DD form.",
+                          "description": "Optional inclusive lower date bound in YYYY-MM-DD form.",
                           "type": "string",
                           "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
                         },
                         "to": {
-                          "description": "Optional inclusive end date in YYYY-MM-DD form.",
+                          "description": "Optional inclusive upper date bound in YYYY-MM-DD form.",
                           "type": "string",
                           "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "List imported document events with optional date bounds."
                 },
                 "manifest": {
                   "type": "object",
@@ -1524,7 +1754,8 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Show the immutable raw import manifest for a document."
                 },
                 "edit": {
                   "type": "object",
@@ -1575,7 +1806,9 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Edit one imported document event by merging a partial JSON patch or one or more path assignments into the saved event.",
+                  "x-incur-hint": "When you change occurredAt or timeZone without patching dayKey directly, you must also pass --day-key-policy keep or --day-key-policy recompute so the saved local day stays explicit."
                 },
                 "delete": {
                   "type": "object",
@@ -1598,11 +1831,13 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Delete one imported document event while retaining any immutable raw artifacts and manifest files."
                 }
               }
             }
-          }
+          },
+          "description": "Document ingestion commands routed through importers."
         },
         "device": {
           "type": "object",
@@ -1637,9 +1872,9 @@
                           "format": "uri"
                         },
                         "returnTo": {
-                          "description": "Optional post-connect redirect. device-syncd accepts relative paths or configured allowed origins.",
+                          "description": "Optional post-connect redirect. Accepts a root-relative path like /settings/devices or an absolute URL; device-syncd still rejects absolute URLs outside its allowed origin list.",
                           "type": "string",
-                          "format": "uri"
+                          "minLength": 1
                         },
                         "open": {
                           "description": "Open the authorization URL in the default browser after creating the OAuth state.",
@@ -1647,7 +1882,8 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Start a browser-based OAuth connection for one device provider through the Murph-managed device daemon."
                 },
                 "provider": {
                   "type": "object",
@@ -1683,11 +1919,13 @@
                                 }
                               }
                             }
-                          }
+                          },
+                          "description": "List device sync providers and their callback/webhook descriptors."
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "List the provider connectors currently registered in the local device sync control plane."
                 },
                 "account": {
                   "type": "object",
@@ -1728,7 +1966,8 @@
                                 }
                               }
                             }
-                          }
+                          },
+                          "description": "List known device sync accounts, optionally filtered to one provider."
                         },
                         "show": {
                           "type": "object",
@@ -1756,7 +1995,8 @@
                                 }
                               }
                             }
-                          }
+                          },
+                          "description": "Show one device sync account by id."
                         },
                         "reconcile": {
                           "type": "object",
@@ -1784,7 +2024,8 @@
                                 }
                               }
                             }
-                          }
+                          },
+                          "description": "Queue one immediate reconcile job for an already-connected device account."
                         },
                         "disconnect": {
                           "type": "object",
@@ -1812,11 +2053,13 @@
                                 }
                               }
                             }
-                          }
+                          },
+                          "description": "Disconnect one device account and revoke upstream access when the provider supports it."
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Inspect connected device accounts and trigger reconnect/disconnect actions."
                 },
                 "daemon": {
                   "type": "object",
@@ -1852,7 +2095,8 @@
                                 }
                               }
                             }
-                          }
+                          },
+                          "description": "Show whether Murph is managing a local device sync daemon for this vault."
                         },
                         "start": {
                           "type": "object",
@@ -1880,7 +2124,8 @@
                                 }
                               }
                             }
-                          }
+                          },
+                          "description": "Start the local device sync daemon for this vault if Murph is not already managing one."
                         },
                         "stop": {
                           "type": "object",
@@ -1908,15 +2153,18 @@
                                 }
                               }
                             }
-                          }
+                          },
+                          "description": "Stop the local device sync daemon that Murph is managing for this vault."
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Start, inspect, and stop the Murph-managed local device sync daemon for one vault."
                 }
               }
             }
-          }
+          },
+          "description": "Device sync commands for provider auth, account inspection, and the Murph-managed local device daemon."
         },
         "memory": {
           "type": "object",
@@ -1941,7 +2189,8 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Show the canonical memory document or one memory record."
                 },
                 "upsert": {
                   "type": "object",
@@ -1968,7 +2217,8 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Add one new canonical memory record."
                 },
                 "update": {
                   "type": "object",
@@ -1995,7 +2245,8 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Update one existing canonical memory record by id."
                 },
                 "forget": {
                   "type": "object",
@@ -2012,11 +2263,13 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Delete one canonical memory record by id."
                 }
               }
             }
-          }
+          },
+          "description": "Canonical first-class memory document commands."
         },
         "model": {
           "type": "object",
@@ -2027,11 +2280,11 @@
               "additionalProperties": false,
               "properties": {
                 "show": {
-                  "description": "Show the saved default assistant backend without changing it.",
+                  "description": "Show the saved default assistant backend without changing it. When set, no update options are allowed.",
                   "type": "boolean"
                 },
                 "preset": {
-                  "description": "Assistant backend preset to save: Codex or an OpenAI-compatible endpoint.",
+                  "description": "Assistant backend preset to save. Required for non-interactive updates when Murph cannot infer or reuse the backend, and required when switching between Codex and an OpenAI-compatible endpoint.",
                   "type": "string",
                   "enum": [
                     "codex",
@@ -2039,7 +2292,7 @@
                   ]
                 },
                 "providerPreset": {
-                  "description": "Optional named OpenAI-compatible provider preset to seed the endpoint prompts.",
+                  "description": "Optional named OpenAI-compatible provider preset. Only applies with `--preset openai-compatible`; seeds endpoint defaults for prompts or non-interactive saves.",
                   "type": "string",
                   "enum": [
                     "openai",
@@ -2062,41 +2315,41 @@
                   ]
                 },
                 "model": {
-                  "description": "Default model to save for the selected backend.",
+                  "description": "Default model to save for the selected backend. In non-interactive mode, pair this with `--preset` unless Murph can reuse the currently saved backend.",
                   "type": "string",
                   "minLength": 1
                 },
                 "baseUrl": {
-                  "description": "OpenAI-compatible base URL to save, such as http://127.0.0.1:11434/v1.",
+                  "description": "OpenAI-compatible base URL to save, such as http://127.0.0.1:11434/v1. Only applies with `--preset openai-compatible`.",
                   "type": "string",
                   "minLength": 1
                 },
                 "apiKeyEnv": {
-                  "description": "Environment variable name that should hold the OpenAI-compatible API key.",
+                  "description": "Environment variable name that should hold the OpenAI-compatible API key. Only applies with `--preset openai-compatible`.",
                   "type": "string",
                   "minLength": 1
                 },
                 "providerName": {
-                  "description": "Stable label for the saved OpenAI-compatible provider.",
+                  "description": "Stable label for the saved OpenAI-compatible provider. Only applies with `--preset openai-compatible`.",
                   "type": "string",
                   "minLength": 1
                 },
                 "zeroDataRetention": {
-                  "description": "Request zero data retention on Vercel AI Gateway assistant turns.",
+                  "description": "Request zero data retention on Vercel AI Gateway assistant turns. Only applies with `--preset openai-compatible`.",
                   "type": "boolean"
                 },
                 "codexCommand": {
-                  "description": "Optional Codex CLI executable path. Defaults to codex.",
+                  "description": "Optional Codex CLI executable path. Only applies with `--preset codex`; defaults to `codex`.",
                   "type": "string",
                   "minLength": 1
                 },
                 "profile": {
-                  "description": "Optional Codex profile name to save.",
+                  "description": "Optional Codex profile name to save. Only applies with `--preset codex`.",
                   "type": "string",
                   "minLength": 1
                 },
                 "reasoningEffort": {
-                  "description": "Optional assistant reasoning effort default to save.",
+                  "description": "Optional assistant reasoning effort default to save for the selected backend. Use the matching `--preset` when Murph cannot infer the backend non-interactively.",
                   "type": "string",
                   "enum": [
                     "low",
@@ -2106,12 +2359,41 @@
                   ]
                 },
                 "oss": {
-                  "description": "Save a local Codex OSS model target instead of the signed-in Codex cloud path.",
+                  "description": "Save a local Codex OSS model target instead of the signed-in Codex cloud path. Only applies with `--preset codex`.",
                   "type": "boolean"
                 }
               }
             }
-          }
+          },
+          "description": "Show or update the saved default assistant backend that Murph reuses for future chats and auto-reply.",
+          "x-incur-hint": "Run `murph model` in a TTY to reopen the provider/model picker, or pass `--preset` plus backend-specific options to update the saved backend non-interactively.",
+          "x-incur-examples": [
+            {
+              "description": "Show the currently saved default assistant backend.",
+              "options": {
+                "show": true
+              }
+            },
+            {
+              "description": "Interactively switch the saved backend using the existing setup prompts."
+            },
+            {
+              "description": "Save a Codex default model without re-running onboarding.",
+              "options": {
+                "preset": "codex",
+                "model": "gpt-5.4"
+              }
+            },
+            {
+              "description": "Save a local OpenAI-compatible endpoint and model.",
+              "options": {
+                "preset": "openai-compatible",
+                "baseUrl": "http://127.0.0.1:11434/v1",
+                "model": "gpt-oss:20b",
+                "providerName": "ollama"
+              }
+            }
+          ]
         },
         "meal": {
           "type": "object",
@@ -2173,7 +2455,8 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Record a meal event using optional media references and/or a freeform note."
                 },
                 "show": {
                   "type": "object",
@@ -2196,7 +2479,8 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Show one meal by meal id."
                 },
                 "list": {
                   "type": "object",
@@ -2218,18 +2502,19 @@
                           "maxLength": 128
                         },
                         "from": {
-                          "description": "Optional inclusive start date in YYYY-MM-DD form.",
+                          "description": "Optional inclusive lower date bound in YYYY-MM-DD form.",
                           "type": "string",
                           "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
                         },
                         "to": {
-                          "description": "Optional inclusive end date in YYYY-MM-DD form.",
+                          "description": "Optional inclusive upper date bound in YYYY-MM-DD form.",
                           "type": "string",
                           "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "List meal events with optional date bounds."
                 },
                 "manifest": {
                   "type": "object",
@@ -2252,7 +2537,8 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Show the immutable raw import manifest for a meal."
                 },
                 "edit": {
                   "type": "object",
@@ -2303,7 +2589,9 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Edit one meal by merging a partial JSON patch or one or more path assignments into the saved event.",
+                  "x-incur-hint": "When you change occurredAt or timeZone without patching dayKey directly, you must also pass --day-key-policy keep or --day-key-policy recompute so the saved local day stays explicit."
                 },
                 "delete": {
                   "type": "object",
@@ -2326,11 +2614,13 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Delete one meal event while retaining any immutable raw artifacts and manifest files."
                 }
               }
             }
-          }
+          },
+          "description": "Meal capture commands routed through the core write API."
         },
         "workout": {
           "type": "object",
@@ -2408,7 +2698,28 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Record one workout either from a freeform note or from a structured JSON payload.",
+                  "x-incur-hint": "Use freeform text for lightweight logging, or omit the positional text and pass --input @workout.json to store a rich nested workout payload with exercises, sets, notes, grouping, and source metadata.",
+                  "x-incur-examples": [
+                    {
+                      "description": "Capture a run directly from one note.",
+                      "args": {
+                        "text": "Went for a 30-minute run around the neighborhood."
+                      },
+                      "options": {
+                        "vault": "./vault"
+                      }
+                    },
+                    {
+                      "description": "Capture a structured workout payload from disk.",
+                      "args": {},
+                      "options": {
+                        "input": "@workout.json",
+                        "vault": "./vault"
+                      }
+                    }
+                  ]
                 },
                 "show": {
                   "type": "object",
@@ -2431,7 +2742,8 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Show one workout session by canonical event id."
                 },
                 "list": {
                   "type": "object",
@@ -2453,22 +2765,26 @@
                           "maxLength": 128
                         },
                         "from": {
+                          "description": "Optional inclusive lower date bound in YYYY-MM-DD form.",
                           "type": "string",
                           "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
                         },
                         "to": {
+                          "description": "Optional inclusive upper date bound in YYYY-MM-DD form.",
                           "type": "string",
                           "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
                         },
                         "limit": {
                           "default": 50,
+                          "description": "Maximum number of results to return.",
                           "type": "integer",
                           "exclusiveMinimum": 0,
                           "maximum": 200
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "List workout sessions with optional date bounds."
                 },
                 "manifest": {
                   "type": "object",
@@ -2491,7 +2807,8 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Show the immutable raw import manifest for an imported workout event."
                 },
                 "edit": {
                   "type": "object",
@@ -2542,7 +2859,9 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Edit one workout session by merging a partial JSON patch or one or more path assignments into the saved activity event.",
+                  "x-incur-hint": "When you change occurredAt or timeZone without patching dayKey directly, you must also pass --day-key-policy keep or --day-key-policy recompute so the saved local day stays explicit."
                 },
                 "delete": {
                   "type": "object",
@@ -2565,7 +2884,8 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Delete one workout activity_session event."
                 },
                 "measurement": {
                   "type": "object",
@@ -2671,7 +2991,8 @@
                                 }
                               }
                             }
-                          }
+                          },
+                          "description": "Record one body-measurement check-in either from a structured JSON payload or a single typed measurement."
                         },
                         "show": {
                           "type": "object",
@@ -2694,7 +3015,8 @@
                                 }
                               }
                             }
-                          }
+                          },
+                          "description": "Show one body-measurement event by canonical event id."
                         },
                         "list": {
                           "type": "object",
@@ -2731,7 +3053,8 @@
                                 }
                               }
                             }
-                          }
+                          },
+                          "description": "List body-measurement events with optional date bounds."
                         },
                         "manifest": {
                           "type": "object",
@@ -2754,11 +3077,13 @@
                                 }
                               }
                             }
-                          }
+                          },
+                          "description": "Show the immutable raw import manifest for an imported body-measurement event."
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Body-measurement capture routed through the core body_measurement write seam with optional progress photos under raw/measurements/**."
                 },
                 "units": {
                   "type": "object",
@@ -2789,7 +3114,8 @@
                                 }
                               }
                             }
-                          }
+                          },
+                          "description": "Show the saved workout unit preferences from the canonical preferences singleton."
                         },
                         "set": {
                           "type": "object",
@@ -2833,11 +3159,13 @@
                                 }
                               }
                             }
-                          }
+                          },
+                          "description": "Set one or more workout unit preferences on the canonical preferences singleton."
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Canonical weight and body-measurement unit preferences used by measurement capture flows."
                 },
                 "import": {
                   "type": "object",
@@ -2880,7 +3208,8 @@
                                 }
                               }
                             }
-                          }
+                          },
+                          "description": "Inspect one workout CSV file without writing anything."
                         },
                         "csv": {
                           "type": "object",
@@ -2919,11 +3248,13 @@
                                 }
                               }
                             }
-                          }
+                          },
+                          "description": "Copy one workout CSV export into raw/workouts/** and optionally map it into activity_session events."
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Inspect and import Strong/Hevy-style workout CSV exports into immutable raw batches plus canonical workout events."
                 },
                 "format": {
                   "type": "object",
@@ -2976,7 +3307,29 @@
                                 }
                               }
                             }
-                          }
+                          },
+                          "description": "Save or update one reusable workout format from a name plus freeform text, or from a structured JSON payload.",
+                          "x-incur-hint": "Saved workout formats now support a structured template payload for routine exercises, planned sets, grouping, and persistent notes. Freeform text still works and is converted into a simple template when possible.",
+                          "x-incur-examples": [
+                            {
+                              "description": "Save one reusable strength workout format from freeform text.",
+                              "args": {
+                                "name": "Push Day A",
+                                "text": "20 min strength training. 4 sets of 20 pushups. 4 sets of 12 incline bench with a 45 lb bar plus 10 lb plates on both sides."
+                              },
+                              "options": {
+                                "vault": "./vault"
+                              }
+                            },
+                            {
+                              "description": "Save a structured routine template from disk.",
+                              "args": {},
+                              "options": {
+                                "input": "@routine.json",
+                                "vault": "./vault"
+                              }
+                            }
+                          ]
                         },
                         "show": {
                           "type": "object",
@@ -2999,7 +3352,8 @@
                                 }
                               }
                             }
-                          }
+                          },
+                          "description": "Show one saved workout format by name, slug, or id."
                         },
                         "list": {
                           "type": "object",
@@ -3028,7 +3382,8 @@
                                 }
                               }
                             }
-                          }
+                          },
+                          "description": "List saved workout formats."
                         },
                         "log": {
                           "type": "object",
@@ -3094,15 +3449,30 @@
                                 }
                               }
                             }
-                          }
+                          },
+                          "description": "Log one dated workout from a saved workout format through the canonical activity_session write path.",
+                          "x-incur-hint": "Structured routine templates log directly into the rich workout session payload. Older thin formats still fall back to their saved freeform text.",
+                          "x-incur-examples": [
+                            {
+                              "description": "Log one saved workout format for today.",
+                              "args": {
+                                "name": "Push Day A"
+                              },
+                              "options": {
+                                "vault": "./vault"
+                              }
+                            }
+                          ]
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Saved workout-format defaults that store structured routine templates in bank/workout-formats."
                 }
               }
             }
-          }
+          },
+          "description": "Workout façade commands over core activity-session writes, body-measurement writes, workout-format docs, CSV import, and saved unit preferences."
         },
         "intervention": {
           "type": "object",
@@ -3166,7 +3536,31 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Record one intervention session from a freeform note with lightweight structured inference.",
+                  "x-incur-hint": "The freeform note is stored on the canonical intervention_session event. Pass --type when the note names multiple interventions and --duration when the note mentions an ambiguous duration.",
+                  "x-incur-examples": [
+                    {
+                      "description": "Capture a sauna session directly from one note.",
+                      "args": {
+                        "text": "20 min sauna after lifting."
+                      },
+                      "options": {
+                        "vault": "./vault"
+                      }
+                    },
+                    {
+                      "description": "Capture an HBOT clinic session and link it to a protocol.",
+                      "args": {
+                        "text": "HBOT session at the clinic."
+                      },
+                      "options": {
+                        "vault": "./vault",
+                        "duration": 60,
+                        "protocolId": "prot_01JNV422Y2M5ZBV64ZP4N1DRB1"
+                      }
+                    }
+                  ]
                 },
                 "edit": {
                   "type": "object",
@@ -3217,7 +3611,9 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Edit one intervention session by merging a partial JSON patch or one or more path assignments into the saved event.",
+                  "x-incur-hint": "When you change occurredAt or timeZone without patching dayKey directly, you must also pass --day-key-policy keep or --day-key-policy recompute so the saved local day stays explicit."
                 },
                 "delete": {
                   "type": "object",
@@ -3240,11 +3636,13 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Delete one intervention_session event."
                 }
               }
             }
-          }
+          },
+          "description": "Quick intervention capture commands routed through canonical intervention-session events."
         },
         "provider": {
           "type": "object",
@@ -3275,7 +3673,8 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Emit a provider payload template for `provider upsert`."
                 },
                 "upsert": {
                   "type": "object",
@@ -3302,7 +3701,8 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Create or update one provider Markdown record from a JSON payload file or stdin."
                 },
                 "show": {
                   "type": "object",
@@ -3325,7 +3725,8 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Show one provider by canonical id or slug."
                 },
                 "list": {
                   "type": "object",
@@ -3352,13 +3753,15 @@
                         },
                         "limit": {
                           "default": 50,
+                          "description": "Maximum number of results to return.",
                           "type": "integer",
                           "exclusiveMinimum": 0,
                           "maximum": 200
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "List provider records with an optional status filter."
                 },
                 "edit": {
                   "type": "object",
@@ -3401,7 +3804,9 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Edit one provider by merging a partial JSON patch or one or more path assignments into the saved record.",
+                  "x-incur-hint": "Pass --input @patch.json for a structured partial patch, use repeated --set dotted.path=value assignments for quick fixes, or use --clear dotted.path to remove fields."
                 },
                 "delete": {
                   "type": "object",
@@ -3424,11 +3829,13 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Delete one provider Markdown record."
                 }
               }
             }
-          }
+          },
+          "description": "Provider registry commands for bank/providers Markdown records."
         },
         "recipe": {
           "type": "object",
@@ -3459,7 +3866,8 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Emit a recipe payload template for `recipe upsert`."
                 },
                 "upsert": {
                   "type": "object",
@@ -3486,7 +3894,8 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Create or update one recipe Markdown record from a JSON payload file or stdin."
                 },
                 "show": {
                   "type": "object",
@@ -3509,7 +3918,8 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Show one recipe by canonical id or slug."
                 },
                 "list": {
                   "type": "object",
@@ -3540,13 +3950,15 @@
                         },
                         "limit": {
                           "default": 50,
+                          "description": "Maximum number of results to return.",
                           "type": "integer",
                           "exclusiveMinimum": 0,
                           "maximum": 200
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "List recipe records with an optional status filter."
                 },
                 "edit": {
                   "type": "object",
@@ -3589,7 +4001,9 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Edit one recipe by merging a partial JSON patch or one or more path assignments into the saved record.",
+                  "x-incur-hint": "Pass --input @patch.json for a structured partial patch, use repeated --set dotted.path=value assignments for quick fixes, or use --clear dotted.path to remove fields."
                 },
                 "delete": {
                   "type": "object",
@@ -3612,11 +4026,13 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Delete one recipe Markdown record."
                 }
               }
             }
-          }
+          },
+          "description": "Recipe registry commands for bank/recipes Markdown records."
         },
         "food": {
           "type": "object",
@@ -3647,7 +4063,8 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Emit a food payload template for `food upsert`."
                 },
                 "upsert": {
                   "type": "object",
@@ -3674,7 +4091,8 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Create or update one food Markdown record from a JSON payload file or stdin."
                 },
                 "show": {
                   "type": "object",
@@ -3697,7 +4115,8 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Show one food by canonical id or slug."
                 },
                 "list": {
                   "type": "object",
@@ -3727,13 +4146,15 @@
                         },
                         "limit": {
                           "default": 50,
+                          "description": "Maximum number of results to return.",
                           "type": "integer",
                           "exclusiveMinimum": 0,
                           "maximum": 200
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "List food records with an optional status filter."
                 },
                 "edit": {
                   "type": "object",
@@ -3776,7 +4197,9 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Edit one food by merging a partial JSON patch or one or more path assignments into the saved record.",
+                  "x-incur-hint": "Pass --input @patch.json for a structured partial patch, use repeated --set dotted.path=value assignments for quick fixes, or use --clear dotted.path to remove fields."
                 },
                 "delete": {
                   "type": "object",
@@ -3799,7 +4222,8 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Delete one remembered food Markdown record."
                 },
                 "rename": {
                   "type": "object",
@@ -3833,7 +4257,9 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Rename one remembered food while preserving its canonical id.",
+                  "x-incur-hint": "The previous food title is kept as an alias automatically so older operator language still resolves in the saved record."
                 },
                 "schedule": {
                   "type": "object",
@@ -3872,11 +4298,14 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Schedule one remembered food for daily auto-log meal creation.",
+                  "x-incur-hint": "This schedules recurring meal logging for a remembered food. The daily log fires while `vault-cli assistant run` is active for the same vault."
                 }
               }
             }
-          }
+          },
+          "description": "Food registry commands for bank/foods Markdown records."
         },
         "event": {
           "type": "object",
@@ -3922,7 +4351,8 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Emit an event payload template for one canonical event kind."
                 },
                 "upsert": {
                   "type": "object",
@@ -3949,7 +4379,8 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Append one canonical event from a JSON payload file or stdin."
                 },
                 "show": {
                   "type": "object",
@@ -3972,7 +4403,8 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Show one canonical event by event id."
                 },
                 "list": {
                   "type": "object",
@@ -3994,6 +4426,7 @@
                           "maxLength": 128
                         },
                         "kind": {
+                          "description": "Optional canonical event kind filter such as encounter, procedure, test, adverse_effect, or exposure.",
                           "type": "string",
                           "minLength": 1
                         },
@@ -4008,7 +4441,7 @@
                           "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
                         },
                         "tag": {
-                          "description": "Optional tag filter. Repeat --tag for multiple values.",
+                          "description": "Optional tag filter. Repeat --tag to match any listed tag.",
                           "type": "array",
                           "items": {
                             "type": "string",
@@ -4016,19 +4449,36 @@
                           }
                         },
                         "experiment": {
+                          "description": "Optional experiment slug filter for events linked to one experiment.",
                           "type": "string",
-                          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
-                          "description": "Stable lowercase kebab-case identifier."
+                          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
                         },
                         "limit": {
                           "default": 50,
+                          "description": "Maximum number of results to return.",
                           "type": "integer",
                           "exclusiveMinimum": 0,
                           "maximum": 200
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "List canonical events with optional kind, date, tag, and experiment filters.",
+                  "x-incur-hint": "Combine --kind, repeatable --tag, --experiment <slug>, and --from/--to to narrow the event read model.",
+                  "x-incur-examples": [
+                    {
+                      "description": "List tagged test events in one date window.",
+                      "options": {
+                        "from": "2026-03-01",
+                        "kind": "test",
+                        "tag": [
+                          "follow-up"
+                        ],
+                        "to": "2026-03-31",
+                        "vault": "./vault"
+                      }
+                    }
+                  ]
                 },
                 "edit": {
                   "type": "object",
@@ -4079,7 +4529,9 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Edit one canonical event by merging a partial JSON patch or one or more path assignments into the saved record.",
+                  "x-incur-hint": "When you change occurredAt or timeZone without patching dayKey directly, you must also pass --day-key-policy keep or --day-key-policy recompute so the saved local day stays explicit."
                 },
                 "delete": {
                   "type": "object",
@@ -4102,11 +4554,13 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Delete one canonical event by event id."
                 }
               }
             }
-          }
+          },
+          "description": "Generic canonical event commands for event kinds without specialized nouns."
         },
         "samples": {
           "type": "object",
@@ -4141,7 +4595,8 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Append one or more manually curated sample records from a JSON payload file or stdin."
                 },
                 "import-csv": {
                   "type": "object",
@@ -4208,7 +4663,8 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Import timestamped numeric samples from a CSV file."
                 },
                 "show": {
                   "type": "object",
@@ -4231,7 +4687,8 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Show one sample record by canonical sample id."
                 },
                 "list": {
                   "type": "object",
@@ -4278,7 +4735,8 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "List sample records with optional stream, date-range, and quality filters."
                 },
                 "batch": {
                   "type": "object",
@@ -4309,7 +4767,8 @@
                                 }
                               }
                             }
-                          }
+                          },
+                          "description": "Show one imported sample batch by transform id."
                         },
                         "list": {
                           "type": "object",
@@ -4352,15 +4811,18 @@
                                 }
                               }
                             }
-                          }
+                          },
+                          "description": "List imported sample batches from raw sample manifests."
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Sample import-batch inspection commands for xfm_* ids."
                 }
               }
             }
-          }
+          },
+          "description": "Sample ingestion and inspection commands routed through importers and the query read model."
         },
         "wearables": {
           "type": "object",
@@ -4404,7 +4866,18 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Show Murph's deduplicated wearable day mirror for one date, including sleep, activity, body-state, recovery, and source-confidence notes.",
+                  "x-incur-hint": "Use `wearables day` as the first read for date-specific wearable questions. Use the list subcommands for longer windows and provider/source freshness checks.",
+                  "x-incur-examples": [
+                    {
+                      "description": "Inspect one day of wearable evidence before drilling into raw records.",
+                      "options": {
+                        "date": "2026-04-05",
+                        "vault": "./vault"
+                      }
+                    }
+                  ]
                 },
                 "sleep": {
                   "type": "object",
@@ -4465,11 +4938,13 @@
                                 }
                               }
                             }
-                          }
+                          },
+                          "description": "List semantic daily sleep summaries instead of raw sleep-session and sample rows."
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Deduplicated daily sleep summaries with provider evidence and source-confidence notes."
                 },
                 "activity": {
                   "type": "object",
@@ -4530,11 +5005,13 @@
                                 }
                               }
                             }
-                          }
+                          },
+                          "description": "List semantic daily activity summaries instead of raw activity-session and sample rows."
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Deduplicated daily activity summaries with workout/session collapse, steps, and source-confidence notes."
                 },
                 "body": {
                   "type": "object",
@@ -4595,11 +5072,13 @@
                                 }
                               }
                             }
-                          }
+                          },
+                          "description": "List semantic daily body-state summaries instead of raw body measurement rows."
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Deduplicated daily body-state summaries with weight, body-fat, BMI, temperature, and source-confidence notes."
                 },
                 "recovery": {
                   "type": "object",
@@ -4660,11 +5139,13 @@
                                 }
                               }
                             }
-                          }
+                          },
+                          "description": "List semantic daily recovery summaries instead of raw readiness observations and supporting sample rows."
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Deduplicated daily recovery summaries with readiness/recovery, HRV, respiratory, temperature, and source-confidence notes."
                 },
                 "sources": {
                   "type": "object",
@@ -4725,15 +5206,18 @@
                                 }
                               }
                             }
-                          }
+                          },
+                          "description": "List wearable source-health summaries so you can see which providers contributed evidence and how fresh that evidence is."
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Wearable source-health, coverage, and freshness summaries across connected providers."
                 }
               }
             }
-          }
+          },
+          "description": "Semantic wearable read commands that collapse duplicate device evidence into calmer daily sleep, activity, body-state, recovery, and source-health summaries."
         },
         "experiment": {
           "type": "object",
@@ -4790,7 +5274,8 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Create a baseline experiment document."
                 },
                 "show": {
                   "type": "object",
@@ -4813,7 +5298,8 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Show one experiment by canonical id or slug."
                 },
                 "list": {
                   "type": "object",
@@ -4847,13 +5333,15 @@
                         },
                         "limit": {
                           "default": 50,
+                          "description": "Maximum number of results to return.",
                           "type": "integer",
                           "exclusiveMinimum": 0,
                           "maximum": 200
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "List experiments through the query read model."
                 },
                 "update": {
                   "type": "object",
@@ -4880,7 +5368,8 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Update one experiment frontmatter/body payload from a JSON payload file or stdin."
                 },
                 "checkpoint": {
                   "type": "object",
@@ -4907,7 +5396,8 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Append one experiment checkpoint event from a JSON payload file or stdin."
                 },
                 "stop": {
                   "type": "object",
@@ -4941,11 +5431,13 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Stop one experiment by id or slug and append a stop lifecycle event."
                 }
               }
             }
-          }
+          },
+          "description": "Experiment bank commands routed through the core write API."
         },
         "journal": {
           "type": "object",
@@ -4976,7 +5468,8 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Create or confirm the daily journal document for a date."
                 },
                 "show": {
                   "type": "object",
@@ -4999,7 +5492,8 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Show the journal document for one day."
                 },
                 "list": {
                   "type": "object",
@@ -5021,24 +5515,26 @@
                           "maxLength": 128
                         },
                         "from": {
-                          "description": "Inclusive lower date bound.",
+                          "description": "Optional inclusive lower date bound in YYYY-MM-DD form.",
                           "type": "string",
                           "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
                         },
                         "to": {
-                          "description": "Inclusive upper date bound.",
+                          "description": "Optional inclusive upper date bound in YYYY-MM-DD form.",
                           "type": "string",
                           "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
                         },
                         "limit": {
                           "default": 50,
+                          "description": "Maximum number of results to return.",
                           "type": "integer",
                           "exclusiveMinimum": 0,
                           "maximum": 200
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "List journal documents over an optional date range."
                 },
                 "append": {
                   "type": "object",
@@ -5066,7 +5562,8 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Append freeform markdown text to one journal day."
                 },
                 "link": {
                   "type": "object",
@@ -5088,7 +5585,7 @@
                           "maxLength": 128
                         },
                         "eventId": {
-                          "description": "Optional event ids to mutate. Repeat --event-id for multiple values.",
+                          "description": "Optional event ids to mutate. Repeat --event-id for multiple values. Mutually exclusive with --stream.",
                           "type": "array",
                           "items": {
                             "type": "string",
@@ -5096,7 +5593,7 @@
                           }
                         },
                         "stream": {
-                          "description": "Optional sample streams to mutate. Repeat --stream for multiple values.",
+                          "description": "Optional sample streams to mutate. Repeat --stream for multiple values. Mutually exclusive with --event-id.",
                           "type": "array",
                           "items": {
                             "type": "string",
@@ -5105,7 +5602,9 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Link either event ids or sample streams into the journal day frontmatter.",
+                  "x-incur-hint": "Choose exactly one target type per command: repeat --event-id for events or repeat --stream for sample streams."
                 },
                 "unlink": {
                   "type": "object",
@@ -5127,7 +5626,7 @@
                           "maxLength": 128
                         },
                         "eventId": {
-                          "description": "Optional event ids to mutate. Repeat --event-id for multiple values.",
+                          "description": "Optional event ids to mutate. Repeat --event-id for multiple values. Mutually exclusive with --stream.",
                           "type": "array",
                           "items": {
                             "type": "string",
@@ -5135,7 +5634,7 @@
                           }
                         },
                         "stream": {
-                          "description": "Optional sample streams to mutate. Repeat --stream for multiple values.",
+                          "description": "Optional sample streams to mutate. Repeat --stream for multiple values. Mutually exclusive with --event-id.",
                           "type": "array",
                           "items": {
                             "type": "string",
@@ -5144,11 +5643,14 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Remove either event ids or sample streams from the journal day frontmatter.",
+                  "x-incur-hint": "Choose exactly one target type per command: repeat --event-id for events or repeat --stream for sample streams."
                 }
               }
             }
-          }
+          },
+          "description": "Journal document commands routed through the core write API."
         },
         "show": {
           "type": "object",
@@ -5171,7 +5673,20 @@
                 }
               }
             }
-          }
+          },
+          "description": "Read one canonical vault record through the query layer when you already know the exact canonical read id to inspect.",
+          "x-incur-hint": "Use generic `show` with canonical read ids such as `meal_*`, `doc_*`, `evt_*`, or `journal:*`. Prefer family-specific `manifest` commands when you need import provenance rather than the canonical read-model record.",
+          "x-incur-examples": [
+            {
+              "args": {
+                "id": "evt_123"
+              },
+              "description": "Show one known canonical event record by its exact canonical read id.",
+              "options": {
+                "vault": "./vault"
+              }
+            }
+          ]
         },
         "list": {
           "type": "object",
@@ -5193,7 +5708,7 @@
                   "maxLength": 128
                 },
                 "recordType": {
-                  "description": "Optional query record families such as event, journal, assessment, goal, condition, allergy, protocol, history, family, genetics, food, recipe, provider, or sample.",
+                  "description": "Optional query record families. Repeat --record-type for multiple values: allergy, assessment, audit, condition, core, event, experiment, family, food, genetics, goal, journal, protocol, provider, recipe, sample, workout_format.",
                   "type": "array",
                   "items": {
                     "type": "string",
@@ -5249,7 +5764,31 @@
                 }
               }
             }
-          }
+          },
+          "description": "List canonical vault records through the query layer when you need filtered recent records rather than one exact id.",
+          "x-incur-hint": "Use `list` for family/kind/status/tag/date filtering, `search query` for fuzzy text recall, and `timeline` for chronology across record types.",
+          "x-incur-examples": [
+            {
+              "description": "List recent meal-related event records from the last week.",
+              "options": {
+                "kind": "meal",
+                "from": "2026-04-01",
+                "to": "2026-04-07",
+                "vault": "./vault"
+              }
+            },
+            {
+              "description": "List active protocols with a smaller page size.",
+              "options": {
+                "recordType": [
+                  "protocol"
+                ],
+                "status": "active",
+                "limit": 10,
+                "vault": "./vault"
+              }
+            }
+          ]
         },
         "search": {
           "type": "object",
@@ -5279,12 +5818,12 @@
                           "maxLength": 128
                         },
                         "text": {
-                          "description": "Search text to run across titles, notes, tags, ids, and record payloads.",
                           "type": "string",
-                          "minLength": 1
+                          "minLength": 1,
+                          "description": "Required search text to run across titles, notes, tags, ids, and record payloads."
                         },
                         "recordType": {
-                          "description": "Optional record families. Repeat --record-type for multiple values: core, experiment, journal, event, sample, audit, assessment, goal, condition, allergy, protocol, family, genetics.",
+                          "description": "Optional query record families. Repeat --record-type for multiple values: allergy, assessment, audit, condition, core, event, experiment, family, food, genetics, goal, journal, protocol, provider, recipe, sample, workout_format.",
                           "type": "array",
                           "items": {
                             "type": "string",
@@ -5339,11 +5878,35 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Search the shared local query projection when the target is fuzzy or remembered by phrase rather than exact id.",
+                  "x-incur-hint": "Use `search query` for fuzzy recall or remembered phrases. Use `show` for one exact id, `list` for structured filters, and `timeline` for chronology.",
+                  "x-incur-examples": [
+                    {
+                      "description": "Find prior mentions of magnesium across records and notes.",
+                      "options": {
+                        "text": "magnesium",
+                        "vault": "./vault"
+                      }
+                    },
+                    {
+                      "description": "Search only assessment, event, and protocol records for insulin sensitivity mentions.",
+                      "options": {
+                        "text": "insulin sensitivity",
+                        "recordType": [
+                          "assessment",
+                          "event",
+                          "protocol"
+                        ],
+                        "vault": "./vault"
+                      }
+                    }
+                  ]
                 }
               }
             }
-          }
+          },
+          "description": "Search commands for the shared local query projection over canonical vault records."
         },
         "query": {
           "type": "object",
@@ -5382,7 +5945,8 @@
                                 }
                               }
                             }
-                          }
+                          },
+                          "description": "Show the current query projection status and freshness."
                         },
                         "rebuild": {
                           "type": "object",
@@ -5405,15 +5969,18 @@
                                 }
                               }
                             }
-                          }
+                          },
+                          "description": "Rebuild the shared local query projection from canonical vault data."
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Inspect and rebuild the shared local query projection under .runtime/projections/query.sqlite."
                 }
               }
             }
-          }
+          },
+          "description": "Commands for the shared local query projection that powers canonical reads and lexical search."
         },
         "timeline": {
           "type": "object",
@@ -5482,7 +6049,33 @@
                 }
               }
             }
-          }
+          },
+          "description": "Build a descending cross-record timeline when the question is about what changed, what happened over a window, or what stood out over time.",
+          "x-incur-hint": "Use `timeline` when you need chronology across journals, events, assessments, and sample summaries. Drill into `show` or family-specific reads after you find the relevant entries.",
+          "x-incur-examples": [
+            {
+              "description": "Review what happened across journals, events, and summaries over the last week.",
+              "options": {
+                "from": "2026-04-01",
+                "to": "2026-04-07",
+                "vault": "./vault"
+              }
+            },
+            {
+              "description": "Review recovery-related sample summaries over one experiment window.",
+              "options": {
+                "entryType": [
+                  "sample_summary"
+                ],
+                "stream": [
+                  "hrv",
+                  "resting_heart_rate"
+                ],
+                "experiment": "sleep-reset",
+                "vault": "./vault"
+              }
+            }
+          ]
         },
         "knowledge": {
           "type": "object",
@@ -5569,7 +6162,8 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Persist one assistant-authored derived knowledge page from local vault context and rebuild the knowledge index."
                 },
                 "list": {
                   "type": "object",
@@ -5602,7 +6196,8 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "List derived knowledge pages currently saved under derived/knowledge/pages/**."
                 },
                 "search": {
                   "type": "object",
@@ -5641,7 +6236,8 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Search derived knowledge pages by lexical match across titles, summaries, body text, related slugs, and source paths."
                 },
                 "show": {
                   "type": "object",
@@ -5664,7 +6260,8 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Show one derived knowledge page by slug."
                 },
                 "lint": {
                   "type": "object",
@@ -5687,7 +6284,8 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Run deterministic health checks over derived knowledge pages: missing sources, missing related pages, parse failures, and other structural problems."
                 },
                 "log": {
                   "type": "object",
@@ -5724,11 +6322,13 @@
                                 }
                               }
                             }
-                          }
+                          },
+                          "description": "Show the latest derived knowledge write-log entries in descending occurredAt order."
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Inspect the append-only derived knowledge activity log."
                 },
                 "index": {
                   "type": "object",
@@ -5759,15 +6359,18 @@
                                 }
                               }
                             }
-                          }
+                          },
+                          "description": "Rebuild derived/knowledge/index.md from the current knowledge pages."
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Rebuild the derived knowledge markdown index."
                 }
               }
             }
-          }
+          },
+          "description": "Manage and inspect Murph's non-canonical derived knowledge wiki under derived/knowledge/**."
         },
         "research": {
           "type": "object",
@@ -5815,7 +6418,31 @@
                 }
               }
             }
-          }
+          },
+          "description": "Run ChatGPT Deep Research through review:gpt, auto-send the staged prompt, wait for the result, and save the captured markdown note under research/ in the selected vault.",
+          "x-incur-hint": "Use this when you need a deeper current-evidence scan that should leave a durable markdown note in the vault. Deep Research commonly takes 10 to 60 minutes, so keep the command running unless it errors. Murph defaults the overall timeout to 40m; raise `--timeout` for longer runs, and only use `--wait-timeout` when you want a different response-wait cap. Free-tier access may be more limited.",
+          "x-incur-examples": [
+            {
+              "args": {
+                "prompt": "Research new LDL cholesterol therapies and practical interventions from the last 30 days."
+              },
+              "options": {
+                "vault": "./vault"
+              },
+              "description": "Run one Deep Research prompt and save the captured note into the current vault."
+            },
+            {
+              "args": {
+                "prompt": "Check Brisbane environmental health hazards from the last week and focus on water and air quality."
+              },
+              "options": {
+                "vault": "./vault",
+                "title": "Brisbane environmental health watch",
+                "chat": "https://chatgpt.com/c/69a86c41-cca8-8327-975a-1716caa599cf"
+              },
+              "description": "Reuse one chat thread and save the note under a stable title."
+            }
+          ]
         },
         "deepthink": {
           "type": "object",
@@ -5863,7 +6490,20 @@
                 }
               }
             }
-          }
+          },
+          "description": "Run GPT Pro through review:gpt, auto-send the staged prompt, wait for the result, and save the captured markdown note under research/ in the selected vault.",
+          "x-incur-hint": "Use this when you want a durable GPT Pro synthesis saved into the vault without switching into Deep Research mode. Murph still defaults the overall timeout to 40m here; `--wait-timeout` is only for the uncommon case where you want the response-wait cap different from the overall timeout. Murph will warn when the saved assistant account is not Pro.",
+          "x-incur-examples": [
+            {
+              "args": {
+                "prompt": "Think through the strongest arguments for and against increasing weekly zone-2 training volume."
+              },
+              "options": {
+                "vault": "./vault"
+              },
+              "description": "Capture one GPT Pro deepthink note into the current vault."
+            }
+          ]
         },
         "export": {
           "type": "object",
@@ -5922,7 +6562,8 @@
                                 }
                               }
                             }
-                          }
+                          },
+                          "description": "Build a date-bounded export pack from the read model."
                         },
                         "show": {
                           "type": "object",
@@ -5945,7 +6586,8 @@
                                 }
                               }
                             }
-                          }
+                          },
+                          "description": "Show one stored export pack manifest by pack id."
                         },
                         "list": {
                           "type": "object",
@@ -5989,7 +6631,8 @@
                                 }
                               }
                             }
-                          }
+                          },
+                          "description": "List stored export packs from exports/packs with optional scope filters."
                         },
                         "materialize": {
                           "type": "object",
@@ -6017,7 +6660,8 @@
                                 }
                               }
                             }
-                          }
+                          },
+                          "description": "Copy one stored export pack to the selected output root."
                         },
                         "prune": {
                           "type": "object",
@@ -6040,15 +6684,18 @@
                                 }
                               }
                             }
-                          }
+                          },
+                          "description": "Remove one stored export pack directory from exports/packs."
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Build and inspect derived export packs."
                 }
               }
             }
-          }
+          },
+          "description": "Export commands routed through the query layer."
         },
         "intake": {
           "type": "object",
@@ -6105,7 +6752,8 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Import one assessment response payload into the health ledgers."
                 },
                 "show": {
                   "type": "object",
@@ -6128,7 +6776,8 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Show one assessment response through the query layer."
                 },
                 "list": {
                   "type": "object",
@@ -6167,7 +6816,8 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "List assessment responses through the query layer."
                 },
                 "manifest": {
                   "type": "object",
@@ -6190,7 +6840,8 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Show the immutable raw import manifest for one assessment."
                 },
                 "raw": {
                   "type": "object",
@@ -6213,7 +6864,8 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Show the immutable raw assessment payload captured during intake import."
                 },
                 "project": {
                   "type": "object",
@@ -6236,11 +6888,13 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Project one assessment into noun-specific proposal payloads."
                 }
               }
             }
-          }
+          },
+          "description": "Assessment intake commands for health extension workflows."
         },
         "inbox": {
           "type": "object",
@@ -6275,7 +6929,24 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Initialize local inbox runtime state under .runtime without mutating canonical vault records.",
+                  "x-incur-hint": "Run this after `vault-cli init`; it creates only machine-local inbox runtime state.",
+                  "x-incur-examples": [
+                    {
+                      "options": {
+                        "vault": "./vault"
+                      },
+                      "description": "Create the inbox runtime config and SQLite database."
+                    },
+                    {
+                      "options": {
+                        "vault": "./vault",
+                        "rebuild": true
+                      },
+                      "description": "Rebuild the runtime index from existing raw inbox envelopes."
+                    }
+                  ]
                 },
                 "bootstrap": {
                   "type": "object",
@@ -6326,7 +6997,26 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Initialize local inbox runtime state and write parser toolchain config in one step.",
+                  "x-incur-hint": "Use this for local-first inbox/parser bootstrap; it composes `inbox init` and `inbox setup` without mixing their flag sets.",
+                  "x-incur-examples": [
+                    {
+                      "options": {
+                        "vault": "./vault"
+                      },
+                      "description": "Create local inbox runtime state and parser toolchain config together."
+                    },
+                    {
+                      "options": {
+                        "vault": "./vault",
+                        "rebuild": true,
+                        "whisperCommand": "/usr/local/bin/whisper-cli",
+                        "whisperModelPath": "./models/ggml-base.en.bin"
+                      },
+                      "description": "Rebuild runtime indexes while persisting explicit whisper.cpp command and model-path overrides."
+                    }
+                  ]
                 },
                 "setup": {
                   "type": "object",
@@ -6369,7 +7059,25 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Write parser toolchain config under .runtime/operations/parsers/toolchain.json and report discovered local tool availability.",
+                  "x-incur-hint": "This config is local runtime state only; it does not write canonical health records.",
+                  "x-incur-examples": [
+                    {
+                      "options": {
+                        "vault": "./vault"
+                      },
+                      "description": "Create or refresh the local parser toolchain config."
+                    },
+                    {
+                      "options": {
+                        "vault": "./vault",
+                        "whisperCommand": "/usr/local/bin/whisper-cli",
+                        "whisperModelPath": "./models/ggml-base.en.bin"
+                      },
+                      "description": "Persist explicit whisper.cpp command and model-path overrides."
+                    }
+                  ]
                 },
                 "source": {
                   "type": "object",
@@ -6470,7 +7178,61 @@
                                 }
                               }
                             }
-                          }
+                          },
+                          "description": "Add a connector configuration to the local inbox runtime config.",
+                          "x-incur-hint": "Use a stable runtime id such as `imessage:self`, `telegram:bot`, `linq:default`, or `email:agentmail`; each connector id must map to a unique source/account runtime namespace, while cursor state stays in SQLite.",
+                          "x-incur-examples": [
+                            {
+                              "args": {
+                                "source": "imessage"
+                              },
+                              "options": {
+                                "id": "imessage:self",
+                                "account": "self",
+                                "includeOwn": true,
+                                "vault": "./vault"
+                              },
+                              "description": "Configure an iMessage source for the local account."
+                            },
+                            {
+                              "args": {
+                                "source": "telegram"
+                              },
+                              "options": {
+                                "id": "telegram:bot",
+                                "account": "bot",
+                                "vault": "./vault"
+                              },
+                              "description": "Configure a Telegram bot source for local long polling."
+                            },
+                            {
+                              "args": {
+                                "source": "linq"
+                              },
+                              "options": {
+                                "id": "linq:default",
+                                "account": "default",
+                                "linqWebhookPort": 8789,
+                                "linqWebhookPath": "/linq-webhook",
+                                "enableAutoReply": true,
+                                "vault": "./vault"
+                              },
+                              "description": "Configure a Linq webhook connector so the local inbox daemon can receive inbound Linq messages and assistant replies can send back into the same direct chat."
+                            },
+                            {
+                              "args": {
+                                "source": "email"
+                              },
+                              "options": {
+                                "id": "email:agentmail",
+                                "provision": true,
+                                "emailDisplayName": "Murph",
+                                "enableAutoReply": true,
+                                "vault": "./vault"
+                              },
+                              "description": "Provision an AgentMail inbox or recover a single existing inbox when create permission is unavailable, then configure email polling and assistant auto-reply."
+                            }
+                          ]
                         },
                         "list": {
                           "type": "object",
@@ -6493,7 +7255,8 @@
                                 }
                               }
                             }
-                          }
+                          },
+                          "description": "List configured inbox connectors from the local runtime config."
                         },
                         "remove": {
                           "type": "object",
@@ -6516,11 +7279,13 @@
                                 }
                               }
                             }
-                          }
+                          },
+                          "description": "Remove a connector from the local inbox runtime config."
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Manage machine-local inbox connector configuration."
                 },
                 "doctor": {
                   "type": "object",
@@ -6543,7 +7308,25 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Verify inbox runtime configuration, local dependencies, and connector readiness.",
+                  "x-incur-examples": [
+                    {
+                      "options": {
+                        "vault": "./vault"
+                      },
+                      "description": "Check runtime config and SQLite availability."
+                    },
+                    {
+                      "args": {
+                        "sourceId": "imessage:self"
+                      },
+                      "options": {
+                        "vault": "./vault"
+                      },
+                      "description": "Run deep iMessage-specific checks for one connector."
+                    }
+                  ]
                 },
                 "parse": {
                   "type": "object",
@@ -6577,7 +7360,8 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Drain queued attachment parse jobs with the local parser toolchain."
                 },
                 "requeue": {
                   "type": "object",
@@ -6619,7 +7403,8 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Reset failed or interrupted attachment parse jobs back to pending."
                 },
                 "backfill": {
                   "type": "object",
@@ -6657,7 +7442,8 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Backfill one configured inbox connector into the runtime and canonical raw inbox store."
                 },
                 "run": {
                   "type": "object",
@@ -6680,7 +7466,9 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Run all enabled inbox connectors in the foreground until stopped, auto-draining parser jobs for new captures.",
+                  "x-incur-hint": "Use `vault-cli inbox status` in another shell to inspect daemon state and `vault-cli inbox stop` to send SIGTERM."
                 },
                 "status": {
                   "type": "object",
@@ -6703,7 +7491,8 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Show the current local inbox daemon state."
                 },
                 "stop": {
                   "type": "object",
@@ -6726,7 +7515,8 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Stop the currently running inbox daemon by signaling its recorded PID."
                 },
                 "list": {
                   "type": "object",
@@ -6761,7 +7551,8 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "List captured inbox items from the local runtime index."
                 },
                 "show": {
                   "type": "object",
@@ -6784,7 +7575,8 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Show one captured inbox item with normalized metadata and stored attachment references."
                 },
                 "search": {
                   "type": "object",
@@ -6824,7 +7616,8 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Search captured inbox items using the local runtime FTS index."
                 },
                 "attachment": {
                   "type": "object",
@@ -6855,7 +7648,8 @@
                                 }
                               }
                             }
-                          }
+                          },
+                          "description": "List stored attachments for one inbox capture."
                         },
                         "show": {
                           "type": "object",
@@ -6878,7 +7672,8 @@
                                 }
                               }
                             }
-                          }
+                          },
+                          "description": "Show one stored inbox attachment by its runtime attachment id."
                         },
                         "show-status": {
                           "type": "object",
@@ -6901,7 +7696,8 @@
                                 }
                               }
                             }
-                          }
+                          },
+                          "description": "Show the current runtime parse status for one inbox attachment."
                         },
                         "parse": {
                           "type": "object",
@@ -6924,7 +7720,8 @@
                                 }
                               }
                             }
-                          }
+                          },
+                          "description": "Drain the current parse queue entry for one parseable inbox attachment."
                         },
                         "reparse": {
                           "type": "object",
@@ -6947,11 +7744,13 @@
                                 }
                               }
                             }
-                          }
+                          },
+                          "description": "Requeue the current runtime parse job for one parseable inbox attachment."
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Inspect stored inbox attachments and their runtime parse state."
                 },
                 "promote": {
                   "type": "object",
@@ -6982,7 +7781,9 @@
                                 }
                               }
                             }
-                          }
+                          },
+                          "description": "Promote one inbox capture with an image attachment into a canonical meal event.",
+                          "x-incur-hint": "The first stored image attachment becomes the meal photo; the first stored audio attachment becomes the optional audio note."
                         },
                         "document": {
                           "type": "object",
@@ -7005,7 +7806,8 @@
                                 }
                               }
                             }
-                          }
+                          },
+                          "description": "Promote one inbox capture with a stored document attachment into a canonical document import."
                         },
                         "journal": {
                           "type": "object",
@@ -7028,7 +7830,8 @@
                                 }
                               }
                             }
-                          }
+                          },
+                          "description": "Promote one inbox capture into the journal day for its occurred-at date using a stable, idempotent note block."
                         },
                         "experiment-note": {
                           "type": "object",
@@ -7051,11 +7854,13 @@
                                 }
                               }
                             }
-                          }
+                          },
+                          "description": "Promote one inbox capture into a single unambiguous experiment page using an idempotent markdown note block."
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Promote captured inbox items into canonical Murph records."
                 },
                 "model": {
                   "type": "object",
@@ -7086,7 +7891,8 @@
                                 }
                               }
                             }
-                          }
+                          },
+                          "description": "Materialize the normalized routing bundle for one inbox capture, including multimodal image-routing eligibility metadata."
                         },
                         "route": {
                           "type": "object",
@@ -7143,15 +7949,19 @@
                                 }
                               }
                             }
-                          }
+                          },
+                          "description": "Use the shared assistant model harness to generate a CLI action plan for one inbox capture.",
+                          "x-incur-hint": "Pass --baseUrl to target a local or other OpenAI-compatible endpoint; omit it to use the AI Gateway model string."
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Build a normalized inbox bundle, attach supported routing images when available, and ask a Vercel AI SDK-backed model to choose canonical CLI actions."
                 }
               }
             }
-          }
+          },
+          "description": "Inbox runtime setup, diagnostics, capture review, and daemon operations."
         },
         "goal": {
           "type": "object",
@@ -7182,7 +7992,17 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Emit a payload template for goal upserts.",
+                  "x-incur-hint": "Edit the emitted payload, save it as goal.json, then pass it back with --input @goal.json or pipe it to --input -. The scaffold output is the current canonical field shape for this command.",
+                  "x-incur-examples": [
+                    {
+                      "description": "Print a template goal payload.",
+                      "options": {
+                        "vault": "./vault"
+                      }
+                    }
+                  ]
                 },
                 "upsert": {
                   "type": "object",
@@ -7209,7 +8029,18 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Upsert one goal from a JSON payload file or stdin.",
+                  "x-incur-hint": "--input accepts @file.json or - so the CLI can load the structured goal payload from disk or stdin. Run goal scaffold first if you need the current canonical field shape.",
+                  "x-incur-examples": [
+                    {
+                      "description": "Upsert one goal from a JSON payload file.",
+                      "options": {
+                        "input": "@goal.json",
+                        "vault": "./vault"
+                      }
+                    }
+                  ]
                 },
                 "show": {
                   "type": "object",
@@ -7232,7 +8063,19 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Show one goal by canonical id or slug.",
+                  "x-incur-examples": [
+                    {
+                      "args": {
+                        "id": "<goal-id>"
+                      },
+                      "description": "Show one goal.",
+                      "options": {
+                        "vault": "./vault"
+                      }
+                    }
+                  ]
                 },
                 "list": {
                   "type": "object",
@@ -7260,17 +8103,30 @@
                         },
                         "limit": {
                           "default": 50,
+                          "description": "Maximum number of results to return.",
                           "type": "integer",
                           "exclusiveMinimum": 0,
                           "maximum": 200
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "List goals through the health read model.",
+                  "x-incur-hint": "Use --limit to cap results.",
+                  "x-incur-examples": [
+                    {
+                      "description": "List goals with a smaller page size.",
+                      "options": {
+                        "limit": 10,
+                        "vault": "./vault"
+                      }
+                    }
+                  ]
                 }
               }
             }
-          }
+          },
+          "description": "Goal registry commands for the health extension surface."
         },
         "condition": {
           "type": "object",
@@ -7301,7 +8157,17 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Emit a payload template for condition upserts.",
+                  "x-incur-hint": "Edit the emitted payload, save it as condition.json, then pass it back with --input @condition.json or pipe it to --input -. The scaffold output is the current canonical field shape for this command.",
+                  "x-incur-examples": [
+                    {
+                      "description": "Print a template condition payload.",
+                      "options": {
+                        "vault": "./vault"
+                      }
+                    }
+                  ]
                 },
                 "upsert": {
                   "type": "object",
@@ -7328,7 +8194,18 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Upsert one condition from a JSON payload file or stdin.",
+                  "x-incur-hint": "--input accepts @file.json or - so the CLI can load the structured condition payload from disk or stdin. Run condition scaffold first if you need the current canonical field shape.",
+                  "x-incur-examples": [
+                    {
+                      "description": "Upsert one condition from a JSON payload file.",
+                      "options": {
+                        "input": "@condition.json",
+                        "vault": "./vault"
+                      }
+                    }
+                  ]
                 },
                 "show": {
                   "type": "object",
@@ -7351,7 +8228,19 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Show one condition by canonical id or slug.",
+                  "x-incur-examples": [
+                    {
+                      "args": {
+                        "id": "<condition-id>"
+                      },
+                      "description": "Show one condition.",
+                      "options": {
+                        "vault": "./vault"
+                      }
+                    }
+                  ]
                 },
                 "list": {
                   "type": "object",
@@ -7379,17 +8268,30 @@
                         },
                         "limit": {
                           "default": 50,
+                          "description": "Maximum number of results to return.",
                           "type": "integer",
                           "exclusiveMinimum": 0,
                           "maximum": 200
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "List conditions through the health read model.",
+                  "x-incur-hint": "Use --limit to cap results.",
+                  "x-incur-examples": [
+                    {
+                      "description": "List conditions with a smaller page size.",
+                      "options": {
+                        "limit": 10,
+                        "vault": "./vault"
+                      }
+                    }
+                  ]
                 }
               }
             }
-          }
+          },
+          "description": "Condition registry commands for the health extension surface."
         },
         "allergy": {
           "type": "object",
@@ -7420,7 +8322,17 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Emit a payload template for allergy upserts.",
+                  "x-incur-hint": "Edit the emitted payload, save it as allergy.json, then pass it back with --input @allergy.json or pipe it to --input -. The scaffold output is the current canonical field shape for this command.",
+                  "x-incur-examples": [
+                    {
+                      "description": "Print a template allergy payload.",
+                      "options": {
+                        "vault": "./vault"
+                      }
+                    }
+                  ]
                 },
                 "upsert": {
                   "type": "object",
@@ -7447,7 +8359,18 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Upsert one allergy from a JSON payload file or stdin.",
+                  "x-incur-hint": "--input accepts @file.json or - so the CLI can load the structured allergy payload from disk or stdin. Run allergy scaffold first if you need the current canonical field shape.",
+                  "x-incur-examples": [
+                    {
+                      "description": "Upsert one allergy from a JSON payload file.",
+                      "options": {
+                        "input": "@allergy.json",
+                        "vault": "./vault"
+                      }
+                    }
+                  ]
                 },
                 "show": {
                   "type": "object",
@@ -7470,7 +8393,19 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Show one allergy by canonical id or slug.",
+                  "x-incur-examples": [
+                    {
+                      "args": {
+                        "id": "<allergy-id>"
+                      },
+                      "description": "Show one allergy.",
+                      "options": {
+                        "vault": "./vault"
+                      }
+                    }
+                  ]
                 },
                 "list": {
                   "type": "object",
@@ -7498,17 +8433,30 @@
                         },
                         "limit": {
                           "default": 50,
+                          "description": "Maximum number of results to return.",
                           "type": "integer",
                           "exclusiveMinimum": 0,
                           "maximum": 200
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "List allergies through the health read model.",
+                  "x-incur-hint": "Use --limit to cap results.",
+                  "x-incur-examples": [
+                    {
+                      "description": "List allergies with a smaller page size.",
+                      "options": {
+                        "limit": 10,
+                        "vault": "./vault"
+                      }
+                    }
+                  ]
                 }
               }
             }
-          }
+          },
+          "description": "Allergy registry commands for the health extension surface."
         },
         "blood-test": {
           "type": "object",
@@ -7539,7 +8487,17 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Emit a payload template for structured blood tests.",
+                  "x-incur-hint": "Edit the emitted payload, save it as blood-test.json, then pass it back with --input @blood-test.json or pipe it to --input -. The scaffold output is the current canonical field shape for this command.",
+                  "x-incur-examples": [
+                    {
+                      "description": "Print a template blood test payload.",
+                      "options": {
+                        "vault": "./vault"
+                      }
+                    }
+                  ]
                 },
                 "upsert": {
                   "type": "object",
@@ -7566,7 +8524,18 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Append one blood test from a JSON payload file or stdin.",
+                  "x-incur-hint": "--input accepts @file.json or - so the CLI can load the structured blood test payload from disk or stdin. Run blood-test scaffold first if you need the current canonical field shape.",
+                  "x-incur-examples": [
+                    {
+                      "description": "Upsert one blood test from a JSON payload file.",
+                      "options": {
+                        "input": "@blood-test.json",
+                        "vault": "./vault"
+                      }
+                    }
+                  ]
                 },
                 "show": {
                   "type": "object",
@@ -7589,7 +8558,19 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Show one blood test.",
+                  "x-incur-examples": [
+                    {
+                      "args": {
+                        "id": "<blood-test-id>"
+                      },
+                      "description": "Show one blood test.",
+                      "options": {
+                        "vault": "./vault"
+                      }
+                    }
+                  ]
                 },
                 "list": {
                   "type": "object",
@@ -7627,17 +8608,30 @@
                         },
                         "limit": {
                           "default": 50,
+                          "description": "Maximum number of results to return.",
                           "type": "integer",
                           "exclusiveMinimum": 0,
                           "maximum": 200
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "List blood tests through the health read model.",
+                  "x-incur-hint": "Use --limit to cap results.",
+                  "x-incur-examples": [
+                    {
+                      "description": "List blood tests with a smaller page size.",
+                      "options": {
+                        "limit": 10,
+                        "vault": "./vault"
+                      }
+                    }
+                  ]
                 }
               }
             }
-          }
+          },
+          "description": "Structured blood-test commands for the health extension surface."
         },
         "family": {
           "type": "object",
@@ -7668,7 +8662,17 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Emit a payload template for family member upserts.",
+                  "x-incur-hint": "Edit the emitted payload, save it as family.json, then pass it back with --input @family.json or pipe it to --input -. The scaffold output is the current canonical field shape for this command.",
+                  "x-incur-examples": [
+                    {
+                      "description": "Print a template family member payload.",
+                      "options": {
+                        "vault": "./vault"
+                      }
+                    }
+                  ]
                 },
                 "upsert": {
                   "type": "object",
@@ -7695,7 +8699,18 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Upsert one family member from a JSON payload file or stdin.",
+                  "x-incur-hint": "--input accepts @file.json or - so the CLI can load the structured family member payload from disk or stdin. Run family scaffold first if you need the current canonical field shape.",
+                  "x-incur-examples": [
+                    {
+                      "description": "Upsert one family member from a JSON payload file.",
+                      "options": {
+                        "input": "@family.json",
+                        "vault": "./vault"
+                      }
+                    }
+                  ]
                 },
                 "show": {
                   "type": "object",
@@ -7718,7 +8733,19 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Show one family member by canonical id or slug.",
+                  "x-incur-examples": [
+                    {
+                      "args": {
+                        "id": "<family-member-id>"
+                      },
+                      "description": "Show one family member.",
+                      "options": {
+                        "vault": "./vault"
+                      }
+                    }
+                  ]
                 },
                 "list": {
                   "type": "object",
@@ -7741,17 +8768,30 @@
                         },
                         "limit": {
                           "default": 50,
+                          "description": "Maximum number of results to return.",
                           "type": "integer",
                           "exclusiveMinimum": 0,
                           "maximum": 200
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "List family members through the health read model.",
+                  "x-incur-hint": "Use --limit to cap results.",
+                  "x-incur-examples": [
+                    {
+                      "description": "List family members with a smaller page size.",
+                      "options": {
+                        "limit": 10,
+                        "vault": "./vault"
+                      }
+                    }
+                  ]
                 }
               }
             }
-          }
+          },
+          "description": "Family member registry commands for the health extension surface."
         },
         "genetics": {
           "type": "object",
@@ -7782,7 +8822,17 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Emit a payload template for genetic variant upserts.",
+                  "x-incur-hint": "Edit the emitted payload, save it as genetics.json, then pass it back with --input @genetics.json or pipe it to --input -. The scaffold output is the current canonical field shape for this command.",
+                  "x-incur-examples": [
+                    {
+                      "description": "Print a template genetic variant payload.",
+                      "options": {
+                        "vault": "./vault"
+                      }
+                    }
+                  ]
                 },
                 "upsert": {
                   "type": "object",
@@ -7809,7 +8859,18 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Upsert one genetic variant from a JSON payload file or stdin.",
+                  "x-incur-hint": "--input accepts @file.json or - so the CLI can load the structured genetic variant payload from disk or stdin. Run genetics scaffold first if you need the current canonical field shape.",
+                  "x-incur-examples": [
+                    {
+                      "description": "Upsert one genetic variant from a JSON payload file.",
+                      "options": {
+                        "input": "@genetics.json",
+                        "vault": "./vault"
+                      }
+                    }
+                  ]
                 },
                 "show": {
                   "type": "object",
@@ -7832,7 +8893,19 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Show one genetic variant by canonical id or slug.",
+                  "x-incur-examples": [
+                    {
+                      "args": {
+                        "id": "<genetic-variant-id>"
+                      },
+                      "description": "Show one genetic variant.",
+                      "options": {
+                        "vault": "./vault"
+                      }
+                    }
+                  ]
                 },
                 "list": {
                   "type": "object",
@@ -7860,17 +8933,30 @@
                         },
                         "limit": {
                           "default": 50,
+                          "description": "Maximum number of results to return.",
                           "type": "integer",
                           "exclusiveMinimum": 0,
                           "maximum": 200
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "List genetic variants through the health read model.",
+                  "x-incur-hint": "Use --limit to cap results.",
+                  "x-incur-examples": [
+                    {
+                      "description": "List genetic variants with a smaller page size.",
+                      "options": {
+                        "limit": 10,
+                        "vault": "./vault"
+                      }
+                    }
+                  ]
                 }
               }
             }
-          }
+          },
+          "description": "Genetic variant registry commands for the health extension surface."
         },
         "supplement": {
           "type": "object",
@@ -7901,7 +8987,17 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Emit a payload template for one supplement product.",
+                  "x-incur-hint": "The supplement payload supports product metadata plus an ingredients array for compound rollups.",
+                  "x-incur-examples": [
+                    {
+                      "description": "Print a template supplement payload.",
+                      "options": {
+                        "vault": "./vault"
+                      }
+                    }
+                  ]
                 },
                 "upsert": {
                   "type": "object",
@@ -7928,7 +9024,18 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Upsert one supplement from a JSON payload file or stdin.",
+                  "x-incur-hint": "--input accepts @file.json or - so the CLI can load a supplement payload with product metadata and ingredients.",
+                  "x-incur-examples": [
+                    {
+                      "description": "Upsert one supplement product from a JSON payload file.",
+                      "options": {
+                        "input": "@supplement.json",
+                        "vault": "./vault"
+                      }
+                    }
+                  ]
                 },
                 "show": {
                   "type": "object",
@@ -7951,7 +9058,20 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Show one supplement by canonical id or slug.",
+                  "x-incur-hint": "Use the canonical supplement id or the supplement slug.",
+                  "x-incur-examples": [
+                    {
+                      "args": {
+                        "id": "<supplement-id>"
+                      },
+                      "description": "Show one saved supplement product.",
+                      "options": {
+                        "vault": "./vault"
+                      }
+                    }
+                  ]
                 },
                 "list": {
                   "type": "object",
@@ -7979,13 +9099,26 @@
                         },
                         "limit": {
                           "default": 50,
+                          "description": "Maximum number of results to return.",
                           "type": "integer",
                           "exclusiveMinimum": 0,
                           "maximum": 200
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "List supplements through the health read model.",
+                  "x-incur-hint": "Use --status active to focus on current supplements or --limit to cap results.",
+                  "x-incur-examples": [
+                    {
+                      "description": "List active supplements with a smaller page size.",
+                      "options": {
+                        "limit": 10,
+                        "status": "active",
+                        "vault": "./vault"
+                      }
+                    }
+                  ]
                 },
                 "stop": {
                   "type": "object",
@@ -8007,13 +9140,36 @@
                           "maxLength": 128
                         },
                         "stoppedOn": {
+                          "description": "Optional calendar day when the supplement stopped. Defaults to today.",
                           "type": "string",
-                          "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
-                          "description": "Calendar date in YYYY-MM-DD form."
+                          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Stop one supplement while preserving its canonical id.",
+                  "x-incur-hint": "Use the canonical supplement id so the stop event is attached to the existing supplement record.",
+                  "x-incur-examples": [
+                    {
+                      "args": {
+                        "id": "<supplement-id>"
+                      },
+                      "description": "Stop a supplement today.",
+                      "options": {
+                        "vault": "./vault"
+                      }
+                    },
+                    {
+                      "args": {
+                        "id": "<supplement-id>"
+                      },
+                      "description": "Stop a supplement on a specific calendar day.",
+                      "options": {
+                        "stoppedOn": "2026-03-12",
+                        "vault": "./vault"
+                      }
+                    }
+                  ]
                 },
                 "rename": {
                   "type": "object",
@@ -8047,7 +9203,21 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Rename one supplement product while preserving its canonical id.",
+                  "x-incur-hint": "Use the canonical supplement id or current slug; the CLI reuses the existing supplement record instead of creating a new one.",
+                  "x-incur-examples": [
+                    {
+                      "args": {
+                        "lookup": "<supplement-id>"
+                      },
+                      "description": "Rename a supplement and let the slug move with the new title.",
+                      "options": {
+                        "title": "Morning Protein Drink",
+                        "vault": "./vault"
+                      }
+                    }
+                  ]
                 },
                 "compound": {
                   "type": "object",
@@ -8078,6 +9248,7 @@
                                 },
                                 "limit": {
                                   "default": 50,
+                                  "description": "Maximum number of results to return.",
                                   "type": "integer",
                                   "exclusiveMinimum": 0,
                                   "maximum": 200
@@ -8089,7 +9260,25 @@
                                 }
                               }
                             }
-                          }
+                          },
+                          "description": "List rolled-up supplement compounds across supplements.",
+                          "x-incur-hint": "The compound ledger defaults to active supplements so overlapping ingredients sum into a single canonical row.",
+                          "x-incur-examples": [
+                            {
+                              "description": "List active compounds from current supplements.",
+                              "options": {
+                                "vault": "./vault"
+                              }
+                            },
+                            {
+                              "description": "List stopped-supplement compounds with a smaller page size.",
+                              "options": {
+                                "limit": 10,
+                                "status": "stopped",
+                                "vault": "./vault"
+                              }
+                            }
+                          ]
                         },
                         "show": {
                           "type": "object",
@@ -8117,15 +9306,39 @@
                                 }
                               }
                             }
-                          }
+                          },
+                          "description": "Show one rolled-up supplement compound by name or lookup id.",
+                          "x-incur-hint": "Lookup ids are kebab-cased compound names derived from the canonical compound field.",
+                          "x-incur-examples": [
+                            {
+                              "args": {
+                                "compound": "vitamin-c"
+                              },
+                              "description": "Show one rolled-up compound by lookup id.",
+                              "options": {
+                                "vault": "./vault"
+                              }
+                            },
+                            {
+                              "args": {
+                                "compound": "Magnesium"
+                              },
+                              "description": "Show one rolled-up compound by display name.",
+                              "options": {
+                                "vault": "./vault"
+                              }
+                            }
+                          ]
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Derived canonical ledger of active compounds across supplements."
                 }
               }
             }
-          }
+          },
+          "description": "Supplement product commands plus a derived active-compound ledger."
         },
         "protocol": {
           "type": "object",
@@ -8156,7 +9369,17 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Emit a payload template for protocol upserts.",
+                  "x-incur-hint": "Edit the emitted payload, save it as protocol.json, then pass it back with --input @protocol.json or pipe it to --input -. The scaffold output is the current canonical field shape for this command.",
+                  "x-incur-examples": [
+                    {
+                      "description": "Print a template protocol payload.",
+                      "options": {
+                        "vault": "./vault"
+                      }
+                    }
+                  ]
                 },
                 "upsert": {
                   "type": "object",
@@ -8183,7 +9406,18 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Upsert one protocol from a JSON payload file or stdin.",
+                  "x-incur-hint": "--input accepts @file.json or - so the CLI can load the structured protocol payload from disk or stdin. Run protocol scaffold first if you need the current canonical field shape.",
+                  "x-incur-examples": [
+                    {
+                      "description": "Upsert one protocol from a JSON payload file.",
+                      "options": {
+                        "input": "@protocol.json",
+                        "vault": "./vault"
+                      }
+                    }
+                  ]
                 },
                 "show": {
                   "type": "object",
@@ -8206,7 +9440,19 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Show one protocol by canonical id or slug.",
+                  "x-incur-examples": [
+                    {
+                      "args": {
+                        "id": "<protocol-id>"
+                      },
+                      "description": "Show one protocol.",
+                      "options": {
+                        "vault": "./vault"
+                      }
+                    }
+                  ]
                 },
                 "list": {
                   "type": "object",
@@ -8234,13 +9480,25 @@
                         },
                         "limit": {
                           "default": 50,
+                          "description": "Maximum number of results to return.",
                           "type": "integer",
                           "exclusiveMinimum": 0,
                           "maximum": 200
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "List protocols through the health read model.",
+                  "x-incur-hint": "Use --limit to cap results.",
+                  "x-incur-examples": [
+                    {
+                      "description": "List protocols with a smaller page size.",
+                      "options": {
+                        "limit": 10,
+                        "vault": "./vault"
+                      }
+                    }
+                  ]
                 },
                 "stop": {
                   "type": "object",
@@ -8268,16 +9526,41 @@
                         }
                       }
                     }
-                  }
+                  },
+                  "description": "Stop one protocol while preserving its canonical id.",
+                  "x-incur-hint": "Use the canonical protocol id so the stop event is attached to the existing registry record.",
+                  "x-incur-examples": [
+                    {
+                      "args": {
+                        "protocolId": "<protocol-id>"
+                      },
+                      "description": "Stop a protocol today.",
+                      "options": {
+                        "vault": "./vault"
+                      }
+                    },
+                    {
+                      "args": {
+                        "protocolId": "<protocol-id>"
+                      },
+                      "description": "Stop a protocol on a specific calendar day.",
+                      "options": {
+                        "stoppedOn": "2026-03-12",
+                        "vault": "./vault"
+                      }
+                    }
+                  ]
                 }
               }
             }
-          }
+          },
+          "description": "Protocol registry commands for the health extension surface."
         }
       }
     },
     "$schema": {
       "type": "string"
     }
-  }
+  },
+  "description": "Typed operator surface for the Murph vault baseline"
 }

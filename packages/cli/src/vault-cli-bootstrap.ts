@@ -35,7 +35,7 @@ export function createVaultCliShell(): Cli.Cli {
       files: [...CLI_CONFIG_FILES],
     },
     sync: {
-      depth: 1,
+      depth: 3,
       suggestions: CLI_SYNC_SUGGESTIONS,
     },
     version: packageJson.version,

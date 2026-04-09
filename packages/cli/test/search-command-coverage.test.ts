@@ -203,12 +203,14 @@ test('search query normalizes repeatable filters and rejects blank text', async 
   const rejected = await runSearchCli(cli, [
     'search',
     'query',
+    '--text',
+    '   ',
     '--vault',
     '/vaults/search',
   ])
   assert.equal(rejected.envelope.ok, false)
   if (rejected.envelope.ok) {
-    throw new Error('Expected search query to reject a missing text filter.')
+    throw new Error('Expected search query to reject blank search text.')
   }
   assert.equal(rejected.envelope.error.code, 'invalid_query')
 

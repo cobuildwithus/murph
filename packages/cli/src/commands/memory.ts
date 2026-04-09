@@ -28,6 +28,16 @@ const memoryUpdateOptionsSchema = vaultOptionSchema.extend({
   ),
 });
 
+const memoryIdArgSchema = z
+  .string()
+  .min(1)
+  .describe("Canonical memory record id.");
+
+const memoryTextArgSchema = z
+  .string()
+  .min(1)
+  .describe("Memory text to store in the canonical memory document.");
+
 const memoryShowResultSchema = z.object({
   vault: z.string().min(1),
   document: memoryDocumentSnapshotSchema,
@@ -56,7 +66,9 @@ export function registerMemoryCommands(cli: Cli.Cli) {
   memory.command("show", {
     description: "Show the canonical memory document or one memory record.",
     args: z.object({
-      memoryId: z.string().min(1).optional(),
+      memoryId: memoryIdArgSchema
+        .optional()
+        .describe("Optional canonical memory record id to show; omit to return the whole memory document."),
     }),
     options: vaultOptionSchema,
     output: memoryShowResultSchema,
@@ -74,7 +86,7 @@ export function registerMemoryCommands(cli: Cli.Cli) {
   memory.command("upsert", {
     description: "Add one new canonical memory record.",
     args: z.object({
-      text: z.string().min(1),
+      text: memoryTextArgSchema,
     }),
     options: memoryUpsertOptionsSchema,
     output: memoryUpsertResultSchema,
@@ -95,8 +107,8 @@ export function registerMemoryCommands(cli: Cli.Cli) {
   memory.command("update", {
     description: "Update one existing canonical memory record by id.",
     args: z.object({
-      memoryId: z.string().min(1),
-      text: z.string().min(1),
+      memoryId: memoryIdArgSchema,
+      text: memoryTextArgSchema,
     }),
     options: memoryUpdateOptionsSchema,
     output: memoryUpsertResultSchema,
@@ -118,7 +130,7 @@ export function registerMemoryCommands(cli: Cli.Cli) {
   memory.command("forget", {
     description: "Delete one canonical memory record by id.",
     args: z.object({
-      memoryId: z.string().min(1),
+      memoryId: memoryIdArgSchema,
     }),
     options: vaultOptionSchema,
     output: memoryForgetResultSchema,

@@ -1,5 +1,40 @@
 import { isValidIanaTimeZone } from '@murphai/contracts'
+import * as Query from '@murphai/query'
 import { z } from 'zod'
+
+const queryRecordTypeFallbackValues = [
+  'allergy',
+  'assessment',
+  'audit',
+  'condition',
+  'core',
+  'event',
+  'experiment',
+  'family',
+  'food',
+  'genetics',
+  'goal',
+  'journal',
+  'protocol',
+  'provider',
+  'recipe',
+  'sample',
+  'workout_format',
+] as const
+
+function resolveQueryRecordTypeValues(): readonly string[] {
+  try {
+    return Array.isArray(Query.ALL_QUERY_ENTITY_FAMILIES)
+      ? Query.ALL_QUERY_ENTITY_FAMILIES
+      : queryRecordTypeFallbackValues
+  } catch {
+    return queryRecordTypeFallbackValues
+  }
+}
+
+const queryRecordTypeValues = resolveQueryRecordTypeValues()
+const queryRecordTypeDescription =
+  `Optional query record families. Repeat --record-type for multiple values: ${queryRecordTypeValues.join(', ')}.`
 
 export const isoTimestampSchema = z
   .string()
@@ -370,9 +405,7 @@ export const listFilterSchema = z.object({
   recordType: z
     .array(z.string().min(1))
     .optional()
-    .describe(
-      'Optional query record families such as event, journal, assessment, goal, condition, allergy, protocol, history, family, genetics, food, recipe, provider, or sample.',
-    ),
+    .describe(queryRecordTypeDescription),
   kind: z
     .string()
     .min(1)

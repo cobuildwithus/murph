@@ -61,6 +61,21 @@ import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import type { VaultServices } from '@murphai/vault-usecases'
 import { requestIdSchema } from '@murphai/operator-config/vault-cli-contracts'
 
+const assistantIdentityRoutingDescription =
+  'Optional local assistant identity id for multi-user routing. Email routes should use the configured AgentMail inbox id.'
+
+const assistantParticipantRoutingDescription =
+  'Optional remote participant identifier when the transport addresses a person directly. Use the transport-native participant value, such as an iMessage phone number/email handle or an email correspondent; thread-addressed transports may rely on --sourceThread instead.'
+
+const assistantSourceThreadRoutingDescription =
+  'Optional upstream thread identifier when the transport routes by thread/chat. Use the transport-native thread value, such as a Telegram chat id or `<chatId>:topic:<messageThreadId>` topic route; direct-recipient routes can often leave this unset.'
+
+const assistantOneSendDeliveryTargetRoutingDescription =
+  'Optional one-send outbound destination in the transport-native send format. For iMessage use a phone number, email handle, or chat id; for Telegram use a chat id or `<chatId>:topic:<messageThreadId>`; for Linq use a chat id; for email use a recipient address. Reply-in-place sessions can often omit this and reuse the saved thread.'
+
+const assistantSavedDeliveryTargetRoutingDescription =
+  'Optional saved outbound destination in the transport-native send format. For iMessage use a phone number, email handle, or chat id; for Telegram use a chat id or `<chatId>:topic:<messageThreadId>`; for Linq use a chat id; for email use a recipient address.'
+
 const assistantSessionOptionFields = {
   session: z
     .string()
@@ -83,17 +98,17 @@ const assistantSessionOptionFields = {
     .string()
     .min(1)
     .optional()
-    .describe('Optional local assistant identity id for multi-user routing.'),
+    .describe(assistantIdentityRoutingDescription),
   participant: z
     .string()
     .min(1)
     .optional()
-    .describe('Optional remote actor id for multi-user routing and direct-conversation binding.'),
+    .describe(assistantParticipantRoutingDescription),
   sourceThread: z
     .string()
     .min(1)
     .optional()
-    .describe('Optional upstream thread id from the source channel. Thread ids anchor stored conversation bindings when present.'),
+    .describe(assistantSourceThreadRoutingDescription),
 }
 
 const assistantProviderOptionFields = {
@@ -138,7 +153,9 @@ const assistantProviderOptionFields = {
     .string()
     .min(1)
     .optional()
-    .describe('Optional JSON object of extra HTTP headers for OpenAI-compatible local assistant chat sessions.'),
+    .describe(
+      'Optional flat JSON object of extra HTTP headers with string values for OpenAI-compatible local assistant chat sessions.',
+    ),
   sandbox: z
     .enum(assistantSandboxValues)
     .optional()
@@ -175,9 +192,7 @@ const assistantDeliveryOptionFields = {
     .string()
     .min(1)
     .optional()
-    .describe(
-      'Optional one-send outbound target override. For iMessage this can be a phone number, email handle, or chat id; for Telegram it can be a chat id or <chatId>:topic:<messageThreadId>; for Linq it can be a chat id; for email it can be a recipient address while thread-bound sessions reply in place.',
-  ),
+    .describe(assistantOneSendDeliveryTargetRoutingDescription),
 }
 
 const assistantSelfDeliveryTargetOptionFields = {
@@ -185,24 +200,24 @@ const assistantSelfDeliveryTargetOptionFields = {
     .string()
     .min(1)
     .optional()
-    .describe('Optional local assistant identity id to reuse for this saved channel target.'),
+    .describe(
+      'Optional local assistant identity id to reuse for this saved channel target. Email targets require the configured AgentMail inbox id here.',
+    ),
   participant: z
     .string()
     .min(1)
     .optional()
-    .describe('Optional remote actor id to reuse for this saved channel target.'),
+    .describe(assistantParticipantRoutingDescription),
   sourceThread: z
     .string()
     .min(1)
     .optional()
-    .describe('Optional upstream thread id to reuse for this saved channel target.'),
+    .describe(assistantSourceThreadRoutingDescription),
   deliveryTarget: z
     .string()
     .min(1)
     .optional()
-    .describe(
-      'Optional explicit outbound destination to save for this channel target, such as a phone number, Telegram chat id, or email address.',
-    ),
+    .describe(assistantSavedDeliveryTargetRoutingDescription),
 }
 
 function assertAssistantSelfDeliveryTargetInput(input: {
@@ -538,7 +553,9 @@ const assistantRunOptionsSchema = withBaseOptions({
     .string()
     .min(1)
     .optional()
-    .describe('Optional JSON object of extra HTTP headers for the routing endpoint.'),
+    .describe(
+      'Optional flat JSON object of extra HTTP headers with string values for the routing endpoint.',
+    ),
   scanIntervalMs: z
     .number()
     .int()
@@ -858,9 +875,7 @@ export function registerAssistantCommands(
           .string()
           .min(1)
           .optional()
-          .describe(
-            'Optional one-send outbound target override. For iMessage this can be a phone number, email handle, or chat id; for Telegram it can be a chat id or <chatId>:topic:<messageThreadId>; for Linq it can be a chat id; for email it can be a recipient address while thread-bound sessions reply in place.',
-          ),
+          .describe(assistantOneSendDeliveryTargetRoutingDescription),
       }),
       output: assistantDeliverResultSchema,
       async run(context) {
@@ -944,9 +959,10 @@ export function registerAssistantCommands(
           .min(1)
           .describe('Outbound channel to save, such as telegram, imessage, linq, or email.'),
       }),
-      description: 'Save or replace the local default outbound target for one channel.',
+      description:
+        'Save or replace the local default outbound target for one channel. Provide at least one of --participant, --sourceThread, or --deliveryTarget; saved email targets also require --identity with the configured AgentMail inbox id.',
       hint:
-        'Use this after the user gives you a phone number, Telegram chat, or email target so later actions can reuse it without asking again.',
+        'Provide at least one of --participant, --sourceThread, or --deliveryTarget. Saved email targets also require --identity with the configured AgentMail inbox id.',
       options: z.object({
         requestId: requestIdSchema,
         ...assistantSelfDeliveryTargetOptionFields,

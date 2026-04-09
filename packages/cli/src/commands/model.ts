@@ -45,55 +45,71 @@ const modelCommandOptionsSchema = z.object({
   show: z
     .boolean()
     .optional()
-    .describe('Show the saved default assistant backend without changing it.'),
+    .describe('Show the saved default assistant backend without changing it. When set, no update options are allowed.'),
   preset: modelCommandPresetSchema
     .optional()
-    .describe('Assistant backend preset to save: Codex or an OpenAI-compatible endpoint.'),
+    .describe(
+      'Assistant backend preset to save. Required for non-interactive updates when Murph cannot infer or reuse the backend, and required when switching between Codex and an OpenAI-compatible endpoint.',
+    ),
   providerPreset: setupAssistantProviderPresetSchema
     .optional()
-    .describe('Optional named OpenAI-compatible provider preset to seed the endpoint prompts.'),
+    .describe(
+      'Optional named OpenAI-compatible provider preset. Only applies with `--preset openai-compatible`; seeds endpoint defaults for prompts or non-interactive saves.',
+    ),
   model: z
     .string()
     .min(1)
     .optional()
-    .describe('Default model to save for the selected backend.'),
+    .describe(
+      'Default model to save for the selected backend. In non-interactive mode, pair this with `--preset` unless Murph can reuse the currently saved backend.',
+    ),
   baseUrl: z
     .string()
     .min(1)
     .optional()
-    .describe('OpenAI-compatible base URL to save, such as http://127.0.0.1:11434/v1.'),
+    .describe(
+      'OpenAI-compatible base URL to save, such as http://127.0.0.1:11434/v1. Only applies with `--preset openai-compatible`.',
+    ),
   apiKeyEnv: z
     .string()
     .min(1)
     .optional()
-    .describe('Environment variable name that should hold the OpenAI-compatible API key.'),
+    .describe(
+      'Environment variable name that should hold the OpenAI-compatible API key. Only applies with `--preset openai-compatible`.',
+    ),
   providerName: z
     .string()
     .min(1)
     .optional()
-    .describe('Stable label for the saved OpenAI-compatible provider.'),
+    .describe(
+      'Stable label for the saved OpenAI-compatible provider. Only applies with `--preset openai-compatible`.',
+    ),
   zeroDataRetention: z
     .boolean()
     .optional()
-    .describe('Request zero data retention on Vercel AI Gateway assistant turns.'),
+    .describe(
+      'Request zero data retention on Vercel AI Gateway assistant turns. Only applies with `--preset openai-compatible`.',
+    ),
   codexCommand: z
     .string()
     .min(1)
     .optional()
-    .describe('Optional Codex CLI executable path. Defaults to codex.'),
+    .describe('Optional Codex CLI executable path. Only applies with `--preset codex`; defaults to `codex`.'),
   profile: z
     .string()
     .min(1)
     .optional()
-    .describe('Optional Codex profile name to save.'),
+    .describe('Optional Codex profile name to save. Only applies with `--preset codex`.'),
   reasoningEffort: z
     .enum(assistantReasoningEffortValues)
     .optional()
-    .describe('Optional assistant reasoning effort default to save.'),
+    .describe(
+      'Optional assistant reasoning effort default to save for the selected backend. Use the matching `--preset` when Murph cannot infer the backend non-interactively.',
+    ),
   oss: z
     .boolean()
     .optional()
-    .describe('Save a local Codex OSS model target instead of the signed-in Codex cloud path.'),
+    .describe('Save a local Codex OSS model target instead of the signed-in Codex cloud path. Only applies with `--preset codex`.'),
 })
 
 const modelCommandResultSchema = z
@@ -190,7 +206,7 @@ export function registerModelCommands(
       },
     ],
     hint:
-      'Run `murph model` in a TTY to reopen the provider/model picker, or use `--show` for the current saved backend.',
+      'Run `murph model` in a TTY to reopen the provider/model picker, or pass `--preset` plus backend-specific options to update the saved backend non-interactively.',
     options: modelCommandOptionsSchema,
     output: modelCommandResultSchema,
     async run({ options }) {

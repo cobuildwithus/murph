@@ -11,14 +11,14 @@ import {
   type FactoryCommandConfig,
   type InputFileCommandConfig,
   type NamedArgCommandConfig,
+  commonDateRangeOptionDescriptions,
+  commonListLimitOptionSchema,
   createCommonListCommand,
   createFactoryCommandGroup,
   createInputFileFactoryCommand,
   createNamedArgFactoryCommand,
   createNamedArgSchema,
 } from './command-factory-primitives.js'
-
-const limitOptionSchema = z.number().int().positive().max(200).default(50)
 
 interface RegistryDocEntityGroupConfig<
   TScaffold,
@@ -160,7 +160,7 @@ export function createRegistryDocEntityGroup<
         examples: config.list.examples,
         hint: config.list.hint,
         options: {
-          limit: limitOptionSchema,
+          limit: commonListLimitOptionSchema,
           status: config.list.statusOption,
         },
         output: config.list.output,
@@ -226,14 +226,14 @@ export function createLedgerEventEntityGroup<
         options: {
           experiment: config.list.experimentOption,
           from: {
-            description: 'Optional inclusive lower date bound in YYYY-MM-DD form.',
+            description: commonDateRangeOptionDescriptions.from,
             name: 'from',
           },
           kind: config.list.kindOption,
-          limit: limitOptionSchema,
+          limit: commonListLimitOptionSchema,
           tag: config.list.tagOption,
           to: {
-            description: 'Optional inclusive upper date bound in YYYY-MM-DD form.',
+            description: commonDateRangeOptionDescriptions.to,
             name: 'to',
           },
         },
@@ -287,12 +287,12 @@ export function createArtifactBackedEntityGroup<
         optionNames,
         options: {
           from: {
-            description: 'Optional inclusive start date in YYYY-MM-DD form.',
+            description: commonDateRangeOptionDescriptions.from,
             name: optionNames.from,
           },
           limit: config.list.limitOption,
           to: {
-            description: 'Optional inclusive end date in YYYY-MM-DD form.',
+            description: commonDateRangeOptionDescriptions.to,
             name: optionNames.to,
           },
         },
@@ -349,7 +349,7 @@ export function createLifecycleEntityGroup<
         examples: config.list.examples,
         hint: config.list.hint,
         options: {
-          limit: limitOptionSchema,
+          limit: commonListLimitOptionSchema,
           status: config.list.statusOption,
         },
         output: config.list.output,

@@ -24,6 +24,29 @@ const accountIdSchema = z
   .min(1)
   .describe('Device sync account id returned by the control plane.')
 
+const invalidReturnToCharacterPattern = /[\u0000-\u001F\u007F]/u
+
+function isDeviceConnectReturnTo(value: string): boolean {
+  if (invalidReturnToCharacterPattern.test(value)) {
+    return false
+  }
+
+  if (
+    value.startsWith('/')
+    && !value.startsWith('//')
+    && !value.includes('\\')
+  ) {
+    return true
+  }
+
+  try {
+    const parsed = new URL(value)
+    return parsed.username.length === 0 && parsed.password.length === 0
+  } catch {
+    return false
+  }
+}
+
 const deviceControlOptionsSchema = withBaseOptions({
   baseUrl: deviceSyncBaseUrlSchema
     .optional()
@@ -79,10 +102,14 @@ export function registerDeviceCommands(
     options: deviceControlOptionsSchema.extend({
       returnTo: z
         .string()
-        .url()
+        .min(1)
+        .refine(
+          isDeviceConnectReturnTo,
+          'Expected a root-relative path like /settings/devices or an absolute URL without embedded credentials.',
+        )
         .optional()
         .describe(
-          'Optional post-connect redirect. device-syncd accepts relative paths or configured allowed origins.',
+          'Optional post-connect redirect. Accepts a root-relative path like /settings/devices or an absolute URL; device-syncd still rejects absolute URLs outside its allowed origin list.',
         ),
       open: z
         .boolean()
