@@ -7,7 +7,10 @@ import {
   resolveMurphAppVitestMaxWorkers,
   resolveMurphVitestConcurrency,
 } from "../../config/vitest-parallelism.js";
-import { murphVitestNoTimeouts } from "../../config/vitest-timeouts.js";
+import {
+  murphVitestLongRunningTimeouts,
+  murphVitestNoTimeouts,
+} from "../../config/vitest-timeouts.js";
 
 import { cloudflareVitestAliases } from "./vitest.shared.js";
 import { resolveVitestBucketFiles } from "../../config/vitest-test-buckets.js";
@@ -36,7 +39,9 @@ function createCloudflareNodeProject(name: string, fileNames: readonly string[])
       alias: cloudflareNodeAliases,
     },
     test: {
-      ...murphVitestNoTimeouts,
+      ...(name === "cloudflare-node-runner"
+        ? murphVitestLongRunningTimeouts
+        : murphVitestNoTimeouts),
       name,
       environment: "node",
       ...cloudflareNodeVitestConcurrency,

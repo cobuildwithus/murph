@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { defineProject } from "vitest/config";
 
 import { resolveMurphVitestConcurrency } from "../../config/vitest-parallelism.js";
-import { murphVitestNoTimeouts } from "../../config/vitest-timeouts.js";
+import { murphVitestLongRunningTimeouts } from "../../config/vitest-timeouts.js";
 
 import { cloudflareVitestAliases } from "./vitest.shared.js";
 
@@ -26,7 +26,7 @@ export default defineProject({
     ],
   },
   test: {
-    ...murphVitestNoTimeouts,
+    ...murphVitestLongRunningTimeouts,
     name: "cloudflare-node",
     environment: "node",
     ...resolveMurphVitestConcurrency(),
