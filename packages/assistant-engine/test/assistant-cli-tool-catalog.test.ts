@@ -160,7 +160,7 @@ describe('assistant CLI tool catalogs', () => {
     )
     expect(providerTurnCatalog.hasTool('assistant.knowledge.list')).toBe(true)
     expect(providerTurnCatalog.hasTool('assistant.knowledge.upsert')).toBe(true)
-    expect(providerTurnCatalog.hasTool('murph.cli.run')).toBe(true)
+    expect(providerTurnCatalog.hasTool('vault.cli.run')).toBe(true)
     expect(providerTurnCatalog.hasTool('vault.fs.readText')).toBe(true)
     expect(providerTurnCatalog.hasTool('vault.show')).toBe(false)
     expect(providerTurnCatalog.hasTool('web.fetch')).toBe(true)
@@ -177,7 +177,7 @@ describe('assistant CLI tool catalogs', () => {
   it('normalizes capability metadata, binds preferred hosts, and emits preview execution results', async () => {
     const cliCapability = defineAssistantCapabilityTool(
       {
-        name: 'murph.cli.run',
+        name: 'vault.cli.run',
         description: 'Execute Murph commands.',
         inputSchema: createEchoSchema(),
         inputExample: {
@@ -235,7 +235,7 @@ describe('assistant CLI tool catalogs', () => {
     const listed = catalog.listTools()
     expect(listed).toEqual([
       expect.objectContaining({
-        name: 'murph.cli.run',
+        name: 'vault.cli.run',
         selectedHostKind: 'cli-backed',
         preferredHostKind: 'cli-backed',
         mutationSemantics: 'mixed',

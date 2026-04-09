@@ -156,16 +156,16 @@ test('formatAssistantRunEventForTerminal shows safe command labels by default', 
 test('formatAssistantRunEventForTerminal shows safe tool labels by default', () => {
   const event: AssistantRunEvent = {
     captureId: 'cap_safe_123',
-    details: 'Tool murph.cli.run',
+    details: 'Tool vault.cli.run',
     providerKind: 'tool',
     providerState: 'completed',
-    safeDetails: 'finished murph.cli.run',
+    safeDetails: 'finished vault.cli.run',
     type: 'capture.reply-progress',
   }
 
   const message = formatAssistantRunEventForTerminal(event)
 
-  assert.equal(message, 'reply-progress cap_safe_123: finished murph.cli.run')
+  assert.equal(message, 'reply-progress cap_safe_123: finished vault.cli.run')
 })
 
 test('formatAssistantRunEventForTerminal keeps safe auto-reply heartbeat details visible by default', () => {
@@ -586,7 +586,7 @@ test.sequential(
 )
 
 test.sequential(
-  'provider-turn murph.cli.run falls back to the workspace CLI when vault-cli is unavailable on PATH',
+  'provider-turn vault.cli.run falls back to the workspace CLI when vault-cli is unavailable on PATH',
   async () => {
     const parent = await mkdtemp(path.join(tmpdir(), 'murph-provider-turn-cli-fallback-'))
     const vaultRoot = path.join(parent, 'vault')
@@ -607,7 +607,7 @@ test.sequential(
       mode: 'apply',
       calls: [
         {
-          tool: 'murph.cli.run',
+          tool: 'vault.cli.run',
           input: {
             args: ['--version'],
           },

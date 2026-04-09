@@ -479,7 +479,7 @@ function resolveAssistantCommandAccessMode(input: {
       return hasRouteToolRuntimeAccess({
         providerCapabilities: input.providerCapabilities,
         toolCatalog: input.toolCatalog,
-        toolNames: ['murph.cli.run'],
+        toolNames: ['vault.cli.run'],
       })
         ? 'bound-tools'
         : 'none'

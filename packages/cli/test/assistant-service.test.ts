@@ -2038,7 +2038,7 @@ test('sendAssistantMessage replays the local transcript for OpenAI-compatible se
     const firstToolCatalog = firstCall?.toolRuntime?.toolCatalog as
       | AssistantToolCatalog
       | undefined
-    assert.equal(firstToolCatalog?.hasTool('murph.cli.run'), true)
+    assert.equal(firstToolCatalog?.hasTool('vault.cli.run'), true)
     assert.deepEqual(secondCall?.conversationMessages, [
       {
         role: 'user',
@@ -2127,7 +2127,7 @@ test('sendAssistantMessage gives OpenAI-compatible auto-reply turns the CLI-firs
 
     assert.equal(providerCall?.provider, 'openai-compatible')
     assert.equal('capabilityRegistry' in (providerCall?.toolRuntime ?? {}), false)
-    assert.equal(toolCatalog?.hasTool('murph.cli.run'), true)
+    assert.equal(toolCatalog?.hasTool('vault.cli.run'), true)
     assert.equal(toolCatalog?.hasTool('vault.fs.readText'), true)
     assert.equal(toolCatalog?.hasTool('assistant.state.show'), false)
     assert.equal(toolCatalog?.hasTool('assistant.memory.search'), false)
@@ -2155,7 +2155,7 @@ test('sendAssistantMessage gives OpenAI-compatible auto-reply turns the CLI-firs
     )
     assert.match(
       providerCall?.systemPrompt ?? '',
-      /If you need the operator-facing CLI surface itself, use `murph\.cli\.run` for knowledge work only when you truly need/u,
+      /If you need the operator-facing CLI surface itself, use `vault\.cli\.run` for knowledge work only when you truly need/u,
     )
     assert.match(
       providerCall?.systemPrompt ?? '',
@@ -2178,19 +2178,19 @@ test('sendAssistantMessage gives OpenAI-compatible auto-reply turns the CLI-firs
       mode: 'apply',
       calls: [
         {
-          tool: 'murph.cli.run',
+          tool: 'vault.cli.run',
           input: {
             args: ['assistant', 'session', 'list'],
           },
         },
         {
-          tool: 'murph.cli.run',
+          tool: 'vault.cli.run',
           input: {
             args: ['assistant', 'session', 'show', result.session.sessionId],
           },
         },
         {
-          tool: 'murph.cli.run',
+          tool: 'vault.cli.run',
           input: {
             args: ['journal', 'append', '2026-03-31', '--text', 'Auto-reply mutation proof.'],
           },
@@ -2277,7 +2277,7 @@ test('sendAssistantMessage carries the provider-turn bound tool catalog into hos
 
     assert.equal(providerCall?.provider, 'openai-compatible')
     assert.equal('capabilityRegistry' in (providerCall?.toolRuntime ?? {}), false)
-    assert.equal(toolCatalog?.hasTool('murph.cli.run'), true)
+    assert.equal(toolCatalog?.hasTool('vault.cli.run'), true)
     assert.equal(toolCatalog?.hasTool('murph.device.connect'), true)
     assert.match(providerCall?.systemPrompt ?? '', /use `murph\.device\.connect` first/iu)
     assert.equal(result.response, 'hosted auto-reply')
@@ -2501,7 +2501,7 @@ test('sendAssistantMessage injects and persists a CLI surface bootstrap contract
   assert.equal(call?.continuityContext, null)
   assert.match(
     call?.systemPrompt ?? '',
-    /This assistant runtime is for Murph vault and assistant operations/u,
+    /Inspect or change Murph vault\/runtime state directly through `vault-cli` in this privileged local route\./u,
   )
 
   const snapshot = await readAssistantStateRecord(

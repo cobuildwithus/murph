@@ -181,7 +181,7 @@ export function defineAssistantCapability<
 }
 
 function inferAssistantToolProvenance(name: string): AssistantToolProvenance {
-  if (name === 'murph.cli.run') {
+  if (name === 'vault.cli.run') {
     return {
       origin: 'cli-backed',
       localOnly: true,
@@ -276,7 +276,7 @@ function inferAssistantCapabilityMutationSemantics(
   name: string,
   provenance: AssistantToolProvenance,
 ): AssistantCapabilityMutationSemantics {
-  if (name === 'murph.cli.run' || provenance.origin === 'cli-backed') {
+  if (name === 'vault.cli.run' || provenance.origin === 'cli-backed') {
     return 'mixed'
   }
 

@@ -78,8 +78,7 @@ function buildAssistantCurrentDateContextText(input: {
   currentTimeZone: string;
 }): string {
   return `The user's canonical timezone for this vault is ${input.currentTimeZone}.
-Today's date for the user is ${input.currentLocalDate}.
-Interpret relative day words such as "today", "yesterday", and "tomorrow" in that timezone unless the user clearly anchors them to another date.`;
+Today's date for the user is ${input.currentLocalDate}.`;
 }
 
 function buildAssistantIdentityAndScopeText(): string {
@@ -120,17 +119,16 @@ function buildAssistantVaultNavigationText(input: {
   const usesDirectCli = input.assistantCommandAccessMode === "direct-cli";
 
   return joinPromptLines(
-    "This assistant runtime is for Murph vault and assistant operations, not repo coding work.",
     input.assistantHostedDeviceConnectAvailable
       ? "- When the user wants help connecting a hosted wearable provider such as WHOOP, Oura, or Garmin, use `murph.device.connect` first so you can return a clickable hosted authorization link. Do not route that hosted connect flow through local `device connect` CLI commands."
       : null,
     usesBoundTools
-      ? "- Inspect or change Murph vault/runtime state through `murph.cli.run`. That tool shells out to the real local `vault-cli`, so treat it as the primary Murph runtime surface for provider turns."
+      ? "- Inspect or change Murph vault/runtime state through `vault.cli.run`. That tool shells out to the real local `vault-cli`, so treat it as the primary Murph runtime surface for provider turns."
       : usesDirectCli
       ? "- Inspect or change Murph vault/runtime state directly through `vault-cli` in this privileged local route."
       : "- Inspect or change Murph vault/runtime state through `vault-cli` semantics when no bound Murph command surface is exposed in this route.",
     usesBoundTools
-      ? "- Use `murph.cli.run` with exact `vault-cli` semantics instead of guessing command shapes."
+      ? "- Use `vault.cli.run` with exact `vault-cli` semantics instead of guessing command shapes."
       : usesDirectCli
       ? "- Use `vault-cli` directly with exact command semantics instead of guessing command shapes."
       : "- Use exact `vault-cli` semantics instead of guessing command shapes.",
@@ -158,8 +156,7 @@ function buildAssistantAudienceSafetyText(
   allowSensitiveHealthContext: boolean
 ): string {
   if (allowSensitiveHealthContext) {
-    return `This conversation is private enough for full health context when needed, but still surface only the details that are relevant to the current task.
-Sensitive details belong in responses, scratch state, or memory only when they are actually useful, not just because they are available.`;
+    return `This conversation is private enough for full health context when needed, but still surface only the details that are relevant to the current task.`;
   }
 
   return `This conversation is not private enough for broad sensitive health context.
@@ -238,7 +235,7 @@ function buildAssistantCronGuidanceText(input: {
 }): string {
   if (input.assistantCommandAccessMode === "bound-tools") {
     return buildAssistantAvailableAutomationGuidanceText(
-      "Scheduled assistant automation commands are exposed in this session through `murph.cli.run`. Use `vault-cli automation ...` there rather than editing assistant runtime files directly."
+      "Scheduled assistant automation commands are exposed in this session through `vault.cli.run`. Use `vault-cli automation ...` there rather than editing assistant runtime files directly."
     );
   }
 
@@ -341,7 +338,7 @@ function buildAssistantKnowledgeGuidanceText(input: {
           `${input.rawCommand} knowledge ...`
         )} directly in this turn rather than assuming a dedicated knowledge surface is callable.`,
     input.assistantCommandAccessMode === "bound-tools"
-      ? "If you need the operator-facing CLI surface itself, use `murph.cli.run` for knowledge work only when you truly need `vault-cli knowledge ...` semantics such as `vault-cli knowledge log tail`."
+      ? "If you need the operator-facing CLI surface itself, use `vault.cli.run` for knowledge work only when you truly need `vault-cli knowledge ...` semantics such as `vault-cli knowledge log tail`."
       : null,
     "Murph's knowledge system has two layers: `bank/library` is the stable reference layer, while `derived/knowledge` is the user's compiled wiki.",
     "The assistant is responsible for compiling and maintaining the wiki over time. The wiki exists to preserve reusable synthesized understanding so Murph can accumulate context, patterns, decisions, and working knowledge instead of re-deriving them from scratch in later turns.",

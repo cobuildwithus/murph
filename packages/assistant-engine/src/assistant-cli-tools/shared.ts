@@ -51,7 +51,7 @@ export interface AssistantCliLlmsManifest {
 export const assistantToolTextReadDefaultMaxChars = 8_000
 export const assistantToolTextReadMaxChars = 20_000
 export const assistantToolTextReadChunkBytes = 4_096
-export const assistantCliExecutorToolName = 'murph.cli.run'
+export const assistantCliExecutorToolName = 'vault.cli.run'
 export const assistantCliDefaultTimeoutMs = 10 * 60 * 1000
 export const assistantCliMaxTimeoutMs = 60 * 60 * 1000
 export const assistantCliMaxOutputChars = 80_000
