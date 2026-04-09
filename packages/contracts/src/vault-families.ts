@@ -17,6 +17,10 @@ import {
   memoryDocumentFrontmatterSchema,
   memoryDocumentRelativePath,
 } from "./memory.ts";
+import {
+  preferencesDocumentRelativePath,
+  preferencesDocumentSchema,
+} from "./preferences.ts";
 import type { ContractSchema } from "./validate.ts";
 import {
   assessmentResponseSchema,
@@ -64,6 +68,7 @@ export const VAULT_FAMILY_IDS = Object.freeze({
   metadata: "metadata",
   coreDocument: "coreDocument",
   memoryDocument: "memoryDocument",
+  preferencesDocument: "preferencesDocument",
   automations: "automations",
   experiments: "experiments",
   journal: "journal",
@@ -219,6 +224,21 @@ const vaultFamilyDescriptors = [
       issueCode: "FRONTMATTER_INVALID",
       optional: true,
       schema: memoryDocumentFrontmatterSchema,
+    },
+  },
+  {
+    id: VAULT_FAMILY_IDS.preferencesDocument,
+    description: "Canonical machine-facing preferences JSON.",
+    owner: "core",
+    storageKind: "singleton-file",
+    fileFormat: "json",
+    relativePath: preferencesDocumentRelativePath,
+    querySource: "none",
+    validation: {
+      kind: "json",
+      issueCode: "CONTRACT_INVALID",
+      optional: true,
+      schema: preferencesDocumentSchema,
     },
   },
   {
@@ -783,6 +803,7 @@ export const VAULT_LAYOUT = Object.freeze({
   metadata: VAULT_METADATA_FILE,
   coreDocument: CORE_DOCUMENT_RELATIVE_PATH,
   memoryDocument: memoryDocumentRelativePath,
+  preferencesDocument: preferencesDocumentRelativePath,
   bankDirectory: BANK_DIRECTORY,
   journalDirectory: JOURNAL_DIRECTORY,
   automationsDirectory: AUTOMATIONS_DIRECTORY,

@@ -12,6 +12,11 @@ export { VaultError, isVaultError } from "./errors.ts";
 export * from "./automation.ts";
 export * from "./memory.ts";
 export {
+  readPreferencesDocument,
+  resolvePreferencesDocumentPath,
+} from "./preferences.ts";
+export type { PreferencesDocumentSnapshot } from "./preferences.ts";
+export {
   assertPathWithinVault,
   assertPathWithinVaultOnDisk,
   normalizeOpaquePathSegment,
@@ -70,6 +75,7 @@ export {
   stopProtocolItem,
   unlinkJournalEventIds,
   unlinkJournalStreams,
+  updateWorkoutUnitPreferences,
   updateExperiment,
   updateVaultSummary,
   upsertEvent,

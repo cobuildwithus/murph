@@ -374,11 +374,11 @@ export function registerWorkoutCommands(
 
   const units = Cli.create('units', {
     description:
-      'Profile-level workout unit preferences used by workout and body-measurement capture flows.',
+      'Canonical workout unit preferences used by workout and body-measurement capture flows.',
   })
 
   units.command('show', {
-    description: 'Show the saved workout unit preferences from the current profile snapshot.',
+    description: 'Show the saved workout unit preferences from the canonical preferences singleton.',
     args: z.object({}),
     options: withBaseOptions(),
     output: workoutUnitPreferencesResultSchema,
@@ -388,7 +388,7 @@ export function registerWorkoutCommands(
   })
 
   units.command('set', {
-    description: 'Set one or more workout unit preferences on the current profile snapshot.',
+    description: 'Set one or more workout unit preferences on the canonical preferences singleton.',
     args: z.object({}),
     options: withBaseOptions({
       weight: z.enum(['lb', 'kg']).optional(),
@@ -399,7 +399,7 @@ export function registerWorkoutCommands(
         .describe('Preferred circumference/body-measurement unit.'),
       recordedAt: isoTimestampSchema
         .optional()
-        .describe('Optional profile-snapshot timestamp override in ISO 8601 form.'),
+        .describe('Optional preferences update timestamp override in ISO 8601 form.'),
     }),
     output: workoutUnitPreferencesResultSchema,
     async run({ options }) {

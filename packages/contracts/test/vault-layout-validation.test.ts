@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { CURRENT_VAULT_FORMAT_VERSION, ID_PREFIXES } from "../src/constants.ts";
+import { preferencesDocumentRelativePath } from "../src/preferences.ts";
 import {
   detectVaultMetadataFormatVersion,
   resolveVaultMetadataFormatVersion,
@@ -217,6 +218,14 @@ describe("vault family descriptors", () => {
     expect(isVaultJsonlDirectoryFamily(rawMealsFamily)).toBe(false);
     expect(isVaultJsonlValidationFamily(rawMealsFamily)).toBe(false);
 
+    const preferencesFamily = getVaultFamily(VAULT_FAMILY_IDS.preferencesDocument);
+    expect(isVaultJsonValidationFamily(preferencesFamily)).toBe(true);
+    expect(preferencesFamily.storageKind).toBe("singleton-file");
+    if (preferencesFamily.storageKind !== "singleton-file") {
+      throw new Error("Expected singleton preferences family.");
+    }
+    expect(preferencesFamily.relativePath).toBe(preferencesDocumentRelativePath);
+
     expect(VAULT_FRONTMATTER_FAMILIES).toEqual(
       VAULT_FAMILY_DESCRIPTORS.filter((family) => isVaultFrontmatterFamily(family)),
     );
@@ -298,6 +307,7 @@ describe("vault layout exports", () => {
       metadata: VAULT_METADATA_FILE,
       coreDocument: CORE_DOCUMENT_RELATIVE_PATH,
       memoryDocument: "bank/memory.md",
+      preferencesDocument: preferencesDocumentRelativePath,
       bankDirectory: BANK_DIRECTORY,
       journalDirectory: JOURNAL_DIRECTORY,
       automationsDirectory: AUTOMATIONS_DIRECTORY,
