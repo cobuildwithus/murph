@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  buildHostedExecutionTelegramMessageReceivedDispatch,
+} from "@murphai/hosted-execution";
 
 const mocks = vi.hoisted(() => ({
   commitHostedExecutionResult: vi.fn(),
@@ -83,6 +86,7 @@ import {
 } from "./hosted-runtime-test-helpers.ts";
 
 const incomingBundle = Uint8Array.from([1, 2, 3]);
+const originalFetch = globalThis.fetch;
 const committedExecution = {
   committedGatewayProjectionSnapshot: {
     schema: "murph.gateway-projection-snapshot.v1",
@@ -126,6 +130,18 @@ const finalResult = {
   },
 };
 
+function restoreFetch() {
+  Object.defineProperty(globalThis, "fetch", {
+    configurable: true,
+    value: originalFetch,
+    writable: true,
+  });
+}
+
+afterEach(() => {
+  restoreFetch();
+});
+
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.createHostedArtifactResolver.mockReturnValue(Symbol("artifact-resolver"));
@@ -159,6 +175,7 @@ beforeEach(() => {
   mocks.materializeHostedExecutionArtifacts.mockResolvedValue(undefined);
   mocks.startLinqChatTypingIndicator.mockResolvedValue(undefined);
   mocks.stopLinqChatTypingIndicator.mockResolvedValue(undefined);
+  restoreFetch();
 });
 
 describe("hosted runtime child payload helpers", () => {
@@ -609,6 +626,150 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
       expect.objectContaining({
         level: "warn",
         message: "Hosted Linq typing indicator could not be started.",
+        phase: "dispatch.running",
+      }),
+    );
+  });
+
+  it("does not block hosted execution while Telegram typing startup is in flight and stops after committed delivery draining", async () => {
+    const steps: string[] = [];
+    let resolveTypingStart!: () => void;
+    let typingSignal!: AbortSignal;
+    Object.defineProperty(globalThis, "fetch", {
+      configurable: true,
+      value: vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+        steps.push("start");
+        const signal = init?.signal;
+        if (!(signal instanceof AbortSignal)) {
+          throw new Error("expected Telegram typing fetch to receive an abort signal");
+        }
+        typingSignal = signal;
+        await new Promise<void>((resolve) => {
+          resolveTypingStart = resolve;
+        });
+        return new Response(JSON.stringify({
+          ok: true,
+        }), {
+          headers: {
+            "content-type": "application/json",
+          },
+          status: 200,
+        });
+      }),
+      writable: true,
+    });
+    mocks.executeHostedDispatchForCommit.mockImplementation(async () => {
+      steps.push("execute");
+      return committedExecution;
+    });
+    mocks.completeHostedExecutionAfterCommit.mockImplementation(async () => {
+      steps.push("complete");
+      return finalResult;
+    });
+
+    const runPromise = runHostedAssistantRuntimeJobInProcessDetailed(
+      {
+        request: {
+          bundle: "incoming-bundle",
+          dispatch: buildHostedExecutionTelegramMessageReceivedDispatch({
+            eventId: "evt_telegram_typing",
+            occurredAt: "2026-04-08T00:00:00.000Z",
+            telegramMessage: {
+              messageId: "tg_message_77",
+              schema: "murph.hosted-telegram-message.v1",
+              threadId: "123456",
+            },
+            userId: "member_123",
+          }),
+        },
+        runtime: {
+          forwardedEnv: {
+            TELEGRAM_BOT_TOKEN: "telegram-token",
+          },
+        },
+      },
+      {
+        platform: {
+          artifactStore: {
+            async get() {
+              return null;
+            },
+            async put() {},
+          },
+          effectsPort: createHostedRuntimeEffectsPortStub(),
+        },
+      },
+    );
+
+    await vi.waitFor(() => {
+      expect(mocks.executeHostedDispatchForCommit).toHaveBeenCalledTimes(1);
+      expect(mocks.completeHostedExecutionAfterCommit).toHaveBeenCalledTimes(1);
+    });
+    expect(typingSignal.aborted).toBe(false);
+
+    resolveTypingStart();
+    await runPromise;
+
+    expect(typingSignal.aborted).toBe(true);
+    expect(steps).toEqual(["start", "execute", "complete"]);
+  });
+
+  it("swallows Telegram typing startup failures and still completes the hosted run", async () => {
+    Object.defineProperty(globalThis, "fetch", {
+      configurable: true,
+      value: vi.fn(async () => new Response(JSON.stringify({
+        description: "telegram typing start failed",
+        ok: false,
+      }), {
+        headers: {
+          "content-type": "application/json",
+        },
+        status: 200,
+      })),
+      writable: true,
+    });
+
+    const result = await runHostedAssistantRuntimeJobInProcessDetailed(
+      {
+        request: {
+          bundle: "incoming-bundle",
+          dispatch: buildHostedExecutionTelegramMessageReceivedDispatch({
+            eventId: "evt_telegram_typing_start_failure",
+            occurredAt: "2026-04-08T00:00:00.000Z",
+            telegramMessage: {
+              messageId: "tg_message_77",
+              schema: "murph.hosted-telegram-message.v1",
+              threadId: "123456",
+            },
+            userId: "member_123",
+          }),
+        },
+        runtime: {
+          forwardedEnv: {
+            TELEGRAM_BOT_TOKEN: "telegram-token",
+          },
+        },
+      },
+      {
+        platform: {
+          artifactStore: {
+            async get() {
+              return null;
+            },
+            async put() {},
+          },
+          effectsPort: createHostedRuntimeEffectsPortStub(),
+        },
+      },
+    );
+
+    assert.deepEqual(result, finalResult);
+    expect(mocks.executeHostedDispatchForCommit).toHaveBeenCalledTimes(1);
+    expect(mocks.completeHostedExecutionAfterCommit).toHaveBeenCalledTimes(1);
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        level: "warn",
+        message: "Hosted Telegram typing indicator could not be started.",
         phase: "dispatch.running",
       }),
     );
