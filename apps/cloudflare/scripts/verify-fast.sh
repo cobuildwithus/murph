@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-verify_step_parallel_default="$([[ -n "${CI:-}" ]] && echo 0 || echo 1)"
-verify_step_parallel="${MURPH_VERIFY_STEP_PARALLEL:-$verify_step_parallel_default}"
+verify_step_parallel="${MURPH_VERIFY_STEP_PARALLEL:-0}"
 tracked_background_pids=()
 
 register_background_pid() {
@@ -94,23 +93,24 @@ wait_for_background_jobs() {
   [[ "$failed" -eq 0 ]]
 }
 
+pnpm typecheck
+
+if [[ "$verify_step_parallel" != "1" ]]; then
+  pnpm test:node
+  pnpm test:workers
+  exit 0
+fi
+
 trap cleanup_background_jobs EXIT
 trap 'handle_termination_signal INT' INT
 trap 'handle_termination_signal TERM' TERM
 trap 'handle_termination_signal HUP' HUP
 
-pnpm typecheck
+pnpm test:node &
+node_pid="$!"
+register_background_pid "$node_pid"
+pnpm test:workers &
+workers_pid="$!"
+register_background_pid "$workers_pid"
 
-if [[ "$verify_step_parallel" == "1" ]]; then
-  pnpm test:node &
-  node_pid="$!"
-  register_background_pid "$node_pid"
-  pnpm test:workers &
-  workers_pid="$!"
-  register_background_pid "$workers_pid"
-
-  wait_for_background_jobs "$node_pid" "$workers_pid"
-else
-  pnpm test:node
-  pnpm test:workers
-fi
+wait_for_background_jobs "$node_pid" "$workers_pid"
