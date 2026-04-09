@@ -42,6 +42,7 @@ export async function resolveAssistantTurnSharedPlan(
       : []
   const firstTurnCheckInEligible =
     input.includeFirstTurnCheckIn === true &&
+    firstTurnCheckInStateDocIds.length > 0 &&
     !(await hasAssistantSeenFirstContact({
       docIds: firstTurnCheckInStateDocIds,
       vault: input.vault,

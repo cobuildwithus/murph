@@ -814,6 +814,75 @@ describe('assistant turn shared plan', () => {
     expect(eligiblePlan.requestedWorkingDirectory).toBe('/tmp/turn-plan-workdir')
     expect(repeatPlan.firstTurnCheckInEligible).toBe(false)
   })
+
+  it('treats first-turn check-ins as ineligible when no first-contact doc ids can be derived', async () => {
+    turnPlanMocks.resolveAssistantCliAccessContext.mockReturnValue({
+      env: {},
+      rawCommand: 'vault-cli',
+      setupCommand: 'murph',
+    })
+    turnPlanMocks.resolveAssistantConversationPolicy.mockReturnValue({
+      allowSensitiveHealthContext: false,
+      audience: {
+        actorId: null,
+        bindingDelivery: null,
+        channel: null,
+        deliveryPolicy: 'binding-target-only',
+        effectiveThreadIsDirect: true,
+        explicitTarget: null,
+        identityId: null,
+        replyToMessageId: null,
+        threadId: null,
+        threadIsDirect: null,
+      },
+      operatorAuthority: 'direct-operator',
+    })
+    turnPlanMocks.resolveAssistantFirstContactStateDocIds.mockReturnValue([])
+    turnPlanMocks.resolveAssistantOperatorAuthority.mockReturnValue('direct-operator')
+
+    const plan = await resolveAssistantTurnSharedPlan(
+      {
+        includeFirstTurnCheckIn: true,
+        prompt: 'hello',
+        vault: '/tmp/turn-plan-vault',
+      },
+      {
+        created: false,
+        paths: resolveAssistantStatePaths('/tmp/turn-plan-vault'),
+        session: parseAssistantSessionRecord({
+          alias: 'local',
+          binding: {
+            actorId: null,
+            channel: null,
+            conversationKey: null,
+            delivery: null,
+            identityId: null,
+            threadId: null,
+            threadIsDirect: null,
+          },
+          createdAt: '2026-04-08T00:00:00.000Z',
+          lastTurnAt: null,
+          resumeState: null,
+          schema: 'murph.assistant-session.v4',
+          sessionId: 'asst_turn_plan_local',
+          target: createTarget(),
+          turnCount: 0,
+          updatedAt: '2026-04-08T00:00:00.000Z',
+        }),
+      },
+    )
+
+    expect(turnPlanMocks.resolveAssistantFirstContactStateDocIds).toHaveBeenCalledWith({
+      actorId: null,
+      channel: null,
+      identityId: null,
+      threadId: null,
+      threadIsDirect: null,
+    })
+    expect(turnPlanMocks.hasAssistantSeenFirstContact).not.toHaveBeenCalled()
+    expect(plan.firstTurnCheckInEligible).toBe(false)
+    expect(plan.firstTurnCheckInStateDocIds).toEqual([])
+  })
 })
 
 async function createVaultRoot(prefix: string): Promise<string> {

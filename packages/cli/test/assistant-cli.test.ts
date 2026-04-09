@@ -1440,7 +1440,6 @@ test('root chat prints only a resume hint after a human TTY session exits', asyn
     [
       {
         vault: '/tmp/mock-vault',
-        includeFirstTurnCheckIn: true,
         initialPrompt: undefined,
         sessionId: undefined,
         alias: undefined,
