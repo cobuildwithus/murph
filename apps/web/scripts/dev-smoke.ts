@@ -68,7 +68,6 @@ async function main(): Promise<void> {
     await waitForHealthyServer(port, child, () => combinedOutput);
     await assertRequestStatus(port, "GET", "/");
     await assertRequestStatus(port, "HEAD", "/");
-    await assertRequestStatus(port, "GET", "/");
     await assertDevArtifacts(distDir);
   } finally {
     removeSignalCleanup();
