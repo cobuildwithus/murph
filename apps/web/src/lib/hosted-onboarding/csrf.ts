@@ -12,9 +12,17 @@ export function assertHostedOnboardingMutationOrigin(request: Request): void {
     });
   }
 
-  const requestOrigin = normalizeOrigin(request.url);
   const publicBaseUrl = normalizeOrigin(getHostedOnboardingEnvironment().publicBaseUrl);
-  const allowedOrigins = new Set([requestOrigin, publicBaseUrl].filter((value): value is string => Boolean(value)));
+  const allowedOrigins = new Set<string>();
+
+  if (publicBaseUrl) {
+    allowedOrigins.add(publicBaseUrl);
+  } else {
+    const requestOrigin = normalizeOrigin(request.url);
+    if (requestOrigin) {
+      allowedOrigins.add(requestOrigin);
+    }
+  }
 
   if (allowedOrigins.has(origin)) {
     return;
