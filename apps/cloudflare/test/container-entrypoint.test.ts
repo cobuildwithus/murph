@@ -431,12 +431,12 @@ describe("startHostedContainerEntrypoint", () => {
       await aborted;
 
       expect(spy).toHaveBeenCalledTimes(1);
-      const signal = abortSignal;
-      expect(
-        typeof signal === "object"
-        && signal !== null
-        && Object.hasOwn(signal, "aborted"),
-      ).toBe(true);
+      const signal = spy.mock.calls[0]?.[1]?.signal;
+      expect(signal).toBeDefined();
+      if (!signal) {
+        throw new Error("Expected the hosted runner to receive an AbortSignal.");
+      }
+      expect(signal.aborted).toBe(true);
       expect(abortReason).toBeInstanceOf(Error);
       expect((abortReason as Error).message).toContain("aborted");
     } finally {
