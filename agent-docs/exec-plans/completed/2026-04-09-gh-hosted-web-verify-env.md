@@ -1,6 +1,6 @@
 # Restore GitHub hosted-web verification env plumbing
 
-Status: active
+Status: completed
 Created: 2026-04-09
 Updated: 2026-04-09
 
@@ -18,6 +18,7 @@ Updated: 2026-04-09
 
 - In scope:
   - GitHub workflow env plumbing for the hosted-web verification path.
+  - Narrow workflow guard tests that keep the release/support env blocks aligned.
   - Narrow local verification of `apps/web verify` / `pnpm release:check` with the same placeholder env contract.
 - Out of scope:
   - Broad hosted-web runtime/env refactors.
@@ -53,12 +54,16 @@ Updated: 2026-04-09
 
 - Keep the fix in workflow env plumbing rather than weakening hosted-web runtime requirements.
 - Use a deterministic one-key contact-privacy keyring plus placeholder Privy verification key for CI-only verification boot.
-- Use a deterministic placeholder Privy app id in GitHub workflows so CI keeps a valid client identifier without adding an out-of-band repo-variable dependency.
+- Source the public Privy app id from a GitHub Actions variable so CI keeps a valid client identifier without wiring the full hosted-web production env set into every workflow.
 
 ## Verification
 
 - Commands to run:
   - `HOSTED_CONTACT_PRIVACY_KEYS=... NEXT_PUBLIC_PRIVY_APP_ID=... PRIVY_VERIFICATION_KEY=... pnpm --dir apps/web verify`
+  - `pnpm exec vitest run packages/cli/test/release-workflow-guards.test.ts packages/cli/test/host-support-workflow-guards.test.ts --no-coverage`
   - `HOSTED_CONTACT_PRIVACY_KEYS=... NEXT_PUBLIC_PRIVY_APP_ID=... PRIVY_VERIFICATION_KEY=... pnpm release:check`
-- Expected outcomes:
-  - Both commands pass on the final tree.
+- Outcomes:
+  - `HOSTED_CONTACT_PRIVACY_KEYS=... NEXT_PUBLIC_PRIVY_APP_ID=<repo variable value> PRIVY_VERIFICATION_KEY=... pnpm --dir apps/web verify` passed.
+  - `pnpm exec vitest run packages/cli/test/release-workflow-guards.test.ts packages/cli/test/host-support-workflow-guards.test.ts --no-coverage` passed.
+  - `HOSTED_CONTACT_PRIVACY_KEYS=... NEXT_PUBLIC_PRIVY_APP_ID=<repo variable value> PRIVY_VERIFICATION_KEY=... pnpm release:check` progressed through hosted-web boot and then hit unrelated CLI test failures in `packages/cli/test/cli-expansion-samples-audit.test.ts` and `packages/cli/test/canonical-write-lock.test.ts`.
+Completed: 2026-04-09
