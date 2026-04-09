@@ -139,8 +139,11 @@ export function buildSetupAssistantOptionsFromDefaults(
         assistantApiKeyEnv: savedDefaults?.apiKeyEnv ?? undefined,
         assistantProviderName: savedDefaults?.providerName ?? undefined,
         assistantReasoningEffort: savedDefaults?.reasoningEffort ?? undefined,
-        assistantZeroDataRetention:
-          savedDefaults?.zeroDataRetention === true ? true : undefined,
+        ...(savedDefaults?.zeroDataRetention === true
+          ? {
+              assistantZeroDataRetention: true,
+            }
+          : {}),
       }
     }
 

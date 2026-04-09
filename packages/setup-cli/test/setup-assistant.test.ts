@@ -752,7 +752,6 @@ test('setup assistant defaults helpers retain explicit codex command and surface
       assistantApiKeyEnv: undefined,
       assistantProviderName: undefined,
       assistantReasoningEffort: undefined,
-      assistantZeroDataRetention: undefined,
     },
   )
 })

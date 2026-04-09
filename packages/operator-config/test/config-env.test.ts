@@ -562,6 +562,7 @@ test('hosted assistant config normalization keeps the active profile ready and s
     provider: 'openai-compatible',
     providerName: null,
     reasoningEffort: 'high',
+    zeroDataRetention: null,
   })
   assert.deepEqual(resolveHostedAssistantOperatorDefaultsState(normalizedConfig), {
     configured: true,

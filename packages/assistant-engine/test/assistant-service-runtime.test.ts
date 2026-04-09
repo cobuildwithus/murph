@@ -466,6 +466,7 @@ describe('assistant service turn routes', () => {
         providerName: null,
         reasoningEffort: 'high',
         sandbox: 'danger-full-access',
+        zeroDataRetention: null,
       },
       route: backup,
     })
@@ -499,6 +500,7 @@ describe('assistant service turn routes', () => {
         providerName: 'murph-openai',
         reasoningEffort: null,
         sandbox: null,
+        zeroDataRetention: null,
       },
       route: nullableBackup,
     })
