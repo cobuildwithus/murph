@@ -1,3 +1,6 @@
+import { preferencesDocumentRelativePath } from "@murphai/contracts";
+
+import { VAULT_LAYOUT } from "./constants.ts";
 import { appendJsonlRecord as appendJsonlRecordInternal } from "./jsonl.ts";
 import {
   addMeal as addMealInternal,
@@ -13,8 +16,16 @@ import {
   acquireCanonicalWriteLock,
   inspectCanonicalWriteLock,
 } from "./operations/canonical-write-lock.ts";
+import {
+  canonicalPathResource,
+  dedupeCanonicalResources,
+  withCanonicalResourceLocks,
+} from "./operations/canonical-resource-lock.ts";
 import { runCanonicalWrite } from "./operations/write-batch.ts";
-import { copyRawArtifact as copyRawArtifactInternal } from "./raw.ts";
+import {
+  copyRawArtifact as copyRawArtifactInternal,
+  prepareRawArtifact,
+} from "./raw.ts";
 import { importAssessmentResponse as importAssessmentResponseInternal } from "./assessment/storage.ts";
 import { upsertAllergy as upsertAllergyInternal } from "./bank/allergies.ts";
 import { upsertCondition as upsertConditionInternal } from "./bank/conditions.ts";
@@ -140,6 +151,20 @@ function withCanonicalInputWriteLock<TInput extends { vaultRoot: string }, TResu
   return withCanonicalWriteLock(input.vaultRoot, () => operation(input));
 }
 
+function withCanonicalInputResourceLock<TInput extends { vaultRoot: string }, TResult>(input: {
+  input: TInput;
+  relativePaths: readonly string[];
+  operation: (input: TInput) => Promise<TResult>;
+}): Promise<TResult> {
+  return withCanonicalResourceLocks({
+    vaultRoot: input.input.vaultRoot,
+    resources: dedupeCanonicalResources(
+      input.relativePaths.map((relativePath) => canonicalPathResource(relativePath)),
+    ),
+    run: async () => await input.operation(input.input),
+  });
+}
+
 function buildStaleCanonicalWriteLockIssue(
   issue: Awaited<ReturnType<typeof inspectCanonicalWriteLock>>,
 ): ValidationIssue | null {
@@ -190,7 +215,11 @@ export async function appendJsonlRecord<TRecord extends object>(input: {
   relativePath: string;
   record: TRecord;
 }): Promise<TRecord> {
-  return withCanonicalInputWriteLock(input, appendJsonlRecordInternal);
+  return withCanonicalResourceLocks({
+    vaultRoot: input.vaultRoot,
+    resources: [canonicalPathResource(input.relativePath)],
+    run: async () => appendJsonlRecordInternal(input),
+  });
 }
 
 export async function applyCanonicalWriteBatch(
@@ -215,80 +244,104 @@ export async function applyCanonicalWriteBatch(
     );
   }
 
-  return withCanonicalWriteLock(input.vaultRoot, async () => {
-    await loadVaultInternal({ vaultRoot: input.vaultRoot });
+  const resources = dedupeCanonicalResources([
+    ...rawCopies.map((entry) => canonicalPathResource(entry.targetRelativePath)),
+    ...rawContents.map((entry) => canonicalPathResource(entry.targetRelativePath)),
+    ...textWrites.map((entry) => canonicalPathResource(entry.relativePath)),
+    ...jsonlAppends.map((entry) => canonicalPathResource(entry.relativePath)),
+    ...deletes.map((entry) => canonicalPathResource(entry.relativePath)),
+  ]);
 
-    return runCanonicalWrite({
-      vaultRoot: input.vaultRoot,
-      operationType: input.operationType,
-      summary: input.summary,
-      occurredAt: input.occurredAt,
-      mutate: async ({ batch }) => {
-        for (const rawCopy of rawCopies) {
-          await batch.stageRawCopy({
-            sourcePath: rawCopy.sourcePath,
-            targetRelativePath: rawCopy.targetRelativePath,
-            originalFileName: rawCopy.originalFileName,
-            mediaType: rawCopy.mediaType,
-            allowExistingMatch: rawCopy.allowExistingMatch,
-          });
-        }
+  return withCanonicalResourceLocks({
+    vaultRoot: input.vaultRoot,
+    resources,
+    run: async () => {
+      await loadVaultInternal({ vaultRoot: input.vaultRoot });
 
-        for (const rawContent of rawContents) {
-          if (typeof rawContent.content === "string") {
-            await batch.stageRawText({
+      return runCanonicalWrite({
+        vaultRoot: input.vaultRoot,
+        operationType: input.operationType,
+        summary: input.summary,
+        occurredAt: input.occurredAt,
+        mutate: async ({ batch }) => {
+          for (const rawCopy of rawCopies) {
+            await batch.stageRawCopy({
+              sourcePath: rawCopy.sourcePath,
+              targetRelativePath: rawCopy.targetRelativePath,
+              originalFileName: rawCopy.originalFileName,
+              mediaType: rawCopy.mediaType,
+              allowExistingMatch: rawCopy.allowExistingMatch,
+            });
+          }
+
+          for (const rawContent of rawContents) {
+            if (typeof rawContent.content === "string") {
+              await batch.stageRawText({
+                targetRelativePath: rawContent.targetRelativePath,
+                originalFileName: rawContent.originalFileName,
+                mediaType: rawContent.mediaType,
+                content: rawContent.content,
+                allowExistingMatch: rawContent.allowExistingMatch,
+              });
+              continue;
+            }
+
+            await batch.stageRawBytes({
               targetRelativePath: rawContent.targetRelativePath,
               originalFileName: rawContent.originalFileName,
               mediaType: rawContent.mediaType,
               content: rawContent.content,
               allowExistingMatch: rawContent.allowExistingMatch,
             });
-            continue;
           }
 
-          await batch.stageRawBytes({
-            targetRelativePath: rawContent.targetRelativePath,
-            originalFileName: rawContent.originalFileName,
-            mediaType: rawContent.mediaType,
-            content: rawContent.content,
-            allowExistingMatch: rawContent.allowExistingMatch,
-          });
-        }
+          for (const textWrite of textWrites) {
+            await batch.stageTextWrite(textWrite.relativePath, textWrite.content, {
+              overwrite: textWrite.overwrite,
+              allowExistingMatch: textWrite.allowExistingMatch,
+            });
+          }
 
-        for (const textWrite of textWrites) {
-          await batch.stageTextWrite(textWrite.relativePath, textWrite.content, {
-            overwrite: textWrite.overwrite,
-            allowExistingMatch: textWrite.allowExistingMatch,
-          });
-        }
+          for (const jsonlAppend of jsonlAppends) {
+            await batch.stageJsonlAppend(
+              jsonlAppend.relativePath,
+              `${JSON.stringify(jsonlAppend.record)}\n`,
+            );
+          }
 
-        for (const jsonlAppend of jsonlAppends) {
-          await batch.stageJsonlAppend(
-            jsonlAppend.relativePath,
-            `${JSON.stringify(jsonlAppend.record)}\n`,
-          );
-        }
+          for (const deletion of deletes) {
+            await batch.stageDelete(deletion.relativePath);
+          }
 
-        for (const deletion of deletes) {
-          await batch.stageDelete(deletion.relativePath);
-        }
-
-        return {
-          rawCopies: rawCopies.map((entry) => entry.targetRelativePath),
-          rawContents: rawContents.map((entry) => entry.targetRelativePath),
-          textWrites: textWrites.map((entry) => entry.relativePath),
-          jsonlAppends: jsonlAppends.map((entry) => entry.relativePath),
-          deletes: deletes.map((entry) => entry.relativePath),
-        };
-      },
-    });
+          return {
+            rawCopies: rawCopies.map((entry) => entry.targetRelativePath),
+            rawContents: rawContents.map((entry) => entry.targetRelativePath),
+            textWrites: textWrites.map((entry) => entry.relativePath),
+            jsonlAppends: jsonlAppends.map((entry) => entry.relativePath),
+            deletes: deletes.map((entry) => entry.relativePath),
+          };
+        },
+      });
+    },
   });
 }
 
 export async function copyRawArtifact(
   input: Parameters<typeof copyRawArtifactInternal>[0],
 ): ReturnType<typeof copyRawArtifactInternal> {
-  return withCanonicalInputWriteLock(input, copyRawArtifactInternal);
+  return withCanonicalInputResourceLock({
+    input,
+    relativePaths: [
+      prepareRawArtifact({
+        sourcePath: input.sourcePath,
+        owner: input.owner,
+        occurredAt: input.occurredAt,
+        role: input.role,
+        targetName: input.targetName,
+      }).relativePath,
+    ],
+    operation: copyRawArtifactInternal,
+  });
 }
 
 export async function ensureJournalDay(
@@ -408,7 +461,11 @@ export async function deleteEvent(
 export async function updateVaultSummary(
   input: Parameters<typeof updateVaultSummaryInternal>[0],
 ): ReturnType<typeof updateVaultSummaryInternal> {
-  return withCanonicalInputWriteLock(input, updateVaultSummaryInternal);
+  return withCanonicalInputResourceLock({
+    input,
+    relativePaths: [VAULT_LAYOUT.metadata, VAULT_LAYOUT.coreDocument],
+    operation: updateVaultSummaryInternal,
+  });
 }
 
 export async function repairVault(
@@ -444,13 +501,21 @@ export async function importAssessmentResponse(
 export async function updateWorkoutUnitPreferences(
   input: Parameters<typeof updateWorkoutUnitPreferencesInternal>[0],
 ): ReturnType<typeof updateWorkoutUnitPreferencesInternal> {
-  return withCanonicalInputWriteLock(input, updateWorkoutUnitPreferencesInternal);
+  return withCanonicalInputResourceLock({
+    input,
+    relativePaths: [preferencesDocumentRelativePath],
+    operation: updateWorkoutUnitPreferencesInternal,
+  });
 }
 
 export async function updateWearablePreferences(
   input: Parameters<typeof updateWearablePreferencesInternal>[0],
 ): ReturnType<typeof updateWearablePreferencesInternal> {
-  return withCanonicalInputWriteLock(input, updateWearablePreferencesInternal);
+  return withCanonicalInputResourceLock({
+    input,
+    relativePaths: [preferencesDocumentRelativePath],
+    operation: updateWearablePreferencesInternal,
+  });
 }
 
 export async function appendHistoryEvent(

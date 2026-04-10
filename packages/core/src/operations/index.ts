@@ -1,4 +1,19 @@
 export {
+  acquireCanonicalResourceLock,
+  CANONICAL_RESOURCE_LOCK_DIRECTORY,
+  CANONICAL_RESOURCE_LOCK_METADATA_BASENAME,
+  canonicalLogicalResource,
+  canonicalPathResource,
+  dedupeCanonicalResources,
+  isCanonicalResourceLockScopeActive,
+  withCanonicalResourceLocks,
+} from "./canonical-resource-lock.ts";
+export type {
+  CanonicalMutationResource,
+  CanonicalResourceLockHandle,
+  CanonicalResourceLockMetadata,
+} from "./canonical-resource-lock.ts";
+export {
   acquireCanonicalWriteLock,
   CANONICAL_WRITE_LOCK_DIRECTORY,
   CANONICAL_WRITE_LOCK_METADATA_PATH,

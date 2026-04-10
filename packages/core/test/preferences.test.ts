@@ -145,6 +145,62 @@ test("defaults updatedAt when writing new preferences without an explicit timest
   });
 });
 
+test("serializes parallel workout unit preference updates against the singleton document", async () => {
+  const vaultRoot = await createTempVault();
+
+  await Promise.all([
+    updateWorkoutUnitPreferences({
+      vaultRoot,
+      updatedAt: "2026-04-08T10:30:00.000Z",
+      preferences: {
+        weight: "lb",
+      },
+    }),
+    updateWorkoutUnitPreferences({
+      vaultRoot,
+      updatedAt: "2026-04-08T10:30:01.000Z",
+      preferences: {
+        bodyMeasurement: "in",
+      },
+    }),
+  ]);
+
+  const document = await readPreferencesDocument(vaultRoot);
+  assert.deepEqual(document.workoutUnitPreferences, {
+    weight: "lb",
+    bodyMeasurement: "in",
+  });
+});
+
+test("serializes concurrent workout and wearable preference updates through the singleton document", async () => {
+  const vaultRoot = await createTempVault();
+
+  await Promise.all([
+    updateWorkoutUnitPreferences({
+      vaultRoot,
+      updatedAt: "2026-04-08T10:40:00.000Z",
+      preferences: {
+        weight: "lb",
+      },
+    }),
+    updateWearablePreferences({
+      vaultRoot,
+      updatedAt: "2026-04-08T10:40:01.000Z",
+      preferences: {
+        desiredProviders: ["whoop", "oura", "whoop"],
+      },
+    }),
+  ]);
+
+  const document = await readPreferencesDocument(vaultRoot);
+  assert.deepEqual(document.workoutUnitPreferences, {
+    weight: "lb",
+  });
+  assert.deepEqual(document.wearablePreferences, {
+    desiredProviders: ["oura", "whoop"],
+  });
+});
+
 test("reads and writes canonical wearable preferences from the singleton preferences owner", async () => {
   const vaultRoot = await createTempVault();
 

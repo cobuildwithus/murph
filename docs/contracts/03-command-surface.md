@@ -9,6 +9,7 @@ Status: frozen baseline plus health extension fence for `vault-cli`
 - `device` commands delegate to the local `@murphai/device-syncd` control plane for provider OAuth/account actions while leaving canonical health writes behind the existing importer/core boundary, and the CLI may start or reuse that local daemon for the selected vault when no explicit control-plane target is provided.
 - Native `incur` owns the transport envelope and human-oriented formatting behavior.
 - `packages/cli` must not write vault files directly. Write commands delegate to `packages/core` or `packages/importers`; read commands delegate to `packages/query`.
+- Canonical write commands run through the core mutation runtime, which acquires declared canonical file resources before any read-modify-write work begins. Commands may overlap only when those declared resources are disjoint; singleton documents and shared monthly ledger or audit shards still serialize by design.
 
 ## Command Groups
 
@@ -249,6 +250,13 @@ Every command now uses native `incur` command definitions directly:
 4. Non-verbose `--format json` writes that payload body directly to stdout.
 5. `--verbose --format json` wraps the same payload in incur's success/error envelope, including metadata and CTAs when present.
 6. Human-oriented rendering, alternate formats, completions, `--llms`, skills, and MCP surfaces are incur-owned and are not redefined here.
+
+Read surfaces intentionally separate summary from detail:
+
+- `show` returns the full canonical read entity, including `markdown` when that noun owns body text.
+- `list` returns summary rows, not many embedded `show` payloads.
+- List rows never include full `markdown`; when a family owns first-class body text, list rows may carry a compact `excerpt` instead.
+- Callers that need the full body must follow a list result with `show`.
 
 ## Shared Option Rules
 
