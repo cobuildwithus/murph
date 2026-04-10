@@ -1,4 +1,4 @@
-import { chmod, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 export async function pruneRunnerBundle(bundleDir: string): Promise<void> {
@@ -64,7 +64,13 @@ export async function rewriteRuntimePackageManifest(
   const packageJson = JSON.parse(raw) as Record<string, unknown> & {
     dependencies?: Record<string, string>;
     exports?: Record<string, unknown> | string;
+    optionalDependencies?: Record<string, string>;
   };
+  const optionalDependencies = await resolveInstalledBundleDependencyVersions(
+    bundleDir,
+    packageJson.optionalDependencies,
+    { allowMissing: true },
+  );
 
   const runtimePackageJson = {
     dependencies: await resolveInstalledBundleDependencyVersions(
@@ -76,6 +82,9 @@ export async function rewriteRuntimePackageManifest(
     license: packageJson.license,
     main: packageJson.main,
     name: packageJson.name,
+    ...(Object.keys(optionalDependencies).length > 0
+      ? { optionalDependencies }
+      : {}),
     private: packageJson.private,
     type: packageJson.type,
     version: packageJson.version,
@@ -117,6 +126,9 @@ function stripTypeOnlyExportMetadata(
 async function resolveInstalledBundleDependencyVersions(
   bundleDir: string,
   dependencyGroup: Record<string, string> | undefined,
+  options: {
+    allowMissing?: boolean;
+  } = {},
 ): Promise<Record<string, string>> {
   if (!dependencyGroup) {
     return {};
@@ -130,8 +142,20 @@ async function resolveInstalledBundleDependencyVersions(
         ...dependencyName.split("/"),
         "package.json",
       );
+      let dependencyPackageJsonRaw: string;
+
+      try {
+        dependencyPackageJsonRaw = await readFile(packageJsonPath, "utf8");
+      } catch (error) {
+        if (options.allowMissing && isMissingFileError(error)) {
+          return null;
+        }
+
+        throw error;
+      }
+
       const dependencyPackageJson = JSON.parse(
-        await readFile(packageJsonPath, "utf8"),
+        dependencyPackageJsonRaw,
       ) as {
         version?: string;
       };
@@ -149,7 +173,11 @@ async function resolveInstalledBundleDependencyVersions(
     }),
   );
 
-  return Object.fromEntries(resolvedEntries);
+  return Object.fromEntries(
+    resolvedEntries.filter(
+      (entry): entry is readonly [string, string] => Array.isArray(entry),
+    ),
+  );
 }
 
 export async function rewriteRuntimeBinWrappers(
@@ -157,6 +185,8 @@ export async function rewriteRuntimeBinWrappers(
 ): Promise<void> {
   const nodeModulesDir = path.join(bundleDir, "node_modules");
   const binDir = path.join(nodeModulesDir, ".bin");
+
+  await mkdir(binDir, { recursive: true });
 
   for (const packageDir of await listTopLevelInstalledPackages(nodeModulesDir)) {
     const packageJsonPath = path.join(packageDir, "package.json");

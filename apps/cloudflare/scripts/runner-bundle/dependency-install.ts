@@ -1,17 +1,15 @@
+import { readFileSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
-import { createRequire } from "node:module";
 import path from "node:path";
 
 import { runPnpmCommand } from "./process.js";
-
-const require = createRequire(import.meta.url);
 
 export async function installPackedRunnerDependencies(
   bundleDir: string,
   tarballPaths: Map<string, string>,
   runtimeWorkspaceClosure: readonly string[],
   input: {
-    repoRoot: string;
+    runtimePackageRoot: string;
   },
 ): Promise<void> {
   const packageJsonPath = path.join(bundleDir, "package.json");
@@ -35,15 +33,16 @@ export async function installPackedRunnerDependencies(
     packageJson.optionalDependencies,
     workspaceTarballOverrides,
   );
-  pinDirectExternalDependencyVersions(
+  pinInstalledDependencyVersions(
     packageJson.dependencies,
     workspaceTarballOverrides,
-    input.repoRoot,
+    input.runtimePackageRoot,
   );
-  pinDirectExternalDependencyVersions(
+  pinInstalledDependencyVersions(
     packageJson.optionalDependencies,
     workspaceTarballOverrides,
-    input.repoRoot,
+    input.runtimePackageRoot,
+    { allowMissing: true, dropMissing: true },
   );
   packageJson.pnpm = {
     ...packageJson.pnpm,
@@ -97,10 +96,14 @@ function rewriteDependencySpecs(
   }
 }
 
-function pinDirectExternalDependencyVersions(
+export function pinInstalledDependencyVersions(
   dependencyGroup: Record<string, string> | undefined,
   overrides: Record<string, string>,
-  repoRoot: string,
+  runtimePackageRoot: string,
+  options: {
+    allowMissing?: boolean;
+    dropMissing?: boolean;
+  } = {},
 ): void {
   if (!dependencyGroup) {
     return;
@@ -111,24 +114,36 @@ function pinDirectExternalDependencyVersions(
       continue;
     }
 
-    const installedVersion = readInstalledPackageVersion(packageName, [repoRoot]);
+    const installedVersion = resolveInstalledPackageVersion(
+      packageName,
+      runtimePackageRoot,
+    );
+
     if (installedVersion !== null) {
       dependencyGroup[packageName] = installedVersion;
+      continue;
+    }
+
+    if (!options.allowMissing) {
+      throw new Error(
+        `Could not resolve an installed version for direct dependency ${packageName} from ${runtimePackageRoot}.`,
+      );
+    }
+
+    if (options.dropMissing) {
+      delete dependencyGroup[packageName];
     }
   }
 }
 
-function readInstalledPackageVersion(
+function resolveInstalledPackageVersion(
   packageName: string,
-  searchRoots: readonly string[],
+  searchRoot: string,
 ): string | null {
   try {
-    const manifestPath = resolveInstalledPackageManifestPath(
-      packageName,
-      searchRoots,
-    );
+    const manifestPath = resolveInstalledPackageManifestPath(packageName, searchRoot);
     const manifest = JSON.parse(
-      require("node:fs").readFileSync(manifestPath, "utf8"),
+      readFileSync(manifestPath, "utf8"),
     ) as {
       version?: string;
     };
@@ -141,59 +156,13 @@ function readInstalledPackageVersion(
 
 function resolveInstalledPackageManifestPath(
   packageName: string,
-  searchRoots: readonly string[],
+  runtimePackageRoot: string,
 ): string {
-  try {
-    return require.resolve(`${packageName}/package.json`, {
-      paths: [...searchRoots],
-    });
-  } catch {
-    const resolvedEntrypoint = require.resolve(packageName, {
-      paths: [...searchRoots],
-    });
-    const packageRoot = findInstalledPackageRoot(
-      resolvedEntrypoint,
-      packageName,
-    );
-
-    return path.join(packageRoot, "package.json");
-  }
-}
-
-function findInstalledPackageRoot(
-  resolvedEntrypoint: string,
-  packageName: string,
-): string {
-  const packageSegments = packageName.split("/");
-  const nodeModulesSegments = ["node_modules", ...packageSegments];
-  const normalizedEntrypoint = path.normalize(resolvedEntrypoint);
-  const pathSegments = normalizedEntrypoint.split(path.sep);
-
-  for (
-    let index = pathSegments.length - nodeModulesSegments.length;
-    index >= 0;
-    index -= 1
-  ) {
-    const candidateSegments = pathSegments.slice(
-      index,
-      index + nodeModulesSegments.length,
-    );
-
-    if (
-      candidateSegments.length === nodeModulesSegments.length &&
-      candidateSegments.every(
-        (segment, segmentIndex) =>
-          segment === nodeModulesSegments[segmentIndex],
-      )
-    ) {
-      return path.join(
-        pathSegments.slice(0, index + nodeModulesSegments.length).join(path.sep),
-      );
-    }
-  }
-
-  throw new Error(
-    `Could not determine package root for ${packageName} from ${resolvedEntrypoint}.`,
+  return path.join(
+    runtimePackageRoot,
+    "node_modules",
+    ...packageName.split("/"),
+    "package.json",
   );
 }
 
