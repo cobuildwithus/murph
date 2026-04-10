@@ -4,6 +4,7 @@ import {
   createIntegratedInboxServices,
   type InboxServices,
 } from '@murphai/inbox-services'
+import { enableAssistantAutoReplyChannelLocal } from '@murphai/assistant-engine/assistant-state'
 import {
   CLI_DESCRIPTION,
   createDefaultVaultServices,
@@ -15,7 +16,13 @@ export { CLI_DESCRIPTION } from './vault-cli-bootstrap.js'
 
 export function createVaultCli(
   services: VaultServices = createDefaultVaultServices(),
-  inboxServices: InboxServices = createIntegratedInboxServices(),
+  inboxServices: InboxServices = createIntegratedInboxServices({
+    enableAssistantAutoReplyChannel: async (vault, channel) =>
+      enableAssistantAutoReplyChannelLocal({
+        channel,
+        vault,
+      }),
+  }),
 ): Cli.Cli {
   const cli = createVaultCliShell()
 

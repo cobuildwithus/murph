@@ -6,6 +6,7 @@ import {
   createIntegratedInboxServices,
   type InboxServices,
 } from '@murphai/inbox-services'
+import { enableAssistantAutoReplyChannelLocal } from '@murphai/assistant-engine/assistant-state'
 import {
   createIntegratedVaultServices,
   type VaultServices,
@@ -173,7 +174,13 @@ export function createSetupServices(
   const vaultServices =
     dependencies.vaultServices ?? createIntegratedVaultServices()
   const inboxServices =
-    dependencies.inboxServices ?? createIntegratedInboxServices()
+    dependencies.inboxServices ?? createIntegratedInboxServices({
+      enableAssistantAutoReplyChannel: async (vault, channel) =>
+        enableAssistantAutoReplyChannelLocal({
+          channel,
+          vault,
+        }),
+    })
   const resolveAgentmailInboxSelection =
     dependencies.resolveAgentmailInboxSelection ??
     createSetupAgentmailSelectionResolver()

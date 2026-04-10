@@ -16,6 +16,7 @@ import {
   type RuntimeStore,
   type TelegramDriver,
 } from '@murphai/inbox-services'
+import { readAssistantAutomationState } from '@murphai/assistant-engine/assistant-state'
 import {
   UNSAFE_FOREGROUND_LOG_DETAILS_ENV,
   formatInboxRunEventForTerminal,
@@ -509,6 +510,23 @@ async function runInProcessInboxCli<TData>(
   return JSON.parse(output.join('').trim()) as CliEnvelope<TData>
 }
 
+async function runInProcessDefaultInboxCli<TData>(
+  args: string[],
+): Promise<CliEnvelope<TData>> {
+  const cli = createVaultCli(createUnwiredVaultServices())
+  const output: string[] = []
+
+  await cli.serve([...args, '--verbose', '--format', 'json'], {
+    env: process.env,
+    exit: () => {},
+    stdout(chunk) {
+      output.push(chunk)
+    },
+  })
+
+  return JSON.parse(output.join('').trim()) as CliEnvelope<TData>
+}
+
 async function expectVaultCliError(
   action: Promise<unknown>,
   code: string,
@@ -700,6 +718,51 @@ test.sequential('source add defaults the Telegram account identity to bot when o
       id: 'telegram:bot',
     })
     assert.equal(added.connector.accountId, 'bot')
+  } finally {
+    await rm(fixture.vaultRoot, { recursive: true, force: true })
+  }
+})
+
+test.sequential('source add --enableAutoReply updates assistant automation state in the default CLI path', async () => {
+  const fixture = await makeVaultFixture('murph-inbox-enable-auto-reply')
+
+  try {
+    requireData(
+      await runInProcessDefaultInboxCli<{
+        configPath: string
+      }>(['inbox', 'init', '--vault', fixture.vaultRoot]),
+    )
+
+    const added = requireData(
+      await runInProcessDefaultInboxCli<{
+        autoReplyEnabled?: boolean
+        connector: {
+          accountId: string | null
+          id: string
+          source: string
+        }
+      }>([
+        'inbox',
+        'source',
+        'add',
+        'telegram',
+        '--vault',
+        fixture.vaultRoot,
+        '--id',
+        'telegram:bot',
+        '--enableAutoReply',
+      ]),
+    )
+
+    assert.equal(added.autoReplyEnabled, true)
+
+    const automationState = await readAssistantAutomationState(fixture.vaultRoot)
+    assert.deepEqual(automationState.autoReply, [
+      {
+        channel: 'telegram',
+        cursor: null,
+      },
+    ])
   } finally {
     await rm(fixture.vaultRoot, { recursive: true, force: true })
   }

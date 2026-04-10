@@ -154,9 +154,12 @@ export function createInboxSourceOps(
       sortConnectors(config)
       await writeConfig(paths, config)
 
-      if (input.enableAutoReply) {
-        await env.enableAssistantAutoReplyChannel(paths.absoluteVaultRoot, connector.source)
-      }
+      const autoReplyEnabled = input.enableAutoReply
+        ? await env.enableAssistantAutoReplyChannel(
+            paths.absoluteVaultRoot,
+            connector.source,
+          )
+        : undefined
 
       return {
         vault: paths.absoluteVaultRoot,
@@ -165,7 +168,7 @@ export function createInboxSourceOps(
         connectorCount: config.connectors.length,
         provisionedMailbox,
         reusedMailbox,
-        autoReplyEnabled: input.enableAutoReply ? true : undefined,
+        autoReplyEnabled,
       }
     },
 
