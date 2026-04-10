@@ -43,7 +43,7 @@ import {
 } from './shared.js'
 import { scanAssistantAutomationOnce } from './scanner.js'
 import { acquireAssistantAutomationRunLock } from './runtime-lock.js'
-import { recoverAssistantAutoRepliesOnStartup } from './startup-recovery.js'
+import { recoverAssistantAutoReplies } from './startup-recovery.js'
 
 type AssistantAutomationLoopStateSnapshot = Pick<
   AssistantAutomationState,
@@ -72,7 +72,6 @@ export interface RunAssistantAutomationInput {
 
 export interface RunAssistantAutomationPassInput
   extends Omit<RunAssistantAutomationInput, 'once' | 'onInboxEvent' | 'startDaemon'> {
-  runStartupRecovery?: boolean
   scanNumber?: number
 }
 
@@ -94,11 +93,10 @@ export async function runAssistantAutomation(
   if (!daemonStarted && !input.once) {
     cleanup()
     throw new Error(
-      'Continuous assistant automation now requires the inbox daemon. Rerun without skipDaemon/startDaemon=false, or use once=true for a one-shot pass.',
+      'Continuous assistant automation now requires the inbox daemon. Rerun in continuous mode with the daemon enabled, or use once=true for a one-shot pass.',
     )
   }
 
-  let startupRecoveryPending = true
   let runLock: Awaited<
     ReturnType<typeof acquireAssistantAutomationRunLock>
   > | null = null
@@ -161,11 +159,9 @@ export async function runAssistantAutomation(
       const passResult = await runAssistantAutomationPass({
         ...input,
         inboxServices,
-        runStartupRecovery: startupRecoveryPending,
         scanNumber: scans,
         signal: controller.signal,
       })
-      startupRecoveryPending = false
 
       aggregateRouting.considered += passResult.routing.considered
       aggregateRouting.failed += passResult.routing.failed
@@ -302,21 +298,19 @@ export async function runAssistantAutomationPass(
   let state = await readAssistantAutomationState(input.vault)
   const stateBeforeScan = snapshotAssistantAutomationLoopState(state)
 
-  const startupRecovery = input.runStartupRecovery
-    ? await recoverAssistantAutoRepliesOnStartup({
-        allowSelfAuthored: input.allowSelfAuthored ?? false,
-        deliveryDispatchMode: input.deliveryDispatchMode,
-        autoReply: state.autoReply,
-        executionContext: input.executionContext,
-        inboxServices,
-        maxPerScan: input.maxPerScan,
-        onEvent: input.onEvent,
-        requestId: input.requestId,
-        signal: input.signal,
-        sessionMaxAgeMs: input.sessionMaxAgeMs ?? null,
-        vault: input.vault,
-      })
-    : createEmptyAutoReplyScanResult()
+  const recovery = await recoverAssistantAutoReplies({
+    allowSelfAuthored: input.allowSelfAuthored ?? false,
+    deliveryDispatchMode: input.deliveryDispatchMode,
+    autoReply: state.autoReply,
+    executionContext: input.executionContext,
+    inboxServices,
+    maxPerScan: input.maxPerScan,
+    onEvent: input.onEvent,
+    requestId: input.requestId,
+    signal: input.signal,
+    sessionMaxAgeMs: input.sessionMaxAgeMs ?? null,
+    vault: input.vault,
+  })
 
   const scanResult = await scanAssistantAutomationOnce({
     allowSelfAuthored: input.allowSelfAuthored ?? false,
@@ -358,7 +352,7 @@ export async function runAssistantAutomationPass(
     ? (await buildAssistantOutboxSummary(input.vault)).nextAttemptAt
     : null
   const replies = mergeAssistantAutoReplyScanResults(
-    startupRecovery,
+    recovery,
     scanResult.replies,
   )
 
@@ -375,7 +369,7 @@ export async function runAssistantAutomationPass(
       stateProgressed ||
       outboxResult.attempted > 0 ||
       cronResult.processed > 0 ||
-      startupRecovery.replied > 0,
+      recovery.progressed,
     replies,
     routing: scanResult.routing,
   }

@@ -57,7 +57,7 @@ All routes are loopback control-plane routes and require `Authorization: Bearer 
 - `GET /cron/jobs`
 - `GET /cron/jobs/:job`
 - `GET /cron/runs`
-- `POST /automation/run-once` (defaults to `once: true` and `startDaemon: false`)
+- `POST /automation/run-once` (defaults to one-shot mode with `once: true`; continuous requests default the daemon on)
 - `POST /cron/process-due`
 
 ## Gateway routes

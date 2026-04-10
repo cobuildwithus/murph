@@ -226,9 +226,6 @@ export async function runHostedAssistantAutomation(
   vaultRoot: string,
   requestId: string,
   executionContext: AssistantExecutionContext,
-  input?: {
-    runStartupRecovery?: boolean;
-  },
 ): Promise<{ nextWakeAt: string | null; progressed: boolean }> {
   const inboxServices = createIntegratedInboxServices();
   const vaultServices = createIntegratedVaultServices({
@@ -243,7 +240,6 @@ export async function runHostedAssistantAutomation(
       inboxServices,
       vaultServices,
       requestId,
-      runStartupRecovery: input?.runStartupRecovery ?? false,
       vault: vaultRoot,
     });
   } catch (error) {
@@ -367,9 +363,6 @@ async function runHostedMaintenancePass(input: {
         input.vaultRoot,
         input.requestId,
         input.executionContext,
-        {
-          runStartupRecovery: false,
-        },
       )
     : {
         nextWakeAt: null,

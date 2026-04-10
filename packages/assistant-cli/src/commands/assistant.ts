@@ -559,10 +559,6 @@ const assistantRunOptionsSchema = withBaseOptions({
     .boolean()
     .optional()
     .describe('Run one assistant scan and then exit.'),
-  skipDaemon: z
-    .boolean()
-    .optional()
-    .describe('Do not start the inbox foreground daemon; only run one assistant automation pass.'),
 })
 
 function createAssistantRunCommandDefinition(
@@ -596,9 +592,8 @@ function createAssistantRunCommandDefinition(
           model: 'gpt-oss:20b',
           baseUrl: 'http://127.0.0.1:11434/v1',
           once: true,
-          skipDaemon: true,
         },
-        description: 'Run a single inbox scan without starting the foreground daemon.',
+        description: 'Run a single inbox scan in one-shot mode.',
       },
       {
         options: {
@@ -636,7 +631,7 @@ function createAssistantRunCommandDefinition(
             ? context.options.sessionRolloverHours * 60 * 60 * 1000
             : null,
         once: context.options.once,
-        startDaemon: context.options.skipDaemon ? false : true,
+        startDaemon: context.options.once === true ? false : true,
         onEvent(event) {
           const message = formatAssistantRunEventForTerminal(
             event,

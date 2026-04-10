@@ -246,6 +246,7 @@ test('assistant command registration exposes the owned subcommands and root alia
   const assistant = readCommandGroup(commands, 'assistant')
   const selfTarget = readCommandGroup(assistant.commands, 'self-target')
   const session = readCommandGroup(assistant.commands, 'session')
+  const run = readCommand(commands, 'run')
 
   assert.deepEqual([...assistant.commands.keys()], [
     'ask',
@@ -260,6 +261,7 @@ test('assistant command registration exposes the owned subcommands and root alia
   ])
   assert.deepEqual([...selfTarget.commands.keys()], ['list', 'show', 'set', 'clear'])
   assert.deepEqual([...session.commands.keys()], ['list', 'show'])
+  assert.equal(Object.hasOwn(run.options?.shape ?? {}, 'skipDaemon'), false)
   assert.equal(readCommand(assistant.commands, 'chat').outputPolicy, 'agent-only')
   assert.equal(readCommand(commands, 'chat').description?.includes('assistant chat'), true)
   assert.equal(readCommand(commands, 'run').description?.includes('assistant run'), true)
@@ -533,7 +535,6 @@ test('assistant run forwards automation options and emits formatted foreground l
       providerName: 'ollama',
       requestId: 'req_assistant_run',
       sessionRolloverHours: 2,
-      skipDaemon: true,
       vault: '/tmp/vault',
     },
   })
