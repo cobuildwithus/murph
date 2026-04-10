@@ -195,6 +195,108 @@ test("canonical write lock rejects concurrent acquisition with an active VaultEr
   );
 });
 
+test("canonical write lock queues same-process callers and re-enters within a scope", async () => {
+  const vaultRoot = await makeVaultRoot();
+  const { acquireCanonicalWriteLock, withCanonicalWriteLockScope } = await loadCanonicalWriteLockModule();
+
+  const firstLock = await acquireCanonicalWriteLock(vaultRoot);
+  let secondResolved = false;
+  const secondLockPromise = acquireCanonicalWriteLock(vaultRoot).then((handle) => {
+    secondResolved = true;
+    return handle;
+  });
+
+  await new Promise((resolve) => setTimeout(resolve, 25));
+  assert.equal(secondResolved, false);
+
+  await firstLock.release();
+  const secondLock = await secondLockPromise;
+  await secondLock.release();
+  assert.equal(secondResolved, true);
+
+  let nestedAcquired = false;
+  await withCanonicalWriteLockScope(vaultRoot, async () => {
+    const outerLock = await acquireCanonicalWriteLock(vaultRoot);
+
+    try {
+      const innerLock = await acquireCanonicalWriteLock(vaultRoot);
+      nestedAcquired = true;
+      await innerLock.release();
+    } finally {
+      await outerLock.release();
+    }
+  });
+
+  assert.equal(nestedAcquired, true);
+});
+
+test("canonical write lock releases its queue slot after a failed acquisition", async () => {
+  const actualRuntimeState = await vi.importActual<typeof import("@murphai/runtime-state/node")>(
+    "@murphai/runtime-state/node",
+  );
+  const acquireDirectoryLock = vi
+    .fn()
+    .mockRejectedValueOnce(
+      new actualRuntimeState.DirectoryLockHeldError({
+        lockPath: "/tmp/mock-vault/.runtime/locks/canonical-write",
+        metadataPath: "/tmp/mock-vault/.runtime/locks/canonical-write/owner.json",
+        metadata: {
+          pid: 1234,
+          command: "stale-lock-holder",
+          startedAt: "2026-04-08T00:00:00.000Z",
+          host: "stale-host",
+        },
+        state: "active",
+      }),
+    )
+    .mockResolvedValueOnce({
+      metadata: {
+        pid: process.pid,
+        command: "vitest",
+        startedAt: "2026-04-10T00:00:00.000Z",
+        host: "test-host",
+      },
+      release: async () => {},
+    });
+
+  vi.doMock("@murphai/runtime-state/node", async () => ({
+    ...actualRuntimeState,
+    acquireDirectoryLock,
+  }));
+
+  const { acquireCanonicalWriteLock } = await loadCanonicalWriteLockModule();
+  const vaultRoot = await makeScratchRoot("murph-core-lock-queue-failure-");
+
+  await assert.rejects(
+    () => acquireCanonicalWriteLock(vaultRoot),
+    (error: unknown) => {
+      assert.equal((error as { name?: string }).name, "VaultError");
+      const lockError = error as { code?: string };
+      assert.equal(lockError.code, "CANONICAL_WRITE_LOCKED");
+      return true;
+    },
+  );
+
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const secondLock = await Promise.race([
+      acquireCanonicalWriteLock(vaultRoot),
+      new Promise<Awaited<ReturnType<typeof acquireCanonicalWriteLock>>>((_, reject) => {
+        timeout = setTimeout(() => {
+          reject(new Error("second canonical write lock acquisition did not resolve"));
+        }, 250);
+      }),
+    ]);
+
+    assert.equal(acquireDirectoryLock.mock.calls.length, 2);
+    await secondLock.release();
+  } finally {
+    if (timeout) {
+      clearTimeout(timeout);
+    }
+  }
+});
+
 test("canonical write lock rejects stale held locks with a rich VaultError", async () => {
   const actualRuntimeState = await vi.importActual<typeof import("@murphai/runtime-state/node")>(
     "@murphai/runtime-state/node",

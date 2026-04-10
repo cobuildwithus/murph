@@ -750,6 +750,86 @@ test("copyRawArtifact enforces raw immutability and importDocument appends contr
   assert.equal(latestAuditRecord.action, "document_import");
 });
 
+test("public raw, jsonl, and batchless audit writes persist canonical operation metadata", async () => {
+  const vaultRoot = await makeTempDirectory("murph-vault");
+  const sourceRoot = await makeTempDirectory("murph-source");
+  await initializeVault({ vaultRoot });
+
+  const documentPath = await writeExternalFile(sourceRoot, "projection-source.json", "{}");
+  await copyRawArtifact({
+    vaultRoot,
+    sourcePath: documentPath,
+    owner: {
+      kind: "document",
+      id: "doc_01JQ9R7WF97M1WAB2B4QF2Q1AB",
+    },
+    targetName: "projection-source.json",
+  });
+  await appendJsonlRecord({
+    vaultRoot,
+    relativePath: "audit/2026/2026-03.jsonl",
+    record: {
+      schemaVersion: "murph.audit.v1",
+      id: "aud_01JQ9R7WF97M1WAB2B4QF2Q1AC",
+      action: "history_add",
+      status: "success",
+      occurredAt: "2026-03-12T09:15:00.000Z",
+      actor: "core",
+      commandName: "core.appendJsonlRecord",
+      summary: "append test",
+      changes: [],
+    } satisfies AuditRecord,
+  });
+
+  const assessmentPath = await writeExternalFile(
+    sourceRoot,
+    "intake.json",
+    JSON.stringify({
+      profile: {
+        goals: {
+          topGoalIds: ["goal_01JNW7YJ7MNE7M9Q2QWQK4Z3F8"],
+        },
+      },
+    }),
+  );
+  const imported = await importAssessmentResponse({
+    vaultRoot,
+    sourcePath: assessmentPath,
+    assessmentType: "intake",
+    questionnaireSlug: "baseline-intake",
+  });
+  const projected = await projectAssessmentResponse({
+    vaultRoot,
+    assessmentId: imported.assessment.id,
+  });
+
+  const operations = await Promise.all(
+    (await listWriteOperationMetadataPaths(vaultRoot)).map((relativePath) =>
+      readStoredWriteOperation(vaultRoot, relativePath),
+    ),
+  );
+
+  assert.ok(operations.some((operation) => operation.operationType === "raw_copy"));
+  assert.ok(
+    operations.some(
+      (operation) =>
+        operation.operationType === "jsonl_append"
+        && operation.actions.some(
+          (action) => action.kind === "jsonl_append" && action.targetRelativePath === "audit/2026/2026-03.jsonl",
+        ),
+    ),
+  );
+  assert.ok(
+    operations.some(
+      (operation) =>
+        operation.operationType === "audit_append"
+        && operation.actions.some(
+          (action) => action.kind === "jsonl_append" && action.targetRelativePath === projected.auditPath,
+        ),
+    ),
+  );
+});
+
 test("photo-only meals keep canonical attachments without legacy audio path projections", async () => {
   const vaultRoot = await makeTempDirectory("murph-vault");
   const sourceRoot = await makeTempDirectory("murph-source");

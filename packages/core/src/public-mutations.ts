@@ -1,4 +1,3 @@
-import { appendJsonlRecord as appendJsonlRecordInternal } from "./jsonl.ts";
 import {
   addMeal as addMealInternal,
   importDeviceBatch as importDeviceBatchInternal,
@@ -12,15 +11,11 @@ import {
 import {
   acquireCanonicalWriteLock,
   inspectCanonicalWriteLock,
+  withCanonicalWriteLockScope,
 } from "./operations/canonical-write-lock.ts";
-import {
-  canonicalPathResource,
-  dedupeCanonicalResources,
-  withCanonicalResourceLocks,
-} from "./operations/canonical-resource-lock.ts";
 import { runCanonicalWrite } from "./operations/write-batch.ts";
 import {
-  copyRawArtifact as copyRawArtifactInternal,
+  type CopyRawArtifactInput as RawCopyRawArtifactInput,
   prepareRawArtifact,
 } from "./raw.ts";
 import { importAssessmentResponse as importAssessmentResponseInternal } from "./assessment/storage.ts";
@@ -132,13 +127,16 @@ async function withCanonicalWriteLock<TResult>(
   vaultRoot: string | undefined,
   operation: () => Promise<TResult>,
 ): Promise<TResult> {
-  const lock = await acquireCanonicalWriteLock(vaultRoot ?? process.cwd());
+  const normalizedVaultRoot = vaultRoot ?? process.cwd();
+  return await withCanonicalWriteLockScope(normalizedVaultRoot, async () => {
+    const lock = await acquireCanonicalWriteLock(normalizedVaultRoot);
 
-  try {
-    return await operation();
-  } finally {
-    await lock.release();
-  }
+    try {
+      return await operation();
+    } finally {
+      await lock.release();
+    }
+  });
 }
 
 function withCanonicalInputWriteLock<TInput extends { vaultRoot: string }, TResult>(
@@ -193,16 +191,30 @@ export async function validateVault(
   };
 }
 
-export async function appendJsonlRecord<TRecord extends object>(input: {
+export async function appendJsonlRecord<TRecord extends Record<string, unknown>>(input: {
   vaultRoot: string;
   relativePath: string;
   record: TRecord;
 }): Promise<TRecord> {
-  return withCanonicalResourceLocks({
+  if (!input.record || typeof input.record !== "object" || Array.isArray(input.record)) {
+    throw new VaultError("VAULT_INVALID_RECORD", "JSONL records must be plain objects.", {
+      relativePath: input.relativePath,
+    });
+  }
+
+  await applyCanonicalWriteBatch({
     vaultRoot: input.vaultRoot,
-    resources: [canonicalPathResource(input.relativePath)],
-    run: async () => appendJsonlRecordInternal(input),
+    operationType: "jsonl_append",
+    summary: `Append JSONL record to ${input.relativePath}`,
+    jsonlAppends: [
+      {
+        relativePath: input.relativePath,
+        record: input.record,
+      },
+    ],
   });
+
+  return input.record;
 }
 
 export async function applyCanonicalWriteBatch(
@@ -227,104 +239,100 @@ export async function applyCanonicalWriteBatch(
     );
   }
 
-  const resources = dedupeCanonicalResources([
-    ...rawCopies.map((entry) => canonicalPathResource(entry.targetRelativePath)),
-    ...rawContents.map((entry) => canonicalPathResource(entry.targetRelativePath)),
-    ...textWrites.map((entry) => canonicalPathResource(entry.relativePath)),
-    ...jsonlAppends.map((entry) => canonicalPathResource(entry.relativePath)),
-    ...deletes.map((entry) => canonicalPathResource(entry.relativePath)),
-  ]);
+  await loadVaultInternal({ vaultRoot: input.vaultRoot });
 
-  return withCanonicalResourceLocks({
+  return runCanonicalWrite({
     vaultRoot: input.vaultRoot,
-    resources,
-    run: async () => {
-      await loadVaultInternal({ vaultRoot: input.vaultRoot });
+    operationType: input.operationType,
+    summary: input.summary,
+    occurredAt: input.occurredAt,
+    mutate: async ({ batch }) => {
+      for (const rawCopy of rawCopies) {
+        await batch.stageRawCopy({
+          sourcePath: rawCopy.sourcePath,
+          targetRelativePath: rawCopy.targetRelativePath,
+          originalFileName: rawCopy.originalFileName,
+          mediaType: rawCopy.mediaType,
+          allowExistingMatch: rawCopy.allowExistingMatch,
+        });
+      }
 
-      return runCanonicalWrite({
-        vaultRoot: input.vaultRoot,
-        operationType: input.operationType,
-        summary: input.summary,
-        occurredAt: input.occurredAt,
-        mutate: async ({ batch }) => {
-          for (const rawCopy of rawCopies) {
-            await batch.stageRawCopy({
-              sourcePath: rawCopy.sourcePath,
-              targetRelativePath: rawCopy.targetRelativePath,
-              originalFileName: rawCopy.originalFileName,
-              mediaType: rawCopy.mediaType,
-              allowExistingMatch: rawCopy.allowExistingMatch,
-            });
-          }
+      for (const rawContent of rawContents) {
+        if (typeof rawContent.content === "string") {
+          await batch.stageRawText({
+            targetRelativePath: rawContent.targetRelativePath,
+            originalFileName: rawContent.originalFileName,
+            mediaType: rawContent.mediaType,
+            content: rawContent.content,
+            allowExistingMatch: rawContent.allowExistingMatch,
+          });
+          continue;
+        }
 
-          for (const rawContent of rawContents) {
-            if (typeof rawContent.content === "string") {
-              await batch.stageRawText({
-                targetRelativePath: rawContent.targetRelativePath,
-                originalFileName: rawContent.originalFileName,
-                mediaType: rawContent.mediaType,
-                content: rawContent.content,
-                allowExistingMatch: rawContent.allowExistingMatch,
-              });
-              continue;
-            }
+        await batch.stageRawBytes({
+          targetRelativePath: rawContent.targetRelativePath,
+          originalFileName: rawContent.originalFileName,
+          mediaType: rawContent.mediaType,
+          content: rawContent.content,
+          allowExistingMatch: rawContent.allowExistingMatch,
+        });
+      }
 
-            await batch.stageRawBytes({
-              targetRelativePath: rawContent.targetRelativePath,
-              originalFileName: rawContent.originalFileName,
-              mediaType: rawContent.mediaType,
-              content: rawContent.content,
-              allowExistingMatch: rawContent.allowExistingMatch,
-            });
-          }
+      for (const textWrite of textWrites) {
+        await batch.stageTextWrite(textWrite.relativePath, textWrite.content, {
+          overwrite: textWrite.overwrite,
+          allowExistingMatch: textWrite.allowExistingMatch,
+        });
+      }
 
-          for (const textWrite of textWrites) {
-            await batch.stageTextWrite(textWrite.relativePath, textWrite.content, {
-              overwrite: textWrite.overwrite,
-              allowExistingMatch: textWrite.allowExistingMatch,
-            });
-          }
+      for (const jsonlAppend of jsonlAppends) {
+        await batch.stageJsonlAppend(
+          jsonlAppend.relativePath,
+          `${JSON.stringify(jsonlAppend.record)}\n`,
+        );
+      }
 
-          for (const jsonlAppend of jsonlAppends) {
-            await batch.stageJsonlAppend(
-              jsonlAppend.relativePath,
-              `${JSON.stringify(jsonlAppend.record)}\n`,
-            );
-          }
+      for (const deletion of deletes) {
+        await batch.stageDelete(deletion.relativePath);
+      }
 
-          for (const deletion of deletes) {
-            await batch.stageDelete(deletion.relativePath);
-          }
-
-          return {
-            rawCopies: rawCopies.map((entry) => entry.targetRelativePath),
-            rawContents: rawContents.map((entry) => entry.targetRelativePath),
-            textWrites: textWrites.map((entry) => entry.relativePath),
-            jsonlAppends: jsonlAppends.map((entry) => entry.relativePath),
-            deletes: deletes.map((entry) => entry.relativePath),
-          };
-        },
-      });
+      return {
+        rawCopies: rawCopies.map((entry) => entry.targetRelativePath),
+        rawContents: rawContents.map((entry) => entry.targetRelativePath),
+        textWrites: textWrites.map((entry) => entry.relativePath),
+        jsonlAppends: jsonlAppends.map((entry) => entry.relativePath),
+        deletes: deletes.map((entry) => entry.relativePath),
+      };
     },
   });
 }
 
 export async function copyRawArtifact(
-  input: Parameters<typeof copyRawArtifactInternal>[0],
-): ReturnType<typeof copyRawArtifactInternal> {
-  return withCanonicalResourceLocks({
-    vaultRoot: input.vaultRoot,
-    resources: dedupeCanonicalResources([
-      prepareRawArtifact({
-        sourcePath: input.sourcePath,
-        owner: input.owner,
-        occurredAt: input.occurredAt,
-        role: input.role,
-        targetName: input.targetName,
-      }).relativePath,
-    ].map((relativePath) => canonicalPathResource(relativePath))),
-    run: async () => await copyRawArtifactInternal(input),
+  input: RawCopyRawArtifactInput,
+): Promise<ReturnType<typeof prepareRawArtifact>> {
+  const artifact = prepareRawArtifact({
+    sourcePath: input.sourcePath,
+    owner: input.owner,
+    occurredAt: input.occurredAt,
+    role: input.role,
+    targetName: input.targetName,
   });
+  await applyCanonicalWriteBatch({
+    vaultRoot: input.vaultRoot,
+    operationType: "raw_copy",
+    summary: `Copy raw artifact ${artifact.relativePath}`,
+    occurredAt: input.occurredAt,
+    rawCopies: [
+      {
+        sourcePath: input.sourcePath,
+        targetRelativePath: artifact.relativePath,
+        originalFileName: artifact.originalFileName,
+        mediaType: artifact.mediaType,
+        allowExistingMatch: input.allowExistingMatch,
+      },
+    ],
+  });
+  return artifact;
 }
 
 export async function ensureJournalDay(

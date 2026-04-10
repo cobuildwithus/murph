@@ -15,8 +15,10 @@ import {
   ID_PREFIXES,
   VAULT_LAYOUT,
 } from "./constants.ts";
+import { runLoadedCanonicalWrite } from "./domains/shared.ts";
 import { generateRecordId } from "./ids.ts";
-import { appendJsonlRecord, toMonthlyShardRelativePath } from "./jsonl.ts";
+import { toMonthlyShardRelativePath } from "./jsonl.ts";
+import { runCanonicalWrite } from "./operations/write-batch.ts";
 import type { WriteBatch } from "./operations/write-batch.ts";
 import { normalizeRelativeVaultPath } from "./path-safety.ts";
 import { toIsoTimestamp } from "./time.ts";
@@ -126,10 +128,14 @@ export async function emitAuditRecord({
   if (batch) {
     await batch.stageJsonlAppend(relativePath, payload);
   } else {
-    await appendJsonlRecord({
+    await runLoadedCanonicalWrite({
       vaultRoot,
-      relativePath,
-      record,
+      operationType: "audit_append",
+      summary: `Append audit record ${record.id}`,
+      occurredAt: record.occurredAt,
+      mutate: async ({ batch }) => {
+        await batch.stageJsonlAppend(relativePath, payload);
+      },
     });
   }
 

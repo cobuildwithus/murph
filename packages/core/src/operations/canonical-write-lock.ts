@@ -1,3 +1,5 @@
+import { AsyncLocalStorage } from "node:async_hooks";
+import { randomUUID } from "node:crypto";
 import path from "node:path";
 import {
   acquireDirectoryLock,
@@ -29,6 +31,11 @@ export interface CanonicalWriteLockHandle {
   release(): Promise<void>;
 }
 
+interface CanonicalWriteLockContext {
+  ownerToken: string;
+  vaultRoot: string;
+}
+
 export type CanonicalWriteLockInspection =
   | {
       state: "unlocked";
@@ -45,6 +52,9 @@ export type CanonicalWriteLockInspection =
       metadata: CanonicalWriteLockMetadata | null;
       reason: string;
     };
+
+const canonicalWriteLockContextStorage = new AsyncLocalStorage<CanonicalWriteLockContext>();
+const processCanonicalWriteQueues = new Map<string, Promise<void>>();
 
 function buildMetadata(): CanonicalWriteLockMetadata {
   return {
@@ -154,14 +164,41 @@ export async function inspectCanonicalWriteLock(vaultRoot: string): Promise<Cano
   };
 }
 
+export async function withCanonicalWriteLockScope<TResult>(
+  vaultRoot: string,
+  run: () => Promise<TResult>,
+): Promise<TResult> {
+  const absoluteRoot = normalizeVaultRoot(vaultRoot);
+  const parentContext = canonicalWriteLockContextStorage.getStore();
+
+  if (parentContext?.vaultRoot === absoluteRoot) {
+    return await run();
+  }
+
+  return await canonicalWriteLockContextStorage.run(
+    {
+      ownerToken: randomUUID().replace(/-/g, ""),
+      vaultRoot: absoluteRoot,
+    },
+    run,
+  );
+}
+
 export async function acquireCanonicalWriteLock(vaultRoot: string): Promise<CanonicalWriteLockHandle> {
   const absoluteRoot = normalizeVaultRoot(vaultRoot);
+  const context = canonicalWriteLockContextStorage.getStore();
+  const ownerToken =
+    context?.vaultRoot === absoluteRoot
+      ? context.ownerToken
+      : randomUUID().replace(/-/g, "");
+  const isReentrantOwner = context?.vaultRoot === absoluteRoot && context.ownerToken === ownerToken;
+  const releaseQueue = isReentrantOwner ? null : await acquireCanonicalWriteQueueSlot(absoluteRoot);
   const lockPath = resolveVaultPath(absoluteRoot, CANONICAL_WRITE_LOCK_DIRECTORY);
   const metadataPath = resolveVaultPath(absoluteRoot, CANONICAL_WRITE_LOCK_METADATA_PATH);
 
   try {
     const handle = await acquireDirectoryLock({
-      ownerKey: `canonical-write:${absoluteRoot}`,
+      ownerKey: `canonical-write:${absoluteRoot}:${ownerToken}`,
       lockPath: lockPath.absolutePath,
       metadataPath: metadataPath.absolutePath,
       metadata: buildMetadata(),
@@ -182,9 +219,17 @@ export async function acquireCanonicalWriteLock(vaultRoot: string): Promise<Cano
     return {
       metadata: handle.metadata,
       relativePath: CANONICAL_WRITE_LOCK_DIRECTORY,
-      release: handle.release,
+      async release() {
+        try {
+          await handle.release();
+        } finally {
+          releaseQueue?.();
+        }
+      },
     };
   } catch (error) {
+    releaseQueue?.();
+
     if (error instanceof DirectoryLockHeldError) {
       const inspection = mapDirectoryLockInspection(
         error.inspection.state === "active"
@@ -231,4 +276,27 @@ export async function acquireCanonicalWriteLock(vaultRoot: string): Promise<Cano
 
     throw error;
   }
+}
+
+async function acquireCanonicalWriteQueueSlot(vaultRoot: string): Promise<() => void> {
+  const queueKey = `canonical-write:${vaultRoot}`;
+  const prior = processCanonicalWriteQueues.get(queueKey) ?? Promise.resolve();
+  let releaseQueue!: () => void;
+  const queued = new Promise<void>((resolve) => {
+    releaseQueue = resolve;
+  });
+  const tail = prior.then(
+    () => queued,
+    () => queued,
+  );
+  processCanonicalWriteQueues.set(queueKey, tail);
+
+  await prior.catch(() => undefined);
+
+  return () => {
+    releaseQueue();
+    if (processCanonicalWriteQueues.get(queueKey) === tail) {
+      processCanonicalWriteQueues.delete(queueKey);
+    }
+  };
 }
