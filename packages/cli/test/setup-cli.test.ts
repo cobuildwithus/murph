@@ -3559,10 +3559,12 @@ test('setup routing helpers only recognize onboard as the root onboarding comman
 })
 
 test.sequential('murph alias routes empty and help invocations to onboarding help', async () => {
-  const help = await runSetupAliasRaw('murph', ['--help'])
-  const onboardHelp = await runSetupAliasRaw('murph', ['onboard', '--help'])
-  const emptyInvocation = await runSetupAliasRaw('murph', [])
-  const inboxHelp = await runSetupAliasRaw('murph', ['inbox', 'doctor', '--help'])
+  const [help, onboardHelp, emptyInvocation, inboxHelp] = await Promise.all([
+    runSetupAliasRaw('murph', ['--help']),
+    runSetupAliasRaw('murph', ['onboard', '--help']),
+    runSetupAliasRaw('murph', []),
+    runSetupAliasRaw('murph', ['inbox', 'doctor', '--help']),
+  ])
 
   assert.match(help, /Murph local machine onboarding helpers\./u)
   assert.match(
