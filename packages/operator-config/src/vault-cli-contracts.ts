@@ -368,6 +368,20 @@ export const readEntitySchema = z.object({
   links: z.array(entityRefSchema),
 })
 
+export const listEntitySchema = readEntitySchema
+  .omit({
+    markdown: true,
+  })
+  .extend({
+    data: z.record(z.string(), z.any()),
+    excerpt: z
+      .string()
+      .min(1)
+      .nullable()
+      .optional()
+      .describe('Optional compact body excerpt for list summaries.'),
+  })
+
 export const showResultSchema = z.object({
   vault: pathSchema,
   entity: readEntitySchema,
@@ -408,16 +422,14 @@ export const listFilterSchema = z.object({
   limit: z.number().int().positive().max(200).default(50),
 })
 
-export const listItemSchema = readEntitySchema.omit({
-  markdown: true,
-})
+export const listItemSchema = listEntitySchema
 
 export const workoutFormatListResultSchema = z.object({
   vault: pathSchema,
   filters: z.object({
     limit: z.number().int().positive().max(200),
   }),
-  items: z.array(listItemSchema),
+  items: z.array(listEntitySchema),
   count: z.number().int().nonnegative(),
   nextCursor: z.string().min(1).nullable(),
 })
@@ -425,7 +437,7 @@ export const workoutFormatListResultSchema = z.object({
 export const listResultSchema = z.object({
   vault: pathSchema,
   filters: listFilterSchema,
-  items: z.array(listItemSchema),
+  items: z.array(listEntitySchema),
   count: z.number().int().nonnegative(),
   nextCursor: z.string().min(1).nullable(),
 })
@@ -456,7 +468,6 @@ export type DocumentImportResult = z.infer<typeof documentImportResultSchema>
 export type MealAddResult = z.infer<typeof mealAddResultSchema>
 export type WorkoutAddResult = z.infer<typeof workoutAddResultSchema>
 export type WorkoutFormatSaveResult = z.infer<typeof workoutFormatSaveResultSchema>
-export type WorkoutFormatListResult = z.infer<typeof workoutFormatListResultSchema>
 export type WorkoutImportInspectResult = z.infer<typeof workoutImportInspectResultSchema>
 export type WorkoutImportCsvResult = z.infer<typeof workoutImportCsvResultSchema>
 export type InterventionAddResult = z.infer<typeof interventionAddResultSchema>
@@ -468,8 +479,15 @@ export type ExperimentCreateResult = z.infer<
 >
 export type JournalEnsureResult = z.infer<typeof journalEnsureResultSchema>
 export type ReadEntity = z.infer<typeof readEntitySchema>
+export interface ListEntity extends Omit<ReadEntity, 'markdown' | 'data'> {
+  [key: string]: any
+  data: any
+  excerpt?: string | null
+}
+export type ListItem = ListEntity
 export type ShowResult = z.infer<typeof showResultSchema>
 export type ListFilters = z.infer<typeof listFilterSchema>
+export type WorkoutFormatListResult = z.infer<typeof workoutFormatListResultSchema>
 export type ListResult = z.infer<typeof listResultSchema>
 export type DeleteResult = z.infer<typeof deleteResultSchema>
 export type ExportPackResult = z.infer<typeof exportPackResultSchema>
