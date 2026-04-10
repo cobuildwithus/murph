@@ -101,21 +101,21 @@ test('assistant reply events respect unsafe detail mode and provider progress su
   assert.equal(
     formatAssistantRunEventForTerminal(
       createAssistantEvent({
-        type: 'reply.scan.primed',
-        details: 'cap-01 queued for Telegram',
+        type: 'reply.scan.started',
+        details: '1 capture pending',
       }),
     ),
-    'primed channel auto-reply',
+    'scanning channel auto-reply: 1 capture pending',
   )
   assert.equal(
     formatAssistantRunEventForTerminal(
       createAssistantEvent({
-        type: 'reply.scan.primed',
-        details: 'cap-01 queued for Telegram',
+        type: 'reply.scan.started',
+        details: '1 capture pending',
       }),
       { unsafeDetails: true },
     ),
-    'primed channel auto-reply: cap-01 queued for Telegram',
+    'scanning channel auto-reply: 1 capture pending',
   )
   assert.equal(
     formatAssistantRunEventForTerminal(

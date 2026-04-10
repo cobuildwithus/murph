@@ -1,4 +1,7 @@
-import type { AssistantAutomationCursor } from '@murphai/operator-config/assistant-cli-contracts'
+import type {
+  AssistantAutomationCursor,
+  AssistantAutomationState,
+} from '@murphai/operator-config/assistant-cli-contracts'
 
 type ShutdownTimer = ReturnType<typeof setTimeout> | number
 
@@ -29,7 +32,6 @@ export interface AssistantRunEvent {
     | 'capture.routed'
     | 'capture.skipped'
     | 'daemon.failed'
-    | 'reply.scan.primed'
     | 'reply.scan.started'
     | 'scan.started'
 }
@@ -52,15 +54,12 @@ export interface AssistantAutoReplyScanResult {
 }
 
 export interface AssistantAutomationStateProgress {
-  cursor: AssistantAutomationCursor | null
-  backlogChannels?: readonly string[]
-  primed: boolean
+  autoReply: AssistantAutomationState['autoReply']
+  cursor?: AssistantAutomationCursor | null
 }
 
 export interface AssistantAutomationScanStateProgress {
-  autoReplyBacklogChannels: string[]
-  autoReplyPrimed: boolean
-  autoReplyScanCursor: AssistantAutomationCursor | null
+  autoReply: AssistantAutomationState['autoReply']
   inboxScanCursor: AssistantAutomationCursor | null
 }
 

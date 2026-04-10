@@ -2,14 +2,20 @@ import assert from "node:assert/strict";
 import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-import { test, vi } from "vitest";
+import { beforeEach, test, vi } from "vitest";
 
 import { resolveAssistantStatePaths } from "@murphai/runtime-state/node";
+
+const mocks = vi.hoisted(() => ({
+  inboxInit: vi.fn(),
+  inboxList: vi.fn(),
+}));
 
 vi.mock("@murphai/inbox-services", () => ({
   createIntegratedInboxServices() {
     return {
-      async init() {},
+      init: mocks.inboxInit,
+      list: mocks.inboxList,
     };
   },
 }));
@@ -37,6 +43,24 @@ import {
   HOSTED_RUNTIME_EMAIL_CAPABILITY_ENV,
 } from "./hosted-runtime-test-helpers.ts";
 
+beforeEach(() => {
+  vi.clearAllMocks();
+  mocks.inboxList.mockResolvedValue({
+    items: [],
+  });
+});
+
+async function readAutomationState(vaultRoot: string) {
+  return JSON.parse(
+    await readFile(resolveAssistantStatePaths(vaultRoot).automationStatePath, "utf8"),
+  ) as {
+    autoReply: Array<{
+      channel: string;
+      cursor: { captureId: string; occurredAt: string } | null;
+    }>;
+  };
+}
+
 test("hosted channel capability reconciliation enables email and telegram auto-reply exactly once", async () => {
   const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace("hosted-runtime-context-");
 
@@ -51,12 +75,16 @@ test("hosted channel capability reconciliation enables email and telegram auto-r
       emailAutoReplyEnabled: true,
       telegramAutoReplyEnabled: true,
     });
-    assert.deepEqual(
-      JSON.parse(
-        await readFile(resolveAssistantStatePaths(vaultRoot).automationStatePath, "utf8"),
-      ).autoReplyChannels,
-      ["email", "telegram"],
-    );
+    assert.deepEqual((await readAutomationState(vaultRoot)).autoReply, [
+      {
+        channel: "email",
+        cursor: null,
+      },
+      {
+        channel: "telegram",
+        cursor: null,
+      },
+    ]);
 
     const secondResult = await reconcileHostedAssistantChannelCapabilities(
       vaultRoot,
@@ -68,6 +96,7 @@ test("hosted channel capability reconciliation enables email and telegram auto-r
       emailAutoReplyEnabled: true,
       telegramAutoReplyEnabled: true,
     });
+    assert.equal(mocks.inboxList.mock.calls.length, 1);
   } finally {
     await cleanup();
   }
@@ -157,11 +186,7 @@ test("hosted dispatch context does not enable new auto-reply channels on non-act
       HOSTED_RUNTIME_RESOLVED_CONFIG,
     );
 
-    const automationState = JSON.parse(
-      await readFile(resolveAssistantStatePaths(vaultRoot).automationStatePath, "utf8"),
-    ) as { autoReplyChannels: string[] };
-
-    assert.deepEqual(automationState.autoReplyChannels, []);
+    assert.deepEqual((await readAutomationState(vaultRoot)).autoReply, []);
   } finally {
     await cleanup();
   }

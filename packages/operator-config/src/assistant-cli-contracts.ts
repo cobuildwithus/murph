@@ -683,10 +683,14 @@ export const assistantStatusRunLockSchema = z
 export const assistantStatusAutomationSchema = z
   .object({
     inboxScanCursor: z.lazy(() => assistantAutomationCursorSchema).nullable(),
-    autoReplyScanCursor: z.lazy(() => assistantAutomationCursorSchema).nullable(),
-    autoReplyChannels: z.array(z.string().min(1)),
-    autoReplyBacklogChannels: z.array(z.string().min(1)),
-    autoReplyPrimed: z.boolean(),
+    autoReply: z.array(
+      z
+        .object({
+          channel: z.string().min(1),
+          cursor: z.lazy(() => assistantAutomationCursorSchema).nullable(),
+        })
+        .strict(),
+    ),
     updatedAt: isoTimestampSchema.nullable(),
   })
   .strict()
@@ -1107,14 +1111,18 @@ export const assistantAutomationCursorSchema = z.object({
   captureId: z.string().min(1),
 })
 
+export const assistantAutoReplyChannelStateSchema = z
+  .object({
+    channel: z.string().min(1),
+    cursor: assistantAutomationCursorSchema.nullable(),
+  })
+  .strict()
+
 export const assistantAutomationStateSchema = z
   .object({
-    version: z.literal(2),
+    version: z.literal(1),
     inboxScanCursor: assistantAutomationCursorSchema.nullable(),
-    autoReplyScanCursor: assistantAutomationCursorSchema.nullable(),
-    autoReplyChannels: z.array(z.string().min(1)),
-    autoReplyBacklogChannels: z.array(z.string().min(1)).default([]),
-    autoReplyPrimed: z.boolean(),
+    autoReply: z.array(assistantAutoReplyChannelStateSchema),
     updatedAt: isoTimestampSchema,
   })
   .strict()

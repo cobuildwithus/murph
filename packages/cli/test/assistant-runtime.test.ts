@@ -267,8 +267,8 @@ function snapshotAssistantAutomationProgress(input: {
 }) {
   return {
     inboxScanCursor: input.inboxScanCursor,
+    autoReply: input.autoReply,
     autoReplyScanCursor: input.autoReply[0]?.cursor ?? null,
-    autoReplyChannels: input.autoReply.map((entry) => entry.channel),
   }
 }
 
@@ -276,6 +276,7 @@ function snapshotAssistantAutoReplyProgress(input: {
   autoReply: readonly AssistantAutoReplyEntrySnapshot[]
 }) {
   return {
+    autoReply: input.autoReply,
     cursor: input.autoReply[0]?.cursor ?? null,
   }
 }
@@ -2110,10 +2111,9 @@ test('scanAssistantAutomationOnce keeps the routing cursor pinned when a capture
   await mkdir(vaultRoot)
   cleanupPaths.push(parent)
 
-  const stateProgress: Array<{
-    inboxScanCursor: { occurredAt: string; captureId: string } | null
-    autoReplyScanCursor: { occurredAt: string; captureId: string } | null
-  }> = []
+  const stateProgress: Array<
+    ReturnType<typeof snapshotAssistantAutomationProgress>
+  > = []
 
   const result = await scanAssistantAutomationOnce({
     inboxServices: {
@@ -2367,10 +2367,9 @@ test('scanAssistantAutomationOnce stops auto-reply when document preservation fa
     throw new Error('preserve exploded')
   })
   const events: Array<{ type: string; captureId?: string; details?: string }> = []
-  const stateProgress: Array<{
-    inboxScanCursor: { occurredAt: string; captureId: string } | null
-    autoReplyScanCursor: { occurredAt: string; captureId: string } | null
-  }> = []
+  const stateProgress: Array<
+    ReturnType<typeof snapshotAssistantAutomationProgress>
+  > = []
 
   const result = await scanAssistantAutomationOnce({
     inboxServices: {
@@ -2486,7 +2485,7 @@ test('scanAssistantAutomationOnce stops auto-reply when document preservation fa
   )
 })
 
-test('scanAssistantAutomationOnce preserves other enabled channels while draining email backlog', async () => {
+test('scanAssistantAutomationOnce advances each enabled channel cursor independently in a shared scan', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-unified-backlog-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
@@ -2593,24 +2592,27 @@ test('scanAssistantAutomationOnce preserves other enabled channels while drainin
   }
 
   let state: Parameters<typeof scanAssistantAutomationOnce>[0]['state'] =
-    createLegacyAutomationState({
+    {
       inboxScanCursor: null,
-      autoReplyScanCursor: null,
-      autoReplyChannels: ['email', 'telegram'],
-      autoReplyBacklogChannels: ['email'],
-      autoReplyPrimed: false,
-    })
-  const stateProgress: Array<{
-    autoReplyBacklogChannels: string[]
-    autoReplyPrimed: boolean
-    autoReplyScanCursor: { occurredAt: string; captureId: string } | null
-  }> = []
+      autoReply: [
+        { channel: 'email', cursor: null },
+        { channel: 'telegram', cursor: null },
+      ],
+    }
+  const stateProgress: Array<
+    ReturnType<typeof snapshotAssistantAutomationProgress>
+  > = []
 
   const inboxServices = {
     async list(input: any) {
       if (input.afterCaptureId === 'cap-email-backlog') {
         return {
           items: [telegramCapture],
+        }
+      }
+      if (input.afterCaptureId === telegramCapture.captureId) {
+        return {
+          items: [],
         }
       }
 
@@ -2681,15 +2683,51 @@ test('scanAssistantAutomationOnce preserves other enabled channels while drainin
       skipped: 0,
     },
     replies: {
-      considered: 1,
+      considered: 2,
       failed: 0,
-      replied: 1,
+      replied: 2,
       skipped: 0,
     },
   })
   assert.deepEqual(stateProgress[0], {
-    autoReplyBacklogChannels: ['email'],
-    autoReplyPrimed: true,
+    inboxScanCursor: null,
+    autoReply: [
+      {
+        channel: 'email',
+        cursor: {
+          occurredAt: '2026-03-18T09:00:00Z',
+          captureId: 'cap-email-backlog',
+        },
+      },
+      {
+        channel: 'telegram',
+        cursor: null,
+      },
+    ],
+    autoReplyScanCursor: {
+      occurredAt: '2026-03-18T09:00:00Z',
+      captureId: 'cap-email-backlog',
+    },
+  })
+
+  assert.deepEqual(stateProgress[1], {
+    inboxScanCursor: null,
+    autoReply: [
+      {
+        channel: 'email',
+        cursor: {
+          occurredAt: '2026-03-18T09:00:00Z',
+          captureId: 'cap-email-backlog',
+        },
+      },
+      {
+        channel: 'telegram',
+        cursor: {
+          occurredAt: '2026-03-18T09:05:00Z',
+          captureId: 'cap-telegram-new',
+        },
+      },
+    ],
     autoReplyScanCursor: {
       occurredAt: '2026-03-18T09:00:00Z',
       captureId: 'cap-email-backlog',
@@ -2712,44 +2750,11 @@ test('scanAssistantAutomationOnce preserves other enabled channels while drainin
       skipped: 0,
     },
   })
-  assert.deepEqual(stateProgress[1], {
-    autoReplyBacklogChannels: [],
-    autoReplyPrimed: true,
-    autoReplyScanCursor: {
-      occurredAt: '2026-03-18T09:00:00Z',
-      captureId: 'cap-email-backlog',
-    },
-  })
-
-  const third = await runScan()
-  assertAssistantAutomationScanResult(third, {
-    routing: {
-      considered: 0,
-      failed: 0,
-      noAction: 0,
-      routed: 0,
-      skipped: 0,
-    },
-    replies: {
-      considered: 1,
-      failed: 0,
-      replied: 1,
-      skipped: 0,
-    },
-  })
-  assert.deepEqual(stateProgress[2], {
-    autoReplyBacklogChannels: [],
-    autoReplyPrimed: true,
-    autoReplyScanCursor: {
-      occurredAt: '2026-03-18T09:05:00Z',
-      captureId: 'cap-telegram-new',
-    },
-  })
   assert.equal(runtimeMocks.executeAssistantProviderTurn.mock.calls.length, 2)
   assert.equal(runtimeMocks.deliverAssistantMessageOverBinding.mock.calls.length, 2)
 })
 
-test('scanAssistantAutomationOnce keeps the reply cursor authoritative after backlog clear', async () => {
+test('scanAssistantAutomationOnce keeps per-channel reply cursors authoritative when one channel is already caught up', async () => {
   const parent = await mkdtemp(
     path.join(tmpdir(), 'murph-assistant-unified-backlog-clear-'),
   )
@@ -2860,18 +2865,22 @@ test('scanAssistantAutomationOnce keeps the reply cursor authoritative after bac
     oldestFirst: boolean
   }> = []
   let state: Parameters<typeof scanAssistantAutomationOnce>[0]['state'] =
-    createLegacyAutomationState({
+    {
       inboxScanCursor: null,
-      autoReplyScanCursor: null,
-      autoReplyChannels: ['email', 'telegram'],
-      autoReplyBacklogChannels: ['email'],
-      autoReplyPrimed: false,
-    })
-  const stateProgress: Array<{
-    autoReplyBacklogChannels: string[]
-    autoReplyPrimed: boolean
-    autoReplyScanCursor: { occurredAt: string; captureId: string } | null
-  }> = []
+      autoReply: [
+        {
+          channel: 'email',
+          cursor: {
+            occurredAt: '2026-03-18T09:00:00Z',
+            captureId: 'cap-email-backlog',
+          },
+        },
+        { channel: 'telegram', cursor: null },
+      ],
+    }
+  const stateProgress: Array<
+    ReturnType<typeof snapshotAssistantAutomationProgress>
+  > = []
 
   const inboxServices = {
     async list(input: any) {
@@ -2883,6 +2892,11 @@ test('scanAssistantAutomationOnce keeps the reply cursor authoritative after bac
       if (input.afterCaptureId === emailBacklogCapture.captureId) {
         return {
           items: [telegramCapture],
+        }
+      }
+      if (input.afterCaptureId === telegramCapture.captureId) {
+        return {
+          items: [],
         }
       }
 
@@ -2960,27 +2974,28 @@ test('scanAssistantAutomationOnce keeps the reply cursor authoritative after bac
     },
   })
   assert.deepEqual(stateProgress[0], {
-    autoReplyBacklogChannels: ['email'],
-    autoReplyPrimed: true,
+    inboxScanCursor: null,
+    autoReply: [
+      {
+        channel: 'email',
+        cursor: {
+          occurredAt: '2026-03-18T09:00:00Z',
+          captureId: 'cap-email-backlog',
+        },
+      },
+      {
+        channel: 'telegram',
+        cursor: {
+          occurredAt: '2026-03-18T09:05:00Z',
+          captureId: 'cap-telegram-new',
+        },
+      },
+    ],
     autoReplyScanCursor: {
       occurredAt: '2026-03-18T09:00:00Z',
       captureId: 'cap-email-backlog',
     },
   })
-
-  state = {
-    ...state,
-    autoReply: state.autoReply.map((entry) =>
-      entry.channel === 'telegram'
-        ? {
-            ...entry,
-            cursor:
-              state.autoReply.find((candidate) => candidate.channel === 'email')
-                ?.cursor ?? null,
-          }
-        : entry,
-    ),
-  }
 
   const second = await runScan()
   assertAssistantAutomationScanResult(second, {
@@ -2992,37 +3007,35 @@ test('scanAssistantAutomationOnce keeps the reply cursor authoritative after bac
       skipped: 0,
     },
     replies: {
-      considered: 1,
+      considered: 0,
       failed: 0,
-      replied: 1,
+      replied: 0,
       skipped: 0,
     },
   })
-  assert.deepEqual(stateProgress[1], {
-    autoReplyBacklogChannels: [],
-    autoReplyPrimed: true,
-    autoReplyScanCursor: {
-      occurredAt: '2026-03-18T09:05:00Z',
-      captureId: 'cap-telegram-new',
-    },
-  })
-  assert.deepEqual(listCalls, [
-    {
-      afterCaptureId: null,
-      afterOccurredAt: null,
-      oldestFirst: true,
-    },
-    {
-      afterCaptureId: 'cap-email-backlog',
-      afterOccurredAt: '2026-03-18T09:00:00Z',
-      oldestFirst: true,
-    },
-  ])
-  assert.equal(runtimeMocks.executeAssistantProviderTurn.mock.calls.length, 2)
-  assert.equal(runtimeMocks.deliverAssistantMessageOverBinding.mock.calls.length, 2)
+  assert.equal(runtimeMocks.executeAssistantProviderTurn.mock.calls.length, 1)
+  assert.equal(runtimeMocks.deliverAssistantMessageOverBinding.mock.calls.length, 1)
+  assert.equal(
+    listCalls.some(
+      (call) =>
+        call.afterCaptureId === 'cap-email-backlog' &&
+        call.afterOccurredAt === '2026-03-18T09:00:00Z' &&
+        call.oldestFirst === true,
+    ),
+    true,
+  )
+  assert.equal(
+    listCalls.some(
+      (call) =>
+        call.afterCaptureId === null &&
+        call.afterOccurredAt === null &&
+        call.oldestFirst === true,
+    ),
+    true,
+  )
 })
 
-test('scanAssistantAutomationOnce does not clear backlog when the first limited page is another channel', async () => {
+test('scanAssistantAutomationOnce pages past interleaved other-channel captures when collecting one channel reply candidates', async () => {
   const parent = await mkdtemp(
     path.join(tmpdir(), 'murph-assistant-unified-backlog-page-'),
   )
@@ -3120,19 +3133,13 @@ test('scanAssistantAutomationOnce does not clear backlog when the first limited 
     afterOccurredAt: string | null
     limit: number
   }> = []
-  let state: Parameters<typeof scanAssistantAutomationOnce>[0]['state'] =
-    createLegacyAutomationState({
-      inboxScanCursor: null,
-      autoReplyScanCursor: null,
-      autoReplyChannels: ['email', 'telegram'],
-      autoReplyBacklogChannels: ['email'],
-      autoReplyPrimed: false,
-    })
-  const stateProgress: Array<{
-    autoReplyBacklogChannels: string[]
-    autoReplyPrimed: boolean
-    autoReplyScanCursor: { occurredAt: string; captureId: string } | null
-  }> = []
+  let state: Parameters<typeof scanAssistantAutomationOnce>[0]['state'] = {
+    inboxScanCursor: null,
+    autoReply: [{ channel: 'email', cursor: null }],
+  }
+  const stateProgress: Array<
+    ReturnType<typeof snapshotAssistantAutomationProgress>
+  > = []
 
   const inboxServices = {
     async list(input: any) {
@@ -3209,33 +3216,16 @@ test('scanAssistantAutomationOnce does not clear backlog when the first limited 
     },
   })
   assert.deepEqual(stateProgress[0], {
-    autoReplyBacklogChannels: ['email'],
-    autoReplyPrimed: true,
-    autoReplyScanCursor: {
-      occurredAt: '2026-03-18T09:01:00Z',
-      captureId: 'cap-email-backlog-later',
-    },
-  })
-
-  const second = await runScan()
-  assertAssistantAutomationScanResult(second, {
-    routing: {
-      considered: 0,
-      failed: 0,
-      noAction: 0,
-      routed: 0,
-      skipped: 0,
-    },
-    replies: {
-      considered: 0,
-      failed: 0,
-      replied: 0,
-      skipped: 0,
-    },
-  })
-  assert.deepEqual(stateProgress[1], {
-    autoReplyBacklogChannels: [],
-    autoReplyPrimed: true,
+    inboxScanCursor: null,
+    autoReply: [
+      {
+        channel: 'email',
+        cursor: {
+          occurredAt: '2026-03-18T09:01:00Z',
+          captureId: 'cap-email-backlog-later',
+        },
+      },
+    ],
     autoReplyScanCursor: {
       occurredAt: '2026-03-18T09:01:00Z',
       captureId: 'cap-email-backlog-later',
@@ -3252,11 +3242,6 @@ test('scanAssistantAutomationOnce does not clear backlog when the first limited 
       afterOccurredAt: '2026-03-18T09:00:30Z',
       limit: 1,
     },
-    {
-      afterCaptureId: 'cap-email-backlog-later',
-      afterOccurredAt: '2026-03-18T09:01:00Z',
-      limit: 1,
-    },
   ])
   assert.equal(runtimeMocks.executeAssistantProviderTurn.mock.calls.length, 1)
   assert.equal(runtimeMocks.deliverAssistantMessageOverBinding.mock.calls.length, 1)
@@ -3269,10 +3254,9 @@ test('scanAssistantAutomationOnce keeps the auto-reply cursor pinned on deferred
   cleanupPaths.push(parent)
 
   const events: Array<{ type: string; captureId?: string; details?: string }> = []
-  const stateProgress: Array<{
-    inboxScanCursor: { occurredAt: string; captureId: string } | null
-    autoReplyScanCursor: { occurredAt: string; captureId: string } | null
-  }> = []
+  const stateProgress: Array<
+    ReturnType<typeof snapshotAssistantAutomationProgress>
+  > = []
 
   const inboxServices = {
     async list() {
@@ -3520,6 +3504,19 @@ test('scanAssistantAutomationOnce keeps the auto-reply cursor pinned on deferred
   })
   assert.deepEqual(stateProgress[0], {
     inboxScanCursor: null,
+    autoReply: [
+      {
+        channel: 'email',
+        cursor: {
+          occurredAt: '2026-03-18T09:04:30Z',
+          captureId: 'cap-unified-2',
+        },
+      },
+      {
+        channel: 'telegram',
+        cursor: null,
+      },
+    ],
     autoReplyScanCursor: {
       occurredAt: '2026-03-18T09:04:30Z',
       captureId: 'cap-unified-2',
@@ -3527,9 +3524,25 @@ test('scanAssistantAutomationOnce keeps the auto-reply cursor pinned on deferred
   })
   assert.deepEqual(stateProgress[1], {
     inboxScanCursor: null,
+    autoReply: [
+      {
+        channel: 'email',
+        cursor: {
+          occurredAt: '2026-03-18T09:04:30Z',
+          captureId: 'cap-unified-2',
+        },
+      },
+      {
+        channel: 'telegram',
+        cursor: {
+          occurredAt: '2026-03-18T09:05:00Z',
+          captureId: 'cap-unified-later',
+        },
+      },
+    ],
     autoReplyScanCursor: {
-      occurredAt: '2026-03-18T09:05:00Z',
-      captureId: 'cap-unified-later',
+      occurredAt: '2026-03-18T09:04:30Z',
+      captureId: 'cap-unified-2',
     },
   })
   assert.equal(runtimeMocks.executeAssistantProviderTurn.mock.calls.length, 1)
@@ -3602,7 +3615,7 @@ test('scanAssistantInboxOnce still waits for unsupported pending HEIC photos', a
   )
 })
 
-test('scanAssistantAutoReplyOnce primes backlog cursors, replies to new inbound Telegram messages, and injects the first-contact check-in', async () => {
+test('scanAssistantAutoReplyOnce replies to offline Telegram messages after the enabled boundary and injects the first-contact check-in', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-auto-reply-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
@@ -3671,10 +3684,9 @@ test('scanAssistantAutoReplyOnce primes backlog cursors, replies to new inbound 
     },
   }))
 
-  const stateProgress: Array<{
-    cursor: { occurredAt: string; captureId: string } | null
-    primed: boolean
-  }> = []
+  const stateProgress: Array<
+    ReturnType<typeof snapshotAssistantAutoReplyProgress>
+  > = []
   const events: Array<{
     captureId?: string
     details?: string
@@ -3687,31 +3699,6 @@ test('scanAssistantAutoReplyOnce primes backlog cursors, replies to new inbound 
   const inboxServices = {
     async list(input: any) {
       listCalls.push(input)
-      if (input.oldestFirst === false) {
-        return {
-          items: [
-            {
-              captureId: 'cap-backlog',
-              source: 'telegram',
-              accountId: 'self',
-              externalId: 'ext-1',
-              threadId: 'chat-1',
-              threadTitle: null,
-              actorId: '+15550001111',
-              actorName: 'Backlog',
-              actorIsSelf: false,
-              occurredAt: '2026-03-18T09:00:00Z',
-              receivedAt: null,
-              text: 'old message',
-              attachmentCount: 0,
-              envelopePath: 'raw/inbox/1.json',
-              eventId: 'evt-1',
-              promotions: [],
-            },
-          ],
-        }
-      }
-
       return {
         items: [
           {
@@ -3755,37 +3742,11 @@ test('scanAssistantAutoReplyOnce primes backlog cursors, replies to new inbound 
     },
   } as any
 
-  const prime = await scanAssistantAutoReplyOnce({
-    afterCursor: null,
-    autoReplyPrimed: false,
-    enabledChannels: ['telegram'],
-    inboxServices,
-    onEvent(event) {
-      events.push(event)
-    },
-    async onStateProgress(next) {
-      stateProgress.push(snapshotAssistantAutoReplyProgress(next))
-    },
-    vault: vaultRoot,
-  })
-
-  assertAssistantAutoReplyScanResult(prime, {
-    considered: 0,
-    failed: 0,
-    replied: 0,
-    skipped: 0,
-  })
-  assert.deepEqual(stateProgress[0], {
-    cursor: {
+  const result = await scanAssistantAutoReplyOnce({
+    afterCursor: {
       occurredAt: '2026-03-18T09:00:00Z',
-      captureId: 'cap-backlog',
+      captureId: 'cap-enabled-boundary',
     },
-    primed: true,
-  })
-
-  const second = await scanAssistantAutoReplyOnce({
-    afterCursor: stateProgress[0]!.cursor,
-    autoReplyPrimed: true,
     enabledChannels: ['telegram'],
     inboxServices,
     onEvent(event) {
@@ -3797,7 +3758,7 @@ test('scanAssistantAutoReplyOnce primes backlog cursors, replies to new inbound 
     vault: vaultRoot,
   })
 
-  assertAssistantAutoReplyScanResult(second, {
+  assertAssistantAutoReplyScanResult(result, {
     considered: 1,
     failed: 0,
     replied: 1,
@@ -3806,12 +3767,20 @@ test('scanAssistantAutoReplyOnce primes backlog cursors, replies to new inbound 
   assert.equal(runtimeMocks.executeAssistantProviderTurn.mock.calls.length, 1)
   assert.equal(runtimeMocks.deliverAssistantMessageOverBinding.mock.calls.length, 1)
   const providerCall = runtimeMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]
-  assert.deepEqual(stateProgress[1], {
+  assert.deepEqual(stateProgress[0], {
+    autoReply: [
+      {
+        channel: 'telegram',
+        cursor: {
+          occurredAt: '2026-03-18T09:05:00Z',
+          captureId: 'cap-new',
+        },
+      },
+    ],
     cursor: {
       occurredAt: '2026-03-18T09:05:00Z',
       captureId: 'cap-new',
     },
-    primed: true,
   })
   const artifact = JSON.parse(
     await readFile(
@@ -3827,12 +3796,6 @@ test('scanAssistantAutoReplyOnce primes backlog cursors, replies to new inbound 
     ),
   )
   assert.equal(artifact.schema, 'murph.assistant-chat-result.v1')
-  assert.equal(
-    events.some(
-      (event) => event.type === 'reply.scan.primed' && event.details?.includes('cap-backlog'),
-    ),
-    true,
-  )
   assert.equal(
     events.some((event) => event.type === 'capture.replied' && event.captureId === 'cap-new'),
     true,
@@ -3873,19 +3836,10 @@ test('scanAssistantAutoReplyOnce primes backlog cursors, replies to new inbound 
     {
       vault: vaultRoot,
       requestId: null,
-      limit: 1,
-      sourceId: null,
-      afterOccurredAt: null,
-      afterCaptureId: null,
-      oldestFirst: false,
-    },
-    {
-      vault: vaultRoot,
-      requestId: null,
       limit: 50,
       sourceId: null,
       afterOccurredAt: '2026-03-18T09:00:00Z',
-      afterCaptureId: 'cap-backlog',
+      afterCaptureId: 'cap-enabled-boundary',
       oldestFirst: true,
     },
   ])
@@ -3917,7 +3871,7 @@ test('scanAssistantAutoReplyOnce advances the cursor and writes deferred artifac
 
   const stateProgress: Array<{
     cursor: { occurredAt: string; captureId: string } | null
-    primed: boolean
+    primed?: boolean
   }> = []
   const inboxServices = {
     async list() {
@@ -3984,11 +3938,19 @@ test('scanAssistantAutoReplyOnce advances the cursor and writes deferred artifac
     skipped: 0,
   })
   assert.deepEqual(stateProgress[0], {
+    autoReply: [
+      {
+        channel: 'telegram',
+        cursor: {
+          occurredAt: '2026-03-18T09:05:00Z',
+          captureId: 'cap-new',
+        },
+      },
+    ],
     cursor: {
       occurredAt: '2026-03-18T09:05:00Z',
       captureId: 'cap-new',
     },
-    primed: true,
   })
   const deferredArtifact = JSON.parse(
     await readFile(
@@ -4222,16 +4184,14 @@ test('scanAssistantAutoReplyOnce does not bootstrap persisted memory text into a
   assert.doesNotMatch(providerCall?.systemPrompt ?? '', /what goals they want help with/u)
 })
 
-test('scanAssistantAutoReplyOnce coalesces same-thread email backlog into one reply', async () => {
+test('scanAssistantAutoReplyOnce coalesces same-thread email offline catch-up into one reply', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-email-backlog-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot, { recursive: true })
 
-  const stateProgress: Array<{
-    cursor: { occurredAt: string; captureId: string } | null
-    backlogChannels?: readonly string[]
-    primed: boolean
-  }> = []
+  const stateProgress: Array<
+    ReturnType<typeof snapshotAssistantAutoReplyProgress>
+  > = []
   const listCalls: unknown[] = []
 
   runtimeMocks.executeAssistantProviderTurn.mockResolvedValue({
@@ -4380,8 +4340,6 @@ test('scanAssistantAutoReplyOnce coalesces same-thread email backlog into one re
 
   const result = await scanAssistantAutoReplyOnce({
     afterCursor: null,
-    autoReplyPrimed: false,
-    backlogChannels: ['email'],
     enabledChannels: ['email'],
     inboxServices,
     async onStateProgress(next) {
@@ -4406,11 +4364,19 @@ test('scanAssistantAutoReplyOnce coalesces same-thread email backlog into one re
   assert.match(providerCall.userPrompt, /second email in thread/)
   assert.match(providerCall.userPrompt, /latest email in thread/)
   assert.deepEqual(stateProgress[0], {
+    autoReply: [
+      {
+        channel: 'email',
+        cursor: {
+          occurredAt: '2026-03-18T09:00:00Z',
+          captureId: 'cap-email-3',
+        },
+      },
+    ],
     cursor: {
       occurredAt: '2026-03-18T09:00:00Z',
       captureId: 'cap-email-3',
     },
-    primed: true,
   })
   assert.deepEqual(listCalls, [
     {
@@ -4626,10 +4592,9 @@ test('scanAssistantAutoReplyOnce can use self-authored attachment prompts and su
     }))
 
     let phase: 'prompt' | 'echo' = 'prompt'
-    const stateProgress: Array<{
-      cursor: { occurredAt: string; captureId: string } | null
-      primed: boolean
-    }> = []
+    const stateProgress: Array<
+      ReturnType<typeof snapshotAssistantAutoReplyProgress>
+    > = []
 
     const inboxServices = {
       async list() {
@@ -4821,10 +4786,9 @@ test('scanAssistantAutoReplyOnce keeps the cursor on prompt defers but advances 
 
   let phase: 'defer' | 'skip' = 'defer'
   const events: Array<{ type: string; captureId?: string; details?: string }> = []
-  const stateProgress: Array<{
-    cursor: { occurredAt: string; captureId: string } | null
-    primed: boolean
-  }> = []
+  const stateProgress: Array<
+    ReturnType<typeof snapshotAssistantAutoReplyProgress>
+  > = []
 
   const inboxServices = {
     async list() {
@@ -4980,15 +4944,28 @@ test('scanAssistantAutoReplyOnce keeps the cursor on prompt defers but advances 
   assert.equal(runtimeMocks.deliverAssistantMessageOverBinding.mock.calls.length, 0)
   assert.deepEqual(stateProgress, [
     {
+      autoReply: [
+        {
+          channel: 'telegram',
+          cursor: null,
+        },
+      ],
       cursor: null,
-      primed: true,
     },
     {
+      autoReply: [
+        {
+          channel: 'telegram',
+          cursor: {
+            occurredAt: '2026-03-18T09:01:00Z',
+            captureId: 'cap-skip',
+          },
+        },
+      ],
       cursor: {
         occurredAt: '2026-03-18T09:01:00Z',
         captureId: 'cap-skip',
       },
-      primed: true,
     },
   ])
   assert.equal(
@@ -5296,10 +5273,9 @@ test('scanAssistantAutoReplyOnce keeps grouped partial reply artifacts queued fo
   cleanupPaths.push(parent)
 
   const events: Array<{ type: string; captureId?: string; details?: string }> = []
-  const stateProgress: Array<{
-    cursor: { occurredAt: string; captureId: string } | null
-    primed: boolean
-  }> = []
+  const stateProgress: Array<
+    ReturnType<typeof snapshotAssistantAutoReplyProgress>
+  > = []
 
   const inboxServices = {
     async list() {
@@ -5407,8 +5383,13 @@ test('scanAssistantAutoReplyOnce keeps grouped partial reply artifacts queued fo
     skipped: 2,
   })
   assert.deepEqual(stateProgress[0], {
+    autoReply: [
+      {
+        channel: 'email',
+        cursor: null,
+      },
+    ],
     cursor: null,
-    primed: true,
   })
   assert.equal(runtimeMocks.executeAssistantProviderTurn.mock.calls.length, 0)
   assert.equal(runtimeMocks.deliverAssistantMessageOverBinding.mock.calls.length, 0)
@@ -5494,11 +5475,19 @@ test('scanAssistantAutoReplyOnce keeps grouped partial reply artifacts queued fo
     skipped: 0,
   })
   assert.deepEqual(stateProgress[1], {
+    autoReply: [
+      {
+        channel: 'email',
+        cursor: {
+          occurredAt: '2026-03-18T09:02:30Z',
+          captureId: 'cap-partial-2',
+        },
+      },
+    ],
     cursor: {
       occurredAt: '2026-03-18T09:02:30Z',
       captureId: 'cap-partial-2',
     },
-    primed: true,
   })
   assert.equal(runtimeMocks.executeAssistantProviderTurn.mock.calls.length, 1)
   assert.equal(runtimeMocks.deliverAssistantMessageOverBinding.mock.calls.length, 1)
@@ -5511,10 +5500,9 @@ test('scanAssistantAutoReplyOnce does not resend after successful delivery when 
   cleanupPaths.push(parent)
 
   const events: Array<{ type: string; captureId?: string; details?: string }> = []
-  const stateProgress: Array<{
-    cursor: { occurredAt: string; captureId: string } | null
-    primed: boolean
-  }> = []
+  const stateProgress: Array<
+    ReturnType<typeof snapshotAssistantAutoReplyProgress>
+  > = []
   runtimeMocks.executeAssistantProviderTurn.mockResolvedValueOnce({
     provider: 'codex-cli',
     providerSessionId: 'thread-zero-artifact',
@@ -5695,11 +5683,19 @@ test('scanAssistantAutoReplyOnce does not resend after successful delivery when 
   })
   assert.deepEqual(stateProgress, [
     {
+      autoReply: [
+        {
+          channel: 'email',
+          cursor: {
+            occurredAt: '2026-03-18T09:02:00Z',
+            captureId: 'cap-zero-artifact',
+          },
+        },
+      ],
       cursor: {
         occurredAt: '2026-03-18T09:02:00Z',
         captureId: 'cap-zero-artifact',
       },
-      primed: true,
     },
   ])
   assert.equal(runtimeMocks.executeAssistantProviderTurn.mock.calls.length, 1)
@@ -6001,10 +5997,9 @@ test('scanAssistantAutoReplyOnce aborts stalled provider turns and retries the s
     },
   }))
 
-  const stateProgress: Array<{
-    cursor: { occurredAt: string; captureId: string } | null
-    primed: boolean
-  }> = []
+  const stateProgress: Array<
+    ReturnType<typeof snapshotAssistantAutoReplyProgress>
+  > = []
   const events: Array<{
     captureId?: string
     details?: string
@@ -6108,15 +6103,28 @@ test('scanAssistantAutoReplyOnce aborts stalled provider turns and retries the s
     skipped: 0,
   })
   assert.deepEqual(stateProgress[0], {
+    autoReply: [
+      {
+        channel: 'telegram',
+        cursor: null,
+      },
+    ],
     cursor: null,
-    primed: true,
   })
   assert.deepEqual(stateProgress[1], {
+    autoReply: [
+      {
+        channel: 'telegram',
+        cursor: {
+          occurredAt: '2026-03-18T09:10:00Z',
+          captureId: 'cap-stall',
+        },
+      },
+    ],
     cursor: {
       occurredAt: '2026-03-18T09:10:00Z',
       captureId: 'cap-stall',
     },
-    primed: true,
   })
   assert.equal(runtimeMocks.executeAssistantProviderTurn.mock.calls.length, 2)
   assert.equal(runtimeMocks.deliverAssistantMessageOverBinding.mock.calls.length, 1)
@@ -6345,10 +6353,9 @@ test('scanAssistantAutoReplyOnce defers reconnectable provider failures and pres
     ),
   )
 
-  const stateProgress: Array<{
-    cursor: { occurredAt: string; captureId: string } | null
-    primed: boolean
-  }> = []
+  const stateProgress: Array<
+    ReturnType<typeof snapshotAssistantAutoReplyProgress>
+  > = []
   const events: Array<{ type: string; captureId?: string; details?: string }> = []
 
   const inboxServices = {
@@ -6445,12 +6452,22 @@ test('scanAssistantAutoReplyOnce defers reconnectable provider failures and pres
   assert.equal(runtimeMocks.deliverAssistantMessageOverBinding.mock.calls.length, 0)
   assert.equal(runtimeMocks.executeAssistantProviderTurn.mock.calls.length, 2)
   assert.deepEqual(stateProgress[0], {
+    autoReply: [
+      {
+        channel: 'telegram',
+        cursor: null,
+      },
+    ],
     cursor: null,
-    primed: true,
   })
   assert.deepEqual(stateProgress[1], {
+    autoReply: [
+      {
+        channel: 'telegram',
+        cursor: null,
+      },
+    ],
     cursor: null,
-    primed: true,
   })
   assert.equal(
     runtimeMocks.executeAssistantProviderTurn.mock.calls[1]?.[0]?.resumeProviderSessionId,
@@ -6580,10 +6597,9 @@ test('scanAssistantAutoReplyOnce keeps scanning after a failed Telegram delivery
       },
     }))
 
-  const stateProgress: Array<{
-    cursor: { occurredAt: string; captureId: string } | null
-    primed: boolean
-  }> = []
+  const stateProgress: Array<
+    ReturnType<typeof snapshotAssistantAutoReplyProgress>
+  > = []
   const events: Array<{
     captureId?: string
     details?: string
@@ -6689,11 +6705,19 @@ test('scanAssistantAutoReplyOnce keeps scanning after a failed Telegram delivery
     skipped: 0,
   })
   assert.deepEqual(stateProgress.at(-1), {
+    autoReply: [
+      {
+        channel: 'telegram',
+        cursor: {
+          occurredAt: '2026-03-18T09:01:00Z',
+          captureId: 'cap-pass',
+        },
+      },
+    ],
     cursor: {
       occurredAt: '2026-03-18T09:01:00Z',
       captureId: 'cap-pass',
     },
-    primed: true,
   })
   assert.equal(runtimeMocks.executeAssistantProviderTurn.mock.calls.length, 2)
   assert.equal(runtimeMocks.deliverAssistantMessageOverBinding.mock.calls.length, 2)
@@ -6796,10 +6820,9 @@ test('scanAssistantAutoReplyOnce records provider quota failures with a safe sum
     safeDetails?: string
     type: string
   }> = []
-  const stateProgress: Array<{
-    cursor: { captureId: string; occurredAt: string } | null
-    primed: boolean
-  }> = []
+  const stateProgress: Array<
+    ReturnType<typeof snapshotAssistantAutoReplyProgress>
+  > = []
   const inboxServices = {
     async list() {
       return {
@@ -6892,15 +6915,28 @@ test('scanAssistantAutoReplyOnce records provider quota failures with a safe sum
   })
   assert.equal(runtimeMocks.executeAssistantProviderTurn.mock.calls.length, 2)
   assert.deepEqual(stateProgress[0], {
+    autoReply: [
+      {
+        channel: 'telegram',
+        cursor: null,
+      },
+    ],
     cursor: null,
-    primed: true,
   })
   assert.deepEqual(stateProgress[1], {
+    autoReply: [
+      {
+        channel: 'telegram',
+        cursor: {
+          occurredAt: '2026-03-18T09:00:00Z',
+          captureId: 'cap-usage-limit',
+        },
+      },
+    ],
     cursor: {
       occurredAt: '2026-03-18T09:00:00Z',
       captureId: 'cap-usage-limit',
     },
-    primed: true,
   })
   assert.equal(
     events.some(

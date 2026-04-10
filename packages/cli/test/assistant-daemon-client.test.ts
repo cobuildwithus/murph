@@ -385,10 +385,7 @@ test('assistant daemon client routes serializable assistant operations through t
             },
             automation: {
               inboxScanCursor: null,
-              autoReplyScanCursor: null,
-              autoReplyChannels: [],
-              autoReplyBacklogChannels: [],
-              autoReplyPrimed: false,
+              autoReply: [],
               updatedAt: '2026-03-28T00:00:00.000Z',
             },
             outbox: {
