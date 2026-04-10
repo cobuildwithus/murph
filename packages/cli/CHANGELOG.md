@@ -2,6 +2,14 @@
 
 All notable changes to `@murphai/murph` will be documented in this file.
 
+## [0.2.6] - 2026-04-10
+
+### Fixed
+- keep cli package build on dist imports
+
+### Changed
+- keep diff-aware cli checks source-first
+
 ## [0.2.5] - 2026-04-10
 
 ### Added
