@@ -1,3 +1,5 @@
+![Murph hero](docs/assets/readme-hero.png)
+
 # Murph 🫀
 
 Murph is your personal health assistant.
