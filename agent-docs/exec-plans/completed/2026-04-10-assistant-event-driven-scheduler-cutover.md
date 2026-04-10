@@ -1,65 +1,49 @@
-# 2026-04-10 Assistant Event-Driven Scheduler Cutover
-
 ## Goal
 
-- Land the returned assistant scheduler patch locally, but only the deltas that still apply safely on top of the current repo state.
-- Replace the generic assistant scan-interval fallback with explicit event/deadline wake propagation across local automation, parser wake signals, and hosted maintenance scheduling.
-- Preserve unrelated in-flight work and finish with repo-required verification, audit, and commit flow.
-
-## Scope
-
-- Returned patch artifact from the external thread
-- `packages/assistant-engine/**`
-- `packages/assistant-cli/**`
-- `packages/assistant-runtime/**`
-- `packages/inbox-services/**`
-- `packages/inboxd/**`
-- `packages/assistantd/**`
-- `packages/cli/**`
-- `apps/cloudflare/**`
-- Durable docs only if the landed delta changes repo truth
+Finish the assistant event/deadline scheduler cutover so hosted and local automation both follow the same rule: ready work drains until idle, and blocked work returns a real wake deadline.
 
 ## Constraints
 
-- Treat the returned patch as behavioral intent, not overwrite authority.
-- Preserve unrelated dirty-tree edits, including the pre-existing edit in `packages/cli/test/assistant-service.test.ts`.
-- Keep the scheduler cutover coherent across local and hosted paths; do not land partial wake/deadline semantics that leave one side relying on removed fallback knobs.
-- Run the verification lane required for the touched owners and capture direct proof for the new wake/deadline behavior.
+- Keep scope to the scheduler, hosted maintenance, and assistant automation retry/wake surfaces.
+- Preserve unrelated in-flight iMessage removal work already present in the tree.
+- Avoid reintroducing synthetic polling wakes when immediate follow-up work can be handled by another pass.
+
+## Files In Scope
+
+- `packages/assistant-runtime/src/hosted-runtime/**`
+- `packages/assistant-engine/src/assistant/**`
+- `apps/cloudflare/src/user-runner/**`
+- `packages/device-syncd/src/service.ts`
+- Focused tests under the matching package/app test directories
 
 ## Plan
 
-1. Inspect the returned patch against the live repo and identify stale, conflicting, or already-landed hunks.
-2. Port the still-applicable assistant, inbox, hosted-runtime, and Cloudflare scheduler changes onto the current tree.
-3. Update any durable docs that need to reflect the removed fallback alarm / scan-interval model.
-4. Run the required verification plus direct proof for the new wake/deadline scheduling behavior.
-5. Complete the required audit passes, close the plan, and create a scoped commit.
+1. Make hosted maintenance drain repeatedly until idle, with progress-aware assistant/device-sync/parser pass handling and no hosted-only fake `+1s` wake shims.
+2. Persist auto-reply retry deadlines on failed turn receipts and make startup recovery honor them instead of retrying early.
+3. Convert document-preservation failures into deferred wake results so local automation does not sleep indefinitely.
+4. Clamp overdue hosted preferred wakes to immediate scheduling instead of dropping them.
+5. Add focused regression tests for each edge and run scoped verification.
 
-## Progress
+## Verification Target
 
-- Done: read the always-read docs, reliability guidance, verification/completion workflow, and the returned patch.
-- Done: confirmed the worktree already has an unrelated pre-existing edit in `packages/cli/test/assistant-service.test.ts`.
-- Done: ported the returned scheduler cutover across assistant-engine, assistant-cli, inbox runtime/daemon, assistant-runtime, assistantd, CLI schema/contracts, and Cloudflare runner paths, including manual resolution for the hosted maintenance file.
-- Done: aligned Cloudflare/node-runner expectations to the explicit `nextWakeAt` and no-fallback-alarm model.
-- Done: resolved final-review findings by preserving startup-recovery retry deadlines in the continuous run loop and adding boundary coverage for continuous `startDaemon: false` rejection through assistantd and the daemon client.
-- Now: close the active plan and create the scoped commit.
-- Next: none.
+- `pnpm typecheck`
+- `pnpm test:diff packages/assistant-engine/src/assistant packages/assistant-runtime/src/hosted-runtime apps/cloudflare/src/user-runner packages/device-syncd/src/service.ts packages/assistant-engine/test/assistant-automation-runtime.test.ts packages/assistant-engine/test/assistant-automation-wake.test.ts packages/assistant-runtime/test/hosted-runtime-maintenance.test.ts apps/cloudflare/test/runner-queue-state.test.ts packages/device-syncd/test/service.test.ts`
 
-## Verification
+## Status
 
-- Passed:
-  - `pnpm typecheck`
-  - `pnpm test:diff packages/assistant-engine packages/assistant-cli packages/assistantd packages/assistant-runtime packages/inbox-services packages/inboxd packages/cli apps/cloudflare`
-  - `pnpm --dir apps/cloudflare verify`
-  - `pnpm exec vitest run packages/assistant-engine/test/assistant-automation-runtime.test.ts`
-  - `pnpm exec vitest run packages/assistantd/test/http.test.ts`
-  - `pnpm exec vitest run packages/cli/test/assistant-daemon-client.test.ts`
-- Direct proof captured:
-  - continuous local automation waits on explicit `nextWakeAt`, including startup-recovery retry deadlines
-  - `parser.jobs.drained` wakes the local automation loop immediately
-  - hosted runner alarms clear when no next wake remains and do not reuse stale wake values
-- Audit passes:
-  - required `coverage-write` pass landed focused proof in `packages/assistant-engine/test/assistant-automation-runtime.test.ts`
-  - required `task-finish-review` pass found and drove the startup-recovery wake fix plus continuous `startDaemon: false` boundary coverage
+- Implemented hosted drain-until-idle maintenance passes, overdue hosted wake clamping, persisted auto-reply retry deadlines, startup-recovery deadline gating, and document-preservation retry deadlines.
+- Focused verification passed:
+  - `pnpm --dir packages/assistant-engine typecheck`
+  - `pnpm --dir packages/assistant-runtime typecheck`
+  - `pnpm --dir packages/device-syncd typecheck`
+  - `pnpm --dir apps/cloudflare typecheck`
+  - `pnpm --dir packages/assistant-engine test -- test/assistant-automation-runtime.test.ts test/assistant-automation-wake.test.ts`
+  - `pnpm --dir packages/assistant-runtime test -- test/hosted-runtime-maintenance.test.ts`
+  - `pnpm --dir packages/device-syncd test -- test/service.test.ts`
+  - `pnpm --dir apps/cloudflare test:node -- test/runner-queue-state.test.ts`
+- Repo-level verification is currently blocked by unrelated in-flight tree issues:
+  - `pnpm typecheck` fails in workspace verification because `packages/inboxd-imessage/package.json` is missing from other concurrent work.
+  - `pnpm test:diff ...` was blocked by the workspace verify lock held by another concurrent diff run in the same worktree.
 Status: completed
 Updated: 2026-04-10
 Completed: 2026-04-10

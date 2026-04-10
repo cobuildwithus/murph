@@ -17,9 +17,11 @@ import {
 } from './routing.js'
 import {
   compareAssistantCaptureOrder,
+  computeAssistantAutomationRetryAt,
   createEmptyAutoReplyScanResult,
   createEmptyInboxScanResult,
   cursorFromCapture,
+  earliestAssistantAutomationWakeAt,
   normalizeEnabledChannels,
   normalizeScanLimit,
   type AssistantAutomationScanResult,
@@ -40,6 +42,8 @@ interface AssistantAutomationCandidate {
   routingPending: boolean
   summary: AssistantInboxCaptureSummary
 }
+
+const ASSISTANT_DOCUMENT_PRESERVATION_RETRY_DELAY_MS = 30 * 1000
 
 export async function scanAssistantAutomationOnce(input: {
   allowSelfAuthored?: boolean
@@ -190,6 +194,21 @@ export async function scanAssistantAutomationOnce(input: {
       }
       return true
     } catch (error) {
+      const nextWakeAt = computeAssistantAutomationRetryAt(
+        ASSISTANT_DOCUMENT_PRESERVATION_RETRY_DELAY_MS,
+      )
+      if (candidate.replyPending || !candidate.routingPending) {
+        replies.nextWakeAt = earliestAssistantAutomationWakeAt(
+          replies.nextWakeAt,
+          nextWakeAt,
+        )
+      }
+      if (candidate.routingPending || !candidate.replyPending) {
+        routing.nextWakeAt = earliestAssistantAutomationWakeAt(
+          routing.nextWakeAt,
+          nextWakeAt,
+        )
+      }
       input.onEvent?.({
         type: 'capture.failed',
         captureId: candidate.summary.captureId,

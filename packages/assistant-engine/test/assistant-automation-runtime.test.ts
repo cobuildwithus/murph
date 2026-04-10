@@ -1383,7 +1383,7 @@ describe('assistant automation scanner', () => {
       replies: {
         considered: 0,
         failed: 0,
-        nextWakeAt: null,
+        nextWakeAt: expect.any(String),
         replied: 0,
         skipped: 0,
       },
@@ -3224,6 +3224,63 @@ describe('assistant auto-reply startup recovery', () => {
       details:
         'retrying up to 1 recent failed auto-reply capture(s) from a previous automation run',
     })
+  })
+
+  it('waits for persisted auto-reply retry deadlines before retrying startup recovery', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T00:00:10.000Z'))
+    try {
+      replyMocks.listAssistantTurnReceipts.mockResolvedValue([
+        createTurnReceipt({
+          primaryCaptureId: 'capture-1',
+          captureIds: ['capture-1'],
+          timeline: [
+            {
+              at: '2026-04-08T00:00:00.000Z',
+              kind: 'turn.started',
+              detail: null,
+              metadata: {
+                autoReplyCaptureId: 'capture-1',
+                autoReplyCaptureIds: 'capture-1',
+              },
+            },
+            {
+              at: '2026-04-08T00:00:05.000Z',
+              kind: 'turn.completed',
+              detail: 'write EPIPE',
+              metadata: {
+                autoReplyRetryAt: '2026-04-08T00:00:30.000Z',
+              },
+            },
+          ],
+        }),
+      ])
+      const recovery = await vi.importActual<
+        typeof import('../src/assistant/automation/startup-recovery.ts')
+      >('../src/assistant/automation/startup-recovery.ts')
+
+      const result = await recovery.recoverAssistantAutoRepliesOnStartup({
+        allowSelfAuthored: false,
+        enabledChannels: ['telegram'],
+        inboxServices: createInboxServices(),
+        scanCursor: {
+          captureId: 'capture-1',
+          occurredAt: '2026-04-08T00:00:00.000Z',
+        },
+        vault: '/tmp/assistant-automation-vault',
+      })
+
+      expect(result).toEqual({
+        considered: 0,
+        failed: 0,
+        nextWakeAt: '2026-04-08T00:00:30.000Z',
+        replied: 0,
+        skipped: 0,
+      })
+      expect(scannerReplyMocks.processAssistantAutoReplyGroup).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('skips startup recovery for ambiguous delivery failures', async () => {

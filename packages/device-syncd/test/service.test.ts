@@ -1364,7 +1364,7 @@ test("device sync service next wake tracks scheduled reconciles and queued jobs"
 
   assert.equal(
     service.getNextWakeAt("2026-03-17T10:00:00.000Z"),
-    "2026-03-17T10:00:01.000Z",
+    "2026-03-17T09:59:00.000Z",
   );
 
   service.close();
