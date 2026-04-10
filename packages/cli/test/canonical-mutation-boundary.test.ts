@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import path from "node:path";
-import { mkdtemp, writeFile, rm } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { test } from "vitest";
 
-import { openSqliteRuntimeDatabase } from "@murphai/runtime-state/node";
-import { createIntegratedInboxServices } from "@murphai/inbox-services";
+import {
+  createIntegratedInboxServices,
+  type RuntimeCaptureRecordInput,
+} from "@murphai/inbox-services";
 
 const builtCoreRuntimeUrl = new URL("../../core/dist/index.js", import.meta.url).href;
 const builtInboxRuntimeUrl = new URL("../../inboxd/dist/index.js", import.meta.url).href;
@@ -22,60 +24,24 @@ async function loadBuiltInboxRuntime() {
   return loadBuiltRuntime<any>(builtInboxRuntimeUrl);
 }
 
-function createFakeImessageDriver(input: {
-  photoPath: string;
-  text: string;
-}) {
-  return {
-    async listChats() {
-      return [{ guid: "chat-1", displayName: "Breakfast", participantCount: 2 }];
-    },
-    async getMessages() {
-      return [
-        {
-          guid: "im-1",
-          text: input.text,
-          date: "2026-03-13T08:00:00.000Z",
-          dateRead: "2026-03-13T08:00:10.000Z",
-          chatGuid: "chat-1",
-          handleId: "friend",
-          displayName: "Friend",
-          isFromMe: false,
-          attachments: [
-            {
-              guid: "att-1",
-              fileName: "toast.jpg",
-              path: input.photoPath,
-              mimeType: "image/jpeg",
-            },
-          ],
-        },
-      ];
-    },
-    async startWatching() {
-      return {
-        close() {},
-      };
-    },
-  };
-}
-
-async function initializeImessageSource(input: {
-  services: ReturnType<typeof createIntegratedInboxServices>;
+async function seedInboxCapture(input: {
+  capture: RuntimeCaptureRecordInput;
   vaultRoot: string;
 }) {
-  await input.services.init({
-    vault: input.vaultRoot,
-    requestId: null,
+  const inboxRuntime = await loadBuiltInboxRuntime();
+  const runtime = await inboxRuntime.openInboxRuntime({
+    vaultRoot: input.vaultRoot,
   });
-  await input.services.sourceAdd({
-    vault: input.vaultRoot,
-    requestId: null,
-    source: "imessage",
-    id: "imessage:self",
-    account: "self",
-    includeOwn: true,
+  const pipeline = await inboxRuntime.createInboxPipeline({
+    runtime,
+    vaultRoot: input.vaultRoot,
   });
+
+  try {
+    await pipeline.processCapture(input.capture);
+  } finally {
+    pipeline.close();
+  }
 }
 
 async function captureSingleCaptureId(input: {
@@ -96,22 +62,12 @@ test.sequential(
   "inbox journal and experiment-note promotions only require high-level core mutation ports",
   async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-inbox-high-level-ports-vault-"));
-    const homeRoot = await mkdtemp(path.join(tmpdir(), "murph-inbox-high-level-ports-home-"));
-    const photoPath = path.join(vaultRoot, "meal-photo.jpg");
-    const messagesDbPath = path.join(homeRoot, "Library", "Messages", "chat.db");
 
     const coreRuntime = await loadBuiltCoreRuntime();
     await coreRuntime.initializeVault({
       vaultRoot,
       createdAt: "2026-03-13T12:00:00.000Z",
     });
-    await writeFile(photoPath, "photo", "utf8");
-
-    const messagesDb = openSqliteRuntimeDatabase(messagesDbPath, {
-      create: true,
-      foreignKeys: false,
-    });
-    messagesDb.close();
 
     const journalCalls: Array<{ date: string; captureId: string }> = [];
     const experimentCalls: Array<{ relativePath: string; captureId: string }> = [];
@@ -179,27 +135,38 @@ test.sequential(
     };
     const services = createIntegratedInboxServices({
       enableJournalPromotion: true,
-      getHomeDirectory: () => homeRoot,
-      getPlatform: () => "darwin",
       loadCoreModule: async () => fakeCoreRuntime as never,
       loadInboxModule: loadBuiltInboxRuntime,
       loadQueryModule: async () => fakeQueryRuntime as never,
-      loadImessageDriver: async () =>
-        createFakeImessageDriver({
-          photoPath,
-          text: "Breakfast note from inbox",
-        }),
     });
 
     try {
-      await initializeImessageSource({
-        services,
-        vaultRoot,
-      });
-      await services.backfill({
+      await services.init({
         vault: vaultRoot,
         requestId: null,
-        sourceId: "imessage:self",
+      });
+      await seedInboxCapture({
+        vaultRoot,
+        capture: {
+          source: "telegram",
+          accountId: "bot",
+          externalId: "telegram-breakfast-1",
+          occurredAt: "2026-03-13T08:00:00.000Z",
+          receivedAt: "2026-03-13T08:00:10.000Z",
+          thread: {
+            id: "chat-1",
+            title: "Breakfast",
+            isDirect: true,
+          },
+          actor: {
+            id: "telegram:user",
+            displayName: "Friend",
+            isSelf: false,
+          },
+          text: "Breakfast note from inbox",
+          attachments: [],
+          raw: {},
+        },
       });
       const captureId = await captureSingleCaptureId({
         services,
@@ -238,7 +205,6 @@ test.sequential(
       ]);
     } finally {
       await rm(vaultRoot, { recursive: true, force: true });
-      await rm(homeRoot, { recursive: true, force: true });
     }
   },
 );

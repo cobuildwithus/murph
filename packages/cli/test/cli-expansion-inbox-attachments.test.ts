@@ -3,8 +3,9 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { test } from 'vitest'
-import { openSqliteRuntimeDatabase } from '@murphai/runtime-state/node'
 import { createIntegratedInboxServices } from '@murphai/inbox-services'
+import type { InboxPipeline, PersistedCapture, RuntimeStore } from '@murphai/inbox-services'
+import type { InboundCapture } from '@murphai/inboxd'
 import { createVaultCli } from '../src/vault-cli.js'
 import { createUnwiredVaultServices } from '@murphai/vault-usecases'
 import { requireData, type CliEnvelope } from './cli-test-helpers.js'
@@ -13,14 +14,11 @@ const builtCoreRuntimeUrl = new URL('../../core/dist/index.js', import.meta.url)
 const builtInboxRuntimeUrl = new URL('../../inboxd/dist/index.js', import.meta.url).href
 
 async function makeVaultFixture(prefix: string): Promise<{
-  homeRoot: string
   photoPath: string
   vaultRoot: string
 }> {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), `${prefix}-vault-`))
-  const homeRoot = await mkdtemp(path.join(tmpdir(), `${prefix}-home-`))
   const photoPath = path.join(vaultRoot, 'meal-photo.jpg')
-  const messagesDbPath = path.join(homeRoot, 'Library', 'Messages', 'chat.db')
 
   const coreRuntime = await loadBuiltCoreRuntime()
   await coreRuntime.initializeVault({
@@ -28,15 +26,8 @@ async function makeVaultFixture(prefix: string): Promise<{
     createdAt: '2026-03-13T12:00:00.000Z',
   })
   await writeFile(photoPath, 'photo', 'utf8')
-  await mkdir(path.dirname(messagesDbPath), { recursive: true })
-  const messagesDb = openSqliteRuntimeDatabase(messagesDbPath, {
-    create: true,
-    foreignKeys: false,
-  })
-  messagesDb.close()
 
   return {
-    homeRoot,
     photoPath,
     vaultRoot,
   }
@@ -71,8 +62,17 @@ async function loadBuiltCoreRuntime() {
 
 async function loadBuiltInboxRuntime() {
   return loadBuiltRuntime<{
-    openInboxRuntime(input: { vaultRoot: string }): Promise<{
-      close(): void
+    createInboxPipeline(input: {
+      runtime: RuntimeStore
+      vaultRoot: string
+    }): Promise<
+      InboxPipeline & {
+        processCapture(input: InboundCapture): Promise<PersistedCapture>
+      }
+    >
+    openInboxRuntime(input: { vaultRoot: string }): Promise<
+      RuntimeStore & {
+        close(): void
       getCapture(captureId: string): {
         captureId: string
         eventId: string
@@ -99,7 +99,8 @@ async function loadBuiltInboxRuntime() {
         resultPath: string
         extractedText?: string | null
       }): unknown
-    }>
+      }
+    >
   }>(builtInboxRuntimeUrl)
 }
 
@@ -119,46 +120,6 @@ async function runInProcessInboxCli<TData>(
   })
 
   return JSON.parse(output.join('').trim()) as CliEnvelope<TData>
-}
-
-function createFakeImessageDriver(input: {
-  photoPath: string
-  attachments?: Array<{
-    guid: string
-    fileName: string
-    path: string
-    mimeType: string
-  }>
-  text?: string
-}) {
-  return {
-    async listChats() {
-      return [{ guid: 'chat-1', displayName: 'Breakfast', participantCount: 2 }]
-    },
-    async getMessages() {
-      return [
-        {
-          guid: 'im-1',
-          text: input.text ?? 'Toast and eggs',
-          date: '2026-03-13T08:00:00.000Z',
-          dateRead: '2026-03-13T08:00:10.000Z',
-          chatGuid: 'chat-1',
-          handleId: 'friend',
-          displayName: 'Friend',
-          isFromMe: false,
-          attachments:
-            input.attachments ?? [
-              {
-                guid: 'att-1',
-                fileName: 'meal-photo.jpg',
-                path: input.photoPath,
-                mimeType: 'image/jpeg',
-              },
-            ],
-        },
-      ]
-    },
-  }
 }
 
 function createFakeParsersModule() {
@@ -226,7 +187,7 @@ function createFakeParsersModule() {
   }
 }
 
-async function initializeImessageSource(input: {
+async function initializeInbox(input: {
   services: ReturnType<typeof createIntegratedInboxServices>
   vaultRoot: string
 }) {
@@ -234,14 +195,35 @@ async function initializeImessageSource(input: {
     vault: input.vaultRoot,
     requestId: null,
   })
-  await input.services.sourceAdd({
-    vault: input.vaultRoot,
-    requestId: null,
-    source: 'imessage',
-    id: 'imessage:self',
-    account: 'self',
-    includeOwn: true,
+}
+
+type SeedCaptureInput = InboundCapture & {
+  attachments?: Array<
+    NonNullable<InboundCapture['attachments']>[number] & {
+      mime?: string | null
+      originalPath?: string | null
+    }
+  >
+}
+
+async function seedInboxCapture(input: {
+  capture: SeedCaptureInput
+  vaultRoot: string
+}) {
+  const inboxRuntime = await loadBuiltInboxRuntime()
+  const runtime = await inboxRuntime.openInboxRuntime({
+    vaultRoot: input.vaultRoot,
   })
+  const pipeline = await inboxRuntime.createInboxPipeline({
+    runtime,
+    vaultRoot: input.vaultRoot,
+  })
+
+  try {
+    await pipeline.processCapture(input.capture)
+  } finally {
+    pipeline.close()
+  }
 }
 
 async function captureSingleCapture(input: {
@@ -270,35 +252,46 @@ test.sequential(
     const pdfPath = path.join(fixture.vaultRoot, 'lab-result.pdf')
     const services = createIntegratedInboxServices({
       enableJournalPromotion: true,
-      getHomeDirectory: () => fixture.homeRoot,
-      getPlatform: () => 'darwin',
       loadCoreModule: loadBuiltCoreRuntime as never,
       loadInboxModule: loadBuiltInboxRuntime as never,
       loadParsersModule: async () => createFakeParsersModule() as never,
-      loadImessageDriver: async () =>
-        createFakeImessageDriver({
-          photoPath: fixture.photoPath,
-          attachments: [
-            {
-              guid: 'att-1',
-              fileName: 'lab-result.pdf',
-              path: pdfPath,
-              mimeType: 'application/pdf',
-            },
-          ],
-        }),
     })
 
     try {
       await writeFile(pdfPath, 'pdf', 'utf8')
-      await initializeImessageSource({
+      await initializeInbox({
         services,
         vaultRoot: fixture.vaultRoot,
       })
-      await services.backfill({
-        vault: fixture.vaultRoot,
-        requestId: null,
-        sourceId: 'imessage:self',
+      await seedInboxCapture({
+        vaultRoot: fixture.vaultRoot,
+        capture: {
+          source: 'telegram',
+          accountId: 'bot',
+          externalId: 'telegram-attachment-1',
+          occurredAt: '2026-03-13T08:00:00.000Z',
+          receivedAt: '2026-03-13T08:00:10.000Z',
+          thread: {
+            id: 'chat-1',
+            title: 'Breakfast',
+            isDirect: true,
+          },
+          actor: {
+            id: 'telegram:user',
+            displayName: 'Friend',
+            isSelf: false,
+          },
+          text: 'Lab result attached',
+          attachments: [
+            {
+              kind: 'document',
+              fileName: 'lab-result.pdf',
+              mime: 'application/pdf',
+              originalPath: pdfPath,
+            },
+          ],
+          raw: {},
+        },
       })
       const capture = await captureSingleCapture({
         services,
@@ -454,7 +447,6 @@ test.sequential(
       )
     } finally {
       await rm(fixture.vaultRoot, { recursive: true, force: true })
-      await rm(fixture.homeRoot, { recursive: true, force: true })
     }
   },
 )
@@ -465,15 +457,8 @@ test.sequential(
     const fixture = await makeVaultFixture('murph-inbox-journal-promotion')
     const services = createIntegratedInboxServices({
       enableJournalPromotion: true,
-      getHomeDirectory: () => fixture.homeRoot,
-      getPlatform: () => 'darwin',
       loadCoreModule: loadBuiltCoreRuntime as never,
       loadInboxModule: loadBuiltInboxRuntime as never,
-      loadImessageDriver: async () =>
-        createFakeImessageDriver({
-          photoPath: fixture.photoPath,
-          text: 'Breakfast note from inbox',
-        }),
     })
 
     try {
@@ -485,14 +470,37 @@ test.sequential(
         startedOn: '2026-03-13',
       })
 
-      await initializeImessageSource({
+      await initializeInbox({
         services,
         vaultRoot: fixture.vaultRoot,
       })
-      await services.backfill({
-        vault: fixture.vaultRoot,
-        requestId: null,
-        sourceId: 'imessage:self',
+      await seedInboxCapture({
+        vaultRoot: fixture.vaultRoot,
+        capture: {
+          source: 'email',
+          accountId: 'agentmail',
+          externalId: 'email-experiment-1',
+          occurredAt: '2026-03-13T08:00:00.000Z',
+          receivedAt: '2026-03-13T08:00:10.000Z',
+          thread: {
+            id: 'thread-1',
+            title: 'Breakfast',
+            isDirect: true,
+          },
+          actor: {
+            id: 'friend@example.test',
+            displayName: 'Friend',
+            isSelf: false,
+          },
+          text: 'Breakfast note from inbox',
+          attachments: [
+            {
+              kind: 'image',
+              fileName: 'meal-photo.jpg',
+            },
+          ],
+          raw: {},
+        },
       })
       const capture = await captureSingleCapture({
         services,
@@ -616,7 +624,6 @@ test.sequential(
       )
     } finally {
       await rm(fixture.vaultRoot, { recursive: true, force: true })
-      await rm(fixture.homeRoot, { recursive: true, force: true })
     }
   },
 )
