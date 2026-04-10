@@ -351,7 +351,7 @@ test('assertAssistantControlRequest rejects repeated forwarded proxy headers on 
         headers: {
           authorization: 'Bearer control-secret',
           host: 'localhost:50241',
-          forwarded: ['for=203.0.113.7', 'for=203.0.113.8'],
+          'x-forwarded-for': ['203.0.113.7', '203.0.113.8'],
         },
         remoteAddress: '127.0.0.1',
         controlToken: 'control-secret',

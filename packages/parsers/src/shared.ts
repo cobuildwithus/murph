@@ -21,7 +21,7 @@ const USER_PATH_PATTERNS = [
 
 const SAFE_CHILD_PROCESS_ENV_KEYS = new Set([
   "APPDATA",
-  "ComSpec",
+  "COMSPEC",
   "HOME",
   "HOMEDRIVE",
   "HOMEPATH",
@@ -29,19 +29,27 @@ const SAFE_CHILD_PROCESS_ENV_KEYS = new Set([
   "LOCALAPPDATA",
   "PATH",
   "PATHEXT",
-  "SystemRoot",
+  "SYSTEMROOT",
   "TEMP",
   "TMP",
   "TMPDIR",
   "TZ",
   "USERPROFILE",
+  "WINDIR",
   "XDG_CACHE_HOME",
   "XDG_CONFIG_HOME",
   "XDG_DATA_HOME",
   "XDG_RUNTIME_DIR",
-  "windir",
 ]);
 const SAFE_CHILD_PROCESS_ENV_PREFIXES = ["LC_"];
+
+function shouldPreserveChildProcessEnvKey(key: string): boolean {
+  const normalizedKey = key.toUpperCase();
+  return (
+    SAFE_CHILD_PROCESS_ENV_KEYS.has(normalizedKey) ||
+    SAFE_CHILD_PROCESS_ENV_PREFIXES.some((prefix) => normalizedKey.startsWith(prefix))
+  );
+}
 
 export function sanitizeChildProcessEnv(
   source: NodeJS.ProcessEnv = process.env,
@@ -53,10 +61,7 @@ export function sanitizeChildProcessEnv(
       continue;
     }
 
-    if (
-      SAFE_CHILD_PROCESS_ENV_KEYS.has(key) ||
-      SAFE_CHILD_PROCESS_ENV_PREFIXES.some((prefix) => key.startsWith(prefix))
-    ) {
+    if (shouldPreserveChildProcessEnvKey(key)) {
       nextEnv[key] = value;
     }
   }
