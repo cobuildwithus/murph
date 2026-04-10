@@ -1,8 +1,13 @@
-import { usePrivy, useUpdateEmail, useUser } from "@privy-io/react-auth";
+import { useUpdateEmail } from "@privy-io/react-auth";
 import { useEffect, useState } from "react";
 
-import type { HostedPrivyEmailAccount } from "@/src/lib/hosted-onboarding/privy-shared";
-import { isHostedPrivyEmailAccountVerified, resolveHostedPrivyLinkedAccounts } from "@/src/lib/hosted-onboarding/privy-shared";
+import type {
+  HostedPrivyEmailAccount,
+  PrivyLinkedAccountLike,
+} from "@/src/lib/hosted-onboarding/privy-shared";
+import {
+  isHostedPrivyEmailAccountVerified,
+} from "@/src/lib/hosted-onboarding/privy-shared";
 
 import {
   isValidEmailAddress,
@@ -13,21 +18,21 @@ import {
 } from "./hosted-email-settings-helpers";
 import { toErrorMessage } from "./hosted-settings-utils";
 
-export function useHostedEmailSettingsController() {
-  const { authenticated, logout, ready } = usePrivy();
-  const { refreshUser, user } = useUser();
+export function useHostedEmailSettingsController(input: {
+  authenticated: boolean;
+  initialLinkedAccounts: readonly PrivyLinkedAccountLike[];
+}) {
   const { sendCode, state, verifyCode } = useUpdateEmail();
   const [code, setCode] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [emailAddress, setEmailAddress] = useState("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isSyncingEmailRoute, setIsSyncingEmailRoute] = useState(false);
-  const [loggingOut, setLoggingOut] = useState(false);
   const [pendingEmailAddress, setPendingEmailAddress] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [verifiedEmailOverride, setVerifiedEmailOverride] = useState<HostedPrivyEmailAccount | null>(null);
 
-  const linkedAccounts = resolveHostedPrivyLinkedAccounts(user);
+  const linkedAccounts = input.initialLinkedAccounts;
   const displayState = resolveHostedEmailSettingsDisplayState({
     linkedAccounts,
     verifiedEmailOverride,
@@ -35,8 +40,7 @@ export function useHostedEmailSettingsController() {
   const effectiveCurrentEmail = displayState.currentEmail;
   const effectiveVerifiedEmail = displayState.currentVerifiedEmail;
   const normalizedCurrentEmail = displayState.normalizedCurrentEmail;
-  const canManageEmail = ready && authenticated && Boolean(user);
-  const isLoadingAuthenticatedUser = ready && authenticated && !user;
+  const canManageEmail = input.authenticated;
   const isAwaitingCode = state.status === "awaiting-code-input";
   const isSendingCode = state.status === "sending-code";
   const isSubmittingCode = state.status === "submitting-code";
@@ -58,18 +62,8 @@ export function useHostedEmailSettingsController() {
     setErrorMessage(null);
     setSuccessMessage(null);
 
-    if (!ready) {
-      setErrorMessage("We are still loading your Privy session. Try again in a moment.");
-      return;
-    }
-
-    if (!authenticated) {
+    if (!input.authenticated) {
       setErrorMessage("Sign in with your existing hosted account before you try to link an email address.");
-      return;
-    }
-
-    if (!user) {
-      setErrorMessage("We are still loading your account details. Try again in a moment.");
       return;
     }
 
@@ -132,10 +126,9 @@ export function useHostedEmailSettingsController() {
     let verifiedEmailAddress: string | null = null;
 
     try {
-      const result = await verifyCode({ code: normalizedCode });
-      const nextUser = result?.user ?? user;
+      await verifyCode({ code: normalizedCode });
       const nextEmail = resolveHostedEmailSettingsDisplayState({
-        linkedAccounts: resolveHostedPrivyLinkedAccounts(nextUser),
+        linkedAccounts,
       }).currentVerifiedEmail;
 
       verifiedEmailAddress = nextEmail?.address ?? pendingEmailAddress ?? normalizeEmailAddress(emailAddress);
@@ -151,8 +144,6 @@ export function useHostedEmailSettingsController() {
           verifiedAt: nextEmail?.verifiedAt ?? Math.trunc(Date.now() / 1000),
         });
       }
-
-      await refreshUser().catch(() => null);
     } catch (error) {
       setErrorMessage(toErrorMessage(error, "We could not verify that code."));
       return;
@@ -178,19 +169,6 @@ export function useHostedEmailSettingsController() {
     await syncVerifiedEmailAddress(effectiveVerifiedEmail.address, "resync");
   }
 
-  async function handleLogout() {
-    setErrorMessage(null);
-    setLoggingOut(true);
-
-    try {
-      await logout();
-    } catch (error) {
-      setErrorMessage(toErrorMessage(error, "We could not sign out of the current Privy session."));
-    } finally {
-      setLoggingOut(false);
-    }
-  }
-
   async function syncVerifiedEmailAddress(verifiedEmailAddress: string, mode: "resync" | "verify") {
     setIsSyncingEmailRoute(true);
 
@@ -207,7 +185,7 @@ export function useHostedEmailSettingsController() {
   }
 
   return {
-    authenticated,
+    authenticated: input.authenticated,
     canManageEmail,
     code,
     dialogOpen,
@@ -216,18 +194,14 @@ export function useHostedEmailSettingsController() {
     emailAddress,
     errorMessage,
     isBusy,
-    isLoadingAuthenticatedUser,
     isSendingCode,
     isSubmittingCode,
     isSyncingEmailRoute,
-    loggingOut,
     pendingEmailAddress,
-    ready,
     successMessage,
     setCode,
     setDialogOpen,
     setEmailAddress,
-    handleLogout,
     handleResendCode,
     handleSendCode,
     handleSyncVerifiedEmail,

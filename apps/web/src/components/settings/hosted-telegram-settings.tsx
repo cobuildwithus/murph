@@ -4,6 +4,7 @@ import { usePrivy, useUser } from "@privy-io/react-auth";
 import { useState } from "react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import type { PrivyLinkedAccountLike } from "@/src/lib/hosted-onboarding/privy-shared";
 import type { HostedPrivyTelegramAccount } from "@/src/lib/hosted-onboarding/privy-shared";
 
 import {
@@ -18,46 +19,35 @@ type PrivyTelegramMethods = ReturnType<typeof usePrivy> & {
   linkTelegram?: (input?: unknown) => Promise<unknown>;
 };
 
-export function HostedTelegramSettings() {
-  return <HostedTelegramSettingsInner />;
-}
-
-function HostedTelegramSettingsInner() {
-  const { authenticated, linkTelegram, logout, ready } = usePrivy() as PrivyTelegramMethods;
+export function HostedTelegramSettings(props: {
+  authenticated: boolean;
+  initialLinkedAccounts: readonly PrivyLinkedAccountLike[];
+}) {
+  const { linkTelegram } = usePrivy() as PrivyTelegramMethods;
   const { refreshUser, user } = useUser();
   const [botLink, setBotLink] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isLinkingTelegram, setIsLinkingTelegram] = useState(false);
   const [isSyncingTelegram, setIsSyncingTelegram] = useState(false);
-  const [loggingOut, setLoggingOut] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [syncedTelegramOverride, setSyncedTelegramOverride] = useState<HostedPrivyTelegramAccount | null>(null);
 
   const displayState = resolveHostedTelegramSettingsDisplayState({
     syncedTelegramOverride,
-    user,
+    user: {
+      linkedAccounts: props.initialLinkedAccounts,
+    },
   });
   const currentTelegram = displayState.currentTelegram;
-  const canManageTelegram = ready && authenticated && Boolean(user);
-  const isLoadingAuthenticatedUser = ready && authenticated && !user;
+  const canManageTelegram = props.authenticated;
   const isBusy = isLinkingTelegram || isSyncingTelegram;
 
   async function handleLinkTelegram() {
     setErrorMessage(null);
     setSuccessMessage(null);
 
-    if (!ready) {
-      setErrorMessage("Still loading — try again in a moment.");
-      return;
-    }
-
-    if (!authenticated) {
+    if (!props.authenticated) {
       setErrorMessage("Please sign in first to link Telegram.");
-      return;
-    }
-
-    if (!user) {
-      setErrorMessage("Still loading your account — try again in a moment.");
       return;
     }
 
@@ -93,19 +83,6 @@ function HostedTelegramSettingsInner() {
     }
 
     await syncLinkedTelegram("resync", currentTelegram.telegramUserId);
-  }
-
-  async function handleLogout() {
-    setErrorMessage(null);
-    setLoggingOut(true);
-
-    try {
-      await logout();
-    } catch (error) {
-      setErrorMessage(toErrorMessage(error, "Could not sign out right now."));
-    } finally {
-      setLoggingOut(false);
-    }
   }
 
   async function syncLinkedTelegram(mode: "link" | "resync", expectedTelegramUserId: string | null) {
@@ -168,10 +145,7 @@ function HostedTelegramSettingsInner() {
 
       {!canManageTelegram ? (
         <HostedSettingsSessionState
-          authenticated={authenticated}
-          isLoadingAuthenticatedUser={isLoadingAuthenticatedUser}
-          profileLabel="Telegram settings"
-          ready={ready}
+          authenticated={props.authenticated}
           signedOutDescription="Sign in to manage your Telegram connection."
         />
       ) : (

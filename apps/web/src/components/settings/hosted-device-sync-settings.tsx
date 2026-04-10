@@ -1,6 +1,5 @@
 "use client";
 
-import { usePrivy, useUser } from "@privy-io/react-auth";
 import { useCallback, useEffect, useState } from "react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -30,13 +29,7 @@ interface HostedDeviceSyncDisconnectResponse {
   warning?: { code: string; message: string };
 }
 
-export function HostedDeviceSyncSettings() {
-  return <HostedDeviceSyncSettingsInner />;
-}
-
-function HostedDeviceSyncSettingsInner() {
-  const { authenticated, ready } = usePrivy();
-  const { user } = useUser();
+export function HostedDeviceSyncSettings(props: { authenticated: boolean }) {
   const [sources, setSources] = useState<HostedDeviceSyncSettingsSource[]>([]);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -46,8 +39,6 @@ function HostedDeviceSyncSettingsInner() {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [warningMessage, setWarningMessage] = useState<string | null>(null);
 
-  const canManageSources = ready && authenticated && Boolean(user);
-  const isLoadingAuthenticatedUser = ready && authenticated && !user;
   const disconnectPending = disconnectTarget
     ? pendingActionKey === sourceKey(disconnectTarget, "disconnect")
     : false;
@@ -74,23 +65,14 @@ function HostedDeviceSyncSettingsInner() {
   }, []);
 
   useEffect(() => {
-    if (!ready) {
-      return;
-    }
-
-    if (!authenticated) {
+    if (!props.authenticated) {
       setSources([]);
       setIsLoading(false);
       return;
     }
 
-    if (!user) {
-      setIsLoading(true);
-      return;
-    }
-
     void loadSources("initial");
-  }, [authenticated, loadSources, ready, user]);
+  }, [loadSources, props.authenticated]);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -208,12 +190,9 @@ function HostedDeviceSyncSettingsInner() {
         </Alert>
       ) : null}
 
-      {!canManageSources ? (
+      {!props.authenticated ? (
         <HostedSettingsSessionState
-          authenticated={authenticated}
-          isLoadingAuthenticatedUser={isLoadingAuthenticatedUser}
-          profileLabel="wearable sources"
-          ready={ready}
+          authenticated={props.authenticated}
           signedOutDescription="Sign in to manage your wearables."
         />
       ) : (

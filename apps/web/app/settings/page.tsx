@@ -5,13 +5,16 @@ import { HostedBillingSettings } from "@/src/components/settings/hosted-billing-
 import { HostedDeviceSyncSettings } from "@/src/components/settings/hosted-device-sync-settings";
 import { HostedEmailSettings } from "@/src/components/settings/hosted-email-settings";
 import { HostedTelegramSettings } from "@/src/components/settings/hosted-telegram-settings";
+import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 
 export const metadata: Metadata = {
   title: "Settings — Murph",
   description: "Manage your Murph account settings.",
 };
 
-export default function SettingsPage() {
+export default async function SettingsPage() {
+  const { authenticated, linkedAccounts } = await getHostedPageAuthSnapshot();
+
   return (
     <main className="min-h-screen bg-cream">
       {/* Header panel */}
@@ -38,7 +41,7 @@ export default function SettingsPage() {
               <span className="inline-block h-1 w-1 rounded-full bg-olive/50" />
               Billing
             </div>
-            <HostedBillingSettings />
+            <HostedBillingSettings authenticated={authenticated} />
           </section>
 
           <section className="animate-fade-up" style={{ animationDelay: "80ms" }}>
@@ -49,12 +52,12 @@ export default function SettingsPage() {
             <div className="grid gap-6 xl:grid-cols-2">
               <Card className="border-stone-200/80 shadow-sm transition-shadow hover:shadow-md">
                 <CardContent>
-                  <HostedEmailSettings />
+                  <HostedEmailSettings authenticated={authenticated} initialLinkedAccounts={linkedAccounts} />
                 </CardContent>
               </Card>
               <Card className="border-stone-200/80 shadow-sm transition-shadow hover:shadow-md">
                 <CardContent>
-                  <HostedTelegramSettings />
+                  <HostedTelegramSettings authenticated={authenticated} initialLinkedAccounts={linkedAccounts} />
                 </CardContent>
               </Card>
             </div>
@@ -67,7 +70,7 @@ export default function SettingsPage() {
             </div>
             <Card className="border-stone-200/80 shadow-sm transition-shadow hover:shadow-md">
               <CardContent className="pt-4 md:pt-6">
-                <HostedDeviceSyncSettings />
+                <HostedDeviceSyncSettings authenticated={authenticated} />
               </CardContent>
             </Card>
           </section>
