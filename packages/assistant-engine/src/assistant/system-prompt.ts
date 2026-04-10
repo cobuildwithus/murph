@@ -2,6 +2,7 @@ import {
   buildAssistantCliGuidanceText,
   type AssistantCliAccessContext,
 } from "../assistant-cli-access.js";
+import type { AssistantTurnTrigger } from "@murphai/operator-config/assistant-cli-contracts";
 import type { AssistantMurphCommandAccessMode } from "./providers/types.js";
 import { isAssistantUserFacingChannel } from "./channel-presentation.js";
 import { ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE } from "./first-contact-welcome.js";
@@ -17,6 +18,7 @@ export interface AssistantSystemPromptInput {
   currentLocalDate: string;
   currentTimeZone: string;
   firstTurnCheckIn: boolean;
+  turnTrigger?: AssistantTurnTrigger | null;
   vaultOverview?: string | null;
 }
 
@@ -58,6 +60,9 @@ export function buildAssistantSystemPrompt(
     buildAssistantAudienceSafetyText(input.allowSensitiveHealthContext),
     buildAssistantToolTruthfulnessText(),
     buildAssistantEvidenceAndReplyStyleText(input.channel),
+    buildAssistantExecutionContextText({
+      turnTrigger: input.turnTrigger ?? null,
+    }),
     buildAssistantFirstTurnCheckInGuidanceText(input.firstTurnCheckIn),
     buildAssistantKnowledgeGuidanceText({
       assistantCommandAccessMode: input.assistantCommandAccessMode,
@@ -167,6 +172,19 @@ Answer the human request directly. Avoid operator-facing meta about tools, promp
 Treat inbound files and documents as durable evidence.
 Do not include citations, source lists, internal paths, ledger details, raw machine timestamps, or Markdown presentation by default unless the user explicitly asks for them.
 Reply naturally in plain conversational prose that fits the channel.`;
+}
+
+function buildAssistantExecutionContextText(input: {
+  turnTrigger: AssistantTurnTrigger | null;
+}): string | null {
+  if (input.turnTrigger !== "automation-cron") {
+    return null;
+  }
+
+  return `Execution context:
+- This turn was triggered by an existing scheduled automation run.
+- The automation already exists and is active.
+- Treat the user prompt as the execution instructions for this scheduled run.`;
 }
 
 function buildAssistantFirstTurnCheckInGuidanceText(
