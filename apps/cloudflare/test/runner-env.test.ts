@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildHostedRunnerJobRuntime,
   buildHostedRunnerJobRuntimeConfig,
   buildHostedRunnerContainerEnv,
   buildHostedRunnerResolvedConfig,
@@ -177,6 +178,42 @@ describe("buildHostedRunnerContainerEnv", () => {
 });
 
 describe("buildHostedRunnerJobRuntimeConfig", () => {
+  it("preserves typed runtime fields when the caller already resolved them", () => {
+    expect(buildHostedRunnerJobRuntime({
+      commitTimeoutMs: 45_000,
+      forwardedEnv: {
+        HOSTED_EMAIL_INGRESS_READY: "true",
+        HOSTED_EMAIL_SEND_READY: "true",
+      },
+      resolvedConfig: {
+        channelCapabilities: {
+          emailSendReady: true,
+          telegramBotConfigured: false,
+        },
+        deviceSync: null,
+      },
+      userEnv: {
+        CUSTOM_API_KEY: "custom-user",
+      },
+    })).toEqual({
+      commitTimeoutMs: 45_000,
+      forwardedEnv: {
+        HOSTED_EMAIL_INGRESS_READY: "true",
+        HOSTED_EMAIL_SEND_READY: "true",
+      },
+      resolvedConfig: {
+        channelCapabilities: {
+          emailSendReady: true,
+          telegramBotConfigured: false,
+        },
+        deviceSync: null,
+      },
+      userEnv: {
+        CUSTOM_API_KEY: "custom-user",
+      },
+    });
+  });
+
   it("builds per-job runtime config from forwarded env instead of ambient process env", () => {
     expect(buildHostedRunnerJobRuntimeConfig({
       forwardedEnv: {
