@@ -296,17 +296,55 @@ describe('monorepo release flow coverage audit', () => {
       path.join(repoRoot, 'scripts', 'workspace-verify.sh'),
       'utf8',
     )
-    const cliCoverageBranch = workspaceVerify.match(
-      /if \[\[ "\$package_dir" == "packages\/cli" \]\]; then[\s\S]*?^\s*fi$/m,
+    const runTimedStep = workspaceVerify.match(
+      /run_timed_step\(\) \{[\s\S]*?^\}/m,
+    )?.[0]
+    const runWorkspacePackageCoverage = workspaceVerify.match(
+      /run_workspace_package_coverage\(\) \{[\s\S]*?^\}/m,
     )?.[0]
 
-    expect(cliCoverageBranch).toBeTruthy()
+    expect(runTimedStep).toBeTruthy()
+    expect(runWorkspacePackageCoverage).toBeTruthy()
 
-    expect(cliCoverageBranch).toContain(
+    const forcedCliCoverage = runWorkspacePackageCoverage!.replace(
       'env MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 MURPH_VITEST_MAX_WORKERS="$package_coverage_vitest_max_workers" pnpm exec vitest run --config "packages/cli/vitest.workspace.ts" --coverage',
+      'false',
     )
-    expect(cliCoverageBranch).toContain('return $?')
-    expect(cliCoverageBranch).not.toContain('return 0')
+    const harnessDir = mkdtempSync(
+      path.join(os.tmpdir(), 'murph-workspace-verify-harness-'),
+    )
+
+    try {
+      const harnessPath = path.join(harnessDir, 'workspace-verify-harness.sh')
+      writeFileSync(
+        harnessPath,
+        `#!/usr/bin/env bash
+set -euo pipefail
+readonly package_coverage_vitest_max_workers="100%"
+verify_log() { :; }
+${runTimedStep!}
+${forcedCliCoverage}
+if ! run_workspace_package_coverage packages/cli "CLI package coverage"; then
+  printf 'captured\\n'
+  exit 0
+fi
+printf 'missed\\n'
+exit 1
+`,
+        'utf8',
+      )
+
+      const result = spawnSync('bash', [harnessPath], {
+        cwd: repoRoot,
+        encoding: 'utf8',
+      })
+
+      expect(result.status).toBe(0)
+      expect(result.stdout).toContain('captured')
+      expect(result.stdout).not.toContain('missed')
+    } finally {
+      rmSync(harnessDir, { recursive: true, force: true })
+    }
   })
 
   it('keeps the durable storage-boundary docs explicit about canonical product state versus assistant runtime residue', () => {
