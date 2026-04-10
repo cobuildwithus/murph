@@ -319,6 +319,14 @@ describe('executeProviderTurnWithRecovery', () => {
     expect(runnerMocks.loadVault).toHaveBeenCalledWith({
       vaultRoot: '/tmp/test-vault',
     })
+    expect(runnerMocks.createProviderTurnAssistantToolCatalog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cliEnv: {
+          CLI_TOKEN: 'test-cli-token',
+          MEMORY_CONTEXT: 'enabled',
+        },
+      }),
+    )
     expect(runnerMocks.buildAssistantSystemPrompt).toHaveBeenCalledWith(
       expect.objectContaining({
         assistantCliContract: 'cli-bootstrap',
@@ -369,6 +377,47 @@ describe('executeProviderTurnWithRecovery', () => {
       expect.objectContaining({
         kind: 'provider.failover.applied',
         level: 'warn',
+      }),
+    )
+  })
+
+  it('merges plan-scoped cli env into the provider tool catalog env', async () => {
+    const route = createRoute({
+      routeId: 'route-merge-cli-env',
+    })
+    const session = createAssistantSession()
+
+    runnerMocks.executeAssistantProviderTurnAttempt.mockResolvedValue(
+      createSuccessfulAttemptResult({
+        providerSessionId: 'provider-session-merge-cli-env',
+        response: 'Merged answer',
+      }),
+    )
+
+    await executeProviderTurnWithRecovery({
+      input: createMessageInput({
+        channel: 'chat',
+        prompt: 'Use the tool',
+      }),
+      plan: createTurnPlan({
+        cliAccessEnv: {
+          CLI_TOKEN: 'test-cli-token',
+          PLAN_ONLY_VAR: 'plan-value',
+        },
+      }),
+      resolvedSession: session,
+      routes: [route],
+      turnCreatedAt: '2026-04-08T00:00:00.000Z',
+      turnId: 'turn-merge-cli-env',
+    })
+
+    expect(runnerMocks.createProviderTurnAssistantToolCatalog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cliEnv: {
+          CLI_TOKEN: 'test-cli-token',
+          MEMORY_CONTEXT: 'enabled',
+          PLAN_ONLY_VAR: 'plan-value',
+        },
       }),
     )
   })
@@ -917,11 +966,12 @@ function createMessageInput(
 function createTurnPlan(input: {
   allowSensitiveHealthContext?: boolean
   firstTurnCheckInEligible?: boolean
+  cliAccessEnv?: Record<string, string>
 }) {
   return {
     allowSensitiveHealthContext: input.allowSensitiveHealthContext ?? false,
     cliAccess: {
-      env: {
+      env: input.cliAccessEnv ?? {
         CLI_TOKEN: 'test-cli-token',
       },
       rawCommand: 'vault-cli' as const,

@@ -270,6 +270,67 @@ describe('executeAssistantCliCommand', () => {
       stdout: `audit list --format json --vault ${vaultRoot}`,
     })
   })
+
+  it('filters hosted vault-cli subprocess env to the explicit allowlist', async () => {
+    const vaultRoot = await createVaultRoot()
+    const homeRoot = await createPathRoot()
+    const previousNodeOptions = process.env.NODE_OPTIONS
+    const previousOpenAiApiKey = process.env.OPENAI_API_KEY
+    const previousUnexpectedSecret = process.env.UNRELATED_SECRET
+    process.env.NODE_OPTIONS = '--require /tmp/ambient-loader.js'
+    process.env.OPENAI_API_KEY = 'ambient-openai-key'
+    process.env.UNRELATED_SECRET = 'ambient-secret'
+    await writeExecutable(
+      path.join(homeRoot, '.local', 'bin', 'vault-cli'),
+      [
+        '#!/bin/sh',
+        'printf \'{"apiEnv":"%s","ambientOpenAi":"%s","customApi":"%s","fetchEnabled":"%s","nodeOptions":"%s","turnId":"%s","unexpected":"%s"}\\n\' \\',
+        '  "${HOSTED_ASSISTANT_API_KEY_ENV-}" "${OPENAI_API_KEY-}" "${OPENAI_ENTERPRISE_API_KEY-}" "${MURPH_WEB_FETCH_ENABLED-}" \\',
+        '  "${NODE_OPTIONS-}" "${ASSISTANT_MEMORY_BOUND_TURN_ID-}" "${UNRELATED_SECRET-}"',
+      ].join('\n'),
+    )
+
+    try {
+      await expect(
+        executeAssistantCliCommand({
+          args: ['audit', 'list'],
+          input: {
+            cliEnv: {
+              ASSISTANT_MEMORY_BOUND_TURN_ID: 'turn-123',
+              HOME: homeRoot,
+              HOSTED_ASSISTANT_API_KEY_ENV: 'OPENAI_ENTERPRISE_API_KEY',
+              MURPH_WEB_FETCH_ENABLED: '1',
+              NODE_OPTIONS: '--require /tmp/cli-loader.js',
+              OPENAI_ENTERPRISE_API_KEY: 'cli-enterprise-key',
+              PATH: '/usr/bin:/bin',
+              UNRELATED_SECRET: 'cli-secret',
+            },
+            executionContext: {
+              hosted: {
+                memberId: 'member_123',
+                userEnvKeys: [],
+              },
+            },
+            vault: vaultRoot,
+          },
+        }),
+      ).resolves.toMatchObject({
+        json: {
+          ambientOpenAi: 'ambient-openai-key',
+          apiEnv: 'OPENAI_ENTERPRISE_API_KEY',
+          customApi: 'cli-enterprise-key',
+          fetchEnabled: '1',
+          nodeOptions: '',
+          turnId: 'turn-123',
+          unexpected: '',
+        },
+      })
+    } finally {
+      restoreEnvVar('NODE_OPTIONS', previousNodeOptions)
+      restoreEnvVar('OPENAI_API_KEY', previousOpenAiApiKey)
+      restoreEnvVar('UNRELATED_SECRET', previousUnexpectedSecret)
+    }
+  })
 })
 
 async function createVaultRoot(): Promise<string> {
@@ -312,6 +373,15 @@ async function writeExecutable(targetPath: string, content: string): Promise<voi
   await mkdir(path.dirname(targetPath), { recursive: true })
   await writeFile(targetPath, content, 'utf8')
   await chmod(targetPath, 0o755)
+}
+
+function restoreEnvVar(key: string, value: string | undefined): void {
+  if (value === undefined) {
+    delete process.env[key]
+    return
+  }
+
+  process.env[key] = value
 }
 
 function expectAssistantPayloadRuntimePath(

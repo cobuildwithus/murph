@@ -20,7 +20,7 @@ describe("buildHostedRunnerContainerEnv", () => {
     });
   });
 
-  it("forwards hosted automation provider and channel keys", () => {
+  it("forwards only the default assistant, parser, and web runner env profiles", () => {
     expect(buildHostedRunnerContainerEnv({
       BRAVE_API_KEY: "brave-key",
       FFMPEG_COMMAND: "/usr/local/bin/ffmpeg",
@@ -34,10 +34,29 @@ describe("buildHostedRunnerContainerEnv", () => {
       FFMPEG_COMMAND: "/usr/local/bin/ffmpeg",
       HOSTED_EMAIL_INGRESS_READY: "false",
       HOSTED_EMAIL_SEND_READY: "false",
-      MAPBOX_ACCESS_TOKEN: "mapbox-token",
       MURPH_WEB_SEARCH_MAX_RESULTS: "8",
       MURPH_WEB_SEARCH_PROVIDER: "brave",
       MURPH_WEB_SEARCH_TIMEOUT_MS: "10000",
+      NODE_ENV: "production",
+    });
+  });
+
+  it("forwards opt-in runner env profiles when configured", () => {
+    expect(buildHostedRunnerContainerEnv({
+      HOSTED_EMAIL_DOMAIN: "mail.example.test",
+      HOSTED_EMAIL_FROM_ADDRESS: "assistant@mail.example.test",
+      HOSTED_EMAIL_LOCAL_PART: "assistant",
+      HOSTED_EMAIL_SIGNING_SECRET: "signing-secret",
+      HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "telegram,mapbox,hosted-email",
+      MAPBOX_ACCESS_TOKEN: "mapbox-token",
+      TELEGRAM_BOT_TOKEN: "telegram-token",
+    })).toEqual({
+      HOSTED_EMAIL_DOMAIN: "mail.example.test",
+      HOSTED_EMAIL_FROM_ADDRESS: "assistant@mail.example.test",
+      HOSTED_EMAIL_INGRESS_READY: "true",
+      HOSTED_EMAIL_LOCAL_PART: "assistant",
+      HOSTED_EMAIL_SEND_READY: "false",
+      MAPBOX_ACCESS_TOKEN: "mapbox-token",
       NODE_ENV: "production",
       TELEGRAM_BOT_TOKEN: "telegram-token",
     });
@@ -53,10 +72,7 @@ describe("buildHostedRunnerContainerEnv", () => {
       NODE_ENV: "production",
       OPENAI_API_KEY: "sk-test",
     })).toEqual({
-      HOSTED_EMAIL_DOMAIN: "mail.example.test",
-      HOSTED_EMAIL_FROM_ADDRESS: "assistant@mail.example.test",
       HOSTED_EMAIL_INGRESS_READY: "false",
-      HOSTED_EMAIL_LOCAL_PART: "assistant",
       HOSTED_EMAIL_SEND_READY: "false",
       NODE_ENV: "production",
       OPENAI_API_KEY: "sk-test",
@@ -129,17 +145,14 @@ describe("buildHostedRunnerContainerEnv", () => {
     });
   });
 
-  it("derives hosted email readiness once and forwards the resolved flags", () => {
+  it("derives hosted email readiness once without forwarding hosted email env by default", () => {
     expect(buildHostedRunnerContainerEnv({
       HOSTED_EMAIL_DOMAIN: "mail.example.test",
       HOSTED_EMAIL_FROM_ADDRESS: "assistant@mail.example.test",
       HOSTED_EMAIL_LOCAL_PART: "assistant",
       HOSTED_EMAIL_SIGNING_SECRET: "signing-secret",
     })).toEqual({
-      HOSTED_EMAIL_DOMAIN: "mail.example.test",
-      HOSTED_EMAIL_FROM_ADDRESS: "assistant@mail.example.test",
-      HOSTED_EMAIL_INGRESS_READY: "true",
-      HOSTED_EMAIL_LOCAL_PART: "assistant",
+      HOSTED_EMAIL_INGRESS_READY: "false",
       HOSTED_EMAIL_SEND_READY: "false",
       NODE_ENV: "production",
     });

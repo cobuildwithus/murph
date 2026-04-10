@@ -108,7 +108,7 @@ function buildHostedExecutionJobRuntime(
   };
   const runtimeConfigSource = buildHostedExecutionRuntimeConfigSource(requestedRuntime, forwardedEnv);
   const emailCapabilities = readHostedEmailCapabilities(
-    buildHostedExecutionEmailCapabilitySource(requestedRuntime.forwardedEnv),
+    buildHostedExecutionEmailCapabilitySource(forwardedEnv),
   );
   const resolvedForwardedEnv: Record<string, string> = {
     ...forwardedEnv,
@@ -147,15 +147,30 @@ function buildHostedExecutionEmailCapabilitySource(
 ): Readonly<Record<string, string | undefined>> {
   const source: Record<string, string | undefined> = {};
 
-  for (const [key, value] of Object.entries(process.env)) {
-    source[key] = value;
-  }
-
   for (const [key, value] of Object.entries(forwardedEnv ?? {})) {
     if (key === "HOSTED_EMAIL_INGRESS_READY" || key === "HOSTED_EMAIL_SEND_READY") {
       continue;
     }
     source[key] = value;
+  }
+
+  const hostedEmailProfileEnabled = Boolean(
+    source.HOSTED_EMAIL_DOMAIN
+    || source.HOSTED_EMAIL_FROM_ADDRESS
+    || source.HOSTED_EMAIL_LOCAL_PART,
+  );
+  if (!hostedEmailProfileEnabled) {
+    return source;
+  }
+
+  for (const key of [
+    "HOSTED_EMAIL_SIGNING_SECRET",
+    "HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID",
+    "HOSTED_EMAIL_CLOUDFLARE_API_TOKEN",
+  ] as const) {
+    if (typeof source[key] !== "string" || source[key].length === 0) {
+      source[key] = process.env[key];
+    }
   }
 
   return source;

@@ -363,6 +363,7 @@ describe("runHostedExecutionJob", () => {
     const previousHostedEmailDomain = process.env.HOSTED_EMAIL_DOMAIN;
     const previousHostedEmailLocalPart = process.env.HOSTED_EMAIL_LOCAL_PART;
     const previousHostedEmailSigningSecret = process.env.HOSTED_EMAIL_SIGNING_SECRET;
+    const previousRunnerEnvProfiles = setHostedRunnerEnvProfiles("hosted-email");
     const previousHostedAssistantEnv = setHostedAssistantSeedEnv();
 
     process.env.HOSTED_EMAIL_DOMAIN = "mail.example.test";
@@ -397,6 +398,7 @@ describe("runHostedExecutionJob", () => {
       expect(result.result.summary).toContain("hosted email auto-reply unavailable");
       expect(automationState.autoReplyChannels).not.toContain("email");
     } finally {
+      restoreEnvVar("HOSTED_EXECUTION_RUNNER_ENV_PROFILES", previousRunnerEnvProfiles);
       restoreEnvVar("HOSTED_EMAIL_DOMAIN", previousHostedEmailDomain);
       restoreEnvVar("HOSTED_EMAIL_LOCAL_PART", previousHostedEmailLocalPart);
       restoreEnvVar("HOSTED_EMAIL_SIGNING_SECRET", previousHostedEmailSigningSecret);
@@ -405,6 +407,7 @@ describe("runHostedExecutionJob", () => {
   });
 
   it("persists hosted Telegram captures from webhook-style dispatches", async () => {
+    const previousRunnerEnvProfiles = setHostedRunnerEnvProfiles("telegram");
     const activation = await runHostedExecutionJob({
       bundles: {
         agentState: null,
@@ -469,6 +472,7 @@ describe("runHostedExecutionJob", () => {
       });
     } finally {
       runtime.close();
+      restoreEnvVar("HOSTED_EXECUTION_RUNNER_ENV_PROFILES", previousRunnerEnvProfiles);
     }
   });
 
@@ -478,6 +482,7 @@ describe("runHostedExecutionJob", () => {
     const previousHostedEmailDomain = process.env.HOSTED_EMAIL_DOMAIN;
     const previousHostedEmailLocalPart = process.env.HOSTED_EMAIL_LOCAL_PART;
     const previousHostedEmailSigningSecret = process.env.HOSTED_EMAIL_SIGNING_SECRET;
+    const previousRunnerEnvProfiles = setHostedRunnerEnvProfiles("hosted-email");
     const previousHostedAssistantEnv = setHostedAssistantSeedEnv();
 
     process.env.HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID = "acct_123";
@@ -511,6 +516,7 @@ describe("runHostedExecutionJob", () => {
       expect(result.result.summary).toContain("seeded explicit hosted assistant config (openai-compatible)");
       expect(result.result.summary).toContain("hosted email auto-reply ready");
     } finally {
+      restoreEnvVar("HOSTED_EXECUTION_RUNNER_ENV_PROFILES", previousRunnerEnvProfiles);
       restoreEnvVar("HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID", previousHostedEmailAccountId);
       restoreEnvVar("HOSTED_EMAIL_CLOUDFLARE_API_TOKEN", previousHostedEmailApiToken);
       restoreEnvVar("HOSTED_EMAIL_DOMAIN", previousHostedEmailDomain);
@@ -526,6 +532,7 @@ describe("runHostedExecutionJob", () => {
     const previousHostedEmailDomain = process.env.HOSTED_EMAIL_DOMAIN;
     const previousHostedEmailFromAddress = process.env.HOSTED_EMAIL_FROM_ADDRESS;
     const previousHostedEmailSigningSecret = process.env.HOSTED_EMAIL_SIGNING_SECRET;
+    const previousRunnerEnvProfiles = setHostedRunnerEnvProfiles("hosted-email");
     const previousHostedAssistantEnv = setHostedAssistantSeedEnv();
 
     process.env.HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID = "acct_123";
@@ -562,6 +569,7 @@ describe("runHostedExecutionJob", () => {
       expect(result.result.summary).toContain("hosted email auto-reply unavailable");
       expect(automationState.autoReplyChannels).not.toContain("email");
     } finally {
+      restoreEnvVar("HOSTED_EXECUTION_RUNNER_ENV_PROFILES", previousRunnerEnvProfiles);
       restoreEnvVar("HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID", previousHostedEmailAccountId);
       restoreEnvVar("HOSTED_EMAIL_CLOUDFLARE_API_TOKEN", previousHostedEmailApiToken);
       restoreEnvVar("HOSTED_EMAIL_DOMAIN", previousHostedEmailDomain);
@@ -577,6 +585,7 @@ describe("runHostedExecutionJob", () => {
     const previousHostedEmailDomain = process.env.HOSTED_EMAIL_DOMAIN;
     const previousHostedEmailLocalPart = process.env.HOSTED_EMAIL_LOCAL_PART;
     const previousHostedEmailSigningSecret = process.env.HOSTED_EMAIL_SIGNING_SECRET;
+    const previousRunnerEnvProfiles = setHostedRunnerEnvProfiles("hosted-email");
     const previousHostedAssistantEnv = clearHostedAssistantSeedEnv();
 
     delete process.env.HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID;
@@ -634,6 +643,7 @@ describe("runHostedExecutionJob", () => {
         readFile(path.join(restored.operatorHomeRoot, ".murph", "config.json"), "utf8"),
       ).rejects.toThrow();
     } finally {
+      restoreEnvVar("HOSTED_EXECUTION_RUNNER_ENV_PROFILES", previousRunnerEnvProfiles);
       restoreEnvVars(previousHostedAssistantEnv);
       restoreEnvVar("HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID", previousHostedEmailAccountId);
       restoreEnvVar("HOSTED_EMAIL_CLOUDFLARE_API_TOKEN", previousHostedEmailApiToken);
@@ -644,6 +654,7 @@ describe("runHostedExecutionJob", () => {
   });
 
   it("fetches raw hosted email through the email worker bridge when processing inbound email events", async () => {
+    const previousRunnerEnvProfiles = setHostedRunnerEnvProfiles("hosted-email");
     const activation = await runHostedExecutionJob({
       bundles: {
         agentState: null,
@@ -719,10 +730,12 @@ describe("runHostedExecutionJob", () => {
     } finally {
       server.close();
       await once(server, "close");
+      restoreEnvVar("HOSTED_EXECUTION_RUNNER_ENV_PROFILES", previousRunnerEnvProfiles);
     }
   });
 
   it("persists hosted stable-alias email captures with Reply-To-based thread targets", async () => {
+    const previousRunnerEnvProfiles = setHostedRunnerEnvProfiles("hosted-email");
     const activation = await runHostedExecutionJob({
       bundles: {
         agentState: null,
@@ -818,10 +831,12 @@ describe("runHostedExecutionJob", () => {
     } finally {
       server.close();
       await once(server, "close");
+      restoreEnvVar("HOSTED_EXECUTION_RUNNER_ENV_PROFILES", previousRunnerEnvProfiles);
     }
   });
 
   it("persists hosted Telegram captures through the hosted runtime event seam", async () => {
+    const previousRunnerEnvProfiles = setHostedRunnerEnvProfiles("telegram");
     const activation = await runHostedExecutionJob({
       bundles: {
         agentState: null,
@@ -884,6 +899,7 @@ describe("runHostedExecutionJob", () => {
       });
     } finally {
       runtime.close();
+      restoreEnvVar("HOSTED_EXECUTION_RUNNER_ENV_PROFILES", previousRunnerEnvProfiles);
     }
   });
 
@@ -891,6 +907,7 @@ describe("runHostedExecutionJob", () => {
     const previousTelegramApiBaseUrl = process.env.TELEGRAM_API_BASE_URL;
     const previousTelegramBotToken = process.env.TELEGRAM_BOT_TOKEN;
     const previousTelegramFileBaseUrl = process.env.TELEGRAM_FILE_BASE_URL;
+    const previousRunnerEnvProfiles = setHostedRunnerEnvProfiles("telegram");
     process.env.TELEGRAM_API_BASE_URL = "https://telegram-api.example.test";
     process.env.TELEGRAM_BOT_TOKEN = "telegram-token";
     process.env.TELEGRAM_FILE_BASE_URL = "https://telegram-files.example.test";
@@ -1055,6 +1072,7 @@ describe("runHostedExecutionJob", () => {
         telegramFetchUrls.indexOf(telegramFileDownloadUrl),
       );
     } finally {
+      restoreEnvVar("HOSTED_EXECUTION_RUNNER_ENV_PROFILES", previousRunnerEnvProfiles);
       restoreEnvVar("TELEGRAM_API_BASE_URL", previousTelegramApiBaseUrl);
       restoreEnvVar("TELEGRAM_BOT_TOKEN", previousTelegramBotToken);
       restoreEnvVar("TELEGRAM_FILE_BASE_URL", previousTelegramFileBaseUrl);
@@ -2585,6 +2603,7 @@ describe("runHostedExecutionJob", () => {
     const previousHostedEmailDomain = process.env.HOSTED_EMAIL_DOMAIN;
     const previousHostedEmailLocalPart = process.env.HOSTED_EMAIL_LOCAL_PART;
     const previousHostedEmailSigningSecret = process.env.HOSTED_EMAIL_SIGNING_SECRET;
+    const previousRunnerEnvProfiles = setHostedRunnerEnvProfiles("hosted-email");
 
     process.env.HOSTED_EMAIL_DOMAIN = "mail.example.test";
     process.env.HOSTED_EMAIL_LOCAL_PART = "assistant";
@@ -2621,6 +2640,60 @@ describe("runHostedExecutionJob", () => {
         deviceSync: null,
       });
     } finally {
+      restoreEnvVar("HOSTED_EXECUTION_RUNNER_ENV_PROFILES", previousRunnerEnvProfiles);
+      restoreEnvVar("HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID", previousHostedEmailAccountId);
+      restoreEnvVar("HOSTED_EMAIL_CLOUDFLARE_API_TOKEN", previousHostedEmailApiToken);
+      restoreEnvVar("HOSTED_EMAIL_DOMAIN", previousHostedEmailDomain);
+      restoreEnvVar("HOSTED_EMAIL_LOCAL_PART", previousHostedEmailLocalPart);
+      restoreEnvVar("HOSTED_EMAIL_SIGNING_SECRET", previousHostedEmailSigningSecret);
+    }
+  });
+
+  it("keeps hosted email readiness disabled when the hosted-email profile is not enabled", () => {
+    const previousHostedEmailAccountId = process.env.HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID;
+    const previousHostedEmailApiToken = process.env.HOSTED_EMAIL_CLOUDFLARE_API_TOKEN;
+    const previousHostedEmailDomain = process.env.HOSTED_EMAIL_DOMAIN;
+    const previousHostedEmailLocalPart = process.env.HOSTED_EMAIL_LOCAL_PART;
+    const previousHostedEmailSigningSecret = process.env.HOSTED_EMAIL_SIGNING_SECRET;
+    const previousRunnerEnvProfiles = process.env.HOSTED_EXECUTION_RUNNER_ENV_PROFILES;
+
+    delete process.env.HOSTED_EXECUTION_RUNNER_ENV_PROFILES;
+    process.env.HOSTED_EMAIL_DOMAIN = "mail.example.test";
+    process.env.HOSTED_EMAIL_LOCAL_PART = "assistant";
+    process.env.HOSTED_EMAIL_SIGNING_SECRET = "email-secret";
+
+    try {
+      const runtime = buildHostedExecutionJobRuntimeForTests({
+        forwardedEnv: {
+          HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID: "acct_123",
+          HOSTED_EMAIL_CLOUDFLARE_API_TOKEN: "cf-token",
+          HOSTED_EMAIL_INGRESS_READY: "false",
+          HOSTED_EMAIL_SEND_READY: "false",
+        },
+        resolvedConfig: {
+          channelCapabilities: {
+            emailSendReady: false,
+            telegramBotConfigured: false,
+          },
+          deviceSync: null,
+        },
+      });
+
+      expect(runtime.forwardedEnv).toMatchObject({
+        HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID: "acct_123",
+        HOSTED_EMAIL_CLOUDFLARE_API_TOKEN: "cf-token",
+        HOSTED_EMAIL_INGRESS_READY: "false",
+        HOSTED_EMAIL_SEND_READY: "false",
+      });
+      expect(runtime.resolvedConfig).toEqual({
+        channelCapabilities: {
+          emailSendReady: false,
+          telegramBotConfigured: false,
+        },
+        deviceSync: null,
+      });
+    } finally {
+      restoreEnvVar("HOSTED_EXECUTION_RUNNER_ENV_PROFILES", previousRunnerEnvProfiles);
       restoreEnvVar("HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID", previousHostedEmailAccountId);
       restoreEnvVar("HOSTED_EMAIL_CLOUDFLARE_API_TOKEN", previousHostedEmailApiToken);
       restoreEnvVar("HOSTED_EMAIL_DOMAIN", previousHostedEmailDomain);
@@ -2719,6 +2792,12 @@ function restoreEnvVar(key: string, value: string | undefined): void {
   }
 
   process.env[key] = value;
+}
+
+function setHostedRunnerEnvProfiles(value: string): string | undefined {
+  const previousValue = process.env.HOSTED_EXECUTION_RUNNER_ENV_PROFILES;
+  process.env.HOSTED_EXECUTION_RUNNER_ENV_PROFILES = value;
+  return previousValue;
 }
 
 function setHostedAssistantSeedEnv(): Record<string, string | undefined> {

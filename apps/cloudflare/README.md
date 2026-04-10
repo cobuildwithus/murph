@@ -54,6 +54,7 @@ Current worker env/config names read directly by `src/env.ts`:
 - optional secret: `HOSTED_EMAIL_CLOUDFLARE_API_TOKEN` enables hosted email delivery through Cloudflare Email Routing
 - optional secret: `HOSTED_EMAIL_SIGNING_SECRET` enables trusted hosted email ingress token generation and verification
 - optional non-secret: `HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS` extends the exact per-user encrypted env key allowlist in both the worker and container
+- optional non-secret: `HOSTED_EXECUTION_RUNNER_ENV_PROFILES` adds explicit hosted runner env profiles beyond the default minimal `assistant,parsers,web` set. Supported opt-in profiles are `device-sync`, `hosted-email`, `linq`, `mapbox`, and `telegram`
 - optional non-secret: `HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID` selects the Cloudflare account used for hosted email sends
 - optional non-secret: `HOSTED_EMAIL_CLOUDFLARE_API_BASE_URL` overrides the Cloudflare API base URL for hosted email delivery
 - optional non-secret: `HOSTED_EMAIL_DEFAULT_SUBJECT` overrides the default hosted email subject
@@ -132,6 +133,7 @@ Current expectations for the container image:
 - `PORT` for the internal bridge listen port, defaulting to `8080`
 - provider/runtime env such as WHOOP, Oura, Linq, Telegram, hosted email bridge config, and model-provider keys when the one-shot runner should execute those surfaces instead of skipping them
 - optional allowlist extension var `HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS` when separately encrypted per-user env overrides need to cover additional exact key names, excluding operator-only binary/model selectors and process-control env such as `FFMPEG_COMMAND`, `PDFTOTEXT_COMMAND`, `WHISPER_COMMAND`, `WHISPER_MODEL_PATH`, `NODE_OPTIONS`, and dynamic-loader variables
+- optional runner env profile var `HOSTED_EXECUTION_RUNNER_ENV_PROFILES` when operators want the container to opt into additional platform-managed integration env beyond the default `assistant,parsers,web` set; supported profile names are `device-sync`, `hosted-email`, `linq`, `mapbox`, and `telegram`
 - optional `HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS` when operators want to override the default 120-second warm-shell idle retention
 - encrypted per-user overrides are read from a dedicated per-user hosted object, injected into the one-shot runtime request, and the default hosted execution path runs each job in an isolated child process launched from a temp cwd rather than `/app`, so per-user env overrides no longer force container-wide request serialization, the job does not inherit the shipped app bundle as its ambient working directory, the child does not inherit supervisor-only container env or proxy credentials, writable cache/temp roots stay per-run, and the launch-time `HOME` no longer reuses the container supervisor account
 
