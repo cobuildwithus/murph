@@ -382,43 +382,52 @@ describe('assistant store persistence seams', () => {
 
     const initial = await readAutomationState(writePaths)
     expect(initial).toMatchObject({
-      version: 2,
+      version: 1,
       inboxScanCursor: null,
-      autoReplyScanCursor: null,
-      autoReplyChannels: [],
-      autoReplyBacklogChannels: [],
-      autoReplyPrimed: true,
+      autoReply: [],
     })
 
     const updated = await writeAutomationState(writePaths, {
-      version: 2,
+      version: 1,
       inboxScanCursor: {
         occurredAt: '2026-04-08T00:04:00.000Z',
         captureId: 'capture-1',
       },
-      autoReplyScanCursor: {
-        occurredAt: '2026-04-08T00:05:00.000Z',
-        captureId: 'capture-2',
-      },
-      autoReplyChannels: ['telegram'],
-      autoReplyBacklogChannels: ['agentmail'],
-      autoReplyPrimed: false,
+      autoReply: [
+        {
+          channel: 'telegram',
+          cursor: {
+            occurredAt: '2026-04-08T00:05:00.000Z',
+            captureId: 'capture-2',
+          },
+        },
+        {
+          channel: 'agentmail',
+          cursor: null,
+        },
+      ],
       updatedAt: '2026-04-08T00:06:00.000Z',
     })
 
     expect(updated).toEqual({
-      version: 2,
+      version: 1,
       inboxScanCursor: {
         occurredAt: '2026-04-08T00:04:00.000Z',
         captureId: 'capture-1',
       },
-      autoReplyScanCursor: {
-        occurredAt: '2026-04-08T00:05:00.000Z',
-        captureId: 'capture-2',
-      },
-      autoReplyChannels: ['telegram'],
-      autoReplyBacklogChannels: ['agentmail'],
-      autoReplyPrimed: false,
+      autoReply: [
+        {
+          channel: 'telegram',
+          cursor: {
+            occurredAt: '2026-04-08T00:05:00.000Z',
+            captureId: 'capture-2',
+          },
+        },
+        {
+          channel: 'agentmail',
+          cursor: null,
+        },
+      ],
       updatedAt: '2026-04-08T00:06:00.000Z',
     })
     expect(JSON.parse(await readFile(writePaths.automationStatePath, 'utf8'))).toEqual(updated)
@@ -432,12 +441,9 @@ describe('assistant store persistence seams', () => {
 
     const rebuilt = await readAutomationState(corruptedPaths)
     expect(rebuilt).toMatchObject({
-      version: 2,
+      version: 1,
       inboxScanCursor: null,
-      autoReplyScanCursor: null,
-      autoReplyChannels: [],
-      autoReplyBacklogChannels: [],
-      autoReplyPrimed: true,
+      autoReply: [],
     })
 
     const quarantines = await listAssistantQuarantineEntriesAtPaths(corruptedPaths, {
