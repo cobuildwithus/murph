@@ -310,7 +310,7 @@ test('setup scheduling helpers respect terminal gating and launch routing', () =
   )
 })
 
-test('setup wizard initial channels reuse saved automation channels and fall back when none are saved', async () => {
+test('setup wizard initial channels prefer persisted state and only default when no persisted source exists', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'setup-cli-vault-'))
   const automationStatePath = resolveAssistantStatePaths(vaultRoot).automationStatePath
   const inboxConfigPath = path.join(
@@ -395,7 +395,7 @@ test('setup wizard initial channels reuse saved automation channels and fall bac
     )
 
     assert.deepEqual(
-      await resolveInitialSetupWizardChannels(vaultRoot, 'linux'),
+      await resolveInitialSetupWizardChannels(vaultRoot, 'darwin'),
       [],
     )
 

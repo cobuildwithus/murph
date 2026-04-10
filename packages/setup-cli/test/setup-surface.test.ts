@@ -786,6 +786,39 @@ test('setup CLI initial wizard channels reuse saved state, fall back to inbox co
     ['telegram', 'linq'],
   )
 
+  await writeFile(
+    automationPath,
+    JSON.stringify({
+      version: 2,
+      inboxScanCursor: null,
+      autoReplyScanCursor: null,
+      autoReplyChannels: [],
+      autoReplyBacklogChannels: [],
+      autoReplyPrimed: false,
+      updatedAt: '2026-04-08T00:00:00.000Z',
+    }),
+    'utf8',
+  )
+
+  assert.deepEqual(
+    await resolveInitialSetupWizardChannels(vaultRoot, 'darwin'),
+    [],
+  )
+
+  await writeFile(
+    automationPath,
+    JSON.stringify({
+      version: 2,
+      inboxScanCursor: null,
+      autoReplyScanCursor: null,
+      autoReplyChannels: ['telegram', 'linq', 'unknown-channel'],
+      autoReplyBacklogChannels: [],
+      autoReplyPrimed: false,
+      updatedAt: '2026-04-08T00:00:00.000Z',
+    }),
+    'utf8',
+  )
+
   await mkdir(path.dirname(inboxConfigPath), { recursive: true })
   await writeFile(
     inboxConfigPath,
