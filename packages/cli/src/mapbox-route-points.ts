@@ -18,10 +18,8 @@ import { fetchMapboxJson } from './mapbox-route-client.js'
 
 const coordinateLiteralPattern =
   /^\s*(-?(?:\d+(?:\.\d+)?|\.\d+))\s*,\s*(-?(?:\d+(?:\.\d+)?|\.\d+))\s*$/u
-const likelyWalkingPoiPattern =
-  /\b(trailhead|trail head|hut|shelter|camp(?:site|ground)?|summit|peak|lookout|falls|waterfall|ridge|track|trail|mount|mt\.?|pass|gap|cabin|chalet|lodge)\b/iu
 const likelyAddressPattern =
-  /^\s*\d+[A-Za-z0-9/\-]*\s+/u
+  /^\s*\d+[A-Za-z0-9/\-]*\s+(?:[A-Za-z0-9.'-]+\s+){0,5}(?:st|street|rd|road|ave|avenue|blvd|boulevard|dr|drive|ln|lane|ct|court|pl|place|pde|parade|way|ter|terrace|hwy|highway|cct|circuit)\b/iu
 
 export interface ResolveRoutePointsInput {
   accessToken: string
@@ -41,6 +39,7 @@ interface RoutePointLookupOptions {
   fetchImpl: typeof fetch
   language?: string
   profile: MapboxRouteProfile
+  proximity: MapboxRouteCoordinatePoint | null
   role: MapboxRoutePointRole
   timeoutMs: number
 }
@@ -56,20 +55,30 @@ export async function resolveRoutePoints(
     })),
     { role: 'destination' as const, value: input.destination },
   ]
+  const resolvedPoints: ResolvedRoutePoint[] = []
+  let proximity: MapboxRouteCoordinatePoint | null = null
 
-  return await Promise.all(
-    sources.map(async ({ role, value }) =>
-      await resolveRoutePoint(value, {
-        accessToken: input.accessToken,
-        country: input.country,
-        fetchImpl: input.fetchImpl,
-        language: input.language,
-        profile: input.profile,
-        role,
-        timeoutMs: input.timeoutMs,
-      }),
-    ),
-  )
+  for (const { role, value } of sources) {
+    const resolvedPoint = await resolveRoutePoint(value, {
+      accessToken: input.accessToken,
+      country: input.country,
+      fetchImpl: input.fetchImpl,
+      language: input.language,
+      profile: input.profile,
+      proximity,
+      role,
+      timeoutMs: input.timeoutMs,
+    })
+
+    resolvedPoints.push(resolvedPoint)
+    proximity = {
+      longitude: resolvedPoint.routableLongitude,
+      latitude: resolvedPoint.routableLatitude,
+      name: resolvedPoint.displayName,
+    }
+  }
+
+  return resolvedPoints
 }
 
 function resolveRoutePoint(
@@ -94,11 +103,9 @@ async function resolveTextRoutePoint(
   query: string,
   input: RoutePointLookupOptions,
 ): Promise<ResolvedRoutePoint> {
-  const preferSearchBox =
-    input.profile === 'walking' && looksLikeWalkingPoiQuery(query)
-  const lookupOrder = preferSearchBox
-    ? [searchBoxRoutePoint, geocodeRoutePoint]
-    : [geocodeRoutePoint]
+  const lookupOrder = looksLikeAddressQuery(query)
+    ? [geocodeRoutePoint, searchBoxRoutePoint]
+    : [searchBoxRoutePoint, geocodeRoutePoint]
   let firstMiss: MapboxRoutePointLookupMissError | null = null
 
   for (const lookup of lookupOrder) {
@@ -196,6 +203,13 @@ async function searchBoxRoutePoint(
 
   if (input.language) {
     url.searchParams.set('language', input.language)
+  }
+
+  if (input.proximity) {
+    url.searchParams.set(
+      'proximity',
+      `${input.proximity.longitude},${input.proximity.latitude}`,
+    )
   }
 
   const payload = await fetchMapboxJson<MapboxSearchBoxResponse>({
@@ -349,11 +363,11 @@ function formatCoordinateLiteral(longitude: number, latitude: number): string {
   return `${longitude.toFixed(6)}, ${latitude.toFixed(6)}`
 }
 
-function looksLikeWalkingPoiQuery(value: string): boolean {
+function looksLikeAddressQuery(value: string): boolean {
   const normalized = normalizeNullableString(value)
-  if (!normalized || likelyAddressPattern.test(normalized)) {
+  if (!normalized) {
     return false
   }
 
-  return likelyWalkingPoiPattern.test(normalized)
+  return likelyAddressPattern.test(normalized)
 }
