@@ -2195,17 +2195,17 @@ test('sendAssistantMessage gives OpenAI-compatible auto-reply turns the CLI-firs
     })
     assert.deepEqual(toolResults.map((entry) => entry.status), ['succeeded', 'succeeded', 'succeeded'])
     const listedSessions = (toolResults[0]?.result as {
-      json?: { sessions?: Array<{ sessionId?: string }> }
-    } | undefined)?.json?.sessions
+      sessions?: Array<{ sessionId?: string }>
+    } | undefined)?.sessions
     const shownSession = (toolResults[1]?.result as {
-      json?: { session?: { sessionId?: string } }
-    } | undefined)?.json?.session
+      session?: { sessionId?: string }
+    } | undefined)?.session
     assert.ok(listedSessions?.some((session) => session.sessionId === result.session.sessionId))
     assert.equal(shownSession?.sessionId, result.session.sessionId)
 
     const journalRelativePath = (toolResults[2]?.result as {
-      json?: { journalPath?: string }
-    } | undefined)?.json?.journalPath
+      journalPath?: string
+    } | undefined)?.journalPath
     assert.equal(typeof journalRelativePath, 'string')
     const journalMarkdown = await readFile(
       path.isAbsolute(journalRelativePath as string)

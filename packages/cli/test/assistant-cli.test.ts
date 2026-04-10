@@ -617,13 +617,10 @@ test.sequential(
 
     assert.equal(result?.status, 'succeeded')
     const payload = result?.result as {
-      argv?: string[]
-      exitCode?: number
-      stdout?: string
-    }
-    assert.deepEqual(payload?.argv?.slice(0, 1), ['vault-cli'])
-    assert.equal(payload?.exitCode, 0)
-    assert.ok(String(payload?.stdout ?? '').trim().length > 0)
+      value?: string
+    } | undefined
+    assert.equal(typeof payload?.value, 'string')
+    assert.ok(String(payload?.value ?? '').trim().length > 0)
   },
   ASSISTANT_CLI_TIMEOUT_MS,
 )

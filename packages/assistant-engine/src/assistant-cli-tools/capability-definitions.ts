@@ -101,13 +101,20 @@ export function createAssistantCliExecutorToolDefinitions(
       inputExample: {
         args: ['device', 'provider', 'list'],
       },
-      execute: async ({ args, stdin, timeoutMs }) =>
-        await executeAssistantCliCommand({
+      execute: async ({ args, stdin, timeoutMs }) => {
+        const result = await executeAssistantCliCommand({
           args,
           stdin,
           timeoutMs,
           input,
-        }),
+        })
+
+        if (result.json !== null) {
+          return result.json
+        }
+
+        return result.stdout.length > 0 ? result.stdout : null
+      },
     }),
   ]
 }
