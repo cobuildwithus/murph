@@ -1,5 +1,5 @@
 const trustMessages = [
-  "Works on Telegram, Linq, and email",
+  "Works on Telegram, iMessage, and email",
   "Syncs with Garmin, Oura, and WHOOP",
   "Plain English — no jargon",
   "Encrypted cloud snapshots for hosted runs",
