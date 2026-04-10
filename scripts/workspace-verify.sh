@@ -131,16 +131,13 @@ run_timed_step() {
   local step_status=0
 
   verify_log "start ${label}"
-  set +e
-  "$@"
-  step_status=$?
-  set -e
-
-  if [[ "$step_status" -ne 0 ]]; then
+  if "$@"; then
+    verify_log "done ${label} (${SECONDS}s total, $((SECONDS - started_at))s step)"
+    return 0
+  else
+    step_status=$?
     return "$step_status"
   fi
-
-  verify_log "done ${label} (${SECONDS}s total, $((SECONDS - started_at))s step)"
 }
 
 register_background_pid() {
