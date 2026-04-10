@@ -15,6 +15,7 @@ import {
 import {
   compareAssistantCaptureOrder,
   createEmptyAutoReplyScanResult,
+  earliestAssistantAutomationWakeAt,
   normalizeEnabledChannels,
   normalizeScanLimit,
   type AssistantAutoReplyScanResult,
@@ -130,6 +131,10 @@ export async function recoverAssistantAutoRepliesOnStartup(
       vault: input.vault,
     })
     summary.failed += result.failed
+    summary.nextWakeAt = earliestAssistantAutomationWakeAt(
+      summary.nextWakeAt,
+      result.nextWakeAt,
+    )
     summary.replied += result.replied
     summary.skipped += result.skipped
     recoveredGroups += 1

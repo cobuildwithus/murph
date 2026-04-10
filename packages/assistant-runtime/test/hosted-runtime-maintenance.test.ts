@@ -12,12 +12,11 @@ const mocks = vi.hoisted(() => ({
   createIntegratedInboxServices: vi.fn(),
   createIntegratedVaultServices: vi.fn(),
   emitHostedExecutionStructuredLog: vi.fn(),
-  getAssistantCronStatus: vi.fn(),
   openInboxRuntime: vi.fn(),
   readHostedAssistantRuntimeState: vi.fn(),
   rebuildRuntimeFromVault: vi.fn(),
   reconcileHostedDeviceSyncControlPlaneState: vi.fn(),
-  runAssistantAutomation: vi.fn(),
+  runAssistantAutomationPass: vi.fn(),
   syncHostedDeviceSyncControlPlaneState: vi.fn(),
 }));
 
@@ -46,8 +45,7 @@ vi.mock("@murphai/parsers", () => ({
 
 vi.mock("@murphai/assistant-engine", () => ({
   createAssistantFoodAutoLogHooks: mocks.createAssistantFoodAutoLogHooks,
-  getAssistantCronStatus: mocks.getAssistantCronStatus,
-  runAssistantAutomation: mocks.runAssistantAutomation,
+  runAssistantAutomationPass: mocks.runAssistantAutomationPass,
 }));
 
 vi.mock("@murphai/inbox-services", () => ({
@@ -113,8 +111,8 @@ beforeEach(() => {
     assistantConfigured: true,
     assistantProvider: "openai-compatible",
   });
-  mocks.getAssistantCronStatus.mockResolvedValue({
-    nextRunAt: "2026-04-08T01:00:00.000Z",
+  mocks.runAssistantAutomationPass.mockResolvedValue({
+    nextWakeAt: "2026-04-08T01:00:00.000Z",
   });
   mocks.createConfiguredDeviceSyncProvidersFromConfigs.mockReturnValue(["oura"]);
   mocks.createDeviceSyncRegistry.mockReturnValue({
@@ -187,7 +185,8 @@ describe("drainHostedParserQueue", () => {
       vaultRoot: "/tmp/vault-root",
     });
 
-    assert.deepEqual(result, {
+    expect(result).toEqual({
+      nextWakeAt: expect.any(String),
       processedJobs: 2,
     });
     expect(mocks.rebuildRuntimeFromVault).toHaveBeenCalledWith({
@@ -207,7 +206,7 @@ describe("drainHostedParserQueue", () => {
 
 describe("runHostedAssistantAutomation", () => {
   it("treats missing inbox runtime state as a non-fatal bootstrap gap", async () => {
-    mocks.runAssistantAutomation.mockRejectedValueOnce({
+    mocks.runAssistantAutomationPass.mockRejectedValueOnce({
       code: "INBOX_NOT_INITIALIZED",
     });
 
@@ -223,11 +222,13 @@ describe("runHostedAssistantAutomation", () => {
           },
         },
       ),
-    ).resolves.toBeUndefined();
+    ).resolves.toEqual({
+      nextWakeAt: null,
+    });
   });
 
   it("rethrows unexpected automation failures", async () => {
-    mocks.runAssistantAutomation.mockRejectedValueOnce(new Error("automation failed"));
+    mocks.runAssistantAutomationPass.mockRejectedValueOnce(new Error("automation failed"));
 
     await expect(
       runHostedAssistantAutomation(
@@ -535,7 +536,7 @@ describe("runHostedMaintenanceLoop", () => {
       nextWakeAt: "2026-04-08T00:30:00.000Z",
       parserProcessed: 0,
     });
-    expect(mocks.runAssistantAutomation).toHaveBeenCalledWith({
+    expect(mocks.runAssistantAutomationPass).toHaveBeenCalledWith({
       deliveryDispatchMode: "queue-only",
       drainOutbox: false,
       executionContext: {
@@ -546,13 +547,11 @@ describe("runHostedMaintenanceLoop", () => {
         },
       },
       inboxServices: expect.any(Symbol),
-      once: true,
       requestId: "req_123",
-      startDaemon: false,
+      runStartupRecovery: true,
       vault: "/tmp/vault-root",
       vaultServices: expect.any(Symbol),
     });
-    expect(mocks.getAssistantCronStatus).toHaveBeenCalledWith("/tmp/vault-root");
   });
 
   it("skips assistant automation without warning when the caller explicitly disables it", async () => {
@@ -602,8 +601,7 @@ describe("runHostedMaintenanceLoop", () => {
       nextWakeAt: null,
       parserProcessed: 0,
     });
-    expect(mocks.runAssistantAutomation).not.toHaveBeenCalled();
-    expect(mocks.getAssistantCronStatus).not.toHaveBeenCalled();
+    expect(mocks.runAssistantAutomationPass).not.toHaveBeenCalled();
     expect(mocks.emitHostedExecutionStructuredLog).not.toHaveBeenCalled();
   });
 
@@ -658,7 +656,7 @@ describe("runHostedMaintenanceLoop", () => {
       nextWakeAt: null,
       parserProcessed: 0,
     });
-    expect(mocks.runAssistantAutomation).not.toHaveBeenCalled();
+    expect(mocks.runAssistantAutomationPass).not.toHaveBeenCalled();
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
         level: "warn",

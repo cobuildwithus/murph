@@ -125,6 +125,8 @@ export function formatInboxRunEventForTerminal(
       )
     case 'capture.imported':
       return formatImportedCaptureEvent(event, options)
+    case 'parser.jobs.drained':
+      return formatParserDrainEvent(event)
     default:
       return null
   }
@@ -150,6 +152,17 @@ function formatImportedCaptureEvent(
   const phase = event.phase === 'backfill' ? 'backfill' : 'new'
   const source = humanizeSource(event.source)
   return `${phase} ${source} capture imported: ${summarizeCapturePayload(event.capture)}`
+}
+
+function formatParserDrainEvent(event: InboxRunEvent): string | null {
+  const processed = event.parser?.processed ?? 0
+  if (processed <= 0) {
+    return null
+  }
+
+  const succeeded = event.parser?.succeeded ?? 0
+  const failed = event.parser?.failed ?? 0
+  return `parser drained ${processed} attachment job${processed === 1 ? '' : 's'}: ${succeeded} succeeded, ${failed} failed`
 }
 
 function formatUnsafeImportedCaptureEvent(event: InboxRunEvent): string {

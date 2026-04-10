@@ -20,7 +20,6 @@ describe("readHostedExecutionEnvironment", () => {
       v1: environment.platformEnvelopeKey,
     });
     expect(environment.platformEnvelopeKeyId).toBe("v1");
-    expect(environment.defaultAlarmDelayMs).toBe(15 * 60 * 1000);
     expect(environment.maxEventAttempts).toBe(3);
     expect(environment.retryDelayMs).toBe(30_000);
     expect(environment.runnerTimeoutMs).toBe(60_000);

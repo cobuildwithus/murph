@@ -407,7 +407,6 @@ function parseAssistantAutomationRunRequestBody(payload: unknown): AssistantAuto
   assertOptionalBooleanField(record, 'once', 'automation/run-once')
   assertOptionalBooleanField(record, 'startDaemon', 'automation/run-once')
   assertOptionalFiniteNumberField(record, 'maxPerScan', 'automation/run-once')
-  assertOptionalFiniteNumberField(record, 'scanIntervalMs', 'automation/run-once')
   assertOptionalFiniteNumberField(record, 'sessionMaxAgeMs', 'automation/run-once')
   const deliveryDispatchMode = readOptionalNullableStringField(
     record,

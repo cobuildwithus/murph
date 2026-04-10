@@ -1,17 +1,14 @@
-import {
-  assistantRunResultSchema,
-  type AssistantAutomationState,
-} from '@murphai/operator-config/assistant-cli-contracts'
-import type {
-  InboxServices,
-  InboxRunEvent,
-} from '@murphai/inbox-services'
+import { assistantRunResultSchema, type AssistantAutomationState } from '@murphai/operator-config/assistant-cli-contracts'
+import type { InboxServices, InboxRunEvent } from '@murphai/inbox-services'
 import { createIntegratedInboxServices } from '@murphai/inbox-services'
 import type { AssistantModelSpec } from '../../model-harness.js'
 import type { VaultServices } from '@murphai/vault-usecases/vault-services'
 import { createIntegratedVaultServices } from '@murphai/vault-usecases/vault-services'
 import { createAssistantFoodAutoLogHooks } from '../food-auto-log-hooks.js'
-import { processDueAssistantCronJobsLocal as processDueAssistantCronJobs } from '../cron.js'
+import {
+  getAssistantCronStatus,
+  processDueAssistantCronJobsLocal as processDueAssistantCronJobs,
+} from '../cron.js'
 import { recordAssistantDiagnosticEvent } from '../diagnostics.js'
 import type { AssistantExecutionContext } from '../execution-context.js'
 import { maybeThrowInjectedAssistantFault } from '../fault-injection.js'
@@ -19,6 +16,7 @@ import {
   drainAssistantOutboxLocal as drainAssistantOutbox,
   type AssistantOutboxDispatchMode,
 } from '../outbox.js'
+import { buildAssistantOutboxSummary } from '../outbox/summary.js'
 import { maybeRunAssistantRuntimeMaintenance } from '../runtime-budgets.js'
 import { refreshAssistantStatusSnapshot } from '../status.js'
 import {
@@ -37,7 +35,9 @@ import {
   createAssistantAutomationWakeController,
   createEmptyAutoReplyScanResult,
   createEmptyInboxScanResult,
-  normalizeScanInterval,
+  earliestAssistantAutomationWakeAt,
+  type AssistantAutomationPassResult,
+  type AssistantAutoReplyScanResult,
   type AssistantRunEvent,
 } from './shared.js'
 import { scanAssistantAutomationOnce } from './scanner.js'
@@ -64,12 +64,17 @@ export interface RunAssistantAutomationInput {
   onInboxEvent?: (event: InboxRunEvent) => void
   once?: boolean
   requestId?: string | null
-  scanIntervalMs?: number
   signal?: AbortSignal
   startDaemon?: boolean
   sessionMaxAgeMs?: number | null
   vault: string
   vaultServices?: VaultServices
+}
+
+export interface RunAssistantAutomationPassInput
+  extends Omit<RunAssistantAutomationInput, 'once' | 'onInboxEvent' | 'startDaemon'> {
+  runStartupRecovery?: boolean
+  scanNumber?: number
 }
 
 export async function runAssistantAutomation(
@@ -80,15 +85,20 @@ export async function runAssistantAutomation(
   const cleanup = bridgeAbortSignals(controller, input.signal)
   const paths = resolveAssistantStatePaths(input.vault)
   const inboxServices = input.inboxServices ?? createIntegratedInboxServices()
-  const vaultServices = input.vaultServices ?? createIntegratedVaultServices({
-    foodAutoLogHooks: createAssistantFoodAutoLogHooks(),
-  })
   const aggregateRouting = createEmptyInboxScanResult()
   const aggregateReplies = createEmptyAutoReplyScanResult()
   const wakeController = createAssistantAutomationWakeController()
   let scans = 0
   let lastError: string | null = null
   const daemonStarted = input.startDaemon ?? true
+
+  if (!daemonStarted && !input.once) {
+    cleanup()
+    throw new Error(
+      'Continuous assistant automation now requires the inbox daemon. Rerun without skipDaemon/startDaemon=false, or use once=true for a one-shot pass.',
+    )
+  }
+
   let startupRecoveryPending = true
   let runLock: Awaited<
     ReturnType<typeof acquireAssistantAutomationRunLock>
@@ -115,8 +125,8 @@ export async function runAssistantAutomation(
         {
           onEvent: (event) => {
             if (
-              event.type === 'capture.imported' &&
-              event.capture?.actor?.isSelf !== true
+              (event.type === 'capture.imported' && event.capture?.actor?.isSelf !== true) ||
+              event.type === 'parser.jobs.drained'
             ) {
               wakeController.requestWake()
             }
@@ -147,124 +157,38 @@ export async function runAssistantAutomation(
     while (!controller.signal.aborted) {
       wakeController.consumePendingWake()
       scans += 1
-      maybeThrowInjectedAssistantFault({
-        component: 'automation',
-        fault: 'automation',
-        message: 'Injected assistant automation failure.',
-      })
-      await recordAssistantDiagnosticEvent({
-        vault: input.vault,
-        component: 'automation',
-        kind: 'automation.scan.started',
-        message: `Assistant automation scan ${scans} started.`,
-        counterDeltas: {
-          automationScans: 1,
-        },
-      })
-      await maybeRunAssistantRuntimeMaintenance({
-        vault: input.vault,
-      }).catch((error) => {
-        warnAssistantBestEffortFailure({
-          error,
-          operation: 'runtime maintenance',
-        })
-      })
-      if (input.drainOutbox ?? true) {
-        await drainAssistantOutbox({
-          vault: input.vault,
-          limit: input.maxPerScan,
-        })
-      }
-      await processDueAssistantCronJobs({
-        deliveryDispatchMode: input.deliveryDispatchMode,
-        executionContext: input.executionContext,
-        vault: input.vault,
-        signal: controller.signal,
-        limit: input.maxPerScan,
-      })
-      let state = await readAssistantAutomationState(input.vault)
-      const stateBeforeScan = snapshotAssistantAutomationLoopState(state)
 
-      if (startupRecoveryPending) {
-        const startupRecovery = await recoverAssistantAutoRepliesOnStartup({
-          allowSelfAuthored: input.allowSelfAuthored ?? false,
-          deliveryDispatchMode: input.deliveryDispatchMode,
-          enabledChannels: state.autoReplyChannels,
-          executionContext: input.executionContext,
-          inboxServices,
-          maxPerScan: input.maxPerScan,
-          onEvent: input.onEvent,
-          requestId: input.requestId,
-          scanCursor: state.autoReplyScanCursor,
-          signal: controller.signal,
-          sessionMaxAgeMs: input.sessionMaxAgeMs ?? null,
-          vault: input.vault,
-        })
-        aggregateReplies.considered += startupRecovery.considered
-        aggregateReplies.failed += startupRecovery.failed
-        aggregateReplies.replied += startupRecovery.replied
-        aggregateReplies.skipped += startupRecovery.skipped
-        startupRecoveryPending = false
-      }
-
-      const scanResult = await scanAssistantAutomationOnce({
-        allowSelfAuthored: input.allowSelfAuthored ?? false,
-        deliveryDispatchMode: input.deliveryDispatchMode,
-        executionContext: input.executionContext,
+      const passResult = await runAssistantAutomationPass({
+        ...input,
         inboxServices,
-        maxPerScan: input.maxPerScan,
-        modelSpec: input.modelSpec,
-        onEvent: input.onEvent,
-        requestId: input.requestId,
+        runStartupRecovery: startupRecoveryPending,
+        scanNumber: scans,
         signal: controller.signal,
-        sessionMaxAgeMs: input.sessionMaxAgeMs ?? null,
-        state,
-        vault: input.vault,
-        vaultServices,
-        async onStateProgress(next) {
-          state = await saveAssistantAutomationState(input.vault, {
-            ...state,
-            inboxScanCursor: next.inboxScanCursor,
-            autoReplyScanCursor: next.autoReplyScanCursor,
-            autoReplyBacklogChannels: [...next.autoReplyBacklogChannels],
-            autoReplyPrimed: next.autoReplyPrimed,
-            updatedAt: new Date().toISOString(),
-          })
-        },
       })
-      aggregateRouting.considered += scanResult.routing.considered
-      aggregateRouting.failed += scanResult.routing.failed
-      aggregateRouting.noAction += scanResult.routing.noAction
-      aggregateRouting.routed += scanResult.routing.routed
-      aggregateRouting.skipped += scanResult.routing.skipped
-      aggregateReplies.considered += scanResult.replies.considered
-      aggregateReplies.failed += scanResult.replies.failed
-      aggregateReplies.replied += scanResult.replies.replied
-      aggregateReplies.skipped += scanResult.replies.skipped
+      startupRecoveryPending = false
 
-      await refreshAssistantStatusSnapshot(input.vault).catch((error) => {
-        warnAssistantBestEffortFailure({
-          error,
-          operation: 'status snapshot refresh',
-        })
-      })
+      aggregateRouting.considered += passResult.routing.considered
+      aggregateRouting.failed += passResult.routing.failed
+      aggregateRouting.noAction += passResult.routing.noAction
+      aggregateRouting.routed += passResult.routing.routed
+      aggregateRouting.skipped += passResult.routing.skipped
+      aggregateReplies.considered += passResult.replies.considered
+      aggregateReplies.failed += passResult.replies.failed
+      aggregateReplies.replied += passResult.replies.replied
+      aggregateReplies.skipped += passResult.replies.skipped
 
       if (input.once) {
         break
       }
 
-      const stateProgressed = didAssistantAutomationStateProgress(
-        stateBeforeScan,
-        state,
-      )
       const wakeRequested = wakeController.consumePendingWake()
-      if (stateProgressed || wakeRequested) {
+      if (passResult.progressed || wakeRequested) {
         continue
       }
 
-      await wakeController.waitForWakeOrTimeout(
+      await wakeController.waitForWakeOrDeadline(
         controller.signal,
-        normalizeScanInterval(input.scanIntervalMs),
+        passResult.nextWakeAt,
       )
     }
 
@@ -323,6 +247,156 @@ export async function runAssistantAutomation(
         operation: 'status snapshot refresh',
       })
     })
+  }
+}
+
+export async function runAssistantAutomationPass(
+  input: RunAssistantAutomationPassInput,
+): Promise<AssistantAutomationPassResult> {
+  const inboxServices = input.inboxServices ?? createIntegratedInboxServices()
+  const vaultServices = input.vaultServices ?? createIntegratedVaultServices({
+    foodAutoLogHooks: createAssistantFoodAutoLogHooks(),
+  })
+
+  maybeThrowInjectedAssistantFault({
+    component: 'automation',
+    fault: 'automation',
+    message: 'Injected assistant automation failure.',
+  })
+  await recordAssistantDiagnosticEvent({
+    vault: input.vault,
+    component: 'automation',
+    kind: 'automation.scan.started',
+    message: `Assistant automation scan ${input.scanNumber ?? 1} started.`,
+    counterDeltas: {
+      automationScans: 1,
+    },
+  })
+  await maybeRunAssistantRuntimeMaintenance({
+    vault: input.vault,
+  }).catch((error) => {
+    warnAssistantBestEffortFailure({
+      error,
+      operation: 'runtime maintenance',
+    })
+  })
+
+  const outboxResult = input.drainOutbox ?? true
+    ? await drainAssistantOutbox({
+        vault: input.vault,
+        limit: input.maxPerScan,
+      })
+    : {
+        attempted: 0,
+        failed: 0,
+        queued: 0,
+        sent: 0,
+      }
+  const cronResult = await processDueAssistantCronJobs({
+    deliveryDispatchMode: input.deliveryDispatchMode,
+    executionContext: input.executionContext,
+    vault: input.vault,
+    signal: input.signal,
+    limit: input.maxPerScan,
+  })
+  let state = await readAssistantAutomationState(input.vault)
+  const stateBeforeScan = snapshotAssistantAutomationLoopState(state)
+
+  const startupRecovery = input.runStartupRecovery
+    ? await recoverAssistantAutoRepliesOnStartup({
+        allowSelfAuthored: input.allowSelfAuthored ?? false,
+        deliveryDispatchMode: input.deliveryDispatchMode,
+        enabledChannels: state.autoReplyChannels,
+        executionContext: input.executionContext,
+        inboxServices,
+        maxPerScan: input.maxPerScan,
+        onEvent: input.onEvent,
+        requestId: input.requestId,
+        scanCursor: state.autoReplyScanCursor,
+        signal: input.signal,
+        sessionMaxAgeMs: input.sessionMaxAgeMs ?? null,
+        vault: input.vault,
+      })
+    : createEmptyAutoReplyScanResult()
+
+  const scanResult = await scanAssistantAutomationOnce({
+    allowSelfAuthored: input.allowSelfAuthored ?? false,
+    deliveryDispatchMode: input.deliveryDispatchMode,
+    executionContext: input.executionContext,
+    inboxServices,
+    maxPerScan: input.maxPerScan,
+    modelSpec: input.modelSpec,
+    onEvent: input.onEvent,
+    requestId: input.requestId,
+    signal: input.signal,
+    sessionMaxAgeMs: input.sessionMaxAgeMs ?? null,
+    state,
+    vault: input.vault,
+    vaultServices,
+    async onStateProgress(next) {
+      state = await saveAssistantAutomationState(input.vault, {
+        ...state,
+        inboxScanCursor: next.inboxScanCursor,
+        autoReplyScanCursor: next.autoReplyScanCursor,
+        autoReplyBacklogChannels: [...next.autoReplyBacklogChannels],
+        autoReplyPrimed: next.autoReplyPrimed,
+        updatedAt: new Date().toISOString(),
+      })
+    },
+  })
+
+  await refreshAssistantStatusSnapshot(input.vault).catch((error) => {
+    warnAssistantBestEffortFailure({
+      error,
+      operation: 'status snapshot refresh',
+    })
+  })
+
+  const stateProgressed = didAssistantAutomationStateProgress(
+    stateBeforeScan,
+    state,
+  )
+  const cronStatus = await getAssistantCronStatus(input.vault)
+  const outboxNextAttemptAt = input.drainOutbox ?? true
+    ? (await buildAssistantOutboxSummary(input.vault)).nextAttemptAt
+    : null
+  const replies = mergeAssistantAutoReplyScanResults(
+    startupRecovery,
+    scanResult.replies,
+  )
+
+  return {
+    cronProcessed: cronResult.processed,
+    nextWakeAt: earliestAssistantAutomationWakeAt(
+      replies.nextWakeAt,
+      scanResult.routing.nextWakeAt,
+      cronStatus.nextRunAt,
+      outboxNextAttemptAt,
+    ),
+    outboxAttempted: outboxResult.attempted,
+    progressed:
+      stateProgressed ||
+      outboxResult.attempted > 0 ||
+      cronResult.processed > 0 ||
+      startupRecovery.replied > 0,
+    replies,
+    routing: scanResult.routing,
+  }
+}
+
+function mergeAssistantAutoReplyScanResults(
+  left: AssistantAutoReplyScanResult,
+  right: AssistantAutoReplyScanResult,
+): AssistantAutoReplyScanResult {
+  return {
+    considered: left.considered + right.considered,
+    failed: left.failed + right.failed,
+    nextWakeAt: earliestAssistantAutomationWakeAt(
+      left.nextWakeAt,
+      right.nextWakeAt,
+    ),
+    replied: left.replied + right.replied,
+    skipped: left.skipped + right.skipped,
   }
 }
 

@@ -160,19 +160,13 @@ export function projectRunnerStateRecord(input: {
 }
 
 export function resolveRunnerNextWakeAt(input: {
-  runtimeBootstrapped: boolean;
-  defaultAlarmDelayMs: number;
   nextPendingAvailableAt: string | null;
   preferredWakeAt?: string | null;
 }): string | null {
-  const scheduledWakeAt = earliestIsoTimestamp(
+  return earliestIsoTimestamp(
     input.nextPendingAvailableAt,
     normalizePreferredWakeAt(input.preferredWakeAt ?? null),
   );
-  const fallbackWakeAt = input.runtimeBootstrapped
-    ? new Date(Date.now() + input.defaultAlarmDelayMs).toISOString()
-    : null;
-  return scheduledWakeAt ?? fallbackWakeAt;
 }
 
 function isInvalidRequestFamilyErrorCode(errorCode: string): boolean {

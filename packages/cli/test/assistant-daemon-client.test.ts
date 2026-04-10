@@ -924,6 +924,50 @@ test('assistant daemon client preserves typed error codes from the control plane
   }
 })
 
+test('assistant daemon client surfaces continuous automation daemon requirements cleanly', async () => {
+  const { env, release } = registerAssistantdFetchHandler(async (input, init) => {
+    const url = new URL(typeof input === 'string' ? input : input.toString())
+    assert.equal(url.pathname, '/automation/run-once')
+    assert.equal(init?.method, 'POST')
+
+    const body = JSON.parse(String(init?.body)) as {
+      once?: boolean
+      startDaemon?: boolean
+    }
+    assert.equal(body.once, false)
+    assert.equal(body.startDaemon, false)
+
+    return new Response(
+      JSON.stringify({
+        error: 'Assistant daemon request failed.',
+      }),
+      { status: 500 },
+    )
+  })
+
+  try {
+    await assert.rejects(
+      () =>
+        maybeRunAssistantAutomationViaDaemon(
+          {
+            once: false,
+            startDaemon: false,
+            vault: '/tmp/vault',
+          },
+          env,
+        ),
+      (error) => {
+        assert.equal(error instanceof Error, true)
+        assert.equal((error as Error).message, 'Assistant daemon request failed.')
+        assert.equal((error as { status?: number }).status, 500)
+        return true
+      },
+    )
+  } finally {
+    release()
+  }
+})
+
 test('assistant daemon client rejects legacy daemon session payloads', async () => {
   const { env, release } = registerAssistantdFetchHandler(async () =>
     new Response(

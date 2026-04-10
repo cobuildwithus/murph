@@ -533,13 +533,6 @@ const assistantRunOptionsSchema = withBaseOptions({
     .describe(
       'Optional flat JSON object of extra HTTP headers with string values for the routing endpoint.',
     ),
-  scanIntervalMs: z
-    .number()
-    .int()
-    .positive()
-    .max(60000)
-    .default(5000)
-    .describe('Polling interval between inbox scans when running continuously.'),
   maxPerScan: z
     .number()
     .int()
@@ -569,7 +562,7 @@ const assistantRunOptionsSchema = withBaseOptions({
   skipDaemon: z
     .boolean()
     .optional()
-    .describe('Do not start the inbox foreground daemon; only run the assistant scan loop.'),
+    .describe('Do not start the inbox foreground daemon; only run one assistant automation pass.'),
 })
 
 function createAssistantRunCommandDefinition(
@@ -636,7 +629,6 @@ function createAssistantRunCommandDefinition(
               headers: parseHeadersJsonOption(context.options.headersJson),
             }
           : undefined,
-        scanIntervalMs: context.options.scanIntervalMs,
         maxPerScan: context.options.maxPerScan,
         allowSelfAuthored: context.options.allowSelfAuthored,
         sessionMaxAgeMs:

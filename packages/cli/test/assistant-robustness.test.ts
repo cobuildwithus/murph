@@ -1162,9 +1162,18 @@ test('runAssistantAutomation exposes active run-lock status and rejects concurre
   const abortController = new AbortController()
   const firstRun = runAssistantAutomation({
     vault: vaultRoot,
-    inboxServices: {} as never,
-    startDaemon: false,
-    scanIntervalMs: 1_000,
+    inboxServices: {
+      list: async () => ({
+        items: [],
+      }),
+      run: async (_input: unknown, options?: { signal?: AbortSignal }) =>
+        await new Promise<void>((resolve) => {
+          options?.signal?.addEventListener('abort', () => resolve(), {
+            once: true,
+          })
+        }),
+    } as never,
+    startDaemon: true,
     signal: abortController.signal,
   })
 

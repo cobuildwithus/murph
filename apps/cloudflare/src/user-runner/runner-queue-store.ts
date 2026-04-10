@@ -577,7 +577,6 @@ export class RunnerQueueStore {
   }
 
   async syncNextWake(input: {
-    defaultAlarmDelayMs: number;
     preferredWakeAt?: string | null;
   }): Promise<RunnerStateRecord> {
     await this.ready;
@@ -586,8 +585,6 @@ export class RunnerQueueStore {
     const meta = this.requireMetaRowSync();
     const nextPendingAvailableAt = this.readNextPendingAvailableAtSync();
     meta.next_wake_at = resolveRunnerNextWakeAt({
-      runtimeBootstrapped: meta.runtime_bootstrapped === 1,
-      defaultAlarmDelayMs: input.defaultAlarmDelayMs,
       nextPendingAvailableAt,
       preferredWakeAt: input.preferredWakeAt ?? null,
     });

@@ -531,13 +531,6 @@
                           "type": "string",
                           "minLength": 1
                         },
-                        "scanIntervalMs": {
-                          "default": 5000,
-                          "description": "Polling interval between inbox scans when running continuously.",
-                          "type": "integer",
-                          "exclusiveMinimum": 0,
-                          "maximum": 60000
-                        },
                         "maxPerScan": {
                           "default": 50,
                           "description": "Maximum inbox captures to inspect during each assistant scan.",
@@ -560,7 +553,7 @@
                           "type": "boolean"
                         },
                         "skipDaemon": {
-                          "description": "Do not start the inbox foreground daemon; only run the assistant scan loop.",
+                          "description": "Do not start the inbox foreground daemon; only run one assistant automation pass.",
                           "type": "boolean"
                         }
                       }
@@ -986,13 +979,6 @@
                   "type": "string",
                   "minLength": 1
                 },
-                "scanIntervalMs": {
-                  "default": 5000,
-                  "description": "Polling interval between inbox scans when running continuously.",
-                  "type": "integer",
-                  "exclusiveMinimum": 0,
-                  "maximum": 60000
-                },
                 "maxPerScan": {
                   "default": 50,
                   "description": "Maximum inbox captures to inspect during each assistant scan.",
@@ -1015,7 +1001,7 @@
                   "type": "boolean"
                 },
                 "skipDaemon": {
-                  "description": "Do not start the inbox foreground daemon; only run the assistant scan loop.",
+                  "description": "Do not start the inbox foreground daemon; only run one assistant automation pass.",
                   "type": "boolean"
                 }
               }

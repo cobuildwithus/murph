@@ -9,7 +9,7 @@ declare module 'incur' {
       'assistant chat': { args: { prompt?: string }; options: { vault: string; requestId?: string; session?: string; alias?: string; channel?: string; identity?: string; participant?: string; sourceThread?: string; provider?: "codex-cli" | "openai-compatible"; codexCommand?: string; model?: string; baseUrl?: string; apiKeyEnv?: string; providerName?: string; headersJson?: string; sandbox?: "read-only" | "workspace-write" | "danger-full-access"; approvalPolicy?: "untrusted" | "on-request" | "never"; profile?: string; oss?: boolean } }
       'assistant deliver': { args: { message: string }; options: { vault: string; requestId?: string; session?: string; alias?: string; channel?: string; identity?: string; participant?: string; sourceThread?: string; deliveryTarget?: string } }
       'assistant doctor': { args: {}; options: { vault: string; requestId?: string; repair: boolean } }
-      'assistant run': { args: {}; options: { vault: string; requestId?: string; model?: string; baseUrl?: string; apiKey?: string; apiKeyEnv?: string; providerName?: string; headersJson?: string; scanIntervalMs: number; maxPerScan: number; allowSelfAuthored?: boolean; sessionRolloverHours?: number; once?: boolean; skipDaemon?: boolean } }
+      'assistant run': { args: {}; options: { vault: string; requestId?: string; model?: string; baseUrl?: string; apiKey?: string; apiKeyEnv?: string; providerName?: string; headersJson?: string; maxPerScan: number; allowSelfAuthored?: boolean; sessionRolloverHours?: number; once?: boolean; skipDaemon?: boolean } }
       'assistant self-target clear': { args: { channel?: string }; options: { requestId?: string } }
       'assistant self-target list': { args: {}; options: { requestId?: string } }
       'assistant self-target set': { args: { channel: string }; options: { requestId?: string; identity?: string; participant?: string; sourceThread?: string; deliveryTarget?: string } }
@@ -170,7 +170,7 @@ declare module 'incur' {
       'recipe show': { args: { id: string }; options: { vault: string; requestId?: string } }
       'recipe upsert': { args: {}; options: { vault: string; requestId?: string; input: string } }
       'research': { args: { prompt: string }; options: { vault: string; requestId?: string; title?: string; chat?: string; browserPath?: string; timeout?: string; waitTimeout?: string } }
-      'run': { args: {}; options: { vault: string; requestId?: string; model?: string; baseUrl?: string; apiKey?: string; apiKeyEnv?: string; providerName?: string; headersJson?: string; scanIntervalMs: number; maxPerScan: number; allowSelfAuthored?: boolean; sessionRolloverHours?: number; once?: boolean; skipDaemon?: boolean } }
+      'run': { args: {}; options: { vault: string; requestId?: string; model?: string; baseUrl?: string; apiKey?: string; apiKeyEnv?: string; providerName?: string; headersJson?: string; maxPerScan: number; allowSelfAuthored?: boolean; sessionRolloverHours?: number; once?: boolean; skipDaemon?: boolean } }
       'samples add': { args: {}; options: { vault: string; requestId?: string; input: string } }
       'samples batch list': { args: {}; options: { vault: string; requestId?: string; stream?: string; from?: string; to?: string; limit: number } }
       'samples batch show': { args: { id: string }; options: { vault: string; requestId?: string } }
