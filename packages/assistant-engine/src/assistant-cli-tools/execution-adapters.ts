@@ -489,13 +489,12 @@ async function createAssistantPayloadFile(
 }
 
 async function resolveAssistantCliLauncher(
-  env: NodeJS.ProcessEnv,
+  cliProcessEnv: NodeJS.ProcessEnv,
 ): Promise<AssistantCliLauncher> {
-  const preparedEnv = prepareAssistantDirectCliEnv(env)
   const localBuiltCliBinPath = resolveLocalBuiltWorkspaceCliBinPath()
   const vaultCliBinary = await resolveExecutableOnPath(
     'vault-cli',
-    preparedEnv,
+    cliProcessEnv,
   )
   if (vaultCliBinary) {
     return {
@@ -518,21 +517,11 @@ async function resolveAssistantCliLauncher(
 }
 
 function resolveLocalBuiltWorkspaceCliBinPath(): string | null {
-  const moduleDir = resolveExecutionAdaptersModuleDir()
-  if (!moduleDir) {
-    return null
-  }
-
-  return path.resolve(moduleDir, '../../../cli/dist/bin.js')
-}
-
-function resolveExecutionAdaptersModuleDir(): string | null {
-  if (typeof import.meta.url !== 'string' || import.meta.url.length === 0) {
-    return null
-  }
-
   try {
-    return path.dirname(fileURLToPath(import.meta.url))
+    return path.resolve(
+      path.dirname(fileURLToPath(import.meta.url)),
+      '../../../cli/dist/bin.js',
+    )
   } catch {
     return null
   }
