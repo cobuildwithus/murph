@@ -1,11 +1,11 @@
 # Product Marketing Context
 
-*Last updated: 2026-04-08*
+*Last updated: 2026-04-10*
 
 ## Product Overview
 **One-liner:** A place to try things with your body and see what actually works — backed by research, measured by your wearable.
 
-**What it does:** Connect your wearable, browse a library of health experiments sourced from experts using AI, start one, follow the protocol, and see AI-analyzed results showing what changed. Each experiment is a bounded hypothesis — something to try, not a new way to live. You interact with Murph through Telegram, Linq, or email — no app to download.
+**What it does:** Connect your wearable, browse a library of health experiments sourced from experts using AI, start one, follow the protocol, and see AI-analyzed results showing what changed. Each experiment is a bounded hypothesis — something to try, not a new way to live. You interact with Murph through Telegram, iMessage, or email — no app to download.
 
 **Product category:** Health experimentation / personal health assistant
 
@@ -94,7 +94,7 @@ What we refuse to become:
 - One experiment at a time = you know what caused the change
 - Match % based on your profile data — personalized recommendations
 - Every experiment has a stop condition — we don't escalate, we conclude
-- Chat-first interface — talk to Murph through Telegram, Linq, or email. Log a meal, ask about your experiment, get a reminder. No app to open.
+- Chat-first interface — talk to Murph through Telegram, iMessage, or email. Log a meal, ask about your experiment, get a reminder. No app to open.
 - Your data stays yours — encrypted infrastructure, minimal data collection, no data sales. Health apps monetize your data; Murph doesn't.
 - Experiment-aware assistant — Murph knows what you're running and reaches out at the right moments. Reminds you to log what you ate, asks if you did your sauna session, nudges you when a check-in matters for the experiment. The assistant lives inside the experiment, not in a separate tab.
 
@@ -111,7 +111,7 @@ What we refuse to become:
 | "I can just Google protocols and track them myself" | You could. But you won't set up a proper baseline, control for variables, or compare your data to the research. We automate that. |
 | "One experiment at a time is too limiting" | That's the point. Running multiple means you can't attribute changes to anything specific. Clean experiments = trustworthy results. |
 | "Won't this just make me more obsessed with my data?" | The opposite. Experiments have a defined end. You try something, learn from it, and move on. No infinite dashboards, no daily score anxiety. |
-| "I don't want another app on my phone" | There isn't one. Murph works through Telegram, Linq, or email — wherever you already are. |
+| "I don't want another app on my phone" | There isn't one. Murph works through Telegram, iMessage, or email — wherever you already are. |
 | "Is my health data safe?" | Encrypted infrastructure, minimal data collection, no data sales. Your data stays yours. |
 
 **Anti-persona:** People who want a passive dashboard. People who don't own a wearable. People looking for medical diagnosis. People who want to be told what to do every day forever.
