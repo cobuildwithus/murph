@@ -1,6 +1,6 @@
 {
   "name": "@murphai/openclaw-plugin",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "private": false,
   "type": "module",
   "license": "Apache-2.0",

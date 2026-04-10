@@ -2,6 +2,47 @@
 
 All notable changes to `@murphai/murph` will be documented in this file.
 
+## [0.2.5] - 2026-04-10
+
+### Added
+- simplify offline auto-reply catch-up
+- add Mapbox route estimate
+- persist wearable onboarding preferences
+- cut over to event-driven scheduling
+- minimize onboarding error retention
+
+### Fixed
+- retry onboarding after session mismatch
+- stabilize coverage and workspace exports
+- fix hosted scheduler retry wakes
+- restore wizard channel selections after runtime wipes
+- preserve timed-step failures
+- propagate CLI coverage failures
+- restore node shared helper exports
+
+### Changed
+- fix clean workspace release builds
+- stabilize workers alarm runtime coverage
+- finish cleanup for green release checks
+- scrub imessage-era fixture paths
+- finish iMessage decommission
+- share wearable provider normalization
+- remove assistant imessage remnants
+- clean inbox imessage greenfield coverage
+- clean inbox iMessage legacy coverage
+- remove stale imessage coverage
+- align assistant automation scheduling coverage
+- cover explicit-empty wearable preference idempotency
+- honor explicit empty channel state
+- Update system-prompt.ts
+- bump review-gpt to 0.5.53
+- Update README.md
+- optimize README hero image
+- simplify fail-closed release guard
+- add hero image
+- default hosted workflow to production
+- align assistant receipt preview assertion
+
 ## [0.2.4] - 2026-04-10
 
 ### Fixed
