@@ -119,8 +119,7 @@ function buildHostedExecutionJobRuntime(
   return {
     ...buildHostedRunnerJobRuntimeConfig({
       forwardedEnv: resolvedForwardedEnv,
-      resolvedConfig: requestedRuntime.resolvedConfig
-        ?? buildHostedRunnerResolvedConfig(resolvedForwardedEnv),
+      resolvedConfig: buildHostedRunnerResolvedConfig(resolvedForwardedEnv),
       runtimeConfigSource,
       userEnv: normalizeHostedUserEnv(requestedRuntime.userEnv ?? {}, runtimeConfigSource),
       userEnvSource: runtimeConfigSource,

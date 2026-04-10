@@ -184,11 +184,49 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
       forwardedEnv: {
         OPENAI_API_KEY: "sk-worker",
       },
+      resolvedConfig: {
+        channelCapabilities: {
+          emailSendReady: false,
+          telegramBotConfigured: false,
+        },
+        deviceSync: null,
+      },
       userEnv: {
         CUSTOM_API_KEY: "custom-user",
         OPENAI_API_KEY: "sk-user",
         VENICE_API_KEY: "venice-user",
       },
+    });
+  });
+
+  it("preserves an explicit resolved config override when the caller already computed semantics", () => {
+    expect(buildHostedRunnerJobRuntimeConfig({
+      forwardedEnv: {
+        TELEGRAM_BOT_TOKEN: "telegram-token",
+      },
+      runtimeConfigSource: {},
+      userEnvSource: {},
+      resolvedConfig: {
+        channelCapabilities: {
+          emailSendReady: false,
+          telegramBotConfigured: false,
+        },
+        deviceSync: null,
+      },
+      userEnv: {},
+    })).toEqual({
+      commitTimeoutMs: 30_000,
+      forwardedEnv: {
+        TELEGRAM_BOT_TOKEN: "telegram-token",
+      },
+      resolvedConfig: {
+        channelCapabilities: {
+          emailSendReady: false,
+          telegramBotConfigured: false,
+        },
+        deviceSync: null,
+      },
+      userEnv: {},
     });
   });
 });

@@ -547,9 +547,6 @@ importers:
       '@murphai/inboxd':
         specifier: workspace:*
         version: link:../inboxd
-      '@murphai/inboxd-imessage':
-        specifier: workspace:*
-        version: link:../inboxd-imessage
       '@murphai/operator-config':
         specifier: workspace:*
         version: link:../operator-config

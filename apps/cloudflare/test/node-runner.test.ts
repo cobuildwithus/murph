@@ -2651,6 +2651,13 @@ describe("runHostedExecutionJob", () => {
           HOSTED_EMAIL_INGRESS_READY: "false",
           HOSTED_EMAIL_SEND_READY: "false",
         },
+        resolvedConfig: {
+          channelCapabilities: {
+            emailSendReady: false,
+            telegramBotConfigured: false,
+          },
+          deviceSync: null,
+        },
       });
 
       expect(runtime.forwardedEnv).toMatchObject({
