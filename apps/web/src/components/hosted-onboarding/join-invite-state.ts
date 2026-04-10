@@ -24,6 +24,27 @@ export function resolveInviteStatusAfterPrivyCompletion(
   };
 }
 
+export function resolveJoinInviteStatusFromRefresh(input: {
+  nextStatus: HostedInviteStatusPayload;
+  status: HostedInviteStatusPayload;
+}): HostedInviteStatusPayload {
+  if (
+    input.status.stage === "verify"
+    || !input.status.session.authenticated
+    || !input.status.session.matchesInvite
+    || input.nextStatus.stage !== "verify"
+    || !input.nextStatus.session.authenticated
+    || !input.nextStatus.session.matchesInvite
+  ) {
+    return input.nextStatus;
+  }
+
+  return {
+    ...input.nextStatus,
+    stage: input.status.stage,
+  };
+}
+
 export function shouldAwaitHostedInviteSessionResolution(input: {
   hasCompletedInitialRefresh: boolean;
   status: HostedInviteStatusPayload;

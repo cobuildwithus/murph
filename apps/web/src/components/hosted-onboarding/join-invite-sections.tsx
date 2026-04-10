@@ -22,6 +22,7 @@ interface JoinInviteSharePreviewAlertProps {
 
 interface JoinInviteStageContentProps {
   awaitingInviteSessionResolution: boolean;
+  checkoutPending: boolean;
   inviteCode: string;
   pendingAction: "checkout" | "share" | null;
   shareImportState: JoinInviteShareImportState;
@@ -59,6 +60,7 @@ export function JoinInviteSharePreviewAlert({ sharePreview }: JoinInviteSharePre
 
 export function JoinInviteStageContent({
   awaitingInviteSessionResolution,
+  checkoutPending,
   inviteCode,
   pendingAction,
   shareImportState,
@@ -96,7 +98,7 @@ export function JoinInviteStageContent({
       {status.stage === "checkout" ? (
         <JoinInviteCheckoutButton
           billingReady={status.capabilities.billingReady}
-          pendingAction={pendingAction}
+          checkoutPending={checkoutPending}
           onCheckout={onCheckout}
         />
       ) : null}
