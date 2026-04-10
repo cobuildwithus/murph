@@ -19,6 +19,32 @@ const assistantCliBlockedCommandPaths = new Set([
   'chat',
   'run',
 ])
+const assistantCliRootFlags = new Set([
+  '--help',
+  '-h',
+  '--llms',
+  '--llms-full',
+  '--mcp',
+  '--no-config',
+  '--schema',
+  '--token-count',
+  '--verbose',
+  '--version',
+])
+const assistantCliRootOptionsWithValues = new Set([
+  ...ROOT_OPTIONS_WITH_VALUES,
+  '--config',
+])
+const assistantCliRouteEstimateValueOptions = new Set([
+  '--country',
+  '--format',
+  '--language',
+  '--maxElevationSamples',
+  '--profile',
+  '--vault',
+  '--waypoint',
+  '--elevationSampleSpacingMeters',
+])
 
 export interface PreparedAssistantCliExecutionRequest {
   args: string[]
@@ -102,7 +128,65 @@ function normalizeAssistantCliRunArgs(args: readonly string[]): string[] {
 }
 
 function redactAssistantCliArgv(args: readonly string[]): string[] {
-  return args.map((token) => redactAssistantCliArg(token))
+  const redactedArgs = args.map((token) => redactAssistantCliArg(token))
+
+  if (readAssistantCliCommandPath(args) !== 'route estimate') {
+    return redactedArgs
+  }
+
+  let commandTokenCount = 0
+  let routePositionalCount = 0
+
+  for (let index = 0; index < args.length; index += 1) {
+    const token = args[index]
+    if (!token || token === '--') {
+      break
+    }
+
+    if (commandTokenCount < 2) {
+      if (token.startsWith('-')) {
+        const optionToken = token.split('=', 1)[0] ?? token
+        if (assistantCliRootOptionsWithValues.has(optionToken) && !token.includes('=')) {
+          index += 1
+        }
+        if (assistantCliRootFlags.has(optionToken) || assistantCliRootOptionsWithValues.has(optionToken)) {
+          continue
+        }
+        continue
+      }
+
+      commandTokenCount += 1
+      continue
+    }
+
+    if (token === '--waypoint' && index + 1 < args.length) {
+      redactedArgs[index + 1] = '<REDACTED_ROUTE_WAYPOINT>'
+      index += 1
+      continue
+    }
+
+    if (token.startsWith('--waypoint=')) {
+      redactedArgs[index] = '--waypoint=<REDACTED_ROUTE_WAYPOINT>'
+      continue
+    }
+
+    if (token.startsWith('-')) {
+      const optionToken = token.split('=', 1)[0] ?? token
+      if (assistantCliRouteEstimateValueOptions.has(optionToken) && !token.includes('=')) {
+        index += 1
+      }
+      continue
+    }
+
+    if (routePositionalCount === 0) {
+      redactedArgs[index] = '<REDACTED_ROUTE_ORIGIN>'
+    } else if (routePositionalCount === 1) {
+      redactedArgs[index] = '<REDACTED_ROUTE_DESTINATION>'
+    }
+    routePositionalCount += 1
+  }
+
+  return redactedArgs
 }
 
 function redactAssistantCliArg(token: string): string {
@@ -146,10 +230,23 @@ function readAssistantCliCommandPath(args: readonly string[]): string | null {
 
     if (token.startsWith('-')) {
       const rootOptionToken = token.split('=', 1)[0] ?? token
-      if (tokens.length === 0 && ROOT_OPTIONS_WITH_VALUES.has(rootOptionToken)) {
-        if (!token.includes('=')) {
+      if (tokens.length === 0) {
+        if (assistantCliRootOptionsWithValues.has(rootOptionToken) && !token.includes('=')) {
           index += 1
         }
+        if (
+          assistantCliRootFlags.has(rootOptionToken) ||
+          assistantCliRootOptionsWithValues.has(rootOptionToken)
+        ) {
+          continue
+        }
+      }
+
+      if (assistantCliRootOptionsWithValues.has(rootOptionToken) && !token.includes('=')) {
+        index += 1
+      }
+
+      if (assistantCliRootFlags.has(rootOptionToken)) {
         continue
       }
 

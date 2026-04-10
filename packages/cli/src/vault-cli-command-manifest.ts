@@ -39,7 +39,7 @@ import { registerRouteCommands } from './commands/route.js'
 import { registerKnowledgeCommands } from './commands/knowledge.js'
 import { registerModelCommands } from './commands/model.js'
 import { researchRunResultSchema } from './research-cli-contracts.js'
-import { mapboxRouteEstimateResultSchema } from '@murphai/assistant-engine'
+import { mapboxRouteEstimateResultSchema } from './mapbox-route.js'
 import {
   knowledgeIndexRebuildResultSchema,
   knowledgeLogTailResultSchema,
@@ -376,9 +376,9 @@ export const vaultCliCommandDescriptors = [
       {
         path: ['route', 'estimate'],
         description:
-          'Estimate route distance, duration, and optional approximate elevation between two points through Mapbox without persisting route data in Murph state.',
+          'Estimate route distance, duration, and optional approximate elevation between two points through temporary Mapbox lookups without persisting route data in Murph state.',
         hint:
-          'Set MAPBOX_ACCESS_TOKEN in the runtime environment before using this command. Route geometry is omitted by default, and elevation is approximate when enabled.',
+          'Set MAPBOX_ACCESS_TOKEN in the runtime environment before using this command. Route geometry is omitted by default, elevation is approximate when enabled, and text lookups stay temporary.',
         output: mapboxRouteEstimateResultSchema,
       },
     ],

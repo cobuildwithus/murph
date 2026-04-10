@@ -161,4 +161,64 @@ describe('assistant CLI policy wrappers', () => {
       ),
     ).toBe('x'.repeat(assistantCliMaxOutputChars))
   })
+
+  it('redacts route estimate origin, destination, and waypoint argv values', async () => {
+    const prepared = await prepareAssistantCliExecutionRequest({
+      args: [
+        'route',
+        'estimate',
+        '123 Example St, Melbourne VIC',
+        'Bogong Hut',
+        '--waypoint',
+        'Mountain Creek Trailhead',
+        '--waypoint=Falls Creek Village',
+        '--profile',
+        'walking',
+      ],
+      vault: '/tmp/active-vault',
+    })
+
+    expect(prepared.redactedArgv).toEqual([
+      'route',
+      'estimate',
+      '<REDACTED_ROUTE_ORIGIN>',
+      '<REDACTED_ROUTE_DESTINATION>',
+      '--waypoint',
+      '<REDACTED_ROUTE_WAYPOINT>',
+      '--waypoint=<REDACTED_ROUTE_WAYPOINT>',
+      '--profile',
+      'walking',
+      '--format',
+      'json',
+    ])
+  })
+
+  it('still redacts route argv when global flags precede the command path', async () => {
+    const prepared = await prepareAssistantCliExecutionRequest({
+      args: [
+        '--verbose',
+        '--format',
+        'json',
+        'route',
+        'estimate',
+        '123 Example St, Melbourne VIC',
+        'Bogong Hut',
+        '--waypoint',
+        'Mountain Creek Trailhead',
+      ],
+      vault: '/tmp/active-vault',
+    })
+
+    expect(prepared.redactedArgv).toEqual([
+      '--verbose',
+      '--format',
+      'json',
+      'route',
+      'estimate',
+      '<REDACTED_ROUTE_ORIGIN>',
+      '<REDACTED_ROUTE_DESTINATION>',
+      '--waypoint',
+      '<REDACTED_ROUTE_WAYPOINT>',
+    ])
+  })
 })

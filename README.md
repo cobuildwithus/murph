@@ -166,7 +166,7 @@ The root CLI is no longer just a vault editor. The built command surface include
 - `assistant` for local chat, status, outbox, cron, automation, and provider-backed runtime control
 - `inbox` for inbox runtime setup, review, and daemon operations
 - `device` for local wearable/device auth, status, and daemon control
-- env-gated route estimation through `vault-cli route estimate`, which uses Mapbox for distance, duration, and optional approximate elevation between two points without persisting the route payload in Murph state
+- env-gated route estimation through `vault-cli route estimate`, which uses temporary Mapbox geocoding and Search Box lookups for distance, duration, hiking POIs, and optional approximate elevation between two points without persisting the route payload in Murph state
 - root shortcuts such as `chat`, `run`, `status`, `doctor`, and `stop`
 - AI-assisted synthesis helpers such as `research`, `deepthink`, and `knowledge`
 

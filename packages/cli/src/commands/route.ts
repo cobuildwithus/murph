@@ -3,19 +3,19 @@ import {
   estimateMapboxRoute,
   mapboxRouteEstimateResultSchema,
   mapboxRouteProfileSchema,
-} from '@murphai/assistant-engine'
+} from '../mapbox-route.js'
 
 const isoCountryCodeSchema = z.string().regex(/^[A-Za-z]{2}$/u)
 
 export function registerRouteCommands(cli: Cli.Cli) {
   const route = Cli.create('route', {
     description:
-      'Estimate route distance, duration, and optional approximate elevation through Mapbox without persisting route data in Murph state.',
+      'Estimate route distance, duration, and optional approximate elevation through temporary Mapbox lookups without persisting route data in Murph state.',
   })
 
   route.command('estimate', {
     description:
-      'Estimate one route between two points. Accept plain-language addresses or places, trailheads, hut names, and lon,lat coordinate literals.',
+      'Estimate one route between two points. Accept addresses, place names, hiking POIs such as trailheads or huts, and lon,lat coordinate literals.',
     args: z.object({
       origin: z
         .string()
@@ -102,7 +102,7 @@ export function registerRouteCommands(cli: Cli.Cli) {
       },
     ],
     hint:
-      'Set MAPBOX_ACCESS_TOKEN in the runtime environment before using this command. Route geometry is omitted by default, and elevation is approximate when enabled.',
+      'Set MAPBOX_ACCESS_TOKEN in the runtime environment before using this command. Route geometry is omitted by default, elevation is approximate when enabled, and text lookups stay temporary.',
     output: mapboxRouteEstimateResultSchema,
     async run({ args, options }) {
       return await estimateMapboxRoute({
