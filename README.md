@@ -1,6 +1,6 @@
-![Murph hero](docs/assets/readme-hero.png)
+<img src="docs/assets/readme-hero.jpg" alt="Murph hero" width="1200" height="685">
 
-# Murph 🫀
+# Murph
 
 Murph is your personal health assistant.
 
