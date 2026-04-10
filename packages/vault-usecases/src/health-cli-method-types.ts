@@ -1,6 +1,9 @@
 import type { JsonObject } from "@murphai/contracts"
 
-import type { ReadEntity } from "@murphai/operator-config/vault-cli-contracts"
+import type {
+  ListEntity,
+  ReadEntity,
+} from "@murphai/operator-config/vault-cli-contracts"
 
 export type { JsonObject }
 
@@ -65,7 +68,7 @@ export interface HealthListFilters {
 export interface HealthListEnvelope {
   vault: string
   filters: HealthListFilters
-  items: ReadEntity[]
+  items: ListEntity[]
   count: number
   nextCursor: string | null
 }
@@ -191,7 +194,10 @@ export interface HealthQueryRuntimeListMethods {
     vaultRoot: string,
     options?: AssessmentListRuntimeOptions,
   ): Promise<JsonObject[]>
-  listGoals(vaultRoot: string, options?: RegistryEntityListRuntimeOptions): Promise<JsonObject[]>
+  listGoals(
+    vaultRoot: string,
+    options?: RegistryEntityListRuntimeOptions,
+  ): Promise<JsonObject[]>
   listConditions(
     vaultRoot: string,
     options?: RegistryEntityListRuntimeOptions,

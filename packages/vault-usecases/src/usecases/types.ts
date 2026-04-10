@@ -16,8 +16,8 @@ import type {
   JournalEnsureResult,
   ListFilters,
   ListResult,
+  ListEntity,
   MealAddResult,
-  ReadEntity,
   SamplesImportCsvResult,
   ShowResult,
   VaultInitResult,
@@ -93,7 +93,7 @@ export interface ProviderListResult {
     status: string | null
     limit: number
   }
-  items: ReadEntity[]
+  items: ListEntity[]
   count: number
   nextCursor: string | null
 }
@@ -118,7 +118,7 @@ export interface RecipeListResult {
     status: string | null
     limit: number
   }
-  items: ReadEntity[]
+  items: ListEntity[]
   count: number
   nextCursor: string | null
 }
@@ -155,7 +155,7 @@ export interface FoodListResult {
     status: string | null
     limit: number
   }
-  items: ReadEntity[]
+  items: ListEntity[]
   count: number
   nextCursor: string | null
 }
@@ -194,7 +194,7 @@ export interface EventListResult {
     experiment: string | null
     limit: number
   }
-  items: ReadEntity[]
+  items: ListEntity[]
   count: number
   nextCursor: string | null
 }
@@ -230,7 +230,7 @@ export interface ExperimentListResult {
     status: string | null
     limit: number
   }
-  items: ReadEntity[]
+  items: ListEntity[]
   count: number
   nextCursor: string | null
 }
@@ -263,7 +263,7 @@ export interface JournalListResult {
     to?: string
     limit: number
   }
-  items: ReadEntity[]
+  items: ListEntity[]
   count: number
   nextCursor: string | null
 }
