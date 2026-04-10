@@ -269,7 +269,11 @@ async function invokeHandler(input: {
     return await harness.invoke({
       method: input.method,
       url: input.url,
-      headers: input.headers,
+      headers: withDefaultHostHeader({
+        headers: input.headers,
+        config: input.config,
+        surface: input.surface,
+      }),
       remoteAddress: input.remoteAddress,
       body: input.body,
       bodyChunks: input.bodyChunks,
@@ -277,6 +281,25 @@ async function invokeHandler(input: {
   } finally {
     await harness.close();
   }
+}
+
+function withDefaultHostHeader(input: {
+  headers?: Record<string, string | string[]>;
+  config?: Parameters<typeof startDeviceSyncHttpServer>[0]["config"];
+  surface: "control" | "public" | "combined";
+}): Record<string, string | string[]> {
+  const headers = { ...(input.headers ?? {}) };
+  const hasHostHeader = Object.keys(headers).some((header) => header.toLowerCase() === "host");
+  if (hasHostHeader) {
+    return headers;
+  }
+
+  const host =
+    input.surface === "public"
+      ? `${input.config?.publicHost ?? "127.0.0.1"}:${input.config?.publicPort ?? 9797}`
+      : `${input.config?.host ?? "127.0.0.1"}:${input.config?.port ?? 0}`;
+  headers.host = host;
+  return headers;
 }
 
 test("assertDeviceSyncControlRequest rejects non-loopback callers", () => {
@@ -299,10 +322,87 @@ test("assertDeviceSyncControlRequest rejects non-loopback callers", () => {
 test("assertDeviceSyncControlRequest accepts loopback callers with a single-value authorization header array", () => {
   assert.doesNotThrow(() =>
     assertDeviceSyncControlRequest({
-      headers: withIncomingHeader("authorization", [CONTROL_AUTHORIZATION]),
+      headers: {
+        ...withIncomingHeader("authorization", [CONTROL_AUTHORIZATION]),
+        host: "127.0.0.1:8788",
+      },
       remoteAddress: " ::Ffff:127.0.0.1 ",
       controlToken: CONTROL_TOKEN,
     }),
+  );
+});
+
+test("assertDeviceSyncControlRequest rejects forwarded proxy headers", () => {
+  assert.throws(
+    () =>
+      assertDeviceSyncControlRequest({
+        headers: {
+          authorization: CONTROL_AUTHORIZATION,
+          host: "127.0.0.1:8788",
+          "x-forwarded-for": "203.0.113.7",
+        },
+        remoteAddress: "127.0.0.1",
+        controlToken: CONTROL_TOKEN,
+      }),
+    (error: unknown) =>
+      error instanceof DeviceSyncError
+      && error.code === "CONTROL_PLANE_PROXY_HEADERS_REJECTED"
+      && error.httpStatus === 403,
+  );
+});
+
+test("assertDeviceSyncControlRequest rejects repeated forwarded proxy headers", () => {
+  assert.throws(
+    () =>
+      assertDeviceSyncControlRequest({
+        headers: {
+          authorization: CONTROL_AUTHORIZATION,
+          host: "127.0.0.1:8788",
+          "x-forwarded-for": ["203.0.113.7", "203.0.113.8"],
+        },
+        remoteAddress: "127.0.0.1",
+        controlToken: CONTROL_TOKEN,
+      }),
+    (error: unknown) =>
+      error instanceof DeviceSyncError
+      && error.code === "CONTROL_PLANE_PROXY_HEADERS_REJECTED"
+      && error.httpStatus === 403,
+  );
+});
+
+test("assertDeviceSyncControlRequest rejects non-loopback host headers", () => {
+  assert.throws(
+    () =>
+      assertDeviceSyncControlRequest({
+        headers: {
+          authorization: CONTROL_AUTHORIZATION,
+          host: "murph.example",
+        },
+        remoteAddress: "127.0.0.1",
+        controlToken: CONTROL_TOKEN,
+      }),
+    (error: unknown) =>
+      error instanceof DeviceSyncError
+      && error.code === "CONTROL_PLANE_LOOPBACK_HOST_REQUIRED"
+      && error.httpStatus === 403,
+  );
+});
+
+test("assertDeviceSyncControlRequest rejects malformed loopback-like host headers", () => {
+  assert.throws(
+    () =>
+      assertDeviceSyncControlRequest({
+        headers: {
+          authorization: CONTROL_AUTHORIZATION,
+          host: "foo@127.0.0.1:8788",
+        },
+        remoteAddress: "127.0.0.1",
+        controlToken: CONTROL_TOKEN,
+      }),
+    (error: unknown) =>
+      error instanceof DeviceSyncError
+      && error.code === "CONTROL_PLANE_LOOPBACK_HOST_REQUIRED"
+      && error.httpStatus === 403,
   );
 });
 
@@ -968,6 +1068,7 @@ test("device sync http server wires control and public listeners to the correct 
       url: "/device-sync/accounts",
       headers: {
         authorization: CONTROL_AUTHORIZATION,
+        host: "127.0.0.1:8788",
       },
     }),
     controlResponse.response,

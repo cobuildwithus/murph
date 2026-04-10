@@ -303,7 +303,6 @@ function pushDeletionObservation(
   pushSharedDeletionObservation(events, rawArtifacts, {
     provider: "whoop",
     providerDisplayName: "WHOOP",
-    deletion,
     resourceType,
     resourceId,
     occurredAt,

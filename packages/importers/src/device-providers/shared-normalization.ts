@@ -68,7 +68,6 @@ export interface PlainObject {
 export interface DeletionObservationOptions {
   provider: string;
   providerDisplayName: string;
-  deletion: unknown;
   resourceType: string;
   resourceId: string;
   occurredAt: string;
@@ -225,6 +224,18 @@ export function pushRawArtifact(
   rawArtifacts.push(artifact);
 }
 
+function buildDeletionArtifactContent(
+  options: DeletionObservationOptions,
+): Record<string, unknown> {
+  return stripUndefined({
+    provider: options.provider,
+    resourceType: options.resourceType,
+    resourceId: options.resourceId,
+    occurredAt: options.occurredAt,
+    sourceEventType: options.sourceEventType,
+  });
+}
+
 export function pushObservationEvent(
   events: DeviceEventPayload[],
   options: ObservationEventOptions,
@@ -364,7 +375,7 @@ export function pushDeletionObservation(
     createRawArtifact(
       deletionRole,
       `deletion-${options.resourceType}-${options.resourceId}.json`,
-      options.deletion,
+      buildDeletionArtifactContent(options),
     ),
   );
 

@@ -162,7 +162,6 @@ function pushDeletionObservation(
   pushSharedDeletionObservation(events, rawArtifacts, {
     provider: "garmin",
     providerDisplayName: "Garmin",
-    deletion,
     resourceType,
     resourceId,
     occurredAt,

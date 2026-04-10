@@ -921,13 +921,6 @@ test("Oura provider accepts documented numeric-second timestamps, uses event_tim
           dataType: "session",
           objectId: "session-42",
           occurredAt: "2026-03-16T09:58:00.000Z",
-          webhookPayload: {
-            event_type: "delete",
-            data_type: "session",
-            object_id: "session-42",
-            user_id: "oura-user-1",
-            event_time: "2026-03-16T09:58:00.000Z",
-          },
         },
       },
     ],
@@ -958,13 +951,6 @@ test("Oura provider accepts documented numeric-second timestamps, uses event_tim
           resource_id: "session-42",
           occurred_at: "2026-03-16T09:58:00.000Z",
           source_event_type: "session.deleted",
-          payload: {
-            event_type: "delete",
-            data_type: "session",
-            object_id: "session-42",
-            user_id: "oura-user-1",
-            event_time: "2026-03-16T09:58:00.000Z",
-          },
         },
       ],
     },
@@ -1005,14 +991,6 @@ test("Oura provider imports hosted-narrowed delete wake payloads as deletion sna
     objectId: "session-42",
     occurredAt: "2026-03-27T08:03:00.000Z",
     sourceEventType: "session.deleted",
-    webhookPayload: {
-      data_type: "session",
-      event_time: "2026-03-27T08:03:00.000Z",
-      event_type: "delete",
-      object_id: "session-42",
-      trace_id: "trace_delete_123",
-      user_id: "oura-user-1",
-    },
   }));
 
   assert.deepEqual(importedSnapshots, [
@@ -1025,14 +1003,6 @@ test("Oura provider imports hosted-narrowed delete wake payloads as deletion sna
           resource_id: "session-42",
           occurred_at: "2026-03-27T08:03:00.000Z",
           source_event_type: "session.deleted",
-          payload: {
-            data_type: "session",
-            event_time: "2026-03-27T08:03:00.000Z",
-            event_type: "delete",
-            object_id: "session-42",
-            trace_id: "trace_delete_123",
-            user_id: "oura-user-1",
-          },
         },
       ],
     },

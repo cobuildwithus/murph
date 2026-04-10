@@ -15,6 +15,13 @@ import type { DeviceSyncService } from "./service.ts";
 
 const DEFAULT_BODY_LIMIT_BYTES = 1_048_576;
 const CONTROL_PLANE_WWW_AUTHENTICATE = 'Bearer realm="device-syncd-control-plane"';
+const CONTROL_PLANE_FORWARDED_HEADER_NAMES = [
+  "forwarded",
+  "x-forwarded-for",
+  "x-forwarded-host",
+  "x-forwarded-proto",
+  "x-real-ip",
+] as const;
 
 type DeviceSyncHttpRouteKind = "control" | "public";
 type DeviceSyncHttpListenerSurface = "combined" | "control" | "public";
@@ -78,6 +85,24 @@ export function assertDeviceSyncControlRequest(input: {
     throw deviceSyncError({
       code: "CONTROL_PLANE_LOOPBACK_REQUIRED",
       message: "Device sync control routes only accept loopback requests.",
+      retryable: false,
+      httpStatus: 403,
+    });
+  }
+
+  if (hasForwardedControlHeaders(input.headers)) {
+    throw deviceSyncError({
+      code: "CONTROL_PLANE_PROXY_HEADERS_REJECTED",
+      message: "Device sync control routes reject forwarded proxy headers.",
+      retryable: false,
+      httpStatus: 403,
+    });
+  }
+
+  if (!hasLoopbackHostHeader(input.headers)) {
+    throw deviceSyncError({
+      code: "CONTROL_PLANE_LOOPBACK_HOST_REQUIRED",
+      message: "Device sync control routes require a loopback Host header.",
       retryable: false,
       httpStatus: 403,
     });
@@ -814,6 +839,37 @@ function readStringField(record: Record<string, unknown>, key: string): string |
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
+function hasForwardedControlHeaders(headers: IncomingHttpHeaders): boolean {
+  return CONTROL_PLANE_FORWARDED_HEADER_NAMES.some(
+    (headerName) => hasPresentHeaderValue(headers[headerName]),
+  );
+}
+
+function hasLoopbackHostHeader(headers: IncomingHttpHeaders): boolean {
+  const hostname = readHostHeaderHostname(headers);
+  return hostname !== null && isLoopbackHostname(hostname);
+}
+
+function readHostHeaderHostname(headers: IncomingHttpHeaders): string | null {
+  const host = readHeaderValue(headers.host);
+
+  if (!host) {
+    return null;
+  }
+
+  if (/[\s@/?#]/u.test(host)) {
+    return null;
+  }
+
+  const ipv6Match = host.match(/^\[([^[\]]+)\](?::\d+)?$/u);
+  if (ipv6Match?.[1]) {
+    return ipv6Match[1];
+  }
+
+  const hostMatch = host.match(/^([^:]+)(?::\d+)?$/u);
+  return hostMatch?.[1] ?? null;
+}
+
 function hasMatchingControlToken(headers: IncomingHttpHeaders, expectedToken: string): boolean {
   const providedToken = readBearerToken(headers.authorization);
 
@@ -844,6 +900,14 @@ function readHeaderValue(value: string | string[] | undefined): string | null {
   }
 
   return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function hasPresentHeaderValue(value: string | string[] | undefined): boolean {
+  if (Array.isArray(value)) {
+    return value.some((entry) => typeof entry === "string" && entry.trim().length > 0);
+  }
+
+  return typeof value === "string" && value.trim().length > 0;
 }
 
 function formatProviderLabel(provider: string): string {
