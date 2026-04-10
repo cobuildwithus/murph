@@ -29,13 +29,14 @@ export function buildHostedRunnerJobRuntimeConfig(input: {
 }): HostedAssistantRuntimeConfig {
   const forwardedEnv = { ...input.forwardedEnv };
   const runtimeConfigSource = input.runtimeConfigSource ?? forwardedEnv;
+  const resolvedConfig = input.resolvedConfig ?? buildHostedRunnerResolvedConfig(forwardedEnv);
 
   return {
     commitTimeoutMs: readHostedRunnerCommitTimeoutMs(
       Number.parseInt(runtimeConfigSource.HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS ?? "", 10),
     ),
     forwardedEnv,
-    ...(input.resolvedConfig ? { resolvedConfig: input.resolvedConfig } : {}),
+    resolvedConfig,
     userEnv: filterHostedRunnerUserEnv(
       input.userEnv,
       input.userEnvSource ?? runtimeConfigSource,
