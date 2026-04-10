@@ -13,7 +13,7 @@ export const metadata: Metadata = {
 };
 
 export default async function SettingsPage() {
-  const { authenticated, linkedAccounts } = await getHostedPageAuthSnapshot();
+  const { authenticated, authenticatedMember, linkedAccounts } = await getHostedPageAuthSnapshot();
 
   return (
     <main className="min-h-screen bg-cream">
@@ -70,7 +70,10 @@ export default async function SettingsPage() {
             </div>
             <Card className="border-stone-200/80 shadow-sm transition-shadow hover:shadow-md">
               <CardContent className="pt-4 md:pt-6">
-                <HostedDeviceSyncSettings authenticated={authenticated} />
+                <HostedDeviceSyncSettings
+                  authenticated={authenticated}
+                  member={authenticatedMember}
+                />
               </CardContent>
             </Card>
           </section>

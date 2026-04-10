@@ -3,6 +3,8 @@ import {
   HostedRevnetIssuanceStatus,
 } from "@prisma/client";
 
+import { hostedOnboardingError } from "./errors";
+
 export type HostedEntitlementInput = {
   billingStatus: HostedBillingStatus;
   revnetIssuanceStatus?: HostedRevnetIssuanceStatus | null;
@@ -39,6 +41,26 @@ export function hasHostedMemberGeneralAccess(
 ): boolean {
   return !isHostedMemberSuspended(input.suspendedAt)
     && !isHostedAccessBlockedBillingStatus(input.billingStatus);
+}
+
+export function assertHostedMemberActiveAccessAllowed(
+  input: Pick<HostedEntitlementInput, "billingStatus" | "suspendedAt">,
+): void {
+  if (isHostedMemberSuspended(input.suspendedAt)) {
+    throw hostedOnboardingError({
+      code: "HOSTED_MEMBER_SUSPENDED",
+      message: "This hosted account is suspended. Contact support to restore access.",
+      httpStatus: 403,
+    });
+  }
+
+  if (!hasHostedMemberActiveAccess(input)) {
+    throw hostedOnboardingError({
+      code: "HOSTED_ACCESS_REQUIRED",
+      message: "Finish hosted activation before continuing.",
+      httpStatus: 403,
+    });
+  }
 }
 
 export function isHostedMemberSuspended(suspendedAt: Date | null | undefined): boolean {
