@@ -133,53 +133,49 @@ export async function updateWorkoutUnitPreferences(input: {
   created: boolean;
   document: PreferencesDocumentSnapshot;
 }> {
-  return await withCanonicalResourceLocks({
-    vaultRoot: input.vaultRoot,
-    resources: [canonicalPathResource(preferencesDocumentRelativePath)],
-    run: async () => {
-      const current = await readPreferencesDocument(input.vaultRoot);
-      const nextPreferences = {
-        ...current.workoutUnitPreferences,
-        ...input.preferences,
-      };
-      const hasChanges =
-        JSON.stringify(current.workoutUnitPreferences) !== JSON.stringify(nextPreferences);
+  return await withLockedPreferencesDocument(input.vaultRoot, async () => {
+    const current = await readPreferencesDocument(input.vaultRoot);
+    const nextPreferences = {
+      ...current.workoutUnitPreferences,
+      ...input.preferences,
+    };
+    const hasChanges =
+      JSON.stringify(current.workoutUnitPreferences) !== JSON.stringify(nextPreferences);
 
-      if (!hasChanges) {
-        return {
-          created: false,
-          document: current,
-        };
-      }
-
-      const document: PreferencesDocument = {
-        schemaVersion: preferencesDocumentSchemaVersion,
-        updatedAt: input.updatedAt ?? new Date().toISOString(),
-        workoutUnitPreferences: nextPreferences,
-        wearablePreferences: current.wearablePreferences,
-      };
-
-      await runCanonicalWrite({
-        vaultRoot: input.vaultRoot,
-        operationType: "preferences_update",
-        summary: "Update canonical workout unit preferences",
-        occurredAt: document.updatedAt,
-        mutate: async ({ batch }) => {
-          await batch.stageTextWrite(
-            preferencesDocumentRelativePath,
-            `${JSON.stringify(document, null, 2)}\n`,
-            { overwrite: true },
-          );
-
-          return null;
-        },
-      });
-
+    if (!hasChanges) {
       return {
-        created: !current.exists,
-        document: await readPreferencesDocument(input.vaultRoot),
+        created: false,
+        document: current,
       };
-    },
+    }
+
+    const document: PreferencesDocument = {
+      schemaVersion: preferencesDocumentSchemaVersion,
+      updatedAt: input.updatedAt ?? new Date().toISOString(),
+      workoutUnitPreferences: nextPreferences,
+      wearablePreferences: current.wearablePreferences,
+    };
+
+    await runCanonicalWrite({
+      vaultRoot: input.vaultRoot,
+      operationType: "preferences_update",
+      summary: "Update canonical workout unit preferences",
+      occurredAt: document.updatedAt,
+      mutate: async ({ batch }) => {
+        await batch.stageTextWrite(
+          preferencesDocumentRelativePath,
+          `${JSON.stringify(document, null, 2)}\n`,
+          { overwrite: true },
+        );
+
+        return null;
+      },
+    });
+
+    return {
+      created: !current.exists,
+      document: await readPreferencesDocument(input.vaultRoot),
+    };
   });
 }
 
@@ -192,51 +188,58 @@ export async function updateWearablePreferences(input: {
   updated: boolean;
   document: PreferencesDocumentSnapshot;
 }> {
-  return await withCanonicalResourceLocks({
-    vaultRoot: input.vaultRoot,
-    resources: [canonicalPathResource(preferencesDocumentRelativePath)],
-    run: async () => {
-      const current = await readPreferencesDocument(input.vaultRoot);
-      const nextPreferences = normalizeWearablePreferencesForRead(input.preferences);
-      const hasChanges =
-        JSON.stringify(current.wearablePreferences) !== JSON.stringify(nextPreferences);
+  return await withLockedPreferencesDocument(input.vaultRoot, async () => {
+    const current = await readPreferencesDocument(input.vaultRoot);
+    const nextPreferences = normalizeWearablePreferencesForRead(input.preferences);
+    const hasChanges =
+      JSON.stringify(current.wearablePreferences) !== JSON.stringify(nextPreferences);
 
-      if (!hasChanges && current.exists) {
-        return {
-          created: false,
-          updated: false,
-          document: current,
-        };
-      }
-
-      const document: PreferencesDocument = {
-        schemaVersion: preferencesDocumentSchemaVersion,
-        updatedAt: input.updatedAt ?? new Date().toISOString(),
-        workoutUnitPreferences: current.workoutUnitPreferences,
-        wearablePreferences: nextPreferences,
-      };
-
-      await runCanonicalWrite({
-        vaultRoot: input.vaultRoot,
-        operationType: "preferences_update",
-        summary: "Update canonical wearable preferences",
-        occurredAt: document.updatedAt,
-        mutate: async ({ batch }) => {
-          await batch.stageTextWrite(
-            preferencesDocumentRelativePath,
-            `${JSON.stringify(document, null, 2)}\n`,
-            { overwrite: true },
-          );
-
-          return null;
-        },
-      });
-
+    if (!hasChanges && current.exists) {
       return {
-        created: !current.exists,
-        updated: true,
-        document: await readPreferencesDocument(input.vaultRoot),
+        created: false,
+        updated: false,
+        document: current,
       };
-    },
+    }
+
+    const document: PreferencesDocument = {
+      schemaVersion: preferencesDocumentSchemaVersion,
+      updatedAt: input.updatedAt ?? new Date().toISOString(),
+      workoutUnitPreferences: current.workoutUnitPreferences,
+      wearablePreferences: nextPreferences,
+    };
+
+    await runCanonicalWrite({
+      vaultRoot: input.vaultRoot,
+      operationType: "preferences_update",
+      summary: "Update canonical wearable preferences",
+      occurredAt: document.updatedAt,
+      mutate: async ({ batch }) => {
+        await batch.stageTextWrite(
+          preferencesDocumentRelativePath,
+          `${JSON.stringify(document, null, 2)}\n`,
+          { overwrite: true },
+        );
+
+        return null;
+      },
+    });
+
+    return {
+      created: !current.exists,
+      updated: true,
+      document: await readPreferencesDocument(input.vaultRoot),
+    };
+  });
+}
+
+async function withLockedPreferencesDocument<TResult>(
+  vaultRoot: string,
+  run: () => Promise<TResult>,
+): Promise<TResult> {
+  return await withCanonicalResourceLocks({
+    vaultRoot,
+    resources: [canonicalPathResource(preferencesDocumentRelativePath)],
+    run,
   });
 }
