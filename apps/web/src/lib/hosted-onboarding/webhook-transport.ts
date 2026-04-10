@@ -2,6 +2,7 @@ import type { Prisma, PrismaClient } from "@prisma/client";
 
 import { enqueueHostedExecutionOutboxPayload } from "../hosted-execution/outbox";
 import { hostedOnboardingError } from "./errors";
+import { sanitizeHostedOnboardingLogString } from "./http";
 import { readHostedMemberSnapshot } from "./hosted-member-store";
 import { buildHostedInviteUrl } from "./invite-service";
 import {
@@ -182,7 +183,9 @@ async function markHostedInviteSentBestEffort(
   } catch (error) {
     console.error(
       "Hosted invite sentAt update failed.",
-      error instanceof Error ? error.message : String(error),
+      sanitizeHostedOnboardingLogString(
+        error instanceof Error ? error.message : String(error),
+      ) ?? "Unknown error.",
     );
   }
 }

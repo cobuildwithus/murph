@@ -23,7 +23,7 @@ This repo now includes:
   - `wrangler.generated.jsonc`
   - `worker-secrets.json`
 - an R2 lifecycle helper that applies the checked-in transient cleanup rules to the configured bundles buckets
-- explicit Wrangler observability config for Workers Logs and Workers Traces
+- explicit Wrangler observability config for Workers Logs and Workers Traces with zero-sampling defaults until operators opt in
 - checked-in and generated Wrangler config that declares the four required runtime secrets through Wrangler's experimental `secrets.required` support
 - a smoke-test script that verifies worker health and, when configured with a user id, triggers one manual hosted run and waits for queue drain, `lastRunAt` advance, and durable bundle refs
 
@@ -90,16 +90,17 @@ Optional tuning variables:
 - `CF_COMPATIBILITY_DATE` (default `2026-03-27`)
 - `CF_CONTAINER_INSTANCE_TYPE` (default `standard-1`; also accepts a custom JSON object with `vcpu`, `memory_mib`, and `disk_mb`)
 - `CF_CONTAINER_MAX_INSTANCES` (default `50`)
-- `CF_DEFAULT_ALARM_DELAY_MS` (default `21600000`)
-- `CF_LOG_HEAD_SAMPLING_RATE` (default `1`)
+- `CF_LOG_HEAD_SAMPLING_RATE` (default `0`)
 - `CF_MAX_EVENT_ATTEMPTS` (default `3`)
 - `CF_RETRY_DELAY_MS` (default `30000`)
 - `CF_RUNNER_TIMEOUT_MS` (default `120000`)
 - `CF_RUNNER_COMMIT_TIMEOUT_MS` (default `30000`)
 - `HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS` (default `120000`)
-- `CF_TRACE_HEAD_SAMPLING_RATE` (default `0.1`)
+- `CF_TRACE_HEAD_SAMPLING_RATE` (default `0`)
 - `CF_ALLOWED_USER_ENV_KEYS`
 - `HOSTED_ASSISTANT_PROVIDER`, `HOSTED_ASSISTANT_MODEL`, and the rest of the `HOSTED_ASSISTANT_*` seed vars when you want hosted member activation to persist one explicit platform-managed assistant profile into `~/.murph/config.json` instead of relying on runtime fallback
+
+Keep both observability sampling knobs at `0` unless you are intentionally collecting a bounded debug window.
 
 Optional non-secret worker variables:
 
@@ -240,8 +241,8 @@ export HOSTED_EMAIL_DOMAIN=mail.example.test
 export HOSTED_EMAIL_LOCAL_PART=assistant
 export HOSTED_EMAIL_SIGNING_SECRET=...
 export CF_RUNNER_TIMEOUT_MS=120000
-export CF_LOG_HEAD_SAMPLING_RATE=1
-export CF_TRACE_HEAD_SAMPLING_RATE=0.1
+export CF_LOG_HEAD_SAMPLING_RATE=0
+export CF_TRACE_HEAD_SAMPLING_RATE=0
 
 pnpm --dir apps/cloudflare r2:lifecycle:apply
 pnpm --dir apps/cloudflare deploy:config:render

@@ -48,8 +48,8 @@ const HOSTED_WORKER_OPTIONAL_VAR_NAMES = [
 
 const DEFAULT_CONTAINER_INSTANCE_TYPE: NamedContainerInstanceType = "standard-1";
 const DEFAULT_CONTAINER_MAX_INSTANCES = 50;
-const DEFAULT_LOG_HEAD_SAMPLING_RATE = 1;
-const DEFAULT_TRACE_HEAD_SAMPLING_RATE = 0.1;
+const DEFAULT_LOG_HEAD_SAMPLING_RATE = 0;
+const DEFAULT_TRACE_HEAD_SAMPLING_RATE = 0;
 const NAMED_CONTAINER_INSTANCE_TYPES = [
   "basic",
   "dev",
@@ -84,7 +84,6 @@ export interface HostedDeployAutomationEnvironment {
   compatibilityDate: string;
   containerInstanceType: HostedContainerInstanceType;
   containerMaxInstances: number;
-  defaultAlarmDelayMs: string;
   logHeadSamplingRate: number;
   maxEventAttempts: string;
   retryDelayMs: string;
@@ -116,11 +115,6 @@ export function readHostedDeployAutomationEnvironment(
       source.CF_CONTAINER_MAX_INSTANCES,
       DEFAULT_CONTAINER_MAX_INSTANCES,
       "CF_CONTAINER_MAX_INSTANCES",
-    ),
-    defaultAlarmDelayMs: normalizePositiveIntegerString(
-      source.CF_DEFAULT_ALARM_DELAY_MS,
-      "21600000",
-      "CF_DEFAULT_ALARM_DELAY_MS",
     ),
     logHeadSamplingRate: normalizeSamplingRate(
       source.CF_LOG_HEAD_SAMPLING_RATE,
