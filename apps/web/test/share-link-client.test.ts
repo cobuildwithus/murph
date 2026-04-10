@@ -4,15 +4,13 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { test } from "vitest";
 
-import {
-  buildHostedShareStatusUrl,
-  ShareLinkClient,
-} from "@/src/components/hosted-share/share-link-client";
+import { buildHostedShareStatusUrl } from "@/src/components/hosted-share/share-link-client";
+import { ShareLinkShell } from "@/src/components/hosted-share/share-link-shell";
 
-test("ShareLinkClient links invite sign-in flows through the hosted join route", () => {
+test("ShareLinkShell links invite sign-in flows through the hosted join route", () => {
   const markup = renderToStaticMarkup(
-    createElement(ShareLinkClient, {
-      initialData: {
+    createElement(ShareLinkShell, {
+      data: {
         inviteCode: "invite-code",
         session: {
           active: false,

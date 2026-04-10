@@ -8,12 +8,12 @@ vi.mock("@/src/components/hosted-onboarding/invite-status-client", () => ({
   useHostedInviteStatusRefresh: () => {},
 }));
 
-import { JoinInviteSuccessClient } from "@/src/components/hosted-onboarding/join-invite-success-client";
+import { JoinInviteSuccessShell } from "@/src/components/hosted-onboarding/join-invite-success-shell";
 import type { HostedInviteStatusPayload } from "@/src/lib/hosted-onboarding/types";
 
 test("verify-stage success page keeps the copy neutral while sign-in settles", () => {
   const markup = renderToStaticMarkup(
-    createElement(JoinInviteSuccessClient, {
+    createElement(JoinInviteSuccessShell, {
       initialStatus: createStatus("verify"),
       inviteCode: "invite-code",
       shareCode: null,
@@ -28,7 +28,7 @@ test("verify-stage success page keeps the copy neutral while sign-in settles", (
 
 test("blocked success page does not pretend setup is still running", () => {
   const markup = renderToStaticMarkup(
-    createElement(JoinInviteSuccessClient, {
+    createElement(JoinInviteSuccessShell, {
       initialStatus: createStatus("blocked"),
       inviteCode: "invite-code",
       shareCode: null,
