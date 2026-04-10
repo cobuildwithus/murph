@@ -496,6 +496,25 @@ describe('assistant cron runtime orchestration', () => {
     expect(await listAssistantCronJobs(vaultRoot)).toEqual([])
   })
 
+  it('passes the raw automation prompt and automation-cron trigger into assistant sends', async () => {
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-send-shape-',
+    )
+    const canonicalJob = await createCanonicalJob(vaultRoot, 'raw-prompt-shape')
+
+    await runAssistantCronJobNow({
+      job: canonicalJob.jobId,
+      vault: vaultRoot,
+    })
+
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prompt: 'Check in for raw-prompt-shape',
+        turnTrigger: 'automation-cron',
+      }),
+    )
+  })
+
   it('processes due jobs across local and canonical stores and reports mixed outcomes', async () => {
     const { vaultRoot } = await createRuntimeContext(
       'assistant-cron-runtime-process-due-',

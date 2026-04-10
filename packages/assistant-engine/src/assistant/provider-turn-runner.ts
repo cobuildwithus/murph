@@ -395,6 +395,7 @@ async function resolveAssistantRouteTurnPlan(input: {
       currentLocalDate: input.promptTimeContext.currentLocalDate,
       currentTimeZone: input.promptTimeContext.currentTimeZone,
       firstTurnCheckIn: shouldInjectFirstTurnCheckIn,
+      turnTrigger: input.input.turnTrigger ?? null,
       vaultOverview,
     }),
   }

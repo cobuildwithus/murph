@@ -329,6 +329,7 @@ describe('executeProviderTurnWithRecovery', () => {
         currentLocalDate: '2026-04-08',
         currentTimeZone: 'America/Los_Angeles',
         firstTurnCheckIn: true,
+        turnTrigger: null,
         vaultOverview:
           'Vault overview for navigation only:\n- Canonical coverage includes 1 meal event.',
       }),
@@ -464,6 +465,46 @@ describe('executeProviderTurnWithRecovery', () => {
         resumeProviderSessionId: 'provider-session-primary',
         sessionContext: undefined,
         systemPrompt: 'prompt:none:later:no-bootstrap:no-overview',
+      }),
+    )
+  })
+
+  it('passes automation-cron turn trigger into the system prompt builder', async () => {
+    const route = createRoute({
+      label: 'Primary',
+      routeId: 'route-primary',
+    })
+    const session = createAssistantSession()
+
+    runnerMocks.executeAssistantProviderTurnAttempt.mockResolvedValue(
+      createSuccessfulAttemptResult({
+        providerSessionId: null,
+        response: 'Scheduled answer',
+      }),
+    )
+
+    const outcome = await executeProviderTurnWithRecovery({
+      input: createMessageInput({
+        channel: 'chat',
+        prompt: 'Send the reminder',
+        turnTrigger: 'automation-cron',
+      }),
+      plan: createTurnPlan({
+        allowSensitiveHealthContext: true,
+        firstTurnCheckInEligible: false,
+      }),
+      resolvedSession: session,
+      routes: [route],
+      turnCreatedAt: '2026-04-08T00:00:00.000Z',
+      turnId: 'turn-automation-cron',
+    })
+
+    expect(outcome).toMatchObject({
+      kind: 'succeeded',
+    })
+    expect(runnerMocks.buildAssistantSystemPrompt).toHaveBeenCalledWith(
+      expect.objectContaining({
+        turnTrigger: 'automation-cron',
       }),
     )
   })
@@ -861,6 +902,7 @@ function createMessageInput(
   return {
     prompt: overrides?.prompt ?? 'Hello there',
     vault: '/tmp/test-vault',
+    turnTrigger: overrides?.turnTrigger,
     channel: overrides?.channel ?? null,
     executionContext: overrides?.executionContext ?? null,
     codexCommand: overrides?.codexCommand,
