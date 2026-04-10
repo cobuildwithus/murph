@@ -262,7 +262,7 @@ test('createAssistantLocalService wires the local integrations and forwards assi
       once: false,
       requestId: null,
       sessionMaxAgeMs: null,
-      startDaemon: false,
+      startDaemon: true,
       vault: TEST_VAULT_ROOT,
       vaultServices: { kind: 'vault-services' },
     },

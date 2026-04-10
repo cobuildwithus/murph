@@ -1571,7 +1571,7 @@ test('assistant http handler rejects continuous automation without the inbox dae
     }),
     runAutomationOnce: async () => {
       throw new Error(
-        'Continuous assistant automation now requires the inbox daemon. Rerun without skipDaemon/startDaemon=false, or use once=true for a one-shot pass.',
+        'Continuous assistant automation now requires the inbox daemon. Rerun in continuous mode with the daemon enabled, or use once=true for a one-shot pass.',
       )
     },
     sendMessage: async () => ({

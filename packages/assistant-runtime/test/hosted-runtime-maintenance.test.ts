@@ -553,7 +553,6 @@ describe("runHostedMaintenanceLoop", () => {
         },
         inboxServices: expect.any(Symbol),
         requestId: "req_123",
-        runStartupRecovery: false,
         vault: "/tmp/vault-root",
         vaultServices: expect.any(Symbol),
       });

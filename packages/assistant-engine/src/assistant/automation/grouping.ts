@@ -61,7 +61,7 @@ async function loadCaptureTelegramMetadata(
   )
 }
 
-function shouldGroupAdjacentConversationCapture(
+export function shouldGroupAdjacentConversationCapture(
   first: InboxListResult['items'][number],
   candidate: InboxListResult['items'][number],
 ): boolean {

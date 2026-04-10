@@ -551,10 +551,6 @@
                         "once": {
                           "description": "Run one assistant scan and then exit.",
                           "type": "boolean"
-                        },
-                        "skipDaemon": {
-                          "description": "Do not start the inbox foreground daemon; only run one assistant automation pass.",
-                          "type": "boolean"
                         }
                       }
                     }
@@ -998,10 +994,6 @@
                 },
                 "once": {
                   "description": "Run one assistant scan and then exit.",
-                  "type": "boolean"
-                },
-                "skipDaemon": {
-                  "description": "Do not start the inbox foreground daemon; only run one assistant automation pass.",
                   "type": "boolean"
                 }
               }

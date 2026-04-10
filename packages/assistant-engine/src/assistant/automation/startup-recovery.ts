@@ -9,7 +9,11 @@ import type { AssistantOutboxDispatchMode } from '../outbox.js'
 import { listAssistantTurnReceipts } from '../receipts.js'
 import { assistantChatReplyArtifactExists } from './artifacts.js'
 import { readAssistantAutoReplyRetryAt } from './auto-reply-retry.js'
-import { collectAssistantAutoReplyGroup } from './grouping.js'
+import {
+  type AssistantAutoReplyGroupItem,
+  shouldGroupAdjacentConversationCapture,
+} from './grouping.js'
+import { loadTelegramAutoReplyMetadata } from './prompt-builder.js'
 import {
   createAssistantAutoReplyGroupContext,
   processAssistantAutoReplyGroup,
@@ -17,19 +21,18 @@ import {
 import {
   compareAssistantCaptureOrder,
   createEmptyAutoReplyScanResult,
-  earliestAssistantAutomationWakeAt,
   normalizeEnabledChannels,
   normalizeScanLimit,
   type AssistantAutoReplyScanResult,
   type AssistantRunEvent,
+  earliestAssistantAutomationWakeAt,
 } from './shared.js'
 
 const AUTO_REPLY_RECEIPT_CAPTURE_ID_KEY = 'autoReplyCaptureId'
 const AUTO_REPLY_RECEIPT_CAPTURE_IDS_KEY = 'autoReplyCaptureIds'
-const STARTUP_RECOVERY_RECEIPT_LIMIT = 200
-const STARTUP_RECOVERY_CAPTURE_LIST_LIMIT = 200
+const FAILED_RECEIPT_RECOVERY_RECEIPT_LIMIT = 200
 
-export interface RecoverAssistantAutoRepliesOnStartupInput {
+export interface RecoverAssistantAutoRepliesInput {
   allowSelfAuthored: boolean
   autoReply?: AssistantAutomationState['autoReply']
   deliveryDispatchMode?: AssistantOutboxDispatchMode
@@ -50,9 +53,14 @@ interface AutoReplyRecoveryCandidate {
   primaryCaptureId: string
 }
 
-export async function recoverAssistantAutoRepliesOnStartup(
-  input: RecoverAssistantAutoRepliesOnStartupInput,
-): Promise<AssistantAutoReplyScanResult> {
+export interface AssistantAutoReplyRecoveryResult
+  extends AssistantAutoReplyScanResult {
+  progressed: boolean
+}
+
+export async function recoverAssistantAutoReplies(
+  input: RecoverAssistantAutoRepliesInput,
+): Promise<AssistantAutoReplyRecoveryResult> {
   const autoReply =
     input.autoReply ??
     normalizeEnabledChannels(input.enabledChannels ?? []).map((channel) => ({
@@ -70,11 +78,14 @@ export async function recoverAssistantAutoRepliesOnStartup(
     autoReply.every((entry) => entry.cursor === null) ||
     input.signal?.aborted
   ) {
-    return createEmptyAutoReplyScanResult()
+    return {
+      ...createEmptyAutoReplyScanResult(),
+      progressed: false,
+    }
   }
 
-  const groupLimit = Math.min(normalizeScanLimit(input.maxPerScan), 10)
-  const candidateListing = await listStartupRecoveryCandidates({
+  const groupLimit = normalizeScanLimit(input.maxPerScan)
+  const candidateListing = await listReceiptRecoveryCandidates({
     limit: groupLimit,
     vault: input.vault,
   })
@@ -82,60 +93,44 @@ export async function recoverAssistantAutoRepliesOnStartup(
     return {
       ...createEmptyAutoReplyScanResult(),
       nextWakeAt: candidateListing.nextWakeAt,
+      progressed: false,
     }
-  }
-
-  const candidateIds = new Set(
-    candidateListing.candidates.map((candidate) => candidate.primaryCaptureId),
-  )
-  const listed = await input.inboxServices.list({
-    vault: input.vault,
-    requestId: input.requestId ?? null,
-    limit: Math.max(groupLimit * 10, STARTUP_RECOVERY_CAPTURE_LIST_LIMIT),
-    sourceId: null,
-    afterOccurredAt: null,
-    afterCaptureId: null,
-    oldestFirst: false,
-  })
-  const captures = [...listed.items].sort(compareAssistantCaptureOrder)
-  if (captures.length === 0) {
-    return createEmptyAutoReplyScanResult()
   }
 
   const summary = createEmptyAutoReplyScanResult()
   summary.nextWakeAt = candidateListing.nextWakeAt
-  let recoveredGroups = 0
+  let resolvedGroups = 0
   input.onEvent?.({
     type: 'reply.scan.started',
-    details: `retrying up to ${candidateListing.candidates.length} recent failed auto-reply capture(s) from a previous automation run`,
+    details: `retrying up to ${candidateListing.candidates.length} failed auto-reply capture(s) from persisted receipts`,
   })
 
-  for (let index = 0; index < captures.length; index += 1) {
-    if (input.signal?.aborted || recoveredGroups >= groupLimit) {
+  for (const candidate of candidateListing.candidates) {
+    if (input.signal?.aborted) {
       break
     }
 
-    const capture = captures[index]
-    if (!capture || !candidateIds.has(capture.captureId)) {
-      continue
-    }
-    const channelState = autoReplyByChannel.get(capture.source)
-    if (!channelState?.cursor || !enabledChannels.includes(capture.source)) {
-      continue
-    }
-    if (compareAssistantCaptureOrder(capture, channelState.cursor) > 0) {
-      continue
-    }
-
-    const group = await collectAssistantAutoReplyGroup({
-      captures,
-      startIndex: index,
+    const context = await loadAutoReplyRecoveryContext({
+      candidate,
+      inboxServices: input.inboxServices,
+      requestId: input.requestId ?? null,
       vault: input.vault,
     })
-    index = group.endIndex
+    if (!context) {
+      continue
+    }
 
-    const context = createAssistantAutoReplyGroupContext(group.items)
-    if (!context || !candidateIds.has(context.firstCaptureId)) {
+    const recoverySource = context.firstItem.summary.source
+    const channelState = autoReplyByChannel.get(recoverySource)
+    if (!channelState?.cursor || !enabledChannels.includes(recoverySource)) {
+      continue
+    }
+    if (
+      compareAssistantCaptureOrder(
+        context.firstItem.summary,
+        channelState.cursor,
+      ) > 0
+    ) {
       continue
     }
 
@@ -160,36 +155,51 @@ export async function recoverAssistantAutoRepliesOnStartup(
     )
     summary.replied += result.replied
     summary.skipped += result.skipped
-    recoveredGroups += 1
+    if (result.replied > 0 || result.skipped > 0) {
+      resolvedGroups += 1
+    }
 
     if (result.stopScanning) {
       break
     }
   }
 
-  return summary
+  if (resolvedGroups > 0 && candidateListing.hasMoreDueCandidates) {
+    summary.nextWakeAt = earliestAssistantAutomationWakeAt(
+      new Date().toISOString(),
+      summary.nextWakeAt,
+    )
+  }
+
+  return {
+    ...summary,
+    progressed: resolvedGroups > 0,
+  }
 }
 
-async function listStartupRecoveryCandidates(input: {
+async function listReceiptRecoveryCandidates(input: {
   limit: number
   vault: string
 }): Promise<{
   candidates: AutoReplyRecoveryCandidate[]
+  hasMoreDueCandidates: boolean
   nextWakeAt: string | null
 }> {
   if (input.limit <= 0) {
     return {
       candidates: [],
+      hasMoreDueCandidates: false,
       nextWakeAt: null,
     }
   }
 
   const receipts = await listAssistantTurnReceipts(
     input.vault,
-    STARTUP_RECOVERY_RECEIPT_LIMIT,
+    FAILED_RECEIPT_RECOVERY_RECEIPT_LIMIT,
   )
   const seenCaptureIds = new Set<string>()
   const recoverable: AutoReplyRecoveryCandidate[] = []
+  let hasMoreDueCandidates = false
   let nextWakeAt: string | null = null
   const nowMs = Date.now()
 
@@ -217,19 +227,83 @@ async function listStartupRecoveryCandidates(input: {
       continue
     }
 
+    if (recoverable.length === input.limit) {
+      hasMoreDueCandidates = true
+      break
+    }
+
     recoverable.push({
       captureIds: metadata.captureIds,
       primaryCaptureId: metadata.primaryCaptureId,
     })
-    if (recoverable.length >= input.limit) {
-      break
-    }
   }
 
   return {
     candidates: recoverable,
+    hasMoreDueCandidates,
     nextWakeAt,
   }
+}
+
+async function loadAutoReplyRecoveryContext(input: {
+  candidate: AutoReplyRecoveryCandidate
+  inboxServices: InboxServices
+  requestId: string | null
+  vault: string
+}) {
+  const shownCaptures = (
+    await Promise.all(
+      input.candidate.captureIds.map(async (captureId) => {
+        try {
+          return (
+            await input.inboxServices.show({
+              captureId,
+              requestId: input.requestId,
+              vault: input.vault,
+            })
+          ).capture
+        } catch (error) {
+          if (isInboxCaptureNotFoundError(error)) {
+            return null
+          }
+          throw error
+        }
+      }),
+    )
+  )
+    .filter((capture): capture is NonNullable<typeof capture> => capture !== null)
+    .sort(compareAssistantCaptureOrder)
+
+  if (shownCaptures.length === 0) {
+    return null
+  }
+
+  const primaryCapture = shownCaptures.find(
+    (capture) => capture.captureId === input.candidate.primaryCaptureId,
+  )
+  if (!primaryCapture || shownCaptures[0]?.captureId !== primaryCapture.captureId) {
+    return null
+  }
+  if (
+    shownCaptures.some(
+      (capture) =>
+        !shouldGroupAdjacentConversationCapture(primaryCapture, capture),
+    )
+  ) {
+    return null
+  }
+
+  const groupItems: AssistantAutoReplyGroupItem[] = await Promise.all(
+    shownCaptures.map(async (capture) => ({
+      summary: capture,
+      telegramMetadata: await loadTelegramAutoReplyMetadata(
+        input.vault,
+        capture.source === 'telegram' ? capture.envelopePath : null,
+      ),
+    })),
+  )
+
+  return createAssistantAutoReplyGroupContext(groupItems)
 }
 
 function readAutoReplyReceiptMetadata(
@@ -283,4 +357,13 @@ async function hasHandledReplyArtifacts(
     ),
   )
   return existingArtifacts.some(Boolean)
+}
+
+function isInboxCaptureNotFoundError(error: unknown): boolean {
+  return (
+    !!error &&
+    typeof error === 'object' &&
+    'code' in error &&
+    error.code === 'INBOX_CAPTURE_NOT_FOUND'
+  )
 }
