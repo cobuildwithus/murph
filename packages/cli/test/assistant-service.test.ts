@@ -1737,7 +1737,11 @@ test('sendAssistantMessage writes a system receipt for provider and delivery mil
   assert.equal(receipt.status, 'completed')
   assert.equal(receipt.deliveryDisposition, 'sent')
   assert.equal(typeof receipt.deliveryIntentId, 'string')
-  assert.equal(receipt.responsePreview, 'Assistant reply.')
+  assert.match(
+    receipt.responsePreview ?? '',
+    /^\[redacted \d+ chars sha256:[0-9a-f]{12}\]$/,
+  )
+  assert.notEqual(receipt.responsePreview, 'Assistant reply.')
   assert.equal(
     receipt.timeline.some((event) => event.kind === 'provider.attempt.started'),
     true,
