@@ -4,7 +4,7 @@ import { DERIVED_KNOWLEDGE_SEARCH_RESULT_FORMAT } from "./knowledge-model.ts";
 import type {
   DerivedKnowledgeSearchHit,
   DerivedKnowledgeSearchResult,
-} from "./knowledge-graph.ts";
+} from "./knowledge-search.ts";
 
 const nonEmptyStringSchema = z.string().min(1);
 const nullableNonEmptyStringSchema = nonEmptyStringSchema.nullable();

@@ -12,7 +12,6 @@ import {
   type FrontmatterObject,
 } from './health/shared.ts'
 import {
-  DERIVED_KNOWLEDGE_SEARCH_RESULT_FORMAT,
   extractKnowledgeFirstHeading,
   humanizeKnowledgeTag,
   orderedUniqueStrings,
@@ -60,35 +59,6 @@ export interface DerivedKnowledgeGraphIssue {
 export interface DerivedKnowledgeGraphReadResult {
   graph: DerivedKnowledgeGraph
   issues: DerivedKnowledgeGraphIssue[]
-}
-
-export interface DerivedKnowledgeSearchFilters {
-  limit?: number
-  pageType?: string | null
-  status?: string | null
-}
-
-export interface DerivedKnowledgeSearchHit {
-  compiledAt: string | null
-  librarySlugs: string[]
-  matchedTerms: string[]
-  pagePath: string
-  pageType: string | null
-  relatedSlugs: string[]
-  score: number
-  slug: string
-  snippet: string
-  sourcePaths: string[]
-  status: string | null
-  summary: string | null
-  title: string
-}
-
-export interface DerivedKnowledgeSearchResult {
-  format: typeof DERIVED_KNOWLEDGE_SEARCH_RESULT_FORMAT
-  hits: DerivedKnowledgeSearchHit[]
-  query: string
-  total: number
 }
 
 interface DerivedKnowledgeNodeParseResult {
