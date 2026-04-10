@@ -250,7 +250,10 @@ async function buildAssistantProviderTurnExecutionPlan(input: {
   })
   const toolCatalog = createProviderTurnAssistantToolCatalog({
     allowSensitiveHealthContext: input.plan.allowSensitiveHealthContext,
-    cliEnv: memoryTurnEnv,
+    cliEnv: {
+      ...input.plan.cliAccess.env,
+      ...memoryTurnEnv,
+    },
     executionContext,
     requestId: input.turnId,
     sessionId: input.resolvedSession.sessionId,

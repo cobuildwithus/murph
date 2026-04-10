@@ -165,6 +165,17 @@ describe("hosted deploy automation helpers", () => {
     expect(environment.workerVars.MURPH_WEB_FETCH_ENABLED).toBe("false");
   });
 
+  it("passes explicit runner env profiles through to worker vars", () => {
+    const environment = readHostedDeployAutomationEnvironment({
+      CF_BUNDLES_BUCKET: "hosted-bundles",
+      CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
+      CF_WORKER_NAME: "hosted-worker",
+      HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "telegram,mapbox",
+    });
+
+    expect(environment.workerVars.HOSTED_EXECUTION_RUNNER_ENV_PROFILES).toBe("telegram,mapbox");
+  });
+
   it("accepts a custom JSON container instance type for generated deploy config", () => {
     const environment = readHostedDeployAutomationEnvironment({
       CF_BUNDLES_BUCKET: "hosted-bundles",
@@ -230,6 +241,7 @@ describe("hosted deploy automation helpers", () => {
       HOSTED_ASSISTANT_API_KEY_ENV: "OPENAI_API_KEY",
       HOSTED_ASSISTANT_MODEL: "gpt-4.1-mini",
       HOSTED_ASSISTANT_PROVIDER: "openai",
+      HOSTED_ASSISTANT_ZERO_DATA_RETENTION: "true",
       HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK: "automation-private-jwk",
       HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK: "automation-public-jwk",
       HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: "bundle-key",
@@ -237,6 +249,7 @@ describe("hosted deploy automation helpers", () => {
       HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
       OPENAI_API_KEY: "sk-user",
     })).toMatchObject({
+      HOSTED_ASSISTANT_ZERO_DATA_RETENTION: "true",
       OPENAI_API_KEY: "sk-user",
     });
 

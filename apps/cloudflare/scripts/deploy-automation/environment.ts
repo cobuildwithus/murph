@@ -1,5 +1,8 @@
 import { readHostedAssistantApiKeyEnvName } from "@murphai/assistant-runtime/hosted-assistant-env";
-import { isAllowedHostedAssistantReferencedRunnerEnvKey } from "../../src/hosted-env-policy.ts";
+import {
+  HOSTED_EXECUTION_RUNNER_ENV_PROFILES_ENV,
+  isAllowedHostedAssistantReferencedRunnerEnvKey,
+} from "../../src/hosted-env-policy.ts";
 
 import {
   isObjectRecord,
@@ -28,7 +31,9 @@ const HOSTED_WORKER_OPTIONAL_VAR_NAMES = [
   "HOSTED_ASSISTANT_PROVIDER_NAME",
   "HOSTED_ASSISTANT_REASONING_EFFORT",
   "HOSTED_ASSISTANT_SANDBOX",
+  "HOSTED_ASSISTANT_ZERO_DATA_RETENTION",
   "HOSTED_EXECUTION_AUTOMATION_RECIPIENT_KEY_ID",
+  HOSTED_EXECUTION_RUNNER_ENV_PROFILES_ENV,
   "HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS",
   "HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT",
   "HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME",
