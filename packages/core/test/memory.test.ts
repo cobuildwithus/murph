@@ -18,6 +18,7 @@ import {
   createMemoryRecordId,
   renderMemoryDocument,
 } from "@murphai/contracts";
+import * as fsModule from "../src/fs.ts";
 
 async function createVaultRoot(): Promise<string> {
   return mkdtemp(path.join(os.tmpdir(), "murph-core-memory-"));
@@ -151,6 +152,69 @@ describe("core memory package wrapper", () => {
     expect(await getMemoryRecord(vaultRoot, expectedRecordId)).toEqual(updated.record);
   });
 
+  test("serializes parallel upserts to the singleton memory document without losing records", async () => {
+    const vaultRoot = await makeVaultRoot();
+    const writes = [
+      {
+        now: new Date("2026-04-08T01:10:00.000Z"),
+        section: "Context" as const,
+        text: "Likes concise answers",
+      },
+      {
+        now: new Date("2026-04-08T01:10:01.000Z"),
+        section: "Instructions" as const,
+        text: "Lead with the answer",
+      },
+      {
+        now: new Date("2026-04-08T01:10:02.000Z"),
+        section: "Preferences" as const,
+        text: "Use bullets for options",
+      },
+    ];
+    vi.resetModules();
+    const operationsModule = await import("../src/operations/index.ts");
+    let tail = Promise.resolve();
+    const lockSpy = vi
+      .spyOn(operationsModule, "withCanonicalResourceLocks")
+      .mockImplementation(async (input) => {
+        const previous = tail;
+        let release: (() => void) | undefined;
+        tail = new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        await previous;
+
+        try {
+          return await input.run();
+        } finally {
+          release?.();
+        }
+      });
+    const memoryModule = await import("../src/memory.ts");
+
+    try {
+      const results = await Promise.all(
+        writes.map((entry) =>
+          memoryModule.upsertMemory(vaultRoot, {
+            now: entry.now,
+            section: entry.section,
+            text: entry.text,
+          }),
+        ),
+      );
+      const snapshot = await memoryModule.readMemoryDocument(vaultRoot);
+
+      expect(results.every((result) => result.created)).toBe(true);
+      expect(snapshot.records).toHaveLength(writes.length);
+      expect(snapshot.records.map((record) => `${record.section}:${record.text}`).sort()).toEqual(
+        writes.map((entry) => `${entry.section}:${entry.text}`).sort(),
+      );
+    } finally {
+      lockSpy.mockRestore();
+      vi.resetModules();
+    }
+  });
+
   test("updates preserve the existing section by default and reject missing ids", async () => {
     const vaultRoot = await makeVaultRoot();
     const createdAt = new Date("2026-04-08T01:00:00.000Z");
@@ -182,6 +246,35 @@ describe("core memory package wrapper", () => {
         text: "Should fail",
       }),
     ).rejects.toThrow('Memory record "mem_missing" does not exist.');
+  });
+
+  test("fails closed when post-write read-back omits the upserted memory record", async () => {
+    const vaultRoot = await makeVaultRoot();
+    const now = new Date("2026-04-08T01:15:00.000Z");
+    const section = "Context";
+    const text = "Remember the resource lock runtime.";
+    const recordId = createMemoryRecordId({ section, text });
+    const readSpy = vi
+      .spyOn(fsModule, "readUtf8File")
+      .mockResolvedValue(renderMemoryDocument({ document: createEmptyMemoryDocument(now) }));
+
+    try {
+      await expect(
+        upsertMemory(vaultRoot, {
+          now,
+          section,
+          text,
+        }),
+      ).rejects.toThrow(`Memory record "${recordId}" was not found after upsert.`);
+    } finally {
+      readSpy.mockRestore();
+    }
+
+    expect(await getMemoryRecord(vaultRoot, recordId)).toMatchObject({
+      id: recordId,
+      section,
+      text,
+    });
   });
 
   test("forgets missing records as a no-op and deletes existing records from the persisted memory file", async () => {
