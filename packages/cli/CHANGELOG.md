@@ -2,6 +2,16 @@
 
 All notable changes to `@murphai/murph` will be documented in this file.
 
+## [0.2.4] - 2026-04-10
+
+### Fixed
+- remove whisper arm arch override
+- minimize persisted email and turn preview data
+- fail closed on release checks
+
+### Changed
+- clean coordination ledger
+
 ## [0.2.3] - 2026-04-10
 
 ### Fixed
