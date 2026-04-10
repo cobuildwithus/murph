@@ -37,7 +37,7 @@ describe('estimateMapboxRoute', () => {
     )
   })
 
-  it('uses temporary geocoding and routable points for text queries', async () => {
+  it('uses temporary geocoding and prefers entrances for walking queries', async () => {
     const requests: URL[] = []
     const directionsCoordinates: string[] = []
 
@@ -51,6 +51,7 @@ describe('estimateMapboxRoute', () => {
         expect(url.searchParams.get('limit')).toBe('1')
         expect(url.searchParams.get('autocomplete')).toBe('false')
         expect(url.searchParams.get('permanent')).toBe('false')
+        expect(url.searchParams.get('entrances')).toBe('true')
 
         if (query === '123 Example St, Melbourne VIC') {
           return jsonResponse({
@@ -64,6 +65,11 @@ describe('estimateMapboxRoute', () => {
                     latitude: -37.81355,
                     accuracy: 'rooftop',
                     routable_points: [
+                      {
+                        name: 'entrance',
+                        longitude: 144.96325,
+                        latitude: -37.81365,
+                      },
                       {
                         name: 'default',
                         longitude: 144.9632,
@@ -138,21 +144,21 @@ describe('estimateMapboxRoute', () => {
     expect(requests.map((request) => request.pathname)).toEqual([
       '/search/geocode/v6/forward',
       '/search/geocode/v6/forward',
-      '/directions/v5/mapbox/walking/144.9632,-37.8136;144.974,-37.867',
+      '/directions/v5/mapbox/walking/144.96325,-37.81365;144.974,-37.867',
     ])
     expect(directionsCoordinates).toEqual([
-      '144.9632,-37.8136;144.974,-37.867',
+      '144.96325,-37.81365;144.974,-37.867',
     ])
     expect(result.summary.distanceMeters).toBe(6200.5)
     expect(result.summary.durationMinutes).toBe(39)
     expect(result.points[0]).toMatchObject({
       source: 'geocoded-query',
       displayName: '123 Example St, Melbourne VIC 3000, Australia',
-      routableLongitude: 144.9632,
-      routableLatitude: -37.8136,
+      routableLongitude: 144.96325,
+      routableLatitude: -37.81365,
       accuracy: 'rooftop',
       matchType: 'address',
-      routablePointName: 'default',
+      routablePointName: 'entrance',
     })
     expect(result.points[1]).toMatchObject({
       source: 'geocoded-query',
@@ -167,6 +173,8 @@ describe('estimateMapboxRoute', () => {
       persistedByTool: false,
       geocodingStorage: 'temporary',
       geocodedPointCount: 2,
+      searchBoxStorage: 'not-used',
+      searchBoxPointCount: 0,
       geometryIncluded: false,
     })
     expect(result.warnings).toEqual([])
@@ -230,9 +238,11 @@ describe('estimateMapboxRoute', () => {
     ])
     expect(result.privacy.geocodingStorage).toBe('not-used')
     expect(result.privacy.geocodedPointCount).toBe(0)
+    expect(result.privacy.searchBoxStorage).toBe('not-used')
+    expect(result.privacy.searchBoxPointCount).toBe(0)
   })
 
-  it('summarizes approximate elevation from sampled terrain contour queries', async () => {
+  it('summarizes approximate elevation from the highest returned terrain contour queries', async () => {
     let elevationCallCount = 0
 
     const fetchImpl: typeof fetch = async (input) => {
@@ -263,15 +273,18 @@ describe('estimateMapboxRoute', () => {
 
       if (url.pathname.startsWith('/v4/mapbox.mapbox-terrain-v2/tilequery/')) {
         elevationCallCount += 1
-        const elevations = [100, 120, 110]
+        expect(url.searchParams.get('limit')).toBe('50')
+        const elevations = [
+          [90, 100, '95'],
+          [80, 120, '115'],
+          [70, 110, '105'],
+        ]
         return jsonResponse({
-          features: [
-            {
-              properties: {
-                ele: elevations[elevationCallCount - 1],
-              },
+          features: elevations[elevationCallCount - 1]!.map((elevation) => ({
+            properties: {
+              ele: elevation,
             },
-          ],
+          })),
         })
       }
 
@@ -368,12 +381,103 @@ describe('estimateMapboxRoute', () => {
     ])
   })
 
+  it('uses Search Box for walking POI-like queries and keeps the lookup temporary', async () => {
+    const requests: URL[] = []
+
+    const fetchImpl: typeof fetch = async (input) => {
+      const url = toUrl(input)
+      requests.push(url)
+      const query = url.searchParams.get('q')
+
+      if (url.pathname === '/search/searchbox/v1/forward' && query === 'Bogong Hut') {
+        return jsonResponse({
+          features: [
+            {
+              geometry: {
+                coordinates: [146.872, -36.84],
+              },
+              properties: {
+                feature_type: 'poi',
+                name: 'Bogong Hut',
+                place_formatted: 'Alpine National Park, Victoria, Australia',
+                coordinates: {
+                  routable_points: [
+                    {
+                      name: 'approach-track',
+                      longitude: 146.8722,
+                      latitude: -36.8398,
+                    },
+                  ],
+                },
+              },
+            },
+          ],
+        })
+      }
+
+      if (url.pathname.startsWith('/directions/v5/mapbox/walking/')) {
+        return jsonResponse({
+          code: 'Ok',
+          routes: [
+            {
+              distance: 5400,
+              duration: 4200,
+              geometry: {
+                type: 'LineString',
+                coordinates: [
+                  [146.8722, -36.8398],
+                  [146.88, -36.845],
+                ],
+              },
+            },
+          ],
+        })
+      }
+
+      throw new Error(`Unexpected request: ${url}`)
+    }
+
+    const result = await estimateMapboxRoute({
+      origin: 'Bogong Hut',
+      destination: '146.88,-36.845',
+      includeGeometry: true,
+    }, {
+      env: {
+        MAPBOX_ACCESS_TOKEN: 'test-token',
+      },
+      fetchImpl,
+    })
+
+    expect(requests.map((request) => request.pathname)).toEqual([
+      '/search/searchbox/v1/forward',
+      '/directions/v5/mapbox/walking/146.8722,-36.8398;146.88,-36.845',
+    ])
+    expect(result.provider.searchBoxApiVersion).toBe('v1')
+    expect(result.points[0]).toMatchObject({
+      source: 'search-box-query',
+      displayName: 'Bogong Hut, Alpine National Park, Victoria, Australia',
+      longitude: 146.872,
+      latitude: -36.84,
+      routableLongitude: 146.8722,
+      routableLatitude: -36.8398,
+      matchType: 'poi',
+      routablePointName: 'approach-track',
+    })
+    expect(result.privacy).toMatchObject({
+      geocodingStorage: 'not-used',
+      geocodedPointCount: 0,
+      searchBoxStorage: 'temporary',
+      searchBoxPointCount: 1,
+      geometryIncluded: true,
+    })
+  })
+
   it('falls back to geometry coordinates, composite names, and the first routable point when geocoding metadata is sparse', async () => {
     const fetchImpl: typeof fetch = async (input) => {
       const url = toUrl(input)
       const query = url.searchParams.get('q')
 
-      if (url.pathname === '/search/geocode/v6/forward' && query === 'Trailhead') {
+      if (url.pathname === '/search/geocode/v6/forward' && query === 'Foothill Base') {
         return jsonResponse({
           features: [
             {
@@ -381,7 +485,7 @@ describe('estimateMapboxRoute', () => {
                 coordinates: [144.95, -37.82],
               },
               properties: {
-                name_preferred: 'Trailhead',
+                name_preferred: 'Foothill Base',
                 place_formatted: 'Victoria, Australia',
                 coordinates: {
                   routable_points: [
@@ -398,12 +502,12 @@ describe('estimateMapboxRoute', () => {
         })
       }
 
-      if (url.pathname === '/search/geocode/v6/forward' && query === 'Summit') {
+      if (url.pathname === '/search/geocode/v6/forward' && query === 'Alpine Village') {
         return jsonResponse({
           features: [
             {
               properties: {
-                full_address: 'Summit, Victoria, Australia',
+                full_address: 'Alpine Village, Victoria, Australia',
                 coordinates: {
                   longitude: 144.98,
                   latitude: -37.84,
@@ -437,8 +541,8 @@ describe('estimateMapboxRoute', () => {
     }
 
     const result = await estimateMapboxRoute({
-      origin: 'Trailhead',
-      destination: 'Summit',
+      origin: 'Foothill Base',
+      destination: 'Alpine Village',
       includeGeometry: true,
     }, {
       env: {
@@ -448,7 +552,7 @@ describe('estimateMapboxRoute', () => {
     })
 
     expect(result.points[0]).toMatchObject({
-      displayName: 'Trailhead, Victoria, Australia',
+      displayName: 'Foothill Base, Victoria, Australia',
       longitude: 144.95,
       latitude: -37.82,
       routableLongitude: 144.951,
@@ -463,5 +567,62 @@ describe('estimateMapboxRoute', () => {
       ],
     })
     expect(result.privacy.geometryIncluded).toBe(true)
+  })
+
+  it('surfaces a clean no-result geocoding failure when temporary fallback also misses', async () => {
+    const fetchImpl: typeof fetch = async (input) => {
+      const url = toUrl(input)
+
+      if (url.pathname === '/search/geocode/v6/forward') {
+        return jsonResponse({
+          features: [],
+        })
+      }
+
+      if (url.pathname === '/search/searchbox/v1/forward') {
+        throw new Error(`Search Box should not be called for non-POI geocode misses: ${url}`)
+      }
+
+      throw new Error(`Unexpected request: ${url}`)
+    }
+
+    await expect(
+      estimateMapboxRoute({
+        origin: 'Unknown address',
+        destination: 'St Kilda Beach',
+      }, {
+        env: {
+          MAPBOX_ACCESS_TOKEN: 'test-token',
+        },
+        fetchImpl,
+      }),
+    ).rejects.toThrow('Mapbox could not geocode the origin.')
+  })
+
+  it('surfaces a clean no-route failure when Mapbox returns no directions', async () => {
+    const fetchImpl: typeof fetch = async (input) => {
+      const url = toUrl(input)
+
+      if (url.pathname === '/directions/v5/mapbox/walking/144.9631,-37.8136;144.978,-37.864') {
+        return jsonResponse({
+          code: 'Ok',
+          routes: [],
+        })
+      }
+
+      throw new Error(`Unexpected request: ${url}`)
+    }
+
+    await expect(
+      estimateMapboxRoute({
+        origin: '144.9631,-37.8136',
+        destination: '144.978,-37.864',
+      }, {
+        env: {
+          MAPBOX_ACCESS_TOKEN: 'test-token',
+        },
+        fetchImpl,
+      }),
+    ).rejects.toThrow('Mapbox did not return a route for these points.')
   })
 })

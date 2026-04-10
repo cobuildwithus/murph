@@ -1,9 +1,9 @@
 /**
- * Shared Mapbox route estimation helper used by the CLI surface.
+ * Mapbox route estimation owned by the CLI surface.
  *
  * Privacy posture:
  * - the access token stays in env only
- * - forward geocoding stays temporary and is not cached by this helper
+ * - temporary text lookup stays temporary and is not cached by this helper
  * - route geometry is only returned when explicitly requested
  * - elevation, when requested, is approximate and derived from bounded contour samples
  */
@@ -13,16 +13,22 @@ import { z } from 'zod'
 
 const MAPBOX_DIRECTIONS_API_VERSION = 'v5'
 const MAPBOX_GEOCODING_API_VERSION = 'v6'
+const MAPBOX_SEARCH_BOX_API_VERSION = 'v1'
 const DEFAULT_MAPBOX_TIMEOUT_MS = 10_000
 const MAX_MAPBOX_TIMEOUT_MS = 30_000
 const DEFAULT_ELEVATION_QUERY_RADIUS_METERS = 50
 const DEFAULT_ELEVATION_SAMPLE_SPACING_METERS = 500
 const DEFAULT_MAX_ELEVATION_SAMPLES = 16
+const MAX_ELEVATION_QUERY_FEATURES = 50
 const MAX_ELEVATION_SAMPLES = 24
 const MAX_ROUTE_COORDINATES = 25
 const MAX_ROUTE_WAYPOINTS = MAX_ROUTE_COORDINATES - 2
 const coordinateLiteralPattern =
   /^\s*(-?(?:\d+(?:\.\d+)?|\.\d+))\s*,\s*(-?(?:\d+(?:\.\d+)?|\.\d+))\s*$/u
+const likelyWalkingPoiPattern =
+  /\b(trailhead|trail head|hut|shelter|camp(?:site|ground)?|summit|peak|lookout|falls|waterfall|ridge|track|trail|mount|mt\.?|pass|gap|cabin|chalet|lodge)\b/iu
+const likelyAddressPattern =
+  /^\s*\d+[A-Za-z0-9/\-]*\s+/u
 
 export const mapboxRouteProfileValues = [
   'walking',
@@ -46,6 +52,7 @@ const pointSourceSchema = z.enum([
   'coordinates',
   'coordinate-literal',
   'geocoded-query',
+  'search-box-query',
 ])
 const elevationSourceSchema = z.enum(['none', 'mapbox-terrain-v2-contour'])
 
@@ -134,6 +141,7 @@ const providerMetadataSchema = z
     name: z.literal('mapbox'),
     directionsApiVersion: z.literal(MAPBOX_DIRECTIONS_API_VERSION),
     geocodingApiVersion: z.literal(MAPBOX_GEOCODING_API_VERSION),
+    searchBoxApiVersion: z.literal(MAPBOX_SEARCH_BOX_API_VERSION),
     elevationSource: elevationSourceSchema,
   })
   .strict()
@@ -144,6 +152,8 @@ const routePrivacySchema = z
     persistedByTool: z.literal(false),
     geocodingStorage: z.enum(['temporary', 'not-used']),
     geocodedPointCount: z.number().int().nonnegative(),
+    searchBoxStorage: z.enum(['temporary', 'not-used']),
+    searchBoxPointCount: z.number().int().nonnegative(),
     geometryIncluded: z.boolean(),
   })
   .strict()
@@ -173,10 +183,14 @@ interface MapboxRouteDependencies {
 }
 
 interface MapboxGeocodingResponse {
-  features?: MapboxGeocodingFeature[]
+  features?: MapboxLocationFeature[]
 }
 
-interface MapboxGeocodingFeature {
+interface MapboxSearchBoxResponse {
+  features?: MapboxLocationFeature[]
+}
+
+interface MapboxLocationFeature {
   geometry?: {
     coordinates?: [number, number]
   }
@@ -249,6 +263,8 @@ interface ElevationSample {
   longitude: number
 }
 
+class MapboxRoutePointLookupMissError extends Error {}
+
 export async function estimateMapboxRoute(
   rawInput: MapboxRouteEstimateInput,
   dependencies: MapboxRouteDependencies = {},
@@ -267,6 +283,7 @@ export async function estimateMapboxRoute(
   const timeoutMs = resolveMapboxTimeoutMs(env)
   const wantsGeometry = Boolean(input.includeGeometry || input.includeElevation)
   const warnings: string[] = []
+  const profile = input.profile ?? 'walking'
   const resolvedPoints = await resolveRoutePoints({
     accessToken,
     country: input.country,
@@ -274,6 +291,7 @@ export async function estimateMapboxRoute(
     fetchImpl,
     language: input.language,
     origin: input.origin,
+    profile,
     timeoutMs,
     waypoints: input.waypoints ?? [],
   })
@@ -281,7 +299,7 @@ export async function estimateMapboxRoute(
     accessToken,
     fetchImpl,
     points: resolvedPoints,
-    profile: input.profile ?? 'walking',
+    profile,
     timeoutMs,
     wantsGeometry,
   })
@@ -325,9 +343,10 @@ export async function estimateMapboxRoute(
       name: 'mapbox',
       directionsApiVersion: MAPBOX_DIRECTIONS_API_VERSION,
       geocodingApiVersion: MAPBOX_GEOCODING_API_VERSION,
+      searchBoxApiVersion: MAPBOX_SEARCH_BOX_API_VERSION,
       elevationSource: input.includeElevation ? 'mapbox-terrain-v2-contour' : 'none',
     },
-    profile: input.profile ?? 'walking',
+    profile,
     summary: {
       distanceMeters: roundTo(directionsRoute.distance ?? 0, 1),
       distanceKilometers: roundTo((directionsRoute.distance ?? 0) / 1000, 3),
@@ -350,6 +369,10 @@ export async function estimateMapboxRoute(
         ? 'temporary'
         : 'not-used',
       geocodedPointCount: resolvedPoints.filter((point) => point.source === 'geocoded-query').length,
+      searchBoxStorage: resolvedPoints.some((point) => point.source === 'search-box-query')
+        ? 'temporary'
+        : 'not-used',
+      searchBoxPointCount: resolvedPoints.filter((point) => point.source === 'search-box-query').length,
       geometryIncluded: Boolean(input.includeGeometry && geometry),
     },
     warnings,
@@ -365,6 +388,7 @@ async function resolveRoutePoints(input: {
   fetchImpl: typeof fetch
   language?: string
   origin: MapboxRouteLocationInput
+  profile: MapboxRouteProfile
   timeoutMs: number
   waypoints: MapboxRouteLocationInput[]
 }): Promise<ResolvedRoutePoint[]> {
@@ -384,6 +408,7 @@ async function resolveRoutePoints(input: {
         country: input.country,
         fetchImpl: input.fetchImpl,
         language: input.language,
+        profile: input.profile,
         role,
         timeoutMs: input.timeoutMs,
       }),
@@ -398,6 +423,7 @@ async function resolveRoutePoint(
     country?: string[]
     fetchImpl: typeof fetch
     language?: string
+    profile: MapboxRouteProfile
     role: z.infer<typeof pointRoleSchema>
     timeoutMs: number
   },
@@ -411,7 +437,41 @@ async function resolveRoutePoint(
     return buildCoordinatePoint(coordinateLiteral, options.role, 'coordinate-literal')
   }
 
-  return await geocodeRoutePoint(input, options)
+  return await resolveTextRoutePoint(input, options)
+}
+
+async function resolveTextRoutePoint(
+  query: string,
+  input: {
+    accessToken: string
+    country?: string[]
+    fetchImpl: typeof fetch
+    language?: string
+    profile: MapboxRouteProfile
+    role: z.infer<typeof pointRoleSchema>
+    timeoutMs: number
+  },
+): Promise<ResolvedRoutePoint> {
+  const preferSearchBox =
+    input.profile === 'walking' && looksLikeWalkingPoiQuery(query)
+  const lookupOrder = preferSearchBox
+    ? [searchBoxRoutePoint, geocodeRoutePoint]
+    : [geocodeRoutePoint]
+  let firstMiss: MapboxRoutePointLookupMissError | null = null
+
+  for (const lookup of lookupOrder) {
+    try {
+      return await lookup(query, input)
+    } catch (error) {
+      if (!(error instanceof MapboxRoutePointLookupMissError)) {
+        throw error
+      }
+
+      firstMiss ??= error
+    }
+  }
+
+  throw firstMiss ?? new Error(`Mapbox could not resolve the ${input.role}.`)
 }
 
 function buildCoordinatePoint(
@@ -444,6 +504,7 @@ async function geocodeRoutePoint(
     country?: string[]
     fetchImpl: typeof fetch
     language?: string
+    profile: MapboxRouteProfile
     role: z.infer<typeof pointRoleSchema>
     timeoutMs: number
   },
@@ -456,6 +517,10 @@ async function geocodeRoutePoint(
   url.searchParams.set('limit', '1')
   url.searchParams.set('autocomplete', 'false')
   url.searchParams.set('permanent', 'false')
+
+  if (input.profile === 'walking') {
+    url.searchParams.set('entrances', 'true')
+  }
 
   if (input.country && input.country.length > 0) {
     url.searchParams.set('country', input.country.join(','))
@@ -474,7 +539,7 @@ async function geocodeRoutePoint(
   const feature = payload.features?.[0]
 
   if (!feature) {
-    throw new Error(`Mapbox could not geocode the ${input.role}.`)
+    throw new MapboxRoutePointLookupMissError(`Mapbox could not geocode the ${input.role}.`)
   }
 
   const featureCoordinates = readFeatureCoordinates(feature)
@@ -482,7 +547,7 @@ async function geocodeRoutePoint(
     throw new Error(`Mapbox returned an unusable coordinate for the ${input.role}.`)
   }
 
-  const routablePoint = selectRoutablePoint(feature)
+  const routablePoint = selectRoutablePoint(feature, input.profile)
   const displayName = readFeatureDisplayName(feature)
   const accuracy =
     normalizeNullableString(feature.properties?.coordinates?.accuracy) ?? null
@@ -503,8 +568,75 @@ async function geocodeRoutePoint(
   }
 }
 
+async function searchBoxRoutePoint(
+  query: string,
+  input: {
+    accessToken: string
+    country?: string[]
+    fetchImpl: typeof fetch
+    language?: string
+    profile: MapboxRouteProfile
+    role: z.infer<typeof pointRoleSchema>
+    timeoutMs: number
+  },
+): Promise<ResolvedRoutePoint> {
+  const url = new URL(
+    `https://api.mapbox.com/search/searchbox/${MAPBOX_SEARCH_BOX_API_VERSION}/forward`,
+  )
+  url.searchParams.set('q', query)
+  url.searchParams.set('access_token', input.accessToken)
+  url.searchParams.set('limit', '1')
+
+  if (input.country && input.country.length > 0) {
+    url.searchParams.set('country', input.country.join(','))
+  }
+
+  if (input.language) {
+    url.searchParams.set('language', input.language)
+  }
+
+  const payload = await fetchMapboxJson<MapboxSearchBoxResponse>({
+    fetchImpl: input.fetchImpl,
+    timeoutMs: input.timeoutMs,
+    url,
+    requestLabel: `${input.role} search box`,
+  })
+  const feature = payload.features?.[0]
+
+  if (!feature) {
+    throw new MapboxRoutePointLookupMissError(
+      `Mapbox could not find a temporary place match for the ${input.role}.`,
+    )
+  }
+
+  const featureCoordinates = readFeatureCoordinates(feature)
+  if (!featureCoordinates) {
+    throw new Error(`Mapbox returned an unusable coordinate for the ${input.role}.`)
+  }
+
+  const routablePoint = selectRoutablePoint(feature, input.profile)
+  const displayName = readFeatureDisplayName(feature)
+  const accuracy =
+    normalizeNullableString(feature.properties?.coordinates?.accuracy) ?? null
+  const matchType =
+    normalizeNullableString(feature.properties?.feature_type) ?? null
+
+  return {
+    role: input.role,
+    source: 'search-box-query',
+    displayName,
+    longitude: featureCoordinates.longitude,
+    latitude: featureCoordinates.latitude,
+    routableLongitude: routablePoint?.longitude ?? featureCoordinates.longitude,
+    routableLatitude: routablePoint?.latitude ?? featureCoordinates.latitude,
+    accuracy,
+    matchType,
+    routablePointName: normalizeNullableString(routablePoint?.name) ?? null,
+  }
+}
+
 function readFeatureCoordinates(
-  feature: MapboxGeocodingFeature,
+  feature: MapboxLocationFeature,
 ): z.infer<typeof coordinatePointSchema> | null {
   const propertiesCoordinates = feature.properties?.coordinates
   const longitude =
@@ -527,14 +659,25 @@ function readFeatureCoordinates(
 }
 
 function selectRoutablePoint(
-  feature: MapboxGeocodingFeature,
+  feature: MapboxLocationFeature,
+  profile: MapboxRouteProfile,
 ): z.infer<typeof coordinatePointSchema> | null {
   const routablePoints = feature.properties?.coordinates?.routable_points ?? []
-  const selectedPoint =
-    routablePoints.find(
+  const preferredPointNames = profile === 'walking'
+    ? ['entrance', 'default']
+    : ['default', 'entrance']
+  let selectedPoint = routablePoints[0]
+
+  for (const preferredPointName of preferredPointNames) {
+    const matchingPoint = routablePoints.find(
       (point) =>
-        normalizeNullableString(point.name)?.toLowerCase() === 'default',
-    ) ?? routablePoints[0]
+        normalizeNullableString(point.name)?.toLowerCase() === preferredPointName,
+    )
+    if (matchingPoint) {
+      selectedPoint = matchingPoint
+      break
+    }
+  }
 
   if (
     !selectedPoint ||
@@ -551,7 +694,7 @@ function selectRoutablePoint(
   }
 }
 
-function readFeatureDisplayName(feature: MapboxGeocodingFeature): string {
+function readFeatureDisplayName(feature: MapboxLocationFeature): string {
   const fullAddress = normalizeNullableString(feature.properties?.full_address)
   if (fullAddress) {
     return fullAddress
@@ -839,7 +982,7 @@ async function queryElevationAtPoint(input: {
   )
   url.searchParams.set('access_token', input.accessToken)
   url.searchParams.set('radius', String(DEFAULT_ELEVATION_QUERY_RADIUS_METERS))
-  url.searchParams.set('limit', '10')
+  url.searchParams.set('limit', String(MAX_ELEVATION_QUERY_FEATURES))
   url.searchParams.set('layers', 'contour')
   url.searchParams.set('geometry', 'linestring')
 
@@ -855,22 +998,11 @@ async function queryElevationAtPoint(input: {
     return null
   }
 
-  const feature = payload.features?.find((candidate) => {
-    const elevation = candidate.properties?.ele
-    return typeof elevation === 'number' || typeof elevation === 'string'
-  })
-  const candidateElevation = feature?.properties?.ele
+  const elevations = (payload.features ?? [])
+    .map((feature) => parseElevationValue(feature.properties?.ele))
+    .filter((value): value is number => typeof value === 'number')
 
-  if (typeof candidateElevation === 'number') {
-    return candidateElevation
-  }
-
-  if (typeof candidateElevation === 'string') {
-    const parsed = Number.parseFloat(candidateElevation)
-    return Number.isFinite(parsed) ? parsed : null
-  }
-
-  return null
+  return elevations.length > 0 ? Math.max(...elevations) : null
 }
 
 async function fetchMapboxJson<T>(input: {
@@ -967,6 +1099,28 @@ function parseCoordinateLiteral(
 
 function formatCoordinateLiteral(longitude: number, latitude: number): string {
   return `${longitude.toFixed(6)}, ${latitude.toFixed(6)}`
+}
+
+function looksLikeWalkingPoiQuery(value: string): boolean {
+  const normalized = normalizeNullableString(value)
+  if (!normalized || likelyAddressPattern.test(normalized)) {
+    return false
+  }
+
+  return likelyWalkingPoiPattern.test(normalized)
+}
+
+function parseElevationValue(value: number | string | undefined): number | null {
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : null
+  }
+
+  if (typeof value === 'string') {
+    const parsed = Number.parseFloat(value)
+    return Number.isFinite(parsed) ? parsed : null
+  }
+
+  return null
 }
 
 function readMapboxAccessToken(

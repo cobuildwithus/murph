@@ -68,7 +68,7 @@ When you need route distance or duration between two points for a run, walk, rid
 MAPBOX_ACCESS_TOKEN=... vault-cli route estimate "123 Example St, Melbourne VIC" "St Kilda Beach" --profile walking
 ```
 
-Add `--elevation` when you want an approximate elevation summary. Geometry stays omitted unless you opt in with `--geometry`.
+Add `--elevation` when you want an approximate elevation summary. Geometry stays omitted unless you opt in with `--geometry`, and walking lookups can now resolve hiking POIs such as trailheads or huts through temporary Mapbox Search Box fallback without persisting that lookup data in Murph state.
 
 For durable local synthesis that should keep adding up inside the vault, use the derived knowledge wiki commands:
 
