@@ -1,5 +1,3 @@
-"use client";
-
 import { useId, type FormEvent } from "react";
 
 import { Button, buttonVariants } from "@/components/ui/button";

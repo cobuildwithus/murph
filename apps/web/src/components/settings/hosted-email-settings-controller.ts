@@ -23,34 +23,31 @@ export function useHostedEmailSettingsController(input: {
   initialLinkedAccounts: readonly PrivyLinkedAccountLike[];
 }) {
   const { sendCode, state, verifyCode } = useUpdateEmail();
+  const linkedAccounts = input.initialLinkedAccounts;
+  const baseDisplayState = resolveHostedEmailSettingsDisplayState({
+    linkedAccounts,
+  });
   const [code, setCode] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [emailAddress, setEmailAddress] = useState("");
+  const [emailAddress, setEmailAddress] = useState(() => baseDisplayState.currentEmail?.address ?? "");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isSyncingEmailRoute, setIsSyncingEmailRoute] = useState(false);
   const [pendingEmailAddress, setPendingEmailAddress] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [verifiedEmailOverride, setVerifiedEmailOverride] = useState<HostedPrivyEmailAccount | null>(null);
 
-  const linkedAccounts = input.initialLinkedAccounts;
-  const displayState = resolveHostedEmailSettingsDisplayState({
+  const overrideDisplayState = resolveHostedEmailSettingsDisplayState({
     linkedAccounts,
     verifiedEmailOverride,
   });
-  const effectiveCurrentEmail = displayState.currentEmail;
-  const effectiveVerifiedEmail = displayState.currentVerifiedEmail;
-  const normalizedCurrentEmail = displayState.normalizedCurrentEmail;
+  const effectiveCurrentEmail = overrideDisplayState.currentEmail;
+  const effectiveVerifiedEmail = overrideDisplayState.currentVerifiedEmail;
+  const normalizedCurrentEmail = overrideDisplayState.normalizedCurrentEmail;
   const canManageEmail = input.authenticated;
   const isAwaitingCode = state.status === "awaiting-code-input";
   const isSendingCode = state.status === "sending-code";
   const isSubmittingCode = state.status === "submitting-code";
   const isBusy = isSendingCode || isSubmittingCode || isSyncingEmailRoute;
-
-  useEffect(() => {
-    if (!emailAddress && effectiveCurrentEmail?.address) {
-      setEmailAddress(effectiveCurrentEmail.address);
-    }
-  }, [effectiveCurrentEmail?.address, emailAddress]);
 
   useEffect(() => {
     if (isAwaitingCode || isSubmittingCode) {

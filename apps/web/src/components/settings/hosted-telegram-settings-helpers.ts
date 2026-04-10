@@ -28,6 +28,7 @@ export interface HostedTelegramSettingsDisplayState {
 }
 
 export type HostedTelegramSyncMode = "link" | "resync";
+export type HostedTelegramSyncOverride = Pick<HostedPrivyTelegramAccount, "telegramUserId" | "username">;
 
 export interface HostedTelegramSyncPresentation {
   errorMessage: string | null;
@@ -36,11 +37,19 @@ export interface HostedTelegramSyncPresentation {
 }
 
 export function resolveHostedTelegramSettingsDisplayState(input: {
-  syncedTelegramOverride?: HostedPrivyTelegramAccount | null;
+  syncedTelegramOverride?: HostedTelegramSyncOverride | null;
   user: HostedPrivyLinkedAccountContainer | null | undefined;
 }): HostedTelegramSettingsDisplayState {
   return {
-    currentTelegram: input.syncedTelegramOverride ?? extractHostedPrivyTelegramAccount(input.user),
+    currentTelegram: input.syncedTelegramOverride
+      ? {
+          firstName: null,
+          lastName: null,
+          photoUrl: null,
+          telegramUserId: input.syncedTelegramOverride.telegramUserId,
+          username: input.syncedTelegramOverride.username,
+        }
+      : extractHostedPrivyTelegramAccount(input.user),
   };
 }
 

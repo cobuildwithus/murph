@@ -5,11 +5,11 @@ import { useState } from "react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import type { PrivyLinkedAccountLike } from "@/src/lib/hosted-onboarding/privy-shared";
-import type { HostedPrivyTelegramAccount } from "@/src/lib/hosted-onboarding/privy-shared";
 
 import {
   resolveHostedTelegramSettingsDisplayState,
   syncHostedLinkedTelegram,
+  type HostedTelegramSyncOverride,
 } from "./hosted-telegram-settings-helpers";
 import { HostedSettingsSessionState } from "./hosted-settings-session-state";
 import { HostedTelegramSettingsContent } from "./hosted-telegram-settings-sections";
@@ -30,7 +30,7 @@ export function HostedTelegramSettings(props: {
   const [isLinkingTelegram, setIsLinkingTelegram] = useState(false);
   const [isSyncingTelegram, setIsSyncingTelegram] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
-  const [syncedTelegramOverride, setSyncedTelegramOverride] = useState<HostedPrivyTelegramAccount | null>(null);
+  const [syncedTelegramOverride, setSyncedTelegramOverride] = useState<HostedTelegramSyncOverride | null>(null);
 
   const displayState = resolveHostedTelegramSettingsDisplayState({
     syncedTelegramOverride,
@@ -105,13 +105,10 @@ export function HostedTelegramSettings(props: {
 
       if (syncResult) {
         setBotLink(syncResult.botLink);
-        setSyncedTelegramOverride((current) => ({
-          firstName: current?.firstName ?? null,
-          lastName: current?.lastName ?? null,
-          photoUrl: current?.photoUrl ?? null,
+        setSyncedTelegramOverride({
           telegramUserId: syncResult.telegramUserId,
           username: syncResult.telegramUsername,
-        }));
+        });
       }
     } finally {
       setIsSyncingTelegram(false);

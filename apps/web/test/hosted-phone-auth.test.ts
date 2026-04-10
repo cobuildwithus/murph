@@ -357,7 +357,7 @@ describe("HostedPhoneAuth", () => {
   });
 
   it("builds the active verification attempt with a masked phone hint", async () => {
-    const { createHostedPhoneVerificationAttempt } = await import("@/src/components/hosted-onboarding/hosted-phone-auth");
+    const { createHostedPhoneVerificationAttempt } = await import("@/src/components/hosted-onboarding/hosted-phone-auth-support");
 
     assert.deepEqual(
       createHostedPhoneVerificationAttempt("+14155552671"),
@@ -369,7 +369,7 @@ describe("HostedPhoneAuth", () => {
   });
 
   it("prefers the just-submitted phone input over a stale draft value", async () => {
-    const { resolveHostedPhoneSubmission } = await import("@/src/components/hosted-onboarding/hosted-phone-auth");
+    const { resolveHostedPhoneSubmission } = await import("@/src/components/hosted-onboarding/hosted-phone-auth-support");
 
     assert.deepEqual(
       resolveHostedPhoneSubmission({
@@ -388,7 +388,7 @@ describe("HostedPhoneAuth", () => {
     const {
       isHostedPhoneVerificationCodeComplete,
       normalizeHostedPhoneVerificationCode,
-    } = await import("@/src/components/hosted-onboarding/hosted-phone-auth");
+    } = await import("@/src/components/hosted-onboarding/hosted-phone-auth-support");
 
     assert.equal(normalizeHostedPhoneVerificationCode("12 34-56 78"), "123456");
     assert.equal(isHostedPhoneVerificationCodeComplete("12345"), false);
@@ -396,7 +396,7 @@ describe("HostedPhoneAuth", () => {
   });
 
   it("resends from the active attempt number when a verification attempt already exists", async () => {
-    const { resolveHostedPhoneResendTarget } = await import("@/src/components/hosted-onboarding/hosted-phone-auth");
+    const { resolveHostedPhoneResendTarget } = await import("@/src/components/hosted-onboarding/hosted-phone-auth-support");
 
     assert.deepEqual(
       resolveHostedPhoneResendTarget({
@@ -413,7 +413,7 @@ describe("HostedPhoneAuth", () => {
   });
 
   it("falls back to the draft-submit resend path when no active attempt exists", async () => {
-    const { resolveHostedPhoneResendTarget } = await import("@/src/components/hosted-onboarding/hosted-phone-auth");
+    const { resolveHostedPhoneResendTarget } = await import("@/src/components/hosted-onboarding/hosted-phone-auth-support");
 
     assert.deepEqual(
       resolveHostedPhoneResendTarget({
@@ -443,7 +443,7 @@ describe("HostedPhoneAuth", () => {
   });
 
   it("clears the pending action after a failed manual continue finalization attempt", async () => {
-    const { runHostedPrivyFinalizationAttempt } = await import("@/src/components/hosted-onboarding/hosted-phone-auth");
+    const { runHostedPrivyFinalizationAttempt } = await import("@/src/components/hosted-onboarding/hosted-phone-auth-support");
 
     let finalizationState: "idle" | "running" | "completed" = "idle";
     const pendingActions: Array<string | null> = [];
@@ -470,7 +470,7 @@ describe("HostedPhoneAuth", () => {
   });
 
   it("writes a queued confirm mutation when invite confirmation does not finish inline", async () => {
-    const { finalizeInvitePhoneCodeSendConfirmation } = await import("@/src/components/hosted-onboarding/hosted-phone-auth");
+    const { finalizeInvitePhoneCodeSendConfirmation } = await import("@/src/components/hosted-onboarding/hosted-phone-auth-support");
 
     const queued: Array<{ inviteCode: string; kind: "abort" | "confirm"; sendAttemptId: string }> = [];
 
@@ -495,7 +495,7 @@ describe("HostedPhoneAuth", () => {
   });
 
   it("skips queueing when invite confirmation finishes inline", async () => {
-    const { finalizeInvitePhoneCodeSendConfirmation } = await import("@/src/components/hosted-onboarding/hosted-phone-auth");
+    const { finalizeInvitePhoneCodeSendConfirmation } = await import("@/src/components/hosted-onboarding/hosted-phone-auth-support");
 
     const queued: Array<{ inviteCode: string; kind: "abort" | "confirm"; sendAttemptId: string }> = [];
 
@@ -514,7 +514,7 @@ describe("HostedPhoneAuth", () => {
   });
 
   it("queues invite confirmation when the background confirm throws", async () => {
-    const { finalizeInvitePhoneCodeSendConfirmation } = await import("@/src/components/hosted-onboarding/hosted-phone-auth");
+    const { finalizeInvitePhoneCodeSendConfirmation } = await import("@/src/components/hosted-onboarding/hosted-phone-auth-support");
 
     const queued: Array<{ inviteCode: string; kind: "abort" | "confirm"; sendAttemptId: string }> = [];
 
@@ -539,7 +539,7 @@ describe("HostedPhoneAuth", () => {
   });
 
   it("resolves authenticated phone auth recovery states in priority order", async () => {
-    const { resolveHostedAuthenticatedPhoneAuthView } = await import("@/src/components/hosted-onboarding/hosted-phone-auth");
+    const { resolveHostedAuthenticatedPhoneAuthView } = await import("@/src/components/hosted-onboarding/hosted-phone-auth-controller");
 
     assert.equal(
       resolveHostedAuthenticatedPhoneAuthView({
@@ -568,7 +568,7 @@ describe("HostedPhoneAuth", () => {
   });
 
   it("sends active existing-account sign-ins straight to settings", async () => {
-    const { resolveHostedPrivyCompletionRedirectUrl } = await import("@/src/components/hosted-onboarding/hosted-phone-auth");
+    const { resolveHostedPrivyCompletionRedirectUrl } = await import("@/src/components/hosted-onboarding/hosted-phone-auth-support");
 
     assert.equal(
       resolveHostedPrivyCompletionRedirectUrl({

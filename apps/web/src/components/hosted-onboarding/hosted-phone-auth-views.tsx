@@ -1,5 +1,3 @@
-"use client";
-
 import type { ReactNode } from "react";
 import { LoaderCircleIcon } from "lucide-react";
 import type { FormEvent } from "react";
