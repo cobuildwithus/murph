@@ -40,6 +40,18 @@ describe("hosted runner container image contract", () => {
       new URL("../scripts/assemble-runner-bundle.ts", import.meta.url),
       "utf8",
     );
+    const workspaceArtifactsScript = await readFile(
+      new URL("../scripts/runner-bundle/workspace-artifacts.ts", import.meta.url),
+      "utf8",
+    );
+    const runtimeShapeScript = await readFile(
+      new URL("../scripts/runner-bundle/runtime-shape.ts", import.meta.url),
+      "utf8",
+    );
+    const finalBundleScript = await readFile(
+      new URL("../scripts/runner-bundle/final-bundle.ts", import.meta.url),
+      "utf8",
+    );
 
     expect(bundleAssemblyScript).toContain("const runnerBundleDeployRoot = path.join(");
     expect(bundleAssemblyScript).toContain('const shouldSkipBuild = process.argv.includes("--skip-build");');
@@ -49,13 +61,31 @@ describe("hosted runner container image contract", () => {
     expect(bundleAssemblyScript).toContain(
       '} from "./runner-bundle-contract.js";',
     );
+    expect(bundleAssemblyScript).toContain(
+      'import { installPackedRunnerDependencies } from "./runner-bundle/dependency-install.js";',
+    );
+    expect(bundleAssemblyScript).toContain(
+      'import { materializeFinalRunnerBundle } from "./runner-bundle/final-bundle.js";',
+    );
+    expect(bundleAssemblyScript).toContain(
+      'import { runPnpmCommand } from "./runner-bundle/process.js";',
+    );
+    expect(bundleAssemblyScript).toContain(
+      'import {\n  pruneRunnerBundle,\n  rewriteRuntimeBinWrappers,\n  rewriteRuntimePackageManifest,\n} from "./runner-bundle/runtime-shape.js";',
+    );
+    expect(bundleAssemblyScript).toContain(
+      'import {\n  buildHostedRunnerWorkspaceArtifacts,\n  packWorkspacePackageArtifacts,\n  stageHostedRunnerRuntimeArtifact,\n} from "./runner-bundle/workspace-artifacts.js";',
+    );
     expect(bundleAssemblyScript).toContain("runnerBundleDirectoryName,");
     expect(bundleAssemblyScript).toContain("if (!shouldSkipBuild) {");
     expect(bundleAssemblyScript).toContain(
-      "await buildHostedRunnerWorkspaceArtifacts(hostedRunnerBuildPackageNames);",
+      "await buildHostedRunnerWorkspaceArtifacts(hostedRunnerBuildPackageNames, {",
     );
     expect(bundleAssemblyScript).toContain(
-      "await stageHostedRunnerRuntimeArtifact(stagingBundleDir);",
+      "await runPnpmCommand([\"build\"], { cwd: appDir });",
+    );
+    expect(bundleAssemblyScript).toContain(
+      "await stageHostedRunnerRuntimeArtifact(stagingBundleDir, { appDir });",
     );
     expect(bundleAssemblyScript).toContain(
       "await packWorkspacePackageArtifacts(",
@@ -63,12 +93,12 @@ describe("hosted runner container image contract", () => {
     expect(bundleAssemblyScript).toContain(
       "await installPackedRunnerDependencies(",
     );
-    expect(bundleAssemblyScript).toContain(
+    expect(workspaceArtifactsScript).toContain(
       'const recursiveBuildArgs = [',
     );
-    expect(bundleAssemblyScript).toContain('"recursive",');
-    expect(bundleAssemblyScript).toContain('"--workspace-concurrency=1",');
-    expect(bundleAssemblyScript).toContain(
+    expect(workspaceArtifactsScript).toContain('"recursive",');
+    expect(workspaceArtifactsScript).toContain('"--workspace-concurrency=1",');
+    expect(workspaceArtifactsScript).toContain(
       '...packageNames.flatMap((packageName) => ["--filter", packageName]),',
     );
     expect(bundleAssemblyScript).toContain("hostedRunnerBuildPackageNames");
@@ -76,7 +106,7 @@ describe("hosted runner container image contract", () => {
     expect(bundleAssemblyScript).toContain(
       "await materializeFinalRunnerBundle(",
     );
-    expect(bundleAssemblyScript).toContain(
+    expect(finalBundleScript).toContain(
       "await mkdir(finalParentDir, { recursive: true });",
     );
     expect(bundleAssemblyScript).toContain(
@@ -88,23 +118,23 @@ describe("hosted runner container image contract", () => {
     expect(bundleAssemblyScript).toContain(
       "await rewriteRuntimeBinWrappers(stagingBundleDir);",
     );
-    expect(bundleAssemblyScript).toContain(
+    expect(runtimeShapeScript).toContain(
       'removeBundlePathIfPresent(path.join(bundleDir, "README.md"))',
     );
-    expect(bundleAssemblyScript).toContain(
+    expect(runtimeShapeScript).toContain(
       'removeBundlePathIfPresent(path.join(bundleDir, "DEPLOY.md"))',
     );
-    expect(bundleAssemblyScript).toContain(
+    expect(runtimeShapeScript).toContain(
       'removeBundlePathIfPresent(path.join(bundleDir, "LICENSE"))',
     );
-    expect(bundleAssemblyScript).toContain(
+    expect(runtimeShapeScript).toContain(
       'entryName === ".pnpm-workspace-state-v1.json"',
     );
-    expect(bundleAssemblyScript).toContain('entryName === ".modules.yaml"');
-    expect(bundleAssemblyScript).toContain('entryName === "pnpm-lock.yaml"');
-    expect(bundleAssemblyScript).toContain('entryPath.endsWith(".d.ts")');
-    expect(bundleAssemblyScript).toContain('entryPath.endsWith(".map")');
-    expect(bundleAssemblyScript).toContain('entryPath.endsWith(".tsbuildinfo")');
+    expect(runtimeShapeScript).toContain('entryName === ".modules.yaml"');
+    expect(runtimeShapeScript).toContain('entryName === "pnpm-lock.yaml"');
+    expect(runtimeShapeScript).toContain('entryPath.endsWith(".d.ts")');
+    expect(runtimeShapeScript).toContain('entryPath.endsWith(".map")');
+    expect(runtimeShapeScript).toContain('entryPath.endsWith(".tsbuildinfo")');
     expect(bundleAssemblyScript).not.toContain("loadWorkspacePackageIndex");
     expect(bundleAssemblyScript).not.toContain("collectWorkspaceRuntimeClosure");
     expect(bundleAssemblyScript).not.toContain("collectWorkspacePackageNamesFromRoots");
@@ -151,14 +181,14 @@ describe("hosted runner container image contract", () => {
   });
 
   it("prunes pnpm workspace metadata recursively from the staged runner bundle", async () => {
-    const bundleAssemblyScript = await readFile(
-      new URL("../scripts/assemble-runner-bundle.ts", import.meta.url),
+    const runtimeShapeScript = await readFile(
+      new URL("../scripts/runner-bundle/runtime-shape.ts", import.meta.url),
       "utf8",
     );
 
-    expect(bundleAssemblyScript).toContain("await pruneNonRuntimeFiles(bundleDir);");
-    expect(bundleAssemblyScript).toContain("await walkBundleFiles(rootDir, async (entryPath) => {");
-    expect(bundleAssemblyScript).toContain(
+    expect(runtimeShapeScript).toContain("await pruneNonRuntimeFiles(bundleDir);");
+    expect(runtimeShapeScript).toContain("await walkBundleFiles(rootDir, async (entryPath) => {");
+    expect(runtimeShapeScript).toContain(
       'entryName === ".pnpm-workspace-state-v1.json"',
     );
   });
