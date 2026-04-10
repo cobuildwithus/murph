@@ -792,6 +792,10 @@ test('assistant command help describes routing shapes and flat header JSON input
     true,
   )
   assert.equal(
+    run.description?.includes('Telegram, Linq, or email'),
+    true,
+  )
+  assert.equal(
     selfTargetSet.description?.includes(
       'Provide at least one of --participant, --sourceThread, or --deliveryTarget',
     ),

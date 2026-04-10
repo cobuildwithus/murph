@@ -123,18 +123,18 @@ it('builds a navigation-only overview from canonical, raw, and source-root cover
     `${vaultRoot}/research/2026/04/sleep-note.md`,
     '# Sleep note\n\nMagnesium may help.\n',
   )
-  await mkdir(`${vaultRoot}/raw/inbox/imessage/self/2026/04/cap_01`, {
+  await mkdir(`${vaultRoot}/raw/inbox/telegram/self/2026/04/cap_01`, {
     recursive: true,
   })
   await writeFile(
-    `${vaultRoot}/raw/inbox/imessage/self/2026/04/cap_01/envelope.json`,
+    `${vaultRoot}/raw/inbox/telegram/self/2026/04/cap_01/envelope.json`,
     '{}\n',
   )
-  await mkdir(`${vaultRoot}/derived/inbox/imessage/self/2026/04/cap_01`, {
+  await mkdir(`${vaultRoot}/derived/inbox/telegram/self/2026/04/cap_01`, {
     recursive: true,
   })
   await writeFile(
-    `${vaultRoot}/derived/inbox/imessage/self/2026/04/cap_01/summary.md`,
+    `${vaultRoot}/derived/inbox/telegram/self/2026/04/cap_01/summary.md`,
     '# Parsed\n',
   )
   await appendFile(
