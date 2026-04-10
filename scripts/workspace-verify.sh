@@ -470,7 +470,7 @@ run_workspace_package_coverage() {
     run_timed_step \
       "$label" \
       env MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 MURPH_VITEST_MAX_WORKERS="$package_coverage_vitest_max_workers" pnpm exec vitest run --config "packages/cli/vitest.workspace.ts" --coverage
-    return 0
+    return $?
   fi
 
   run_timed_step \
