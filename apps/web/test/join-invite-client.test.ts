@@ -187,7 +187,6 @@ test("phone verification auto-launches checkout exactly once when checkout is ne
   expect(fetchMock).toHaveBeenCalledWith("/api/hosted-onboarding/billing/checkout", expect.objectContaining({
     body: JSON.stringify({
       inviteCode: "invite-code",
-      shareCode: null,
     }),
     method: "POST",
   }));
@@ -250,7 +249,9 @@ test("failed auto checkout falls back to the manual checkout button", async () =
     }));
   vi.stubGlobal("fetch", fetchMock);
 
-  const view = await renderJoinInviteClientForEffects();
+  const view = await renderJoinInviteClientForEffects({
+    shareCode: "share-code",
+  });
   const onCompleted = readHostedInvitePhoneAuthOnCompleted();
 
   await act(async () => {
@@ -271,6 +272,13 @@ test("failed auto checkout falls back to the manual checkout button", async () =
   });
 
   expect(fetchMock).toHaveBeenCalledTimes(2);
+  expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/hosted-onboarding/billing/checkout", expect.objectContaining({
+    body: JSON.stringify({
+      inviteCode: "invite-code",
+      shareCode: "share-code",
+    }),
+    method: "POST",
+  }));
   expect(view.locationAssign).toHaveBeenCalledWith("https://stripe.example.test/retry");
 
   await view.cleanup();
@@ -739,6 +747,7 @@ function createCompletionPayload(stage: HostedPrivyCompletionPayload["stage"]): 
 
 async function renderJoinInviteClientForEffects(input?: {
   initialStatus?: HostedInviteStatusPayload;
+  shareCode?: string | null;
 }) {
   const { document, window } = parseHTML("<html><body><div id='root'></div></body></html>");
   const locationAssign = vi.fn();
@@ -759,7 +768,7 @@ async function renderJoinInviteClientForEffects(input?: {
           },
         }),
         inviteCode: "invite-code",
-        shareCode: null,
+        shareCode: input?.shareCode ?? null,
         sharePreview: null,
       }),
     );
@@ -781,8 +790,8 @@ async function renderJoinInviteClientForEffects(input?: {
 }
 
 function installJoinInviteClientGlobals(
-  window: Record<string, unknown>,
-  document: Record<string, unknown>,
+  window: Window & typeof globalThis,
+  document: Document,
   locationAssign: ReturnType<typeof vi.fn>,
 ) {
   const location = {
@@ -791,7 +800,7 @@ function installJoinInviteClientGlobals(
   const restoreEntries = [
     setJoinInviteClientGlobal("window", window),
     setJoinInviteClientGlobal("document", document),
-    setJoinInviteClientGlobal("location", location as Location),
+    setJoinInviteClientGlobal("location", location),
     setJoinInviteClientGlobal("navigator", window.navigator),
     setJoinInviteClientGlobal("HTMLElement", window.HTMLElement),
     setJoinInviteClientGlobal("Node", window.Node),
@@ -817,7 +826,7 @@ function installJoinInviteClientGlobals(
   };
 }
 
-function setJoinInviteClientGlobal<K extends keyof typeof globalThis>(key: K, value: (typeof globalThis)[K]) {
+function setJoinInviteClientGlobal(key: string, value: unknown) {
   const hadOwnProperty = Object.prototype.hasOwnProperty.call(globalThis, key);
   const previousDescriptor = Object.getOwnPropertyDescriptor(globalThis, key);
 

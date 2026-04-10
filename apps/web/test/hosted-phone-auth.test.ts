@@ -92,7 +92,7 @@ describe("HostedPhoneAuth", () => {
       }),
     );
 
-    assert.match(markup, /You already started signup in this browser/);
+    assert.match(markup, /You already started signup\./);
     assert.match(markup, /Continue signup/);
     assert.match(markup, /Use a different number/);
     assert.doesNotMatch(markup, /Preparing your account/);
@@ -251,7 +251,7 @@ describe("HostedPhoneAuth", () => {
       }),
     );
 
-    assert.match(markup, /You already started signup in this browser/);
+    assert.match(markup, /You already started signup\./);
     assert.match(markup, /Continue signup/);
     assert.match(markup, /Use a different number/);
     assert.ok((markup.match(/h-14/g)?.length ?? 0) >= 2);
@@ -437,7 +437,7 @@ describe("HostedPhoneAuth", () => {
       }),
     );
 
-    assert.match(markup, /You already started signup in this browser/);
+    assert.match(markup, /You already started signup\./);
     assert.match(markup, /Continue signup/);
     assert.doesNotMatch(markup, /Preparing your account/);
   });
@@ -605,15 +605,20 @@ describe("HostedPhoneAuth", () => {
     );
   });
 
-  it("keeps checkout-stage homepage verification on the local join route", async () => {
+  it("sends checkout-stage homepage verification straight to Stripe checkout", async () => {
     vi.resetModules();
 
     const ensureHostedPrivyPhoneReady = vi.fn().mockResolvedValue(undefined);
-    const requestHostedOnboardingJson = vi.fn().mockResolvedValue({
-      inviteCode: "invite-code",
-      joinUrl: "/join/invite-code",
-      stage: "checkout",
-    });
+    const requestHostedOnboardingJson = vi.fn()
+      .mockResolvedValueOnce({
+        inviteCode: "invite-code",
+        joinUrl: "/join/invite-code",
+        stage: "checkout",
+      })
+      .mockResolvedValueOnce({
+        alreadyActive: false,
+        url: "https://stripe.example.test/checkout",
+      });
     const assign = vi.fn();
 
     vi.doMock("@/src/lib/hosted-onboarding/privy-client", () => ({
@@ -625,62 +630,12 @@ describe("HostedPhoneAuth", () => {
         code: string | null = null;
         retryable = false;
       },
-      requestHostedOnboardingJson,
-    }));
-    vi.stubGlobal("window", {
-      location: {
-        assign,
+      requestHostedBillingCheckout(input: { inviteCode: string }) {
+        return requestHostedOnboardingJson({
+          payload: input,
+          url: "/api/hosted-onboarding/billing/checkout",
+        });
       },
-    });
-
-    try {
-      const { finalizeHostedPrivyVerification } = await import("@/src/components/hosted-onboarding/hosted-phone-auth-support");
-
-      await finalizeHostedPrivyVerification({
-        createWallet: vi.fn(),
-        intent: "signup",
-        user: null,
-      });
-    } finally {
-      vi.unstubAllGlobals();
-    }
-
-    assert.equal(ensureHostedPrivyPhoneReady.mock.calls.length, 1);
-    assert.equal(requestHostedOnboardingJson.mock.calls.length, 1);
-    assert.equal(requestHostedOnboardingJson.mock.calls[0]?.[0]?.url, "/api/hosted-onboarding/privy/complete");
-    assert.equal(assign.mock.calls.length, 1);
-    assert.equal(assign.mock.calls[0]?.[0], "/join/invite-code");
-  });
-
-  it("retries hosted completion once when the Privy cookie has not propagated yet", async () => {
-    vi.resetModules();
-
-    const ensureHostedPrivyPhoneReady = vi.fn().mockResolvedValue(undefined);
-    class TestHostedOnboardingApiError extends Error {
-      code: string | null;
-      retryable: boolean;
-
-      constructor(code: string | null, message: string, retryable = false) {
-        super(message);
-        this.code = code;
-        this.retryable = retryable;
-      }
-    }
-    const requestHostedOnboardingJson = vi.fn()
-      .mockRejectedValueOnce(new TestHostedOnboardingApiError("AUTH_REQUIRED", "Verify your phone to continue."))
-      .mockResolvedValueOnce({
-        inviteCode: "invite-code",
-        joinUrl: "/join/invite-code",
-        stage: "checkout",
-      });
-    const assign = vi.fn();
-
-    vi.doMock("@/src/lib/hosted-onboarding/privy-client", () => ({
-      HOSTED_PRIVY_COMPLETION_RETRY_DELAYS_MS: [0, 0],
-      ensureHostedPrivyPhoneReady,
-    }));
-    vi.doMock("@/src/components/hosted-onboarding/client-api", () => ({
-      HostedOnboardingApiError: TestHostedOnboardingApiError,
       requestHostedOnboardingJson,
     }));
     vi.stubGlobal("window", {
@@ -703,8 +658,78 @@ describe("HostedPhoneAuth", () => {
 
     assert.equal(ensureHostedPrivyPhoneReady.mock.calls.length, 1);
     assert.equal(requestHostedOnboardingJson.mock.calls.length, 2);
+    assert.equal(requestHostedOnboardingJson.mock.calls[0]?.[0]?.url, "/api/hosted-onboarding/privy/complete");
+    assert.equal(requestHostedOnboardingJson.mock.calls[1]?.[0]?.url, "/api/hosted-onboarding/billing/checkout");
+    assert.deepEqual(requestHostedOnboardingJson.mock.calls[1]?.[0]?.payload, {
+      inviteCode: "invite-code",
+    });
     assert.equal(assign.mock.calls.length, 1);
-    assert.equal(assign.mock.calls[0]?.[0], "/join/invite-code");
+    assert.equal(assign.mock.calls[0]?.[0], "https://stripe.example.test/checkout");
+  });
+
+  it("retries hosted completion once when the Privy cookie has not propagated yet", async () => {
+    vi.resetModules();
+
+    const ensureHostedPrivyPhoneReady = vi.fn().mockResolvedValue(undefined);
+    class TestHostedOnboardingApiError extends Error {
+      code: string | null;
+      retryable: boolean;
+
+      constructor(code: string | null, message: string, retryable = false) {
+        super(message);
+        this.code = code;
+        this.retryable = retryable;
+      }
+    }
+    const requestHostedOnboardingJson = vi.fn()
+      .mockRejectedValueOnce(new TestHostedOnboardingApiError("AUTH_REQUIRED", "Verify your phone to continue."))
+      .mockResolvedValueOnce({
+        inviteCode: "invite-code",
+        joinUrl: "/join/invite-code",
+        stage: "checkout",
+      })
+      .mockResolvedValueOnce({
+        alreadyActive: false,
+        url: "https://stripe.example.test/retry-checkout",
+      });
+    const assign = vi.fn();
+
+    vi.doMock("@/src/lib/hosted-onboarding/privy-client", () => ({
+      HOSTED_PRIVY_COMPLETION_RETRY_DELAYS_MS: [0, 0],
+      ensureHostedPrivyPhoneReady,
+    }));
+    vi.doMock("@/src/components/hosted-onboarding/client-api", () => ({
+      HostedOnboardingApiError: TestHostedOnboardingApiError,
+      requestHostedBillingCheckout(input: { inviteCode: string }) {
+        return requestHostedOnboardingJson({
+          payload: input,
+          url: "/api/hosted-onboarding/billing/checkout",
+        });
+      },
+      requestHostedOnboardingJson,
+    }));
+    vi.stubGlobal("window", {
+      location: {
+        assign,
+      },
+    });
+
+    try {
+      const { finalizeHostedPrivyVerification } = await import("@/src/components/hosted-onboarding/hosted-phone-auth-support");
+
+      await finalizeHostedPrivyVerification({
+        createWallet: vi.fn(),
+        intent: "signup",
+        user: null,
+      });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+
+    assert.equal(ensureHostedPrivyPhoneReady.mock.calls.length, 1);
+    assert.equal(requestHostedOnboardingJson.mock.calls.length, 3);
+    assert.equal(assign.mock.calls.length, 1);
+    assert.equal(assign.mock.calls[0]?.[0], "https://stripe.example.test/retry-checkout");
   });
 
   it("uses the invite shortcut route for the first invite send-code request", async () => {

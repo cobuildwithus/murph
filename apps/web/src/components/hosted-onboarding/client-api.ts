@@ -26,6 +26,11 @@ export class HostedOnboardingApiError extends Error {
   }
 }
 
+export interface HostedBillingCheckoutResponse {
+  alreadyActive: boolean;
+  url: string | null;
+}
+
 export async function requestHostedOnboardingJson<T>(input: {
   credentials?: RequestCredentials;
   keepalive?: boolean;
@@ -70,6 +75,19 @@ export async function requestHostedOnboardingJson<T>(input: {
   }
 
   return data as T;
+}
+
+export async function requestHostedBillingCheckout(input: {
+  inviteCode: string;
+  shareCode?: string | null;
+}): Promise<HostedBillingCheckoutResponse> {
+  return requestHostedOnboardingJson<HostedBillingCheckoutResponse>({
+    payload: {
+      inviteCode: input.inviteCode,
+      ...(input.shareCode ? { shareCode: input.shareCode } : {}),
+    },
+    url: "/api/hosted-onboarding/billing/checkout",
+  });
 }
 
 async function readOptionalJsonValue(response: Response): Promise<unknown> {

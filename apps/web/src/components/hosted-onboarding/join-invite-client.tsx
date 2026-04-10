@@ -11,7 +11,7 @@ import type {
   HostedPrivyCompletionPayload,
 } from "@/src/lib/hosted-onboarding/types";
 
-import { requestHostedOnboardingJson } from "./client-api";
+import { requestHostedBillingCheckout } from "./client-api";
 import {
   fetchHostedInviteStatus,
   useHostedInviteStatusRefresh,
@@ -120,12 +120,9 @@ export function JoinInviteClient({
     setPendingAction("checkout");
 
     try {
-      const payload = await requestHostedOnboardingJson<{ alreadyActive: boolean; url: string | null }>({
-        payload: {
-          inviteCode,
-          shareCode,
-        },
-        url: "/api/hosted-onboarding/billing/checkout",
+      const payload = await requestHostedBillingCheckout({
+        inviteCode,
+        shareCode,
       });
 
       if (payload.alreadyActive) {
