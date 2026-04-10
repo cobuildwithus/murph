@@ -9,6 +9,7 @@ import { readHostedEmailCapabilities } from "@murphai/hosted-execution";
 import {
   buildHostedRunnerContainerEnv,
   buildHostedRunnerJobRuntimeConfig,
+  buildHostedRunnerResolvedConfig,
 } from "./runner-env.ts";
 import {
   runHostedExecutionJobIsolatedDetailed,
@@ -106,7 +107,9 @@ function buildHostedExecutionJobRuntime(
     ...stripWorkerOnlyRuntimeEnvKeys(requestedRuntime.forwardedEnv),
   };
   const runtimeConfigSource = buildHostedExecutionRuntimeConfigSource(requestedRuntime, forwardedEnv);
-  const emailCapabilities = readHostedEmailCapabilities(forwardedEnv);
+  const emailCapabilities = readHostedEmailCapabilities(
+    buildHostedExecutionEmailCapabilitySource(requestedRuntime.forwardedEnv),
+  );
   const resolvedForwardedEnv: Record<string, string> = {
     ...forwardedEnv,
     HOSTED_EMAIL_INGRESS_READY: emailCapabilities.ingressReady ? "true" : "false",
@@ -116,6 +119,8 @@ function buildHostedExecutionJobRuntime(
   return {
     ...buildHostedRunnerJobRuntimeConfig({
       forwardedEnv: resolvedForwardedEnv,
+      resolvedConfig: requestedRuntime.resolvedConfig
+        ?? buildHostedRunnerResolvedConfig(resolvedForwardedEnv),
       runtimeConfigSource,
       userEnv: normalizeHostedUserEnv(requestedRuntime.userEnv ?? {}, runtimeConfigSource),
       userEnvSource: runtimeConfigSource,
@@ -136,6 +141,25 @@ function stripWorkerOnlyRuntimeEnvKeys(
   }
 
   return filtered;
+}
+
+function buildHostedExecutionEmailCapabilitySource(
+  forwardedEnv: HostedAssistantRuntimeConfig["forwardedEnv"],
+): Readonly<Record<string, string | undefined>> {
+  const source: Record<string, string | undefined> = {};
+
+  for (const [key, value] of Object.entries(process.env)) {
+    source[key] = value;
+  }
+
+  for (const [key, value] of Object.entries(forwardedEnv ?? {})) {
+    if (key === "HOSTED_EMAIL_INGRESS_READY" || key === "HOSTED_EMAIL_SEND_READY") {
+      continue;
+    }
+    source[key] = value;
+  }
+
+  return source;
 }
 
 function buildHostedExecutionRuntimeConfigSource(

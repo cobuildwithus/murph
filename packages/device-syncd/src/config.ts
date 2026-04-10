@@ -26,6 +26,12 @@ export interface LoadedDeviceSyncEnvironment {
   http: DeviceSyncHttpConfig;
 }
 
+export interface ConfiguredDeviceSyncProviderConfigs {
+  garmin?: GarminDeviceSyncProviderConfig;
+  oura?: OuraDeviceSyncProviderConfig;
+  whoop?: WhoopDeviceSyncProviderConfig;
+}
+
 type DeviceSyncEnvSource = Readonly<Record<string, string | undefined>>;
 
 const DEVICE_SYNC_ALLOWED_RETURN_ORIGINS_ENV_KEYS = [
@@ -182,10 +188,18 @@ export function createConsoleDeviceSyncLogger(consoleLike: Console = console): D
 }
 
 export function createConfiguredDeviceSyncProviders(env: DeviceSyncEnvSource): DeviceSyncProvider[] {
+  return createConfiguredDeviceSyncProvidersFromConfigs(
+    readConfiguredDeviceSyncProviderConfigs(env),
+  );
+}
+
+export function createConfiguredDeviceSyncProvidersFromConfigs(
+  configs: ConfiguredDeviceSyncProviderConfigs,
+): DeviceSyncProvider[] {
   const providers: DeviceSyncProvider[] = [];
-  const garminConfig = readConfiguredGarminDeviceSyncProviderConfig(env);
-  const whoopConfig = readConfiguredWhoopDeviceSyncProviderConfig(env);
-  const ouraConfig = readConfiguredOuraDeviceSyncProviderConfig(env);
+  const garminConfig = configs.garmin;
+  const whoopConfig = configs.whoop;
+  const ouraConfig = configs.oura;
 
   if (garminConfig) {
     providers.push(createGarminDeviceSyncProvider(garminConfig));
@@ -200,6 +214,20 @@ export function createConfiguredDeviceSyncProviders(env: DeviceSyncEnvSource): D
   }
 
   return providers;
+}
+
+export function readConfiguredDeviceSyncProviderConfigs(
+  env: DeviceSyncEnvSource,
+): ConfiguredDeviceSyncProviderConfigs {
+  const garmin = readConfiguredGarminDeviceSyncProviderConfig(env);
+  const oura = readConfiguredOuraDeviceSyncProviderConfig(env);
+  const whoop = readConfiguredWhoopDeviceSyncProviderConfig(env);
+
+  return {
+    ...(garmin ? { garmin } : {}),
+    ...(oura ? { oura } : {}),
+    ...(whoop ? { whoop } : {}),
+  };
 }
 
 export function readConfiguredGarminDeviceSyncProviderConfig(

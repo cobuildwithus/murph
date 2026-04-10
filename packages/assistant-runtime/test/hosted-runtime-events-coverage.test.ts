@@ -51,7 +51,10 @@ vi.mock("../src/hosted-runtime/events/telegram.ts", () => ({
 }));
 
 import { executeHostedDispatchEvent } from "../src/hosted-runtime/events.ts";
-import { createHostedRuntimeEffectsPortStub } from "./hosted-runtime-test-helpers.ts";
+import {
+  createHostedRuntimeEffectsPortStub,
+  createHostedRuntimeResolvedConfig,
+} from "./hosted-runtime-test-helpers.ts";
 
 function createRuntime() {
   return {
@@ -67,6 +70,7 @@ function createRuntime() {
       effectsPort: createHostedRuntimeEffectsPortStub(),
       usageExportPort: null,
     },
+    resolvedConfig: createHostedRuntimeResolvedConfig(),
     userEnv: {},
   } as const;
 }

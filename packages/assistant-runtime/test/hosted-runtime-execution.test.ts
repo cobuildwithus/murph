@@ -90,6 +90,7 @@ import {
   completeHostedExecutionAfterCommit,
   executeHostedDispatchForCommit,
 } from "../src/hosted-runtime/execution.ts";
+import { createHostedRuntimeResolvedConfig } from "./hosted-runtime-test-helpers.ts";
 
 const incomingBundle = Uint8Array.from([1, 2, 3]);
 const committedBundle = Uint8Array.from([4, 5, 6]);
@@ -223,6 +224,7 @@ describe("executeHostedDispatchForCommit", () => {
           },
           usageExportPort: null,
         },
+        resolvedConfig: createHostedRuntimeResolvedConfig(),
         userEnv: {
           HOSTED_USER_VERIFIED_EMAIL: "member@example.com",
         },
@@ -389,6 +391,7 @@ describe("completeHostedExecutionAfterCommit", () => {
             },
           },
         },
+        resolvedConfig: createHostedRuntimeResolvedConfig(),
         userEnv: {
           HOSTED_USER_VERIFIED_EMAIL: "member@example.com",
         },

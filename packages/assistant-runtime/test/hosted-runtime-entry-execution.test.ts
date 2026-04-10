@@ -117,6 +117,7 @@ import {
   completeHostedExecutionAfterCommit,
   executeHostedDispatchForCommit,
 } from "../src/hosted-runtime/execution.ts";
+import { createHostedRuntimeResolvedConfig } from "./hosted-runtime-test-helpers.ts";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -308,6 +309,7 @@ describe("executeHostedDispatchForCommit", () => {
           },
           usageExportPort: null,
         },
+        resolvedConfig: createHostedRuntimeResolvedConfig(),
         userEnv: {},
       },
       runtimeEnv: {
@@ -401,6 +403,7 @@ describe("completeHostedExecutionAfterCommit", () => {
           },
           usageExportPort: null,
         },
+        resolvedConfig: createHostedRuntimeResolvedConfig(),
         userEnv: {
           HOSTED_USER_VERIFIED_EMAIL: "member@example.com",
         },

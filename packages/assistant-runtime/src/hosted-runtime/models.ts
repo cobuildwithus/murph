@@ -4,6 +4,9 @@ import {
   restoreHostedExecutionContext,
 } from "@murphai/runtime-state/node";
 import type {
+  ConfiguredDeviceSyncProviderConfigs,
+} from "@murphai/device-syncd/config";
+import type {
   HostedAssistantDeliveryEffect,
   HostedExecutionBundleRefState,
   HostedExecutionDispatchRequest,
@@ -19,9 +22,26 @@ export interface HostedExecutionCommitCallback {
   bundleRef: HostedExecutionBundleRefState;
 }
 
+export interface HostedAssistantRuntimeChannelCapabilities {
+  emailSendReady: boolean;
+  telegramBotConfigured: boolean;
+}
+
+export interface HostedAssistantRuntimeDeviceSyncConfig {
+  providerConfigs: ConfiguredDeviceSyncProviderConfigs;
+  publicBaseUrl: string;
+  secret: string;
+}
+
+export interface HostedAssistantRuntimeResolvedConfig {
+  channelCapabilities: HostedAssistantRuntimeChannelCapabilities;
+  deviceSync: HostedAssistantRuntimeDeviceSyncConfig | null;
+}
+
 export interface HostedAssistantRuntimeConfig {
   commitTimeoutMs?: number | null;
   forwardedEnv?: Readonly<Record<string, string>>;
+  resolvedConfig?: HostedAssistantRuntimeResolvedConfig;
   userEnv?: Readonly<Record<string, string>>;
 }
 
@@ -60,6 +80,7 @@ export interface NormalizedHostedAssistantRuntimeConfig {
   commitTimeoutMs: number | null;
   forwardedEnv: Record<string, string>;
   platform: HostedRuntimePlatform;
+  resolvedConfig: HostedAssistantRuntimeResolvedConfig;
   userEnv: Record<string, string>;
 }
 

@@ -46,10 +46,6 @@ test('assistant-runtime depends on the canonical engine and operator-config owne
   )
   assert.match(
     hostedContextSource,
-    /from "@murphai\/operator-config\/text\/shared"/,
-  )
-  assert.match(
-    hostedContextSource,
     /from "@murphai\/vault-usecases\/vault-services"/,
   )
   assert.match(

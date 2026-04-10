@@ -48,7 +48,7 @@ export async function executeHostedDispatchForCommit(input: {
   restored: HostedRestoredExecutionContext;
   runtime: Pick<
     NormalizedHostedAssistantRuntimeConfig,
-    "commitTimeoutMs" | "platform" | "userEnv"
+    "commitTimeoutMs" | "platform" | "resolvedConfig" | "userEnv"
   >;
   runtimeEnv: Readonly<Record<string, string>>;
 }): Promise<HostedCommittedExecutionState> {
@@ -72,10 +72,10 @@ export async function executeHostedDispatchForCommit(input: {
     dispatch: input.request.dispatch,
     executionContext: input.executionContext,
     requestId: input.request.dispatch.eventId,
+    resolvedConfig: input.runtime.resolvedConfig,
     skipAssistantAutomation: input.request.dispatch.event.kind === "member.activated"
       && dispatchMetrics.bootstrapResult?.assistantConfigured === false,
     timeoutMs: input.runtime.commitTimeoutMs,
-    runtimeEnv: input.runtimeEnv,
     vaultRoot: input.restored.vaultRoot,
   });
   const committedSnapshot = await snapshotHostedExecutionContext({
@@ -127,7 +127,7 @@ export async function completeHostedExecutionAfterCommit(input: {
   run?: HostedExecutionRunContext | null;
   runtime: Pick<
     NormalizedHostedAssistantRuntimeConfig,
-    "commitTimeoutMs" | "platform" | "userEnv"
+    "commitTimeoutMs" | "platform" | "resolvedConfig" | "userEnv"
   >;
   restored: HostedRestoredExecutionContext;
   committedExecution: HostedCommittedExecutionState;

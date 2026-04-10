@@ -10,7 +10,10 @@ import {
   buildHostedExecutionTelegramMessageReceivedDispatch,
   buildHostedExecutionVaultShareAcceptedDispatch,
 } from "@murphai/hosted-execution";
-import { createHostedRuntimeEffectsPortStub } from "./hosted-runtime-test-helpers.ts";
+import {
+  createHostedRuntimeEffectsPortStub,
+  createHostedRuntimeResolvedConfig,
+} from "./hosted-runtime-test-helpers.ts";
 
 const mocks = vi.hoisted(() => ({
   assistantGatewayLocalMessageSender: Symbol("assistantGatewayLocalMessageSender"),
@@ -75,6 +78,7 @@ function createRuntime(userEnv: Readonly<Record<string, string>> = {}) {
       effectsPort: createHostedRuntimeEffectsPortStub(),
       usageExportPort: null,
     },
+    resolvedConfig: createHostedRuntimeResolvedConfig(),
     userEnv: { ...userEnv },
   } as const;
 }
@@ -129,6 +133,7 @@ describe("executeHostedDispatchEvent", () => {
       {
         OPENAI_API_KEY: "secret",
       },
+      runtime.resolvedConfig,
     );
     expect(mocks.queueAssistantFirstContactWelcome).toHaveBeenCalledWith({
       channel: "linq",
