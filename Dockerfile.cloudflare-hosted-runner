@@ -25,7 +25,6 @@ RUN curl -fsSL --retry 5 --retry-delay 2 \
   && cmake -B build \
     -DCMAKE_BUILD_TYPE=Release \
     -DGGML_NATIVE=OFF \
-    -DGGML_CPU_ARM_ARCH=armv8-a \
   && cmake --build build -j"$(nproc)" --config Release --target whisper-cli \
   && install -d /opt/whisper/bin /opt/whisper/lib \
   && install -Dm755 build/bin/whisper-cli /opt/whisper/bin/whisper-cli \
