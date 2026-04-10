@@ -291,6 +291,24 @@ describe('monorepo release flow coverage audit', () => {
     expect(releaseScript).not.toContain('sh -lc "$CHECK_CMD"')
   })
 
+  it('propagates CLI package coverage failures instead of forcing the release lane green', () => {
+    const workspaceVerify = readFileSync(
+      path.join(repoRoot, 'scripts', 'workspace-verify.sh'),
+      'utf8',
+    )
+    const cliCoverageBranch = workspaceVerify.match(
+      /if \[\[ "\$package_dir" == "packages\/cli" \]\]; then[\s\S]*?^\s*fi$/m,
+    )?.[0]
+
+    expect(cliCoverageBranch).toBeTruthy()
+
+    expect(cliCoverageBranch).toContain(
+      'env MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 MURPH_VITEST_MAX_WORKERS="$package_coverage_vitest_max_workers" pnpm exec vitest run --config "packages/cli/vitest.workspace.ts" --coverage',
+    )
+    expect(cliCoverageBranch).toContain('return $?')
+    expect(cliCoverageBranch).not.toContain('return 0')
+  })
+
   it('keeps the durable storage-boundary docs explicit about canonical product state versus assistant runtime residue', () => {
     const architecture = readFileSync(path.join(repoRoot, 'ARCHITECTURE.md'), 'utf8')
     const readme = readFileSync(path.join(repoRoot, 'README.md'), 'utf8')
