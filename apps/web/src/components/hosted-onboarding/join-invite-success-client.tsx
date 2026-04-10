@@ -7,7 +7,7 @@ import { AlertCircleIcon, CheckCircleIcon, LoaderCircleIcon } from "lucide-react
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import type { HostedInviteStatusPayload } from "@/src/lib/hosted-onboarding/types";
 
 import { useHostedInviteStatusRefresh } from "./invite-status-client";
@@ -51,45 +51,43 @@ export function JoinInviteSuccessClient({
   const successState = resolveHostedInviteSuccessState(status);
 
   return (
-    <main className="grid min-h-screen place-items-center px-5 py-12">
-      <Card className="w-full max-w-xl shadow-sm">
-        <CardHeader className="gap-5">
-          <div className="flex h-12 w-12 items-center justify-center rounded bg-olive/10">
-            {successState.variant === "active" ? (
-              <CheckCircleIcon className="h-6 w-6 text-olive" />
-            ) : successState.variant === "pending" ? (
-              <LoaderCircleIcon className="h-6 w-6 animate-spin text-olive" />
-            ) : (
-              <AlertCircleIcon className="h-6 w-6 text-olive" />
-            )}
+    <>
+      <CardHeader className="gap-5">
+        <div className="flex h-12 w-12 items-center justify-center rounded bg-olive/10">
+          {successState.variant === "active" ? (
+            <CheckCircleIcon className="h-6 w-6 text-olive" />
+          ) : successState.variant === "pending" ? (
+            <LoaderCircleIcon className="h-6 w-6 animate-spin text-olive" />
+          ) : (
+            <AlertCircleIcon className="h-6 w-6 text-olive" />
+          )}
+        </div>
+        <div className="space-y-5">
+          <CardTitle className="text-4xl font-bold tracking-tight text-stone-900 md:text-5xl">
+            {successState.title}
+          </CardTitle>
+          <CardDescription className="leading-relaxed text-stone-500">{successState.description}</CardDescription>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {successState.pending ? (
+          <div className="rounded-xl border border-olive/20 bg-olive/5 px-5 py-4 text-sm leading-relaxed text-olive">
+            We&apos;ll keep checking automatically and your invite page will switch over as soon as setup finishes.
           </div>
-          <div className="space-y-5">
-            <CardTitle className="text-4xl font-bold tracking-tight text-stone-900 md:text-5xl">
-              {successState.title}
-            </CardTitle>
-            <CardDescription className="leading-relaxed text-stone-500">{successState.description}</CardDescription>
-          </div>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {successState.pending ? (
-            <div className="rounded-xl border border-olive/20 bg-olive/5 px-5 py-4 text-sm leading-relaxed text-olive">
-              We&apos;ll keep checking automatically and your invite page will switch over as soon as setup finishes.
-            </div>
-          ) : null}
+        ) : null}
 
-          {errorMessage ? (
-            <Alert variant="destructive">
-              <AlertTitle>Unable to refresh status</AlertTitle>
-              <AlertDescription>{errorMessage}</AlertDescription>
-            </Alert>
-          ) : null}
+        {errorMessage ? (
+          <Alert variant="destructive">
+            <AlertTitle>Unable to refresh status</AlertTitle>
+            <AlertDescription>{errorMessage}</AlertDescription>
+          </Alert>
+        ) : null}
 
-          <Button render={<Link href={href} />} nativeButton={false} size="lg">
-            {successState.buttonLabel}
-          </Button>
-        </CardContent>
-      </Card>
-    </main>
+        <Button render={<Link href={href} />} nativeButton={false} size="lg">
+          {successState.buttonLabel}
+        </Button>
+      </CardContent>
+    </>
   );
 }
 

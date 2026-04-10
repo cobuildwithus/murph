@@ -3,17 +3,11 @@
 import { useEffect, useState, startTransition } from "react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import type { HostedSharePageData } from "@/src/lib/hosted-share/service";
 
 import { requestHostedOnboardingJson } from "../hosted-onboarding/client-api";
-import { ShareLinkPreviewAlert, ShareLinkStageContent } from "./share-link-sections";
-import {
-  buildHostedShareStatusUrl,
-  resolveShareLinkSubtitle,
-  resolveShareLinkTitle,
-} from "./share-link-state";
+import { ShareLinkStageContent } from "./share-link-sections";
+import { buildHostedShareStatusUrl } from "./share-link-state";
 
 interface ShareLinkClientProps {
   initialData: HostedSharePageData;
@@ -89,34 +83,16 @@ export function ShareLinkClient({ initialData, shareCode }: ShareLinkClientProps
   }, [data.share?.acceptedByCurrentMember, data.stage, statusUrl]);
 
   return (
-    <Card className="mx-auto w-full max-w-2xl shadow-sm">
-      <CardHeader className="gap-3">
-          <Badge variant="secondary" className="w-fit">
-            Murph share link
-          </Badge>
-          <div className="space-y-3">
-            <CardTitle className="text-4xl font-bold tracking-tight text-stone-900 md:text-5xl">
-              {resolveShareLinkTitle(data)}
-            </CardTitle>
-            <CardDescription className="leading-relaxed text-stone-500">
-              {resolveShareLinkSubtitle(data)}
-            </CardDescription>
-          </div>
-        </CardHeader>
+    <>
+      {errorMessage ? (
+        <Alert variant="destructive">
+          <AlertTitle>Unable to import the shared bundle</AlertTitle>
+          <AlertDescription>{errorMessage}</AlertDescription>
+        </Alert>
+      ) : null}
 
-      <CardContent className="flex flex-col gap-5">
-        <ShareLinkPreviewAlert data={data} />
-
-        {errorMessage ? (
-          <Alert variant="destructive">
-            <AlertTitle>Unable to import the shared bundle</AlertTitle>
-            <AlertDescription>{errorMessage}</AlertDescription>
-          </Alert>
-        ) : null}
-
-        <ShareLinkStageContent data={data} pendingAction={pendingAction} onAccept={handleAccept} shareCode={shareCode} />
-      </CardContent>
-    </Card>
+      <ShareLinkStageContent data={data} pendingAction={pendingAction} onAccept={handleAccept} shareCode={shareCode} />
+    </>
   );
 }
 

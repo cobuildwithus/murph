@@ -1,6 +1,6 @@
-import { JoinInviteSuccessClient } from "@/src/components/hosted-onboarding/join-invite-success-client";
 import { buildHostedInvitePageData } from "@/src/lib/hosted-onboarding/invite-service";
 import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
+import { JoinInviteSuccessShell } from "@/src/components/hosted-onboarding/join-invite-success-shell";
 
 export default async function JoinInviteSuccessPage(input: {
   params: Promise<{ inviteCode: string }>;
@@ -16,11 +16,5 @@ export default async function JoinInviteSuccessPage(input: {
     inviteCode: decodedInviteCode,
   });
 
-  return (
-    <JoinInviteSuccessClient
-      initialStatus={initialStatus}
-      inviteCode={decodedInviteCode}
-      shareCode={shareCode}
-    />
-  );
+  return <JoinInviteSuccessShell initialStatus={initialStatus} inviteCode={decodedInviteCode} shareCode={shareCode} />;
 }
