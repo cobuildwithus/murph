@@ -4,13 +4,6 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { test, vi } from "vitest";
 
-vi.mock("@privy-io/react-auth", () => ({
-  usePrivy: () => ({
-    authenticated: false,
-    ready: true,
-  }),
-}));
-
 vi.mock("@/src/components/hosted-onboarding/invite-status-client", () => ({
   useHostedInviteStatusRefresh: () => {},
 }));

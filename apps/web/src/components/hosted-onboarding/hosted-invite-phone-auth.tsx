@@ -64,7 +64,6 @@ export function HostedInvitePhoneAuth({
     try {
       await flushPendingInvitePhoneCodeMutation(inviteCode);
       const payload = await requestHostedOnboardingJson<InvitePhoneCodePayload>({
-        auth: "none",
         method: "POST",
         url: `/api/hosted-onboarding/invites/${encodeURIComponent(inviteCode)}/send-code`,
       });

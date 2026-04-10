@@ -25,7 +25,7 @@ interface JoinInviteSharePreviewAlertProps {
 interface JoinInviteStageContentProps {
   awaitingInviteSessionResolution: boolean;
   inviteCode: string;
-  pendingAction: "checkout" | "logout" | "share" | null;
+  pendingAction: "checkout" | "share" | null;
   shareImportState: JoinInviteShareImportState;
   sharePreview: HostedSharePreview | null;
   status: HostedInviteStatusPayload;
@@ -78,7 +78,7 @@ export function JoinInviteStageContent({
   return (
     <>
       {status.session.authenticated && !status.session.matchesInvite ? (
-        <JoinInviteSignedInMismatchAlert pendingAction={pendingAction} onSignOut={onSignOut} />
+        <JoinInviteSignedInMismatchAlert onSignOut={onSignOut} />
       ) : null}
 
       {status.stage === "verify" ? (

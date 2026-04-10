@@ -3,30 +3,16 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   lookupHostedMemberForPrivyIdentity: vi.fn(),
-  revnetEnabled: false,
-  verifyHostedPrivyAccessToken: vi.fn(),
-  verifyHostedPrivyIdentityToken: vi.fn(),
+  resolveHostedPrivySessionFromRequest: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/member-identity-service", () => ({
   lookupHostedMemberForPrivyIdentity: mocks.lookupHostedMemberForPrivyIdentity,
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/revnet", () => ({
-  isHostedOnboardingRevnetEnabled: () => mocks.revnetEnabled,
+vi.mock("@/src/lib/hosted-onboarding/hosted-session", () => ({
+  resolveHostedPrivySessionFromRequest: mocks.resolveHostedPrivySessionFromRequest,
 }));
-
-vi.mock("@/src/lib/hosted-onboarding/privy", async () => {
-  const actual = await vi.importActual<typeof import("@/src/lib/hosted-onboarding/privy")>(
-    "@/src/lib/hosted-onboarding/privy",
-  );
-
-  return {
-    ...actual,
-    verifyHostedPrivyAccessToken: mocks.verifyHostedPrivyAccessToken,
-    verifyHostedPrivyIdentityToken: mocks.verifyHostedPrivyIdentityToken,
-  };
-});
 
 import {
   requireHostedPrivyCompletionRequestAuthContext,
@@ -40,18 +26,21 @@ describe("hosted Privy request auth", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.revnetEnabled = false;
-    mocks.verifyHostedPrivyAccessToken.mockResolvedValue({
-      appId: "cm_app_123",
-      expiration: 1743067800,
-      issuedAt: 1743064200,
-      issuer: "privy.io",
-      sessionId: "session_123",
-      userId: "did:privy:user_123",
-    });
-    mocks.verifyHostedPrivyIdentityToken.mockResolvedValue({
-      id: "did:privy:user_123",
-      linked_accounts: [
+    mocks.resolveHostedPrivySessionFromRequest.mockResolvedValue({
+      identity: {
+        phone: {
+          number: "+14155552671",
+          verifiedAt: 1741194420,
+        },
+        userId: "did:privy:user_123",
+        wallet: {
+          address: "0xD8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
+          chainType: "ethereum",
+          id: "wallet_123",
+          type: "wallet",
+        },
+      },
+      linkedAccounts: [
         {
           latest_verified_at: 1741194420,
           phone_number: "+1 415 555 2671",
@@ -75,59 +64,42 @@ describe("hosted Privy request auth", () => {
           type: "email",
         },
       ],
+      verifiedPrivyUser: {
+        id: "did:privy:user_123",
+      },
     });
     mocks.lookupHostedMemberForPrivyIdentity.mockResolvedValue(
       createHostedMemberLookup(),
     );
   });
 
-  it("returns null when no Privy auth headers are present", async () => {
+  it("returns null when no Privy session cookie is present", async () => {
+    mocks.resolveHostedPrivySessionFromRequest.mockResolvedValue(null);
+
     await expect(
       resolveHostedPrivyRequestAuthContext(
         new Request("https://join.example.test/api/settings/email/sync"),
         prisma,
       ),
     ).resolves.toBeNull();
-    expect(mocks.verifyHostedPrivyAccessToken).not.toHaveBeenCalled();
-    expect(mocks.verifyHostedPrivyIdentityToken).not.toHaveBeenCalled();
+    expect(mocks.lookupHostedMemberForPrivyIdentity).not.toHaveBeenCalled();
   });
 
-  it("requires the full bearer plus identity-token auth header set", async () => {
+  it("requires the hosted Privy identity cookie", async () => {
+    mocks.resolveHostedPrivySessionFromRequest.mockResolvedValue(null);
+
     await expect(
       requireHostedPrivyRequestAuthContext(
-        new Request("https://join.example.test/api/settings/email/sync", {
-          headers: {
-            "x-privy-identity-token": "identity-token",
-          },
-        }),
+        new Request("https://join.example.test/api/settings/email/sync"),
         prisma,
       ),
     ).rejects.toMatchObject({
       code: "AUTH_REQUIRED",
       httpStatus: 401,
     });
-    expect(mocks.verifyHostedPrivyAccessToken).not.toHaveBeenCalled();
-    expect(mocks.verifyHostedPrivyIdentityToken).not.toHaveBeenCalled();
   });
 
-  it("rejects requests when the verified access token and identity token resolve to different users", async () => {
-    mocks.verifyHostedPrivyAccessToken.mockResolvedValue({
-      appId: "cm_app_123",
-      expiration: 1743067800,
-      issuedAt: 1743064200,
-      issuer: "privy.io",
-      sessionId: "session_123",
-      userId: "did:privy:user_other",
-    });
-
-    await expect(requireHostedPrivyRequestAuthContext(createAuthenticatedRequest(), prisma)).rejects.toMatchObject({
-      code: "PRIVY_SESSION_MISMATCH",
-      httpStatus: 403,
-    });
-    expect(mocks.lookupHostedMemberForPrivyIdentity).not.toHaveBeenCalled();
-  });
-
-  it("returns the authenticated hosted member when both Privy tokens verify for the same user", async () => {
+  it("returns the authenticated hosted member when the cookie-backed session verifies", async () => {
     await expect(requireHostedPrivyRequestAuthContext(createAuthenticatedRequest(), prisma)).resolves.toMatchObject({
       memberLookup: {
         matchedBy: [
@@ -142,11 +114,10 @@ describe("hosted Privy request auth", () => {
         id: "did:privy:user_123",
       },
     });
-    expect(mocks.verifyHostedPrivyAccessToken).toHaveBeenCalledWith("signed-access-token");
-    expect(mocks.verifyHostedPrivyIdentityToken).toHaveBeenCalledWith("signed-identity-token");
+    expect(mocks.resolveHostedPrivySessionFromRequest).toHaveBeenCalledWith(expect.any(Request));
   });
 
-  it("allows the completion route to verify the same strict auth contract before a member exists", async () => {
+  it("allows the completion route to verify the cookie-backed session before a member exists", async () => {
     mocks.lookupHostedMemberForPrivyIdentity.mockResolvedValue(null);
 
     await expect(requireHostedPrivyCompletionRequestAuthContext(createAuthenticatedRequest(), prisma)).resolves.toMatchObject({
@@ -167,15 +138,25 @@ describe("hosted Privy request auth", () => {
   });
 
   it("allows the completion route to proceed with a phone-only Privy session when RevNet is disabled", async () => {
-    mocks.verifyHostedPrivyIdentityToken.mockResolvedValue({
-      id: "did:privy:user_123",
-      linked_accounts: [
+    mocks.resolveHostedPrivySessionFromRequest.mockResolvedValue({
+      identity: {
+        phone: {
+          number: "+14155552671",
+          verifiedAt: 1741194420,
+        },
+        userId: "did:privy:user_123",
+        wallet: null,
+      },
+      linkedAccounts: [
         {
           latest_verified_at: 1741194420,
           phone_number: "+1 415 555 2671",
           type: "phone",
         },
       ],
+      verifiedPrivyUser: {
+        id: "did:privy:user_123",
+      },
     });
     mocks.lookupHostedMemberForPrivyIdentity.mockResolvedValue(null);
 
@@ -226,8 +207,7 @@ describe("hosted Privy request auth", () => {
 function createAuthenticatedRequest(): Request {
   return new Request("https://join.example.test/api/settings/email/sync", {
     headers: {
-      authorization: "Bearer signed-access-token",
-      "x-privy-identity-token": "signed-identity-token",
+      cookie: "privy-id-token=signed-identity-token",
     },
   });
 }

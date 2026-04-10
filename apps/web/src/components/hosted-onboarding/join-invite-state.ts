@@ -25,19 +25,10 @@ export function resolveInviteStatusAfterPrivyCompletion(
 }
 
 export function shouldAwaitHostedInviteSessionResolution(input: {
-  authenticated: boolean;
-  ready: boolean;
+  hasCompletedInitialRefresh: boolean;
   status: HostedInviteStatusPayload;
 }): boolean {
-  if (input.status.stage !== "verify" || input.status.session.authenticated) {
-    return false;
-  }
-
-  if (!input.ready) {
-    return true;
-  }
-
-  return input.authenticated;
+  return input.status.stage === "verify" && !input.hasCompletedInitialRefresh;
 }
 
 export function resolveJoinInviteShareStateFromAccept(

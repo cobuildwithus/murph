@@ -1,6 +1,5 @@
 "use client";
 
-import { usePrivy } from "@privy-io/react-auth";
 import { useEffect, useState, startTransition } from "react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -22,7 +21,6 @@ interface ShareLinkClientProps {
 }
 
 export function ShareLinkClient({ initialData, shareCode }: ShareLinkClientProps) {
-  const { authenticated, ready } = usePrivy();
   const [data, setData] = useState(initialData);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState<"accept" | null>(null);
@@ -57,23 +55,6 @@ export function ShareLinkClient({ initialData, shareCode }: ShareLinkClientProps
   }
 
   useEffect(() => {
-    if (!ready || !authenticated) {
-      return;
-    }
-
-    void requestHostedOnboardingJson<HostedSharePageData>({
-      auth: "optional",
-      url: statusUrl,
-    })
-      .then((payload) => {
-        startTransition(() => {
-          setData(payload);
-        });
-      })
-      .catch(() => null);
-  }, [authenticated, ready, statusUrl]);
-
-  useEffect(() => {
     if (!(data.stage === "processing" && data.share?.acceptedByCurrentMember)) {
       return;
     }
@@ -82,7 +63,6 @@ export function ShareLinkClient({ initialData, shareCode }: ShareLinkClientProps
     const poll = async () => {
       try {
         const payload = await requestHostedOnboardingJson<HostedSharePageData>({
-          auth: "optional",
           url: statusUrl,
         });
         if (cancelled) {

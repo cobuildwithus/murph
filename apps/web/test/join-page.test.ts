@@ -7,6 +7,7 @@ import { beforeEach, expect, test, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   buildHostedInvitePageData: vi.fn(),
   buildHostedSharePageData: vi.fn(),
+  getHostedPageAuthSnapshot: vi.fn(),
 }));
 
 vi.mock("@/src/components/hosted-onboarding/join-invite-client", () => ({
@@ -35,21 +36,52 @@ vi.mock("@/src/lib/hosted-onboarding/invite-service", () => ({
   buildHostedInvitePageData: mocks.buildHostedInvitePageData,
 }));
 
+vi.mock("server-only", () => ({}));
+
+vi.mock("@/src/lib/hosted-onboarding/page-auth", () => ({
+  getHostedPageAuthSnapshot: mocks.getHostedPageAuthSnapshot,
+}));
+
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+    authenticated: true,
+    authenticatedMember: {
+      billingStatus: "active",
+      createdAt: new Date("2025-03-27T08:00:00.000Z"),
+      id: "member_123",
+      suspendedAt: null,
+      updatedAt: new Date("2025-03-27T08:00:00.000Z"),
+    },
+    linkedAccounts: [],
+    memberLookup: null,
+    session: {
+      identity: {
+        phone: {
+          number: "+14155552671",
+          verifiedAt: 1741194420,
+        },
+        userId: "did:privy:user_123",
+        wallet: null,
+      },
+      linkedAccounts: [],
+      verifiedPrivyUser: {
+        id: "did:privy:user_123",
+      },
+    },
+  });
   mocks.buildHostedInvitePageData.mockResolvedValue({
     capabilities: {
       billingReady: true,
       phoneAuthReady: true,
     },
     invite: null,
-    member: null,
     session: {
       authenticated: false,
       expiresAt: null,
       matchesInvite: false,
     },
-    stage: "register",
+    stage: "verify",
   });
   mocks.buildHostedSharePageData.mockResolvedValue({
     share: {
@@ -78,11 +110,23 @@ test("JoinInvitePage passes invite status and share data into the client tree", 
   );
 
   expect(mocks.buildHostedInvitePageData).toHaveBeenCalledWith({
-    authenticatedMember: null,
+    authenticatedMember: {
+      billingStatus: "active",
+      createdAt: new Date("2025-03-27T08:00:00.000Z"),
+      id: "member_123",
+      suspendedAt: null,
+      updatedAt: new Date("2025-03-27T08:00:00.000Z"),
+    },
     inviteCode: "invite-code",
   });
   expect(mocks.buildHostedSharePageData).toHaveBeenCalledWith({
-    authenticatedMember: null,
+    authenticatedMember: {
+      billingStatus: "active",
+      createdAt: new Date("2025-03-27T08:00:00.000Z"),
+      id: "member_123",
+      suspendedAt: null,
+      updatedAt: new Date("2025-03-27T08:00:00.000Z"),
+    },
     inviteCode: "invite-code",
     shareCode: "share-code",
   });

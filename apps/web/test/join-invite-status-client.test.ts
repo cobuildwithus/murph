@@ -8,22 +8,14 @@ vi.mock("@/src/components/hosted-onboarding/client-api", () => ({
   requestHostedOnboardingJson: mocks.requestHostedOnboardingJson,
 }));
 
-import {
-  fetchHostedInviteStatus,
-  resolveHostedInviteStatusAuthMode,
-} from "@/src/components/hosted-onboarding/invite-status-client";
+import { fetchHostedInviteStatus } from "@/src/components/hosted-onboarding/invite-status-client";
 
 describe("invite status client", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it("uses required auth once the client is already authenticated", () => {
-    expect(resolveHostedInviteStatusAuthMode(true)).toBe("required");
-    expect(resolveHostedInviteStatusAuthMode(false)).toBe("optional");
-  });
-
-  it("forwards the selected auth mode to the invite status request", async () => {
+  it("requests invite status from the same-origin hosted onboarding route", async () => {
     mocks.requestHostedOnboardingJson.mockResolvedValue({
       capabilities: {
         billingReady: true,
@@ -38,10 +30,9 @@ describe("invite status client", () => {
       stage: "invalid",
     });
 
-    await fetchHostedInviteStatus("invite-code", "required");
+    await fetchHostedInviteStatus("invite-code");
 
     expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
-      auth: "required",
       url: "/api/hosted-onboarding/invites/invite-code/status",
     });
   });
