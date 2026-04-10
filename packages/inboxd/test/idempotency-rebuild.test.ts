@@ -160,7 +160,7 @@ test("processCapture recovers from a crash after vault persistence without dupli
       },
     ],
     raw: {
-      externalPath: "/tmp/messages/chat.db",
+      externalPath: "/tmp/inbox-source/capture.sqlite",
     },
   });
   const captureId = createDeterministicInboxCaptureId(inbound);
