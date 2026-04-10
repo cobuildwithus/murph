@@ -44,6 +44,13 @@ review_gpt_register_dir_preset "bad-code" "bad-code-quality.md" \
   "anti-patterns-and-bad-practices" \
   "code-quality" \
   "bad-code-quality"
+review_gpt_register_dir_preset "bug-hunt" "bug-hunt-high-value-seams.md" \
+  "Bug-finding review focused on Murph's highest-value seams, invariants, and failure modes." \
+  "bugs" \
+  "bug-hunt" \
+  "high-value-seams" \
+  "failure-modes" \
+  "invariant-violations"
 review_gpt_register_dir_preset "legacy-removal" "legacy-removal.md" \
   "Greenfield hard-cut audit for removable legacy compatibility, migrations, and fallback paths." \
   "remove-legacy" \
