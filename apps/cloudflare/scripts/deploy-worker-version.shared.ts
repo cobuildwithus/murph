@@ -340,6 +340,11 @@ function readDeploymentMode(value: string | undefined): DeploymentMode {
 
 function readRolloutPercentage(value: string | undefined): number {
   const normalized = normalizeOptionalString(value) ?? "10";
+
+  if (!/^-?\d+$/u.test(normalized)) {
+    throw new Error("HOSTED_EXECUTION_GRADUAL_ROLLOUT_PERCENTAGE must be an integer between 0 and 100.");
+  }
+
   const parsed = Number.parseInt(normalized, 10);
 
   if (!Number.isInteger(parsed) || parsed < 0 || parsed > 100) {

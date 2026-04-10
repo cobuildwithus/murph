@@ -24,25 +24,18 @@ export function listMissingHostedDeployEnvironment(
     deployWorker: boolean;
   },
 ): string[] {
-  const requiredEnvNames: readonly string[] = input.deployWorker
-    ? [
-        ...REQUIRED_DEPLOY_ENV_NAMES,
-        ...REQUIRED_DEPLOY_WORKER_ENV_NAMES,
-        ...HOSTED_WORKER_REQUIRED_SECRET_NAMES,
-      ]
-    : REQUIRED_DEPLOY_ENV_NAMES;
-  const missing = listMissingRequiredEnvNames(source, requiredEnvNames);
-
-  if (
-    normalizeOptionalString(source.MURPH_WEB_SEARCH_PROVIDER)?.toLowerCase() !== "brave"
-  ) {
-    return missing;
-  }
-
-  return [
-    ...missing,
-    ...listMissingRequiredEnvNames(source, BRAVE_REQUIRED_ENV_NAMES),
+  const requiredEnvNames: readonly string[] = [
+    ...REQUIRED_DEPLOY_ENV_NAMES,
+    ...(input.deployWorker
+      ? [
+          ...REQUIRED_DEPLOY_WORKER_ENV_NAMES,
+          ...HOSTED_WORKER_REQUIRED_SECRET_NAMES,
+          ...(isBraveWebSearchProvider(source) ? BRAVE_REQUIRED_ENV_NAMES : []),
+        ]
+      : []),
   ];
+
+  return listMissingRequiredEnvNames(source, requiredEnvNames);
 }
 
 export function assertHostedDeployEnvironment(
@@ -70,4 +63,8 @@ function listMissingRequiredEnvNames(
   names: readonly string[],
 ): string[] {
   return names.filter((name) => normalizeOptionalString(source[name]) === null);
+}
+
+function isBraveWebSearchProvider(source: EnvSource): boolean {
+  return normalizeOptionalString(source.MURPH_WEB_SEARCH_PROVIDER)?.toLowerCase() === "brave";
 }

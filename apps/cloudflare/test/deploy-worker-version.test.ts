@@ -218,6 +218,26 @@ describe("runHostedWorkerDeployment", () => {
     expect(result.mode).toBe("direct");
   });
 
+  it("rejects rollout percentages with trailing non-digit characters", async () => {
+    const dependencies = createDependencies();
+
+    await expect(runHostedWorkerDeployment({
+      configPath: "/tmp/rendered-wrangler.json",
+      dependencies,
+      env: {
+        HOSTED_EXECUTION_DEPLOYMENT_MODE: "gradual",
+        HOSTED_EXECUTION_GRADUAL_ROLLOUT_PERCENTAGE: "10%",
+      },
+      resultPath: "/tmp/deploy-result.json",
+      secretsFilePath: "/tmp/worker-secrets.json",
+      workerName: "murph-worker",
+    })).rejects.toThrow(
+      "HOSTED_EXECUTION_GRADUAL_ROLLOUT_PERCENTAGE must be an integer between 0 and 100.",
+    );
+
+    expect(dependencies.mkdir).not.toHaveBeenCalled();
+  });
+
   it("keeps deployment and version message overrides scoped to the gradual upload flow", async () => {
     const currentDeployment: DeploymentStatusPayload = {
       created_on: "2026-03-27T00:00:00.000Z",

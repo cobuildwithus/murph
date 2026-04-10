@@ -535,7 +535,7 @@ async function resolveExecutableOnPath(
     return (await isExecutable(command)) ? command : null
   }
 
-  const pathValue = env.PATH ?? process.env.PATH ?? ''
+  const pathValue = env.PATH ?? ''
   const entries = pathValue
     .split(path.delimiter)
     .map((entry) => entry.trim())
