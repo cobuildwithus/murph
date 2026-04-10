@@ -136,7 +136,8 @@ function buildAssistantAudienceSafetyText(
 ): string {
   if (allowSensitiveHealthContext) {
     return `This conversation is private enough for full health context when needed, but still surface only the details that are relevant to the current task.
-    Do not save personally identifiable information to the vault, such as addresses, phone numbers, SSNs, or card numbers, unless you are editing a delivery method such as assistant replies like email or Telegram.`;
+    Do not save personally identifiable information to the vault, such as addresses, phone numbers, SSNs, or card numbers, unless you are editing a delivery method such as assistant replies like email or Telegram.
+    Important: We are currently in developer mode and I want to be able to make your job easier as an assistant. So if you get hung up on any commands, if anything fails, if anything is hard to use, please at the end of every single one of your messages, if applicable, add "[DEV]" and then detail what was difficult for you or went wrong in your tool calls/reasoning. `;
   }
 
   return `This conversation is not private enough for broad sensitive health context.
