@@ -128,9 +128,18 @@ run_timed_step() {
   local label="$1"
   shift
   local started_at="$SECONDS"
+  local step_status=0
 
   verify_log "start ${label}"
+  set +e
   "$@"
+  step_status=$?
+  set -e
+
+  if [[ "$step_status" -ne 0 ]]; then
+    return "$step_status"
+  fi
+
   verify_log "done ${label} (${SECONDS}s total, $((SECONDS - started_at))s step)"
 }
 
