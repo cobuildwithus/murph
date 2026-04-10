@@ -222,6 +222,12 @@ describe("@murphai/contracts public entrypoint", () => {
         },
       },
     });
+    expect(contracts.isWearablePreferenceProvider('oura')).toBe(true);
+    expect(contracts.isWearablePreferenceProvider('fitbit')).toBe(false);
+    expect(contracts.normalizeWearablePreferenceProviders(undefined)).toEqual([]);
+    expect(
+      contracts.normalizeWearablePreferenceProviders(['whoop', 'garmin', 'whoop']),
+    ).toEqual(['garmin', 'whoop']);
     expect(contracts.VAULT_LAYOUT.preferencesDocument).toBe("bank/preferences.json");
   });
 });

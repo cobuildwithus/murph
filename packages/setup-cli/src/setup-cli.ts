@@ -6,6 +6,7 @@ import { inboxRuntimeConfigSchema } from '@murphai/operator-config/inbox-cli-con
 import { resolveAssistantStatePaths } from '@murphai/assistant-engine/assistant-state'
 import { showWearablePreferences } from '@murphai/vault-usecases'
 import {
+  normalizeSetupWearables,
   type SetupAssistantPreset,
   type SetupAssistantProviderPreset,
   type SetupChannel,
@@ -386,7 +387,7 @@ export async function resolveInitialSetupWizardChannels(
 
   if (state !== null) {
     return setupChannelValues.filter((channel) =>
-      state.autoReplyChannels.includes(channel),
+      state.autoReply.some((entry) => entry.channel === channel),
     )
   }
 
@@ -405,10 +406,7 @@ export async function resolveInitialSetupWizardWearables(
 ): Promise<SetupWearable[]> {
   const preferences = await showWearablePreferences(vault)
 
-  return preferences.wearablePreferences.desiredProviders.filter(
-    (provider): provider is SetupWearable =>
-      setupWearableValues.includes(provider as SetupWearable),
-  )
+  return normalizeSetupWearables(preferences.wearablePreferences.desiredProviders)
 }
 
 async function readInitialSetupWizardAutomationState(vault: string) {

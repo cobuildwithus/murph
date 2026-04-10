@@ -1,5 +1,10 @@
 import { z } from 'zod'
 import {
+  normalizeWearablePreferenceProviders,
+  wearablePreferenceProviderValues,
+  type WearablePreferenceProvider,
+} from '@murphai/contracts'
+import {
   assistantApprovalPolicyValues,
   assistantChatProviderValues,
   assistantCronPresetSchema,
@@ -29,11 +34,17 @@ export const whisperModelValues = [
 
 export const whisperModelSchema = z.enum(whisperModelValues)
 
-export const setupChannelValues = ['imessage', 'telegram', 'linq', 'email'] as const
+export const setupChannelValues = ['telegram', 'linq', 'email'] as const
 export const setupChannelSchema = z.enum(setupChannelValues)
 
-export const setupWearableValues = ['garmin', 'oura', 'whoop'] as const
+export const setupWearableValues = wearablePreferenceProviderValues
 export const setupWearableSchema = z.enum(setupWearableValues)
+
+export function normalizeSetupWearables(
+  wearables: readonly SetupWearable[] | null | undefined,
+): SetupWearable[] {
+  return normalizeWearablePreferenceProviders(wearables)
+}
 
 export const setupAssistantPresetValues = [
   'codex',
@@ -247,7 +258,7 @@ export const setupResultSchema = z.object({
 
 export type WhisperModel = z.infer<typeof whisperModelSchema>
 export type SetupChannel = z.infer<typeof setupChannelSchema>
-export type SetupWearable = z.infer<typeof setupWearableSchema>
+export type SetupWearable = WearablePreferenceProvider
 export type SetupAssistantPreset = z.infer<typeof setupAssistantPresetSchema>
 export type SetupAssistantProviderPreset = z.infer<
   typeof setupAssistantProviderPresetSchema

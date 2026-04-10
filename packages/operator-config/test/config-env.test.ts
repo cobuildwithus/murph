@@ -42,6 +42,7 @@ import {
   resolveSetupChannelMissingEnv,
   resolveSetupWearableMissingEnv,
 } from '../src/setup-runtime-env.ts'
+import { normalizeSetupWearables } from '../src/setup-cli-contracts.ts'
 import {
   timeZoneSchema,
   workoutFormatListResultSchema,
@@ -76,7 +77,7 @@ async function withTemporaryProcessEnv(
   }
 }
 
-test('setup env helpers trim values, report missing keys, and surface platform readiness', () => {
+test('setup env helpers trim values, report missing keys, and surface channel readiness', () => {
   const env: NodeJS.ProcessEnv = {
     AGENTMAIL_API_KEY: '  agentmail-key  ',
     LINQ_API_TOKEN: '  linq-token  ',
@@ -88,16 +89,12 @@ test('setup env helpers trim values, report missing keys, and surface platform r
   assert.deepEqual(resolveSetupChannelMissingEnv('telegram', env), [])
   assert.deepEqual(resolveSetupChannelMissingEnv('linq', env), ['LINQ_WEBHOOK_SECRET'])
   assert.deepEqual(resolveSetupChannelMissingEnv('email', env), [])
-  const imessageDarwinStatus = describeSetupChannelStatus('imessage', env, 'darwin')
-  const imessageLinuxStatus = describeSetupChannelStatus('imessage', env, 'linux')
-
-  assert.equal(imessageDarwinStatus.badge, 'ready')
-  assert.equal(imessageDarwinStatus.ready, true)
-  assert.deepEqual(imessageDarwinStatus.missingEnv, [])
-  assert.match(imessageDarwinStatus.detail, /Messages\.app/u)
-  assert.equal(imessageLinuxStatus.badge, 'macOS only')
-  assert.equal(imessageLinuxStatus.ready, false)
-  assert.match(imessageLinuxStatus.detail, /macOS host/u)
+  assert.deepEqual(describeSetupChannelStatus('telegram', env, 'darwin'), {
+    badge: 'ready',
+    detail: 'Bot token is available in the current environment.',
+    missingEnv: [],
+    ready: true,
+  })
 })
 
 test('setup wearables are deduplicated, sorted, and keyed off trimmed env values', () => {
@@ -144,6 +141,10 @@ test('setup wearables are deduplicated, sorted, and keyed off trimmed env values
   assert.match(
     configuredWearables[0]?.detail ?? '',
     /GARMIN_CLIENT_SECRET/u,
+  )
+  assert.deepEqual(
+    normalizeSetupWearables(['whoop', 'garmin', 'whoop']),
+    ['garmin', 'whoop'],
   )
 })
 
@@ -393,17 +394,27 @@ test('representative contract schemas stay wired to the owned setup/operator sea
   )
   assert.deepEqual(
     assistantStatusAutomationSchema.parse({
-      autoReplyBacklogChannels: ['email'],
-      autoReplyChannels: ['telegram'],
-      autoReplyPrimed: true,
-      autoReplyScanCursor: {
-        captureId: 'capture-1',
-        occurredAt: '2026-04-08T12:05:00.000Z',
-      },
+      autoReply: [
+        {
+          channel: 'telegram',
+          cursor: {
+            captureId: 'capture-1',
+            occurredAt: '2026-04-08T12:05:00.000Z',
+          },
+        },
+      ],
       inboxScanCursor: null,
       updatedAt: '2026-04-08T12:10:00.000Z',
-    }).autoReplyChannels,
-    ['telegram'],
+    }).autoReply,
+    [
+      {
+        channel: 'telegram',
+        cursor: {
+          captureId: 'capture-1',
+          occurredAt: '2026-04-08T12:05:00.000Z',
+        },
+      },
+    ],
   )
   assert.deepEqual(
     parseAssistantSessionRecord({
