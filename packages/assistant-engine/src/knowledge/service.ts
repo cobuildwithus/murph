@@ -1,5 +1,9 @@
 import { access, readFile, stat } from 'node:fs/promises'
 import path from 'node:path'
+import {
+  canonicalPathResource,
+  withCanonicalResourceLocks,
+} from '@murphai/core'
 import { resolveAssistantVaultPath } from '@murphai/vault-usecases/assistant-vault-paths'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { loadIntegratedRuntime } from '@murphai/vault-usecases/runtime'
@@ -128,126 +132,132 @@ export async function upsertKnowledgePage(
   const now = dependencies.now ?? (() => new Date())
   const savedAt = now().toISOString()
   const saveText = dependencies.saveText ?? saveKnowledgeText
-  const { graph } = await readDerivedKnowledgeGraphWithIssues(input.vault)
-
   const initialTitle = deriveKnowledgeTitle({
     body: input.body,
     slug: input.slug,
     title: input.title,
   })
   const slug = normalizeKnowledgeSlug(input.slug ?? initialTitle)
-  const existingPage = requireUniqueKnowledgePageBySlug(graph, slug, 'upsert')
-  const title = deriveKnowledgeTitle({
-    body: input.body,
-    existingPage,
-    slug,
-    title: input.title,
-  })
-  const pageType = resolveKnowledgeMetadataTag(
-    input.pageType,
-    existingPage?.pageType,
-    DEFAULT_KNOWLEDGE_PAGE_TYPE,
-  )
-  const status = resolveKnowledgeMetadataTag(
-    input.status,
-    existingPage?.status,
-    DEFAULT_KNOWLEDGE_STATUS,
-  )
-  const existingSourcePaths = existingPage?.sourcePaths ?? []
-  const explicitSourcePaths = normalizeSourcePathInputs(input.sourcePaths)
-  const sourcePaths = await normalizeKnowledgeSourcePaths(
-    input.vault,
-    explicitSourcePaths.length > 0
-      ? orderedUniqueStrings([...existingSourcePaths, ...explicitSourcePaths])
-      : existingSourcePaths,
-  )
-  const normalizedBody = normalizeKnowledgeBody(input.body)
-  const bodyRelatedSlugs = extractKnowledgeRelatedSlugsFromBody({
-    body: input.body,
-    slug,
-  })
-  const explicitRelatedSlugs = normalizeRelatedSlugInputs(input.relatedSlugs, slug)
-  const relatedSlugs = orderedUniqueStrings([
-    ...explicitRelatedSlugs,
-    ...bodyRelatedSlugs,
-  ])
-  const explicitLibrarySlugs = normalizeLibrarySlugInputs(input.librarySlugs)
-  const librarySlugs =
-    input.librarySlugs !== undefined
-      ? explicitLibrarySlugs
-      : input.clearLibrarySlugs === true
-        ? []
-        : existingPage?.librarySlugs ?? []
 
-  await assertKnowledgeLibrarySlugsExist(input.vault, librarySlugs)
-  const markdown = buildKnowledgeMarkdown({
-    body: normalizedBody,
-    compiledAt: savedAt,
-    librarySlugs,
-    pageType,
-    relatedSlugs,
-    slug,
-    sourcePaths,
-    status,
-    summary: summarizeKnowledgeBody(normalizedBody),
-    title,
-  })
-  const pageRelativePath = buildKnowledgePageRelativePath(slug)
+  return await withCanonicalResourceLocks({
+    vaultRoot: input.vault,
+    resources: knowledgeUpsertResources(slug),
+    run: async () => {
+      const { graph } = await readDerivedKnowledgeGraphWithIssues(input.vault)
+      const existingPage = requireUniqueKnowledgePageBySlug(graph, slug, 'upsert')
+      const title = deriveKnowledgeTitle({
+        body: input.body,
+        existingPage,
+        slug,
+        title: input.title,
+      })
+      const pageType = resolveKnowledgeMetadataTag(
+        input.pageType,
+        existingPage?.pageType,
+        DEFAULT_KNOWLEDGE_PAGE_TYPE,
+      )
+      const status = resolveKnowledgeMetadataTag(
+        input.status,
+        existingPage?.status,
+        DEFAULT_KNOWLEDGE_STATUS,
+      )
+      const existingSourcePaths = existingPage?.sourcePaths ?? []
+      const explicitSourcePaths = normalizeSourcePathInputs(input.sourcePaths)
+      const sourcePaths = await normalizeKnowledgeSourcePaths(
+        input.vault,
+        explicitSourcePaths.length > 0
+          ? orderedUniqueStrings([...existingSourcePaths, ...explicitSourcePaths])
+          : existingSourcePaths,
+      )
+      const normalizedBody = normalizeKnowledgeBody(input.body)
+      const bodyRelatedSlugs = extractKnowledgeRelatedSlugsFromBody({
+        body: input.body,
+        slug,
+      })
+      const explicitRelatedSlugs = normalizeRelatedSlugInputs(input.relatedSlugs, slug)
+      const relatedSlugs = orderedUniqueStrings([
+        ...explicitRelatedSlugs,
+        ...bodyRelatedSlugs,
+      ])
+      const explicitLibrarySlugs = normalizeLibrarySlugInputs(input.librarySlugs)
+      const librarySlugs =
+        input.librarySlugs !== undefined
+          ? explicitLibrarySlugs
+          : input.clearLibrarySlugs === true
+            ? []
+            : existingPage?.librarySlugs ?? []
 
-  await saveText({
-    vault: input.vault,
-    relativePath: pageRelativePath,
-    content: markdown,
-    operationType: 'knowledge_page.write',
-    overwrite: true,
-    summary: `Upserted derived knowledge page "${title}".`,
-  })
+      await assertKnowledgeLibrarySlugsExist(input.vault, librarySlugs)
+      const markdown = buildKnowledgeMarkdown({
+        body: normalizedBody,
+        compiledAt: savedAt,
+        librarySlugs,
+        pageType,
+        relatedSlugs,
+        slug,
+        sourcePaths,
+        status,
+        summary: summarizeKnowledgeBody(normalizedBody),
+        title,
+      })
+      const pageRelativePath = buildKnowledgePageRelativePath(slug)
 
-  const indexResult = await rebuildKnowledgeIndex(
-    { vault: input.vault },
-    {
-      now: () => new Date(savedAt),
-      saveText,
+      await saveText({
+        vault: input.vault,
+        relativePath: pageRelativePath,
+        content: markdown,
+        operationType: 'knowledge_page.write',
+        overwrite: true,
+        summary: `Upserted derived knowledge page "${title}".`,
+      })
+
+      const indexResult = await rebuildKnowledgeIndex(
+        { vault: input.vault },
+        {
+          now: () => new Date(savedAt),
+          saveText,
+        },
+      )
+      const refreshedGraph = await readDerivedKnowledgeGraph(input.vault)
+      const page = requireUniqueKnowledgePageBySlug(refreshedGraph, slug, 'reload')
+
+      if (!page) {
+        throw new VaultCliError(
+          'knowledge_upsert_failed',
+          `Knowledge page "${slug}" was written but could not be reloaded from the derived knowledge graph.`,
+        )
+      }
+
+      await appendKnowledgeLogEntry(
+        {
+          action: 'upsert',
+          indexPath: indexResult.indexPath,
+          librarySlugs: page.librarySlugs,
+          occurredAt: savedAt,
+          pagePath: page.relativePath,
+          pageType: page.pageType,
+          relatedSlugs: page.relatedSlugs,
+          slug: page.slug,
+          sourcePaths: page.sourcePaths,
+          status: page.status,
+          title: page.title,
+        },
+        {
+          readTextFile: dependencies.readTextFile,
+          saveText,
+          vault: input.vault,
+        },
+      )
+
+      return {
+        vault: input.vault,
+        indexPath: indexResult.indexPath,
+        page: toKnowledgeMetadata(page),
+        bodyLength: normalizedBody.length,
+        savedAt,
+      }
     },
-  )
-  const refreshedGraph = await readDerivedKnowledgeGraph(input.vault)
-  const page = requireUniqueKnowledgePageBySlug(refreshedGraph, slug, 'reload')
-
-  if (!page) {
-    throw new VaultCliError(
-      'knowledge_upsert_failed',
-      `Knowledge page "${slug}" was written but could not be reloaded from the derived knowledge graph.`,
-    )
-  }
-
-  await appendKnowledgeLogEntry(
-    {
-      action: 'upsert',
-      indexPath: indexResult.indexPath,
-      librarySlugs: page.librarySlugs,
-      occurredAt: savedAt,
-      pagePath: page.relativePath,
-      pageType: page.pageType,
-      relatedSlugs: page.relatedSlugs,
-      slug: page.slug,
-      sourcePaths: page.sourcePaths,
-      status: page.status,
-      title: page.title,
-    },
-    {
-      readTextFile: dependencies.readTextFile,
-      saveText,
-      vault: input.vault,
-    },
-  )
-
-  return {
-    vault: input.vault,
-    indexPath: indexResult.indexPath,
-    page: toKnowledgeMetadata(page),
-    bodyLength: normalizedBody.length,
-    savedAt,
-  }
+  })
 }
 
 export async function searchKnowledgePages(
@@ -326,30 +336,36 @@ export async function rebuildKnowledgeIndex(
   input: KnowledgeMaintenanceInput,
   dependencies: Pick<KnowledgeServiceDependencies, 'now' | 'saveText'> = {},
 ): Promise<KnowledgeIndexRebuildResult> {
-  const graph = await readDerivedKnowledgeGraph(input.vault)
-  const generatedAt = (dependencies.now ?? (() => new Date()))().toISOString()
-  const markdown = renderDerivedKnowledgeIndex(graph, generatedAt)
+  return await withCanonicalResourceLocks({
+    vaultRoot: input.vault,
+    resources: [canonicalPathResource(DERIVED_KNOWLEDGE_INDEX_PATH)],
+    run: async () => {
+      const graph = await readDerivedKnowledgeGraph(input.vault)
+      const generatedAt = (dependencies.now ?? (() => new Date()))().toISOString()
+      const markdown = renderDerivedKnowledgeIndex(graph, generatedAt)
 
-  await (dependencies.saveText ?? saveKnowledgeText)({
-    vault: input.vault,
-    relativePath: DERIVED_KNOWLEDGE_INDEX_PATH,
-    content: markdown,
-    operationType: 'knowledge_index.rebuild',
-    overwrite: true,
-    summary: 'Rebuilt the derived knowledge index.',
+      await (dependencies.saveText ?? saveKnowledgeText)({
+        vault: input.vault,
+        relativePath: DERIVED_KNOWLEDGE_INDEX_PATH,
+        content: markdown,
+        operationType: 'knowledge_index.rebuild',
+        overwrite: true,
+        summary: 'Rebuilt the derived knowledge index.',
+      })
+
+      return {
+        indexPath: DERIVED_KNOWLEDGE_INDEX_PATH,
+        pageCount: graph.nodes.length,
+        pageTypes: orderedUniqueStrings(
+          graph.nodes
+            .map((node: DerivedKnowledgeNode) => node.pageType)
+            .filter((value): value is string => Boolean(value)),
+        ),
+        rebuilt: true,
+        vault: input.vault,
+      }
+    },
   })
-
-  return {
-    indexPath: DERIVED_KNOWLEDGE_INDEX_PATH,
-    pageCount: graph.nodes.length,
-    pageTypes: orderedUniqueStrings(
-      graph.nodes
-        .map((node: DerivedKnowledgeNode) => node.pageType)
-        .filter((value): value is string => Boolean(value)),
-    ),
-    rebuilt: true,
-    vault: input.vault,
-  }
 }
 
 export async function lintKnowledgePages(
@@ -735,6 +751,14 @@ async function appendKnowledgeLogEntry(
     overwrite: true,
     summary: `Appended derived knowledge log entry for "${entry.title}".`,
   })
+}
+
+function knowledgeUpsertResources(slug: string) {
+  return [
+    canonicalPathResource(buildKnowledgePageRelativePath(slug)),
+    canonicalPathResource(DERIVED_KNOWLEDGE_INDEX_PATH),
+    canonicalPathResource(DERIVED_KNOWLEDGE_LOG_PATH),
+  ]
 }
 
 async function defaultReadTextFile(filePath: string): Promise<string> {

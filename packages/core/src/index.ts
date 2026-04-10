@@ -106,6 +106,13 @@ export type {
   CanonicalTextWriteInput,
 } from "./public-mutations.ts";
 export {
+  acquireCanonicalResourceLock,
+  CANONICAL_RESOURCE_LOCK_DIRECTORY,
+  CANONICAL_RESOURCE_LOCK_METADATA_BASENAME,
+  canonicalLogicalResource,
+  canonicalPathResource,
+  dedupeCanonicalResources,
+  withCanonicalResourceLocks,
   acquireCanonicalWriteLock,
   CANONICAL_WRITE_LOCK_DIRECTORY,
   CANONICAL_WRITE_LOCK_METADATA_PATH,
@@ -117,6 +124,9 @@ export {
   readStoredWriteOperation,
 } from "./operations/index.ts";
 export type {
+  CanonicalMutationResource,
+  CanonicalResourceLockHandle,
+  CanonicalResourceLockMetadata,
   CanonicalWriteLockHandle,
   CanonicalWriteLockInspection,
   CanonicalWriteLockMetadata,

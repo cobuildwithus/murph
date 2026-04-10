@@ -1,6 +1,7 @@
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
+import { setTimeout as sleep } from 'node:timers/promises'
 
 import { afterEach, describe, expect, it } from 'vitest'
 
@@ -224,6 +225,92 @@ describe('knowledge service helpers', () => {
     expect(savedLog).toContain('- slug: `hydration`')
   })
 
+  it('serializes concurrent upserts before page, index, and log writes enter saveText', async () => {
+    const vaultRoot = await createKnowledgeVaultRoot('murph-knowledge-concurrent-upsert-')
+    await writeVaultFile(vaultRoot, 'journal/first.md', 'First evidence.\n')
+    await writeVaultFile(vaultRoot, 'journal/second.md', 'Second evidence.\n')
+
+    const firstPageWriteStarted = createDeferred<void>()
+    const releaseFirstPageWrite = createDeferred<void>()
+    let blockedFirstPageWrite = false
+    let activeSaveCalls = 0
+    let maxConcurrentSaveCalls = 0
+    const saveText = async ({
+      relativePath,
+      content,
+    }: {
+      relativePath: string
+      content: string
+    }) => {
+      activeSaveCalls += 1
+      maxConcurrentSaveCalls = Math.max(maxConcurrentSaveCalls, activeSaveCalls)
+
+      try {
+        if (
+          relativePath === 'derived/knowledge/pages/hydration.md' &&
+          blockedFirstPageWrite === false
+        ) {
+          blockedFirstPageWrite = true
+          firstPageWriteStarted.resolve()
+          await releaseFirstPageWrite.promise
+        }
+
+        await writeVaultFile(vaultRoot, relativePath, content)
+      } finally {
+        activeSaveCalls -= 1
+      }
+    }
+
+    const firstUpsert = upsertKnowledgePage(
+      {
+        body: 'Hydration supports recovery.',
+        slug: 'hydration',
+        sourcePaths: ['journal/first.md'],
+        vault: vaultRoot,
+      },
+      {
+        now: () => new Date('2026-04-08T12:00:00.000Z'),
+        saveText,
+      },
+    )
+
+    await firstPageWriteStarted.promise
+
+    let secondFinished = false
+    const secondUpsert = upsertKnowledgePage(
+      {
+        body: 'Hydration supports recovery and sleep.',
+        slug: 'hydration',
+        sourcePaths: ['journal/second.md'],
+        vault: vaultRoot,
+      },
+      {
+        now: () => new Date('2026-04-08T12:05:00.000Z'),
+        saveText,
+      },
+    ).then((result) => {
+      secondFinished = true
+      return result
+    })
+
+    await sleep(50)
+    expect(secondFinished).toBe(false)
+    expect(maxConcurrentSaveCalls).toBe(1)
+
+    releaseFirstPageWrite.resolve()
+
+    const [, secondResult] = await Promise.all([firstUpsert, secondUpsert])
+
+    expect(secondResult.page.sourcePaths).toEqual([
+      'journal/first.md',
+      'journal/second.md',
+    ])
+
+    const savedLog = await readFile(path.join(vaultRoot, DERIVED_KNOWLEDGE_LOG_PATH), 'utf8')
+    expect(savedLog).toContain('## [2026-04-08T12:00:00.000Z] upsert | Hydration')
+    expect(savedLog).toContain('## [2026-04-08T12:05:00.000Z] upsert | Hydration')
+  })
+
   it('lists, searches, gets, and rebuilds knowledge pages with normalized filters', async () => {
     const vaultRoot = await createKnowledgeVaultRoot('murph-knowledge-read-')
     await writeKnowledgePage(
@@ -443,6 +530,21 @@ function expectKnowledgeSourcePathError(sourcePath: string, code: string): void 
   expect(thrown).toMatchObject({
     code,
   })
+}
+
+function createDeferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise
+    reject = rejectPromise
+  })
+
+  return {
+    promise,
+    reject,
+    resolve,
+  }
 }
 
 async function createTempDirectory(prefix: string): Promise<string> {
