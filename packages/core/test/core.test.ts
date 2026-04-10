@@ -4005,3 +4005,34 @@ test("updateVaultSummary rejects invalid metadata and malformed CORE frontmatter
       error instanceof VaultError && error.code === "CORE_FRONTMATTER_INVALID",
   );
 });
+
+test("updateVaultSummary serializes concurrent metadata and CORE rewrites through the shared resource bundle", async () => {
+  const vaultRoot = await makeTempDirectory("murph-vault-summary-parallel");
+  await initializeVault({ vaultRoot });
+
+  await Promise.all([
+    updateVaultSummary({
+      vaultRoot,
+      title: "Parallel Health Vault",
+    }),
+    updateVaultSummary({
+      vaultRoot,
+      timezone: "America/Los_Angeles",
+    }),
+  ]);
+
+  const vaultMetadata = JSON.parse(
+    await fs.readFile(path.join(vaultRoot, "vault.json"), "utf8"),
+  ) as {
+    title: string;
+    timezone: string;
+  };
+  const coreDocument = parseFrontmatterDocument(
+    await fs.readFile(path.join(vaultRoot, "CORE.md"), "utf8"),
+  );
+
+  assert.equal(vaultMetadata.title, "Parallel Health Vault");
+  assert.equal(vaultMetadata.timezone, "America/Los_Angeles");
+  assert.equal(coreDocument.attributes.title, "Parallel Health Vault");
+  assert.equal(coreDocument.attributes.timezone, "America/Los_Angeles");
+});
