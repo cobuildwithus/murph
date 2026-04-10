@@ -1,6 +1,3 @@
-import { preferencesDocumentRelativePath } from "@murphai/contracts";
-
-import { VAULT_LAYOUT } from "./constants.ts";
 import { appendJsonlRecord as appendJsonlRecordInternal } from "./jsonl.ts";
 import {
   addMeal as addMealInternal,
@@ -149,20 +146,6 @@ function withCanonicalInputWriteLock<TInput extends { vaultRoot: string }, TResu
   operation: (input: TInput) => Promise<TResult>,
 ): Promise<TResult> {
   return withCanonicalWriteLock(input.vaultRoot, () => operation(input));
-}
-
-function withCanonicalInputResourceLock<TInput extends { vaultRoot: string }, TResult>(input: {
-  input: TInput;
-  relativePaths: readonly string[];
-  operation: (input: TInput) => Promise<TResult>;
-}): Promise<TResult> {
-  return withCanonicalResourceLocks({
-    vaultRoot: input.input.vaultRoot,
-    resources: dedupeCanonicalResources(
-      input.relativePaths.map((relativePath) => canonicalPathResource(relativePath)),
-    ),
-    run: async () => await input.operation(input.input),
-  });
 }
 
 function buildStaleCanonicalWriteLockIssue(
@@ -329,9 +312,9 @@ export async function applyCanonicalWriteBatch(
 export async function copyRawArtifact(
   input: Parameters<typeof copyRawArtifactInternal>[0],
 ): ReturnType<typeof copyRawArtifactInternal> {
-  return withCanonicalInputResourceLock({
-    input,
-    relativePaths: [
+  return withCanonicalResourceLocks({
+    vaultRoot: input.vaultRoot,
+    resources: dedupeCanonicalResources([
       prepareRawArtifact({
         sourcePath: input.sourcePath,
         owner: input.owner,
@@ -339,8 +322,8 @@ export async function copyRawArtifact(
         role: input.role,
         targetName: input.targetName,
       }).relativePath,
-    ],
-    operation: copyRawArtifactInternal,
+    ].map((relativePath) => canonicalPathResource(relativePath))),
+    run: async () => await copyRawArtifactInternal(input),
   });
 }
 
@@ -461,11 +444,7 @@ export async function deleteEvent(
 export async function updateVaultSummary(
   input: Parameters<typeof updateVaultSummaryInternal>[0],
 ): ReturnType<typeof updateVaultSummaryInternal> {
-  return withCanonicalInputResourceLock({
-    input,
-    relativePaths: [VAULT_LAYOUT.metadata, VAULT_LAYOUT.coreDocument],
-    operation: updateVaultSummaryInternal,
-  });
+  return updateVaultSummaryInternal(input);
 }
 
 export async function repairVault(
@@ -501,21 +480,13 @@ export async function importAssessmentResponse(
 export async function updateWorkoutUnitPreferences(
   input: Parameters<typeof updateWorkoutUnitPreferencesInternal>[0],
 ): ReturnType<typeof updateWorkoutUnitPreferencesInternal> {
-  return withCanonicalInputResourceLock({
-    input,
-    relativePaths: [preferencesDocumentRelativePath],
-    operation: updateWorkoutUnitPreferencesInternal,
-  });
+  return updateWorkoutUnitPreferencesInternal(input);
 }
 
 export async function updateWearablePreferences(
   input: Parameters<typeof updateWearablePreferencesInternal>[0],
 ): ReturnType<typeof updateWearablePreferencesInternal> {
-  return withCanonicalInputResourceLock({
-    input,
-    relativePaths: [preferencesDocumentRelativePath],
-    operation: updateWearablePreferencesInternal,
-  });
+  return updateWearablePreferencesInternal(input);
 }
 
 export async function appendHistoryEvent(
