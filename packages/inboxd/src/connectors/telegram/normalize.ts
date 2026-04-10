@@ -1,7 +1,6 @@
 import {
   buildTelegramThreadId,
   extractTelegramMessage,
-  minimizeTelegramUpdate,
   summarizeTelegramMessage,
   type TelegramFile,
   type TelegramFileBase,
@@ -10,6 +9,7 @@ import {
   type TelegramUpdateLike,
   type TelegramUser,
 } from "@murphai/messaging-ingress/telegram-webhook";
+import { minimizeTelegramUpdate } from "@murphai/messaging-ingress/telegram-webhook-payload";
 
 import type { ChatMessage } from "../chat/message.ts";
 import { createInboundCaptureFromChatMessage } from "../chat/message.ts";

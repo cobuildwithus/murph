@@ -12,6 +12,7 @@ export async function main() {
   await verifyTypecheckTsconfigs(failures);
   await verifyWorkspacePackageExports(failures);
   await verifyAssistantEnginePublicSourceSurface(failures);
+  await verifyFocusedOwnerSourceSurfaces(failures);
   await verifyWorkspacePackageExportTargets(failures);
   await verifyTsconfigPathMappings(failures);
   await verifyWorkspaceImports(failures);
@@ -173,6 +174,59 @@ async function verifyAssistantEnginePublicSourceSurface(failures) {
       failures.push(
         `packages/assistant-engine/src/assistant-provider.ts re-exports ${JSON.stringify(specifier)}; assistant-provider must stay on provider runtime state and recovery instead of leaking CLI access or tool-catalog helpers.`,
       );
+    }
+  }
+}
+
+async function verifyFocusedOwnerSourceSurfaces(failures) {
+  const sourceChecks = [
+    {
+      path: path.join(repoRoot, "packages", "device-syncd", "src", "public-ingress.ts"),
+      failures: [
+        {
+          specifier: "./config.ts",
+          message:
+            "packages/device-syncd/src/public-ingress.ts re-exports ./config.ts; the shared public-ingress seam must stay on provider-agnostic callback and webhook behavior instead of leaking daemon config readers through a second boundary.",
+        },
+        {
+          specifier: "./http.ts",
+          message:
+            "packages/device-syncd/src/public-ingress.ts re-exports ./http.ts; the shared public-ingress seam must not bundle daemon HTTP helpers when @murphai/device-syncd/http already owns that surface.",
+        },
+      ],
+      predicate: sourceReexportsSpecifier,
+    },
+    {
+      path: path.join(repoRoot, "packages", "messaging-ingress", "src", "telegram-webhook.ts"),
+      failures: [
+        {
+          specifier: "./telegram-webhook-payload.ts",
+          message:
+            "packages/messaging-ingress/src/telegram-webhook.ts re-exports ./telegram-webhook-payload.ts; raw Telegram payload parsing must stay on its dedicated owner surface instead of hiding behind the thread-target and summary entrypoint.",
+        },
+      ],
+      predicate: sourceReexportsSpecifier,
+    },
+    {
+      path: path.join(repoRoot, "packages", "query", "src", "knowledge-graph.ts"),
+      failures: [
+        {
+          specifier: "./knowledge-search.ts",
+          message:
+            "packages/query/src/knowledge-graph.ts imports or re-exports ./knowledge-search.ts; derived-knowledge graph loading must stay readable without routing back through the search owner surface.",
+        },
+      ],
+      predicate: sourceMentionsSpecifier,
+    },
+  ];
+
+  for (const check of sourceChecks) {
+    const source = await readFile(check.path, "utf8");
+
+    for (const failure of check.failures) {
+      if (check.predicate(source, failure.specifier)) {
+        failures.push(failure.message);
+      }
     }
   }
 }
@@ -670,6 +724,10 @@ function sourceReexportsSpecifier(source, specifier) {
     `^\\s*export\\s+(?:\\*|\\{[^}]+\\})\\s+from\\s+["']${escapeRegExp(specifier)}["']`,
     "mu",
   ).test(source);
+}
+
+function sourceMentionsSpecifier(source, specifier) {
+  return extractModuleSpecifiers(source).includes(specifier);
 }
 
 function importsNamedBindingsFromSpecifier(source, specifier, bindingNames) {

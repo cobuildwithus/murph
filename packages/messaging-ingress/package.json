@@ -22,6 +22,10 @@
     "./telegram-webhook": {
       "types": "./dist/telegram-webhook.d.ts",
       "default": "./dist/telegram-webhook.js"
+    },
+    "./telegram-webhook-payload": {
+      "types": "./dist/telegram-webhook-payload.d.ts",
+      "default": "./dist/telegram-webhook-payload.js"
     }
   },
   "files": [

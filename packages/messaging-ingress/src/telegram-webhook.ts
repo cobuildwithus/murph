@@ -3,11 +3,6 @@ import {
   toIsoTimestamp,
 } from "./internal.ts";
 
-export {
-  minimizeTelegramUpdate,
-  parseTelegramWebhookUpdate,
-} from "./telegram-webhook-payload.ts";
-
 export interface TelegramUser {
   id: number;
   is_bot?: boolean;

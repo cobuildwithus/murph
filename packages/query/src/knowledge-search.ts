@@ -2,6 +2,7 @@ import {
   DERIVED_KNOWLEDGE_SEARCH_RESULT_FORMAT,
   normalizeKnowledgeTag,
 } from './knowledge-model.ts'
+import { readDerivedKnowledgeGraph } from './knowledge-graph.ts'
 import type {
   DerivedKnowledgeGraph,
   DerivedKnowledgeNode,
@@ -71,6 +72,15 @@ export function searchDerivedKnowledgeGraph(
     query: normalizedQuery,
     total: hits.length,
   }
+}
+
+export async function searchDerivedKnowledgeVault(
+  vaultRoot: string,
+  query: string,
+  filters: DerivedKnowledgeSearchFilters = {},
+): Promise<DerivedKnowledgeSearchResult> {
+  const graph = await readDerivedKnowledgeGraph(vaultRoot)
+  return searchDerivedKnowledgeGraph(graph, query, filters)
 }
 
 function materializeKnowledgeSearchDocument(
