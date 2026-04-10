@@ -144,7 +144,7 @@ describe("cloudflare worker runtime suite", () => {
 
   it("supports direct Durable Object RPC and alarm execution inside the Workers runtime", async () => {
     vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-03-26T12:00:00.000Z"));
+    vi.setSystemTime(new Date("2026-05-26T12:00:00.000Z"));
 
     const userId = "member_alarm";
     await resolveHostedUserCryptoContext(userId);
@@ -152,7 +152,10 @@ describe("cloudflare worker runtime suite", () => {
     const initialStatus = await stub.dispatch(createDispatch("evt_alarm_seed", userId));
 
     expect(initialStatus.lastEventId).toBe("evt_alarm_seed");
-    await expect(runDurableObjectAlarm(stub as never)).resolves.toBeTypeOf("boolean");
+    expect(initialStatus.nextWakeAt).toBe("2026-05-26T12:01:00.000Z");
+
+    vi.setSystemTime(new Date("2026-05-26T12:01:10.000Z"));
+    await expect(runDurableObjectAlarm(stub as never)).resolves.toBe(true);
     await vi.waitFor(async () => {
       await expect(stub.status()).resolves.toMatchObject({
         lastEventId: expect.stringMatching(/^alarm:/u),
