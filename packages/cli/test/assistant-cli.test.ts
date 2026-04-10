@@ -747,12 +747,21 @@ test('default-vault injection skips incomplete command groups', () => {
     applyDefaultVaultToArgs(['assistant', 'self-target', 'list'], '/tmp/default-vault'),
     ['assistant', 'self-target', 'list'],
   )
+  assert.deepEqual(
+    applyDefaultVaultToArgs(
+      ['route', 'estimate', '123 Example St, Melbourne VIC', 'St Kilda Beach'],
+      '/tmp/default-vault',
+    ),
+    ['route', 'estimate', '123 Example St, Melbourne VIC', 'St Kilda Beach'],
+  )
 })
 
-test('manifest marks query as vault-backed and model as exempt', () => {
+test('manifest marks query as vault-backed while model and route are exempt', () => {
   assert.equal(collectVaultRequiredCliDescriptorRootCommandNames().includes('query'), true)
   assert.equal(collectVaultCliDescriptorRootCommandNames().includes('model'), true)
+  assert.equal(collectVaultCliDescriptorRootCommandNames().includes('route'), true)
   assert.equal(collectVaultRequiredCliDescriptorRootCommandNames().includes('model'), false)
+  assert.equal(collectVaultRequiredCliDescriptorRootCommandNames().includes('route'), false)
 })
 
 test('applyDefaultVaultToArgs keeps model outside default-vault injection', () => {

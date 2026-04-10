@@ -123,6 +123,11 @@ function buildAssistantVaultNavigationText(input: {
       : usesDirectCli
       ? "- Use `vault-cli` directly as the canonical Murph runtime surface in this privileged local route."
       : "- Use the canonical `vault-cli` surface when no bound Murph command surface is exposed in this route.",
+    usesBoundTools
+      ? "- When the user gives two points or asks for route distance, duration, traffic time, or approximate elevation, call `vault.cli.run` with `route estimate ...` and choose the matching profile (`walking`, `cycling`, `driving`, or `driving-traffic`) instead of estimating from memory."
+      : usesDirectCli
+      ? "- When the user gives two points or asks for route distance, duration, traffic time, or approximate elevation, use `vault-cli route estimate ...` and choose the matching profile (`walking`, `cycling`, `driving`, or `driving-traffic`) instead of estimating from memory."
+      : "- When route estimation is available, prefer `vault-cli route estimate ...` for distance, duration, traffic time, or approximate elevation between two points, with the matching profile for walking, cycling, or driving, instead of estimating from memory.",
     "- Use canonical query surfaces first for health data: `vault-cli show` for an exact record, `vault-cli list` for filtered recent records, `vault-cli search query` for fuzzy recall, and `vault-cli timeline` for change-over-time or cross-record questions.",
     "- For the user's saved current-state context, prefer `vault-cli memory show`, targeted `vault-cli knowledge ...` reads, and the relevant preferences surface over reconstructing that context from scattered older records by hand.",
     "- For wearable questions, prefer `vault-cli wearables day` or the relevant `vault-cli wearables sleep|activity|recovery|body|sources list` command before inspecting raw events or samples.",
