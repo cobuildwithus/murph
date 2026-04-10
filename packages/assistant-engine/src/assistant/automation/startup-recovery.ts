@@ -7,6 +7,7 @@ import type { AssistantExecutionContext } from '../execution-context.js'
 import type { AssistantOutboxDispatchMode } from '../outbox.js'
 import { listAssistantTurnReceipts } from '../receipts.js'
 import { assistantChatReplyArtifactExists } from './artifacts.js'
+import { readAssistantAutoReplyRetryAt } from './auto-reply-retry.js'
 import { collectAssistantAutoReplyGroup } from './grouping.js'
 import {
   createAssistantAutoReplyGroupContext,
@@ -56,16 +57,19 @@ export async function recoverAssistantAutoRepliesOnStartup(
   }
 
   const groupLimit = Math.min(normalizeScanLimit(input.maxPerScan), 10)
-  const candidates = await listStartupRecoveryCandidates({
+  const candidateListing = await listStartupRecoveryCandidates({
     limit: groupLimit,
     vault: input.vault,
   })
-  if (candidates.length === 0 || input.signal?.aborted) {
-    return createEmptyAutoReplyScanResult()
+  if (candidateListing.candidates.length === 0 || input.signal?.aborted) {
+    return {
+      ...createEmptyAutoReplyScanResult(),
+      nextWakeAt: candidateListing.nextWakeAt,
+    }
   }
 
   const candidateIds = new Set(
-    candidates.map((candidate) => candidate.primaryCaptureId),
+    candidateListing.candidates.map((candidate) => candidate.primaryCaptureId),
   )
   const listed = await input.inboxServices.list({
     vault: input.vault,
@@ -82,10 +86,11 @@ export async function recoverAssistantAutoRepliesOnStartup(
   }
 
   const summary = createEmptyAutoReplyScanResult()
+  summary.nextWakeAt = candidateListing.nextWakeAt
   let recoveredGroups = 0
   input.onEvent?.({
     type: 'reply.scan.started',
-    details: `retrying up to ${candidates.length} recent failed auto-reply capture(s) from a previous automation run`,
+    details: `retrying up to ${candidateListing.candidates.length} recent failed auto-reply capture(s) from a previous automation run`,
   })
 
   for (let index = 0; index < captures.length; index += 1) {
@@ -150,9 +155,15 @@ export async function recoverAssistantAutoRepliesOnStartup(
 async function listStartupRecoveryCandidates(input: {
   limit: number
   vault: string
-}): Promise<AutoReplyRecoveryCandidate[]> {
+}): Promise<{
+  candidates: AutoReplyRecoveryCandidate[]
+  nextWakeAt: string | null
+}> {
   if (input.limit <= 0) {
-    return []
+    return {
+      candidates: [],
+      nextWakeAt: null,
+    }
   }
 
   const receipts = await listAssistantTurnReceipts(
@@ -161,6 +172,8 @@ async function listStartupRecoveryCandidates(input: {
   )
   const seenCaptureIds = new Set<string>()
   const recoverable: AutoReplyRecoveryCandidate[] = []
+  let nextWakeAt: string | null = null
+  const nowMs = Date.now()
 
   for (const receipt of receipts) {
     const metadata = readAutoReplyReceiptMetadata(receipt)
@@ -172,6 +185,11 @@ async function listStartupRecoveryCandidates(input: {
     }
     seenCaptureIds.add(metadata.primaryCaptureId)
     if (receipt.status !== 'failed') {
+      continue
+    }
+    const retryAt = readAssistantAutoReplyRetryAt(receipt)
+    if (retryAt && Date.parse(retryAt) > nowMs) {
+      nextWakeAt = earliestAssistantAutomationWakeAt(nextWakeAt, retryAt)
       continue
     }
     if (hasUnsafeDeliveryEvidence(receipt)) {
@@ -190,7 +208,10 @@ async function listStartupRecoveryCandidates(input: {
     }
   }
 
-  return recoverable
+  return {
+    candidates: recoverable,
+    nextWakeAt,
+  }
 }
 
 function readAutoReplyReceiptMetadata(

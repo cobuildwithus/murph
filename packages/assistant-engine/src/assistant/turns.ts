@@ -157,6 +157,7 @@ export async function finalizeAssistantTurnReceipt(input: {
   deliveryDisposition?: AssistantTurnReceipt['deliveryDisposition']
   deliveryIntentId?: string | null
   error?: AssistantDeliveryError | null
+  metadata?: Record<string, string> | null
   response?: string | null
   status: AssistantTurnReceipt['status']
   turnId: string
@@ -173,7 +174,7 @@ export async function finalizeAssistantTurnReceipt(input: {
       input.status === 'failed'
         ? input.error?.message ?? 'assistant turn failed'
         : null,
-    metadata: {},
+    metadata: input.metadata ?? {},
   })
 
   return updateAssistantTurnReceipt({

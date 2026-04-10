@@ -41,6 +41,10 @@ import {
   writeAssistantChatResultArtifacts,
 } from './artifacts.js'
 import {
+  computeAssistantAutoReplyRetryAt,
+  isAssistantProviderCapacityError,
+} from './auto-reply-retry.js'
+import {
   describeAssistantAutoReplyFailure,
   type AssistantAutoReplyFailureSnapshot,
 } from './failure-observability.js'
@@ -70,8 +74,6 @@ import {
 
 const SELF_AUTHORED_ECHO_WINDOW_MS = 10 * 60 * 1000
 const ASSISTANT_AUTO_REPLY_DEFERRED_RETRY_DELAY_MS = 30 * 1000
-const ASSISTANT_AUTO_REPLY_PROVIDER_RETRY_DELAY_MS = 30 * 1000
-const ASSISTANT_AUTO_REPLY_PROVIDER_CAPACITY_RETRY_DELAY_MS = 5 * 60 * 1000
 const AUTO_REPLY_RECEIPT_CAPTURE_ID_KEY = 'autoReplyCaptureId'
 const AUTO_REPLY_RECEIPT_CAPTURE_IDS_KEY = 'autoReplyCaptureIds'
 
@@ -1017,9 +1019,7 @@ function classifyAssistantAutoReplyFailure(input: {
   if (isAssistantProviderStalledError(input.error)) {
     return createDeferredGroupOutcome({
       captureCount: input.captureCount,
-      nextWakeAt: computeAssistantAutomationRetryAt(
-        ASSISTANT_AUTO_REPLY_PROVIDER_RETRY_DELAY_MS,
-      ),
+      nextWakeAt: computeAssistantAutoReplyRetryAt(input.error),
       reason: AUTO_REPLY_PROVIDER_STALLED_DETAIL,
       stopScanning: true,
     })
@@ -1029,9 +1029,7 @@ function classifyAssistantAutoReplyFailure(input: {
   if (isAssistantProviderConnectionLostError(input.error)) {
     return createDeferredGroupOutcome({
       captureCount: input.captureCount,
-      nextWakeAt: computeAssistantAutomationRetryAt(
-        ASSISTANT_AUTO_REPLY_PROVIDER_RETRY_DELAY_MS,
-      ),
+      nextWakeAt: computeAssistantAutoReplyRetryAt(input.error),
       reason: `${detail} Will retry this capture after the provider reconnects.`,
       stopScanning: true,
     })
@@ -1041,9 +1039,7 @@ function classifyAssistantAutoReplyFailure(input: {
     return createFailedGroupOutcome({
       advanceCursor: false,
       error: input.error,
-      nextWakeAt: computeAssistantAutomationRetryAt(
-        ASSISTANT_AUTO_REPLY_PROVIDER_CAPACITY_RETRY_DELAY_MS,
-      ),
+      nextWakeAt: computeAssistantAutoReplyRetryAt(input.error),
       stopScanning: true,
     })
   }
@@ -1052,33 +1048,6 @@ function classifyAssistantAutoReplyFailure(input: {
     advanceCursor: true,
     error: input.error,
   })
-}
-
-function isAssistantProviderCapacityError(error: unknown): boolean {
-  const message = errorMessage(error).toLowerCase()
-  const code =
-    error &&
-    typeof error === 'object' &&
-    'code' in error &&
-    typeof (error as { code?: unknown }).code === 'string'
-      ? (error as { code: string }).code.toUpperCase()
-      : ''
-  const providerFailure =
-    code.startsWith('ASSISTANT_') ||
-    message.includes('codex cli failed') ||
-    message.includes('assistant provider')
-
-  return providerFailure && (
-    code.includes('RATE') ||
-    code.includes('LIMIT') ||
-    code.includes('QUOTA') ||
-    message.includes('rate limit') ||
-    message.includes('usage limit') ||
-    message.includes('quota') ||
-    message.includes('too many requests') ||
-    message.includes('purchase more credits') ||
-    message.includes('try again at ')
-  )
 }
 
 function classifyAssistantAutoReplyGroupArtifactStatus(

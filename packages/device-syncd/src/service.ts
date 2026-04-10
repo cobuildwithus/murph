@@ -292,7 +292,7 @@ export class DeviceSyncService {
     };
   }
 
-  getNextWakeAt(now = toIsoTimestamp(new Date())): string | null {
+  getNextWakeAt(_now = toIsoTimestamp(new Date())): string | null {
     const nextWakeAt = earliestIsoTimestamp(
       this.store.readNextActiveReconcileAt(),
       this.store.readNextJobWakeAt(),
@@ -302,9 +302,7 @@ export class DeviceSyncService {
       return null;
     }
 
-    return Date.parse(nextWakeAt) <= Date.parse(now)
-      ? addMilliseconds(now, 1_000)
-      : nextWakeAt;
+    return nextWakeAt;
   }
 
   async runSchedulerOnce(): Promise<void> {

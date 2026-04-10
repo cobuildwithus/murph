@@ -184,11 +184,11 @@ function normalizePreferredWakeAt(value: string | null): string | null {
   }
 
   const parsedMs = Date.parse(value);
-  if (!Number.isFinite(parsedMs) || parsedMs <= Date.now()) {
+  if (!Number.isFinite(parsedMs)) {
     return null;
   }
 
-  return new Date(parsedMs).toISOString();
+  return new Date(Math.max(parsedMs, Date.now())).toISOString();
 }
 
 function parseHostedBundleRefJson(value: string | null): HostedExecutionBundleRef | null {

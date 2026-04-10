@@ -37,6 +37,10 @@ import {
   finalizeAssistantTurnReceipt,
 } from './turns.js'
 import {
+  AUTO_REPLY_RECEIPT_RETRY_AT_KEY,
+  computeAssistantAutoReplyRetryAt,
+} from './automation/auto-reply-retry.js'
+import {
   mergeAssistantProviderConfigsForProvider,
   serializeAssistantProviderSessionOptions,
 } from '@murphai/operator-config/assistant/provider-config'
@@ -240,6 +244,13 @@ export async function sendAssistantMessageLocal(
       } catch (error) {
         const normalizedError = normalizeAssistantDeliveryError(error)
         const failedAt = new Date().toISOString()
+        const retryAt =
+          input.turnTrigger === 'automation-auto-reply'
+            ? computeAssistantAutoReplyRetryAt(
+                error,
+                Date.parse(failedAt),
+              )
+            : null
         const failedSession =
           extractRecoveredAssistantSession(error) ?? resolved.session
 
@@ -264,6 +275,12 @@ export async function sendAssistantMessageLocal(
             error: normalizedError,
             response: responseText,
             completedAt: failedAt,
+            metadata:
+              retryAt === null
+                ? null
+                : {
+                    [AUTO_REPLY_RECEIPT_RETRY_AT_KEY]: retryAt,
+                  },
           }),
         )
 
