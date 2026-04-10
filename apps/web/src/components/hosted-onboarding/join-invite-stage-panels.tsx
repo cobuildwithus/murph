@@ -139,16 +139,16 @@ export function JoinInviteBlockedAlert() {
 
 export function JoinInviteCheckoutButton({
   billingReady,
-  pendingAction,
+  checkoutPending,
   onCheckout,
 }: {
   billingReady: boolean;
-  pendingAction: "checkout" | "share" | null;
+  checkoutPending: boolean;
   onCheckout: () => Promise<void>;
 }) {
   return (
-    <Button type="button" onClick={onCheckout} disabled={pendingAction !== null || !billingReady} size="lg">
-      {pendingAction === "checkout"
+    <Button type="button" onClick={onCheckout} disabled={checkoutPending || !billingReady} size="lg">
+      {checkoutPending
         ? "Opening checkout..."
         : billingReady
           ? "Continue to Apple Pay"

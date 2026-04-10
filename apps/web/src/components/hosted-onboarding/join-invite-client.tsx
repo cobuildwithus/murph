@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useEffectEvent, useState } from "react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -18,6 +18,7 @@ import {
 } from "./invite-status-client";
 import {
   resolveInviteStatusAfterPrivyCompletion,
+  resolveJoinInviteStatusFromRefresh,
   resolveJoinInviteSubtitle,
   resolveJoinInviteTitle,
   shouldAwaitHostedInviteSessionResolution,
@@ -49,11 +50,13 @@ export function JoinInviteClient({
   const [pendingAction, setPendingAction] = useState<"checkout" | "share" | null>(null);
   const [statusRefreshErrorMessage, setStatusRefreshErrorMessage] = useState<string | null>(null);
   const [statusRefreshRetryPending, setStatusRefreshRetryPending] = useState(false);
+  const [autoCheckoutArmed, setAutoCheckoutArmed] = useState(false);
 
   const awaitingInviteSessionResolution = shouldAwaitHostedInviteSessionResolution({
     hasCompletedInitialRefresh,
     status,
   });
+  const checkoutPending = autoCheckoutArmed || pendingAction === "checkout";
   const { handleAcceptShare, shareImportState } = useJoinInviteShareImport({
     inviteCode,
     onErrorMessage: setErrorMessage,
@@ -61,6 +64,13 @@ export function JoinInviteClient({
     shareCode,
     statusStage: status.stage,
   });
+
+  function applyRefreshedStatus(payload: HostedInviteStatusPayload) {
+    setStatus((currentStatus) => resolveJoinInviteStatusFromRefresh({
+      nextStatus: payload,
+      status: currentStatus,
+    }));
+  }
 
   useHostedInviteStatusRefresh({
     inviteCode,
@@ -70,7 +80,7 @@ export function JoinInviteClient({
       );
     },
     onStatus: (payload) => {
-      setStatus(payload);
+      applyRefreshedStatus(payload);
       setStatusRefreshErrorMessage(null);
       if (!payload.session.authenticated || payload.stage !== "verify") {
         setHasCompletedInitialRefresh(true);
@@ -81,7 +91,7 @@ export function JoinInviteClient({
 
   async function refreshStatus(): Promise<HostedInviteStatusPayload> {
     const payload = await fetchHostedInviteStatus(inviteCode);
-    setStatus(payload);
+    applyRefreshedStatus(payload);
     setStatusRefreshErrorMessage(null);
     if (!payload.session.authenticated || payload.stage !== "verify") {
       setHasCompletedInitialRefresh(true);
@@ -104,7 +114,8 @@ export function JoinInviteClient({
     }
   }
 
-  async function handleCheckout() {
+  async function startCheckout() {
+    setAutoCheckoutArmed(false);
     setErrorMessage(null);
     setPendingAction("checkout");
 
@@ -134,13 +145,22 @@ export function JoinInviteClient({
     }
   }
 
+  const startAutoCheckout = useEffectEvent(() => {
+    void startCheckout();
+  });
+
+  useEffect(() => {
+    if (!autoCheckoutArmed || !status.capabilities.billingReady || pendingAction !== null) {
+      return;
+    }
+
+    startAutoCheckout();
+  }, [autoCheckoutArmed, pendingAction, status.capabilities.billingReady]);
+
   async function handlePhoneVerified(payload: HostedPrivyCompletionPayload) {
     const nextStatus = resolveInviteStatusAfterPrivyCompletion(status, payload);
     setStatus(nextStatus);
-
-    if (payload.stage === "checkout" && nextStatus.capabilities.billingReady) {
-      await handleCheckout();
-    }
+    setAutoCheckoutArmed(nextStatus.capabilities.billingReady && payload.stage === "checkout");
   }
 
   return (
@@ -174,6 +194,7 @@ export function JoinInviteClient({
 
           <JoinInviteStageContent
             awaitingInviteSessionResolution={awaitingInviteSessionResolution}
+            checkoutPending={checkoutPending}
             inviteCode={inviteCode}
             pendingAction={pendingAction}
             shareImportState={shareImportState}
@@ -182,7 +203,7 @@ export function JoinInviteClient({
             statusRefreshErrorMessage={statusRefreshErrorMessage}
             statusRefreshRetryPending={statusRefreshRetryPending}
             onAcceptShare={handleAcceptShare}
-            onCheckout={handleCheckout}
+            onCheckout={startCheckout}
             onPhoneVerified={handlePhoneVerified}
             onRefreshStatus={refreshStatus}
             onRetryStatusRefresh={handleRetryStatusRefresh}
@@ -198,6 +219,7 @@ export function JoinInviteClient({
 
 export {
   resolveInviteStatusAfterPrivyCompletion,
+  resolveJoinInviteStatusFromRefresh,
   resolveJoinInviteShareStateFromAccept,
   resolveJoinInviteShareStateFromStatus,
   shouldAwaitHostedInviteSessionResolution,
