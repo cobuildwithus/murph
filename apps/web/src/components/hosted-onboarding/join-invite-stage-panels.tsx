@@ -1,5 +1,7 @@
 "use client";
 
+import { usePrivy } from "@privy-io/react-auth";
+import { useState } from "react";
 import Link from "next/link";
 
 import {
@@ -31,10 +33,8 @@ interface JoinInviteVerificationPanelProps {
 }
 
 export function JoinInviteSignedInMismatchAlert({
-  pendingAction,
   onSignOut,
 }: {
-  pendingAction: "checkout" | "logout" | "share" | null;
   onSignOut: () => Promise<void>;
 }) {
   return (
@@ -44,11 +44,31 @@ export function JoinInviteSignedInMismatchAlert({
         This browser is already signed in with a different number. Sign out first to continue with this invite.
       </AlertDescription>
       <div className="mt-3">
-        <Button type="button" onClick={onSignOut} disabled={pendingAction !== null} variant="outline" size="lg">
-          {pendingAction === "logout" ? "Signing out..." : "Use this invite instead"}
-        </Button>
+        <HostedInviteSignOutButton onSignOut={onSignOut} />
       </div>
     </Alert>
+  );
+}
+
+function HostedInviteSignOutButton({ onSignOut }: { onSignOut: () => Promise<void> }) {
+  const { logout } = usePrivy();
+  const [signOutPending, setSignOutPending] = useState(false);
+
+  async function handleSignOut() {
+    setSignOutPending(true);
+
+    try {
+      await logout();
+      await onSignOut();
+    } finally {
+      setSignOutPending(false);
+    }
+  }
+
+  return (
+    <Button type="button" onClick={handleSignOut} disabled={signOutPending} variant="outline" size="lg">
+      {signOutPending ? "Signing out..." : "Use this invite instead"}
+    </Button>
   );
 }
 
@@ -88,7 +108,7 @@ export function JoinInviteVerificationPanel({
       <Alert className="border-stone-200 bg-stone-50">
         <LoaderCircleIcon className="mt-0.5 size-4 animate-spin" />
         <AlertTitle>Checking your signup state</AlertTitle>
-        <AlertDescription>One moment while we pick up your verified phone session.</AlertDescription>
+        <AlertDescription>One moment while we pick up your hosted session.</AlertDescription>
       </Alert>
     );
   }
@@ -123,7 +143,7 @@ export function JoinInviteCheckoutButton({
   onCheckout,
 }: {
   billingReady: boolean;
-  pendingAction: "checkout" | "logout" | "share" | null;
+  pendingAction: "checkout" | "share" | null;
   onCheckout: () => Promise<void>;
 }) {
   return (
@@ -163,7 +183,7 @@ export function JoinInviteActivePanel({
   sharePreview,
   onAcceptShare,
 }: {
-  pendingAction: "checkout" | "logout" | "share" | null;
+  pendingAction: "checkout" | "share" | null;
   shareImportState: JoinInviteShareImportState;
   sharePreview: HostedSharePreview | null;
   onAcceptShare: () => Promise<void>;

@@ -1,25 +1,6 @@
-"use client";
-
-import { usePrivy } from "@privy-io/react-auth";
-
 const SETTINGS_HREF = "/settings";
 
-export function HomepageCtaContent() {
-  const { authenticated, ready } = usePrivy();
-
-  if (!ready) {
-    return (
-      <>
-        <h2 className="text-3xl font-bold tracking-tight md:text-5xl">
-          Checking your session.
-        </h2>
-        <p className="mx-auto mt-4 max-w-lg text-lg leading-relaxed text-white/60">
-          If you already signed in here, we&apos;ll use that session instead of asking you to start over.
-        </p>
-      </>
-    );
-  }
-
+export function HomepageCtaContent({ authenticated }: { authenticated: boolean }) {
   if (authenticated) {
     return (
       <>

@@ -1,6 +1,5 @@
 "use client";
 
-import { usePrivy } from "@privy-io/react-auth";
 import { useState } from "react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -15,7 +14,6 @@ import type {
 import { requestHostedOnboardingJson } from "./client-api";
 import {
   fetchHostedInviteStatus,
-  resolveHostedInviteStatusAuthMode,
   useHostedInviteStatusRefresh,
 } from "./invite-status-client";
 import {
@@ -43,16 +41,17 @@ export function JoinInviteClient({
   shareCode,
   sharePreview,
 }: JoinInviteClientProps) {
-  const { authenticated, logout, ready } = usePrivy();
   const [status, setStatus] = useState(initialStatus);
+  const [hasCompletedInitialRefresh, setHasCompletedInitialRefresh] = useState(
+    initialStatus.stage !== "verify" || !initialStatus.session.authenticated,
+  );
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [pendingAction, setPendingAction] = useState<"checkout" | "logout" | "share" | null>(null);
+  const [pendingAction, setPendingAction] = useState<"checkout" | "share" | null>(null);
   const [statusRefreshErrorMessage, setStatusRefreshErrorMessage] = useState<string | null>(null);
   const [statusRefreshRetryPending, setStatusRefreshRetryPending] = useState(false);
 
   const awaitingInviteSessionResolution = shouldAwaitHostedInviteSessionResolution({
-    authenticated,
-    ready,
+    hasCompletedInitialRefresh,
     status,
   });
   const { handleAcceptShare, shareImportState } = useJoinInviteShareImport({
@@ -64,7 +63,6 @@ export function JoinInviteClient({
   });
 
   useHostedInviteStatusRefresh({
-    authenticated,
     inviteCode,
     onError: (error: unknown) => {
       setStatusRefreshErrorMessage(
@@ -74,19 +72,20 @@ export function JoinInviteClient({
     onStatus: (payload) => {
       setStatus(payload);
       setStatusRefreshErrorMessage(null);
+      if (!payload.session.authenticated || payload.stage !== "verify") {
+        setHasCompletedInitialRefresh(true);
+      }
     },
-    ready,
-    sessionAuthenticated: status.session.authenticated,
-    shouldPoll: status.stage === "activating",
+    shouldPoll: status.stage === "verify" || status.stage === "checkout" || status.stage === "activating",
   });
 
   async function refreshStatus(): Promise<HostedInviteStatusPayload> {
-    const payload = await fetchHostedInviteStatus(
-      inviteCode,
-      resolveHostedInviteStatusAuthMode(authenticated),
-    );
+    const payload = await fetchHostedInviteStatus(inviteCode);
     setStatus(payload);
     setStatusRefreshErrorMessage(null);
+    if (!payload.session.authenticated || payload.stage !== "verify") {
+      setHasCompletedInitialRefresh(true);
+    }
     return payload;
   }
 
@@ -130,24 +129,6 @@ export function JoinInviteClient({
       window.location.assign(payload.url);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : String(error));
-    } finally {
-      setPendingAction(null);
-    }
-  }
-
-  async function handleSignOut() {
-    setErrorMessage(null);
-    setPendingAction("logout");
-
-    try {
-      if (authenticated) {
-        await logout();
-      }
-      await refreshStatus();
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      setErrorMessage(message);
-      throw error;
     } finally {
       setPendingAction(null);
     }
@@ -205,7 +186,9 @@ export function JoinInviteClient({
             onPhoneVerified={handlePhoneVerified}
             onRefreshStatus={refreshStatus}
             onRetryStatusRefresh={handleRetryStatusRefresh}
-            onSignOut={handleSignOut}
+            onSignOut={async () => {
+              await refreshStatus();
+            }}
           />
         </CardContent>
       </Card>

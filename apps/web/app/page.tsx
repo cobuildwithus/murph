@@ -10,6 +10,7 @@ import { NavHeader } from "@/src/components/homepage/nav-header";
 import { PrivacySection } from "@/src/components/homepage/privacy-section";
 import { QuickStartSection } from "@/src/components/homepage/quick-start-section";
 import { TrustStrip } from "@/src/components/homepage/trust-strip";
+import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 import {
   resolveHostedInstallScriptUrl,
 } from "@/src/lib/hosted-onboarding/landing";
@@ -20,21 +21,22 @@ export const metadata: Metadata = {
     "Track meals, sync wearables, spot patterns, and get answers about your health via Telegram, Linq, or email.",
 };
 
-export default function HomePage() {
+export default async function HomePage() {
+  const { authenticated } = await getHostedPageAuthSnapshot();
   const installCommandUrl =
     resolveHostedInstallScriptUrl() ?? "https://YOUR_DOMAIN/install.sh";
 
   return (
     <main className="min-h-screen">
       <NavHeader />
-      <HeroSection />
+      <HeroSection authenticated={authenticated} />
       <IntegrationsBar />
       <QuickStartSection installCommandUrl={installCommandUrl} />
       <CapabilitiesGrid />
       <PrivacySection />
       <ConversationsSection />
       <FaqSection />
-      <CtaSection />
+      <CtaSection authenticated={authenticated} />
       <TrustStrip />
     </main>
   );

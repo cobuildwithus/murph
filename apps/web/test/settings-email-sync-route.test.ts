@@ -58,7 +58,7 @@ describe("settings email sync route", () => {
     });
   });
 
-  it("verifies the server-side Privy tokens and syncs the verified email into hosted user env", async () => {
+  it("verifies the server-side Privy cookie-backed session and syncs the verified email into hosted user env", async () => {
     const response = await settingsEmailSyncRoute.POST(
       new Request("https://join.example.test/api/settings/email/sync", {
         body: JSON.stringify({
@@ -85,7 +85,7 @@ describe("settings email sync route", () => {
     });
   });
 
-  it("accepts an empty POST body when the server-side Privy session already has the verified email", async () => {
+  it("accepts an empty POST body when the server-side Privy cookie session already has the verified email", async () => {
     const response = await settingsEmailSyncRoute.POST(
       new Request("https://join.example.test/api/settings/email/sync", {
         headers: SAME_ORIGIN_HEADERS,
@@ -101,11 +101,11 @@ describe("settings email sync route", () => {
     });
   });
 
-  it("rejects sync attempts whose Privy session does not match the hosted session", async () => {
+  it("rejects sync attempts when the cookie-backed Privy session no longer maps to a hosted member", async () => {
     mocks.requireHostedPrivyActiveRequestAuthContext.mockRejectedValue(hostedOnboardingError({
-      code: "PRIVY_SESSION_MISMATCH",
+      code: "HOSTED_MEMBER_NOT_FOUND",
       httpStatus: 403,
-      message: "This Privy session does not match the current hosted account. Reopen the latest invite and try again.",
+      message: "Finish signup from your latest Murph link before continuing.",
     }));
 
     const response = await settingsEmailSyncRoute.POST(
@@ -119,8 +119,8 @@ describe("settings email sync route", () => {
     expect(mocks.syncHostedVerifiedEmailToHostedExecution).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       error: {
-        code: "PRIVY_SESSION_MISMATCH",
-        message: "This Privy session does not match the current hosted account. Reopen the latest invite and try again.",
+        code: "HOSTED_MEMBER_NOT_FOUND",
+        message: "Finish signup from your latest Murph link before continuing.",
         retryable: false,
       },
     });

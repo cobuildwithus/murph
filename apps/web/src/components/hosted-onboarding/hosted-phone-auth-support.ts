@@ -199,7 +199,6 @@ export async function abortInvitePhoneCodeSend(input: {
 }): Promise<boolean> {
   try {
     await requestHostedOnboardingJson<{ ok: true }>({
-      auth: "none",
       method: "POST",
       payload: {
         sendAttemptId: input.sendAttemptId,
@@ -238,8 +237,15 @@ export async function flushPendingInvitePhoneCodeMutation(inviteCode: string): P
 }
 
 function isRetryableHostedPrivyCompletionError(error: unknown): boolean {
+  if (!(error instanceof HostedOnboardingApiError)) {
+    return false;
+  }
+
+  if (error.code === "AUTH_REQUIRED") {
+    return true;
+  }
+
   return (
-    error instanceof HostedOnboardingApiError &&
     error.retryable &&
     (error.code === "PRIVY_PHONE_NOT_READY" || error.code === "PRIVY_WALLET_NOT_READY")
   );
@@ -283,7 +289,6 @@ async function confirmInvitePhoneCodeSend(input: {
 
     try {
       await requestHostedOnboardingJson<{ ok: true }>({
-        auth: "none",
         method: "POST",
         payload: {
           sendAttemptId: input.sendAttemptId,

@@ -11,16 +11,12 @@ import {
   type HostedMemberPrivyIdentityLookup,
 } from "./member-identity-service";
 import {
-  readHostedPrivyAccessTokenFromRequest,
   type HostedPrivyIdentity,
   type HostedPrivyUser,
   remapHostedPrivyCompletionLagError,
-  verifyHostedPrivyAccessToken,
-  readHostedPrivyIdentityTokenFromRequest,
-  resolveHostedPrivyIdentityFromVerifiedUser,
-  verifyHostedPrivyIdentityToken,
 } from "./privy";
-import { type PrivyLinkedAccountLike, resolveHostedPrivyLinkedAccounts } from "./privy-shared";
+import { type PrivyLinkedAccountLike } from "./privy-shared";
+import { resolveHostedPrivySessionFromRequest } from "./hosted-session";
 
 export interface HostedPrivyRequestAuthContext {
   identity: HostedPrivyIdentity;
@@ -38,46 +34,22 @@ export async function resolveHostedPrivyRequestAuthContext(
   request: Request,
   prisma: PrismaClient = getPrisma(),
 ): Promise<HostedPrivyRequestAuthContext | null> {
-  const accessToken = readHostedPrivyAccessTokenFromRequest(request);
-  const identityToken = readHostedPrivyIdentityTokenFromRequest(request);
+  const session = await resolveHostedPrivySessionFromRequest(request);
 
-  if (!accessToken && !identityToken) {
+  if (!session) {
     return null;
   }
-
-  if (!accessToken || !identityToken) {
-    throw hostedOnboardingError({
-      code: "AUTH_REQUIRED",
-      message: "Verify your phone to continue.",
-      httpStatus: 401,
-    });
-  }
-
-  const [verifiedAccessToken, verifiedPrivyUser] = await Promise.all([
-    verifyHostedPrivyAccessToken(accessToken),
-    verifyHostedPrivyIdentityToken(identityToken),
-  ]);
-
-  if (verifiedAccessToken.userId !== verifiedPrivyUser.id) {
-    throw hostedOnboardingError({
-      code: "PRIVY_SESSION_MISMATCH",
-      message: "This Privy session does not match the current hosted account. Reopen the latest invite and try again.",
-      httpStatus: 403,
-    });
-  }
-
-  const identity = resolveHostedPrivyIdentityFromVerifiedUser(verifiedPrivyUser);
   const memberLookup = await lookupHostedMemberForPrivyIdentity({
-    identity,
+    identity: session.identity,
     prisma,
   });
 
   return {
-    identity,
-    linkedAccounts: resolveHostedPrivyLinkedAccounts(verifiedPrivyUser),
+    identity: session.identity,
+    linkedAccounts: session.linkedAccounts,
     member: memberLookup?.core ?? null,
     memberLookup,
-    verifiedPrivyUser,
+    verifiedPrivyUser: session.verifiedPrivyUser,
   };
 }
 

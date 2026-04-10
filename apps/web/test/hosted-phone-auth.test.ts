@@ -652,6 +652,61 @@ describe("HostedPhoneAuth", () => {
     assert.equal(assign.mock.calls[0]?.[0], "/join/invite-code");
   });
 
+  it("retries hosted completion once when the Privy cookie has not propagated yet", async () => {
+    vi.resetModules();
+
+    const ensureHostedPrivyPhoneReady = vi.fn().mockResolvedValue(undefined);
+    class TestHostedOnboardingApiError extends Error {
+      code: string | null;
+      retryable: boolean;
+
+      constructor(code: string | null, message: string, retryable = false) {
+        super(message);
+        this.code = code;
+        this.retryable = retryable;
+      }
+    }
+    const requestHostedOnboardingJson = vi.fn()
+      .mockRejectedValueOnce(new TestHostedOnboardingApiError("AUTH_REQUIRED", "Verify your phone to continue."))
+      .mockResolvedValueOnce({
+        inviteCode: "invite-code",
+        joinUrl: "/join/invite-code",
+        stage: "checkout",
+      });
+    const assign = vi.fn();
+
+    vi.doMock("@/src/lib/hosted-onboarding/privy-client", () => ({
+      HOSTED_PRIVY_COMPLETION_RETRY_DELAYS_MS: [0, 0],
+      ensureHostedPrivyPhoneReady,
+    }));
+    vi.doMock("@/src/components/hosted-onboarding/client-api", () => ({
+      HostedOnboardingApiError: TestHostedOnboardingApiError,
+      requestHostedOnboardingJson,
+    }));
+    vi.stubGlobal("window", {
+      location: {
+        assign,
+      },
+    });
+
+    try {
+      const { finalizeHostedPrivyVerification } = await import("@/src/components/hosted-onboarding/hosted-phone-auth-support");
+
+      await finalizeHostedPrivyVerification({
+        createWallet: vi.fn(),
+        intent: "signup",
+        user: null,
+      });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+
+    assert.equal(ensureHostedPrivyPhoneReady.mock.calls.length, 1);
+    assert.equal(requestHostedOnboardingJson.mock.calls.length, 2);
+    assert.equal(assign.mock.calls.length, 1);
+    assert.equal(assign.mock.calls[0]?.[0], "/join/invite-code");
+  });
+
   it("uses the invite shortcut route for the first invite send-code request", async () => {
     const harness = await loadHostedInvitePhoneAuthHarness();
 
@@ -666,7 +721,6 @@ describe("HostedPhoneAuth", () => {
 
     assert.equal(harness.requestHostedOnboardingJson.mock.calls.length, 1);
     assert.match(String(harness.requestHostedOnboardingJson.mock.calls[0]?.[0]?.url), /\/invites\/invite-code\/send-code$/);
-    assert.deepEqual(harness.requestHostedOnboardingJson.mock.calls[0]?.[0]?.auth, "none");
     assert.equal(harness.controller.sendVerificationCode.mock.calls[0]?.[0], "+14044092523");
     assert.equal(harness.finalizeInvitePhoneCodeSendConfirmation.mock.calls[0]?.[0]?.sendAttemptId, "attempt-id");
     assert.equal(harness.controller.handleResendCode.mock.calls.length, 0);

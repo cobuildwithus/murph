@@ -1,6 +1,5 @@
 "use client";
 
-import { usePrivy } from "@privy-io/react-auth";
 import Link from "next/link";
 import { useState } from "react";
 
@@ -32,12 +31,11 @@ export function JoinInviteSuccessClient({
   inviteCode,
   shareCode,
 }: JoinInviteSuccessClientProps) {
-  const { authenticated, ready } = usePrivy();
   const [status, setStatus] = useState(initialStatus);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const shouldPoll = status.stage === "verify" || status.stage === "checkout" || status.stage === "activating";
 
   useHostedInviteStatusRefresh({
-    authenticated,
     inviteCode,
     onError: (error: unknown) => {
       setErrorMessage(error instanceof Error ? error.message : "Unable to refresh activation status.");
@@ -46,9 +44,7 @@ export function JoinInviteSuccessClient({
       setErrorMessage(null);
       setStatus(payload);
     },
-    ready,
-    sessionAuthenticated: status.session.authenticated,
-    shouldPoll: status.stage === "verify" || status.stage === "checkout" || status.stage === "activating",
+    shouldPoll,
   });
 
   const href = `/join/${encodeURIComponent(inviteCode)}${shareCode ? `?share=${encodeURIComponent(shareCode)}` : ""}`;

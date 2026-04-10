@@ -83,7 +83,7 @@ Hosted onboarding extras:
 - `PRIVY_VERIFICATION_KEY`
 - enable Privy email login/linking in the dashboard so `/settings` can verify account email addresses
 - enable Privy identity tokens in the dashboard under `User management > Authentication > Advanced`
-- enable Privy access + identity tokens so hosted browser requests can authenticate API calls with bearer + identity-token headers
+- hosted browser auth expects Privy to issue its normal `privy-id-token` cookie so same-origin requests can authenticate through server-side cookie verification instead of client-managed auth headers
 - `HOSTED_ONBOARDING_INVITE_TTL_HOURS`
 - `HOSTED_ONBOARDING_STRIPE_PRICE_ID`
 - `STRIPE_SECRET_KEY`
@@ -198,7 +198,7 @@ Hosted settings-authenticated wearable routes:
 - `POST /api/settings/device-sync/providers/:provider/connect`
 - `POST /api/settings/device-sync/connections/:connectionId/disconnect`
 
-These are the only browser-facing wearable-management routes. They power the `/settings` wearable-sources card and use the hosted onboarding Privy bearer + identity-token contract so the browser can manage calm connect, reconnect, refresh, and disconnect flows without the separate signed browser-assertion headers required by the lower-level agent bridge.
+These are the only browser-facing wearable-management routes. They power the `/settings` wearable-sources card and use the hosted device-sync signed browser-assertion flow so the browser can manage calm connect, reconnect, refresh, and disconnect flows without exposing the lower-level agent bridge directly.
 
 Assertion-authenticated browser-to-agent bridge routes:
 
@@ -265,7 +265,7 @@ The onboarding lane is intentionally thin:
 - a Linq webhook can text back a hosted join link to a new phone number or a trigger phrase like "I want to get healthy"
 - the public landing page can start the same flow with Privy SMS verification
 - the invite page binds the verified phone number to a hosted member row in Postgres, while the UI stage itself is derived from invite expiry, session match, billing entitlement, suspension facts, and post-checkout activation progress instead of persisted invite/member lifecycle enums
-- Privy handles phone OTP, the browser makes one explicit completion attempt after verifying phone and best-effort wallet provisioning, and the backend locally verifies the client's bearer access token plus identity token instead of minting a separate hosted session cookie; the wallet only becomes mandatory later if RevNet-backed billing is ever enabled again
+- Privy handles phone OTP, the browser makes one explicit completion attempt after verifying phone and best-effort wallet provisioning, and the backend locally verifies Privy's `privy-id-token` cookie directly instead of depending on client-managed auth headers or minting a separate Murph-owned session cookie; the wallet only becomes mandatory later if RevNet-backed billing is ever enabled again
 - checkout uses Stripe Checkout so Apple Pay can appear directly inside the hosted payment handoff when available in Safari, the hosted app creates a fresh Checkout Session for each start attempt, and durable Postgres state keeps only the stable Stripe customer/subscription refs needed for metering and reconciliation
 - Stripe webhook ingress now verifies and stores a minimal Stripe receipt quickly, then immediately re-fetches the live event from Stripe during reconciliation so billing activation and the durable inline `member.activated` outbox fact are not gated on a scheduler; receipt completion waits for post-commit managed-user crypto provisioning, and the hosted Stripe cron remains the recovery path for failed or deferred receipts
 - hosted billing is subscription-only, `invoice.paid` is the only positive Stripe entitlement source, `customer.subscription.*` only tracks negative or status transitions, and `checkout.session.completed` only binds stable Stripe refs without granting access by itself

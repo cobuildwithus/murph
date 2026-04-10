@@ -153,14 +153,14 @@ describe("hosted onboarding routes", () => {
     });
   });
 
-  it("marks Privy verification responses as no-store", async () => {
+  it("marks cookie-backed Privy verification responses as no-store", async () => {
     const response = await privyCompleteRoute.POST(
       new Request("https://join.example.test/api/hosted-onboarding/privy/complete", {
         body: JSON.stringify({
           inviteCode: "invite-code",
         }),
         headers: {
-          "x-privy-identity-token": "header-token",
+          cookie: "privy-id-token=cookie-token",
           origin: SAME_ORIGIN_HEADERS.origin,
           "user-agent": "test-agent",
         },
@@ -194,11 +194,11 @@ describe("hosted onboarding routes", () => {
     });
   });
 
-  it("accepts a valid Privy auth header set even when the request body is empty", async () => {
+  it("accepts a valid Privy cookie-backed session even when the request body is empty", async () => {
     const response = await privyCompleteRoute.POST(
       new Request("https://join.example.test/api/hosted-onboarding/privy/complete", {
         headers: {
-          "x-privy-identity-token": "header-token",
+          cookie: "privy-id-token=cookie-token",
           origin: SAME_ORIGIN_HEADERS.origin,
           "user-agent": "test-agent",
         },
@@ -226,7 +226,7 @@ describe("hosted onboarding routes", () => {
     });
   });
 
-  it("ignores any body identity token and keeps the request headers authoritative", async () => {
+  it("ignores any body identity token and keeps the Privy cookie authoritative", async () => {
     const response = await privyCompleteRoute.POST(
       new Request("https://join.example.test/api/hosted-onboarding/privy/complete", {
         body: JSON.stringify({
@@ -234,7 +234,7 @@ describe("hosted onboarding routes", () => {
           inviteCode: "invite-code",
         }),
         headers: {
-          "x-privy-identity-token": "header-token",
+          cookie: "privy-id-token=cookie-token",
           origin: SAME_ORIGIN_HEADERS.origin,
           "user-agent": "test-agent",
         },
@@ -261,7 +261,7 @@ describe("hosted onboarding routes", () => {
     });
   });
 
-  it("rejects hosted Privy completion requests that are missing the strict Privy auth header set", async () => {
+  it("rejects hosted Privy completion requests that are missing the Privy identity cookie", async () => {
     mocks.requireHostedPrivyCompletionRequestAuthContext.mockRejectedValue(
       hostedOnboardingError({
         code: "AUTH_REQUIRED",
@@ -295,7 +295,7 @@ describe("hosted onboarding routes", () => {
     });
   });
 
-  it("checks the hosted Privy auth headers before parsing malformed request JSON", async () => {
+  it("checks the hosted Privy cookie-backed session before parsing malformed request JSON", async () => {
     mocks.requireHostedPrivyCompletionRequestAuthContext.mockRejectedValue(
       hostedOnboardingError({
         code: "AUTH_REQUIRED",
@@ -328,7 +328,7 @@ describe("hosted onboarding routes", () => {
     });
   });
 
-  it("does not accept a body identity token when the strict hosted Privy auth headers are missing", async () => {
+  it("does not accept a body identity token when the hosted Privy identity cookie is missing", async () => {
     mocks.requireHostedPrivyCompletionRequestAuthContext.mockRejectedValue(
       hostedOnboardingError({
         code: "AUTH_REQUIRED",
@@ -409,7 +409,7 @@ describe("hosted onboarding routes", () => {
       new Request("https://join.example.test/api/hosted-onboarding/privy/complete", {
         body: JSON.stringify({}),
         headers: {
-          "x-privy-identity-token": "header-token",
+          cookie: "privy-id-token=cookie-token",
           origin: SAME_ORIGIN_HEADERS.origin,
           "user-agent": "test-agent",
         },

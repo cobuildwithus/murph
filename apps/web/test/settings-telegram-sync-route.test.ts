@@ -72,7 +72,7 @@ describe("settings telegram sync route", () => {
     mocks.buildHostedTelegramBotLink.mockReturnValue("https://t.me/murph_bot?start=connect");
   });
 
-  it("verifies the server-side Privy session and links the Telegram identity onto the hosted member", async () => {
+  it("verifies the server-side Privy cookie-backed session and links the Telegram identity onto the hosted member", async () => {
     const response = await settingsTelegramSyncRoute.POST(
       new Request("https://join.example.test/api/settings/telegram/sync", {
         body: JSON.stringify({
@@ -154,11 +154,11 @@ describe("settings telegram sync route", () => {
     });
   });
 
-  it("rejects sync attempts whose Privy session does not match the hosted session", async () => {
+  it("rejects sync attempts when the cookie-backed Privy session no longer maps to a hosted member", async () => {
     mocks.requireHostedPrivyActiveRequestAuthContext.mockRejectedValue(hostedOnboardingError({
-      code: "PRIVY_SESSION_MISMATCH",
+      code: "HOSTED_MEMBER_NOT_FOUND",
       httpStatus: 403,
-      message: "This Privy session does not match the current hosted account. Reopen the latest invite and try again.",
+      message: "Finish signup from your latest Murph link before continuing.",
     }));
 
     const response = await settingsTelegramSyncRoute.POST(
@@ -178,8 +178,8 @@ describe("settings telegram sync route", () => {
     expect(mocks.upsertHostedMemberTelegramRoutingBinding).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       error: {
-        code: "PRIVY_SESSION_MISMATCH",
-        message: "This Privy session does not match the current hosted account. Reopen the latest invite and try again.",
+        code: "HOSTED_MEMBER_NOT_FOUND",
+        message: "Finish signup from your latest Murph link before continuing.",
         retryable: false,
       },
     });

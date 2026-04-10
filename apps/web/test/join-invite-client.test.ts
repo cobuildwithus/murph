@@ -7,6 +7,7 @@ import { beforeEach, expect, test, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   fetchHostedInviteStatus: vi.fn(),
   logout: vi.fn(),
+  useHostedInviteStatusRefresh: vi.fn(),
   usePrivy: vi.fn(),
 }));
 
@@ -28,7 +29,7 @@ vi.mock("@/src/components/hosted-onboarding/hosted-invite-phone-auth", () => ({
 
 vi.mock("@/src/components/hosted-onboarding/invite-status-client", () => ({
   fetchHostedInviteStatus: mocks.fetchHostedInviteStatus,
-  useHostedInviteStatusRefresh: () => {},
+  useHostedInviteStatusRefresh: mocks.useHostedInviteStatusRefresh,
 }));
 
 import {
@@ -44,10 +45,9 @@ import type { HostedInviteStatusPayload, HostedPrivyCompletionPayload } from "@/
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.usePrivy.mockReturnValue({
-    authenticated: false,
     logout: mocks.logout,
-    ready: true,
   });
+  mocks.useHostedInviteStatusRefresh.mockImplementation(() => {});
 });
 
 test("verify-stage invite copy stays neutral and does not expose the masked phone hint", () => {
@@ -73,16 +73,15 @@ test("verify-stage invite copy stays neutral and does not expose the masked phon
   assert.match(markup, /data-hosted-invite-phone-auth="true"/);
 });
 
-test("verify-stage invite waits for Privy readiness before showing phone auth", () => {
-  mocks.usePrivy.mockReturnValue({
-    authenticated: false,
-    logout: mocks.logout,
-    ready: false,
-  });
-
+test("verify-stage invite shows the hosted session check while the server session is still settling", () => {
   const markup = renderToStaticMarkup(
     createElement(JoinInviteClient, {
       initialStatus: createStatus({
+        session: {
+          authenticated: true,
+          expiresAt: null,
+          matchesInvite: false,
+        },
         capabilities: {
           billingReady: true,
           phoneAuthReady: true,
@@ -95,20 +94,19 @@ test("verify-stage invite waits for Privy readiness before showing phone auth", 
   );
 
   assert.match(markup, /Checking your signup state/);
-  assert.match(markup, /One moment while we pick up your verified phone session\./);
+  assert.match(markup, /One moment while we pick up your hosted session\./);
   assert.doesNotMatch(markup, /data-hosted-invite-phone-auth=/);
 });
 
-test("verify-stage invite waits for the auth-backed status refresh when Privy is already authenticated", () => {
-  mocks.usePrivy.mockReturnValue({
-    authenticated: true,
-    logout: mocks.logout,
-    ready: true,
-  });
-
-  const markup = renderToStaticMarkup(
+test("verify-stage invite keeps polling while the hosted session is still settling", () => {
+  renderToStaticMarkup(
     createElement(JoinInviteClient, {
       initialStatus: createStatus({
+        session: {
+          authenticated: true,
+          expiresAt: null,
+          matchesInvite: false,
+        },
         capabilities: {
           billingReady: true,
           phoneAuthReady: true,
@@ -120,8 +118,10 @@ test("verify-stage invite waits for the auth-backed status refresh when Privy is
     }),
   );
 
-  assert.match(markup, /Checking your signup state/);
-  assert.doesNotMatch(markup, /data-hosted-invite-phone-auth=/);
+  expect(mocks.useHostedInviteStatusRefresh).toHaveBeenCalledWith(expect.objectContaining({
+    inviteCode: "invite-code",
+    shouldPoll: true,
+  }));
 });
 
 test("active invite state links to hosted settings with client navigation markup", () => {
@@ -244,15 +244,19 @@ test("resolveInviteStatusAfterPrivyCompletion marks the invite session authentic
   });
 });
 
-test("verify-stage auth-settling guard only holds while Privy session state is unresolved", () => {
+test("verify-stage auth-settling guard only holds until the first hosted refresh completes", () => {
   assert.equal(
     shouldAwaitHostedInviteSessionResolution({
-      authenticated: false,
-      ready: false,
+      hasCompletedInitialRefresh: false,
       status: createStatus({
         capabilities: {
           billingReady: true,
           phoneAuthReady: true,
+        },
+        session: {
+          authenticated: true,
+          expiresAt: null,
+          matchesInvite: false,
         },
       }),
     }),
@@ -260,21 +264,7 @@ test("verify-stage auth-settling guard only holds while Privy session state is u
   );
   assert.equal(
     shouldAwaitHostedInviteSessionResolution({
-      authenticated: true,
-      ready: true,
-      status: createStatus({
-        capabilities: {
-          billingReady: true,
-          phoneAuthReady: true,
-        },
-      }),
-    }),
-    true,
-  );
-  assert.equal(
-    shouldAwaitHostedInviteSessionResolution({
-      authenticated: false,
-      ready: true,
+      hasCompletedInitialRefresh: true,
       status: createStatus({
         capabilities: {
           billingReady: true,
@@ -286,8 +276,24 @@ test("verify-stage auth-settling guard only holds while Privy session state is u
   );
   assert.equal(
     shouldAwaitHostedInviteSessionResolution({
-      authenticated: true,
-      ready: true,
+      hasCompletedInitialRefresh: false,
+      status: createStatus({
+        capabilities: {
+          billingReady: true,
+          phoneAuthReady: true,
+        },
+        session: {
+          authenticated: false,
+          expiresAt: null,
+          matchesInvite: false,
+        },
+      }),
+    }),
+    true,
+  );
+  assert.equal(
+    shouldAwaitHostedInviteSessionResolution({
+      hasCompletedInitialRefresh: true,
       status: createStatus({
         session: {
           authenticated: true,

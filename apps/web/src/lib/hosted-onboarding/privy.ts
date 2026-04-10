@@ -1,4 +1,4 @@
-import { verifyAccessToken, verifyIdentityToken } from "@privy-io/node";
+import { verifyIdentityToken } from "@privy-io/node";
 import { cookies } from "next/headers";
 
 import { hostedOnboardingError, isHostedOnboardingError } from "./errors";
@@ -20,22 +20,12 @@ export interface HostedPrivyCookieStore {
   get(name: string): { value?: string } | undefined;
 }
 
-export const HOSTED_PRIVY_IDENTITY_TOKEN_HEADER_NAME = "x-privy-identity-token";
-const HOSTED_PRIVY_IDENTITY_TOKEN_COOKIE_NAME = "privy-id-token";
+export const HOSTED_PRIVY_IDENTITY_TOKEN_COOKIE_NAME = "privy-id-token";
 
 export interface HostedPrivyIdentity {
   phone: HostedPrivyPhoneAccount;
   userId: string;
   wallet: HostedPrivyWalletAccount | null;
-}
-
-export interface HostedPrivyAccessTokenClaims {
-  appId: string;
-  expiration: number;
-  issuedAt: number;
-  issuer: string;
-  sessionId: string;
-  userId: string;
 }
 
 export async function requireHostedPrivyIdentity(identityToken: string): Promise<HostedPrivyIdentity> {
@@ -67,12 +57,12 @@ export async function requireHostedPrivyCompletionIdentityFromCookies(): Promise
 }
 
 export async function requireHostedPrivyIdentityFromRequest(request: Request): Promise<HostedPrivyIdentity> {
-  const identityToken = readHostedPrivyIdentityTokenFromRequest(request);
+  const identityToken = readHostedPrivyIdentityTokenFromRequestCookies(request);
 
   if (!identityToken) {
     throw hostedOnboardingError({
       code: "PRIVY_IDENTITY_TOKEN_REQUIRED",
-      message: "A Privy identity token is required to continue. Refresh and verify your phone again.",
+      message: "A Privy identity cookie is required to continue. Refresh and verify your phone again.",
       httpStatus: 401,
     });
   }
@@ -156,52 +146,36 @@ export function readHostedPrivyIdentityTokenFromCookieStore(cookieStore: HostedP
   return normalizeEnvValue(value);
 }
 
-export function readHostedPrivyIdentityTokenFromRequest(request: Request): string | null {
-  return normalizeEnvValue(request.headers.get(HOSTED_PRIVY_IDENTITY_TOKEN_HEADER_NAME));
-}
-
-export function readHostedPrivyAccessTokenFromRequest(request: Request): string | null {
-  return normalizeHostedPrivyAccessToken(request.headers.get("authorization"));
-}
-
-export async function verifyHostedPrivyAccessToken(accessToken: string): Promise<HostedPrivyAccessTokenClaims> {
-  const token = accessToken.trim();
-
-  if (!token) {
-    throw hostedOnboardingError({
-      code: "AUTH_REQUIRED",
-      message: "Verify your phone to continue.",
-      httpStatus: 401,
-    });
+export function readHostedPrivyIdentityTokenFromCookieHeader(value: string | null | undefined): string | null {
+  if (typeof value !== "string" || !value.trim()) {
+    return null;
   }
 
-  const { appId, verificationKey } = requireHostedPrivyPhoneAuthConfig();
+  for (const entry of value.split(/;\s*/u)) {
+    const separatorIndex = entry.indexOf("=");
 
-  try {
-    const claims = await verifyAccessToken({
-      access_token: token,
-      app_id: appId,
-      verification_key: verificationKey,
-    });
+    if (separatorIndex <= 0) {
+      continue;
+    }
 
-    return {
-      appId: claims.app_id,
-      expiration: claims.expiration,
-      issuedAt: claims.issued_at,
-      issuer: claims.issuer,
-      sessionId: claims.session_id,
-      userId: claims.user_id,
-    };
-  } catch (error) {
-    throw hostedOnboardingError({
-      code: "PRIVY_AUTH_FAILED",
-      message: "We could not verify your Privy session. Request a fresh code and try again.",
-      httpStatus: 401,
-      details: {
-        cause: error instanceof Error ? error.name : typeof error,
-      },
-    });
+    if (entry.slice(0, separatorIndex).trim() !== HOSTED_PRIVY_IDENTITY_TOKEN_COOKIE_NAME) {
+      continue;
+    }
+
+    const rawCookieValue = entry.slice(separatorIndex + 1);
+
+    try {
+      return normalizeEnvValue(decodeURIComponent(rawCookieValue));
+    } catch {
+      return normalizeEnvValue(rawCookieValue);
+    }
   }
+
+  return null;
+}
+
+export function readHostedPrivyIdentityTokenFromRequestCookies(request: Request): string | null {
+  return readHostedPrivyIdentityTokenFromCookieHeader(request.headers.get("cookie"));
 }
 
 export function hasHostedPrivyPhoneAuthConfig(source: NodeJS.ProcessEnv = process.env): boolean {
@@ -234,17 +208,6 @@ function normalizeEnvValue(value: string | null | undefined): string | null {
   }
 
   return null;
-}
-
-function normalizeHostedPrivyAccessToken(value: string | null | undefined): string | null {
-  const normalized = normalizeEnvValue(value);
-
-  if (!normalized) {
-    return null;
-  }
-
-  const match = /^Bearer\s+(.+)$/iu.exec(normalized);
-  return normalizeEnvValue(match?.[1]);
 }
 
 export function remapHostedPrivyCompletionLagError(error: unknown): unknown {

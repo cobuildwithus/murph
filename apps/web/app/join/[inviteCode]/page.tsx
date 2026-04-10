@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import { JoinInviteClient } from "@/src/components/hosted-onboarding/join-invite-client";
 import { buildHostedSharePageData } from "@/src/lib/hosted-share/service";
 import { buildHostedInvitePageData } from "@/src/lib/hosted-onboarding/invite-service";
+import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 
 export const metadata: Metadata = {
   title: "Murph hosted invite",
@@ -25,14 +26,15 @@ export default async function JoinInvitePage(input: {
   const { inviteCode } = await input.params;
   const searchParams = await input.searchParams;
   const decodedInviteCode = decodeURIComponent(inviteCode);
+  const { authenticatedMember } = await getHostedPageAuthSnapshot();
   const initialStatus = await buildHostedInvitePageData({
-    authenticatedMember: null,
+    authenticatedMember,
     inviteCode: decodedInviteCode,
   });
   const shareCode = typeof searchParams.share === "string" ? decodeURIComponent(searchParams.share) : null;
   const shareData = shareCode
     ? await buildHostedSharePageData({
-        authenticatedMember: null,
+        authenticatedMember,
         inviteCode: decodedInviteCode,
         shareCode,
       })
