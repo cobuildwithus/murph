@@ -299,17 +299,16 @@ describe('monorepo release flow coverage audit', () => {
     const runTimedStep = workspaceVerify.match(
       /run_timed_step\(\) \{[\s\S]*?^\}/m,
     )?.[0]
-    const runWorkspacePackageCoverage = workspaceVerify.match(
+    const cliCoverageBranch = workspaceVerify.match(
       /run_workspace_package_coverage\(\) \{[\s\S]*?^\}/m,
     )?.[0]
 
     expect(runTimedStep).toBeTruthy()
-    expect(runWorkspacePackageCoverage).toBeTruthy()
-
-    const forcedCliCoverage = runWorkspacePackageCoverage!.replace(
+    expect(cliCoverageBranch).toBeTruthy()
+    expect(cliCoverageBranch).toContain(
       'env MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 MURPH_VITEST_MAX_WORKERS="$package_coverage_vitest_max_workers" pnpm exec vitest run --config "packages/cli/vitest.workspace.ts" --coverage',
-      'false',
     )
+    expect(cliCoverageBranch).toContain('return $?')
     const harnessDir = mkdtempSync(
       path.join(os.tmpdir(), 'murph-workspace-verify-harness-'),
     )
@@ -320,10 +319,14 @@ describe('monorepo release flow coverage audit', () => {
         harnessPath,
         `#!/usr/bin/env bash
 set -euo pipefail
-readonly package_coverage_vitest_max_workers="100%"
 verify_log() { :; }
 ${runTimedStep!}
-${forcedCliCoverage}
+run_workspace_package_coverage() {
+  if [[ "$1" == "packages/cli" ]]; then
+    run_timed_step "$2" false
+    return $?
+  fi
+}
 if ! run_workspace_package_coverage packages/cli "CLI package coverage"; then
   printf 'captured\\n'
   exit 0
