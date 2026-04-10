@@ -14,6 +14,7 @@ import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/t
 
 import {
   HostedOnboardingApiError,
+  requestHostedBillingCheckout,
   requestHostedOnboardingJson,
 } from "./client-api";
 import type {
@@ -130,6 +131,21 @@ export async function finalizeHostedPrivyVerification(input: {
 }) {
   await ensureHostedPrivyPhoneReady(input);
   const payload = await requestHostedPrivyCompletionWithRetry(input.inviteCode);
+
+  if (!input.onCompleted && input.intent === "signup" && payload.stage === "checkout") {
+    const checkout = await requestHostedBillingCheckout({
+      inviteCode: payload.inviteCode,
+    });
+
+    if (!checkout.alreadyActive) {
+      if (!checkout.url) {
+        throw new Error("Checkout did not return a redirect URL.");
+      }
+
+      window.location.assign(checkout.url);
+      return;
+    }
+  }
 
   if (input.onCompleted) {
     await input.onCompleted(payload);
