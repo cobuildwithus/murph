@@ -15,6 +15,7 @@ import {
 } from "../src/hosted-runtime/environment.ts";
 import {
   createHostedRuntimeLauncherDirectories,
+  createHostedRuntimeResolvedConfig,
   createHostedRuntimeWorkspace,
 } from "./hosted-runtime-test-helpers.ts";
 
@@ -48,12 +49,14 @@ function createHostedRuntimePlatformStub(): HostedRuntimePlatform {
 test("hosted runtime config copies user and forwarded env maps", () => {
   const platform = createHostedRuntimePlatformStub();
   const forwardedEnv = { OPENAI_API_KEY: "secret" };
+  const resolvedConfig = createHostedRuntimeResolvedConfig();
   const userEnv = { HOSTED_USER_VERIFIED_EMAIL: "user@example.com" };
 
   const normalized = normalizeHostedAssistantRuntimeConfig(
     {
       commitTimeoutMs: 45_000,
       forwardedEnv,
+      resolvedConfig,
       userEnv,
     },
     platform,
@@ -63,8 +66,58 @@ test("hosted runtime config copies user and forwarded env maps", () => {
   assert.equal(normalized.commitTimeoutMs, 45_000);
   assert.deepEqual(normalized.forwardedEnv, forwardedEnv);
   assert.notEqual(normalized.forwardedEnv, forwardedEnv);
+  assert.deepEqual(normalized.resolvedConfig, resolvedConfig);
+  assert.notEqual(normalized.resolvedConfig, resolvedConfig);
   assert.deepEqual(normalized.userEnv, userEnv);
   assert.notEqual(normalized.userEnv, userEnv);
+});
+
+test("hosted runtime config deep-clones resolved device-sync provider config", () => {
+  const platform = createHostedRuntimePlatformStub();
+  const resolvedConfig = createHostedRuntimeResolvedConfig({
+    deviceSync: {
+      providerConfigs: {
+        garmin: {
+          clientId: "garmin-client",
+          clientSecret: "garmin-secret",
+        },
+        oura: {
+          clientId: "oura-client",
+          clientSecret: "oura-secret",
+          scopes: ["daily", "sleep"],
+        },
+        whoop: {
+          clientId: "whoop-client",
+          clientSecret: "whoop-secret",
+          scopes: ["read:profile", "offline"],
+        },
+      },
+      publicBaseUrl: "https://device-sync.example.test",
+      secret: "secret_123",
+    },
+  });
+
+  const normalized = normalizeHostedAssistantRuntimeConfig(
+    {
+      resolvedConfig,
+    },
+    platform,
+  );
+
+  assert.deepEqual(normalized.resolvedConfig, resolvedConfig);
+  assert.notEqual(normalized.resolvedConfig.deviceSync, resolvedConfig.deviceSync);
+  assert.notEqual(
+    normalized.resolvedConfig.deviceSync?.providerConfigs,
+    resolvedConfig.deviceSync?.providerConfigs,
+  );
+  assert.notEqual(
+    normalized.resolvedConfig.deviceSync?.providerConfigs.oura?.scopes,
+    resolvedConfig.deviceSync?.providerConfigs.oura?.scopes,
+  );
+  assert.notEqual(
+    normalized.resolvedConfig.deviceSync?.providerConfigs.whoop?.scopes,
+    resolvedConfig.deviceSync?.providerConfigs.whoop?.scopes,
+  );
 });
 
 test("hosted child launcher directories create the expected cache, home, hf, and temp roots", async () => {
@@ -135,6 +188,16 @@ test("hosted runtime environment resolves stable tsx loader and tsconfig paths",
   assert.match(resolveHostedRuntimeTsconfigPath(), /tsconfig\.base\.json$/u);
   assert.equal(typeof resolveHostedRuntimeTsxImportSpecifier(), "string");
   assert.notEqual(resolveHostedRuntimeTsxImportSpecifier().length, 0);
+});
+
+test("hosted runtime environment falls back to the bare tsx specifier when resolution fails", () => {
+  const unresolvedRequire = {
+    resolve() {
+      throw new Error("tsx not installed");
+    },
+  } as unknown as NodeJS.Require;
+
+  assert.equal(resolveHostedRuntimeTsxImportSpecifier(unresolvedRequire), "tsx");
 });
 
 test("withHostedProcessEnvironment restores overwritten and newly introduced env values", async () => {

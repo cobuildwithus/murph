@@ -67,6 +67,7 @@ import {
   reconcileHostedAssistantChannelCapabilities,
   requireHostedBootstrapForDispatch,
 } from "../src/hosted-runtime/context.ts";
+import { createHostedRuntimeResolvedConfig } from "./hosted-runtime-test-helpers.ts";
 
 async function createWorkspace(): Promise<{ cleanup: () => Promise<void>; vaultRoot: string }> {
   const root = await mkdtemp(path.join(tmpdir(), "hosted-runtime-context-coverage-"));
@@ -144,6 +145,12 @@ describe("hosted runtime context coverage", () => {
         {
           TELEGRAM_BOT_TOKEN: "telegram-token",
         },
+        createHostedRuntimeResolvedConfig({
+          channelCapabilities: {
+            emailSendReady: false,
+            telegramBotConfigured: true,
+          },
+        }),
       );
 
       assert.equal(result, null);
@@ -184,6 +191,12 @@ describe("hosted runtime context coverage", () => {
           HOSTED_EMAIL_DOMAIN: "mail.example.test",
           TELEGRAM_BOT_TOKEN: "telegram-token",
         },
+        createHostedRuntimeResolvedConfig({
+          channelCapabilities: {
+            emailSendReady: true,
+            telegramBotConfigured: true,
+          },
+        }),
       );
 
       assert.deepEqual(result, {
@@ -266,9 +279,6 @@ describe("hosted runtime context coverage", () => {
   });
 
   it("leaves automation state untouched when reconciled channels already match capabilities", async () => {
-    mocks.readHostedEmailCapabilities.mockReturnValue({
-      sendReady: true,
-    });
     mocks.readAssistantAutomationState.mockResolvedValue({
       autoReplyBacklogChannels: ["linq", "email"],
       autoReplyChannels: ["linq", "email", "telegram"],
@@ -281,7 +291,8 @@ describe("hosted runtime context coverage", () => {
       reconcileHostedAssistantChannelCapabilities(
         "/tmp/assistant-runtime-context-coverage",
         {
-          TELEGRAM_BOT_TOKEN: "telegram-token",
+          emailSendReady: true,
+          telegramBotConfigured: true,
         },
         true,
       ),

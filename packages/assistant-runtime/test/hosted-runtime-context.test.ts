@@ -33,6 +33,7 @@ import {
 } from "../src/hosted-runtime/context.ts";
 import {
   createHostedRuntimeWorkspace,
+  HOSTED_RUNTIME_RESOLVED_CONFIG,
   HOSTED_RUNTIME_EMAIL_CAPABILITY_ENV,
 } from "./hosted-runtime-test-helpers.ts";
 
@@ -42,7 +43,7 @@ test("hosted channel capability reconciliation enables email and telegram auto-r
   try {
     const firstResult = await reconcileHostedAssistantChannelCapabilities(
       vaultRoot,
-      HOSTED_RUNTIME_EMAIL_CAPABILITY_ENV,
+      HOSTED_RUNTIME_RESOLVED_CONFIG.channelCapabilities,
       true,
     );
 
@@ -59,7 +60,7 @@ test("hosted channel capability reconciliation enables email and telegram auto-r
 
     const secondResult = await reconcileHostedAssistantChannelCapabilities(
       vaultRoot,
-      HOSTED_RUNTIME_EMAIL_CAPABILITY_ENV,
+      HOSTED_RUNTIME_RESOLVED_CONFIG.channelCapabilities,
       true,
     );
 
@@ -89,6 +90,7 @@ test("hosted dispatch context still requires member activation bootstrap before 
           occurredAt: "2026-03-28T09:00:00.000Z",
         },
         {},
+        HOSTED_RUNTIME_RESOLVED_CONFIG,
       ),
       /requires member\.activated bootstrap first/u,
     );
@@ -104,6 +106,7 @@ test("hosted dispatch context still requires member activation bootstrap before 
         occurredAt: "2026-03-28T09:05:00.000Z",
       },
       {},
+      HOSTED_RUNTIME_RESOLVED_CONFIG,
     );
 
     assert.deepEqual(bootstrapResult, {
@@ -136,6 +139,7 @@ test("hosted dispatch context does not enable new auto-reply channels on non-act
         occurredAt: "2026-03-28T09:05:00.000Z",
       },
       {},
+      HOSTED_RUNTIME_RESOLVED_CONFIG,
     );
 
     await prepareHostedDispatchContext(
@@ -150,6 +154,7 @@ test("hosted dispatch context does not enable new auto-reply channels on non-act
         occurredAt: "2026-03-28T09:10:00.000Z",
       },
       HOSTED_RUNTIME_EMAIL_CAPABILITY_ENV,
+      HOSTED_RUNTIME_RESOLVED_CONFIG,
     );
 
     const automationState = JSON.parse(

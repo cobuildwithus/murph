@@ -50,10 +50,13 @@ export {
 } from "./hosted-runtime/child-result.ts";
 
 export type {
+  HostedAssistantRuntimeChannelCapabilities,
   HostedAssistantRuntimeConfig,
+  HostedAssistantRuntimeDeviceSyncConfig,
   HostedAssistantRuntimeJobInput,
   HostedAssistantRuntimeJobResult,
   HostedAssistantRuntimeJobRequest,
+  HostedAssistantRuntimeResolvedConfig,
   HostedExecutionCommitCallback,
 } from "./hosted-runtime/models.ts";
 export type {

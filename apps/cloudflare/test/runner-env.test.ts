@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildHostedRunnerJobRuntimeConfig,
   buildHostedRunnerContainerEnv,
+  buildHostedRunnerResolvedConfig,
   filterHostedRunnerUserEnv,
 } from "../src/runner-env.js";
 
@@ -187,6 +188,59 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
         CUSTOM_API_KEY: "custom-user",
         OPENAI_API_KEY: "sk-user",
         VENICE_API_KEY: "venice-user",
+      },
+    });
+  });
+});
+
+describe("buildHostedRunnerResolvedConfig", () => {
+  it("derives explicit channel capabilities from the forwarded runner env", () => {
+    expect(buildHostedRunnerResolvedConfig({
+      HOSTED_EMAIL_DOMAIN: "mail.example.test",
+      HOSTED_EMAIL_INGRESS_READY: "true",
+      HOSTED_EMAIL_LOCAL_PART: "assistant",
+      HOSTED_EMAIL_SEND_READY: "true",
+      TELEGRAM_BOT_TOKEN: "telegram-token",
+    })).toEqual({
+      channelCapabilities: {
+        emailSendReady: true,
+        telegramBotConfigured: true,
+      },
+      deviceSync: null,
+    });
+  });
+
+  it("requires both device-sync secrets and provider credentials before enabling device sync", () => {
+    expect(buildHostedRunnerResolvedConfig({
+      DEVICE_SYNC_PUBLIC_BASE_URL: "https://device-sync.example.test",
+      DEVICE_SYNC_SECRET: "secret_123",
+    })).toEqual({
+      channelCapabilities: {
+        emailSendReady: false,
+        telegramBotConfigured: false,
+      },
+      deviceSync: null,
+    });
+
+    expect(buildHostedRunnerResolvedConfig({
+      DEVICE_SYNC_PUBLIC_BASE_URL: "https://device-sync.example.test",
+      DEVICE_SYNC_SECRET: "secret_123",
+      WHOOP_CLIENT_ID: "whoop-client",
+      WHOOP_CLIENT_SECRET: "whoop-secret",
+    })).toMatchObject({
+      channelCapabilities: {
+        emailSendReady: false,
+        telegramBotConfigured: false,
+      },
+      deviceSync: {
+        providerConfigs: {
+          whoop: {
+            clientId: "whoop-client",
+            clientSecret: "whoop-secret",
+          },
+        },
+        publicBaseUrl: "https://device-sync.example.test",
+        secret: "secret_123",
       },
     });
   });

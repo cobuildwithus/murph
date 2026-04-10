@@ -100,6 +100,7 @@ import {
 } from "../src/hosted-runtime.ts";
 import {
   createHostedRuntimeEffectsPortStub,
+  createHostedRuntimeResolvedConfig,
 } from "./hosted-runtime-test-helpers.ts";
 
 const incomingBundle = Uint8Array.from([1, 2, 3]);
@@ -169,6 +170,7 @@ beforeEach(() => {
     commitTimeoutMs: runtime?.commitTimeoutMs ?? null,
     forwardedEnv: { ...(runtime?.forwardedEnv ?? {}) },
     platform,
+    resolvedConfig: createHostedRuntimeResolvedConfig(runtime?.resolvedConfig ?? {}),
     userEnv: { ...(runtime?.userEnv ?? {}) },
   }));
   mocks.parseLinqWebhookEvent.mockImplementation((rawBody: string) => JSON.parse(rawBody));

@@ -25,7 +25,7 @@ export async function executeHostedDispatchEvent(input: {
   dispatch: HostedExecutionDispatchRequest;
   runtime: Pick<
     NormalizedHostedAssistantRuntimeConfig,
-    "commitTimeoutMs" | "platform" | "userEnv"
+    "commitTimeoutMs" | "platform" | "resolvedConfig" | "userEnv"
   >;
   runtimeEnv: Readonly<Record<string, string>>;
   sharePack?: HostedExecutionRunnerSharePack | null;
@@ -35,6 +35,7 @@ export async function executeHostedDispatchEvent(input: {
     input.vaultRoot,
     input.dispatch,
     input.runtimeEnv,
+    input.runtime.resolvedConfig,
   );
   const dispatchEffect = await handleHostedDispatchEvent({
     dispatch: input.dispatch,
@@ -54,7 +55,7 @@ async function handleHostedDispatchEvent(input: {
   dispatch: HostedExecutionDispatchRequest;
   runtime: Pick<
     NormalizedHostedAssistantRuntimeConfig,
-    "commitTimeoutMs" | "platform" | "userEnv"
+    "commitTimeoutMs" | "platform" | "resolvedConfig" | "userEnv"
   >;
   sharePack?: HostedExecutionRunnerSharePack | null;
   vaultRoot: string;

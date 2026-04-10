@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   createAssistantFoodAutoLogHooks: vi.fn(),
-  createConfiguredDeviceSyncProviders: vi.fn(),
+  createConfiguredDeviceSyncProvidersFromConfigs: vi.fn(),
   createConfiguredParserRegistry: vi.fn(),
   createDeviceSyncRegistry: vi.fn(),
   createDeviceSyncService: vi.fn(),
@@ -22,7 +22,8 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@murphai/device-syncd/config", () => ({
-  createConfiguredDeviceSyncProviders: mocks.createConfiguredDeviceSyncProviders,
+  createConfiguredDeviceSyncProvidersFromConfigs:
+    mocks.createConfiguredDeviceSyncProvidersFromConfigs,
 }));
 
 vi.mock("@murphai/device-syncd/registry", () => ({
@@ -84,6 +85,17 @@ import {
   runHostedMaintenanceLoop,
 } from "../src/hosted-runtime/maintenance.ts";
 
+const DEVICE_SYNC_CONFIG = {
+  providerConfigs: {
+    oura: {
+      clientId: "oura-client",
+      clientSecret: "oura-secret",
+    },
+  },
+  publicBaseUrl: "https://device-sync.example.test",
+  secret: "secret_123",
+} as const;
+
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.createConfiguredParserRegistry.mockResolvedValue({
@@ -104,7 +116,7 @@ beforeEach(() => {
   mocks.getAssistantCronStatus.mockResolvedValue({
     nextRunAt: "2026-04-08T01:00:00.000Z",
   });
-  mocks.createConfiguredDeviceSyncProviders.mockReturnValue(["oura"]);
+  mocks.createConfiguredDeviceSyncProvidersFromConfigs.mockReturnValue(["oura"]);
   mocks.createDeviceSyncRegistry.mockReturnValue({
     list: () => ["oura"],
   });
@@ -250,7 +262,7 @@ describe("runHostedDeviceSyncPass", () => {
         occurredAt: "2026-04-08T00:00:00.000Z",
       },
       "/tmp/vault-root",
-      {},
+      null,
       null,
       45_000,
     );
@@ -263,7 +275,7 @@ describe("runHostedDeviceSyncPass", () => {
     expect(mocks.createDeviceSyncService).not.toHaveBeenCalled();
   });
 
-  it("skips device sync when the hosted runtime is missing required env even if providers exist", async () => {
+  it("skips device sync when the hosted runtime resolved config disables device sync", async () => {
     const result = await runHostedDeviceSyncPass(
       {
         event: {
@@ -275,9 +287,7 @@ describe("runHostedDeviceSyncPass", () => {
         occurredAt: "2026-04-08T00:00:00.000Z",
       },
       "/tmp/vault-root",
-      {
-        DEVICE_SYNC_PUBLIC_BASE_URL: "https://device-sync.example.test",
-      },
+      null,
       null,
       45_000,
     );
@@ -316,10 +326,7 @@ describe("runHostedDeviceSyncPass", () => {
         occurredAt: "2026-04-08T00:00:00.000Z",
       },
       "/tmp/vault-root",
-      {
-        DEVICE_SYNC_PUBLIC_BASE_URL: "https://device-sync.example.test",
-        DEVICE_SYNC_SECRET: "secret_123",
-      },
+      DEVICE_SYNC_CONFIG,
       {
         applyUpdates: vi.fn(),
         createConnectLink: vi.fn(),
@@ -369,10 +376,7 @@ describe("runHostedDeviceSyncPass", () => {
         occurredAt: "2026-04-08T00:00:00.000Z",
       },
       "/tmp/vault-root",
-      {
-        DEVICE_SYNC_PUBLIC_BASE_URL: "https://device-sync.example.test",
-        DEVICE_SYNC_SECRET: "secret_123",
-      },
+      DEVICE_SYNC_CONFIG,
       {
         applyUpdates: vi.fn(),
         createConnectLink: vi.fn(),
@@ -422,10 +426,7 @@ describe("runHostedDeviceSyncPass", () => {
           occurredAt: "2026-04-08T00:00:00.000Z",
         },
         "/tmp/vault-root",
-        {
-          DEVICE_SYNC_PUBLIC_BASE_URL: "https://device-sync.example.test",
-          DEVICE_SYNC_SECRET: "secret_123",
-        },
+        DEVICE_SYNC_CONFIG,
         {
           applyUpdates: vi.fn(),
           createConnectLink: vi.fn(),
@@ -465,10 +466,7 @@ describe("runHostedDeviceSyncPass", () => {
           occurredAt: "2026-04-08T00:00:00.000Z",
         },
         "/tmp/vault-root",
-        {
-          DEVICE_SYNC_PUBLIC_BASE_URL: "https://device-sync.example.test",
-          DEVICE_SYNC_SECRET: "secret_123",
-        },
+        DEVICE_SYNC_CONFIG,
         {
           applyUpdates: vi.fn(),
           createConnectLink: vi.fn(),
@@ -524,9 +522,8 @@ describe("runHostedMaintenanceLoop", () => {
         },
       },
       requestId: "req_123",
-      runtimeEnv: {
-        DEVICE_SYNC_PUBLIC_BASE_URL: "https://device-sync.example.test",
-        DEVICE_SYNC_SECRET: "secret_123",
+      resolvedConfig: {
+        deviceSync: DEVICE_SYNC_CONFIG,
       },
       timeoutMs: 45_000,
       vaultRoot: "/tmp/vault-root",
@@ -591,7 +588,9 @@ describe("runHostedMaintenanceLoop", () => {
         },
       },
       requestId: "req_123",
-      runtimeEnv: {},
+      resolvedConfig: {
+        deviceSync: null,
+      },
       skipAssistantAutomation: true,
       timeoutMs: 45_000,
       vaultRoot: "/tmp/vault-root",
@@ -646,7 +645,9 @@ describe("runHostedMaintenanceLoop", () => {
         },
       },
       requestId: "req_123",
-      runtimeEnv: {},
+      resolvedConfig: {
+        deviceSync: null,
+      },
       timeoutMs: 45_000,
       vaultRoot: "/tmp/vault-root",
     });
@@ -705,7 +706,9 @@ describe("runHostedMaintenanceLoop", () => {
         },
       },
       requestId: "req_123",
-      runtimeEnv: {},
+      resolvedConfig: {
+        deviceSync: null,
+      },
       timeoutMs: 45_000,
       vaultRoot: "/tmp/vault-root",
     });

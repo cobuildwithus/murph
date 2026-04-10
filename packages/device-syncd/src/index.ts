@@ -8,13 +8,18 @@ export { createDeviceSyncService, createDefaultImporterPort, DeviceSyncService }
 export type { CreateDeviceSyncServiceInput } from "./service.ts";
 export {
   createConfiguredDeviceSyncProviders,
+  createConfiguredDeviceSyncProvidersFromConfigs,
   createConsoleDeviceSyncLogger,
   loadDeviceSyncEnvironment,
+  readConfiguredDeviceSyncProviderConfigs,
   readConfiguredGarminDeviceSyncProviderConfig,
   readConfiguredOuraDeviceSyncProviderConfig,
   readConfiguredWhoopDeviceSyncProviderConfig,
 } from "./config.ts";
-export type { LoadedDeviceSyncEnvironment } from "./config.ts";
+export type {
+  ConfiguredDeviceSyncProviderConfigs,
+  LoadedDeviceSyncEnvironment,
+} from "./config.ts";
 export { buildPublicDeviceSyncErrorPayload, startDeviceSyncHttpServer } from "./http.ts";
 export type { CreateDeviceSyncHttpServerInput } from "./http.ts";
 export { SqliteDeviceSyncStore } from "./store.ts";

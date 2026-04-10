@@ -2585,9 +2585,93 @@ describe("runHostedExecutionJob", () => {
       expect(runtime.userEnv).toMatchObject({
         CUSTOM_API_KEY: "custom-user",
       });
+      expect(runtime.resolvedConfig).toEqual({
+        channelCapabilities: {
+          emailSendReady: false,
+          telegramBotConfigured: false,
+        },
+        deviceSync: null,
+      });
     } finally {
       restoreEnvVar("HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS", previousAllowedUserEnvKeys);
       restoreEnvVar("HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS", previousCommitTimeout);
+    }
+  });
+
+  it("derives explicit runtime capabilities from the forwarded runner env", () => {
+    const runtime = buildHostedExecutionJobRuntimeForTests({
+      forwardedEnv: {
+        DEVICE_SYNC_PUBLIC_BASE_URL: "https://device-sync.example.test",
+        DEVICE_SYNC_SECRET: "secret_123",
+        HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID: "acct_123",
+        HOSTED_EMAIL_CLOUDFLARE_API_TOKEN: "cf-token",
+        HOSTED_EMAIL_DOMAIN: "mail.example.test",
+        HOSTED_EMAIL_LOCAL_PART: "assistant",
+        HOSTED_EMAIL_SIGNING_SECRET: "email-secret",
+        TELEGRAM_BOT_TOKEN: "telegram-token",
+        WHOOP_CLIENT_ID: "whoop-client",
+        WHOOP_CLIENT_SECRET: "whoop-secret",
+      },
+    });
+
+    expect(runtime.resolvedConfig).toMatchObject({
+      channelCapabilities: {
+        emailSendReady: true,
+        telegramBotConfigured: true,
+      },
+      deviceSync: {
+        providerConfigs: {
+          whoop: {
+            clientId: "whoop-client",
+            clientSecret: "whoop-secret",
+          },
+        },
+        publicBaseUrl: "https://device-sync.example.test",
+        secret: "secret_123",
+      },
+    });
+  });
+
+  it("recomputes hosted email readiness from ambient env plus per-job overrides instead of keeping synthetic false defaults", () => {
+    const previousHostedEmailAccountId = process.env.HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID;
+    const previousHostedEmailApiToken = process.env.HOSTED_EMAIL_CLOUDFLARE_API_TOKEN;
+    const previousHostedEmailDomain = process.env.HOSTED_EMAIL_DOMAIN;
+    const previousHostedEmailLocalPart = process.env.HOSTED_EMAIL_LOCAL_PART;
+    const previousHostedEmailSigningSecret = process.env.HOSTED_EMAIL_SIGNING_SECRET;
+
+    process.env.HOSTED_EMAIL_DOMAIN = "mail.example.test";
+    process.env.HOSTED_EMAIL_LOCAL_PART = "assistant";
+    process.env.HOSTED_EMAIL_SIGNING_SECRET = "email-secret";
+
+    try {
+      const runtime = buildHostedExecutionJobRuntimeForTests({
+        forwardedEnv: {
+          HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID: "acct_123",
+          HOSTED_EMAIL_CLOUDFLARE_API_TOKEN: "cf-token",
+          HOSTED_EMAIL_INGRESS_READY: "false",
+          HOSTED_EMAIL_SEND_READY: "false",
+        },
+      });
+
+      expect(runtime.forwardedEnv).toMatchObject({
+        HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID: "acct_123",
+        HOSTED_EMAIL_CLOUDFLARE_API_TOKEN: "cf-token",
+        HOSTED_EMAIL_INGRESS_READY: "true",
+        HOSTED_EMAIL_SEND_READY: "true",
+      });
+      expect(runtime.resolvedConfig).toEqual({
+        channelCapabilities: {
+          emailSendReady: true,
+          telegramBotConfigured: false,
+        },
+        deviceSync: null,
+      });
+    } finally {
+      restoreEnvVar("HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID", previousHostedEmailAccountId);
+      restoreEnvVar("HOSTED_EMAIL_CLOUDFLARE_API_TOKEN", previousHostedEmailApiToken);
+      restoreEnvVar("HOSTED_EMAIL_DOMAIN", previousHostedEmailDomain);
+      restoreEnvVar("HOSTED_EMAIL_LOCAL_PART", previousHostedEmailLocalPart);
+      restoreEnvVar("HOSTED_EMAIL_SIGNING_SECRET", previousHostedEmailSigningSecret);
     }
   });
 

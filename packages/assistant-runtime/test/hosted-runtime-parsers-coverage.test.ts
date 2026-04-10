@@ -48,6 +48,23 @@ describe("hosted runtime parser coverage", () => {
         forwardedEnv: {
           PATH: "/usr/bin",
         },
+        resolvedConfig: {
+          channelCapabilities: {
+            emailSendReady: true,
+            telegramBotConfigured: false,
+          },
+          deviceSync: {
+            providerConfigs: {
+              whoop: {
+                clientId: "whoop-client",
+                clientSecret: "whoop-secret",
+                scopes: ["offline", "read:profile"],
+              },
+            },
+            publicBaseUrl: "https://device-sync.example.test",
+            secret: "secret_123",
+          },
+        },
         userEnv: {
           OPENAI_API_KEY: "secret",
         },
@@ -56,6 +73,23 @@ describe("hosted runtime parser coverage", () => {
       commitTimeoutMs: null,
       forwardedEnv: {
         PATH: "/usr/bin",
+      },
+      resolvedConfig: {
+        channelCapabilities: {
+          emailSendReady: true,
+          telegramBotConfigured: false,
+        },
+        deviceSync: {
+          providerConfigs: {
+            whoop: {
+              clientId: "whoop-client",
+              clientSecret: "whoop-secret",
+              scopes: ["offline", "read:profile"],
+            },
+          },
+          publicBaseUrl: "https://device-sync.example.test",
+          secret: "secret_123",
+        },
       },
       userEnv: {
         OPENAI_API_KEY: "secret",
@@ -97,6 +131,15 @@ describe("hosted runtime parser coverage", () => {
     expect(() => parseHostedAssistantRuntimeConfig({
       commitTimeoutMs: Number.NaN,
     })).toThrow(/commitTimeoutMs must be a finite number/u);
+
+    expect(() => parseHostedAssistantRuntimeConfig({
+      resolvedConfig: {
+        channelCapabilities: {
+          emailSendReady: "yes",
+          telegramBotConfigured: false,
+        },
+      },
+    })).toThrow(/emailSendReady must be a boolean/u);
   });
 
   it("rejects invalid non-null next wake timestamps and empty summaries", () => {
@@ -157,5 +200,27 @@ describe("hosted runtime parser coverage", () => {
         [field]: "https://murph.example.test",
       })).toThrow(new RegExp(`${field} is no longer supported`, "u"));
     }
+  });
+
+  it("rejects non-serializable provider config entries inside resolved runtime config", () => {
+    expect(() => parseHostedAssistantRuntimeConfig({
+      resolvedConfig: {
+        channelCapabilities: {
+          emailSendReady: false,
+          telegramBotConfigured: false,
+        },
+        deviceSync: {
+          providerConfigs: {
+            oura: {
+              clientId: "oura-client",
+              clientSecret: "oura-secret",
+              fetchImpl: () => Promise.resolve(new Response()),
+            },
+          },
+          publicBaseUrl: "https://device-sync.example.test",
+          secret: "secret_123",
+        },
+      },
+    })).toThrow(/fetchImpl is not supported in serialized runtime config/u);
   });
 });

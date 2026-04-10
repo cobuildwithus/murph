@@ -1,4 +1,4 @@
-import { createConfiguredDeviceSyncProviders } from "@murphai/device-syncd/config";
+import { createConfiguredDeviceSyncProvidersFromConfigs } from "@murphai/device-syncd/config";
 import { createDeviceSyncRegistry } from "@murphai/device-syncd/registry";
 import { createDeviceSyncService } from "@murphai/device-syncd/service";
 import {
@@ -21,6 +21,7 @@ import {
 } from "@murphai/assistant-engine";
 
 import type {
+  HostedAssistantRuntimeDeviceSyncConfig,
   HostedMaintenanceMetrics,
   HostedWorkspaceArtifactMaterializer,
 } from "./models.ts";
@@ -90,9 +91,11 @@ export async function runHostedMaintenanceLoop(input: {
   dispatch: HostedExecutionDispatchRequest;
   executionContext: AssistantExecutionContext;
   requestId: string;
+  resolvedConfig: {
+    deviceSync: HostedAssistantRuntimeDeviceSyncConfig | null;
+  };
   skipAssistantAutomation?: boolean;
   timeoutMs: number | null;
-  runtimeEnv: Readonly<Record<string, string>>;
   vaultRoot: string;
 }): Promise<HostedMaintenanceMetrics> {
   const parserResult = await drainHostedParserQueue({
@@ -125,7 +128,7 @@ export async function runHostedMaintenanceLoop(input: {
   const deviceSyncResult = await runHostedDeviceSyncPass(
     input.dispatch,
     input.vaultRoot,
-    input.runtimeEnv,
+    input.resolvedConfig.deviceSync,
     input.deviceSyncPort,
     input.timeoutMs,
   );
@@ -246,12 +249,12 @@ export async function runHostedAssistantAutomation(
 export async function runHostedDeviceSyncPass(
   dispatch: HostedExecutionDispatchRequest,
   vaultRoot: string,
-  env: Readonly<Record<string, string>>,
+  deviceSyncConfig: HostedAssistantRuntimeDeviceSyncConfig | null,
   deviceSyncPort: HostedRuntimeDeviceSyncPort | null | undefined,
   timeoutMs: number | null,
 ): Promise<{ nextWakeAt: string | null; processedJobs: number; skipped: boolean }> {
   const service = createHostedDeviceSyncRuntime({
-    env,
+    deviceSyncConfig,
     vaultRoot,
   });
 
@@ -263,7 +266,7 @@ export async function runHostedDeviceSyncPass(
     };
   }
 
-  const secret = env.DEVICE_SYNC_SECRET ?? null;
+  const secret = deviceSyncConfig?.secret ?? null;
   let syncState: HostedDeviceSyncRuntimeSyncState = {
     hostedToLocalAccountIds: new Map(),
     localToHostedAccountIds: new Map(),
@@ -341,28 +344,25 @@ function reportHostedDeviceSyncControlPlaneFailure(
 }
 
 function createHostedDeviceSyncRuntime(input: {
-  env: Readonly<Record<string, string>>;
+  deviceSyncConfig: HostedAssistantRuntimeDeviceSyncConfig | null;
   vaultRoot: string;
 }) {
+  if (!input.deviceSyncConfig) {
+    return null;
+  }
+
   const registry = createDeviceSyncRegistry(
-    createConfiguredDeviceSyncProviders(input.env),
+    createConfiguredDeviceSyncProvidersFromConfigs(input.deviceSyncConfig.providerConfigs),
   );
 
   if (registry.list().length === 0) {
     return null;
   }
 
-  const secret = input.env.DEVICE_SYNC_SECRET ?? null;
-  const publicBaseUrl = input.env.DEVICE_SYNC_PUBLIC_BASE_URL ?? null;
-
-  if (!secret || !publicBaseUrl) {
-    return null;
-  }
-
   return createDeviceSyncService({
-    secret,
+    secret: input.deviceSyncConfig.secret,
     config: {
-      publicBaseUrl,
+      publicBaseUrl: input.deviceSyncConfig.publicBaseUrl,
       vaultRoot: input.vaultRoot,
     },
     registry,

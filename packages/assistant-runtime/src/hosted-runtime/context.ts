@@ -3,7 +3,6 @@ import path from "node:path";
 
 import { VAULT_LAYOUT } from "@murphai/contracts";
 import {
-  readHostedEmailCapabilities,
   type HostedExecutionDispatchRequest,
 } from "@murphai/hosted-execution";
 import {
@@ -20,14 +19,14 @@ import {
   resolveHostedAssistantConfig,
 } from "@murphai/operator-config/operator-config";
 import {
-  normalizeNullableString,
-} from "@murphai/operator-config/text/shared";
-import {
   readAssistantAutomationState,
   saveAssistantAutomationState,
 } from "@murphai/assistant-engine";
 
-import type { HostedBootstrapResult } from "./models.ts";
+import type {
+  HostedAssistantRuntimeChannelCapabilities,
+  HostedBootstrapResult,
+} from "./models.ts";
 
 interface HostedMemberBootstrapResult {
   vaultCreated: boolean;
@@ -47,6 +46,9 @@ export async function prepareHostedDispatchContext(
   vaultRoot: string,
   dispatch: HostedExecutionDispatchRequest,
   runtimeEnv: Readonly<Record<string, string>>,
+  resolvedConfig: {
+    channelCapabilities: HostedAssistantRuntimeChannelCapabilities;
+  },
 ): Promise<HostedBootstrapResult | null> {
   const isMemberActivation = dispatch.event.kind === "member.activated";
   const memberBootstrap = isMemberActivation
@@ -58,6 +60,7 @@ export async function prepareHostedDispatchContext(
   const assistantRuntimeState = await bootstrapHostedAssistantRuntimeState(
     vaultRoot,
     runtimeEnv,
+    resolvedConfig.channelCapabilities,
     {
       enableChannelCapabilityReconciliation: isMemberActivation,
     },
@@ -99,6 +102,7 @@ export async function bootstrapHostedMemberContext(
 async function bootstrapHostedAssistantRuntimeState(
   vaultRoot: string,
   runtimeEnv: Readonly<Record<string, string>>,
+  channelCapabilities: HostedAssistantRuntimeChannelCapabilities,
   options: {
     enableChannelCapabilityReconciliation: boolean;
   },
@@ -107,10 +111,10 @@ async function bootstrapHostedAssistantRuntimeState(
     allowMissing: true,
     env: runtimeEnv,
   });
-  const channelCapabilities = options.enableChannelCapabilityReconciliation
+  const reconciledChannelCapabilities = options.enableChannelCapabilityReconciliation
     ? await reconcileHostedAssistantChannelCapabilities(
         vaultRoot,
-        runtimeEnv,
+        channelCapabilities,
         assistantBootstrap.configured,
       )
     : {
@@ -123,7 +127,7 @@ async function bootstrapHostedAssistantRuntimeState(
     assistantConfigured: assistantBootstrap.configured,
     assistantProvider: assistantBootstrap.provider,
     assistantSeeded: assistantBootstrap.seeded,
-    ...channelCapabilities,
+    ...reconciledChannelCapabilities,
   };
 }
 
@@ -152,13 +156,13 @@ export async function readHostedAssistantRuntimeState(): Promise<Pick<
 
 export async function reconcileHostedAssistantChannelCapabilities(
   vaultRoot: string,
-  runtimeEnv: Readonly<Record<string, string>>,
+  channelCapabilities: HostedAssistantRuntimeChannelCapabilities,
   assistantConfigured: boolean,
 ): Promise<Pick<HostedBootstrapResult, "emailAutoReplyEnabled" | "telegramAutoReplyEnabled">> {
   const emailAutoReplyEnabled = assistantConfigured
-    && readHostedEmailCapabilities(runtimeEnv).sendReady;
+    && channelCapabilities.emailSendReady;
   const telegramAutoReplyEnabled = assistantConfigured
-    && Boolean(normalizeNullableString(runtimeEnv.TELEGRAM_BOT_TOKEN));
+    && channelCapabilities.telegramBotConfigured;
 
   const automationState = await readAssistantAutomationState(vaultRoot);
   const nextAutoReplyChannels = reconcileHostedAssistantChannels(
