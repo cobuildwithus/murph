@@ -124,7 +124,8 @@ export async function runAssistantAutomation(
         {
           onEvent: (event) => {
             if (
-              (event.type === 'capture.imported' && event.capture?.actor?.isSelf !== true) ||
+              (event.type === 'capture.imported' &&
+                (input.allowSelfAuthored || event.capture?.actor?.isSelf !== true)) ||
               event.type === 'parser.jobs.drained'
             ) {
               wakeController.requestWake()

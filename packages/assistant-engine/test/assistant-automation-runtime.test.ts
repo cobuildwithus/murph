@@ -3690,6 +3690,175 @@ describe('assistant automation run loop', () => {
     expect(scanStartedAt[1]! - scanStartedAt[0]!).toBe(10)
   })
 
+  it('wakes immediately on self-authored imported captures when allowSelfAuthored is enabled', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-09T00:00:00.000Z'))
+
+    const externalAbort = new AbortController()
+    const scanStartedAt: number[] = []
+    const inboxServices = createInboxServices({
+      run: vi.fn().mockImplementation(
+        async (
+          _input: { requestId: string | null; vault: string },
+          options: {
+            onEvent?: (event: Record<string, unknown>) => void
+            signal: AbortSignal
+          },
+        ) => {
+          setTimeout(() => {
+            options.onEvent?.({
+              type: 'capture.imported',
+              connectorId: 'telegram',
+              source: 'telegram',
+              capture: {
+                actor: {
+                  isSelf: true,
+                },
+              },
+            })
+          }, 10)
+
+          await new Promise<void>((resolve) => {
+            options.signal.addEventListener('abort', () => resolve(), {
+              once: true,
+            })
+          })
+        },
+      ),
+    })
+    runLoopMocks.scanAssistantAutomationOnce.mockImplementation(async () => {
+      scanStartedAt.push(Date.now())
+      if (scanStartedAt.length === 2) {
+        externalAbort.abort()
+      }
+      return {
+        routing: {
+          considered: 0,
+          failed: 0,
+          nextWakeAt: null,
+          noAction: 0,
+          routed: 0,
+          skipped: 0,
+        },
+        replies: {
+          considered: 0,
+          failed: 0,
+          nextWakeAt: null,
+          replied: 0,
+          skipped: 0,
+        },
+      }
+    })
+    const runLoop = await vi.importActual<typeof import('../src/assistant/automation/run-loop.ts')>(
+      '../src/assistant/automation/run-loop.ts',
+    )
+
+    const resultPromise = runLoop.runAssistantAutomation({
+      allowSelfAuthored: true,
+      inboxServices,
+      once: false,
+      signal: externalAbort.signal,
+      startDaemon: true,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    await vi.advanceTimersByTimeAsync(0)
+    expect(scanStartedAt).toHaveLength(1)
+
+    await vi.advanceTimersByTimeAsync(10)
+    const result = await resultPromise
+
+    expect(result.reason).toBe('signal')
+    expect(scanStartedAt).toHaveLength(2)
+    expect(scanStartedAt[1]! - scanStartedAt[0]!).toBe(10)
+  })
+
+  it('does not wake on self-authored imported captures during ordinary runs', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-09T00:00:00.000Z'))
+
+    const externalAbort = new AbortController()
+    const scanStartedAt: number[] = []
+    const inboxServices = createInboxServices({
+      run: vi.fn().mockImplementation(
+        async (
+          _input: { requestId: string | null; vault: string },
+          options: {
+            onEvent?: (event: Record<string, unknown>) => void
+            signal: AbortSignal
+          },
+        ) => {
+          setTimeout(() => {
+            options.onEvent?.({
+              type: 'capture.imported',
+              connectorId: 'telegram',
+              source: 'telegram',
+              capture: {
+                actor: {
+                  isSelf: true,
+                },
+              },
+            })
+          }, 10)
+
+          await new Promise<void>((resolve) => {
+            options.signal.addEventListener('abort', () => resolve(), {
+              once: true,
+            })
+          })
+        },
+      ),
+    })
+    runLoopMocks.scanAssistantAutomationOnce.mockImplementation(async () => {
+      scanStartedAt.push(Date.now())
+      if (scanStartedAt.length === 2) {
+        externalAbort.abort()
+      }
+      return {
+        routing: {
+          considered: 0,
+          failed: 0,
+          nextWakeAt: '2026-04-09T00:00:00.020Z',
+          noAction: 0,
+          routed: 0,
+          skipped: 0,
+        },
+        replies: {
+          considered: 0,
+          failed: 0,
+          nextWakeAt: null,
+          replied: 0,
+          skipped: 0,
+        },
+      }
+    })
+    const runLoop = await vi.importActual<typeof import('../src/assistant/automation/run-loop.ts')>(
+      '../src/assistant/automation/run-loop.ts',
+    )
+
+    const resultPromise = runLoop.runAssistantAutomation({
+      allowSelfAuthored: false,
+      inboxServices,
+      once: false,
+      signal: externalAbort.signal,
+      startDaemon: true,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    await vi.advanceTimersByTimeAsync(10)
+    expect(scanStartedAt).toHaveLength(1)
+
+    await vi.advanceTimersByTimeAsync(9)
+    expect(scanStartedAt).toHaveLength(1)
+
+    await vi.advanceTimersByTimeAsync(1)
+    const result = await resultPromise
+
+    expect(result.reason).toBe('signal')
+    expect(scanStartedAt).toHaveLength(2)
+    expect(scanStartedAt[1]! - scanStartedAt[0]!).toBe(20)
+  })
+
   it('wakes immediately on parser drain events instead of waiting for the scan interval', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-09T00:00:00.000Z'))
