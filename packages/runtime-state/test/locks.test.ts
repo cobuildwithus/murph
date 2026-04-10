@@ -13,9 +13,22 @@ import {
 interface TestLockMetadata {
   owner: string;
   stale?: boolean;
+  padding?: string;
 }
 
 const tempRoots: string[] = [];
+
+function isFulfilled<T>(
+  result: PromiseSettledResult<T>,
+): result is PromiseFulfilledResult<T> {
+  return result.status === "fulfilled";
+}
+
+function isRejected<T>(
+  result: PromiseSettledResult<T>,
+): result is PromiseRejectedResult {
+  return result.status === "rejected";
+}
 
 function createTempRoot(): string {
   const tempRoot = mkdtempSync(path.join(tmpdir(), "runtime-state-locks-"));
@@ -48,9 +61,15 @@ function createLockOptions(
         return null;
       }
 
+      const padding = "padding" in value ? value.padding : undefined;
+      if (typeof padding !== "undefined" && typeof padding !== "string") {
+        return null;
+      }
+
       return {
         owner,
         ...(typeof stale === "boolean" ? { stale } : {}),
+        ...(typeof padding === "string" ? { padding } : {}),
       };
     },
     inspectStale(metadata) {
@@ -205,6 +224,43 @@ describe("runtime-state locks", () => {
       });
     } finally {
       await heldHandle.release();
+    }
+  });
+
+  it("allows only one winner when contenders race to clear a metadata-less stale directory", async () => {
+    const tempRoot = createTempRoot();
+    const options = createLockOptions(tempRoot);
+
+    mkdirSync(options.lockPath, { recursive: true });
+
+    const padding = "x".repeat(8_000_000);
+    const results = await Promise.allSettled([
+      acquireDirectoryLock({
+        ...options,
+        ownerKey: "owner-2",
+        metadata: { owner: "fresh-owner-1", padding },
+      }),
+      acquireDirectoryLock({
+        ...options,
+        ownerKey: "owner-3",
+        metadata: { owner: "fresh-owner-2", padding },
+      }),
+    ]);
+
+    const fulfilled = results.filter(isFulfilled);
+    const rejected = results.filter(isRejected);
+
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+    expect(rejected[0]?.reason).toBeInstanceOf(DirectoryLockHeldError);
+
+    try {
+      await expect(inspectDirectoryLock(options)).resolves.toMatchObject({
+        state: "active",
+        metadata: { owner: fulfilled[0]!.value.metadata.owner },
+      });
+    } finally {
+      await fulfilled[0]!.value.release();
     }
   });
 });
