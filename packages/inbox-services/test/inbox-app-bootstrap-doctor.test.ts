@@ -72,7 +72,6 @@ import { createInboxBootstrapDoctorOps } from '../src/inbox-app/bootstrap-doctor
 import { DOCTOR_STRATEGIES } from '../src/inbox-app/bootstrap-doctor-strategies.ts'
 import type {
   DoctorContext,
-  ImessageDriver,
   InboxAppEnvironment,
   InboxConnectorConfig,
   InboxRuntimeModule,
@@ -271,7 +270,6 @@ function createEnvironment(
       throw new Error('not used in bootstrap tests')
     },
     enableAssistantAutoReplyChannel: unusedAsync,
-    ensureConfiguredImessageReady: async () => undefined,
     getEnvironment: () => ({}),
     getHomeDirectory: () => '/tmp',
     getPid: () => 1,
@@ -279,12 +277,10 @@ function createEnvironment(
     journalPromotionEnabled: false,
     killProcess() {},
     loadConfiguredEmailDriver: unusedAsync,
-    loadConfiguredImessageDriver: unusedAsync,
     loadConfiguredTelegramDriver: unusedAsync,
     loadCore: unusedAsync,
     loadImporters: unusedAsync,
     loadInbox: async () => createInboxRuntimeModule(),
-    loadInboxImessage: unusedAsync,
     loadParsers: async () => createParsersModule(),
     loadQuery: unusedAsync,
     provisionOrRecoverAgentmailInbox: unusedAsync,
@@ -337,7 +333,7 @@ async function runDoctorCheck<TResult>(
 }
 
 function findCheck(
-  context: DoctorContext,
+  context: Pick<DoctorContext, 'checks'>,
   name: string,
 ) {
   return context.checks.find((check) => check.name === name) ?? null
@@ -636,79 +632,6 @@ test('doctor rebuilds runtime and runs the telegram strategy for a configured co
     ),
     true,
   )
-})
-
-test('iMessage strategy covers platform, driver, Messages DB, and probe branches', async () => {
-  const imessageConnector = createConnector('imessage', 'imessage:self', {
-    accountId: 'self',
-    options: {
-      includeOwnMessages: true,
-    },
-  })
-
-  const failureContext = createDoctorContext({
-    sourceId: imessageConnector.id,
-  })
-  await DOCTOR_STRATEGIES.imessage(failureContext, imessageConnector, {
-    env: createEnvironment({
-      ensureConfiguredImessageReady: async () => {
-        throw new Error('messages unavailable')
-      },
-      getPlatform: () => 'linux',
-      loadConfiguredImessageDriver: async () => {
-        throw new Error('driver unavailable')
-      },
-    }),
-    runDoctorCheck,
-  })
-  assert.equal(findCheck(failureContext, 'platform')?.status, 'fail')
-  assert.equal(findCheck(failureContext, 'driver-import')?.status, 'fail')
-  assert.equal(findCheck(failureContext, 'messages-db')?.status, 'fail')
-  assert.equal(findCheck(failureContext, 'probe'), null)
-
-  const warningContext = createDoctorContext({
-    sourceId: imessageConnector.id,
-  })
-  const quietDriver: ImessageDriver = {
-    async getMessages() {
-      return []
-    },
-    async listChats() {
-      return []
-    },
-  }
-  await DOCTOR_STRATEGIES.imessage(warningContext, imessageConnector, {
-    env: createEnvironment({
-      ensureConfiguredImessageReady: async () => undefined,
-      getPlatform: () => 'darwin',
-      loadConfiguredImessageDriver: async () => quietDriver,
-    }),
-    runDoctorCheck,
-  })
-  assert.equal(findCheck(warningContext, 'platform')?.status, 'pass')
-  assert.equal(findCheck(warningContext, 'messages-db')?.status, 'pass')
-  assert.equal(findCheck(warningContext, 'probe')?.status, 'warn')
-
-  const successContext = createDoctorContext({
-    sourceId: imessageConnector.id,
-  })
-  const activeDriver: ImessageDriver = {
-    async getMessages() {
-      return [{}]
-    },
-    async listChats() {
-      return []
-    },
-  }
-  await DOCTOR_STRATEGIES.imessage(successContext, imessageConnector, {
-    env: createEnvironment({
-      ensureConfiguredImessageReady: async () => undefined,
-      getPlatform: () => 'darwin',
-      loadConfiguredImessageDriver: async () => activeDriver,
-    }),
-    runDoctorCheck,
-  })
-  assert.equal(findCheck(successContext, 'probe')?.status, 'pass')
 })
 
 test('telegram strategy covers missing token, delegated drivers, webhook passes, and webhook warnings', async () => {

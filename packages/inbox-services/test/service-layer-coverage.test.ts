@@ -77,7 +77,6 @@ import {
 } from '@murphai/vault-usecases/assistant-vault-paths'
 import type {
   EmailDriver,
-  InboxImessageRuntimeModule,
   InboxPaths,
   InboxRuntimeModule,
   PollConnector,
@@ -280,7 +279,10 @@ test('service-layer helpers cover connector, query, state, daemon, and vault pat
   })
   assert.equal(runtimeNamespaceAccountId(connector), 'bot')
   assert.equal(connectorNamespaceKey(connector), 'telegram::bot')
-  assert.equal(normalizeConnectorAccountId('imessage', undefined), 'self')
+  assert.throws(
+    () => normalizeConnectorAccountId('unsupported' as never, undefined),
+    (error: unknown) => error instanceof VaultCliError && error.code === 'INBOX_SOURCE_UNSUPPORTED',
+  )
   assert.equal(normalizeConnectorAccountId('telegram', undefined), 'bot')
   assert.equal(normalizeConnectorAccountId('linq', undefined), 'default')
   assert.equal(normalizeConnectorAccountId('email', undefined), null)
@@ -346,9 +348,6 @@ test('service-layer helpers cover connector, query, state, daemon, and vault pat
       async runInboxDaemon() {},
       async runInboxDaemonWithParsers() {},
     } satisfies InboxRuntimeModule),
-    loadImessageDriver: async () => {
-      throw new Error('unused')
-    },
     loadTelegramDriver: async () => ({}) as TelegramDriver,
   })
   assert.equal(telegramConnector.id, 'telegram:bot')
@@ -362,7 +361,6 @@ test('service-layer helpers cover connector, query, state, daemon, and vault pat
         }),
         linqWebhookSecret: '   ',
         loadInbox: async () => ({}) as InboxRuntimeModule,
-        loadImessageDriver: async () => ({}) as never,
         loadTelegramDriver: async () => ({}) as TelegramDriver,
       }),
     /Linq webhook secret is required/,
@@ -404,7 +402,6 @@ test('service-layer helpers cover connector, query, state, daemon, and vault pat
       async runInboxDaemon() {},
       async runInboxDaemonWithParsers() {},
     } satisfies InboxRuntimeModule),
-    loadImessageDriver: async () => ({}) as never,
     loadTelegramDriver: async () => ({}) as TelegramDriver,
   })
   assert.equal(emailConnector.id, 'email:primary')

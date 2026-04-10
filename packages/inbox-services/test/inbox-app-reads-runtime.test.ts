@@ -346,7 +346,6 @@ function createEnv(
       throw new Error('not used in reads/runtime tests')
     },
     enableAssistantAutoReplyChannel: async () => false,
-    ensureConfiguredImessageReady: async () => {},
     getEnvironment: () => ({ LINQ_WEBHOOK_SECRET: 'linq-secret' }),
     getHomeDirectory: () => '/tmp/home',
     getPid: () => 321,
@@ -354,9 +353,6 @@ function createEnv(
     journalPromotionEnabled: false,
     killProcess() {},
     loadConfiguredEmailDriver: async () => {
-      throw new Error('not used in reads/runtime tests')
-    },
-    loadConfiguredImessageDriver: async () => {
       throw new Error('not used in reads/runtime tests')
     },
     loadConfiguredTelegramDriver: async () => {
@@ -370,9 +366,6 @@ function createEnv(
     },
     loadInbox: async () => {
       throw new Error('test did not provide loadInbox')
-    },
-    loadInboxImessage: async () => {
-      throw new Error('not used in reads/runtime tests')
     },
     loadParsers: async () => {
       throw new Error('not used in reads/runtime tests')
@@ -1090,11 +1083,11 @@ test('runtime run rejects pre-existing daemon state owned by another pid', async
   )
 })
 
-test('runtime run skips unsupported imessage connectors and surfaces no-supported-sources', async () => {
+test('runtime run rejects enabled connectors outside the supported source list', async () => {
   const paths = await createTempPaths()
   const connector = createConnectorConfig({
-    id: 'imessage-main',
-    source: 'imessage',
+    id: 'unsupported-main',
+    source: 'unsupported' as never,
   })
   const onEvent = vi.fn()
 
@@ -1113,12 +1106,6 @@ test('runtime run skips unsupported imessage connectors and surfaces no-supporte
     status: 'idle',
     stoppedAt: null,
   })
-  connectorMocks.instantiateConnector.mockRejectedValue(
-    new VaultCliError(
-      'INBOX_IMESSAGE_UNAVAILABLE',
-      'iMessage is unavailable on this host.',
-    ),
-  )
   linqRuntimeMocks.resolveLinqWebhookSecret.mockReturnValue('linq-secret')
 
   const ops = createInboxRuntimeOps(
@@ -1146,7 +1133,8 @@ test('runtime run skips unsupported imessage connectors and surfaces no-supporte
       error instanceof VaultCliError &&
       error.code === 'INBOX_NO_SUPPORTED_SOURCES',
   )
-  assert.equal(onEvent.mock.calls[0]?.[0]?.type, 'connector.skipped')
+  assert.equal(onEvent.mock.calls.length, 0)
+  assert.equal(connectorMocks.instantiateConnector.mock.calls.length, 0)
 })
 
 test('runtime run writes failed daemon state when the daemon surface throws', async () => {
