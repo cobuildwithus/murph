@@ -149,8 +149,6 @@ export {
   readDerivedKnowledgeGraph,
   readDerivedKnowledgeGraphWithIssues,
   renderDerivedKnowledgeIndex,
-  searchDerivedKnowledgeGraph,
-  searchDerivedKnowledgeVault,
   type DerivedKnowledgeGraph,
   type DerivedKnowledgeGraphIssue,
   type DerivedKnowledgeGraphReadResult,
@@ -159,6 +157,10 @@ export {
   type DerivedKnowledgeSearchHit,
   type DerivedKnowledgeSearchResult,
 } from "./knowledge-graph.ts";
+export {
+  searchDerivedKnowledgeGraph,
+  searchDerivedKnowledgeVault,
+} from "./knowledge-search.ts";
 export {
   DERIVED_KNOWLEDGE_SEARCH_RESULT_FORMAT,
   extractKnowledgeFirstHeading,

@@ -22,8 +22,6 @@ import {
   stripGeneratedKnowledgeSections,
   stripKnowledgeLeadingHeading,
 } from './knowledge-format.ts'
-import { searchDerivedKnowledgeGraph } from './knowledge-search.ts'
-export { searchDerivedKnowledgeGraph } from './knowledge-search.ts'
 
 export const DERIVED_KNOWLEDGE_ROOT = 'derived/knowledge'
 export const DERIVED_KNOWLEDGE_PAGES_ROOT = `${DERIVED_KNOWLEDGE_ROOT}/pages`
@@ -154,15 +152,6 @@ export async function readDerivedKnowledgeGraphWithIssues(
     },
     issues,
   }
-}
-
-export async function searchDerivedKnowledgeVault(
-  vaultRoot: string,
-  query: string,
-  filters: DerivedKnowledgeSearchFilters = {},
-): Promise<DerivedKnowledgeSearchResult> {
-  const graph = await readDerivedKnowledgeGraph(vaultRoot)
-  return searchDerivedKnowledgeGraph(graph, query, filters)
 }
 
 export function renderDerivedKnowledgeIndex(

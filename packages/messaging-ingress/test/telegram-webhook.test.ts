@@ -6,10 +6,12 @@ import {
 } from "vitest";
 
 import {
-  minimizeTelegramUpdate,
-  parseTelegramWebhookUpdate,
   summarizeTelegramUpdate,
 } from "../src/index.ts";
+import {
+  minimizeTelegramUpdate,
+  parseTelegramWebhookUpdate,
+} from "../src/telegram-webhook-payload.ts";
 
 test("parseTelegramWebhookUpdate validates supported message fields", () => {
   const update = parseTelegramWebhookUpdate(JSON.stringify({

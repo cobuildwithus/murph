@@ -9,6 +9,8 @@ Murph's CLI can install, start, reuse, and stop this daemon for the selected vau
 The daemon binds the control plane to localhost by default. CLI and web clients must authenticate that control plane with a bearer token. If provider callbacks or webhooks need public reachability, expose only the public callback/webhook routes through a separate listener or reverse proxy instead of widening `/accounts/*` and `/providers/*/connect`.
 
 The package now also exports a reusable `DeviceSyncPublicIngress` layer that encapsulates provider-agnostic OAuth state, callback handling, and webhook verification/dispatch. Hosted or alternate HTTP surfaces should import that seam from `@murphai/device-syncd/public-ingress`; the package root stays daemon-oriented. That shared ingress is the seam for a future hosted Vercel control plane while keeping the current local/tunneled callback flow alive.
+Daemon config readers and HTTP response helpers stay on `@murphai/device-syncd/config`
+and `@murphai/device-syncd/http` instead of leaking back through the shared ingress seam.
 For non-daemon callers, `@murphai/device-syncd/client` is the canonical shared control-plane client surface for base-url/token resolution, loopback safety checks, and JSON request helpers inside this workspace or bundled public tarballs.
 
 What it does:
