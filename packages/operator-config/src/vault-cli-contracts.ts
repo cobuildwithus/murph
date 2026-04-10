@@ -1,42 +1,12 @@
 import { isValidIanaTimeZone } from '@murphai/contracts'
-import * as Query from '@murphai/query'
+import { ALL_QUERY_ENTITY_FAMILIES } from '@murphai/query'
 import { z } from 'zod'
-
-const queryRecordTypeFallbackValues = [
-  'allergy',
-  'assessment',
-  'audit',
-  'condition',
-  'core',
-  'event',
-  'experiment',
-  'family',
-  'food',
-  'genetics',
-  'goal',
-  'journal',
-  'protocol',
-  'provider',
-  'recipe',
-  'sample',
-  'workout_format',
-] as const
-
-function resolveQueryRecordTypeValues(): readonly string[] {
-  try {
-    return Array.isArray(Query.ALL_QUERY_ENTITY_FAMILIES)
-      ? Query.ALL_QUERY_ENTITY_FAMILIES
-      : queryRecordTypeFallbackValues
-  } catch {
-    return queryRecordTypeFallbackValues
-  }
-}
 
 function describeQueryRecordTypes(values: readonly string[]): string {
   return `Optional query record families. Repeat --record-type for multiple values: ${values.join(', ')}.`
 }
 
-const queryRecordTypeValues = resolveQueryRecordTypeValues()
+const queryRecordTypeValues = ALL_QUERY_ENTITY_FAMILIES
 const queryRecordTypeDescription = describeQueryRecordTypes(queryRecordTypeValues)
 
 export const isoTimestampSchema = z

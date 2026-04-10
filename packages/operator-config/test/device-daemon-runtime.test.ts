@@ -44,6 +44,7 @@ const tempDirectories = new Set<string>()
 afterEach(async () => {
   vi.restoreAllMocks()
   vi.resetModules()
+  vi.doUnmock('node:module')
   vi.doUnmock('node:child_process')
   vi.doUnmock('node:fs')
   vi.doUnmock('node:fs/promises')
@@ -78,6 +79,47 @@ async function importDeviceDaemonProcessWithMocks(setupMocks: () => void) {
   vi.resetModules()
   setupMocks()
   return await import('../src/device-daemon/process.ts')
+}
+
+async function importDeviceDaemonPathsWithMockedRequire(
+  setupMock: (
+    callCount: number,
+    actualModule: typeof import('node:module'),
+  ) => NodeJS.Require,
+): Promise<typeof import('../src/device-daemon/paths.ts')> {
+  vi.resetModules()
+  vi.doMock('node:module', async () => {
+    const actual = await vi.importActual<typeof import('node:module')>('node:module')
+    let callCount = 0
+
+    return {
+      ...actual,
+      createRequire() {
+        callCount += 1
+        return setupMock(callCount, actual)
+      },
+    }
+  })
+
+  return await import('../src/device-daemon/paths.ts')
+}
+
+function createMockRequire(
+  actualModule: typeof import('node:module'),
+  resolveImpl: () => string,
+): NodeJS.Require {
+  const mockRequire = actualModule.createRequire(import.meta.url)
+  mockRequire.resolve = createMockResolve(resolveImpl)
+  return mockRequire
+}
+
+function createMockResolve(resolveImpl: () => string): NodeJS.RequireResolve {
+  function resolve(_request: string): string {
+    return resolveImpl()
+  }
+
+  resolve.paths = (_request: string) => []
+  return resolve
 }
 
 const deviceDaemonChildFixtureArgs = [
@@ -456,6 +498,73 @@ test('device-daemon path, env, process, and state helpers stay deterministic', a
       startedAt: '2026-04-08T00:00:00.000Z',
       message: 'invalid',
     }),
+  )
+})
+
+test('resolveInstalledDeviceSyncPackageEntry falls back only when the bare package request is missing', async () => {
+  const fallbackModule = await importDeviceDaemonPathsWithMockedRequire((callCount, actual) => {
+    if (callCount === 1) {
+      return createMockRequire(actual, () => {
+        const error = new Error('missing local package') as NodeJS.ErrnoException
+        error.code = 'MODULE_NOT_FOUND'
+        error.message = "Cannot find module '@murphai/device-syncd'"
+        throw error
+      })
+    }
+
+    return createMockRequire(actual, () => '/repo-root/node_modules/@murphai/device-syncd/dist/index.js')
+  })
+
+  assert.equal(
+    fallbackModule.resolveInstalledDeviceSyncPackageEntry(),
+    '/repo-root/node_modules/@murphai/device-syncd/dist/index.js',
+  )
+
+  const rethrowModule = await importDeviceDaemonPathsWithMockedRequire((callCount, actual) => {
+    if (callCount === 1) {
+      return createMockRequire(actual, () => {
+        const error = new Error('permission denied') as NodeJS.ErrnoException
+        error.code = 'EACCES'
+        throw error
+      })
+    }
+
+    return createMockRequire(actual, () => '/repo-root/node_modules/@murphai/device-syncd/dist/index.js')
+  })
+
+  assert.throws(
+    () => rethrowModule.resolveInstalledDeviceSyncPackageEntry(),
+    (error: unknown) => {
+      assert.equal(typeof error, 'object')
+      assert.notEqual(error, null)
+      assert.equal((error as NodeJS.ErrnoException).code, 'EACCES')
+      return true
+    },
+  )
+
+  const brokenEntrypointModule = await importDeviceDaemonPathsWithMockedRequire((callCount, actual) => {
+    if (callCount === 1) {
+      return createMockRequire(actual, () => {
+        const error = new Error(
+          "Cannot find module '/tmp/node_modules/@murphai/device-syncd/dist/index.js'. Please verify that the package.json has a valid \"main\" entry",
+        ) as NodeJS.ErrnoException
+        error.code = 'MODULE_NOT_FOUND'
+        throw error
+      })
+    }
+
+    return createMockRequire(actual, () => '/repo-root/node_modules/@murphai/device-syncd/dist/index.js')
+  })
+
+  assert.throws(
+    () => brokenEntrypointModule.resolveInstalledDeviceSyncPackageEntry(),
+    (error: unknown) => {
+      assert.equal(typeof error, 'object')
+      assert.notEqual(error, null)
+      assert.equal((error as NodeJS.ErrnoException).code, 'MODULE_NOT_FOUND')
+      assert.match(String((error as Error).message), /valid "main" entry/u)
+      return true
+    },
   )
 })
 

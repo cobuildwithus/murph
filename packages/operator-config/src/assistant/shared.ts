@@ -18,24 +18,18 @@ export function readAssistantEnvString(
 export function isAssistantOpenAIBaseUrl(
   value: string | null | undefined,
 ): boolean {
-  const normalized = normalizeNullableText(value)
-  if (!normalized) {
-    return false
-  }
-
-  try {
-    const parsed = new URL(normalized)
-    return (
-      parsed.protocol === 'https:' &&
-      parsed.hostname.toLowerCase() === 'api.openai.com'
-    )
-  } catch {
-    return false
-  }
+  return matchesAssistantHttpsHost(value, 'api.openai.com')
 }
 
 export function isAssistantVercelAIGatewayBaseUrl(
   value: string | null | undefined,
+): boolean {
+  return matchesAssistantHttpsHost(value, 'ai-gateway.vercel.sh')
+}
+
+function matchesAssistantHttpsHost(
+  value: string | null | undefined,
+  expectedHostname: string,
 ): boolean {
   const normalized = normalizeNullableText(value)
   if (!normalized) {
@@ -46,7 +40,7 @@ export function isAssistantVercelAIGatewayBaseUrl(
     const parsed = new URL(normalized)
     return (
       parsed.protocol === 'https:' &&
-      parsed.hostname.toLowerCase() === 'ai-gateway.vercel.sh'
+      parsed.hostname.toLowerCase() === expectedHostname
     )
   } catch {
     return false

@@ -19,57 +19,11 @@ export {
   formatStructuredErrorMessage,
   normalizeNullableString,
 } from '@murphai/operator-config/text/shared'
-
-export function readAssistantEnvString(
-  env: NodeJS.ProcessEnv | null | undefined,
-  key: string | null | undefined,
-): string | null {
-  const normalizedKey = normalizeNullableString(key)
-  if (!normalizedKey) {
-    return null
-  }
-
-  const value = env?.[normalizedKey]
-  return typeof value === 'string' ? normalizeNullableString(value) : null
-}
-
-export function isAssistantOpenAIBaseUrl(
-  value: string | null | undefined,
-): boolean {
-  const normalized = normalizeNullableString(value)
-  if (!normalized) {
-    return false
-  }
-
-  try {
-    const parsed = new URL(normalized)
-    return (
-      parsed.protocol === 'https:' &&
-      parsed.hostname.toLowerCase() === 'api.openai.com'
-    )
-  } catch {
-    return false
-  }
-}
-
-export function isAssistantVercelAIGatewayBaseUrl(
-  value: string | null | undefined,
-): boolean {
-  const normalized = normalizeNullableString(value)
-  if (!normalized) {
-    return false
-  }
-
-  try {
-    const parsed = new URL(normalized)
-    return (
-      parsed.protocol === 'https:' &&
-      parsed.hostname.toLowerCase() === 'ai-gateway.vercel.sh'
-    )
-  } catch {
-    return false
-  }
-}
+export {
+  isAssistantOpenAIBaseUrl,
+  isAssistantVercelAIGatewayBaseUrl,
+  readAssistantEnvString,
+} from '@murphai/operator-config/assistant/shared'
 
 export function normalizeAssistantProviderOptionKey(
   value: string | null | undefined,
