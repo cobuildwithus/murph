@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
@@ -61,7 +62,7 @@ describe('assistant turns', () => {
       deliveryIntentId: null,
       deliveryRequested: true,
       lastError: null,
-      promptPreview: normalizePreview(prompt, 240),
+      promptPreview: buildExpectedRedactedPreview(prompt),
       provider: 'openai-compatible',
       providerModel: normalizePreview(providerModel, 240),
       responsePreview: null,
@@ -135,7 +136,7 @@ describe('assistant turns', () => {
         code: 'DELIVERY_FAILED',
         message: 'provider send failed',
       },
-      responsePreview: normalizePreview(response, 320),
+      responsePreview: buildExpectedRedactedPreview(response),
       status: 'failed',
       updatedAt: '2026-04-08T00:02:00.000Z',
     })
@@ -221,7 +222,7 @@ describe('assistant turns', () => {
       deliveryDisposition: 'not-requested',
       deliveryIntentId: null,
       providerModel: null,
-      promptPreview: 'hello world',
+      promptPreview: buildExpectedRedactedPreview('  hello world  '),
       responsePreview: null,
       status: 'deferred',
     })
@@ -369,4 +370,10 @@ function normalizePreview(value: string, limit: number): string {
     return trimmed
   }
   return `${trimmed.slice(0, limit - 1).trimEnd()}…`
+}
+
+function buildExpectedRedactedPreview(value: string): string {
+  const trimmed = value.trim()
+  const digest = createHash('sha256').update(trimmed).digest('hex').slice(0, 12)
+  return `[redacted ${trimmed.length} chars sha256:${digest}]`
 }

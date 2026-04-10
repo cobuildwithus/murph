@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { readdir, readFile } from 'node:fs/promises'
 import path from 'node:path'
 import {
@@ -25,8 +25,8 @@ import {
 } from './shared.js'
 
 const ASSISTANT_TURN_RECEIPT_SCHEMA = 'murph.assistant-turn-receipt.v1'
-const PROMPT_PREVIEW_LIMIT = 240
-const RESPONSE_PREVIEW_LIMIT = 320
+const PROVIDER_MODEL_PREVIEW_LIMIT = 240
+const TURN_TEXT_PREVIEW_HASH_LENGTH = 12
 
 export function createAssistantTurnId(): string {
   return `turn_${randomUUID().replace(/-/gu, '')}`
@@ -49,8 +49,8 @@ export async function createAssistantTurnReceipt(input: {
     turnId: input.turnId ?? createAssistantTurnId(),
     sessionId: input.sessionId,
     provider: input.provider,
-    providerModel: normalizePreview(input.providerModel, PROMPT_PREVIEW_LIMIT),
-    promptPreview: normalizePreview(input.prompt, PROMPT_PREVIEW_LIMIT),
+    providerModel: normalizePreview(input.providerModel, PROVIDER_MODEL_PREVIEW_LIMIT),
+    promptPreview: buildRedactedTurnTextPreview(input.prompt),
     responsePreview: null,
     status: 'running',
     deliveryRequested: input.deliveryRequested,
@@ -190,7 +190,7 @@ export async function finalizeAssistantTurnReceipt(input: {
             : receipt.deliveryIntentId,
         responsePreview:
           input.response !== undefined
-            ? normalizePreview(input.response, RESPONSE_PREVIEW_LIMIT)
+            ? buildRedactedTurnTextPreview(input.response)
             : receipt.responsePreview,
         updatedAt: completedAt,
         completedAt,
@@ -354,4 +354,22 @@ function normalizePreview(value: string | null | undefined, limit: number): stri
   }
 
   return `${trimmed.slice(0, limit - 1).trimEnd()}…`
+}
+
+function buildRedactedTurnTextPreview(value: string | null | undefined): string | null {
+  if (typeof value !== 'string') {
+    return null
+  }
+
+  const trimmed = value.trim()
+  if (trimmed.length === 0) {
+    return null
+  }
+
+  const digest = createHash('sha256')
+    .update(trimmed)
+    .digest('hex')
+    .slice(0, TURN_TEXT_PREVIEW_HASH_LENGTH)
+
+  return `[redacted ${trimmed.length} chars sha256:${digest}]`
 }

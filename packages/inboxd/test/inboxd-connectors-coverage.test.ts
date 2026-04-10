@@ -421,7 +421,21 @@ test("normalizeParsedEmailMessage builds fallback thread targets, dedupes reply-
     "<prior@example.test>",
   ]);
   assert.equal(threadTarget?.subject, "Inbox coverage");
-  assert.equal((capture.raw.headers as Record<string, unknown>)["x-trace-id"], "trace-1");
+  assert.deepEqual(capture.raw, {
+    attachment_count: 1,
+    cc_count: 3,
+    has_from: true,
+    has_in_reply_to: true,
+    has_subject: true,
+    has_text: true,
+    header_count: 1,
+    raw_hash: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    raw_size: 512,
+    reference_count: 1,
+    reply_to_count: 4,
+    schema: "murph.email-parsed-capture.v1",
+    to_count: 2,
+  });
 });
 
 test("createAgentmailApiPollDriver validates inputs, normalizes empty download URLs, and createEmailPollConnector rejects tiny poll intervals", async () => {

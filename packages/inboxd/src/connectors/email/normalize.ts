@@ -2,10 +2,7 @@ import type { InboundAttachment, InboundCapture } from "../../contracts/capture.
 import type { ChatMessage } from "../chat/message.ts";
 import { createInboundCaptureFromChatMessage } from "../chat/message.ts";
 import { normalizeTextValue, sanitizeRawMetadata, toIsoTimestamp } from "../../shared.ts";
-import type {
-  AgentmailMessageAttachment,
-  AgentmailMessageLike,
-} from "./types.ts";
+import type { AgentmailMessageLike } from "./types.ts";
 
 export interface AgentmailAttachmentDownloadDriver {
   downloadAttachment(input: {
@@ -296,7 +293,10 @@ async function buildAgentmailAttachments(
 }
 
 export function inferAttachmentKind(
-  attachment: Pick<AgentmailMessageAttachment, "content_type" | "filename">,
+  attachment: {
+    content_type?: string | null;
+    filename?: string | null;
+  },
 ): InboundAttachment["kind"] {
   const mime = String(attachment.content_type ?? "").toLowerCase();
   const fileName = String(attachment.filename ?? "").toLowerCase();
@@ -324,44 +324,52 @@ function sanitizeRawAgentmailMessage(
   message: AgentmailMessageLike,
 ): Record<string, unknown> {
   return sanitizeRawMetadata(compactRecord({
-    inbox_id: message.inbox_id,
-    thread_id: message.thread_id,
-    message_id: message.message_id,
-    labels: message.labels ?? undefined,
+    schema: "murph.email-agentmail-capture.v1",
     timestamp: message.timestamp,
-    from: message.from,
-    to: message.to ?? undefined,
-    size: message.size,
-    updated_at: message.updated_at,
     created_at: message.created_at,
-    reply_to: message.reply_to ?? undefined,
-    cc: message.cc ?? undefined,
-    bcc: message.bcc ?? undefined,
-    subject: message.subject,
-    preview: message.preview,
-    text: message.text,
-    html: message.html,
-    extracted_text: message.extracted_text,
-    extracted_html: message.extracted_html,
-    attachments:
-      message.attachments?.map((attachment) => pickAttachment(attachment)) ?? undefined,
-    in_reply_to: message.in_reply_to,
-    references: message.references ?? undefined,
-    headers: message.headers ?? undefined,
+    updated_at: message.updated_at,
+    size: message.size,
+    label_count: countNormalizedEntries(message.labels),
+    to_count: countNormalizedEntries(message.to),
+    cc_count: countNormalizedEntries(message.cc),
+    bcc_count: countNormalizedEntries(message.bcc),
+    reply_to_count: countNormalizedEntries(message.reply_to),
+    reference_count: countNormalizedEntries(message.references),
+    attachment_count: countArrayEntries(message.attachments),
+    has_subject: truthyFlag(message.subject),
+    has_preview: truthyFlag(message.preview),
+    has_text: truthyFlag(message.text),
+    has_html: truthyFlag(message.html),
+    has_extracted_text: truthyFlag(message.extracted_text),
+    has_extracted_html: truthyFlag(message.extracted_html),
+    has_in_reply_to: truthyFlag(message.in_reply_to),
+    header_count: countRecordEntries(message.headers),
   })) as Record<string, unknown>;
 }
 
-function pickAttachment(
-  attachment: AgentmailMessageAttachment,
-): Record<string, unknown> {
-  return compactRecord({
-    attachment_id: attachment.attachment_id,
-    size: attachment.size,
-    filename: attachment.filename,
-    content_type: attachment.content_type,
-    content_disposition: attachment.content_disposition,
-    content_id: attachment.content_id,
-  });
+function truthyFlag(value: string | null | undefined): boolean | undefined {
+  return normalizeTextValue(value) ? true : undefined;
+}
+
+function countNormalizedEntries(
+  values: ReadonlyArray<string | null | undefined> | null | undefined,
+): number | undefined {
+  const count = (values ?? []).filter((value) => normalizeTextValue(value) !== null).length;
+  return count > 0 ? count : undefined;
+}
+
+function countArrayEntries(
+  values: ReadonlyArray<unknown> | null | undefined,
+): number | undefined {
+  const count = values?.length ?? 0;
+  return count > 0 ? count : undefined;
+}
+
+function countRecordEntries(
+  value: Record<string, unknown> | null | undefined,
+): number | undefined {
+  const count = value ? Object.keys(value).length : 0;
+  return count > 0 ? count : undefined;
 }
 
 function compactRecord(

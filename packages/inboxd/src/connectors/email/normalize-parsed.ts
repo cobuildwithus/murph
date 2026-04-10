@@ -200,28 +200,55 @@ function buildParsedEmailAttachments(
 }
 
 function sanitizeParsedEmailMessage(message: ParsedEmailMessage): Record<string, unknown> {
-  return sanitizeRawMetadata({
-    attachments: message.attachments.map((attachment) => ({
-      content_disposition: attachment.contentDisposition,
-      content_id: attachment.contentId,
-      content_transfer_encoding: attachment.contentTransferEncoding,
-      content_type: attachment.contentType,
-      file_name: attachment.fileName,
-      size: attachment.data?.byteLength ?? null,
-    })),
-    bcc: message.bcc,
-    cc: message.cc,
-    from: message.from,
-    headers: message.headers,
-    html: message.html,
-    in_reply_to: message.inReplyTo,
-    message_id: message.messageId,
+  return sanitizeRawMetadata(compactRecord({
+    schema: "murph.email-parsed-capture.v1",
     raw_hash: message.rawHash,
     raw_size: message.rawSize,
-    references: message.references,
-    reply_to: message.replyTo,
-    subject: message.subject,
-    text: message.text,
-    to: message.to,
-  }) as Record<string, unknown>;
+    attachment_count: countArrayEntries(message.attachments),
+    to_count: countNormalizedEntries(message.to),
+    cc_count: countNormalizedEntries(message.cc),
+    bcc_count: countNormalizedEntries(message.bcc),
+    reply_to_count: countNormalizedEntries(message.replyTo),
+    reference_count: countNormalizedEntries(message.references),
+    header_count: countRecordEntries(message.headers),
+    has_message_id: truthyFlag(message.messageId),
+    has_in_reply_to: truthyFlag(message.inReplyTo),
+    has_from: truthyFlag(message.from),
+    has_subject: truthyFlag(message.subject),
+    has_text: truthyFlag(message.text),
+    has_html: truthyFlag(message.html),
+  })) as Record<string, unknown>;
+}
+
+function truthyFlag(value: string | null | undefined): boolean | undefined {
+  return normalizeTextValue(value) ? true : undefined;
+}
+
+function countNormalizedEntries(
+  values: ReadonlyArray<string | null | undefined> | null | undefined,
+): number | undefined {
+  const count = (values ?? []).filter((value) => normalizeTextValue(value) !== null).length;
+  return count > 0 ? count : undefined;
+}
+
+function countArrayEntries(
+  values: ReadonlyArray<unknown> | null | undefined,
+): number | undefined {
+  const count = values?.length ?? 0;
+  return count > 0 ? count : undefined;
+}
+
+function countRecordEntries(
+  value: Record<string, unknown> | null | undefined,
+): number | undefined {
+  const count = value ? Object.keys(value).length : 0;
+  return count > 0 ? count : undefined;
+}
+
+function compactRecord(
+  value: Record<string, unknown>,
+): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(value).filter(([, entryValue]) => entryValue !== undefined),
+  );
 }
