@@ -169,7 +169,6 @@ test('createAssistantLocalService wires the local integrations and forwards assi
     drainOutbox: true,
     maxPerScan: 11,
     once: false,
-    scanIntervalMs: 1234,
     vault: TEST_VAULT_ROOT,
   })
   await service.runAutomationOnce()
@@ -262,7 +261,6 @@ test('createAssistantLocalService wires the local integrations and forwards assi
       modelSpec: undefined,
       once: false,
       requestId: null,
-      scanIntervalMs: 1234,
       sessionMaxAgeMs: null,
       startDaemon: false,
       vault: TEST_VAULT_ROOT,
@@ -279,7 +277,6 @@ test('createAssistantLocalService wires the local integrations and forwards assi
       modelSpec: undefined,
       once: true,
       requestId: null,
-      scanIntervalMs: undefined,
       sessionMaxAgeMs: null,
       startDaemon: false,
       vault: TEST_VAULT_ROOT,

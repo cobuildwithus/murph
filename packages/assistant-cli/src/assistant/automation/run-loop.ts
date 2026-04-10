@@ -26,7 +26,6 @@ export async function runAssistantAutomation(
         modelSpec: input.modelSpec,
         once: input.once,
         requestId: input.requestId ?? null,
-        scanIntervalMs: input.scanIntervalMs,
         sessionMaxAgeMs: input.sessionMaxAgeMs ?? null,
         startDaemon: input.startDaemon,
         vault: input.vault,

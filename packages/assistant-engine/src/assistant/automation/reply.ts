@@ -57,8 +57,10 @@ import {
   type AssistantAutoReplyPromptCapture,
 } from './prompt-builder.js'
 import {
+  computeAssistantAutomationRetryAt,
   createEmptyAutoReplyScanResult,
   cursorFromCapture,
+  earliestAssistantAutomationWakeAt,
   normalizeEnabledChannels,
   normalizeScanLimit,
   type AssistantAutoReplyScanResult,
@@ -67,6 +69,9 @@ import {
 } from './shared.js'
 
 const SELF_AUTHORED_ECHO_WINDOW_MS = 10 * 60 * 1000
+const ASSISTANT_AUTO_REPLY_DEFERRED_RETRY_DELAY_MS = 30 * 1000
+const ASSISTANT_AUTO_REPLY_PROVIDER_RETRY_DELAY_MS = 30 * 1000
+const ASSISTANT_AUTO_REPLY_PROVIDER_CAPACITY_RETRY_DELAY_MS = 5 * 60 * 1000
 const AUTO_REPLY_RECEIPT_CAPTURE_ID_KEY = 'autoReplyCaptureId'
 const AUTO_REPLY_RECEIPT_CAPTURE_IDS_KEY = 'autoReplyCaptureIds'
 
@@ -92,6 +97,7 @@ interface AssistantAutoReplyReplyDecision {
 interface AssistantAutoReplySkipDecision {
   kind: 'skip'
   advanceCursor: boolean
+  nextWakeAt: string | null
   reason: string
   stopScanning: boolean
 }
@@ -141,6 +147,7 @@ interface AssistantAutoReplyGroupOutcome {
   artifact: AssistantAutoReplyOutcomeArtifact
   event: AssistantAutoReplyOutcomeEvent
   kind: 'deferred' | 'failed' | 'ignored' | 'replied' | 'skipped'
+  nextWakeAt: string | null
   stopScanning: boolean
   summary: AssistantAutoReplyOutcomeSummary
 }
@@ -150,6 +157,7 @@ type AssistantAutoReplyGroupArtifactStatus = 'complete' | 'none' | 'partial'
 export interface AssistantAutoReplyProcessResult {
   advanceCursor: boolean
   failed: number
+  nextWakeAt: string | null
   replied: number
   skipped: number
   stopScanning: boolean
@@ -323,6 +331,10 @@ export function applyAssistantAutoReplyProcessResult(input: {
   updateCursor: (cursor: AssistantAutomationCursor) => void
 }): boolean {
   input.summary.failed += input.result.failed
+  input.summary.nextWakeAt = earliestAssistantAutomationWakeAt(
+    input.summary.nextWakeAt,
+    input.result.nextWakeAt,
+  )
   input.summary.replied += input.result.replied
   input.summary.skipped += input.result.skipped
   if (input.result.advanceCursor) {
@@ -466,6 +478,7 @@ async function commitAssistantAutoReplyGroupOutcome(input: {
   return {
     advanceCursor: input.outcome.advanceCursor,
     failed: input.outcome.summary.failed,
+    nextWakeAt: input.outcome.nextWakeAt,
     replied: input.outcome.summary.replied,
     skipped: input.outcome.summary.skipped,
     stopScanning: input.outcome.stopScanning,
@@ -554,6 +567,7 @@ function createIgnoredGroupOutcome(): AssistantAutoReplyGroupOutcome {
     artifact: { kind: 'none' },
     event: null,
     kind: 'ignored',
+    nextWakeAt: null,
     stopScanning: false,
     summary: createAssistantAutoReplyOutcomeSummary(),
   }
@@ -567,12 +581,14 @@ function createSkippedDecisionOutcome(input: {
     return createSkippedGroupOutcome({
       captureCount: input.captureCount,
       reason: input.decision.reason,
+      nextWakeAt: input.decision.nextWakeAt,
       stopScanning: input.decision.stopScanning,
     })
   }
 
   return createDeferredGroupOutcome({
     captureCount: input.captureCount,
+    nextWakeAt: input.decision.nextWakeAt,
     reason: input.decision.reason,
     stopScanning: input.decision.stopScanning,
   })
@@ -580,6 +596,7 @@ function createSkippedDecisionOutcome(input: {
 
 function createSkippedGroupOutcome(input: {
   captureCount: number
+  nextWakeAt?: string | null
   reason: string
   stopScanning?: boolean
 }): AssistantAutoReplyGroupOutcome {
@@ -591,6 +608,7 @@ function createSkippedGroupOutcome(input: {
       type: 'capture.reply-skipped',
     },
     kind: 'skipped',
+    nextWakeAt: input.nextWakeAt ?? null,
     stopScanning: input.stopScanning ?? false,
     summary: createAssistantAutoReplyOutcomeSummary({
       skipped: input.captureCount,
@@ -600,6 +618,7 @@ function createSkippedGroupOutcome(input: {
 
 function createDeferredGroupOutcome(input: {
   captureCount: number
+  nextWakeAt?: string | null
   reason: string
   stopScanning: boolean
 }): AssistantAutoReplyGroupOutcome {
@@ -611,6 +630,7 @@ function createDeferredGroupOutcome(input: {
       type: 'capture.reply-skipped',
     },
     kind: 'deferred',
+    nextWakeAt: input.nextWakeAt ?? null,
     stopScanning: input.stopScanning,
     summary: createAssistantAutoReplyOutcomeSummary({
       skipped: input.captureCount,
@@ -634,6 +654,7 @@ function createDeferredDeliveryGroupOutcome(
       type: 'capture.replied',
     },
     kind: 'deferred',
+    nextWakeAt: null,
     stopScanning: false,
     summary: createAssistantAutoReplyOutcomeSummary({
       replied: 1,
@@ -662,6 +683,7 @@ function createSuccessfulReplyGroupOutcome(
       type: 'capture.replied',
     },
     kind: 'replied',
+    nextWakeAt: null,
     stopScanning: false,
     summary: createAssistantAutoReplyOutcomeSummary({
       replied: 1,
@@ -672,6 +694,7 @@ function createSuccessfulReplyGroupOutcome(
 function createFailedGroupOutcome(input: {
   advanceCursor: boolean
   error: unknown
+  nextWakeAt?: string | null
   stopScanning?: boolean
 }): AssistantAutoReplyGroupOutcome {
   const failure = describeAssistantAutoReplyFailure(input.error)
@@ -690,6 +713,7 @@ function createFailedGroupOutcome(input: {
       type: 'capture.reply-failed',
     },
     kind: 'failed',
+    nextWakeAt: input.nextWakeAt ?? null,
     stopScanning: input.stopScanning ?? false,
     summary: createAssistantAutoReplyOutcomeSummary({
       failed: 1,
@@ -993,6 +1017,9 @@ function classifyAssistantAutoReplyFailure(input: {
   if (isAssistantProviderStalledError(input.error)) {
     return createDeferredGroupOutcome({
       captureCount: input.captureCount,
+      nextWakeAt: computeAssistantAutomationRetryAt(
+        ASSISTANT_AUTO_REPLY_PROVIDER_RETRY_DELAY_MS,
+      ),
       reason: AUTO_REPLY_PROVIDER_STALLED_DETAIL,
       stopScanning: true,
     })
@@ -1002,6 +1029,9 @@ function classifyAssistantAutoReplyFailure(input: {
   if (isAssistantProviderConnectionLostError(input.error)) {
     return createDeferredGroupOutcome({
       captureCount: input.captureCount,
+      nextWakeAt: computeAssistantAutomationRetryAt(
+        ASSISTANT_AUTO_REPLY_PROVIDER_RETRY_DELAY_MS,
+      ),
       reason: `${detail} Will retry this capture after the provider reconnects.`,
       stopScanning: true,
     })
@@ -1011,6 +1041,9 @@ function classifyAssistantAutoReplyFailure(input: {
     return createFailedGroupOutcome({
       advanceCursor: false,
       error: input.error,
+      nextWakeAt: computeAssistantAutomationRetryAt(
+        ASSISTANT_AUTO_REPLY_PROVIDER_CAPACITY_RETRY_DELAY_MS,
+      ),
       stopScanning: true,
     })
   }
@@ -1066,6 +1099,7 @@ function createAdvancingSkipDecision(
   return {
     advanceCursor: true,
     kind: 'skip',
+    nextWakeAt: null,
     reason,
     stopScanning: false,
   }
@@ -1106,10 +1140,19 @@ async function assistantAutoReplyHandledByTurnReceipt(
 
 function createDeferredSkipDecision(
   reason: string,
+  input?: {
+    nextWakeAt?: string | null
+  },
 ): AssistantAutoReplySkipDecision {
   return {
     advanceCursor: false,
     kind: 'skip',
+    nextWakeAt:
+      input?.nextWakeAt === undefined
+        ? computeAssistantAutomationRetryAt(
+            ASSISTANT_AUTO_REPLY_DEFERRED_RETRY_DELAY_MS,
+          )
+        : input.nextWakeAt,
     reason,
     stopScanning: true,
   }

@@ -40,12 +40,14 @@ const groupingMocks = vi.hoisted(() => ({
 
 const runLoopMocks = vi.hoisted(() => ({
   acquireAssistantAutomationRunLock: vi.fn(),
+  buildAssistantOutboxSummary: vi.fn(),
   createAssistantFoodAutoLogHooks: vi.fn(),
   createIntegratedInboxServices: vi.fn(),
   createIntegratedVaultServices: vi.fn(),
   drainAssistantOutbox: vi.fn(),
   errorMessage: vi.fn(),
   formatStructuredErrorMessage: vi.fn(),
+  getAssistantCronStatus: vi.fn(),
   maybeRunAssistantRuntimeMaintenance: vi.fn(),
   maybeThrowInjectedAssistantFault: vi.fn(),
   processDueAssistantCronJobs: vi.fn(),
@@ -147,6 +149,7 @@ vi.mock('../src/assistant/food-auto-log-hooks.ts', () => ({
 }))
 
 vi.mock('../src/assistant/cron.ts', () => ({
+  getAssistantCronStatus: runLoopMocks.getAssistantCronStatus,
   processDueAssistantCronJobsLocal: runLoopMocks.processDueAssistantCronJobs,
 }))
 
@@ -160,6 +163,10 @@ vi.mock('../src/assistant/fault-injection.ts', () => ({
 
 vi.mock('../src/assistant/outbox.ts', () => ({
   drainAssistantOutboxLocal: runLoopMocks.drainAssistantOutbox,
+}))
+
+vi.mock('../src/assistant/outbox/summary.ts', () => ({
+  buildAssistantOutboxSummary: runLoopMocks.buildAssistantOutboxSummary,
 }))
 
 vi.mock('../src/assistant/runtime-budgets.ts', () => ({
@@ -616,7 +623,12 @@ beforeEach(() => {
   })
   runLoopMocks.createIntegratedInboxServices.mockReset()
   runLoopMocks.createIntegratedVaultServices.mockReset().mockReturnValue({})
-  runLoopMocks.drainAssistantOutbox.mockReset().mockResolvedValue(undefined)
+  runLoopMocks.drainAssistantOutbox.mockReset().mockResolvedValue({
+    attempted: 0,
+    failed: 0,
+    queued: 0,
+    sent: 0,
+  })
   runLoopMocks.errorMessage.mockReset().mockImplementation((error: unknown) =>
     error instanceof Error ? error.message : String(error),
   )
@@ -625,9 +637,17 @@ beforeEach(() => {
     .mockImplementation((error: unknown) =>
       error instanceof Error ? error.message : String(error),
     )
+  runLoopMocks.getAssistantCronStatus.mockReset().mockResolvedValue({
+    nextRunAt: null,
+  })
+  runLoopMocks.buildAssistantOutboxSummary.mockReset().mockResolvedValue({
+    nextAttemptAt: null,
+  })
   runLoopMocks.maybeRunAssistantRuntimeMaintenance.mockReset().mockResolvedValue(undefined)
   runLoopMocks.maybeThrowInjectedAssistantFault.mockReset().mockImplementation(() => {})
-  runLoopMocks.processDueAssistantCronJobs.mockReset().mockResolvedValue(undefined)
+  runLoopMocks.processDueAssistantCronJobs.mockReset().mockResolvedValue({
+    processed: 0,
+  })
   runLoopMocks.readAssistantAutomationState
     .mockReset()
     .mockResolvedValue(createAutomationState())
@@ -641,6 +661,7 @@ beforeEach(() => {
     .mockResolvedValue({
       considered: 0,
       failed: 0,
+      nextWakeAt: null,
       replied: 0,
       skipped: 0,
     })
@@ -654,6 +675,7 @@ beforeEach(() => {
     routing: {
       considered: 1,
       failed: 0,
+      nextWakeAt: null,
       noAction: 0,
       routed: 1,
       skipped: 0,
@@ -661,6 +683,7 @@ beforeEach(() => {
     replies: {
       considered: 1,
       failed: 0,
+      nextWakeAt: null,
       replied: 1,
       skipped: 0,
     },
@@ -797,15 +820,27 @@ describe('assistant automation shared helpers', () => {
       'telegram',
       'linq',
     ])
-    expect(shared.normalizeScanInterval(undefined)).toBe(5000)
-    expect(shared.normalizeScanInterval(249.9)).toBe(250)
-    expect(shared.normalizeScanInterval(90_000.2)).toBe(60_000)
+    expect(
+      shared.computeAssistantAutomationRetryAt(
+        5_000,
+        Date.parse('2026-04-08T00:00:00.000Z'),
+      ),
+    ).toBe('2026-04-08T00:00:05.000Z')
+    expect(shared.normalizeAssistantAutomationWakeAt('invalid')).toBeNull()
+    expect(
+      shared.earliestAssistantAutomationWakeAt(
+        '2026-04-08T00:00:05.000Z',
+        '2026-04-08T00:00:03.000Z',
+        null,
+      ),
+    ).toBe('2026-04-08T00:00:03.000Z')
     expect(shared.normalizeScanLimit(undefined)).toBe(50)
     expect(shared.normalizeScanLimit(0.4)).toBe(1)
     expect(shared.normalizeScanLimit(250.8)).toBe(200)
     expect(shared.createEmptyInboxScanResult()).toEqual({
       considered: 0,
       failed: 0,
+      nextWakeAt: null,
       noAction: 0,
       routed: 0,
       skipped: 0,
@@ -813,6 +848,7 @@ describe('assistant automation shared helpers', () => {
     expect(shared.createEmptyAutoReplyScanResult()).toEqual({
       considered: 0,
       failed: 0,
+      nextWakeAt: null,
       replied: 0,
       skipped: 0,
     })
@@ -941,6 +977,7 @@ describe('assistant inbox routing', () => {
     expect(outcome).toEqual({
       advanceCursor: false,
       details: 'waiting for parser completion',
+      nextWakeAt: expect.any(String),
       status: 'skipped',
     })
     expect(routingMocks.routeInboxCaptureWithModel).not.toHaveBeenCalled()
@@ -1088,6 +1125,7 @@ describe('assistant inbox routing', () => {
     expect(result).toEqual({
       considered: 2,
       failed: 0,
+      nextWakeAt: null,
       noAction: 0,
       routed: 1,
       skipped: 0,
@@ -1116,6 +1154,7 @@ describe('assistant inbox routing', () => {
     const summary = {
       considered: 0,
       failed: 0,
+      nextWakeAt: null,
       noAction: 0,
       routed: 0,
       skipped: 0,
@@ -1162,6 +1201,7 @@ describe('assistant inbox routing', () => {
     expect(summary).toEqual({
       considered: 0,
       failed: 1,
+      nextWakeAt: null,
       noAction: 1,
       routed: 0,
       skipped: 1,
@@ -1202,12 +1242,14 @@ describe('assistant automation scanner', () => {
       replies: {
         considered: 0,
         failed: 0,
+        nextWakeAt: null,
         replied: 0,
         skipped: 0,
       },
       routing: {
         considered: 0,
         failed: 0,
+        nextWakeAt: null,
         noAction: 0,
         routed: 0,
         skipped: 0,
@@ -1259,6 +1301,7 @@ describe('assistant automation scanner', () => {
     expect(result.replies).toEqual({
       considered: 0,
       failed: 0,
+      nextWakeAt: null,
       replied: 0,
       skipped: 0,
     })
@@ -1340,12 +1383,14 @@ describe('assistant automation scanner', () => {
       replies: {
         considered: 0,
         failed: 0,
+        nextWakeAt: null,
         replied: 0,
         skipped: 0,
       },
       routing: {
         considered: 0,
         failed: 0,
+        nextWakeAt: null,
         noAction: 0,
         routed: 0,
         skipped: 0,
@@ -1408,6 +1453,7 @@ describe('assistant automation scanner', () => {
     expect(result.routing).toEqual({
       considered: 2,
       failed: 0,
+      nextWakeAt: null,
       noAction: 0,
       routed: 1,
       skipped: 1,
@@ -1465,6 +1511,7 @@ describe('assistant automation scanner', () => {
     expect(result.replies).toEqual({
       considered: 1,
       failed: 0,
+      nextWakeAt: null,
       replied: 1,
       skipped: 0,
     })
@@ -1494,6 +1541,7 @@ describe('assistant auto-reply runtime', () => {
     expect(result).toEqual({
       considered: 0,
       failed: 0,
+      nextWakeAt: null,
       replied: 0,
       skipped: 0,
     })
@@ -1534,6 +1582,7 @@ describe('assistant auto-reply runtime', () => {
     expect(result).toEqual({
       considered: 0,
       failed: 0,
+      nextWakeAt: null,
       replied: 0,
       skipped: 0,
     })
@@ -1581,6 +1630,7 @@ describe('assistant auto-reply runtime', () => {
     expect(result).toEqual({
       considered: 0,
       failed: 0,
+      nextWakeAt: null,
       replied: 0,
       skipped: 0,
     })
@@ -1623,6 +1673,7 @@ describe('assistant auto-reply runtime', () => {
     expect(result).toEqual({
       considered: 0,
       failed: 0,
+      nextWakeAt: null,
       replied: 0,
       skipped: 0,
     })
@@ -1687,6 +1738,7 @@ describe('assistant auto-reply runtime', () => {
     expect(result).toEqual({
       considered: 2,
       failed: 0,
+      nextWakeAt: null,
       replied: 1,
       skipped: 0,
     })
@@ -1736,6 +1788,7 @@ describe('assistant auto-reply runtime', () => {
     expect(result).toEqual({
       considered: 0,
       failed: 0,
+      nextWakeAt: null,
       replied: 0,
       skipped: 0,
     })
@@ -1776,6 +1829,7 @@ describe('assistant auto-reply runtime', () => {
     expect(result).toEqual({
       considered: 0,
       failed: 0,
+      nextWakeAt: null,
       replied: 0,
       skipped: 0,
     })
@@ -1838,6 +1892,7 @@ describe('assistant auto-reply runtime', () => {
     const summary = {
       considered: 0,
       failed: 0,
+      nextWakeAt: null,
       replied: 0,
       skipped: 0,
     }
@@ -1847,6 +1902,7 @@ describe('assistant auto-reply runtime', () => {
       result: {
         advanceCursor: true,
         failed: 1,
+        nextWakeAt: null,
         replied: 2,
         skipped: 3,
         stopScanning: true,
@@ -1860,6 +1916,7 @@ describe('assistant auto-reply runtime', () => {
     expect(summary).toEqual({
       considered: 0,
       failed: 1,
+      nextWakeAt: null,
       replied: 2,
       skipped: 3,
     })
@@ -1885,6 +1942,7 @@ describe('assistant auto-reply runtime', () => {
     const summary = {
       considered: 0,
       failed: 0,
+      nextWakeAt: null,
       replied: 0,
       skipped: 0,
     }
@@ -1894,6 +1952,7 @@ describe('assistant auto-reply runtime', () => {
       result: {
         advanceCursor: false,
         failed: 1,
+        nextWakeAt: null,
         replied: 0,
         skipped: 0,
         stopScanning: false,
@@ -1905,6 +1964,7 @@ describe('assistant auto-reply runtime', () => {
     expect(summary).toEqual({
       considered: 0,
       failed: 1,
+      nextWakeAt: null,
       replied: 0,
       skipped: 0,
     })
@@ -1950,6 +2010,7 @@ describe('assistant auto-reply runtime', () => {
     expect(result).toEqual({
       advanceCursor: false,
       failed: 0,
+      nextWakeAt: expect.any(String),
       replied: 0,
       skipped: 2,
       stopScanning: true,
@@ -1991,6 +2052,7 @@ describe('assistant auto-reply runtime', () => {
     expect(result).toEqual({
       advanceCursor: true,
       failed: 0,
+      nextWakeAt: null,
       replied: 0,
       skipped: 1,
       stopScanning: false,
@@ -2023,6 +2085,7 @@ describe('assistant auto-reply runtime', () => {
     expect(result).toEqual({
       advanceCursor: true,
       failed: 0,
+      nextWakeAt: null,
       replied: 0,
       skipped: 1,
       stopScanning: false,
@@ -2062,6 +2125,7 @@ describe('assistant auto-reply runtime', () => {
     expect(result).toEqual({
       advanceCursor: false,
       failed: 0,
+      nextWakeAt: expect.any(String),
       replied: 0,
       skipped: 2,
       stopScanning: true,
@@ -2137,6 +2201,7 @@ describe('assistant auto-reply runtime', () => {
     expect(result).toEqual({
       advanceCursor: true,
       failed: 0,
+      nextWakeAt: null,
       replied: 0,
       skipped: 1,
       stopScanning: false,
@@ -2190,6 +2255,7 @@ describe('assistant auto-reply runtime', () => {
     expect(result).toEqual({
       advanceCursor: true,
       failed: 0,
+      nextWakeAt: null,
       replied: 1,
       skipped: 0,
       stopScanning: false,
@@ -2259,6 +2325,7 @@ describe('assistant auto-reply runtime', () => {
     expect(result).toEqual({
       advanceCursor: true,
       failed: 0,
+      nextWakeAt: null,
       replied: 1,
       skipped: 0,
       stopScanning: false,
@@ -2345,6 +2412,7 @@ describe('assistant auto-reply runtime', () => {
     expect(result).toEqual({
       advanceCursor: false,
       failed: 0,
+      nextWakeAt: expect.any(String),
       replied: 0,
       skipped: 1,
       stopScanning: true,
@@ -2386,6 +2454,7 @@ describe('assistant auto-reply runtime', () => {
     expect(result).toEqual({
       advanceCursor: false,
       failed: 1,
+      nextWakeAt: expect.any(String),
       replied: 0,
       skipped: 0,
       stopScanning: true,
@@ -2422,6 +2491,7 @@ describe('assistant auto-reply runtime', () => {
     expect(result).toEqual({
       advanceCursor: true,
       failed: 0,
+      nextWakeAt: null,
       replied: 0,
       skipped: 1,
       stopScanning: false,
@@ -2457,6 +2527,7 @@ describe('assistant auto-reply runtime', () => {
     expect(result).toEqual({
       advanceCursor: true,
       failed: 0,
+      nextWakeAt: null,
       replied: 0,
       skipped: 1,
       stopScanning: false,
@@ -2505,6 +2576,7 @@ describe('assistant auto-reply runtime', () => {
     expect(result).toEqual({
       advanceCursor: true,
       failed: 0,
+      nextWakeAt: null,
       replied: 0,
       skipped: 1,
       stopScanning: false,
@@ -2542,6 +2614,7 @@ describe('assistant auto-reply runtime', () => {
     expect(result).toEqual({
       advanceCursor: true,
       failed: 0,
+      nextWakeAt: null,
       replied: 0,
       skipped: 1,
       stopScanning: false,
@@ -2580,6 +2653,7 @@ describe('assistant auto-reply runtime', () => {
     expect(result).toEqual({
       advanceCursor: false,
       failed: 0,
+      nextWakeAt: expect.any(String),
       replied: 0,
       skipped: 1,
       stopScanning: true,
@@ -2618,6 +2692,7 @@ describe('assistant auto-reply runtime', () => {
     expect(result).toEqual({
       advanceCursor: true,
       failed: 0,
+      nextWakeAt: null,
       replied: 0,
       skipped: 1,
       stopScanning: false,
@@ -2654,6 +2729,7 @@ describe('assistant auto-reply runtime', () => {
     expect(result).toEqual({
       advanceCursor: false,
       failed: 0,
+      nextWakeAt: expect.any(String),
       replied: 0,
       skipped: 1,
       stopScanning: true,
@@ -2716,6 +2792,7 @@ describe('assistant auto-reply runtime', () => {
     expect(result).toEqual({
       advanceCursor: true,
       failed: 0,
+      nextWakeAt: null,
       replied: 0,
       skipped: 1,
       stopScanning: false,
@@ -2762,6 +2839,7 @@ describe('assistant auto-reply runtime', () => {
     expect(result).toEqual({
       advanceCursor: true,
       failed: 0,
+      nextWakeAt: null,
       replied: 1,
       skipped: 0,
       stopScanning: false,
@@ -2798,6 +2876,7 @@ describe('assistant auto-reply runtime', () => {
     expect(result).toEqual({
       advanceCursor: false,
       failed: 0,
+      nextWakeAt: null,
       replied: 0,
       skipped: 0,
       stopScanning: false,
@@ -2893,6 +2972,7 @@ describe('assistant auto-reply runtime', () => {
     expect(result).toEqual({
       advanceCursor: true,
       failed: 0,
+      nextWakeAt: null,
       replied: 1,
       skipped: 0,
       stopScanning: false,
@@ -2995,6 +3075,7 @@ describe('assistant auto-reply runtime', () => {
     expect(result).toEqual({
       advanceCursor: true,
       failed: 1,
+      nextWakeAt: null,
       replied: 0,
       skipped: 0,
       stopScanning: false,
@@ -3042,6 +3123,7 @@ describe('assistant auto-reply runtime', () => {
     expect(result).toEqual({
       advanceCursor: true,
       failed: 0,
+      nextWakeAt: null,
       replied: 0,
       skipped: 1,
       stopScanning: false,
@@ -3132,6 +3214,7 @@ describe('assistant auto-reply startup recovery', () => {
     expect(result).toEqual({
       considered: 1,
       failed: 0,
+      nextWakeAt: null,
       replied: 1,
       skipped: 0,
     })
@@ -3225,6 +3308,7 @@ describe('assistant auto-reply startup recovery', () => {
     expect(result).toEqual({
       considered: 1,
       failed: 0,
+      nextWakeAt: null,
       replied: 0,
       skipped: 1,
     })
@@ -3272,6 +3356,7 @@ describe('assistant auto-reply startup recovery', () => {
     expect(result).toEqual({
       considered: 0,
       failed: 0,
+      nextWakeAt: null,
       replied: 0,
       skipped: 0,
     })
@@ -3370,6 +3455,7 @@ describe('assistant auto-reply startup recovery', () => {
     expect(result).toEqual({
       considered: 1,
       failed: 0,
+      nextWakeAt: null,
       replied: 1,
       skipped: 0,
     })
@@ -3477,6 +3563,7 @@ describe('assistant automation run loop', () => {
         routing: {
           considered: 0,
           failed: 0,
+          nextWakeAt: null,
           noAction: 0,
           routed: 0,
           skipped: 0,
@@ -3484,6 +3571,7 @@ describe('assistant automation run loop', () => {
         replies: {
           considered: 0,
           failed: 0,
+          nextWakeAt: null,
           replied: 0,
           skipped: 0,
         },
@@ -3496,7 +3584,6 @@ describe('assistant automation run loop', () => {
     const resultPromise = runLoop.runAssistantAutomation({
       inboxServices,
       once: false,
-      scanIntervalMs: 1000,
       signal: externalAbort.signal,
       startDaemon: true,
       vault: '/tmp/assistant-automation-vault',
@@ -3513,12 +3600,192 @@ describe('assistant automation run loop', () => {
     expect(scanStartedAt[1]! - scanStartedAt[0]!).toBe(10)
   })
 
+  it('wakes immediately on parser drain events instead of waiting for the scan interval', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-09T00:00:00.000Z'))
+
+    const externalAbort = new AbortController()
+    const scanStartedAt: number[] = []
+    const inboxServices = createInboxServices({
+      run: vi.fn().mockImplementation(
+        async (
+          _input: { requestId: string | null; vault: string },
+          options: {
+            onEvent?: (event: Record<string, unknown>) => void
+            signal: AbortSignal
+          },
+        ) => {
+          setTimeout(() => {
+            options.onEvent?.({
+              connectorId: 'parser',
+              parser: {
+                captureIds: ['capture_1'],
+                failed: 0,
+                processed: 1,
+                succeeded: 1,
+              },
+              source: 'parser',
+              type: 'parser.jobs.drained',
+            })
+          }, 10)
+
+          await new Promise<void>((resolve) => {
+            options.signal.addEventListener('abort', () => resolve(), {
+              once: true,
+            })
+          })
+        },
+      ),
+    })
+    runLoopMocks.scanAssistantAutomationOnce.mockImplementation(async () => {
+      scanStartedAt.push(Date.now())
+      if (scanStartedAt.length === 2) {
+        externalAbort.abort()
+      }
+      return {
+        routing: {
+          considered: 0,
+          failed: 0,
+          nextWakeAt: null,
+          noAction: 0,
+          routed: 0,
+          skipped: 0,
+        },
+        replies: {
+          considered: 0,
+          failed: 0,
+          nextWakeAt: null,
+          replied: 0,
+          skipped: 0,
+        },
+      }
+    })
+    const runLoop = await vi.importActual<typeof import('../src/assistant/automation/run-loop.ts')>(
+      '../src/assistant/automation/run-loop.ts',
+    )
+
+    const resultPromise = runLoop.runAssistantAutomation({
+      inboxServices,
+      once: false,
+      signal: externalAbort.signal,
+      startDaemon: true,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    await vi.advanceTimersByTimeAsync(0)
+    expect(scanStartedAt).toHaveLength(1)
+
+    await vi.advanceTimersByTimeAsync(10)
+    const result = await resultPromise
+
+    expect(result.reason).toBe('signal')
+    expect(scanStartedAt).toHaveLength(2)
+    expect(scanStartedAt[1]! - scanStartedAt[0]!).toBe(10)
+  })
+
+  it('waits for the startup recovery retry deadline instead of rescanning immediately on failures', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-09T00:00:00.000Z'))
+
+    const externalAbort = new AbortController()
+    const scanStartedAt: number[] = []
+    const inboxServices = createInboxServices({
+      run: vi.fn().mockImplementation(
+        async (
+          _input: { requestId: string | null; vault: string },
+          options: { signal: AbortSignal },
+        ) =>
+          await new Promise<void>((resolve) => {
+            options.signal.addEventListener('abort', () => resolve(), {
+              once: true,
+            })
+          }),
+      ),
+    })
+    runLoopMocks.readAssistantAutomationState.mockResolvedValue(
+      createAutomationState({
+        autoReplyChannels: ['telegram'],
+        autoReplyScanCursor: {
+          captureId: 'capture-1',
+          occurredAt: '2026-04-08T00:00:00.000Z',
+        },
+      }),
+    )
+    runLoopMocks.recoverAssistantAutoRepliesOnStartup.mockResolvedValue({
+      considered: 1,
+      failed: 1,
+      nextWakeAt: '2026-04-09T00:00:10.000Z',
+      replied: 0,
+      skipped: 0,
+    })
+    runLoopMocks.scanAssistantAutomationOnce.mockImplementation(async () => {
+      scanStartedAt.push(Date.now())
+      if (scanStartedAt.length === 2) {
+        externalAbort.abort()
+      }
+      return {
+        routing: {
+          considered: 0,
+          failed: 0,
+          nextWakeAt: null,
+          noAction: 0,
+          routed: 0,
+          skipped: 0,
+        },
+        replies: {
+          considered: 0,
+          failed: 0,
+          nextWakeAt: null,
+          replied: 0,
+          skipped: 0,
+        },
+      }
+    })
+    const runLoop = await vi.importActual<typeof import('../src/assistant/automation/run-loop.ts')>(
+      '../src/assistant/automation/run-loop.ts',
+    )
+
+    const resultPromise = runLoop.runAssistantAutomation({
+      inboxServices,
+      once: false,
+      signal: externalAbort.signal,
+      startDaemon: true,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    await vi.advanceTimersByTimeAsync(0)
+    expect(scanStartedAt).toHaveLength(1)
+
+    await vi.advanceTimersByTimeAsync(9_999)
+    expect(scanStartedAt).toHaveLength(1)
+
+    await vi.advanceTimersByTimeAsync(1)
+    const result = await resultPromise
+
+    expect(result.reason).toBe('signal')
+    expect(scanStartedAt).toHaveLength(2)
+    expect(scanStartedAt[1]! - scanStartedAt[0]!).toBe(10_000)
+  })
+
   it('continues immediately when scan state progress is persisted', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-09T00:00:00.000Z'))
 
     const externalAbort = new AbortController()
     const scanStartedAt: number[] = []
+    const inboxServices = createInboxServices({
+      run: vi.fn().mockImplementation(
+        async (
+          _input: { requestId: string | null; vault: string },
+          options: { signal: AbortSignal },
+        ) =>
+          await new Promise<void>((resolve) => {
+            options.signal.addEventListener('abort', () => resolve(), {
+              once: true,
+            })
+          }),
+      ),
+    })
     runLoopMocks.scanAssistantAutomationOnce.mockImplementation(
       async (input: {
         onStateProgress: (next: {
@@ -3547,6 +3814,7 @@ describe('assistant automation run loop', () => {
           routing: {
             considered: 0,
             failed: 0,
+            nextWakeAt: null,
             noAction: 0,
             routed: 0,
             skipped: 0,
@@ -3554,6 +3822,7 @@ describe('assistant automation run loop', () => {
           replies: {
             considered: 0,
             failed: 0,
+            nextWakeAt: null,
             replied: 0,
             skipped: 0,
           },
@@ -3565,10 +3834,10 @@ describe('assistant automation run loop', () => {
     )
 
     const result = await runLoop.runAssistantAutomation({
+      inboxServices,
       once: false,
-      scanIntervalMs: 1000,
       signal: externalAbort.signal,
-      startDaemon: false,
+      startDaemon: true,
       vault: '/tmp/assistant-automation-vault',
     })
 
@@ -3590,6 +3859,7 @@ describe('assistant automation run loop', () => {
     runLoopMocks.recoverAssistantAutoRepliesOnStartup.mockResolvedValue({
       considered: 1,
       failed: 0,
+      nextWakeAt: null,
       replied: 1,
       skipped: 0,
     })
@@ -3666,14 +3936,18 @@ describe('assistant automation run loop', () => {
   it('reports a signal reason when the upstream abort signal is already set', async () => {
     const controller = new AbortController()
     controller.abort()
+    const inboxServices = createInboxServices({
+      run: vi.fn().mockResolvedValue(undefined),
+    })
     const runLoop = await vi.importActual<typeof import('../src/assistant/automation/run-loop.ts')>(
       '../src/assistant/automation/run-loop.ts',
     )
 
     const result = await runLoop.runAssistantAutomation({
+      inboxServices,
       once: false,
       signal: controller.signal,
-      startDaemon: false,
+      startDaemon: true,
       vault: '/tmp/assistant-automation-vault',
     })
 
@@ -3729,6 +4003,7 @@ describe('assistant automation run loop', () => {
           routing: {
             considered: 0,
             failed: 0,
+            nextWakeAt: null,
             noAction: 0,
             routed: 0,
             skipped: 0,
@@ -3736,6 +4011,7 @@ describe('assistant automation run loop', () => {
           replies: {
             considered: 0,
             failed: 0,
+            nextWakeAt: null,
             replied: 0,
             skipped: 0,
           },
@@ -3748,9 +4024,8 @@ describe('assistant automation run loop', () => {
 
     const result = await runLoop.runAssistantAutomation({
       requestId: 'request-1',
-      scanIntervalMs: 250,
       signal: externalAbort.signal,
-      startDaemon: false,
+      startDaemon: true,
       vault: '/tmp/assistant-automation-vault',
     })
 

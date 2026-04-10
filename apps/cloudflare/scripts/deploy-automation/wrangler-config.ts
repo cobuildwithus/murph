@@ -15,7 +15,6 @@ export function buildHostedWranglerDeployConfig(
 ): Record<string, unknown> {
   const vars: Record<string, string> = {
     HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY_ID: environment.platformEnvelopeKeyId,
-    HOSTED_EXECUTION_DEFAULT_ALARM_DELAY_MS: environment.defaultAlarmDelayMs,
     HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS: environment.maxEventAttempts,
     HOSTED_EXECUTION_RETRY_DELAY_MS: environment.retryDelayMs,
     HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: environment.runnerCommitTimeoutMs,

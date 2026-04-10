@@ -514,7 +514,6 @@ test('assistant automation run loop only uses the daemon for remote-safe inputs'
       modelSpec: undefined,
       once: true,
       requestId: null,
-      scanIntervalMs: undefined,
       sessionMaxAgeMs: null,
       startDaemon: undefined,
       vault: TEST_VAULT,

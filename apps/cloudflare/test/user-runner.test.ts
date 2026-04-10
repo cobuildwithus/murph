@@ -75,7 +75,6 @@ describe("HostedUserRunner", () => {
     platformEnvelopeKeysById: {
       v1: Uint8Array.from({ length: 32 }, () => 7),
     },
-    defaultAlarmDelayMs: 60_000,
     maxEventAttempts: 3,
     recoveryRecipientKeyId: TEST_RECOVERY_RECIPIENT_KEY_ID,
     recoveryRecipientPublicKey: TEST_RECOVERY_RECIPIENT_PUBLIC_JWK,
@@ -1145,7 +1144,7 @@ describe("HostedUserRunner", () => {
       "completed",
     ]);
     expect(new Set((status.timeline ?? []).map((entry) => entry.runId)).size).toBe(1);
-    expect(storage.lastAlarm).not.toBeNull();
+    expect(storage.lastAlarm).toBeNull();
     expectHostedBundleKeys(bucket.keys(), ["vault"]);
     await expect(createHostedExecutionJournalStore({
       bucket: bucket.api,
@@ -1506,8 +1505,8 @@ describe("HostedUserRunner", () => {
     const status = await runner.status();
     expect(status.lastEventId).toMatch(/^alarm:/u);
     expect(status.nextWakeAt).not.toBe("2026-03-26T12:00:05.000Z");
-    expect(status.nextWakeAt).toBe("2026-03-26T12:01:10.000Z");
-    expect(storage.lastAlarm).toBe(Date.parse("2026-03-26T12:01:10.000Z"));
+    expect(status.nextWakeAt).toBeNull();
+    expect(storage.lastAlarm).toBeNull();
   });
 
   it("passes the worker commit callback metadata through the runner container invoke request", async () => {
@@ -3239,9 +3238,8 @@ describe("HostedUserRunner", () => {
       eventId: "evt_alarm_clear",
       occurredAt: "2026-03-26T12:00:00.000Z",
     });
-    expect(storage.lastAlarm).not.toBeNull();
-
-    storage.clear();
+    expect(storage.lastAlarm).toBeNull();
+    storage.lastAlarm = Date.parse("2026-03-26T12:05:00.000Z");
     await runner.alarm();
 
     expect(storage.lastAlarm).toBeNull();

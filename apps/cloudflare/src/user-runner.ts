@@ -188,7 +188,7 @@ export class HostedUserRunner {
       state,
       dispatchPayloadStore,
     );
-    this.scheduler = new RunnerScheduler(this.queueStore, state, env.defaultAlarmDelayMs);
+    this.scheduler = new RunnerScheduler(this.queueStore, state);
     this.dispatchProcessor = new RunnerDispatchProcessor({
       applyHostedTransition: <T>(input: {
         eventId: string;

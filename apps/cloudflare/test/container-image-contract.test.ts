@@ -23,7 +23,6 @@ function createDeployEnvironment() {
     compatibilityDate: "2026-03-27",
     containerInstanceType: "standard-1" as const,
     containerMaxInstances: 50,
-    defaultAlarmDelayMs: "21600000",
     logHeadSamplingRate: 1,
     maxEventAttempts: "3",
     retryDelayMs: "30000",

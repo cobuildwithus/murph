@@ -7377,10 +7377,19 @@ test('runAssistantAutomation rejects concurrent runs for the same vault and rele
   const firstRun = runAssistantAutomation({
     vault: vaultRoot,
     once: false,
-    startDaemon: false,
-    scanIntervalMs: 1_000,
+    startDaemon: true,
     signal: signal.signal,
-    inboxServices: {} as any,
+    inboxServices: {
+      list: async () => ({
+        items: [],
+      }),
+      run: async (_input: unknown, options?: { signal?: AbortSignal }) =>
+        await new Promise<void>((resolve) => {
+          options?.signal?.addEventListener('abort', () => resolve(), {
+            once: true,
+          })
+        }),
+    } as any,
   })
 
   await new Promise((resolve) => setTimeout(resolve, 25))
@@ -7457,7 +7466,6 @@ test('runAssistantAutomation reports daemon failures as error results', async ()
   const result = await runAssistantAutomation({
     vault: vaultRoot,
     once: false,
-    scanIntervalMs: 5,
     modelSpec: {
       model: 'gpt-oss:20b',
     },
@@ -7530,7 +7538,6 @@ test('runAssistantAutomation preserves structured daemon failure details in the 
   const result = await runAssistantAutomation({
     vault: vaultRoot,
     once: false,
-    scanIntervalMs: 5,
     modelSpec: {
       model: 'gpt-oss:20b',
     },

@@ -2033,23 +2033,12 @@ describe("runHostedExecutionJob", () => {
     expect(savedIntent.delivery?.target).toBe("chat_123");
   });
 
-  it("journals hosted assistant deliveries after the durable commit before finalizing returned bundles", async () => {
+  it("keeps newly queued hosted assistant deliveries pending when the durable commit records no committed side effects", async () => {
     const previousHostedAssistantEnv = setHostedAssistantSeedEnv();
     const parent = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-outbox-journal-"));
     cleanupPaths.push(parent);
     const intentId = "outbox_hosted_send";
     const createdAt = "2026-03-26T12:00:00.000Z";
-    const sentAt = "2026-03-26T12:00:05.000Z";
-    const delivery = {
-      channel: "linq" as const,
-      idempotencyKey: "assistant-outbox:outbox_hosted_send",
-      sentAt,
-      target: "chat_123",
-      targetKind: "thread" as const,
-      messageLength: "Queued the Linq reply.".length,
-      providerMessageId: null,
-      providerThreadId: null,
-    };
     const writePendingIntent = async (vaultRoot: string) => {
       const statePaths = resolveAssistantStatePaths(vaultRoot);
       await mkdir(statePaths.outboxDirectory, { recursive: true });
@@ -2089,52 +2078,7 @@ describe("runHostedExecutionJob", () => {
     hostedCliMocks.runAssistantAutomation.mockImplementationOnce(async ({ vault }) => {
       await writePendingIntent(vault);
     });
-    hostedCliMocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dispatchHooks, intentId: nextIntentId, vault }) => {
-      expect(nextIntentId).toBe(intentId);
-      const statePaths = resolveAssistantStatePaths(vault);
-      const intentPath = path.join(statePaths.outboxDirectory, `${intentId}.json`);
-      const pendingIntent = assistantOutboxIntentSchema.parse(
-        JSON.parse(await readFile(intentPath, "utf8")),
-      );
-
-      await expect(
-        dispatchHooks?.resolveDeliveredIntent?.({
-          intent: pendingIntent,
-          vault,
-        }),
-      ).resolves.toBeNull();
-      await dispatchHooks?.persistDeliveredIntent?.({
-        delivery,
-        intent: pendingIntent,
-        vault,
-      });
-      await writeFile(
-        intentPath,
-        `${JSON.stringify({
-          ...pendingIntent,
-          updatedAt: sentAt,
-          nextAttemptAt: null,
-          sentAt,
-          status: "sent",
-          delivery,
-          lastError: null,
-        })}\n`,
-      );
-
-      return {
-        deliveryError: null,
-        intent: assistantOutboxIntentSchema.parse({
-          ...pendingIntent,
-          updatedAt: sentAt,
-          nextAttemptAt: null,
-          sentAt,
-          status: "sent",
-          delivery,
-          lastError: null,
-        }),
-        session: null,
-      };
-    });
+    hostedCliMocks.dispatchAssistantOutboxIntent.mockClear();
     const fetchCalls: string[] = [];
     vi.stubGlobal(
       "fetch",
@@ -2146,14 +2090,8 @@ describe("runHostedExecutionJob", () => {
           === "http://results.worker/events/evt_outbox_send/commit"
         ) {
           expect(JSON.parse(String(init?.body))).toMatchObject({
-            sideEffects: [
-              {
-                effectId: intentId,
-                fingerprint: "dedupe_hosted_send",
-                intentId,
-                kind: "assistant.delivery",
-              },
-            ],
+            assistantDeliveryEffects: [],
+            sideEffects: [],
           });
           return new Response(JSON.stringify({ ok: true }), { status: 200 });
         }
@@ -2208,9 +2146,8 @@ describe("runHostedExecutionJob", () => {
 
       expect(fetchCalls).toEqual([
         "POST http://results.worker/events/evt_outbox_send/commit",
-        "GET http://results.worker/effects/outbox_hosted_send?fingerprint=dedupe_hosted_send",
-        "PUT http://results.worker/effects/outbox_hosted_send?fingerprint=dedupe_hosted_send",
       ]);
+      expect(hostedCliMocks.dispatchAssistantOutboxIntent).not.toHaveBeenCalled();
 
       const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-outbox-journal-restored-"));
       cleanupPaths.push(workspaceRoot);
@@ -2219,16 +2156,14 @@ describe("runHostedExecutionJob", () => {
         vaultBundle: Buffer.from(result.bundles.vault!, "base64"),
         workspaceRoot,
       });
-      const savedIntent = assistantOutboxIntentSchema.parse(
-        JSON.parse(
-          await readFile(
-            path.join(resolveAssistantStatePaths(restored.vaultRoot).outboxDirectory, `${intentId}.json`),
-            "utf8",
-          ),
+      await expect(
+        readFile(
+          path.join(resolveAssistantStatePaths(restored.vaultRoot).outboxDirectory, `${intentId}.json`),
+          "utf8",
         ),
-      );
-      expect(savedIntent.status).toBe("sent");
-      expect(savedIntent.delivery).toEqual(delivery);
+      ).rejects.toMatchObject({
+        code: "ENOENT",
+      });
     } finally {
       restoreEnvVars(previousHostedAssistantEnv);
     }

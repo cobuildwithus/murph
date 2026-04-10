@@ -5,14 +5,10 @@ export class RunnerScheduler {
   constructor(
     private readonly queueStore: RunnerQueueStore,
     private readonly state: DurableObjectStateLike,
-    private readonly defaultAlarmDelayMs: number,
   ) {}
 
   async syncNextWake(preferredWakeAt: string | null = null): Promise<RunnerStateRecord> {
-    const record = await this.queueStore.syncNextWake({
-      defaultAlarmDelayMs: this.defaultAlarmDelayMs,
-      preferredWakeAt,
-    });
+    const record = await this.queueStore.syncNextWake({ preferredWakeAt });
     await this.applyAlarm(record.nextWakeAt);
     return record;
   }

@@ -170,6 +170,30 @@ function emitConnectorSkipped(
   })
 }
 
+function emitParserDrainEvent(
+  results: ParserRuntimeDrainResult[],
+  onEvent?: ((event: InboxRunEvent) => void) | null,
+): void {
+  if (!onEvent || results.length === 0) {
+    return
+  }
+
+  const captureIds = [...new Set(results.map((result) => result.job.captureId))]
+  const failed = results.filter((result) => result.status === 'failed').length
+
+  onEvent({
+    connectorId: 'parser',
+    parser: {
+      captureIds,
+      failed,
+      processed: results.length,
+      succeeded: results.length - failed,
+    },
+    source: 'parser',
+    type: 'parser.jobs.drained',
+  })
+}
+
 async function waitForDaemonStop(
   paths: Awaited<ReturnType<typeof ensureInitialized>>,
   input: {
@@ -457,6 +481,9 @@ export function createInboxRuntimeOps(
           signal: runSignal,
           continueOnConnectorFailure: true,
           connectorRestartPolicy: FOREGROUND_CONNECTOR_RESTART_POLICY,
+          onParserDrain: (results) => {
+            emitParserDrainEvent(results, options?.onEvent)
+          },
         })
       } catch (error) {
         reason = runSignal.aborted ? 'signal' : 'error'

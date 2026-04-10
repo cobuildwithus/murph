@@ -16,7 +16,13 @@ import {
 
 export interface CreateParsedInboxPipelineInput
   extends CreateInboxPipelineInput,
-    Omit<CreateInboxParserServiceInput, "runtime" | "vaultRoot"> {}
+    Omit<CreateInboxParserServiceInput, "runtime" | "vaultRoot"> {
+  onParserDrain?: (results: ParsedInboxPipelineDrainResults) => Promise<void> | void;
+}
+
+type ParsedInboxPipelineDrainResults = Awaited<
+  ReturnType<InboxParserService["drain"]>
+>;
 
 export interface ParsedInboxPipeline extends InboxPipeline {
   readonly parserService: InboxParserService;
@@ -40,9 +46,12 @@ export async function createParsedInboxPipeline(
     parserService,
     async processCapture(capture) {
       const persisted = await pipeline.processCapture(capture);
-      await parserService.drain({
+      const results = await parserService.drain({
         captureId: persisted.captureId,
       });
+      if (results.length > 0) {
+        await input.onParserDrain?.(results);
+      }
       return persisted;
     },
     close() {
@@ -76,9 +85,12 @@ export async function runInboxDaemonWithParsers(
       return;
     }
 
-    await pipeline.parserService.drain({
+    const startupResults = await pipeline.parserService.drain({
       signal,
     });
+    if (startupResults.length > 0) {
+      await input.onParserDrain?.(startupResults);
+    }
     if (signal.aborted) {
       await closeConnectors(connectors);
       return;

@@ -1487,6 +1487,154 @@ test('assistantd http server enforces bearer auth, validates requests, and route
   }
 })
 
+test('assistant http handler rejects continuous automation without the inbox daemon', async () => {
+  const service = {
+    drainOutbox: async () => ({ attempted: 0, sent: 0, failed: 0, queued: 0 }),
+    getSession: async () => TEST_SESSION as any,
+    health: async () => ({
+      generatedAt: '2026-03-28T00:00:00.000Z',
+      ok: true,
+      pid: 1234,
+      vaultBound: true,
+    }),
+    getStatus: async () => ({
+      vault: '/tmp/vault',
+      stateRoot: '/tmp/vault/.runtime/operations/assistant',
+      statusPath: '/tmp/vault/.runtime/operations/assistant/status.json',
+      outboxRoot: '/tmp/vault/.runtime/operations/assistant/outbox',
+      diagnosticsPath: '/tmp/vault/.runtime/operations/assistant/diagnostics.snapshot.json',
+      failoverStatePath: '/tmp/vault/.runtime/operations/assistant/failover.json',
+      turnsRoot: '/tmp/vault/.runtime/operations/assistant/turns',
+      generatedAt: '2026-03-28T00:00:00.000Z',
+      runLock: {
+        state: 'unlocked',
+        pid: null,
+        startedAt: null,
+        mode: null,
+        command: null,
+        reason: null,
+      },
+      automation: {
+        inboxScanCursor: null,
+        autoReplyScanCursor: null,
+        autoReplyChannels: [],
+        autoReplyBacklogChannels: [],
+        autoReplyPrimed: false,
+        updatedAt: '2026-03-28T00:00:00.000Z',
+      },
+      sessions: [],
+      diagnostics: {
+        automationScans: 0,
+        automationFailures: 0,
+      },
+      outbox: {
+        queued: 0,
+        sent: 0,
+        failed: 0,
+      },
+    } as any),
+    listSessions: async () => [],
+    listCronJobs: async () => [],
+    listCronRuns: async () => ({
+      jobId: TEST_CRON_JOB.jobId,
+      runs: [],
+    }),
+    listOutbox: async () => [],
+    getOutboxIntent: async () => null,
+    getCronJob: async () => TEST_CRON_JOB as any,
+    getCronTarget: async () => ({
+      jobId: TEST_CRON_JOB.jobId,
+      jobName: TEST_CRON_JOB.name,
+      target: TEST_CRON_JOB.target,
+      bindingDelivery: null,
+    }),
+    getCronStatus: async () => ({
+      totalJobs: 0,
+      enabledJobs: 0,
+      dueJobs: 0,
+      runningJobs: 0,
+      nextRunAt: null,
+    }),
+    openConversation: async () => ({ created: true, session: TEST_SESSION as any }),
+    processDueCron: async () => ({ failed: 0, processed: 0, succeeded: 0 } as any),
+    setCronTarget: async () => ({
+      job: TEST_CRON_JOB as any,
+      beforeTarget: {
+        jobId: TEST_CRON_JOB.jobId,
+        jobName: TEST_CRON_JOB.name,
+        target: TEST_CRON_JOB.target,
+        bindingDelivery: null,
+      },
+      afterTarget: {
+        jobId: TEST_CRON_JOB.jobId,
+        jobName: TEST_CRON_JOB.name,
+        target: TEST_CRON_JOB.target,
+        bindingDelivery: null,
+      },
+      changed: false,
+      continuityReset: false,
+      dryRun: false,
+    }),
+    runAutomationOnce: async () => {
+      throw new Error(
+        'Continuous assistant automation now requires the inbox daemon. Rerun without skipDaemon/startDaemon=false, or use once=true for a one-shot pass.',
+      )
+    },
+    sendMessage: async () => ({
+      vault: '/tmp/vault',
+      status: 'completed',
+      prompt: 'hello',
+      response: 'daemon response',
+      session: TEST_SESSION,
+      delivery: null,
+      deliveryDeferred: false,
+      deliveryIntentId: null,
+      deliveryError: null,
+      blocked: null,
+    }),
+    gateway: createGatewayServiceMock(),
+    updateSessionOptions: async () => TEST_SESSION as any,
+    vault: '/tmp/vault',
+  } as AssistantLocalService
+
+  const baseUrl = 'http://127.0.0.1:50241'
+  const fetch = createAssistantdTestFetch(
+    createAssistantHttpRequestHandler({
+      controlToken: 'secret-token',
+      host: '127.0.0.1',
+      port: 0,
+      service,
+    }),
+    baseUrl,
+  )
+  const handle = {
+    address: {
+      baseUrl,
+    },
+    close: async () => undefined,
+  }
+
+  try {
+    const response = await fetch(`${handle.address.baseUrl}/automation/run-once`, {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer secret-token',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        once: false,
+        startDaemon: false,
+        vault: '/tmp/vault',
+      }),
+    })
+    assert.equal(response.status, 500)
+    const payload = await response.json() as { error: string }
+    assert.equal(payload.error, 'Assistant daemon request failed.')
+  } finally {
+    await handle.close()
+  }
+})
+
 test('assistantd http server preserves typed assistant error codes for invalid ids and missing cron jobs', async () => {
   const getOutboxIntent = vi.fn(async () => TEST_OUTBOX_INTENT as any)
   const service = {

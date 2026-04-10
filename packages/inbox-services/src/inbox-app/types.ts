@@ -260,6 +260,12 @@ export interface InboxRunEvent {
     imported: number
   }
   details?: string
+  parser?: {
+    captureIds: string[]
+    failed: number
+    processed: number
+    succeeded: number
+  }
   persisted?: PersistedCapture
   phase?: 'backfill' | 'startup' | 'watch'
   source: string
@@ -268,6 +274,7 @@ export interface InboxRunEvent {
     | 'connector.backfill.finished'
     | 'connector.backfill.started'
     | 'connector.failed'
+    | 'parser.jobs.drained'
     | 'connector.skipped'
     | 'connector.watch.started'
 }
@@ -415,6 +422,7 @@ export interface InboxRuntimeModule {
     signal: AbortSignal
     continueOnConnectorFailure?: boolean
     connectorRestartPolicy?: ConnectorRestartPolicy
+    onParserDrain?: (results: ParserRuntimeDrainResult[]) => Promise<void> | void
   }): Promise<void>
 }
 

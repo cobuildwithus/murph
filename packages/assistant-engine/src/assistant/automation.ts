@@ -6,7 +6,9 @@ export type {
 } from './automation/shared.js'
 export {
   runAssistantAutomation,
+  runAssistantAutomationPass,
   type RunAssistantAutomationInput,
+  type RunAssistantAutomationPassInput,
 } from './automation/run-loop.js'
 export {
   scanAssistantAutomationOnce,

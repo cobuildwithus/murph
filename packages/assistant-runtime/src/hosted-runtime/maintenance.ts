@@ -10,15 +10,12 @@ import {
   createInboxParserService,
 } from "@murphai/parsers";
 import {
+  type AssistantExecutionContext,
   createAssistantFoodAutoLogHooks,
+  runAssistantAutomationPass,
 } from "@murphai/assistant-engine";
 import { createIntegratedInboxServices } from "@murphai/inbox-services";
 import { createIntegratedVaultServices } from "@murphai/vault-usecases/vault-services";
-import {
-  getAssistantCronStatus,
-  runAssistantAutomation,
-  type AssistantExecutionContext,
-} from "@murphai/assistant-engine";
 
 import type {
   HostedAssistantRuntimeDeviceSyncConfig,
@@ -115,16 +112,32 @@ export async function runHostedMaintenanceLoop(input: {
   }
 
   if (assistantAutomation.shouldRun) {
-    await runHostedAssistantAutomation(
+    const assistantResult = await runHostedAssistantAutomation(
       input.vaultRoot,
       input.requestId,
       input.executionContext,
     );
+
+    const deviceSyncResult = await runHostedDeviceSyncPass(
+      input.dispatch,
+      input.vaultRoot,
+      input.resolvedConfig.deviceSync,
+      input.deviceSyncPort,
+      input.timeoutMs,
+    );
+
+    return {
+      deviceSyncProcessed: deviceSyncResult.processedJobs,
+      deviceSyncSkipped: deviceSyncResult.skipped,
+      nextWakeAt: earliestHostedWakeAt(
+        parserResult.nextWakeAt,
+        assistantResult.nextWakeAt,
+        deviceSyncResult.nextWakeAt,
+      ),
+      parserProcessed: parserResult.processedJobs,
+    };
   }
 
-  const assistantNextWakeAt = assistantAutomation.shouldRun
-    ? (await getAssistantCronStatus(input.vaultRoot)).nextRunAt
-    : null;
   const deviceSyncResult = await runHostedDeviceSyncPass(
     input.dispatch,
     input.vaultRoot,
@@ -137,7 +150,7 @@ export async function runHostedMaintenanceLoop(input: {
     deviceSyncProcessed: deviceSyncResult.processedJobs,
     deviceSyncSkipped: deviceSyncResult.skipped,
     nextWakeAt: earliestHostedWakeAt(
-      assistantNextWakeAt,
+      parserResult.nextWakeAt,
       deviceSyncResult.nextWakeAt,
     ),
     parserProcessed: parserResult.processedJobs,
@@ -147,7 +160,7 @@ export async function runHostedMaintenanceLoop(input: {
 export async function drainHostedParserQueue(input: {
   artifactMaterializer?: HostedWorkspaceArtifactMaterializer | null;
   vaultRoot: string;
-}): Promise<{ processedJobs: number }> {
+}): Promise<{ nextWakeAt: string | null; processedJobs: number }> {
   const runtime = await openInboxRuntime({
     vaultRoot: input.vaultRoot,
   });
@@ -175,8 +188,16 @@ export async function drainHostedParserQueue(input: {
     const results = await parserService.drain({
       maxJobs: HOSTED_MAX_PARSER_JOBS,
     });
+    const pendingJobs = runtime.listAttachmentParseJobs?.({
+      limit: 1,
+      state: "pending",
+    }) ?? [];
+    const hasPendingJobs = pendingJobs.length > 0;
 
     return {
+      nextWakeAt: hasPendingJobs
+        ? new Date(Date.now() + 1_000).toISOString()
+        : null,
       processedJobs: results.length,
     };
   } finally {
@@ -214,22 +235,21 @@ export async function runHostedAssistantAutomation(
   vaultRoot: string,
   requestId: string,
   executionContext: AssistantExecutionContext,
-): Promise<void> {
+): Promise<{ nextWakeAt: string | null }> {
   const inboxServices = createIntegratedInboxServices();
   const vaultServices = createIntegratedVaultServices({
     foodAutoLogHooks: createAssistantFoodAutoLogHooks(),
   });
 
   try {
-    await runAssistantAutomation({
+    return await runAssistantAutomationPass({
       deliveryDispatchMode: "queue-only",
       drainOutbox: false,
       executionContext,
       inboxServices,
       vaultServices,
-      once: true,
       requestId,
-      startDaemon: false,
+      runStartupRecovery: true,
       vault: vaultRoot,
     });
   } catch (error) {
@@ -239,7 +259,9 @@ export async function runHostedAssistantAutomation(
       && "code" in error
       && error.code === "INBOX_NOT_INITIALIZED"
     ) {
-      return;
+      return {
+        nextWakeAt: null,
+      };
     }
 
     throw error;

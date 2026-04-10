@@ -11,7 +11,10 @@ describe('assistant automation wake controller', () => {
     let resolved = false
 
     const waitPromise = wakeController
-      .waitForWakeOrTimeout(abortController.signal, 1000)
+      .waitForWakeOrDeadline(
+        abortController.signal,
+        new Date(Date.now() + 1_000).toISOString(),
+      )
       .then(() => {
         resolved = true
       })
@@ -34,7 +37,10 @@ describe('assistant automation wake controller', () => {
 
     const outcome = await Promise.race([
       wakeController
-        .waitForWakeOrTimeout(abortController.signal, 1000)
+        .waitForWakeOrDeadline(
+          abortController.signal,
+          new Date(Date.now() + 1_000).toISOString(),
+        )
         .then(() => 'woke' as const),
       new Promise<'timeout'>((resolve) => setTimeout(() => resolve('timeout'), 25)),
     ])
