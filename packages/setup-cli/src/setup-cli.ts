@@ -1,6 +1,8 @@
 import { readFile } from 'node:fs/promises'
+import path from 'node:path'
 import { Cli, z } from 'incur'
 import { assistantAutomationStateSchema } from '@murphai/operator-config/assistant-cli-contracts'
+import { inboxRuntimeConfigSchema } from '@murphai/operator-config/inbox-cli-contracts'
 import { resolveAssistantStatePaths } from '@murphai/assistant-engine/assistant-state'
 import {
   type SetupAssistantPreset,
@@ -57,6 +59,9 @@ import {
 import { configureSetupChannels } from './setup-services/channels.js'
 import { configureSetupScheduledUpdates } from './setup-services/scheduled-updates.js'
 import { incurErrorBridge } from './incur-error-bridge.js'
+
+const INITIAL_SETUP_WIZARD_INBOX_CONFIG_SCHEMA = 'murph.inbox-runtime-config.v1'
+const INITIAL_SETUP_WIZARD_INBOX_CONFIG_SCHEMA_VERSION = 1
 
 export {
   buildSetupWizardPublicUrlReview,
@@ -378,7 +383,8 @@ export async function resolveInitialSetupWizardChannels(
   const state = await readInitialSetupWizardAutomationState(vault)
 
   if (state === null) {
-    return getDefaultSetupWizardChannels(platform)
+    const configuredChannels = await readInitialSetupWizardInboxChannels(vault)
+    return configuredChannels ?? getDefaultSetupWizardChannels(platform)
   }
 
   const savedChannels = setupChannelValues.filter((channel) =>
@@ -413,6 +419,76 @@ async function readInitialSetupWizardAutomationState(vault: string) {
 
     throw error
   }
+}
+
+async function readInitialSetupWizardInboxChannels(
+  vault: string,
+): Promise<SetupChannel[] | null> {
+  const inboxConfigPath = resolveInitialSetupWizardInboxConfigPath(vault)
+
+  try {
+    const raw = await readFile(inboxConfigPath, 'utf8')
+    const config = parseInitialSetupWizardInboxConfig(raw)
+    return setupChannelValues.filter((channel) =>
+      config.connectors.some(
+        (connector) => connector.enabled && connector.source === channel,
+      ),
+    )
+  } catch (error) {
+    if (
+      typeof error === 'object' &&
+      error !== null &&
+      'code' in error &&
+      error.code === 'ENOENT'
+    ) {
+      return null
+    }
+
+    throw error
+  }
+}
+
+function resolveInitialSetupWizardInboxConfigPath(vault: string): string {
+  return path.join(
+    resolveAssistantStatePaths(vault).absoluteVaultRoot,
+    '.runtime',
+    'operations',
+    'inbox',
+    'config.json',
+  )
+}
+
+function parseInitialSetupWizardInboxConfig(raw: string) {
+  const parsed = JSON.parse(raw) as unknown
+
+  if (
+    typeof parsed === 'object' &&
+    parsed !== null &&
+    'schema' in parsed &&
+    'schemaVersion' in parsed &&
+    'value' in parsed
+  ) {
+    const schema =
+      typeof parsed.schema === 'string' ? parsed.schema.trim() : ''
+    const schemaVersion =
+      typeof parsed.schemaVersion === 'number' ? parsed.schemaVersion : NaN
+
+    if (schema !== INITIAL_SETUP_WIZARD_INBOX_CONFIG_SCHEMA) {
+      throw new TypeError(
+        `Inbox runtime config schema must be ${INITIAL_SETUP_WIZARD_INBOX_CONFIG_SCHEMA}.`,
+      )
+    }
+
+    if (schemaVersion !== INITIAL_SETUP_WIZARD_INBOX_CONFIG_SCHEMA_VERSION) {
+      throw new TypeError(
+        `Inbox runtime config schemaVersion must be ${INITIAL_SETUP_WIZARD_INBOX_CONFIG_SCHEMA_VERSION}.`,
+      )
+    }
+
+    return inboxRuntimeConfigSchema.parse(parsed.value)
+  }
+
+  return inboxRuntimeConfigSchema.parse(parsed)
 }
 
 function buildSetupCtaCommands(result: SetupResult): Array<{

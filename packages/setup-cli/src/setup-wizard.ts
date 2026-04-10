@@ -99,9 +99,9 @@ export async function runSetupWizard(
   const initialAssistantPreset =
     input.initialAssistantPreset ?? getDefaultSetupWizardAssistantPreset()
   const initialChannels = sortSetupWizardChannels(
-    input.initialChannels && input.initialChannels.length > 0
-      ? [...input.initialChannels]
-      : getDefaultSetupWizardChannels(input.platform),
+    input.initialChannels === undefined
+      ? getDefaultSetupWizardChannels(input.platform)
+      : [...input.initialChannels],
   )
   const initialScheduledUpdates = resolveSetupWizardInitialScheduledUpdates(
     input.initialScheduledUpdates,
