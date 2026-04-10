@@ -32,7 +32,17 @@ export * from "../loopback-control-plane.ts";
 export * from "../process-env.ts";
 export * from "../process-kill.ts";
 export * from "../runtime-paths.ts";
-export * from "../shared.ts";
+export {
+  ASSISTANT_RUNTIME_DIRECTORY_NAME,
+  ASSISTANT_STATE_DIRECTORY_NAME,
+  buildProcessCommand,
+  fingerprintHost,
+  hashVaultRoot,
+  isProcessRunning,
+  resolveSiblingLocalStateBucketRoot,
+  toVaultRelativePath,
+  type SiblingLocalStateBucketRoot,
+} from "../shared.ts";
 export * from "../local-state-taxonomy.ts";
 export * from "../local-state-files.ts";
 export * from "../versioned-json-state.ts";
