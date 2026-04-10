@@ -71,9 +71,9 @@ Cloudflare-specific deploy constraints still apply:
 
 ## Required GitHub environment variables and secrets
 
-Use GitHub Environments such as `staging` and `production`.
+Use a GitHub Environment such as `production`, or add `staging` only when you have actually configured a separate staging target.
 
-The workflow is parameterized by `workflow_dispatch.environment`, and the deploy job is attached to that GitHub environment so staging and production values can stay isolated.
+The workflow is parameterized by `workflow_dispatch.environment`, and the deploy job is attached to that GitHub environment so environment-scoped values stay isolated. The manual workflow now defaults to `production` to avoid creating empty staging deployment records by accident.
 
 ### Required environment variables
 
@@ -325,7 +325,7 @@ The workflow is intentionally manual (`workflow_dispatch`) so you do not acciden
 
 Open Actions, then `Deploy Cloudflare Hosted Execution`, and choose:
 
-- `environment`: `staging` or `production`
+- `environment`: defaults to `production`; choose `staging` only when that GitHub environment is configured
 - `sync_worker_secrets`: whether to include the rendered Worker secrets file in the upload or deploy command
 - `deploy_worker`: whether to actually deploy the Worker
 - `smoke_user_id`: optional hosted user id to trigger one manual `/run` smoke test
