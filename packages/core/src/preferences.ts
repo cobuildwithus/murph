@@ -1,9 +1,13 @@
 import {
+  legacyPreferencesDocumentSchemaVersion,
   preferencesDocumentRelativePath,
   preferencesDocumentSchema,
   preferencesDocumentSchemaVersion,
   type PreferencesDocument,
+  type WearablePreferenceProvider,
+  type WearablePreferences,
   type WorkoutUnitPreferences,
+  wearablePreferenceProviderValues,
 } from "@murphai/contracts";
 
 import {
@@ -16,6 +20,7 @@ import { isPlainRecord } from "./types.ts";
 
 export type {
   PreferencesDocument,
+  WearablePreferences,
   WorkoutUnitPreferences,
 } from "@murphai/contracts";
 
@@ -34,16 +39,58 @@ function normalizePreferencesDocumentForRead(value: unknown): unknown {
     return value;
   }
 
-  const workoutUnitPreferences = value.workoutUnitPreferences;
-  if (!isPlainRecord(workoutUnitPreferences) || !("distance" in workoutUnitPreferences)) {
+  if (value.schemaVersion !== legacyPreferencesDocumentSchemaVersion) {
     return value;
   }
 
-  const { distance: _removedDistance, ...normalizedWorkoutUnitPreferences } = workoutUnitPreferences;
+  const normalizedWorkoutUnitPreferences = normalizeWorkoutUnitPreferencesForRead(
+    value.workoutUnitPreferences,
+  );
+  const wearablePreferences = normalizeWearablePreferencesForRead(
+    value.wearablePreferences,
+  );
+
   return {
     ...value,
+    schemaVersion: preferencesDocumentSchemaVersion,
     workoutUnitPreferences: normalizedWorkoutUnitPreferences,
+    wearablePreferences,
   };
+}
+
+function normalizeWorkoutUnitPreferencesForRead(value: unknown): unknown {
+  if (!isPlainRecord(value)) {
+    return value;
+  }
+
+  if (!("distance" in value)) {
+    return value;
+  }
+
+  const { distance: _removedDistance, ...normalizedWorkoutUnitPreferences } = value;
+  return normalizedWorkoutUnitPreferences;
+}
+
+function normalizeWearablePreferencesForRead(value: unknown): WearablePreferences {
+  if (!isPlainRecord(value) || !Array.isArray(value.desiredProviders)) {
+    return { desiredProviders: [] };
+  }
+
+  const order = new Map<WearablePreferenceProvider, number>(
+    wearablePreferenceProviderValues.map((provider, index) => [provider, index] as const),
+  );
+  const desiredProviders = [...new Set(value.desiredProviders)]
+    .filter(
+      (provider): provider is WearablePreferenceProvider =>
+        typeof provider === "string" && order.has(provider as WearablePreferenceProvider),
+    )
+    .sort(
+      (left, right) =>
+        (order.get(left) ?? Number.MAX_SAFE_INTEGER) -
+        (order.get(right) ?? Number.MAX_SAFE_INTEGER),
+    );
+
+  return { desiredProviders };
 }
 
 export async function readPreferencesDocument(
@@ -58,14 +105,23 @@ export async function readPreferencesDocument(
       sourcePath: resolved.relativePath,
       updatedAt: null,
       workoutUnitPreferences: {},
+      wearablePreferences: {
+        desiredProviders: [],
+      },
     };
   }
 
-  const document = preferencesDocumentSchema.parse(
+  const parsedDocument = preferencesDocumentSchema.parse(
     normalizePreferencesDocumentForRead(
       await readJsonFile(vaultRoot, resolved.relativePath),
     ),
   );
+  const document: PreferencesDocument = {
+    ...parsedDocument,
+    wearablePreferences: normalizeWearablePreferencesForRead(
+      parsedDocument.wearablePreferences,
+    ),
+  };
 
   return {
     ...document,
@@ -102,6 +158,7 @@ export async function updateWorkoutUnitPreferences(input: {
     schemaVersion: preferencesDocumentSchemaVersion,
     updatedAt: input.updatedAt ?? new Date().toISOString(),
     workoutUnitPreferences: nextPreferences,
+    wearablePreferences: current.wearablePreferences,
   };
 
   await runCanonicalWrite({
@@ -122,6 +179,58 @@ export async function updateWorkoutUnitPreferences(input: {
 
   return {
     created: !current.exists,
+    document: await readPreferencesDocument(input.vaultRoot),
+  };
+}
+
+export async function updateWearablePreferences(input: {
+  vaultRoot: string;
+  preferences: WearablePreferences;
+  updatedAt?: string;
+}): Promise<{
+  created: boolean;
+  updated: boolean;
+  document: PreferencesDocumentSnapshot;
+}> {
+  const current = await readPreferencesDocument(input.vaultRoot);
+  const nextPreferences = normalizeWearablePreferencesForRead(input.preferences);
+  const hasChanges =
+    JSON.stringify(current.wearablePreferences) !== JSON.stringify(nextPreferences);
+
+  if (!hasChanges && current.exists) {
+    return {
+      created: false,
+      updated: false,
+      document: current,
+    };
+  }
+
+  const document: PreferencesDocument = {
+    schemaVersion: preferencesDocumentSchemaVersion,
+    updatedAt: input.updatedAt ?? new Date().toISOString(),
+    workoutUnitPreferences: current.workoutUnitPreferences,
+    wearablePreferences: nextPreferences,
+  };
+
+  await runCanonicalWrite({
+    vaultRoot: input.vaultRoot,
+    operationType: "preferences_update",
+    summary: "Update canonical wearable preferences",
+    occurredAt: document.updatedAt,
+    mutate: async ({ batch }) => {
+      await batch.stageTextWrite(
+        preferencesDocumentRelativePath,
+        `${JSON.stringify(document, null, 2)}\n`,
+        { overwrite: true },
+      );
+
+      return null;
+    },
+  });
+
+  return {
+    created: !current.exists,
+    updated: true,
     document: await readPreferencesDocument(input.vaultRoot),
   };
 }

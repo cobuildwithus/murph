@@ -54,7 +54,10 @@ import {
   upsertEvent as upsertEventInternal,
 } from "./domains/events.ts";
 import { updateVaultSummary as updateVaultSummaryInternal } from "./domains/vault-summary.ts";
-import { updateWorkoutUnitPreferences as updateWorkoutUnitPreferencesInternal } from "./preferences.ts";
+import {
+  updateWearablePreferences as updateWearablePreferencesInternal,
+  updateWorkoutUnitPreferences as updateWorkoutUnitPreferencesInternal,
+} from "./preferences.ts";
 import { VaultError } from "./errors.ts";
 import {
   initializeVault as initializeVaultInternal,
@@ -442,6 +445,12 @@ export async function updateWorkoutUnitPreferences(
   input: Parameters<typeof updateWorkoutUnitPreferencesInternal>[0],
 ): ReturnType<typeof updateWorkoutUnitPreferencesInternal> {
   return withCanonicalInputWriteLock(input, updateWorkoutUnitPreferencesInternal);
+}
+
+export async function updateWearablePreferences(
+  input: Parameters<typeof updateWearablePreferencesInternal>[0],
+): ReturnType<typeof updateWearablePreferencesInternal> {
+  return withCanonicalInputWriteLock(input, updateWearablePreferencesInternal);
 }
 
 export async function appendHistoryEvent(

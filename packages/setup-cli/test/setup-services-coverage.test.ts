@@ -64,6 +64,7 @@ import {
 } from '@murphai/assistant-engine/assistant-state'
 import {
   createIntegratedVaultServices,
+  showWearablePreferences,
 } from '@murphai/vault-usecases'
 import type {
   InboxSourceSetEnabledResult,
@@ -320,7 +321,7 @@ test('configureSetupScheduledUpdates describes a single deferred update outside 
 test('configureSetupChannels covers dry-run, missing-env, readiness, reconciliation, and automation state updates', async () => {
   const dryRunSteps: SetupStepResult[] = []
   const dryRunChannels = await configureSetupChannels({
-    channels: ['imessage', 'telegram', 'email'],
+    channels: ['telegram', 'linq', 'email'],
     dryRun: true,
     env: {},
     inboxServices: {
@@ -334,15 +335,17 @@ test('configureSetupChannels covers dry-run, missing-env, readiness, reconciliat
     vault: '/tmp/vault',
   })
 
-  assert.equal(dryRunChannels[0]?.channel, 'imessage')
+  assert.equal(dryRunChannels[0]?.channel, 'telegram')
   assert.equal(dryRunChannels[0]?.configured, false)
+  assert.deepEqual(dryRunChannels[0]?.missingEnv, ['TELEGRAM_BOT_TOKEN'])
   assert.equal(dryRunChannels[0]?.enabled, true)
-  assert.equal(dryRunSteps[0]?.status, 'skipped')
-  assert.equal(dryRunChannels[1]?.channel, 'telegram')
-  assert.deepEqual(dryRunChannels[1]?.missingEnv, ['TELEGRAM_BOT_TOKEN'])
+  assert.equal(dryRunSteps[0]?.status, 'planned')
+  assert.equal(dryRunChannels[1]?.channel, 'linq')
+  assert.deepEqual(dryRunChannels[1]?.missingEnv, ['LINQ_API_TOKEN', 'LINQ_WEBHOOK_SECRET'])
   assert.equal(dryRunSteps[1]?.status, 'planned')
   assert.equal(dryRunChannels[2]?.channel, 'email')
   assert.deepEqual(dryRunChannels[2]?.missingEnv, ['AGENTMAIL_API_KEY'])
+  assert.equal(dryRunSteps[2]?.status, 'planned')
 
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'setup-cli-channel-state-'))
   const automationStatePath = resolveAssistantStatePaths(vaultRoot).automationStatePath
@@ -353,7 +356,7 @@ test('configureSetupChannels covers dry-run, missing-env, readiness, reconciliat
       version: 2,
       inboxScanCursor: null,
       autoReplyScanCursor: 'cursor-1',
-      autoReplyChannels: ['email', 'imessage'],
+      autoReplyChannels: ['email', 'linq'],
       autoReplyBacklogChannels: ['email'],
       autoReplyPrimed: true,
       updatedAt: '2026-04-08T00:00:00.000Z',
@@ -401,11 +404,6 @@ test('configureSetupChannels covers dry-run, missing-env, readiness, reconciliat
               },
               source: 'email',
             }),
-            makeInboxConnector({
-              accountId: 'self',
-              id: 'imessage:self',
-              source: 'imessage',
-            }),
           ])
         },
         async sourceAdd() {
@@ -424,9 +422,7 @@ test('configureSetupChannels covers dry-run, missing-env, readiness, reconciliat
               id: input.connectorId,
               source: input.connectorId.startsWith('telegram')
                 ? 'telegram'
-                : input.connectorId.startsWith('email')
-                  ? 'email'
-                  : 'imessage',
+                : 'email',
             }),
             input.connectorId === 'telegram:bot' ? 3 : 2,
           )
@@ -507,54 +503,10 @@ test('configureSetupChannels covers dry-run, missing-env, readiness, reconciliat
   }
 })
 
-test('configureSetupChannels covers iMessage adds, Linq reuse fallback, email inbox reuse, and runtime unavailability', async () => {
+test('configureSetupChannels covers Linq reuse fallback, email inbox reuse, and runtime unavailability', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'setup-cli-channel-branches-'))
 
   try {
-    const imessageConfigured = await configureSetupChannels({
-      channels: ['imessage'],
-      dryRun: false,
-      env: {},
-      inboxServices: {
-        async bootstrap() {
-          throw new Error('bootstrap should not run in this test')
-        },
-        async sourceList() {
-          return makeInboxSourceListResult(vaultRoot, [])
-        },
-        async sourceAdd(input) {
-          return makeInboxSourceAddResult(
-            vaultRoot,
-            makeInboxConnector({
-              accountId: input.account ?? 'self',
-              id: input.id,
-              options: {
-                includeOwnMessages: true,
-              },
-              source: 'imessage',
-            }),
-          )
-        },
-      },
-      platform: 'darwin',
-      requestId: 'req-imessage',
-      steps: [],
-      vault: vaultRoot,
-    })
-
-    assert.deepEqual(imessageConfigured, [
-      {
-        autoReply: true,
-        channel: 'imessage',
-        configured: true,
-        connectorId: 'imessage:self',
-        detail:
-          'Configured the iMessage connector "imessage:self" and enabled assistant auto-reply for new iMessage conversations.',
-        enabled: true,
-        missingEnv: [],
-      },
-    ])
-
     const linqConfigured = await configureSetupChannels({
       channels: ['linq'],
       dryRun: false,
@@ -1237,49 +1189,10 @@ test('configureSetupChannels reuses Linq connectors when env is missing and pres
   }
 })
 
-test('configureSetupChannels covers reused iMessage and missing-env Telegram reuse messaging', async () => {
+test('configureSetupChannels covers missing-env Telegram reuse messaging', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'setup-cli-channel-reuse-'))
 
   try {
-    const imessageConfigured = await configureSetupChannels({
-      channels: ['imessage'],
-      dryRun: false,
-      env: {},
-      inboxServices: {
-        async bootstrap() {
-          throw new Error('bootstrap should not run in this test')
-        },
-        async sourceList() {
-          return makeInboxSourceListResult(vaultRoot, [
-            makeInboxConnector({
-              accountId: 'self',
-              id: 'imessage-existing',
-              source: 'imessage',
-            }),
-          ])
-        },
-        async sourceAdd() {
-          throw new Error('sourceAdd should not run when iMessage already exists')
-        },
-      },
-      platform: 'darwin',
-      requestId: 'req-imessage-reuse',
-      steps: [],
-      vault: vaultRoot,
-    })
-    assert.deepEqual(imessageConfigured, [
-      {
-        autoReply: true,
-        channel: 'imessage',
-        configured: true,
-        connectorId: 'imessage-existing',
-        detail:
-          'Reused the iMessage connector "imessage-existing" and enabled assistant auto-reply for new iMessage conversations.',
-        enabled: true,
-        missingEnv: [],
-      },
-    ])
-
     const telegramConfigured = await configureSetupChannels({
       channels: ['telegram'],
       dryRun: false,
@@ -2201,7 +2114,7 @@ test('createSetupServices reuses deterministic linux toolchain inputs and writes
 
     const result = await services.setupHost({
       assistant,
-      channels: ['imessage'],
+      channels: [],
       dryRun: false,
       requestId: 'req-setup',
       scheduledUpdatePresetIds: [
@@ -2232,8 +2145,8 @@ test('createSetupServices reuses deterministic linux toolchain inputs and writes
       'completed',
     )
     assert.equal(
-      result.steps.find((step) => step.id === 'channel-imessage')?.status,
-      'skipped',
+      result.steps.find((step) => step.id === 'channel-email'),
+      undefined,
     )
     assert.equal(result.scheduledUpdates.length, 2)
 
@@ -2278,6 +2191,135 @@ test('createSetupServices reuses deterministic linux toolchain inputs and writes
         error instanceof VaultCliError &&
         error.code === 'unsupported_platform' &&
         error.message.includes('setupMacos'),
+    )
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('createSetupServices saves canonical wearable preferences, including explicit empty selections', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'setup-cli-services-wearable-prefs-'))
+  const cwd = path.join(root, 'workspace')
+  const homeDirectory = path.join(root, 'home')
+  const binDirectory = path.join(root, 'bin')
+  const toolchainRoot = path.join(root, 'toolchain')
+  const vaultPath = path.join(cwd, 'vault')
+  const cliBinPath = path.join(root, 'repo', 'packages', 'cli', 'dist', 'bin.js')
+
+  await mkdir(cwd, { recursive: true })
+  await mkdir(homeDirectory, { recursive: true })
+  await mkdir(binDirectory, { recursive: true })
+  await mkdir(path.dirname(cliBinPath), { recursive: true })
+  await writeFile(cliBinPath, '// cli stub\n', 'utf8')
+
+  for (const tool of ['ffmpeg', 'pdftotext', 'whisper-cli']) {
+    const toolPath = path.join(binDirectory, tool)
+    await writeFile(toolPath, '#!/usr/bin/env bash\nexit 0\n', 'utf8')
+    await chmod(toolPath, 0o755)
+  }
+
+  const whisperModelPath = path.join(
+    toolchainRoot,
+    'models',
+    'whisper',
+    'ggml-base.en.bin',
+  )
+  await mkdir(path.dirname(whisperModelPath), { recursive: true })
+  await writeFile(whisperModelPath, 'model', 'utf8')
+
+  const assistant: SetupConfiguredAssistant = {
+    preset: 'skip',
+    enabled: false,
+    provider: null,
+    model: null,
+    baseUrl: null,
+    apiKeyEnv: null,
+    providerName: null,
+    codexCommand: null,
+    codexHome: undefined,
+    profile: null,
+    reasoningEffort: null,
+    sandbox: null,
+    approvalPolicy: null,
+    oss: false,
+    account: null,
+    detail: 'Skipped',
+  }
+
+  try {
+    const vaultCore = createIntegratedVaultServices().core
+    const services = createSetupServices({
+      arch: () => 'x64',
+      env: () => ({
+        PATH: binDirectory,
+      }),
+      getCwd: () => cwd,
+      getHomeDirectory: () => homeDirectory,
+      platform: () => 'linux',
+      resolveCliBinPath: () => cliBinPath,
+      inboxServices: {
+        async bootstrap(input) {
+          return makeInboxBootstrapResult(
+            input.vault,
+            path.join(homeDirectory, '.runtime', 'toolchain.json'),
+          )
+        },
+      },
+      vaultServices: {
+        core: {
+          ...vaultCore,
+          async init(input) {
+            await mkdir(input.vault, { recursive: true })
+            await writeFile(path.join(input.vault, 'vault.json'), '{}', 'utf8')
+            return {
+              created: true,
+              directories: [input.vault],
+              files: [path.join(input.vault, 'vault.json')],
+              vault: input.vault,
+            }
+          },
+        },
+      },
+    })
+
+    const firstResult = await services.setupHost({
+      assistant,
+      dryRun: false,
+      strict: false,
+      toolchainRoot,
+      vault: './vault',
+      wearables: ['whoop', 'garmin'],
+    })
+
+    assert.equal(
+      firstResult.steps.find((step) => step.id === 'wearable-preferences')?.status,
+      'completed',
+    )
+    assert.deepEqual(
+      (await showWearablePreferences(vaultPath)).wearablePreferences,
+      {
+        desiredProviders: ['garmin', 'whoop'],
+      },
+    )
+
+    const secondResult = await services.setupHost({
+      assistant,
+      dryRun: false,
+      strict: false,
+      toolchainRoot,
+      vault: './vault',
+      wearables: [],
+    })
+
+    assert.equal(
+      secondResult.steps.find((step) => step.id === 'wearable-preferences')?.status,
+      'completed',
+    )
+    assert.deepEqual(
+      (await showWearablePreferences(vaultPath)).wearablePreferences,
+      {
+        desiredProviders: [],
+      },
     )
   } finally {
     await rm(root, { recursive: true, force: true })

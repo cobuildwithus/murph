@@ -278,7 +278,6 @@ test('onboard CLI builds setup CTAs from configured channels, updates, wearables
       'murph automation list',
       'murph assistant chat',
       'murph inbox doctor',
-      'murph inbox source add imessage --id imessage:self --account self --includeOwn',
       'murph inbox source add telegram --id telegram:bot --account bot',
       'murph inbox source add linq --id linq:default --account default --linqWebhookPort 8789 --linqWebhookPath /linq-webhook',
       'murph device connect oura --open',
@@ -359,6 +358,7 @@ test('interactive onboard uses wizard defaults, runtime env hints, and setupHost
               deviceSyncLocalBaseUrl: input.deviceSyncLocalBaseUrl,
               initialChannels: [...input.initialChannels],
               initialScheduledUpdates: [...input.initialScheduledUpdates],
+              initialWearables: [...input.initialWearables],
               linqLocalWebhookUrl: input.linqLocalWebhookUrl,
               platform: input.platform,
               publicBaseUrl: input.publicBaseUrl,
@@ -388,6 +388,7 @@ test('interactive onboard uses wizard defaults, runtime env hints, and setupHost
         'environment-health-watch',
         'weekly-health-snapshot',
       ],
+      initialWearables: [],
       linqLocalWebhookUrl: 'http://127.0.0.1:8789/linq-webhook',
       platform: 'linux',
       publicBaseUrl: 'https://public.example',
@@ -441,6 +442,72 @@ test('interactive onboard uses wizard defaults, runtime env hints, and setupHost
     } else {
       process.env.OURA_CLIENT_ID = previousOuraClientId
     }
+  }
+})
+
+test('interactive onboard restores canonical wearable preferences into the wizard', async () => {
+  const wizardCalls: Array<{
+    initialWearables: string[]
+  }> = []
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-setup-surface-wearables-'))
+
+  try {
+    await mkdir(path.join(vaultRoot, 'bank'), { recursive: true })
+    await writeFile(
+      path.join(vaultRoot, 'bank', 'preferences.json'),
+      JSON.stringify({
+        schemaVersion: 2,
+        updatedAt: '2026-04-10T00:00:00.000Z',
+        workoutUnitPreferences: {},
+        wearablePreferences: {
+          desiredProviders: ['whoop', 'garmin'],
+        },
+      }),
+      'utf8',
+    )
+
+    await runSetupCli(
+      ['onboard', '--vault', vaultRoot],
+      {
+        platform: () => 'linux',
+        services: {
+          async setupHost(input) {
+            return makeSetupResult(input.vault, {
+              platform: 'linux',
+            })
+          },
+          async setupMacos(input) {
+            return makeSetupResult(input.vault)
+          },
+        } satisfies NonNullable<SetupCliOptions['services']>,
+        terminal: {
+          stdinIsTTY: true,
+          stderrIsTTY: true,
+        },
+        wizard: {
+          async run(input) {
+            wizardCalls.push({
+              initialWearables: [...input.initialWearables],
+            })
+
+            return {
+              assistantPreset: 'skip',
+              channels: [],
+              scheduledUpdates: [],
+              wearables: [],
+            }
+          },
+        },
+      },
+    )
+
+    assert.deepEqual(wizardCalls, [
+      {
+        initialWearables: ['garmin', 'whoop'],
+      },
+    ])
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
   }
 })
 

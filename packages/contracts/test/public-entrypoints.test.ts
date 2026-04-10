@@ -66,9 +66,12 @@ describe("@murphai/contracts public entrypoint", () => {
 
   it("covers the contracts helper seams exposed through the public package", () => {
     expect(createEmptyPreferencesDocument(new Date("2026-04-08T10:11:12.000Z"))).toEqual({
-      schemaVersion: 1,
+      schemaVersion: 2,
       updatedAt: "2026-04-08T10:11:12.000Z",
       workoutUnitPreferences: {},
+      wearablePreferences: {
+        desiredProviders: [],
+      },
     });
 
     expect(isStrictIsoDateTime("2026-04-08T10:11:12.000Z")).toBe(true);
@@ -192,9 +195,32 @@ describe("@murphai/contracts public entrypoint", () => {
     );
 
     expect(createEmptyPreferencesDocument(new Date("2026-04-08T00:00:00.000Z"))).toEqual({
-      schemaVersion: 1,
+      schemaVersion: 2,
       updatedAt: "2026-04-08T00:00:00.000Z",
       workoutUnitPreferences: {},
+      wearablePreferences: {
+        desiredProviders: [],
+      },
+    });
+    expect(
+      contracts.safeParseContract(contracts.validPreferencesDocumentSchema, {
+        schemaVersion: 1,
+        updatedAt: "2026-04-08T00:00:00.000Z",
+        workoutUnitPreferences: {
+          weight: "kg",
+          distance: "mi",
+        },
+      }),
+    ).toEqual({
+      success: true,
+      data: {
+        schemaVersion: 1,
+        updatedAt: "2026-04-08T00:00:00.000Z",
+        workoutUnitPreferences: {
+          weight: "kg",
+          distance: "mi",
+        },
+      },
     });
     expect(contracts.VAULT_LAYOUT.preferencesDocument).toBe("bank/preferences.json");
   });

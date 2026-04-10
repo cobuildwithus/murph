@@ -4,6 +4,7 @@ import { Cli, z } from 'incur'
 import { assistantAutomationStateSchema } from '@murphai/operator-config/assistant-cli-contracts'
 import { inboxRuntimeConfigSchema } from '@murphai/operator-config/inbox-cli-contracts'
 import { resolveAssistantStatePaths } from '@murphai/assistant-engine/assistant-state'
+import { showWearablePreferences } from '@murphai/vault-usecases'
 import {
   type SetupAssistantPreset,
   type SetupAssistantProviderPreset,
@@ -14,8 +15,8 @@ import {
   type SetupWearable,
   setupChannelValues,
   setupCommandOptionsSchema,
-  setupResultSchema,
   setupWearableValues,
+  setupResultSchema,
 } from '@murphai/operator-config/setup-cli-contracts'
 import {
   createSetupAssistantResolver,
@@ -49,7 +50,6 @@ import {
   describeSetupWizardPublicUrlStrategyChoice,
   getDefaultSetupWizardChannels,
   getDefaultSetupWizardScheduledUpdates,
-  getDefaultSetupWizardWearables,
   inferSetupWizardAssistantProvider,
   resolveSetupWizardInitialScheduledUpdates,
   resolveSetupWizardAssistantSelection,
@@ -194,7 +194,9 @@ export function createSetupCli(options: SetupCliOptions = {}): Cli.Cli {
         initialScheduledUpdates: await resolveInitialSetupWizardScheduledUpdates(
           context.options.vault,
         ),
-        initialWearables: getDefaultSetupWizardWearables(),
+        initialWearables: await resolveInitialSetupWizardWearables(
+          context.options.vault,
+        ),
         linqLocalWebhookUrl: resolveSetupWizardLinqLocalWebhookUrl(),
         platform: getPlatform(),
         publicBaseUrl: resolveSetupWizardPublicBaseUrl(currentEnv),
@@ -398,6 +400,17 @@ export async function resolveInitialSetupWizardScheduledUpdates(
   return getDefaultSetupWizardScheduledUpdates()
 }
 
+export async function resolveInitialSetupWizardWearables(
+  vault: string,
+): Promise<SetupWearable[]> {
+  const preferences = await showWearablePreferences(vault)
+
+  return preferences.wearablePreferences.desiredProviders.filter(
+    (provider): provider is SetupWearable =>
+      setupWearableValues.includes(provider as SetupWearable),
+  )
+}
+
 async function readInitialSetupWizardAutomationState(vault: string) {
   const automationPath = resolveAssistantStatePaths(vault).automationStatePath
 
@@ -501,7 +514,7 @@ function buildSetupCtaCommands(result: SetupResult): Array<{
     commands.push({
       command: 'assistant run',
       description:
-        'Start the assistant automation loop so configured channels like iMessage, Telegram, Linq, or email can receive automatic replies.',
+        'Start the assistant automation loop so configured Telegram, Linq, or email channels can receive automatic replies.',
     })
   }
 
@@ -529,17 +542,6 @@ function buildSetupCtaCommands(result: SetupResult): Array<{
       description: 'Verify the local runtime after setup.',
     },
   )
-
-  if (
-    result.platform === 'darwin' &&
-    !result.channels.some((channel) => channel.channel === 'imessage' && channel.configured)
-  ) {
-    commands.push({
-      command: 'inbox source add imessage --id imessage:self --account self --includeOwn',
-      description:
-        'Add a local iMessage connector when you are ready to ingest captures and deliver assistant replies.',
-    })
-  }
 
   if (!result.channels.some((channel) => channel.channel === 'telegram' && channel.configured)) {
     commands.push({

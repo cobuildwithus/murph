@@ -19,7 +19,7 @@ import {
 } from "./memory.ts";
 import {
   preferencesDocumentRelativePath,
-  preferencesDocumentSchema,
+  validPreferencesDocumentSchema,
 } from "./preferences.ts";
 import type { ContractSchema } from "./validate.ts";
 import {
@@ -231,7 +231,7 @@ const vaultFamilyDescriptors = [
       kind: "json",
       issueCode: "CONTRACT_INVALID",
       optional: true,
-      schema: preferencesDocumentSchema,
+      schema: validPreferencesDocumentSchema,
     },
   },
   {
