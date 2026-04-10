@@ -10,7 +10,18 @@ if [[ "$#" -gt 0 ]]; then
   workspace_artifact_lock_label+=" $1"
 fi
 
-if [[ "${MURPH_WORKSPACE_ARTIFACT_LOCK_HELD:-0}" != "1" ]]; then
+command_requires_workspace_artifact_lock() {
+  case "${1:-}" in
+    "typecheck" | "typecheck:packages" | "test:packages:coverage" | "test:coverage" | "verify:cli")
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+if [[ "${MURPH_WORKSPACE_ARTIFACT_LOCK_HELD:-0}" != "1" ]] && command_requires_workspace_artifact_lock "${1:-}"; then
   exec node "$repo_root/scripts/run-with-workspace-artifact-lock.mjs" "$workspace_artifact_lock_label" -- \
     bash "$repo_root/scripts/workspace-verify.sh" "$@"
 fi
@@ -755,7 +766,7 @@ run_test_diff() {
   fi
 
   if [[ "$diff_run_verify_cli" == "1" ]]; then
-    run_timed_step "CLI targeted verification" run_verify_cli
+    run_timed_step "CLI targeted verification" run_verify_cli_with_workspace_artifact_lock
   fi
 
   local package_dir
@@ -792,6 +803,15 @@ run_verify_cli() {
   run_timed_step \
     "CLI workspace Vitest" \
     env MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 pnpm exec vitest run --config "packages/cli/vitest.workspace.ts" "${cli_verify_test_files[@]}" --no-coverage
+}
+
+run_verify_cli_with_workspace_artifact_lock() {
+  if [[ "${MURPH_WORKSPACE_ARTIFACT_LOCK_HELD:-0}" == "1" ]]; then
+    run_verify_cli
+    return 0
+  fi
+
+  bash "$repo_root/scripts/workspace-verify.sh" verify:cli
 }
 
 main() {
