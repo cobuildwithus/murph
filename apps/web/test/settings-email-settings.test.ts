@@ -5,18 +5,13 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  refreshUser: vi.fn(),
   sendCode: vi.fn(),
-  usePrivy: vi.fn(),
   useUpdateEmail: vi.fn(),
-  useUser: vi.fn(),
   verifyCode: vi.fn(),
 }));
 
 vi.mock("@privy-io/react-auth", () => ({
-  usePrivy: mocks.usePrivy,
   useUpdateEmail: mocks.useUpdateEmail,
-  useUser: mocks.useUser,
 }));
 
 vi.mock("@radix-ui/react-dialog", () => ({
@@ -46,28 +41,6 @@ vi.mock("@radix-ui/react-dialog", () => ({
 describe("HostedEmailSettings", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.usePrivy.mockReturnValue({
-      authenticated: true,
-      logout: vi.fn(),
-      ready: true,
-    });
-    mocks.useUser.mockReturnValue({
-      refreshUser: mocks.refreshUser,
-      user: {
-        id: "did:privy:user_123",
-        linkedAccounts: [
-          {
-            address: "stale@example.com",
-            type: "email",
-          },
-          {
-            address: "verified@example.com",
-            latest_verified_at: 1741194420,
-            type: "email",
-          },
-        ],
-      },
-    });
     mocks.useUpdateEmail.mockReturnValue({
       sendCode: mocks.sendCode,
       state: {
@@ -82,7 +55,18 @@ describe("HostedEmailSettings", () => {
 
     const markup = renderToStaticMarkup(
       React.createElement(HostedEmailSettings, {
-        expectedPrivyUserId: "did:privy:user_123",
+        authenticated: true,
+        initialLinkedAccounts: [
+          {
+            address: "stale@example.com",
+            type: "email",
+          },
+          {
+            address: "verified@example.com",
+            latest_verified_at: 1741194420,
+            type: "email",
+          },
+        ],
       }),
     );
 

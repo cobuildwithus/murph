@@ -1,6 +1,7 @@
 "use client";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import type { PrivyLinkedAccountLike } from "@/src/lib/hosted-onboarding/privy-shared";
 import { useHostedEmailSettingsController } from "./hosted-email-settings-controller";
 import {
   HostedEmailSettingsContent,
@@ -8,12 +9,14 @@ import {
 } from "./hosted-email-settings-sections";
 import { HostedSettingsSessionState } from "./hosted-settings-session-state";
 
-export function HostedEmailSettings() {
-  return <HostedEmailSettingsInner />;
-}
-
-function HostedEmailSettingsInner() {
-  const controller = useHostedEmailSettingsController();
+export function HostedEmailSettings(props: {
+  authenticated: boolean;
+  initialLinkedAccounts: readonly PrivyLinkedAccountLike[];
+}) {
+  const controller = useHostedEmailSettingsController({
+    authenticated: props.authenticated,
+    initialLinkedAccounts: props.initialLinkedAccounts,
+  });
 
   return (
     <div className="space-y-5">
@@ -43,9 +46,6 @@ function HostedEmailSettingsInner() {
       {!controller.canManageEmail ? (
         <HostedSettingsSessionState
           authenticated={controller.authenticated}
-          isLoadingAuthenticatedUser={controller.isLoadingAuthenticatedUser}
-          profileLabel="email settings"
-          ready={controller.ready}
           signedOutDescription="Sign in to manage your email."
         />
       ) : (

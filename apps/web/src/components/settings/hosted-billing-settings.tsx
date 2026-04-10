@@ -1,6 +1,5 @@
 "use client";
 
-import { usePrivy, useUser } from "@privy-io/react-auth";
 import { useState } from "react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -9,39 +8,21 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { requestHostedOnboardingJson } from "@/src/components/hosted-onboarding/client-api";
 
 import { toErrorMessage } from "./hosted-settings-sync-helpers";
+import { HostedSettingsSessionState } from "./hosted-settings-session-state";
 
 interface HostedBillingPortalResponse {
   url: string;
 }
 
-export function HostedBillingSettings() {
-  return <HostedBillingSettingsInner />;
-}
-
-function HostedBillingSettingsInner() {
-  const { authenticated, ready } = usePrivy();
-  const { user } = useUser();
+export function HostedBillingSettings(props: { authenticated: boolean }) {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isOpeningPortal, setIsOpeningPortal] = useState(false);
-
-  const canManageBilling = ready && authenticated && Boolean(user);
-  const isLoadingAuthenticatedUser = ready && authenticated && !user;
 
   async function handleManageSubscription() {
     setErrorMessage(null);
 
-    if (!ready) {
-      setErrorMessage("Still loading — try again in a moment.");
-      return;
-    }
-
-    if (!authenticated) {
+    if (!props.authenticated) {
       setErrorMessage("Please sign in first to manage billing.");
-      return;
-    }
-
-    if (!user) {
-      setErrorMessage("Still loading your account — try again in a moment.");
       return;
     }
 
@@ -77,14 +58,11 @@ function HostedBillingSettingsInner() {
           </Alert>
         ) : null}
 
-        {!ready || isLoadingAuthenticatedUser ? (
-          <p className="text-sm leading-relaxed text-stone-500">Loading&hellip;</p>
-        ) : !authenticated ? (
-          <p className="text-sm leading-relaxed text-stone-500">
-            Sign in to manage your subscription.
-          </p>
-        ) : !canManageBilling ? (
-          <p className="text-sm leading-relaxed text-stone-500">Loading your account&hellip;</p>
+        {!props.authenticated ? (
+          <HostedSettingsSessionState
+            authenticated={props.authenticated}
+            signedOutDescription="Sign in to manage your subscription."
+          />
         ) : (
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-sm leading-relaxed text-stone-500">
