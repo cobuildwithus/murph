@@ -11,7 +11,6 @@ import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   asListEnvelope,
   loadJsonInputFile,
-  summarizeListMarkdown,
   toListEntity,
 } from './shared.js'
 import { applyRecordPatch } from './record-mutations.js'
@@ -564,7 +563,7 @@ export async function listProviderRecords(input: {
         title: entry.title,
         occurredAt: null,
         path: entry.relativePath,
-        excerpt: summarizeListMarkdown(entry.markdown),
+        markdown: entry.markdown,
         data,
         links: [],
       })
@@ -856,6 +855,7 @@ function toCommandListItem(record: QueryRecord) {
     title: record.title ?? null,
     occurredAt: normalizeIsoTimestamp(record.occurredAt),
     path: record.path ?? null,
+    markdown: record.body ?? null,
     data: compactObject({
       ...record.attributes,
       status: record.status ?? undefined,

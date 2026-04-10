@@ -380,13 +380,6 @@ function normalizeGenericEntityKind(entity: QueryEntity) {
   return entity.kind || entity.family
 }
 
-const LIST_EXCERPT_FAMILIES = new Set<QueryEntity["family"]>([
-  "core",
-  "experiment",
-  "journal",
-  "provider",
-])
-
 export function summarizeListMarkdown(
   markdown: string | null | undefined,
   maxLength = 220,
@@ -424,6 +417,7 @@ export function toListEntity(input: {
   title: string | null
   occurredAt: string | null
   path: string | null
+  markdown?: string | null
   data: Record<string, unknown>
   links: ListEntity["links"]
   excerpt?: string | null
@@ -438,8 +432,19 @@ export function toListEntity(input: {
     links: input.links,
   }
 
-  if (typeof input.excerpt === "string" && input.excerpt.trim().length > 0) {
-    entity.excerpt = input.excerpt.trim()
+  const normalizedExplicitExcerpt =
+    typeof input.excerpt === "string"
+      ? input.excerpt.trim()
+      : input.excerpt
+  const normalizedExcerpt =
+    normalizedExplicitExcerpt === null
+      ? null
+      : typeof normalizedExplicitExcerpt === "string" && normalizedExplicitExcerpt.length > 0
+        ? normalizedExplicitExcerpt
+        : summarizeListMarkdown(input.markdown)
+
+  if (typeof normalizedExcerpt === "string" && normalizedExcerpt.length > 0) {
+    entity.excerpt = normalizedExcerpt
   }
 
   return entity
@@ -468,10 +473,7 @@ export function toGenericListItem(entity: QueryEntity) {
     title: entity.title ?? null,
     occurredAt: entity.occurredAt ?? null,
     path: entity.path ?? null,
-    excerpt:
-      LIST_EXCERPT_FAMILIES.has(entity.family)
-        ? summarizeListMarkdown(entity.body)
-        : null,
+    markdown: entity.body ?? null,
     data: entity.attributes,
     links: buildEntityLinks({
       data: entity.attributes,

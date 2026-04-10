@@ -95,6 +95,7 @@ function toWorkoutFormatListEntity(record: WorkoutFormatRecord) {
     title: record.title,
     occurredAt: null,
     path: record.relativePath,
+    markdown: record.markdown,
     data: {
       workoutFormatId: record.workoutFormatId,
       slug: record.slug,

@@ -15,7 +15,6 @@ import {
 import {
   asListEnvelope,
   readJsonPayload,
-  summarizeListMarkdown,
   toListEntity,
 } from './shared.js'
 import {
@@ -702,7 +701,7 @@ function toListItem(entity: QueryCanonicalEntity) {
     title: entity.title ?? null,
     occurredAt: normalizeIsoTimestamp(entity.occurredAt),
     path: entity.path ?? null,
-    excerpt: summarizeListMarkdown(entity.body),
+    markdown: entity.body ?? null,
     data: buildEntityData(entity),
     links: buildEntityLinks(entity),
   })

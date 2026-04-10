@@ -440,6 +440,7 @@ test.sequential(
           id: string
           kind: string
           data: Record<string, unknown>
+          excerpt?: string | null
         }>
       }>([
         'recipe',
@@ -467,6 +468,11 @@ test.sequential(
       assert.equal(requireData(recipeList).count, 1)
       assert.equal(requireData(recipeList).items.length, 1)
       assert.equal(requireData(recipeList).items[0]?.kind, 'recipe')
+      assert.match(
+        requireData(recipeList).items[0]?.excerpt ?? '',
+        /Summary A reliable high protein salmon b/u,
+      )
+      assert.equal('markdown' in (requireData(recipeList).items[0] ?? {}), false)
       assert.equal(requireData(recipeList).items[0]?.data.dishType, 'dinner')
 
       const recipeMarkdown = await readFile(
@@ -584,6 +590,7 @@ test.sequential(
           id: string
           kind: string
           data: Record<string, unknown>
+          excerpt?: string | null
         }>
       }>([
         'food',
@@ -613,6 +620,11 @@ test.sequential(
       assert.equal(requireData(foodList).count, 1)
       assert.equal(requireData(foodList).items.length, 1)
       assert.equal(requireData(foodList).items[0]?.kind, 'food')
+      assert.match(
+        requireData(foodList).items[0]?.excerpt ?? '',
+        /Summary The usual acai bowl order from the neighborhood spot with re/u,
+      )
+      assert.equal('markdown' in (requireData(foodList).items[0] ?? {}), false)
       assert.equal(requireData(foodList).items[0]?.data.kind, 'acai bowl')
 
       const foodMarkdown = await readFile(

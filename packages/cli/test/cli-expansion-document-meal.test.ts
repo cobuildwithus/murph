@@ -69,6 +69,7 @@ interface ListEnvelope {
   items: Array<{
     id: string
     kind: string
+    excerpt?: string | null
     data: Record<string, unknown>
     links: Array<{
       id: string
@@ -261,6 +262,8 @@ test.sequential(
         requireData(listedDocuments).items.map((item) => item.id),
         [currentDocument.documentId],
       )
+      assert.match(requireData(listedDocuments).items[0]?.excerpt ?? '', /Fasted lipid panel/u)
+      assert.equal('markdown' in (requireData(listedDocuments).items[0] ?? {}), false)
       assert.equal(requireData(listedDocuments).items[0]?.data.source, 'device')
       assert.deepEqual(requireData(listedDocuments).items[0]?.links, [])
       assert.equal(
@@ -564,6 +567,8 @@ test.sequential(
         requireData(listedMeals).items.map((item) => item.id),
         [currentMeal.mealId],
       )
+      assert.match(requireData(listedMeals).items[0]?.excerpt ?? '', /Eggs and avocado/u)
+      assert.equal('markdown' in (requireData(listedMeals).items[0] ?? {}), false)
       assert.equal(requireData(listedMeals).items[0]?.data.source, 'device')
       assert.deepEqual(requireData(listedMeals).items[0]?.links, [])
       assert.equal(
