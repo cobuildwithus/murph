@@ -353,13 +353,7 @@ describe('assistant CLI tool capability seam', () => {
       args: ['device', 'provider', 'list'],
       stdin: '{"hello":true}',
       timeoutMs: 1000,
-    })).toEqual({
-      argv: ['vault-cli', '--help'],
-      exitCode: 0,
-      json: { ok: true },
-      stderr: '',
-      stdout: '{"ok":true}',
-    })
+    })).toEqual({ ok: true })
     expect(cliExecuteSpy).toHaveBeenCalledWith({
       args: ['device', 'provider', 'list'],
       stdin: '{"hello":true}',

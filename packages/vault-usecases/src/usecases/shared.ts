@@ -265,13 +265,31 @@ export function asListEnvelope<
   count: number
   nextCursor: string | null
 } {
+  const normalizedItems = items.map((item) => stripListItemMarkdown(item)) as TItem[]
+
   return {
     vault,
     filters,
-    items,
-    count: items.length,
+    items: normalizedItems,
+    count: normalizedItems.length,
     nextCursor: null,
   }
+}
+
+function stripListItemMarkdown<TItem>(item: TItem): TItem {
+  if (typeof item !== "object" || item === null || Array.isArray(item)) {
+    return item
+  }
+
+  if (!Object.hasOwn(item, "markdown")) {
+    return item
+  }
+
+  const { markdown: _markdown, ...rest } = item as TItem & {
+    markdown?: unknown
+  }
+
+  return rest as TItem
 }
 
 export function recordPath(record: JsonObject) {

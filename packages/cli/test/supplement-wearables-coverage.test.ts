@@ -171,6 +171,7 @@ test('supplement commands exercise scaffold, upsert, read, compound, rename, and
     count: number
     items: Array<{
       slug: string
+      markdown?: string | null
     }>
   }>(cli, [
     'supplement',
@@ -184,6 +185,7 @@ test('supplement commands exercise scaffold, upsert, read, compound, rename, and
   ])
   assert.equal(listed.exitCode, null)
   assert.equal(requireData(listed.envelope).count >= 1, true)
+  assert.equal('markdown' in (requireData(listed.envelope).items[0] ?? {}), false)
 
   const listedDefault = await runInProcessJsonCli<{
     filters: {

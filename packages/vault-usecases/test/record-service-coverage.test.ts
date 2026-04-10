@@ -542,7 +542,6 @@ describe("record service seams", () => {
           title: "Daily note",
           occurredAt: "2026-04-08T12:00:00.000Z",
           path: "raw/documents/doc_1/document.md",
-          markdown: "Recorded details.",
           data: {
             documentPath: "raw/documents/doc_1/manifest.json",
           },

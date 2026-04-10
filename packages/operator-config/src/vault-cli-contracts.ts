@@ -308,16 +308,6 @@ export const workoutFormatSaveResultSchema = z.object({
   created: z.boolean(),
 })
 
-export const workoutFormatListResultSchema = z.object({
-  vault: pathSchema,
-  filters: z.object({
-    limit: z.number().int().positive().max(200),
-  }),
-  items: z.array(z.lazy(() => readEntitySchema)),
-  count: z.number().int().nonnegative(),
-  nextCursor: z.string().min(1).nullable(),
-})
-
 export const interventionAddResultSchema = z.object({
   vault: pathSchema,
   eventId: z.string().min(1),
@@ -418,7 +408,19 @@ export const listFilterSchema = z.object({
   limit: z.number().int().positive().max(200).default(50),
 })
 
-export const listItemSchema = readEntitySchema
+export const listItemSchema = readEntitySchema.omit({
+  markdown: true,
+})
+
+export const workoutFormatListResultSchema = z.object({
+  vault: pathSchema,
+  filters: z.object({
+    limit: z.number().int().positive().max(200),
+  }),
+  items: z.array(listItemSchema),
+  count: z.number().int().nonnegative(),
+  nextCursor: z.string().min(1).nullable(),
+})
 
 export const listResultSchema = z.object({
   vault: pathSchema,
