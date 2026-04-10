@@ -14,6 +14,9 @@ describe("@murphai/runtime-state package boundary", () => {
     expect("resolveRuntimePaths" in runtimeState).toBe(false);
     expect("snapshotHostedExecutionContext" in runtimeState).toBe(false);
     expect("decodeHostedBundleBase64" in runtimeState).toBe(false);
+    expect("buildProcessCommand" in runtimeState).toBe(false);
+    expect("fingerprintHost" in runtimeState).toBe(false);
+    expect("isProcessRunning" in runtimeState).toBe(false);
     expect(rootBarrel).not.toContain('./hosted-bundle.ts');
   });
 
@@ -29,6 +32,9 @@ describe("@murphai/runtime-state package boundary", () => {
     expect(runtimeStateNode.resolveRuntimePaths).toBeTypeOf("function");
     expect(runtimeStateNode.snapshotHostedExecutionContext).toBeTypeOf("function");
     expect(runtimeStateNode.decodeHostedBundleBase64).toBeTypeOf("function");
+    expect(runtimeStateNode.buildProcessCommand).toBeTypeOf("function");
+    expect(runtimeStateNode.fingerprintHost).toBeTypeOf("function");
+    expect(runtimeStateNode.isProcessRunning).toBeTypeOf("function");
     expect(packageJson.exports?.["./node"]).toEqual({
       default: "./dist/node/index.js",
       types: "./dist/node/index.d.ts",
