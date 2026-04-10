@@ -174,6 +174,21 @@ test.sequential(
         '--vault',
         vaultRoot,
       ])
+      const listed = await runSliceCli<{
+        count: number
+        items: Array<{
+          id: string
+          excerpt?: string | null
+          markdown?: string | null
+        }>
+      }>([
+        'experiment',
+        'list',
+        '--status',
+        'completed',
+        '--vault',
+        vaultRoot,
+      ])
 
       assert.equal(updated.ok, true)
       assert.equal(updated.meta?.command, 'experiment update')
@@ -207,6 +222,13 @@ test.sequential(
         requireData(eventShown).entity.data.experimentId,
         requireData(created).experimentId,
       )
+      assert.equal(listed.ok, true)
+      assert.equal(requireData(listed).count, 1)
+      assert.match(
+        requireData(listed).items[0]?.excerpt ?? '',
+        /Focus Sprint Updated Plan Keep the walks short and consistent\./u,
+      )
+      assert.equal('markdown' in (requireData(listed).items[0] ?? {}), false)
     } finally {
       await rm(vaultRoot, { recursive: true, force: true })
     }
@@ -359,6 +381,23 @@ test.sequential(
         '--vault',
         vaultRoot,
       ])
+      const listed = await runSliceCli<{
+        count: number
+        items: Array<{
+          id: string
+          excerpt?: string | null
+          markdown?: string | null
+        }>
+      }>([
+        'journal',
+        'list',
+        '--from',
+        '2026-03-12',
+        '--to',
+        '2026-03-12',
+        '--vault',
+        vaultRoot,
+      ])
 
       assert.equal(appended.ok, true)
       assert.equal(appended.meta?.command, 'journal append')
@@ -410,6 +449,13 @@ test.sequential(
       assert.match(requireData(shown).entity.markdown ?? '', /Evening note from the CLI append helper\./u)
       assert.deepEqual(requireData(shown).entity.data.eventIds, [firstEventId])
       assert.deepEqual(requireData(shown).entity.data.sampleStreams, ['glucose'])
+      assert.equal(listed.ok, true)
+      assert.equal(requireData(listed).count, 1)
+      assert.match(
+        requireData(listed).items[0]?.excerpt ?? '',
+        /Evening note from the CLI append helper\./u,
+      )
+      assert.equal('markdown' in (requireData(listed).items[0] ?? {}), false)
 
       const journalPath = path.join(vaultRoot, 'journal/2026/2026-03-12.md')
       const journalMarkdown = await readFile(journalPath, 'utf8')

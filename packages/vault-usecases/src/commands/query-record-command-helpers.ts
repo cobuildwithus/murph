@@ -33,7 +33,16 @@ export interface CommandShowEntity {
   links: CommandEntityLink[]
 }
 
-export type CommandListItem = CommandShowEntity
+export interface CommandListItem {
+  id: string
+  kind: string
+  title: string | null
+  occurredAt: string | null
+  path: string | null
+  excerpt?: string | null
+  data: JsonObject
+  links: CommandEntityLink[]
+}
 
 export interface SampleCommandListItem extends CommandListItem {
   quality: string | null
@@ -99,6 +108,16 @@ export function toOwnedEventCommandShowEntity(
   )
 }
 
+export function toCommandListItem(
+  record: QueryRecord,
+  extraLinkKeys: string[] = [],
+): CommandListItem {
+  return toCommandListItemWithLinks(
+    record,
+    toCommandEntityLinks(record, { extraLinkKeys }),
+  )
+}
+
 function toCommandShowEntityWithLinks(
   record: QueryRecord,
   links: CommandEntityLink[],
@@ -115,11 +134,26 @@ function toCommandShowEntityWithLinks(
   }
 }
 
+function toCommandListItemWithLinks(
+  record: QueryRecord,
+  links: CommandEntityLink[],
+): CommandListItem {
+  return {
+    id: record.entityId || record.primaryLookupId,
+    kind: record.kind || record.family,
+    title: record.title ?? null,
+    occurredAt: record.occurredAt ?? null,
+    path: record.path ?? null,
+    data: record.attributes,
+    links,
+  }
+}
+
 export function toSampleCommandListItem(
   record: QueryRecord,
 ): SampleCommandListItem {
   return {
-    ...toCommandShowEntity(record),
+    ...toCommandListItem(record),
     data: {
       ...record.attributes,
       status: record.status ?? undefined,
@@ -134,7 +168,7 @@ export function toAuditCommandListItem(
   record: QueryRecord,
 ): AuditCommandListItem {
   return {
-    ...toCommandShowEntity(record),
+    ...toCommandListItem(record),
     action: firstString(record.attributes, ['action']),
     actor: firstString(record.attributes, ['actor']),
     status: record.status ?? null,

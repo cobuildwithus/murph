@@ -28,7 +28,10 @@ import {
 import type {
   HealthEntityEnvelope,
 } from "../health-cli-method-types.js"
-import type { VaultValidateResult } from "@murphai/operator-config/vault-cli-contracts"
+import type {
+  ListEntity,
+  VaultValidateResult,
+} from "@murphai/operator-config/vault-cli-contracts"
 import type {
   QueryEntity,
 } from "./types.js"
@@ -265,31 +268,13 @@ export function asListEnvelope<
   count: number
   nextCursor: string | null
 } {
-  const normalizedItems = items.map((item) => stripListItemMarkdown(item)) as TItem[]
-
   return {
     vault,
     filters,
-    items: normalizedItems,
-    count: normalizedItems.length,
+    items,
+    count: items.length,
     nextCursor: null,
   }
-}
-
-function stripListItemMarkdown<TItem>(item: TItem): TItem {
-  if (typeof item !== "object" || item === null || Array.isArray(item)) {
-    return item
-  }
-
-  if (!Object.hasOwn(item, "markdown")) {
-    return item
-  }
-
-  const { markdown: _markdown, ...rest } = item as TItem & {
-    markdown?: unknown
-  }
-
-  return rest as TItem
 }
 
 export function recordPath(record: JsonObject) {
@@ -395,6 +380,71 @@ function normalizeGenericEntityKind(entity: QueryEntity) {
   return entity.kind || entity.family
 }
 
+const LIST_EXCERPT_FAMILIES = new Set<QueryEntity["family"]>([
+  "core",
+  "experiment",
+  "journal",
+  "provider",
+])
+
+export function summarizeListMarkdown(
+  markdown: string | null | undefined,
+  maxLength = 220,
+) {
+  if (typeof markdown !== "string") {
+    return null
+  }
+
+  const withoutFrontmatter = markdown.replace(
+    /^---\s*\n[\s\S]*?\n---\s*\n?/u,
+    "",
+  )
+
+  const normalized = withoutFrontmatter
+    .replace(/^#{1,6}\s+/gmu, "")
+    .replace(/\[([^\]]+)\]\([^)]+\)/gu, "$1")
+    .replace(/[*_`>#-]+/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim()
+
+  if (normalized.length === 0) {
+    return null
+  }
+
+  if (normalized.length <= maxLength) {
+    return normalized
+  }
+
+  return `${normalized.slice(0, Math.max(1, maxLength - 1)).trimEnd()}…`
+}
+
+export function toListEntity(input: {
+  id: string
+  kind: string
+  title: string | null
+  occurredAt: string | null
+  path: string | null
+  data: Record<string, unknown>
+  links: ListEntity["links"]
+  excerpt?: string | null
+}): ListEntity {
+  const entity: ListEntity = {
+    id: input.id,
+    kind: input.kind,
+    title: input.title,
+    occurredAt: input.occurredAt,
+    path: input.path,
+    data: input.data,
+    links: input.links,
+  }
+
+  if (typeof input.excerpt === "string" && input.excerpt.trim().length > 0) {
+    entity.excerpt = input.excerpt.trim()
+  }
+
+  return entity
+}
+
 export function toGenericShowEntity(entity: QueryEntity) {
   return {
     id: entity.entityId,
@@ -412,19 +462,22 @@ export function toGenericShowEntity(entity: QueryEntity) {
 }
 
 export function toGenericListItem(entity: QueryEntity) {
-  return {
+  return toListEntity({
     id: entity.entityId,
     kind: normalizeGenericEntityKind(entity),
     title: entity.title ?? null,
     occurredAt: entity.occurredAt ?? null,
     path: entity.path ?? null,
-    markdown: entity.body ?? null,
+    excerpt:
+      LIST_EXCERPT_FAMILIES.has(entity.family)
+        ? summarizeListMarkdown(entity.body)
+        : null,
     data: entity.attributes,
     links: buildEntityLinks({
       data: entity.attributes,
       relatedIds: entity.relatedIds,
     }),
-  }
+  })
 }
 
 export function matchesGenericKindFilter(entity: QueryEntity, kind?: string) {

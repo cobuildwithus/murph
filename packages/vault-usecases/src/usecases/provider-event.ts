@@ -11,6 +11,8 @@ import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   asListEnvelope,
   loadJsonInputFile,
+  summarizeListMarkdown,
+  toListEntity,
 } from './shared.js'
 import { applyRecordPatch } from './record-mutations.js'
 import {
@@ -556,16 +558,16 @@ export async function listProviderRecords(input: {
     .map((entry) => {
       const data = buildProviderData(entry)
 
-      return {
+      return toListEntity({
         id: entry.providerId,
         kind: 'provider',
         title: entry.title,
         occurredAt: null,
         path: entry.relativePath,
-        markdown: entry.markdown,
+        excerpt: summarizeListMarkdown(entry.markdown),
         data,
         links: [],
-      }
+      })
     })
 
   return asListEnvelope(input.vault, {
@@ -848,7 +850,20 @@ function toCommandShowEntity(record: QueryRecord) {
 }
 
 function toCommandListItem(record: QueryRecord) {
-  return toCommandShowEntity(record)
+  return toListEntity({
+    id: record.entityId,
+    kind: record.kind ?? 'event',
+    title: record.title ?? null,
+    occurredAt: normalizeIsoTimestamp(record.occurredAt),
+    path: record.path ?? null,
+    data: compactObject({
+      ...record.attributes,
+      status: record.status ?? undefined,
+      stream: record.stream ?? undefined,
+      experimentSlug: record.experimentSlug ?? undefined,
+    }),
+    links: buildRecordLinks(record),
+  })
 }
 
 function buildRecordLinks(record: QueryRecord) {

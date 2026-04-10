@@ -381,6 +381,8 @@ test('generic list exposes record-type, status, stream, and tag filter parity', 
       items: Array<{
         id: string
         kind: string
+        excerpt?: string | null
+        markdown?: string | null
       }>
     }>([
       'list',
@@ -410,6 +412,8 @@ test('generic list exposes record-type, status, stream, and tag filter parity', 
     assert.equal(requireData(experimentList).items.length, 1)
     assert.equal(requireData(experimentList).items[0]?.id, experimentId)
     assert.equal(requireData(experimentList).items[0]?.kind, 'experiment')
+    assert.match(requireData(experimentList).items[0]?.excerpt ?? '', /Sleep Window Notes\./u)
+    assert.equal('markdown' in (requireData(experimentList).items[0] ?? {}), false)
 
     const sampleList = await runSourceCli<{
       filters: {

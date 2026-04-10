@@ -33,6 +33,7 @@ import {
   readJsonPayload,
   recordPath,
   requirePayloadObjectField,
+  toListEntity,
 } from "./shared.js";
 import { toVaultCliError } from "./vault-usecase-helpers.js";
 
@@ -320,6 +321,34 @@ function toRegistryDocReadEntity(
   };
 }
 
+function toRegistryDocListEntity(
+  config: Pick<RegistryDocFamilyConfig<string>, "kind" | "readEntityIdKeys">,
+  record: JsonObject,
+) {
+  const data = toRegistryDocEntityData(record)
+  const entity = readRegistryRecordEntity(record)
+  const document = readRegistryRecordDocument(record)
+
+  if (config.kind === "protocol") {
+    const protocolKind = firstNonEmptyString(entity, ["kind"])
+    if (protocolKind) {
+      data.kind = protocolKind
+    }
+  }
+
+  return toListEntity({
+    id: firstNonEmptyString(entity, config.readEntityIdKeys) ?? "",
+    kind: config.kind,
+    title: firstNonEmptyString(entity, ["title", "summary", "name", "label"]),
+    occurredAt: null,
+    path: firstNonEmptyString(document, ["relativePath", "path"]),
+    data,
+    links: buildEntityLinks({
+      data,
+    }),
+  })
+}
+
 function toAssessmentReadEntity(record: JsonObject) {
   const data = toRegistryDocEntityData(record);
 
@@ -336,6 +365,23 @@ function toAssessmentReadEntity(record: JsonObject) {
       relatedIds: stringArray(record.relatedIds),
     }),
   };
+}
+
+function toAssessmentListEntity(record: JsonObject) {
+  const data = toRegistryDocEntityData(record)
+
+  return toListEntity({
+    id: firstNonEmptyString(record, ["id"]) ?? "",
+    kind: "assessment" as const,
+    title: firstNonEmptyString(record, ["title", "summary", "name", "label"]),
+    occurredAt: firstNonEmptyString(record, ["recordedAt", "occurredAt", "importedAt"]),
+    path: firstNonEmptyString(record, ["relativePath", "path"]),
+    data,
+    links: buildEntityLinks({
+      data,
+      relatedIds: stringArray(record.relatedIds),
+    }),
+  })
 }
 
 function toNestedHealthEntityData(record: JsonObject) {
@@ -388,6 +434,29 @@ function toBloodTestReadEntity(record: JsonObject) {
   };
 }
 
+function toBloodTestListEntity(record: JsonObject) {
+  const data = toNestedHealthEntityData(record)
+
+  return toListEntity({
+    id: firstNonEmptyString(record, ["id"]) ?? "",
+    kind: "blood_test" as const,
+    title: firstNonEmptyString(record, ["title", "summary", "name", "label"]),
+    occurredAt: firstNonEmptyString(record, [
+      "occurredAt",
+      "recordedAt",
+      "capturedAt",
+      "updatedAt",
+      "importedAt",
+    ]),
+    path: firstNonEmptyString(record, ["relativePath", "path"]),
+    data,
+    links: buildEntityLinks({
+      data,
+      relatedIds: stringArray(record.relatedIds),
+    }),
+  })
+}
+
 function slugifyLookup(value: string): string {
   return value
     .trim()
@@ -428,6 +497,28 @@ function toSupplementReadEntity(record: object) {
       data,
     }),
   };
+}
+
+function toSupplementListEntity(record: object) {
+  const rawRecord = readRegistryRecordEntity(record as JsonObject)
+  const rawDocument = readRegistryRecordDocument(record as JsonObject)
+  const data = toSupplementEntityData(record)
+  const id =
+    firstRawString(rawRecord, ["id"]) ??
+    firstRawString(rawRecord, ["protocolId"]) ??
+    ""
+
+  return toListEntity({
+    id,
+    kind: "supplement" as const,
+    title: firstRawString(rawRecord, ["title"]),
+    occurredAt: firstRawString(rawRecord, ["startedOn"]),
+    path: firstRawString(rawDocument, ["relativePath", "path"]),
+    data,
+    links: buildEntityLinks({
+      data,
+    }),
+  })
 }
 
 async function renameSupplementRecord(
@@ -577,7 +668,7 @@ function createRegistryDocQueryServices(
           limit: input.limit ?? 50,
           status: input.status,
         },
-        records.map((record) => toRegistryDocReadEntity(config, record)),
+        records.map((record) => toRegistryDocListEntity(config, record)),
       );
     };
   }
@@ -727,7 +818,7 @@ export function createExplicitHealthQueryServices(
           to: input.to,
           limit: input.limit ?? 50,
         },
-        records.map((record) => toAssessmentReadEntity(record)),
+        records.map((record) => toAssessmentListEntity(record)),
       );
     },
     ...createRegistryDocQueryServices(loadRuntime),
@@ -758,7 +849,7 @@ export function createExplicitHealthQueryServices(
           to: input.to,
           limit: input.limit ?? 50,
         },
-        records.map((record) => toBloodTestReadEntity(record)),
+        records.map((record) => toBloodTestListEntity(record)),
       );
     },
     async showSupplement(input: CommandContext & { id: string }) {
@@ -789,7 +880,7 @@ export function createExplicitHealthQueryServices(
           limit: input.limit,
           status: input.status,
         },
-        records.map((record: object) => toSupplementReadEntity(record)),
+        records.map((record: object) => toSupplementListEntity(record)),
       );
     },
     async showSupplementCompound(
