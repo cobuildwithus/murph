@@ -1,7 +1,4 @@
-import {
-  readAssistantAutomationState,
-  saveAssistantAutomationState,
-} from '@murphai/assistant-engine/assistant-state'
+import { reconcileManagedAssistantAutoReplyChannelsLocal } from '@murphai/assistant-engine/assistant-state'
 import { resolveAgentmailApiKey } from '@murphai/operator-config/agentmail-runtime'
 import { getAssistantChannelAdapter } from '@murphai/assistant-engine/assistant-runtime'
 import { describeLinqConnectorEndpoint as describeLinqEndpoint } from '@murphai/inbox-services/linq-endpoint'
@@ -64,6 +61,9 @@ type SetupAddedEmailConnectorResult = SetupAddedConnectorResult & {
 type SetupChannelAddedResult =
   | SetupAddedConnectorResult
   | SetupAddedEmailConnectorResult
+type SetupInboxListResult = Awaited<
+  ReturnType<NonNullable<SetupChannelInboxServices['list']>>
+>
 type SetupReadiness = Awaited<ReturnType<typeof probeSetupReadiness>>
 
 type SetupChannelMessages = {
@@ -131,15 +131,6 @@ type SetupChannelResolution = {
   stepStatus: SetupStepResult['status']
 }
 
-type SetupAssistantAutomationCursor = Awaited<
-  ReturnType<typeof readAssistantAutomationState>
->['inboxScanCursor']
-
-type SetupAssistantAutoReplyEntry = {
-  channel: string
-  cursor: SetupAssistantAutomationCursor | null
-}
-
 type SetupChannelSpec = {
   channel: SetupChannel
   title: string
@@ -176,87 +167,6 @@ export function normalizeSetupChannels(
   return [...new Set(value ?? [])]
 }
 
-function compareSetupAssistantAutoReplyEntry(
-  left: SetupAssistantAutoReplyEntry,
-  right: SetupAssistantAutoReplyEntry,
-): number {
-  return left.channel.localeCompare(right.channel)
-}
-
-function sameSetupAssistantAutomationCursor(
-  left: SetupAssistantAutomationCursor | null,
-  right: SetupAssistantAutomationCursor | null,
-): boolean {
-  if (left === right) {
-    return true
-  }
-
-  if (!left || !right) {
-    return false
-  }
-
-  return left.captureId === right.captureId && left.occurredAt === right.occurredAt
-}
-
-function sameSetupAssistantAutoReplyEntries(
-  left: readonly SetupAssistantAutoReplyEntry[],
-  right: readonly SetupAssistantAutoReplyEntry[],
-): boolean {
-  return (
-    left.length === right.length &&
-    left.every(
-      (entry, index) =>
-        entry.channel === right[index]?.channel &&
-        sameSetupAssistantAutomationCursor(entry.cursor, right[index]?.cursor ?? null),
-    )
-  )
-}
-
-function isSetupAssistantAutomationCursor(
-  value: unknown,
-): value is NonNullable<SetupAssistantAutomationCursor> {
-  const candidate =
-    value && typeof value === 'object'
-      ? (value as Record<string, unknown>)
-      : null
-
-  return Boolean(
-    candidate &&
-      'captureId' in candidate &&
-      typeof candidate.captureId === 'string' &&
-      'occurredAt' in candidate &&
-      typeof candidate.occurredAt === 'string',
-  )
-}
-
-function normalizeSetupAssistantAutoReplyEntries(
-  value: unknown,
-): SetupAssistantAutoReplyEntry[] {
-  if (!Array.isArray(value)) {
-    return []
-  }
-
-  const entriesByChannel = new Map<string, SetupAssistantAutoReplyEntry>()
-
-  for (const entry of value) {
-    if (!entry || typeof entry !== 'object') {
-      continue
-    }
-
-    const channel = typeof entry.channel === 'string' ? entry.channel.trim() : ''
-    if (!channel) {
-      continue
-    }
-
-    entriesByChannel.set(channel, {
-      channel,
-      cursor: isSetupAssistantAutomationCursor(entry.cursor) ? entry.cursor : null,
-    })
-  }
-
-  return [...entriesByChannel.values()].sort(compareSetupAssistantAutoReplyEntry)
-}
-
 function isSetupManagedAutoReplyChannel(
   channel: string,
   platform: NodeJS.Platform,
@@ -264,57 +174,40 @@ function isSetupManagedAutoReplyChannel(
   return isSetupChannel(channel) && isSetupChannelSupportedOnPlatform(channel, platform)
 }
 
-function cursorFromSetupInboxCapture(input: {
-  captureId: string
-  occurredAt: string
-}): NonNullable<SetupAssistantAutomationCursor> {
+function createEmptySetupInboxListResult(vault: string): SetupInboxListResult {
   return {
-    captureId: input.captureId,
-    occurredAt: input.occurredAt,
+    vault,
+    filters: {
+      afterCaptureId: null,
+      afterOccurredAt: null,
+      limit: 1,
+      oldestFirst: false,
+      sourceId: null,
+    },
+    items: [],
   }
 }
 
-async function readLatestSetupInboxCaptureCursor(input: {
+function createSetupAutoReplyInboxServices(input: {
   inboxServices: SetupChannelInboxServices
   requestId: string | null
   vault: string
-}): Promise<SetupAssistantAutomationCursor | null> {
+}): Pick<InboxServices, 'list'> {
   const list = input.inboxServices.list
-  if (!list) {
-    return null
+
+  return {
+    async list(listInput) {
+      if (!list) {
+        return createEmptySetupInboxListResult(input.vault)
+      }
+
+      return list({
+        ...listInput,
+        requestId: input.requestId,
+        vault: input.vault,
+      })
+    },
   }
-
-  const latestCapture = (
-    await list({
-      limit: 1,
-      oldestFirst: false,
-      requestId: input.requestId,
-      vault: input.vault,
-    })
-  ).items[0]
-
-  return latestCapture ? cursorFromSetupInboxCapture(latestCapture) : null
-}
-
-function reconcileSetupAssistantAutoReplyEntries(input: {
-  current: readonly SetupAssistantAutoReplyEntry[]
-  desiredChannels: readonly SetupChannel[]
-  latestCaptureCursor: SetupAssistantAutomationCursor | null
-  platform: NodeJS.Platform
-}): SetupAssistantAutoReplyEntry[] {
-  const desiredChannels = normalizeSetupChannels(input.desiredChannels)
-  const currentByChannel = new Map(
-    input.current.map((entry) => [entry.channel, entry] as const),
-  )
-  const preservedEntries = input.current.filter(
-    (entry) => !isSetupManagedAutoReplyChannel(entry.channel, input.platform),
-  )
-  const managedEntries = desiredChannels.map((channel) => {
-    const existing = currentByChannel.get(channel)
-    return existing ?? { channel, cursor: input.latestCaptureCursor }
-  })
-
-  return [...preservedEntries, ...managedEntries].sort(compareSetupAssistantAutoReplyEntry)
 }
 
 function isTelegramSetupConnector(connector: SetupListedConnector): boolean {
@@ -973,43 +866,18 @@ async function updateAssistantChannelState(input: {
   requestId: string | null
   vault: string
 }): Promise<void> {
-  const state = await readAssistantAutomationState(input.vault)
-  const currentAutoReply = normalizeSetupAssistantAutoReplyEntries(
-    'autoReply' in state ? state.autoReply : [],
-  )
-  const enabledChannels = normalizeSetupChannels(input.autoReplyChannels)
-  const currentManagedChannels = new Set(
-    currentAutoReply
-      .filter((entry) => isSetupManagedAutoReplyChannel(entry.channel, input.platform))
-      .map((entry) => entry.channel),
-  )
-  const newlyEnabledChannels = enabledChannels.filter(
-    (channel) => !currentManagedChannels.has(channel),
-  )
-  const latestCaptureCursor =
-    newlyEnabledChannels.length > 0
-      ? await readLatestSetupInboxCaptureCursor({
-          inboxServices: input.inboxServices,
-          requestId: input.requestId,
-          vault: input.vault,
-        })
-      : null
-  const nextAutoReply = reconcileSetupAssistantAutoReplyEntries({
-    current: currentAutoReply,
-    desiredChannels: enabledChannels,
-    latestCaptureCursor,
-    platform: input.platform,
-  })
-
-  if (sameSetupAssistantAutoReplyEntries(currentAutoReply, nextAutoReply)) {
-    return
-  }
-
-  await saveAssistantAutomationState(input.vault, {
-    version: state.version,
-    inboxScanCursor: state.inboxScanCursor,
-    autoReply: nextAutoReply,
-    updatedAt: new Date().toISOString(),
+  await reconcileManagedAssistantAutoReplyChannelsLocal({
+    desiredChannels: normalizeSetupChannels(input.autoReplyChannels).filter((channel) =>
+      isSetupChannelSupportedOnPlatform(channel, input.platform),
+    ),
+    inboxServices: createSetupAutoReplyInboxServices({
+      inboxServices: input.inboxServices,
+      requestId: input.requestId,
+      vault: input.vault,
+    }),
+    isManagedChannel: (channel) =>
+      isSetupManagedAutoReplyChannel(channel, input.platform),
+    vault: input.vault,
   })
 }
 

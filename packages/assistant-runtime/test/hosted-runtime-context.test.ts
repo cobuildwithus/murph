@@ -61,6 +61,23 @@ async function readAutomationState(vaultRoot: string) {
   };
 }
 
+async function writeAutomationState(
+  vaultRoot: string,
+  state: {
+    autoReply: Array<{
+      channel: string;
+      cursor: { captureId: string; occurredAt: string } | null;
+    }>;
+    inboxScanCursor: { captureId: string; occurredAt: string } | null;
+    updatedAt: string;
+    version: number;
+  },
+) {
+  const automationStatePath = resolveAssistantStatePaths(vaultRoot).automationStatePath;
+  await mkdir(path.dirname(automationStatePath), { recursive: true });
+  await writeFile(automationStatePath, `${JSON.stringify(state, null, 2)}\n`, "utf8");
+}
+
 test("hosted channel capability reconciliation enables email and telegram auto-reply exactly once", async () => {
   const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace("hosted-runtime-context-");
 
@@ -97,6 +114,74 @@ test("hosted channel capability reconciliation enables email and telegram auto-r
       telegramAutoReplyEnabled: true,
     });
     assert.equal(mocks.inboxList.mock.calls.length, 1);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("hosted channel capability reconciliation preserves unmanaged entries while pruning disabled hosted channels", async () => {
+  const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace("hosted-runtime-context-");
+
+  try {
+    await writeAutomationState(vaultRoot, {
+      version: 1,
+      inboxScanCursor: null,
+      autoReply: [
+        {
+          channel: "email",
+          cursor: {
+            captureId: "cap_email",
+            occurredAt: "2026-03-28T09:00:00.000Z",
+          },
+        },
+        {
+          channel: "linq",
+          cursor: {
+            captureId: "cap_linq",
+            occurredAt: "2026-03-28T09:01:00.000Z",
+          },
+        },
+        {
+          channel: "telegram",
+          cursor: {
+            captureId: "cap_telegram",
+            occurredAt: "2026-03-28T09:02:00.000Z",
+          },
+        },
+      ],
+      updatedAt: "2026-03-28T09:03:00.000Z",
+    });
+
+    const result = await reconcileHostedAssistantChannelCapabilities(
+      vaultRoot,
+      {
+        emailSendReady: false,
+        telegramBotConfigured: true,
+      },
+      true,
+    );
+
+    assert.deepEqual(result, {
+      emailAutoReplyEnabled: false,
+      telegramAutoReplyEnabled: true,
+    });
+    assert.deepEqual((await readAutomationState(vaultRoot)).autoReply, [
+      {
+        channel: "linq",
+        cursor: {
+          captureId: "cap_linq",
+          occurredAt: "2026-03-28T09:01:00.000Z",
+        },
+      },
+      {
+        channel: "telegram",
+        cursor: {
+          captureId: "cap_telegram",
+          occurredAt: "2026-03-28T09:02:00.000Z",
+        },
+      },
+    ]);
+    assert.equal(mocks.inboxList.mock.calls.length, 0);
   } finally {
     await cleanup();
   }

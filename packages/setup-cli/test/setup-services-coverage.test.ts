@@ -541,6 +541,121 @@ test('configureSetupChannels covers dry-run, missing-env, readiness, reconciliat
   }
 })
 
+test('configureSetupChannels preserves unmanaged auto-reply entries when enabling a managed setup channel', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'setup-cli-channel-preserve-unmanaged-'))
+  const automationStatePath = resolveAssistantStatePaths(vaultRoot).automationStatePath
+  await mkdir(path.dirname(automationStatePath), { recursive: true })
+  await writeFile(
+    automationStatePath,
+    JSON.stringify({
+      version: 1,
+      inboxScanCursor: null,
+      autoReply: [{ channel: 'custom', cursor: null }],
+      updatedAt: TEST_TIMESTAMP,
+    }),
+    'utf8',
+  )
+
+  try {
+    await configureSetupChannels({
+      channels: ['telegram'],
+      dryRun: false,
+      env: {
+        TELEGRAM_BOT_TOKEN: 'bot-token',
+      },
+      inboxServices: {
+        async bootstrap() {
+          throw new Error('bootstrap should not run in this test')
+        },
+        async doctor(input) {
+          return makeInboxDoctorResult(vaultRoot, {
+            checks: [
+              {
+                message: 'Telegram ready',
+                name: 'probe',
+                status: 'pass',
+              },
+            ],
+            target: input.sourceId ?? null,
+          })
+        },
+        async sourceList() {
+          return makeInboxSourceListResult(vaultRoot, [
+            makeInboxConnector({
+              accountId: 'bot',
+              enabled: true,
+              id: 'telegram:bot',
+              source: 'telegram',
+            }),
+          ])
+        },
+        async sourceAdd() {
+          throw new Error('sourceAdd should not run when telegram already exists')
+        },
+        async list() {
+          return {
+            filters: {
+              afterCaptureId: null,
+              afterOccurredAt: null,
+              limit: 1,
+              oldestFirst: false,
+              sourceId: null,
+            },
+            items: [
+              {
+                accountId: null,
+                actorId: 'contact_1',
+                actorIsSelf: false,
+                actorName: 'Sender',
+                attachmentCount: 0,
+                captureId: 'capture-latest',
+                envelopePath: '/tmp/latest-envelope.json',
+                eventId: 'evt_latest',
+                externalId: 'external_latest',
+                occurredAt: '2026-04-08T00:05:00.000Z',
+                promotions: [],
+                receivedAt: '2026-04-08T00:05:01.000Z',
+                source: 'telegram',
+                text: 'latest message',
+                threadId: 'thread-latest',
+                threadIsDirect: true,
+                threadTitle: null,
+              },
+            ],
+            vault: vaultRoot,
+          }
+        },
+      },
+      platform: 'linux',
+      requestId: 'req-preserve-unmanaged',
+      steps: [],
+      vault: vaultRoot,
+    })
+
+    const savedAutomationState = JSON.parse(
+      await readFile(automationStatePath, 'utf8'),
+    ) as {
+      autoReply: Array<{
+        channel: string
+        cursor: { captureId: string; occurredAt: string } | null
+      }>
+    }
+
+    assert.deepEqual(savedAutomationState.autoReply, [
+      { channel: 'custom', cursor: null },
+      {
+        channel: 'telegram',
+        cursor: {
+          captureId: 'capture-latest',
+          occurredAt: '2026-04-08T00:05:00.000Z',
+        },
+      },
+    ])
+  } finally {
+    await rm(vaultRoot, { force: true, recursive: true })
+  }
+})
+
 test('configureSetupChannels covers Linq reuse fallback, email inbox reuse, and runtime unavailability', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'setup-cli-channel-branches-'))
 
