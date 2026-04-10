@@ -22,7 +22,6 @@ import {
   createEmptyInboxScanResult,
   cursorFromCapture,
   earliestAssistantAutomationWakeAt,
-  normalizeEnabledChannels,
   normalizeScanLimit,
   type AssistantAutomationScanResult,
   type AssistantAutomationScanStateProgress,
@@ -62,14 +61,7 @@ export async function scanAssistantAutomationOnce(input: {
   requestId?: string | null
   signal?: AbortSignal
   sessionMaxAgeMs?: number | null
-  state: Pick<
-    AssistantAutomationState,
-    | 'autoReplyBacklogChannels'
-    | 'autoReplyChannels'
-    | 'autoReplyPrimed'
-    | 'autoReplyScanCursor'
-    | 'inboxScanCursor'
-  >
+  state: Pick<AssistantAutomationState, 'autoReply' | 'inboxScanCursor'>
   vault: string
   vaultServices?: VaultServices
 }): Promise<AssistantAutomationScanResult> {
@@ -79,7 +71,7 @@ export async function scanAssistantAutomationOnce(input: {
   let persistedState = cloneAutomationScanState(scanState)
   const routingModelSpec = input.modelSpec?.model ? input.modelSpec : null
   const routingEnabled = routingModelSpec !== null
-  const replyBacklogActive = scanState.autoReplyBacklogChannels.length > 0
+  const replyChannels = scanState.autoReply.map((entry) => entry.channel)
   const persistScanState = async () => {
     await persistAssistantAutomationScanState({
       onStateProgress: input.onStateProgress,
@@ -90,11 +82,6 @@ export async function scanAssistantAutomationOnce(input: {
       },
     })
   }
-  const replyChannels = normalizeEnabledChannels(
-    replyBacklogActive
-      ? scanState.autoReplyBacklogChannels
-      : input.state.autoReplyChannels,
-  )
 
   if (!routingEnabled && replyChannels.length === 0) {
     return {
@@ -103,47 +90,15 @@ export async function scanAssistantAutomationOnce(input: {
     }
   }
 
-  if (replyBacklogActive) {
-    // Once backlog replay starts, the current reply cursor becomes authoritative.
-    scanState.autoReplyPrimed = true
-  }
-
-  if (replyChannels.length > 0 && !scanState.autoReplyPrimed && !replyBacklogActive) {
-    scanState.autoReplyScanCursor = await primeAssistantAutoReplyCursor({
-      afterCursor: scanState.autoReplyScanCursor,
-      inboxServices: input.inboxServices,
-      requestId: input.requestId ?? null,
-      vault: input.vault,
-    })
-    scanState.autoReplyPrimed = true
-    await persistScanState()
-    input.onEvent?.({
-      type: 'reply.scan.primed',
-      details:
-        scanState.autoReplyScanCursor === null
-          ? 'no existing captures yet; auto-reply will start with the next inbound message'
-          : `starting after ${scanState.autoReplyScanCursor.captureId}`,
-    })
-  }
-
   const candidateBatches = await listAssistantAutomationCandidates({
+    autoReply: scanState.autoReply,
     inboxServices: input.inboxServices,
     maxPerScan: input.maxPerScan,
-    restrictReplyToChannels: replyBacklogActive,
-    replyChannels,
     requestId: input.requestId ?? null,
     routingEnabled,
     scanState,
     vault: input.vault,
   })
-
-  if (replyBacklogActive && candidateBatches.reply.length === 0) {
-    scanState.autoReplyBacklogChannels = []
-    // Once the configured backlog is drained, continue from the current
-    // reply cursor instead of re-priming to the newest capture.
-    scanState.autoReplyPrimed = true
-    await persistScanState()
-  }
 
   const candidates = constrainAssistantAutomationCandidates({
     candidates: mergeAssistantAutomationCandidates(candidateBatches),
@@ -171,6 +126,7 @@ export async function scanAssistantAutomationOnce(input: {
     AssistantPreserveDocumentAttachmentsResult
   >()
   let routingCursorBlocked = false
+
   const preserveCandidateDocuments = async (
     candidate: AssistantAutomationCandidate,
   ): Promise<boolean> => {
@@ -217,6 +173,7 @@ export async function scanAssistantAutomationOnce(input: {
       return false
     }
   }
+
   const routeCandidate = async (candidate: AssistantAutomationCandidate) => {
     if (!routingModelSpec) {
       return
@@ -310,7 +267,7 @@ export async function scanAssistantAutomationOnce(input: {
         result: replyResult,
         summary: replies,
         updateCursor: (cursor) => {
-          scanState.autoReplyScanCursor = cursor
+          updateAutoReplyChannelCursor(scanState, context.firstItem.summary.source, cursor)
         },
       })
 
@@ -344,30 +301,10 @@ export async function scanAssistantAutomationOnce(input: {
   }
 }
 
-async function primeAssistantAutoReplyCursor(input: {
-  afterCursor: AssistantAutomationScanStateProgress['autoReplyScanCursor']
-  inboxServices: InboxServices
-  requestId: string | null
-  vault: string
-}): Promise<AssistantAutomationScanStateProgress['autoReplyScanCursor']> {
-  const latest = await input.inboxServices.list({
-    vault: input.vault,
-    requestId: input.requestId,
-    limit: 1,
-    sourceId: null,
-    afterOccurredAt: null,
-    afterCaptureId: null,
-    oldestFirst: false,
-  })
-  const latestCapture = [...latest.items].sort(compareAssistantCaptureOrder).pop()
-  return latestCapture ? cursorFromCapture(latestCapture) : input.afterCursor
-}
-
 async function listAssistantAutomationCandidates(input: {
+  autoReply: AssistantAutomationScanStateProgress['autoReply']
   inboxServices: InboxServices
   maxPerScan?: number
-  restrictReplyToChannels: boolean
-  replyChannels: readonly string[]
   requestId: string | null
   routingEnabled: boolean
   scanState: AssistantAutomationScanStateProgress
@@ -379,12 +316,10 @@ async function listAssistantAutomationCandidates(input: {
   const limit = normalizeScanLimit(input.maxPerScan)
   const [reply, routingListed] = await Promise.all([
     listAssistantReplyCandidates({
+      autoReply: input.autoReply,
       inboxServices: input.inboxServices,
       limit,
-      replyChannels: input.replyChannels,
       requestId: input.requestId,
-      restrictReplyToChannels: input.restrictReplyToChannels,
-      scanCursor: input.scanState.autoReplyScanCursor,
       vault: input.vault,
     }),
     input.routingEnabled
@@ -398,7 +333,11 @@ async function listAssistantAutomationCandidates(input: {
           oldestFirst: true,
         })
       : Promise.resolve(
-          createEmptyAssistantInboxListResult(input.vault, limit, input.scanState.inboxScanCursor),
+          createEmptyAssistantInboxListResult(
+            input.vault,
+            limit,
+            input.scanState.inboxScanCursor,
+          ),
         ),
   ])
 
@@ -409,61 +348,55 @@ async function listAssistantAutomationCandidates(input: {
 }
 
 async function listAssistantReplyCandidates(input: {
+  autoReply: AssistantAutomationScanStateProgress['autoReply']
   inboxServices: InboxServices
   limit: number
-  replyChannels: readonly string[]
   requestId: string | null
-  restrictReplyToChannels: boolean
-  scanCursor: AssistantAutomationScanStateProgress['autoReplyScanCursor']
   vault: string
 }): Promise<AssistantInboxCaptureSummary[]> {
-  if (input.replyChannels.length === 0) {
+  if (input.autoReply.length === 0) {
     return []
   }
 
-  if (!input.restrictReplyToChannels) {
-    const listed = await input.inboxServices.list({
-      vault: input.vault,
-      requestId: input.requestId,
-      limit: input.limit,
-      sourceId: null,
-      afterOccurredAt: input.scanCursor?.occurredAt ?? null,
-      afterCaptureId: input.scanCursor?.captureId ?? null,
-      oldestFirst: true,
-    })
-    return [...listed.items].sort(compareAssistantCaptureOrder)
-  }
+  const candidates = await Promise.all(
+    input.autoReply.map(async (channelState) => {
+      const channelCandidates: AssistantInboxCaptureSummary[] = []
+      let cursor = channelState.cursor
 
-  const backlogCandidates: AssistantInboxCaptureSummary[] = []
-  let cursor = input.scanCursor
+      while (channelCandidates.length < input.limit) {
+        const listed = await input.inboxServices.list({
+          vault: input.vault,
+          requestId: input.requestId,
+          limit: input.limit,
+          sourceId: null,
+          afterOccurredAt: cursor?.occurredAt ?? null,
+          afterCaptureId: cursor?.captureId ?? null,
+          oldestFirst: true,
+        })
+        const listedItems = [...listed.items].sort(compareAssistantCaptureOrder)
+        if (listedItems.length === 0) {
+          break
+        }
 
-  while (backlogCandidates.length < input.limit) {
-    const listed = await input.inboxServices.list({
-      vault: input.vault,
-      requestId: input.requestId,
-      limit: input.limit,
-      sourceId: null,
-      afterOccurredAt: cursor?.occurredAt ?? null,
-      afterCaptureId: cursor?.captureId ?? null,
-      oldestFirst: true,
-    })
-    const listedItems = [...listed.items].sort(compareAssistantCaptureOrder)
-    if (listedItems.length === 0) {
-      break
-    }
+        channelCandidates.push(
+          ...listedItems.filter((capture) => capture.source === channelState.channel),
+        )
 
-    backlogCandidates.push(
-      ...listedItems.filter((capture) => input.replyChannels.includes(capture.source)),
-    )
+        const lastListed = listedItems[listedItems.length - 1]
+        cursor = lastListed ? cursorFromCapture(lastListed) : cursor
+        if (listedItems.length < input.limit) {
+          break
+        }
+      }
 
-    const lastListed = listedItems[listedItems.length - 1]
-    cursor = lastListed ? cursorFromCapture(lastListed) : cursor
-    if (listedItems.length < input.limit) {
-      break
-    }
-  }
+      return channelCandidates.slice(0, input.limit)
+    }),
+  )
 
-  return backlogCandidates.slice(0, input.limit)
+  return candidates
+    .flat()
+    .sort(compareAssistantCaptureOrder)
+    .slice(0, input.limit)
 }
 
 function mergeAssistantAutomationCandidates(input: {
@@ -503,7 +436,7 @@ function mergeAssistantAutomationCandidates(input: {
 function createEmptyAssistantInboxListResult(
   vault: string,
   limit: number,
-  cursor: AssistantAutomationScanStateProgress['autoReplyScanCursor'],
+  cursor: AssistantAutomationScanStateProgress['inboxScanCursor'],
 ): AssistantInboxListResult {
   return {
     vault,
@@ -540,6 +473,21 @@ function constrainAssistantAutomationCandidates(input: {
   )
 }
 
+function updateAutoReplyChannelCursor(
+  scanState: AssistantAutomationScanStateProgress,
+  channel: string,
+  cursor: ReturnType<typeof cursorFromCapture>,
+): void {
+  scanState.autoReply = scanState.autoReply.map((entry) =>
+    entry.channel === channel
+      ? {
+          ...entry,
+          cursor,
+        }
+      : entry,
+  )
+}
+
 async function persistAssistantAutomationScanState(input: {
   onStateProgress?: (
     state: AssistantAutomationScanStateProgress,
@@ -558,18 +506,13 @@ async function persistAssistantAutomationScanState(input: {
 }
 
 function cloneAutomationScanState(
-  state: Pick<
-    AssistantAutomationScanStateProgress,
-    | 'autoReplyBacklogChannels'
-    | 'autoReplyPrimed'
-    | 'autoReplyScanCursor'
-    | 'inboxScanCursor'
-  >,
+  state: Pick<AssistantAutomationScanStateProgress, 'autoReply' | 'inboxScanCursor'>,
 ): AssistantAutomationScanStateProgress {
   return {
-    autoReplyBacklogChannels: [...state.autoReplyBacklogChannels],
-    autoReplyPrimed: state.autoReplyPrimed,
-    autoReplyScanCursor: state.autoReplyScanCursor,
+    autoReply: state.autoReply.map((entry) => ({
+      channel: entry.channel,
+      cursor: entry.cursor,
+    })),
     inboxScanCursor: state.inboxScanCursor,
   }
 }
@@ -579,29 +522,30 @@ function assistantAutomationScanStateEqual(
   right: AssistantAutomationScanStateProgress,
 ): boolean {
   return (
-    left.autoReplyPrimed === right.autoReplyPrimed &&
-    sameCursor(left.autoReplyScanCursor, right.autoReplyScanCursor) &&
-    sameCursor(left.inboxScanCursor, right.inboxScanCursor) &&
-    sameStringArray(left.autoReplyBacklogChannels, right.autoReplyBacklogChannels)
+    sameAutoReplyState(left.autoReply, right.autoReply) &&
+    sameCursor(left.inboxScanCursor, right.inboxScanCursor)
+  )
+}
+
+function sameAutoReplyState(
+  left: AssistantAutomationScanStateProgress['autoReply'],
+  right: AssistantAutomationScanStateProgress['autoReply'],
+): boolean {
+  return (
+    left.length === right.length &&
+    left.every((entry, index) => {
+      const other = right[index]
+      return other?.channel === entry.channel && sameCursor(other.cursor, entry.cursor)
+    })
   )
 }
 
 function sameCursor(
-  left: AssistantAutomationScanStateProgress['autoReplyScanCursor'],
-  right: AssistantAutomationScanStateProgress['autoReplyScanCursor'],
+  left: ReturnType<typeof cursorFromCapture> | null,
+  right: ReturnType<typeof cursorFromCapture> | null,
 ): boolean {
   return (
     left?.captureId === right?.captureId &&
     left?.occurredAt === right?.occurredAt
-  )
-}
-
-function sameStringArray(
-  left: readonly string[],
-  right: readonly string[],
-): boolean {
-  return (
-    left.length === right.length &&
-    left.every((value, index) => value === right[index])
   )
 }

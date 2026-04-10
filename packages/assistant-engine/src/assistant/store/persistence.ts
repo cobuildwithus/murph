@@ -50,7 +50,7 @@ import type { AssistantStatePaths } from './paths.js'
 import type { ResolvedAssistantSession } from './types.js'
 
 export const ASSISTANT_INDEX_STORE_VERSION = 2
-export const ASSISTANT_AUTOMATION_STATE_VERSION = 2
+export const ASSISTANT_AUTOMATION_STATE_VERSION = 1
 
 const assistantSessionCache = createAssistantBoundedRuntimeCache<string, AssistantSession | null>({
   name: 'assistant.sessions',
@@ -635,10 +635,7 @@ function createInitialAutomationState(): AssistantAutomationState {
   return assistantAutomationStateSchema.parse({
     version: ASSISTANT_AUTOMATION_STATE_VERSION,
     inboxScanCursor: null,
-    autoReplyScanCursor: null,
-    autoReplyChannels: [],
-    autoReplyBacklogChannels: [],
-    autoReplyPrimed: true,
+    autoReply: [],
     updatedAt: new Date().toISOString(),
   })
 }

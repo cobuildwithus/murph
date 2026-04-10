@@ -1315,9 +1315,29 @@ test('runtime run instruments connector backfill/watch events and records daemon
     onEvent.mock.calls.map((call) => call[0].type),
     [
       'connector.backfill.started',
+      'capture.imported',
       'connector.backfill.finished',
       'connector.watch.started',
       'capture.imported',
+    ],
+  )
+  assert.deepEqual(
+    onEvent.mock.calls
+      .map((call) => call[0])
+      .filter((event) => event.type === 'capture.imported')
+      .map((event) => ({
+        captureId: event.capture?.externalId ?? null,
+        phase: event.phase ?? null,
+      })),
+    [
+      {
+        captureId: 'capture-imported',
+        phase: 'backfill',
+      },
+      {
+        captureId: 'capture-watch',
+        phase: 'watch',
+      },
     ],
   )
   assert.equal(cleanup.mock.calls.length, 1)

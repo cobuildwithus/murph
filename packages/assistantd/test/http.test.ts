@@ -426,10 +426,7 @@ test('assistantd http server enforces bearer auth, validates requests, and route
     },
     automation: {
       inboxScanCursor: null,
-      autoReplyScanCursor: null,
-      autoReplyChannels: [],
-      autoReplyBacklogChannels: [],
-      autoReplyPrimed: false,
+      autoReply: [],
       updatedAt: '2026-03-28T00:00:00.000Z',
     },
     outbox: {
@@ -1516,10 +1513,7 @@ test('assistant http handler rejects continuous automation without the inbox dae
       },
       automation: {
         inboxScanCursor: null,
-        autoReplyScanCursor: null,
-        autoReplyChannels: [],
-        autoReplyBacklogChannels: [],
-        autoReplyPrimed: false,
+        autoReply: [],
         updatedAt: '2026-03-28T00:00:00.000Z',
       },
       sessions: [],
@@ -1687,10 +1681,7 @@ test('assistantd http server preserves typed assistant error codes for invalid i
       },
       automation: {
         inboxScanCursor: null,
-        autoReplyScanCursor: null,
-        autoReplyChannels: [],
-        autoReplyBacklogChannels: [],
-        autoReplyPrimed: false,
+        autoReply: [],
         updatedAt: '2026-03-28T00:00:00.000Z',
       },
       outbox: {

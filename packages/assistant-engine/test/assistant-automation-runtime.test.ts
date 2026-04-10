@@ -408,19 +408,54 @@ function createTurnReceipt(
   })
 }
 
+type LegacyAutomationStateOverrides = Partial<AssistantAutomationState> & {
+  autoReplyBacklogChannels?: readonly string[]
+  autoReplyChannels?: readonly string[]
+  autoReplyPrimed?: boolean
+  autoReplyScanCursor?: AssistantAutomationCursor | null
+}
+
 function createAutomationState(
-  overrides: Partial<AssistantAutomationState> = {},
+  overrides: LegacyAutomationStateOverrides = {},
 ): AssistantAutomationState {
+  const {
+    autoReply: explicitAutoReply,
+    autoReplyBacklogChannels: _legacyBacklogChannels,
+    autoReplyChannels: legacyAutoReplyChannels,
+    autoReplyPrimed: _legacyAutoReplyPrimed,
+    autoReplyScanCursor: legacyAutoReplyScanCursor,
+    ...stateOverrides
+  } = overrides
+  const autoReply =
+    explicitAutoReply ??
+    [...new Set(legacyAutoReplyChannels ?? [])].map((channel) => ({
+      channel,
+      cursor: legacyAutoReplyScanCursor ?? null,
+    }))
   return {
-    version: 2,
+    version: 1,
     inboxScanCursor: null,
-    autoReplyScanCursor: null,
-    autoReplyChannels: [],
-    autoReplyBacklogChannels: [],
-    autoReplyPrimed: false,
+    autoReply,
     updatedAt: '2026-04-08T00:00:00.000Z',
-    ...overrides,
+    ...stateOverrides,
   }
+}
+
+function createAutoReplyEntries(
+  channels: readonly string[],
+  cursor: AssistantAutomationCursor | null = null,
+): AssistantAutomationState['autoReply'] {
+  return [...new Set(channels)].map((channel) => ({
+    channel,
+    cursor,
+  }))
+}
+
+function readAutoReplyCursor(
+  state: Pick<AssistantAutomationState, 'autoReply'>,
+  channel: string,
+): AssistantAutomationCursor | null {
+  return state.autoReply.find((entry) => entry.channel === channel)?.cursor ?? null
 }
 
 function createInboxServices(
@@ -1286,9 +1321,7 @@ describe('assistant automation scanner', () => {
       onStateProgress: async (next) => {
         stateUpdates.push({
           ...createAutomationState(),
-          autoReplyBacklogChannels: [...next.autoReplyBacklogChannels],
-          autoReplyPrimed: next.autoReplyPrimed,
-          autoReplyScanCursor: next.autoReplyScanCursor,
+          autoReply: [...next.autoReply],
           inboxScanCursor: next.inboxScanCursor,
         })
       },
@@ -1299,21 +1332,21 @@ describe('assistant automation scanner', () => {
     })
 
     expect(result.replies).toEqual({
-      considered: 0,
+      considered: 1,
       failed: 0,
       nextWakeAt: null,
       replied: 0,
-      skipped: 0,
+      skipped: 1,
     })
-    expect(stateUpdates[0]?.autoReplyScanCursor).toEqual({
+    expect(readAutoReplyCursor(stateUpdates[0] ?? createAutomationState(), 'telegram')).toEqual({
       captureId: 'capture-latest',
       occurredAt: '2026-04-08T00:05:00.000Z',
     })
-    expect(stateUpdates[0]?.autoReplyPrimed).toBe(true)
-    expect(events).toContainEqual({
-      type: 'reply.scan.primed',
-      details: 'starting after capture-latest',
-    })
+    expect(events).not.toContainEqual(
+      expect.objectContaining({
+        type: 'reply.scan.primed',
+      }),
+    )
   })
 
   it('clears reply backlog state once the backlog is drained', async () => {
@@ -1330,26 +1363,17 @@ describe('assistant automation scanner', () => {
       onStateProgress: async (next) => {
         stateUpdates.push({
           ...createAutomationState(),
-          autoReplyBacklogChannels: [...next.autoReplyBacklogChannels],
-          autoReplyPrimed: next.autoReplyPrimed,
-          autoReplyScanCursor: next.autoReplyScanCursor,
+          autoReply: [...next.autoReply],
           inboxScanCursor: next.inboxScanCursor,
         })
       },
       state: createAutomationState({
-        autoReplyBacklogChannels: ['telegram'],
-        autoReplyPrimed: false,
+        autoReplyChannels: ['telegram'],
       }),
       vault: '/tmp/assistant-automation-vault',
     })
 
-    expect(stateUpdates).toContainEqual({
-      ...createAutomationState(),
-      autoReplyBacklogChannels: [],
-      autoReplyPrimed: true,
-      autoReplyScanCursor: null,
-      inboxScanCursor: null,
-    })
+    expect(stateUpdates).toEqual([])
   })
 
   it('stops the scan loop when automatic document preservation fails', async () => {
@@ -1440,9 +1464,7 @@ describe('assistant automation scanner', () => {
       onStateProgress: async (next) => {
         stateUpdates.push({
           ...createAutomationState(),
-          autoReplyBacklogChannels: [...next.autoReplyBacklogChannels],
-          autoReplyPrimed: next.autoReplyPrimed,
-          autoReplyScanCursor: next.autoReplyScanCursor,
+          autoReply: [...next.autoReply],
           inboxScanCursor: next.inboxScanCursor,
         })
       },
@@ -1547,7 +1569,7 @@ describe('assistant auto-reply runtime', () => {
     })
   })
 
-  it('primes the reply cursor against the latest existing capture', async () => {
+  it('advances the reply cursor after scanning existing captures', async () => {
     const latest = createCaptureSummary({
       captureId: 'capture-latest',
       occurredAt: '2026-04-08T00:03:00.000Z',
@@ -1567,7 +1589,6 @@ describe('assistant auto-reply runtime', () => {
     const stateUpdates: Array<Record<string, unknown>> = []
     const events: Array<Record<string, unknown>> = []
     const result = await reply.scanAssistantAutoReplyOnce({
-      autoReplyPrimed: false,
       enabledChannels: ['telegram'],
       inboxServices,
       onEvent: (event) => {
@@ -1580,28 +1601,33 @@ describe('assistant auto-reply runtime', () => {
     })
 
     expect(result).toEqual({
-      considered: 0,
-      failed: 0,
+      considered: 1,
+      failed: 1,
       nextWakeAt: null,
       replied: 0,
       skipped: 0,
     })
     expect(stateUpdates).toEqual([
       {
-        cursor: {
-          captureId: 'capture-latest',
-          occurredAt: '2026-04-08T00:03:00.000Z',
-        },
-        primed: true,
+        autoReply: [
+          {
+            channel: 'telegram',
+            cursor: {
+              captureId: 'capture-latest',
+              occurredAt: '2026-04-08T00:03:00.000Z',
+            },
+          },
+        ],
       },
     ])
-    expect(events).toContainEqual({
-      type: 'reply.scan.primed',
-      details: 'starting after capture-latest',
-    })
+    expect(events).not.toContainEqual(
+      expect.objectContaining({
+        type: 'reply.scan.primed',
+      }),
+    )
   })
 
-  it('primes with a null cursor when no existing captures are present yet', async () => {
+  it('keeps a null reply cursor when no captures are present yet', async () => {
     const inboxServices = createInboxServices({
       list: vi.fn().mockResolvedValue(createListResult([], {
         limit: 1,
@@ -1615,7 +1641,6 @@ describe('assistant auto-reply runtime', () => {
     const stateUpdates: Array<Record<string, unknown>> = []
     const events: Array<Record<string, unknown>> = []
     const result = await reply.scanAssistantAutoReplyOnce({
-      autoReplyPrimed: false,
       enabledChannels: ['telegram'],
       inboxServices,
       onEvent: (event) => {
@@ -1636,17 +1661,21 @@ describe('assistant auto-reply runtime', () => {
     })
     expect(stateUpdates).toEqual([
       {
-        cursor: null,
-        primed: true,
+        autoReply: [
+          {
+            channel: 'telegram',
+            cursor: null,
+          },
+        ],
       },
     ])
     expect(events).toContainEqual({
-      type: 'reply.scan.primed',
-      details: 'no existing captures yet; auto-reply will start with the next inbound message',
+      type: 'reply.scan.started',
+      details: '0 capture(s)',
     })
   })
 
-  it('clears backlog scan channels when replay finds no work', async () => {
+  it('keeps the supplied reply cursor when no new captures are found', async () => {
     const inboxServices = createInboxServices({
       list: vi.fn().mockResolvedValue(createListResult([])),
     })
@@ -1660,8 +1689,6 @@ describe('assistant auto-reply runtime', () => {
         captureId: 'capture-previous',
         occurredAt: '2026-04-08T00:01:00.000Z',
       },
-      autoReplyPrimed: true,
-      backlogChannels: ['telegram'],
       enabledChannels: ['telegram'],
       inboxServices,
       onStateProgress: async (state) => {
@@ -1679,12 +1706,15 @@ describe('assistant auto-reply runtime', () => {
     })
     expect(stateUpdates).toEqual([
       {
-        backlogChannels: [],
-        cursor: {
-          captureId: 'capture-previous',
-          occurredAt: '2026-04-08T00:01:00.000Z',
-        },
-        primed: true,
+        autoReply: [
+          {
+            channel: 'telegram',
+            cursor: {
+              captureId: 'capture-previous',
+              occurredAt: '2026-04-08T00:01:00.000Z',
+            },
+          },
+        ],
       },
     ])
   })
@@ -1723,7 +1753,6 @@ describe('assistant auto-reply runtime', () => {
     const stateUpdates: Array<Record<string, unknown>> = []
     const events: Array<Record<string, unknown>> = []
     const result = await reply.scanAssistantAutoReplyOnce({
-      autoReplyPrimed: true,
       enabledChannels: ['telegram'],
       inboxServices,
       onEvent: (event) => {
@@ -1748,11 +1777,15 @@ describe('assistant auto-reply runtime', () => {
     })
     expect(stateUpdates).toEqual([
       {
-        cursor: {
-          captureId: 'capture-2',
-          occurredAt: '2026-04-08T00:02:00.000Z',
-        },
-        primed: true,
+        autoReply: [
+          {
+            channel: 'telegram',
+            cursor: {
+              captureId: 'capture-2',
+              occurredAt: '2026-04-08T00:02:00.000Z',
+            },
+          },
+        ],
       },
     ])
   })
@@ -1776,7 +1809,6 @@ describe('assistant auto-reply runtime', () => {
         captureId: 'capture-before',
         occurredAt: '2026-04-08T00:00:00.000Z',
       },
-      autoReplyPrimed: true,
       enabledChannels: ['telegram'],
       inboxServices,
       onStateProgress: async (state) => {
@@ -1794,11 +1826,15 @@ describe('assistant auto-reply runtime', () => {
     })
     expect(stateUpdates).toEqual([
       {
-        cursor: {
-          captureId: 'capture-before',
-          occurredAt: '2026-04-08T00:00:00.000Z',
-        },
-        primed: true,
+        autoReply: [
+          {
+            channel: 'telegram',
+            cursor: {
+              captureId: 'capture-before',
+              occurredAt: '2026-04-08T00:00:00.000Z',
+            },
+          },
+        ],
       },
     ])
   })
@@ -1816,7 +1852,6 @@ describe('assistant auto-reply runtime', () => {
 
     const stateUpdates: Array<Record<string, unknown>> = []
     const result = await reply.scanAssistantAutoReplyOnce({
-      autoReplyPrimed: true,
       enabledChannels: ['telegram'],
       inboxServices,
       onStateProgress: async (state) => {
@@ -1835,8 +1870,12 @@ describe('assistant auto-reply runtime', () => {
     })
     expect(stateUpdates).toEqual([
       {
-        cursor: null,
-        primed: true,
+        autoReply: [
+          {
+            channel: 'telegram',
+            cursor: null,
+          },
+        ],
       },
     ])
   })
@@ -3199,14 +3238,13 @@ describe('assistant auto-reply startup recovery', () => {
     const events: Array<Record<string, unknown>> = []
     const result = await recovery.recoverAssistantAutoRepliesOnStartup({
       allowSelfAuthored: false,
-      enabledChannels: ['telegram'],
+      autoReply: createAutoReplyEntries(['telegram'], {
+        captureId: 'capture-1',
+        occurredAt: '2026-04-08T00:00:00.000Z',
+      }),
       inboxServices,
       onEvent: (event) => {
         events.push(toSnapshotRecord(event))
-      },
-      scanCursor: {
-        captureId: 'capture-1',
-        occurredAt: '2026-04-08T00:00:00.000Z',
       },
       vault: '/tmp/assistant-automation-vault',
     })
@@ -3261,12 +3299,11 @@ describe('assistant auto-reply startup recovery', () => {
 
       const result = await recovery.recoverAssistantAutoRepliesOnStartup({
         allowSelfAuthored: false,
-        enabledChannels: ['telegram'],
-        inboxServices: createInboxServices(),
-        scanCursor: {
+        autoReply: createAutoReplyEntries(['telegram'], {
           captureId: 'capture-1',
           occurredAt: '2026-04-08T00:00:00.000Z',
-        },
+        }),
+        inboxServices: createInboxServices(),
         vault: '/tmp/assistant-automation-vault',
       })
 
@@ -3353,12 +3390,11 @@ describe('assistant auto-reply startup recovery', () => {
 
     const result = await recovery.recoverAssistantAutoRepliesOnStartup({
       allowSelfAuthored: false,
-      enabledChannels: ['telegram'],
-      inboxServices,
-      scanCursor: {
+      autoReply: createAutoReplyEntries(['telegram'], {
         captureId: 'capture-5',
         occurredAt: '2026-04-08T00:00:02.000Z',
-      },
+      }),
+      inboxServices,
       vault: '/tmp/assistant-automation-vault',
     })
 
@@ -3401,12 +3437,11 @@ describe('assistant auto-reply startup recovery', () => {
 
     const result = await recovery.recoverAssistantAutoRepliesOnStartup({
       allowSelfAuthored: false,
-      enabledChannels: ['telegram'],
-      inboxServices,
-      scanCursor: {
+      autoReply: createAutoReplyEntries(['telegram'], {
         captureId: 'capture-1',
         occurredAt: '2026-04-08T00:00:00.000Z',
-      },
+      }),
+      inboxServices,
       vault: '/tmp/assistant-automation-vault',
     })
 
@@ -3499,13 +3534,12 @@ describe('assistant auto-reply startup recovery', () => {
 
     const result = await recovery.recoverAssistantAutoRepliesOnStartup({
       allowSelfAuthored: false,
-      enabledChannels: ['telegram'],
-      inboxServices,
-      maxPerScan: 1,
-      scanCursor: {
+      autoReply: createAutoReplyEntries(['telegram'], {
         captureId: 'capture-later',
         occurredAt: '2026-04-08T00:00:01.000Z',
-      },
+      }),
+      inboxServices,
+      maxPerScan: 1,
       vault: '/tmp/assistant-automation-vault',
     })
 
@@ -3565,8 +3599,7 @@ describe('assistant automation run loop', () => {
     })
     expect(runLoopMocks.recoverAssistantAutoRepliesOnStartup).toHaveBeenCalledWith(
       expect.objectContaining({
-        enabledChannels: [],
-        scanCursor: null,
+        autoReply: [],
         vault: '/tmp/assistant-automation-vault',
       }),
     )
@@ -3846,21 +3879,17 @@ describe('assistant automation run loop', () => {
     runLoopMocks.scanAssistantAutomationOnce.mockImplementation(
       async (input: {
         onStateProgress: (next: {
-          autoReplyBacklogChannels: string[]
-          autoReplyPrimed: boolean
-          autoReplyScanCursor: AssistantAutomationCursor | null
+          autoReply: AssistantAutomationState['autoReply']
           inboxScanCursor: AssistantAutomationCursor | null
         }) => Promise<void>
       }) => {
         scanStartedAt.push(Date.now())
         if (scanStartedAt.length === 1) {
           await input.onStateProgress({
-            autoReplyBacklogChannels: ['telegram'],
-            autoReplyPrimed: true,
-            autoReplyScanCursor: {
+            autoReply: createAutoReplyEntries(['telegram'], {
               captureId: 'capture-auto-reply',
               occurredAt: '2026-04-09T00:00:00.000Z',
-            },
+            }),
             inboxScanCursor: null,
           })
         } else {
@@ -4035,19 +4064,15 @@ describe('assistant automation run loop', () => {
     runLoopMocks.scanAssistantAutomationOnce.mockImplementationOnce(
       async (input: {
         onStateProgress: (next: {
-          autoReplyBacklogChannels: string[]
-          autoReplyPrimed: boolean
-          autoReplyScanCursor: AssistantAutomationCursor | null
+          autoReply: AssistantAutomationState['autoReply']
           inboxScanCursor: AssistantAutomationCursor | null
         }) => Promise<void>
       }) => {
         await input.onStateProgress({
-          autoReplyBacklogChannels: ['telegram'],
-          autoReplyPrimed: true,
-          autoReplyScanCursor: {
+          autoReply: createAutoReplyEntries(['telegram'], {
             captureId: 'capture-auto-reply',
             occurredAt: '2026-04-08T00:01:00.000Z',
-          },
+          }),
           inboxScanCursor: {
             captureId: 'capture-routing',
             occurredAt: '2026-04-08T00:02:00.000Z',
@@ -4096,12 +4121,10 @@ describe('assistant automation run loop', () => {
     expect(runLoopMocks.saveAssistantAutomationState).toHaveBeenCalledWith(
       '/tmp/assistant-automation-vault',
       expect.objectContaining({
-        autoReplyBacklogChannels: ['telegram'],
-        autoReplyPrimed: true,
-        autoReplyScanCursor: {
+        autoReply: createAutoReplyEntries(['telegram'], {
           captureId: 'capture-auto-reply',
           occurredAt: '2026-04-08T00:01:00.000Z',
-        },
+        }),
         inboxScanCursor: {
           captureId: 'capture-routing',
           occurredAt: '2026-04-08T00:02:00.000Z',

@@ -168,8 +168,6 @@ export interface AssistantAutoReplyProcessResult {
 export async function scanAssistantAutoReplyOnce(input: {
   afterCursor?: AssistantAutomationCursor | null
   allowSelfAuthored?: boolean
-  autoReplyPrimed?: boolean
-  backlogChannels?: readonly string[]
   deliveryDispatchMode?: AssistantOutboxDispatchMode
   enabledChannels: readonly string[]
   inboxServices: InboxServices
@@ -187,54 +185,8 @@ export async function scanAssistantAutoReplyOnce(input: {
   vault: string
 }): Promise<AssistantAutoReplyScanResult> {
   const enabledChannels = normalizeEnabledChannels(input.enabledChannels)
-  const backlogChannels = normalizeEnabledChannels(input.backlogChannels ?? [])
-  const backlogActive = backlogChannels.length > 0
   if (enabledChannels.length === 0) {
     return createEmptyAutoReplyScanResult()
-  }
-
-  if (!(input.autoReplyPrimed ?? true) && !backlogActive) {
-    const latest = await input.inboxServices.list({
-      vault: input.vault,
-      requestId: input.requestId ?? null,
-      limit: 1,
-      sourceId: null,
-      afterOccurredAt: null,
-      afterCaptureId: null,
-      oldestFirst: false,
-    })
-    const latestCapture = [...latest.items].sort((left, right) =>
-      left.occurredAt === right.occurredAt
-        ? right.captureId.localeCompare(left.captureId)
-        : right.occurredAt.localeCompare(left.occurredAt),
-    )[0]
-    const nextCursor = latestCapture
-      ? {
-          occurredAt: latestCapture.occurredAt,
-          captureId: latestCapture.captureId,
-        }
-      : input.afterCursor ?? null
-
-    await input.onStateProgress?.({
-      cursor: nextCursor,
-      primed: true,
-    })
-    input.onEvent?.({
-      type: 'reply.scan.primed',
-      details:
-        nextCursor === null
-          ? 'no existing captures yet; auto-reply will start with the next inbound message'
-          : `starting after ${nextCursor.captureId}`,
-    })
-
-    return createEmptyAutoReplyScanResult()
-  }
-
-  if (backlogActive) {
-    input.onEvent?.({
-      type: 'reply.scan.primed',
-      details: `processing existing ${backlogChannels.join(', ')} backlog before switching to new inbound messages`,
-    })
   }
 
   const listed = await input.inboxServices.list({
@@ -255,15 +207,6 @@ export async function scanAssistantAutoReplyOnce(input: {
     type: 'reply.scan.started',
     details: `${captures.length} capture(s)`,
   })
-
-  if (backlogActive && captures.length === 0) {
-    await input.onStateProgress?.({
-      cursor: input.afterCursor ?? null,
-      backlogChannels: [],
-      primed: true,
-    })
-    return createEmptyAutoReplyScanResult()
-  }
 
   const summary = createEmptyAutoReplyScanResult()
   const scanState: AssistantAutoReplyScanState = {
@@ -319,8 +262,10 @@ export async function scanAssistantAutoReplyOnce(input: {
   }
 
   await input.onStateProgress?.({
-    cursor: scanState.cursor,
-    primed: true,
+    autoReply: enabledChannels.map((channel) => ({
+      channel,
+      cursor: scanState.cursor,
+    })),
   })
 
   return summary

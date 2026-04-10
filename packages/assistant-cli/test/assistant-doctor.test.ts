@@ -265,12 +265,9 @@ test('runAssistantDoctor reports a clean assistant state as healthy', async () =
     BASE_OUTBOX_INTENT,
   )
   await writeJson(paths.automationStatePath, {
-    version: 2,
+    version: 1,
     inboxScanCursor: null,
-    autoReplyScanCursor: null,
-    autoReplyChannels: [],
-    autoReplyBacklogChannels: [],
-    autoReplyPrimed: false,
+    autoReply: [],
     updatedAt: testNow,
   })
   await writeJsonl(paths.diagnosticEventsPath, [
@@ -362,10 +359,7 @@ test('runAssistantDoctor reports a clean assistant state as healthy', async () =
       },
       automation: {
         inboxScanCursor: null,
-        autoReplyScanCursor: null,
-        autoReplyChannels: [],
-        autoReplyBacklogChannels: [],
-        autoReplyPrimed: false,
+        autoReply: [],
         updatedAt: null,
       },
       outbox: {

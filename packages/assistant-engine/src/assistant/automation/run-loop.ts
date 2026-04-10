@@ -25,6 +25,7 @@ import {
   resolveAssistantStatePaths,
   saveAssistantAutomationState,
 } from '../store.js'
+import { sameAssistantAutoReplyState } from '../automation-state.js'
 import {
   errorMessage,
   formatStructuredErrorMessage,
@@ -46,9 +47,7 @@ import { recoverAssistantAutoRepliesOnStartup } from './startup-recovery.js'
 
 type AssistantAutomationLoopStateSnapshot = Pick<
   AssistantAutomationState,
-  | 'autoReplyBacklogChannels'
-  | 'autoReplyPrimed'
-  | 'autoReplyScanCursor'
+  | 'autoReply'
   | 'inboxScanCursor'
 >
 
@@ -306,13 +305,12 @@ export async function runAssistantAutomationPass(
     ? await recoverAssistantAutoRepliesOnStartup({
         allowSelfAuthored: input.allowSelfAuthored ?? false,
         deliveryDispatchMode: input.deliveryDispatchMode,
-        enabledChannels: state.autoReplyChannels,
+        autoReply: state.autoReply,
         executionContext: input.executionContext,
         inboxServices,
         maxPerScan: input.maxPerScan,
         onEvent: input.onEvent,
         requestId: input.requestId,
-        scanCursor: state.autoReplyScanCursor,
         signal: input.signal,
         sessionMaxAgeMs: input.sessionMaxAgeMs ?? null,
         vault: input.vault,
@@ -337,9 +335,7 @@ export async function runAssistantAutomationPass(
       state = await saveAssistantAutomationState(input.vault, {
         ...state,
         inboxScanCursor: next.inboxScanCursor,
-        autoReplyScanCursor: next.autoReplyScanCursor,
-        autoReplyBacklogChannels: [...next.autoReplyBacklogChannels],
-        autoReplyPrimed: next.autoReplyPrimed,
+        autoReply: [...next.autoReply],
         updatedAt: new Date().toISOString(),
       })
     },
@@ -404,9 +400,10 @@ function snapshotAssistantAutomationLoopState(
   state: AssistantAutomationLoopStateSnapshot,
 ): AssistantAutomationLoopStateSnapshot {
   return {
-    autoReplyBacklogChannels: [...state.autoReplyBacklogChannels],
-    autoReplyPrimed: state.autoReplyPrimed,
-    autoReplyScanCursor: state.autoReplyScanCursor,
+    autoReply: state.autoReply.map((entry) => ({
+      channel: entry.channel,
+      cursor: entry.cursor,
+    })),
     inboxScanCursor: state.inboxScanCursor,
   }
 }
@@ -416,38 +413,20 @@ function didAssistantAutomationStateProgress(
   after: AssistantAutomationLoopStateSnapshot,
 ): boolean {
   return (
-    before.autoReplyPrimed !== after.autoReplyPrimed ||
-    !sameAssistantAutomationCursor(
-      before.autoReplyScanCursor,
-      after.autoReplyScanCursor,
-    ) ||
+    !sameAssistantAutoReplyState(before.autoReply, after.autoReply) ||
     !sameAssistantAutomationCursor(
       before.inboxScanCursor,
       after.inboxScanCursor,
-    ) ||
-    !sameStringArray(
-      before.autoReplyBacklogChannels,
-      after.autoReplyBacklogChannels,
     )
   )
 }
 
 function sameAssistantAutomationCursor(
-  left: AssistantAutomationLoopStateSnapshot['autoReplyScanCursor'],
-  right: AssistantAutomationLoopStateSnapshot['autoReplyScanCursor'],
+  left: AssistantAutomationLoopStateSnapshot['inboxScanCursor'],
+  right: AssistantAutomationLoopStateSnapshot['inboxScanCursor'],
 ): boolean {
   return (
     left?.captureId === right?.captureId &&
     left?.occurredAt === right?.occurredAt
-  )
-}
-
-function sameStringArray(
-  left: readonly string[],
-  right: readonly string[],
-): boolean {
-  return (
-    left.length === right.length &&
-    left.every((value, index) => value === right[index])
   )
 }

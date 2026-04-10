@@ -99,10 +99,7 @@ export async function getAssistantStatusLocal(
     runLock,
     automation: {
       inboxScanCursor: automation.inboxScanCursor,
-      autoReplyScanCursor: automation.autoReplyScanCursor,
-      autoReplyChannels: automation.autoReplyChannels,
-      autoReplyBacklogChannels: automation.autoReplyBacklogChannels,
-      autoReplyPrimed: automation.autoReplyPrimed,
+      autoReply: automation.autoReply,
       updatedAt: automation.updatedAt,
     },
     outbox,

@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { resolveAssistantStatePaths } from "@murphai/runtime-state/node";
 
 const mocks = vi.hoisted(() => ({
   createAssistantFoodAutoLogHooks: vi.fn(() => ({ kind: "food-hooks" })),
@@ -11,33 +12,37 @@ const mocks = vi.hoisted(() => ({
   createIntegratedVaultServices: vi.fn(),
   ensureHostedAssistantOperatorDefaults: vi.fn(),
   inboxInit: vi.fn(),
-  normalizeNullableString: vi.fn((value: unknown) =>
-    typeof value === "string" && value.length > 0 ? value : null
-  ),
-  readAssistantAutomationState: vi.fn(),
-  readHostedEmailCapabilities: vi.fn(),
+  inboxList: vi.fn(),
   readOperatorConfig: vi.fn(),
   resolveHostedAssistantConfig: vi.fn(),
   resolveHostedAssistantOperatorDefaultsState: vi.fn(),
-  saveAssistantAutomationState: vi.fn(),
   vaultInit: vi.fn(),
 }));
 
-vi.mock("@murphai/contracts", () => ({
-  VAULT_LAYOUT: {
-    metadata: "vault.json",
-  },
-}));
+vi.mock("@murphai/contracts", async () => {
+  const actual = await vi.importActual<typeof import("@murphai/contracts")>(
+    "@murphai/contracts",
+  );
 
-vi.mock("@murphai/hosted-execution", () => ({
-  readHostedEmailCapabilities: mocks.readHostedEmailCapabilities,
-}));
+  return {
+    ...actual,
+    VAULT_LAYOUT: {
+      ...actual.VAULT_LAYOUT,
+      metadata: "vault.json",
+    },
+  };
+});
 
-vi.mock("@murphai/assistant-engine", () => ({
-  createAssistantFoodAutoLogHooks: mocks.createAssistantFoodAutoLogHooks,
-  readAssistantAutomationState: mocks.readAssistantAutomationState,
-  saveAssistantAutomationState: mocks.saveAssistantAutomationState,
-}));
+vi.mock("@murphai/assistant-engine", async () => {
+  const actual = await vi.importActual<typeof import("@murphai/assistant-engine")>(
+    "@murphai/assistant-engine",
+  );
+
+  return {
+    ...actual,
+    createAssistantFoodAutoLogHooks: mocks.createAssistantFoodAutoLogHooks,
+  };
+});
 
 vi.mock("@murphai/inbox-services", () => ({
   createIntegratedInboxServices: mocks.createIntegratedInboxServices,
@@ -52,14 +57,17 @@ vi.mock("@murphai/operator-config/hosted-assistant-config", () => ({
   resolveHostedAssistantOperatorDefaultsState: mocks.resolveHostedAssistantOperatorDefaultsState,
 }));
 
-vi.mock("@murphai/operator-config/operator-config", () => ({
-  readOperatorConfig: mocks.readOperatorConfig,
-  resolveHostedAssistantConfig: mocks.resolveHostedAssistantConfig,
-}));
+vi.mock("@murphai/operator-config/operator-config", async () => {
+  const actual = await vi.importActual<
+    typeof import("@murphai/operator-config/operator-config")
+  >("@murphai/operator-config/operator-config");
 
-vi.mock("@murphai/operator-config/text/shared", () => ({
-  normalizeNullableString: mocks.normalizeNullableString,
-}));
+  return {
+    ...actual,
+    readOperatorConfig: mocks.readOperatorConfig,
+    resolveHostedAssistantConfig: mocks.resolveHostedAssistantConfig,
+  };
+});
 
 import {
   prepareHostedDispatchContext,
@@ -84,6 +92,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.createIntegratedInboxServices.mockReturnValue({
     init: mocks.inboxInit,
+    list: mocks.inboxList,
   });
   mocks.createIntegratedVaultServices.mockReturnValue({
     core: {
@@ -96,15 +105,8 @@ beforeEach(() => {
     seeded: false,
     source: "missing",
   });
-  mocks.readAssistantAutomationState.mockResolvedValue({
-    autoReplyBacklogChannels: [],
-    autoReplyChannels: [],
-    autoReplyPrimed: false,
-    autoReplyScanCursor: null,
-    updatedAt: "2026-04-08T00:00:00.000Z",
-  });
-  mocks.readHostedEmailCapabilities.mockReturnValue({
-    sendReady: false,
+  mocks.inboxList.mockResolvedValue({
+    items: [],
   });
   mocks.readOperatorConfig.mockResolvedValue(null);
   mocks.resolveHostedAssistantConfig.mockResolvedValue(null);
@@ -117,6 +119,39 @@ beforeEach(() => {
 afterEach(() => {
   vi.clearAllMocks();
 });
+
+async function readAutomationState(vaultRoot: string) {
+  return JSON.parse(
+    await readFile(resolveAssistantStatePaths(vaultRoot).automationStatePath, "utf8"),
+  ) as {
+    autoReply: Array<{
+      channel: string;
+      cursor: { captureId: string; occurredAt: string } | null;
+    }>;
+    inboxScanCursor: { captureId: string; occurredAt: string } | null;
+    updatedAt: string;
+    version: number;
+  };
+}
+
+async function writeAutomationState(
+  vaultRoot: string,
+  state: {
+    autoReply: Array<{
+      channel: string;
+      cursor: { captureId: string; occurredAt: string } | null;
+    }>;
+    inboxScanCursor: { captureId: string; occurredAt: string } | null;
+    updatedAt: string;
+    version: number;
+  },
+): Promise<void> {
+  const automationStatePath = resolveAssistantStatePaths(vaultRoot).automationStatePath;
+  await mkdir(path.dirname(automationStatePath), {
+    recursive: true,
+  });
+  await writeFile(automationStatePath, `${JSON.stringify(state, null, 2)}\n`, "utf8");
+}
 
 describe("hosted runtime context coverage", () => {
   it("returns null for non-activation dispatches after bootstrap and skips channel reconciliation", async () => {
@@ -154,7 +189,7 @@ describe("hosted runtime context coverage", () => {
       );
 
       assert.equal(result, null);
-      expect(mocks.readAssistantAutomationState).not.toHaveBeenCalled();
+      expect(mocks.inboxList).not.toHaveBeenCalled();
       expect(mocks.vaultInit).not.toHaveBeenCalled();
       expect(mocks.inboxInit).toHaveBeenCalledWith({
         rebuild: false,
@@ -212,7 +247,11 @@ describe("hosted runtime context coverage", () => {
         requestId: "evt_activation",
         vault: vaultRoot,
       });
-      expect(mocks.saveAssistantAutomationState).not.toHaveBeenCalled();
+      await expect(readAutomationState(vaultRoot)).resolves.toMatchObject({
+        autoReply: [],
+        inboxScanCursor: null,
+        version: 1,
+      });
     } finally {
       await cleanup();
     }
@@ -278,29 +317,152 @@ describe("hosted runtime context coverage", () => {
     });
   });
 
-  it("leaves automation state untouched when reconciled channels already match capabilities", async () => {
-    mocks.readAssistantAutomationState.mockResolvedValue({
-      autoReplyBacklogChannels: ["linq", "email"],
-      autoReplyChannels: ["linq", "email", "telegram"],
-      autoReplyPrimed: true,
-      autoReplyScanCursor: "cursor_123",
-      updatedAt: "2026-04-08T00:00:00.000Z",
-    });
+  it("leaves automation state untouched when hosted auto-reply entries already match capabilities", async () => {
+    const { cleanup, vaultRoot } = await createWorkspace();
 
-    await expect(
-      reconcileHostedAssistantChannelCapabilities(
-        "/tmp/assistant-runtime-context-coverage",
-        {
-          emailSendReady: true,
-          telegramBotConfigured: true,
+    try {
+      await writeAutomationState(vaultRoot, {
+        version: 1,
+        inboxScanCursor: null,
+        autoReply: [
+          {
+            channel: "email",
+            cursor: {
+              captureId: "cap_email",
+              occurredAt: "2026-04-08T00:00:00.000Z",
+            },
+          },
+          {
+            channel: "linq",
+            cursor: null,
+          },
+          {
+            channel: "telegram",
+            cursor: {
+              captureId: "cap_telegram",
+              occurredAt: "2026-04-08T00:01:00.000Z",
+            },
+          },
+        ],
+        updatedAt: "2026-04-08T00:05:00.000Z",
+      });
+
+      await expect(
+        reconcileHostedAssistantChannelCapabilities(
+          vaultRoot,
+          {
+            emailSendReady: true,
+            telegramBotConfigured: true,
+          },
+          true,
+        ),
+      ).resolves.toEqual({
+        emailAutoReplyEnabled: true,
+        telegramAutoReplyEnabled: true,
+      });
+
+      await expect(readAutomationState(vaultRoot)).resolves.toEqual({
+        version: 1,
+        inboxScanCursor: null,
+        autoReply: [
+          {
+            channel: "email",
+            cursor: {
+              captureId: "cap_email",
+              occurredAt: "2026-04-08T00:00:00.000Z",
+            },
+          },
+          {
+            channel: "linq",
+            cursor: null,
+          },
+          {
+            channel: "telegram",
+            cursor: {
+              captureId: "cap_telegram",
+              occurredAt: "2026-04-08T00:01:00.000Z",
+            },
+          },
+        ],
+        updatedAt: "2026-04-08T00:05:00.000Z",
+      });
+      expect(mocks.inboxList).not.toHaveBeenCalled();
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it("seeds the latest persisted inbox capture when re-enabling a hosted channel", async () => {
+    const { cleanup, vaultRoot } = await createWorkspace();
+
+    try {
+      await writeAutomationState(vaultRoot, {
+        version: 1,
+        inboxScanCursor: {
+          captureId: "cap_route",
+          occurredAt: "2026-04-08T00:00:00.000Z",
         },
-        true,
-      ),
-    ).resolves.toEqual({
-      emailAutoReplyEnabled: true,
-      telegramAutoReplyEnabled: true,
-    });
-    expect(mocks.saveAssistantAutomationState).not.toHaveBeenCalled();
+        autoReply: [
+          {
+            channel: "linq",
+            cursor: {
+              captureId: "cap_linq",
+              occurredAt: "2026-04-08T00:00:00.000Z",
+            },
+          },
+        ],
+        updatedAt: "2026-04-08T00:05:00.000Z",
+      });
+      mocks.inboxList.mockResolvedValue({
+        items: [
+          {
+            captureId: "cap_latest",
+            occurredAt: "2026-04-08T00:09:00.000Z",
+          },
+        ],
+      });
+
+      await expect(
+        reconcileHostedAssistantChannelCapabilities(
+          vaultRoot,
+          {
+            emailSendReady: true,
+            telegramBotConfigured: false,
+          },
+          true,
+        ),
+      ).resolves.toEqual({
+        emailAutoReplyEnabled: true,
+        telegramAutoReplyEnabled: false,
+      });
+
+      await expect(readAutomationState(vaultRoot)).resolves.toMatchObject({
+        inboxScanCursor: {
+          captureId: "cap_route",
+          occurredAt: "2026-04-08T00:00:00.000Z",
+        },
+        autoReply: [
+          {
+            channel: "email",
+            cursor: {
+              captureId: "cap_latest",
+              occurredAt: "2026-04-08T00:09:00.000Z",
+            },
+          },
+          {
+            channel: "linq",
+            cursor: {
+              captureId: "cap_linq",
+              occurredAt: "2026-04-08T00:00:00.000Z",
+            },
+          },
+        ],
+        version: 1,
+      });
+      expect(mocks.inboxList).toHaveBeenCalledTimes(1);
+    } finally {
+      await cleanup();
+    }
   });
 
   it("allows both existing and activation bootstrap paths", async () => {

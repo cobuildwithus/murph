@@ -209,10 +209,7 @@ const TEST_STATUS_RESULT = {
   },
   automation: {
     inboxScanCursor: null,
-    autoReplyScanCursor: null,
-    autoReplyChannels: [],
-    autoReplyBacklogChannels: [],
-    autoReplyPrimed: false,
+    autoReply: [],
     updatedAt: null,
   },
   outbox: {

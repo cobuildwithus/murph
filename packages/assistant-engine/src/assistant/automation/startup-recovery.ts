@@ -1,5 +1,6 @@
 import type {
   AssistantAutomationCursor,
+  AssistantAutomationState,
   AssistantTurnReceipt,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import type { InboxServices } from '@murphai/inbox-services'
@@ -30,8 +31,9 @@ const STARTUP_RECOVERY_CAPTURE_LIST_LIMIT = 200
 
 export interface RecoverAssistantAutoRepliesOnStartupInput {
   allowSelfAuthored: boolean
+  autoReply?: AssistantAutomationState['autoReply']
   deliveryDispatchMode?: AssistantOutboxDispatchMode
-  enabledChannels: readonly string[]
+  enabledChannels?: readonly string[]
   executionContext?: AssistantExecutionContext | null
   inboxServices: InboxServices
   maxPerScan?: number
@@ -51,8 +53,23 @@ interface AutoReplyRecoveryCandidate {
 export async function recoverAssistantAutoRepliesOnStartup(
   input: RecoverAssistantAutoRepliesOnStartupInput,
 ): Promise<AssistantAutoReplyScanResult> {
-  const enabledChannels = normalizeEnabledChannels(input.enabledChannels)
-  if (enabledChannels.length === 0 || input.scanCursor == null || input.signal?.aborted) {
+  const autoReply =
+    input.autoReply ??
+    normalizeEnabledChannels(input.enabledChannels ?? []).map((channel) => ({
+      channel,
+      cursor: input.scanCursor ?? null,
+    }))
+  const enabledChannels = normalizeEnabledChannels(
+    autoReply.map((entry) => entry.channel),
+  )
+  const autoReplyByChannel = new Map(
+    autoReply.map((entry) => [entry.channel, entry] as const),
+  )
+  if (
+    enabledChannels.length === 0 ||
+    autoReply.every((entry) => entry.cursor === null) ||
+    input.signal?.aborted
+  ) {
     return createEmptyAutoReplyScanResult()
   }
 
@@ -102,10 +119,11 @@ export async function recoverAssistantAutoRepliesOnStartup(
     if (!capture || !candidateIds.has(capture.captureId)) {
       continue
     }
-    if (compareAssistantCaptureOrder(capture, input.scanCursor) > 0) {
+    const channelState = autoReplyByChannel.get(capture.source)
+    if (!channelState?.cursor || !enabledChannels.includes(capture.source)) {
       continue
     }
-    if (!enabledChannels.includes(capture.source)) {
+    if (compareAssistantCaptureOrder(capture, channelState.cursor) > 0) {
       continue
     }
 
