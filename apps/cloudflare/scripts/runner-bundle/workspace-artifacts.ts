@@ -4,7 +4,6 @@ import path from "node:path";
 import {
   buildHostedRunnerRuntimeArtifactPackageJson,
   hostedRunnerBundleOnlyDependencyNames,
-  hostedRunnerRuntimeDependencyNames,
   hostedRunnerRuntimeDistDirectoryName,
   hostedRunnerRuntimePackageName,
 } from "../runner-bundle-contract.js";
@@ -71,10 +70,7 @@ export async function stageHostedRunnerRuntimeArtifact(
     `${JSON.stringify(
       buildHostedRunnerRuntimeArtifactPackageJson({
         dependencies: {
-          ...resolveDeclaredDependencySpecs(
-            hostedRunnerRuntimeDependencyNames,
-            runtimePackageJson,
-          ),
+          ...(runtimePackageJson.dependencies ?? {}),
           ...createBundleOnlyWorkspaceDependencySpecs(
             hostedRunnerBundleOnlyDependencyNames,
           ),
@@ -84,6 +80,7 @@ export async function stageHostedRunnerRuntimeArtifact(
         license: runtimePackageJson.license ?? "Apache-2.0",
         main: runtimePackageJson.main,
         name: runtimePackageJson.name ?? hostedRunnerRuntimePackageName,
+        optionalDependencies: runtimePackageJson.optionalDependencies,
         private: runtimePackageJson.private ?? true,
         type: runtimePackageJson.type ?? "module",
         version: runtimePackageJson.version ?? "0.0.0",
@@ -144,32 +141,6 @@ async function packWorkspacePackage(
   }
 
   return path.join(tarballsDir, tarballName);
-}
-
-function resolveDeclaredDependencySpecs<
-  const TDependencyNames extends readonly string[],
->(
-  dependencyNames: TDependencyNames,
-  manifest: WorkspacePackageManifest,
-): Record<TDependencyNames[number], string> {
-  const dependencies = {} as Record<TDependencyNames[number], string>;
-
-  for (const dependencyName of dependencyNames) {
-    const declaredSpecifier =
-      manifest.dependencies?.[dependencyName] ??
-      manifest.optionalDependencies?.[dependencyName] ??
-      null;
-
-    if (declaredSpecifier === null) {
-      throw new Error(
-        `Could not resolve a declared specifier for ${dependencyName}.`,
-      );
-    }
-
-    dependencies[dependencyName as TDependencyNames[number]] = declaredSpecifier;
-  }
-
-  return dependencies;
 }
 
 function createBundleOnlyWorkspaceDependencySpecs<

@@ -64,7 +64,7 @@ async function assembleRunnerBundle(): Promise<void> {
       stagingBundleDir,
       tarballPaths,
       hostedRunnerWorkspacePackageNames,
-      { repoRoot },
+      { runtimePackageRoot: appDir },
     );
     await pruneRunnerBundle(stagingBundleDir);
     await rewriteRuntimePackageManifest(stagingBundleDir);

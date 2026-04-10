@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { access, readFile } from "node:fs/promises";
 
 import { describe, expect, it } from "vitest";
@@ -8,7 +9,6 @@ import {
   buildHostedRunnerRuntimeArtifactPackageJson,
   hostedRunnerBuildPackageNames,
   hostedRunnerBundleOnlyDependencyNames,
-  hostedRunnerRuntimeDependencyNames,
   hostedRunnerWorkspacePackageNames,
   publishedMurphBundledWorkspacePackageNames,
   runnerBundleDirectoryName,
@@ -163,21 +163,20 @@ describe("hosted runner container image contract", () => {
     ).rejects.toThrow();
   });
 
-  it("keeps only the runtime leaf dependencies in the published package manifest", async () => {
-    const packageJson = JSON.parse(await readFile(
-      new URL("../package.json", import.meta.url),
-      "utf8",
-    )) as {
-      dependencies?: Record<string, string>;
-    };
+  it("excludes build-only workspace packages from the runtime package manifest", async () => {
+    const packageJson = await readRunnerPackageManifest();
+    const runtimeDependencyNames = Object.keys(packageJson.dependencies ?? {});
+    const buildOnlyWorkspacePackageNames = hostedRunnerBuildPackageNames.filter(
+      (packageName) => !hostedRunnerWorkspacePackageNames.includes(packageName),
+    );
 
-    for (const dependencyName of hostedRunnerRuntimeDependencyNames) {
-      expect(packageJson.dependencies).toHaveProperty(dependencyName);
+    for (const dependencyName of buildOnlyWorkspacePackageNames) {
+      expect(runtimeDependencyNames).not.toContain(dependencyName);
     }
 
-    expect(Object.keys(packageJson.dependencies ?? {}).sort()).toEqual(
-      [...hostedRunnerRuntimeDependencyNames].sort(),
-    );
+    for (const dependencyName of hostedRunnerBundleOnlyDependencyNames) {
+      expect(runtimeDependencyNames).not.toContain(dependencyName);
+    }
   });
 
   it("prunes pnpm workspace metadata recursively from the staged runner bundle", async () => {
@@ -197,16 +196,13 @@ describe("hosted runner container image contract", () => {
     const hostedRunnerWorkspacePackageNameSet = new Set<string>(
       hostedRunnerWorkspacePackageNames,
     );
+    const runtimeDependencyNames = [
+      ...Object.keys(readRunnerPackageManifestSync().dependencies ?? {}),
+      ...hostedRunnerBundleOnlyDependencyNames,
+    ];
     const runtimeDependencies = Object.fromEntries(
-      [...hostedRunnerRuntimeDependencyNames, ...hostedRunnerBundleOnlyDependencyNames].map((dependencyName) => [
-        dependencyName,
-        "1.2.3",
-      ]),
-    ) as Record<
-      | (typeof hostedRunnerRuntimeDependencyNames)[number]
-      | (typeof hostedRunnerBundleOnlyDependencyNames)[number],
-      string
-    >;
+      runtimeDependencyNames.map((dependencyName) => [dependencyName, "1.2.3"]),
+    ) as Record<string, string>;
     const runtimePackageJson = buildHostedRunnerRuntimeArtifactPackageJson({
       dependencies: runtimeDependencies,
       engines: {
@@ -222,7 +218,7 @@ describe("hosted runner container image contract", () => {
 
     expect(runnerBundleDirectoryName).toBe("runner-bundle");
     expect(Object.keys(runtimeDependencies).sort()).toEqual(
-      [...hostedRunnerRuntimeDependencyNames, ...hostedRunnerBundleOnlyDependencyNames].sort(),
+      runtimeDependencyNames.sort(),
     );
     expect(hostedRunnerWorkspacePackageNames).toEqual([
       "@murphai/assistant-engine",
@@ -250,7 +246,7 @@ describe("hosted runner container image contract", () => {
       ...publishedMurphBundledWorkspacePackageNames.filter(
         (packageName) => !hostedRunnerWorkspacePackageNameSet.has(packageName),
       ),
-    ]);
+    ].sort());
     expect(new Set(hostedRunnerBuildPackageNames)).toEqual(
       new Set([
         ...hostedRunnerWorkspacePackageNames,
@@ -369,3 +365,23 @@ describe("hosted runner container image contract", () => {
     expect(dockerignore).not.toContain("!apps/cloudflare/.deploy/worker-secrets.json");
   });
 });
+
+async function readRunnerPackageManifest(): Promise<{
+  dependencies?: Record<string, string>;
+}> {
+  return JSON.parse(
+    await readFile(new URL("../package.json", import.meta.url), "utf8"),
+  ) as {
+    dependencies?: Record<string, string>;
+  };
+}
+
+function readRunnerPackageManifestSync(): {
+  dependencies?: Record<string, string>;
+} {
+  return JSON.parse(
+    readFileSync(new URL("../package.json", import.meta.url), "utf8"),
+  ) as {
+    dependencies?: Record<string, string>;
+  };
+}
