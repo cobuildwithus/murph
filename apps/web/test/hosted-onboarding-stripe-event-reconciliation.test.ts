@@ -305,7 +305,7 @@ describe("hosted Stripe event reconciliation", () => {
     expect(prisma.rows[0]).toEqual(expect.objectContaining({
       eventId: "evt_invoice_paid_123",
       lastErrorCode: "Error",
-      lastErrorMessage: "Stripe unavailable",
+      lastErrorMessage: "[redacted]",
       status: HostedStripeEventStatus.failed,
     }));
   });
@@ -341,7 +341,7 @@ describe("hosted Stripe event reconciliation", () => {
     expect(prisma.rows[0]).toEqual(expect.objectContaining({
       eventId: "evt_invoice_paid_123",
       lastErrorCode: "Error",
-      lastErrorMessage: "Cloudflare provisioning failed",
+      lastErrorMessage: "[redacted]",
       processedAt: null,
       status: HostedStripeEventStatus.failed,
     }));

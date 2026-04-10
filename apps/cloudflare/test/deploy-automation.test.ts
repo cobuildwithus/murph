@@ -111,10 +111,10 @@ describe("hosted deploy automation helpers", () => {
     expect(config.compatibility_flags).toEqual(["nodejs_compat"]);
     expect(config.observability).toEqual({
       enabled: true,
-      head_sampling_rate: 1,
+      head_sampling_rate: 0,
       traces: {
         enabled: true,
-        head_sampling_rate: 0.1,
+        head_sampling_rate: 0,
       },
     });
     expect(config.vars.HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS).toBe("45000");

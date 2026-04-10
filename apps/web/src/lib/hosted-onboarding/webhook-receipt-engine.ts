@@ -25,6 +25,7 @@ import type {
 } from "./webhook-receipt-types";
 import { HostedWebhookReceiptSideEffectDrainError as ReceiptSideEffectDrainError } from "./webhook-receipt-types";
 import { hostedOnboardingError } from "./errors";
+import { sanitizeHostedOnboardingLogString } from "./http";
 
 export async function runHostedWebhookWithReceipt<TResult extends HostedWebhookResponsePayload>(input: {
   deferSideEffectDrain?: (drain: () => Promise<void>) => Promise<void> | void;
@@ -100,7 +101,9 @@ export async function runHostedWebhookWithReceipt<TResult extends HostedWebhookR
       } catch (error) {
         console.error(
           "Hosted webhook side-effect drain scheduling failed.",
-          error instanceof Error ? error.message : String(error),
+          sanitizeHostedOnboardingLogString(
+            error instanceof Error ? error.message : String(error),
+          ) ?? "Unknown error.",
         );
       }
     }

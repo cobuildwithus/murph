@@ -26,6 +26,10 @@ import {
 } from "./billing";
 import { readHostedMemberSnapshot } from "./hosted-member-store";
 import {
+  sanitizeHostedOnboardingPersistedErrorCode,
+  sanitizeHostedOnboardingPersistedErrorMessage,
+} from "./http";
+import {
   isHostedOnboardingRevnetEnabled,
   readHostedRevnetPaymentReceipt,
 } from "./revnet";
@@ -481,8 +485,12 @@ async function processClaimedHostedStripeEvent(
       },
       data: {
         claimExpiresAt: null,
-        lastErrorCode: deriveHostedStripeEventErrorCode(error),
-        lastErrorMessage: error instanceof Error ? error.message : String(error),
+        lastErrorCode: sanitizeHostedOnboardingPersistedErrorCode(
+          deriveHostedStripeEventErrorCode(error),
+        ),
+        lastErrorMessage: sanitizeHostedOnboardingPersistedErrorMessage(
+          error instanceof Error ? error.message : String(error),
+        ),
         nextAttemptAt: computeHostedStripeEventNextAttemptAt(claimed.attemptCount),
         status:
           claimed.attemptCount >= STRIPE_EVENT_MAX_ATTEMPTS

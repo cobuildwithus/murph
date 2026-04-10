@@ -9,10 +9,18 @@ import type {
 
 const {
   deleteHostedStoredDispatchPayloadBestEffort,
+  claimHostedWebhookReceiptForContinuation,
+  continueHostedWebhookReceipt,
+  createHostedWebhookReceiptHandlers,
   maybeStageHostedExecutionDispatchPayload,
+  listHostedWebhookReceiptContinuationCandidates,
 } = vi.hoisted(() => ({
   deleteHostedStoredDispatchPayloadBestEffort: vi.fn(),
+  claimHostedWebhookReceiptForContinuation: vi.fn(),
+  continueHostedWebhookReceipt: vi.fn(),
+  createHostedWebhookReceiptHandlers: vi.fn(),
   maybeStageHostedExecutionDispatchPayload: vi.fn(),
+  listHostedWebhookReceiptContinuationCandidates: vi.fn(),
 }));
 
 vi.mock("@prisma/client", () => ({
@@ -44,6 +52,65 @@ vi.mock("../../src/lib/hosted-execution/control", () => ({
   maybeStageHostedExecutionDispatchPayload,
 }));
 
+vi.mock("../../src/lib/hosted-execution/outbox", () => ({
+  drainHostedExecutionOutboxBestEffort: vi.fn(),
+}));
+
+vi.mock("../../src/lib/hosted-onboarding/linq", () => ({
+  requireHostedLinqMessageReceivedEvent: vi.fn(),
+  verifyAndParseHostedLinqWebhookRequest: vi.fn(),
+}));
+
+vi.mock("../../src/lib/hosted-onboarding/runtime", () => ({
+  requireHostedStripeWebhookVerificationConfig: vi.fn(),
+}));
+
+vi.mock("../../src/lib/hosted-onboarding/stripe-event-reconciliation", () => ({
+  recordHostedStripeEvent: vi.fn(),
+  reconcileHostedStripeEventById: vi.fn(),
+}));
+
+vi.mock("../../src/lib/hosted-onboarding/stripe-revnet-issuance", () => ({
+  drainHostedRevnetIssuanceSubmissionQueue: vi.fn(),
+}));
+
+vi.mock("../../src/lib/hosted-onboarding/telegram", () => ({
+  assertHostedTelegramWebhookSecret: vi.fn(),
+  buildHostedTelegramWebhookEventId: vi.fn(),
+  parseHostedTelegramWebhookUpdate: vi.fn(),
+}));
+
+vi.mock("../../src/lib/hosted-onboarding/webhook-provider-linq", () => ({
+  planHostedOnboardingLinqWebhook: vi.fn(),
+}));
+
+vi.mock("../../src/lib/hosted-onboarding/webhook-provider-telegram", () => ({
+  planHostedOnboardingTelegramWebhook: vi.fn(),
+}));
+
+vi.mock("../../src/lib/hosted-onboarding/webhook-receipts", async () => {
+  const actual = await vi.importActual<
+    typeof import("../../src/lib/hosted-onboarding/webhook-receipts")
+  >("../../src/lib/hosted-onboarding/webhook-receipts");
+
+  return {
+    ...actual,
+    claimHostedWebhookReceiptForContinuation,
+    continueHostedWebhookReceipt,
+    listHostedWebhookReceiptContinuationCandidates,
+  };
+});
+
+vi.mock("../../src/lib/hosted-onboarding/webhook-transport", () => ({
+  createHostedWebhookReceiptHandlers,
+}));
+
+vi.mock("../../src/lib/prisma", () => ({
+  getPrisma: vi.fn(() => {
+    throw new Error("Unexpected getPrisma call in webhook-receipt-privacy.test.ts");
+  }),
+}));
+
 vi.mock("../../src/lib/hosted-onboarding/contact-privacy", () => ({
   createHostedOpaqueIdentifier: (kind: string, value: string | number | null | undefined) =>
     value === null || value === undefined
@@ -51,6 +118,10 @@ vi.mock("../../src/lib/hosted-onboarding/contact-privacy", () => ({
       : `opaque:${kind}:${String(value)}`,
 }));
 
+import {
+  HOSTED_ONBOARDING_REDACTED_ERROR_MESSAGE,
+  sanitizeHostedOnboardingLogString,
+} from "../../src/lib/hosted-onboarding/http";
 import {
   buildHostedWebhookDispatchFromPayload,
   readHostedWebhookReceiptDispatchByEventId,
@@ -72,6 +143,9 @@ import {
   type HostedWebhookReceiptState,
   type HostedWebhookSideEffect,
 } from "../../src/lib/hosted-onboarding/webhook-receipt-types";
+import {
+  drainHostedOnboardingWebhookReceipts,
+} from "../../src/lib/hosted-onboarding/webhook-service";
 
 describe("hosted webhook receipt privacy baseline", () => {
   beforeEach(() => {
@@ -256,6 +330,65 @@ describe("hosted webhook receipt privacy baseline", () => {
         payload: stagedEffect.payload,
       }),
     ]);
+  });
+
+  it("redacts persisted receipt error messages while keeping sanitized codes and names", () => {
+    const serialized = serializeHostedWebhookReceiptErrorState({
+      code: "https://example.test/error?token=secret",
+      message: "operator@example.test /Users/example/private +15555550123",
+      name: "HostedOnboardingError",
+      retryable: true,
+    });
+
+    expect(serialized).toEqual({
+      lastErrorCode: "<redacted-url>",
+      lastErrorMessage: HOSTED_ONBOARDING_REDACTED_ERROR_MESSAGE,
+      lastErrorName: "HostedOnboardingError",
+      lastErrorRetryable: true,
+    });
+  });
+
+  it("redacts urls, emails, phones, and paths in hosted onboarding log strings", () => {
+    expect(
+      sanitizeHostedOnboardingLogString(
+        "See https://example.test/a?token=secret contact operator@example.test +15555550123 /Users/example/private /app/run/task",
+      ),
+    ).toBe(
+      "See <redacted-url> contact <redacted-email> <redacted-phone> <redacted-path> <redacted-path>",
+    );
+  });
+
+  it("redacts hosted onboarding console.error output before logging claim failures", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    listHostedWebhookReceiptContinuationCandidates.mockResolvedValue([
+      {
+        eventId: "evt_sensitive",
+        source: "linq",
+      },
+    ]);
+    claimHostedWebhookReceiptForContinuation.mockRejectedValue(
+      new Error(
+        "Failed to read https://example.test/a?token=secret from operator@example.test at +15555550123 /Users/example/private",
+      ),
+    );
+
+    await expect(drainHostedOnboardingWebhookReceipts({
+      prisma: {
+        prisma: true,
+      } as never,
+    })).resolves.toEqual([
+      {
+        eventId: "evt_sensitive",
+        source: "linq",
+        status: "failed",
+      },
+    ]);
+
+    expect(errorSpy).toHaveBeenCalledWith(
+      "Hosted webhook receipt claim failed during cron recovery.",
+      "Failed to read <redacted-url> from <redacted-email> at <redacted-phone> <redacted-path>",
+    );
+    errorSpy.mockRestore();
   });
 });
 

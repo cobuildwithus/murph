@@ -15,7 +15,7 @@ This app is intentionally separate from `apps/web`:
 - perform durable hosted bootstrap explicitly on `member.activated`
 - restore a temporary execution context for one-shot runs
 - start the Durable Object's native Cloudflare container on demand for the runner process
-- run the existing Murph inbox, parser, assistant, device-sync, and hosted share-import seams for member activation, direct Linq messages, hosted share acceptance, hosted device-sync wake events, and periodic assistant ticks through the headless `@murphai/assistant-runtime` package
+- run the existing Murph inbox, parser, assistant, device-sync, and hosted share-import seams for member activation, direct Linq messages, hosted share acceptance, hosted device-sync wake events, and explicit assistant cron/deadline wakes through the headless `@murphai/assistant-runtime` package
 - hydrate opaque hosted share packs from Cloudflare storage only when a `vault.share.accepted` runner job is about to import them
 
 ## Non-goals
@@ -60,7 +60,6 @@ Current worker env/config names read directly by `src/env.ts`:
 - optional non-secret: `HOSTED_EMAIL_DOMAIN`, `HOSTED_EMAIL_FROM_ADDRESS`, and `HOSTED_EMAIL_LOCAL_PART` configure the fixed hosted email sender identity plus stable per-user reply aliases
 - optional non-secret: `HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY_ID` defaults to `v1`
 - optional secret: `HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEYRING_JSON` may provide a JSON object of `{ keyId: base64Key }` entries so already-addressed hosted ciphertext can still decrypt during key rotation
-- optional non-secret: `HOSTED_EXECUTION_DEFAULT_ALARM_DELAY_MS` defaults to `21600000` in the checked-in Wrangler scaffold
 - optional non-secret: `HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS` defaults to `3`
 - optional non-secret: `HOSTED_EXECUTION_RETRY_DELAY_MS` defaults to `30000`
 - optional non-secret: `HOSTED_EXECUTION_RUNNER_TIMEOUT_MS` defaults to `120000`
@@ -176,7 +175,7 @@ The Cloudflare app now keeps two focused Vitest lanes:
 - Broad hosted idempotency no longer depends on the web outbox lifecycle: `apps/web` now uses the shared Postgres `execution_outbox` only for delivery handoff into Cloudflare, while the Durable Object queue owns retries, poison/backpressure, committed-result recovery, and any hosted-web business-outcome callback before it consumes the event. Hosted webhook receipts still keep their own durable side-effect state for Linq replies, and RevNet issuance stays on its invoice-owned idempotency path.
 - Missing hosted share packs are treated as an async runner-side failure instead of a web claim-time validation step. If hydration fails, Cloudflare releases the Postgres share claim through the signed hosted-web release callback and then poisons the queue event instead of retrying a permanently missing pack forever.
 - Follow-up hosted events now require an already bootstrapped member context; they no longer create the vault or force-enable Linq auto-reply as a hidden side effect.
-- The checked-in Wrangler scaffold now explicitly enables Workers Logs and Workers Traces so request logs, container logs, and trace spans are available before production deploys. The generated deploy config exposes log and trace sampling through `CF_LOG_HEAD_SAMPLING_RATE` and `CF_TRACE_HEAD_SAMPLING_RATE`.
+- The checked-in Wrangler scaffold keeps Workers Logs and Workers Traces wiring available, but both sampling defaults are now `0` so request logs, container logs, and trace spans stay opt-in until `CF_LOG_HEAD_SAMPLING_RATE` or `CF_TRACE_HEAD_SAMPLING_RATE` is raised for a bounded debugging window.
 - The operational deploy path now uses a direct cut through `wrangler deploy` semantics on every GitHub Actions run and local `deploy:worker` invocation. The helper prepares `wrangler.generated.jsonc`, `worker-secrets.json`, and the prebuilt `apps/cloudflare/.deploy/runner-bundle` once before the deploy call, so deploy flow and image contents stay aligned around the prepared runtime artifact. The lower-level version/deploy split stays in the helper code as a manual escape hatch, but the default workflow no longer treats gradual traffic rollout as the normal path.
 - Frequent deploys can accumulate old managed-registry tags. Use `pnpm --dir apps/cloudflare images:cleanup -- --filter '<repo-regex>' --keep 10` first, then add `--apply` once the dry-run plan looks correct.
 - The checked-in deploy surface now documents and forwards only the canonical runtime vars that the container actually consumes, such as `HOSTED_EMAIL_*`, `FFMPEG_COMMAND`, `PDFTOTEXT_COMMAND`, `WHISPER_COMMAND`, `WHISPER_MODEL_PATH`, and the explicit runner web-control host allowlist override. The default image already bakes the standard parser-toolchain values, so the parser vars are operator-only override knobs rather than baseline deployment requirements or per-user env settings. AgentMail stays a local-only integration and is not part of the hosted deploy surface.

@@ -31,6 +31,7 @@ import {
   planHostedOnboardingTelegramWebhook,
   type HostedOnboardingTelegramWebhookResponse,
 } from "./webhook-provider-telegram";
+import { sanitizeHostedOnboardingLogString } from "./http";
 import { createHostedWebhookReceiptHandlers } from "./webhook-transport";
 
 export type HostedStripeWebhookResponse = {
@@ -210,7 +211,9 @@ export async function continueHostedOnboardingWebhookReceiptBestEffort(input: {
   } catch (error) {
     console.error(
       "Hosted webhook receipt continuation failed.",
-      error instanceof Error ? error.message : String(error),
+      sanitizeHostedOnboardingLogString(
+        error instanceof Error ? error.message : String(error),
+      ) ?? "Unknown error.",
     );
   }
 }
@@ -255,7 +258,9 @@ export async function drainHostedOnboardingWebhookReceipts(input: {
 
       console.error(
         "Hosted webhook receipt claim failed during cron recovery.",
-        error instanceof Error ? error.message : String(error),
+        sanitizeHostedOnboardingLogString(
+          error instanceof Error ? error.message : String(error),
+        ) ?? "Unknown error.",
       );
       drained.push({
         eventId: candidate.eventId,
@@ -331,7 +336,9 @@ async function drainHostedRevnetIssuanceSubmissionQueueBestEffort(
   } catch (error) {
     console.error(
       "Hosted RevNet issuance best-effort drain failed.",
-      error instanceof Error ? error.message : String(error),
+      sanitizeHostedOnboardingLogString(
+        error instanceof Error ? error.message : String(error),
+      ) ?? "Unknown error.",
     );
   }
 }

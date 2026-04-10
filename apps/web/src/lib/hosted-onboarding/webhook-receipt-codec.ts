@@ -2,6 +2,11 @@ import { Prisma } from "@prisma/client";
 
 import { hostedOnboardingError } from "./errors";
 import {
+  sanitizeHostedOnboardingPersistedErrorCode,
+  sanitizeHostedOnboardingPersistedErrorMessage,
+  sanitizeHostedOnboardingPersistedErrorName,
+} from "./http";
+import {
   readHostedWebhookStoredDispatchSideEffectPayload,
   requireHostedWebhookStoredDispatchSideEffectPayload,
 } from "./webhook-dispatch-payload";
@@ -76,9 +81,9 @@ export function serializeHostedWebhookReceiptErrorState(
   lastErrorRetryable: boolean | null;
 } {
   return {
-    lastErrorCode: value?.code ?? null,
-    lastErrorMessage: value?.message ?? null,
-    lastErrorName: value?.name ?? null,
+    lastErrorCode: sanitizeHostedOnboardingPersistedErrorCode(value?.code),
+    lastErrorMessage: sanitizeHostedOnboardingPersistedErrorMessage(value?.message),
+    lastErrorName: sanitizeHostedOnboardingPersistedErrorName(value?.name),
     lastErrorRetryable: value?.retryable ?? null,
   };
 }
@@ -92,9 +97,9 @@ export function serializeHostedWebhookSideEffectErrorState(
   lastErrorRetryable: boolean | null;
 } {
   return {
-    lastErrorCode: value?.code ?? null,
-    lastErrorMessage: value?.message ?? null,
-    lastErrorName: value?.name ?? null,
+    lastErrorCode: sanitizeHostedOnboardingPersistedErrorCode(value?.code),
+    lastErrorMessage: sanitizeHostedOnboardingPersistedErrorMessage(value?.message),
+    lastErrorName: sanitizeHostedOnboardingPersistedErrorName(value?.name),
     lastErrorRetryable: value?.retryable ?? null,
   };
 }
