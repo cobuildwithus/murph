@@ -162,11 +162,19 @@ describe('assistant CLI tool capability seam', () => {
     const cliExecuteSpy = vi
       .spyOn(executionAdapters, 'executeAssistantCliCommand')
       .mockResolvedValue({
-        argv: ['vault-cli', '--help'],
+        argv: ['vault-cli', 'device', 'provider', 'list'],
         exitCode: 0,
-        json: { ok: true },
+        json: {
+          count: 1,
+          items: [
+            {
+              id: 'prov_01JNV422Y2M5ZBV64ZP4N1DRB1',
+              kind: 'provider',
+            },
+          ],
+        },
         stderr: '',
-        stdout: '{"ok":true}',
+        stdout: '{"count":1,"items":[{"id":"prov_01JNV422Y2M5ZBV64ZP4N1DRB1","kind":"provider"}]}',
       })
     const readFileSpy = vi
       .spyOn(executionAdapters, 'readAssistantTextFile')
@@ -349,11 +357,23 @@ describe('assistant CLI tool capability seam', () => {
     expect(showTargetSpy).toHaveBeenCalledWith('telegram')
 
     const cliTools = createAssistantCliExecutorToolDefinitions(context)
-    expect(await executeTool(cliTools, 'vault.cli.run', {
+    const cliRunResult = await executeTool(cliTools, 'vault.cli.run', {
       args: ['device', 'provider', 'list'],
       stdin: '{"hello":true}',
       timeoutMs: 1000,
-    })).toEqual({ ok: true })
+    })
+    expect(cliRunResult).toEqual({
+      count: 1,
+      items: [
+        {
+          id: 'prov_01JNV422Y2M5ZBV64ZP4N1DRB1',
+          kind: 'provider',
+        },
+      ],
+    })
+    expect(cliRunResult).not.toHaveProperty('argv')
+    expect(cliRunResult).not.toHaveProperty('stdout')
+    expect(cliRunResult).not.toHaveProperty('exitCode')
     expect(cliExecuteSpy).toHaveBeenCalledWith({
       args: ['device', 'provider', 'list'],
       stdin: '{"hello":true}',

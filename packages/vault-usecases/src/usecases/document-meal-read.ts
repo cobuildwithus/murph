@@ -16,7 +16,7 @@ import {
   deleteEventRecord,
   editEventRecord,
 } from './event-record-mutations.js'
-import { asListEnvelope } from './shared.js'
+import { asListEnvelope, toListEntity } from './shared.js'
 import { relativePathEntries } from './vault-usecase-helpers.js'
 
 type DocumentMealKind = 'document' | 'meal'
@@ -204,7 +204,10 @@ async function listOwnedRecords(input: {
       to: input.to,
     })
     .slice(0, DEFAULT_LIST_LIMIT)
-    .map((record: QueryRecord) => toOwnedEventCommandShowEntity(record, OWNED_EVENT_LINK_KEYS))
+    .map((record: QueryRecord) => {
+      const entity = toOwnedEventCommandShowEntity(record, OWNED_EVENT_LINK_KEYS)
+      return toListEntity(entity)
+    })
 
   return asListEnvelope(input.vault, {
     kind: input.expectedKind,

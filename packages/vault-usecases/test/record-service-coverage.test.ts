@@ -20,6 +20,7 @@ import {
   matchesOptionalString,
   nullableString,
   numberOrNull,
+  toCommandListItem,
   toAuditCommandListItem,
   toCommandShowEntity,
   toOwnedEventCommandShowEntity,
@@ -178,6 +179,27 @@ describe("query record helpers", () => {
       ],
     });
 
+    const providerListRecord = sampleQueryRecord({
+      family: "provider",
+      kind: "provider",
+      title: "Hydration",
+      body: "# Morning hydration\n\nHydration helps recovery.",
+      attributes: {},
+      relatedIds: [],
+    });
+
+    assert.deepEqual(toGenericListItem(providerListRecord), {
+      id: providerListRecord.entityId,
+      kind: "provider",
+      title: "Hydration",
+      occurredAt: "2026-04-08T12:00:00.000Z",
+      path: "bank/events/evt_01JNV422Y2M5ZBV64ZP4N1DRB1.md",
+      data: {},
+      links: [],
+      excerpt: "Morning hydration Hydration helps recovery.",
+    });
+    expect(toGenericListItem(providerListRecord)).not.toHaveProperty("markdown");
+
     assert.deepEqual(toOwnedEventCommandShowEntity(record), {
       id: record.entityId,
       kind: "note",
@@ -190,7 +212,7 @@ describe("query record helpers", () => {
     });
 
     assert.deepEqual(toSampleCommandListItem(record), {
-      ...toCommandShowEntity(record),
+      ...toCommandListItem(record),
       data: {
         ...record.attributes,
         status: "active",
@@ -201,7 +223,7 @@ describe("query record helpers", () => {
     });
 
     assert.deepEqual(toAuditCommandListItem(record), {
-      ...toCommandShowEntity(record),
+      ...toCommandListItem(record),
       action: "updated",
       actor: "assistant",
       status: "active",

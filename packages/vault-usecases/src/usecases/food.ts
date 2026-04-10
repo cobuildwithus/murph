@@ -12,6 +12,7 @@ import {
   buildEntityLinks,
   loadJsonInputFile,
   preparePatchedUpsertPayload,
+  toListEntity,
 } from './shared.js'
 import {
   compactObject,
@@ -536,18 +537,17 @@ export async function listFoodRecords(input: {
     .map((entry) => {
       const data = buildFoodData(entry)
 
-      return {
+      return toListEntity({
         id: entry.foodId,
         kind: 'food',
         title: entry.title,
         occurredAt: null,
         path: entry.relativePath,
-        markdown: entry.markdown,
         data,
         links: buildEntityLinks({
           data,
         }),
-      }
+      })
     })
 
   return asListEnvelope(input.vault, {

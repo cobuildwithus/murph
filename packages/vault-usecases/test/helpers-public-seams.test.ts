@@ -558,7 +558,29 @@ describe("helper barrel exports", () => {
         },
       ],
     });
-    expect(toGenericListItem(symptomEntity)).toEqual(toGenericShowEntity(symptomEntity));
+    expect(toGenericListItem(symptomEntity)).toEqual({
+      id: "evt_99",
+      kind: "symptom",
+      title: "Goal A",
+      occurredAt: "2026-04-08T00:00:00Z",
+      path: "ledger/events/2026/2026-04.jsonl",
+      data: {
+        parentGoalId: "goal_sleep",
+      },
+      links: [
+        {
+          id: "current",
+          kind: "core",
+          queryable: true,
+        },
+        {
+          id: "goal_sleep",
+          kind: "goal",
+          queryable: true,
+        },
+      ],
+    });
+    expect(toGenericListItem(symptomEntity)).not.toHaveProperty("markdown");
     expect(matchesGenericKindFilter(createQueryRecord({ family: "core", kind: "core" }))).toBe(
       false,
     );

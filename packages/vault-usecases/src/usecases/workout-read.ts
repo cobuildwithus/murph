@@ -11,7 +11,7 @@ import {
 } from '../commands/query-record-command-helpers.js'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { pathSchema } from '@murphai/operator-config/vault-cli-contracts'
-import { asListEnvelope } from './shared.js'
+import { asListEnvelope, toListEntity } from './shared.js'
 import { relativePathEntries } from './vault-usecase-helpers.js'
 
 const DEFAULT_LIST_LIMIT = 50
@@ -164,7 +164,10 @@ async function listTrackedWorkoutRecords(input: {
       to: input.to,
     })
     .slice(0, limit)
-    .map((record: QueryRecord) => toCommandShowEntity(record))
+    .map((record: QueryRecord) => {
+      const entity = toCommandShowEntity(record)
+      return toListEntity(entity)
+    })
 
   return asListEnvelope(input.vault, {
     kind: input.kinds.length === 1 ? input.kinds[0] : 'workout_event',

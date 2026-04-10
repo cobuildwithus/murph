@@ -15,6 +15,8 @@ import {
 import {
   asListEnvelope,
   readJsonPayload,
+  summarizeListMarkdown,
+  toListEntity,
 } from './shared.js'
 import {
   compactObject,
@@ -349,7 +351,7 @@ export async function listExperimentRecords(input: {
       statuses: input.status ? [input.status] : undefined,
     })
     .slice(0, input.limit)
-    .map(toShowEntity)
+    .map(toListItem)
 
   return asListEnvelope(input.vault, {
     status: input.status ?? null,
@@ -484,7 +486,7 @@ export async function listJournalRecords(input: {
       to: input.to,
     })
     .slice(0, input.limit)
-    .map(toShowEntity)
+    .map(toListItem)
 
   return asListEnvelope(input.vault, {
     kind: 'journal_day',
@@ -691,6 +693,19 @@ function toShowEntity(entity: QueryCanonicalEntity) {
     data: buildEntityData(entity),
     links: buildEntityLinks(entity),
   }
+}
+
+function toListItem(entity: QueryCanonicalEntity) {
+  return toListEntity({
+    id: entity.entityId,
+    kind: entity.kind,
+    title: entity.title ?? null,
+    occurredAt: normalizeIsoTimestamp(entity.occurredAt),
+    path: entity.path ?? null,
+    excerpt: summarizeListMarkdown(entity.body),
+    data: buildEntityData(entity),
+    links: buildEntityLinks(entity),
+  })
 }
 
 function buildEntityData(entity: QueryCanonicalEntity) {

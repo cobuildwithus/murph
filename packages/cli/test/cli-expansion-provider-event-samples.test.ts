@@ -874,6 +874,8 @@ test.sequential(
         items: Array<{
           id: string
           kind: string
+          excerpt?: string | null
+          markdown?: string | null
           data: Record<string, unknown>
         }>
       }>([
@@ -902,6 +904,11 @@ test.sequential(
       assert.equal(requireData(providerList).items.length, 1)
       assert.equal(requireData(providerList).items[0]?.kind, 'provider')
       assert.equal(requireData(providerList).items[0]?.data.specialty, 'lab')
+      assert.match(
+        requireData(providerList).items[0]?.excerpt ?? '',
+        /Labcorp Primary lab partner\./u,
+      )
+      assert.equal('markdown' in (requireData(providerList).items[0] ?? {}), false)
 
       await writeFile(
         eventPayloadPath,
@@ -965,6 +972,7 @@ test.sequential(
         items: Array<{
           id: string
           kind: string
+          markdown?: string | null
           data: Record<string, unknown>
           links: Array<{
             id: string
@@ -1010,6 +1018,7 @@ test.sequential(
       assert.equal(requireData(eventList).items[0]?.kind, 'symptom')
       assert.equal(requireData(eventList).items[0]?.data.symptom, 'headache')
       assert.equal(requireData(eventList).items[0]?.links[0]?.id, requireData(providerUpsert).providerId)
+      assert.equal('markdown' in (requireData(eventList).items[0] ?? {}), false)
 
       const csvEventList = await runSliceCli([
         'event',
