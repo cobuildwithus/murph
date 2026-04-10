@@ -164,6 +164,44 @@ test('setup wizard exported defaults and wrapper controller keep platform-specif
   )
 })
 
+test.sequential('setup wizard preserves an explicit empty channel selection on darwin', async () => {
+  await withMockProcessTty(async ({ flush, readOutput, writeInput }) => {
+    const wizardResultPromise = runSetupWizard({
+      initialAssistantPreset: 'skip',
+      initialChannels: [],
+      platform: 'darwin',
+      vault: './wizard-explicit-empty-channels',
+    })
+
+    await flush()
+    await writeInput('\r')
+    await waitForRenderedText(flush, readOutput, /How should Murph answer\?/u)
+    await writeInput('\r')
+    await waitForRenderedText(flush, readOutput, /Auto updates/u)
+    await writeInput('\r')
+    await waitForRenderedText(flush, readOutput, /Chat channels/u)
+    await writeInput('\r')
+    await waitForRenderedText(flush, readOutput, /Health data/u)
+    await writeInput('\r')
+    await waitForRenderedText(flush, readOutput, /Review your setup/u)
+    await writeInput('\r')
+
+    assert.deepEqual(await wizardResultPromise, {
+      assistantApiKeyEnv: null,
+      assistantBaseUrl: null,
+      assistantOss: null,
+      assistantPreset: 'skip',
+      assistantProviderName: null,
+      channels: [],
+      scheduledUpdates: [
+        'environment-health-watch',
+        'weekly-health-snapshot',
+      ],
+      wearables: [],
+    })
+  })
+}, WIZARD_TEST_TIMEOUT_MS)
+
 test.sequential('setup wizard wrapper rejects when Ink render throws before initialization completes', async () => {
   const renderError = new Error('render failed')
 

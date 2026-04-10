@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdir, writeFile } from 'node:fs/promises'
+import { mkdir, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { tmpdir } from 'node:os'
 import { mkdtemp } from 'node:fs/promises'
@@ -755,9 +755,16 @@ test('setup CLI helper exports keep interactive and post-launch decisions stable
   assert.equal(formatSetupWearableLabel('whoop'), 'WHOOP')
 })
 
-test('setup CLI initial wizard channels reuse saved automation channels and rethrow invalid state', async () => {
+test('setup CLI initial wizard channels reuse saved state, fall back to inbox config, and rethrow invalid state', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'setup-cli-automation-state-'))
   const automationPath = resolveAssistantStatePaths(vaultRoot).automationStatePath
+  const inboxConfigPath = path.join(
+    vaultRoot,
+    '.runtime',
+    'operations',
+    'inbox',
+    'config.json',
+  )
 
   await mkdir(path.dirname(automationPath), { recursive: true })
   await writeFile(
@@ -779,7 +786,43 @@ test('setup CLI initial wizard channels reuse saved automation channels and reth
     ['telegram', 'linq'],
   )
 
+  await mkdir(path.dirname(inboxConfigPath), { recursive: true })
+  await writeFile(
+    inboxConfigPath,
+    JSON.stringify({
+      schema: 'murph.inbox-runtime-config.v1',
+      schemaVersion: 1,
+      value: {
+        connectors: [
+          {
+            id: 'email:primary',
+            source: 'email',
+            enabled: true,
+            accountId: 'primary',
+            options: {},
+          },
+        ],
+      },
+    }),
+    'utf8',
+  )
+
+  await rm(automationPath, { force: true })
+
+  assert.deepEqual(
+    await resolveInitialSetupWizardChannels(vaultRoot, 'linux'),
+    ['email'],
+  )
+
   await writeFile(automationPath, '{not json', 'utf8')
+
+  await assert.rejects(
+    resolveInitialSetupWizardChannels(vaultRoot, 'linux'),
+    /Expected property name|JSON/u,
+  )
+
+  await rm(automationPath, { force: true })
+  await writeFile(inboxConfigPath, '{not json', 'utf8')
 
   await assert.rejects(
     resolveInitialSetupWizardChannels(vaultRoot, 'linux'),

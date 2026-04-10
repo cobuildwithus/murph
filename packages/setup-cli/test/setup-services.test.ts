@@ -313,6 +313,13 @@ test('setup scheduling helpers respect terminal gating and launch routing', () =
 test('setup wizard initial channels reuse saved automation channels and fall back when none are saved', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'setup-cli-vault-'))
   const automationStatePath = resolveAssistantStatePaths(vaultRoot).automationStatePath
+  const inboxConfigPath = path.join(
+    vaultRoot,
+    '.runtime',
+    'operations',
+    'inbox',
+    'config.json',
+  )
 
   try {
     assert.deepEqual(
@@ -340,6 +347,39 @@ test('setup wizard initial channels reuse saved automation channels and fall bac
       ['telegram', 'email'],
     )
 
+    await mkdir(path.dirname(inboxConfigPath), { recursive: true })
+    await writeFile(
+      inboxConfigPath,
+      JSON.stringify({
+        schema: 'murph.inbox-runtime-config.v1',
+        schemaVersion: 1,
+        value: {
+          connectors: [
+            {
+              id: 'telegram:bot',
+              source: 'telegram',
+              enabled: true,
+              accountId: 'bot',
+              options: {},
+            },
+            {
+              id: 'email:primary',
+              source: 'email',
+              enabled: false,
+              accountId: 'primary',
+              options: {},
+            },
+          ],
+        },
+      }),
+      'utf8',
+    )
+
+    assert.deepEqual(
+      await resolveInitialSetupWizardChannels(vaultRoot, 'darwin'),
+      ['telegram', 'email'],
+    )
+
     await writeFile(
       automationStatePath,
       JSON.stringify({
@@ -356,6 +396,57 @@ test('setup wizard initial channels reuse saved automation channels and fall bac
 
     assert.deepEqual(
       await resolveInitialSetupWizardChannels(vaultRoot, 'linux'),
+      [],
+    )
+
+    await rm(automationStatePath, { force: true })
+    await mkdir(path.dirname(inboxConfigPath), { recursive: true })
+    await writeFile(
+      inboxConfigPath,
+      JSON.stringify({
+        schema: 'murph.inbox-runtime-config.v1',
+        schemaVersion: 1,
+        value: {
+          connectors: [
+            {
+              id: 'telegram:bot',
+              source: 'telegram',
+              enabled: true,
+              accountId: 'bot',
+              options: {},
+            },
+            {
+              id: 'email:primary',
+              source: 'email',
+              enabled: false,
+              accountId: 'primary',
+              options: {},
+            },
+          ],
+        },
+      }),
+      'utf8',
+    )
+
+    assert.deepEqual(
+      await resolveInitialSetupWizardChannels(vaultRoot, 'darwin'),
+      ['telegram'],
+    )
+
+    await writeFile(
+      inboxConfigPath,
+      JSON.stringify({
+        schema: 'murph.inbox-runtime-config.v1',
+        schemaVersion: 1,
+        value: {
+          connectors: [],
+        },
+      }),
+      'utf8',
+    )
+
+    assert.deepEqual(
+      await resolveInitialSetupWizardChannels(vaultRoot, 'darwin'),
       [],
     )
   } finally {
