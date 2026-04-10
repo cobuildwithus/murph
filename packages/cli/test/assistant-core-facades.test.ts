@@ -53,8 +53,12 @@ test('cli and split owner packages publish the expected owner dependencies', asy
   assert.equal(cliManifest.dependencies?.['@murphai/operator-config'], 'workspace:*')
   assert.equal(cliManifest.dependencies?.['@murphai/assistant-engine'], 'workspace:*')
   assert.equal(cliManifest.dependencies?.['@murphai/vault-usecases'], 'workspace:*')
-  assert.equal(cliManifest.dependencies?.['@murphai/inboxd-imessage'], 'workspace:*')
-  assert.equal(cliManifest.bundleDependencies?.includes('@murphai/inboxd-imessage'), true)
+  assert.equal(cliManifest.dependencies?.['@murphai/inboxd-imessage'], undefined)
+  assert.equal(cliManifest.dependencies?.['@photon-ai/imessage-kit'], undefined)
+  assert.equal(
+    cliManifest.bundleDependencies?.includes('@murphai/inboxd-imessage'),
+    false,
+  )
 
   assert.equal(assistantCliManifest.dependencies?.['@murphai/assistant-engine'], 'workspace:*')
   assert.equal(assistantCliManifest.dependencies?.['@murphai/operator-config'], 'workspace:*')
@@ -106,6 +110,7 @@ test('cli and split owner packages publish the expected owner dependencies', asy
   assert.equal(vaultUsecasesManifest.exports?.['./testing'], undefined)
   assert.equal(vaultUsecasesManifest.exports?.['./workouts'] !== undefined, true)
   assert.equal(inboxServicesManifest.exports?.['./testing'], undefined)
+  assert.equal(operatorConfigManifest.exports?.['./imessage-readiness'], undefined)
   assert.equal(operatorConfigManifest.exports?.['./text/*'], undefined)
   assert.equal(operatorConfigManifest.exports?.['./text/shared'] !== undefined, true)
 
@@ -135,6 +140,7 @@ test('cli and split owner packages publish the expected owner dependencies', asy
   assert.deepEqual(repoTsconfigBase.compilerOptions?.paths?.['@murphai/operator-config/*'], [
     'packages/operator-config/src/*',
   ])
+  assert.equal(repoTsconfigBase.compilerOptions?.paths?.['@murphai/inboxd-imessage'], undefined)
   assert.equal(repoTsconfigBase.compilerOptions?.paths?.['@murphai/vault-inbox/*'], undefined)
   assert.equal(repoTsconfigBase.compilerOptions?.paths?.['@murphai/assistant-core/*'], undefined)
 })

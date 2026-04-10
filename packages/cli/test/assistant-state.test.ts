@@ -61,19 +61,19 @@ test('resolveAssistantAliasKey prefers explicit alias and otherwise derives a st
   assert.equal(
     resolveAssistantAliasKey({
       alias: 'chat:bob',
-      channel: 'imessage',
+      channel: 'telegram',
       participantId: 'contact:bob',
     }),
     'chat:bob',
   )
   assert.equal(
     resolveAssistantAliasKey({
-      channel: 'imessage',
+      channel: 'telegram',
       identityId: 'assistant:primary',
       participantId: 'contact:bob',
       sourceThreadId: 'thread/1',
     }),
-    'channel:imessage|identity:assistant%3Aprimary|thread:thread%2F1',
+    'channel:telegram|identity:assistant%3Aprimary|thread:thread%2F1',
   )
   assert.equal(resolveAssistantAliasKey({}), null)
 })
@@ -152,8 +152,8 @@ test('assistant sessions live under the vault runtime area, omit redundant path 
 
   const first = await resolveAssistantSession({
     vault: vaultRoot,
-    alias: 'imessage:bob',
-    channel: 'imessage',
+    alias: 'telegram:bob',
+    channel: 'telegram',
     identityId: 'assistant:primary',
     participantId: 'contact:bob',
     sourceThreadId: 'chat-1',
@@ -165,18 +165,18 @@ test('assistant sessions live under the vault runtime area, omit redundant path 
   })
 
   assert.equal(first.created, true)
-  assert.equal(first.session.alias, 'imessage:bob')
+  assert.equal(first.session.alias, 'telegram:bob')
   assert.equal(first.session.provider, 'codex-cli')
   assert.equal(first.session.providerOptions.model, 'gpt-oss:20b')
   assert.equal(first.session.providerOptions.reasoningEffort, 'high')
   assert.equal(first.session.providerOptions.oss, true)
-  assert.equal(first.session.binding.channel, 'imessage')
+  assert.equal(first.session.binding.channel, 'telegram')
   assert.equal(first.session.binding.identityId, 'assistant:primary')
   assert.equal(first.session.binding.actorId, 'contact:bob')
   assert.equal(first.session.binding.threadId, 'chat-1')
   assert.equal(
     first.session.binding.conversationKey,
-    'channel:imessage|identity:assistant%3Aprimary|thread:chat-1',
+    'channel:telegram|identity:assistant%3Aprimary|thread:chat-1',
   )
 
   const persisted = JSON.parse(
@@ -192,7 +192,7 @@ test('assistant sessions live under the vault runtime area, omit redundant path 
 
   const second = await resolveAssistantSession({
     vault: vaultRoot,
-    alias: 'imessage:bob',
+    alias: 'telegram:bob',
     createIfMissing: false,
   })
 
@@ -229,7 +229,7 @@ test('resolveAssistantSession prefers explicit sessionId over conversation-key m
   const conversationMatch = await resolveAssistantSession({
     vault: vaultRoot,
     alias: 'chat:conversation',
-    channel: 'imessage',
+    channel: 'telegram',
     identityId: 'assistant:primary',
     participantId: 'contact:conversation',
     sourceThreadId: 'thread-conversation',
@@ -243,7 +243,7 @@ test('resolveAssistantSession prefers explicit sessionId over conversation-key m
   const resolved = await resolveAssistantSession({
     vault: vaultRoot,
     sessionId: sessionIdMatch.session.sessionId,
-    channel: 'imessage',
+    channel: 'telegram',
     identityId: 'assistant:primary',
     participantId: 'contact:conversation',
     sourceThreadId: 'thread-conversation',
@@ -252,7 +252,7 @@ test('resolveAssistantSession prefers explicit sessionId over conversation-key m
 
   assert.equal(resolved.created, false)
   assert.equal(resolved.session.sessionId, sessionIdMatch.session.sessionId)
-  assert.equal(resolved.session.binding.channel, 'imessage')
+  assert.equal(resolved.session.binding.channel, 'telegram')
   assert.equal(resolved.session.binding.actorId, 'contact:conversation')
   assert.equal(resolved.session.binding.threadId, 'thread-conversation')
 
@@ -397,7 +397,7 @@ test('resolveAssistantSession rejects participant retargeting when a saved sessi
 
   const created = await resolveAssistantSession({
     vault: vaultRoot,
-    channel: 'imessage',
+    channel: 'telegram',
     participantId: '+15551234567',
   })
 
@@ -466,7 +466,7 @@ test('resolveAssistantSession rejects clearing a saved participant binding becau
 
   const created = await resolveAssistantSession({
     vault: vaultRoot,
-    channel: 'imessage',
+    channel: 'telegram',
     participantId: '+15551234567',
   })
 
@@ -567,7 +567,7 @@ test('resolveAssistantSession rejects alias reuse when the supplied routing meta
   const aliasMatch = await resolveAssistantSession({
     vault: vaultRoot,
     alias: 'chat:alias',
-    channel: 'imessage',
+    channel: 'telegram',
     identityId: 'assistant:primary',
     participantId: 'contact:alias',
     sourceThreadId: 'thread-alias',
@@ -575,7 +575,7 @@ test('resolveAssistantSession rejects alias reuse when the supplied routing meta
   const conversationMatch = await resolveAssistantSession({
     vault: vaultRoot,
     alias: 'chat:conversation',
-    channel: 'imessage',
+    channel: 'telegram',
     identityId: 'assistant:primary',
     participantId: 'contact:conversation',
     sourceThreadId: 'thread-conversation',
@@ -591,7 +591,7 @@ test('resolveAssistantSession rejects alias reuse when the supplied routing meta
       resolveAssistantSession({
         vault: vaultRoot,
         alias: 'chat:alias',
-        channel: 'imessage',
+        channel: 'telegram',
         identityId: 'assistant:primary',
         participantId: 'contact:conversation',
         sourceThreadId: 'thread-conversation',
@@ -616,7 +616,7 @@ test('resolveAssistantSession rotates conversation-key sessions after the max ag
 
   const first = await resolveAssistantSession({
     vault: vaultRoot,
-    channel: 'imessage',
+    channel: 'telegram',
     participantId: 'contact:bob',
     sourceThreadId: 'chat-1',
     now: new Date('2026-03-16T00:00:00.000Z'),
@@ -631,7 +631,7 @@ test('resolveAssistantSession rotates conversation-key sessions after the max ag
 
   const rotated = await resolveAssistantSession({
     vault: vaultRoot,
-    channel: 'imessage',
+    channel: 'telegram',
     participantId: 'contact:bob',
     sourceThreadId: 'chat-1',
     now: new Date('2026-03-19T00:00:00.000Z'),
@@ -647,7 +647,7 @@ test('resolveAssistantSession rotates conversation-key sessions after the max ag
 
   const reused = await resolveAssistantSession({
     vault: vaultRoot,
-    channel: 'imessage',
+    channel: 'telegram',
     participantId: 'contact:bob',
     sourceThreadId: 'chat-1',
     now: new Date('2026-03-19T01:00:00.000Z'),
@@ -973,8 +973,8 @@ test('getAssistantSession rejects non-canonical assistant state payloads with ex
         },
         alias: 'legacy:bob',
         binding: {
-          conversationKey: 'channel:imessage|actor:contact%3Abob',
-          channel: 'imessage',
+          conversationKey: 'channel:telegram|actor:contact%3Abob',
+          channel: 'telegram',
           identityId: null,
           actorId: 'contact:bob',
           threadId: 'chat-123',
@@ -1134,8 +1134,7 @@ test('readAssistantAutomationState quarantines and rebuilds legacy automation v1
   )
 
   const recovered = await readAssistantAutomationState(vaultRoot)
-  assert.equal(recovered.autoReplyPrimed, true)
-  assert.deepEqual(recovered.autoReplyChannels, [])
+  assert.deepEqual(recovered.autoReply, [])
 
   const automationQuarantineDirectory = path.join(
     statePaths.quarantineDirectory,
@@ -1363,7 +1362,7 @@ test('assistant session secrets persist in private sidecars with private permiss
   const resolved = await resolveAssistantSession({
     vault: vaultRoot,
     alias: 'assistant:secret-session',
-    channel: 'imessage',
+    channel: 'telegram',
     participantId: 'contact:secret-user',
   })
   const statePaths = resolveAssistantStatePaths(vaultRoot)
@@ -1484,7 +1483,7 @@ test('malformed session secret sidecars are quarantined instead of being treated
   const resolved = await resolveAssistantSession({
     vault: vaultRoot,
     alias: 'assistant:corrupted-sidecar',
-    channel: 'imessage',
+    channel: 'telegram',
     participantId: 'contact:corrupted-sidecar',
   })
   const updatedSession = await saveAssistantSession(vaultRoot, {

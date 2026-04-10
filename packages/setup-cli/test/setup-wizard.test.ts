@@ -123,12 +123,12 @@ test('setup wizard scheduled updates keep the starter bundle unless explicitly o
 })
 
 test('setup wizard selection toggles keep channels and wearables in canonical order', () => {
-  assert.deepEqual(toggleSetupWizardChannel(['telegram'], 'imessage'), [
-    'imessage',
+  assert.deepEqual(toggleSetupWizardChannel(['email'], 'telegram'), [
     'telegram',
+    'email',
   ])
-  assert.deepEqual(toggleSetupWizardChannel(['imessage', 'telegram'], 'imessage'), [
-    'telegram',
+  assert.deepEqual(toggleSetupWizardChannel(['telegram', 'email'], 'telegram'), [
+    'email',
   ])
   assert.deepEqual(toggleSetupWizardWearable(['whoop'], 'garmin'), [
     'garmin',
@@ -138,7 +138,7 @@ test('setup wizard selection toggles keep channels and wearables in canonical or
 })
 
 test('setup wizard exported defaults and wrapper controller keep platform-specific decisions stable', async () => {
-  assert.deepEqual(getDefaultSetupWizardChannels('darwin'), ['imessage'])
+  assert.deepEqual(getDefaultSetupWizardChannels('darwin'), [])
   assert.deepEqual(getDefaultSetupWizardChannels('linux'), [])
   assert.deepEqual(getDefaultSetupWizardWearables(), [])
   assert.deepEqual(
@@ -769,7 +769,7 @@ test.sequential('setup wizard accepts wrapped selection navigation plus space-ba
       assistantOss: null,
       assistantPreset: 'skip',
       assistantProviderName: null,
-      channels: ['linq'],
+      channels: ['email'],
       scheduledUpdates: [],
       wearables: ['whoop'],
     })

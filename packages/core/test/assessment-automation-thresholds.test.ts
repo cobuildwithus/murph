@@ -128,7 +128,7 @@ test("automation previews normalize each schedule shape and route selector field
         everyMs: 15_000,
       },
       route: {
-        channel: "imessage",
+        channel: "telegram",
         deliverResponse: true,
         deliveryTarget: null,
         identityId: null,
@@ -196,7 +196,7 @@ test("automation previews normalize each schedule shape and route selector field
         timeZone: "Australia/Melbourne",
       },
       route: {
-        channel: "imessage",
+        channel: "telegram",
         deliverResponse: true,
         deliveryTarget: null,
         identityId: null,
@@ -223,7 +223,7 @@ test("automation previews normalize each schedule shape and route selector field
           timeZone: "Australia/Sydney",
         },
         route: {
-          channel: "imessage",
+          channel: "telegram",
           deliverResponse: true,
           deliveryTarget: null,
           identityId: null,
@@ -237,7 +237,7 @@ test("automation previews normalize each schedule shape and route selector field
         timeZone: "Australia/Sydney",
       },
       route: {
-        channel: "imessage",
+        channel: "telegram",
         deliverResponse: true,
         deliveryTarget: null,
         identityId: null,

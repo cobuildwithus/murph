@@ -77,9 +77,30 @@ const SETUP_ALIAS_TIMEOUT_MS = 45_000
 
 type InboxBootstrapInput = Parameters<InboxServices['bootstrap']>[0]
 type InboxDoctorInput = Parameters<InboxServices['doctor']>[0]
+type InboxListInput = Parameters<InboxServices['list']>[0]
 type InboxSourceAddInput = Parameters<InboxServices['sourceAdd']>[0]
 type InboxSourceListInput = Parameters<InboxServices['sourceList']>[0]
 type InboxSourceSetEnabledInput = Parameters<InboxServices['sourceSetEnabled']>[0]
+
+function listAutoReplyChannels(
+  state: Awaited<ReturnType<typeof readAssistantAutomationState>>,
+): string[] {
+  return state.autoReply.map((entry) => entry.channel)
+}
+
+function createEmptyInboxListResult(input: InboxListInput) {
+  return {
+    vault: input.vault,
+    filters: {
+      afterCaptureId: input.afterCaptureId ?? null,
+      afterOccurredAt: input.afterOccurredAt ?? null,
+      limit: input.limit ?? 20,
+      oldestFirst: input.oldestFirst ?? false,
+      sourceId: input.sourceId ?? null,
+    },
+    items: [],
+  }
+}
 
 function buildFakeJwt(payload: Record<string, unknown>): string {
   const header = Buffer.from(JSON.stringify({ alg: 'none' }), 'utf8')
@@ -1160,7 +1181,7 @@ test.sequential('onboard CLI keeps post-setup CTAs usable when invoked as murph'
   )
   assert.equal(
     result.meta.cta?.commands[2]?.command,
-    'murph inbox source add imessage --id imessage:self --account self --includeOwn',
+    'murph inbox source add telegram --id telegram:bot --account bot',
   )
 })
 
@@ -1281,6 +1302,14 @@ test('onboard invokes the wizard for interactive runs and skips it for explicit 
   const cli = createSetupCli({
     commandName: 'murph',
     platform: () => 'darwin',
+    runtimeEnv: {
+      getCurrentEnv() {
+        return {}
+      },
+      async promptForMissing() {
+        return {}
+      },
+    },
     terminal: {
       stdinIsTTY: true,
       stderrIsTTY: true,
@@ -1307,7 +1336,7 @@ test('onboard invokes the wizard for interactive runs and skips it for explicit 
         wizardInitialChannels.push([...input.initialChannels])
         wizardInitialScheduledUpdates.push([...input.initialScheduledUpdates])
         return {
-          channels: ['imessage'],
+          channels: ['telegram'],
           scheduledUpdates: ['environment-health-watch'],
           wearables: [],
         }
@@ -1334,12 +1363,12 @@ test('onboard invokes the wizard for interactive runs and skips it for explicit 
     })
 
     assert.equal(wizardCalls, 1)
-    assert.deepEqual(wizardInitialChannels, [['imessage']])
+    assert.deepEqual(wizardInitialChannels, [[]])
     assert.deepEqual(wizardInitialScheduledUpdates, [[
       'environment-health-watch',
       'weekly-health-snapshot',
     ]])
-    assert.deepEqual(receivedChannels[1], ['imessage'])
+    assert.deepEqual(receivedChannels[1], ['telegram'])
     assert.deepEqual(receivedScheduledUpdates[1], ['environment-health-watch'])
     assert.deepEqual(receivedWearables[1], [])
   } finally {
@@ -1347,7 +1376,7 @@ test('onboard invokes the wizard for interactive runs and skips it for explicit 
   }
 })
 
-test('interactive onboarding on Linux starts without the macOS-only iMessage default', async () => {
+test('interactive onboarding on Linux starts with no default chat channels', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-setup-wizard-linux-'))
   const wizardInitialChannels: Array<string[]> = []
   const wizardInitialScheduledUpdates: Array<string[]> = []
@@ -1408,7 +1437,7 @@ test('interactive onboarding on Linux starts without the macOS-only iMessage def
 
 test('resolveInitialSetupWizardChannels falls back to channel defaults when no auto-reply channels are persisted', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-setup-wizard-'))
-  const expectedChannels = process.platform === 'darwin' ? ['imessage'] : []
+  const expectedChannels: string[] = []
 
   try {
     assert.deepEqual(
@@ -2070,10 +2099,10 @@ test('setup handoff launches assistant automation instead of chat when auto-repl
       channels: [
         {
           autoReply: true,
-          channel: 'imessage' as const,
+          channel: 'telegram' as const,
           configured: true,
-          connectorId: 'imessage:self',
-          detail: 'Configured iMessage.',
+          connectorId: 'telegram:bot',
+          detail: 'Configured Telegram.',
           enabled: true,
           missingEnv: [],
         },
@@ -2186,6 +2215,9 @@ test.sequential('setup service configures Telegram and enables assistant auto-re
           parserToolchain: null,
         }
       },
+      async list(input: InboxListInput) {
+        return createEmptyInboxListResult(input)
+      },
       async sourceAdd(input: InboxSourceAddInput) {
         sourceAddCalls.push(input as unknown as Record<string, unknown>)
         return {
@@ -2285,7 +2317,7 @@ test.sequential('setup service configures Telegram and enables assistant auto-re
     )
 
     const automationState = await readAssistantAutomationState(vaultRoot)
-    assert.deepEqual(automationState.autoReplyChannels, ['telegram'])
+    assert.deepEqual(listAutoReplyChannels(automationState), ['telegram'])
   } finally {
     await rm(tempRoot, { recursive: true, force: true })
   }
@@ -2433,7 +2465,7 @@ test.sequential('setup service keeps Telegram configured but disables auto-reply
     )
 
     const automationState = await readAssistantAutomationState(vaultRoot)
-    assert.deepEqual(automationState.autoReplyChannels, [])
+    assert.deepEqual(listAutoReplyChannels(automationState), [])
   } finally {
     await rm(tempRoot, { recursive: true, force: true })
   }
@@ -3791,7 +3823,7 @@ test.sequential('setup-macos wrapper dry-run prints a plan without mutating the 
   }
 })
 
-test.sequential('setup service dry-run on Linux keeps cross-platform channels and skips iMessage cleanly', async () => {
+test.sequential('setup service dry-run on Linux reports supported channels cleanly', async () => {
   const homeRoot = await mkdtemp(path.join(tmpdir(), 'murph-setup-linux-home-'))
   const services = createSetupServices({
     arch: () => 'x64',
@@ -3804,18 +3836,17 @@ test.sequential('setup service dry-run on Linux keeps cross-platform channels an
   try {
     const result = await services.setupHost({
       vault: './vault',
-      channels: ['imessage', 'email'],
+      channels: ['email'],
       dryRun: true,
     })
 
     assert.equal(result.platform, 'linux')
     assert.equal(result.dryRun, true)
-    assert.equal(result.channels[0]?.channel, 'imessage')
+    assert.equal(result.channels[0]?.channel, 'email')
     assert.equal(result.channels[0]?.configured, false)
-    assert.match(result.channels[0]?.detail ?? '', /requires macOS/u)
-    assert.equal(result.channels[1]?.channel, 'email')
-    assert.equal(result.channels[1]?.autoReply, true)
-    assert.ok(result.steps.some((step) => step.id === 'channel-imessage' && step.status === 'skipped'))
+    assert.match(result.channels[0]?.detail ?? '', /enable assistant auto-reply for direct email threads/u)
+    assert.equal(result.channels[0]?.autoReply, true)
+    assert.ok(result.steps.some((step) => step.id === 'channel-email' && step.status === 'planned'))
   } finally {
     await rm(homeRoot, { recursive: true, force: true })
   }
@@ -3979,8 +4010,8 @@ test.sequential('Linux setup reuses one apt update across declarative tool insta
   }
 })
 
-test.sequential('Linux setup preserves existing iMessage state while adding Telegram on the same vault', async () => {
-  const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-setup-linux-preserve-imessage-'))
+test.sequential('Linux setup reuses existing email state while adding Telegram on the same vault', async () => {
+  const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-setup-linux-preserve-email-'))
   const homeRoot = path.join(tempRoot, 'home')
   const vaultRoot = path.join(tempRoot, 'vault')
   const binRoot = path.join(tempRoot, 'bin')
@@ -3990,13 +4021,13 @@ test.sequential('Linux setup preserves existing iMessage state while adding Tele
   const cliBinPath = path.join(tempRoot, 'packages', 'cli', 'dist', 'bin.js')
   const connectors: InboxConnectorConfig[] = [
     {
-      accountId: 'self',
+      accountId: 'default',
       enabled: true,
-      id: 'imessage:self',
+      id: 'email:agentmail',
       options: {
-        includeOwnMessages: true,
+        emailAddress: 'team@example.com',
       },
-      source: 'imessage' as const,
+      source: 'email' as const,
     },
   ]
   const sourceAddCalls: Array<{
@@ -4019,12 +4050,14 @@ test.sequential('Linux setup preserves existing iMessage state while adding Tele
   await writeExecutable(pdftotextCommand)
   await writeExecutable(whisperCommand)
   await saveAssistantAutomationState(vaultRoot, {
-    version: 2,
+    version: 1,
     inboxScanCursor: null,
-    autoReplyScanCursor: null,
-    autoReplyChannels: ['imessage'],
-    autoReplyBacklogChannels: [],
-    autoReplyPrimed: false,
+    autoReply: [
+      {
+        channel: 'email',
+        cursor: null,
+      },
+    ],
     updatedAt: '2026-03-24T23:00:00.000Z',
   })
 
@@ -4035,6 +4068,7 @@ test.sequential('Linux setup preserves existing iMessage state while adding Tele
       await writeFile(destinationPath, 'model', 'utf8')
     },
     env: () => ({
+      AGENTMAIL_API_KEY: 'agentmail-key',
       PATH: binRoot,
       TELEGRAM_BOT_TOKEN: 'token-123',
     }),
@@ -4046,6 +4080,25 @@ test.sequential('Linux setup preserves existing iMessage state while adding Tele
         })
       },
       async doctor(input: InboxDoctorInput) {
+        if (input.sourceId === 'email:agentmail') {
+          return {
+            vault: input.vault,
+            configPath: '.runtime/inboxd/config.json',
+            databasePath: '.runtime/inboxd.sqlite',
+            target: input.sourceId ?? null,
+            ok: true,
+            checks: [
+              {
+                name: 'probe',
+                status: 'warn' as const,
+                message: 'Email inbox reachable',
+              },
+            ],
+            connectors: [],
+            parserToolchain: null,
+          }
+        }
+
         return {
           vault: input.vault,
           configPath: '.runtime/inboxd/config.json',
@@ -4067,6 +4120,9 @@ test.sequential('Linux setup preserves existing iMessage state while adding Tele
           connectors: [],
           parserToolchain: null,
         }
+      },
+      async list(input: InboxListInput) {
+        return createEmptyInboxListResult(input)
       },
       async sourceAdd(input: InboxSourceAddInput) {
         sourceAddCalls.push({
@@ -4142,16 +4198,19 @@ test.sequential('Linux setup preserves existing iMessage state while adding Tele
 
   try {
     const result = await services.setupHost({
-      channels: ['telegram'],
+      channels: ['telegram', 'email'],
       vault: vaultRoot,
       whisperModel: 'base.en',
     })
 
     assert.equal(result.platform, 'linux')
-    assert.equal(result.channels.length, 1)
+    assert.equal(result.channels.length, 2)
     assert.equal(result.channels[0]?.channel, 'telegram')
     assert.equal(result.channels[0]?.configured, true)
     assert.equal(result.channels[0]?.autoReply, true)
+    assert.equal(result.channels[1]?.channel, 'email')
+    assert.equal(result.channels[1]?.configured, true)
+    assert.equal(result.channels[1]?.autoReply, true)
     assert.deepEqual(sourceAddCalls, [
       {
         account: 'bot',
@@ -4162,10 +4221,10 @@ test.sequential('Linux setup preserves existing iMessage state while adding Tele
       },
     ])
     assert.deepEqual(sourceSetEnabledCalls, [])
-    assert.equal(connectors.find((connector) => connector.id === 'imessage:self')?.enabled, true)
+    assert.equal(connectors.find((connector) => connector.id === 'email:agentmail')?.enabled, true)
 
     const automationState = await readAssistantAutomationState(vaultRoot)
-    assert.deepEqual(automationState.autoReplyChannels, ['telegram', 'imessage'])
+    assert.deepEqual(listAutoReplyChannels(automationState), ['email', 'telegram'])
   } finally {
     await rm(tempRoot, { recursive: true, force: true })
   }
@@ -4230,7 +4289,6 @@ exit 99
     assert.match(result.stdout, /download Node 24\.14\.1 under ~\/\.murph\/bootstrap/u)
     assert.match(result.stdout, /corepack pnpm install/u)
     assert.match(result.stdout, /node packages\/cli\/dist\/bin\.js onboard --dry-run --vault \.\/vault/u)
-    assert.match(result.stdout, /iMessage stays macOS-only/u)
     assert.equal(result.stderr, '')
     assert.equal(await readOptionalText(callLog), '')
   } finally {

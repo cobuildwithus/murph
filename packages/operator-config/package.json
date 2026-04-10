@@ -76,11 +76,6 @@
       "import": "./dist/hosted-assistant-config.js",
       "default": "./dist/hosted-assistant-config.js"
     },
-    "./imessage-readiness": {
-      "types": "./dist/imessage-readiness.d.ts",
-      "import": "./dist/imessage-readiness.js",
-      "default": "./dist/imessage-readiness.js"
-    },
     "./knowledge-contracts": {
       "types": "./dist/knowledge-contracts.d.ts",
       "import": "./dist/knowledge-contracts.js",

@@ -1326,7 +1326,7 @@ test("attachment parse worker consumes inbox jobs, writes derived artifacts, and
   const pipeline = await createInboxPipeline({ vaultRoot, runtime });
 
   const capture = await pipeline.processCapture({
-    source: "imessage",
+    source: "telegram",
     externalId: "img-1",
     accountId: "self",
     thread: {
@@ -1442,7 +1442,7 @@ test("stale running parser attempts do not overwrite a requeued rerun", async ()
   const pipeline = await createInboxPipeline({ vaultRoot, runtime });
 
   const capture = await pipeline.processCapture({
-    source: "imessage",
+    source: "telegram",
     externalId: "race-1",
     accountId: "self",
     thread: {
@@ -1632,7 +1632,7 @@ test("attachment parse worker marks jobs failed when no provider is available", 
   const pipeline = await createInboxPipeline({ vaultRoot, runtime });
 
   const capture = await pipeline.processCapture({
-    source: "imessage",
+    source: "telegram",
     externalId: "img-fail-1",
     accountId: "self",
     thread: {
@@ -1688,7 +1688,7 @@ test("attachment parse worker can drain jobs scoped to a single capture", async 
   const pipeline = await createInboxPipeline({ vaultRoot, runtime });
 
   const first = await pipeline.processCapture({
-    source: "imessage",
+    source: "telegram",
     externalId: "scoped-first",
     thread: {
       id: "chat-scoped",
@@ -1709,7 +1709,7 @@ test("attachment parse worker can drain jobs scoped to a single capture", async 
     raw: {},
   });
   const second = await pipeline.processCapture({
-    source: "imessage",
+    source: "telegram",
     externalId: "scoped-second",
     thread: {
       id: "chat-scoped",
@@ -1809,7 +1809,7 @@ test("parsed inbox pipeline auto-drains parser jobs for each processed capture",
   });
 
   const capture = await pipeline.processCapture({
-    source: "imessage",
+    source: "telegram",
     externalId: "auto-drain-1",
     thread: {
       id: "chat-auto-drain",
@@ -1855,7 +1855,7 @@ test("daemon with parsers drains pending jobs before connector watch work begins
   const pipeline = await createInboxPipeline({ vaultRoot, runtime });
 
   const capture = await pipeline.processCapture({
-    source: "imessage",
+    source: "telegram",
     externalId: "startup-drain-1",
     thread: {
       id: "chat-startup-drain",
@@ -1880,8 +1880,8 @@ test("daemon with parsers drains pending jobs before connector watch work begins
   const daemonRuntime = await openInboxRuntime({ vaultRoot });
   const controller = new AbortController();
   const connector: PollConnector = {
-    id: "noop-imessage",
-    source: "imessage",
+    id: "noop-telegram",
+    source: "telegram",
     accountId: "self",
     kind: "poll" as const,
     capabilities: {
@@ -1961,7 +1961,7 @@ test("daemon with parsers skips startup drain when the signal is already aborted
   const pipeline = await createInboxPipeline({ vaultRoot, runtime });
 
   const capture = await pipeline.processCapture({
-    source: "imessage",
+    source: "telegram",
     externalId: "aborted-drain-1",
     thread: {
       id: "chat-aborted-drain",
@@ -1994,8 +1994,8 @@ test("daemon with parsers skips startup drain when the signal is already aborted
     registry: createParserRegistry([]),
     connectors: [
       {
-        id: "aborted-imessage",
-        source: "imessage",
+        id: "aborted-telegram",
+        source: "telegram",
         accountId: "self",
         kind: "poll" as const,
         capabilities: {
@@ -2039,7 +2039,7 @@ test("daemon with parsers stops startup drain after abort between jobs", async (
   const pipeline = await createInboxPipeline({ vaultRoot, runtime });
 
   const first = await pipeline.processCapture({
-    source: "imessage",
+    source: "telegram",
     externalId: "abort-drain-first",
     thread: {
       id: "chat-abort-drain",
@@ -2060,7 +2060,7 @@ test("daemon with parsers stops startup drain after abort between jobs", async (
     raw: {},
   });
   const second = await pipeline.processCapture({
-    source: "imessage",
+    source: "telegram",
     externalId: "abort-drain-second",
     thread: {
       id: "chat-abort-drain",
@@ -2143,8 +2143,8 @@ test("daemon with parsers still rejects connector failures after cleanup", async
       registry: createParserRegistry([]),
       connectors: [
         {
-          id: "failing-imessage",
-          source: "imessage",
+          id: "failing-telegram",
+          source: "telegram",
           accountId: "self",
           kind: "poll" as const,
           capabilities: {
@@ -2163,7 +2163,7 @@ test("daemon with parsers still rejects connector failures after cleanup", async
       ],
       signal: new AbortController().signal,
     }),
-    /Connector "failing-imessage" \(imessage\) failed: daemon blew up/u,
+    /Connector "failing-telegram" \(telegram\) failed: daemon blew up/u,
   );
 });
 
@@ -2223,8 +2223,8 @@ test("daemon with parsers can keep healthy connectors running after one connecto
         },
       },
         {
-          id: "failing-imessage",
-          source: "imessage",
+          id: "failing-telegram",
+          source: "telegram",
         accountId: "self",
         kind: "poll" as const,
           capabilities: {
@@ -2275,7 +2275,7 @@ test("parsed inbox pipeline stores captures even when auto-drain parsing fails",
   });
 
   const capture = await pipeline.processCapture({
-    source: "imessage",
+    source: "telegram",
     externalId: "auto-drain-fail-1",
     thread: {
       id: "chat-auto-fail",
@@ -2329,7 +2329,7 @@ test("attachment parse worker marks jobs failed when no provider can handle the 
   const pipeline = await createInboxPipeline({ vaultRoot, runtime });
 
   const capture = await pipeline.processCapture({
-    source: "imessage",
+    source: "telegram",
     externalId: "img-fail-1",
     accountId: "self",
     thread: {
@@ -2387,7 +2387,7 @@ test("attachment parse worker stores audio output as transcript text", async () 
   const pipeline = await createInboxPipeline({ vaultRoot, runtime });
 
   const capture = await pipeline.processCapture({
-    source: "imessage",
+    source: "telegram",
     externalId: "audio-1",
     accountId: "self",
     thread: {
@@ -2469,7 +2469,7 @@ test("successful parser results stay derived-only and rebuild re-enqueues work f
   const pipeline = await createInboxPipeline({ vaultRoot, runtime });
 
   const capture = await pipeline.processCapture({
-    source: "imessage",
+    source: "telegram",
     externalId: "img-rebuild-1",
     accountId: "self",
     thread: {
@@ -2579,7 +2579,7 @@ test("attachment parse worker redacts local paths from stored failure messages",
   const pipeline = await createInboxPipeline({ vaultRoot, runtime });
 
   const capture = await pipeline.processCapture({
-    source: "imessage",
+    source: "telegram",
     externalId: "img-failure-1",
     accountId: "self",
     thread: {

@@ -1,10 +1,9 @@
 import type {
   InboxConnectorConfig,
 } from '@murphai/operator-config/inbox-cli-contracts'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import type {
   EmailDriver,
-  ImessageDriver,
-  InboxImessageRuntimeModule,
   InboxRuntimeModule,
   PollConnector,
   TelegramDriver,
@@ -15,34 +14,11 @@ export async function instantiateConnector(input: {
   connector: InboxConnectorConfig
   inputLimit?: number
   loadInbox: () => Promise<InboxRuntimeModule>
-  loadInboxImessage?: () => Promise<InboxImessageRuntimeModule>
-  loadImessageDriver: (config: InboxConnectorConfig) => Promise<ImessageDriver>
   loadTelegramDriver: (config: InboxConnectorConfig) => Promise<TelegramDriver>
   loadEmailDriver?: (config: InboxConnectorConfig) => Promise<EmailDriver>
   linqWebhookSecret: string | null
-  ensureImessageReady?: () => Promise<void>
 }): Promise<PollConnector> {
   switch (input.connector.source) {
-    case 'imessage': {
-      if (!input.loadInboxImessage) {
-        throw new Error('iMessage connector instantiation requires loadInboxImessage.')
-      }
-
-      await input.ensureImessageReady?.()
-      const inboxImessage = await input.loadInboxImessage()
-      const driver = await input.loadImessageDriver(input.connector)
-      return inboxImessage.createImessageConnector({
-        driver,
-        id: input.connector.id,
-        accountId: input.connector.accountId ?? 'self',
-        includeOwnMessages:
-          input.connector.options.includeOwnMessages ?? true,
-        backfillLimit:
-          normalizeBackfillLimit(input.inputLimit) ??
-          input.connector.options.backfillLimit ??
-          500,
-      })
-    }
     case 'telegram': {
       const inboxd = await input.loadInbox()
       const driver = await input.loadTelegramDriver(input.connector)
@@ -89,8 +65,7 @@ export async function instantiateConnector(input: {
       })
     }
     default: {
-      const unsupportedSource: never = input.connector.source
-      throw new Error(`Unsupported inbox connector source: ${unsupportedSource}`)
+      throw new Error(`Unsupported inbox connector source: ${input.connector.source}`)
     }
   }
 }

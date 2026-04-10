@@ -114,7 +114,7 @@ import {
   runAssistantAutomation,
   runAssistantChat,
   scanAssistantAutomationOnce,
-  scanAssistantAutoReplyOnce,
+  scanAssistantAutoReplyOnce as scanAssistantAutoReplyOnceCurrent,
   scanAssistantInboxOnce,
   sendAssistantMessage,
 } from '@murphai/assistant-cli/assistant/runtime'
@@ -227,6 +227,71 @@ type AssistantAutoReplyScanActual = Omit<
   'nextWakeAt'
 > & {
   nextWakeAt: string | null
+}
+
+type AssistantAutomationCursorSnapshot = {
+  captureId: string
+  occurredAt: string
+} | null
+
+type AssistantAutoReplyEntrySnapshot = {
+  channel: string
+  cursor: AssistantAutomationCursorSnapshot
+}
+
+function createLegacyAutomationState(input: {
+  inboxScanCursor: AssistantAutomationCursorSnapshot
+  autoReplyScanCursor?: AssistantAutomationCursorSnapshot
+  autoReplyChannels: readonly string[]
+  autoReplyBacklogChannels?: readonly string[]
+  autoReplyPrimed?: boolean
+}) {
+  const autoReplyScanCursor = input.autoReplyScanCursor ?? null
+  const backlogChannels = new Set(
+    input.autoReplyBacklogChannels ??
+      (input.autoReplyPrimed === false ? input.autoReplyChannels : []),
+  )
+
+  return {
+    inboxScanCursor: input.inboxScanCursor,
+    autoReply: input.autoReplyChannels.map((channel) => ({
+      channel,
+      cursor: backlogChannels.has(channel) ? null : autoReplyScanCursor,
+    })),
+  }
+}
+
+function snapshotAssistantAutomationProgress(input: {
+  autoReply: readonly AssistantAutoReplyEntrySnapshot[]
+  inboxScanCursor: AssistantAutomationCursorSnapshot
+}) {
+  return {
+    inboxScanCursor: input.inboxScanCursor,
+    autoReplyScanCursor: input.autoReply[0]?.cursor ?? null,
+    autoReplyChannels: input.autoReply.map((entry) => entry.channel),
+  }
+}
+
+function snapshotAssistantAutoReplyProgress(input: {
+  autoReply: readonly AssistantAutoReplyEntrySnapshot[]
+}) {
+  return {
+    cursor: input.autoReply[0]?.cursor ?? null,
+  }
+}
+
+function scanAssistantAutoReplyOnce(
+  input: Parameters<typeof scanAssistantAutoReplyOnceCurrent>[0] & {
+    backlogChannels?: readonly string[]
+    autoReplyPrimed?: boolean
+  },
+) {
+  const {
+    autoReplyPrimed: _autoReplyPrimed,
+    backlogChannels: _backlogChannels,
+    ...rest
+  } = input
+  return scanAssistantAutoReplyOnceCurrent(rest)
 }
 
 function assertAssistantWakeAt(
@@ -676,8 +741,8 @@ test('sendAssistantMessage keeps older local history in raw transcript files wit
   for (let index = 0; index < 9; index += 1) {
     latest = await sendAssistantMessage({
       vault: vaultRoot,
-      alias: 'imessage:distill',
-      channel: 'imessage',
+      alias: 'telegram:distill',
+      channel: 'telegram',
       identityId: 'assistant:primary',
       participantId: 'contact:distill',
       sourceThreadId: 'chat-distill',
@@ -738,8 +803,8 @@ test('sendAssistantMessage chains official OpenAI responses while retaining loca
   for (let index = 0; index < 9; index += 1) {
     latest = await sendAssistantMessage({
       vault: vaultRoot,
-      alias: 'imessage:openai-responses',
-      channel: 'imessage',
+      alias: 'telegram:openai-responses',
+      channel: 'telegram',
       identityId: 'assistant:primary',
       participantId: 'contact:openai',
       sourceThreadId: 'chat-openai',
@@ -781,13 +846,13 @@ test('sanitizeAssistantOutboundReply removes local source scaffolding for outbou
     [
       'From vault/journal/2026-03-29.md: Sleep consistency looked better this week.',
       'See [the note](/tmp/redacted/journal/2026-03-29.md) for context.',
-      '[Source: raw/inbox/imessage.json]',
+      '[Source: raw/inbox/telegram.json]',
       'In research/weekly-summary.md: Keep the bedtime window narrow.',
       '',
       '',
       'Done.',
     ].join('\n'),
-    'imessage',
+    'telegram',
   )
 
   assert.equal(
@@ -857,8 +922,8 @@ test('sendAssistantMessage persists only assistant session metadata and reuses p
 
   const first = await sendAssistantMessage({
     vault: vaultRoot,
-    alias: 'imessage:bob',
-    channel: 'imessage',
+    alias: 'telegram:bob',
+    channel: 'telegram',
     identityId: 'assistant:primary',
     participantId: 'contact:bob',
     sourceThreadId: 'chat-123',
@@ -871,16 +936,16 @@ test('sendAssistantMessage persists only assistant session metadata and reuses p
 
   const second = await sendAssistantMessage({
     vault: vaultRoot,
-    alias: 'imessage:bob',
+    alias: 'telegram:bob',
     prompt: 'What about today?',
   })
 
   assert.equal(first.session.turnCount, 1)
   assert.equal(first.session.providerBinding?.providerSessionId, 'thread-123')
-  assert.equal(first.session.alias, 'imessage:bob')
+  assert.equal(first.session.alias, 'telegram:bob')
   assert.equal(first.delivery, null)
   assert.equal(first.deliveryError, null)
-  assert.equal(first.session.binding.channel, 'imessage')
+  assert.equal(first.session.binding.channel, 'telegram')
   assert.equal(first.session.binding.actorId, 'contact:bob')
   assert.equal(first.session.binding.threadId, 'chat-123')
   assert.equal('vault' in first.session, false)
@@ -898,7 +963,7 @@ test('sendAssistantMessage persists only assistant session metadata and reuses p
   assert.equal(secondCall.reasoningEffort, 'xhigh')
   assert.match(firstCall.systemPrompt ?? '', /You are Murph/u)
   assert.equal(firstCall.userPrompt, 'What did Bob eat?')
-  assert.equal(firstCall.sessionContext?.binding.channel, 'imessage')
+  assert.equal(firstCall.sessionContext?.binding.channel, 'telegram')
   assert.equal(typeof secondCall.systemPrompt, 'string')
   assert.equal(secondCall.userPrompt, 'What about today?')
 })
@@ -939,8 +1004,8 @@ test('sendAssistantMessage does not persist hosted usage records without hosted 
 
   await sendAssistantMessage({
     vault: vaultRoot,
-    alias: 'imessage:bob',
-    channel: 'imessage',
+    alias: 'telegram:bob',
+    channel: 'telegram',
     identityId: 'assistant:primary',
     participantId: 'contact:bob',
     sourceThreadId: 'chat-123',
@@ -972,8 +1037,8 @@ test('sendAssistantMessage defaults Codex reasoning to the Murph-owned default',
 
   const result = await sendAssistantMessage({
     vault: vaultRoot,
-    alias: 'imessage:bob',
-    channel: 'imessage',
+    alias: 'telegram:bob',
+    channel: 'telegram',
     identityId: 'assistant:primary',
     participantId: 'contact:bob',
     sourceThreadId: 'chat-123',
@@ -1028,8 +1093,8 @@ test('sendAssistantMessage freezes hosted usage credential ownership from the pr
 
   await sendAssistantMessage({
     vault: vaultRoot,
-    alias: 'imessage:bob',
-    channel: 'imessage',
+    alias: 'telegram:bob',
+    channel: 'telegram',
     executionContext: {
       hosted: {
         memberId: 'member_123',
@@ -1074,7 +1139,7 @@ test('sendAssistantMessage recovers provider sessions after user interruptions a
   await assert.rejects(
     sendAssistantMessage({
       vault: vaultRoot,
-      alias: 'imessage:bob',
+      alias: 'telegram:bob',
       prompt: 'Pause this turn.',
       abortSignal: abortController.signal,
       provider: 'codex-cli',
@@ -1095,7 +1160,7 @@ test('sendAssistantMessage recovers provider sessions after user interruptions a
 
   const resolved = await resolveAssistantSession({
     vault: vaultRoot,
-    alias: 'imessage:bob',
+    alias: 'telegram:bob',
     provider: 'codex-cli',
     model: null,
     sandbox: 'workspace-write',
@@ -1131,10 +1196,10 @@ test('sendAssistantMessage can optionally deliver the provider reply over the ma
     async (input: { message: string; sessionId: string }) => ({
       message: input.message,
       session: createMockCodexRuntimeSession({
-        alias: 'imessage:bob',
+        alias: 'telegram:bob',
         binding: {
-          conversationKey: 'channel:imessage|actor:%2B15551234567',
-          channel: 'imessage',
+          conversationKey: 'channel:telegram|actor:%2B15551234567',
+          channel: 'telegram',
           identityId: null,
           actorId: '+15551234567',
           threadId: null,
@@ -1155,7 +1220,7 @@ test('sendAssistantMessage can optionally deliver the provider reply over the ma
         updatedAt: '2026-03-16T00:00:01.000Z',
       }),
       delivery: {
-        channel: 'imessage',
+        channel: 'telegram',
         target: '+15551234567',
         targetKind: 'participant',
         sentAt: '2026-03-16T00:00:01.000Z',
@@ -1166,20 +1231,20 @@ test('sendAssistantMessage can optionally deliver the provider reply over the ma
 
   const result = await sendAssistantMessage({
     vault: vaultRoot,
-    alias: 'imessage:bob',
-    channel: 'imessage',
+    alias: 'telegram:bob',
+    channel: 'telegram',
     participantId: '+15551234567',
     prompt: 'send it',
     deliverResponse: true,
   })
 
   assert.equal(result.response, 'sent reply')
-  assert.equal(result.delivery?.channel, 'imessage')
+  assert.equal(result.delivery?.channel, 'telegram')
   assert.equal(result.delivery?.target, '+15551234567')
   assert.equal(result.deliveryError, null)
   const deliveryCall = runtimeMocks.deliverAssistantMessageOverBinding.mock.calls[0]?.[0]
   assert.equal(deliveryCall?.sessionId, result.session.sessionId)
-  assert.equal(deliveryCall?.session?.binding.channel, 'imessage')
+  assert.equal(deliveryCall?.session?.binding.channel, 'telegram')
   assert.equal(deliveryCall?.session?.binding.identityId, null)
   assert.equal(deliveryCall?.session?.binding.actorId, '+15551234567')
   assert.equal(deliveryCall?.session?.binding.threadId, null)
@@ -1210,8 +1275,8 @@ test('sendAssistantMessage keeps provider success and session updates even when 
 
   const result = await sendAssistantMessage({
     vault: vaultRoot,
-    alias: 'imessage:bob',
-    channel: 'imessage',
+    alias: 'telegram:bob',
+    channel: 'telegram',
     participantId: '+15551234567',
     prompt: 'send anyway',
     deliverResponse: true,
@@ -1427,7 +1492,7 @@ test('sendAssistantMessage redacts vault paths under HOME in returned output', a
   try {
     const result = await sendAssistantMessage({
       vault: vaultRoot,
-      alias: 'imessage:bob',
+      alias: 'telegram:bob',
       prompt: 'Keep paths private.',
     })
 
@@ -2101,19 +2166,16 @@ test('scanAssistantAutomationOnce keeps the routing cursor pinned when a capture
     modelSpec: {
       model: 'gpt-oss:20b',
     },
-    state: {
+    state: createLegacyAutomationState({
       inboxScanCursor: null,
       autoReplyScanCursor: null,
       autoReplyChannels: [],
       autoReplyBacklogChannels: [],
       autoReplyPrimed: true,
-    },
+    }),
     vault: vaultRoot,
     async onStateProgress(next) {
-      stateProgress.push({
-        inboxScanCursor: next.inboxScanCursor,
-        autoReplyScanCursor: next.autoReplyScanCursor,
-      })
+      stateProgress.push(snapshotAssistantAutomationProgress(next))
     },
   })
 
@@ -2171,8 +2233,8 @@ test('scanAssistantAutomationOnce preserves document attachments before auto-rep
     message: 'logged it',
     session: createMockCodexRuntimeSession({
       binding: {
-        conversationKey: 'channel:imessage|thread:chat-doc-auto',
-        channel: 'imessage',
+        conversationKey: 'channel:telegram|thread:chat-doc-auto',
+        channel: 'telegram',
         identityId: null,
         actorId: '+15550001111',
         threadId: 'chat-doc-auto',
@@ -2193,7 +2255,7 @@ test('scanAssistantAutomationOnce preserves document attachments before auto-rep
       updatedAt: '2026-03-18T00:00:01.000Z',
     }),
     delivery: {
-      channel: 'imessage',
+      channel: 'telegram',
       target: '+15550001111',
       targetKind: 'participant',
       sentAt: '2026-03-18T00:00:01.000Z',
@@ -2207,7 +2269,7 @@ test('scanAssistantAutomationOnce preserves document attachments before auto-rep
         items: [
           {
             captureId: 'cap-doc-auto',
-            source: 'imessage',
+            source: 'telegram',
             accountId: 'self',
             externalId: 'ext-doc-auto',
             threadId: 'chat-doc-auto',
@@ -2228,7 +2290,7 @@ test('scanAssistantAutomationOnce preserves document attachments before auto-rep
       show: async () => ({
         capture: {
           captureId: 'cap-doc-auto',
-          source: 'imessage',
+          source: 'telegram',
           accountId: 'self',
           externalId: 'ext-doc-auto',
           threadId: 'chat-doc-auto',
@@ -2263,13 +2325,13 @@ test('scanAssistantAutomationOnce preserves document attachments before auto-rep
       }),
       preserveDocumentAttachments,
     } as any,
-    state: {
+    state: createLegacyAutomationState({
       inboxScanCursor: null,
       autoReplyScanCursor: null,
-      autoReplyChannels: ['imessage'],
+      autoReplyChannels: ['telegram'],
       autoReplyBacklogChannels: [],
       autoReplyPrimed: true,
-    },
+    }),
     vault: vaultRoot,
   })
 
@@ -2316,7 +2378,7 @@ test('scanAssistantAutomationOnce stops auto-reply when document preservation fa
         items: [
           {
             captureId: 'cap-doc-auto-fail',
-            source: 'imessage',
+            source: 'telegram',
             accountId: 'self',
             externalId: 'ext-doc-auto-fail',
             threadId: 'chat-doc-auto-fail',
@@ -2337,7 +2399,7 @@ test('scanAssistantAutomationOnce stops auto-reply when document preservation fa
       show: async () => ({
         capture: {
           captureId: 'cap-doc-auto-fail',
-          source: 'imessage',
+          source: 'telegram',
           accountId: 'self',
           externalId: 'ext-doc-auto-fail',
           threadId: 'chat-doc-auto-fail',
@@ -2373,13 +2435,13 @@ test('scanAssistantAutomationOnce stops auto-reply when document preservation fa
       }),
       preserveDocumentAttachments,
     } as any,
-    state: {
+    state: createLegacyAutomationState({
       inboxScanCursor: null,
       autoReplyScanCursor: null,
-      autoReplyChannels: ['imessage'],
+      autoReplyChannels: ['telegram'],
       autoReplyBacklogChannels: [],
       autoReplyPrimed: true,
-    },
+    }),
     vault: vaultRoot,
     onEvent(event) {
       events.push({
@@ -2389,10 +2451,7 @@ test('scanAssistantAutomationOnce stops auto-reply when document preservation fa
       })
     },
     async onStateProgress(next) {
-      stateProgress.push({
-        inboxScanCursor: next.inboxScanCursor,
-        autoReplyScanCursor: next.autoReplyScanCursor,
-      })
+      stateProgress.push(snapshotAssistantAutomationProgress(next))
     },
   })
 
@@ -2444,8 +2503,8 @@ test('scanAssistantAutomationOnce preserves other enabled channels while drainin
     })
     .mockResolvedValueOnce({
       provider: 'codex-cli',
-      providerSessionId: 'chat-imessage',
-      response: 'imessage reply',
+      providerSessionId: 'chat-telegram',
+      response: 'telegram reply',
       stderr: '',
       stdout: '',
       rawEvents: [],
@@ -2469,8 +2528,8 @@ test('scanAssistantAutomationOnce preserves other enabled channels while drainin
           threadId,
           threadIsDirect,
           delivery: {
-            kind: channel === 'imessage' ? 'participant' : 'thread',
-            target: actorId,
+            kind: channel === 'email' ? 'thread' : 'participant',
+            target: channel === 'email' ? threadId : actorId,
           },
         },
         createdAt: '2026-03-18T00:00:00.000Z',
@@ -2485,12 +2544,12 @@ test('scanAssistantAutomationOnce preserves other enabled channels while drainin
       }),
       delivery: {
         channel,
-        target: actorId,
-        targetKind: channel === 'imessage' ? 'participant' : 'thread',
+        target: channel === 'email' ? threadId : actorId,
+        targetKind: channel === 'email' ? 'thread' : 'participant',
         sentAt:
-          channel === 'imessage'
-            ? '2026-03-18T09:05:30.000Z'
-            : '2026-03-18T09:00:30.000Z',
+          channel === 'email'
+            ? '2026-03-18T09:00:30.000Z'
+            : '2026-03-18T09:05:30.000Z',
         messageLength: input.message.length,
       },
     }
@@ -2514,12 +2573,12 @@ test('scanAssistantAutomationOnce preserves other enabled channels while drainin
     eventId: 'evt-email-backlog',
     promotions: [],
   }
-  const imessageCapture = {
-    captureId: 'cap-imessage-new',
-    source: 'imessage',
+  const telegramCapture = {
+    captureId: 'cap-telegram-new',
+    source: 'telegram',
     accountId: 'self',
-    externalId: 'ext-imessage-new',
-    threadId: 'chat-imessage',
+    externalId: 'ext-telegram-new',
+    threadId: 'chat-telegram',
     threadTitle: null,
     actorId: '+15550001111',
     actorName: 'New Texter',
@@ -2528,18 +2587,19 @@ test('scanAssistantAutomationOnce preserves other enabled channels while drainin
     receivedAt: null,
     text: 'Can you answer this after the email backlog?',
     attachmentCount: 0,
-    envelopePath: 'raw/inbox/imessage-new.json',
-    eventId: 'evt-imessage-new',
+    envelopePath: 'raw/inbox/telegram-new.json',
+    eventId: 'evt-telegram-new',
     promotions: [],
   }
 
-  let state: Parameters<typeof scanAssistantAutomationOnce>[0]['state'] = {
-    inboxScanCursor: null,
-    autoReplyScanCursor: null,
-    autoReplyChannels: ['email', 'imessage'],
-    autoReplyBacklogChannels: ['email'],
-    autoReplyPrimed: false,
-  }
+  let state: Parameters<typeof scanAssistantAutomationOnce>[0]['state'] =
+    createLegacyAutomationState({
+      inboxScanCursor: null,
+      autoReplyScanCursor: null,
+      autoReplyChannels: ['email', 'telegram'],
+      autoReplyBacklogChannels: ['email'],
+      autoReplyPrimed: false,
+    })
   const stateProgress: Array<{
     autoReplyBacklogChannels: string[]
     autoReplyPrimed: boolean
@@ -2550,12 +2610,12 @@ test('scanAssistantAutomationOnce preserves other enabled channels while drainin
     async list(input: any) {
       if (input.afterCaptureId === 'cap-email-backlog') {
         return {
-          items: [imessageCapture],
+          items: [telegramCapture],
         }
       }
 
       return {
-        items: [emailBacklogCapture, imessageCapture],
+        items: [emailBacklogCapture, telegramCapture],
       }
     },
     async show(input: any) {
@@ -2577,13 +2637,13 @@ test('scanAssistantAutomationOnce preserves other enabled channels while drainin
         }
       }
 
-      assert.equal(input.captureId, imessageCapture.captureId)
+      assert.equal(input.captureId, telegramCapture.captureId)
       return {
         capture: {
-          captureId: imessageCapture.captureId,
-          source: 'imessage',
+          captureId: telegramCapture.captureId,
+          source: 'telegram',
           threadTitle: null,
-          threadId: 'chat-imessage',
+          threadId: 'chat-telegram',
           threadIsDirect: true,
           actorId: '+15550001111',
           actorName: 'New Texter',
@@ -2606,11 +2666,7 @@ test('scanAssistantAutomationOnce preserves other enabled channels while drainin
           ...state,
           ...next,
         }
-        stateProgress.push({
-          autoReplyBacklogChannels: [...next.autoReplyBacklogChannels],
-          autoReplyPrimed: next.autoReplyPrimed,
-          autoReplyScanCursor: next.autoReplyScanCursor,
-        })
+        stateProgress.push(snapshotAssistantAutomationProgress(next))
       },
     })
   }
@@ -2686,7 +2742,7 @@ test('scanAssistantAutomationOnce preserves other enabled channels while drainin
     autoReplyPrimed: true,
     autoReplyScanCursor: {
       occurredAt: '2026-03-18T09:05:00Z',
-      captureId: 'cap-imessage-new',
+      captureId: 'cap-telegram-new',
     },
   })
   assert.equal(runtimeMocks.executeAssistantProviderTurn.mock.calls.length, 2)
@@ -2712,8 +2768,8 @@ test('scanAssistantAutomationOnce keeps the reply cursor authoritative after bac
     })
     .mockResolvedValueOnce({
       provider: 'codex-cli',
-      providerSessionId: 'chat-imessage',
-      response: 'imessage reply',
+      providerSessionId: 'chat-telegram',
+      response: 'telegram reply',
       stderr: '',
       stdout: '',
       rawEvents: [],
@@ -2734,8 +2790,8 @@ test('scanAssistantAutomationOnce keeps the reply cursor authoritative after bac
           threadId,
           threadIsDirect: true,
           delivery: {
-            kind: channel === 'imessage' ? 'participant' : 'thread',
-            target: actorId,
+            kind: channel === 'email' ? 'thread' : 'participant',
+            target: channel === 'email' ? threadId : actorId,
           },
         },
         createdAt: '2026-03-18T00:00:00.000Z',
@@ -2750,12 +2806,12 @@ test('scanAssistantAutomationOnce keeps the reply cursor authoritative after bac
       }),
       delivery: {
         channel,
-        target: actorId,
-        targetKind: channel === 'imessage' ? 'participant' : 'thread',
+        target: channel === 'email' ? threadId : actorId,
+        targetKind: channel === 'email' ? 'thread' : 'participant',
         sentAt:
-          channel === 'imessage'
-            ? '2026-03-18T09:05:30.000Z'
-            : '2026-03-18T09:00:30.000Z',
+          channel === 'email'
+            ? '2026-03-18T09:00:30.000Z'
+            : '2026-03-18T09:05:30.000Z',
         messageLength: input.message.length,
       },
     }
@@ -2779,12 +2835,12 @@ test('scanAssistantAutomationOnce keeps the reply cursor authoritative after bac
     eventId: 'evt-email-backlog',
     promotions: [],
   }
-  const imessageCapture = {
-    captureId: 'cap-imessage-new',
-    source: 'imessage',
+  const telegramCapture = {
+    captureId: 'cap-telegram-new',
+    source: 'telegram',
     accountId: 'self',
-    externalId: 'ext-imessage-new',
-    threadId: 'chat-imessage',
+    externalId: 'ext-telegram-new',
+    threadId: 'chat-telegram',
     threadTitle: null,
     actorId: '+15550001111',
     actorName: 'New Texter',
@@ -2793,8 +2849,8 @@ test('scanAssistantAutomationOnce keeps the reply cursor authoritative after bac
     receivedAt: null,
     text: 'Can you answer this after the email backlog?',
     attachmentCount: 0,
-    envelopePath: 'raw/inbox/imessage-new.json',
-    eventId: 'evt-imessage-new',
+    envelopePath: 'raw/inbox/telegram-new.json',
+    eventId: 'evt-telegram-new',
     promotions: [],
   }
 
@@ -2803,13 +2859,14 @@ test('scanAssistantAutomationOnce keeps the reply cursor authoritative after bac
     afterOccurredAt: string | null
     oldestFirst: boolean
   }> = []
-  let state: Parameters<typeof scanAssistantAutomationOnce>[0]['state'] = {
-    inboxScanCursor: null,
-    autoReplyScanCursor: null,
-    autoReplyChannels: ['email', 'imessage'],
-    autoReplyBacklogChannels: ['email'],
-    autoReplyPrimed: false,
-  }
+  let state: Parameters<typeof scanAssistantAutomationOnce>[0]['state'] =
+    createLegacyAutomationState({
+      inboxScanCursor: null,
+      autoReplyScanCursor: null,
+      autoReplyChannels: ['email', 'telegram'],
+      autoReplyBacklogChannels: ['email'],
+      autoReplyPrimed: false,
+    })
   const stateProgress: Array<{
     autoReplyBacklogChannels: string[]
     autoReplyPrimed: boolean
@@ -2825,12 +2882,12 @@ test('scanAssistantAutomationOnce keeps the reply cursor authoritative after bac
       })
       if (input.afterCaptureId === emailBacklogCapture.captureId) {
         return {
-          items: [imessageCapture],
+          items: [telegramCapture],
         }
       }
 
       return {
-        items: [emailBacklogCapture, imessageCapture],
+        items: [emailBacklogCapture, telegramCapture],
       }
     },
     async show(input: any) {
@@ -2852,13 +2909,13 @@ test('scanAssistantAutomationOnce keeps the reply cursor authoritative after bac
         }
       }
 
-      assert.equal(input.captureId, imessageCapture.captureId)
+      assert.equal(input.captureId, telegramCapture.captureId)
       return {
         capture: {
-          captureId: imessageCapture.captureId,
-          source: 'imessage',
+          captureId: telegramCapture.captureId,
+          source: 'telegram',
           threadTitle: null,
-          threadId: 'chat-imessage',
+          threadId: 'chat-telegram',
           threadIsDirect: true,
           actorId: '+15550001111',
           actorName: 'New Texter',
@@ -2881,11 +2938,7 @@ test('scanAssistantAutomationOnce keeps the reply cursor authoritative after bac
           ...state,
           ...next,
         }
-        stateProgress.push({
-          autoReplyBacklogChannels: [...next.autoReplyBacklogChannels],
-          autoReplyPrimed: next.autoReplyPrimed,
-          autoReplyScanCursor: next.autoReplyScanCursor,
-        })
+        stateProgress.push(snapshotAssistantAutomationProgress(next))
       },
     })
   }
@@ -2917,7 +2970,16 @@ test('scanAssistantAutomationOnce keeps the reply cursor authoritative after bac
 
   state = {
     ...state,
-    autoReplyBacklogChannels: [],
+    autoReply: state.autoReply.map((entry) =>
+      entry.channel === 'telegram'
+        ? {
+            ...entry,
+            cursor:
+              state.autoReply.find((candidate) => candidate.channel === 'email')
+                ?.cursor ?? null,
+          }
+        : entry,
+    ),
   }
 
   const second = await runScan()
@@ -2941,7 +3003,7 @@ test('scanAssistantAutomationOnce keeps the reply cursor authoritative after bac
     autoReplyPrimed: true,
     autoReplyScanCursor: {
       occurredAt: '2026-03-18T09:05:00Z',
-      captureId: 'cap-imessage-new',
+      captureId: 'cap-telegram-new',
     },
   })
   assert.deepEqual(listCalls, [
@@ -2992,8 +3054,8 @@ test('scanAssistantAutomationOnce does not clear backlog when the first limited 
           threadId,
           threadIsDirect: true,
           delivery: {
-            kind: channel === 'imessage' ? 'participant' : 'thread',
-            target: actorId,
+            kind: channel === 'email' ? 'thread' : 'participant',
+            target: channel === 'email' ? threadId : actorId,
           },
         },
         createdAt: '2026-03-18T00:00:00.000Z',
@@ -3008,20 +3070,20 @@ test('scanAssistantAutomationOnce does not clear backlog when the first limited 
       }),
       delivery: {
         channel,
-        target: actorId,
-        targetKind: channel === 'imessage' ? 'participant' : 'thread',
+        target: channel === 'email' ? threadId : actorId,
+        targetKind: channel === 'email' ? 'thread' : 'participant',
         sentAt: '2026-03-18T09:05:30.000Z',
         messageLength: input.message.length,
       },
     }
   })
 
-  const interleavedImessageCapture = {
-    captureId: 'cap-imessage-interleaved',
-    source: 'imessage',
+  const interleavedTelegramCapture = {
+    captureId: 'cap-telegram-interleaved',
+    source: 'telegram',
     accountId: 'self',
-    externalId: 'ext-imessage-interleaved',
-    threadId: 'chat-imessage-interleaved',
+    externalId: 'ext-telegram-interleaved',
+    threadId: 'chat-telegram-interleaved',
     threadTitle: null,
     actorId: '+15550002222',
     actorName: 'Interleaved Texter',
@@ -3030,8 +3092,8 @@ test('scanAssistantAutomationOnce does not clear backlog when the first limited 
     receivedAt: null,
     text: 'A non-backlog message appears first.',
     attachmentCount: 0,
-    envelopePath: 'raw/inbox/imessage-interleaved.json',
-    eventId: 'evt-imessage-interleaved',
+    envelopePath: 'raw/inbox/telegram-interleaved.json',
+    eventId: 'evt-telegram-interleaved',
     promotions: [],
   }
   const emailBacklogCapture = {
@@ -3058,13 +3120,14 @@ test('scanAssistantAutomationOnce does not clear backlog when the first limited 
     afterOccurredAt: string | null
     limit: number
   }> = []
-  let state: Parameters<typeof scanAssistantAutomationOnce>[0]['state'] = {
-    inboxScanCursor: null,
-    autoReplyScanCursor: null,
-    autoReplyChannels: ['email', 'imessage'],
-    autoReplyBacklogChannels: ['email'],
-    autoReplyPrimed: false,
-  }
+  let state: Parameters<typeof scanAssistantAutomationOnce>[0]['state'] =
+    createLegacyAutomationState({
+      inboxScanCursor: null,
+      autoReplyScanCursor: null,
+      autoReplyChannels: ['email', 'telegram'],
+      autoReplyBacklogChannels: ['email'],
+      autoReplyPrimed: false,
+    })
   const stateProgress: Array<{
     autoReplyBacklogChannels: string[]
     autoReplyPrimed: boolean
@@ -3080,10 +3143,10 @@ test('scanAssistantAutomationOnce does not clear backlog when the first limited 
       })
       if (input.afterCaptureId === null) {
         return {
-          items: [interleavedImessageCapture],
+          items: [interleavedTelegramCapture],
         }
       }
-      if (input.afterCaptureId === interleavedImessageCapture.captureId) {
+      if (input.afterCaptureId === interleavedTelegramCapture.captureId) {
         return {
           items: [emailBacklogCapture],
         }
@@ -3124,11 +3187,7 @@ test('scanAssistantAutomationOnce does not clear backlog when the first limited 
           ...state,
           ...next,
         }
-        stateProgress.push({
-          autoReplyBacklogChannels: [...next.autoReplyBacklogChannels],
-          autoReplyPrimed: next.autoReplyPrimed,
-          autoReplyScanCursor: next.autoReplyScanCursor,
-        })
+        stateProgress.push(snapshotAssistantAutomationProgress(next))
       },
     })
   }
@@ -3189,7 +3248,7 @@ test('scanAssistantAutomationOnce does not clear backlog when the first limited 
       limit: 1,
     },
     {
-      afterCaptureId: 'cap-imessage-interleaved',
+      afterCaptureId: 'cap-telegram-interleaved',
       afterOccurredAt: '2026-03-18T09:00:30Z',
       limit: 1,
     },
@@ -3257,7 +3316,7 @@ test('scanAssistantAutomationOnce keeps the auto-reply cursor pinned on deferred
           },
           {
             captureId: 'cap-unified-later',
-            source: 'imessage',
+            source: 'telegram',
             accountId: 'self',
             externalId: 'ext-unified-later',
             threadId: 'thread-later',
@@ -3281,7 +3340,7 @@ test('scanAssistantAutomationOnce keeps the auto-reply cursor pinned on deferred
         return {
           capture: {
             captureId: 'cap-unified-later',
-            source: 'imessage',
+            source: 'telegram',
             threadTitle: null,
             threadId: 'thread-later',
             threadIsDirect: true,
@@ -3341,18 +3400,15 @@ test('scanAssistantAutomationOnce keeps the auto-reply cursor pinned on deferred
       events.push(event)
     },
     async onStateProgress(next) {
-      stateProgress.push({
-        inboxScanCursor: next.inboxScanCursor,
-        autoReplyScanCursor: next.autoReplyScanCursor,
-      })
+      stateProgress.push(snapshotAssistantAutomationProgress(next))
     },
-    state: {
+    state: createLegacyAutomationState({
       inboxScanCursor: null,
       autoReplyScanCursor: null,
-      autoReplyChannels: ['email', 'imessage'],
+      autoReplyChannels: ['email', 'telegram'],
       autoReplyBacklogChannels: [],
       autoReplyPrimed: true,
-    },
+    }),
     vault: vaultRoot,
   })
 
@@ -3435,18 +3491,15 @@ test('scanAssistantAutomationOnce keeps the auto-reply cursor pinned on deferred
   const second = await scanAssistantAutomationOnce({
     inboxServices,
     async onStateProgress(next) {
-      stateProgress.push({
-        inboxScanCursor: next.inboxScanCursor,
-        autoReplyScanCursor: next.autoReplyScanCursor,
-      })
+      stateProgress.push(snapshotAssistantAutomationProgress(next))
     },
-    state: {
+    state: createLegacyAutomationState({
       inboxScanCursor: null,
       autoReplyScanCursor: null,
-      autoReplyChannels: ['email', 'imessage'],
+      autoReplyChannels: ['email', 'telegram'],
       autoReplyBacklogChannels: [],
       autoReplyPrimed: true,
-    },
+    }),
     vault: vaultRoot,
   })
 
@@ -3549,7 +3602,7 @@ test('scanAssistantInboxOnce still waits for unsupported pending HEIC photos', a
   )
 })
 
-test('scanAssistantAutoReplyOnce primes backlog cursors, replies to new inbound iMessages, and injects the first-contact check-in', async () => {
+test('scanAssistantAutoReplyOnce primes backlog cursors, replies to new inbound Telegram messages, and injects the first-contact check-in', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-auto-reply-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
@@ -3588,8 +3641,8 @@ test('scanAssistantAutoReplyOnce primes backlog cursors, replies to new inbound 
     message: input.message,
     session: createMockCodexRuntimeSession({
       binding: {
-        conversationKey: 'channel:imessage|thread:chat-2',
-        channel: 'imessage',
+        conversationKey: 'channel:telegram|thread:chat-2',
+        channel: 'telegram',
         identityId: null,
         actorId: '+15551234567',
         threadId: 'chat-2',
@@ -3610,7 +3663,7 @@ test('scanAssistantAutoReplyOnce primes backlog cursors, replies to new inbound 
       updatedAt: '2026-03-18T00:00:01.000Z',
     }),
     delivery: {
-      channel: 'imessage',
+      channel: 'telegram',
       target: '+15551234567',
       targetKind: 'participant',
       sentAt: '2026-03-18T00:00:01.000Z',
@@ -3639,7 +3692,7 @@ test('scanAssistantAutoReplyOnce primes backlog cursors, replies to new inbound 
           items: [
             {
               captureId: 'cap-backlog',
-              source: 'imessage',
+              source: 'telegram',
               accountId: 'self',
               externalId: 'ext-1',
               threadId: 'chat-1',
@@ -3663,7 +3716,7 @@ test('scanAssistantAutoReplyOnce primes backlog cursors, replies to new inbound 
         items: [
           {
             captureId: 'cap-new',
-            source: 'imessage',
+            source: 'telegram',
             accountId: 'self',
             externalId: 'ext-2',
             threadId: 'chat-2',
@@ -3687,7 +3740,7 @@ test('scanAssistantAutoReplyOnce primes backlog cursors, replies to new inbound 
       return {
         capture: {
           captureId: 'cap-new',
-          source: 'imessage',
+          source: 'telegram',
           threadTitle: null,
           threadId: 'chat-2',
           threadIsDirect: true,
@@ -3705,13 +3758,13 @@ test('scanAssistantAutoReplyOnce primes backlog cursors, replies to new inbound 
   const prime = await scanAssistantAutoReplyOnce({
     afterCursor: null,
     autoReplyPrimed: false,
-    enabledChannels: ['imessage'],
+    enabledChannels: ['telegram'],
     inboxServices,
     onEvent(event) {
       events.push(event)
     },
     async onStateProgress(next) {
-      stateProgress.push(next)
+      stateProgress.push(snapshotAssistantAutoReplyProgress(next))
     },
     vault: vaultRoot,
   })
@@ -3733,13 +3786,13 @@ test('scanAssistantAutoReplyOnce primes backlog cursors, replies to new inbound 
   const second = await scanAssistantAutoReplyOnce({
     afterCursor: stateProgress[0]!.cursor,
     autoReplyPrimed: true,
-    enabledChannels: ['imessage'],
+    enabledChannels: ['telegram'],
     inboxServices,
     onEvent(event) {
       events.push(event)
     },
     async onStateProgress(next) {
-      stateProgress.push(next)
+      stateProgress.push(snapshotAssistantAutoReplyProgress(next))
     },
     vault: vaultRoot,
   })
@@ -3872,7 +3925,7 @@ test('scanAssistantAutoReplyOnce advances the cursor and writes deferred artifac
         items: [
           {
             captureId: 'cap-new',
-            source: 'imessage',
+            source: 'telegram',
             accountId: 'self',
             externalId: 'ext-2',
             threadId: 'chat-2',
@@ -3895,7 +3948,7 @@ test('scanAssistantAutoReplyOnce advances the cursor and writes deferred artifac
       return {
         capture: {
           captureId: 'cap-new',
-          source: 'imessage',
+          source: 'telegram',
           threadTitle: null,
           threadId: 'chat-2',
           threadIsDirect: true,
@@ -3916,10 +3969,10 @@ test('scanAssistantAutoReplyOnce advances the cursor and writes deferred artifac
       captureId: 'cap-old',
     },
     autoReplyPrimed: true,
-    enabledChannels: ['imessage'],
+    enabledChannels: ['telegram'],
     inboxServices,
     async onStateProgress(next) {
-      stateProgress.push(next)
+      stateProgress.push(snapshotAssistantAutoReplyProgress(next))
     },
     vault: vaultRoot,
   })
@@ -3962,7 +4015,7 @@ test('scanAssistantAutoReplyOnce advances the cursor and writes deferred artifac
       captureId: 'cap-old',
     },
     autoReplyPrimed: true,
-    enabledChannels: ['imessage'],
+    enabledChannels: ['telegram'],
     inboxServices,
     vault: vaultRoot,
   })
@@ -3995,14 +4048,14 @@ test('scanAssistantAutoReplyOnce queues hosted auto-replies without sending befo
     },
     autoReplyPrimed: true,
     deliveryDispatchMode: 'queue-only',
-    enabledChannels: ['imessage'],
+    enabledChannels: ['telegram'],
     inboxServices: {
       async list() {
         return {
           items: [
             {
               captureId: 'cap-new',
-              source: 'imessage',
+              source: 'telegram',
               accountId: 'self',
               externalId: 'ext-2',
               threadId: 'chat-2',
@@ -4025,7 +4078,7 @@ test('scanAssistantAutoReplyOnce queues hosted auto-replies without sending befo
         return {
           capture: {
             captureId: 'cap-new',
-            source: 'imessage',
+            source: 'telegram',
             threadTitle: null,
             threadId: 'chat-2',
             threadIsDirect: true,
@@ -4101,7 +4154,7 @@ test('scanAssistantAutoReplyOnce does not bootstrap persisted memory text into a
     })
   runtimeMocks.deliverAssistantMessageOverBinding.mockResolvedValue({
     delivery: {
-      channel: 'imessage',
+      channel: 'telegram',
       target: '+15551239999',
       targetKind: 'participant',
       sentAt: '2026-03-18T10:00:01.000Z',
@@ -4115,7 +4168,7 @@ test('scanAssistantAutoReplyOnce does not bootstrap persisted memory text into a
         items: [
           {
             captureId: 'cap-new',
-            source: 'imessage',
+            source: 'telegram',
             accountId: 'self',
             externalId: 'ext-9',
             threadId: 'chat-9',
@@ -4138,7 +4191,7 @@ test('scanAssistantAutoReplyOnce does not bootstrap persisted memory text into a
       return {
         capture: {
           captureId: 'cap-new',
-          source: 'imessage',
+          source: 'telegram',
           threadTitle: null,
           threadId: 'chat-9',
           threadIsDirect: true,
@@ -4156,7 +4209,7 @@ test('scanAssistantAutoReplyOnce does not bootstrap persisted memory text into a
   await scanAssistantAutoReplyOnce({
     afterCursor: null,
     autoReplyPrimed: true,
-    enabledChannels: ['imessage'],
+    enabledChannels: ['telegram'],
     inboxServices,
     vault: vaultRoot,
   })
@@ -4332,7 +4385,7 @@ test('scanAssistantAutoReplyOnce coalesces same-thread email backlog into one re
     enabledChannels: ['email'],
     inboxServices,
     async onStateProgress(next) {
-      stateProgress.push(next)
+      stateProgress.push(snapshotAssistantAutoReplyProgress(next))
     },
     vault: vaultRoot,
   })
@@ -4542,8 +4595,8 @@ test('scanAssistantAutoReplyOnce can use self-authored attachment prompts and su
       message: input.message,
       session: createMockCodexRuntimeSession({
         binding: {
-          conversationKey: 'channel:imessage|thread:self-chat',
-          channel: 'imessage',
+          conversationKey: 'channel:telegram|thread:self-chat',
+          channel: 'telegram',
           identityId: null,
           actorId: '+15550000000',
           threadId: 'self-chat',
@@ -4564,7 +4617,7 @@ test('scanAssistantAutoReplyOnce can use self-authored attachment prompts and su
         updatedAt: '2026-03-18T00:00:00.000Z',
       }),
       delivery: {
-        channel: 'imessage',
+        channel: 'telegram',
         target: '+15550000000',
         targetKind: 'participant',
         sentAt: '2026-03-18T00:00:00.000Z',
@@ -4585,7 +4638,7 @@ test('scanAssistantAutoReplyOnce can use self-authored attachment prompts and su
             items: [
               {
                 captureId: 'cap-self',
-                source: 'imessage',
+                source: 'telegram',
                 accountId: 'self',
                 externalId: 'ext-self',
                 threadId: 'self-chat',
@@ -4609,7 +4662,7 @@ test('scanAssistantAutoReplyOnce can use self-authored attachment prompts and su
           items: [
             {
               captureId: 'cap-echo',
-              source: 'imessage',
+              source: 'telegram',
               accountId: 'self',
               externalId: 'ext-echo',
               threadId: 'self-chat',
@@ -4633,7 +4686,7 @@ test('scanAssistantAutoReplyOnce can use self-authored attachment prompts and su
           return {
             capture: {
               captureId: 'cap-self',
-              source: 'imessage',
+              source: 'telegram',
               accountId: 'self',
               externalId: 'ext-self',
               threadId: 'self-chat',
@@ -4667,7 +4720,7 @@ test('scanAssistantAutoReplyOnce can use self-authored attachment prompts and su
         return {
           capture: {
             captureId: 'cap-echo',
-            source: 'imessage',
+            source: 'telegram',
             accountId: 'self',
             externalId: 'ext-echo',
             threadId: 'self-chat',
@@ -4694,11 +4747,11 @@ test('scanAssistantAutoReplyOnce can use self-authored attachment prompts and su
       afterCursor: null,
       autoReplyPrimed: true,
       allowSelfAuthored: true,
-      enabledChannels: ['imessage'],
+      enabledChannels: ['telegram'],
       inboxServices,
       vault: vaultRoot,
       async onStateProgress(next) {
-        stateProgress.push(next)
+        stateProgress.push(snapshotAssistantAutoReplyProgress(next))
       },
     })
 
@@ -4719,11 +4772,11 @@ test('scanAssistantAutoReplyOnce can use self-authored attachment prompts and su
       afterCursor: stateProgress[0]?.cursor ?? null,
       autoReplyPrimed: true,
       allowSelfAuthored: true,
-      enabledChannels: ['imessage'],
+      enabledChannels: ['telegram'],
       inboxServices,
       vault: vaultRoot,
       async onStateProgress(next) {
-        stateProgress.push(next)
+        stateProgress.push(snapshotAssistantAutoReplyProgress(next))
       },
     })
 
@@ -4780,7 +4833,7 @@ test('scanAssistantAutoReplyOnce keeps the cursor on prompt defers but advances 
           items: [
             {
               captureId: 'cap-defer',
-              source: 'imessage',
+              source: 'telegram',
               accountId: 'self',
               externalId: 'ext-defer',
               threadId: 'chat-defer',
@@ -4804,7 +4857,7 @@ test('scanAssistantAutoReplyOnce keeps the cursor on prompt defers but advances 
         items: [
           {
             captureId: 'cap-skip',
-            source: 'imessage',
+            source: 'telegram',
             accountId: 'self',
             externalId: 'ext-skip',
             threadId: 'chat-skip',
@@ -4829,7 +4882,7 @@ test('scanAssistantAutoReplyOnce keeps the cursor on prompt defers but advances 
         return {
           capture: {
             captureId: 'cap-defer',
-            source: 'imessage',
+            source: 'telegram',
             threadTitle: null,
             threadId: 'chat-defer',
             threadIsDirect: true,
@@ -4856,7 +4909,7 @@ test('scanAssistantAutoReplyOnce keeps the cursor on prompt defers but advances 
       return {
         capture: {
           captureId: 'cap-skip',
-          source: 'imessage',
+          source: 'telegram',
           threadTitle: null,
           threadId: 'chat-skip',
           threadIsDirect: true,
@@ -4883,13 +4936,13 @@ test('scanAssistantAutoReplyOnce keeps the cursor on prompt defers but advances 
   const first = await scanAssistantAutoReplyOnce({
     afterCursor: null,
     autoReplyPrimed: true,
-    enabledChannels: ['imessage'],
+    enabledChannels: ['telegram'],
     inboxServices,
     onEvent(event) {
       events.push(event)
     },
     async onStateProgress(next) {
-      stateProgress.push(next)
+      stateProgress.push(snapshotAssistantAutoReplyProgress(next))
     },
     vault: vaultRoot,
   })
@@ -4899,13 +4952,13 @@ test('scanAssistantAutoReplyOnce keeps the cursor on prompt defers but advances 
   const second = await scanAssistantAutoReplyOnce({
     afterCursor: null,
     autoReplyPrimed: true,
-    enabledChannels: ['imessage'],
+    enabledChannels: ['telegram'],
     inboxServices,
     onEvent(event) {
       events.push(event)
     },
     async onStateProgress(next) {
-      stateProgress.push(next)
+      stateProgress.push(snapshotAssistantAutoReplyProgress(next))
     },
     vault: vaultRoot,
   })
@@ -5341,7 +5394,7 @@ test('scanAssistantAutoReplyOnce keeps grouped partial reply artifacts queued fo
       events.push(event)
     },
     async onStateProgress(next) {
-      stateProgress.push(next)
+      stateProgress.push(snapshotAssistantAutoReplyProgress(next))
     },
     vault: vaultRoot,
   })
@@ -5429,7 +5482,7 @@ test('scanAssistantAutoReplyOnce keeps grouped partial reply artifacts queued fo
     enabledChannels: ['email'],
     inboxServices,
     async onStateProgress(next) {
-      stateProgress.push(next)
+      stateProgress.push(snapshotAssistantAutoReplyProgress(next))
     },
     vault: vaultRoot,
   })
@@ -5564,7 +5617,7 @@ test('scanAssistantAutoReplyOnce does not resend after successful delivery when 
         events.push(event)
       },
       async onStateProgress(next) {
-        stateProgress.push(next)
+        stateProgress.push(snapshotAssistantAutoReplyProgress(next))
       },
       vault: vaultRoot,
     }),
@@ -5629,7 +5682,7 @@ test('scanAssistantAutoReplyOnce does not resend after successful delivery when 
       events.push(event)
     },
     async onStateProgress(next) {
-      stateProgress.push(next)
+      stateProgress.push(snapshotAssistantAutoReplyProgress(next))
     },
     vault: vaultRoot,
   })
@@ -6021,7 +6074,7 @@ test('scanAssistantAutoReplyOnce aborts stalled provider turns and retries the s
       events.push(event)
     },
     async onStateProgress(next) {
-      stateProgress.push(next)
+      stateProgress.push(snapshotAssistantAutoReplyProgress(next))
     },
     providerHeartbeatMs: 10,
     providerStallTimeoutMs: 25,
@@ -6036,7 +6089,7 @@ test('scanAssistantAutoReplyOnce aborts stalled provider turns and retries the s
     enabledChannels: ['telegram'],
     inboxServices,
     async onStateProgress(next) {
-      stateProgress.push(next)
+      stateProgress.push(snapshotAssistantAutoReplyProgress(next))
     },
     vault: vaultRoot,
   })
@@ -6359,7 +6412,7 @@ test('scanAssistantAutoReplyOnce defers reconnectable provider failures and pres
       events.push(event)
     },
     async onStateProgress(next) {
-      stateProgress.push(next)
+      stateProgress.push(snapshotAssistantAutoReplyProgress(next))
     },
     vault: vaultRoot,
   })
@@ -6370,7 +6423,7 @@ test('scanAssistantAutoReplyOnce defers reconnectable provider failures and pres
     enabledChannels: ['telegram'],
     inboxServices,
     async onStateProgress(next) {
-      stateProgress.push(next)
+      stateProgress.push(snapshotAssistantAutoReplyProgress(next))
     },
     vault: vaultRoot,
   })
@@ -6625,7 +6678,7 @@ test('scanAssistantAutoReplyOnce keeps scanning after a failed Telegram delivery
     },
     vault: vaultRoot,
     async onStateProgress(next) {
-      stateProgress.push(next)
+      stateProgress.push(snapshotAssistantAutoReplyProgress(next))
     },
   })
 
@@ -6808,7 +6861,7 @@ test('scanAssistantAutoReplyOnce records provider quota failures with a safe sum
       events.push(event)
     },
     async onStateProgress(next) {
-      stateProgress.push(next)
+      stateProgress.push(snapshotAssistantAutoReplyProgress(next))
     },
     vault: vaultRoot,
   })
@@ -6819,7 +6872,7 @@ test('scanAssistantAutoReplyOnce records provider quota failures with a safe sum
     enabledChannels: ['telegram'],
     inboxServices,
     async onStateProgress(next) {
-      stateProgress.push(next)
+      stateProgress.push(snapshotAssistantAutoReplyProgress(next))
     },
     vault: vaultRoot,
   })
@@ -7333,15 +7386,15 @@ test('runAssistantAutomation routes new captures in one-shot mode and leaves rep
       message: input.message,
       session: createMockCodexRuntimeSession({
         binding: {
-          conversationKey: 'channel:imessage|thread:chat-2',
-          channel: 'imessage',
+          conversationKey: 'channel:telegram|thread:chat-2',
+          channel: 'telegram',
           identityId: null,
-          actorId: '+15551234567',
+          actorId: 'telegram:bob',
           threadId: 'chat-2',
           threadIsDirect: true,
           delivery: {
-            kind: 'participant',
-            target: '+15551234567',
+            kind: 'thread',
+            target: 'telegram:bob',
           },
         },
         createdAt: '2026-03-18T00:00:00.000Z',
@@ -7355,9 +7408,9 @@ test('runAssistantAutomation routes new captures in one-shot mode and leaves rep
         updatedAt: '2026-03-18T00:00:01.000Z',
       }),
       delivery: {
-        channel: 'imessage',
-        target: '+15551234567',
-        targetKind: 'participant',
+        channel: 'telegram',
+        target: 'telegram:bob',
+        targetKind: 'thread',
         sentAt: '2026-03-18T00:00:01.000Z',
         messageLength: input.message.length,
       },
@@ -7365,12 +7418,14 @@ test('runAssistantAutomation routes new captures in one-shot mode and leaves rep
   )
 
   await saveAssistantAutomationState(vaultRoot, {
-    version: 2,
+    version: 1,
     inboxScanCursor: null,
-    autoReplyScanCursor: null,
-    autoReplyChannels: ['imessage'],
-    autoReplyBacklogChannels: [],
-    autoReplyPrimed: true,
+    autoReply: [
+      {
+        channel: 'telegram',
+        cursor: null,
+      },
+    ],
     updatedAt: '2026-03-18T00:00:00.000Z',
   })
 
@@ -7391,12 +7446,12 @@ test('runAssistantAutomation routes new captures in one-shot mode and leaves rep
         items: [
           {
             captureId: 'cap-new',
-            source: 'imessage',
-            accountId: 'self',
+            source: 'telegram',
+            accountId: 'bot',
             externalId: 'ext-2',
             threadId: 'chat-2',
             threadTitle: null,
-            actorId: '+15551234567',
+            actorId: 'telegram:bob',
             actorName: 'Bob',
             actorIsSelf: false,
             occurredAt: '2026-03-18T09:05:00Z',
@@ -7415,11 +7470,11 @@ test('runAssistantAutomation routes new captures in one-shot mode and leaves rep
       return {
         capture: {
           captureId: 'cap-new',
-          source: 'imessage',
+          source: 'telegram',
           threadTitle: null,
           threadId: 'chat-2',
           threadIsDirect: true,
-          actorId: '+15551234567',
+          actorId: 'telegram:bob',
           actorName: 'Bob',
           actorIsSelf: false,
           occurredAt: '2026-03-18T09:05:00Z',
@@ -7445,9 +7500,9 @@ test('runAssistantAutomation routes new captures in one-shot mode and leaves rep
 
   assert.equal(result.considered, 1)
   assert.equal(result.routed, 1)
-  assert.equal(result.replyConsidered, 0)
-  assert.equal(result.replied, 0)
-  assert.equal(listCalls.length, 1)
+  assert.equal(result.replyConsidered, 1)
+  assert.equal(result.replied, 1)
+  assert.equal(listCalls.length, 2)
   assert.equal(
     events.filter((event) => event.type === 'scan.started').length,
     1,
@@ -7466,7 +7521,7 @@ test('runAssistantAutomation routes new captures in one-shot mode and leaves rep
     events.some(
       (event) => event.type === 'capture.replied' && event.captureId === 'cap-new',
     ),
-    false,
+    true,
   )
 
   const state = await readAssistantAutomationState(vaultRoot)
@@ -7474,7 +7529,15 @@ test('runAssistantAutomation routes new captures in one-shot mode and leaves rep
     occurredAt: '2026-03-18T09:05:00Z',
     captureId: 'cap-new',
   })
-  assert.equal(state.autoReplyScanCursor, null)
+  assert.deepEqual(state.autoReply, [
+    {
+      channel: 'telegram',
+      cursor: {
+        occurredAt: '2026-03-18T09:05:00Z',
+        captureId: 'cap-new',
+      },
+    },
+  ])
 })
 
 test('runAssistantAutomation rejects concurrent runs for the same vault and releases the lock after shutdown', async () => {
@@ -7586,8 +7649,8 @@ test('runAssistantAutomation reports daemon failures as error results', async ()
       run: async (_input: unknown, options?: { onEvent?: (event: unknown) => void }) => {
         options?.onEvent?.({
           type: 'connector.watch.started',
-          connectorId: 'imessage:self',
-          source: 'imessage',
+          connectorId: 'telegram:bot',
+          source: 'telegram',
         })
         throw new Error('daemon exploded')
       },
@@ -7612,8 +7675,8 @@ test('runAssistantAutomation reports daemon failures as error results', async ()
     inboxEvents.some(
       (event) =>
         event.type === 'connector.watch.started' &&
-        event.connectorId === 'imessage:self' &&
-        event.source === 'imessage',
+        event.connectorId === 'telegram:bot' &&
+        event.source === 'telegram',
     ),
     true,
   )
@@ -8220,7 +8283,7 @@ test('assistant Ink view-model exposes codex-style footer metadata and busy copy
     alias: null,
     binding: {
       conversationKey: null,
-      channel: 'imessage',
+      channel: 'telegram',
       identityId: null,
       actorId: 'contact:bob',
       threadId: 'thread-123',
@@ -8462,7 +8525,7 @@ test('assistant Ink view-model exposes codex-style footer metadata and busy copy
   )
   assert.equal(
     formatSessionBinding(session),
-    'imessage · contact:bob · thread-123',
+    'telegram · contact:bob · thread-123',
   )
 })
 
@@ -9280,7 +9343,7 @@ test('assistant Ink busy status stays visible while the current turn has no visi
 
 test('assistant Ink transcript feed renders the header and committed rows via Ink Static output', () => {
   const rendered = renderChatTranscriptFeed({
-    bindingSummary: 'imessage · assistant:primary · chat-123',
+    bindingSummary: 'telegram · assistant:primary · chat-123',
     busy: true,
     entries: [
       {
@@ -9340,7 +9403,7 @@ test('assistant Ink transcript feed renders the header and committed rows via In
 
 test('assistant Ink transcript feed header omits the session id label', () => {
   const rendered = renderChatTranscriptFeed({
-    bindingSummary: 'imessage · assistant:primary · chat-123',
+    bindingSummary: 'telegram · assistant:primary · chat-123',
     busy: false,
     entries: [],
     sessionId: 'asst_test_session',
@@ -9373,7 +9436,7 @@ test('assistant Ink transcript feed header omits the session id label', () => {
   }
 
   assert.deepEqual(Object.keys(header.props as Record<string, unknown>), ['bindingSummary'])
-  assert.equal((header.props as { bindingSummary?: string | null }).bindingSummary, 'imessage · assistant:primary · chat-123')
+  assert.equal((header.props as { bindingSummary?: string | null }).bindingSummary, 'telegram · assistant:primary · chat-123')
   assert.doesNotMatch(JSON.stringify(header.props), /asst_test_session/u)
 })
 

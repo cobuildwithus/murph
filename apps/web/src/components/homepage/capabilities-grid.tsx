@@ -1,7 +1,7 @@
 const capabilities = [
   {
     title: "Any chat app",
-    body: "Talk to Murph on iMessage, Telegram, or email. No app to download.",
+    body: "Talk to Murph on Telegram, Linq, or email. No app to download.",
   },
   {
     title: "Wearable sync",

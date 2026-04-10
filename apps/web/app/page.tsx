@@ -17,7 +17,7 @@ import {
 export const metadata: Metadata = {
   title: "Murph — Health assistant that fits your real life",
   description:
-    "Track meals, sync wearables, spot patterns, and get answers about your health via iMessage, Telegram, or email.",
+    "Track meals, sync wearables, spot patterns, and get answers about your health via Telegram, Linq, or email.",
 };
 
 export default function HomePage() {

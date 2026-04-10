@@ -69,8 +69,6 @@ export function normalizeConnectorAccountId(
   const normalized = normalizeNullableString(value)
 
   switch (source) {
-    case 'imessage':
-      return normalized ?? 'self'
     case 'telegram':
       return normalized ?? 'bot'
     case 'email':
@@ -78,10 +76,9 @@ export function normalizeConnectorAccountId(
     case 'linq':
       return normalized ?? 'default'
     default: {
-      const unsupportedSource: never = source
       throw new VaultCliError(
         'INBOX_SOURCE_UNSUPPORTED',
-        `Inbox source "${unsupportedSource}" is not supported.`,
+        `Inbox source "${source}" is not supported.`,
       )
     }
   }

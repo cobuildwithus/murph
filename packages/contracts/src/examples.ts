@@ -53,15 +53,15 @@ export const exampleInboxCaptureRecords: readonly Readonly<InboxCaptureRecord>[]
   {
     schemaVersion: "murph.inbox-capture.v1",
     captureId: "cap_3f9f0d778d89c3beec6b8a13dc",
-    identityKey: "imessage\u0000self\u0000msg-123",
+    identityKey: "telegram\u0000bot\u0000msg-123",
     eventId: "evt_01JNV41B483QH9GQ1Y08D7RMTA",
-    source: "imessage",
-    accountId: "self",
+    source: "telegram",
+    accountId: "bot",
     externalId: "msg-123",
     thread: {
-      id: "chat-1",
+      id: "chat-123",
       title: "Breakfast",
-      isDirect: false,
+      isDirect: true,
     },
     actor: {
       id: "contact-1",
@@ -73,14 +73,14 @@ export const exampleInboxCaptureRecords: readonly Readonly<InboxCaptureRecord>[]
     receivedAt: "2026-03-12T08:16:04Z",
     text: "Breakfast photo and note",
     raw: {
-      source: "imessage",
+      source: "telegram",
       attachmentCount: 1,
     },
-    sourceDirectory: "raw/inbox/imessage/self/2026/03/cap_3f9f0d778d89c3beec6b8a13dc",
-    envelopePath: "raw/inbox/imessage/self/2026/03/cap_3f9f0d778d89c3beec6b8a13dc/envelope.json",
+    sourceDirectory: "raw/inbox/telegram/bot/2026/03/cap_3f9f0d778d89c3beec6b8a13dc",
+    envelopePath: "raw/inbox/telegram/bot/2026/03/cap_3f9f0d778d89c3beec6b8a13dc/envelope.json",
     rawRefs: [
-      "raw/inbox/imessage/self/2026/03/cap_3f9f0d778d89c3beec6b8a13dc/envelope.json",
-      "raw/inbox/imessage/self/2026/03/cap_3f9f0d778d89c3beec6b8a13dc/attachments/01__breakfast.jpg",
+      "raw/inbox/telegram/bot/2026/03/cap_3f9f0d778d89c3beec6b8a13dc/envelope.json",
+      "raw/inbox/telegram/bot/2026/03/cap_3f9f0d778d89c3beec6b8a13dc/attachments/01__breakfast.jpg",
     ],
     attachments: [
       {
@@ -92,7 +92,7 @@ export const exampleInboxCaptureRecords: readonly Readonly<InboxCaptureRecord>[]
         originalPath: null,
         fileName: "breakfast.jpg",
         byteSize: 12345,
-        storedPath: "raw/inbox/imessage/self/2026/03/cap_3f9f0d778d89c3beec6b8a13dc/attachments/01__breakfast.jpg",
+        storedPath: "raw/inbox/telegram/bot/2026/03/cap_3f9f0d778d89c3beec6b8a13dc/attachments/01__breakfast.jpg",
         sha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       },
     ],

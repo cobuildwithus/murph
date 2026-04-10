@@ -1287,7 +1287,7 @@ describe("runHostedExecutionJob", () => {
         occurredAt: "2026-03-28T12:00:00.000Z",
         raw: {},
         receivedAt: "2026-03-28T12:00:05.000Z",
-        source: "imessage",
+        source: "telegram",
         text: "document inbound",
         thread: {
           id: "chat-404",

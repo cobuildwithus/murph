@@ -12,8 +12,8 @@ export function HeroSection() {
             Your personal health assistant.
           </h1>
           <p className="mt-8 max-w-lg text-lg leading-relaxed text-stone-400 md:text-xl md:leading-relaxed">
-            Murph meets you where you already are — iMessage, Telegram, or
-            email. Ask questions, track meals, and spot patterns without
+            Murph meets you where you already are — Telegram, Linq, or email.
+            Ask questions, track meals, and spot patterns without
             downloading another app.
           </p>
           <div className="mt-6 flex items-center gap-3 text-sm text-stone-500">

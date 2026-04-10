@@ -978,7 +978,7 @@ test('readConfig rejects unsupported connector sources in the stored config', as
           connectors: [
             {
               id: 'legacy:self',
-              source: 'imessage',
+              source: 'legacy',
               enabled: true,
               accountId: 'self',
               options: {},

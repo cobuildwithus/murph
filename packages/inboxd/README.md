@@ -31,13 +31,11 @@ Consumers that need inbox-owned normalization without the full inboxd barrel sho
 
 - connector contracts for polling and webhook sources
 - a generic normalized chat-poll connector factory for source-specific transports
-- Telegram and email/Linq inbox connector ownership plus shared connector primitives that optional local-only owners can build on
+- Telegram and email/Linq inbox connector ownership plus shared connector primitives for supported inbox sources
 - source-specific checkpoints for connectors whose cursors are not derivable from `occurredAt`/`externalId`
 - capture pipeline with atomic raw persistence, inbox-capture ledger append, dedupe, FTS, and a durable local capture mutation cursor for downstream projections like the gateway store
 - runtime list, show, and search helpers for future CLI/agent surfaces
 - `vault-cli inbox ...` is the intended human/operator surface layered on top of this package
-
-The optional macOS-only iMessage connector now lives in `@murphai/inboxd-imessage` so callers that only need inbox core do not inherit the `@photon-ai/imessage-kit` dependency closure.
 
 ## Parser-facing runtime operations
 

@@ -12,18 +12,6 @@ import {
 } from '@murphai/operator-config/assistant-cli-contracts'
 import type { ConversationRef } from '../conversation-ref.js'
 
-export interface ImessageSdkLike {
-  close?: () => Promise<void> | void
-  send?: (target: string, content: string) => Promise<unknown>
-}
-
-export interface ImessageRuntimeDependencies {
-  createSdk?: () => ImessageSdkLike
-  homeDirectory?: string | null
-  platform?: NodeJS.Platform
-  probeMessagesDb?: (targetPath: string) => Promise<void>
-}
-
 export interface AssistantChannelActivityHandle {
   stop: () => Promise<void>
 }
@@ -44,11 +32,6 @@ export interface LinqRuntimeDependencies {
 }
 
 export interface AssistantChannelDependencies {
-  sendImessage?: (input: {
-    idempotencyKey?: string | null
-    message: string
-    target: string
-  }) => Promise<void>
   startLinqTyping?: (input: {
     target: string
   }) => Promise<AssistantChannelActivityHandle | void>
@@ -102,7 +85,7 @@ export interface AssistantDeliveryCandidate {
 }
 
 export interface AssistantChannelAdapter {
-  channel: 'imessage' | 'telegram' | 'linq' | 'email'
+  channel: 'telegram' | 'linq' | 'email'
   canAutoReply: (capture: InboxShowResult['capture']) => string | null
   inferBindingDelivery: (input: {
     conversation: ConversationRef

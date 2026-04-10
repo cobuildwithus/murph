@@ -31,7 +31,7 @@ You may use the Hosted Service only if:
 
 Murph is a health assistant and health-organization tool that may include, depending on the features you enable or purchase:
 
-- health-related conversations through channels such as iMessage, Telegram, email, or similar surfaces;
+- health-related conversations through channels such as Telegram, Linq, email, or similar surfaces;
 - wearable and connected-source integrations, including sources such as Oura, WHOOP, Garmin, or similar providers;
 - meal, supplement, routine, note, symptom, health-history, and other wellness logging;
 - AI-generated summaries, suggestions, reminders, pattern-spotting, and follow-up prompts;

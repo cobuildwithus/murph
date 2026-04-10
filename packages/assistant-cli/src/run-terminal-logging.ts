@@ -50,14 +50,6 @@ export function formatAssistantRunEventForTerminal(
       : `scanning channel auto-reply: ${event.details ?? ''}`.trim()
   }
 
-  if (event.type === 'reply.scan.primed') {
-    const details = formatAssistantReplyScanPrimedDetails(
-      event.details,
-      options,
-    )
-    return details ? `primed channel auto-reply: ${details}` : 'primed channel auto-reply'
-  }
-
   if (event.type === 'capture.routed') {
     const tools = (event.tools ?? []).join(', ')
     return `routed ${event.captureId ?? 'capture'}${tools ? `: ${tools}` : ''}`
@@ -362,42 +354,6 @@ function formatAssistantReplyProgressDetails(
   }
 }
 
-function formatAssistantReplyScanPrimedDetails(
-  details: string | undefined,
-  options: ForegroundTerminalLogOptions,
-): string | null {
-  const normalized = normalizeLabel(details)
-  if (!normalized) {
-    return null
-  }
-
-  if (options.unsafeDetails) {
-    return normalized
-  }
-
-  if (
-    normalized ===
-    'no existing captures yet; auto-reply will start with the next inbound message'
-  ) {
-    return normalized
-  }
-
-  if (
-    normalized.startsWith('processing existing ') &&
-    normalized.endsWith(
-      ' backlog before switching to new inbound messages',
-    )
-  ) {
-    return normalized
-  }
-
-  if (normalized.startsWith('starting after ')) {
-    return 'starting after latest existing capture'
-  }
-
-  return null
-}
-
 function formatConnectorEventLine(
   message: string,
   details?: string | null,
@@ -470,8 +426,6 @@ function captureCountFromDetails(details?: string): number | null {
 
 function humanizeSource(source: string): string {
   switch (source) {
-    case 'imessage':
-      return 'iMessage'
     case 'telegram':
       return 'Telegram'
     case 'linq':

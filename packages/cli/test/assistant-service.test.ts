@@ -340,7 +340,7 @@ test('buildResolveAssistantSessionInput keeps locator shaping and operator defau
       {
         vault: '/tmp/vault',
         alias: 'chat:bob',
-        channel: 'imessage',
+        channel: 'telegram',
         participantId: 'contact:bob',
         sourceThreadId: 'thread-1',
       },
@@ -349,7 +349,7 @@ test('buildResolveAssistantSessionInput keeps locator shaping and operator defau
     {
       vault: '/tmp/vault',
       alias: 'chat:bob',
-      channel: 'imessage',
+      channel: 'telegram',
       identityId: 'assistant:primary',
       actorId: 'contact:bob',
       threadId: 'thread-1',
@@ -1700,7 +1700,7 @@ test('sendAssistantMessage writes a system receipt for provider and delivery mil
   })
   serviceMocks.deliverAssistantMessageOverBinding.mockResolvedValue({
     delivery: {
-      channel: 'imessage',
+      channel: 'telegram',
       target: '+15551234567',
       targetKind: 'participant',
       sentAt: '2026-03-26T01:10:00.000Z',
@@ -1712,7 +1712,7 @@ test('sendAssistantMessage writes a system receipt for provider and delivery mil
 
   const result = await sendAssistantMessage({
     vault: vaultRoot,
-    channel: 'imessage',
+    channel: 'telegram',
     participantId: '+15551234567',
     prompt: 'Send a quick check-in.',
     deliverResponse: true,

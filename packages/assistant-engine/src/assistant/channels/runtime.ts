@@ -9,10 +9,6 @@ import {
   resolveAgentmailBaseUrl,
 } from '@murphai/operator-config/agentmail-runtime'
 import {
-  ensureImessageMessagesDbReadable,
-  mapImessageMessagesDbRuntimeError,
-} from '@murphai/operator-config/imessage-readiness'
-import {
   resolveLinqApiToken,
   sendLinqChatMessage,
   startLinqChatTypingIndicator,
@@ -31,8 +27,6 @@ import type {
   AssistantChannelActivityHandle,
   AssistantDeliveryCandidate,
   EmailRuntimeDependencies,
-  ImessageSdkLike,
-  ImessageRuntimeDependencies,
   LinqRuntimeDependencies,
   TelegramRuntimeDependencies,
 } from './types.js'
@@ -41,7 +35,6 @@ import { normalizeOptionalText } from './helpers.js'
 const TELEGRAM_MAX_TEXT_LENGTH = 4096
 const TELEGRAM_MAX_DELIVERY_ATTEMPTS = 3
 const TELEGRAM_SEND_TIMEOUT_MS = 30_000
-const IMESSAGE_KIT_MODULE_PARTS = ['@photon-ai', 'imessage-kit'] as const
 
 type TelegramParsedTarget = TelegramThreadTarget
 
@@ -75,70 +68,6 @@ type TelegramSendAttemptOutcome =
       kind: 'retry'
       retryAfterSeconds: number | null
     }
-
-export async function sendImessageMessage(
-  input: {
-    idempotencyKey?: string | null
-    message: string
-    target: string
-  },
-  dependencies: ImessageRuntimeDependencies = {},
-): Promise<void> {
-  await ensureImessageRuntimeReady(dependencies)
-  let sdk
-
-  try {
-    sdk = dependencies.createSdk
-      ? dependencies.createSdk()
-      : new (await loadImessageSdkConstructor())()
-  } catch (error) {
-    throw mapImessageRuntimeError(error)
-  }
-
-  if (typeof sdk.send !== 'function') {
-    throw new VaultCliError(
-      'ASSISTANT_IMESSAGE_UNAVAILABLE',
-      '@photon-ai/imessage-kit did not expose the expected send() method on IMessageSDK.',
-    )
-  }
-
-  try {
-    await sdk.send(input.target, input.message)
-  } catch (error) {
-    throw mapImessageRuntimeError(error)
-  } finally {
-    try {
-      await sdk.close?.()
-    } catch {}
-  }
-}
-
-async function loadImessageSdkConstructor(): Promise<new () => ImessageSdkLike> {
-  const imported = await importImessageKitModule()
-  const sdkConstructor =
-    imported && typeof imported === 'object' && 'IMessageSDK' in imported
-      ? (imported as { IMessageSDK?: unknown }).IMessageSDK
-      : null
-
-  if (typeof sdkConstructor !== 'function') {
-    throw new VaultCliError(
-      'ASSISTANT_IMESSAGE_UNAVAILABLE',
-      '@photon-ai/imessage-kit did not expose the expected IMessageSDK constructor.',
-    )
-  }
-
-  return sdkConstructor as new () => ImessageSdkLike
-}
-
-async function importImessageKitModule(): Promise<unknown> {
-  const specifier = IMESSAGE_KIT_MODULE_PARTS.join('/')
-  return await importDynamicModule(specifier)
-}
-
-const importDynamicModule = new Function(
-  'specifier',
-  'return import(specifier)',
-) as (specifier: string) => Promise<unknown>
 
 export async function sendTelegramMessage(
   input: {
@@ -415,46 +344,6 @@ function resolveAgentmailThreadReplyMessageId(input: {
   }
 
   return null
-}
-
-async function ensureImessageRuntimeReady(
-  dependencies: ImessageRuntimeDependencies,
-): Promise<void> {
-  try {
-    await ensureImessageMessagesDbReadable(dependencies, {
-      unavailableCode: 'ASSISTANT_IMESSAGE_UNAVAILABLE',
-      unavailableMessage: 'Outbound iMessage delivery requires macOS.',
-      permissionCode: 'ASSISTANT_IMESSAGE_PERMISSION_REQUIRED',
-      permissionMessage:
-        'Outbound iMessage delivery requires Full Disk Access or read access to ~/Library/Messages/chat.db. Grant access, restart it, and retry.',
-    })
-  } catch (error) {
-    throw mapImessageRuntimeError(error)
-  }
-}
-
-function mapImessageRuntimeError(error: unknown): VaultCliError {
-  if (error instanceof VaultCliError) {
-    return error
-  }
-
-  const mapped = mapImessageMessagesDbRuntimeError(error, {
-    permissionCode: 'ASSISTANT_IMESSAGE_PERMISSION_REQUIRED',
-    permissionMessage:
-      'Outbound iMessage delivery requires Full Disk Access or read access to ~/Library/Messages/chat.db. Grant access, restart it, and retry.',
-    fallbackCode: 'ASSISTANT_IMESSAGE_DELIVERY_FAILED',
-    fallbackMessage: 'Outbound iMessage delivery failed.',
-  })
-  if (mapped) {
-    return mapped
-  }
-
-  return new VaultCliError(
-    'ASSISTANT_IMESSAGE_DELIVERY_FAILED',
-    error instanceof Error && error.message.trim().length > 0
-      ? error.message
-      : 'Outbound iMessage delivery failed.',
-  )
 }
 
 async function sendTelegramTextChunk(input: {

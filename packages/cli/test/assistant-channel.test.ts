@@ -9,14 +9,12 @@ import {
 } from '@murphai/runtime-state/node'
 import {
   sendEmailMessage,
-  sendImessageMessage,
   sendLinqMessage,
   sendTelegramMessage,
   startLinqTypingIndicator,
   startTelegramTypingIndicator,
 } from '@murphai/assistant-engine/assistant/channel-adapters'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
-import { repoRoot } from './cli-test-helpers.js'
 
 type OutboundChannelModule = Awaited<typeof import('@murphai/assistant-engine/outbound-channel')>
 type AssistantStateModule = Awaited<typeof import('@murphai/assistant-engine/assistant-state')>
@@ -29,14 +27,6 @@ async function deliverAssistantMessage(
 ) {
   const module: OutboundChannelModule = await import('@murphai/assistant-engine/outbound-channel')
   return module.deliverAssistantMessage(input, dependencies)
-}
-
-async function resolveImessageDeliveryCandidates(
-  input: Parameters<
-    Awaited<typeof import('@murphai/assistant-engine/outbound-channel')>['resolveImessageDeliveryCandidates']
-  >[0],
-) {
-  return (await import('@murphai/assistant-engine/outbound-channel')).resolveImessageDeliveryCandidates(input)
 }
 
 async function getAssistantSession(
@@ -89,58 +79,7 @@ afterEach(async () => {
   )
 })
 
-test(
-  'resolveImessageDeliveryCandidates prefers explicit targets and otherwise uses the stored binding delivery',
-  async () => {
-    assert.deepEqual(
-      await resolveImessageDeliveryCandidates({
-        explicitTarget: 'chat-override',
-        bindingDelivery: {
-          kind: 'thread',
-          target: 'chat-123',
-        },
-      }),
-      [
-        {
-          kind: 'explicit',
-          target: 'chat-override',
-        },
-      ],
-    )
-
-    assert.deepEqual(
-      await resolveImessageDeliveryCandidates({
-        bindingDelivery: {
-          kind: 'participant',
-          target: '+15551234567',
-        },
-      }),
-      [
-        {
-          kind: 'participant',
-          target: '+15551234567',
-        },
-      ],
-    )
-
-    assert.deepEqual(
-      await resolveImessageDeliveryCandidates({
-        bindingDelivery: {
-          kind: 'thread',
-          target: 'chat45e2b868',
-        },
-      }),
-      [
-        {
-          kind: 'thread',
-          target: 'chat45e2b868',
-        },
-      ],
-    )
-  },
-)
-
-test('deliverAssistantMessage resolves a session, sends over iMessage, and keeps assistant state metadata-only', async () => {
+test('deliverAssistantMessage resolves a session, sends over Telegram, and keeps assistant state metadata-only', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-channel-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
@@ -155,12 +94,14 @@ test('deliverAssistantMessage resolves a session, sends over iMessage, and keeps
   const result = await deliverAssistantMessage(
     {
       vault: vaultRoot,
-      channel: 'imessage',
-      participantId: '+15551234567',
+      channel: 'telegram',
+      participantId: '123456789',
+      sourceThreadId: '-1001234567890:topic:42',
+      threadIsDirect: false,
       message: 'Lunch is logged.',
     },
     {
-      sendImessage: async (input: { message: string; target: string }) => {
+      sendTelegram: async (input: { message: string; target: string }) => {
         sent.push(input)
       },
     },
@@ -168,14 +109,15 @@ test('deliverAssistantMessage resolves a session, sends over iMessage, and keeps
 
   assert.equal(sent.length, 1)
   assertAssistantOutboxDispatch(sent[0], {
-    target: '+15551234567',
+    target: '-1001234567890:topic:42',
     message: 'Lunch is logged.',
+    replyToMessageId: null,
   })
-  assert.equal(result.delivery.channel, 'imessage')
-  assert.equal(result.delivery.target, '+15551234567')
-  assert.equal(result.delivery.targetKind, 'participant')
-  assert.equal(result.session.binding.channel, 'imessage')
-  assert.equal(result.session.binding.delivery?.target, '+15551234567')
+  assert.equal(result.delivery.channel, 'telegram')
+  assert.equal(result.delivery.target, '-1001234567890:topic:42')
+  assert.equal(result.delivery.targetKind, 'thread')
+  assert.equal(result.session.binding.channel, 'telegram')
+  assert.equal(result.session.binding.delivery?.target, '-1001234567890:topic:42')
   assert.equal('lastAssistantMessage' in result.session, false)
   assert.equal(result.session.turnCount, 0)
 })
@@ -190,12 +132,14 @@ test('deliverAssistantMessage writes a manual delivery receipt plus a sent outbo
   const result = await deliverAssistantMessage(
     {
       vault: vaultRoot,
-      channel: 'imessage',
-      participantId: '+15551234567',
+      channel: 'telegram',
+      participantId: '123456789',
+      sourceThreadId: '-1001234567890:topic:42',
+      threadIsDirect: false,
       message: 'Lunch is logged.',
     },
     {
-      sendImessage: async () => {},
+      sendTelegram: async () => {},
     },
   )
 
@@ -233,11 +177,11 @@ test('deliverAssistantMessage writes a manual delivery receipt plus a sent outbo
     status: string
   }
   assert.equal(intent.status, 'sent')
-  assert.equal(intent.delivery?.target, '+15551234567')
+  assert.equal(intent.delivery?.target, '-1001234567890:topic:42')
   assert.equal(intent.intentId, receipt.deliveryIntentId)
 })
 
-test('deliverAssistantMessage preserves a deferred receipt when outbound delivery fails retryably', async () => {
+test('deliverAssistantMessage preserves a deferred receipt when outbound delivery fails retryably over Telegram', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-channel-deferred-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
@@ -248,12 +192,14 @@ test('deliverAssistantMessage preserves a deferred receipt when outbound deliver
       deliverAssistantMessage(
         {
           vault: vaultRoot,
-          channel: 'imessage',
-          participantId: '+15551234567',
+          channel: 'telegram',
+          participantId: '123456789',
+          sourceThreadId: '-1001234567890:topic:42',
+          threadIsDirect: false,
           message: 'Lunch is logged.',
         },
         {
-          sendImessage: async () => {
+          sendTelegram: async () => {
             throw new VaultCliError(
               'ASSISTANT_DELIVERY_FAILED',
               'Temporary network interruption while delivering the reply.',
@@ -310,20 +256,22 @@ test('deliverAssistantMessage uses one-off targets only for the current send and
   const result = await deliverAssistantMessage(
     {
       vault: vaultRoot,
-      channel: 'imessage',
-      participantId: '+15551234567',
+      channel: 'telegram',
+      participantId: '123456789',
+      sourceThreadId: '-1001234567890:topic:42',
+      threadIsDirect: false,
       message: 'Temporary override.',
-      target: 'chat-override',
+      target: '-1009876543210:topic:7',
     },
     {
-      sendImessage: async () => {},
+      sendTelegram: async () => {},
     },
   )
 
-  assert.equal(result.delivery.target, 'chat-override')
+  assert.equal(result.delivery.target, '-1009876543210:topic:7')
   assert.equal(result.delivery.targetKind, 'explicit')
-  assert.equal(result.session.binding.delivery?.kind, 'participant')
-  assert.equal(result.session.binding.delivery?.target, '+15551234567')
+  assert.equal(result.session.binding.delivery?.kind, 'thread')
+  assert.equal(result.session.binding.delivery?.target, '-1001234567890:topic:42')
 })
 
 
@@ -1886,12 +1834,14 @@ test('deliverAssistantMessage redacts HOME-based vault paths in its result paylo
     const result = await deliverAssistantMessage(
       {
         vault: vaultRoot,
-        channel: 'imessage',
-        participantId: '+15551234567',
+        channel: 'telegram',
+        participantId: '123456789',
+        sourceThreadId: '-1001234567890:topic:42',
+        threadIsDirect: false,
         message: 'Redact the vault path.',
       },
       {
-        sendImessage: async () => {},
+        sendTelegram: async () => {},
       },
     )
 
@@ -1899,97 +1849,6 @@ test('deliverAssistantMessage redacts HOME-based vault paths in its result paylo
   } finally {
     restoreEnvironmentVariable('HOME', originalHome)
   }
-})
-
-test('sendImessageMessage fails before constructing the adapter when the Messages database is unreadable', async () => {
-  const createSdk = vi.fn(() => ({
-    send: async () => {},
-  }))
-
-  await assert.rejects(
-    () =>
-      sendImessageMessage(
-        {
-          message: 'Smoke test',
-          target: '+15551234567',
-        },
-        {
-          platform: 'darwin',
-          homeDirectory: '/Users/tester',
-          probeMessagesDb: async () => {
-            const error = new Error('authorization denied') as Error & {
-              code?: string
-            }
-            error.code = 'EPERM'
-            throw error
-          },
-          createSdk,
-        },
-      ),
-    (error: unknown) => {
-      assert.equal(error instanceof VaultCliError, true)
-      assert.equal((error as VaultCliError).code, 'ASSISTANT_IMESSAGE_PERMISSION_REQUIRED')
-      assert.match(
-        (error as VaultCliError).message,
-        /Full Disk Access.*restart it, and retry/iu,
-      )
-      assert.equal(
-        (error as VaultCliError).context?.path,
-        '~/Library/Messages/chat.db',
-      )
-      return true
-    },
-  )
-
-  assert.equal(createSdk.mock.calls.length, 0)
-})
-
-test('sendImessageMessage maps adapter database-open failures to permission guidance', async () => {
-  await assert.rejects(
-    () =>
-      sendImessageMessage(
-        {
-          message: 'Smoke test',
-          target: '+15551234567',
-        },
-        {
-          platform: 'darwin',
-          homeDirectory: '/Users/tester',
-          probeMessagesDb: async () => {},
-          createSdk: () => {
-            const error = new Error('unable to open database file') as Error & {
-              code?: string
-            }
-            error.code = 'DATABASE'
-            throw error
-          },
-        },
-      ),
-    (error: unknown) => {
-      assert.equal(error instanceof VaultCliError, true)
-      assert.equal((error as VaultCliError).code, 'ASSISTANT_IMESSAGE_PERMISSION_REQUIRED')
-      assert.match(
-        (error as VaultCliError).message,
-        /read access to ~\/Library\/Messages\/chat\.db/iu,
-      )
-      assert.equal(
-        (error as VaultCliError).context?.causeCode,
-        'DATABASE',
-      )
-      return true
-    },
-  )
-})
-
-test('sendImessageMessage loads the iMessage SDK at runtime instead of statically importing it', async () => {
-  const runtimeSource = await readFile(
-    path.join(repoRoot, 'packages/assistant-engine/src/assistant/channels/runtime.ts'),
-    'utf8',
-  )
-
-  assert.doesNotMatch(runtimeSource, /from '@photon-ai\/imessage-kit'/u)
-  assert.match(runtimeSource, /IMESSAGE_KIT_MODULE_PARTS/u)
-  assert.match(runtimeSource, /new Function\(\s*'specifier',/u)
 })
 
 function restoreEnvironmentVariable(

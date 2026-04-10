@@ -3902,7 +3902,7 @@ test("high-level canonical mutation ports own inbox journal and experiment-note 
   const capture = {
     captureId: "cap_01JNV422Y2M5ZBV64ZP4N1DRB1",
     eventId: "evt_01JNV422Y2M5ZBV64ZP4N1DRB2",
-    source: "imessage",
+    source: "telegram",
     occurredAt: "2026-03-13T08:00:00.000Z",
     text: "Breakfast note from inbox",
     thread: {
