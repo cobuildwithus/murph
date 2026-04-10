@@ -126,6 +126,61 @@ describe("hosted onboarding client auth headers", () => {
     }));
   });
 
+  it("refreshes explicit Privy headers after a 403 Privy session mismatch response", async () => {
+    mocks.getAccessToken.mockResolvedValue("signed-access-token");
+    mocks.getIdentityToken.mockResolvedValue("signed-identity-token");
+    const fetchMock = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        error: {
+          code: "PRIVY_SESSION_MISMATCH",
+          message: "Privy session changed.",
+        },
+      }), {
+        status: 403,
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        ok: true,
+      }), {
+        status: 200,
+      }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(requestHostedOnboardingJson<{ ok: true }>({
+      url: "/api/hosted-onboarding/example",
+    })).resolves.toEqual({
+      ok: true,
+    });
+
+    expect(mocks.getAccessToken).toHaveBeenCalledTimes(2);
+    expect(mocks.getIdentityToken).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not retry unrelated 403 onboarding responses", async () => {
+    mocks.getAccessToken.mockResolvedValue("signed-access-token");
+    mocks.getIdentityToken.mockResolvedValue("signed-identity-token");
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(new Response(JSON.stringify({
+      error: {
+        code: "INVITE_INVALID",
+        message: "Invite is invalid.",
+      },
+    }), {
+      status: 403,
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(requestHostedOnboardingJson<{ ok: true }>({
+      url: "/api/hosted-onboarding/example",
+    })).rejects.toMatchObject({
+      code: "INVITE_INVALID",
+      message: "Invite is invalid.",
+    });
+
+    expect(mocks.getAccessToken).toHaveBeenCalledTimes(1);
+    expect(mocks.getIdentityToken).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("fails explicitly before fetch when Privy token refresh stays unavailable", async () => {
     mocks.getAccessToken.mockRejectedValue(new Error("temporary failure"));
     mocks.getIdentityToken.mockRejectedValue(new Error("temporary failure"));

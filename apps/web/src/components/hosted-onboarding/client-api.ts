@@ -67,7 +67,7 @@ export async function requestHostedOnboardingJson<T>(input: {
     body,
   });
 
-  if (shouldRetryHostedOnboardingAuthRequest({
+  if (await shouldRetryHostedOnboardingAuthRequest({
     mode,
     authHeaders,
     response,
@@ -223,19 +223,31 @@ async function buildHostedOnboardingAuthHeadersUncached(): Promise<Record<string
   });
 }
 
-function shouldRetryHostedOnboardingAuthRequest(input: {
+async function shouldRetryHostedOnboardingAuthRequest(input: {
   mode: HostedOnboardingAuthMode;
   authHeaders: Record<string, string>;
   response: Response;
-}): boolean {
-  if (input.mode === "none" || input.response.status !== 401) {
+}): Promise<boolean> {
+  if (input.mode === "none") {
     return false;
   }
 
-  return (
-    input.mode === "required"
-    || Object.keys(input.authHeaders).length > 0
-  );
+  if (input.response.status === 401) {
+    return (
+      input.mode === "required"
+      || Object.keys(input.authHeaders).length > 0
+    );
+  }
+
+  if (input.response.status !== 403) {
+    return false;
+  }
+
+  if (input.mode !== "required" && Object.keys(input.authHeaders).length === 0) {
+    return false;
+  }
+
+  return responseHasHostedOnboardingErrorCode(input.response, "PRIVY_SESSION_MISMATCH");
 }
 
 function sleep(delayMs: number): Promise<void> {
@@ -256,6 +268,14 @@ async function readOptionalJsonValue(response: Response): Promise<unknown> {
   } catch {
     return null;
   }
+}
+
+async function responseHasHostedOnboardingErrorCode(
+  response: Response,
+  code: string,
+): Promise<boolean> {
+  const payload = readApiErrorPayload(await readOptionalJsonValue(response.clone()));
+  return payload?.code === code;
 }
 
 function readApiErrorPayload(value: unknown): ApiErrorPayload["error"] | null {
