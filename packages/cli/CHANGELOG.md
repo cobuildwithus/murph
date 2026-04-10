@@ -2,6 +2,22 @@
 
 All notable changes to `@murphai/murph` will be documented in this file.
 
+## [0.2.3] - 2026-04-10
+
+### Fixed
+- harden resolved runtime config ownership
+- restore hosted and release boundaries
+- include imessage in runner bundle closure
+
+### Changed
+- privacy
+- resolve hosted env semantics at the Cloudflare boundary
+- cut duplicated workflow guidance
+- isolate node-runner env from device sync
+- restore explicit audit-pass authorization
+- trim workflow defaults
+- simplify task router table
+
 ## [0.2.2] - 2026-04-09
 
 ### Fixed
