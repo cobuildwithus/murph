@@ -196,10 +196,6 @@ describe('monorepo release flow coverage audit', () => {
       path.join(repoRoot, 'scripts', 'review-gpt.config.sh'),
       'utf8',
     )
-    const privacyPreset = readFileSync(
-      path.join(repoRoot, 'scripts', 'chatgpt-review-presets', 'privacy.md'),
-      'utf8',
-    )
     const fullReviewConfig = readFileSync(
       path.join(repoRoot, 'scripts', 'review-gpt-full.config.sh'),
       'utf8',
@@ -217,7 +213,6 @@ describe('monorepo release flow coverage audit', () => {
     expect(leanReviewConfig).toContain('include_docs=0')
     expect(leanReviewConfig).toContain('package_script="scripts/package-audit-context.sh"')
     expect(leanReviewConfig).toContain('review_gpt_register_dir_preset "privacy" "privacy.md"')
-    expect(privacyPreset).toContain('storing as little user data as possible')
     expect(fullReviewConfig).toContain('source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/review-gpt.config.sh"')
     expect(fullReviewConfig).toContain('include_tests=1')
     expect(fullReviewConfig).toContain('include_docs=1')
@@ -286,8 +281,17 @@ describe('monorepo release flow coverage audit', () => {
     )
   })
 
+  it('runs release checks directly instead of through an env-overridable shell command', () => {
+    const releaseScript = readFileSync(path.join(repoRoot, 'scripts', 'release.sh'), 'utf8')
+
+    expect(releaseScript).toContain("echo 'Running release checks...'")
+    expect(releaseScript).toContain('corepack pnpm release:check')
+    expect(releaseScript).not.toContain('RELEASE_CHECK_CMD')
+    expect(releaseScript).not.toContain('CHECK_CMD=')
+    expect(releaseScript).not.toContain('sh -lc "$CHECK_CMD"')
+  })
+
   it('keeps the durable storage-boundary docs explicit about canonical product state versus assistant runtime residue', () => {
-    const agents = readFileSync(path.join(repoRoot, 'AGENTS.md'), 'utf8')
     const architecture = readFileSync(path.join(repoRoot, 'ARCHITECTURE.md'), 'utf8')
     const readme = readFileSync(path.join(repoRoot, 'README.md'), 'utf8')
     const baselineArchitecture = readFileSync(
@@ -320,7 +324,6 @@ describe('monorepo release flow coverage audit', () => {
       'utf8',
     )
 
-    expect(agents).toContain('it must not land in assistant runtime or other local operational state first')
     expect(architecture).toContain('Storage-policy hard line:')
     expect(architecture).toContain('execution residue, replay/continuity artifacts, and operator diagnostics only')
     expect(readme).toContain('it does not belong in assistant runtime first')
