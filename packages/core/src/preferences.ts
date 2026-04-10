@@ -1,13 +1,13 @@
 import {
+  isWearablePreferenceProvider,
   legacyPreferencesDocumentSchemaVersion,
+  normalizeWearablePreferenceProviders,
   preferencesDocumentRelativePath,
   preferencesDocumentSchema,
   preferencesDocumentSchemaVersion,
   type PreferencesDocument,
-  type WearablePreferenceProvider,
   type WearablePreferences,
   type WorkoutUnitPreferences,
-  wearablePreferenceProviderValues,
 } from "@murphai/contracts";
 
 import {
@@ -76,19 +76,9 @@ function normalizeWearablePreferencesForRead(value: unknown): WearablePreference
     return { desiredProviders: [] };
   }
 
-  const order = new Map<WearablePreferenceProvider, number>(
-    wearablePreferenceProviderValues.map((provider, index) => [provider, index] as const),
+  const desiredProviders = normalizeWearablePreferenceProviders(
+    value.desiredProviders.filter(isWearablePreferenceProvider),
   );
-  const desiredProviders = [...new Set(value.desiredProviders)]
-    .filter(
-      (provider): provider is WearablePreferenceProvider =>
-        typeof provider === "string" && order.has(provider as WearablePreferenceProvider),
-    )
-    .sort(
-      (left, right) =>
-        (order.get(left) ?? Number.MAX_SAFE_INTEGER) -
-        (order.get(right) ?? Number.MAX_SAFE_INTEGER),
-    );
 
   return { desiredProviders };
 }

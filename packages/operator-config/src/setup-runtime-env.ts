@@ -5,7 +5,7 @@ import {
   type SetupChannel,
   type SetupConfiguredWearable,
   type SetupWearable,
-  setupWearableValues,
+  normalizeSetupWearables,
 } from './setup-cli-contracts.js'
 
 const TELEGRAM_TOKEN_KEYS = ['TELEGRAM_BOT_TOKEN'] as const
@@ -92,8 +92,6 @@ export function resolveSetupChannelMissingEnv(
   env: NodeJS.ProcessEnv,
 ): string[] {
   switch (channel) {
-    case 'imessage':
-      return []
     case 'telegram':
       return hasAnyEnv(env, TELEGRAM_TOKEN_KEYS)
         ? []
@@ -129,24 +127,10 @@ export function describeSetupChannelStatus(
   env: NodeJS.ProcessEnv,
   platform: NodeJS.Platform = process.platform,
 ): SetupWizardRuntimeStatus {
+  void platform
   const missingEnv = resolveSetupChannelMissingEnv(channel, env)
 
   switch (channel) {
-    case 'imessage':
-      return platform === 'darwin'
-        ? {
-            badge: 'ready',
-            detail: 'Works through Messages.app on this Mac.',
-            missingEnv,
-            ready: true,
-          }
-        : {
-            badge: 'macOS only',
-            detail:
-              'Requires Messages.app plus ~/Library/Messages/chat.db on a macOS host.',
-            missingEnv,
-            ready: false,
-          }
     case 'telegram':
       return missingEnv.length === 0
         ? {
@@ -256,15 +240,9 @@ export function describeSelectedSetupWearables(input: {
   wearables: readonly SetupWearable[]
   env: NodeJS.ProcessEnv
 }): SetupConfiguredWearable[] {
-  const seen = new Set<SetupWearable>()
   const configured: SetupConfiguredWearable[] = []
 
-  for (const wearable of input.wearables) {
-    if (seen.has(wearable)) {
-      continue
-    }
-    seen.add(wearable)
-
+  for (const wearable of normalizeSetupWearables(input.wearables)) {
     const status = describeSetupWearableStatus(wearable, input.env)
     configured.push({
       detail: status.ready
@@ -277,11 +255,7 @@ export function describeSelectedSetupWearables(input: {
     })
   }
 
-  return configured.sort(
-    (left, right) =>
-      setupWearableValues.indexOf(left.wearable) -
-      setupWearableValues.indexOf(right.wearable),
-  )
+  return configured
 }
 
 function collectSetupPromptKeys(input: {

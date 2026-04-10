@@ -1,9 +1,9 @@
 import { listAssistantCronPresets } from '@murphai/assistant-engine/assistant-cron'
 import {
+  normalizeSetupWearables,
   type SetupChannel,
   type SetupWearable,
   setupChannelValues,
-  setupWearableValues,
 } from '@murphai/operator-config/setup-cli-contracts'
 
 interface SetupWizardChannelOption {
@@ -27,18 +27,13 @@ interface SetupWizardWearableOption {
 
 export const setupWizardChannelOptions: readonly SetupWizardChannelOption[] = [
   {
-    channel: 'imessage',
-    description: 'Reply from Messages on this Mac.',
-    title: 'iMessage',
-  },
-  {
     channel: 'telegram',
     description: 'Reply through a Telegram bot.',
     title: 'Telegram',
   },
   {
     channel: 'linq',
-    description: 'Reply by SMS, iMessage, or RCS through Linq.',
+    description: 'Reply by SMS or RCS through Linq.',
     title: 'Linq',
   },
   {
@@ -82,7 +77,8 @@ export const setupWizardWearableOptions: readonly SetupWizardWearableOption[] = 
 export function getDefaultSetupWizardChannels(
   platform: NodeJS.Platform = process.platform,
 ): SetupChannel[] {
-  return platform === 'darwin' ? ['imessage'] : []
+  void platform
+  return []
 }
 
 export function getDefaultSetupWizardWearables(): SetupWearable[] {
@@ -169,16 +165,7 @@ export function sortSetupWizardChannels(channels: readonly SetupChannel[]): Setu
 export function sortSetupWizardWearables(
   wearables: readonly SetupWearable[],
 ): SetupWearable[] {
-  const order = new Map<SetupWearable, number>(
-    setupWearableValues.map((wearable, index) => [wearable, index] as const),
-  )
-  const unique = [...new Set(wearables)]
-
-  return unique.sort(
-    (left, right) =>
-      (order.get(left) ?? Number.MAX_SAFE_INTEGER) -
-      (order.get(right) ?? Number.MAX_SAFE_INTEGER),
-  )
+  return normalizeSetupWearables(wearables)
 }
 
 export function sortSetupWizardScheduledUpdates(
@@ -198,8 +185,6 @@ export function sortSetupWizardScheduledUpdates(
 
 export function formatSetupChannel(channel: SetupChannel): string {
   switch (channel) {
-    case 'imessage':
-      return 'iMessage'
     case 'telegram':
       return 'Telegram'
     case 'linq':

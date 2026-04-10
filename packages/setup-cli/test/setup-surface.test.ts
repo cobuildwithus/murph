@@ -837,12 +837,13 @@ test('setup CLI initial wizard channels reuse saved state, fall back to inbox co
   await writeFile(
     automationPath,
     JSON.stringify({
-      version: 2,
+      version: 1,
       inboxScanCursor: null,
-      autoReplyScanCursor: null,
-      autoReplyChannels: ['telegram', 'linq', 'unknown-channel'],
-      autoReplyBacklogChannels: [],
-      autoReplyPrimed: false,
+      autoReply: [
+        { channel: 'telegram', cursor: null },
+        { channel: 'linq', cursor: null },
+        { channel: 'unknown-channel', cursor: null },
+      ],
       updatedAt: '2026-04-08T00:00:00.000Z',
     }),
     'utf8',
@@ -856,12 +857,9 @@ test('setup CLI initial wizard channels reuse saved state, fall back to inbox co
   await writeFile(
     automationPath,
     JSON.stringify({
-      version: 2,
+      version: 1,
       inboxScanCursor: null,
-      autoReplyScanCursor: null,
-      autoReplyChannels: [],
-      autoReplyBacklogChannels: [],
-      autoReplyPrimed: false,
+      autoReply: [],
       updatedAt: '2026-04-08T00:00:00.000Z',
     }),
     'utf8',
@@ -875,12 +873,13 @@ test('setup CLI initial wizard channels reuse saved state, fall back to inbox co
   await writeFile(
     automationPath,
     JSON.stringify({
-      version: 2,
+      version: 1,
       inboxScanCursor: null,
-      autoReplyScanCursor: null,
-      autoReplyChannels: ['telegram', 'linq', 'unknown-channel'],
-      autoReplyBacklogChannels: [],
-      autoReplyPrimed: false,
+      autoReply: [
+        { channel: 'telegram', cursor: null },
+        { channel: 'linq', cursor: null },
+        { channel: 'unknown-channel', cursor: null },
+      ],
       updatedAt: '2026-04-08T00:00:00.000Z',
     }),
     'utf8',

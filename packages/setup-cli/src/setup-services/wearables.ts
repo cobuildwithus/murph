@@ -4,7 +4,7 @@ import {
 import {
   type SetupStepResult,
   type SetupWearable,
-  setupWearableValues,
+  normalizeSetupWearables,
 } from '@murphai/operator-config/setup-cli-contracts'
 import { createStep } from './steps.js'
 
@@ -13,20 +13,6 @@ export interface ConfigureSetupWearablesInput {
   steps: SetupStepResult[]
   vault: string
   wearables: readonly SetupWearable[]
-}
-
-export function normalizeSetupWearables(
-  wearables: readonly SetupWearable[] | null | undefined,
-): SetupWearable[] {
-  const order = new Map<SetupWearable, number>(
-    setupWearableValues.map((wearable, index) => [wearable, index] as const),
-  )
-
-  return [...new Set(wearables ?? [])].sort(
-    (left, right) =>
-      (order.get(left) ?? Number.MAX_SAFE_INTEGER) -
-      (order.get(right) ?? Number.MAX_SAFE_INTEGER),
-  )
 }
 
 export async function configureSetupWearables(
