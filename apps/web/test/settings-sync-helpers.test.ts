@@ -130,4 +130,26 @@ describe("hosted settings sync helpers", () => {
       url: "/api/settings/telegram/sync",
     });
   });
+
+  it("builds a displayable telegram account from the slim sync override shape", async () => {
+    const { resolveHostedTelegramSettingsDisplayState } = await import(
+      "@/src/components/settings/hosted-telegram-settings-helpers"
+    );
+
+    await expect(resolveHostedTelegramSettingsDisplayState({
+      syncedTelegramOverride: {
+        telegramUserId: "12345",
+        username: "murph_user",
+      },
+      user: null,
+    })).toEqual({
+      currentTelegram: {
+        firstName: null,
+        lastName: null,
+        photoUrl: null,
+        telegramUserId: "12345",
+        username: "murph_user",
+      },
+    });
+  });
 });

@@ -44,15 +44,3 @@ export function HostedPhoneAuth({
     </HostedPhoneAuthScaffold>
   );
 }
-
-export {
-  createHostedPhoneVerificationAttempt,
-  finalizeInvitePhoneCodeSendConfirmation,
-  isHostedPhoneVerificationCodeComplete,
-  normalizeHostedPhoneVerificationCode,
-  resolveHostedPhoneResendTarget,
-  resolveHostedPhoneSubmission,
-  resolveHostedPrivyCompletionRedirectUrl,
-  runHostedPrivyFinalizationAttempt,
-} from "./hosted-phone-auth-support";
-export { resolveHostedAuthenticatedPhoneAuthView } from "./hosted-phone-auth-controller";
