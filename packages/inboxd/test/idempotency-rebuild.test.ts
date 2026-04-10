@@ -51,7 +51,7 @@ async function pathExists(targetPath: string): Promise<boolean> {
 
 function createCapture(overrides: Partial<InboundCapture> = {}): InboundCapture {
   return {
-    source: "imessage",
+    source: "email",
     externalId: "msg-durable-1",
     accountId: "self",
     thread: {
@@ -656,8 +656,8 @@ test("persistRawCapture rejects attachment writes that traverse vault symlinks",
     ],
   });
   const captureId = createDeterministicInboxCaptureId(inbound);
-  await fs.mkdir(path.join(vaultRoot, "raw", "inbox", "imessage", "self", "2026"), { recursive: true });
-  await fs.symlink(outsideRoot, path.join(vaultRoot, "raw", "inbox", "imessage", "self", "2026", "03"));
+  await fs.mkdir(path.join(vaultRoot, "raw", "inbox", "email", "self", "2026"), { recursive: true });
+  await fs.symlink(outsideRoot, path.join(vaultRoot, "raw", "inbox", "email", "self", "2026", "03"));
 
   await assert.rejects(
     () =>
@@ -689,7 +689,7 @@ test("findStoredCaptureEnvelope rejects symlinked envelope files", async () => {
     vaultRoot,
     "raw",
     "inbox",
-    "imessage",
+    "email",
     "self",
     "2026",
     "03",
@@ -914,7 +914,7 @@ test("openInboxRuntime rejects runtime rows missing canonical attachment ids", a
       )
       .run(
         "cap_legacy_attach",
-        "imessage",
+        "email",
         "self",
         "msg-legacy-attachment-row",
         "thread-legacy",
@@ -928,7 +928,7 @@ test("openInboxRuntime rejects runtime rows missing canonical attachment ids", a
         "legacy row",
         "{}",
         "evt_legacy_attachment_row",
-        "raw/inbox/imessage/self/2026/03/cap_legacy_attach/envelope.json",
+        "raw/inbox/email/self/2026/03/cap_legacy_attach/envelope.json",
         "2026-03-13T11:31:00.000Z",
       );
 
@@ -965,7 +965,7 @@ test("openInboxRuntime rejects runtime rows missing canonical attachment ids", a
         "document",
         "text/plain",
         null,
-        "raw/inbox/imessage/self/2026/03/cap_legacy_attach/attachments/01__legacy.txt",
+        "raw/inbox/email/self/2026/03/cap_legacy_attach/attachments/01__legacy.txt",
         "legacy.txt",
         null,
         6,
