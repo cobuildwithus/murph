@@ -960,14 +960,8 @@ test('state helpers initialize config, sort connectors, and guard namespace conf
   }
 })
 
-test('readConfig prunes legacy imessage connectors and rewrites the sanitized config', async () => {
-  const tempDir = await mkdtemp(
-    path.join(os.tmpdir(), 'inbox-services-state-imessage-migration-'),
-  )
-  const warningSpy = vi
-    .spyOn(process, 'emitWarning')
-    .mockImplementation(() => undefined)
-
+test('readConfig rejects unsupported connector sources in the stored config', async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'inbox-services-state-invalid-'))
   try {
     const paths = resolveRuntimePaths(tempDir)
     await ensureDirectory(
@@ -983,7 +977,7 @@ test('readConfig prunes legacy imessage connectors and rewrites the sanitized co
         value: {
           connectors: [
             {
-              id: 'imessage:self',
+              id: 'legacy:self',
               source: 'imessage',
               enabled: true,
               accountId: 'self',
@@ -1002,32 +996,17 @@ test('readConfig prunes legacy imessage connectors and rewrites the sanitized co
       'utf8',
     )
 
-    const config = await readConfig(paths)
-    assert.deepEqual(config, {
-      connectors: [
-        {
-          id: 'telegram:bot',
-          source: 'telegram',
-          enabled: true,
-          accountId: 'bot',
-          options: {},
-        },
-      ],
-    })
-
-    const persisted = JSON.parse(await readFile(paths.inboxConfigPath, 'utf8')) as {
-      value: InboxRuntimeConfig
-    }
-    assert.deepEqual(persisted.value, config)
-    expect(warningSpy).toHaveBeenCalledWith(
-      'Inbox runtime config pruned unsupported iMessage connectors during migration.',
-      expect.objectContaining({
-        code: 'MURPH_INBOX_IMESSAGE_CONNECTORS_PRUNED',
-        detail: expect.stringContaining('imessage:self'),
-      }),
+    await assert.rejects(
+      () => readConfig(paths),
+      (error: unknown) =>
+        error instanceof VaultCliError &&
+        error.code === 'INBOX_CONFIG_INVALID' &&
+        typeof error.context?.error === 'string' &&
+        error.context.error.includes(
+          'Invalid option: expected one of \\"telegram\\"|\\"email\\"|\\"linq\\"',
+        ),
     )
   } finally {
-    warningSpy.mockRestore()
     await rm(tempDir, { recursive: true, force: true })
   }
 })

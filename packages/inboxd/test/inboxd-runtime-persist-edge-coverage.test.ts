@@ -29,7 +29,7 @@ async function writeExternalFile(directory: string, fileName: string, content: s
 
 function createCapture(overrides: Partial<InboundCapture> = {}): InboundCapture {
   return {
-    source: "imessage",
+    source: "email",
     externalId: "msg-persist-edge-1",
     accountId: "self",
     thread: {
@@ -196,10 +196,10 @@ test("rebuildRuntimeFromVault rewrites legacy attachment ids from canonical ordi
   }
 });
 
-test("persistRawCapture only stores trusted imessage attachment files and drops blocked path metadata", async () => {
-  const vaultRoot = await makeTempDirectory("murph-inbox-trusted-imessage-vault");
-  const trustedSourceRoot = await makeTempDirectory("murph-inbox-trusted-imessage-source");
-  const untrustedSourceRoot = await makeHomeTempDirectory("murph-inbox-untrusted-imessage-source-");
+test("persistRawCapture only stores trusted temp-root attachment files and drops blocked path metadata", async () => {
+  const vaultRoot = await makeTempDirectory("murph-inbox-trusted-attachment-vault");
+  const trustedSourceRoot = await makeTempDirectory("murph-inbox-trusted-attachment-source");
+  const untrustedSourceRoot = await makeHomeTempDirectory("murph-inbox-untrusted-attachment-source-");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
   try {
@@ -217,7 +217,7 @@ test("persistRawCapture only stores trusted imessage attachment files and drops 
     await fs.mkdir(trustedDirectoryPath);
 
     const inbound = createCapture({
-      externalId: "msg-trusted-imessage-attachments",
+      externalId: "msg-trusted-email-attachments",
       attachments: [
         {
           externalId: "att-trusted",

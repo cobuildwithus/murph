@@ -9,45 +9,45 @@ import { createConnectorRegistry } from "../src/kernel/registry.ts";
 
 test("connector registry keeps distinct runtime ids under the same source family", () => {
   const left = createStubPollConnector({
-    id: "imessage:self",
-    source: "imessage",
+    id: "email:self",
+    source: "email",
     accountId: "self",
   });
   const right = createStubPollConnector({
-    id: "imessage:work",
-    source: "imessage",
+    id: "email:work",
+    source: "email",
     accountId: "work",
   });
   const registry = createConnectorRegistry([left, right]);
 
-  assert.equal(registry.get("imessage:self")?.id, "imessage:self");
-  assert.equal(registry.requirePoll("imessage:work").accountId, "work");
+  assert.equal(registry.get("email:self")?.id, "email:self");
+  assert.equal(registry.requirePoll("email:work").accountId, "work");
   assert.deepEqual(
-    registry.listBySource("imessage").map((connector) => connector.id),
-    ["imessage:self", "imessage:work"],
+    registry.listBySource("email").map((connector) => connector.id),
+    ["email:self", "email:work"],
   );
-  assert.equal(registry.get("imessage"), null);
+  assert.equal(registry.get("email"), null);
   assert.throws(
-    () => registry.requirePoll("imessage"),
-    /Multiple connectors registered for source: imessage\. Use a connector id\./,
+    () => registry.requirePoll("email"),
+    /Multiple connectors registered for source: email\. Use a connector id\./,
   );
   assert.throws(
-    () => registry.requireWebhook("imessage:self"),
-    /Webhook connector not registered for id: imessage:self/,
+    () => registry.requireWebhook("email:self"),
+    /Webhook connector not registered for id: email:self/,
   );
   assert.throws(
     () =>
       createConnectorRegistry([
         createStubPollConnector({
           id: "   ",
-          source: "imessage",
+          source: "email",
         }),
         createStubPollConnector({
           id: "   ",
-          source: "imessage",
+          source: "email",
         }),
       ]),
-    /Connector id is required when multiple connectors share source: imessage/,
+    /Connector id is required when multiple connectors share source: email/,
   );
 });
 
@@ -75,15 +75,15 @@ test("runPollConnector keeps cursor writes scoped to the connector account id", 
 
   await runPollConnector({
     connector: createStubPollConnector({
-      id: "imessage:self",
-      source: "imessage",
+      id: "email:self",
+      source: "email",
       accountId: "self",
       async backfill(cursor, emit) {
         assert.equal(cursor, null);
 
         await emit({
-          source: "imessage",
-          externalId: "im-account-scope",
+          source: "email",
+          externalId: "email-account-scope",
           accountId: "other",
           thread: {
             id: "chat-account-scope",
@@ -395,8 +395,8 @@ test("runInboxDaemon aborts sibling connectors and waits for their cleanup when 
   let runningConnectorAborted = false;
   let runningConnectorClosed = 0;
   const runningConnector = createStubPollConnector({
-    id: "imessage:self",
-    source: "imessage",
+    id: "email:self",
+    source: "email",
     accountId: "self",
     async watch(_cursor, _emit, signal) {
       await new Promise<void>((resolve) => {
@@ -421,8 +421,8 @@ test("runInboxDaemon aborts sibling connectors and waits for their cleanup when 
     },
   });
   const failingConnector = createStubPollConnector({
-    id: "imessage:work",
-    source: "imessage",
+    id: "email:work",
+    source: "email",
     accountId: "work",
     async watch() {
       throw new Error("watch exploded");
@@ -480,7 +480,7 @@ test("runInboxDaemon aborts sibling connectors and waits for their cleanup when 
         connectors: [runningConnector, failingConnector],
         signal: new AbortController().signal,
       }),
-    /Connector "imessage:work" \(imessage\) failed: watch exploded/,
+    /Connector "email:work" \(email\) failed: watch exploded/,
   );
 
   assert.equal(runningConnectorAborted, true);
@@ -489,16 +489,16 @@ test("runInboxDaemon aborts sibling connectors and waits for their cleanup when 
 
 test("runInboxDaemon aggregates wrapped connector failures when multiple connectors throw", async () => {
   const left = createStubPollConnector({
-    id: "imessage:self",
-    source: "imessage",
+    id: "email:self",
+    source: "email",
     accountId: "self",
     async watch() {
       throw new Error("left exploded");
     },
   });
   const right = createStubPollConnector({
-    id: "imessage:work",
-    source: "imessage",
+    id: "email:work",
+    source: "email",
     accountId: "work",
     async watch() {
       throw new Error("right exploded");
@@ -563,8 +563,8 @@ test("runInboxDaemon aggregates wrapped connector failures when multiple connect
         entry instanceof Error ? entry.message : String(entry),
       );
       assert.deepEqual(messages.sort(), [
-        'Connector "imessage:self" (imessage) failed: left exploded',
-        'Connector "imessage:work" (imessage) failed: right exploded',
+        'Connector "email:self" (email) failed: left exploded',
+        'Connector "email:work" (email) failed: right exploded',
       ]);
       return true;
     },
@@ -608,9 +608,9 @@ test("runInboxDaemon can keep sibling connectors alive after a connector failure
     },
   });
   const failingConnector = createStubPollConnector({
-    id: "imessage:self",
-    source: "imessage",
-    accountId: "self",
+    id: "telegram:bot",
+    source: "telegram",
+    accountId: "bot",
     async watch() {
       throw new Error("watch exploded");
     },
@@ -801,9 +801,9 @@ test("runInboxDaemon stops cleanly when aborted during connector restart backoff
 
 test("runInboxDaemon still rejects when every connector fails in isolation mode", async () => {
   const left = createStubPollConnector({
-    id: "imessage:self",
-    source: "imessage",
-    accountId: "self",
+    id: "telegram:bot",
+    source: "telegram",
+    accountId: "bot",
     async watch() {
       throw new Error("left exploded");
     },
@@ -877,7 +877,7 @@ test("runInboxDaemon still rejects when every connector fails in isolation mode"
       );
       assert.deepEqual(messages.sort(), [
         'Connector "email:agentmail" (email) failed: right exploded',
-        'Connector "imessage:self" (imessage) failed: left exploded',
+        'Connector "telegram:bot" (telegram) failed: left exploded',
       ]);
       return true;
     },
