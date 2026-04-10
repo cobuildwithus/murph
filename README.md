@@ -1,6 +1,6 @@
 <img src="docs/assets/readme-hero.jpg" alt="Murph hero" width="1200" height="685">
 
-# Murph
+# Murph 🌙
 
 Murph is your personal health assistant.
 
@@ -113,30 +113,30 @@ The result is a system you can inspect with normal filesystem tools while still 
 
 Only five packages are published to npm: `@murphai/murph`, `@murphai/openclaw-plugin`, `@murphai/contracts`, `@murphai/hosted-execution`, and `@murphai/gateway-core`. The remaining `packages/*` entries are workspace-private owner packages that stay installable from a checkout and can be bundled into public tarballs, but they are not intended to be consumed as standalone npm products.
 
-| Path | Responsibility |
-| --- | --- |
-| `packages/contracts` | Canonical Zod contracts, types, examples, and generated JSON Schema artifacts. |
-| `packages/hosted-execution` | Shared hosted dispatch contracts, env readers, signing helpers, and typed clients. |
-| `packages/runtime-state` | Workspace-private shared local-state taxonomy, `.runtime` path resolution, JSON-state versioning, and SQLite schema-version helpers. |
-| `packages/core` | Workspace-private canonical mutation owner. No other package may write canonical vault data directly. |
-| `packages/importers` | Workspace-private external adapters that normalize inputs and delegate writes to `core`. |
-| `packages/inboxd` | Workspace-private inbox capture, canonical evidence persistence, runtime indexing, and attachment parse-job orchestration. |
-| `packages/parsers` | Workspace-private local-first attachment parsing and derived artifact publication. |
-| `packages/query` | Workspace-private read helpers, summaries, list/search helpers, export-pack generation, and derived-knowledge parser/search/index helpers. |
-| `packages/device-syncd` | Workspace-private local wearable/device OAuth, webhook, and reconcile daemon. |
-| `packages/assistant-engine` | Workspace-private headless assistant execution/runtime owner. |
-| `packages/operator-config` | Workspace-private operator config, setup/runtime-env, and hosted assistant config owner. |
-| `packages/assistant-cli` | Workspace-private CLI-only assistant wrappers, commands, terminal logging, and Ink chat UI. |
-| `packages/setup-cli` | Workspace-private CLI-only onboarding, host setup, and setup-wizard package. |
-| `packages/gateway-core` | Headless transport-neutral gateway boundary. |
-| `packages/gateway-local` | Workspace-private local vault-backed gateway runtime and projection store. |
-| `packages/assistant-runtime` | Workspace-private headless hosted execution surface used by Cloudflare runner paths. |
-| `packages/assistantd` | Workspace-private local assistant daemon with a loopback-only bearer-authenticated control plane. |
-| `packages/cli` | The published `@murphai/murph` package, exposing the `murph` / `vault-cli` binaries and the main operator surface. |
-| `packages/openclaw-plugin` | The published OpenClaw-compatible bundle that teaches OpenClaw to use `vault-cli` directly against the configured Murph vault. |
-| `apps/web` | Hosted Next.js control plane for onboarding, billing, OAuth, webhooks, and execution dispatch/outbox. |
-| `apps/cloudflare` | Hosted execution plane for signed internal dispatch, per-user coordination, encrypted hosted bundles, and container-backed runs. |
-| `fixtures` and `e2e` | Deterministic fixtures and smoke coverage. |
+| Path                         | Responsibility                                                                                                                             |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `packages/contracts`         | Canonical Zod contracts, types, examples, and generated JSON Schema artifacts.                                                             |
+| `packages/hosted-execution`  | Shared hosted dispatch contracts, env readers, signing helpers, and typed clients.                                                         |
+| `packages/runtime-state`     | Workspace-private shared local-state taxonomy, `.runtime` path resolution, JSON-state versioning, and SQLite schema-version helpers.       |
+| `packages/core`              | Workspace-private canonical mutation owner. No other package may write canonical vault data directly.                                      |
+| `packages/importers`         | Workspace-private external adapters that normalize inputs and delegate writes to `core`.                                                   |
+| `packages/inboxd`            | Workspace-private inbox capture, canonical evidence persistence, runtime indexing, and attachment parse-job orchestration.                 |
+| `packages/parsers`           | Workspace-private local-first attachment parsing and derived artifact publication.                                                         |
+| `packages/query`             | Workspace-private read helpers, summaries, list/search helpers, export-pack generation, and derived-knowledge parser/search/index helpers. |
+| `packages/device-syncd`      | Workspace-private local wearable/device OAuth, webhook, and reconcile daemon.                                                              |
+| `packages/assistant-engine`  | Workspace-private headless assistant execution/runtime owner.                                                                              |
+| `packages/operator-config`   | Workspace-private operator config, setup/runtime-env, and hosted assistant config owner.                                                   |
+| `packages/assistant-cli`     | Workspace-private CLI-only assistant wrappers, commands, terminal logging, and Ink chat UI.                                                |
+| `packages/setup-cli`         | Workspace-private CLI-only onboarding, host setup, and setup-wizard package.                                                               |
+| `packages/gateway-core`      | Headless transport-neutral gateway boundary.                                                                                               |
+| `packages/gateway-local`     | Workspace-private local vault-backed gateway runtime and projection store.                                                                 |
+| `packages/assistant-runtime` | Workspace-private headless hosted execution surface used by Cloudflare runner paths.                                                       |
+| `packages/assistantd`        | Workspace-private local assistant daemon with a loopback-only bearer-authenticated control plane.                                          |
+| `packages/cli`               | The published `@murphai/murph` package, exposing the `murph` / `vault-cli` binaries and the main operator surface.                         |
+| `packages/openclaw-plugin`   | The published OpenClaw-compatible bundle that teaches OpenClaw to use `vault-cli` directly against the configured Murph vault.             |
+| `apps/web`                   | Hosted Next.js control plane for onboarding, billing, OAuth, webhooks, and execution dispatch/outbox.                                      |
+| `apps/cloudflare`            | Hosted execution plane for signed internal dispatch, per-user coordination, encrypted hosted bundles, and container-backed runs.           |
+| `fixtures` and `e2e`         | Deterministic fixtures and smoke coverage.                                                                                                 |
 
 ## Local and hosted surfaces
 
