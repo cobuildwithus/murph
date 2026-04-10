@@ -196,6 +196,10 @@ describe('monorepo release flow coverage audit', () => {
       path.join(repoRoot, 'scripts', 'review-gpt.config.sh'),
       'utf8',
     )
+    const privacyPreset = readFileSync(
+      path.join(repoRoot, 'scripts', 'chatgpt-review-presets', 'privacy.md'),
+      'utf8',
+    )
     const fullReviewConfig = readFileSync(
       path.join(repoRoot, 'scripts', 'review-gpt-full.config.sh'),
       'utf8',
@@ -212,6 +216,8 @@ describe('monorepo release flow coverage audit', () => {
     expect(leanReviewConfig).toContain('include_tests=0')
     expect(leanReviewConfig).toContain('include_docs=0')
     expect(leanReviewConfig).toContain('package_script="scripts/package-audit-context.sh"')
+    expect(leanReviewConfig).toContain('review_gpt_register_dir_preset "privacy" "privacy.md"')
+    expect(privacyPreset).toContain('storing as little user data as possible')
     expect(fullReviewConfig).toContain('source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/review-gpt.config.sh"')
     expect(fullReviewConfig).toContain('include_tests=1')
     expect(fullReviewConfig).toContain('include_docs=1')
