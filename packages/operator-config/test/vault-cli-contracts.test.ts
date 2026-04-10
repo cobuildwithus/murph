@@ -14,6 +14,7 @@ afterEach(() => {
 })
 
 test('listFilterSchema describes query record types from the query package when available', async () => {
+  vi.resetModules()
   vi.doMock('@murphai/query', () => ({
     ALL_QUERY_ENTITY_FAMILIES: ['custom_a', 'custom_b'],
   }))
@@ -25,6 +26,7 @@ test('listFilterSchema describes query record types from the query package when 
 })
 
 test('listFilterSchema falls back when query record types are not an array', async () => {
+  vi.resetModules()
   vi.doMock('@murphai/query', () => ({
     ALL_QUERY_ENTITY_FAMILIES: 'not-an-array',
   }))
@@ -37,6 +39,7 @@ test('listFilterSchema falls back when query record types are not an array', asy
 })
 
 test('listFilterSchema falls back when reading query record types throws', async () => {
+  vi.resetModules()
   vi.doMock('@murphai/query', () => {
     const mockedModule: Record<string, unknown> = {}
     Object.defineProperty(mockedModule, 'ALL_QUERY_ENTITY_FAMILIES', {
