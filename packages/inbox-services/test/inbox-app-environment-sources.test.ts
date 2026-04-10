@@ -439,10 +439,9 @@ test('integrated services can init, setup, and manage Linq connectors in a temp 
   })
 })
 
-test('source operations reject unsupported iMessage enabling on non-macOS hosts', async () => {
+test('source operations reject unsupported source identifiers outside the current runtime contract', async () => {
   await withTempVault(async (vault) => {
     const env = createInboxAppEnvironment({
-      getPlatform: () => 'linux',
       loadInboxModule: async () => createInboxRuntimeModule(),
     })
     const bootstrap = createInboxBootstrapDoctorOps(env)
@@ -458,12 +457,12 @@ test('source operations reject unsupported iMessage enabling on non-macOS hosts'
         sources.sourceAdd({
           requestId: null,
           vault,
-          id: 'imessage:self',
-          source: 'imessage',
+          id: 'unsupported:self',
+          source: 'unsupported' as never,
         }),
       (error: unknown) => {
         assert.ok(error instanceof VaultCliError)
-        assert.equal(error.code, 'INBOX_IMESSAGE_UNAVAILABLE')
+        assert.equal(error.code, 'INBOX_SOURCE_UNSUPPORTED')
         return true
       },
     )

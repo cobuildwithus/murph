@@ -33,7 +33,6 @@ import type {
   CoreRuntimeModule,
   ImportersFactoryRuntimeModule,
   InboxAppEnvironment,
-  InboxImessageRuntimeModule,
   InboxRuntimeModule,
   ParsersRuntimeModule,
   QueryRuntimeModule,
@@ -281,15 +280,6 @@ function createInboxAppEnvironment(input: {
     },
   }
 
-  const imessage: InboxImessageRuntimeModule = {
-    createImessageConnector() {
-      throw new Error('createImessageConnector not used in promotions tests')
-    },
-    async loadImessageKitDriver() {
-      throw new Error('loadImessageKitDriver not used in promotions tests')
-    },
-  }
-
   return {
     clock: input.clock ?? (() => new Date('2026-04-08T12:00:00.000Z')),
     getPid: () => 1,
@@ -315,13 +305,9 @@ function createInboxAppEnvironment(input: {
         },
       },
     loadInbox: async () => inbox,
-    loadInboxImessage: async () => imessage,
     loadParsers: async () => parsers,
     loadQuery: async () => query,
     requireParsers: async () => parsers,
-    async loadConfiguredImessageDriver() {
-      throw new Error('loadConfiguredImessageDriver not used in promotions tests')
-    },
     async loadConfiguredTelegramDriver() {
       throw new Error('loadConfiguredTelegramDriver not used in promotions tests')
     },
@@ -340,7 +326,6 @@ function createInboxAppEnvironment(input: {
     async tryResolveAgentmailInboxAddress() {
       return null
     },
-    async ensureConfiguredImessageReady() {},
     journalPromotionEnabled: true,
   }
 }

@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict'
 import os from 'node:os'
 import path from 'node:path'
-import { mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 
 import { resolveRuntimePaths, tryKillProcess } from '@murphai/runtime-state/node'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
-import { test } from 'vitest'
+import { expect, test, vi } from 'vitest'
 
 import type {
   InboxRuntimeConfig,
@@ -152,7 +152,10 @@ function createPollConnector(id: string) {
 test('shared utility helpers normalize inbox metadata and paths', async () => {
   assert.equal(runtimeNamespaceAccountId({ accountId: null }), null)
   assert.equal(connectorNamespaceKey({ source: 'telegram', accountId: null }), 'telegram::default')
-  assert.equal(normalizeConnectorAccountId('imessage', undefined), 'self')
+  assert.throws(
+    () => normalizeConnectorAccountId('unsupported' as never, undefined),
+    (error: unknown) => error instanceof VaultCliError && error.code === 'INBOX_SOURCE_UNSUPPORTED',
+  )
   assert.equal(normalizeConnectorAccountId('telegram', undefined), 'bot')
   assert.equal(normalizeConnectorAccountId('linq', undefined), 'default')
   assert.equal(normalizeConnectorAccountId('email', ' inbox@example.com '), 'inbox@example.com')
@@ -299,13 +302,9 @@ test('capture and attachment helpers summarize runtime records', () => {
 
 test('connector helpers instantiate every supported source and reject missing prerequisites', async () => {
   const calls: string[] = []
-  const imessageConnector = createPollConnector('imessage:primary')
   const telegramConnector = createPollConnector('telegram:bot')
   const emailConnector = createPollConnector('email:primary')
   const linqConnector = createPollConnector('linq:default')
-  const imessageDriver = {
-    getMessages: async () => [],
-  }
   const telegramDriver = {
     downloadFile: async () => new Uint8Array(),
     getFile: async () => ({}),
@@ -319,7 +318,6 @@ test('connector helpers instantiate every supported source and reject missing pr
     listUnreadMessages: async () => [],
     markProcessed: async () => undefined,
   }
-  let imessageInput: unknown
   let telegramInput: unknown
   let emailInput: unknown
   let linqInput: unknown
@@ -340,59 +338,6 @@ test('connector helpers instantiate every supported source and reject missing pr
       return linqConnector
     },
   }
-  const inboxImessage = {
-    createImessageConnector(input: unknown) {
-      calls.push('imessage')
-      imessageInput = input
-      return imessageConnector
-    },
-  }
-
-  const imessage = await instantiateConnector({
-    connector: {
-      id: 'imessage:primary',
-      source: 'imessage',
-      enabled: true,
-      accountId: null,
-      options: {
-        includeOwnMessages: false,
-      },
-    },
-    inputLimit: 12,
-    async ensureImessageReady() {
-      calls.push('imessage-ready')
-    },
-    async loadInbox() {
-      return inboxd as never
-    },
-    async loadInboxImessage() {
-      calls.push('load-imessage-runtime')
-      return inboxImessage as never
-    },
-    async loadImessageDriver() {
-      calls.push('load-imessage-driver')
-      return imessageDriver as never
-    },
-    async loadTelegramDriver() {
-      throw new Error('unexpected telegram driver load')
-    },
-    linqWebhookSecret: null,
-  })
-  assert.equal(imessage, imessageConnector)
-  assert.deepEqual(calls.slice(0, 4), [
-    'imessage-ready',
-    'load-imessage-runtime',
-    'load-imessage-driver',
-    'imessage',
-  ])
-  assert.deepEqual(imessageInput, {
-    accountId: 'self',
-    backfillLimit: 12,
-    driver: imessageDriver,
-    id: 'imessage:primary',
-    includeOwnMessages: false,
-  })
-
   const telegram = await instantiateConnector({
     connector: {
       id: 'telegram:bot',
@@ -404,11 +349,7 @@ test('connector helpers instantiate every supported source and reject missing pr
     async loadInbox() {
       return inboxd as never
     },
-    async loadImessageDriver() {
-      throw new Error('unexpected imessage driver load')
-    },
     async loadTelegramDriver() {
-      calls.push('load-telegram-driver')
       return telegramDriver as never
     },
     linqWebhookSecret: null,
@@ -434,14 +375,10 @@ test('connector helpers instantiate every supported source and reject missing pr
     async loadInbox() {
       return inboxd as never
     },
-    async loadImessageDriver() {
-      throw new Error('unexpected imessage driver load')
-    },
     async loadTelegramDriver() {
       throw new Error('unexpected telegram driver load')
     },
     async loadEmailDriver() {
-      calls.push('load-email-driver')
       return emailDriver as never
     },
     linqWebhookSecret: null,
@@ -470,9 +407,6 @@ test('connector helpers instantiate every supported source and reject missing pr
     async loadInbox() {
       return inboxd as never
     },
-    async loadImessageDriver() {
-      throw new Error('unexpected imessage driver load')
-    },
     async loadTelegramDriver() {
       throw new Error('unexpected telegram driver load')
     },
@@ -493,30 +427,6 @@ test('connector helpers instantiate every supported source and reject missing pr
     () =>
       instantiateConnector({
         connector: {
-          id: 'imessage:missing',
-          source: 'imessage',
-          enabled: true,
-          accountId: null,
-          options: {},
-        },
-        async loadInbox() {
-          return inboxd as never
-        },
-        async loadImessageDriver() {
-          return { getMessages: async () => [] } as never
-        },
-        async loadTelegramDriver() {
-          throw new Error('unexpected telegram driver load')
-        },
-        linqWebhookSecret: null,
-      }),
-    /loadInboxImessage/,
-  )
-
-  await assert.rejects(
-    () =>
-      instantiateConnector({
-        connector: {
           id: 'email:missing',
           source: 'email',
           enabled: true,
@@ -525,9 +435,6 @@ test('connector helpers instantiate every supported source and reject missing pr
         },
         async loadInbox() {
           return inboxd as never
-        },
-        async loadImessageDriver() {
-          return { getMessages: async () => [] } as never
         },
         async loadTelegramDriver() {
           throw new Error('unexpected telegram driver load')
@@ -550,9 +457,6 @@ test('connector helpers instantiate every supported source and reject missing pr
         async loadInbox() {
           return inboxd as never
         },
-        async loadImessageDriver() {
-          return { getMessages: async () => [] } as never
-        },
         async loadTelegramDriver() {
           throw new Error('unexpected telegram driver load')
         },
@@ -573,9 +477,6 @@ test('connector helpers instantiate every supported source and reject missing pr
         },
         async loadInbox() {
           return inboxd as never
-        },
-        async loadImessageDriver() {
-          return imessageDriver as never
         },
         async loadTelegramDriver() {
           return telegramDriver as never
@@ -1055,6 +956,78 @@ test('state helpers initialize config, sort connectors, and guard namespace conf
     const ensured = await ensureInitialized(async () => inboxd as never, tempDir)
     assert.equal(ensured.absoluteVaultRoot, paths.absoluteVaultRoot)
   } finally {
+    await rm(tempDir, { recursive: true, force: true })
+  }
+})
+
+test('readConfig prunes legacy imessage connectors and rewrites the sanitized config', async () => {
+  const tempDir = await mkdtemp(
+    path.join(os.tmpdir(), 'inbox-services-state-imessage-migration-'),
+  )
+  const warningSpy = vi
+    .spyOn(process, 'emitWarning')
+    .mockImplementation(() => undefined)
+
+  try {
+    const paths = resolveRuntimePaths(tempDir)
+    await ensureDirectory(
+      path.dirname(paths.inboxConfigPath),
+      [],
+      paths.absoluteVaultRoot,
+    )
+    await writeFile(
+      paths.inboxConfigPath,
+      JSON.stringify({
+        schema: 'murph.inbox-runtime-config.v1',
+        schemaVersion: 1,
+        value: {
+          connectors: [
+            {
+              id: 'imessage:self',
+              source: 'imessage',
+              enabled: true,
+              accountId: 'self',
+              options: {},
+            },
+            {
+              id: 'telegram:bot',
+              source: 'telegram',
+              enabled: true,
+              accountId: 'bot',
+              options: {},
+            },
+          ],
+        },
+      }),
+      'utf8',
+    )
+
+    const config = await readConfig(paths)
+    assert.deepEqual(config, {
+      connectors: [
+        {
+          id: 'telegram:bot',
+          source: 'telegram',
+          enabled: true,
+          accountId: 'bot',
+          options: {},
+        },
+      ],
+    })
+
+    const persisted = JSON.parse(await readFile(paths.inboxConfigPath, 'utf8')) as {
+      value: InboxRuntimeConfig
+    }
+    assert.deepEqual(persisted.value, config)
+    expect(warningSpy).toHaveBeenCalledWith(
+      'Inbox runtime config pruned unsupported iMessage connectors during migration.',
+      expect.objectContaining({
+        code: 'MURPH_INBOX_IMESSAGE_CONNECTORS_PRUNED',
+        detail: expect.stringContaining('imessage:self'),
+      }),
+    )
+  } finally {
+    warningSpy.mockRestore()
     await rm(tempDir, { recursive: true, force: true })
   }
 })

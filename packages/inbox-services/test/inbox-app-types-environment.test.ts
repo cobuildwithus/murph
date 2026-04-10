@@ -8,7 +8,6 @@ const {
   matchesAgentmailHttpErrorMock,
   resolveAgentmailApiKeyMock,
   resolveAgentmailBaseUrlMock,
-  ensureImessageMessagesDbReadableMock,
   resolveTelegramApiBaseUrlMock,
   resolveTelegramBotTokenMock,
   resolveTelegramFileBaseUrlMock,
@@ -20,7 +19,6 @@ const {
   matchesAgentmailHttpErrorMock: vi.fn(),
   resolveAgentmailApiKeyMock: vi.fn(),
   resolveAgentmailBaseUrlMock: vi.fn(),
-  ensureImessageMessagesDbReadableMock: vi.fn(),
   resolveTelegramApiBaseUrlMock: vi.fn(),
   resolveTelegramBotTokenMock: vi.fn(),
   resolveTelegramFileBaseUrlMock: vi.fn(),
@@ -34,10 +32,6 @@ vi.mock('@murphai/operator-config/agentmail-runtime', () => ({
   matchesAgentmailHttpError: matchesAgentmailHttpErrorMock,
   resolveAgentmailApiKey: resolveAgentmailApiKeyMock,
   resolveAgentmailBaseUrl: resolveAgentmailBaseUrlMock,
-}))
-
-vi.mock('@murphai/operator-config/imessage-readiness', () => ({
-  ensureImessageMessagesDbReadable: ensureImessageMessagesDbReadableMock,
 }))
 
 vi.mock('@murphai/operator-config/setup-runtime-env', () => ({
@@ -61,7 +55,6 @@ import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
 import {
   createInboxAppEnvironment,
-  IMESSAGE_MESSAGES_DB_RELATIVE_PATH,
 } from '../src/inbox-app/environment.ts'
 import type {
   CoreRuntimeModule,
@@ -161,7 +154,6 @@ beforeEach(() => {
   matchesAgentmailHttpErrorMock.mockReset()
   resolveAgentmailApiKeyMock.mockReset()
   resolveAgentmailBaseUrlMock.mockReset()
-  ensureImessageMessagesDbReadableMock.mockReset()
   resolveTelegramApiBaseUrlMock.mockReset()
   resolveTelegramBotTokenMock.mockReset()
   resolveTelegramFileBaseUrlMock.mockReset()
@@ -559,25 +551,6 @@ test('provisionOrRecoverAgentmailInbox surfaces a scoped-key error when discover
       return true
     },
   )
-})
-
-test('ensureConfiguredImessageReady forwards the expected messages-db probe details', async () => {
-  const env = createInboxAppEnvironment({
-    getHomeDirectory: () => '/tmp/home',
-    getPlatform: () => 'darwin',
-    probeImessageMessagesDb: async () => undefined,
-  })
-
-  await env.ensureConfiguredImessageReady()
-
-  const probeInput = ensureImessageMessagesDbReadableMock.mock.calls[0]?.[0]
-  assert.equal(probeInput?.homeDirectory, '/tmp/home')
-  assert.equal(probeInput?.platform, 'darwin')
-  assert.equal(typeof probeInput?.probeMessagesDb, 'function')
-  const messages = ensureImessageMessagesDbReadableMock.mock.calls[0]?.[1]
-  assert.equal(messages.unavailableCode, 'INBOX_IMESSAGE_UNAVAILABLE')
-  assert.equal(messages.permissionCode, 'INBOX_IMESSAGE_PERMISSION_REQUIRED')
-  assert.match(messages.permissionMessage, new RegExp(IMESSAGE_MESSAGES_DB_RELATIVE_PATH))
 })
 
 test('journalPromotionEnabled honours explicit dependency overrides', () => {

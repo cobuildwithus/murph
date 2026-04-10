@@ -8,7 +8,6 @@ const {
   matchesAgentmailHttpErrorMock,
   resolveAgentmailApiKeyMock,
   resolveAgentmailBaseUrlMock,
-  ensureImessageMessagesDbReadableMock,
   resolveTelegramApiBaseUrlMock,
   resolveTelegramBotTokenMock,
   resolveTelegramFileBaseUrlMock,
@@ -20,7 +19,6 @@ const {
   matchesAgentmailHttpErrorMock: vi.fn(),
   resolveAgentmailApiKeyMock: vi.fn(),
   resolveAgentmailBaseUrlMock: vi.fn(),
-  ensureImessageMessagesDbReadableMock: vi.fn(),
   resolveTelegramApiBaseUrlMock: vi.fn(),
   resolveTelegramBotTokenMock: vi.fn(),
   resolveTelegramFileBaseUrlMock: vi.fn(),
@@ -34,10 +32,6 @@ vi.mock('@murphai/operator-config/agentmail-runtime', () => ({
   matchesAgentmailHttpError: matchesAgentmailHttpErrorMock,
   resolveAgentmailApiKey: resolveAgentmailApiKeyMock,
   resolveAgentmailBaseUrl: resolveAgentmailBaseUrlMock,
-}))
-
-vi.mock('@murphai/operator-config/imessage-readiness', () => ({
-  ensureImessageMessagesDbReadable: ensureImessageMessagesDbReadableMock,
 }))
 
 vi.mock('@murphai/operator-config/setup-runtime-env', () => ({
@@ -63,21 +57,8 @@ import { createInboxAppEnvironment } from '../src/inbox-app/environment.ts'
 import { describeLinqConnectorEndpoint } from '../src/inbox-app/linq-endpoint.ts'
 import type {
   EmailDriver,
-  ImessageDriver,
   InboxConnectorConfig,
-  InboxImessageRuntimeModule,
 } from '../src/inbox-app/types.ts'
-
-function createImessageDriver(
-  overrides: Partial<ImessageDriver> = {},
-): ImessageDriver {
-  return {
-    async getMessages() {
-      return []
-    },
-    ...overrides,
-  }
-}
 
 function createEmailDriver(
   overrides: Partial<EmailDriver> = {},
@@ -95,28 +76,6 @@ function createEmailDriver(
   }
 }
 
-function createInboxImessageModule(
-  overrides: Partial<InboxImessageRuntimeModule> = {},
-): InboxImessageRuntimeModule {
-  return {
-    createImessageConnector() {
-      throw new Error('not used in threshold tests')
-    },
-    async loadImessageKitDriver() {
-      return createImessageDriver()
-    },
-    ...overrides,
-  }
-}
-
-const IMESSAGE_CONNECTOR = {
-  accountId: 'imessage-account',
-  enabled: true,
-  id: 'imessage:primary',
-  options: {},
-  source: 'imessage',
-} satisfies InboxConnectorConfig
-
 const EMAIL_CONNECTOR = {
   accountId: 'mailbox-1',
   enabled: true,
@@ -131,7 +90,6 @@ beforeEach(() => {
   matchesAgentmailHttpErrorMock.mockReset()
   resolveAgentmailApiKeyMock.mockReset()
   resolveAgentmailBaseUrlMock.mockReset()
-  ensureImessageMessagesDbReadableMock.mockReset()
   resolveTelegramApiBaseUrlMock.mockReset()
   resolveTelegramBotTokenMock.mockReset()
   resolveTelegramFileBaseUrlMock.mockReset()
@@ -193,66 +151,6 @@ test('default helper methods expose live process values and the no-op auto-reply
 
   await env.sleep(0)
   assert.equal(await env.enableAssistantAutoReplyChannel('/tmp/vault', 'linq'), false)
-})
-
-test('loadConfiguredImessageDriver returns an injected driver without loading runtime modules', async () => {
-  const expectedDriver = createImessageDriver()
-  const loadImessageDriver = vi.fn(
-    async (_config: InboxConnectorConfig) => expectedDriver,
-  )
-  const env = createInboxAppEnvironment({
-    loadImessageDriver,
-  })
-
-  assert.equal(await env.loadConfiguredImessageDriver(IMESSAGE_CONNECTOR), expectedDriver)
-  assert.equal(loadImessageDriver.mock.calls.length, 1)
-  assert.equal(loadRuntimeModuleMock.mock.calls.length, 0)
-})
-
-test('loadConfiguredImessageDriver preserves runtime_unavailable failures from loading the iMessage runtime', async () => {
-  const env = createInboxAppEnvironment({
-    loadInboxImessageModule: async () => {
-      throw new Error('missing runtime package')
-    },
-  })
-
-  await assert.rejects(
-    () => env.loadConfiguredImessageDriver(IMESSAGE_CONNECTOR),
-    (error: unknown) => {
-      assert.ok(error instanceof VaultCliError)
-      assert.equal(error.code, 'runtime_unavailable')
-      assert.match(error.message, /the iMessage inbox connector/)
-      assert.deepEqual(error.context, {
-        cause: 'missing runtime package',
-        packages: ['@murphai/inboxd-imessage'],
-      })
-      return true
-    },
-  )
-})
-
-test('loadConfiguredImessageDriver wraps runtime driver failures with connector-specific context', async () => {
-  const env = createInboxAppEnvironment({
-    inboxImessageModule: createInboxImessageModule({
-      loadImessageKitDriver() {
-        throw new Error('driver boot failed')
-      },
-    }),
-  })
-
-  await assert.rejects(
-    () => env.loadConfiguredImessageDriver(IMESSAGE_CONNECTOR),
-    (error: unknown) => {
-      assert.ok(error instanceof VaultCliError)
-      assert.equal(error.code, 'runtime_unavailable')
-      assert.match(error.message, /"imessage:primary"/)
-      assert.deepEqual(error.context, {
-        cause: 'driver boot failed',
-        packages: ['@murphai/inboxd-imessage'],
-      })
-      return true
-    },
-  )
 })
 
 test('requireParsers wraps non-Error runtime failures with parser package guidance', async () => {

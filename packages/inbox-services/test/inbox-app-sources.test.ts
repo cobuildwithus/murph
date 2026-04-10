@@ -56,7 +56,6 @@ function createEnv(
     enableAssistantAutoReplyChannel: vi.fn(
       async (_vault: string, _channel: InboxConnectorConfig['source']) => false,
     ),
-    ensureConfiguredImessageReady: async () => undefined,
     getEnvironment: () => ({}),
     getHomeDirectory: () => '/tmp',
     getPid: () => 123,
@@ -69,9 +68,6 @@ function createEnv(
     loadConfiguredEmailDriver: async () => {
       throw new Error('not used in source tests')
     },
-    loadConfiguredImessageDriver: async () => {
-      throw new Error('not used in source tests')
-    },
     loadConfiguredTelegramDriver: async () => {
       throw new Error('not used in source tests')
     },
@@ -79,9 +75,6 @@ function createEnv(
       throw new Error('not used in source tests')
     },
     loadInbox: async () => {
-      throw new Error('not used in source tests')
-    },
-    loadInboxImessage: async () => {
       throw new Error('not used in source tests')
     },
     loadParsers: async () => {
@@ -174,20 +167,16 @@ test('sourceAdd rejects duplicate connector ids', async () => {
   )
 })
 
-test('sourceAdd blocks iMessage on non-macOS hosts', async () => {
-  const ops = createInboxSourceOps(
-    createEnv({
-      getPlatform: () => 'linux',
-    }),
-  )
+test('sourceAdd rejects unsupported sources outside the current runtime contract', async () => {
+  const ops = createInboxSourceOps(createEnv())
 
   await assert.rejects(
     () =>
       ops.sourceAdd({
         ...commandContext(),
-        id: 'imessage:self',
-        source: 'imessage',
-        account: 'self',
+        id: 'unsupported:source',
+        source: 'unsupported' as never,
+        account: 'custom',
         address: null,
         backfillLimit: undefined,
         provision: false,
@@ -199,7 +188,7 @@ test('sourceAdd blocks iMessage on non-macOS hosts', async () => {
       }),
     (error: unknown) => {
       assert.ok(error instanceof VaultCliError)
-      assert.equal(error.code, 'INBOX_IMESSAGE_UNAVAILABLE')
+      assert.equal(error.code, 'INBOX_SOURCE_UNSUPPORTED')
       return true
     },
   )
@@ -426,39 +415,6 @@ test('sourceSetEnabled rejects unknown connector ids', async () => {
     (error: unknown) => {
       assert.ok(error instanceof VaultCliError)
       assert.equal(error.code, 'INBOX_SOURCE_NOT_FOUND')
-      return true
-    },
-  )
-})
-
-test('sourceSetEnabled blocks enabling iMessage on unsupported hosts', async () => {
-  readConfigMock.mockResolvedValue(
-    createConfig([
-      {
-        id: 'imessage:self',
-        source: 'imessage',
-        enabled: false,
-        accountId: 'self',
-        options: {},
-      },
-    ]),
-  )
-  const ops = createInboxSourceOps(
-    createEnv({
-      getPlatform: () => 'linux',
-    }),
-  )
-
-  await assert.rejects(
-    () =>
-      ops.sourceSetEnabled({
-        ...commandContext(),
-        connectorId: 'imessage:self',
-        enabled: true,
-      }),
-    (error: unknown) => {
-      assert.ok(error instanceof VaultCliError)
-      assert.equal(error.code, 'INBOX_IMESSAGE_UNAVAILABLE')
       return true
     },
   )
