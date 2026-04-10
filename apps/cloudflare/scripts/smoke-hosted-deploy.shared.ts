@@ -30,9 +30,10 @@ const DEFAULT_SMOKE_STATUS_POLL_INTERVAL_MS = 2_000;
 const DEFAULT_SMOKE_STATUS_TIMEOUT_MS = 60_000;
 
 export function resolveSmokeWorkerBaseUrl(source: EnvSource = process.env): string {
-  const workerBaseUrl =
-    normalizeOptionalString(source.HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL)
-    ?? normalizeOptionalString(source.HOSTED_EXECUTION_DISPATCH_URL);
+  const workerBaseUrl = readFirstConfiguredString(
+    source.HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL,
+    source.HOSTED_EXECUTION_DISPATCH_URL,
+  );
 
   if (!workerBaseUrl) {
     throw new Error(
@@ -52,9 +53,9 @@ export function buildVersionOverrideHeaders(
     return undefined;
   }
 
-  const workerName = normalizeOptionalString(
-    source.HOSTED_EXECUTION_SMOKE_WORKER_NAME
-      ?? source.CF_WORKER_NAME,
+  const workerName = readFirstConfiguredString(
+    source.HOSTED_EXECUTION_SMOKE_WORKER_NAME,
+    source.CF_WORKER_NAME,
   );
 
   if (!workerName) {
@@ -98,6 +99,17 @@ export async function runSmokeHostedDeploy(input: {
     );
   }
 
+  const pollIntervalMs = readPositiveInteger(
+    source.HOSTED_EXECUTION_SMOKE_STATUS_POLL_INTERVAL_MS,
+    DEFAULT_SMOKE_STATUS_POLL_INTERVAL_MS,
+    "HOSTED_EXECUTION_SMOKE_STATUS_POLL_INTERVAL_MS",
+  );
+  const timeoutMs = readPositiveInteger(
+    source.HOSTED_EXECUTION_SMOKE_STATUS_TIMEOUT_MS,
+    DEFAULT_SMOKE_STATUS_TIMEOUT_MS,
+    "HOSTED_EXECUTION_SMOKE_STATUS_TIMEOUT_MS",
+  );
+
   const statusRequest: SmokeControlRequest = {
     authorizationHeader,
     fetchImpl,
@@ -109,16 +121,6 @@ export async function runSmokeHostedDeploy(input: {
     ...statusRequest,
     url: new URL(buildCloudflareHostedControlUserRunPath(smokeUserId), smokeBaseUrl).toString(),
   });
-  const pollIntervalMs = readPositiveInteger(
-    source.HOSTED_EXECUTION_SMOKE_STATUS_POLL_INTERVAL_MS,
-    DEFAULT_SMOKE_STATUS_POLL_INTERVAL_MS,
-    "HOSTED_EXECUTION_SMOKE_STATUS_POLL_INTERVAL_MS",
-  );
-  const timeoutMs = readPositiveInteger(
-    source.HOSTED_EXECUTION_SMOKE_STATUS_TIMEOUT_MS,
-    DEFAULT_SMOKE_STATUS_TIMEOUT_MS,
-    "HOSTED_EXECUTION_SMOKE_STATUS_TIMEOUT_MS",
-  );
   const finalStatus = await waitForSmokeCompletion({
     initialStatus,
     pollIntervalMs,
@@ -256,6 +258,10 @@ function readPositiveInteger(value: string | undefined, fallback: number, label:
     return fallback;
   }
 
+  if (!/^\d+$/u.test(normalized)) {
+    throw new Error(`${label} must be a positive integer.`);
+  }
+
   const parsed = Number.parseInt(normalized, 10);
 
   if (!Number.isInteger(parsed) || parsed < 1) {
@@ -266,8 +272,10 @@ function readPositiveInteger(value: string | undefined, fallback: number, label:
 }
 
 function readSmokeOidcAuthorizationHeader(source: EnvSource): string | null {
-  const token = normalizeOptionalString(source.HOSTED_EXECUTION_SMOKE_OIDC_TOKEN)
-    ?? normalizeOptionalString(source.VERCEL_OIDC_TOKEN);
+  const token = readFirstConfiguredString(
+    source.HOSTED_EXECUTION_SMOKE_OIDC_TOKEN,
+    source.VERCEL_OIDC_TOKEN,
+  );
 
   if (!token) {
     return null;
@@ -281,4 +289,16 @@ function sleep(durationMs: number): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, durationMs);
   });
+}
+
+function readFirstConfiguredString(...values: Array<string | undefined>): string | null {
+  for (const value of values) {
+    const normalized = normalizeOptionalString(value);
+
+    if (normalized) {
+      return normalized;
+    }
+  }
+
+  return null;
 }

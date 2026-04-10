@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   readBearerAuthorizationToken,
 } from "../src/auth-adapter.js";
@@ -64,6 +64,16 @@ describe("buildVersionOverrideHeaders", () => {
     expect(() => buildVersionOverrideHeaders({
       HOSTED_EXECUTION_SMOKE_VERSION_ID: "version-123",
     })).toThrow("HOSTED_EXECUTION_SMOKE_WORKER_NAME or CF_WORKER_NAME must be configured.");
+  });
+
+  it("falls back to CF_WORKER_NAME when the smoke worker name is blank", () => {
+    expect(buildVersionOverrideHeaders({
+      CF_WORKER_NAME: "hosted-worker",
+      HOSTED_EXECUTION_SMOKE_VERSION_ID: "version-123",
+      HOSTED_EXECUTION_SMOKE_WORKER_NAME: "   ",
+    })).toEqual({
+      "Cloudflare-Workers-Version-Overrides": "hosted-worker=\"version-123\"",
+    });
   });
 });
 
@@ -227,6 +237,27 @@ describe("runSmokeHostedDeploy", () => {
         HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL: "https://worker.example.test",
       },
     })).rejects.toThrow(/Timed out waiting for manual smoke run completion/u);
+  });
+
+  it("rejects timeout values with trailing non-digit characters", async () => {
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+
+    await expect(runSmokeHostedDeploy({
+      fetchImpl,
+      log() {},
+      source: {
+        HOSTED_EXECUTION_DISPATCH_URL: "https://worker.example.com",
+        HOSTED_EXECUTION_SMOKE_OIDC_TOKEN: "token-123",
+        HOSTED_EXECUTION_SMOKE_STATUS_TIMEOUT_MS: "10ms",
+        HOSTED_EXECUTION_SMOKE_USER_ID: "member_test_123",
+      },
+    })).rejects.toThrow(
+      "HOSTED_EXECUTION_SMOKE_STATUS_TIMEOUT_MS must be a positive integer.",
+    );
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
   it("does not echo manual smoke control response bodies in thrown errors", async () => {

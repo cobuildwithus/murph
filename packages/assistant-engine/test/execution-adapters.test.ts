@@ -2,7 +2,7 @@ import { access, chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'no
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
@@ -269,6 +269,88 @@ describe('executeAssistantCliCommand', () => {
       argv: ['vault-cli', 'audit', 'list', '--format', 'json', '--vault', '<REDACTED_PATH>'],
       stdout: `audit list --format json --vault ${vaultRoot}`,
     })
+  })
+
+  it('resolves vault-cli from the prepared child PATH instead of the ambient PATH', async () => {
+    const vaultRoot = await createVaultRoot()
+    const homeRoot = await createPathRoot()
+    const ambientPathRoot = await createPathRoot()
+    const childPathRoot = await createPathRoot()
+    const previousPath = process.env.PATH
+    const allowedPaths = new Set([
+      path.join(ambientPathRoot, 'vault-cli'),
+      path.join(childPathRoot, 'vault-cli'),
+    ])
+
+    await writeExecutable(
+      path.join(ambientPathRoot, 'vault-cli'),
+      [
+        '#!/bin/sh',
+        'printf \'{"launcher":"ambient"}\\n\'',
+      ].join('\n'),
+    )
+    await writeExecutable(
+      path.join(childPathRoot, 'vault-cli'),
+      [
+        '#!/bin/sh',
+        'printf \'{"launcher":"child"}\\n\'',
+      ].join('\n'),
+    )
+
+    process.env.PATH = ambientPathRoot
+
+    try {
+      vi.resetModules()
+      vi.doMock('node:fs/promises', async () => {
+        const actual = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises')
+        return {
+          ...actual,
+          access: vi.fn(async (candidatePath: Parameters<typeof actual.access>[0], mode?: Parameters<typeof actual.access>[1]) => {
+            const resolvedPath = String(candidatePath)
+
+            if (allowedPaths.has(resolvedPath)) {
+              return await actual.access(candidatePath, mode)
+            }
+
+            throw Object.assign(new Error(`Missing ${resolvedPath}`), {
+              code: 'ENOENT',
+            })
+          }),
+        }
+      })
+
+      const executionAdaptersSpecifier = new URL(
+        '../src/assistant-cli-tools/execution-adapters.ts?prepared-child-path',
+        import.meta.url,
+      ).href
+      const mockedExecutionAdapters = await import(executionAdaptersSpecifier)
+
+      await expect(
+        mockedExecutionAdapters.executeAssistantCliCommand({
+          args: ['audit', 'list'],
+          input: {
+            cliEnv: {
+              HOME: homeRoot,
+              PATH: childPathRoot,
+            },
+            vault: vaultRoot,
+          },
+        }),
+      ).resolves.toMatchObject({
+        json: {
+          launcher: 'child',
+        },
+        stdout: '{"launcher":"child"}',
+      })
+    } finally {
+      if (previousPath === undefined) {
+        delete process.env.PATH
+      } else {
+        process.env.PATH = previousPath
+      }
+      vi.doUnmock('node:fs/promises')
+      vi.resetModules()
+    }
   })
 
   it('filters hosted vault-cli subprocess env to the explicit allowlist', async () => {
