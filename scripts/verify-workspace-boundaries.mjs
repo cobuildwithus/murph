@@ -186,15 +186,26 @@ async function verifyFocusedOwnerSourceSurfaces(failures) {
         {
           specifier: "./config.ts",
           message:
-            "packages/device-syncd/src/public-ingress.ts re-exports ./config.ts; the shared public-ingress seam must stay on provider-agnostic callback and webhook behavior instead of leaking daemon config readers through a second boundary.",
+            "packages/device-syncd/src/public-ingress.ts imports or re-exports ./config.ts; the shared public-ingress seam must stay on provider-agnostic callback and webhook behavior instead of leaking daemon config readers through a second boundary.",
         },
         {
           specifier: "./http.ts",
           message:
-            "packages/device-syncd/src/public-ingress.ts re-exports ./http.ts; the shared public-ingress seam must not bundle daemon HTTP helpers when @murphai/device-syncd/http already owns that surface.",
+            "packages/device-syncd/src/public-ingress.ts imports or re-exports ./http.ts; the shared public-ingress seam must not depend on daemon HTTP helpers when @murphai/device-syncd/http already owns that surface.",
         },
       ],
-      predicate: sourceReexportsSpecifier,
+      predicate: sourceMentionsSpecifier,
+    },
+    {
+      path: path.join(repoRoot, "packages", "messaging-ingress", "src", "index.ts"),
+      failures: [
+        {
+          specifier: "./telegram-webhook-payload.ts",
+          message:
+            "packages/messaging-ingress/src/index.ts mentions ./telegram-webhook-payload.ts; the package root should stay on linq plus higher-level Telegram webhook helpers instead of leaking raw payload parsing through a second boundary.",
+        },
+      ],
+      predicate: sourceMentionsSpecifier,
     },
     {
       path: path.join(repoRoot, "packages", "messaging-ingress", "src", "telegram-webhook.ts"),
@@ -202,10 +213,21 @@ async function verifyFocusedOwnerSourceSurfaces(failures) {
         {
           specifier: "./telegram-webhook-payload.ts",
           message:
-            "packages/messaging-ingress/src/telegram-webhook.ts re-exports ./telegram-webhook-payload.ts; raw Telegram payload parsing must stay on its dedicated owner surface instead of hiding behind the thread-target and summary entrypoint.",
+            "packages/messaging-ingress/src/telegram-webhook.ts imports or re-exports ./telegram-webhook-payload.ts; raw Telegram payload parsing must stay on its dedicated owner surface instead of hiding behind the thread-target and summary entrypoint.",
         },
       ],
-      predicate: sourceReexportsSpecifier,
+      predicate: sourceMentionsSpecifier,
+    },
+    {
+      path: path.join(repoRoot, "packages", "messaging-ingress", "src", "telegram-webhook-payload.ts"),
+      failures: [
+        {
+          specifier: "./telegram-webhook.ts",
+          message:
+            "packages/messaging-ingress/src/telegram-webhook-payload.ts imports ./telegram-webhook.ts; raw Telegram payload parsing should depend on shared telegram-types.ts instead of the higher-level summary entrypoint.",
+        },
+      ],
+      predicate: sourceMentionsSpecifier,
     },
     {
       path: path.join(repoRoot, "packages", "query", "src", "knowledge-graph.ts"),
@@ -228,6 +250,15 @@ async function verifyFocusedOwnerSourceSurfaces(failures) {
         failures.push(failure.message);
       }
     }
+  }
+
+  const knowledgeGraphPath = path.join(repoRoot, "packages", "query", "src", "knowledge-graph.ts");
+  const knowledgeGraphSource = await readFile(knowledgeGraphPath, "utf8");
+
+  if (/\bDerivedKnowledgeSearch(?:Filters|Hit|Result)\b/u.test(knowledgeGraphSource)) {
+    failures.push(
+      "packages/query/src/knowledge-graph.ts still declares derived-knowledge search types; search contracts belong with packages/query/src/knowledge-search.ts so graph loading stays on one owner surface.",
+    );
   }
 }
 

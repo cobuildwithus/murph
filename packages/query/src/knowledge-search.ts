@@ -6,10 +6,36 @@ import { readDerivedKnowledgeGraph } from './knowledge-graph.ts'
 import type {
   DerivedKnowledgeGraph,
   DerivedKnowledgeNode,
-  DerivedKnowledgeSearchFilters,
-  DerivedKnowledgeSearchHit,
-  DerivedKnowledgeSearchResult,
 } from './knowledge-graph.ts'
+
+export interface DerivedKnowledgeSearchFilters {
+  limit?: number
+  pageType?: string | null
+  status?: string | null
+}
+
+export interface DerivedKnowledgeSearchHit {
+  compiledAt: string | null
+  librarySlugs: string[]
+  matchedTerms: string[]
+  pagePath: string
+  pageType: string | null
+  relatedSlugs: string[]
+  score: number
+  slug: string
+  snippet: string
+  sourcePaths: string[]
+  status: string | null
+  summary: string | null
+  title: string
+}
+
+export interface DerivedKnowledgeSearchResult {
+  format: typeof DERIVED_KNOWLEDGE_SEARCH_RESULT_FORMAT
+  hits: DerivedKnowledgeSearchHit[]
+  query: string
+  total: number
+}
 
 const DEFAULT_KNOWLEDGE_SEARCH_LIMIT = 20
 const MAX_KNOWLEDGE_SEARCH_LIMIT = 200
