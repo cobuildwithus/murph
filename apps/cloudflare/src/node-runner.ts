@@ -4,12 +4,10 @@ import {
   type HostedAssistantRuntimeJobInput,
   type HostedAssistantRuntimeJobResult,
 } from "@murphai/assistant-runtime";
-import { readHostedEmailCapabilities } from "@murphai/hosted-execution";
 
 import {
   buildHostedRunnerContainerEnv,
-  buildHostedRunnerJobRuntimeConfig,
-  buildHostedRunnerResolvedConfig,
+  buildHostedRunnerJobRuntime,
 } from "./runner-env.ts";
 import {
   runHostedExecutionJobIsolatedDetailed,
@@ -18,7 +16,6 @@ import {
 import {
   buildHostedExecutionRuntimePlatform,
 } from "./runtime-platform.ts";
-import { normalizeHostedUserEnv } from "./user-env.ts";
 
 let hostedExecutionRunStartHookForTests: (() => void) | null = null;
 let hostedExecutionRunModeForTests: "in-process" | "isolated" | null = null;
@@ -28,7 +25,7 @@ let hostedExecutionIsolatedRunnerForTests:
     options?: { signal?: AbortSignal },
   ) => Promise<HostedAssistantRuntimeJobResult>)
   | null = null;
-const hostedExecutionWorkerOnlyRuntimeEnvKeys = new Set([
+const hostedExecutionChildEnvExcludedKeys = new Set([
   "HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS",
   "HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS",
 ]);
@@ -102,98 +99,32 @@ export async function runHostedExecutionJob(
 function buildHostedExecutionJobRuntime(
   requestedRuntime: HostedAssistantRuntimeConfig,
 ): HostedAssistantRuntimeConfig {
+  // The worker already resolved runtime semantics into the typed envelope.
+  // The container only merges child-process transport env and strips control-only keys.
   const forwardedEnv: Record<string, string> = {
     ...buildHostedRunnerContainerEnv(process.env),
-    ...stripWorkerOnlyRuntimeEnvKeys(requestedRuntime.forwardedEnv),
-  };
-  const runtimeConfigSource = buildHostedExecutionRuntimeConfigSource(requestedRuntime, forwardedEnv);
-  const emailCapabilities = readHostedEmailCapabilities(
-    buildHostedExecutionEmailCapabilitySource(forwardedEnv),
-  );
-  const resolvedForwardedEnv: Record<string, string> = {
-    ...forwardedEnv,
-    HOSTED_EMAIL_INGRESS_READY: emailCapabilities.ingressReady ? "true" : "false",
-    HOSTED_EMAIL_SEND_READY: emailCapabilities.sendReady ? "true" : "false",
+    ...stripChildProcessExcludedRuntimeEnvKeys(requestedRuntime.forwardedEnv),
   };
 
-  return {
-    ...buildHostedRunnerJobRuntimeConfig({
-      forwardedEnv: resolvedForwardedEnv,
-      resolvedConfig: buildHostedRunnerResolvedConfig(resolvedForwardedEnv),
-      runtimeConfigSource,
-      userEnv: normalizeHostedUserEnv(requestedRuntime.userEnv ?? {}, runtimeConfigSource),
-      userEnvSource: runtimeConfigSource,
-    }),
-  };
+  return buildHostedRunnerJobRuntime({
+    commitTimeoutMs: requestedRuntime.commitTimeoutMs ?? null,
+    forwardedEnv,
+    resolvedConfig: requestedRuntime.resolvedConfig,
+    userEnv: requestedRuntime.userEnv ?? {},
+  });
 }
 
-function stripWorkerOnlyRuntimeEnvKeys(
+function stripChildProcessExcludedRuntimeEnvKeys(
   forwardedEnv: HostedAssistantRuntimeConfig["forwardedEnv"],
 ): Record<string, string> {
   const filtered: Record<string, string> = {};
 
   for (const [key, value] of Object.entries(forwardedEnv ?? {})) {
-    if (hostedExecutionWorkerOnlyRuntimeEnvKeys.has(key)) {
+    if (hostedExecutionChildEnvExcludedKeys.has(key)) {
       continue;
     }
     filtered[key] = value;
   }
 
   return filtered;
-}
-
-function buildHostedExecutionEmailCapabilitySource(
-  forwardedEnv: HostedAssistantRuntimeConfig["forwardedEnv"],
-): Readonly<Record<string, string | undefined>> {
-  const source: Record<string, string | undefined> = {};
-
-  for (const [key, value] of Object.entries(forwardedEnv ?? {})) {
-    if (key === "HOSTED_EMAIL_INGRESS_READY" || key === "HOSTED_EMAIL_SEND_READY") {
-      continue;
-    }
-    source[key] = value;
-  }
-
-  const hostedEmailProfileEnabled = Boolean(
-    source.HOSTED_EMAIL_DOMAIN
-    || source.HOSTED_EMAIL_FROM_ADDRESS
-    || source.HOSTED_EMAIL_LOCAL_PART,
-  );
-  if (!hostedEmailProfileEnabled) {
-    return source;
-  }
-
-  for (const key of [
-    "HOSTED_EMAIL_SIGNING_SECRET",
-    "HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID",
-    "HOSTED_EMAIL_CLOUDFLARE_API_TOKEN",
-  ] as const) {
-    if (typeof source[key] !== "string" || source[key].length === 0) {
-      source[key] = process.env[key];
-    }
-  }
-
-  return source;
-}
-
-function buildHostedExecutionRuntimeConfigSource(
-  requestedRuntime: HostedAssistantRuntimeConfig,
-  forwardedEnv: Readonly<Record<string, string>>,
-): Readonly<Record<string, string | undefined>> {
-  const requestedAllowedUserEnvKeys =
-    typeof requestedRuntime.forwardedEnv?.HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS === "string"
-      ? requestedRuntime.forwardedEnv.HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS
-      : undefined;
-  const requestedCommitTimeout =
-    typeof requestedRuntime.forwardedEnv?.HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS === "string"
-      ? requestedRuntime.forwardedEnv.HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS
-      : undefined;
-
-  return {
-    ...forwardedEnv,
-    HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS:
-      requestedCommitTimeout ?? process.env.HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS,
-    HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS:
-      requestedAllowedUserEnvKeys ?? process.env.HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS,
-  };
 }

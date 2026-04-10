@@ -65,7 +65,7 @@ const HOSTED_DEVICE_SYNC_ENV_PREFIXES = [
 type NodeRunnerTestInput =
   Pick<
     HostedAssistantRuntimeConfig,
-    "forwardedEnv" | "userEnv"
+    "commitTimeoutMs" | "forwardedEnv" | "userEnv"
   > & {
     internalWorkerProxyToken?: string | null;
     bundles:
@@ -158,6 +158,7 @@ async function runHostedExecutionJob(
 }> {
   const {
     bundles,
+    commitTimeoutMs,
     commit,
     forwardedEnv,
     internalWorkerProxyToken,
@@ -165,6 +166,7 @@ async function runHostedExecutionJob(
     ...request
   } = input;
   const runtime: HostedAssistantRuntimeConfig = {
+    ...(commitTimeoutMs === undefined ? {} : { commitTimeoutMs }),
     ...(forwardedEnv === undefined ? {} : { forwardedEnv }),
     ...(userEnv === undefined ? {} : { userEnv }),
   };
@@ -2475,7 +2477,51 @@ describe("runHostedExecutionJob", () => {
     }
   });
 
-  it("prefers per-job forwarded env over ambient process env when deriving the commit timeout", async () => {
+  it("uses the worker-resolved commit timeout instead of ambient or forwarded env overrides", async () => {
+    const previousCommitTimeout = process.env.HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS;
+    process.env.HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS = "15000";
+    const commitFetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+      }),
+    );
+    vi.stubGlobal("fetch", commitFetch);
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
+
+    try {
+      await runHostedExecutionJob({
+        bundles: {
+          agentState: null,
+          vault: null,
+        },
+        commitTimeoutMs: 45_000,
+        commit: {
+          bundleRefs: {
+            agentState: null,
+            vault: null,
+          },
+        },
+        dispatch: {
+          event: {
+            kind: "member.activated",
+            userId: "member_123",
+          },
+          eventId: "evt_commit_forwarded_timeout",
+          occurredAt: "2026-03-26T12:10:00.000Z",
+        },
+        forwardedEnv: {
+          HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: "5000",
+        },
+      });
+
+      expect(commitFetch).toHaveBeenCalledTimes(1);
+      expect(timeoutSpy).toHaveBeenCalledWith(45_000);
+    } finally {
+      restoreEnvVar("HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS", previousCommitTimeout);
+    }
+  });
+
+  it("ignores ambient and forwarded env commit-timeout overrides when no typed timeout is provided", async () => {
     const previousCommitTimeout = process.env.HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS;
     process.env.HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS = "15000";
     const commitFetch = vi.fn().mockResolvedValue(
@@ -2503,7 +2549,7 @@ describe("runHostedExecutionJob", () => {
             kind: "member.activated",
             userId: "member_123",
           },
-          eventId: "evt_commit_forwarded_timeout",
+          eventId: "evt_commit_default_timeout",
           occurredAt: "2026-03-26T12:10:00.000Z",
         },
         forwardedEnv: {
@@ -2512,13 +2558,13 @@ describe("runHostedExecutionJob", () => {
       });
 
       expect(commitFetch).toHaveBeenCalledTimes(1);
-      expect(timeoutSpy).toHaveBeenCalledWith(5_000);
+      expect(timeoutSpy).toHaveBeenCalledWith(30_000);
     } finally {
       restoreEnvVar("HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS", previousCommitTimeout);
     }
   });
 
-  it("keeps worker-only runtime overrides out of forwarded child env while still applying them", () => {
+  it("preserves worker-resolved runtime fields while keeping control-only keys out of child env", () => {
     const previousAllowedUserEnvKeys = process.env.HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS;
     const previousCommitTimeout = process.env.HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS;
     process.env.HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS = "OPENAI_API_KEY";
@@ -2526,19 +2572,30 @@ describe("runHostedExecutionJob", () => {
 
     try {
       const runtime = buildHostedExecutionJobRuntimeForTests({
+        commitTimeoutMs: 45_000,
         forwardedEnv: {
           HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS: "CUSTOM_API_KEY",
           HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: "5000",
+          HOSTED_EMAIL_INGRESS_READY: "true",
+          HOSTED_EMAIL_SEND_READY: "true",
           OPENAI_API_KEY: "sk-worker",
+        },
+        resolvedConfig: {
+          channelCapabilities: {
+            emailSendReady: true,
+            telegramBotConfigured: false,
+          },
+          deviceSync: null,
         },
         userEnv: {
           CUSTOM_API_KEY: "custom-user",
-          OPENAI_API_KEY: "sk-user",
         },
       });
 
-      expect(runtime.commitTimeoutMs).toBe(5_000);
+      expect(runtime.commitTimeoutMs).toBe(45_000);
       expect(runtime.forwardedEnv).toMatchObject({
+        HOSTED_EMAIL_INGRESS_READY: "true",
+        HOSTED_EMAIL_SEND_READY: "true",
         OPENAI_API_KEY: "sk-worker",
       });
       expect(runtime.forwardedEnv).not.toHaveProperty(
@@ -2552,7 +2609,7 @@ describe("runHostedExecutionJob", () => {
       });
       expect(runtime.resolvedConfig).toEqual({
         channelCapabilities: {
-          emailSendReady: false,
+          emailSendReady: true,
           telegramBotConfigured: false,
         },
         deviceSync: null,
@@ -2571,7 +2628,9 @@ describe("runHostedExecutionJob", () => {
         HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID: "acct_123",
         HOSTED_EMAIL_CLOUDFLARE_API_TOKEN: "cf-token",
         HOSTED_EMAIL_DOMAIN: "mail.example.test",
+        HOSTED_EMAIL_INGRESS_READY: "true",
         HOSTED_EMAIL_LOCAL_PART: "assistant",
+        HOSTED_EMAIL_SEND_READY: "true",
         HOSTED_EMAIL_SIGNING_SECRET: "email-secret",
         TELEGRAM_BOT_TOKEN: "telegram-token",
         WHOOP_CLIENT_ID: "whoop-client",
@@ -2597,109 +2656,79 @@ describe("runHostedExecutionJob", () => {
     });
   });
 
-  it("recomputes hosted email readiness from ambient env plus per-job overrides instead of keeping synthetic false defaults", () => {
-    const previousHostedEmailAccountId = process.env.HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID;
-    const previousHostedEmailApiToken = process.env.HOSTED_EMAIL_CLOUDFLARE_API_TOKEN;
-    const previousHostedEmailDomain = process.env.HOSTED_EMAIL_DOMAIN;
-    const previousHostedEmailLocalPart = process.env.HOSTED_EMAIL_LOCAL_PART;
-    const previousHostedEmailSigningSecret = process.env.HOSTED_EMAIL_SIGNING_SECRET;
-    const previousRunnerEnvProfiles = setHostedRunnerEnvProfiles("hosted-email");
-
-    process.env.HOSTED_EMAIL_DOMAIN = "mail.example.test";
-    process.env.HOSTED_EMAIL_LOCAL_PART = "assistant";
-    process.env.HOSTED_EMAIL_SIGNING_SECRET = "email-secret";
-
-    try {
-      const runtime = buildHostedExecutionJobRuntimeForTests({
-        forwardedEnv: {
-          HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID: "acct_123",
-          HOSTED_EMAIL_CLOUDFLARE_API_TOKEN: "cf-token",
-          HOSTED_EMAIL_INGRESS_READY: "false",
-          HOSTED_EMAIL_SEND_READY: "false",
-        },
-        resolvedConfig: {
-          channelCapabilities: {
-            emailSendReady: false,
-            telegramBotConfigured: false,
-          },
-          deviceSync: null,
-        },
-      });
-
-      expect(runtime.forwardedEnv).toMatchObject({
-        HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID: "acct_123",
-        HOSTED_EMAIL_CLOUDFLARE_API_TOKEN: "cf-token",
+  it("preserves worker-resolved hosted email readiness instead of rereading ambient env", () => {
+    const runtime = buildHostedExecutionJobRuntimeForTests({
+      forwardedEnv: {
         HOSTED_EMAIL_INGRESS_READY: "true",
         HOSTED_EMAIL_SEND_READY: "true",
-      });
-      expect(runtime.resolvedConfig).toEqual({
+      },
+      resolvedConfig: {
         channelCapabilities: {
           emailSendReady: true,
           telegramBotConfigured: false,
         },
         deviceSync: null,
-      });
-    } finally {
-      restoreEnvVar("HOSTED_EXECUTION_RUNNER_ENV_PROFILES", previousRunnerEnvProfiles);
-      restoreEnvVar("HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID", previousHostedEmailAccountId);
-      restoreEnvVar("HOSTED_EMAIL_CLOUDFLARE_API_TOKEN", previousHostedEmailApiToken);
-      restoreEnvVar("HOSTED_EMAIL_DOMAIN", previousHostedEmailDomain);
-      restoreEnvVar("HOSTED_EMAIL_LOCAL_PART", previousHostedEmailLocalPart);
-      restoreEnvVar("HOSTED_EMAIL_SIGNING_SECRET", previousHostedEmailSigningSecret);
-    }
+      },
+    });
+
+    expect(runtime.forwardedEnv).toMatchObject({
+      HOSTED_EMAIL_INGRESS_READY: "true",
+      HOSTED_EMAIL_SEND_READY: "true",
+    });
+    expect(runtime.resolvedConfig).toEqual({
+      channelCapabilities: {
+        emailSendReady: true,
+        telegramBotConfigured: false,
+      },
+      deviceSync: null,
+    });
   });
 
-  it("keeps hosted email readiness disabled when the hosted-email profile is not enabled", () => {
-    const previousHostedEmailAccountId = process.env.HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID;
-    const previousHostedEmailApiToken = process.env.HOSTED_EMAIL_CLOUDFLARE_API_TOKEN;
-    const previousHostedEmailDomain = process.env.HOSTED_EMAIL_DOMAIN;
-    const previousHostedEmailLocalPart = process.env.HOSTED_EMAIL_LOCAL_PART;
-    const previousHostedEmailSigningSecret = process.env.HOSTED_EMAIL_SIGNING_SECRET;
-    const previousRunnerEnvProfiles = process.env.HOSTED_EXECUTION_RUNNER_ENV_PROFILES;
-
-    delete process.env.HOSTED_EXECUTION_RUNNER_ENV_PROFILES;
-    process.env.HOSTED_EMAIL_DOMAIN = "mail.example.test";
-    process.env.HOSTED_EMAIL_LOCAL_PART = "assistant";
-    process.env.HOSTED_EMAIL_SIGNING_SECRET = "email-secret";
-
-    try {
-      const runtime = buildHostedExecutionJobRuntimeForTests({
-        forwardedEnv: {
-          HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID: "acct_123",
-          HOSTED_EMAIL_CLOUDFLARE_API_TOKEN: "cf-token",
-          HOSTED_EMAIL_INGRESS_READY: "false",
-          HOSTED_EMAIL_SEND_READY: "false",
-        },
-        resolvedConfig: {
-          channelCapabilities: {
-            emailSendReady: false,
-            telegramBotConfigured: false,
-          },
-          deviceSync: null,
-        },
-      });
-
-      expect(runtime.forwardedEnv).toMatchObject({
-        HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID: "acct_123",
-        HOSTED_EMAIL_CLOUDFLARE_API_TOKEN: "cf-token",
+  it("keeps worker-resolved hosted email readiness disabled", () => {
+    const runtime = buildHostedExecutionJobRuntimeForTests({
+      forwardedEnv: {
         HOSTED_EMAIL_INGRESS_READY: "false",
         HOSTED_EMAIL_SEND_READY: "false",
-      });
-      expect(runtime.resolvedConfig).toEqual({
+      },
+      resolvedConfig: {
         channelCapabilities: {
           emailSendReady: false,
           telegramBotConfigured: false,
         },
         deviceSync: null,
-      });
-    } finally {
-      restoreEnvVar("HOSTED_EXECUTION_RUNNER_ENV_PROFILES", previousRunnerEnvProfiles);
-      restoreEnvVar("HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID", previousHostedEmailAccountId);
-      restoreEnvVar("HOSTED_EMAIL_CLOUDFLARE_API_TOKEN", previousHostedEmailApiToken);
-      restoreEnvVar("HOSTED_EMAIL_DOMAIN", previousHostedEmailDomain);
-      restoreEnvVar("HOSTED_EMAIL_LOCAL_PART", previousHostedEmailLocalPart);
-      restoreEnvVar("HOSTED_EMAIL_SIGNING_SECRET", previousHostedEmailSigningSecret);
-    }
+      },
+    });
+
+    expect(runtime.forwardedEnv).toMatchObject({
+      HOSTED_EMAIL_INGRESS_READY: "false",
+      HOSTED_EMAIL_SEND_READY: "false",
+    });
+    expect(runtime.resolvedConfig).toEqual({
+      channelCapabilities: {
+        emailSendReady: false,
+        telegramBotConfigured: false,
+      },
+      deviceSync: null,
+    });
+  });
+
+  it("derives email channel readiness from forwarded capability flags when resolved config is absent", () => {
+    const runtime = buildHostedExecutionJobRuntimeForTests({
+      forwardedEnv: {
+        HOSTED_EMAIL_DOMAIN: "mail.example.test",
+        HOSTED_EMAIL_LOCAL_PART: "assistant",
+        HOSTED_EMAIL_INGRESS_READY: "true",
+        HOSTED_EMAIL_SEND_READY: "true",
+      },
+    });
+
+    expect(runtime.resolvedConfig).toEqual({
+      channelCapabilities: {
+        emailSendReady: true,
+        telegramBotConfigured: false,
+      },
+      deviceSync: null,
+    });
   });
 
   it("does not block a concurrent hosted run when another hosted commit fails", async () => {

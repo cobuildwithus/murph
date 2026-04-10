@@ -15,6 +15,22 @@ import {
   filterHostedRunnerUserEnv,
 } from "./hosted-env-policy.ts";
 
+export function buildHostedRunnerJobRuntime(input: {
+  commitTimeoutMs?: number | null;
+  forwardedEnv: Readonly<Record<string, string>>;
+  resolvedConfig?: HostedAssistantRuntimeResolvedConfig;
+  userEnv?: Readonly<Record<string, string>>;
+}): HostedAssistantRuntimeConfig {
+  const forwardedEnv = { ...input.forwardedEnv };
+
+  return {
+    commitTimeoutMs: readHostedRunnerCommitTimeoutMs(input.commitTimeoutMs ?? null),
+    forwardedEnv,
+    resolvedConfig: input.resolvedConfig ?? buildHostedRunnerResolvedConfig(forwardedEnv),
+    userEnv: { ...(input.userEnv ?? {}) },
+  };
+}
+
 export {
   buildHostedRunnerContainerEnv,
   filterHostedRunnerUserEnv,
@@ -27,21 +43,20 @@ export function buildHostedRunnerJobRuntimeConfig(input: {
   userEnvSource?: Readonly<Record<string, string | undefined>>;
   userEnv: Readonly<Record<string, string>>;
 }): HostedAssistantRuntimeConfig {
-  const forwardedEnv = { ...input.forwardedEnv };
-  const runtimeConfigSource = input.runtimeConfigSource ?? forwardedEnv;
-  const resolvedConfig = input.resolvedConfig ?? buildHostedRunnerResolvedConfig(forwardedEnv);
+  const runtimeConfigSource = input.runtimeConfigSource ?? input.forwardedEnv;
 
-  return {
-    commitTimeoutMs: readHostedRunnerCommitTimeoutMs(
-      Number.parseInt(runtimeConfigSource.HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS ?? "", 10),
+  return buildHostedRunnerJobRuntime({
+    commitTimeoutMs: Number.parseInt(
+      runtimeConfigSource.HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS ?? "",
+      10,
     ),
-    forwardedEnv,
-    resolvedConfig,
+    forwardedEnv: input.forwardedEnv,
+    resolvedConfig: input.resolvedConfig,
     userEnv: filterHostedRunnerUserEnv(
       input.userEnv,
       input.userEnvSource ?? runtimeConfigSource,
     ),
-  };
+  });
 }
 
 export function buildHostedRunnerResolvedConfig(
