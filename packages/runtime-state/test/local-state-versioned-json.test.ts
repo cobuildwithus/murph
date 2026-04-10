@@ -82,6 +82,34 @@ describe("runtime-state local-state files", () => {
     assert.equal(hasLocalStatePathSync({ currentPath: missingPath }), false);
     assert.equal(await hasLocalStatePath({ currentPath: missingPath }), false);
   });
+
+  test("treats only missing paths as absent and rethrows other access errors", async () => {
+    const tempRoot = await createTempRoot("runtime-state-local-state-files-errors-");
+    const blockingFilePath = path.join(tempRoot, "blocking-file");
+    const blockedChildPath = path.join(blockingFilePath, "child.json");
+
+    await writeFile(blockingFilePath, "blocked", "utf8");
+
+    assert.throws(
+      () => hasLocalStatePathSync({ currentPath: blockedChildPath }),
+      (error: unknown) => {
+        assert.equal(typeof error, "object");
+        assert.notEqual(error, null);
+        assert.equal((error as NodeJS.ErrnoException).code, "ENOTDIR");
+        return true;
+      },
+    );
+
+    await assert.rejects(
+      () => hasLocalStatePath({ currentPath: blockedChildPath }),
+      (error: unknown) => {
+        assert.equal(typeof error, "object");
+        assert.notEqual(error, null);
+        assert.equal((error as NodeJS.ErrnoException).code, "ENOTDIR");
+        return true;
+      },
+    );
+  });
 });
 
 describe("runtime-state local-state descriptors", () => {

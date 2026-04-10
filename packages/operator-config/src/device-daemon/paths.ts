@@ -23,6 +23,11 @@ import {
 } from './types.js'
 import { readEnvValue } from '../env-values.js'
 
+const localRequire = createRequire(import.meta.url)
+const repoRootRequire = createRequire(
+  new URL('../../../../package.json', import.meta.url),
+)
+
 export function resolveDeviceDaemonPaths(vaultRoot: string): DeviceDaemonPaths {
   const runtimePaths = resolveDeviceSyncRuntimePaths(vaultRoot)
 
@@ -46,16 +51,34 @@ export function resolveDeviceSyncDaemonBinPath(
 
 export function resolveInstalledDeviceSyncPackageEntry(): string {
   try {
-    return resolveNodeRequire().resolve('@murphai/device-syncd')
-  } catch {
-    return createRequire(
-      new URL('../../../../package.json', import.meta.url),
-    ).resolve('@murphai/device-syncd')
+    return localRequire.resolve('@murphai/device-syncd')
+  } catch (error) {
+    if (!isMissingDeviceSyncPackageError(error)) {
+      throw error
+    }
+
+    return repoRootRequire.resolve('@murphai/device-syncd')
   }
 }
 
-function resolveNodeRequire(): NodeJS.Require {
-  return createRequire(import.meta.url)
+function isMissingDeviceSyncPackageError(error: unknown): boolean {
+  const message =
+    error instanceof Error
+      ? error.message
+      : typeof error === 'object' &&
+          error &&
+          'message' in error &&
+          typeof (error as { message?: unknown }).message === 'string'
+        ? (error as { message: string }).message
+        : null
+
+  return Boolean(
+    message?.includes("Cannot find module '@murphai/device-syncd'") &&
+      error &&
+      typeof error === 'object' &&
+      'code' in error &&
+      (error as { code?: unknown }).code === 'MODULE_NOT_FOUND',
+  )
 }
 
 export function buildManagedDeviceSyncEnvironment(input: {

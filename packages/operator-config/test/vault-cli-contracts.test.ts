@@ -25,20 +25,18 @@ test('listFilterSchema describes query record types from the query package when 
   assert.match(description ?? '', /custom_a, custom_b/u)
 })
 
-test('listFilterSchema falls back when query record types are not an array', async () => {
+test('listFilterSchema fails closed when query record types are not an array', async () => {
   vi.resetModules()
   vi.doMock('@murphai/query', () => ({
     ALL_QUERY_ENTITY_FAMILIES: 'not-an-array',
   }))
 
-  const module = await import('../src/vault-cli-contracts.ts')
-  const description = recordTypeDescriptionFromModule(module)
-
-  assert.match(description ?? '', /assessment/u)
-  assert.match(description ?? '', /workout_format/u)
+  await assert.rejects(() => import('../src/vault-cli-contracts.ts'), {
+    message: /join is not a function/u,
+  })
 })
 
-test('listFilterSchema falls back when reading query record types throws', async () => {
+test('listFilterSchema surfaces query family loading failures', async () => {
   vi.resetModules()
   vi.doMock('@murphai/query', () => {
     const mockedModule: Record<string, unknown> = {}
@@ -51,9 +49,7 @@ test('listFilterSchema falls back when reading query record types throws', async
     return mockedModule
   })
 
-  const module = await import('../src/vault-cli-contracts.ts')
-  const description = recordTypeDescriptionFromModule(module)
-
-  assert.match(description ?? '', /allergy/u)
-  assert.match(description ?? '', /sample/u)
+  await assert.rejects(() => import('../src/vault-cli-contracts.ts'), {
+    message: /query families unavailable/u,
+  })
 })

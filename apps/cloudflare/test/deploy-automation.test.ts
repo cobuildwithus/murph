@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   buildHostedWorkerSecretsPayload,
@@ -17,6 +17,37 @@ import {
   selectHostedContainerImageTagsForCleanup,
 } from "../scripts/deploy-automation.js";
 import { renderWorkerSecretsFile } from "../scripts/render-worker-secrets.ts";
+
+afterEach(() => {
+  vi.doUnmock("node:fs/promises");
+  vi.resetModules();
+});
+
+async function importRenderWorkerSecretsWithMockedAccess(
+  blockedPath: string,
+): Promise<typeof import("../scripts/render-worker-secrets.ts")> {
+  vi.resetModules();
+  vi.doMock("node:fs/promises", async () => {
+    const actual = await vi.importActual<typeof import("node:fs/promises")>(
+      "node:fs/promises",
+    );
+
+    return {
+      ...actual,
+      access: async (targetPath: string) => {
+        if (targetPath === blockedPath) {
+          const error = new Error("permission denied") as NodeJS.ErrnoException;
+          error.code = "EACCES";
+          throw error;
+        }
+
+        return await actual.access(targetPath);
+      },
+    };
+  });
+
+  return await import("../scripts/render-worker-secrets.ts");
+}
 
 describe("hosted deploy automation helpers", () => {
   it("builds a generated wrangler config for the native container worker", () => {
@@ -314,6 +345,21 @@ describe("hosted deploy automation helpers", () => {
     } finally {
       await rm(tempRoot, { recursive: true, force: true });
     }
+  });
+
+  it("rethrows non-ENOENT access errors while probing worker secrets output directories", async () => {
+    const tempRoot = path.join(tmpdir(), "murph-worker-secrets-blocked");
+    const blockedDirectory = path.join(tempRoot, "nested");
+    const { renderWorkerSecretsFile: renderWithMockedAccess } =
+      await importRenderWorkerSecretsWithMockedAccess(blockedDirectory);
+
+    await expect(
+      renderWithMockedAccess({
+        outputPath: path.join(blockedDirectory, "worker-secrets.json"),
+      }),
+    ).rejects.toMatchObject({
+      code: "EACCES",
+    });
   });
 
   it("builds a gradual canary split against the current stable version", () => {
