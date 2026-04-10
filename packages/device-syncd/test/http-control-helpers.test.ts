@@ -25,6 +25,7 @@ test("assertDeviceSyncControlRequest accepts valid loopback bearer auth and reje
     assertDeviceSyncControlRequest({
       headers: {
         authorization: "  bearer control-token-for-tests  ",
+        host: "127.0.0.1:8788",
       },
       remoteAddress: "::ffff:127.0.0.1",
       controlToken: "control-token-for-tests",
@@ -34,7 +35,10 @@ test("assertDeviceSyncControlRequest accepts valid loopback bearer auth and reje
   assert.throws(
     () =>
       assertDeviceSyncControlRequest({
-        headers: withIncomingHeader("authorization", ["Bearer control-token-for-tests", "Bearer duplicate"]),
+        headers: {
+          ...withIncomingHeader("authorization", ["Bearer control-token-for-tests", "Bearer duplicate"]),
+          host: "127.0.0.1:8788",
+        },
         remoteAddress: "127.0.0.1",
         controlToken: "control-token-for-tests",
       }),

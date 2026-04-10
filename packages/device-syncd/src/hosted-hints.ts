@@ -56,43 +56,16 @@ function shapeHostedOuraJobHintPayload(
         windowEnd: "string",
         windowStart: "string",
       });
-    case "delete": {
-      const shaped = pickHostedWakePayloadFields(payload, {
+    case "delete":
+      return pickHostedWakePayloadFields(payload, {
         dataType: "string",
         objectId: "string",
         occurredAt: "string",
         sourceEventType: "string",
       });
-      const webhookPayload = shapeHostedOuraDeleteWebhookPayload(payload.webhookPayload);
-      return webhookPayload ? { ...shaped, webhookPayload } : shaped;
-    }
     default:
       return {};
   }
-}
-
-function shapeHostedOuraDeleteWebhookPayload(value: unknown): Record<string, unknown> | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return null;
-  }
-
-  const payload = pickHostedWakePayloadFields(value as Record<string, unknown>, {
-    data_type: "string",
-    dataType: "string",
-    event_time: "string",
-    eventTime: "string",
-    event_type: "string",
-    eventType: "string",
-    id: "string",
-    object_id: "string",
-    objectId: "string",
-    trace_id: "string",
-    traceId: "string",
-    user_id: "string",
-    userId: "string",
-  });
-
-  return Object.keys(payload).length > 0 ? payload : null;
 }
 
 function shapeHostedWhoopJobHintPayload(

@@ -30,16 +30,6 @@ test("hosted job hint payload shaping keeps only the provider-specific allowlist
         occurredAt: "2026-04-07T00:00:00.000Z",
         sourceEventType: "sleep.deleted",
         ignored: "discarded",
-        webhookPayload: {
-          id: "evt_123",
-          object_id: "sleep_123",
-          traceId: "trace_123",
-          user_id: "user_123",
-          nested: {
-            secret: "discarded",
-          },
-          attempts: 2,
-        },
       },
     }),
     {
@@ -47,12 +37,6 @@ test("hosted job hint payload shaping keeps only the provider-specific allowlist
       objectId: "sleep_123",
       occurredAt: "2026-04-07T00:00:00.000Z",
       sourceEventType: "sleep.deleted",
-      webhookPayload: {
-        id: "evt_123",
-        object_id: "sleep_123",
-        traceId: "trace_123",
-        user_id: "user_123",
-      },
     },
   );
 

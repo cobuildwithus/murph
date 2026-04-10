@@ -2,7 +2,9 @@ import assert from 'node:assert/strict'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { Readable } from 'node:stream'
 import { afterEach, test, vi } from 'vitest'
+import { AssistantHttpRequestError } from '../src/http-protocol.js'
 import {
+  assertAssistantControlRequest,
   createAssistantHttpRequestHandler,
   type AssistantHttpRequestHandler,
 } from '../src/http.js'
@@ -321,6 +323,93 @@ function requireFirstCallArg<T>(
 
 afterEach(() => {
   vi.restoreAllMocks()
+})
+
+test('assertAssistantControlRequest rejects forwarded proxy headers on control routes', () => {
+  assert.throws(
+    () =>
+      assertAssistantControlRequest({
+        headers: {
+          authorization: 'Bearer control-secret',
+          host: 'localhost:50241',
+          forwarded: 'for=203.0.113.7;proto=https;host=murph.example',
+        },
+        remoteAddress: '127.0.0.1',
+        controlToken: 'control-secret',
+      }),
+    (error: unknown) =>
+      error instanceof AssistantHttpRequestError &&
+      error.code === 'ASSISTANT_CONTROL_PROXY_HEADERS_REJECTED' &&
+      error.statusCode === 403,
+  )
+})
+
+test('assertAssistantControlRequest rejects repeated forwarded proxy headers on control routes', () => {
+  assert.throws(
+    () =>
+      assertAssistantControlRequest({
+        headers: {
+          authorization: 'Bearer control-secret',
+          host: 'localhost:50241',
+          forwarded: ['for=203.0.113.7', 'for=203.0.113.8'],
+        },
+        remoteAddress: '127.0.0.1',
+        controlToken: 'control-secret',
+      }),
+    (error: unknown) =>
+      error instanceof AssistantHttpRequestError &&
+      error.code === 'ASSISTANT_CONTROL_PROXY_HEADERS_REJECTED' &&
+      error.statusCode === 403,
+  )
+})
+
+test('assertAssistantControlRequest rejects non-loopback host headers on control routes', () => {
+  assert.throws(
+    () =>
+      assertAssistantControlRequest({
+        headers: {
+          authorization: 'Bearer control-secret',
+          host: 'murph.example',
+        },
+        remoteAddress: '127.0.0.1',
+        controlToken: 'control-secret',
+      }),
+    (error: unknown) =>
+      error instanceof AssistantHttpRequestError &&
+      error.code === 'ASSISTANT_CONTROL_LOOPBACK_HOST_REQUIRED' &&
+      error.statusCode === 403,
+  )
+})
+
+test('assertAssistantControlRequest rejects malformed loopback-like host headers', () => {
+  assert.throws(
+    () =>
+      assertAssistantControlRequest({
+        headers: {
+          authorization: 'Bearer control-secret',
+          host: 'foo@localhost:50241',
+        },
+        remoteAddress: '127.0.0.1',
+        controlToken: 'control-secret',
+      }),
+    (error: unknown) =>
+      error instanceof AssistantHttpRequestError &&
+      error.code === 'ASSISTANT_CONTROL_LOOPBACK_HOST_REQUIRED' &&
+      error.statusCode === 403,
+  )
+})
+
+test('assertAssistantControlRequest accepts loopback requests with a loopback host header', () => {
+  assert.doesNotThrow(() =>
+    assertAssistantControlRequest({
+      headers: {
+        authorization: 'Bearer control-secret',
+        host: 'localhost:50241',
+      },
+      remoteAddress: '127.0.0.1',
+      controlToken: 'control-secret',
+    }),
+  )
 })
 
 test('assistantd http server enforces bearer auth, validates requests, and routes calls to the local assistant service', async () => {

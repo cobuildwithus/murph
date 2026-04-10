@@ -1,7 +1,14 @@
 import { timingSafeEqual } from 'node:crypto'
-import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
+import {
+  createServer,
+  type IncomingHttpHeaders,
+  type IncomingMessage,
+  type Server,
+  type ServerResponse,
+} from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { URL } from 'node:url'
+import { isLoopbackHostname } from '@murphai/runtime-state'
 import { isLoopbackRemoteAddress } from '@murphai/runtime-state/node'
 import {
   AssistantHttpRequestError,
@@ -35,6 +42,13 @@ import {
 import type { AssistantLocalService } from './service.js'
 
 const MAX_ASSISTANT_HTTP_BODY_BYTES = 256 * 1024
+const ASSISTANT_CONTROL_PLANE_FORWARDED_HEADER_NAMES = [
+  'forwarded',
+  'x-forwarded-for',
+  'x-forwarded-host',
+  'x-forwarded-proto',
+  'x-real-ip',
+] as const
 
 export interface CreateAssistantHttpServerInput {
   controlToken: string
@@ -93,15 +107,11 @@ async function handleAssistantRequest(
   input: CreateAssistantHttpServerInput,
 ): Promise<void> {
   try {
-    if (!isLoopbackRemoteAddress(request.socket.remoteAddress)) {
-      sendJson(response, 403, { error: 'Forbidden.' })
-      return
-    }
-
-    if (!isAuthorizedAssistantRequest(request, input.controlToken)) {
-      sendJson(response, 401, { error: 'Unauthorized.' })
-      return
-    }
+    assertAssistantControlRequest({
+      headers: request.headers,
+      remoteAddress: request.socket.remoteAddress,
+      controlToken: input.controlToken,
+    })
 
     const method = request.method?.toUpperCase() ?? 'GET'
     const url = new URL(request.url ?? '/', `http://${request.headers.host ?? 'localhost'}`)
@@ -259,6 +269,36 @@ async function handleAssistantRequest(
   }
 }
 
+export function assertAssistantControlRequest(input: {
+  headers: IncomingHttpHeaders
+  remoteAddress: string | null | undefined
+  controlToken: string
+}): void {
+  if (!isLoopbackRemoteAddress(input.remoteAddress)) {
+    throw new AssistantHttpRequestError('Forbidden.', 403)
+  }
+
+  if (hasForwardedControlHeaders(input.headers)) {
+    throw new AssistantHttpRequestError(
+      'Forbidden.',
+      403,
+      'ASSISTANT_CONTROL_PROXY_HEADERS_REJECTED',
+    )
+  }
+
+  if (!hasLoopbackHostHeader(input.headers)) {
+    throw new AssistantHttpRequestError(
+      'Forbidden.',
+      403,
+      'ASSISTANT_CONTROL_LOOPBACK_HOST_REQUIRED',
+    )
+  }
+
+  if (!hasMatchingControlToken(input.headers, input.controlToken)) {
+    throw new AssistantHttpRequestError('Unauthorized.', 401)
+  }
+}
+
 async function readJsonBody(request: IncomingMessage): Promise<unknown> {
   const chunks: Buffer[] = []
   let totalBytes = 0
@@ -274,22 +314,74 @@ async function readJsonBody(request: IncomingMessage): Promise<unknown> {
   return raw.length === 0 ? {} : JSON.parse(raw)
 }
 
-function isAuthorizedAssistantRequest(
-  request: IncomingMessage,
+function hasForwardedControlHeaders(headers: IncomingHttpHeaders): boolean {
+  return ASSISTANT_CONTROL_PLANE_FORWARDED_HEADER_NAMES.some(
+    (headerName) => hasPresentHeaderValue(headers[headerName]),
+  )
+}
+
+function hasLoopbackHostHeader(headers: IncomingHttpHeaders): boolean {
+  const hostname = readHostHeaderHostname(headers)
+  return hostname !== null && isLoopbackHostname(hostname)
+}
+
+function readHostHeaderHostname(headers: IncomingHttpHeaders): string | null {
+  const host = readHeaderValue(headers.host)
+  if (!host) {
+    return null
+  }
+
+  if (/[\s@/?#]/u.test(host)) {
+    return null
+  }
+
+  const ipv6Match = host.match(/^\[([^[\]]+)\](?::\d+)?$/u)
+  if (ipv6Match?.[1]) {
+    return ipv6Match[1]
+  }
+
+  const hostMatch = host.match(/^([^:]+)(?::\d+)?$/u)
+  return hostMatch?.[1] ?? null
+}
+
+function hasMatchingControlToken(
+  headers: IncomingHttpHeaders,
   expectedToken: string,
 ): boolean {
-  const header = request.headers.authorization
-  if (typeof header !== 'string') {
-    return false
-  }
-  const matched = header.match(/^bearer\s+(.+)$/iu)
-  if (!matched?.[1]) {
+  const providedToken = readBearerToken(headers.authorization)
+  if (!providedToken) {
     return false
   }
 
-  const provided = Buffer.from(matched[1], 'utf8')
+  const provided = Buffer.from(providedToken, 'utf8')
   const expected = Buffer.from(expectedToken, 'utf8')
   return provided.length === expected.length && timingSafeEqual(provided, expected)
+}
+
+function readBearerToken(value: string | string[] | undefined): string | null {
+  const header = readHeaderValue(value)
+  if (!header) {
+    return null
+  }
+
+  const matched = header.match(/^bearer\s+(.+)$/iu)
+  return matched?.[1]?.trim() || null
+}
+
+function readHeaderValue(value: string | string[] | undefined): string | null {
+  if (Array.isArray(value)) {
+    return value.length === 1 ? readHeaderValue(value[0]) : null
+  }
+
+  return typeof value === 'string' && value.trim() ? value.trim() : null
+}
+
+function hasPresentHeaderValue(value: string | string[] | undefined): boolean {
+  if (Array.isArray(value)) {
+    return value.some((entry) => typeof entry === 'string' && entry.trim().length > 0)
+  }
+
+  return typeof value === 'string' && value.trim().length > 0
 }
 
 function buildAssistantServerBaseUrl(address: AddressInfo): string {

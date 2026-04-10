@@ -407,7 +407,6 @@ function pushDeletionObservation(
   pushSharedDeletionObservation(events, rawArtifacts, {
     provider: "oura",
     providerDisplayName: "Oura",
-    deletion,
     resourceType,
     resourceId,
     occurredAt,
@@ -576,18 +575,17 @@ export function normalizeOuraSnapshot(snapshot: OuraSnapshotInput): NormalizedDe
     const role = `sleep:${sleepId}`;
     const version = firstIso(sleep.timestamp, sleep.updated_at, sleep.updatedAt);
 
-    pushRawArtifact(rawArtifacts, createRawArtifact(role, `sleep-${sleepId}.json`, sleep));
-
     if (sleepType === "deleted") {
       pushDeletionObservation(events, rawArtifacts, importedAt, {
         resource_type: "sleep",
         resource_id: sleepId,
         occurred_at: recordedAt,
         source_event_type: "sleep.deleted",
-        payload: sleep,
       });
       continue;
     }
+
+    pushRawArtifact(rawArtifacts, createRawArtifact(role, `sleep-${sleepId}.json`, sleep));
 
     if (sleepType !== "rest" && occurredAt && startAt && endAt && durationMinutes) {
       events.push(
