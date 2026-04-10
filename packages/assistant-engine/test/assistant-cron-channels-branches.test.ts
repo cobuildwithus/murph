@@ -40,8 +40,6 @@ type MockAutomationRecord = {
 
 const runtimeMocks = vi.hoisted(() => ({
   createAgentmailApiClient: vi.fn(),
-  ensureImessageMessagesDbReadable: vi.fn(),
-  mapImessageMessagesDbRuntimeError: vi.fn(),
   sendLinqChatMessage: vi.fn(),
   startLinqChatTypingIndicator: vi.fn(),
   stopLinqChatTypingIndicator: vi.fn(),
@@ -71,13 +69,6 @@ vi.mock('@murphai/operator-config/agentmail-runtime', async (importOriginal) => 
     createAgentmailApiClient: runtimeMocks.createAgentmailApiClient,
   }
 })
-
-vi.mock('@murphai/operator-config/imessage-readiness', () => ({
-  ensureImessageMessagesDbReadable:
-    runtimeMocks.ensureImessageMessagesDbReadable,
-  mapImessageMessagesDbRuntimeError:
-    runtimeMocks.mapImessageMessagesDbRuntimeError,
-}))
 
 vi.mock('@murphai/operator-config/linq-runtime', async (importOriginal) => {
   const actual =
@@ -134,7 +125,6 @@ import { ASSISTANT_CHANNEL_ADAPTERS } from '../src/assistant/channels/descriptor
 import { createAssistantBindingDelivery } from '../src/assistant/channels/helpers.ts'
 import {
   sendEmailMessage,
-  sendImessageMessage,
   sendLinqMessage,
   sendTelegramMessage,
   startLinqTypingIndicator,
@@ -183,12 +173,9 @@ beforeEach(() => {
   vi.unstubAllGlobals()
 
   runtimeMocks.createAgentmailApiClient.mockReset()
-  runtimeMocks.ensureImessageMessagesDbReadable.mockReset()
-  runtimeMocks.mapImessageMessagesDbRuntimeError.mockReset()
   runtimeMocks.sendLinqChatMessage.mockReset()
   runtimeMocks.startLinqChatTypingIndicator.mockReset()
   runtimeMocks.stopLinqChatTypingIndicator.mockReset()
-  runtimeMocks.mapImessageMessagesDbRuntimeError.mockReturnValue(null)
 
   cronMocks.automationsByVault.clear()
   cronMocks.nextAutomationId = 1
@@ -377,31 +364,6 @@ afterEach(async () => {
 
 describe('assistant channel descriptors and runtime edges', () => {
   it('covers direct descriptor adapter send and typing branches', async () => {
-    const sendImessage = vi.fn().mockResolvedValue(undefined)
-    await expect(
-      ASSISTANT_CHANNEL_ADAPTERS.imessage.send(
-        {
-          bindingDelivery: null,
-          explicitTarget: '  +15551230000  ',
-          identityId: null,
-          message: 'hello',
-        },
-        {
-          sendImessage,
-        },
-      ),
-    ).resolves.toMatchObject({
-      channel: 'imessage',
-      providerMessageId: null,
-      target: '+15551230000',
-      targetKind: 'explicit',
-    })
-    expect(sendImessage).toHaveBeenCalledWith({
-      idempotencyKey: null,
-      message: 'hello',
-      target: '+15551230000',
-    })
-
     const telegramTyping = vi.fn().mockResolvedValue(undefined)
     await expect(
       ASSISTANT_CHANNEL_ADAPTERS.telegram.startTypingIndicator?.(
@@ -527,44 +489,7 @@ describe('assistant channel descriptors and runtime edges', () => {
     })
   })
 
-  it('covers runtime fallbacks and error shaping for imessage, telegram, linq, and email', async () => {
-    runtimeMocks.mapImessageMessagesDbRuntimeError.mockReturnValueOnce(null)
-    await expect(
-      sendImessageMessage(
-        {
-          message: 'hello',
-          target: '+15550001111',
-        },
-        {
-          createSdk() {
-            throw new Error('sdk bootstrap failed')
-          },
-        },
-      ),
-    ).rejects.toMatchObject({
-      code: 'ASSISTANT_IMESSAGE_DELIVERY_FAILED',
-      message: 'sdk bootstrap failed',
-    })
-
-    const imessageFailure = new VaultCliError(
-      'ASSISTANT_IMESSAGE_DELIVERY_FAILED',
-      'send failed',
-    )
-    await expect(
-      sendImessageMessage(
-        {
-          message: 'hello',
-          target: '+15550002222',
-        },
-        {
-          createSdk: () => ({
-            close: vi.fn().mockRejectedValue(new Error('close failed')),
-            send: vi.fn().mockRejectedValue(imessageFailure),
-          }),
-        },
-      ),
-    ).rejects.toBe(imessageFailure)
-
+  it('covers runtime fallbacks and error shaping for telegram, linq, and email', async () => {
     await expect(
       sendLinqMessage(
         {

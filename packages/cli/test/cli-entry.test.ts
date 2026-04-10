@@ -395,7 +395,7 @@ test("runMurphCliAction starts assistant automation when setup requests assistan
   assert.equal(exit.mock.calls.length, 2);
   assert.deepEqual(stderrSpy.mock.calls, [
     [
-      "\nStarting Murph assistant automation. Leave this terminal open while channel auto-reply is active for iMessage, Telegram, and/or email. Press Ctrl+C to stop.\n\n",
+      "\nStarting Murph assistant automation. Leave this terminal open while channel auto-reply is active for Telegram, Linq, and/or email. Press Ctrl+C to stop.\n\n",
     ],
   ]);
 });

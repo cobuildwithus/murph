@@ -130,8 +130,8 @@ function createDocumentShowResult(vaultRoot: string): InboxShowResult {
     vault: vaultRoot,
     capture: {
       captureId: 'cap_doc',
-      source: 'imessage',
-      accountId: 'self',
+      source: 'telegram',
+      accountId: 'bot',
       externalId: 'message-1',
       threadId: 'thread-1',
       threadTitle: 'Care team',
@@ -171,8 +171,8 @@ function createImageShowResult(vaultRoot: string, mime: string, fileName: string
     vault: vaultRoot,
     capture: {
       captureId: 'cap_photo',
-      source: 'imessage',
-      accountId: 'self',
+      source: 'telegram',
+      accountId: 'bot',
       externalId: 'message-2',
       threadId: 'thread-2',
       threadTitle: 'Meal log',
@@ -212,8 +212,8 @@ function createPdfFallbackShowResult(vaultRoot: string): InboxShowResult {
     vault: vaultRoot,
     capture: {
       captureId: 'cap_pdf',
-      source: 'imessage',
-      accountId: 'self',
+      source: 'telegram',
+      accountId: 'bot',
       externalId: 'message-pdf',
       threadId: 'thread-pdf',
       threadTitle: 'Care team',

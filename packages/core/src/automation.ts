@@ -409,7 +409,7 @@ export function scaffoldAutomationPayload(): AutomationScaffoldPayload {
       timeZone: "Australia/Sydney",
     },
     route: {
-      channel: "imessage",
+      channel: "telegram",
       deliverResponse: true,
       deliveryTarget: null,
       identityId: null,

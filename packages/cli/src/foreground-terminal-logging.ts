@@ -52,14 +52,6 @@ export function formatAssistantRunEventForTerminal(
     )
   }
 
-  if (event.type === 'reply.scan.primed') {
-    const details = formatAssistantReplyScanPrimedDetails(
-      event.details,
-      options,
-    )
-    return details ? `primed channel auto-reply: ${details}` : 'primed channel auto-reply'
-  }
-
   if (event.type === 'capture.routed') {
     const tools = (event.tools ?? []).join(', ')
     return `routed ${event.captureId ?? 'capture'}${tools ? `: ${tools}` : ''}`
@@ -277,8 +269,6 @@ function clipTerminalText(
 
 function humanizeSource(source: string | null | undefined): string {
   switch (source) {
-    case 'imessage':
-      return 'iMessage'
     case 'telegram':
       return 'Telegram'
     case 'linq':
@@ -338,17 +328,6 @@ function formatAssistantReplyProgressDetails(
   return event.details?.includes('tool')
     ? 'assistant provider turn is using tools'
     : 'assistant provider turn is still running'
-}
-
-function formatAssistantReplyScanPrimedDetails(
-  details: string | null | undefined,
-  options: ForegroundTerminalLogOptions,
-): string | null {
-  if (!options.unsafeDetails) {
-    return null
-  }
-
-  return normalizePreviewText(details)
 }
 
 function captureCountFromDetails(details: string | null | undefined): number {

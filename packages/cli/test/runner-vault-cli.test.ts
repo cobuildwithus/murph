@@ -65,6 +65,7 @@ test('runner vault cli keeps vault/inbox surfaces and omits local-only assistant
   const help = await runRawRunnerCli(['--help'])
 
   assert.match(help, /\binbox\b/u)
+  assert.match(help, /\broute\b/u)
   assert.match(help, /\bsearch\b/u)
   assert.doesNotMatch(help, /\n\s+assistant\s+/u)
   assert.doesNotMatch(help, /\n\s+model\s+/u)
@@ -74,6 +75,7 @@ test('vault cli keeps the public help surface available from the default factory
   const help = await runRawVaultCli(['--help'])
 
   assert.match(help, /\binbox\b/u)
+  assert.match(help, /\broute\b/u)
   assert.match(help, /\bsearch\b/u)
   assert.match(help, /\bassistant\b/u)
 })
@@ -203,12 +205,7 @@ test('createVaultCli uses the default integrated inbox services wiring', async (
     devices: {},
   }))
   const createIntegratedInboxServices = vi.fn(
-    (dependencies?: {
-      loadInboxImessageModule?: () => Promise<unknown>
-    }) => {
-      void dependencies?.loadInboxImessageModule?.()
-      return {}
-    },
+    () => ({}),
   )
   const createAssistantFoodAutoLogHooks = vi.fn(() => ({}))
   const registerVaultCliCommandDescriptors = vi.fn()

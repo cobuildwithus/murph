@@ -11,7 +11,6 @@ import gatewayLocalProject from "./packages/gateway-local/vitest.config.ts";
 import hostedExecutionProject from "./packages/hosted-execution/vitest.config.ts";
 import importersProject from "./packages/importers/vitest.config.ts";
 import inboxServicesProject from "./packages/inbox-services/vitest.config.ts";
-import inboxdImessageProject from "./packages/inboxd-imessage/vitest.config.ts";
 import inboxdProject from "./packages/inboxd/vitest.config.ts";
 import messagingIngressProject from "./packages/messaging-ingress/vitest.config.ts";
 import openclawPluginProject from "./packages/openclaw-plugin/vitest.config.ts";
@@ -101,11 +100,6 @@ const ROOT_REPO_PROJECTS: RootRepoProject[] = [
   {
     config: inboxServicesProject,
     root: "packages/inbox-services",
-    include: ["test/**/*.test.ts"],
-  },
-  {
-    config: inboxdImessageProject,
-    root: "packages/inboxd-imessage",
     include: ["test/**/*.test.ts"],
   },
   {

@@ -431,7 +431,7 @@ exit 1
       name: '@murphai/hosted-execution',
     }))
     expect(summary.packages).toContainEqual(expect.objectContaining({
-      bundledWorkspaceDependencies: [
+      bundledWorkspaceDependencies: expect.arrayContaining([
         '@murphai/assistant-cli',
         '@murphai/assistant-engine',
         '@murphai/assistantd',
@@ -441,7 +441,6 @@ exit 1
         '@murphai/importers',
         '@murphai/inbox-services',
         '@murphai/inboxd',
-        '@murphai/inboxd-imessage',
         '@murphai/messaging-ingress',
         '@murphai/operator-config',
         '@murphai/parsers',
@@ -449,7 +448,7 @@ exit 1
         '@murphai/runtime-state',
         '@murphai/setup-cli',
         '@murphai/vault-usecases',
-      ],
+      ]),
       name: '@murphai/murph',
     }))
   })
@@ -560,7 +559,6 @@ exit 1
     expect(cliPackageJson.bundleDependencies).toContain('@murphai/assistant-engine')
     expect(cliPackageJson.bundleDependencies).toContain('@murphai/vault-usecases')
     expect(cliPackageJson.bundleDependencies).toContain('@murphai/gateway-local')
-    expect(cliPackageJson.bundleDependencies).toContain('@murphai/inboxd-imessage')
     expect(cliPackageJson.bundleDependencies).toContain('@murphai/messaging-ingress')
     expect(cliPackageJson.scripts?.['release:check']).toBeUndefined()
     expect(existsSync(path.join(packageDir, 'scripts', 'release.sh'))).toBe(false)

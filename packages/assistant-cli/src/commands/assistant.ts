@@ -65,16 +65,16 @@ const assistantIdentityRoutingDescription =
   'Optional local assistant identity id for multi-user routing. Email routes should use the configured AgentMail inbox id.'
 
 const assistantParticipantRoutingDescription =
-  'Optional remote participant identifier when the transport addresses a person directly. Use the transport-native participant value, such as an iMessage phone number/email handle or an email correspondent; thread-addressed transports may rely on --sourceThread instead.'
+  'Optional remote participant identifier when the transport addresses a person directly. Use the transport-native participant value, such as an email correspondent; thread-addressed transports may rely on --sourceThread instead.'
 
 const assistantSourceThreadRoutingDescription =
   'Optional upstream thread identifier when the transport routes by thread/chat. Use the transport-native thread value, such as a Telegram chat id or `<chatId>:topic:<messageThreadId>` topic route; direct-recipient routes can often leave this unset.'
 
 const assistantOneSendDeliveryTargetRoutingDescription =
-  'Optional one-send outbound destination in the transport-native send format. For iMessage use a phone number, email handle, or chat id; for Telegram use a chat id or `<chatId>:topic:<messageThreadId>`; for Linq use a chat id; for email use a recipient address. Reply-in-place sessions can often omit this and reuse the saved thread.'
+  'Optional one-send outbound destination in the transport-native send format. For Telegram use a chat id or `<chatId>:topic:<messageThreadId>`; for Linq use a chat id; for email use a recipient address. Reply-in-place sessions can often omit this and reuse the saved thread.'
 
 const assistantSavedDeliveryTargetRoutingDescription =
-  'Optional saved outbound destination in the transport-native send format. For iMessage use a phone number, email handle, or chat id; for Telegram use a chat id or `<chatId>:topic:<messageThreadId>`; for Linq use a chat id; for email use a recipient address.'
+  'Optional saved outbound destination in the transport-native send format. For Telegram use a chat id or `<chatId>:topic:<messageThreadId>`; for Linq use a chat id; for email use a recipient address.'
 
 function optionalNonEmptyStringOption(description: string) {
   return z
@@ -90,7 +90,7 @@ const assistantSessionOptionFields = {
     'Optional stable alias used to map an external conversation onto one assistant session.',
   ),
   channel: optionalNonEmptyStringOption(
-    'Optional channel label such as imessage, telegram, linq, or email.',
+    'Optional channel label such as telegram, linq, or email.',
   ),
   identity: optionalNonEmptyStringOption(assistantIdentityRoutingDescription),
   participant: optionalNonEmptyStringOption(assistantParticipantRoutingDescription),
@@ -544,7 +544,7 @@ const assistantRunOptionsSchema = withBaseOptions({
     .boolean()
     .optional()
     .describe(
-      'Allow self-authored captures to trigger channel auto-reply. Useful for texting your own Mac, but only safe when you dedicate a self-chat thread to Murph.',
+      'Allow self-authored captures to trigger channel auto-reply. Useful for a dedicated assistant self-chat or sandbox thread, but only safe when you isolate that thread to Murph.',
     ),
   sessionRolloverHours: z
     .number()
@@ -577,7 +577,7 @@ function createAssistantRunCommandDefinition(
     args: emptyArgsSchema,
     description:
       input?.description ??
-      'Start the local assistant automation loop that watches the inbox runtime, runs due automations, auto-replies over configured channels such as iMessage or Telegram, and optionally applies model-routed canonical promotions.',
+      'Start the local assistant automation loop that watches the inbox runtime, runs due automations, auto-replies over configured channels such as Telegram, Linq, or email, and optionally applies model-routed canonical promotions.',
     hint:
       input?.hint ??
       'Use --baseUrl with a local OpenAI-compatible model endpoint such as Ollama when you also want canonical inbox triage. Channel auto-reply can run without a routing model, and due automations fire while this loop is active.',
@@ -606,7 +606,7 @@ function createAssistantRunCommandDefinition(
           allowSelfAuthored: true,
           sessionRolloverHours: 48,
         },
-        description: 'Run dedicated iMessage self-chat mode with two-day session rollover.',
+        description: 'Run a dedicated self-chat thread with two-day session rollover.',
       },
     ],
     options: assistantRunOptionsSchema,
@@ -678,7 +678,7 @@ export function registerAssistantCommands(
       description:
         'Send one message through the local provider-backed assistant and persist session metadata plus a local transcript outside the canonical vault.',
       hint:
-        'Murph persists a local transcript plus per-session metadata under `.runtime/operations/assistant/`, and still reuses provider-side history when available. Use --deliverResponse to send the assistant reply back out over a mapped channel such as iMessage, Telegram, or email.',
+        'Murph persists a local transcript plus per-session metadata under `.runtime/operations/assistant/`, and still reuses provider-side history when available. Use --deliverResponse to send the assistant reply back out over a mapped channel such as Telegram, Linq, or email.',
       examples: [
         {
           args: {
@@ -695,11 +695,12 @@ export function registerAssistantCommands(
           },
           options: {
             vault: './vault',
-            channel: 'imessage',
-            participant: '+15551234567',
+            channel: 'linq',
+            sourceThread: 'chat_lunch',
+            deliveryTarget: 'chat_lunch',
             deliverResponse: true,
           },
-          description: 'Generate a reply locally and deliver it over iMessage.',
+          description: 'Generate a reply locally and deliver it over Linq.',
         },
         {
           args: {
@@ -765,9 +766,9 @@ export function registerAssistantCommands(
           .describe('Outbound message body to deliver over the mapped assistant channel.'),
       }),
       description:
-        'Deliver one outbound assistant message without invoking the chat provider. iMessage, Telegram, Linq, and email all use the same stored assistant channel binding surface.',
+        'Deliver one outbound assistant message without invoking the chat provider. Telegram, Linq, and email all use the same stored assistant channel binding surface.',
       hint:
-        'Use --deliveryTarget to override the stored delivery target for one send only. For iMessage that target can be a phone number, email handle, or chat id; for Telegram it can be a chat id or <chatId>:topic:<messageThreadId>; for Linq it can be a chat id; for email it can be a recipient address while thread-bound sessions reply in place.',
+        'Use --deliveryTarget to override the stored delivery target for one send only. For Telegram it can be a chat id or <chatId>:topic:<messageThreadId>; for Linq it can be a chat id; for email it can be a recipient address while thread-bound sessions reply in place.',
       examples: [
         {
           args: {
@@ -775,10 +776,11 @@ export function registerAssistantCommands(
           },
           options: {
             vault: './vault',
-            channel: 'imessage',
-            participant: '+15551234567',
+            channel: 'telegram',
+            sourceThread: '123456789',
+            deliveryTarget: '123456789',
           },
-          description: 'Send a direct iMessage to one participant.',
+          description: 'Send a direct Telegram reply to one chat.',
         },
         {
           args: {
@@ -905,7 +907,7 @@ export function registerAssistantCommands(
         channel: z
           .string()
           .min(1)
-          .describe('Outbound channel to save, such as telegram, imessage, linq, or email.'),
+          .describe('Outbound channel to save, such as telegram, linq, or email.'),
       }),
       description:
         'Save or replace the local default outbound target for one channel. Provide at least one of --participant, --sourceThread, or --deliveryTarget; saved email targets also require --identity with the configured AgentMail inbox id.',

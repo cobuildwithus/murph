@@ -6,5 +6,5 @@
     "fixtures/minimal-vault/CORE.md"
   ],
   "goldenOutput": "fixtures/golden-outputs/assistant",
-  "purpose": "Documents direct outbound assistant delivery over a mapped channel such as iMessage without invoking the chat provider."
+  "purpose": "Documents direct outbound assistant delivery over a mapped channel such as Telegram, Linq, or email without invoking the chat provider."
 }

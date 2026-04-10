@@ -297,7 +297,7 @@ test("helper-backed experiment mutation readers preserve exact invalid-frontmatt
   const capture = {
     captureId: "cap_01JNV422Y2M5ZBV64ZP4N1DRC1",
     eventId: "evt_01JNV422Y2M5ZBV64ZP4N1DRC2",
-    source: "imessage",
+    source: "telegram",
     occurredAt: "2026-03-13T08:00:00.000Z",
     text: "Reader boundary inbox note",
     thread: {
@@ -408,7 +408,7 @@ test("helper-backed journal mutation readers preserve exact invalid-frontmatter 
   const capture = {
     captureId: "cap_01JNV422Y2M5ZBV64ZP4N1DRD1",
     eventId: "evt_01JNV422Y2M5ZBV64ZP4N1DRD2",
-    source: "imessage",
+    source: "telegram",
     occurredAt: "2026-03-13T09:00:00.000Z",
     text: "Reader boundary journal note",
     thread: {
@@ -467,7 +467,7 @@ test("high-level core inbox promotion ports preserve journal and experiment-note
   const capture = {
     captureId: "cap_01JNV422Y2M5ZBV64ZP4N1DRB1",
     eventId: "evt_01JNV422Y2M5ZBV64ZP4N1DRB2",
-    source: "imessage",
+    source: "telegram",
     occurredAt: "2026-03-13T08:00:00.000Z",
     text: "Breakfast note from inbox",
     thread: {

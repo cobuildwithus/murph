@@ -10,11 +10,9 @@ export {
   listAssistantChannelAdapters,
   listAssistantChannelNames,
   resolveDeliveryCandidates,
-  resolveImessageDeliveryCandidates,
 } from './channels/registry.js'
 export {
   sendEmailMessage,
-  sendImessageMessage,
   sendLinqMessage,
   sendTelegramMessage,
   startLinqTypingIndicator,

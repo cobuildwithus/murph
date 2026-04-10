@@ -12,7 +12,7 @@ If you want a local, inspectable assistant that keeps durable truth in normal fi
 
 Runtime: Node `>= 24.14.1`.
 
-Supported host setup path: macOS and Linux. iMessage remains macOS-only.
+Supported host setup path: macOS and Linux.
 
 ## Install
 
@@ -61,6 +61,14 @@ When you need to read from the vault, use this chooser:
 - `vault-cli memory show` plus targeted `vault-cli knowledge ...` reads for saved user context
 - `vault-cli wearables day` or `wearables ... list` for semantic wearable summaries
 - family `manifest` commands for immutable import provenance
+
+When you need route distance or duration between two points for a run, walk, ride, or hike, use:
+
+```bash
+MAPBOX_ACCESS_TOKEN=... vault-cli route estimate "123 Example St, Melbourne VIC" "St Kilda Beach" --profile walking
+```
+
+Add `--elevation` when you want an approximate elevation summary. Geometry stays omitted unless you opt in with `--geometry`.
 
 For durable local synthesis that should keep adding up inside the vault, use the derived knowledge wiki commands:
 

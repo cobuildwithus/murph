@@ -40,12 +40,14 @@ test('assistant status surfaces recent receipts and doctor passes on healthy loc
   await deliverAssistantMessage(
     {
       vault: vaultRoot,
-      channel: 'imessage',
-      participantId: '+15551234567',
+      channel: 'telegram',
+      participantId: '123456789',
+      sourceThreadId: '-1001234567890:topic:42',
+      threadIsDirect: false,
       message: 'Lunch is logged.',
     },
     {
-      sendImessage: async () => {},
+      sendTelegram: async () => {},
     },
   )
 
@@ -209,21 +211,21 @@ test('assistant outbox keeps raw dedupe identity separate from persisted target 
 
   const spaced = await createAssistantOutboxIntent({
     ...baseIntent,
-    channel: ' imessage ',
+    channel: ' telegram ',
     identityId: ' assistant:primary ',
     actorId: ' actor:1 ',
-    threadId: ' thread:1 ',
+    threadId: ' -1001234567890:topic:42 ',
     replyToMessageId: ' reply:1 ',
-    explicitTarget: ' +15551234567 ',
+    explicitTarget: ' -1001234567890:topic:42 ',
   })
   const trimmed = await createAssistantOutboxIntent({
     ...baseIntent,
-    channel: 'imessage',
+    channel: 'telegram',
     identityId: 'assistant:primary',
     actorId: 'actor:1',
-    threadId: 'thread:1',
+    threadId: '-1001234567890:topic:42',
     replyToMessageId: 'reply:1',
-    explicitTarget: '+15551234567',
+    explicitTarget: '-1001234567890:topic:42',
   })
 
   assert.notEqual(spaced.intentId, trimmed.intentId)
@@ -235,13 +237,13 @@ test('assistant outbox keeps raw dedupe identity separate from persisted target 
 
   for (const intent of [persistedSpaced, persistedTrimmed]) {
     assert.equal(intent?.message, 'Hello')
-    assert.equal(intent?.channel, 'imessage')
+    assert.equal(intent?.channel, 'telegram')
     assert.equal(intent?.identityId, 'assistant:primary')
     assert.equal(intent?.actorId, 'actor:1')
-    assert.equal(intent?.threadId, 'thread:1')
+    assert.equal(intent?.threadId, '-1001234567890:topic:42')
     assert.equal(intent?.threadIsDirect, true)
     assert.equal(intent?.replyToMessageId, 'reply:1')
-    assert.equal(intent?.explicitTarget, '+15551234567')
+    assert.equal(intent?.explicitTarget, '-1001234567890:topic:42')
   }
 })
 
@@ -399,12 +401,14 @@ test('assistant outbox inventory paths quarantine legacy intent payloads without
   await deliverAssistantMessage(
     {
       vault: vaultRoot,
-      channel: 'imessage',
-      participantId: '+15551234567',
+      channel: 'telegram',
+      participantId: '123456789',
+      sourceThreadId: '-1001234567890:topic:42',
+      threadIsDirect: false,
       message: 'Lunch is still logged.',
     },
     {
-      sendImessage: async () => {},
+      sendTelegram: async () => {},
     },
   )
 
@@ -434,12 +438,14 @@ test('assistant status ignores expired cooldown warnings and can find an older r
     {
       vault: vaultRoot,
       alias: 'chat:older',
-      channel: 'imessage',
-      participantId: '+15550000001',
+      channel: 'telegram',
+      participantId: '123450001',
+      sourceThreadId: '-1001234567890:topic:42',
+      threadIsDirect: false,
       message: 'older session message',
     },
     {
-      sendImessage: async () => {},
+      sendTelegram: async () => {},
     },
   )
 
@@ -448,12 +454,14 @@ test('assistant status ignores expired cooldown warnings and can find an older r
       {
         vault: vaultRoot,
         alias: 'chat:newer',
-        channel: 'imessage',
-        participantId: '+15550000002',
+        channel: 'telegram',
+        participantId: '123450002',
+        sourceThreadId: '-1001234567890:topic:43',
+        threadIsDirect: false,
         message: `newer session message ${index}`,
       },
       {
-        sendImessage: async () => {},
+        sendTelegram: async () => {},
       },
     )
   }

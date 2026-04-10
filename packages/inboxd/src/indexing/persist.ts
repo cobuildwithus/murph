@@ -1,7 +1,7 @@
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { mkdir, readFile, realpath, rename, stat } from "node:fs/promises";
-import { homedir, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 
 import {
   assertContract,
@@ -51,11 +51,6 @@ import {
 
 const STORED_CAPTURE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]*$/u;
 const QUARANTINED_INVALID_CAPTURE_ID_SUFFIX = "quarantined-invalid-capture-id";
-const IMESSAGE_ATTACHMENT_DIRECTORY = path.join("Library", "Messages", "Attachments");
-const TRUSTED_IMESSAGE_EPHEMERAL_PATH_FRAGMENTS = [
-  "/TemporaryItems/",
-  "/com.apple.imagent/",
-] as const;
 export interface PersistRawCaptureInput {
   vaultRoot: string;
   captureId: string;
@@ -132,7 +127,6 @@ function buildSanitizedInboundCapture(input: InboundCapture): InboundCapture {
 }
 
 async function resolveTrustedAttachmentSourcePath(input: {
-  source: string;
   originalPath: string;
 }): Promise<string | null> {
   const sourceAbsolutePath = path.resolve(input.originalPath);
@@ -148,24 +142,15 @@ async function resolveTrustedAttachmentSourcePath(input: {
     throw error;
   }
 
-  if (hasTrustedImessageEphemeralPathFragment(canonicalSourcePath)) {
-    return canonicalSourcePath;
-  }
-
-  const trustedRoots = await listTrustedAttachmentRoots(input.source);
+  const trustedRoots = await listTrustedAttachmentRoots();
 
   return trustedRoots.some((root) => isPathWithinRoot(root, canonicalSourcePath))
     ? canonicalSourcePath
     : null;
 }
 
-async function listTrustedAttachmentRoots(source: string): Promise<string[]> {
+async function listTrustedAttachmentRoots(): Promise<string[]> {
   const rootCandidates = [path.resolve(tmpdir())];
-
-  if (source === "imessage") {
-    rootCandidates.unshift(path.resolve(homedir(), IMESSAGE_ATTACHMENT_DIRECTORY));
-  }
-
   const trustedRoots: string[] = [];
 
   for (const rootCandidate of rootCandidates) {
@@ -179,13 +164,6 @@ async function listTrustedAttachmentRoots(source: string): Promise<string[]> {
   }
 
   return trustedRoots;
-}
-
-function hasTrustedImessageEphemeralPathFragment(candidate: string): boolean {
-  const normalizedCandidate = candidate.replaceAll("\\", "/");
-  return TRUSTED_IMESSAGE_EPHEMERAL_PATH_FRAGMENTS.some((fragment) =>
-    normalizedCandidate.includes(fragment)
-  );
 }
 
 function isPathWithinRoot(root: string, candidate: string): boolean {
@@ -232,7 +210,6 @@ async function prepareRawCapturePersistence({
     const sourceAbsolutePath =
       !attachment.data && attachment.originalPath
         ? await resolveTrustedAttachmentSourcePath({
-            source: input.source,
             originalPath: attachment.originalPath,
           })
         : null;

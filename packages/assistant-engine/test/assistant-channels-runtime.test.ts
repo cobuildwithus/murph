@@ -5,12 +5,9 @@ import type {
   AgentmailFetch,
 } from '@murphai/operator-config/agentmail-runtime'
 import type { InboxShowResult } from '@murphai/operator-config/inbox-cli-contracts'
-import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
 const runtimeMocks = vi.hoisted(() => ({
   createAgentmailApiClient: vi.fn(),
-  ensureImessageMessagesDbReadable: vi.fn(),
-  mapImessageMessagesDbRuntimeError: vi.fn(),
   sendLinqChatMessage: vi.fn(),
   startLinqChatTypingIndicator: vi.fn(),
   stopLinqChatTypingIndicator: vi.fn(),
@@ -25,13 +22,6 @@ vi.mock('@murphai/operator-config/agentmail-runtime', async (importOriginal) => 
   }
 })
 
-vi.mock('@murphai/operator-config/imessage-readiness', () => ({
-  ensureImessageMessagesDbReadable:
-    runtimeMocks.ensureImessageMessagesDbReadable,
-  mapImessageMessagesDbRuntimeError:
-    runtimeMocks.mapImessageMessagesDbRuntimeError,
-}))
-
 vi.mock('@murphai/operator-config/linq-runtime', async (importOriginal) => {
   const actual =
     await importOriginal<typeof import('@murphai/operator-config/linq-runtime')>()
@@ -44,18 +34,15 @@ vi.mock('@murphai/operator-config/linq-runtime', async (importOriginal) => {
 })
 
 import { isAssistantUserFacingChannel } from '../src/assistant/channel-presentation.ts'
-import { createAssistantBindingDelivery } from '../src/assistant/channels/helpers.ts'
 import { ASSISTANT_CHANNEL_ADAPTERS } from '../src/assistant/channels/descriptors.ts'
 import {
   getAssistantChannelAdapter,
   inferAssistantBindingDelivery,
   listAssistantChannelAdapters,
   listAssistantChannelNames,
-  resolveImessageDeliveryCandidates,
 } from '../src/assistant/channels/registry.ts'
 import {
   sendEmailMessage,
-  sendImessageMessage,
   sendLinqMessage,
   sendTelegramMessage,
   startLinqTypingIndicator,
@@ -66,12 +53,9 @@ beforeEach(() => {
   vi.useRealTimers()
   vi.restoreAllMocks()
   runtimeMocks.createAgentmailApiClient.mockReset()
-  runtimeMocks.ensureImessageMessagesDbReadable.mockReset()
-  runtimeMocks.mapImessageMessagesDbRuntimeError.mockReset()
   runtimeMocks.sendLinqChatMessage.mockReset()
   runtimeMocks.startLinqChatTypingIndicator.mockReset()
   runtimeMocks.stopLinqChatTypingIndicator.mockReset()
-  runtimeMocks.mapImessageMessagesDbRuntimeError.mockReturnValue(null)
 })
 
 afterEach(() => {
@@ -82,7 +66,6 @@ afterEach(() => {
 describe('assistant channels runtime seam', () => {
   it('lists adapters, resolves fallback bindings, and classifies user-facing channels', () => {
     expect(listAssistantChannelNames()).toEqual([
-      'imessage',
       'telegram',
       'linq',
       'email',
@@ -108,18 +91,6 @@ describe('assistant channels runtime seam', () => {
       target: 'thread-1',
     })
 
-    expect(
-      resolveImessageDeliveryCandidates({
-        bindingDelivery: createAssistantBindingDelivery('participant', 'bound-target'),
-        explicitTarget: '  explicit-target  ',
-      }),
-    ).toEqual([
-      {
-        kind: 'explicit',
-        target: 'explicit-target',
-      },
-    ])
-
     expect(isAssistantUserFacingChannel(' telegram ')).toBe(true)
     expect(isAssistantUserFacingChannel('LOCAL')).toBe(false)
     expect(isAssistantUserFacingChannel('null')).toBe(false)
@@ -127,7 +98,6 @@ describe('assistant channels runtime seam', () => {
   })
 
   it('reports channel readiness and auto-reply support from descriptors', () => {
-    expect(ASSISTANT_CHANNEL_ADAPTERS.imessage.isReadyForSetup({})).toBe(true)
     expect(
       ASSISTANT_CHANNEL_ADAPTERS.telegram.isReadyForSetup({
         TELEGRAM_BOT_TOKEN: 'bot-token',
@@ -149,7 +119,6 @@ describe('assistant channels runtime seam', () => {
 
     const directCapture = createInboxCapture(true)
     const groupCapture = createInboxCapture(false)
-    expect(ASSISTANT_CHANNEL_ADAPTERS.imessage.canAutoReply(directCapture)).toBeNull()
     expect(ASSISTANT_CHANNEL_ADAPTERS.telegram.canAutoReply(directCapture)).toBeNull()
     expect(ASSISTANT_CHANNEL_ADAPTERS.telegram.canAutoReply(groupCapture)).toContain(
       'direct chats',
@@ -160,71 +129,6 @@ describe('assistant channels runtime seam', () => {
     expect(ASSISTANT_CHANNEL_ADAPTERS.email.canAutoReply(groupCapture)).toContain(
       'direct threads',
     )
-  })
-
-  it('sends iMessage through the sdk and maps runtime readiness failures', async () => {
-    const close = vi.fn()
-    const send = vi.fn().mockResolvedValue(undefined)
-
-    await sendImessageMessage(
-      {
-        message: 'hello from murph',
-        target: '+15551230000',
-      },
-      {
-        createSdk: () => ({
-          close,
-          send,
-        }),
-      },
-    )
-
-    expect(runtimeMocks.ensureImessageMessagesDbReadable).toHaveBeenCalledOnce()
-    expect(send).toHaveBeenCalledWith('+15551230000', 'hello from murph')
-    expect(close).toHaveBeenCalledOnce()
-
-    runtimeMocks.ensureImessageMessagesDbReadable.mockRejectedValueOnce(
-      new Error('disk access denied'),
-    )
-    runtimeMocks.mapImessageMessagesDbRuntimeError.mockReturnValueOnce(
-      new VaultCliError(
-        'ASSISTANT_IMESSAGE_PERMISSION_REQUIRED',
-        'blocked by permissions',
-      ),
-    )
-
-    await expect(
-      sendImessageMessage(
-        {
-          message: 'blocked',
-          target: '+15550000000',
-        },
-        {
-          createSdk: () => ({
-            send,
-          }),
-        },
-      ),
-    ).rejects.toMatchObject({
-      code: 'ASSISTANT_IMESSAGE_PERMISSION_REQUIRED',
-      message: 'blocked by permissions',
-    })
-
-    await expect(
-      sendImessageMessage(
-        {
-          message: 'missing send',
-          target: '+15554443333',
-        },
-        {
-          createSdk: () => ({
-            close,
-          }),
-        },
-      ),
-    ).rejects.toMatchObject({
-      code: 'ASSISTANT_IMESSAGE_UNAVAILABLE',
-    })
   })
 
   it('sends Telegram chunks across migrate and retry branches', async () => {

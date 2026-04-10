@@ -140,7 +140,7 @@ print_linux_install_plan() {
   printf '%s\n' '  - workspace dependencies and build output'
   printf '%s\n' '  - ffmpeg, poppler/pdftotext, whisper.cpp, and a local Whisper model through the Murph Linux toolchain setup'
   printf '%s\n' '  - vault bootstrap, default config, user-level murph/vault-cli shims, onboarding channel selection, wearables, and assistant automation/chat handoff'
-  printf '%s\n' '  - iMessage stays macOS-only; Linux keeps the rest of Murph available for server or VM deployments'
+  printf '%s\n' '  - supported inbox channels and local runtime tools stay available on Linux for server or VM deployments'
 }
 
 normalize_linux_arch() {
@@ -281,7 +281,7 @@ print_linux_dry_run_plan() {
   else
     printf '%s\n' '5. Delegate to `node packages/cli/dist/bin.js onboard`.'
   fi
-  printf '%s\n' '6. Inside the CLI setup flow, provision or reuse Linux parser/runtime tools, skip unsupported iMessage setup, and finish vault bootstrap plus shims.'
+  printf '%s\n' '6. Inside the CLI setup flow, provision or reuse Linux parser/runtime tools, finish vault bootstrap plus shims, and hand off into supported channel setup.'
   printf '%s\n' 'Run the built setup entrypoint directly with `--dry-run` after bootstrap if you want the inner setup-step preview.'
 }
 

@@ -21,10 +21,10 @@ import {
   passCheck,
   warnCheck,
 } from '../inbox-services/shared.js'
-import { IMESSAGE_MESSAGES_DB_RELATIVE_PATH } from './environment.js'
 
 type DoctorCheckResult = InboxDoctorCheck | InboxDoctorCheck[]
 type DoctorSource = InboxConnectorConfig['source']
+type SupportedDoctorSource = 'telegram' | 'email' | 'linq'
 
 export interface DoctorCheckRunner {
   <TResult>(
@@ -47,90 +47,6 @@ export type DoctorStrategy = (
   connector: InboxConnectorConfig,
   deps: DoctorStrategyDeps,
 ) => Promise<void>
-
-const runImessageDoctorChecks: DoctorStrategy = async (
-  context,
-  connector,
-  { env, runDoctorCheck },
-) => {
-  if (env.getPlatform() !== 'darwin') {
-    context.checks.push(
-      failCheck(
-        'platform',
-        'The iMessage connector requires macOS.',
-        { platform: env.getPlatform() },
-      ),
-    )
-  } else {
-    context.checks.push(passCheck('platform', 'Running on macOS.'))
-  }
-
-  const driver = await runDoctorCheck(context, {
-    run: () => env.loadConfiguredImessageDriver(connector),
-    onSuccess: () =>
-      passCheck('driver-import', 'The iMessage driver imported successfully.'),
-    onError: (error) =>
-      failCheck(
-        'driver-import',
-        'The iMessage driver could not be imported.',
-        { error: errorMessage(error) },
-      ),
-  })
-
-  await runDoctorCheck(context, {
-    run: () => env.ensureConfiguredImessageReady(),
-    onSuccess: () =>
-      passCheck('messages-db', 'The local Messages database is readable.', {
-        path: IMESSAGE_MESSAGES_DB_RELATIVE_PATH.replace(/\\/g, '/'),
-      }),
-    onError: (error) =>
-      failCheck(
-        'messages-db',
-        'The local Messages database could not be accessed.',
-        { error: errorMessage(error) },
-      ),
-  })
-
-  if (!driver) {
-    return
-  }
-
-  await runDoctorCheck(context, {
-    run: async () => {
-      const chats = (await driver.listChats?.()) ?? []
-      const messages = await driver.getMessages({
-        limit: 1,
-        cursor: null,
-        includeOwnMessages: connector.options.includeOwnMessages ?? true,
-      })
-
-      return {
-        chats,
-        messages,
-      }
-    },
-    onSuccess: ({ chats, messages }) =>
-      chats.length > 0 || messages.length > 0
-        ? passCheck(
-            'probe',
-            'The connector can list chats or fetch messages.',
-            {
-              chats: chats.length,
-              messages: messages.length,
-            },
-          )
-        : warnCheck(
-            'probe',
-            'The connector responded but returned no chats or messages.',
-          ),
-    onError: (error) =>
-      failCheck(
-        'probe',
-        'The connector could not fetch chats or messages.',
-        { error: errorMessage(error) },
-      ),
-  })
-}
 
 const runTelegramDoctorChecks: DoctorStrategy = async (
   context,
@@ -406,8 +322,7 @@ const runLinqDoctorChecks: DoctorStrategy = async (
   })
 }
 
-export const DOCTOR_STRATEGIES: Record<DoctorSource, DoctorStrategy> = {
-  imessage: runImessageDoctorChecks,
+export const DOCTOR_STRATEGIES: Record<SupportedDoctorSource, DoctorStrategy> = {
   telegram: runTelegramDoctorChecks,
   email: runEmailDoctorChecks,
   linq: runLinqDoctorChecks,

@@ -55,10 +55,3 @@ export function inferAssistantBindingDelivery(input: {
     deliveryTarget: input.deliveryTarget ?? null,
   })
 }
-
-export function resolveImessageDeliveryCandidates(input: {
-  bindingDelivery?: AssistantBindingDelivery | null
-  explicitTarget?: string | null
-}): AssistantDeliveryCandidate[] {
-  return resolveDeliveryCandidates(input)
-}

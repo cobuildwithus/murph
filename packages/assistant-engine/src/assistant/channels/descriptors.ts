@@ -11,7 +11,6 @@ import {
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   createAssistantChannelAdapter,
-  inferFallbackBindingDelivery,
   inferThreadFirstBindingDelivery,
   readDeliveredProviderMessageId,
   readDeliveredProviderThreadId,
@@ -19,7 +18,6 @@ import {
 } from './helpers.js'
 import {
   sendEmailMessage,
-  sendImessageMessage,
   sendLinqMessage,
   sendTelegramMessage,
   startLinqTypingIndicator,
@@ -29,30 +27,6 @@ import type {
   AssistantChannelAdapter,
   AssistantChannelName,
 } from './types.js'
-
-const IMESSAGE_CHANNEL_ADAPTER = createAssistantChannelAdapter({
-  channel: 'imessage',
-  canAutoReply() {
-    return null
-  },
-  inferBindingDelivery(input) {
-    return inferFallbackBindingDelivery(input)
-  },
-  isReadyForSetup() {
-    return true
-  },
-  supportsIdempotencyKey: false,
-  targetRequiredMessage:
-    'iMessage delivery requires an explicit target or a stored delivery binding.',
-  async sendMessage({ candidate, dependencies, idempotencyKey, message }) {
-    const send = dependencies.sendImessage ?? sendImessageMessage
-    await send({
-      idempotencyKey: idempotencyKey ?? null,
-      target: candidate.target,
-      message,
-    })
-  },
-})
 
 const TELEGRAM_CHANNEL_ADAPTER = createAssistantChannelAdapter({
   channel: 'telegram',
@@ -183,7 +157,6 @@ export const ASSISTANT_CHANNEL_ADAPTERS: Readonly<Record<
   AssistantChannelName,
   AssistantChannelAdapter
 >> = Object.freeze({
-  imessage: IMESSAGE_CHANNEL_ADAPTER,
   telegram: TELEGRAM_CHANNEL_ADAPTER,
   linq: LINQ_CHANNEL_ADAPTER,
   email: EMAIL_CHANNEL_ADAPTER,

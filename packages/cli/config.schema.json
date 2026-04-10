@@ -209,7 +209,7 @@
                           "minLength": 1
                         },
                         "channel": {
-                          "description": "Optional channel label such as imessage, telegram, linq, or email.",
+                          "description": "Optional channel label such as telegram, linq, or email.",
                           "type": "string",
                           "minLength": 1
                         },
@@ -219,7 +219,7 @@
                           "minLength": 1
                         },
                         "participant": {
-                          "description": "Optional remote participant identifier when the transport addresses a person directly. Use the transport-native participant value, such as an iMessage phone number/email handle or an email correspondent; thread-addressed transports may rely on --sourceThread instead.",
+                          "description": "Optional remote participant identifier when the transport addresses a person directly. Use the transport-native participant value, such as an email correspondent; thread-addressed transports may rely on --sourceThread instead.",
                           "type": "string",
                           "minLength": 1
                         },
@@ -298,7 +298,7 @@
                           "type": "boolean"
                         },
                         "deliveryTarget": {
-                          "description": "Optional one-send outbound destination in the transport-native send format. For iMessage use a phone number, email handle, or chat id; for Telegram use a chat id or `<chatId>:topic:<messageThreadId>`; for Linq use a chat id; for email use a recipient address. Reply-in-place sessions can often omit this and reuse the saved thread.",
+                          "description": "Optional one-send outbound destination in the transport-native send format. For Telegram use a chat id or `<chatId>:topic:<messageThreadId>`; for Linq use a chat id; for email use a recipient address. Reply-in-place sessions can often omit this and reuse the saved thread.",
                           "type": "string",
                           "minLength": 1
                         }
@@ -336,7 +336,7 @@
                           "minLength": 1
                         },
                         "channel": {
-                          "description": "Optional channel label such as imessage, telegram, linq, or email.",
+                          "description": "Optional channel label such as telegram, linq, or email.",
                           "type": "string",
                           "minLength": 1
                         },
@@ -346,7 +346,7 @@
                           "minLength": 1
                         },
                         "participant": {
-                          "description": "Optional remote participant identifier when the transport addresses a person directly. Use the transport-native participant value, such as an iMessage phone number/email handle or an email correspondent; thread-addressed transports may rely on --sourceThread instead.",
+                          "description": "Optional remote participant identifier when the transport addresses a person directly. Use the transport-native participant value, such as an email correspondent; thread-addressed transports may rely on --sourceThread instead.",
                           "type": "string",
                           "minLength": 1
                         },
@@ -454,7 +454,7 @@
                           "minLength": 1
                         },
                         "channel": {
-                          "description": "Optional channel label such as imessage, telegram, linq, or email.",
+                          "description": "Optional channel label such as telegram, linq, or email.",
                           "type": "string",
                           "minLength": 1
                         },
@@ -464,7 +464,7 @@
                           "minLength": 1
                         },
                         "participant": {
-                          "description": "Optional remote participant identifier when the transport addresses a person directly. Use the transport-native participant value, such as an iMessage phone number/email handle or an email correspondent; thread-addressed transports may rely on --sourceThread instead.",
+                          "description": "Optional remote participant identifier when the transport addresses a person directly. Use the transport-native participant value, such as an email correspondent; thread-addressed transports may rely on --sourceThread instead.",
                           "type": "string",
                           "minLength": 1
                         },
@@ -474,7 +474,7 @@
                           "minLength": 1
                         },
                         "deliveryTarget": {
-                          "description": "Optional one-send outbound destination in the transport-native send format. For iMessage use a phone number, email handle, or chat id; for Telegram use a chat id or `<chatId>:topic:<messageThreadId>`; for Linq use a chat id; for email use a recipient address. Reply-in-place sessions can often omit this and reuse the saved thread.",
+                          "description": "Optional one-send outbound destination in the transport-native send format. For Telegram use a chat id or `<chatId>:topic:<messageThreadId>`; for Linq use a chat id; for email use a recipient address. Reply-in-place sessions can often omit this and reuse the saved thread.",
                           "type": "string",
                           "minLength": 1
                         }
@@ -539,7 +539,7 @@
                           "maximum": 200
                         },
                         "allowSelfAuthored": {
-                          "description": "Allow self-authored captures to trigger channel auto-reply. Useful for texting your own Mac, but only safe when you dedicate a self-chat thread to Murph.",
+                          "description": "Allow self-authored captures to trigger channel auto-reply. Useful for a dedicated assistant self-chat or sandbox thread, but only safe when you isolate that thread to Murph.",
                           "type": "boolean"
                         },
                         "sessionRolloverHours": {
@@ -624,7 +624,7 @@
                                   "minLength": 1
                                 },
                                 "participant": {
-                                  "description": "Optional remote participant identifier when the transport addresses a person directly. Use the transport-native participant value, such as an iMessage phone number/email handle or an email correspondent; thread-addressed transports may rely on --sourceThread instead.",
+                                  "description": "Optional remote participant identifier when the transport addresses a person directly. Use the transport-native participant value, such as an email correspondent; thread-addressed transports may rely on --sourceThread instead.",
                                   "type": "string",
                                   "minLength": 1
                                 },
@@ -634,7 +634,7 @@
                                   "minLength": 1
                                 },
                                 "deliveryTarget": {
-                                  "description": "Optional saved outbound destination in the transport-native send format. For iMessage use a phone number, email handle, or chat id; for Telegram use a chat id or `<chatId>:topic:<messageThreadId>`; for Linq use a chat id; for email use a recipient address.",
+                                  "description": "Optional saved outbound destination in the transport-native send format. For Telegram use a chat id or `<chatId>:topic:<messageThreadId>`; for Linq use a chat id; for email use a recipient address.",
                                   "type": "string",
                                   "minLength": 1
                                 }
@@ -842,7 +842,7 @@
                   "minLength": 1
                 },
                 "channel": {
-                  "description": "Optional channel label such as imessage, telegram, linq, or email.",
+                  "description": "Optional channel label such as telegram, linq, or email.",
                   "type": "string",
                   "minLength": 1
                 },
@@ -852,7 +852,7 @@
                   "minLength": 1
                 },
                 "participant": {
-                  "description": "Optional remote participant identifier when the transport addresses a person directly. Use the transport-native participant value, such as an iMessage phone number/email handle or an email correspondent; thread-addressed transports may rely on --sourceThread instead.",
+                  "description": "Optional remote participant identifier when the transport addresses a person directly. Use the transport-native participant value, such as an email correspondent; thread-addressed transports may rely on --sourceThread instead.",
                   "type": "string",
                   "minLength": 1
                 },
@@ -987,7 +987,7 @@
                   "maximum": 200
                 },
                 "allowSelfAuthored": {
-                  "description": "Allow self-authored captures to trigger channel auto-reply. Useful for texting your own Mac, but only safe when you dedicate a self-chat thread to Murph.",
+                  "description": "Allow self-authored captures to trigger channel auto-reply. Useful for a dedicated assistant self-chat or sandbox thread, but only safe when you isolate that thread to Murph.",
                   "type": "boolean"
                 },
                 "sessionRolloverHours": {
@@ -2072,6 +2072,84 @@
                 "oss": {
                   "description": "Save a local Codex OSS model target instead of the signed-in Codex cloud path. Only applies with `--preset codex`.",
                   "type": "boolean"
+                }
+              }
+            }
+          }
+        },
+        "route": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "commands": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "estimate": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "options": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "waypoint": {
+                          "description": "Optional intermediate stops. Repeat --waypoint to add more than one.",
+                          "maxItems": 23,
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
+                        "profile": {
+                          "description": "Routing profile. Use walking for hikes, runs, and on-foot trail estimates.",
+                          "type": "string",
+                          "enum": [
+                            "walking",
+                            "cycling",
+                            "driving",
+                            "driving-traffic"
+                          ]
+                        },
+                        "elevation": {
+                          "description": "Include an approximate elevation summary from bounded terrain contour samples.",
+                          "type": "boolean"
+                        },
+                        "geometry": {
+                          "description": "Include the routed GeoJSON LineString in the response.",
+                          "type": "boolean"
+                        },
+                        "country": {
+                          "description": "Optional ISO 3166-1 alpha-2 country hints for geocoding. Repeat --country to add more than one.",
+                          "maxItems": 10,
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "pattern": "^[A-Za-z]{2}$"
+                          }
+                        },
+                        "language": {
+                          "description": "Optional language hint for geocoding display names.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 10
+                        },
+                        "elevationSampleSpacingMeters": {
+                          "description": "Approximate spacing between elevation samples when --elevation is set.",
+                          "type": "number",
+                          "exclusiveMinimum": 0,
+                          "maximum": 10000
+                        },
+                        "maxElevationSamples": {
+                          "description": "Maximum number of elevation sample points when --elevation is set.",
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 24
+                        }
+                      }
+                    }
+                  }
                 }
               }
             }
@@ -6378,7 +6456,7 @@
                                   "description": "Runtime connector id."
                                 },
                                 "account": {
-                                  "description": "Optional account identity for the connector. Defaults to `self` for iMessage, `bot` for Telegram, and should be an AgentMail inbox id for email unless `--provision` is used; for AgentMail this is often the inbox id or inbox email address.",
+                                  "description": "Optional account identity for the connector. Defaults to `bot` for Telegram, `default` for Linq, and should be an AgentMail inbox id for email unless `--provision` is used; for AgentMail this is often the inbox id or inbox email address.",
                                   "type": "string",
                                   "minLength": 1
                                 },
@@ -6386,10 +6464,6 @@
                                   "description": "Optional email address to associate with an existing AgentMail inbox connector.",
                                   "type": "string",
                                   "minLength": 1
-                                },
-                                "includeOwn": {
-                                  "description": "Include messages sent by the local account when supported.",
-                                  "type": "boolean"
                                 },
                                 "backfillLimit": {
                                   "default": 500,

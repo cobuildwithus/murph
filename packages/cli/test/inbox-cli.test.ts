@@ -1,13 +1,9 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { test } from 'vitest'
-import {
-  createVersionedJsonStateEnvelope,
-  parseVersionedJsonStateEnvelope,
-  resolveRuntimePaths,
-} from '@murphai/runtime-state/node'
+import { resolveRuntimePaths } from '@murphai/runtime-state/node'
 import {
   createIntegratedInboxServices,
   type CoreRuntimeModule,
@@ -168,10 +164,6 @@ async function loadBuiltCoreModule() {
 
 async function loadBuiltInboxRuntime() {
   return loadBuiltRuntime<InboxRuntimeModule>(builtInboxRuntimeUrl)
-}
-
-function inboxPaths(vaultRoot: string) {
-  return resolveRuntimePaths(vaultRoot)
 }
 
 function createFakeEmailDriver(): EmailDriver {
@@ -915,81 +907,6 @@ test.sequential('source add rejects connector ids that alias the same source/acc
       }),
       'INBOX_SOURCE_NAMESPACE_EXISTS',
     )
-  } finally {
-    await rm(fixture.vaultRoot, { recursive: true, force: true })
-  }
-})
-
-test.sequential('sourceList prunes legacy iMessage connectors from persisted config during migration', async () => {
-  const fixture = await makeVaultFixture('murph-inbox-legacy-prune')
-  const paths = inboxPaths(fixture.vaultRoot)
-  const services = createIntegratedInboxServices({
-    loadInboxModule: async () => createFakeInboxRuntimeModule(),
-  })
-
-  try {
-    await services.init({
-      vault: fixture.vaultRoot,
-      requestId: null,
-    })
-    await writeFile(
-      paths.inboxConfigPath,
-      `${JSON.stringify(
-        createVersionedJsonStateEnvelope({
-          schema: 'murph.inbox-runtime-config.v1',
-          schemaVersion: 1,
-          value: {
-            connectors: [
-              {
-                id: 'imessage:self',
-                source: 'imessage',
-                enabled: true,
-                accountId: 'self',
-                options: {
-                  backfillLimit: 5,
-                  includeOwnMessages: true,
-                },
-              },
-              {
-                id: 'telegram:bot',
-                source: 'telegram',
-                enabled: true,
-                accountId: 'bot',
-                options: {},
-              },
-            ],
-          },
-        }),
-        null,
-        2,
-      )}\n`,
-      'utf8',
-    )
-
-    const listed = await services.sourceList({
-      vault: fixture.vaultRoot,
-      requestId: null,
-    })
-    assert.deepEqual(listed.connectors.map((connector) => connector.id), ['telegram:bot'])
-
-    const persisted = parseVersionedJsonStateEnvelope(
-      await readJsonFile<unknown>(paths.inboxConfigPath),
-      {
-        label: 'Inbox runtime config',
-        parseValue(value) {
-          if (!value || typeof value !== 'object' || Array.isArray(value)) {
-            throw new TypeError('Inbox runtime config must be an object.')
-          }
-
-          return value as {
-            connectors: Array<{ id: string }>
-          }
-        },
-        schema: 'murph.inbox-runtime-config.v1',
-        schemaVersion: 1,
-      },
-    )
-    assert.deepEqual(persisted.connectors.map((connector) => connector.id), ['telegram:bot'])
   } finally {
     await rm(fixture.vaultRoot, { recursive: true, force: true })
   }

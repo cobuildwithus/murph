@@ -425,7 +425,6 @@ describe('channel helper seams', () => {
   })
 
   it('routes descriptor sends through channel-specific helpers and enforces email identity requirements', async () => {
-    const sendImessage = vi.fn().mockResolvedValue(undefined)
     const sendTelegram = vi.fn().mockResolvedValue({
       providerMessageId: '  telegram-message  ',
       target: '  delivered-chat  ',
@@ -437,38 +436,6 @@ describe('channel helper seams', () => {
       providerMessageId: '  email-message  ',
       providerThreadId: '  email-thread  ',
       target: '  delivered@example.com  ',
-    })
-
-    const imessageDelivery = await ASSISTANT_CHANNEL_ADAPTERS.imessage.send(
-      {
-        bindingDelivery: createAssistantBindingDelivery(
-          'participant',
-          'imessage-binding',
-        ),
-        explicitTarget: '  +15551234567  ',
-        idempotencyKey: '  idem-imessage  ',
-        identityId: null,
-        message: 'imessage hello',
-        replyToMessageId: '  ignored-reply  ',
-      },
-      {
-        sendImessage,
-      },
-    )
-    expect(sendImessage).toHaveBeenCalledWith({
-      idempotencyKey: 'idem-imessage',
-      message: 'imessage hello',
-      target: '+15551234567',
-    })
-    expect(imessageDelivery).toMatchObject({
-      channel: 'imessage',
-      idempotencyKey: 'idem-imessage',
-      messageLength: 14,
-      providerMessageId: null,
-      providerThreadId: null,
-      sentAt: FIXED_NOW.toISOString(),
-      target: '+15551234567',
-      targetKind: 'explicit',
     })
 
     const telegramDelivery = await ASSISTANT_CHANNEL_ADAPTERS.telegram.send(

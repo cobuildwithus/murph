@@ -27,7 +27,7 @@ test("automation scaffold payload uses the canonical default shape", () => {
       timeZone: "Australia/Sydney",
     },
     route: {
-      channel: "imessage",
+      channel: "telegram",
       deliverResponse: true,
       deliveryTarget: null,
       identityId: null,
@@ -59,7 +59,7 @@ test("automation record schema accepts the canonical automation shape", () => {
       timeZone: "Australia/Sydney",
     },
     route: {
-      channel: "imessage",
+      channel: "telegram",
       deliverResponse: true,
       deliveryTarget: null,
       identityId: null,
@@ -93,7 +93,7 @@ test("automation record schema rejects invalid slugs", () => {
       timeZone: "Australia/Sydney",
     },
     route: {
-      channel: "imessage",
+      channel: "telegram",
       deliverResponse: true,
       deliveryTarget: null,
       identityId: null,

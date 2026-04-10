@@ -27,10 +27,8 @@ const outboundMocks = vi.hoisted(() => ({
   redactAssistantSessionForDisplay: vi.fn((session) => session),
   resolveAssistantSession: vi.fn(),
   resolveDeliveryCandidates: vi.fn(() => []),
-  resolveImessageDeliveryCandidates: vi.fn(),
   saveAssistantSession: vi.fn(),
   sendEmailMessage: vi.fn(),
-  sendImessageMessage: vi.fn(),
   sendLinqMessage: vi.fn(),
   sendTelegramMessage: vi.fn(),
   updateAssistantTurnReceipt: vi.fn(),
@@ -46,9 +44,7 @@ vi.mock('@murphai/operator-config/assistant-cli-contracts', () => ({
 vi.mock('../src/assistant/channel-adapters.js', () => ({
   getAssistantChannelAdapter: outboundMocks.getAssistantChannelAdapter,
   resolveDeliveryCandidates: outboundMocks.resolveDeliveryCandidates,
-  resolveImessageDeliveryCandidates: outboundMocks.resolveImessageDeliveryCandidates,
   sendEmailMessage: outboundMocks.sendEmailMessage,
-  sendImessageMessage: outboundMocks.sendImessageMessage,
   sendLinqMessage: outboundMocks.sendLinqMessage,
   sendTelegramMessage: outboundMocks.sendTelegramMessage,
 }))

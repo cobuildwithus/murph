@@ -135,35 +135,26 @@ test('assistant CLI foreground logging keeps safe auto-reply summaries while hid
   )
 })
 
-test('assistant CLI foreground logging normalizes scan priming hints', () => {
+test('assistant CLI foreground logging summarizes reply scans', () => {
   assert.equal(
     formatAssistantRunEventForTerminal({
-      type: 'reply.scan.primed',
+      type: 'reply.scan.started',
     }),
-    'primed channel auto-reply',
+    'scanning channel auto-reply:',
   )
   assert.equal(
     formatAssistantRunEventForTerminal({
-      details:
-        'no existing captures yet; auto-reply will start with the next inbound message',
-      type: 'reply.scan.primed',
+      details: '2 capture(s)',
+      type: 'reply.scan.started',
     }),
-    'primed channel auto-reply: no existing captures yet; auto-reply will start with the next inbound message',
+    'scanning channel auto-reply: 2 capture(s)',
   )
   assert.equal(
     formatAssistantRunEventForTerminal({
-      details:
-        'processing existing 4 capture backlog before switching to new inbound messages',
-      type: 'reply.scan.primed',
+      details: '0 capture(s)',
+      type: 'reply.scan.started',
     }),
-    'primed channel auto-reply: processing existing 4 capture backlog before switching to new inbound messages',
-  )
-  assert.equal(
-    formatAssistantRunEventForTerminal({
-      details: 'starting after 4 existing captures',
-      type: 'reply.scan.primed',
-    }),
-    'primed channel auto-reply: starting after latest existing capture',
+    null,
   )
 })
 
@@ -386,11 +377,11 @@ test('assistant CLI inbox foreground logging redacts by default and exposes rich
   )
   assert.equal(
     formatInboxRunEventForTerminal({
-      connectorId: 'connector_imessage',
-      source: 'imessage',
+      connectorId: 'connector_telegram_watch',
+      source: 'telegram',
       type: 'connector.watch.started',
     }),
-    'iMessage connector watching for new messages',
+    'Telegram connector watching for new messages',
   )
   assert.equal(
     formatInboxRunEventForTerminal({

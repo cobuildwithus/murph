@@ -567,8 +567,8 @@ test('executeAssistantProviderTurn dispatches to the Codex adapter and preserves
     userPrompt: 'hello',
     sessionContext: {
       binding: {
-        conversationKey: 'channel:imessage|thread:chat-123',
-        channel: 'imessage',
+        conversationKey: 'channel:telegram|thread:chat-123',
+        channel: 'telegram',
         identityId: null,
         actorId: 'contact:bob',
         threadId: 'chat-123',
@@ -608,7 +608,7 @@ test('executeAssistantProviderTurn dispatches to the Codex adapter and preserves
   assert.equal(call?.profile, 'primary')
   assert.equal(call?.oss, true)
   assert.match(call?.prompt ?? '', /system prompt/u)
-  assert.match(call?.prompt ?? '', /channel: imessage/u)
+  assert.match(call?.prompt ?? '', /channel: telegram/u)
   assert.match(call?.prompt ?? '', /thread: chat-123/u)
   assert.match(call?.prompt ?? '', /Recent local conversation transcript/u)
   assert.match(call?.prompt ?? '', /User message:\nhello/u)

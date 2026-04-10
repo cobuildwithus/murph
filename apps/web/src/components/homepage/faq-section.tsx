@@ -1,7 +1,7 @@
 const faqItems = [
   {
     question: "Do I need to download an app?",
-    answer: "No. Murph works through iMessage, Telegram, or email — tools you already have.",
+    answer: "No. Murph works through Telegram, Linq, or email — tools you already have.",
   },
   {
     question: "How does wearable syncing work?",

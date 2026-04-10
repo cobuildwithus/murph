@@ -1,5 +1,5 @@
 const integrations = [
-  "iMessage", "Telegram", "Email", "Garmin", "Oura", "WHOOP",
+  "Telegram", "Linq", "Email", "Garmin", "Oura", "WHOOP",
 ] as const;
 
 export function IntegrationsBar() {

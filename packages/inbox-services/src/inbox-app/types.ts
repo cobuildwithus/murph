@@ -285,26 +285,6 @@ export interface InboxPipeline {
   close(): void
 }
 
-export interface ImessageDriver {
-  getMessages(input: {
-    cursor?: Record<string, unknown> | null
-    limit?: number
-    includeOwnMessages?: boolean
-  }): Promise<unknown[]>
-  listChats?(): Promise<unknown[]>
-}
-
-export interface InboxImessageRuntimeModule {
-  createImessageConnector(input: {
-    driver: ImessageDriver
-    id?: string
-    accountId?: string | null
-    includeOwnMessages?: boolean
-    backfillLimit?: number
-  }): PollConnector
-  loadImessageKitDriver(): Promise<ImessageDriver>
-}
-
 export interface TelegramDriver {
   getMe(signal?: AbortSignal): Promise<unknown>
   getMessages(input: {
@@ -617,11 +597,8 @@ export interface InboxServicesDependencies {
   loadCoreModule?: () => Promise<CoreRuntimeModule>
   loadImportersModule?: () => Promise<ImportersFactoryRuntimeModule>
   loadInboxModule?: () => Promise<InboxRuntimeModule>
-  inboxImessageModule?: InboxImessageRuntimeModule
-  loadInboxImessageModule?: () => Promise<InboxImessageRuntimeModule>
   loadParsersModule?: () => Promise<ParsersRuntimeModule>
   loadQueryModule?: () => Promise<QueryRuntimeModule>
-  loadImessageDriver?: (config: InboxConnectorConfig) => Promise<ImessageDriver>
   loadTelegramDriver?: (config: InboxConnectorConfig) => Promise<TelegramDriver>
   loadEmailDriver?: (config: InboxConnectorConfig) => Promise<EmailDriver>
   createAgentmailClient?: (input: {
@@ -633,7 +610,6 @@ export interface InboxServicesDependencies {
     vault: string,
     channel: InboxConnectorConfig['source'],
   ) => Promise<boolean>
-  probeImessageMessagesDb?: (targetPath: string) => Promise<void>
   getEnvironment?: () => NodeJS.ProcessEnv
 }
 
@@ -822,11 +798,9 @@ export interface InboxAppEnvironment {
   loadCore: () => Promise<CoreRuntimeModule>
   loadImporters: () => Promise<ImportersFactoryRuntimeModule>
   loadInbox: () => Promise<InboxRuntimeModule>
-  loadInboxImessage: () => Promise<InboxImessageRuntimeModule>
   loadParsers: () => Promise<ParsersRuntimeModule>
   loadQuery: () => Promise<QueryRuntimeModule>
   requireParsers: (operation: string) => Promise<ParsersRuntimeModule>
-  loadConfiguredImessageDriver: (config: InboxConnectorConfig) => Promise<ImessageDriver>
   loadConfiguredTelegramDriver: (config: InboxConnectorConfig) => Promise<TelegramDriver>
   loadConfiguredEmailDriver: (config: InboxConnectorConfig) => Promise<EmailDriver>
   createConfiguredAgentmailClient: (apiKey?: string | null) => AgentmailApiClient
@@ -846,6 +820,5 @@ export interface InboxAppEnvironment {
     accountId: string
     emailAddress: string | null
   }) => Promise<string | null>
-  ensureConfiguredImessageReady: () => Promise<void>
   journalPromotionEnabled: boolean
 }
