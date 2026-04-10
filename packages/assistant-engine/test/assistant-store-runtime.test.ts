@@ -405,28 +405,27 @@ describe('assistant store seam', () => {
     expect(savedSession.alias).toBe('gamma-saved')
 
     await expect(store.readAssistantAutomationState(vaultRoot)).resolves.toMatchObject({
-      autoReplyBacklogChannels: [],
-      autoReplyChannels: [],
-      autoReplyPrimed: true,
-      autoReplyScanCursor: null,
+      autoReply: [],
       inboxScanCursor: null,
-      version: 2,
+      version: 1,
     })
 
     const updatedAutomationState: AssistantAutomationState = {
-      autoReplyBacklogChannels: ['telegram'],
-      autoReplyChannels: ['telegram'],
-      autoReplyPrimed: true,
-      autoReplyScanCursor: {
-        captureId: 'capture-auto-reply',
-        occurredAt: '2026-04-08T00:11:00.000Z',
-      },
+      autoReply: [
+        {
+          channel: 'telegram',
+          cursor: {
+            captureId: 'capture-auto-reply',
+            occurredAt: '2026-04-08T00:11:00.000Z',
+          },
+        },
+      ],
       inboxScanCursor: {
         captureId: 'capture-inbox',
         occurredAt: '2026-04-08T00:10:00.000Z',
       },
       updatedAt: '2026-04-08T00:11:00.000Z',
-      version: 2,
+      version: 1,
     }
 
     await expect(
