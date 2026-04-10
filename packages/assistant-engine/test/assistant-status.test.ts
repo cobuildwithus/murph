@@ -108,10 +108,7 @@ beforeEach(() => {
   statusMocks.readAutomationState.mockReset().mockResolvedValue(
     assistantStatusAutomationSchema.parse({
       inboxScanCursor: null,
-      autoReplyScanCursor: null,
-      autoReplyChannels: [],
-      autoReplyBacklogChannels: [],
-      autoReplyPrimed: false,
+      autoReply: [],
       updatedAt: '2026-04-08T00:00:00.000Z',
     }),
   )
@@ -630,10 +627,12 @@ function makeStatusSnapshot(paths: AssistantStatePaths) {
     }),
     automation: assistantStatusAutomationSchema.parse({
       inboxScanCursor: null,
-      autoReplyScanCursor: null,
-      autoReplyChannels: ['telegram'],
-      autoReplyBacklogChannels: [],
-      autoReplyPrimed: true,
+      autoReply: [
+        {
+          channel: 'telegram',
+          cursor: null,
+        },
+      ],
       updatedAt: '2026-04-08T06:00:00.000Z',
     }),
     outbox: assistantStatusOutboxSummarySchema.parse({

@@ -106,7 +106,10 @@ interface SetupServicesDependencies {
   runCommand?: (input: CommandRunInput) => Promise<CommandRunResult>
   inboxServices?: Pick<InboxServices, 'bootstrap'> &
     Partial<
-      Pick<InboxServices, 'doctor' | 'sourceAdd' | 'sourceList' | 'sourceSetEnabled'>
+      Pick<
+        InboxServices,
+        'doctor' | 'list' | 'sourceAdd' | 'sourceList' | 'sourceSetEnabled'
+      >
     >
   resolveAgentmailInboxSelection?: SetupAgentmailSelectionResolver
   vaultServices?: Pick<VaultServices, 'core'>

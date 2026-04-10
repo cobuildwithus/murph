@@ -1,6 +1,6 @@
 # Murph Agent Docs Index
 
-Last verified: 2026-04-09
+Last verified: 2026-04-10
 
 ## Purpose
 
@@ -11,8 +11,8 @@ It intentionally lists live architecture, product, verification, and package-bou
 
 | Path | Purpose | Source of truth | Criticality | Last verified |
 | --- | --- | --- | --- | --- |
-| `README.md` | Human-facing repo overview, install path, runtime tiers, and verification entrypoints. | Current repository state | High | 2026-04-06 |
-| `ARCHITECTURE.md` | Top-level module map, trust boundaries, persisted-state rules, control-flow contracts, and package-boundary rules. | Current runtime architecture | High | 2026-04-08 |
+| `README.md` | Human-facing repo overview, install path, runtime tiers, and verification entrypoints. | Current repository state | High | 2026-04-10 |
+| `ARCHITECTURE.md` | Top-level module map, trust boundaries, persisted-state rules, control-flow contracts, and package-boundary rules. | Current runtime architecture | High | 2026-04-10 |
 | `docs/architecture.md` | Concise architecture summary, repo-shape overview, and package-boundary hygiene notes. | Current architectural baseline | High | 2026-04-08 |
 | `docs/contracts/` | Frozen contract docs for vault layout, schemas, commands, and invariants. | Canonical vault interface decisions | High | 2026-03-27 |
 | `docs/cloudflare-hosted-idempotency-followup.md` | Current hosted execution idempotency rules and outbox/journal expectations. | Hosted execution reliability policy | Medium | 2026-03-28 |
@@ -23,7 +23,7 @@ It intentionally lists live architecture, product, verification, and package-bou
 | `docs/templates/README.md` | Entry points for reusable device-provider templates. | Template inventory | Low | 2026-04-03 |
 | `agent-docs/PRODUCT_SENSE.md` | Product behavior guardrails for implementation work. | Current product behavior | High | 2026-04-02 |
 | `agent-docs/PRODUCT_CONSTITUTION.md` | Internal product constitution and tradeoff rules. | Product principles | High | 2026-03-28 |
-| `agent-docs/product-marketing-context.md` | Product marketing context: positioning, audience, differentiation, customer language, brand voice, and experiment data model. | Product/marketing decisions | High | 2026-04-08 |
+| `agent-docs/product-marketing-context.md` | Product marketing context: positioning, audience, differentiation, customer language, brand voice, and experiment data model. | Product/marketing decisions | High | 2026-04-10 |
 | `agent-docs/QUALITY_SCORE.md` | Current quality posture by area. | Current repo quality posture | Medium | 2026-04-06 |
 | `agent-docs/RELIABILITY.md` | Reliability guardrails and failure-mode expectations. | Runtime reliability policy | High | 2026-03-31 |
 | `agent-docs/SECURITY.md` | Security constraints, trust boundaries, and escalation rules. | Security policy | High | 2026-04-03 |
@@ -31,11 +31,11 @@ It intentionally lists live architecture, product, verification, and package-bou
 | `agent-docs/product-specs/repo-v1.md` | Canonical v1 repository posture and success criteria. | Current repo product spec | High | 2026-04-06 |
 | `agent-docs/references/README.md` | Reference-pack overview and maintenance rules. | Reference pack conventions | Medium | 2026-03-12 |
 | `agent-docs/references/repo-scope.md` | Concrete repo scope and routing boundaries. | Repo ownership boundary | High | 2026-04-06 |
-| `agent-docs/references/testing-ci-map.md` | Verification map for packages, apps, smoke flows, and CI. | Testing and CI truth | High | 2026-04-06 |
+| `agent-docs/references/testing-ci-map.md` | Verification map for packages, apps, smoke flows, and CI. | Testing and CI truth | High | 2026-04-10 |
 | `agent-docs/references/health-entity-taxonomy-seam.md` | Shared owner seam for health taxonomy metadata. | Health taxonomy seam | Medium | 2026-04-06 |
 | `agent-docs/references/data-model-seams.md` | Current shared-owner notes for high-leverage data-model seams. | Data-model seam guidance | Medium | 2026-04-07 |
 | `agent-docs/operations/agent-workflow-routing.md` | Workflow router for task classes, plans, audits, verification, and commit paths. | Agent workflow routing | High | 2026-04-09 |
-| `agent-docs/operations/verification-and-runtime.md` | Verification rules and runtime assumptions for repo work. | Verification policy | High | 2026-04-09 |
+| `agent-docs/operations/verification-and-runtime.md` | Verification rules and runtime assumptions for repo work. | Verification policy | High | 2026-04-10 |
 | `agent-docs/operations/completion-workflow.md` | Required post-implementation audit and completion flow. | Completion workflow | High | 2026-04-09 |
 | `agent-docs/PLANS.md` | Execution-plan lifecycle and storage rules. | Plan workflow | Medium | 2026-03-31 |
 | `agent-docs/generated/README.md` | Meaning and expectations for generated doc artifacts. | Generated-doc conventions | Low | 2026-04-02 |

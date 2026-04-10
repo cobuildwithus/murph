@@ -115,9 +115,21 @@ async function readAssistantAutomationState(assistantStateRoot: string): Promise
   autoReplyChannels: string[];
 }> {
   try {
-    return JSON.parse(
+    const parsed = JSON.parse(
       await readFile(path.join(assistantStateRoot, "automation.json"), "utf8"),
-    ) as { autoReplyChannels: string[] };
+    ) as {
+      autoReply?: Array<{ channel?: string }>;
+      autoReplyChannels?: string[];
+    };
+    return {
+      autoReplyChannels: Array.isArray(parsed.autoReply)
+        ? parsed.autoReply
+            .map((entry) => (typeof entry?.channel === "string" ? entry.channel : ""))
+            .filter((channel) => channel.length > 0)
+        : Array.isArray(parsed.autoReplyChannels)
+          ? parsed.autoReplyChannels
+          : [],
+    };
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
       return {

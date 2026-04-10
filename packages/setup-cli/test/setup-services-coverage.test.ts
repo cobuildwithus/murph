@@ -353,12 +353,12 @@ test('configureSetupChannels covers dry-run, missing-env, readiness, reconciliat
   await writeFile(
     automationStatePath,
     JSON.stringify({
-      version: 2,
+      version: 1,
       inboxScanCursor: null,
-      autoReplyScanCursor: 'cursor-1',
-      autoReplyChannels: ['email', 'linq'],
-      autoReplyBacklogChannels: ['email'],
-      autoReplyPrimed: true,
+      autoReply: [
+        { channel: 'email', cursor: null },
+        { channel: 'linq', cursor: null },
+      ],
       updatedAt: '2026-04-08T00:00:00.000Z',
     }),
     'utf8',
@@ -405,6 +405,39 @@ test('configureSetupChannels covers dry-run, missing-env, readiness, reconciliat
               source: 'email',
             }),
           ])
+        },
+        async list() {
+          return {
+            filters: {
+              afterCaptureId: null,
+              afterOccurredAt: null,
+              limit: 1,
+              oldestFirst: false,
+              sourceId: null,
+            },
+            items: [
+              {
+                accountId: null,
+                actorId: 'contact_1',
+                actorIsSelf: false,
+                actorName: 'Sender',
+                attachmentCount: 0,
+                captureId: 'capture-latest',
+                envelopePath: '/tmp/latest-envelope.json',
+                eventId: 'evt_latest',
+                externalId: 'external_latest',
+                occurredAt: '2026-04-08T00:05:00.000Z',
+                promotions: [],
+                receivedAt: '2026-04-08T00:05:01.000Z',
+                source: 'telegram',
+                text: 'latest message',
+                threadId: 'thread-latest',
+                threadIsDirect: true,
+                threadTitle: null,
+              },
+            ],
+            vault: vaultRoot,
+          }
         },
         async sourceAdd() {
           throw new Error('sourceAdd should not run when telegram already exists')
@@ -454,16 +487,21 @@ test('configureSetupChannels covers dry-run, missing-env, readiness, reconciliat
     const savedAutomationState = JSON.parse(
       await readFile(automationStatePath, 'utf8'),
     ) as {
-      autoReplyBacklogChannels: string[]
-      autoReplyChannels: string[]
-      autoReplyPrimed: boolean
-      autoReplyScanCursor: string | null
+      autoReply: Array<{
+        channel: string
+        cursor: { captureId: string; occurredAt: string } | null
+      }>
     }
 
-    assert.deepEqual(savedAutomationState.autoReplyChannels, ['telegram'])
-    assert.deepEqual(savedAutomationState.autoReplyBacklogChannels, [])
-    assert.equal(savedAutomationState.autoReplyScanCursor, null)
-    assert.equal(savedAutomationState.autoReplyPrimed, false)
+    assert.deepEqual(savedAutomationState.autoReply, [
+      {
+        channel: 'telegram',
+        cursor: {
+          captureId: 'capture-latest',
+          occurredAt: '2026-04-08T00:05:00.000Z',
+        },
+      },
+    ])
 
     const missingEnvChannel = await configureSetupChannels({
       channels: ['email'],
@@ -691,12 +729,17 @@ test('configureSetupChannels treats email probe warnings as ready, avoids no-op 
   const automationStatePath = resolveAssistantStatePaths(vaultRoot).automationStatePath
   await mkdir(path.dirname(automationStatePath), { recursive: true })
   const unchangedState = JSON.stringify({
-    version: 2,
+    version: 1,
     inboxScanCursor: null,
-    autoReplyScanCursor: 'cursor-email',
-    autoReplyChannels: ['email'],
-    autoReplyBacklogChannels: ['email'],
-    autoReplyPrimed: false,
+    autoReply: [
+      {
+        channel: 'email',
+        cursor: {
+          captureId: 'capture-email',
+          occurredAt: '2026-04-08T00:00:00.000Z',
+        },
+      },
+    ],
     updatedAt: TEST_TIMESTAMP,
   })
   await writeFile(automationStatePath, unchangedState, 'utf8')
@@ -775,11 +818,20 @@ test('configureSetupChannels treats email probe warnings as ready, avoids no-op 
     const savedEmailState = JSON.parse(
       await readFile(automationStatePath, 'utf8'),
     ) as {
-      autoReplyBacklogChannels: string[]
-      autoReplyChannels: string[]
+      autoReply: Array<{
+        channel: string
+        cursor: { captureId: string; occurredAt: string } | null
+      }>
     }
-    assert.deepEqual(savedEmailState.autoReplyChannels, ['email'])
-    assert.deepEqual(savedEmailState.autoReplyBacklogChannels, ['email'])
+    assert.deepEqual(savedEmailState.autoReply, [
+      {
+        channel: 'email',
+        cursor: {
+          captureId: 'capture-email',
+          occurredAt: '2026-04-08T00:00:00.000Z',
+        },
+      },
+    ])
 
     const telegramConfigured = await configureSetupChannels({
       channels: ['telegram'],
@@ -837,12 +889,9 @@ test('configureSetupChannels leaves empty automation state untouched when nothin
   await mkdir(path.dirname(automationStatePath), { recursive: true })
   const emptyState = `${JSON.stringify(
     {
-      version: 2,
+      version: 1,
       inboxScanCursor: null,
-      autoReplyScanCursor: null,
-      autoReplyChannels: [],
-      autoReplyBacklogChannels: [],
-      autoReplyPrimed: true,
+      autoReply: [],
       updatedAt: TEST_TIMESTAMP,
     },
     null,
@@ -1137,12 +1186,9 @@ test('configureSetupChannels reuses Linq connectors when env is missing and pres
     )
 
     await saveAssistantAutomationState(vaultRoot, {
-      version: 2,
+      version: 1,
       inboxScanCursor: null,
-      autoReplyScanCursor: null,
-      autoReplyChannels: ['email'],
-      autoReplyBacklogChannels: ['email'],
-      autoReplyPrimed: false,
+      autoReply: [{ channel: 'email', cursor: null }],
       updatedAt: TEST_TIMESTAMP,
     })
 
