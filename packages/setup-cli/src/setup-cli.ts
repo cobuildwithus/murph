@@ -382,17 +382,14 @@ export async function resolveInitialSetupWizardChannels(
 ): Promise<SetupChannel[]> {
   const state = await readInitialSetupWizardAutomationState(vault)
 
-  if (state === null) {
-    const configuredChannels = await readInitialSetupWizardInboxChannels(vault)
-    return configuredChannels ?? getDefaultSetupWizardChannels(platform)
+  if (state !== null) {
+    return setupChannelValues.filter((channel) =>
+      state.autoReplyChannels.includes(channel),
+    )
   }
 
-  const savedChannels = setupChannelValues.filter((channel) =>
-    state.autoReplyChannels.includes(channel),
-  )
-  return savedChannels.length > 0
-    ? savedChannels
-    : getDefaultSetupWizardChannels(platform)
+  const configuredChannels = await readInitialSetupWizardInboxChannels(vault)
+  return configuredChannels ?? getDefaultSetupWizardChannels(platform)
 }
 
 export async function resolveInitialSetupWizardScheduledUpdates(
