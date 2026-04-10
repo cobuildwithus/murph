@@ -342,6 +342,7 @@ function toRegistryDocListEntity(
     title: firstNonEmptyString(entity, ["title", "summary", "name", "label"]),
     occurredAt: null,
     path: firstNonEmptyString(document, ["relativePath", "path"]),
+    markdown: firstRawString(document, ["markdown", "body"]),
     data,
     links: buildEntityLinks({
       data,
@@ -376,6 +377,7 @@ function toAssessmentListEntity(record: JsonObject) {
     title: firstNonEmptyString(record, ["title", "summary", "name", "label"]),
     occurredAt: firstNonEmptyString(record, ["recordedAt", "occurredAt", "importedAt"]),
     path: firstNonEmptyString(record, ["relativePath", "path"]),
+    markdown: firstRawString(record, ["markdown", "body"]),
     data,
     links: buildEntityLinks({
       data,
@@ -449,6 +451,7 @@ function toBloodTestListEntity(record: JsonObject) {
       "importedAt",
     ]),
     path: firstNonEmptyString(record, ["relativePath", "path"]),
+    markdown: firstRawString(record, ["markdown", "body"]),
     data,
     links: buildEntityLinks({
       data,
@@ -514,6 +517,7 @@ function toSupplementListEntity(record: object) {
     title: firstRawString(rawRecord, ["title"]),
     occurredAt: firstRawString(rawRecord, ["startedOn"]),
     path: firstRawString(rawDocument, ["relativePath", "path"]),
+    markdown: firstRawString(rawDocument, ["markdown", "body"]),
     data,
     links: buildEntityLinks({
       data,

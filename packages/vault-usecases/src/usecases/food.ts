@@ -543,6 +543,7 @@ export async function listFoodRecords(input: {
         title: entry.title,
         occurredAt: null,
         path: entry.relativePath,
+        markdown: entry.markdown,
         data,
         links: buildEntityLinks({
           data,

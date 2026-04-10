@@ -11,6 +11,7 @@ import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   inferEntityKind,
   isQueryableRecordId,
+  toListEntity,
 } from '../usecases/shared.js'
 
 type JsonObject = Record<string, unknown>
@@ -138,15 +139,16 @@ function toCommandListItemWithLinks(
   record: QueryRecord,
   links: CommandEntityLink[],
 ): CommandListItem {
-  return {
+  return toListEntity({
     id: record.entityId || record.primaryLookupId,
     kind: record.kind || record.family,
     title: record.title ?? null,
     occurredAt: record.occurredAt ?? null,
     path: record.path ?? null,
+    markdown: record.body ?? null,
     data: record.attributes,
     links,
-  }
+  })
 }
 
 export function toSampleCommandListItem(

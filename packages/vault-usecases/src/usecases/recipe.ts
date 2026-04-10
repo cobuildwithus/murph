@@ -313,6 +313,7 @@ export async function listRecipeRecords(input: {
         title: entry.title,
         occurredAt: null,
         path: entry.relativePath,
+        markdown: entry.markdown,
         data,
         links: buildEntityLinks({
           data,

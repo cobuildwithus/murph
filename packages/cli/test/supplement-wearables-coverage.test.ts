@@ -186,6 +186,10 @@ test('supplement commands exercise scaffold, upsert, read, compound, rename, and
   assert.equal(listed.exitCode, null)
   assert.equal(requireData(listed.envelope).count >= 1, true)
   assert.equal('markdown' in (requireData(listed.envelope).items[0] ?? {}), false)
+  assert.match(
+    requireData(listed.envelope).items[0]?.excerpt ?? '',
+    /Liposomal Vitamin C/u,
+  )
 
   const listedDefault = await runInProcessJsonCli<{
     filters: {

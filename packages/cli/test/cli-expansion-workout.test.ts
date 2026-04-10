@@ -71,6 +71,7 @@ interface WorkoutFormatListEnvelope {
     path: string | null
     data: Record<string, unknown>
     markdown: string | null
+    excerpt?: string | null
   }>
   count: number
 }
@@ -398,6 +399,7 @@ test(
       assert.equal(requireData(listFormats).items[0]?.kind, 'workout_format')
       assert.equal(requireData(listFormats).items[0]?.id, requireData(showFormat).entity.id)
       assert.equal(requireData(listFormats).items[0]?.title, 'Push Day A')
+      assert.match(requireData(listFormats).items[0]?.excerpt ?? '', /strength training/i)
       assert.equal('markdown' in (requireData(listFormats).items[0] ?? {}), false)
 
       const logFormat = await runCli<WorkoutAddEnvelope>([
