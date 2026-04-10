@@ -1,6 +1,3 @@
-"use client";
-
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -11,7 +8,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Skeleton } from "@/components/ui/skeleton";
 import {
   formatAbsoluteTime,
   formatRelativeTime,
@@ -22,7 +18,6 @@ import { badgeClasses, sourceCardKey, sourceKey } from "./hosted-device-sync-set
 
 export function HostedDeviceSyncSettingsContent(props: {
   disconnectTarget: HostedDeviceSyncSettingsSource | null;
-  isLoading: boolean;
   isRefreshing: boolean;
   pendingActionKey: string | null;
   sources: HostedDeviceSyncSettingsSource[];
@@ -40,33 +35,13 @@ export function HostedDeviceSyncSettingsContent(props: {
               Connect your wearables. Disconnect or reconnect any time.
             </p>
           </div>
-          <Button type="button" onClick={() => void props.onRefresh()} disabled={props.isRefreshing || props.isLoading} variant="outline" size="md">
+          <Button type="button" onClick={() => void props.onRefresh()} disabled={props.isRefreshing} variant="outline" size="md">
             {props.isRefreshing ? "Refreshing..." : "Refresh status"}
           </Button>
         </div>
       </div>
 
-      {props.isLoading ? (
-        <div className="space-y-4">
-          {Array.from({ length: 3 }).map((_, index) => (
-            <Card key={`device-sync-skeleton-${index}`} className="shadow-sm">
-              <CardHeader className="space-y-3">
-                <Skeleton className="h-5 w-40" />
-                <Skeleton className="h-4 w-64" />
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <Skeleton className="h-4 w-full" />
-                <Skeleton className="h-4 w-5/6" />
-                <div className="grid gap-3 md:grid-cols-3">
-                  <Skeleton className="h-12 w-full" />
-                  <Skeleton className="h-12 w-full" />
-                  <Skeleton className="h-12 w-full" />
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      ) : props.sources.length === 0 ? (
+      {props.sources.length === 0 ? (
         <Card className="shadow-sm">
           <CardHeader>
             <CardTitle className="text-lg text-stone-900">No wearables available yet</CardTitle>

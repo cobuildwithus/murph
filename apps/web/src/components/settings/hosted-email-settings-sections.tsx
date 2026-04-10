@@ -1,5 +1,3 @@
-"use client";
-
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -13,7 +11,7 @@ import { Label } from "@/components/ui/label";
 import type { HostedPrivyEmailAccount } from "@/src/lib/hosted-onboarding/privy-shared";
 import { isHostedPrivyEmailAccountVerified } from "@/src/lib/hosted-onboarding/privy-shared";
 
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 
 export function HostedEmailSettingsContent(props: {
   currentEmail: HostedPrivyEmailAccount | null;

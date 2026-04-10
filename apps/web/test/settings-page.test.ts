@@ -8,8 +8,11 @@ const mocks = vi.hoisted(() => ({
   getHostedPageAuthSnapshot: vi.fn(),
   HostedBillingSettings: vi.fn((props: { authenticated: boolean }) =>
     React.createElement("div", null, `Hosted billing settings ${String(props.authenticated)}`)),
-  HostedDeviceSyncSettings: vi.fn((props: { authenticated: boolean }) =>
-    React.createElement("div", null, `Hosted device sync settings ${String(props.authenticated)}`)),
+  HostedDeviceSyncSettings: vi.fn((props: {
+    authenticated: boolean;
+    member: { billingStatus: string; id: string; suspendedAt: Date | null } | null;
+  }) =>
+    React.createElement("div", null, `Hosted device sync settings ${String(props.authenticated)} ${String(props.member?.id ?? "")}`)),
   HostedEmailSettings: vi.fn((props: { authenticated: boolean; initialLinkedAccounts: unknown[] }) =>
     React.createElement(
       "div",
@@ -50,7 +53,9 @@ test("SettingsPage reads the server-side Privy session and threads it into the s
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
     authenticated: true,
     authenticatedMember: {
+      billingStatus: "active",
       id: "member_123",
+      suspendedAt: null,
     },
     linkedAccounts: [
       {
@@ -87,5 +92,10 @@ test("SettingsPage reads the server-side Privy session and threads it into the s
   }), undefined);
   expect(mocks.HostedDeviceSyncSettings).toHaveBeenCalledWith(expect.objectContaining({
     authenticated: true,
+    member: expect.objectContaining({
+      billingStatus: "active",
+      id: "member_123",
+      suspendedAt: null,
+    }),
   }), undefined);
 });
