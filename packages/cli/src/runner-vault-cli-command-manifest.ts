@@ -24,6 +24,7 @@ import { registerProviderCommands } from './commands/provider.js'
 import { registerReadCommands } from './commands/read.js'
 import { registerRecipeCommands } from './commands/recipe.js'
 import { registerResearchCommands } from './commands/research.js'
+import { registerRouteCommands } from './commands/route.js'
 import { registerSamplesCommands } from './commands/samples.js'
 import { registerSearchCommands } from './commands/search.js'
 import { registerSupplementCommands } from './commands/supplement.js'
@@ -67,6 +68,7 @@ export function registerRunnerVaultCliCommandDescriptors(input: {
   registerSearchCommands(cli, services)
   registerKnowledgeCommands(cli)
   registerResearchCommands(cli)
+  registerRouteCommands(cli)
   registerExportCommands(cli, services)
   registerIntakeCommands(cli, services)
   registerInboxCommands(cli, inboxServices, services)

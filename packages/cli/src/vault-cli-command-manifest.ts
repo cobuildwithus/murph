@@ -35,9 +35,11 @@ import { registerRecipeCommands } from './commands/recipe.js'
 import { registerProviderCommands } from './commands/provider.js'
 import { registerFoodCommands } from './commands/food.js'
 import { registerResearchCommands } from './commands/research.js'
+import { registerRouteCommands } from './commands/route.js'
 import { registerKnowledgeCommands } from './commands/knowledge.js'
 import { registerModelCommands } from './commands/model.js'
 import { researchRunResultSchema } from './research-cli-contracts.js'
+import { mapboxRouteEstimateResultSchema } from '@murphai/assistant-engine'
 import {
   knowledgeIndexRebuildResultSchema,
   knowledgeLogTailResultSchema,
@@ -364,6 +366,24 @@ export const vaultCliCommandDescriptors = [
     rootCommandNames: ['model'],
     register({ cli }) {
       registerModelCommands(cli)
+    },
+  },
+  {
+    id: 'route',
+    bindingMode: 'none',
+    rootCommandNames: ['route'],
+    leafCommands: [
+      {
+        path: ['route', 'estimate'],
+        description:
+          'Estimate route distance, duration, and optional approximate elevation between two points through Mapbox without persisting route data in Murph state.',
+        hint:
+          'Set MAPBOX_ACCESS_TOKEN in the runtime environment before using this command. Route geometry is omitted by default, and elevation is approximate when enabled.',
+        output: mapboxRouteEstimateResultSchema,
+      },
+    ],
+    register({ cli }) {
+      registerRouteCommands(cli)
     },
   },
   {
@@ -1057,7 +1077,7 @@ function assertValidVaultCliCommandManifest(
 
 assertValidVaultCliCommandManifest(vaultCliCommandDescriptors)
 
-const ROOT_COMMAND_NAMES_EXEMPT_FROM_VAULT = new Set(['model'])
+const ROOT_COMMAND_NAMES_EXEMPT_FROM_VAULT = new Set(['model', 'route'])
 
 export function registerVaultCliCommandDescriptors(input: {
   cli: Cli.Cli

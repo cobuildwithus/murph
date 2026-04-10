@@ -24,6 +24,7 @@ describe("buildHostedRunnerContainerEnv", () => {
     expect(buildHostedRunnerContainerEnv({
       BRAVE_API_KEY: "brave-key",
       FFMPEG_COMMAND: "/usr/local/bin/ffmpeg",
+      MAPBOX_ACCESS_TOKEN: "mapbox-token",
       MURPH_WEB_SEARCH_MAX_RESULTS: "8",
       MURPH_WEB_SEARCH_PROVIDER: "brave",
       MURPH_WEB_SEARCH_TIMEOUT_MS: "10000",
@@ -33,6 +34,7 @@ describe("buildHostedRunnerContainerEnv", () => {
       FFMPEG_COMMAND: "/usr/local/bin/ffmpeg",
       HOSTED_EMAIL_INGRESS_READY: "false",
       HOSTED_EMAIL_SEND_READY: "false",
+      MAPBOX_ACCESS_TOKEN: "mapbox-token",
       MURPH_WEB_SEARCH_MAX_RESULTS: "8",
       MURPH_WEB_SEARCH_PROVIDER: "brave",
       MURPH_WEB_SEARCH_TIMEOUT_MS: "10000",

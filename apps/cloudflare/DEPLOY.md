@@ -190,6 +190,7 @@ Add whichever hosted features you actually want the containerized runner to supp
 - `OURA_CLIENT_SECRET`
 - `LINQ_API_TOKEN`
 - `LINQ_WEBHOOK_SECRET`
+- `MAPBOX_ACCESS_TOKEN`
 - `TELEGRAM_BOT_TOKEN`
 - `OPENAI_API_KEY`
 - `ANTHROPIC_API_KEY`
@@ -202,7 +203,7 @@ Add whichever hosted features you actually want the containerized runner to supp
 - `XAI_API_KEY`
 - `MISTRAL_API_KEY`
 
-Hosted email on this path is Cloudflare-native. Keep `HOSTED_EMAIL_*` configured when you want hosted ingress or sends; the worker keeps a fixed public sender identity, new outbound mail reuses one stable per-user reply alias instead of writing fresh per-thread routes, registered members can initiate new threads by emailing that fixed public sender address once their verified email has been synced into hosted execution, and ingress still re-authorizes the verified owner before raw-message persistence or hosted dispatch. `AGENTMAIL_*` is intentionally not part of the hosted deploy surface. `TELEGRAM_WEBHOOK_SECRET` belongs to `apps/web` on Vercel for hosted Telegram webhook verification and is not part of the Cloudflare worker secret set.
+Hosted email on this path is Cloudflare-native. Keep `HOSTED_EMAIL_*` configured when you want hosted ingress or sends; the worker keeps a fixed public sender identity, new outbound mail reuses one stable per-user reply alias instead of writing fresh per-thread routes, registered members can initiate new threads by emailing that fixed public sender address once their verified email has been synced into hosted execution, and ingress still re-authorizes the verified owner before raw-message persistence or hosted dispatch. `MAPBOX_ACCESS_TOKEN` is optional and only needed when you want hosted route estimation through `vault-cli route estimate`. `AGENTMAIL_*` is intentionally not part of the hosted deploy surface. `TELEGRAM_WEBHOOK_SECRET` belongs to `apps/web` on Vercel for hosted Telegram webhook verification and is not part of the Cloudflare worker secret set.
 
 ## Local dry run before touching production
 

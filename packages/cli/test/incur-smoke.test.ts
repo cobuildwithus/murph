@@ -439,6 +439,47 @@ test('audit list schema describes its filters and sort controls', async () => {
   assert.deepEqual(schema.options.required, ['vault', 'sort', 'limit'])
 })
 
+test('route estimate schema exposes the Mapbox-backed routing inputs', async () => {
+  const schema = JSON.parse(
+    await runRawCli(['route', 'estimate', '--schema', '--format', 'json']),
+  ) as {
+    args: {
+      properties: Record<string, { description?: string }>
+      required?: string[]
+    }
+    options: {
+      properties: Record<string, { description?: string }>
+    }
+  }
+
+  assert.deepEqual(schema.args.required, ['origin', 'destination'])
+  assert.match(
+    String(schema.args.properties.origin?.description ?? ''),
+    /plain text or a lon,lat literal/u,
+  )
+  assert.match(
+    String(schema.args.properties.destination?.description ?? ''),
+    /plain text or a lon,lat literal/u,
+  )
+  assert.match(
+    String(schema.options.properties.profile?.description ?? ''),
+    /walking for hikes, runs, and on-foot trail estimates/u,
+  )
+  assert.match(
+    String(schema.options.properties.elevation?.description ?? ''),
+    /approximate elevation summary/u,
+  )
+  assert.match(
+    String(schema.options.properties.geometry?.description ?? ''),
+    /GeoJSON LineString/u,
+  )
+  assert.equal('waypoint' in schema.options.properties, true)
+  assert.equal('country' in schema.options.properties, true)
+  assert.equal('language' in schema.options.properties, true)
+  assert.equal('elevationSampleSpacingMeters' in schema.options.properties, true)
+  assert.equal('maxElevationSamples' in schema.options.properties, true)
+})
+
 test('model schema explains preset-gated non-interactive updates', async () => {
   const schema = JSON.parse(
     await runRawCli(['model', '--schema', '--format', 'json']),
