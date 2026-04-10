@@ -26,6 +26,15 @@ const ROOT_GLOBAL_FILES = new Set([
   "pnpm-lock.yaml",
   "pnpm-workspace.yaml",
 ]);
+const CLI_ARTIFACT_SENSITIVE_FILES = new Set([
+  "packages/cli/config.schema.json",
+  "packages/cli/package.json",
+  "packages/cli/scripts/verify-package-shape.ts",
+  "packages/cli/tsconfig.build.json",
+  "packages/cli/vitest.config.ts",
+  "packages/cli/vitest.workspace.ts",
+  "scripts/build-test-runtime-prepared.mjs",
+]);
 
 function isRepoInternalFastPathFile(filePath) {
   if (ROOT_FAST_PATH_FILES.has(filePath)) {
@@ -46,6 +55,10 @@ function isRepoInternalFastPathFile(filePath) {
     || filePath.startsWith("docs/")
     || filePath.startsWith("scripts/")
   );
+}
+
+function isCliArtifactSensitiveFile(filePath) {
+  return ROOT_GLOBAL_FILES.has(filePath) || CLI_ARTIFACT_SENSITIVE_FILES.has(filePath);
 }
 
 function workspaceDirFromFile(filePath) {
@@ -213,7 +226,7 @@ async function buildDiffScopeSummary(explicitChangedFiles) {
     .map((workspaceDir) => metadataByDir.get(workspaceDir))
     .filter((metadata) => metadata !== undefined)
     .sort((left, right) => left.dir.localeCompare(right.dir));
-  const runVerifyCli = affectedWorkspaceDirs.has("packages/cli");
+  const runVerifyCli = changedFiles.some((filePath) => isCliArtifactSensitiveFile(filePath));
   const typecheckDirs = [];
   const testDirs = [];
   const verifyAppDirs = [];
@@ -226,7 +239,7 @@ async function buildDiffScopeSummary(explicitChangedFiles) {
       continue;
     }
 
-    if (metadata.dir === "packages/cli") {
+    if (metadata.dir === "packages/cli" && runVerifyCli) {
       continue;
     }
 

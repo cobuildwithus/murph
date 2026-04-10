@@ -130,6 +130,24 @@ function listZipEntries(zipPath: string) {
     .filter(Boolean)
 }
 
+function readWorkspaceDiffScope(...changedFiles: string[]) {
+  const result = runNodeScript('scripts/workspace-diff-scope.mjs', '--format', 'json', ...changedFiles)
+
+  if (result.status !== 0) {
+    throw new Error(
+      `workspace-diff-scope failed for ${changedFiles.join(', ')}:\nSTDOUT:\n${result.stdout}\nSTDERR:\n${result.stderr}`,
+    )
+  }
+
+  return JSON.parse(result.stdout) as {
+    affectedWorkspaceDirs: string[]
+    repoInternalFastPath: boolean
+    runVerifyCli: boolean
+    testDirs: string[]
+    typecheckDirs: string[]
+  }
+}
+
 describe('monorepo release flow coverage audit', () => {
   it('exposes root-owned release scripts', () => {
     expect(rootPackageJson.name).toBe('murph-workspace')
@@ -189,6 +207,31 @@ describe('monorepo release flow coverage audit', () => {
     expect(pnpmWorkspace).toContain(`  - '@cobuild/review-gpt@${reviewGptPinnedVersion}'`)
     expect(pnpmWorkspace).not.toContain('patchedDependencies:')
     expect(existsSync(path.join(repoRoot, 'patches', `@cobuild__review-gpt@${reviewGptPinnedVersion}.patch`))).toBe(false)
+  })
+
+  it('keeps reverse-dependent CLI coverage on the source lane for inboxd-only diffs', () => {
+    const summary = readWorkspaceDiffScope('packages/inboxd/test/inboxd.test.ts')
+
+    expect(summary.affectedWorkspaceDirs).toContain('packages/cli')
+    expect(summary.runVerifyCli).toBe(false)
+    expect(summary.typecheckDirs).toContain('packages/cli')
+    expect(summary.testDirs).toContain('packages/cli')
+  })
+
+  it('escalates CLI artifact-sensitive diffs onto the targeted verify lane', () => {
+    const summary = readWorkspaceDiffScope('packages/cli/package.json')
+
+    expect(summary.affectedWorkspaceDirs).toContain('packages/cli')
+    expect(summary.runVerifyCli).toBe(true)
+    expect(summary.typecheckDirs).not.toContain('packages/cli')
+    expect(summary.testDirs).not.toContain('packages/cli')
+  })
+
+  it('treats shared prepared-runtime helper changes as CLI artifact-sensitive', () => {
+    const summary = readWorkspaceDiffScope('scripts/build-test-runtime-prepared.mjs')
+
+    expect(summary.repoInternalFastPath).toBe(true)
+    expect(summary.runVerifyCli).toBe(true)
   })
 
   it('keeps the lean and full review-gpt wrappers wired to the expected package scripts', () => {
@@ -718,5 +761,21 @@ exit 1
       rmSync(outputRoot, { recursive: true, force: true })
       rmSync(parentRoot, { recursive: true, force: true })
     }
+  })
+
+  it('keeps diff-aware CLI escalation behind the nested lock handoff instead of locking every test:diff run', () => {
+    const workspaceVerifyScript = readFileSync(
+      path.join(repoRoot, 'scripts', 'workspace-verify.sh'),
+      'utf8',
+    )
+
+    expect(workspaceVerifyScript).toContain('command_requires_workspace_artifact_lock()')
+    expect(workspaceVerifyScript).toContain(
+      'if [[ "${MURPH_WORKSPACE_ARTIFACT_LOCK_HELD:-0}" != "1" ]] && command_requires_workspace_artifact_lock "${1:-}"; then',
+    )
+    expect(workspaceVerifyScript).toContain('run_verify_cli_with_workspace_artifact_lock')
+    expect(workspaceVerifyScript).toContain(
+      'run_timed_step "CLI targeted verification" run_verify_cli_with_workspace_artifact_lock',
+    )
   })
 })

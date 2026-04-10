@@ -1,6 +1,6 @@
 # verification lock-scope rework
 
-Status: active
+Status: completed
 Created: 2026-04-10
 Updated: 2026-04-10
 
@@ -56,6 +56,7 @@ Updated: 2026-04-10
 ## Decisions
 
 - CLI built-runtime and package-shape checks remain explicit acceptance gates; the main change is when diff-aware verification invokes them.
+- Keep the user-facing command surface unchanged; the source-vs-artifact split lives entirely inside `workspace-diff-scope` and `workspace-verify`.
 
 ## Verification
 
@@ -67,3 +68,8 @@ Updated: 2026-04-10
 - Expected outcomes:
   - Diff-aware verification keeps CLI reverse-dependent checks source-first by default.
   - Explicit acceptance lanes still cover prepared runtime and package-shape verification when the diff actually needs them.
+- Results:
+  - `pnpm test:diff scripts/workspace-verify.sh scripts/workspace-diff-scope.mjs packages/cli/test/release-script-coverage-audit.test.ts agent-docs/operations/verification-and-runtime.md agent-docs/references/testing-ci-map.md` passed.
+  - `pnpm typecheck` failed in pre-existing dirty `apps/web` hosted-onboarding work (`apps/web/test/hosted-onboarding-client-api.test.ts`, `apps/web/test/join-invite-status-client.test.ts` against changed hosted-onboarding source files) and did not fail in the touched verification files.
+  - Direct checks passed: `bash -n scripts/workspace-verify.sh`, `node --check scripts/workspace-diff-scope.mjs`, and targeted `workspace-diff-scope` JSON probes for inboxd-only, CLI-manifest, and prepared-runtime-helper diffs.
+Completed: 2026-04-10
