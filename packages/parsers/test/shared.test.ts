@@ -31,4 +31,21 @@ describe("sanitizeChildProcessEnv", () => {
       XDG_RUNTIME_DIR: "/run/user/1000",
     });
   });
+
+  it("preserves allowlisted Windows variables regardless of source key casing", () => {
+    const sanitized = sanitizeChildProcessEnv({
+      ComSpec: "C:\\Windows\\System32\\cmd.exe",
+      Path: "C:\\Windows\\System32",
+      SYSTEMROOT: "C:\\Windows",
+      windir: "C:\\Windows",
+      OPENAI_API_KEY: "secret",
+    });
+
+    expect(sanitized).toEqual({
+      ComSpec: "C:\\Windows\\System32\\cmd.exe",
+      Path: "C:\\Windows\\System32",
+      SYSTEMROOT: "C:\\Windows",
+      windir: "C:\\Windows",
+    });
+  });
 });

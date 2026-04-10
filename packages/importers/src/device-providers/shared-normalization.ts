@@ -236,6 +236,58 @@ function buildDeletionArtifactContent(
   });
 }
 
+function buildDeletionArtifactRole(options: DeletionObservationOptions): string {
+  return [
+    "deletion",
+    options.resourceType,
+    options.resourceId,
+    options.occurredAt,
+    options.sourceEventType,
+  ]
+    .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+    .join(":")
+}
+
+function buildDeletionArtifactFileName(options: DeletionObservationOptions): string {
+  const suffix = [
+    options.resourceType,
+    options.resourceId,
+    options.occurredAt,
+    options.sourceEventType,
+  ]
+    .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+    .map((value) => value.replace(/[^A-Za-z0-9._-]+/gu, "-"))
+    .join("-")
+
+  return `deletion-${suffix}.json`
+}
+
+function addDeletionArtifactOrdinal(fileName: string, ordinal: number): string {
+  return fileName.endsWith(".json")
+    ? `${fileName.slice(0, -".json".length)}-${ordinal}.json`
+    : `${fileName}-${ordinal}`
+}
+
+function resolveUniqueDeletionArtifactIdentity(
+  rawArtifacts: readonly DeviceRawArtifactPayload[],
+  options: DeletionObservationOptions,
+): { role: string; fileName: string } {
+  const baseRole = buildDeletionArtifactRole(options)
+  const baseFileName = buildDeletionArtifactFileName(options)
+
+  let role = baseRole
+  let fileName = baseFileName
+  let ordinal = 1
+
+  while (rawArtifacts.some((artifact) => artifact.role === role || artifact.fileName === fileName)) {
+    ordinal += 1
+    role = `${baseRole}:${ordinal}`
+    fileName = addDeletionArtifactOrdinal(baseFileName, ordinal)
+  }
+
+  return { role, fileName }
+}
+
 export function pushObservationEvent(
   events: DeviceEventPayload[],
   options: ObservationEventOptions,
@@ -368,16 +420,16 @@ export function pushDeletionObservation(
   rawArtifacts: DeviceRawArtifactPayload[],
   options: DeletionObservationOptions,
 ): void {
-  const deletionRole = `deletion:${options.resourceType}:${options.resourceId}`;
+  const deletionArtifact = resolveUniqueDeletionArtifactIdentity(rawArtifacts, options)
 
   pushRawArtifact(
     rawArtifacts,
     createRawArtifact(
-      deletionRole,
-      `deletion-${options.resourceType}-${options.resourceId}.json`,
+      deletionArtifact.role,
+      deletionArtifact.fileName,
       buildDeletionArtifactContent(options),
     ),
-  );
+  )
 
   events.push(
     stripUndefined({
@@ -389,7 +441,7 @@ export function pushDeletionObservation(
       note: options.sourceEventType
         ? trimToLength(`Webhook event: ${options.sourceEventType}`, 4000)
         : undefined,
-      rawArtifactRoles: [deletionRole],
+      rawArtifactRoles: [deletionArtifact.role],
       externalRef: options.makeExternalRef(
         options.resourceType,
         options.resourceId,
@@ -406,5 +458,5 @@ export function pushDeletionObservation(
         sourceEventType: options.sourceEventType,
       }),
     }),
-  );
+  )
 }

@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 
 import { test } from "vitest";
+import { isLoopbackRemoteAddress } from "@murphai/runtime-state/node";
 
 import { DeviceSyncError } from "../src/errors.ts";
 import {
   assertDeviceSyncControlRequest,
   buildPublicDeviceSyncErrorPayload,
-  isLoopbackRemoteAddress,
   renderCallbackHtml,
 } from "../src/http.ts";
 import { withIncomingHeader } from "./helpers.ts";

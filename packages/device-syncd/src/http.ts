@@ -2,7 +2,12 @@ import { Buffer } from "node:buffer";
 import { timingSafeEqual } from "node:crypto";
 import { createServer } from "node:http";
 
-import { isLoopbackHostname } from "@murphai/runtime-state";
+import {
+  hasForwardedLoopbackControlHeaders,
+  hasLoopbackControlHostHeader,
+  isLoopbackHostname,
+} from "@murphai/runtime-state";
+import { isLoopbackRemoteAddress } from "@murphai/runtime-state/node";
 
 import { deviceSyncError, isDeviceSyncError } from "./errors.ts";
 import { DEFAULT_DEVICE_SYNC_HOST } from "./shared.ts";
@@ -15,13 +20,6 @@ import type { DeviceSyncService } from "./service.ts";
 
 const DEFAULT_BODY_LIMIT_BYTES = 1_048_576;
 const CONTROL_PLANE_WWW_AUTHENTICATE = 'Bearer realm="device-syncd-control-plane"';
-const CONTROL_PLANE_FORWARDED_HEADER_NAMES = [
-  "forwarded",
-  "x-forwarded-for",
-  "x-forwarded-host",
-  "x-forwarded-proto",
-  "x-real-ip",
-] as const;
 
 type DeviceSyncHttpRouteKind = "control" | "public";
 type DeviceSyncHttpListenerSurface = "combined" | "control" | "public";
@@ -67,15 +65,6 @@ export interface CreateDeviceSyncHttpServerInput {
   bodyLimitBytes?: number;
 }
 
-export function isLoopbackRemoteAddress(value: string | null | undefined): boolean {
-  if (typeof value !== "string") {
-    return false;
-  }
-
-  const normalized = value.trim().toLowerCase();
-  return normalized === "::1" || normalized.startsWith("127.") || normalized.startsWith("::ffff:127.");
-}
-
 export function assertDeviceSyncControlRequest(input: {
   headers: IncomingHttpHeaders;
   remoteAddress: string | null | undefined;
@@ -90,7 +79,7 @@ export function assertDeviceSyncControlRequest(input: {
     });
   }
 
-  if (hasForwardedControlHeaders(input.headers)) {
+  if (hasForwardedLoopbackControlHeaders(input.headers)) {
     throw deviceSyncError({
       code: "CONTROL_PLANE_PROXY_HEADERS_REJECTED",
       message: "Device sync control routes reject forwarded proxy headers.",
@@ -99,7 +88,7 @@ export function assertDeviceSyncControlRequest(input: {
     });
   }
 
-  if (!hasLoopbackHostHeader(input.headers)) {
+  if (!hasLoopbackControlHostHeader(input.headers.host)) {
     throw deviceSyncError({
       code: "CONTROL_PLANE_LOOPBACK_HOST_REQUIRED",
       message: "Device sync control routes require a loopback Host header.",
@@ -839,37 +828,6 @@ function readStringField(record: Record<string, unknown>, key: string): string |
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
-function hasForwardedControlHeaders(headers: IncomingHttpHeaders): boolean {
-  return CONTROL_PLANE_FORWARDED_HEADER_NAMES.some(
-    (headerName) => hasPresentHeaderValue(headers[headerName]),
-  );
-}
-
-function hasLoopbackHostHeader(headers: IncomingHttpHeaders): boolean {
-  const hostname = readHostHeaderHostname(headers);
-  return hostname !== null && isLoopbackHostname(hostname);
-}
-
-function readHostHeaderHostname(headers: IncomingHttpHeaders): string | null {
-  const host = readHeaderValue(headers.host);
-
-  if (!host) {
-    return null;
-  }
-
-  if (/[\s@/?#]/u.test(host)) {
-    return null;
-  }
-
-  const ipv6Match = host.match(/^\[([^[\]]+)\](?::\d+)?$/u);
-  if (ipv6Match?.[1]) {
-    return ipv6Match[1];
-  }
-
-  const hostMatch = host.match(/^([^:]+)(?::\d+)?$/u);
-  return hostMatch?.[1] ?? null;
-}
-
 function hasMatchingControlToken(headers: IncomingHttpHeaders, expectedToken: string): boolean {
   const providedToken = readBearerToken(headers.authorization);
 
@@ -900,14 +858,6 @@ function readHeaderValue(value: string | string[] | undefined): string | null {
   }
 
   return typeof value === "string" && value.trim() ? value.trim() : null;
-}
-
-function hasPresentHeaderValue(value: string | string[] | undefined): boolean {
-  if (Array.isArray(value)) {
-    return value.some((entry) => typeof entry === "string" && entry.trim().length > 0);
-  }
-
-  return typeof value === "string" && value.trim().length > 0;
 }
 
 function formatProviderLabel(provider: string): string {
