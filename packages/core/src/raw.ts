@@ -16,7 +16,7 @@ import { toIsoTimestamp } from "./time.ts";
 
 import type { DateInput } from "./types.ts";
 
-interface CopyRawArtifactInput {
+export interface CopyRawArtifactInput {
   vaultRoot: string;
   sourcePath: string;
   owner: RawAssetOwner;

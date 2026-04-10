@@ -24,7 +24,6 @@ import {
   assertWriteTargetPolicy,
   prepareVerifiedWriteTarget,
 } from "../write-policy.ts";
-import { isCanonicalResourceLockScopeActive } from "./canonical-resource-lock.ts";
 import { acquireCanonicalWriteLock } from "./canonical-write-lock.ts";
 
 import type { DateInput } from "../types.ts";
@@ -989,9 +988,7 @@ export class WriteBatch {
 
   async commit(): Promise<void> {
     this.assertMutable();
-    const lock = isCanonicalResourceLockScopeActive(this.vaultRoot)
-      ? null
-      : await acquireCanonicalWriteLock(this.vaultRoot);
+    const lock = await acquireCanonicalWriteLock(this.vaultRoot);
 
     try {
       this.record.status = "committing";
@@ -1038,9 +1035,7 @@ export class WriteBatch {
 
   async rollback(): Promise<void> {
     this.assertMutable();
-    const lock = isCanonicalResourceLockScopeActive(this.vaultRoot)
-      ? null
-      : await acquireCanonicalWriteLock(this.vaultRoot);
+    const lock = await acquireCanonicalWriteLock(this.vaultRoot);
 
     try {
       await this.rollbackAppliedActions();

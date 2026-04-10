@@ -21,6 +21,7 @@ vi.mock("../src/operations/canonical-write-lock.ts", () => ({
     state: "unlocked" as const,
     relativePath: ".runtime/locks/canonical-write",
   }),
+  withCanonicalWriteLockScope: async (_vaultRoot: string, run: () => Promise<unknown>) => await run(),
 }));
 
 import {
