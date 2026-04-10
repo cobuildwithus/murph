@@ -277,7 +277,7 @@ describe("hosted runner container image contract", () => {
       "https://github.com/ggml-org/whisper.cpp/archive/refs/tags/${WHISPER_CPP_VERSION}.tar.gz",
     );
     expect(dockerfile).toContain("-DGGML_NATIVE=OFF");
-    expect(dockerfile).toContain("-DGGML_CPU_ARM_ARCH=armv8-a");
+    expect(dockerfile).not.toContain("GGML_CPU_ARM_ARCH");
     expect(dockerfile).toContain(
       "cmake --build build -j\"$(nproc)\" --config Release --target whisper-cli",
     );
