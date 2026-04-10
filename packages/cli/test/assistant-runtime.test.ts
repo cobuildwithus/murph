@@ -185,6 +185,106 @@ const DEFAULT_CODEX_REASONING_EFFORT = 'medium'
 const PHOTO_ONLY_CAPTURE_ID = 'cap-photo'
 const PHOTO_ONLY_OCCURED_AT = '2026-03-18T09:00:00Z'
 const PHOTO_ONLY_ATTACHMENT_BUFFER = Buffer.from([0xff, 0xd8, 0xff])
+const ASSISTANT_WAKE_ASSERTION_TOLERANCE_MS = 5_000
+const RETRY_WAKE_30S = {
+  delayMs: 30_000,
+} as const
+const RETRY_WAKE_5M = {
+  delayMs: 5 * 60_000,
+} as const
+
+type AssistantWakeExpectation =
+  | typeof RETRY_WAKE_30S
+  | typeof RETRY_WAKE_5M
+  | null
+
+type AssistantInboxScanExpectation = {
+  considered: number
+  failed: number
+  nextWakeAt?: AssistantWakeExpectation
+  noAction: number
+  routed: number
+  skipped: number
+}
+
+type AssistantAutoReplyScanExpectation = {
+  considered: number
+  failed: number
+  nextWakeAt?: AssistantWakeExpectation
+  replied: number
+  skipped: number
+}
+
+type AssistantInboxScanActual = Omit<
+  AssistantInboxScanExpectation,
+  'nextWakeAt'
+> & {
+  nextWakeAt: string | null
+}
+
+type AssistantAutoReplyScanActual = Omit<
+  AssistantAutoReplyScanExpectation,
+  'nextWakeAt'
+> & {
+  nextWakeAt: string | null
+}
+
+function assertAssistantWakeAt(
+  actual: string | null,
+  expected: AssistantWakeExpectation = null,
+) {
+  if (expected !== null) {
+    assert.equal(typeof actual, 'string')
+    const wakeAtMs = Date.parse(actual ?? '')
+    assert.equal(Number.isNaN(wakeAtMs), false)
+    const deltaMs = wakeAtMs - Date.now()
+    assert.equal(
+      deltaMs >= expected.delayMs - ASSISTANT_WAKE_ASSERTION_TOLERANCE_MS,
+      true,
+    )
+    assert.equal(
+      deltaMs <= expected.delayMs + ASSISTANT_WAKE_ASSERTION_TOLERANCE_MS,
+      true,
+    )
+    return
+  }
+
+  assert.equal(actual, expected)
+}
+
+function assertAssistantInboxScanResult(
+  actual: AssistantInboxScanActual,
+  expected: AssistantInboxScanExpectation,
+) {
+  const { nextWakeAt = null, ...expectedRest } = expected
+  const { nextWakeAt: actualNextWakeAt, ...actualRest } = actual
+  assert.deepEqual(actualRest, expectedRest)
+  assertAssistantWakeAt(actualNextWakeAt ?? null, nextWakeAt)
+}
+
+function assertAssistantAutoReplyScanResult(
+  actual: AssistantAutoReplyScanActual,
+  expected: AssistantAutoReplyScanExpectation,
+) {
+  const { nextWakeAt = null, ...expectedRest } = expected
+  const { nextWakeAt: actualNextWakeAt, ...actualRest } = actual
+  assert.deepEqual(actualRest, expectedRest)
+  assertAssistantWakeAt(actualNextWakeAt ?? null, nextWakeAt)
+}
+
+function assertAssistantAutomationScanResult(
+  actual: {
+    replies: AssistantAutoReplyScanActual
+    routing: AssistantInboxScanActual
+  },
+  expected: {
+    replies: AssistantAutoReplyScanExpectation
+    routing: AssistantInboxScanExpectation
+  },
+) {
+  assertAssistantInboxScanResult(actual.routing, expected.routing)
+  assertAssistantAutoReplyScanResult(actual.replies, expected.replies)
+}
 
 function createMockCodexRuntimeSession(input: {
   alias?: string | null
@@ -1569,9 +1669,10 @@ test('scanAssistantInboxOnce skips completed captures, waits for parsers, routes
     },
   })
 
-  assert.deepEqual(result, {
+  assertAssistantInboxScanResult(result, {
     considered: 7,
     failed: 2,
+    nextWakeAt: RETRY_WAKE_30S,
     noAction: 1,
     routed: 1,
     skipped: 3,
@@ -1858,7 +1959,7 @@ test('scanAssistantInboxOnce bypasses parser waits for supported pending meal ph
     },
   })
 
-  assert.deepEqual(result, {
+  assertAssistantInboxScanResult(result, {
     considered: 1,
     failed: 0,
     noAction: 0,
@@ -1919,11 +2020,12 @@ test('scanAssistantInboxOnce still waits for pending document parsers', async ()
     },
   })
 
-  assert.deepEqual(result, {
+  assertAssistantInboxScanResult(result, {
     considered: 1,
     failed: 0,
     noAction: 0,
     routed: 0,
+    nextWakeAt: RETRY_WAKE_30S,
     skipped: 1,
   })
   assert.equal(runtimeMocks.routeInboxCaptureWithModel.mock.calls.length, 0)
@@ -2015,12 +2117,13 @@ test('scanAssistantAutomationOnce keeps the routing cursor pinned when a capture
     },
   })
 
-  assert.deepEqual(result, {
+  assertAssistantAutomationScanResult(result, {
     routing: {
       considered: 1,
       failed: 0,
       noAction: 0,
       routed: 0,
+      nextWakeAt: RETRY_WAKE_30S,
       skipped: 1,
     },
     replies: {
@@ -2170,7 +2273,7 @@ test('scanAssistantAutomationOnce preserves document attachments before auto-rep
     vault: vaultRoot,
   })
 
-  assert.deepEqual(result, {
+  assertAssistantAutomationScanResult(result, {
     routing: {
       considered: 0,
       failed: 0,
@@ -2293,7 +2396,7 @@ test('scanAssistantAutomationOnce stops auto-reply when document preservation fa
     },
   })
 
-  assert.deepEqual(result, {
+  assertAssistantAutomationScanResult(result, {
     routing: {
       considered: 0,
       failed: 0,
@@ -2304,6 +2407,7 @@ test('scanAssistantAutomationOnce stops auto-reply when document preservation fa
     replies: {
       considered: 0,
       failed: 0,
+      nextWakeAt: RETRY_WAKE_30S,
       replied: 0,
       skipped: 0,
     },
@@ -2512,7 +2616,7 @@ test('scanAssistantAutomationOnce preserves other enabled channels while drainin
   }
 
   const first = await runScan()
-  assert.deepEqual(first, {
+  assertAssistantAutomationScanResult(first, {
     routing: {
       considered: 0,
       failed: 0,
@@ -2537,7 +2641,7 @@ test('scanAssistantAutomationOnce preserves other enabled channels while drainin
   })
 
   const second = await runScan()
-  assert.deepEqual(second, {
+  assertAssistantAutomationScanResult(second, {
     routing: {
       considered: 0,
       failed: 0,
@@ -2562,7 +2666,7 @@ test('scanAssistantAutomationOnce preserves other enabled channels while drainin
   })
 
   const third = await runScan()
-  assert.deepEqual(third, {
+  assertAssistantAutomationScanResult(third, {
     routing: {
       considered: 0,
       failed: 0,
@@ -2787,7 +2891,7 @@ test('scanAssistantAutomationOnce keeps the reply cursor authoritative after bac
   }
 
   const first = await runScan()
-  assert.deepEqual(first, {
+  assertAssistantAutomationScanResult(first, {
     routing: {
       considered: 0,
       failed: 0,
@@ -2817,7 +2921,7 @@ test('scanAssistantAutomationOnce keeps the reply cursor authoritative after bac
   }
 
   const second = await runScan()
-  assert.deepEqual(second, {
+  assertAssistantAutomationScanResult(second, {
     routing: {
       considered: 0,
       failed: 0,
@@ -3030,7 +3134,7 @@ test('scanAssistantAutomationOnce does not clear backlog when the first limited 
   }
 
   const first = await runScan()
-  assert.deepEqual(first, {
+  assertAssistantAutomationScanResult(first, {
     routing: {
       considered: 0,
       failed: 0,
@@ -3055,7 +3159,7 @@ test('scanAssistantAutomationOnce does not clear backlog when the first limited 
   })
 
   const second = await runScan()
-  assert.deepEqual(second, {
+  assertAssistantAutomationScanResult(second, {
     routing: {
       considered: 0,
       failed: 0,
@@ -3252,7 +3356,7 @@ test('scanAssistantAutomationOnce keeps the auto-reply cursor pinned on deferred
     vault: vaultRoot,
   })
 
-  assert.deepEqual(first, {
+  assertAssistantAutomationScanResult(first, {
     routing: {
       considered: 0,
       failed: 0,
@@ -3263,6 +3367,7 @@ test('scanAssistantAutomationOnce keeps the auto-reply cursor pinned on deferred
     replies: {
       considered: 2,
       failed: 0,
+      nextWakeAt: RETRY_WAKE_30S,
       replied: 0,
       skipped: 2,
     },
@@ -3345,7 +3450,7 @@ test('scanAssistantAutomationOnce keeps the auto-reply cursor pinned on deferred
     vault: vaultRoot,
   })
 
-  assert.deepEqual(second, {
+  assertAssistantAutomationScanResult(second, {
     routing: {
       considered: 0,
       failed: 0,
@@ -3425,11 +3530,12 @@ test('scanAssistantInboxOnce still waits for unsupported pending HEIC photos', a
     },
   })
 
-  assert.deepEqual(result, {
+  assertAssistantInboxScanResult(result, {
     considered: 1,
     failed: 0,
     noAction: 0,
     routed: 0,
+    nextWakeAt: RETRY_WAKE_30S,
     skipped: 1,
   })
   assert.equal(runtimeMocks.routeInboxCaptureWithModel.mock.calls.length, 0)
@@ -3610,7 +3716,7 @@ test('scanAssistantAutoReplyOnce primes backlog cursors, replies to new inbound 
     vault: vaultRoot,
   })
 
-  assert.deepEqual(prime, {
+  assertAssistantAutoReplyScanResult(prime, {
     considered: 0,
     failed: 0,
     replied: 0,
@@ -3638,7 +3744,7 @@ test('scanAssistantAutoReplyOnce primes backlog cursors, replies to new inbound 
     vault: vaultRoot,
   })
 
-  assert.deepEqual(second, {
+  assertAssistantAutoReplyScanResult(second, {
     considered: 1,
     failed: 0,
     replied: 1,
@@ -3818,7 +3924,7 @@ test('scanAssistantAutoReplyOnce advances the cursor and writes deferred artifac
     vault: vaultRoot,
   })
 
-  assert.deepEqual(first, {
+  assertAssistantAutoReplyScanResult(first, {
     considered: 1,
     failed: 0,
     replied: 1,
@@ -3936,7 +4042,7 @@ test('scanAssistantAutoReplyOnce queues hosted auto-replies without sending befo
     vault: vaultRoot,
   })
 
-  assert.deepEqual(result, {
+  assertAssistantAutoReplyScanResult(result, {
     considered: 1,
     failed: 0,
     replied: 1,
@@ -4231,7 +4337,7 @@ test('scanAssistantAutoReplyOnce coalesces same-thread email backlog into one re
     vault: vaultRoot,
   })
 
-  assert.deepEqual(result, {
+  assertAssistantAutoReplyScanResult(result, {
     considered: 3,
     failed: 0,
     replied: 1,
@@ -4402,7 +4508,7 @@ test('scanAssistantAutoReplyOnce anchors grouped linq replies to the newest grou
     vault: vaultRoot,
   })
 
-  assert.deepEqual(result, {
+  assertAssistantAutoReplyScanResult(result, {
     considered: 2,
     failed: 0,
     replied: 1,
@@ -4596,7 +4702,7 @@ test('scanAssistantAutoReplyOnce can use self-authored attachment prompts and su
       },
     })
 
-    assert.deepEqual(first, {
+    assertAssistantAutoReplyScanResult(first, {
       considered: 1,
       failed: 0,
       replied: 1,
@@ -4621,7 +4727,7 @@ test('scanAssistantAutoReplyOnce can use self-authored attachment prompts and su
       },
     })
 
-    assert.deepEqual(second, {
+    assertAssistantAutoReplyScanResult(second, {
       considered: 1,
       failed: 0,
       replied: 0,
@@ -4804,17 +4910,18 @@ test('scanAssistantAutoReplyOnce keeps the cursor on prompt defers but advances 
     vault: vaultRoot,
   })
 
-  assert.deepEqual(first, {
-    considered: 1,
-    failed: 0,
-    replied: 0,
-    skipped: 1,
-  })
-  assert.deepEqual(second, {
-    considered: 1,
-    failed: 0,
-    replied: 0,
-    skipped: 1,
+    assertAssistantAutoReplyScanResult(first, {
+      considered: 1,
+      failed: 0,
+      replied: 0,
+      nextWakeAt: RETRY_WAKE_30S,
+      skipped: 1,
+    })
+    assertAssistantAutoReplyScanResult(second, {
+      considered: 1,
+      failed: 0,
+      replied: 0,
+      skipped: 1,
   })
   assert.equal(runtimeMocks.executeAssistantProviderTurn.mock.calls.length, 0)
   assert.equal(runtimeMocks.deliverAssistantMessageOverBinding.mock.calls.length, 0)
@@ -4870,7 +4977,7 @@ test('scanAssistantAutoReplyOnce forwards multimodal content for photo-only capt
       vault: vaultRoot,
     })
 
-    assert.deepEqual(result, {
+    assertAssistantAutoReplyScanResult(result, {
       considered: 1,
       failed: 0,
       replied: 1,
@@ -4922,7 +5029,7 @@ test('scanAssistantAutoReplyOnce skips photo-only captures when the configured p
       vault: vaultRoot,
     })
 
-    assert.deepEqual(result, {
+    assertAssistantAutoReplyScanResult(result, {
       considered: 1,
       failed: 0,
       replied: 0,
@@ -4993,7 +5100,7 @@ test('scanAssistantAutoReplyOnce reroutes photo-only captures to a multimodal fa
       vault: vaultRoot,
     })
 
-    assert.deepEqual(result, {
+    assertAssistantAutoReplyScanResult(result, {
       considered: 1,
       failed: 0,
       replied: 1,
@@ -5239,9 +5346,10 @@ test('scanAssistantAutoReplyOnce keeps grouped partial reply artifacts queued fo
     vault: vaultRoot,
   })
 
-  assert.deepEqual(first, {
+  assertAssistantAutoReplyScanResult(first, {
     considered: 2,
     failed: 0,
+    nextWakeAt: RETRY_WAKE_30S,
     replied: 0,
     skipped: 2,
   })
@@ -5326,7 +5434,7 @@ test('scanAssistantAutoReplyOnce keeps grouped partial reply artifacts queued fo
     vault: vaultRoot,
   })
 
-  assert.deepEqual(second, {
+  assertAssistantAutoReplyScanResult(second, {
     considered: 2,
     failed: 0,
     replied: 1,
@@ -5526,7 +5634,7 @@ test('scanAssistantAutoReplyOnce does not resend after successful delivery when 
     vault: vaultRoot,
   })
 
-  assert.deepEqual(result, {
+  assertAssistantAutoReplyScanResult(result, {
     considered: 1,
     failed: 0,
     replied: 0,
@@ -5715,7 +5823,7 @@ test('scanAssistantAutoReplyOnce only auto-replies to Telegram direct chats', as
     vault: vaultRoot,
   })
 
-  assert.deepEqual(result, {
+  assertAssistantAutoReplyScanResult(result, {
     considered: 2,
     failed: 0,
     replied: 1,
@@ -5933,13 +6041,14 @@ test('scanAssistantAutoReplyOnce aborts stalled provider turns and retries the s
     vault: vaultRoot,
   })
 
-  assert.deepEqual(first, {
+  assertAssistantAutoReplyScanResult(first, {
     considered: 1,
     failed: 0,
     replied: 0,
+    nextWakeAt: RETRY_WAKE_30S,
     skipped: 1,
   })
-  assert.deepEqual(second, {
+  assertAssistantAutoReplyScanResult(second, {
     considered: 1,
     failed: 0,
     replied: 1,
@@ -6147,10 +6256,11 @@ test('scanAssistantAutoReplyOnce keeps long-running deepthink commands past the 
 
   const result = await runPromise
 
-  assert.deepEqual(result, {
+  assertAssistantAutoReplyScanResult(result, {
     considered: 1,
     failed: 0,
     replied: 0,
+    nextWakeAt: RETRY_WAKE_30S,
     skipped: 1,
   })
   assert.equal(
@@ -6265,16 +6375,18 @@ test('scanAssistantAutoReplyOnce defers reconnectable provider failures and pres
     vault: vaultRoot,
   })
 
-  assert.deepEqual(first, {
+  assertAssistantAutoReplyScanResult(first, {
     considered: 1,
     failed: 0,
     replied: 0,
+    nextWakeAt: RETRY_WAKE_30S,
     skipped: 1,
   })
-  assert.deepEqual(second, {
+  assertAssistantAutoReplyScanResult(second, {
     considered: 1,
     failed: 0,
     replied: 0,
+    nextWakeAt: RETRY_WAKE_30S,
     skipped: 1,
   })
   assert.equal(runtimeMocks.deliverAssistantMessageOverBinding.mock.calls.length, 0)
@@ -6517,7 +6629,7 @@ test('scanAssistantAutoReplyOnce keeps scanning after a failed Telegram delivery
     },
   })
 
-  assert.deepEqual(result, {
+  assertAssistantAutoReplyScanResult(result, {
     considered: 2,
     failed: 1,
     replied: 1,
@@ -6712,13 +6824,14 @@ test('scanAssistantAutoReplyOnce records provider quota failures with a safe sum
     vault: vaultRoot,
   })
 
-  assert.deepEqual(first, {
+  assertAssistantAutoReplyScanResult(first, {
     considered: 1,
     failed: 1,
+    nextWakeAt: RETRY_WAKE_5M,
     replied: 0,
     skipped: 0,
   })
-  assert.deepEqual(second, {
+  assertAssistantAutoReplyScanResult(second, {
     considered: 1,
     failed: 0,
     replied: 1,
@@ -6965,7 +7078,7 @@ test('scanAssistantAutoReplyOnce groups Telegram media albums into one assistant
     vault: vaultRoot,
   })
 
-  assert.deepEqual(result, {
+  assertAssistantAutoReplyScanResult(result, {
     considered: 2,
     failed: 0,
     replied: 1,
@@ -7182,7 +7295,7 @@ test('scanAssistantAutoReplyOnce does not group Telegram media albums across acc
     vault: vaultRoot,
   })
 
-  assert.deepEqual(result, {
+  assertAssistantAutoReplyScanResult(result, {
     considered: 2,
     failed: 0,
     replied: 2,
@@ -7192,7 +7305,7 @@ test('scanAssistantAutoReplyOnce does not group Telegram media albums across acc
   assert.equal(runtimeMocks.deliverAssistantMessageOverBinding.mock.calls.length, 2)
 })
 
-test('runAssistantAutomation merges routing and reply into one inbox decision pass', async () => {
+test('runAssistantAutomation routes new captures in one-shot mode and leaves replies for a later wake', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-unified-scan-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
@@ -7332,9 +7445,9 @@ test('runAssistantAutomation merges routing and reply into one inbox decision pa
 
   assert.equal(result.considered, 1)
   assert.equal(result.routed, 1)
-  assert.equal(result.replyConsidered, 1)
-  assert.equal(result.replied, 1)
-  assert.equal(listCalls.length, 2)
+  assert.equal(result.replyConsidered, 0)
+  assert.equal(result.replied, 0)
+  assert.equal(listCalls.length, 1)
   assert.equal(
     events.filter((event) => event.type === 'scan.started').length,
     1,
@@ -7353,7 +7466,7 @@ test('runAssistantAutomation merges routing and reply into one inbox decision pa
     events.some(
       (event) => event.type === 'capture.replied' && event.captureId === 'cap-new',
     ),
-    true,
+    false,
   )
 
   const state = await readAssistantAutomationState(vaultRoot)
@@ -7361,10 +7474,7 @@ test('runAssistantAutomation merges routing and reply into one inbox decision pa
     occurredAt: '2026-03-18T09:05:00Z',
     captureId: 'cap-new',
   })
-  assert.deepEqual(state.autoReplyScanCursor, {
-    occurredAt: '2026-03-18T09:05:00Z',
-    captureId: 'cap-new',
-  })
+  assert.equal(state.autoReplyScanCursor, null)
 })
 
 test('runAssistantAutomation rejects concurrent runs for the same vault and releases the lock after shutdown', async () => {
