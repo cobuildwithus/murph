@@ -107,9 +107,9 @@ export async function runSetupWizard(
     input.initialScheduledUpdates,
   )
   const initialWearables = sortSetupWizardWearables(
-    input.initialWearables && input.initialWearables.length > 0
-      ? [...input.initialWearables]
-      : getDefaultSetupWizardWearables(),
+    input.initialWearables === undefined
+      ? getDefaultSetupWizardWearables()
+      : [...input.initialWearables],
   )
   const commandName = input.commandName ?? 'murph'
   const completion = createSetupWizardCompletionController()

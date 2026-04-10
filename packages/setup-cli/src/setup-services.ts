@@ -35,6 +35,7 @@ import {
   normalizeSetupChannels,
 } from './setup-services/channels.js'
 import { configureSetupScheduledUpdates } from './setup-services/scheduled-updates.js'
+import { configureSetupWearables } from './setup-services/wearables.js'
 import {
   createSetupAgentmailSelectionResolver,
   type SetupAgentmailSelectionResolver,
@@ -362,6 +363,14 @@ export function createSetupServices(
             env: toolchainEnv,
             wearables: input.wearables,
           })
+    if (input.wearables != null) {
+      await configureSetupWearables({
+        dryRun,
+        steps,
+        vault,
+        wearables: wearables.map((wearable) => wearable.wearable),
+      })
+    }
     const scheduledUpdates =
       input.scheduledUpdatePresetIds == null
         ? []

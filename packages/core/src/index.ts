@@ -73,6 +73,7 @@ export {
   unlinkJournalEventIds,
   unlinkJournalStreams,
   updateWorkoutUnitPreferences,
+  updateWearablePreferences,
   updateExperiment,
   updateVaultSummary,
   upsertEvent,
