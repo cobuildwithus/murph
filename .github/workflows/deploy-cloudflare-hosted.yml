@@ -6,11 +6,11 @@ on:
       environment:
         description: GitHub environment to deploy from
         required: true
-        default: staging
+        default: production
         type: choice
         options:
-          - staging
           - production
+          - staging
       sync_worker_secrets:
         description: Include the rendered Worker secrets file during upload or deploy
         required: true
