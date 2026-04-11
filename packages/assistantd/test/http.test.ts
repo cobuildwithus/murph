@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import type { IncomingMessage, ServerResponse } from 'node:http'
+import type { IncomingHttpHeaders, IncomingMessage, ServerResponse } from 'node:http'
 import { Readable } from 'node:stream'
 import { afterEach, test, vi } from 'vitest'
 import { AssistantHttpRequestError } from '../src/http-protocol.js'
@@ -322,6 +322,12 @@ function requireFirstCallArg<T>(
   return firstArg as T
 }
 
+function withIncomingHeader(name: string, value: string | string[]): IncomingHttpHeaders {
+  const headers: IncomingHttpHeaders = {}
+  Reflect.set(headers, name, value)
+  return headers
+}
+
 afterEach(() => {
   vi.restoreAllMocks()
 })
@@ -400,14 +406,33 @@ test('assertAssistantControlRequest rejects malformed loopback-like host headers
   )
 })
 
+test('assertAssistantControlRequest rejects duplicate authorization headers instead of guessing', () => {
+  assert.throws(
+    () =>
+      assertAssistantControlRequest({
+        headers: {
+          host: 'localhost:50241',
+          ...withIncomingHeader('authorization', [
+            'Bearer control-secret',
+            'Bearer shadow-secret',
+          ]),
+        },
+        remoteAddress: '127.0.0.1',
+        controlToken: 'control-secret',
+      }),
+    (error: unknown) =>
+      error instanceof AssistantHttpRequestError && error.statusCode === 401,
+  )
+})
+
 test('assertAssistantControlRequest accepts loopback requests with a loopback host header', () => {
   assert.doesNotThrow(() =>
     assertAssistantControlRequest({
       headers: {
         authorization: 'Bearer control-secret',
-        host: 'localhost:50241',
+        host: '[::1]:50241',
       },
-      remoteAddress: '127.0.0.1',
+      remoteAddress: '::ffff:127.0.0.1',
       controlToken: 'control-secret',
     }),
   )

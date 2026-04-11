@@ -299,7 +299,9 @@ export function assertAssistantControlRequest(input: {
     )
   }
 
-  if (!hasMatchingControlToken(input.headers, input.controlToken)) {
+  if (
+    !hasMatchingLoopbackControlBearerToken(input.headers.authorization, input.controlToken)
+  ) {
     throw new AssistantHttpRequestError('Unauthorized.', 401)
   }
 }
@@ -317,13 +319,6 @@ async function readJsonBody(request: IncomingMessage): Promise<unknown> {
   }
   const raw = Buffer.concat(chunks).toString('utf8').trim()
   return raw.length === 0 ? {} : JSON.parse(raw)
-}
-
-function hasMatchingControlToken(
-  headers: IncomingHttpHeaders,
-  expectedToken: string,
-): boolean {
-  return hasMatchingLoopbackControlBearerToken(headers.authorization, expectedToken)
 }
 
 function buildAssistantServerBaseUrl(address: AddressInfo): string {

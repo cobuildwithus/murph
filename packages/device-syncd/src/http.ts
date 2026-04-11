@@ -106,7 +106,9 @@ export function assertDeviceSyncControlRequest(input: {
     });
   }
 
-  if (!hasMatchingControlToken(input.headers, input.controlToken)) {
+  if (
+    !hasMatchingLoopbackControlBearerToken(input.headers.authorization, input.controlToken)
+  ) {
     throw deviceSyncError({
       code: "CONTROL_PLANE_AUTH_REQUIRED",
       message: "Device sync control routes require a valid bearer token.",
@@ -863,10 +865,6 @@ function readDeviceSyncErrorStatusDetail(
 function readStringField(record: Record<string, unknown>, key: string): string | null {
   const value = record[key];
   return typeof value === "string" && value.trim() ? value.trim() : null;
-}
-
-function hasMatchingControlToken(headers: IncomingHttpHeaders, expectedToken: string): boolean {
-  return hasMatchingLoopbackControlBearerToken(headers.authorization, expectedToken);
 }
 
 function formatProviderLabel(provider: string): string {

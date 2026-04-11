@@ -466,6 +466,32 @@ describe("normalizeOuraSnapshot", () => {
       [rawArtifacts[1]?.role],
     ]);
   });
+
+  it("omits missing source event types from artifact strings instead of serializing undefined", () => {
+    const events: Parameters<typeof pushDeletionObservation>[0] = [];
+    const rawArtifacts: Parameters<typeof pushDeletionObservation>[1] = [];
+
+    pushDeletionObservation(events, rawArtifacts, {
+      provider: "oura",
+      providerDisplayName: "Oura",
+      resourceType: "sleep",
+      resourceId: "sleep_123",
+      occurredAt: "2026-04-10T00:00:00.000Z",
+      sourceEventType: undefined,
+      makeExternalRef,
+    });
+
+    expect(events).toHaveLength(1);
+    expect(rawArtifacts).toHaveLength(1);
+    expect(rawArtifacts[0]?.role).not.toContain("undefined");
+    expect(rawArtifacts[0]?.fileName).not.toContain("undefined");
+    expect(rawArtifacts[0]?.content).toEqual({
+      occurredAt: "2026-04-10T00:00:00.000Z",
+      provider: "oura",
+      resourceId: "sleep_123",
+      resourceType: "sleep",
+    });
+  });
 });
 
 describe("normalizeGarminSnapshot", () => {

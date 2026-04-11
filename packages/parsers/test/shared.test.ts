@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { sanitizeChildProcessEnv } from "../src/shared.js";
+import { readConfiguredEnvValue, sanitizeChildProcessEnv } from "../src/shared.js";
 
 describe("sanitizeChildProcessEnv", () => {
   it("keeps only the minimal safe execution environment", () => {
@@ -86,5 +86,30 @@ describe("sanitizeChildProcessEnv", () => {
     ).toEqual({
       PATH: "",
     });
+  });
+
+  it("skips non-string values even when the key itself is allowlisted", () => {
+    const env: NodeJS.ProcessEnv = {
+      HOME: "/home/murph",
+    };
+    Reflect.set(env, "TMP", 42);
+
+    expect(sanitizeChildProcessEnv(env)).toEqual({
+      HOME: "/home/murph",
+    });
+  });
+});
+
+describe("readConfiguredEnvValue", () => {
+  it("returns the first non-empty configured key after trimming", () => {
+    expect(
+      readConfiguredEnvValue(
+        {
+          PARSER_BIN: "   ",
+          PARSER_PATH: " /usr/local/bin/pdftotext ",
+        },
+        ["PARSER_BIN", "PARSER_PATH"],
+      ),
+    ).toBe("/usr/local/bin/pdftotext");
   });
 });

@@ -303,18 +303,6 @@ export function pushRawArtifact(
   rawArtifacts.push(artifact);
 }
 
-function buildDeletionArtifactContent(
-  options: DeletionObservationOptions,
-): Record<string, unknown> {
-  return stripUndefined({
-    provider: options.provider,
-    resourceType: options.resourceType,
-    resourceId: options.resourceId,
-    occurredAt: options.occurredAt,
-    sourceEventType: options.sourceEventType,
-  });
-}
-
 function buildDeletionArtifactIdentity(options: DeletionObservationOptions): string {
   return createHash("sha256")
     .update(JSON.stringify([
@@ -346,7 +334,13 @@ function buildDeletionArtifactDescriptor(
   ].filter((value): value is string => typeof value === "string" && value.trim().length > 0);
 
   return {
-    content: buildDeletionArtifactContent(options),
+    content: stripUndefined({
+      provider: options.provider,
+      resourceType: options.resourceType,
+      resourceId: options.resourceId,
+      occurredAt: options.occurredAt,
+      sourceEventType: options.sourceEventType,
+    }),
     fileName: `deletion-${artifactParts
       .map((value) => value.replace(/[^A-Za-z0-9._-]+/gu, "-"))
       .join("-")}-${identity}.json`,
