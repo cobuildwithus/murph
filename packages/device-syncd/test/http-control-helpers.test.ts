@@ -68,6 +68,24 @@ test("assertDeviceSyncControlRequest rejects forwarded proxy headers with the sp
   );
 });
 
+test("assertDeviceSyncControlRequest rejects non-loopback host headers with the mapped control-plane error", () => {
+  assert.throws(
+    () =>
+      assertDeviceSyncControlRequest({
+        headers: {
+          authorization: "Bearer control-token",
+          host: "device-sync.example",
+        },
+        remoteAddress: "127.0.0.1",
+        controlToken: "control-token",
+      }),
+    (error: unknown) =>
+      error instanceof DeviceSyncError &&
+      error.code === "CONTROL_PLANE_LOOPBACK_HOST_REQUIRED" &&
+      error.httpStatus === 403,
+  );
+});
+
 test("assertDeviceSyncControlRequest accepts ipv6 loopback hosts after shared loopback validation", () => {
   assert.doesNotThrow(() =>
     assertDeviceSyncControlRequest({
