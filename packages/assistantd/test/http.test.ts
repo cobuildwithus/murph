@@ -6,6 +6,7 @@ import { AssistantHttpRequestError } from '../src/http-protocol.js'
 import {
   assertAssistantControlRequest,
   createAssistantHttpRequestHandler,
+  startAssistantHttpServer,
   type AssistantHttpRequestHandler,
 } from '../src/http.js'
 import type { AssistantLocalService } from '../src/service.js'
@@ -409,6 +410,19 @@ test('assertAssistantControlRequest accepts loopback requests with a loopback ho
       remoteAddress: '127.0.0.1',
       controlToken: 'control-secret',
     }),
+  )
+})
+
+test('assistantd http server rejects non-loopback listener hosts', async () => {
+  await assert.rejects(
+    () =>
+      startAssistantHttpServer({
+        controlToken: 'control-secret',
+        host: '0.0.0.0',
+        port: 0,
+        service: {} as AssistantLocalService,
+      }),
+    /Assistant daemon listener host must be a loopback hostname or address\./u,
   )
 })
 

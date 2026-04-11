@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
+import { normalizeGarminSnapshot } from "../../src/device-providers/garmin.ts";
+import { buildSyntheticDeletionResourceId } from "../../src/device-providers/shared-normalization.ts";
 import { normalizeOuraSnapshot } from "../../src/device-providers/oura.ts";
+import { normalizeWhoopSnapshot } from "../../src/device-providers/whoop.ts";
 import { pushDeletionObservation } from "../../src/device-providers/shared-normalization.ts";
 
 function makeExternalRef(resourceType: string, resourceId: string, version?: string, facet?: string) {
@@ -11,6 +14,58 @@ function makeExternalRef(resourceType: string, resourceId: string, version?: str
     version,
     facet,
   };
+}
+
+function expectSyntheticDeletionArtifact(
+  normalized: {
+    events?: Array<{
+      externalRef?: {
+        resourceId?: string;
+      };
+      rawArtifactRoles?: string[];
+    }>;
+    rawArtifacts?: Array<{
+      content: unknown;
+      fileName: string;
+      mediaType?: string;
+      role: string;
+    }>;
+  },
+  provider: string,
+  resourceType: string,
+  occurredAt: string,
+  sourceEventType: string,
+) {
+  expect(normalized.events).toHaveLength(1);
+  expect(normalized.rawArtifacts).toHaveLength(1);
+
+  const rawArtifact = normalized.rawArtifacts?.[0];
+  expect(rawArtifact).toEqual({
+    role: expect.stringMatching(
+      new RegExp(
+        `^deletion:${resourceType}:deleted-[0-9a-f]{16}:${occurredAt}:${sourceEventType}:[0-9a-f]{64}$`,
+        "u",
+      ),
+    ),
+    fileName: expect.stringMatching(
+      new RegExp(
+        `^deletion-${resourceType}-deleted-[0-9a-f]{16}-${occurredAt.replaceAll(":", "-")}-${sourceEventType.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}-[0-9a-f]{64}\\.json$`,
+        "u",
+      ),
+    ),
+    mediaType: "application/json",
+    content: {
+      provider,
+      resourceType,
+      resourceId: expect.stringMatching(/^deleted-[0-9a-f]{16}$/u),
+      occurredAt,
+      sourceEventType,
+    },
+  });
+  expect(normalized.events?.[0]?.rawArtifactRoles).toEqual([rawArtifact?.role]);
+  expect(normalized.events?.[0]?.externalRef?.resourceId).toMatch(
+    /^deleted-[0-9a-f]{16}$/u,
+  );
 }
 
 describe("pushDeletionObservation", () => {
@@ -84,6 +139,38 @@ describe("pushDeletionObservation", () => {
     ]);
   });
 
+  it("keeps distinct deletion identities when the source event type changes", () => {
+    const events: Parameters<typeof pushDeletionObservation>[0] = [];
+    const rawArtifacts: Parameters<typeof pushDeletionObservation>[1] = [];
+
+    pushDeletionObservation(events, rawArtifacts, {
+      provider: "oura",
+      providerDisplayName: "Oura",
+      resourceType: "sleep",
+      resourceId: "sleep_123",
+      occurredAt: "2026-04-10T00:00:00.000Z",
+      sourceEventType: "sleep.deleted",
+      makeExternalRef,
+    });
+    pushDeletionObservation(events, rawArtifacts, {
+      provider: "oura",
+      providerDisplayName: "Oura",
+      resourceType: "sleep",
+      resourceId: "sleep_123",
+      occurredAt: "2026-04-10T00:00:00.000Z",
+      sourceEventType: "sleep.hard-deleted",
+      makeExternalRef,
+    });
+
+    expect(rawArtifacts).toHaveLength(2);
+    expect(rawArtifacts[0]?.role).not.toEqual(rawArtifacts[1]?.role);
+    expect(rawArtifacts[0]?.fileName).not.toEqual(rawArtifacts[1]?.fileName);
+    expect(events.map((event) => event.rawArtifactRoles)).toEqual([
+      [rawArtifacts[0]?.role],
+      [rawArtifacts[1]?.role],
+    ]);
+  });
+
   it("collapses exact duplicate delete observations that share identical metadata", () => {
     const events: Parameters<typeof pushDeletionObservation>[0] = [];
     const rawArtifacts: Parameters<typeof pushDeletionObservation>[1] = [];
@@ -116,7 +203,85 @@ describe("pushDeletionObservation", () => {
   });
 });
 
+describe("buildSyntheticDeletionResourceId", () => {
+  it("is stable across equivalent payload key order", () => {
+    const options = {
+      provider: "oura",
+      resourceType: "sleep",
+      occurredAt: "2026-04-11T00:00:00.000Z",
+      sourceEventType: "sleep.deleted",
+    };
+
+    const left = buildSyntheticDeletionResourceId({
+      ...options,
+      deletion: {
+        event_type: "sleep.deleted",
+        nested: { b: 2, a: 1 },
+        occurred_at: options.occurredAt,
+      },
+    });
+
+    const right = buildSyntheticDeletionResourceId({
+      ...options,
+      deletion: {
+        occurred_at: options.occurredAt,
+        nested: { a: 1, b: 2 },
+        event_type: "sleep.deleted",
+      },
+    });
+
+    expect(left).toBe(right);
+    expect(left).toMatch(/^deleted-[0-9a-f]{16}$/u);
+  });
+
+  it("changes when the deletion payload meaningfully changes", () => {
+    const shared = {
+      provider: "whoop",
+      resourceType: "workout",
+      occurredAt: "2026-04-11T00:00:00.000Z",
+      sourceEventType: "workout.deleted",
+    };
+
+    expect(
+      buildSyntheticDeletionResourceId({
+        ...shared,
+        deletion: { occurred_at: shared.occurredAt, tombstone: "alpha" },
+      }),
+    ).not.toBe(
+      buildSyntheticDeletionResourceId({
+        ...shared,
+        deletion: { occurred_at: shared.occurredAt, tombstone: "beta" },
+      }),
+    );
+  });
+});
+
 describe("normalizeOuraSnapshot", () => {
+  it("generates deterministic synthetic deletion ids when stable ids are missing", () => {
+    const normalized = normalizeOuraSnapshot({
+      accountId: "acct_1",
+      importedAt: "2026-04-10T00:00:00.000Z",
+      deletions: [
+        {
+          resource_type: "sleep",
+          occurred_at: "2026-04-09T09:30:00.000Z",
+          source_event_type: "sleep.deleted",
+          payload: {
+            profile: "sensitive",
+          },
+        },
+      ],
+    });
+
+    expectSyntheticDeletionArtifact(
+      normalized,
+      "oura",
+      "sleep",
+      "2026-04-09T09:30:00.000Z",
+      "sleep.deleted",
+    );
+  });
+
   it("does not keep full deleted sleep payload artifacts", () => {
     const normalized = normalizeOuraSnapshot({
       accountId: "acct_1",
@@ -239,5 +404,59 @@ describe("normalizeOuraSnapshot", () => {
       [rawArtifacts[0]?.role],
       [rawArtifacts[1]?.role],
     ]);
+  });
+});
+
+describe("normalizeGarminSnapshot", () => {
+  it("generates deterministic synthetic deletion ids when stable ids are missing", () => {
+    const normalized = normalizeGarminSnapshot({
+      accountId: "acct_2",
+      importedAt: "2026-04-10T00:00:00.000Z",
+      deletions: [
+        {
+          resourceType: "sleep",
+          occurredAt: "2026-04-09T09:30:00.000Z",
+          eventType: "sleep.deleted",
+          payload: {
+            profile: "sensitive",
+          },
+        },
+      ],
+    });
+
+    expectSyntheticDeletionArtifact(
+      normalized,
+      "garmin",
+      "sleep",
+      "2026-04-09T09:30:00.000Z",
+      "sleep.deleted",
+    );
+  });
+});
+
+describe("normalizeWhoopSnapshot", () => {
+  it("generates deterministic synthetic deletion ids when stable ids are missing", () => {
+    const normalized = normalizeWhoopSnapshot({
+      accountId: "acct_3",
+      importedAt: "2026-04-10T00:00:00.000Z",
+      deletions: [
+        {
+          resource_type: "sleep",
+          occurred_at: "2026-04-09T09:30:00.000Z",
+          source_event_type: "sleep.deleted",
+          payload: {
+            profile: "sensitive",
+          },
+        },
+      ],
+    });
+
+    expectSyntheticDeletionArtifact(
+      normalized,
+      "whoop",
+      "sleep",
+      "2026-04-09T09:30:00.000Z",
+      "sleep.deleted",
+    );
   });
 });

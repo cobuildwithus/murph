@@ -6,6 +6,7 @@ import { stripEmptyObject, stripUndefined } from "../shared.ts";
 import {
   asArray,
   asPlainObject,
+  buildSyntheticDeletionResourceId,
   createRawArtifact,
   emitObservationMetrics,
   emitSampleMetrics,
@@ -388,9 +389,6 @@ function pushDeletionObservation(
     deletion.resource_type ?? deletion.resourceType ?? deletion.data_type ?? deletion.dataType,
     "resource",
   );
-  const resourceId =
-    stringId(deletion.resource_id ?? deletion.resourceId ?? deletion.object_id ?? deletion.objectId) ??
-    `deleted-${events.length + 1}`;
   const occurredAt =
     firstIso(deletion.occurred_at, deletion.occurredAt, deletion.event_time, deletion.eventTime) ??
     importedAt;
@@ -400,10 +398,19 @@ function pushDeletionObservation(
       : typeof deletion.sourceEventType === "string" && deletion.sourceEventType.trim()
         ? deletion.sourceEventType.trim()
         : typeof deletion.event_type === "string" && deletion.event_type.trim()
-          ? deletion.event_type.trim()
-          : typeof deletion.eventType === "string" && deletion.eventType.trim()
-            ? deletion.eventType.trim()
-            : undefined;
+        ? deletion.event_type.trim()
+        : typeof deletion.eventType === "string" && deletion.eventType.trim()
+          ? deletion.eventType.trim()
+          : undefined;
+  const resourceId =
+    stringId(deletion.resource_id ?? deletion.resourceId ?? deletion.object_id ?? deletion.objectId) ??
+    buildSyntheticDeletionResourceId({
+      provider: "oura",
+      resourceType,
+      occurredAt,
+      sourceEventType,
+      deletion,
+    });
   pushSharedDeletionObservation(events, rawArtifacts, {
     provider: "oura",
     providerDisplayName: "Oura",

@@ -4,6 +4,7 @@ import { stripEmptyObject } from "../shared.ts";
 import {
   asArray,
   asPlainObject,
+  buildSyntheticDeletionResourceId,
   makeNormalizedDeviceBatch,
   pushDeletionObservation as pushSharedDeletionObservation,
   slugify,
@@ -141,9 +142,6 @@ function pushDeletionObservation(
     deletion.resourceType ?? deletion.resource_type ?? deletion.dataType ?? deletion.data_type,
     "resource",
   );
-  const resourceId =
-    stringId(deletion.resourceId ?? deletion.resource_id ?? deletion.objectId ?? deletion.object_id) ??
-    `deleted-${events.length + 1}`;
   const occurredAt =
     firstIso(
       deletion.occurredAt,
@@ -158,6 +156,15 @@ function pushDeletionObservation(
       deletion.eventType,
       deletion.event_type,
     );
+  const resourceId =
+    stringId(deletion.resourceId ?? deletion.resource_id ?? deletion.objectId ?? deletion.object_id) ??
+    buildSyntheticDeletionResourceId({
+      provider: "garmin",
+      resourceType,
+      occurredAt,
+      sourceEventType,
+      deletion,
+    });
 
   pushSharedDeletionObservation(events, rawArtifacts, {
     provider: "garmin",
