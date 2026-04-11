@@ -546,10 +546,7 @@ test("WHOOP provider maps webhook events to the same job kinds, priorities, and 
     assert.equal(result?.eventType, testCase.eventType);
     assert.equal(result?.externalAccountId, "whoop-user-1");
     assert.equal(result?.traceId, `trace:${testCase.eventType}`);
-    assert.deepEqual(result?.payload, {
-      eventType: testCase.eventType,
-      resourceType: testCase.resourceType,
-    });
+    assert.equal(result?.resourceCategory, testCase.resourceType);
     assert.deepEqual(result?.jobs, [
       {
         kind: testCase.kind,
@@ -659,9 +656,7 @@ test("WHOOP provider accepts numeric-second timestamps and leaves unknown webhoo
     eventType: "team.updated",
     traceId: expectedTraceId,
     occurredAt: now,
-    payload: {
-      eventType: "team.updated",
-    },
+    resourceCategory: null,
     jobs: [],
   });
 });

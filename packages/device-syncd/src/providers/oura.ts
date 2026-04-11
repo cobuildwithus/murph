@@ -1064,11 +1064,7 @@ export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfi
         eventType,
         traceId,
         occurredAt,
-        payload: {
-          eventType,
-          dataType,
-          operation,
-        },
+        resourceCategory: dataType,
         jobs: [
           {
             kind: operation === "delete" ? "delete" : operation ? "resource" : "reconcile",

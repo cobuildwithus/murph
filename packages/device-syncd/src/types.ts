@@ -188,7 +188,8 @@ export interface ProviderWebhookResult {
   eventType: string;
   traceId: string;
   occurredAt?: string;
-  payload?: Record<string, unknown>;
+  // Keep the shared parser result narrow so ingress hooks do not inherit raw provider payloads.
+  resourceCategory?: string | null;
   jobs: DeviceSyncJobInput[];
 }
 
@@ -196,7 +197,8 @@ export interface DeviceSyncIngressWebhook {
   eventType: string;
   jobs: readonly DeviceSyncJobInput[];
   occurredAt?: string;
-  payload?: Record<string, unknown>;
+  // Accepted and unknown ingress hooks should receive only the stripped webhook summary.
+  resourceCategory?: string | null;
 }
 
 export interface ProviderWebhookAdminChallengeContext {

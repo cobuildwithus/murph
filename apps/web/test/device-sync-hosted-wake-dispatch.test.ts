@@ -366,14 +366,7 @@ describe("dispatchHostedDeviceSyncWake", () => {
               },
             ],
             occurredAt: "2026-03-26T11:59:00.000Z",
-            payload: {
-              dataType: "daily_sleep",
-              access_token: "provider-secret-token",
-              nested: {
-                ssn: "123-45-6789",
-              },
-              objectId: "daily-sleep-1",
-            },
+            resourceCategory: "daily_sleep",
           },
         });
         return {
@@ -1244,9 +1237,7 @@ describe("dispatchHostedDeviceSyncWake", () => {
               },
             ],
             occurredAt: "2026-03-26T11:59:00.000Z",
-            payload: {
-              resourceType: "workout",
-            },
+            resourceCategory: "workout",
           },
         });
         return {
@@ -1371,10 +1362,7 @@ describe("dispatchHostedDeviceSyncWake", () => {
         },
       ],
       occurredAt: "2026-03-26T11:59:00.000Z",
-      payload: {
-        dataType: "session",
-        operation: "delete",
-      },
+      resourceCategory: "session",
     };
     mocks.createDeviceSyncPublicIngress.mockImplementationOnce((input: {
       hooks?: {
