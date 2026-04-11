@@ -49,6 +49,38 @@ test("assertDeviceSyncControlRequest accepts valid loopback bearer auth and reje
   );
 });
 
+test("assertDeviceSyncControlRequest rejects forwarded proxy headers with the specific control-plane error", () => {
+  assert.throws(
+    () =>
+      assertDeviceSyncControlRequest({
+        headers: {
+          authorization: "Bearer control-token",
+          forwarded: "for=127.0.0.1",
+          host: "localhost",
+        },
+        remoteAddress: "127.0.0.1",
+        controlToken: "control-token",
+      }),
+    (error: unknown) =>
+      error instanceof DeviceSyncError &&
+      error.code === "CONTROL_PLANE_PROXY_HEADERS_REJECTED" &&
+      error.httpStatus === 403,
+  );
+});
+
+test("assertDeviceSyncControlRequest accepts ipv6 loopback hosts after shared loopback validation", () => {
+  assert.doesNotThrow(() =>
+    assertDeviceSyncControlRequest({
+      headers: {
+        authorization: "Bearer control-token",
+        host: "[::1]:8788",
+      },
+      remoteAddress: "::ffff:127.0.0.1",
+      controlToken: "control-token",
+    }),
+  );
+});
+
 test("buildPublicDeviceSyncErrorPayload exposes only safe numeric status details", () => {
   const withNumericStatus = buildPublicDeviceSyncErrorPayload(
     new DeviceSyncError({

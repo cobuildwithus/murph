@@ -1,4 +1,3 @@
-import { timingSafeEqual } from 'node:crypto'
 import {
   createServer,
   type IncomingHttpHeaders,
@@ -9,10 +8,10 @@ import {
 import type { AddressInfo } from 'node:net'
 import { URL } from 'node:url'
 import {
-  hasForwardedLoopbackControlHeaders,
-  hasLoopbackControlHostHeader,
+  assertLoopbackListenerHost,
+  getLoopbackControlRequestRejectionReason,
 } from '@murphai/runtime-state'
-import { isLoopbackRemoteAddress } from '@murphai/runtime-state/node'
+import { hasMatchingLoopbackControlBearerToken } from '@murphai/runtime-state/node'
 import {
   AssistantHttpRequestError,
   assertAssistantBoundVault,
@@ -71,6 +70,11 @@ export type AssistantHttpRequestHandler = (
 export async function startAssistantHttpServer(
   input: CreateAssistantHttpServerInput,
 ): Promise<AssistantHttpServerHandle> {
+  assertLoopbackListenerHost(
+    input.host,
+    'Assistant daemon listener host must be a loopback hostname or address.',
+  )
+
   const server = createServer(createAssistantHttpRequestHandler(input))
   const address = await listenAssistantServer(server, input.host, input.port)
 
@@ -270,11 +274,16 @@ export function assertAssistantControlRequest(input: {
   remoteAddress: string | null | undefined
   controlToken: string
 }): void {
-  if (!isLoopbackRemoteAddress(input.remoteAddress)) {
+  const rejectionReason = getLoopbackControlRequestRejectionReason({
+    headers: input.headers,
+    remoteAddress: input.remoteAddress,
+  })
+
+  if (rejectionReason === 'loopback-remote-address-required') {
     throw new AssistantHttpRequestError('Forbidden.', 403)
   }
 
-  if (hasForwardedLoopbackControlHeaders(input.headers)) {
+  if (rejectionReason === 'forwarded-headers-rejected') {
     throw new AssistantHttpRequestError(
       'Forbidden.',
       403,
@@ -282,7 +291,7 @@ export function assertAssistantControlRequest(input: {
     )
   }
 
-  if (!hasLoopbackControlHostHeader(input.headers.host)) {
+  if (rejectionReason === 'loopback-host-required') {
     throw new AssistantHttpRequestError(
       'Forbidden.',
       403,
@@ -314,32 +323,7 @@ function hasMatchingControlToken(
   headers: IncomingHttpHeaders,
   expectedToken: string,
 ): boolean {
-  const providedToken = readBearerToken(headers.authorization)
-  if (!providedToken) {
-    return false
-  }
-
-  const provided = Buffer.from(providedToken, 'utf8')
-  const expected = Buffer.from(expectedToken, 'utf8')
-  return provided.length === expected.length && timingSafeEqual(provided, expected)
-}
-
-function readBearerToken(value: string | string[] | undefined): string | null {
-  const header = readHeaderValue(value)
-  if (!header) {
-    return null
-  }
-
-  const matched = header.match(/^bearer\s+(.+)$/iu)
-  return matched?.[1]?.trim() || null
-}
-
-function readHeaderValue(value: string | string[] | undefined): string | null {
-  if (Array.isArray(value)) {
-    return value.length === 1 ? readHeaderValue(value[0]) : null
-  }
-
-  return typeof value === 'string' && value.trim() ? value.trim() : null
+  return hasMatchingLoopbackControlBearerToken(headers.authorization, expectedToken)
 }
 
 function buildAssistantServerBaseUrl(address: AddressInfo): string {

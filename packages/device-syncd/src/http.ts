@@ -1,13 +1,10 @@
-import { Buffer } from "node:buffer";
-import { timingSafeEqual } from "node:crypto";
 import { createServer } from "node:http";
 
 import {
   assertLoopbackListenerHost,
-  hasForwardedLoopbackControlHeaders,
-  hasLoopbackControlHostHeader,
+  getLoopbackControlRequestRejectionReason,
 } from "@murphai/runtime-state";
-import { isLoopbackRemoteAddress } from "@murphai/runtime-state/node";
+import { hasMatchingLoopbackControlBearerToken } from "@murphai/runtime-state/node";
 
 import { deviceSyncError, isDeviceSyncError } from "./errors.ts";
 import { DEFAULT_DEVICE_SYNC_HOST } from "./shared.ts";
@@ -71,7 +68,12 @@ export function assertDeviceSyncControlRequest(input: {
   remoteAddress: string | null | undefined;
   controlToken: string;
 }): void {
-  if (!isLoopbackRemoteAddress(input.remoteAddress)) {
+  const rejectionReason = getLoopbackControlRequestRejectionReason({
+    headers: input.headers,
+    remoteAddress: input.remoteAddress,
+  });
+
+  if (rejectionReason === "loopback-remote-address-required") {
     throw deviceSyncError({
       code: "CONTROL_PLANE_LOOPBACK_REQUIRED",
       message: "Device sync control routes only accept loopback requests.",
@@ -80,7 +82,7 @@ export function assertDeviceSyncControlRequest(input: {
     });
   }
 
-  if (hasForwardedLoopbackControlHeaders(input.headers)) {
+  if (rejectionReason === "forwarded-headers-rejected") {
     throw deviceSyncError({
       code: "CONTROL_PLANE_PROXY_HEADERS_REJECTED",
       message: "Device sync control routes reject forwarded proxy headers.",
@@ -89,7 +91,7 @@ export function assertDeviceSyncControlRequest(input: {
     });
   }
 
-  if (!hasLoopbackControlHostHeader(input.headers.host)) {
+  if (rejectionReason === "loopback-host-required") {
     throw deviceSyncError({
       code: "CONTROL_PLANE_LOOPBACK_HOST_REQUIRED",
       message: "Device sync control routes require a loopback Host header.",
@@ -823,35 +825,7 @@ function readStringField(record: Record<string, unknown>, key: string): string |
 }
 
 function hasMatchingControlToken(headers: IncomingHttpHeaders, expectedToken: string): boolean {
-  const providedToken = readBearerToken(headers.authorization);
-
-  if (!providedToken) {
-    return false;
-  }
-
-  const expected = Buffer.from(expectedToken, "utf8");
-  const provided = Buffer.from(providedToken, "utf8");
-
-  return expected.length === provided.length && timingSafeEqual(expected, provided);
-}
-
-function readBearerToken(value: string | string[] | undefined): string | null {
-  const header = readHeaderValue(value);
-
-  if (!header) {
-    return null;
-  }
-
-  const match = header.match(/^bearer\s+(.+)$/iu);
-  return match?.[1]?.trim() || null;
-}
-
-function readHeaderValue(value: string | string[] | undefined): string | null {
-  if (Array.isArray(value)) {
-    return value.length === 1 ? readHeaderValue(value[0]) : null;
-  }
-
-  return typeof value === "string" && value.trim() ? value.trim() : null;
+  return hasMatchingLoopbackControlBearerToken(headers.authorization, expectedToken);
 }
 
 function formatProviderLabel(provider: string): string {
