@@ -8,6 +8,7 @@ import { scopeWebhookTraceId, sha256Text } from "../src/shared.ts";
 
 import type {
   ClaimDeviceSyncWebhookTraceInput,
+  DeviceSyncIngressWebhook,
   DeviceSyncWebhookTraceClaimResult,
   DeviceSyncProvider,
   DeviceSyncPublicIngressStore,
@@ -634,6 +635,124 @@ test("public ingress leaves unknown-account webhook traces retryable and reruns 
   ]);
   assert.equal(store.completedWebhookTraceCalls, 0);
   assert.equal(store.lastRecordedWebhookTrace, null);
+});
+
+test("public ingress passes only a stripped webhook summary into accepted hooks", async () => {
+  const store = new InMemoryPublicIngressStore();
+  const acceptedCalls: Array<{ traceId: string; webhook: DeviceSyncIngressWebhook }> = [];
+  const ingress = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    registry: createDeviceSyncRegistry([
+      createFakeProvider({
+        async verifyAndParseWebhook() {
+          return {
+            externalAccountId: "demo-abc",
+            eventType: "demo.updated",
+            traceId: "trace-summary",
+            occurredAt: "2026-04-11T12:59:00.000Z",
+            resourceCategory: "  sleep  ",
+            jobs: [
+              {
+                kind: "resource",
+                payload: {
+                  resourceId: "resource-1",
+                },
+              },
+            ],
+          };
+        },
+      }),
+    ]),
+    store,
+    hooks: {
+      onWebhookAccepted({ account, traceId, webhook }) {
+        acceptedCalls.push({ traceId, webhook });
+        return completeWebhookAcceptDurably(store, account, traceId);
+      },
+    },
+  });
+
+  const begin = await ingress.startConnection({ provider: "demo" });
+  await ingress.handleOAuthCallback({
+    provider: "demo",
+    state: begin.state,
+    code: "abc",
+  });
+
+  const result = await ingress.handleWebhook("demo", new Headers(), Buffer.from("{}"));
+
+  assert.equal(result.accepted, true);
+  assert.equal(result.duplicate, false);
+  assert.equal(result.traceId, scopeWebhookTraceId("demo", "demo-abc", "trace-summary"));
+  assert.deepEqual(acceptedCalls, [
+    {
+      traceId: scopeWebhookTraceId("demo", "demo-abc", "trace-summary"),
+      webhook: {
+        eventType: "demo.updated",
+        jobs: [
+          {
+            kind: "resource",
+            payload: {
+              resourceId: "resource-1",
+            },
+          },
+        ],
+        occurredAt: "2026-04-11T12:59:00.000Z",
+        resourceCategory: "sleep",
+      },
+    },
+  ]);
+  assert.equal(Object.prototype.hasOwnProperty.call(acceptedCalls[0]?.webhook ?? {}, "payload"), false);
+});
+
+test("public ingress passes the same stripped webhook summary into unknown hooks", async () => {
+  const store = new InMemoryPublicIngressStore();
+  const unknownCalls: Array<{ traceId: string; webhook: DeviceSyncIngressWebhook }> = [];
+  const ingress = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    registry: createDeviceSyncRegistry([
+      createFakeProvider({
+        async verifyAndParseWebhook() {
+          return {
+            externalAccountId: "demo-late",
+            eventType: "demo.updated",
+            traceId: "trace-summary-unknown",
+            occurredAt: "2026-04-11T12:59:00.000Z",
+            resourceCategory: "  sleep  ",
+            jobs: [],
+          };
+        },
+      }),
+    ]),
+    store,
+    hooks: {
+      onUnknownWebhook({ traceId, webhook }) {
+        unknownCalls.push({ traceId, webhook });
+      },
+    },
+  });
+
+  await assert.rejects(
+    () => ingress.handleWebhook("demo", new Headers(), Buffer.from("{}")),
+    (error: unknown) =>
+      error instanceof DeviceSyncError
+      && error.code === "WEBHOOK_ACCOUNT_NOT_READY"
+      && error.httpStatus === 503
+      && error.retryable === true,
+  );
+
+  assert.deepEqual(unknownCalls, [
+    {
+      traceId: scopeWebhookTraceId("demo", "demo-late", "trace-summary-unknown"),
+      webhook: {
+        eventType: "demo.updated",
+        jobs: [],
+        occurredAt: "2026-04-11T12:59:00.000Z",
+        resourceCategory: "sleep",
+      },
+    },
+  ]);
+  assert.equal(Object.prototype.hasOwnProperty.call(unknownCalls[0]?.webhook ?? {}, "payload"), false);
 });
 
 test("public ingress scopes durable webhook traces by external account while preserving same-account dedupe", async () => {

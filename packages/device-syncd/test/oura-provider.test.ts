@@ -636,11 +636,7 @@ test("Oura provider turns non-operation webhook events into reconcile hints and 
     eventType: "sync_completed",
     traceId: parsed?.traceId,
     occurredAt: "2026-03-16T10:00:00.000Z",
-    payload: {
-      eventType: "sync_completed",
-      dataType: "workout",
-      operation: null,
-    },
+    resourceCategory: "workout",
     jobs: [
       {
         kind: "reconcile",
@@ -698,11 +694,7 @@ test("Oura provider validates webhook signatures and turns notifications into re
     eventType: "daily_sleep.updated",
     traceId: parsed?.traceId,
     occurredAt: "2026-03-16T09:58:00.000Z",
-    payload: {
-      eventType: "daily_sleep.updated",
-      dataType: "daily_sleep",
-      operation: "update",
-    },
+    resourceCategory: "daily_sleep",
     jobs: [
       {
         kind: "resource",
@@ -753,7 +745,7 @@ test("Oura provider accepts uppercase hexadecimal webhook signatures", async () 
   });
 
   assert.equal(parsed?.eventType, "daily_sleep.updated");
-  assert.equal(parsed?.payload?.dataType, "daily_sleep");
+  assert.equal(parsed?.resourceCategory, "daily_sleep");
 });
 
 test("Oura provider accepts base64 webhook signatures and falls back to the request time when event_time is absent", async () => {
@@ -789,11 +781,7 @@ test("Oura provider accepts base64 webhook signatures and falls back to the requ
     eventType: "workout.updated",
     traceId: parsed?.traceId,
     occurredAt: now,
-    payload: {
-      eventType: "workout.updated",
-      dataType: "workout",
-      operation: "update",
-    },
+    resourceCategory: "workout",
     jobs: [
       {
         kind: "resource",
@@ -906,11 +894,7 @@ test("Oura provider accepts documented numeric-second timestamps, uses event_tim
     eventType: "session.deleted",
     traceId: parsed?.traceId,
     occurredAt: "2026-03-16T09:58:00.000Z",
-    payload: {
-      eventType: "session.deleted",
-      dataType: "session",
-      operation: "delete",
-    },
+    resourceCategory: "session",
     jobs: [
       {
         kind: "delete",

@@ -1,6 +1,7 @@
 import {
   deviceSyncError,
   isDeviceSyncError,
+  type DeviceSyncIngressWebhook,
   type DeviceSyncJobInput,
   type DeviceSyncRegistry,
   type ProviderConnectionResult,
@@ -278,12 +279,7 @@ export async function handleHostedDeviceSyncWebhookAccepted(input: {
   now: string;
   store: PrismaDeviceSyncControlPlaneStore;
   traceId?: string | null;
-  webhook: {
-    eventType: string;
-    jobs?: readonly DeviceSyncJobInput[];
-    occurredAt?: string | null;
-    payload?: Record<string, unknown>;
-  };
+  webhook: DeviceSyncIngressWebhook;
 }): Promise<void> {
   const traceId = normalizeNullableString(input.traceId);
   const ownerId = await input.store.getConnectionOwnerId(input.account.id);
@@ -308,8 +304,8 @@ export async function handleHostedDeviceSyncWebhookAccepted(input: {
     eventType: input.webhook.eventType,
     jobs: input.webhook.jobs,
     occurredAt: input.webhook.occurredAt ?? null,
-    payload: input.webhook.payload,
     provider: input.account.provider,
+    resourceCategory: input.webhook.resourceCategory ?? null,
     traceId,
   });
   const dispatch = buildHostedDeviceSyncWakeDispatch({
@@ -453,16 +449,9 @@ function buildHostedWebhookHintSignal(input: {
   jobs?: readonly DeviceSyncJobInput[];
   traceId?: string | null;
   occurredAt?: string | null;
-  payload?: Record<string, unknown>;
   provider: string;
+  resourceCategory?: string | null;
 }): NonNullable<HostedExecutionDeviceSyncWakeEvent["hint"]> {
-  const resourceCategory =
-    typeof input.payload?.dataType === "string"
-      ? input.payload.dataType
-      : typeof input.payload?.resourceType === "string"
-        ? input.payload.resourceType
-        : null;
-
   return {
     eventType: input.eventType,
     jobs: normalizeHostedDeviceSyncJobHints({
@@ -474,7 +463,7 @@ function buildHostedWebhookHintSignal(input: {
       traceId: input.traceId,
     }),
     occurredAt: input.occurredAt ?? null,
-    resourceCategory,
+    resourceCategory: input.resourceCategory ?? null,
     traceId: input.traceId ?? null,
   } satisfies HostedExecutionDeviceSyncWakeEvent["hint"];
 }

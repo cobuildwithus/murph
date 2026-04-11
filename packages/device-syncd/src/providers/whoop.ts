@@ -465,19 +465,6 @@ export function createWhoopDeviceSyncProvider(config: WhoopDeviceSyncProviderCon
     ];
   }
 
-  function buildWhoopWebhookHint(eventType: string): Record<string, unknown> {
-    const eventDescriptor = WHOOP_WEBHOOK_EVENT_MAP[eventType];
-
-    return eventDescriptor
-      ? {
-          eventType,
-          resourceType: eventDescriptor.resourceType,
-        }
-      : {
-          eventType,
-        };
-  }
-
   function createApiSession(context: ProviderJobContext) {
     const session = createRefreshingApiSession({
       context,
@@ -766,7 +753,7 @@ export function createWhoopDeviceSyncProvider(config: WhoopDeviceSyncProviderCon
         eventType,
         traceId,
         occurredAt: context.now,
-        payload: buildWhoopWebhookHint(eventType),
+        resourceCategory: WHOOP_WEBHOOK_EVENT_MAP[eventType]?.resourceType ?? null,
         jobs: buildWhoopWebhookJobs(eventType, resourceId, payload, traceId),
       };
     },

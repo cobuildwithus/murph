@@ -44,13 +44,15 @@ function toIngressWebhook(parsed: {
   eventType: string;
   jobs: DeviceSyncIngressWebhook["jobs"];
   occurredAt?: string;
-  payload?: Record<string, unknown>;
+  resourceCategory?: string | null;
 }): DeviceSyncIngressWebhook {
+  const resourceCategory = normalizeString(parsed.resourceCategory);
+
   return {
     eventType: parsed.eventType,
     jobs: [...parsed.jobs],
     ...(parsed.occurredAt ? { occurredAt: parsed.occurredAt } : {}),
-    ...(parsed.payload ? { payload: parsed.payload } : {}),
+    ...(resourceCategory ? { resourceCategory } : {}),
   };
 }
 
@@ -505,6 +507,7 @@ export type {
   CompleteConnectionResult,
   DeviceSyncAccount,
   DeviceSyncAccountStatus,
+  DeviceSyncIngressWebhook,
   DeviceSyncJobInput,
   DeviceSyncProvider,
   DeviceSyncPublicIngressStore,
