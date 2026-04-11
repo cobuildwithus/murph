@@ -1,3 +1,4 @@
+import { DEFAULT_DEVICE_SYNC_HTTP_BODY_LIMIT_BYTES } from "@murphai/device-syncd/public-ingress";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -1042,6 +1043,33 @@ describe("dispatchHostedDeviceSyncWake", () => {
         tx: mocks.prismaTx,
       }),
     );
+  });
+
+  it("rejects hosted webhook bodies above the shared device-sync limit before ingress parsing", async () => {
+    const controlPlane = new HostedDeviceSyncControlPlane(
+      new Request("https://control.example.test/api/device-sync/webhooks/oura", {
+        body: "x".repeat(DEFAULT_DEVICE_SYNC_HTTP_BODY_LIMIT_BYTES + 1),
+        headers: {
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+    );
+
+    await expect(controlPlane.handleWebhook("oura")).rejects.toMatchObject({
+      code: "PAYLOAD_TOO_LARGE",
+      httpStatus: 413,
+      message: `Request body exceeded ${DEFAULT_DEVICE_SYNC_HTTP_BODY_LIMIT_BYTES} bytes.`,
+      retryable: false,
+    });
+
+    const ingress = mocks.createDeviceSyncPublicIngress.mock.results[0]?.value as {
+      handleWebhook: ReturnType<typeof vi.fn>;
+    };
+    expect(ingress.handleWebhook).not.toHaveBeenCalled();
+    expect(mocks.createSignal).not.toHaveBeenCalled();
+    expect(mocks.completeWebhookTrace).not.toHaveBeenCalled();
+    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
   });
 
   it("does not complete or drain a hosted webhook trace when the outbox enqueue fails", async () => {

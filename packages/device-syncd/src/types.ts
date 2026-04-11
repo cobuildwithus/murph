@@ -10,6 +10,11 @@ import type {
 
 export type { DeviceSyncAccountStatus } from "./client.ts";
 
+export const DEFAULT_DEVICE_SYNC_HTTP_BODY_LIMIT_BYTES = 1_048_576;
+export const DEVICE_SYNC_WEBHOOK_TRACE_COMPLETED = {
+  webhookTraceCompleted: true,
+} as const;
+
 export interface DeviceSyncLogger {
   debug?(message: string, context?: Record<string, unknown>): void;
   info?(message: string, context?: Record<string, unknown>): void;
@@ -98,7 +103,6 @@ export interface DeviceSyncWebhookTraceRecord {
   externalAccountId: string;
   eventType: string;
   receivedAt: string;
-  payload?: Record<string, unknown>;
 }
 
 export interface ClaimDeviceSyncWebhookTraceInput extends DeviceSyncWebhookTraceRecord {
@@ -225,6 +229,10 @@ export interface DeviceSyncPublicIngressWebhookAcceptedInput {
   now: string;
 }
 
+export interface DeviceSyncPublicIngressWebhookAcceptedResult {
+  webhookTraceCompleted: true;
+}
+
 export interface DeviceSyncPublicIngressUnknownWebhookInput {
   provider: DeviceSyncProvider;
   traceId: string;
@@ -237,7 +245,9 @@ export interface DeviceSyncPublicIngressHooks {
   onConnectionEstablished?(input: DeviceSyncPublicIngressConnectionEstablishedInput): void | Promise<void>;
   // When present, the hook owns durable webhook acceptance and must complete the claimed trace
   // transactionally once its side effects are committed by using traceId.
-  onWebhookAccepted?(input: DeviceSyncPublicIngressWebhookAcceptedInput): void | Promise<void>;
+  onWebhookAccepted?(
+    input: DeviceSyncPublicIngressWebhookAcceptedInput,
+  ): DeviceSyncPublicIngressWebhookAcceptedResult | Promise<DeviceSyncPublicIngressWebhookAcceptedResult>;
   onUnknownWebhook?(input: DeviceSyncPublicIngressUnknownWebhookInput): void | Promise<void>;
 }
 

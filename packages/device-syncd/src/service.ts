@@ -17,6 +17,7 @@ import {
   toIsoTimestamp,
 } from "./shared.ts";
 import { SqliteDeviceSyncStore } from "./store.ts";
+import { DEVICE_SYNC_WEBHOOK_TRACE_COMPLETED } from "./types.ts";
 
 import type {
   BeginConnectionResult,
@@ -138,6 +139,7 @@ export class DeviceSyncService {
             traceId,
             jobs: webhook.jobs,
           });
+          return DEVICE_SYNC_WEBHOOK_TRACE_COMPLETED;
         },
       },
       log: this.logger,

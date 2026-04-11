@@ -60,8 +60,60 @@ export async function readOptionalJsonObject(request: Request): Promise<Record<s
   return requireJsonObject(JSON.parse(text) as unknown);
 }
 
-export async function readRawBodyBuffer(request: Request): Promise<Buffer> {
-  return Buffer.from(await request.arrayBuffer());
+export async function readRawBodyBuffer(
+  request: Request,
+  options: { limitBytes?: number } = {},
+): Promise<Buffer> {
+  const limitBytes = options.limitBytes;
+
+  if (limitBytes === undefined) {
+    return Buffer.from(await request.arrayBuffer());
+  }
+
+  const declaredContentLength = request.headers.get("content-length");
+
+  if (declaredContentLength) {
+    const parsedContentLength = Number.parseInt(declaredContentLength, 10);
+
+    if (Number.isFinite(parsedContentLength) && parsedContentLength > limitBytes) {
+      throw new RangeError(`Request body exceeded ${limitBytes} bytes.`);
+    }
+  }
+
+  if (!request.body) {
+    return Buffer.alloc(0);
+  }
+
+  const reader = request.body.getReader();
+  const chunks: Buffer[] = [];
+  let totalBytes = 0;
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+
+      if (done) {
+        break;
+      }
+
+      if (!value || value.byteLength === 0) {
+        continue;
+      }
+
+      totalBytes += value.byteLength;
+
+      if (totalBytes > limitBytes) {
+        await reader.cancel();
+        throw new RangeError(`Request body exceeded ${limitBytes} bytes.`);
+      }
+
+      chunks.push(Buffer.from(value));
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  return Buffer.concat(chunks, totalBytes);
 }
 
 export async function resolveRouteParams<TParams extends Record<string, string>>(

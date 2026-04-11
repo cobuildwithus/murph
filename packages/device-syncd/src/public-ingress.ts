@@ -372,8 +372,10 @@ export class DeviceSyncPublicIngress {
         };
     }
 
+    const onWebhookAccepted = this.hooks.onWebhookAccepted;
+
     try {
-      await this.hooks.onWebhookAccepted?.({
+      const acceptedResult = await onWebhookAccepted?.({
         account,
         traceId,
         webhook,
@@ -381,8 +383,15 @@ export class DeviceSyncPublicIngress {
         now,
       });
 
-      if (!this.hooks.onWebhookAccepted) {
+      if (!onWebhookAccepted) {
         await this.store.completeWebhookTrace(provider.provider, traceId);
+      } else if (acceptedResult?.webhookTraceCompleted !== true) {
+        throw deviceSyncError({
+          code: "WEBHOOK_TRACE_COMPLETION_REQUIRED",
+          message: "Webhook acceptance must complete the claimed trace before returning.",
+          retryable: true,
+          httpStatus: 503,
+        });
       }
     } catch (error) {
       await this.store.releaseWebhookTrace(provider.provider, traceId);
@@ -486,6 +495,10 @@ export { createOuraDeviceSyncProvider } from "./providers/oura.ts";
 export type { OuraDeviceSyncProviderConfig } from "./providers/oura.ts";
 export { createWhoopDeviceSyncProvider } from "./providers/whoop.ts";
 export type { WhoopDeviceSyncProviderConfig } from "./providers/whoop.ts";
+export {
+  DEFAULT_DEVICE_SYNC_HTTP_BODY_LIMIT_BYTES,
+  DEVICE_SYNC_WEBHOOK_TRACE_COMPLETED,
+} from "./types.ts";
 export type {
   BeginConnectionResult,
   ClaimDeviceSyncWebhookTraceInput,
@@ -495,6 +508,7 @@ export type {
   DeviceSyncJobInput,
   DeviceSyncProvider,
   DeviceSyncPublicIngressStore,
+  DeviceSyncPublicIngressWebhookAcceptedResult,
   DeviceSyncRegistry,
   DeviceSyncWebhookTraceClaimResult,
   HandleWebhookResult,
