@@ -1,6 +1,7 @@
 import { createServer } from "node:http";
 
 import {
+  assertListenerPort,
   assertLoopbackListenerHost,
   assertUnbracketedListenerHost,
   getLoopbackControlRequestRejectionReason,
@@ -128,6 +129,11 @@ export async function startDeviceSyncHttpServer(input: CreateDeviceSyncHttpServe
     "Device sync control listener host must be a loopback hostname or address. Use publicHost/publicPort for externally reachable callback and webhook routes.",
   );
   const port = input.config?.port ?? 8788;
+  assertListenerPort(
+    port,
+    "Device sync control listener port must be an integer between 0 and 65535.",
+    { allowZero: true },
+  );
   const controlToken = requireControlToken(input.config?.controlToken);
   const publicListener = resolvePublicListener(input.config);
   const controlHandler = createDeviceSyncHttpRequestHandler({
@@ -542,6 +548,11 @@ function resolvePublicListener(
   assertUnbracketedListenerHost(
     publicHost,
     "Device sync public listener host must be a hostname or address without URL bracket syntax. Use ::1, not [::1].",
+  );
+  assertListenerPort(
+    publicPort,
+    "Device sync public listener port must be an integer between 0 and 65535.",
+    { allowZero: true },
   );
 
   return {

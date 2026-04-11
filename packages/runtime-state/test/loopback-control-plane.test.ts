@@ -3,12 +3,14 @@ import assert from "node:assert/strict";
 import { test } from "vitest";
 
 import {
+  assertListenerPort,
   assertLoopbackListenerHost,
   assertUnbracketedListenerHost,
   getLoopbackControlRequestRejectionReason,
   hasForwardedLoopbackControlHeaders,
   hasLoopbackControlHostHeader,
   isBracketedListenerHost,
+  isListenerPort,
   isLoopbackHostname,
   isLoopbackHttpBaseUrl,
   isLoopbackListenerHost,
@@ -94,6 +96,18 @@ test("listener host helpers distinguish listener syntax from URL and Host-header
   assert.throws(() => assertUnbracketedListenerHost("[::1]"), TypeError);
   assert.equal(isLoopbackHttpBaseUrl("http://[::1]:50241"), true);
   assert.equal(hasLoopbackControlHostHeader("[::1]:50241"), true);
+});
+
+test("listener port helpers accept integer TCP ports and reject invalid values", () => {
+  assert.equal(isListenerPort(0), false);
+  assert.equal(isListenerPort(0, { allowZero: true }), true);
+  assert.equal(isListenerPort(50241), true);
+  assert.equal(isListenerPort(65_536), false);
+  assert.equal(isListenerPort(50.5), false);
+  assert.doesNotThrow(() =>
+    assertListenerPort(0, "listener port", { allowZero: true }),
+  );
+  assert.throws(() => assertListenerPort(-1), TypeError);
 });
 
 test("readLoopbackControlHeaderValue trims single values and rejects duplicates or blanks", () => {

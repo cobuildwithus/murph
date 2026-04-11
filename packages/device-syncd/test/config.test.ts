@@ -102,6 +102,30 @@ test("loadDeviceSyncEnvironment supports an explicit control token and public li
   assert.equal(loaded.http.publicPort, 9876);
 });
 
+test("loadDeviceSyncEnvironment rejects non-decimal and out-of-range listener ports", () => {
+  assert.throws(
+    () =>
+      loadDeviceSyncEnvironment({
+        DEVICE_SYNC_PORT: "1e3",
+        OURA_CLIENT_ID: "oura-client-id",
+        OURA_CLIENT_SECRET: "oura-client-secret",
+        ...createDeviceSyncEnv(),
+      }),
+    /DEVICE_SYNC_PORT must be an integer/u,
+  );
+  assert.throws(
+    () =>
+      loadDeviceSyncEnvironment({
+        DEVICE_SYNC_PUBLIC_HOST: "0.0.0.0",
+        DEVICE_SYNC_PUBLIC_PORT: "70000",
+        OURA_CLIENT_ID: "oura-client-id",
+        OURA_CLIENT_SECRET: "oura-client-secret",
+        ...createDeviceSyncEnv(),
+      }),
+    /DEVICE_SYNC_PUBLIC_PORT must be an integer between 0 and 65535/u,
+  );
+});
+
 test("loadDeviceSyncEnvironment rejects non-loopback DEVICE_SYNC_HOST values", () => {
   assert.throws(
     () =>
@@ -249,6 +273,15 @@ test("readConfiguredOuraDeviceSyncProviderConfig rejects invalid integer overrid
         OURA_CLIENT_ID: "oura-client-id",
         OURA_CLIENT_SECRET: "oura-client-secret",
         OURA_BACKFILL_DAYS: "soon",
+      }),
+    /OURA_BACKFILL_DAYS must be an integer/u,
+  );
+  assert.throws(
+    () =>
+      readConfiguredOuraDeviceSyncProviderConfig({
+        OURA_CLIENT_ID: "oura-client-id",
+        OURA_CLIENT_SECRET: "oura-client-secret",
+        OURA_BACKFILL_DAYS: "7days",
       }),
     /OURA_BACKFILL_DAYS must be an integer/u,
   );

@@ -40,18 +40,67 @@ async function main(): Promise<void> {
     }
   })();
 
-  const shutdown = async () => {
-    service.stop();
-    await server.close();
-    service.close();
+  let exitRequested = false;
+  let shutdownPromise: Promise<number> | null = null;
+
+  const shutdown = (): Promise<number> => {
+    if (shutdownPromise) {
+      return shutdownPromise;
+    }
+
+    shutdownPromise = (async () => {
+      const shutdownErrors: unknown[] = [];
+
+      try {
+        service.stop();
+      } catch (error) {
+        shutdownErrors.push(error);
+      }
+
+      try {
+        await server.close();
+      } catch (error) {
+        shutdownErrors.push(error);
+      }
+
+      try {
+        service.close();
+      } catch (error) {
+        shutdownErrors.push(error);
+      }
+
+      if (shutdownErrors.length === 1) {
+        throw shutdownErrors[0];
+      }
+
+      if (shutdownErrors.length > 1) {
+        throw new AggregateError(
+          shutdownErrors,
+          "Device sync shutdown failed.",
+        );
+      }
+    })().then(
+      () => 0,
+      (error) => {
+        console.error(formatDeviceSyncStartupError(error));
+        return 1;
+      },
+    );
+
+    return shutdownPromise;
   };
 
-  process.once("SIGINT", () => {
-    void shutdown().finally(() => process.exit(0));
-  });
-  process.once("SIGTERM", () => {
-    void shutdown().finally(() => process.exit(0));
-  });
+  const requestExit = () => {
+    if (exitRequested) {
+      return;
+    }
+
+    exitRequested = true;
+    void shutdown().then((exitCode) => process.exit(exitCode));
+  };
+
+  process.once("SIGINT", requestExit);
+  process.once("SIGTERM", requestExit);
 }
 
 void main().catch((error) => {

@@ -51,11 +51,11 @@ async function triggerSignal(signalHandlers: Map<string, () => void>, signal: st
   await waitForImmediate();
 }
 
-function assertShutdown(exitSpy: ReturnType<typeof vi.spyOn>): void {
+function assertShutdown(exitSpy: ReturnType<typeof vi.spyOn>, exitCode = 0): void {
   assert.equal(mocks.service.stop.mock.calls.length, 1);
   assert.equal(mocks.server.close.mock.calls.length, 1);
   assert.equal(mocks.service.close.mock.calls.length, 1);
-  assert.deepEqual(exitSpy.mock.calls, [[0]]);
+  assert.deepEqual(exitSpy.mock.calls, [[exitCode]]);
 }
 
 function mockProcessSignals() {
@@ -215,4 +215,54 @@ test("device-syncd bin preserves rollback failures when service.start throws aft
   } finally {
     process.exitCode = previousExitCode;
   }
+});
+
+test("device-syncd bin formats shutdown failures, still closes the service, and exits non-zero", async () => {
+  const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+  const { exitSpy, signalHandlers } = mockProcessSignals();
+
+  mocks.server.close.mockRejectedValueOnce(new Error("shutdown close failed"));
+  mocks.formatDeviceSyncStartupError.mockImplementationOnce((error: unknown) =>
+    error instanceof Error ? `formatted: ${error.message}` : "formatted",
+  );
+
+  await loadDeviceSyncBin();
+  await triggerSignal(signalHandlers, "SIGINT");
+
+  assert.equal(mocks.service.stop.mock.calls.length, 1);
+  assert.equal(mocks.server.close.mock.calls.length, 1);
+  assert.equal(mocks.service.close.mock.calls.length, 1);
+  assert.deepEqual(consoleErrorSpy.mock.calls, [["formatted: shutdown close failed"]]);
+  assert.deepEqual(exitSpy.mock.calls, [[1]]);
+});
+
+test("device-syncd bin coalesces duplicate shutdown signals into one cleanup pass", async () => {
+  const closeControl: { resolve: (() => void) | null } = { resolve: null };
+  mocks.server.close.mockImplementationOnce(
+    () => new Promise<void>((resolve) => {
+      closeControl.resolve = resolve;
+    }),
+  );
+  const { exitSpy, signalHandlers } = mockProcessSignals();
+
+  await loadDeviceSyncBin();
+
+  signalHandlers.get("SIGINT")?.();
+  signalHandlers.get("SIGTERM")?.();
+  await waitForImmediate();
+
+  assert.equal(mocks.service.stop.mock.calls.length, 1);
+  assert.equal(mocks.server.close.mock.calls.length, 1);
+  assert.equal(mocks.service.close.mock.calls.length, 0);
+  assert.equal(exitSpy.mock.calls.length, 0);
+
+  const resolveClose = closeControl.resolve;
+  if (!resolveClose) {
+    throw new Error("Expected server.close() to expose a resolver.");
+  }
+  resolveClose();
+  await waitForImmediate();
+
+  assert.equal(mocks.service.close.mock.calls.length, 1);
+  assert.deepEqual(exitSpy.mock.calls, [[0]]);
 });

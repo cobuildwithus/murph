@@ -1,4 +1,5 @@
 import {
+  assertListenerPort,
   assertLoopbackListenerHost,
   assertUnbracketedListenerHost,
 } from "@murphai/runtime-state";
@@ -164,7 +165,7 @@ export function loadDeviceSyncEnvironment(env: NodeJS.ProcessEnv = process.env):
     },
     http: {
       host,
-      port: parseIntegerEnv(env, DEVICE_SYNC_PORT_ENV_KEYS) ?? 8788,
+      port: parsePortEnv(env, DEVICE_SYNC_PORT_ENV_KEYS) ?? 8788,
       controlToken,
       ouraWebhookVerificationToken: optionalEnv(env, OURA_WEBHOOK_VERIFICATION_TOKEN_ENV_KEYS),
       ...publicListener,
@@ -316,7 +317,7 @@ export function readConfiguredOuraDeviceSyncProviderConfig(
 
 function readOptionalPublicListener(env: NodeJS.ProcessEnv): Pick<DeviceSyncHttpConfig, "publicHost" | "publicPort"> {
   const publicHost = optionalEnv(env, DEVICE_SYNC_PUBLIC_HOST_ENV_KEYS);
-  const publicPort = parseIntegerEnv(env, DEVICE_SYNC_PUBLIC_PORT_ENV_KEYS);
+  const publicPort = parsePortEnv(env, DEVICE_SYNC_PUBLIC_PORT_ENV_KEYS);
 
   if (!publicHost && publicPort === undefined) {
     return {};
@@ -390,13 +391,31 @@ function parseIntegerEnv(env: DeviceSyncEnvSource, keys: readonly string[]): num
     return undefined;
   }
 
-  const parsed = Number.parseInt(value, 10);
+  return parseDecimalInteger(value, keys[0]);
+}
 
-  if (!Number.isFinite(parsed)) {
-    throw new TypeError(`Environment variable ${keys[0]} must be an integer.`);
+function parsePortEnv(env: DeviceSyncEnvSource, keys: readonly string[]): number | undefined {
+  const parsed = parseIntegerEnv(env, keys);
+
+  if (parsed === undefined) {
+    return undefined;
   }
 
+  assertListenerPort(
+    parsed,
+    `Environment variable ${keys[0]} must be an integer between 0 and 65535.`,
+    { allowZero: true },
+  );
+
   return parsed;
+}
+
+function parseDecimalInteger(value: string, key: string): number {
+  if (!/^\d+$/u.test(value)) {
+    throw new TypeError(`Environment variable ${key} must be an integer.`);
+  }
+
+  return Number.parseInt(value, 10);
 }
 
 function parseCsvEnv(env: DeviceSyncEnvSource, keys: readonly string[]): string[] | undefined {
