@@ -6,12 +6,19 @@ import {
 } from './shared.js'
 import {
   createAssistantWebFetchRuntimeContext,
-  fetchAssistantWebResponse,
-  readAssistantWebResponseBytes,
+  normalizeAssistantWebRequestUrl,
+} from './web-fetch/config.js'
+import {
   resolveAssistantWebMediaType,
   truncateAssistantWebText,
+} from './web-fetch/content.js'
+import {
+  fetchAssistantWebResponse,
   redactAssistantWebFetchUrl,
-} from './web-fetch.js'
+} from './web-fetch/network.js'
+import {
+  readAssistantWebResponseBytes,
+} from './web-fetch/response.js'
 
 const ASSISTANT_WEB_PDF_READ_DEFAULT_MAX_CHARS = 12_000
 export const assistantWebPdfReadMaxChars = 40_000
@@ -142,15 +149,13 @@ function normalizeAssistantWebPdfReadRequest(
 
   let parsedUrl: URL
   try {
-    parsedUrl = new URL(url)
+    parsedUrl = normalizeAssistantWebRequestUrl(url)
   } catch {
     throw new VaultCliError(
       'WEB_PDF_READ_URL_INVALID',
       'web.pdf.read requires a valid absolute URL.',
     )
   }
-
-  parsedUrl.hash = ''
 
   return {
     url: parsedUrl,

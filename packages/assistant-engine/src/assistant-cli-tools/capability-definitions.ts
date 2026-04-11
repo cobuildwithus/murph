@@ -11,10 +11,12 @@ import {
   upsertKnowledgePage,
 } from '../knowledge.js'
 import {
-  assistantWebFetchExtractModeValues,
   fetchAssistantWeb,
-  resolveAssistantWebFetchEnabled,
 } from '../assistant/web-fetch.js'
+import {
+  assistantWebFetchExtractModeValues,
+  resolveAssistantWebFetchEnabled,
+} from '../assistant/web-fetch/config.js'
 import {
   assistantWebPdfReadMaxChars,
   assistantWebPdfReadMaxPages,
