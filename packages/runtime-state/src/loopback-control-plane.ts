@@ -69,11 +69,29 @@ export function isLoopbackHttpBaseUrl(baseUrl: string): boolean {
   return url.protocol === 'http:' && isLoopbackHostname(url.hostname)
 }
 
+export function isBracketedListenerHost(host: string): boolean {
+  return /^\[[^[\]]+\]$/u.test(host.trim())
+}
+
+export function assertUnbracketedListenerHost(
+  host: string,
+  message = 'Listener host must be an unbracketed hostname or address.',
+): void {
+  if (isBracketedListenerHost(host)) {
+    throw new TypeError(message)
+  }
+}
+
+export function isLoopbackListenerHost(host: string): boolean {
+  const trimmed = host.trim()
+  return !isBracketedListenerHost(trimmed) && isLoopbackHostname(trimmed)
+}
+
 export function assertLoopbackListenerHost(
   host: string,
   message = 'Loopback listener host must be a loopback hostname or address.',
 ): void {
-  if (!isLoopbackHostname(host)) {
+  if (!isLoopbackListenerHost(host)) {
     throw new TypeError(message)
   }
 }

@@ -115,6 +115,19 @@ test("loadDeviceSyncEnvironment rejects non-loopback DEVICE_SYNC_HOST values", (
   );
 });
 
+test("loadDeviceSyncEnvironment rejects URL-bracket control listener hosts", () => {
+  assert.throws(
+    () =>
+      loadDeviceSyncEnvironment({
+        DEVICE_SYNC_HOST: "[::1]",
+        OURA_CLIENT_ID: "oura-client-id",
+        OURA_CLIENT_SECRET: "oura-client-secret",
+        ...createDeviceSyncEnv(),
+      }),
+    /DEVICE_SYNC_HOST must be a loopback hostname or address/u,
+  );
+});
+
 test("loadDeviceSyncEnvironment ignores the removed bare PORT alias", () => {
   const loaded = loadDeviceSyncEnvironment({
     OURA_CLIENT_ID: "oura-client-id",
@@ -136,6 +149,20 @@ test("loadDeviceSyncEnvironment rejects partial public listener configuration", 
         ...createDeviceSyncEnv(),
       }),
     /DEVICE_SYNC_PUBLIC_HOST and DEVICE_SYNC_PUBLIC_PORT together/u,
+  );
+});
+
+test("loadDeviceSyncEnvironment rejects URL-bracket public listener hosts", () => {
+  assert.throws(
+    () =>
+      loadDeviceSyncEnvironment({
+        DEVICE_SYNC_PUBLIC_HOST: "[::1]",
+        DEVICE_SYNC_PUBLIC_PORT: "9876",
+        OURA_CLIENT_ID: "oura-client-id",
+        OURA_CLIENT_SECRET: "oura-client-secret",
+        ...createDeviceSyncEnv(),
+      }),
+    /DEVICE_SYNC_PUBLIC_HOST must be a hostname or address without URL bracket syntax/u,
   );
 });
 

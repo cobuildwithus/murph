@@ -145,6 +145,15 @@ test('loadAssistantdEnvironment validates the loopback host and numeric port', (
       loadAssistantdEnvironment({
         ASSISTANTD_VAULT_ROOT: '/tmp/vault',
         ASSISTANTD_CONTROL_TOKEN: 'secret-token',
+        ASSISTANTD_HOST: '[::1]',
+      }),
+    /loopback hostname or address/u,
+  )
+  assert.throws(
+    () =>
+      loadAssistantdEnvironment({
+        ASSISTANTD_VAULT_ROOT: '/tmp/vault',
+        ASSISTANTD_CONTROL_TOKEN: 'secret-token',
         ASSISTANTD_PORT: '0',
       }),
     /ASSISTANTD_PORT must be an integer between 1 and 65535/u,

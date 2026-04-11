@@ -1,4 +1,7 @@
-import { isLoopbackHostname } from "@murphai/runtime-state";
+import {
+  assertLoopbackListenerHost,
+  assertUnbracketedListenerHost,
+} from "@murphai/runtime-state";
 
 import {
   DEVICE_SYNC_CONTROL_TOKEN_ENV_KEYS,
@@ -129,11 +132,10 @@ export function loadDeviceSyncEnvironment(env: NodeJS.ProcessEnv = process.env):
   const publicListener = readOptionalPublicListener(env);
   const host = optionalEnv(env, DEVICE_SYNC_HOST_ENV_KEYS) ?? DEFAULT_DEVICE_SYNC_HOST;
 
-  if (!isLoopbackHostname(host)) {
-    throw new TypeError(
-      "DEVICE_SYNC_HOST must be a loopback hostname or address. Use DEVICE_SYNC_PUBLIC_HOST and DEVICE_SYNC_PUBLIC_PORT for externally reachable callback and webhook routes.",
-    );
-  }
+  assertLoopbackListenerHost(
+    host,
+    "DEVICE_SYNC_HOST must be a loopback hostname or address. Use DEVICE_SYNC_PUBLIC_HOST and DEVICE_SYNC_PUBLIC_PORT for externally reachable callback and webhook routes.",
+  );
 
   if (providers.length === 0) {
     throw new TypeError(
@@ -325,6 +327,11 @@ function readOptionalPublicListener(env: NodeJS.ProcessEnv): Pick<DeviceSyncHttp
       "Set DEVICE_SYNC_PUBLIC_HOST and DEVICE_SYNC_PUBLIC_PORT together to enable the public callback/webhook listener.",
     );
   }
+
+  assertUnbracketedListenerHost(
+    publicHost,
+    "DEVICE_SYNC_PUBLIC_HOST must be a hostname or address without URL bracket syntax. Use ::1, not [::1].",
+  );
 
   return {
     publicHost,
