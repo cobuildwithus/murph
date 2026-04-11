@@ -23,11 +23,6 @@ import {
 } from './types.js'
 import { readEnvValue } from '../env-values.js'
 
-const localRequire = createRequire(import.meta.url)
-const repoRootRequire = createRequire(
-  new URL('../../../../package.json', import.meta.url),
-)
-
 export function resolveDeviceDaemonPaths(vaultRoot: string): DeviceDaemonPaths {
   const runtimePaths = resolveDeviceSyncRuntimePaths(vaultRoot)
 
@@ -51,14 +46,52 @@ export function resolveDeviceSyncDaemonBinPath(
 
 export function resolveInstalledDeviceSyncPackageEntry(): string {
   try {
-    return localRequire.resolve('@murphai/device-syncd')
+    return createPackageScopedRequire('../../package.json').resolve(
+      '@murphai/device-syncd',
+    )
   } catch (error) {
     if (!isMissingDeviceSyncPackageError(error)) {
       throw error
     }
 
-    return repoRootRequire.resolve('@murphai/device-syncd')
+    return createPackageScopedRequire('../../../../package.json').resolve(
+      '@murphai/device-syncd',
+    )
   }
+}
+
+function createPackageScopedRequire(relativePackageJsonPath: string): NodeJS.Require {
+  const moduleUrl =
+    typeof import.meta.url === 'string' && import.meta.url.length > 0
+      ? import.meta.url
+      : null
+
+  if (moduleUrl !== null) {
+    try {
+      return createRequire(new URL(relativePackageJsonPath, moduleUrl))
+    } catch (error) {
+      if (!isInvalidCreateRequirePathError(error)) {
+        throw error
+      }
+    }
+  }
+
+  if (typeof process !== 'undefined' && typeof process.cwd === 'function') {
+    return createRequire(path.join(process.cwd(), 'package.json'))
+  }
+
+  throw new TypeError(
+    'Unable to resolve a package root for @murphai/device-syncd.',
+  )
+}
+
+function isInvalidCreateRequirePathError(error: unknown): boolean {
+  return (
+    error instanceof TypeError &&
+    error.message.includes(
+      "The argument must be a file URL object, a file URL string, or an absolute path string.",
+    )
+  )
 }
 
 function isMissingDeviceSyncPackageError(error: unknown): boolean {
