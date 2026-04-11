@@ -188,6 +188,13 @@ export interface ProviderWebhookResult {
   jobs: DeviceSyncJobInput[];
 }
 
+export interface DeviceSyncIngressWebhook {
+  eventType: string;
+  jobs: readonly DeviceSyncJobInput[];
+  occurredAt?: string;
+  payload?: Record<string, unknown>;
+}
+
 export interface ProviderWebhookAdminChallengeContext {
   url: URL;
   verificationToken: string | null;
@@ -212,15 +219,16 @@ export interface DeviceSyncPublicIngressConnectionEstablishedInput {
 
 export interface DeviceSyncPublicIngressWebhookAcceptedInput {
   account: PublicDeviceSyncAccount;
-  durableTraceId: string;
-  webhook: ProviderWebhookResult;
+  traceId: string;
+  webhook: DeviceSyncIngressWebhook;
   provider: DeviceSyncProvider;
   now: string;
 }
 
 export interface DeviceSyncPublicIngressUnknownWebhookInput {
   provider: DeviceSyncProvider;
-  webhook: ProviderWebhookResult;
+  traceId: string;
+  webhook: DeviceSyncIngressWebhook;
   externalAccountId: string;
   now: string;
 }
@@ -228,7 +236,7 @@ export interface DeviceSyncPublicIngressUnknownWebhookInput {
 export interface DeviceSyncPublicIngressHooks {
   onConnectionEstablished?(input: DeviceSyncPublicIngressConnectionEstablishedInput): void | Promise<void>;
   // When present, the hook owns durable webhook acceptance and must complete the claimed trace
-  // transactionally once its side effects are committed.
+  // transactionally once its side effects are committed by using traceId.
   onWebhookAccepted?(input: DeviceSyncPublicIngressWebhookAcceptedInput): void | Promise<void>;
   onUnknownWebhook?(input: DeviceSyncPublicIngressUnknownWebhookInput): void | Promise<void>;
 }

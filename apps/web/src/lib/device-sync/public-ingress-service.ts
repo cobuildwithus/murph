@@ -97,11 +97,12 @@ export class HostedDeviceSyncPublicIngressService {
 
           await this.webhookAdmin.ensureHostedWebhookAdminUpkeepForConnectionEstablished(provider);
         },
-        onWebhookAccepted: async ({ account, webhook, now }) => {
+        onWebhookAccepted: async ({ account, traceId, webhook, now }) => {
           await handleHostedDeviceSyncWebhookAccepted({
             account,
             now,
             store: this.context.store,
+            traceId,
             webhook,
           });
         },

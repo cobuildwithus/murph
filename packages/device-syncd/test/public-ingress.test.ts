@@ -202,9 +202,9 @@ class InMemoryPublicIngressStore implements DeviceSyncPublicIngressStore {
 function completeWebhookAcceptDurably(
   store: InMemoryPublicIngressStore,
   account: PublicDeviceSyncAccount,
-  durableTraceId: string,
+  traceId: string,
 ): void {
-  store.completeWebhookTrace(account.provider, durableTraceId);
+  store.completeWebhookTrace(account.provider, traceId);
 }
 
 function requireCallback(callback: (() => void) | null, message: string): () => void {
@@ -583,7 +583,7 @@ test("public ingress rejects webhook deliveries for providers without webhook ha
   );
 });
 
-test("public ingress dedupes unknown-account webhook deliveries before rerunning unknown hooks", async () => {
+test("public ingress leaves unknown-account webhook traces retryable and reruns unknown hooks", async () => {
   const store = new InMemoryPublicIngressStore();
   const unknownWebhooks: string[] = [];
   const ingress = createDeviceSyncPublicIngress({
@@ -602,24 +602,36 @@ test("public ingress dedupes unknown-account webhook deliveries before rerunning
     ]),
     store,
     hooks: {
-      onUnknownWebhook({ provider, externalAccountId, webhook }) {
-        unknownWebhooks.push(`${provider.provider}:${externalAccountId}:${webhook.traceId}`);
+      onUnknownWebhook({ provider, externalAccountId, traceId, webhook }) {
+        assert.equal("traceId" in webhook, false);
+        unknownWebhooks.push(`${provider.provider}:${externalAccountId}:${traceId}`);
       },
     },
   });
 
-  const first = await ingress.handleWebhook("demo", new Headers(), Buffer.from("{}"));
   const expectedScopedTraceId = scopeWebhookTraceId("demo", "demo-late", "trace-late");
-  assert.equal(first.accepted, true);
-  assert.equal(first.duplicate, false);
-  assert.deepEqual(unknownWebhooks, ["demo:demo-late:trace-late"]);
-  assert.equal(store.lastRecordedWebhookTrace?.traceId, expectedScopedTraceId);
-
-  const duplicate = await ingress.handleWebhook("demo", new Headers(), Buffer.from("{}"));
-  assert.equal(duplicate.accepted, true);
-  assert.equal(duplicate.duplicate, true);
-  assert.deepEqual(unknownWebhooks, ["demo:demo-late:trace-late"]);
-  assert.equal(store.completedWebhookTraceCalls, 1);
+  await assert.rejects(
+    () => ingress.handleWebhook("demo", new Headers(), Buffer.from("{}")),
+    (error: unknown) =>
+      error instanceof DeviceSyncError
+      && error.code === "WEBHOOK_ACCOUNT_NOT_READY"
+      && error.httpStatus === 503
+      && error.retryable === true,
+  );
+  await assert.rejects(
+    () => ingress.handleWebhook("demo", new Headers(), Buffer.from("{}")),
+    (error: unknown) =>
+      error instanceof DeviceSyncError
+      && error.code === "WEBHOOK_ACCOUNT_NOT_READY"
+      && error.httpStatus === 503
+      && error.retryable === true,
+  );
+  assert.deepEqual(unknownWebhooks, [
+    `demo:demo-late:${expectedScopedTraceId}`,
+    `demo:demo-late:${expectedScopedTraceId}`,
+  ]);
+  assert.equal(store.completedWebhookTraceCalls, 0);
+  assert.equal(store.lastRecordedWebhookTrace, null);
 });
 
 test("public ingress scopes durable webhook traces by external account while preserving same-account dedupe", async () => {
@@ -646,9 +658,10 @@ test("public ingress scopes durable webhook traces by external account while pre
     ]),
     store,
     hooks: {
-      onWebhookAccepted({ account, durableTraceId, webhook }) {
-        completeWebhookAcceptDurably(store, account, durableTraceId);
-        acceptedWebhooks.push(`${account.id}:${webhook.traceId}:${durableTraceId}`);
+      onWebhookAccepted({ account, traceId, webhook }) {
+        completeWebhookAcceptDurably(store, account, traceId);
+        assert.equal("traceId" in webhook, false);
+        acceptedWebhooks.push(`${account.id}:${traceId}`);
       },
     },
   });
@@ -697,15 +710,16 @@ test("public ingress scopes durable webhook traces by external account while pre
   assert.equal(first.duplicate, false);
   assert.equal(second.duplicate, false);
   assert.equal(duplicate.duplicate, true);
-  assert.equal(first.traceId, "provider-event-1");
-  assert.equal(second.traceId, "provider-event-1");
+  assert.equal(first.traceId, scopeWebhookTraceId("demo", "demo-a", "provider-event-1"));
+  assert.equal(second.traceId, scopeWebhookTraceId("demo", "demo-b", "provider-event-1"));
+  assert.equal(duplicate.traceId, first.traceId);
   assert.deepEqual(acceptedWebhooks, [
-    `acct_01:provider-event-1:${scopeWebhookTraceId("demo", "demo-a", "provider-event-1")}`,
-    `acct_02:provider-event-1:${scopeWebhookTraceId("demo", "demo-b", "provider-event-1")}`,
+    `acct_01:${scopeWebhookTraceId("demo", "demo-a", "provider-event-1")}`,
+    `acct_02:${scopeWebhookTraceId("demo", "demo-b", "provider-event-1")}`,
   ]);
 });
 
-test("public ingress marks inactive-account webhook traces processed so delayed duplicates stay suppressed", async () => {
+test("public ingress marks disconnected-account webhook traces processed so delayed duplicates stay suppressed", async () => {
   const store = new InMemoryPublicIngressStore();
   const acceptedWebhooks: string[] = [];
   const ingress = createDeviceSyncPublicIngress({
@@ -724,9 +738,9 @@ test("public ingress marks inactive-account webhook traces processed so delayed 
     ]),
     store,
     hooks: {
-      onWebhookAccepted({ account, durableTraceId, webhook }) {
-        completeWebhookAcceptDurably(store, account, durableTraceId);
-        acceptedWebhooks.push(`${account.id}:${webhook.traceId}`);
+      onWebhookAccepted({ account, traceId }) {
+        completeWebhookAcceptDurably(store, account, traceId);
+        acceptedWebhooks.push(account.id);
       },
     },
   });
@@ -743,14 +757,72 @@ test("public ingress marks inactive-account webhook traces processed so delayed 
   const expectedScopedTraceId = scopeWebhookTraceId("demo", "demo-abc", "trace-inactive");
   assert.equal(first.accepted, true);
   assert.equal(first.duplicate, false);
+  assert.equal(first.traceId, expectedScopedTraceId);
   assert.deepEqual(acceptedWebhooks, []);
   assert.equal(store.lastRecordedWebhookTrace?.traceId, expectedScopedTraceId);
 
   const duplicate = await ingress.handleWebhook("demo", new Headers(), Buffer.from("{}"));
   assert.equal(duplicate.accepted, true);
   assert.equal(duplicate.duplicate, true);
+  assert.equal(duplicate.traceId, expectedScopedTraceId);
   assert.deepEqual(acceptedWebhooks, []);
   assert.equal(store.completedWebhookTraceCalls, 1);
+});
+
+test("public ingress leaves reauthorization-required webhook traces retryable until the account is reconnected", async () => {
+  const store = new InMemoryPublicIngressStore();
+  const acceptedWebhooks: string[] = [];
+  const ingress = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    registry: createDeviceSyncRegistry([
+      createFakeProvider({
+        async verifyAndParseWebhook() {
+          return {
+            externalAccountId: "demo-abc",
+            eventType: "demo.updated",
+            traceId: "trace-reauthorization",
+            jobs: [],
+          };
+        },
+      }),
+    ]),
+    store,
+    hooks: {
+      onWebhookAccepted({ account, traceId }) {
+        completeWebhookAcceptDurably(store, account, traceId);
+        acceptedWebhooks.push(account.id);
+      },
+    },
+  });
+
+  const begin = await ingress.startConnection({ provider: "demo" });
+  const connected = await ingress.handleOAuthCallback({
+    provider: "demo",
+    state: begin.state,
+    code: "abc",
+  });
+  store.patchAccountStatus(connected.account.id, "reauthorization_required");
+
+  await assert.rejects(
+    () => ingress.handleWebhook("demo", new Headers(), Buffer.from("{}")),
+    (error: unknown) =>
+      error instanceof DeviceSyncError
+      && error.code === "WEBHOOK_ACCOUNT_NOT_READY"
+      && error.httpStatus === 503
+      && error.retryable === true,
+  );
+  await assert.rejects(
+    () => ingress.handleWebhook("demo", new Headers(), Buffer.from("{}")),
+    (error: unknown) =>
+      error instanceof DeviceSyncError
+      && error.code === "WEBHOOK_ACCOUNT_NOT_READY"
+      && error.httpStatus === 503
+      && error.retryable === true,
+  );
+
+  assert.deepEqual(acceptedWebhooks, []);
+  assert.equal(store.completedWebhookTraceCalls, 0);
+  assert.equal(store.lastRecordedWebhookTrace, null);
 });
 
 test("public ingress leaves the webhook trace retryable when the durable acceptance hook fails", async () => {
@@ -773,14 +845,14 @@ test("public ingress leaves the webhook trace retryable when the durable accepta
     ]),
     store,
     hooks: {
-      onWebhookAccepted({ account, durableTraceId }) {
+      onWebhookAccepted({ account, traceId }) {
         attempts += 1;
 
         if (attempts === 1) {
           throw new Error("transient enqueue failure");
         }
 
-        completeWebhookAcceptDurably(store, account, durableTraceId);
+        completeWebhookAcceptDurably(store, account, traceId);
         successes += 1;
       },
     },
@@ -888,7 +960,7 @@ test("public ingress keeps accepted webhook traces when only receipt timestamp p
     duplicate: false,
     provider: "demo",
     eventType: "demo.updated",
-    traceId: "trace-mark-failure",
+    traceId: scopeWebhookTraceId("demo", "demo-abc", "trace-mark-failure"),
   });
   assert.equal(
     store.lastRecordedWebhookTrace?.traceId,
@@ -950,21 +1022,20 @@ test("public ingress hashes unknown external account ids before logging them", a
     log: { warn },
   });
 
-  const result = await ingress.handleWebhook("demo", new Headers(), Buffer.from("{}"));
-
-  assert.deepEqual(result, {
-    accepted: true,
-    duplicate: false,
-    provider: "demo",
-    eventType: "demo.updated",
-    traceId: "trace-unknown-account",
-  });
+  await assert.rejects(
+    () => ingress.handleWebhook("demo", new Headers(), Buffer.from("{}")),
+    (error: unknown) =>
+      error instanceof DeviceSyncError
+      && error.code === "WEBHOOK_ACCOUNT_NOT_READY"
+      && error.httpStatus === 503
+      && error.retryable === true,
+  );
   assert.equal(warn.mock.calls.length, 1);
   assert.deepEqual(warn.mock.calls[0]?.[1], {
     provider: "demo",
     externalAccountIdHash: sha256Text("demo-unknown"),
     eventType: "demo.updated",
-    traceId: "trace-unknown-account",
+    traceId: scopeWebhookTraceId("demo", "demo-unknown", "trace-unknown-account"),
   });
 });
 
@@ -996,11 +1067,12 @@ test("public ingress rejects overlapping active webhook deliveries until the fir
     ]),
     store,
     hooks: {
-      async onWebhookAccepted({ account, durableTraceId, webhook }) {
+      async onWebhookAccepted({ account, traceId, webhook }) {
         acceptedCalls += 1;
         releaseProcessing?.();
         await processingGate;
-        completeWebhookAcceptDurably(store, account, durableTraceId);
+        assert.equal("traceId" in webhook, false);
+        completeWebhookAcceptDurably(store, account, traceId);
       },
     },
   });
@@ -1030,12 +1102,14 @@ test("public ingress rejects overlapping active webhook deliveries until the fir
 
   assert.equal(firstResult.accepted, true);
   assert.equal(firstResult.duplicate, false);
+  assert.equal(firstResult.traceId, expectedScopedTraceId);
   assert.equal(acceptedCalls, 1);
   assert.equal(store.lastRecordedWebhookTrace?.traceId, expectedScopedTraceId);
 
   const duplicate = await ingress.handleWebhook("demo", new Headers(), Buffer.from("{}"));
   assert.equal(duplicate.accepted, true);
   assert.equal(duplicate.duplicate, true);
+  assert.equal(duplicate.traceId, expectedScopedTraceId);
   assert.equal(acceptedCalls, 1);
 });
 
@@ -1201,8 +1275,9 @@ test("public ingress stores webhook receipt timestamps using ingestion time, not
     ]),
     store,
     hooks: {
-      onWebhookAccepted({ account, durableTraceId, webhook, now }) {
-        completeWebhookAcceptDurably(store, account, durableTraceId);
+      onWebhookAccepted({ account, traceId, webhook, now }) {
+        assert.equal("traceId" in webhook, false);
+        completeWebhookAcceptDurably(store, account, traceId);
         observedAcceptedAt.push(now);
       },
     },
@@ -1234,8 +1309,9 @@ test("public ingress does not complete a claimed webhook trace twice when the du
     registry: createDeviceSyncRegistry([createFakeProvider()]),
     store,
     hooks: {
-      onWebhookAccepted({ account, durableTraceId, webhook }) {
-        completeWebhookAcceptDurably(store, account, durableTraceId);
+      onWebhookAccepted({ account, traceId, webhook }) {
+        assert.equal("traceId" in webhook, false);
+        completeWebhookAcceptDurably(store, account, traceId);
       },
     },
   });

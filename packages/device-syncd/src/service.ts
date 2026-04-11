@@ -131,11 +131,11 @@ export class DeviceSyncService {
         onConnectionEstablished: async ({ account, connection }) => {
           this.enqueueJobs(account, connection.initialJobs ?? []);
         },
-        onWebhookAccepted: async ({ account, durableTraceId, webhook }) => {
+        onWebhookAccepted: async ({ account, traceId, webhook }) => {
           this.store.enqueueJobsAndCompleteWebhookTrace({
             accountId: account.id,
             provider: account.provider,
-            traceId: durableTraceId,
+            traceId,
             jobs: webhook.jobs,
           });
         },
