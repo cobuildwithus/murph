@@ -135,3 +135,84 @@ test("device-syncd bin formats startup failures and sets process exit code", asy
     process.exitCode = previousExitCode;
   }
 });
+
+test("device-syncd bin closes the service when HTTP startup fails", async () => {
+  const previousExitCode = process.exitCode;
+  process.exitCode = undefined;
+  const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+  try {
+    mocks.startDeviceSyncHttpServer.mockRejectedValueOnce(new Error("bind failed"));
+    mocks.formatDeviceSyncStartupError.mockImplementationOnce((error: unknown) =>
+      error instanceof Error ? `formatted: ${error.message}` : "formatted",
+    );
+
+    await loadDeviceSyncBin();
+
+    assert.equal(mocks.service.start.mock.calls.length, 0);
+    assert.equal(mocks.service.close.mock.calls.length, 1);
+    assert.deepEqual(consoleErrorSpy.mock.calls, [["formatted: bind failed"]]);
+    assert.equal(process.exitCode, 1);
+  } finally {
+    process.exitCode = previousExitCode;
+  }
+});
+
+test("device-syncd bin closes the started server when service.start throws", async () => {
+  const previousExitCode = process.exitCode;
+  process.exitCode = undefined;
+  const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+  try {
+    mocks.service.start.mockImplementationOnce(() => {
+      throw new Error("service start failed");
+    });
+    mocks.formatDeviceSyncStartupError.mockImplementationOnce((error: unknown) =>
+      error instanceof Error ? `formatted: ${error.message}` : "formatted",
+    );
+
+    await loadDeviceSyncBin();
+
+    assert.equal(mocks.server.close.mock.calls.length, 1);
+    assert.equal(mocks.service.close.mock.calls.length, 1);
+    assert.deepEqual(consoleErrorSpy.mock.calls, [["formatted: service start failed"]]);
+    assert.equal(process.exitCode, 1);
+  } finally {
+    process.exitCode = previousExitCode;
+  }
+});
+
+test("device-syncd bin preserves rollback failures when service.start throws after HTTP startup", async () => {
+  const previousExitCode = process.exitCode;
+  process.exitCode = undefined;
+  const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+  try {
+    mocks.service.start.mockImplementationOnce(() => {
+      throw new Error("service start failed");
+    });
+    mocks.server.close.mockRejectedValueOnce(new Error("rollback close failed"));
+    mocks.formatDeviceSyncStartupError.mockImplementationOnce((error: unknown) => {
+      assert.ok(error instanceof AggregateError);
+      assert.equal(error.errors.length, 2);
+      return "formatted aggregate";
+    });
+
+    await loadDeviceSyncBin();
+
+    const formattedErrorCall = mocks.formatDeviceSyncStartupError.mock.calls[0]?.[0];
+    assert.ok(formattedErrorCall instanceof AggregateError);
+    assert.deepEqual(
+      formattedErrorCall.errors.map((entry: unknown) =>
+        entry instanceof Error ? entry.message : String(entry),
+      ),
+      ["service start failed", "rollback close failed"],
+    );
+    assert.equal(mocks.server.close.mock.calls.length, 1);
+    assert.equal(mocks.service.close.mock.calls.length, 1);
+    assert.deepEqual(consoleErrorSpy.mock.calls, [["formatted aggregate"]]);
+    assert.equal(process.exitCode, 1);
+  } finally {
+    process.exitCode = previousExitCode;
+  }
+});

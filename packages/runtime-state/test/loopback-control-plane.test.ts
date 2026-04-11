@@ -4,11 +4,14 @@ import { test } from "vitest";
 
 import {
   assertLoopbackListenerHost,
+  assertUnbracketedListenerHost,
   getLoopbackControlRequestRejectionReason,
   hasForwardedLoopbackControlHeaders,
   hasLoopbackControlHostHeader,
+  isBracketedListenerHost,
   isLoopbackHostname,
   isLoopbackHttpBaseUrl,
+  isLoopbackListenerHost,
   isLoopbackRemoteAddress,
   readLoopbackControlHeaderValue,
 } from "../src/loopback-control-plane.ts";
@@ -74,11 +77,22 @@ test("assertLoopbackListenerHost accepts loopback listener hosts and rejects non
   assert.doesNotThrow(() => assertLoopbackListenerHost("127.0.0.1"));
   assert.doesNotThrow(() => assertLoopbackListenerHost("localhost"));
   assert.doesNotThrow(() => assertLoopbackListenerHost("::1"));
+  assert.equal(isLoopbackListenerHost("[::1]"), false);
+  assert.throws(() => assertLoopbackListenerHost("[::1]"), TypeError);
   assert.throws(() => assertLoopbackListenerHost("0.0.0.0"), TypeError);
   assert.throws(() => assertLoopbackListenerHost("example.com"), TypeError);
 });
 
 test("loopback control host checks accept bracketed ipv6 loopback hosts", () => {
+  assert.equal(hasLoopbackControlHostHeader("[::1]:50241"), true);
+});
+
+test("listener host helpers distinguish listener syntax from URL and Host-header syntax", () => {
+  assert.equal(isBracketedListenerHost("[::1]"), true);
+  assert.equal(isBracketedListenerHost("::1"), false);
+  assert.doesNotThrow(() => assertUnbracketedListenerHost("::1"));
+  assert.throws(() => assertUnbracketedListenerHost("[::1]"), TypeError);
+  assert.equal(isLoopbackHttpBaseUrl("http://[::1]:50241"), true);
   assert.equal(hasLoopbackControlHostHeader("[::1]:50241"), true);
 });
 

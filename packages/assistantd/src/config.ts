@@ -1,5 +1,5 @@
 import path from 'node:path'
-import { isLoopbackHostname } from '@murphai/runtime-state'
+import { assertLoopbackListenerHost } from '@murphai/runtime-state'
 
 export interface AssistantdEnvironment {
   controlToken: string
@@ -45,9 +45,10 @@ export function loadAssistantdEnvironment(
   }
 
   const host = normalizeNullableString(env.ASSISTANTD_HOST) ?? DEFAULT_ASSISTANTD_HOST
-  if (!isLoopbackHostname(host)) {
-    throw new Error('ASSISTANTD_HOST must be a loopback hostname or address.')
-  }
+  assertLoopbackListenerHost(
+    host,
+    'ASSISTANTD_HOST must be a loopback hostname or address.',
+  )
 
   return {
     controlToken,

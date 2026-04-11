@@ -2,6 +2,7 @@ import { createServer } from "node:http";
 
 import {
   assertLoopbackListenerHost,
+  assertUnbracketedListenerHost,
   getLoopbackControlRequestRejectionReason,
 } from "@murphai/runtime-state";
 import { hasMatchingLoopbackControlBearerToken } from "@murphai/runtime-state/node";
@@ -61,6 +62,11 @@ export interface CreateDeviceSyncHttpServerInput {
   service: DeviceSyncService;
   config?: DeviceSyncHttpConfig;
   bodyLimitBytes?: number;
+}
+
+interface StartedDeviceSyncHttpListener {
+  server: Server;
+  address: NodeServerHandle["control"];
 }
 
 export function assertDeviceSyncControlRequest(input: {
@@ -144,23 +150,34 @@ export async function startDeviceSyncHttpServer(input: CreateDeviceSyncHttpServe
     port,
     handler: controlHandler,
   });
-  const publicServer = publicListener
-    ? await startListener({
-        host: publicListener.host,
-        port: publicListener.port,
-        handler: publicHandler!,
-      })
-    : null;
+
+  let publicServer: StartedDeviceSyncHttpListener | null = null;
+  try {
+    publicServer = publicListener
+      ? await startListener({
+          host: publicListener.host,
+          port: publicListener.port,
+          handler: publicHandler!,
+        })
+      : null;
+  } catch (error) {
+    try {
+      await closeStartedListeners([controlServer]);
+    } catch (closeError) {
+      throw new AggregateError(
+        [error, closeError],
+        "Device sync HTTP startup failed and could not fully roll back the control listener.",
+      );
+    }
+
+    throw error;
+  }
 
   return {
     control: controlServer.address,
     public: publicServer?.address ?? null,
     async close() {
-      if (publicServer) {
-        await closeServer(publicServer.server);
-      }
-
-      await closeServer(controlServer.server);
+      await closeStartedListeners([publicServer, controlServer]);
     },
   };
 }
@@ -429,10 +446,7 @@ async function startListener(input: {
   host: string;
   port: number;
   handler: DeviceSyncHttpRequestHandler;
-}): Promise<{
-  server: Server;
-  address: NodeServerHandle["control"];
-}> {
+}): Promise<StartedDeviceSyncHttpListener> {
   const server = createServer(input.handler);
   const address = await listenServer(server, input.host, input.port);
   return {
@@ -475,6 +489,28 @@ async function closeServer(server: Server): Promise<void> {
   });
 }
 
+async function closeStartedListeners(
+  listeners: readonly (StartedDeviceSyncHttpListener | null | undefined)[],
+): Promise<void> {
+  let firstError: unknown = null;
+
+  for (const listener of listeners) {
+    if (!listener) {
+      continue;
+    }
+
+    try {
+      await closeServer(listener.server);
+    } catch (error) {
+      firstError ??= error;
+    }
+  }
+
+  if (firstError) {
+    throw firstError;
+  }
+}
+
 function requireControlToken(controlToken: string | undefined): string {
   if (typeof controlToken === "string" && controlToken.trim()) {
     return controlToken.trim();
@@ -500,6 +536,11 @@ function resolvePublicListener(
       "Set both publicHost and publicPort to expose a separate public callback/webhook listener.",
     );
   }
+
+  assertUnbracketedListenerHost(
+    publicHost,
+    "Device sync public listener host must be a hostname or address without URL bracket syntax. Use ::1, not [::1].",
+  );
 
   return {
     host: publicHost,
