@@ -117,6 +117,7 @@ export {
   CANONICAL_WRITE_LOCK_DIRECTORY,
   CANONICAL_WRITE_LOCK_METADATA_PATH,
   inspectCanonicalWriteLock,
+  withCanonicalWriteLockScope,
   isProtectedCanonicalPath,
   listProtectedCanonicalPaths,
   listWriteOperationMetadataPaths,

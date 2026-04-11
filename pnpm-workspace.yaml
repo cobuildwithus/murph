@@ -16,6 +16,7 @@ minimumReleaseAgeExclude:
   - '@cobuild/review-gpt@0.5.51'
   - '@cobuild/review-gpt@0.5.52'
   - '@cobuild/review-gpt@0.5.53'
+  - '@cobuild/review-gpt@0.5.55'
   - next@16.2.2
   - '@next/env@16.2.2'
   - '@next/swc-darwin-arm64@16.2.2'

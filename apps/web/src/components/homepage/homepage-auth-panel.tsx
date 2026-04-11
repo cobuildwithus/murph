@@ -3,7 +3,11 @@ import { HostedPhoneAuth } from "@/src/components/hosted-onboarding/hosted-phone
 
 const SETTINGS_HREF = "/settings";
 
-export function HomepageAuthPanel({ authenticated }: { authenticated: boolean }) {
+export function HomepageAuthPanel({
+  authenticated,
+}: {
+  authenticated: boolean;
+}) {
   if (authenticated) {
     return (
       <section className="rounded-lg bg-olive p-7 text-white md:p-9">
@@ -11,7 +15,8 @@ export function HomepageAuthPanel({ authenticated }: { authenticated: boolean })
           You&apos;re already signed in.
         </h2>
         <p className="mt-5 max-w-sm text-sm leading-relaxed text-white/80">
-          Open your account settings to manage billing, connected channels, and wearable sources.
+          Open your account settings to manage billing, connected channels, and
+          wearable sources.
         </p>
         <div className="mt-6">
           <a
@@ -28,7 +33,7 @@ export function HomepageAuthPanel({ authenticated }: { authenticated: boolean })
   return (
     <section
       aria-labelledby="signup-title"
-      className="rounded-lg bg-olive p-7 text-white md:p-9"
+      className="rounded-lg bg-olive p-5 text-white md:p-9"
     >
       <h2
         id="signup-title"

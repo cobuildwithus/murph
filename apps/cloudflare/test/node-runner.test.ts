@@ -2452,7 +2452,7 @@ describe("runHostedExecutionJob", () => {
       });
 
       expect(commitFetch).toHaveBeenCalledTimes(1);
-      expect(timeoutSpy).toHaveBeenCalledWith(15_000);
+      expect(timeoutSpy).toHaveBeenCalledWith(30_000);
       const [commitUrl, commitInit] = commitFetch.mock.calls[0] ?? [];
       expect(String(commitUrl)).toBe(
         "http://results.worker/events/evt_commit/commit",

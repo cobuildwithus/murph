@@ -1307,7 +1307,7 @@ test('stopAssistantAutomation gracefully stops an active run lock', async () => 
 
   const paths = resolveAssistantStatePaths(vaultRoot)
   const lockPath = path.join(paths.assistantStateRoot, '.automation-run.lock')
-  const metadataPath = path.join(paths.assistantStateRoot, '.automation-run-lock.json')
+  const metadataPath = path.join(lockPath, 'owner.json')
   await mkdir(lockPath, { recursive: true })
   await writeFile(
     metadataPath,
@@ -1349,7 +1349,7 @@ test('stopAssistantAutomation force-kills a stubborn active run lock', async () 
 
   const paths = resolveAssistantStatePaths(vaultRoot)
   const lockPath = path.join(paths.assistantStateRoot, '.automation-run.lock')
-  const metadataPath = path.join(paths.assistantStateRoot, '.automation-run-lock.json')
+  const metadataPath = path.join(lockPath, 'owner.json')
   await mkdir(lockPath, { recursive: true })
   await writeFile(
     metadataPath,
@@ -1391,7 +1391,7 @@ test('stopAssistantAutomation clears a stale run lock without signalling a proce
 
   const paths = resolveAssistantStatePaths(vaultRoot)
   const lockPath = path.join(paths.assistantStateRoot, '.automation-run.lock')
-  const metadataPath = path.join(paths.assistantStateRoot, '.automation-run-lock.json')
+  const metadataPath = path.join(lockPath, 'owner.json')
   await mkdir(lockPath, { recursive: true })
   await writeFile(
     metadataPath,

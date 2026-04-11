@@ -94,7 +94,9 @@ export function HostedPhoneAuthScaffold({
           onContinue={onContinue}
           onUseDifferentNumber={onUseDifferentNumber}
         />
-      ) : children}
+      ) : (
+        children
+      )}
     </div>
   );
 }
@@ -161,8 +163,8 @@ export function HostedAuthenticatedPhoneAuthState({
       <Alert className="border-stone-200 bg-stone-50">
         <AlertTitle>
           {intent === "signin"
-            ? "You already started signing in on this browser."
-            : "You already started signup in this browser."}
+            ? "You already started signing in."
+            : "You already started signup."}
         </AlertTitle>
         <AlertDescription>
           Keep going with this number, or sign out and use a different one.
@@ -173,6 +175,7 @@ export function HostedAuthenticatedPhoneAuthState({
             onClick={onContinue}
             disabled={disabled}
             size="lg"
+            className="w-full"
           >
             {intent === "signin" ? "Continue sign in" : "Continue signup"}
           </Button>

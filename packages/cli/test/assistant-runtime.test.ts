@@ -7643,7 +7643,7 @@ test('runAssistantAutomation clears stale run locks before starting', async () =
     recursive: true,
   })
   await writeFile(
-    path.join(paths.assistantStateRoot, '.automation-run-lock.json'),
+    path.join(paths.assistantStateRoot, '.automation-run.lock', 'owner.json'),
     JSON.stringify({
       command: 'node murph assistant run',
       mode: 'continuous',
