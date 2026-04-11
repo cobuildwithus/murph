@@ -6,10 +6,10 @@ import type {
 import type {
   KnowledgeGetResult,
   KnowledgeSearchResult,
-} from '../src/knowledge/contracts.ts'
+} from '../src/knowledge.ts'
 
 describe('assistant-engine knowledge contract compatibility', () => {
-  it('re-exports the query-owned knowledge result types without widening them', () => {
+  it('re-exports the query-owned knowledge result types from the public knowledge surface without widening them', () => {
     expectTypeOf<KnowledgeSearchResult>().toEqualTypeOf<QueryKnowledgeSearchResult>()
     expectTypeOf<KnowledgeGetResult>().toEqualTypeOf<QueryKnowledgeGetResult>()
   })

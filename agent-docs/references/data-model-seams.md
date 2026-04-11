@@ -177,20 +177,20 @@ Do not let `vault-usecases` start reaching into query internals or reintroducing
 
 ### 11. Keep knowledge result contracts owned by `@murphai/query`, with assistant/CLI as thin adapters
 
-**Seam:** `packages/query/src/knowledge-contracts.ts`, `packages/query/src/index.ts`, `packages/operator-config/src/knowledge-contracts.ts`, `packages/assistant-engine/src/knowledge/{contracts.ts,service.ts}`, `packages/assistant-engine/src/knowledge.ts`, `packages/cli/src/knowledge-cli-contracts.ts`
+**Seam:** `packages/query/src/knowledge-contracts.ts`, `packages/query/src/index.ts`, `packages/assistant-engine/src/knowledge/{documents.ts,service.ts}`, `packages/assistant-engine/src/knowledge.ts`, `packages/cli/src/knowledge-cli-contracts.ts`
 
 The query package already owned the stable knowledge read model, but result contracts were still split across assistant-engine and CLI-local schemas.
-That made one shared product contract drift across multiple packages even though both layers already depend on the query runtime.
+That made one shared product contract drift across multiple packages even though the assistant and CLI layers already depend on the query runtime.
 
 This patch:
 
-- adds one shared `Knowledge*` contract owner in `packages/query/src/knowledge-contracts.ts` and exports it from the public query entrypoint
-- turns `packages/operator-config/src/knowledge-contracts.ts` into a compatibility shim over the query-owned types
-- turns `packages/assistant-engine/src/knowledge/contracts.ts` into a pure compatibility re-export of the query-owned result types
-- switches assistant-engine's knowledge service and public barrel back to the query-owned result contracts
+- keeps one shared `Knowledge*` contract owner in `packages/query/src/knowledge-contracts.ts` and exports it from the public query entrypoint
+- removes the old `packages/operator-config/src/knowledge-contracts.ts` compatibility shim and its public export so operator-config no longer surfaces query-owned knowledge result contracts
+- removes the old `packages/assistant-engine/src/knowledge/contracts.ts` compatibility shim and has assistant-engine import query-owned result types directly
+- keeps assistant-engine's knowledge service, document helpers, and public barrel on the query-owned result contracts
 - keeps `packages/cli/src/knowledge-cli-contracts.ts` as a thin compatibility schema surface that re-exports the query-owned schemas and aliases `KnowledgeShowResult` to the shared `KnowledgeGetResult`
 
-**Why this is simpler:** query is now the only real owner of the knowledge result model, while assistant-engine, operator-config, and CLI keep only compatibility or boundary seams.
+**Why this is simpler:** query is now the only real owner of the knowledge result model, while assistant-engine and CLI keep only thin boundary seams.
 Adding or renaming a knowledge result field now has one type owner instead of multiple parallel copies.
 
 **Main refactor risk:** do not move CLI-only help text or command ergonomics into query just because the schemas are now shared there.

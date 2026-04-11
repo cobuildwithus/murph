@@ -108,6 +108,15 @@ async function verifyWorkspacePackageExports(failures) {
       }
 
       if (
+        packageJson.name === "@murphai/operator-config"
+        && exportKey === "./knowledge-contracts"
+      ) {
+        failures.push(
+          `${path.relative(repoRoot, packageJsonPath)} declares ${JSON.stringify(exportKey)} as a public entrypoint; knowledge result contracts are owned by @murphai/query and must not leak back through the operator-config boundary.`,
+        );
+      }
+
+      if (
         packageJson.name === "@murphai/importers"
         && exportKey === "./device-providers"
       ) {
@@ -179,7 +188,41 @@ async function verifyAssistantEnginePublicSourceSurface(failures) {
 }
 
 async function verifyFocusedOwnerSourceSurfaces(failures) {
+  const deletedKnowledgeCompatibilityFiles = [
+    {
+      path: path.join(repoRoot, "packages", "operator-config", "src", "knowledge-contracts.ts"),
+      message:
+        "packages/operator-config/src/knowledge-contracts.ts exists; knowledge result contracts are owned by @murphai/query and must not return through an operator-config compatibility shim.",
+    },
+    {
+      path: path.join(repoRoot, "packages", "assistant-engine", "src", "knowledge", "contracts.ts"),
+      message:
+        "packages/assistant-engine/src/knowledge/contracts.ts exists; assistant-engine knowledge helpers must depend on @murphai/query directly instead of reviving a local compatibility shim.",
+    },
+  ];
   const sourceChecks = [
+    {
+      path: path.join(repoRoot, "packages", "operator-config", "src", "index.ts"),
+      failures: [
+        {
+          specifier: "./knowledge-contracts.js",
+          message:
+            "packages/operator-config/src/index.ts mentions ./knowledge-contracts.js; knowledge result contracts are owned by @murphai/query and should not leak through the operator-config umbrella barrel.",
+        },
+      ],
+      predicate: sourceMentionsSpecifier,
+    },
+    {
+      path: path.join(repoRoot, "packages", "assistant-engine", "src", "knowledge", "documents.ts"),
+      failures: [
+        {
+          specifier: "./contracts.js",
+          message:
+            "packages/assistant-engine/src/knowledge/documents.ts imports ./contracts.js; knowledge document helpers should depend on @murphai/query for KnowledgePage types instead of reviving a local compatibility shim.",
+        },
+      ],
+      predicate: sourceMentionsSpecifier,
+    },
     {
       path: path.join(repoRoot, "packages", "device-syncd", "src", "public-ingress.ts"),
       failures: [
@@ -249,6 +292,12 @@ async function verifyFocusedOwnerSourceSurfaces(failures) {
       if (check.predicate(source, failure.specifier)) {
         failures.push(failure.message);
       }
+    }
+  }
+
+  for (const check of deletedKnowledgeCompatibilityFiles) {
+    if (await pathExists(check.path)) {
+      failures.push(check.message);
     }
   }
 

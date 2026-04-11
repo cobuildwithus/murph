@@ -76,11 +76,6 @@
       "import": "./dist/hosted-assistant-config.js",
       "default": "./dist/hosted-assistant-config.js"
     },
-    "./knowledge-contracts": {
-      "types": "./dist/knowledge-contracts.d.ts",
-      "import": "./dist/knowledge-contracts.js",
-      "default": "./dist/knowledge-contracts.js"
-    },
     "./inbox-cli-contracts": {
       "types": "./dist/inbox-cli-contracts.d.ts",
       "import": "./dist/inbox-cli-contracts.js",
