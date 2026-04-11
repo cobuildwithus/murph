@@ -43,12 +43,14 @@ const SAFE_CHILD_PROCESS_ENV_KEYS = new Set([
 ]);
 const SAFE_CHILD_PROCESS_ENV_PREFIXES = ["LC_"];
 
-function shouldPreserveChildProcessEnvKey(key: string): boolean {
+function resolvePreservedChildProcessEnvKey(key: string): string | null {
   const normalizedKey = key.toUpperCase();
   return (
     SAFE_CHILD_PROCESS_ENV_KEYS.has(normalizedKey) ||
     SAFE_CHILD_PROCESS_ENV_PREFIXES.some((prefix) => normalizedKey.startsWith(prefix))
-  );
+  )
+    ? normalizedKey
+    : null;
 }
 
 export function sanitizeChildProcessEnv(
@@ -61,8 +63,13 @@ export function sanitizeChildProcessEnv(
       continue;
     }
 
-    if (shouldPreserveChildProcessEnvKey(key)) {
-      nextEnv[key] = value;
+    const preservedKey = resolvePreservedChildProcessEnvKey(key);
+    if (!preservedKey) {
+      continue;
+    }
+
+    if (!(preservedKey in nextEnv) || key === preservedKey) {
+      nextEnv[preservedKey] = value;
     }
   }
 

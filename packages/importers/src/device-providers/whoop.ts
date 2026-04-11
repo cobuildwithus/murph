@@ -4,6 +4,7 @@ import { stripEmptyObject, stripUndefined } from "../shared.ts";
 import {
   asArray,
   asPlainObject,
+  buildSyntheticDeletionResourceId,
   createRawArtifact,
   emitObservationMetrics,
   emitSampleMetrics,
@@ -291,7 +292,6 @@ function pushDeletionObservation(
   deletion: PlainObject,
 ): void {
   const resourceType = slugify(deletion.resource_type ?? deletion.resourceType, "resource");
-  const resourceId = stringId(deletion.resource_id ?? deletion.resourceId) ?? `deleted-${events.length + 1}`;
   const occurredAt = toIso(deletion.occurred_at ?? deletion.occurredAt) ?? importedAt;
   const sourceEventType =
     typeof deletion.source_event_type === "string" && deletion.source_event_type.trim()
@@ -299,6 +299,15 @@ function pushDeletionObservation(
       : typeof deletion.sourceEventType === "string" && deletion.sourceEventType.trim()
         ? deletion.sourceEventType.trim()
         : undefined;
+  const resourceId =
+    stringId(deletion.resource_id ?? deletion.resourceId) ??
+    buildSyntheticDeletionResourceId({
+      provider: "whoop",
+      resourceType,
+      occurredAt,
+      sourceEventType,
+      deletion,
+    });
 
   pushSharedDeletionObservation(events, rawArtifacts, {
     provider: "whoop",

@@ -42,10 +42,49 @@ describe("sanitizeChildProcessEnv", () => {
     });
 
     expect(sanitized).toEqual({
-      ComSpec: "C:\\Windows\\System32\\cmd.exe",
-      Path: "C:\\Windows\\System32",
+      COMSPEC: "C:\\Windows\\System32\\cmd.exe",
+      PATH: "C:\\Windows\\System32",
       SYSTEMROOT: "C:\\Windows",
-      windir: "C:\\Windows",
+      WINDIR: "C:\\Windows",
+    });
+  });
+
+  it("dedupes preserved keys by canonical casing and prefers the canonical entry", () => {
+    expect(
+      sanitizeChildProcessEnv({
+        HOME: "/home/murph",
+        Path: "/tmp/bad-bin",
+        PATH: "/usr/bin",
+        SECRET_TOKEN: "nope",
+        lc_all: "C.UTF-8",
+      }),
+    ).toEqual({
+      HOME: "/home/murph",
+      LC_ALL: "C.UTF-8",
+      PATH: "/usr/bin",
+    });
+  });
+
+  it("keeps the first preserved variant when no canonical entry exists", () => {
+    expect(
+      sanitizeChildProcessEnv({
+        path: "/usr/local/bin",
+        tmpdir: "/tmp/murph",
+      }),
+    ).toEqual({
+      PATH: "/usr/local/bin",
+      TMPDIR: "/tmp/murph",
+    });
+  });
+
+  it("prefers the canonical uppercase entry even when a later mixed-case duplicate is non-empty", () => {
+    expect(
+      sanitizeChildProcessEnv({
+        PATH: "",
+        path: "/usr/local/bin",
+      }),
+    ).toEqual({
+      PATH: "",
     });
   });
 });
