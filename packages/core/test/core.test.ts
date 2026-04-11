@@ -1753,6 +1753,40 @@ test("jsonl helpers reject non-object writes and surface invalid JSON line numbe
   );
 });
 
+test("jsonl helpers use the default date field and stringify non-Error parse failures", async () => {
+  assert.equal(
+    toMonthlyShardRelativePath("audit", "2026-03-10T12:00:00.000Z"),
+    "audit/2026/2026-03.jsonl",
+  );
+
+  const vaultRoot = await makeTempDirectory("murph-vault");
+  await initializeVault({ vaultRoot });
+
+  const invalidJsonlPath = path.join(vaultRoot, "audit/2026/non-error.jsonl");
+  await fs.writeFile(invalidJsonlPath, '{"ok":true}', "utf8");
+
+  const parseSpy = vi.spyOn(JSON, "parse").mockImplementationOnce(() => {
+    throw "broken-jsonl";
+  });
+
+  try {
+    await assert.rejects(
+      () =>
+        readJsonlRecords({
+          vaultRoot,
+          relativePath: "audit/2026/non-error.jsonl",
+        }),
+      (error: unknown) =>
+        error instanceof VaultError &&
+        error.code === "VAULT_INVALID_JSONL" &&
+        error.details.lineNumber === 1 &&
+        error.details.cause === "broken-jsonl",
+    );
+  } finally {
+    parseSpy.mockRestore();
+  }
+});
+
 test("validateVault reports invalid metadata before deeper validation", async () => {
   const vaultRoot = await makeTempDirectory("murph-vault");
   await initializeVault({ vaultRoot });

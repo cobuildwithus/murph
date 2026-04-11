@@ -4,6 +4,10 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { test } from 'vitest'
 import {
+  inboxListResultSchema,
+  type InboxListResult,
+} from '@murphai/operator-config/inbox-cli-contracts'
+import {
   hasAssistantAutoReplyChannel,
   normalizeAssistantAutoReplyChannels,
   reconcileAssistantAutoReplyState,
@@ -12,9 +16,65 @@ import {
 import {
   enableAssistantAutoReplyChannelLocal,
   managedAssistantAutoReplyChannelsNeedCursorSeed as managedChannelsNeedCursorSeed,
+  readLatestPersistedInboxCaptureCursor,
   reconcileManagedAssistantAutoReplyChannels as reconcileManagedChannels,
+  reconcileManagedAssistantAutoReplyChannelsLocal,
 } from '../src/assistant/auto-reply-channels.js'
 import { saveAssistantAutomationState } from '../src/assistant/store.js'
+
+function createInboxListResult(
+  overrides: Partial<InboxListResult> = {},
+): InboxListResult {
+  return inboxListResultSchema.parse({
+    vault: 'vault-test',
+    filters: {
+      sourceId: null,
+      limit: 1,
+      afterOccurredAt: null,
+      afterCaptureId: null,
+      oldestFirst: false,
+    },
+    items: [],
+    ...overrides,
+  })
+}
+
+function createListCapture(
+  overrides: Partial<InboxListResult['items'][number]> = {},
+): InboxListResult['items'][number] {
+  return inboxListResultSchema.parse({
+    vault: 'vault-test',
+    filters: {
+      sourceId: null,
+      limit: 1,
+      afterOccurredAt: null,
+      afterCaptureId: null,
+      oldestFirst: false,
+    },
+    items: [
+      {
+        captureId: 'cap-latest',
+        source: 'telegram',
+        accountId: 'account-1',
+        externalId: 'external-1',
+        threadId: 'thread-1',
+        threadTitle: 'Thread',
+        threadIsDirect: true,
+        actorId: 'actor-1',
+        actorName: 'Taylor',
+        actorIsSelf: false,
+        occurredAt: '2026-04-10T02:00:00.000Z',
+        receivedAt: null,
+        text: 'hello',
+        attachmentCount: 0,
+        envelopePath: 'inbox/telegram/cap-latest.json',
+        eventId: 'event-1',
+        promotions: [],
+        ...overrides,
+      },
+    ],
+  }).items[0]
+}
 test('normalizeAssistantAutoReplyChannels trims, dedupes, and sorts channels', () => {
   assert.deepEqual(
     normalizeAssistantAutoReplyChannels([
@@ -150,6 +210,128 @@ test('enableAssistantAutoReplyChannelLocal returns true when the channel is alre
     })
 
     assert.equal(enabled, true)
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
+
+test('readLatestPersistedInboxCaptureCursor returns the latest stored cursor when available', async () => {
+  const calls: unknown[] = []
+  const cursor = await readLatestPersistedInboxCaptureCursor('vault-test', {
+    list: async (input) => {
+      calls.push(input)
+      return createInboxListResult({
+        vault: input.vault,
+        filters: {
+          sourceId: input.sourceId ?? null,
+          limit: input.limit ?? 1,
+          afterOccurredAt: input.afterOccurredAt ?? null,
+          afterCaptureId: input.afterCaptureId ?? null,
+          oldestFirst: input.oldestFirst ?? false,
+        },
+        items: [createListCapture()],
+      })
+    },
+  })
+
+  assert.deepEqual(calls, [
+    {
+      afterCaptureId: null,
+      afterOccurredAt: null,
+      limit: 1,
+      oldestFirst: false,
+      requestId: null,
+      sourceId: null,
+      vault: 'vault-test',
+    },
+  ])
+  assert.deepEqual(cursor, {
+    captureId: 'cap-latest',
+    occurredAt: '2026-04-10T02:00:00.000Z',
+  })
+})
+
+test('readLatestPersistedInboxCaptureCursor returns null when no captures exist', async () => {
+  const cursor = await readLatestPersistedInboxCaptureCursor('vault-empty', {
+    list: async (input) =>
+      createInboxListResult({
+        vault: input.vault,
+        filters: {
+          sourceId: input.sourceId ?? null,
+          limit: input.limit ?? 1,
+          afterOccurredAt: input.afterOccurredAt ?? null,
+          afterCaptureId: input.afterCaptureId ?? null,
+          oldestFirst: input.oldestFirst ?? false,
+        },
+      }),
+  })
+
+  assert.equal(cursor, null)
+})
+
+test('reconcileManagedAssistantAutoReplyChannelsLocal writes seeded state when enabling a new managed channel', async () => {
+  const vaultRoot = await mkdtemp(
+    path.join(tmpdir(), 'murph-assistant-auto-reply-reconcile-'),
+  )
+
+  try {
+    await saveAssistantAutomationState(vaultRoot, {
+      version: 1,
+      inboxScanCursor: null,
+      autoReply: [
+        {
+          channel: 'custom',
+          cursor: {
+            captureId: 'cap-custom',
+            occurredAt: '2026-04-09T00:00:00.000Z',
+          },
+        },
+      ],
+      updatedAt: '2026-04-10T00:00:00.000Z',
+    })
+
+    const result = await reconcileManagedAssistantAutoReplyChannelsLocal({
+      desiredChannels: ['telegram'],
+      inboxServices: {
+        list: async (input) =>
+          createInboxListResult({
+            vault: input.vault,
+            filters: {
+              sourceId: input.sourceId ?? null,
+              limit: input.limit ?? 1,
+              afterOccurredAt: input.afterOccurredAt ?? null,
+              afterCaptureId: input.afterCaptureId ?? null,
+              oldestFirst: input.oldestFirst ?? false,
+            },
+            items: [
+              createListCapture({
+                captureId: 'cap-latest',
+                occurredAt: '2026-04-10T03:00:00.000Z',
+              }),
+            ],
+          }),
+      },
+      isManagedChannel: (channel) => channel !== 'custom',
+      vault: vaultRoot,
+    })
+
+    assert.equal(result.changed, true)
+    assert.deepEqual(result.state.autoReply, [
+      {
+        channel: 'custom',
+        cursor: {
+          captureId: 'cap-custom',
+          occurredAt: '2026-04-09T00:00:00.000Z',
+        },
+      },
+      {
+        channel: 'telegram',
+        cursor: {
+          captureId: 'cap-latest',
+          occurredAt: '2026-04-10T03:00:00.000Z',
+        },
+      },
+    ])
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })
   }
