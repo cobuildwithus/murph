@@ -234,6 +234,37 @@ describe("buildSyntheticDeletionResourceId", () => {
     expect(left).toMatch(/^deleted-[0-9a-f]{16}$/u);
   });
 
+  it("ignores alias-only differences in normalized deletion identity fields", () => {
+    const options = {
+      provider: "oura",
+      resourceType: "sleep",
+      occurredAt: "2026-04-11T00:00:00.000Z",
+      sourceEventType: "sleep.deleted",
+    };
+
+    const snakeCase = buildSyntheticDeletionResourceId({
+      ...options,
+      deletion: {
+        event_type: "sleep.deleted",
+        occurred_at: options.occurredAt,
+        payload: { tombstone: "alpha" },
+        resource_type: "sleep",
+      },
+    });
+
+    const camelCase = buildSyntheticDeletionResourceId({
+      ...options,
+      deletion: {
+        eventTime: options.occurredAt,
+        payload: { tombstone: "alpha" },
+        resourceType: "sleep",
+        sourceEventType: "sleep.deleted",
+      },
+    });
+
+    expect(snakeCase).toBe(camelCase);
+  });
+
   it("changes when the deletion payload meaningfully changes", () => {
     const shared = {
       provider: "whoop",
@@ -342,6 +373,36 @@ describe("normalizeOuraSnapshot", () => {
 
     expect(normalized.rawArtifacts).toHaveLength(1);
     expect(normalized.events).toHaveLength(1);
+    expect(normalized.events?.[0]?.rawArtifactRoles).toEqual([normalized.rawArtifacts?.[0]?.role]);
+  });
+
+  it("dedupes alias-equivalent deletions when a stable id is missing", () => {
+    const normalized = normalizeOuraSnapshot({
+      accountId: "acct_1",
+      importedAt: "2026-04-10T00:00:00.000Z",
+      deletions: [
+        {
+          event_type: "sleep.deleted",
+          occurred_at: "2026-04-09T09:30:00.000Z",
+          payload: {
+            profile: "sensitive",
+          },
+          resource_type: "sleep",
+        },
+        {
+          eventTime: "2026-04-09T09:30:00.000Z",
+          payload: {
+            profile: "sensitive",
+          },
+          resourceType: "sleep",
+          sourceEventType: "sleep.deleted",
+        },
+      ],
+    });
+
+    expect(normalized.rawArtifacts).toHaveLength(1);
+    expect(normalized.events).toHaveLength(1);
+    expect(normalized.events?.[0]?.externalRef?.resourceId).toMatch(/^deleted-[0-9a-f]{16}$/u);
     expect(normalized.events?.[0]?.rawArtifactRoles).toEqual([normalized.rawArtifacts?.[0]?.role]);
   });
 
