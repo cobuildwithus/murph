@@ -568,6 +568,26 @@ test('resolveInstalledDeviceSyncPackageEntry falls back only when the bare packa
   )
 })
 
+test('resolveInstalledDeviceSyncPackageEntry does not require a valid file-url base at module load', async () => {
+  const module = await importDeviceDaemonPathsWithMockedRequire((callCount, actual) => {
+    if (callCount === 1) {
+      throw new TypeError(
+        "The argument 'path' The argument must be a file URL object, a file URL string, or an absolute path string.. Received 'undefined'",
+      )
+    }
+
+    return createMockRequire(
+      actual,
+      () => '/workspace/node_modules/@murphai/device-syncd/dist/index.js',
+    )
+  })
+
+  assert.equal(
+    module.resolveInstalledDeviceSyncPackageEntry(),
+    '/workspace/node_modules/@murphai/device-syncd/dist/index.js',
+  )
+})
+
 test('managed device-daemon lifecycle helpers cover explicit, status, start, and stop branches', async () => {
   const explicit = await ensureManagedDeviceSyncControlPlane({
     baseUrl: 'http://127.0.0.1:4318',
