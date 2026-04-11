@@ -41,6 +41,7 @@ export {
 } from './web-fetch/network.js'
 export {
   readAssistantWebResponseBytes,
+  readAssistantWebResponseText,
 } from './web-fetch/response.js'
 export {
   resolveAssistantWebMediaType,
@@ -78,6 +79,7 @@ export async function fetchAssistantWeb(
     const extracted = await extractAssistantWebResponse({
       contentType,
       extractMode: normalizedRequest.extractMode,
+      finalUrl: fetched.finalUrl,
       maxChars: normalizedRequest.maxChars,
       maxResponseBytes: runtime.maxResponseBytes,
       response: fetched.response,

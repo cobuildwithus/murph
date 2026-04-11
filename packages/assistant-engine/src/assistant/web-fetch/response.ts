@@ -5,6 +5,12 @@ import { createBrotliDecompress, createUnzip } from 'node:zlib'
 import { normalizeNullableString } from '../shared.js'
 import type { AssistantWebResponseBytes } from './config.js'
 
+export interface AssistantWebResponseText {
+  text: string
+  truncated: boolean
+  warnings: string[]
+}
+
 export async function readAssistantWebResponseBytes(input: {
   maxResponseBytes: number
   response: Response
@@ -81,6 +87,22 @@ export async function readAssistantWebResponseBytes(input: {
   }
 }
 
+export async function readAssistantWebResponseText(input: {
+  maxResponseBytes: number
+  response: Response
+}): Promise<AssistantWebResponseText> {
+  const body = await readAssistantWebResponseBytes(input)
+  const decoder = createAssistantWebResponseTextDecoder(
+    input.response.headers.get('content-type'),
+  )
+
+  return {
+    text: decoder.decoder.decode(body.bytes),
+    truncated: body.truncated,
+    warnings: [...body.warnings, ...decoder.warnings],
+  }
+}
+
 export async function cancelAssistantWebResponseBody(response: Response): Promise<void> {
   if (!response.body) {
     return
@@ -97,15 +119,38 @@ export function createAssistantWebNodeResponse(
   response: IncomingMessage,
 ): Response {
   const headers = createAssistantWebResponseHeaders(response)
-  const body = decodeAssistantWebResponseBody(response, headers)
   const status = response.statusCode ?? 500
   const statusText = normalizeNullableString(response.statusMessage)
 
+  if (assistantWebResponseStatusHasNoBody(status)) {
+    discardAssistantWebIncomingMessageBody(response, headers)
+    return new Response(null, {
+      status,
+      headers,
+      ...(statusText ? { statusText } : {}),
+    })
+  }
+
+  const body = decodeAssistantWebResponseBody(response, headers)
   return new Response(Readable.toWeb(body) as ReadableStream<Uint8Array>, {
     status,
     headers,
     ...(statusText ? { statusText } : {}),
   })
+}
+
+function assistantWebResponseStatusHasNoBody(status: number): boolean {
+  return status === 204 || status === 205 || status === 304
+}
+
+function discardAssistantWebIncomingMessageBody(
+  response: IncomingMessage,
+  headers: Headers,
+): void {
+  headers.delete('content-encoding')
+  headers.delete('content-length')
+  headers.delete('transfer-encoding')
+  response.resume()
 }
 
 function createAssistantWebResponseHeaders(
@@ -163,6 +208,79 @@ function parsePositiveInteger(value: string | null): number | null {
   }
 
   return Math.trunc(parsed)
+}
+
+function createAssistantWebResponseTextDecoder(
+  contentTypeHeader: string | null,
+): {
+  decoder: TextDecoder
+  warnings: string[]
+} {
+  const charset = resolveAssistantWebResponseCharset(contentTypeHeader)
+  if (!charset) {
+    return {
+      decoder: new TextDecoder(),
+      warnings: [],
+    }
+  }
+
+  try {
+    return {
+      decoder: new TextDecoder(charset),
+      warnings: [],
+    }
+  } catch {
+    return {
+      decoder: new TextDecoder(),
+      warnings: [
+        `Response declared unsupported charset ${charset}; decoding as utf-8 instead.`,
+      ],
+    }
+  }
+}
+
+function resolveAssistantWebResponseCharset(
+  contentTypeHeader: string | null,
+): string | null {
+  const normalized = normalizeNullableString(contentTypeHeader)
+  if (!normalized) {
+    return null
+  }
+
+  const parameters = normalized
+    .split(';')
+    .slice(1)
+    .map((parameter) => parameter.trim())
+    .filter((parameter) => parameter.length > 0)
+
+  for (const parameter of parameters) {
+    const [key, ...valueParts] = parameter.split('=')
+    if (key?.trim().toLowerCase() !== 'charset') {
+      continue
+    }
+
+    const rawCharset = valueParts.join('=')
+    const trimmedCharset = normalizeNullableString(rawCharset)
+    if (!trimmedCharset) {
+      return null
+    }
+
+    return stripAssistantWrappingQuotes(trimmedCharset).toLowerCase()
+  }
+
+  return null
+}
+
+function stripAssistantWrappingQuotes(input: string): string {
+  if (
+    input.length >= 2 &&
+    ((input.startsWith('"') && input.endsWith('"')) ||
+      (input.startsWith("'") && input.endsWith("'")))
+  ) {
+    return input.slice(1, -1)
+  }
+
+  return input
 }
 
 function concatAssistantWebResponseBytes(

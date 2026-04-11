@@ -2,6 +2,7 @@ import { Readability } from '@mozilla/readability'
 import { DOMParser } from 'linkedom'
 
 import { normalizeNullableString } from '../shared.js'
+import { normalizeAssistantWebRequestUrl } from './config.js'
 import type {
   AssistantWebFetchExtractMode,
   AssistantWebFetchResponse,
@@ -15,6 +16,10 @@ interface AssistantHtmlNodeLike {
   textContent: string | null
 }
 
+interface AssistantHtmlRenderContext {
+  baseUrl: URL | null
+}
+
 type AssistantHtmlDocument = ReturnType<
   InstanceType<typeof DOMParser>['parseFromString']
 > extends infer T
@@ -25,6 +30,7 @@ const ASSISTANT_WEB_FETCH_TEXT_NODE = 3
 const ASSISTANT_WEB_FETCH_ELEMENT_NODE = 1
 
 export function extractAssistantWebHtml(input: {
+  baseUrl?: URL | null
   extractMode: AssistantWebFetchExtractMode
   html: string
 }): {
@@ -34,6 +40,9 @@ export function extractAssistantWebHtml(input: {
   warnings: string[]
 } {
   const document = parseAssistantHtmlDocument(input.html)
+  const renderContext: AssistantHtmlRenderContext = {
+    baseUrl: input.baseUrl ?? null,
+  }
   const article = parseAssistantHtmlWithReadability(document)
   const warnings: string[] = []
 
@@ -42,6 +51,7 @@ export function extractAssistantWebHtml(input: {
     const markdownText = normalizeAssistantMarkdown(
       renderAssistantHtmlToMarkdown(
         parseAssistantHtmlFragment(normalizeNullableString(article.content) ?? ''),
+        renderContext,
       ),
     )
     if (input.extractMode === 'markdown' && markdownText.length === 0 && articleText.length > 0) {
@@ -69,7 +79,7 @@ export function extractAssistantWebHtml(input: {
 
   const fallbackText = normalizeAssistantText(document.body?.textContent ?? '')
   const fallbackMarkdown = normalizeAssistantMarkdown(
-    renderAssistantHtmlToMarkdown(document),
+    renderAssistantHtmlToMarkdown(document, renderContext),
   )
   if (input.extractMode === 'markdown' && fallbackMarkdown.length === 0 && fallbackText.length > 0) {
     warnings.push(
@@ -115,12 +125,16 @@ function parseAssistantHtmlFragment(
 
 function renderAssistantHtmlToMarkdown(
   document: AssistantHtmlDocument,
+  context: AssistantHtmlRenderContext,
 ): string {
-  return normalizeAssistantMarkdown(renderAssistantNodeToMarkdown(document.body))
+  return normalizeAssistantMarkdown(
+    renderAssistantNodeToMarkdown(document.body, context),
+  )
 }
 
 function renderAssistantNodeToMarkdown(
   node: AssistantHtmlNodeLike | null | undefined,
+  context: AssistantHtmlRenderContext,
 ): string {
   if (!node) {
     return ''
@@ -135,7 +149,7 @@ function renderAssistantNodeToMarkdown(
   }
 
   const tagName = node.nodeName.toLowerCase()
-  const childText = renderAssistantChildrenToMarkdown(node)
+  const childText = renderAssistantChildrenToMarkdown(node, context)
 
   switch (tagName) {
     case 'body':
@@ -169,7 +183,7 @@ function renderAssistantNodeToMarkdown(
       return '\n---\n\n'
     case 'ul':
     case 'ol':
-      return `${renderAssistantListToMarkdown(node, tagName === 'ol')}\n`
+      return `${renderAssistantListToMarkdown(node, tagName === 'ol', context)}\n`
     case 'li': {
       const text = normalizeAssistantMarkdownInline(childText)
       return text ? `${text}\n` : ''
@@ -184,7 +198,10 @@ function renderAssistantNodeToMarkdown(
     }
     case 'a': {
       const text = normalizeAssistantMarkdownInline(childText)
-      const href = normalizeNullableString(node.getAttribute?.('href') ?? null)
+      const href = resolveAssistantMarkdownHref(
+        node.getAttribute?.('href') ?? null,
+        context.baseUrl,
+      )
       if (!text) {
         return ''
       }
@@ -218,14 +235,17 @@ function renderAssistantNodeToMarkdown(
   }
 }
 
-function renderAssistantChildrenToMarkdown(node: AssistantHtmlNodeLike): string {
+function renderAssistantChildrenToMarkdown(
+  node: AssistantHtmlNodeLike,
+  context: AssistantHtmlRenderContext,
+): string {
   if (!node.childNodes || node.childNodes.length === 0) {
     return ''
   }
 
   let markdown = ''
   for (const childNode of Array.from(node.childNodes)) {
-    markdown += renderAssistantNodeToMarkdown(childNode)
+    markdown += renderAssistantNodeToMarkdown(childNode, context)
   }
 
   return markdown
@@ -234,6 +254,7 @@ function renderAssistantChildrenToMarkdown(node: AssistantHtmlNodeLike): string 
 function renderAssistantListToMarkdown(
   node: AssistantHtmlNodeLike,
   ordered: boolean,
+  context: AssistantHtmlRenderContext,
 ): string {
   if (!node.childNodes || node.childNodes.length === 0) {
     return ''
@@ -248,12 +269,12 @@ function renderAssistantListToMarkdown(
     }
 
     if (childNode.nodeName.toLowerCase() !== 'li') {
-      markdown += renderAssistantNodeToMarkdown(childNode)
+      markdown += renderAssistantNodeToMarkdown(childNode, context)
       continue
     }
 
     const itemText = normalizeAssistantMarkdownInline(
-      renderAssistantChildrenToMarkdown(childNode),
+      renderAssistantChildrenToMarkdown(childNode, context),
     )
     if (!itemText) {
       continue
@@ -287,6 +308,35 @@ function normalizeAssistantMarkdown(input: string): string {
 
 function normalizeAssistantMarkdownInline(input: string): string {
   return normalizeAssistantText(input).replace(/\n+/gu, ' ')
+}
+
+function resolveAssistantMarkdownHref(
+  href: string | null | undefined,
+  baseUrl: URL | null,
+): string | null {
+  const normalized = normalizeNullableString(href)
+  if (!normalized) {
+    return null
+  }
+
+  try {
+    const resolvedUrl = baseUrl
+      ? new URL(normalized, baseUrl)
+      : new URL(normalized)
+
+    if (resolvedUrl.username || resolvedUrl.password) {
+      return null
+    }
+
+    const protocol = resolvedUrl.protocol.toLowerCase()
+    if (protocol !== 'http:' && protocol !== 'https:') {
+      return null
+    }
+
+    return normalizeAssistantWebRequestUrl(resolvedUrl.toString()).toString()
+  } catch {
+    return null
+  }
 }
 
 function parseAssistantHtmlWithReadability(

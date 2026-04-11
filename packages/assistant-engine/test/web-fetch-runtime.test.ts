@@ -344,7 +344,7 @@ describe('assistant web-fetch runtime', () => {
         {
           response: {
             headers: {
-              location: '/next?token=secret',
+              location: 'https://Example.com./next?token=secret#fragment',
             },
             status: 302,
           },

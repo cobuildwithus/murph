@@ -6,19 +6,14 @@ import type {
 } from './config.js'
 import {
   cancelAssistantWebResponseBody,
-  readAssistantWebResponseBytes,
+  readAssistantWebResponseText,
 } from './response.js'
 import { extractAssistantWebHtml } from './html.js'
-
-interface AssistantWebResponseText {
-  text: string
-  truncated: boolean
-  warnings: string[]
-}
 
 export async function extractAssistantWebResponse(input: {
   contentType: string | null
   extractMode: AssistantWebFetchExtractMode
+  finalUrl: URL
   maxChars: number
   maxResponseBytes: number
   response: Response
@@ -29,7 +24,7 @@ export async function extractAssistantWebResponse(input: {
   truncated: boolean
   warnings: string[]
 }> {
-  if (input.contentType === 'application/pdf') {
+  if (isAssistantWebPdfContentType(input.contentType)) {
     await cancelAssistantWebResponseBody(input.response)
     throw new VaultCliError(
       'WEB_FETCH_PDF_UNSUPPORTED',
@@ -57,6 +52,7 @@ export async function extractAssistantWebResponse(input: {
 
   if (isAssistantWebHtmlContentType(input.contentType)) {
     const extractedHtml = extractAssistantWebHtml({
+      baseUrl: input.finalUrl,
       extractMode: input.extractMode,
       html: responseText.text,
     })
@@ -116,20 +112,6 @@ export function resolveAssistantWebMediaType(
   return normalized.split(';', 1)[0]?.trim().toLowerCase() ?? null
 }
 
-async function readAssistantWebResponseText(input: {
-  maxResponseBytes: number
-  response: Response
-}): Promise<AssistantWebResponseText> {
-  const body = await readAssistantWebResponseBytes(input)
-  const decoder = new TextDecoder()
-
-  return {
-    text: decoder.decode(body.bytes),
-    truncated: body.truncated,
-    warnings: body.warnings,
-  }
-}
-
 function normalizeAssistantWebJsonText(input: string): {
   text: string
   warnings: string[]
@@ -162,6 +144,12 @@ function isAssistantWebJsonContentType(
     Boolean(contentType?.endsWith('+json'))
 }
 
+export function isAssistantWebPdfContentType(
+  contentType: string | null,
+): boolean {
+  return contentType === 'application/pdf' || contentType === 'application/x-pdf'
+}
+
 function isAssistantWebLikelyBinaryContentType(
   contentType: string | null,
 ): boolean {
@@ -169,23 +157,37 @@ function isAssistantWebLikelyBinaryContentType(
     return false
   }
 
-  if (
-    contentType.startsWith('text/') ||
-    isAssistantWebHtmlContentType(contentType) ||
-    isAssistantWebJsonContentType(contentType) ||
-    contentType === 'application/xml' ||
-    contentType.endsWith('+xml') ||
-    contentType === 'image/svg+xml'
-  ) {
+  if (isAssistantWebSupportedTextContentType(contentType)) {
     return false
   }
 
   return contentType.startsWith('image/') ||
     contentType.startsWith('audio/') ||
     contentType.startsWith('video/') ||
-    contentType === 'application/octet-stream' ||
-    contentType === 'application/pdf' ||
-    contentType === 'application/zip'
+    contentType.startsWith('font/') ||
+    contentType.startsWith('model/') ||
+    contentType.startsWith('multipart/') ||
+    contentType.startsWith('application/')
+}
+
+function isAssistantWebSupportedTextContentType(
+  contentType: string,
+): boolean {
+  return contentType.startsWith('text/') ||
+    isAssistantWebHtmlContentType(contentType) ||
+    isAssistantWebJsonContentType(contentType) ||
+    contentType === 'application/ecmascript' ||
+    contentType === 'application/graphql' ||
+    contentType === 'application/javascript' ||
+    contentType === 'application/xml' ||
+    contentType === 'application/x-javascript' ||
+    contentType === 'application/x-toml' ||
+    contentType === 'application/x-www-form-urlencoded' ||
+    contentType === 'application/x-yaml' ||
+    contentType === 'application/yaml' ||
+    contentType === 'application/toml' ||
+    contentType.endsWith('+xml') ||
+    contentType === 'image/svg+xml'
 }
 
 function normalizeAssistantWebText(input: string): string {
