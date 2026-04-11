@@ -19,6 +19,7 @@ import {
   readJsonlRecords,
   VAULT_LAYOUT,
   walkVaultFiles,
+  withCanonicalWriteLockScope,
 } from "@murphai/core";
 
 import type { InboundCapture, StoredAttachment, StoredCapture } from "../contracts/capture.ts";
@@ -470,36 +471,38 @@ export async function ensureStoredCaptureCanonicalEvidence(input: {
   envelope: StoredCaptureEnvelope;
 }): Promise<void> {
   const capturePath = buildInboxCaptureLedgerPath(input.envelope);
-  const lock = await acquireCanonicalWriteLock(input.vaultRoot);
+  await withCanonicalWriteLockScope(input.vaultRoot, async () => {
+    const lock = await acquireCanonicalWriteLock(input.vaultRoot);
 
-  try {
-    const captureRecords = await readInboxCaptureRecordsIfPresent({
-      vaultRoot: input.vaultRoot,
-      relativePath: capturePath,
-    });
-    if (findMatchingInboxCaptureRecord(captureRecords, input.envelope)) {
-      return;
+    try {
+      const captureRecords = await readInboxCaptureRecordsIfPresent({
+        vaultRoot: input.vaultRoot,
+        relativePath: capturePath,
+      });
+      if (findMatchingInboxCaptureRecord(captureRecords, input.envelope)) {
+        return;
+      }
+
+      await applyCanonicalWriteBatch({
+        vaultRoot: input.vaultRoot,
+        operationType: "inbox_capture_canonical_evidence",
+        summary: `Ensure canonical evidence for inbox capture ${input.envelope.captureId}`,
+        occurredAt: input.envelope.stored.storedAt,
+        jsonlAppends: [
+          {
+            relativePath: capturePath,
+            record: buildInboxCaptureRecord({
+              eventId: input.envelope.eventId,
+              inbound: input.envelope.input,
+              stored: input.envelope.stored,
+            }),
+          },
+        ],
+      });
+    } finally {
+      await lock.release();
     }
-
-    await applyCanonicalWriteBatch({
-      vaultRoot: input.vaultRoot,
-      operationType: "inbox_capture_canonical_evidence",
-      summary: `Ensure canonical evidence for inbox capture ${input.envelope.captureId}`,
-      occurredAt: input.envelope.stored.storedAt,
-      jsonlAppends: [
-        {
-          relativePath: capturePath,
-          record: buildInboxCaptureRecord({
-            eventId: input.envelope.eventId,
-            inbound: input.envelope.input,
-            stored: input.envelope.stored,
-          }),
-        },
-      ],
-    });
-  } finally {
-    await lock.release();
-  }
+  });
 }
 
 export async function appendInboxCaptureEvent(input: {

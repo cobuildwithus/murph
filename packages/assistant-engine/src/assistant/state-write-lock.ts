@@ -24,6 +24,7 @@ interface AssistantStateWriteLockOptions {
   ownerKeyPrefix: string
   lockDirectory: string
   lockMetadataPath: string
+  legacyLockMetadataPath?: string
   invalidMetadataReason: string
   heldLockErrorCode: string
   formatHeldLockMessage(metadata: AssistantStateWriteLockMetadata | null): string
@@ -88,6 +89,25 @@ export function createAssistantStateWriteLock<
   async function acquireWriteLock(paths: TPaths): Promise<{
     release(): Promise<void>
   }> {
+    const currentInspection = await inspectCurrentWriteLock(paths)
+    if (
+      currentInspection.state === 'stale' &&
+      currentInspection.metadata === null &&
+      options.legacyLockMetadataPath
+    ) {
+      const legacyInspection = await inspectLegacyWriteLock(paths)
+      if (legacyInspection?.state === 'active') {
+        throw new VaultCliError(
+          options.heldLockErrorCode,
+          options.formatHeldLockMessage(legacyInspection.metadata),
+        )
+      }
+
+      if (legacyInspection?.state === 'stale') {
+        await clearWriteLock(paths)
+      }
+    }
+
     try {
       const handle = await acquireDirectoryLock({
         ownerKey: `${options.ownerKeyPrefix}:${paths.assistantStateRoot}`,
@@ -127,6 +147,19 @@ export function createAssistantStateWriteLock<
   }
 
   async function inspectWriteLock(paths: TPaths) {
+    const currentInspection = await inspectCurrentWriteLock(paths)
+    if (
+      currentInspection.state === 'stale' &&
+      currentInspection.metadata === null &&
+      options.legacyLockMetadataPath
+    ) {
+      return (await inspectLegacyWriteLock(paths)) ?? currentInspection
+    }
+
+    return currentInspection
+  }
+
+  async function inspectCurrentWriteLock(paths: TPaths) {
     return await inspectDirectoryLock({
       lockPath: path.join(paths.assistantStateRoot, options.lockDirectory),
       metadataPath: path.join(paths.assistantStateRoot, options.lockMetadataPath),
@@ -142,20 +175,45 @@ export function createAssistantStateWriteLock<
     })
   }
 
+  async function inspectLegacyWriteLock(paths: TPaths) {
+    if (!options.legacyLockMetadataPath) {
+      return null
+    }
+
+    return await inspectDirectoryLock({
+      lockPath: path.join(paths.assistantStateRoot, options.lockDirectory),
+      metadataPath: path.join(paths.assistantStateRoot, options.legacyLockMetadataPath),
+      parseMetadata(value) {
+        return isAssistantStateWriteLockMetadata(value) ? value : null
+      },
+      invalidMetadataReason: options.invalidMetadataReason,
+      inspectStale(metadata) {
+        return isProcessRunning(metadata.pid)
+          ? null
+          : `Process ${metadata.pid} is no longer running.`
+      },
+    })
+  }
+
   async function clearWriteLock(paths: TPaths): Promise<void> {
-    await Promise.all([
-      rm(path.join(paths.assistantStateRoot, options.lockDirectory), {
-        recursive: true,
-        force: true,
-        maxRetries: 3,
-        retryDelay: 10,
+    const cleanupTargets = [
+      path.join(paths.assistantStateRoot, options.lockDirectory),
+      path.join(paths.assistantStateRoot, options.lockMetadataPath),
+      ...(options.legacyLockMetadataPath
+        ? [path.join(paths.assistantStateRoot, options.legacyLockMetadataPath)]
+        : []),
+    ]
+
+    await Promise.all(
+      cleanupTargets.map(async (targetPath) => {
+        await rm(targetPath, {
+          recursive: true,
+          force: true,
+          maxRetries: 3,
+          retryDelay: 10,
+        })
       }),
-      rm(path.join(paths.assistantStateRoot, options.lockMetadataPath), {
-        force: true,
-        maxRetries: 3,
-        retryDelay: 10,
-      }),
-    ])
+    )
   }
 
   return {

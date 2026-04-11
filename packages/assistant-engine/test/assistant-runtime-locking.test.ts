@@ -67,7 +67,7 @@ test('assistant runtime write lock reports active state while held and clears st
     recursive: true,
   })
   await writeFile(
-    path.join(expectedPaths.assistantStateRoot, '.runtime-write-lock.json'),
+    path.join(expectedPaths.assistantStateRoot, '.runtime-write.lock', 'owner.json'),
     JSON.stringify({
       command: 'stale-runtime-writer',
       pid: 999_999,
@@ -84,6 +84,41 @@ test('assistant runtime write lock reports active state while held and clears st
   assert.equal((await inspectAssistantRuntimeWriteLock(vaultRoot)).state, 'unlocked')
 })
 
+test('assistant runtime write lock respects legacy sibling metadata during migration', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    'murph-assistant-runtime-write-legacy-held-',
+  )
+  cleanupPaths.push(parentRoot)
+
+  const paths = resolveAssistantStatePaths(vaultRoot)
+  await mkdir(path.join(paths.assistantStateRoot, '.runtime-write.lock'), {
+    recursive: true,
+  })
+  await writeFile(
+    path.join(paths.assistantStateRoot, '.runtime-write-lock.json'),
+    JSON.stringify({
+      command: 'existing-runtime-writer',
+      pid: process.pid,
+      startedAt: '2026-04-08T12:34:56.000Z',
+    }),
+    'utf8',
+  )
+
+  const active = await inspectAssistantRuntimeWriteLock(vaultRoot)
+  assert.equal(active.state, 'active')
+  assert.equal(active.metadata.pid, process.pid)
+
+  await assert.rejects(
+    () => withAssistantRuntimeWriteLock(vaultRoot, async () => undefined),
+    (error) => {
+      assert.ok(error instanceof VaultCliError)
+      assert.equal(error.code, 'ASSISTANT_RUNTIME_WRITE_LOCKED')
+      assert.match(error.message, /existing-runtime-writer/u)
+      return true
+    },
+  )
+})
+
 test('assistant runtime write lock surfaces held external metadata as a VaultCliError', async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext(
     'murph-assistant-runtime-write-held-',
@@ -95,7 +130,7 @@ test('assistant runtime write lock surfaces held external metadata as a VaultCli
     recursive: true,
   })
   await writeFile(
-    path.join(paths.assistantStateRoot, '.runtime-write-lock.json'),
+    path.join(paths.assistantStateRoot, '.runtime-write.lock', 'owner.json'),
     JSON.stringify({
       command: 'existing-runtime-writer',
       pid: process.pid,
@@ -249,7 +284,7 @@ test('assistant automation run lock distinguishes external active and stale hold
     recursive: true,
   })
   await writeFile(
-    path.join(paths.assistantStateRoot, '.automation-run-lock.json'),
+    path.join(paths.assistantStateRoot, '.automation-run.lock', 'owner.json'),
     JSON.stringify({
       command: 'existing-automation-runner',
       mode: 'continuous',
@@ -282,7 +317,7 @@ test('assistant automation run lock distinguishes external active and stale hold
   )
 
   await writeFile(
-    path.join(paths.assistantStateRoot, '.automation-run-lock.json'),
+    path.join(paths.assistantStateRoot, '.automation-run.lock', 'owner.json'),
     JSON.stringify({
       command: 'stale-automation-runner',
       mode: 'once',
@@ -312,4 +347,47 @@ test('assistant automation run lock distinguishes external active and stale hold
     command: null,
     reason: null,
   })
+})
+
+test('assistant automation run lock respects legacy sibling metadata during migration', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    'murph-assistant-automation-legacy-lock-',
+  )
+  cleanupPaths.push(parentRoot)
+
+  const paths = resolveAssistantStatePaths(vaultRoot)
+  await mkdir(path.join(paths.assistantStateRoot, '.automation-run.lock'), {
+    recursive: true,
+  })
+  await writeFile(
+    path.join(paths.assistantStateRoot, '.automation-run-lock.json'),
+    JSON.stringify({
+      command: 'existing-automation-runner',
+      mode: 'continuous',
+      pid: process.pid,
+      startedAt: '2026-04-08T12:34:56.000Z',
+    }),
+    'utf8',
+  )
+
+  const active = await inspectAssistantAutomationRunLock(paths)
+  assert.deepEqual(active, {
+    state: 'active',
+    pid: process.pid,
+    startedAt: '2026-04-08T12:34:56.000Z',
+    mode: 'continuous',
+    command: 'existing-automation-runner',
+    reason: null,
+  })
+
+  await assert.rejects(
+    () => acquireAssistantAutomationRunLock({ paths }),
+    (error) => {
+      assert.ok(error instanceof VaultCliError)
+      assert.equal(error.code, 'ASSISTANT_AUTOMATION_ALREADY_RUNNING')
+      assert.equal(error.context?.sameProcess, false)
+      assert.equal(error.context?.mode, 'continuous')
+      return true
+    },
+  )
 })

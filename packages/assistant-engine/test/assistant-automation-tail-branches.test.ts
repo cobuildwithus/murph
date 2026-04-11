@@ -93,10 +93,12 @@ describe('assistant automation tail branch coverage', () => {
       .mockResolvedValueOnce({
         release: async () => undefined,
       })
-    const inspectDirectoryLock = vi
-      .fn()
-      .mockImplementationOnce(async (options) => {
-        assert.equal(options.parseMetadata([]), null)
+    let inspectCallCount = 0
+    const inspectDirectoryLock = vi.fn(async (options) => {
+      inspectCallCount += 1
+      assert.equal(options.parseMetadata([]), null)
+
+      if (inspectCallCount === 4) {
         return {
           lockPath: `${options.lockPath}`,
           metadata: null,
@@ -104,7 +106,14 @@ describe('assistant automation tail branch coverage', () => {
           reason: 'Assistant automation run lock metadata is malformed.',
           state: 'stale' as const,
         }
-      })
+      }
+
+      return {
+        lockPath: `${options.lockPath}`,
+        metadataPath: `${options.metadataPath}`,
+        state: 'unlocked' as const,
+      }
+    })
     const buildProcessCommand = vi.fn(() => 'murph automation run')
     const isProcessRunning = vi.fn((pid: number) => pid === process.pid)
 
@@ -168,7 +177,11 @@ describe('assistant automation tail branch coverage', () => {
       DirectoryLockHeldError: MockDirectoryLockHeldError,
       acquireDirectoryLock,
       buildProcessCommand: () => 'murph automation run',
-      inspectDirectoryLock: vi.fn(),
+      inspectDirectoryLock: vi.fn(async () => ({
+        lockPath: '/tmp/assistant-state-2/.automation-run.lock',
+        metadataPath: '/tmp/assistant-state-2/.automation-run.lock/owner.json',
+        state: 'unlocked' as const,
+      })),
       isProcessRunning: vi.fn(),
     }))
 

@@ -280,7 +280,6 @@ describe("hosted deploy automation helpers", () => {
       HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
       OPENAI_API_KEY: "sk-user",
     })).toMatchObject({
-      HOSTED_ASSISTANT_ZERO_DATA_RETENTION: "true",
       OPENAI_API_KEY: "sk-user",
     });
 

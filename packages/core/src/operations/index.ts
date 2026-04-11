@@ -18,6 +18,7 @@ export {
   CANONICAL_WRITE_LOCK_DIRECTORY,
   CANONICAL_WRITE_LOCK_METADATA_PATH,
   inspectCanonicalWriteLock,
+  withCanonicalWriteLockScope,
 } from "./canonical-write-lock.ts";
 export type {
   CanonicalWriteLockHandle,

@@ -170,6 +170,7 @@ test('supplement commands exercise scaffold, upsert, read, compound, rename, and
     }
     count: number
     items: Array<{
+      excerpt?: string | null
       slug: string
       markdown?: string | null
     }>

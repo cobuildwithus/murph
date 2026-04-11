@@ -564,7 +564,8 @@ test.sequential('setup wizard runs the public-link flow, preserves explicit opt-
     await writeInput(' ')
     await writeInput('\r')
     await waitForRenderedText(flush, readOutput, /Health data/u)
-    await writeInput('\u001B[A')
+    await writeInput('\u001B[B')
+    await writeInput('\u001B[B')
     await writeInput(' ')
     await writeInput('\r')
     const publicLinkOutput = await waitForRenderedText(

@@ -52,10 +52,17 @@ vi.mock("@murphai/vault-usecases/vault-services", () => ({
   createIntegratedVaultServices: mocks.createIntegratedVaultServices,
 }));
 
-vi.mock("@murphai/operator-config/hosted-assistant-config", () => ({
-  ensureHostedAssistantOperatorDefaults: mocks.ensureHostedAssistantOperatorDefaults,
-  resolveHostedAssistantOperatorDefaultsState: mocks.resolveHostedAssistantOperatorDefaultsState,
-}));
+vi.mock("@murphai/operator-config/hosted-assistant-config", async () => {
+  const actual = await vi.importActual<
+    typeof import("@murphai/operator-config/hosted-assistant-config")
+  >("@murphai/operator-config/hosted-assistant-config");
+
+  return {
+    ...actual,
+    ensureHostedAssistantOperatorDefaults: mocks.ensureHostedAssistantOperatorDefaults,
+    resolveHostedAssistantOperatorDefaultsState: mocks.resolveHostedAssistantOperatorDefaultsState,
+  };
+});
 
 vi.mock("@murphai/operator-config/operator-config", async () => {
   const actual = await vi.importActual<

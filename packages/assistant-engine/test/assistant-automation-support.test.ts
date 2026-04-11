@@ -1541,14 +1541,15 @@ describe('assistant automation runtime locks', () => {
     const paths = resolveAssistantStatePaths(vaultRoot)
     const metadataPath = path.join(
       paths.assistantStateRoot,
-      '.automation-run-lock.json',
+      '.automation-run.lock',
+      'owner.json',
     )
     const lockPath = path.join(
       paths.assistantStateRoot,
       '.automation-run.lock',
     )
 
-    await mkdir(paths.assistantStateRoot, { recursive: true })
+    await mkdir(lockPath, { recursive: true })
 
     await writeFile(
       metadataPath,
@@ -1560,8 +1561,6 @@ describe('assistant automation runtime locks', () => {
       }),
       'utf8',
     )
-    await writeFile(lockPath, '', 'utf8')
-
     await expect(inspectAssistantAutomationRunLock(paths)).resolves.toEqual({
       state: 'stale',
       pid: 999_999,
