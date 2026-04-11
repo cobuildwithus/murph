@@ -922,7 +922,7 @@ test("device sync service accepts configured external return origins and still r
   }
 });
 
-test("device sync service rejects manual reconcile and webhook enqueue for disconnected accounts", async () => {
+test("device sync service accepts and dedupes disconnected-account webhooks while manual reconcile stays blocked", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-disconnect");
   const imports: unknown[] = [];
   const importer: DeviceSyncImporterPort = {
@@ -940,7 +940,25 @@ test("device sync service rejects manual reconcile and webhook enqueue for disco
       publicBaseUrl: "https://sync.example.test/device-sync",
       stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
     },
-    providers: [createFakeProvider()],
+    providers: [
+      createFakeProvider({
+        async verifyAndParseWebhook() {
+          return {
+            externalAccountId: "demo-xyz",
+            eventType: "demo.updated",
+            traceId: "trace-disconnected",
+            jobs: [
+              {
+                kind: "resource",
+                payload: {
+                  resourceId: "resource-disconnected",
+                },
+              },
+            ],
+          };
+        },
+      }),
+    ],
     importer,
   });
 
@@ -961,8 +979,22 @@ test("device sync service rejects manual reconcile and webhook enqueue for disco
   );
 
   const webhook = await service.handleWebhook("demo", new Headers(), Buffer.from("{}"));
-  assert.equal(webhook.accepted, true);
-  assert.equal(webhook.duplicate, false);
+  assert.deepEqual(webhook, {
+    accepted: true,
+    duplicate: false,
+    eventType: "demo.updated",
+    provider: "demo",
+    traceId: scopeWebhookTraceId("demo", "demo-xyz", "trace-disconnected"),
+  });
+
+  const duplicate = await service.handleWebhook("demo", new Headers(), Buffer.from("{}"));
+  assert.deepEqual(duplicate, {
+    accepted: true,
+    duplicate: true,
+    eventType: "demo.updated",
+    provider: "demo",
+    traceId: scopeWebhookTraceId("demo", "demo-xyz", "trace-disconnected"),
+  });
 
   const nextJob = await service.runWorkerOnce();
   assert.equal(nextJob, null);
