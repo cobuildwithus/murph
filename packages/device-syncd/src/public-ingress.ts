@@ -7,6 +7,7 @@ import {
   normalizePublicBaseUrl,
   normalizeString,
   resolveRelativeOrAllowedOriginUrl,
+  scopeWebhookTraceId,
   sha256Text,
   toIsoTimestamp,
 } from "./shared.ts";
@@ -254,10 +255,15 @@ export class DeviceSyncPublicIngress {
       rawBody,
       now,
     });
+    const durableTraceId = scopeWebhookTraceId(
+      provider.provider,
+      parsed.externalAccountId,
+      parsed.traceId,
+    );
 
     const traceClaim = await this.store.claimWebhookTrace({
       provider: provider.provider,
-      traceId: parsed.traceId,
+      traceId: durableTraceId,
       externalAccountId: parsed.externalAccountId,
       eventType: parsed.eventType,
       receivedAt: now,
@@ -301,9 +307,9 @@ export class DeviceSyncPublicIngress {
           externalAccountId: parsed.externalAccountId,
           now,
         });
-        await this.store.completeWebhookTrace(provider.provider, parsed.traceId);
+        await this.store.completeWebhookTrace(provider.provider, durableTraceId);
       } catch (error) {
-        await this.store.releaseWebhookTrace(provider.provider, parsed.traceId);
+        await this.store.releaseWebhookTrace(provider.provider, durableTraceId);
         throw error;
       }
 
@@ -324,7 +330,7 @@ export class DeviceSyncPublicIngress {
         eventType: parsed.eventType,
         traceId: parsed.traceId,
       });
-      await this.store.completeWebhookTrace(provider.provider, parsed.traceId);
+      await this.store.completeWebhookTrace(provider.provider, durableTraceId);
 
       return {
         accepted: true,
@@ -338,16 +344,17 @@ export class DeviceSyncPublicIngress {
     try {
       await this.hooks.onWebhookAccepted?.({
         account,
+        durableTraceId,
         webhook: parsed,
         provider,
         now,
       });
 
       if (!this.hooks.onWebhookAccepted) {
-        await this.store.completeWebhookTrace(provider.provider, parsed.traceId);
+        await this.store.completeWebhookTrace(provider.provider, durableTraceId);
       }
     } catch (error) {
-      await this.store.releaseWebhookTrace(provider.provider, parsed.traceId);
+      await this.store.releaseWebhookTrace(provider.provider, durableTraceId);
       throw error;
     }
 

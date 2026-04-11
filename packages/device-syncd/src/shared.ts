@@ -44,6 +44,10 @@ export function sha256Text(value: string): string {
   return createHash("sha256").update(value).digest("hex");
 }
 
+export function scopeWebhookTraceId(provider: string, externalAccountId: string, traceId: string): string {
+  return sha256Text(JSON.stringify(["device-sync-webhook-trace", provider, externalAccountId, traceId]));
+}
+
 export function normalizeString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }

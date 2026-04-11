@@ -15,6 +15,7 @@ import {
   parseJsonObject,
   sanitizeStoredDeviceSyncMetadata,
   sha256Text,
+  scopeWebhookTraceId,
   stringifyJson,
   toIsoTimestamp,
   resolveRelativeOrAllowedOriginUrl,
@@ -111,4 +112,11 @@ test("device-syncd shared helpers normalize metadata, timestamps, and JSON paylo
   assert.equal(computeRetryDelayMs(99), 7_200_000);
   assert.equal(joinUrl("https://sync.example.test/device-sync/", "/oauth/demo/callback"), "https://sync.example.test/device-sync/oauth/demo/callback");
   assert.match(defaultStateDatabasePath("./vault"), /state\.sqlite$/u);
+});
+
+test("device-syncd webhook trace scoping is unambiguous when tuple members contain delimiters", () => {
+  assert.notEqual(
+    scopeWebhookTraceId("demo", "acct:1", "evt"),
+    scopeWebhookTraceId("demo", "acct", "1:evt"),
+  );
 });

@@ -7,6 +7,7 @@ import { openSqliteRuntimeDatabase, writeSqliteRuntimeUserVersion } from "@murph
 import { createWhoopDeviceSyncProvider } from "../src/providers/whoop.ts";
 import { DeviceSyncError, deviceSyncError } from "../src/errors.ts";
 import { createDeviceSyncService } from "../src/service.ts";
+import { scopeWebhookTraceId } from "../src/shared.ts";
 import { SqliteDeviceSyncStore } from "../src/store.ts";
 import { createJsonResponse, makeTempDirectory, readUrl } from "./helpers.ts";
 
@@ -197,7 +198,7 @@ test("device sync service connects, imports, and deduplicates webhook traces", a
     (
       service.store.database
         .prepare("select status from webhook_trace where provider = ? and trace_id = ?")
-        .get("demo", "trace-1") as { status?: string } | undefined
+        .get("demo", scopeWebhookTraceId("demo", "demo-abc", "trace-1")) as { status?: string } | undefined
     )?.status,
     "processed",
   );

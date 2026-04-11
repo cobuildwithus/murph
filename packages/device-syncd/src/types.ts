@@ -212,6 +212,7 @@ export interface DeviceSyncPublicIngressConnectionEstablishedInput {
 
 export interface DeviceSyncPublicIngressWebhookAcceptedInput {
   account: PublicDeviceSyncAccount;
+  durableTraceId: string;
   webhook: ProviderWebhookResult;
   provider: DeviceSyncProvider;
   now: string;
