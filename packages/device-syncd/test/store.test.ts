@@ -27,12 +27,6 @@ test("device sync store minimizes webhook trace payload retention without changi
         eventType: "sleep.updated",
         receivedAt: "2026-01-01T00:00:00.000Z",
         processingExpiresAt: "2026-01-01T00:01:00.000Z",
-        payload: {
-          accessToken: "sample-token",
-          nested: {
-            healthRecordId: "sample-record",
-          },
-        },
       }),
       "claimed",
     );
@@ -51,9 +45,6 @@ test("device sync store minimizes webhook trace payload retention without changi
         eventType: "sleep.updated",
         receivedAt: "2026-01-01T00:02:00.000Z",
         processingExpiresAt: "2026-01-01T00:03:00.000Z",
-        payload: {
-          email: "still-should-not-persist@example.invalid",
-        },
       }),
       "claimed",
     );

@@ -3,22 +3,23 @@ import { timingSafeEqual } from "node:crypto";
 import { createServer } from "node:http";
 
 import {
+  assertLoopbackListenerHost,
   hasForwardedLoopbackControlHeaders,
   hasLoopbackControlHostHeader,
-  isLoopbackHostname,
 } from "@murphai/runtime-state";
 import { isLoopbackRemoteAddress } from "@murphai/runtime-state/node";
 
 import { deviceSyncError, isDeviceSyncError } from "./errors.ts";
 import { DEFAULT_DEVICE_SYNC_HOST } from "./shared.ts";
 import { resolveDeviceSyncWebhookVerificationResponse } from "./webhook-verification.ts";
+import { DEFAULT_DEVICE_SYNC_HTTP_BODY_LIMIT_BYTES } from "./types.ts";
 
 import type { IncomingHttpHeaders, IncomingMessage, Server, ServerResponse } from "node:http";
 import type { DeviceSyncError } from "./errors.ts";
 import type { DeviceSyncHttpConfig, NodeServerHandle } from "./types.ts";
 import type { DeviceSyncService } from "./service.ts";
 
-const DEFAULT_BODY_LIMIT_BYTES = 1_048_576;
+const DEFAULT_BODY_LIMIT_BYTES = DEFAULT_DEVICE_SYNC_HTTP_BODY_LIMIT_BYTES;
 const CONTROL_PLANE_WWW_AUTHENTICATE = 'Bearer realm="device-syncd-control-plane"';
 
 type DeviceSyncHttpRouteKind = "control" | "public";
@@ -112,7 +113,10 @@ export async function startDeviceSyncHttpServer(input: CreateDeviceSyncHttpServe
   const bodyLimitBytes = Math.max(1024, input.bodyLimitBytes ?? DEFAULT_BODY_LIMIT_BYTES);
   const configuredHost = input.config?.host?.trim();
   const host = configuredHost && configuredHost.length > 0 ? configuredHost : DEFAULT_DEVICE_SYNC_HOST;
-  assertLoopbackControlListenerHost(host);
+  assertLoopbackListenerHost(
+    host,
+    "Device sync control listener host must be a loopback hostname or address. Use publicHost/publicPort for externally reachable callback and webhook routes.",
+  );
   const port = input.config?.port ?? 8788;
   const controlToken = requireControlToken(input.config?.controlToken);
   const publicListener = resolvePublicListener(input.config);
@@ -467,16 +471,6 @@ async function closeServer(server: Server): Promise<void> {
       resolve();
     });
   });
-}
-
-function assertLoopbackControlListenerHost(host: string): void {
-  if (isLoopbackHostname(host)) {
-    return;
-  }
-
-  throw new TypeError(
-    "Device sync control listener host must be a loopback hostname or address. Use publicHost/publicPort for externally reachable callback and webhook routes.",
-  );
 }
 
 function requireControlToken(controlToken: string | undefined): string {
