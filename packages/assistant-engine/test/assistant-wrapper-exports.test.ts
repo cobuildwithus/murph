@@ -122,10 +122,13 @@ const wrapperCases = [
     'knowledge',
     knowledge,
     [
+      'getKnowledgePage',
+      'rebuildKnowledgeIndex',
       'upsertKnowledgePage',
       'listKnowledgePages',
-      'normalizeSourcePathInputs',
-      'matchesKnowledgeFilter',
+      'searchKnowledgePages',
+      'lintKnowledgePages',
+      'tailKnowledgeLog',
     ],
   ],
   [
@@ -138,7 +141,6 @@ const wrapperCases = [
       'assistantGatewayLocalProjectionSourceReader',
       'createAssistantCapabilityRegistry',
       'deliverAssistantMessage',
-      'searchKnowledgePages',
     ],
   ],
 ] as const
