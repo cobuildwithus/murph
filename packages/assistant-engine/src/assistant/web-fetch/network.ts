@@ -17,6 +17,7 @@ import {
   type AssistantWebFetchedResponse,
   type AssistantWebFetchRuntimeContext,
   normalizeAssistantWebHostname,
+  normalizeAssistantWebRequestUrl,
 } from './config.js'
 
 interface AssistantWebResolvedAddress {
@@ -99,8 +100,9 @@ export async function fetchAssistantWebResponse(input: {
       )
     }
 
-    const nextUrl = new URL(location, currentUrl)
-    nextUrl.hash = ''
+    const nextUrl = normalizeAssistantWebRequestUrl(
+      new URL(location, currentUrl).toString(),
+    )
     warnings.push(
       `Followed redirect ${redirectCount + 1} to ${redactAssistantWebFetchUrl(nextUrl)}.`,
     )

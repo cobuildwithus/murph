@@ -37,6 +37,7 @@ describe('extractAssistantWebResponse', () => {
     const result = await extractAssistantWebResponse({
       contentType: 'text/html',
       extractMode: 'markdown',
+      finalUrl: new URL('https://example.com/start'),
       maxChars: 500,
       maxResponseBytes: 8_192,
       response,
@@ -54,6 +55,7 @@ describe('extractAssistantWebResponse', () => {
       extractAssistantWebResponse({
         contentType: 'application/pdf',
         extractMode: 'markdown',
+        finalUrl: new URL('https://example.com/file.pdf'),
         maxChars: 500,
         maxResponseBytes: 8_192,
         response: new Response('ignored'),
@@ -61,5 +63,69 @@ describe('extractAssistantWebResponse', () => {
     ).rejects.toMatchObject({
       code: 'WEB_FETCH_PDF_UNSUPPORTED',
     })
+  })
+
+  it('rejects x-pdf content through the shared PDF classifier', async () => {
+    await expect(
+      extractAssistantWebResponse({
+        contentType: 'application/x-pdf',
+        extractMode: 'markdown',
+        finalUrl: new URL('https://example.com/file.pdf'),
+        maxChars: 500,
+        maxResponseBytes: 8_192,
+        response: new Response('ignored'),
+      }),
+    ).rejects.toMatchObject({
+      code: 'WEB_FETCH_PDF_UNSUPPORTED',
+    })
+  })
+
+  it('rejects opaque application binaries instead of decoding them as text', async () => {
+    await expect(
+      extractAssistantWebResponse({
+        contentType: 'application/wasm',
+        extractMode: 'text',
+        finalUrl: new URL('https://example.com/app.wasm'),
+        maxChars: 1_024,
+        maxResponseBytes: 1_024,
+        response: new Response(new Uint8Array([0x00, 0x61, 0x73, 0x6d])),
+      }),
+    ).rejects.toMatchObject({
+      code: 'WEB_FETCH_CONTENT_TYPE_UNSUPPORTED',
+      message: 'web.fetch cannot extract readable text from application/wasm.',
+    })
+  })
+
+  it('still allows known textual application payloads', async () => {
+    const extracted = await extractAssistantWebResponse({
+      contentType: 'application/javascript',
+      extractMode: 'text',
+      finalUrl: new URL('https://example.com/app.js'),
+      maxChars: 1_024,
+      maxResponseBytes: 1_024,
+      response: new Response('const greeting = "murph";\n'),
+    })
+
+    expect(extracted.extractor).toBe('raw-text')
+    expect(extracted.text).toContain('const greeting = "murph";')
+    expect(extracted.truncated).toBe(false)
+  })
+
+  it('resolves relative markdown links against the fetched final url', async () => {
+    const extracted = await extractAssistantWebResponse({
+      contentType: 'text/html',
+      extractMode: 'markdown',
+      finalUrl: new URL('https://example.com/articles/start?ref=docs'),
+      maxChars: 4_000,
+      maxResponseBytes: 4_000,
+      response: new Response(
+        '<html><body><article><p><a href="/guides/install#quickstart">Install guide</a></p></article></body></html>',
+      ),
+    })
+
+    expect(extracted.text).toContain(
+      '[Install guide](https://example.com/guides/install)',
+    )
+    expect(extracted.text).not.toContain('#quickstart')
   })
 })

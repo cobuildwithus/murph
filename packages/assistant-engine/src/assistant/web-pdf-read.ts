@@ -9,6 +9,7 @@ import {
   normalizeAssistantWebRequestUrl,
 } from './web-fetch/config.js'
 import {
+  isAssistantWebPdfContentType,
   resolveAssistantWebMediaType,
   truncateAssistantWebText,
 } from './web-fetch/content.js'
@@ -386,10 +387,6 @@ function normalizeAssistantPdfBlock(input: string): string {
     .replace(/[ \t]+\n/gu, '\n')
     .replace(/\n{3,}/gu, '\n\n')
     .trim()
-}
-
-function isAssistantWebPdfContentType(contentType: string | null): boolean {
-  return contentType === 'application/pdf' || contentType === 'application/x-pdf'
 }
 
 async function loadAssistantPdfJs(): Promise<AssistantPdfJsModule> {
