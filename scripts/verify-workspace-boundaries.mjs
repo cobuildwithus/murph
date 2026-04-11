@@ -117,11 +117,38 @@ async function verifyWorkspacePackageExports(failures) {
       }
 
       if (
+        packageJson.name === "@murphai/murph"
+        && exportKey === "./knowledge-cli-contracts"
+      ) {
+        failures.push(
+          `${path.relative(repoRoot, packageJsonPath)} declares ${JSON.stringify(exportKey)} as a public entrypoint; shared knowledge result contracts belong on @murphai/query, so the published CLI package must not grow a second public knowledge-contract surface.`,
+        );
+      }
+
+      if (
         packageJson.name === "@murphai/importers"
         && exportKey === "./device-providers"
       ) {
         failures.push(
           `${path.relative(repoRoot, packageJsonPath)} declares ${JSON.stringify(exportKey)} as a public entrypoint; cross-package wearable metadata must stay on @murphai/importers/device-providers/provider-descriptors instead of leaking the full device-provider implementation barrel.`,
+        );
+      }
+
+      if (
+        packageJson.name === "@murphai/query"
+        && exportKey === "./knowledge-contracts"
+      ) {
+        failures.push(
+          `${path.relative(repoRoot, packageJsonPath)} declares ${JSON.stringify(exportKey)} as a public entrypoint; derived-knowledge result contracts already live on the @murphai/query root surface and should not leak as a duplicate subpath boundary.`,
+        );
+      }
+
+      if (
+        packageJson.name === "@murphai/query"
+        && exportKey === "./knowledge-search"
+      ) {
+        failures.push(
+          `${path.relative(repoRoot, packageJsonPath)} declares ${JSON.stringify(exportKey)} as a public entrypoint; derived-knowledge search helpers already live on the @murphai/query root surface and should not leak as a duplicate subpath boundary.`,
         );
       }
 
@@ -160,11 +187,14 @@ async function verifyAssistantEnginePublicSourceSurface(failures) {
     "./assistant-cli-access.js",
     "./assistant-cli-tools.js",
     "./assistant-vault-paths.js",
+    "./knowledge.js",
     "./process-kill.js",
   ]) {
     if (sourceReexportsSpecifier(indexSource, specifier)) {
       failures.push(
-        `packages/assistant-engine/src/index.ts re-exports ${JSON.stringify(specifier)}; assistant-engine's public root must stay on canonical runtime surfaces instead of leaking internal CLI/config helpers.`,
+        specifier === "./knowledge.js"
+          ? "packages/assistant-engine/src/index.ts re-exports ./knowledge.js; knowledge operations already have a dedicated @murphai/assistant-engine/knowledge entrypoint and should not leak through the ambient root barrel."
+          : `packages/assistant-engine/src/index.ts re-exports ${JSON.stringify(specifier)}; assistant-engine's public root must stay on canonical runtime surfaces instead of leaking internal CLI/config helpers.`,
       );
     }
   }
@@ -224,6 +254,27 @@ async function verifyFocusedOwnerSourceSurfaces(failures) {
       predicate: sourceMentionsSpecifier,
     },
     {
+      path: path.join(repoRoot, "packages", "assistant-engine", "src", "knowledge.ts"),
+      failures: [
+        {
+          specifier: "assertKnowledgeSourcePathAllowed",
+          message:
+            "packages/assistant-engine/src/knowledge.ts mentions assertKnowledgeSourcePathAllowed; the assistant-engine public knowledge surface should stay on service operations instead of leaking lower-level validation helpers.",
+        },
+        {
+          specifier: "./knowledge/documents.js",
+          message:
+            "packages/assistant-engine/src/knowledge.ts mentions ./knowledge/documents.js; the assistant-engine public knowledge surface should stay on service operations instead of leaking document-normalization helpers through a second boundary.",
+        },
+        {
+          specifier: "@murphai/query",
+          message:
+            "packages/assistant-engine/src/knowledge.ts mentions @murphai/query; knowledge result contracts are owned by @murphai/query and should be imported from there directly instead of re-exporting them through @murphai/assistant-engine/knowledge.",
+        },
+      ],
+      predicate: sourceMentionsSpecifier,
+    },
+    {
       path: path.join(repoRoot, "packages", "device-syncd", "src", "public-ingress.ts"),
       failures: [
         {
@@ -235,6 +286,17 @@ async function verifyFocusedOwnerSourceSurfaces(failures) {
           specifier: "./http.ts",
           message:
             "packages/device-syncd/src/public-ingress.ts imports or re-exports ./http.ts; the shared public-ingress seam must not depend on daemon HTTP helpers when @murphai/device-syncd/http already owns that surface.",
+        },
+      ],
+      predicate: sourceMentionsSpecifier,
+    },
+    {
+      path: path.join(repoRoot, "packages", "cli", "src", "index.ts"),
+      failures: [
+        {
+          specifier: "./knowledge-cli-contracts.js",
+          message:
+            "packages/cli/src/index.ts re-exports ./knowledge-cli-contracts.js; shared knowledge result contracts belong on @murphai/query, not on the published CLI root surface.",
         },
       ],
       predicate: sourceMentionsSpecifier,
