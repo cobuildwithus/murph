@@ -8,6 +8,7 @@ import {
 import type { AddressInfo } from 'node:net'
 import { URL } from 'node:url'
 import {
+  assertListenerPort,
   assertLoopbackListenerHost,
   getLoopbackControlRequestRejectionReason,
 } from '@murphai/runtime-state'
@@ -73,6 +74,11 @@ export async function startAssistantHttpServer(
   assertLoopbackListenerHost(
     input.host,
     'Assistant daemon listener host must be a loopback hostname or address.',
+  )
+  assertListenerPort(
+    input.port,
+    'Assistant daemon listener port must be an integer between 0 and 65535.',
+    { allowZero: true },
   )
 
   const server = createServer(createAssistantHttpRequestHandler(input))

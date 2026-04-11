@@ -71,6 +71,41 @@ test("device sync http server closes the control listener when the public listen
   }
 });
 
+test("device sync http server rejects invalid listener ports before binding", async () => {
+  const service = await createDeviceSyncServiceForStartupTest();
+
+  try {
+    await assert.rejects(
+      () =>
+        startDeviceSyncHttpServer({
+          service,
+          config: {
+            host: LOOPBACK_HOST,
+            port: 70_000,
+            controlToken: "test-control-token",
+          },
+        }),
+      /Device sync control listener port must be an integer between 0 and 65535/u,
+    );
+    await assert.rejects(
+      () =>
+        startDeviceSyncHttpServer({
+          service,
+          config: {
+            host: LOOPBACK_HOST,
+            port: 0,
+            controlToken: "test-control-token",
+            publicHost: LOOPBACK_HOST,
+            publicPort: -1,
+          },
+        }),
+      /Device sync public listener port must be an integer between 0 and 65535/u,
+    );
+  } finally {
+    service.close();
+  }
+});
+
 async function createDeviceSyncServiceForStartupTest() {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-device-syncd-startup-"));
   TEMP_DIRECTORIES.push(vaultRoot);

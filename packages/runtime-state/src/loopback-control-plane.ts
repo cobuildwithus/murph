@@ -96,6 +96,24 @@ export function assertLoopbackListenerHost(
   }
 }
 
+export function isListenerPort(
+  port: number,
+  options: { allowZero?: boolean } = {},
+): boolean {
+  const minimum = options.allowZero ? 0 : 1
+  return Number.isInteger(port) && port >= minimum && port <= 65_535
+}
+
+export function assertListenerPort(
+  port: number,
+  message = 'Listener port must be an integer between 1 and 65535.',
+  options: { allowZero?: boolean } = {},
+): void {
+  if (!isListenerPort(port, options)) {
+    throw new TypeError(message)
+  }
+}
+
 export function isLoopbackRemoteAddress(
   value: string | null | undefined,
 ): boolean {

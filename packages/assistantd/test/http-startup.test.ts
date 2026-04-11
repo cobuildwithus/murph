@@ -16,3 +16,16 @@ test('assistantd http server rejects URL-bracket listener hosts before binding',
     /Assistant daemon listener host must be a loopback hostname or address\./u,
   )
 })
+
+test('assistantd http server rejects invalid listener ports before binding', async () => {
+  await assert.rejects(
+    () =>
+      startAssistantHttpServer({
+        controlToken: 'control-secret',
+        host: '127.0.0.1',
+        port: 70_000,
+        service: {} as AssistantLocalService,
+      }),
+    /Assistant daemon listener port must be an integer between 0 and 65535\./u,
+  )
+})
