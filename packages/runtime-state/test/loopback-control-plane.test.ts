@@ -3,12 +3,16 @@ import assert from "node:assert/strict";
 import { test } from "vitest";
 
 import {
+  assertLoopbackListenerHost,
+  getLoopbackControlRequestRejectionReason,
   hasForwardedLoopbackControlHeaders,
   hasLoopbackControlHostHeader,
   isLoopbackHostname,
   isLoopbackHttpBaseUrl,
   isLoopbackRemoteAddress,
+  readLoopbackControlHeaderValue,
 } from "../src/loopback-control-plane.ts";
+import { hasMatchingLoopbackControlBearerToken } from "../src/node/loopback-control-plane-auth.ts";
 
 test("loopback host checks accept normalized localhost and literal loopback addresses only", () => {
   assert.equal(isLoopbackHostname("localhost"), true);
@@ -64,4 +68,84 @@ test("loopback control host checks accept mapped loopback hosts and reject malfo
   assert.equal(hasLoopbackControlHostHeader("[::ffff:7f00:1]:8788"), true);
   assert.equal(hasLoopbackControlHostHeader("foo@localhost:8788"), false);
   assert.equal(hasLoopbackControlHostHeader(["localhost:8788", "127.0.0.1:8788"]), false);
+});
+
+test("assertLoopbackListenerHost accepts loopback listener hosts and rejects non-loopback values", () => {
+  assert.doesNotThrow(() => assertLoopbackListenerHost("127.0.0.1"));
+  assert.doesNotThrow(() => assertLoopbackListenerHost("localhost"));
+  assert.doesNotThrow(() => assertLoopbackListenerHost("::1"));
+  assert.throws(() => assertLoopbackListenerHost("0.0.0.0"), TypeError);
+  assert.throws(() => assertLoopbackListenerHost("example.com"), TypeError);
+});
+
+test("loopback control host checks accept bracketed ipv6 loopback hosts", () => {
+  assert.equal(hasLoopbackControlHostHeader("[::1]:50241"), true);
+});
+
+test("readLoopbackControlHeaderValue trims single values and rejects duplicates or blanks", () => {
+  assert.equal(readLoopbackControlHeaderValue("  Bearer secret  "), "Bearer secret");
+  assert.equal(
+    readLoopbackControlHeaderValue(["Bearer one", "Bearer two"]),
+    null,
+  );
+  assert.equal(readLoopbackControlHeaderValue("   "), null);
+});
+
+test("getLoopbackControlRequestRejectionReason preserves remote-then-forwarded-then-host ordering", () => {
+  assert.equal(
+    getLoopbackControlRequestRejectionReason({
+      headers: {
+        forwarded: "for=127.0.0.1",
+        host: "localhost",
+      },
+      remoteAddress: "10.0.0.8",
+    }),
+    "loopback-remote-address-required",
+  );
+  assert.equal(
+    getLoopbackControlRequestRejectionReason({
+      headers: {
+        forwarded: "for=127.0.0.1",
+        host: "localhost",
+      },
+      remoteAddress: "127.0.0.1",
+    }),
+    "forwarded-headers-rejected",
+  );
+  assert.equal(
+    getLoopbackControlRequestRejectionReason({
+      headers: {
+        host: "example.com",
+      },
+      remoteAddress: "127.0.0.1",
+    }),
+    "loopback-host-required",
+  );
+  assert.equal(
+    getLoopbackControlRequestRejectionReason({
+      headers: {
+        host: "[::1]:8788",
+      },
+      remoteAddress: "::ffff:127.0.0.1",
+    }),
+    null,
+  );
+});
+
+test("hasMatchingLoopbackControlBearerToken accepts matching tokens and rejects duplicates or mismatches", () => {
+  assert.equal(
+    hasMatchingLoopbackControlBearerToken("Bearer control-token", "control-token"),
+    true,
+  );
+  assert.equal(
+    hasMatchingLoopbackControlBearerToken("Bearer wrong-token", "control-token"),
+    false,
+  );
+  assert.equal(
+    hasMatchingLoopbackControlBearerToken(
+      ["Bearer control-token", "Bearer shadow-token"],
+      "control-token",
+    ),
+    false,
+  );
 });

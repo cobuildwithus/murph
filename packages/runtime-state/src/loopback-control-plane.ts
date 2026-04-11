@@ -8,16 +8,16 @@ const LOOPBACK_CONTROL_PLANE_FORWARDED_HEADER_NAMES = [
   'x-real-ip',
 ] as const
 
-type LoopbackControlHeaderValue = string | readonly string[] | undefined
+export type LoopbackControlHeaderValue = string | readonly string[] | undefined
+
+export type LoopbackControlRequestRejectionReason =
+  | 'loopback-remote-address-required'
+  | 'forwarded-headers-rejected'
+  | 'loopback-host-required'
 
 export function isLoopbackHostname(hostname: string): boolean {
   const normalized = normalizeLoopbackValue(hostname)
-  return (
-    normalized === 'localhost' ||
-    normalized === '::1' ||
-    isLoopbackIpv4Literal(normalized) ||
-    isLoopbackIpv4MappedLoopbackLiteral(normalized)
-  )
+  return normalized === 'localhost' || isLoopbackAddressLiteral(normalized)
 }
 
 export function hasForwardedLoopbackControlHeaders(
@@ -35,9 +35,47 @@ export function hasLoopbackControlHostHeader(
   return hostname !== null && isLoopbackHostname(hostname)
 }
 
+export function readLoopbackControlHeaderValue(
+  value: LoopbackControlHeaderValue,
+): string | null {
+  if (Array.isArray(value)) {
+    return value.length === 1 ? readLoopbackControlHeaderValue(value[0]) : null
+  }
+
+  return typeof value === 'string' && value.trim() ? value.trim() : null
+}
+
+export function getLoopbackControlRequestRejectionReason(input: {
+  headers: Readonly<Record<string, LoopbackControlHeaderValue>>
+  remoteAddress: string | null | undefined
+}): LoopbackControlRequestRejectionReason | null {
+  if (!isLoopbackRemoteAddress(input.remoteAddress)) {
+    return 'loopback-remote-address-required'
+  }
+
+  if (hasForwardedLoopbackControlHeaders(input.headers)) {
+    return 'forwarded-headers-rejected'
+  }
+
+  if (!hasLoopbackControlHostHeader(input.headers.host)) {
+    return 'loopback-host-required'
+  }
+
+  return null
+}
+
 export function isLoopbackHttpBaseUrl(baseUrl: string): boolean {
   const url = new URL(baseUrl)
   return url.protocol === 'http:' && isLoopbackHostname(url.hostname)
+}
+
+export function assertLoopbackListenerHost(
+  host: string,
+  message = 'Loopback listener host must be a loopback hostname or address.',
+): void {
+  if (!isLoopbackHostname(host)) {
+    throw new TypeError(message)
+  }
 }
 
 export function isLoopbackRemoteAddress(
@@ -47,21 +85,25 @@ export function isLoopbackRemoteAddress(
     return false
   }
 
-  const normalized = normalizeLoopbackValue(value)
-  if (normalized === '::1' || isLoopbackIpv4Literal(normalized)) {
-    return true
-  }
-  return isLoopbackIpv4MappedLoopbackLiteral(normalized)
+  return isLoopbackAddressLiteral(normalizeLoopbackValue(value))
 }
 
 function normalizeLoopbackValue(value: string): string {
   return value.trim().toLowerCase().replace(/^\[(.*)\]$/u, '$1')
 }
 
+function isLoopbackAddressLiteral(value: string): boolean {
+  return (
+    value === '::1' ||
+    isLoopbackIpv4Literal(value) ||
+    isLoopbackIpv4MappedLoopbackLiteral(value)
+  )
+}
+
 function readLoopbackControlHostHeaderHostname(
   value: LoopbackControlHeaderValue,
 ): string | null {
-  const host = readSingleLoopbackControlHeaderValue(value)
+  const host = readLoopbackControlHeaderValue(value)
   if (!host) {
     return null
   }
@@ -77,16 +119,6 @@ function readLoopbackControlHostHeaderHostname(
 
   const hostMatch = host.match(/^([^:]+)(?::\d+)?$/u)
   return hostMatch?.[1] ?? null
-}
-
-function readSingleLoopbackControlHeaderValue(
-  value: LoopbackControlHeaderValue,
-): string | null {
-  if (Array.isArray(value)) {
-    return value.length === 1 ? readSingleLoopbackControlHeaderValue(value[0]) : null
-  }
-
-  return typeof value === 'string' && value.trim() ? value.trim() : null
 }
 
 function hasPresentLoopbackControlHeaderValue(

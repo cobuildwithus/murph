@@ -86,6 +86,51 @@ export type NormalizedDeviceBatchOptions = Omit<NormalizedDeviceBatch, "source">
 const INTEGER_SAMPLE_STREAMS = new Set(["heart_rate", "steps"]);
 const DELETION_ARTIFACT_IDENTITY_PREFIX = "device-deletion-observation";
 
+export interface SyntheticDeletionResourceIdOptions {
+  provider: string;
+  resourceType: string;
+  occurredAt: string;
+  sourceEventType?: string;
+  deletion: PlainObject;
+}
+
+function stableSortValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((entry) => stableSortValue(entry));
+  }
+
+  if (value && typeof value === "object") {
+    return Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .reduce<Record<string, unknown>>((result, [key, entry]) => {
+        result[key] = stableSortValue(entry);
+        return result;
+      }, {});
+  }
+
+  return value;
+}
+
+function stableStringify(value: unknown): string {
+  return JSON.stringify(stableSortValue(value));
+}
+
+export function buildSyntheticDeletionResourceId(
+  options: SyntheticDeletionResourceIdOptions,
+): string {
+  const identity = createHash("sha256")
+    .update(stableStringify({
+      provider: options.provider,
+      resourceType: options.resourceType,
+      occurredAt: options.occurredAt,
+      sourceEventType: options.sourceEventType ?? null,
+      deletion: options.deletion,
+    }))
+    .digest("hex");
+
+  return `deleted-${identity.slice(0, 16)}`;
+}
+
 export function asPlainObject(value: unknown): PlainObject | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return undefined;
@@ -251,41 +296,30 @@ function buildDeletionArtifactIdentity(options: DeletionObservationOptions): str
     .digest("hex")
 }
 
-function buildDeletionArtifactRole(options: DeletionObservationOptions): string {
-  const identity = buildDeletionArtifactIdentity(options)
-  return [
-    "deletion",
-    options.resourceType,
-    options.resourceId,
-    options.occurredAt,
-    options.sourceEventType,
-    identity,
-  ]
-    .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
-    .join(":")
+interface DeletionArtifactDescriptor {
+  content: Record<string, unknown>;
+  fileName: string;
+  role: string;
 }
 
-function buildDeletionArtifactFileName(options: DeletionObservationOptions): string {
-  const identity = buildDeletionArtifactIdentity(options)
-  const suffix = [
-    options.resourceType,
-    options.resourceId,
-    options.occurredAt,
-    options.sourceEventType,
-  ]
-    .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
-    .map((value) => value.replace(/[^A-Za-z0-9._-]+/gu, "-"))
-    .join("-")
-
-  return `deletion-${suffix}-${identity}.json`
-}
-
-function hasDeletionArtifact(
-  rawArtifacts: readonly DeviceRawArtifactPayload[],
+function buildDeletionArtifactDescriptor(
   options: DeletionObservationOptions,
-): boolean {
-  const role = buildDeletionArtifactRole(options)
-  return rawArtifacts.some((artifact) => artifact.role === role)
+): DeletionArtifactDescriptor {
+  const identity = buildDeletionArtifactIdentity(options);
+  const artifactParts = [
+    options.resourceType,
+    options.resourceId,
+    options.occurredAt,
+    options.sourceEventType,
+  ].filter((value): value is string => typeof value === "string" && value.trim().length > 0);
+
+  return {
+    content: buildDeletionArtifactContent(options),
+    fileName: `deletion-${artifactParts
+      .map((value) => value.replace(/[^A-Za-z0-9._-]+/gu, "-"))
+      .join("-")}-${identity}.json`,
+    role: ["deletion", ...artifactParts, identity].join(":"),
+  };
 }
 
 export function pushObservationEvent(
@@ -420,21 +454,20 @@ export function pushDeletionObservation(
   rawArtifacts: DeviceRawArtifactPayload[],
   options: DeletionObservationOptions,
 ): void {
-  if (hasDeletionArtifact(rawArtifacts, options)) {
-    return
-  }
+  const deletionArtifact = buildDeletionArtifactDescriptor(options);
 
-  const role = buildDeletionArtifactRole(options)
-  const fileName = buildDeletionArtifactFileName(options)
+  if (rawArtifacts.some((artifact) => artifact.role === deletionArtifact.role)) {
+    return;
+  }
 
   pushRawArtifact(
     rawArtifacts,
     createRawArtifact(
-      role,
-      fileName,
-      buildDeletionArtifactContent(options),
+      deletionArtifact.role,
+      deletionArtifact.fileName,
+      deletionArtifact.content,
     ),
-  )
+  );
 
   events.push(
     stripUndefined({
@@ -446,7 +479,7 @@ export function pushDeletionObservation(
       note: options.sourceEventType
         ? trimToLength(`Webhook event: ${options.sourceEventType}`, 4000)
         : undefined,
-      rawArtifactRoles: [role],
+      rawArtifactRoles: [deletionArtifact.role],
       externalRef: options.makeExternalRef(
         options.resourceType,
         options.resourceId,
@@ -463,5 +496,5 @@ export function pushDeletionObservation(
         sourceEventType: options.sourceEventType,
       }),
     }),
-  )
+  );
 }
