@@ -115,6 +115,24 @@ function stableStringify(value: unknown): string {
   return JSON.stringify(stableSortValue(value));
 }
 
+const SYNTHETIC_DELETION_NORMALIZED_KEYS = new Set([
+  "dataType",
+  "data_type",
+  "eventTime",
+  "event_type",
+  "event_time",
+  "objectId",
+  "object_id",
+  "occurredAt",
+  "occurred_at",
+  "resourceId",
+  "resourceType",
+  "resource_id",
+  "resource_type",
+  "sourceEventType",
+  "source_event_type",
+]);
+
 export function buildSyntheticDeletionResourceId(
   options: SyntheticDeletionResourceIdOptions,
 ): string {
@@ -124,11 +142,25 @@ export function buildSyntheticDeletionResourceId(
       resourceType: options.resourceType,
       occurredAt: options.occurredAt,
       sourceEventType: options.sourceEventType ?? null,
-      deletion: options.deletion,
+      deletion: stripNormalizedDeletionIdentityFields(options.deletion),
     }))
     .digest("hex");
 
   return `deleted-${identity.slice(0, 16)}`;
+}
+
+function stripNormalizedDeletionIdentityFields(
+  deletion: unknown,
+): unknown {
+  if (!deletion || typeof deletion !== "object" || Array.isArray(deletion)) {
+    return deletion;
+  }
+
+  return Object.fromEntries(
+    Object.entries(deletion as Record<string, unknown>).filter(
+      ([key]) => !SYNTHETIC_DELETION_NORMALIZED_KEYS.has(key),
+    ),
+  );
 }
 
 export function asPlainObject(value: unknown): PlainObject | undefined {
