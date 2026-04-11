@@ -8,9 +8,15 @@ const timeoutMocks = vi.hoisted(() => ({
   didTimeout: false,
 }))
 
-const webFetchMocks = vi.hoisted(() => ({
+const webFetchConfigMocks = vi.hoisted(() => ({
   createAssistantWebFetchRuntimeContext: vi.fn(),
+}))
+
+const webFetchNetworkMocks = vi.hoisted(() => ({
   fetchAssistantWebResponse: vi.fn(),
+}))
+
+const webFetchResponseMocks = vi.hoisted(() => ({
   readAssistantWebResponseBytes: vi.fn(),
 }))
 
@@ -29,17 +35,38 @@ vi.mock('@murphai/operator-config/http-retry', async () => {
   }
 })
 
-vi.mock('../src/assistant/web-fetch.ts', async () => {
+vi.mock('../src/assistant/web-fetch/config.js', async () => {
   const actual = await vi.importActual<
-    typeof import('../src/assistant/web-fetch.ts')
-  >('../src/assistant/web-fetch.ts')
+    typeof import('../src/assistant/web-fetch/config.js')
+  >('../src/assistant/web-fetch/config.js')
 
   return {
     ...actual,
     createAssistantWebFetchRuntimeContext:
-      webFetchMocks.createAssistantWebFetchRuntimeContext,
-    fetchAssistantWebResponse: webFetchMocks.fetchAssistantWebResponse,
-    readAssistantWebResponseBytes: webFetchMocks.readAssistantWebResponseBytes,
+      webFetchConfigMocks.createAssistantWebFetchRuntimeContext,
+  }
+})
+
+vi.mock('../src/assistant/web-fetch/network.js', async () => {
+  const actual = await vi.importActual<
+    typeof import('../src/assistant/web-fetch/network.js')
+  >('../src/assistant/web-fetch/network.js')
+
+  return {
+    ...actual,
+    fetchAssistantWebResponse: webFetchNetworkMocks.fetchAssistantWebResponse,
+  }
+})
+
+vi.mock('../src/assistant/web-fetch/response.js', async () => {
+  const actual = await vi.importActual<
+    typeof import('../src/assistant/web-fetch/response.js')
+  >('../src/assistant/web-fetch/response.js')
+
+  return {
+    ...actual,
+    readAssistantWebResponseBytes:
+      webFetchResponseMocks.readAssistantWebResponseBytes,
   }
 })
 
@@ -73,20 +100,20 @@ beforeEach(() => {
     }
   })
 
-  webFetchMocks.createAssistantWebFetchRuntimeContext.mockReset().mockReturnValue({
+  webFetchConfigMocks.createAssistantWebFetchRuntimeContext.mockReset().mockReturnValue({
     lookupImplementation: vi.fn(),
     maxRedirects: 2,
     maxResponseBytes: 4_096,
     timeoutMs: 1_500,
   })
-  webFetchMocks.fetchAssistantWebResponse.mockReset().mockResolvedValue(
+  webFetchNetworkMocks.fetchAssistantWebResponse.mockReset().mockResolvedValue(
     createFetchedResponse({
       contentType: 'application/pdf',
       finalUrl: 'https://example.com/document.pdf',
       status: 200,
     }),
   )
-  webFetchMocks.readAssistantWebResponseBytes.mockReset().mockResolvedValue({
+  webFetchResponseMocks.readAssistantWebResponseBytes.mockReset().mockResolvedValue({
     bytes: new Uint8Array([1, 2, 3]),
     truncated: false,
     warnings: [],
@@ -100,7 +127,7 @@ afterEach(() => {
 
 describe('readAssistantWebPdf', () => {
   it('reads PDF text, clamps request bounds, and reports page, text, and HTTP warnings', async () => {
-    webFetchMocks.fetchAssistantWebResponse.mockResolvedValueOnce(
+    webFetchNetworkMocks.fetchAssistantWebResponse.mockResolvedValueOnce(
       createFetchedResponse({
         contentType: 'application/x-pdf; charset=binary',
         finalUrl: 'https://docs.example.com/report.pdf?token=secret',
@@ -108,7 +135,7 @@ describe('readAssistantWebPdf', () => {
         warnings: ['Followed one redirect.'],
       }),
     )
-    webFetchMocks.readAssistantWebResponseBytes.mockResolvedValueOnce({
+    webFetchResponseMocks.readAssistantWebResponseBytes.mockResolvedValueOnce({
       bytes: new Uint8Array([7, 8, 9]),
       truncated: false,
       warnings: ['Decoded a compressed response body.'],
@@ -152,14 +179,14 @@ describe('readAssistantWebPdf', () => {
       },
     )
 
-    expect(webFetchMocks.fetchAssistantWebResponse).toHaveBeenCalledWith(
+    expect(webFetchNetworkMocks.fetchAssistantWebResponse).toHaveBeenCalledWith(
       expect.objectContaining({
         acceptHeader: expect.stringContaining('application/pdf'),
         toolName: 'web.pdf.read',
       }),
     )
     expect(
-      String(webFetchMocks.fetchAssistantWebResponse.mock.calls[0]?.[0].url),
+      String(webFetchNetworkMocks.fetchAssistantWebResponse.mock.calls[0]?.[0].url),
     ).toBe('https://example.com/source.pdf')
     expect(pdfJsMocks.getDocument).toHaveBeenCalledWith({
       data: new Uint8Array([7, 8, 9]),
@@ -191,14 +218,14 @@ describe('readAssistantWebPdf', () => {
   })
 
   it('falls back to .pdf URLs, uses default bounds for non-finite inputs, and warns when no text is extractable', async () => {
-    webFetchMocks.fetchAssistantWebResponse.mockResolvedValueOnce(
+    webFetchNetworkMocks.fetchAssistantWebResponse.mockResolvedValueOnce(
       createFetchedResponse({
         contentType: 'text/plain',
         finalUrl: 'https://cdn.example.com/archive.pdf?download=1',
         status: 200,
       }),
     )
-    webFetchMocks.readAssistantWebResponseBytes.mockResolvedValueOnce({
+    webFetchResponseMocks.readAssistantWebResponseBytes.mockResolvedValueOnce({
       bytes: new Uint8Array([5, 4, 3]),
       truncated: true,
       warnings: ['Response body exceeded 4096 bytes and was truncated.'],
@@ -276,7 +303,7 @@ describe('readAssistantWebPdf', () => {
       code: 'WEB_PDF_READ_URL_INVALID',
     })
 
-    webFetchMocks.fetchAssistantWebResponse.mockResolvedValueOnce(
+    webFetchNetworkMocks.fetchAssistantWebResponse.mockResolvedValueOnce(
       createFetchedResponse({
         contentType: 'text/html',
         finalUrl: 'https://example.com/index.html',
@@ -297,11 +324,11 @@ describe('readAssistantWebPdf', () => {
       code: 'WEB_PDF_READ_CONTENT_TYPE_UNSUPPORTED',
     })
 
-    expect(webFetchMocks.readAssistantWebResponseBytes).not.toHaveBeenCalled()
+    expect(webFetchResponseMocks.readAssistantWebResponseBytes).not.toHaveBeenCalled()
   })
 
   it('wraps PDF parse failures and appends the truncation note when bytes were clipped', async () => {
-    webFetchMocks.readAssistantWebResponseBytes.mockResolvedValueOnce({
+    webFetchResponseMocks.readAssistantWebResponseBytes.mockResolvedValueOnce({
       bytes: new Uint8Array([1]),
       truncated: true,
       warnings: [],
@@ -482,7 +509,7 @@ describe('readAssistantWebPdf', () => {
 
   it('translates timed out failures into a VaultCliError and still cleans up the timeout controller', async () => {
     timeoutMocks.didTimeout = true
-    webFetchMocks.fetchAssistantWebResponse.mockRejectedValueOnce(
+    webFetchNetworkMocks.fetchAssistantWebResponse.mockRejectedValueOnce(
       new Error('socket hang up'),
     )
 
