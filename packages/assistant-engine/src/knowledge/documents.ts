@@ -11,13 +11,11 @@ import {
   renderKnowledgePageBody,
   stripGeneratedKnowledgeSections,
   stripKnowledgeLeadingHeading,
+  type KnowledgePage,
+  type KnowledgePageMetadata,
   type DerivedKnowledgeNode,
 } from '@murphai/query'
 import { normalizeNullableString } from '@murphai/operator-config/text/shared'
-import {
-  type KnowledgePage,
-  type KnowledgePageMetadata,
-} from './contracts.js'
 
 export function deriveKnowledgeTitle(input: {
   body?: string | null
