@@ -205,7 +205,9 @@ test('createVaultCli uses the default integrated inbox services wiring', async (
     devices: {},
   }))
   const createIntegratedInboxServices = vi.fn(
-    () => ({}),
+    (_options?: {
+      enableAssistantAutoReplyChannel?: (vault: string, channel: string) => Promise<boolean>
+    }) => ({}),
   )
   const createAssistantFoodAutoLogHooks = vi.fn(() => ({}))
   const registerVaultCliCommandDescriptors = vi.fn()
@@ -261,7 +263,11 @@ test('createVaultCli uses the default integrated inbox services wiring', async (
 
   createVaultCliMocked()
 
-  assert.deepEqual(createIntegratedInboxServices.mock.calls, [[]])
+  assert.equal(createIntegratedInboxServices.mock.calls.length, 1)
+  assert.equal(
+    typeof createIntegratedInboxServices.mock.calls[0]?.[0]?.enableAssistantAutoReplyChannel,
+    'function',
+  )
   assert.equal(registerVaultCliCommandDescriptors.mock.calls.length, 1)
   assert.equal(fakeCli.use.mock.calls.length, 1)
 })
