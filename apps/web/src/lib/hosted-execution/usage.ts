@@ -10,6 +10,7 @@ import {
 
 import { readHostedMemberBillingPrivateState } from "../hosted-onboarding/member-private-codecs";
 import { getPrisma } from "../prisma";
+import { formatHostedExecutionSafeLogError } from "./logging";
 import { requireHostedPendingUsageClient } from "./pending-usage-client";
 
 export interface ImportHostedAiUsageResult {
@@ -298,8 +299,8 @@ export async function drainHostedPendingAiUsageImports(input: {
     } catch (error) {
       failedUsers += 1;
       console.error(
-        `Failed to import hosted pending AI usage for ${userId}.`,
-        error instanceof Error ? error.message : String(error),
+        "Failed to import hosted pending AI usage for one user.",
+        formatHostedExecutionSafeLogError(error),
       );
     }
   }

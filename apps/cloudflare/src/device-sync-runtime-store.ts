@@ -66,25 +66,28 @@ export function createHostedDeviceSyncRuntimeStore(input: {
           ? cloneConnectionSnapshot(currentConnection)
           : createSeededConnectionSnapshot(update.connectionId, update.seed!, appliedAt);
         const nextConnection = cloneConnectionSnapshot(baseConnection);
-        const connectionMutationRequested = Boolean(update.connection) || update.tokenBundle !== undefined;
+        const stateMutationRequested = Boolean(update.connection)
+          || Boolean(update.localState)
+          || update.tokenBundle !== undefined;
         const connectionVersionMismatch = Boolean(
           currentConnection
-          && connectionMutationRequested
+          && stateMutationRequested
           && update.observedUpdatedAt !== undefined
           && update.observedUpdatedAt !== null
           && (nextConnection.connection.updatedAt ?? null) !== update.observedUpdatedAt,
         );
+        const tokenMutationRequested = update.tokenBundle !== undefined || update.connection?.status === "disconnected";
         const tokenVersionMismatch = Boolean(
           currentConnection
-          && update.tokenBundle !== undefined
-          && update.tokenBundle !== null
+          && tokenMutationRequested
           && nextConnection.tokenBundle
           && update.observedTokenVersion !== undefined
           && update.observedTokenVersion !== null
           && nextConnection.tokenBundle.tokenVersion !== update.observedTokenVersion,
         );
+        const versionMismatch = connectionVersionMismatch || tokenVersionMismatch;
 
-        if (!connectionVersionMismatch && update.connection) {
+        if (!versionMismatch && update.connection) {
           if (Object.prototype.hasOwnProperty.call(update.connection, "displayName")) {
             nextConnection.connection.displayName = update.connection.displayName ?? null;
           }
@@ -101,7 +104,7 @@ export function createHostedDeviceSyncRuntimeStore(input: {
           }
         }
 
-        if (update.localState) {
+        if (!versionMismatch && update.localState) {
           if (update.localState.clearError) {
             nextConnection.localState.lastErrorCode = null;
             nextConnection.localState.lastErrorMessage = null;
@@ -124,7 +127,7 @@ export function createHostedDeviceSyncRuntimeStore(input: {
         let tokenUpdate: HostedExecutionDeviceSyncRuntimeApplyEntry["tokenUpdate"];
         if (update.tokenBundle === undefined) {
           tokenUpdate = nextConnection.tokenBundle ? "unchanged" : "missing";
-        } else if (connectionVersionMismatch || tokenVersionMismatch) {
+        } else if (versionMismatch) {
           tokenUpdate = "skipped_version_mismatch";
         } else if (update.connection?.status === "disconnected") {
           nextConnection.tokenBundle = null;
@@ -151,7 +154,7 @@ export function createHostedDeviceSyncRuntimeStore(input: {
           nextConnection.connection.updatedAt = baseConnection.connection.updatedAt ?? appliedAt;
         }
 
-        if (!connectionVersionMismatch && connectionMutationRequested) {
+        if (!versionMismatch && stateMutationRequested) {
           nextConnection.connection.updatedAt = appliedAt;
         }
 

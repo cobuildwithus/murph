@@ -11,6 +11,7 @@ import {
 
 import { readHostedExecutionControlClientIfConfigured } from "./control";
 import { createHostedExecutionVercelOidcBearerTokenProvider } from "./auth-adapter";
+import { formatHostedExecutionSafeLogError } from "./logging";
 import {
   type HostedExecutionDispatchEnvironment,
   readHostedExecutionDispatchEnvironment,
@@ -74,10 +75,9 @@ export async function dispatchHostedExecutionBestEffort(
   try {
     return await dispatchHostedExecution(input);
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
     console.error(
       options.context ? `Hosted execution dispatch failed (${options.context}).` : "Hosted execution dispatch failed.",
-      message,
+      formatHostedExecutionSafeLogError(error),
     );
     return {
       dispatched: false,

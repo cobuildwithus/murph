@@ -137,6 +137,8 @@ export async function disconnectHostedDeviceSyncConnection(input: {
           lastErrorMessage: disconnectLocalState.lastErrorMessage,
           nextReconcileAt: null,
         },
+        observedUpdatedAt: runtimeConnection?.connection.updatedAt ?? existing.updatedAt,
+        observedTokenVersion: runtimeConnection?.tokenBundle?.tokenVersion ?? null,
         seed: buildHostedDeviceSyncRuntimeSeedFromPublicAccount({
           account: {
             ...existing,
@@ -162,7 +164,12 @@ export async function disconnectHostedDeviceSyncConnection(input: {
   });
   const appliedUpdate = applyResponse.updates.find((entry) => entry.connectionId === input.connectionId) ?? null;
 
-  if (!appliedUpdate || appliedUpdate.status === "missing" || appliedUpdate.connection?.status !== "disconnected") {
+  if (
+    !appliedUpdate
+    || appliedUpdate.status === "missing"
+    || appliedUpdate.tokenUpdate === "skipped_version_mismatch"
+    || appliedUpdate.connection?.status !== "disconnected"
+  ) {
     throw deviceSyncError({
       code: "RUNTIME_STATE_CONFLICT",
       message: `Hosted device-sync runtime did not persist the disconnected state for connection ${input.connectionId}.`,

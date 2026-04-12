@@ -11,6 +11,7 @@ import { createHostedVerifiedEmailUserEnv } from "@murphai/runtime-state";
 
 import { createHostedExecutionVercelOidcBearerTokenProvider } from "./auth-adapter";
 import { readHostedExecutionControlBaseUrl } from "./environment";
+import { formatHostedExecutionSafeLogError } from "./logging";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 
 export interface HostedVerifiedEmailSyncResult {
@@ -67,7 +68,7 @@ export async function deleteHostedStoredDispatchPayloadBestEffort(
   } catch (error) {
     console.error(
       "Hosted stored dispatch payload cleanup failed.",
-      error instanceof Error ? error.message : String(error),
+      formatHostedExecutionSafeLogError(error),
     );
   }
 }
@@ -97,8 +98,8 @@ export async function syncHostedVerifiedEmailToHostedExecution(input: {
     };
   } catch (error) {
     console.error(
-      `Hosted verified email sync saved user env but could not trigger a hosted run for ${input.userId}.`,
-      error instanceof Error ? error.message : String(error),
+      "Hosted verified email sync saved user env but could not trigger a hosted run.",
+      formatHostedExecutionSafeLogError(error),
     );
 
     return {
