@@ -64,7 +64,6 @@ export const cliVitestCoverage = createMurphVitestCoverage({
     "src/bin.ts",
     "src/incur.generated.ts",
     "src/index.ts",
-    "src/runner-vault-cli-bin.ts",
   ],
   thresholds: cliVitestCoverageThresholds,
 });

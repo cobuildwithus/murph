@@ -44,8 +44,10 @@ import {
   workoutFormatRecordFromEntity,
   workoutFormatRegistryDefinition,
 } from "../src/health/registries.ts";
-import { getBankRegistryQueryMetadata } from "../src/health/bank-registry-query-metadata.ts";
-import { getHealthRegistryQueryMetadata } from "../src/health/health-registry-query-metadata.ts";
+import {
+  getBankRegistryQueryMetadata,
+  getHealthRegistryQueryMetadata,
+} from "../src/health/bank-registry-query-metadata.ts";
 import { projectRegistryEntity } from "../src/health/projectors/registry.ts";
 import type { MarkdownDocumentRecord } from "../src/health/shared.ts";
 import {
