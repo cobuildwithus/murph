@@ -1414,13 +1414,23 @@ describe("HostedUserRunner", () => {
     );
     const runner = new HostedUserRunner(
       storage.state,
-      environment,
+      {
+        ...environment,
+        allowedUserEnvKeys: "CUSTOM_API_KEY",
+      },
       bucket.api,
       {
         HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: "45000",
         OPENAI_API_KEY: "sk-worker",
       },
     );
+    await runner.provisionManagedUserCrypto("member_123");
+    await runner.updateUserEnv({
+      env: {
+        CUSTOM_API_KEY: "custom-user",
+      },
+      mode: "replace",
+    });
 
     await runner.dispatch({
       event: {
@@ -1443,6 +1453,7 @@ describe("HostedUserRunner", () => {
         runtime?: {
           commitTimeoutMs?: number;
           forwardedEnv?: Record<string, string>;
+          userEnv?: Record<string, string>;
         };
       };
       runnerEnvironment?: unknown;
@@ -1453,6 +1464,9 @@ describe("HostedUserRunner", () => {
       commitTimeoutMs: 45_000,
       forwardedEnv: {
         OPENAI_API_KEY: "sk-worker",
+      },
+      userEnv: {
+        CUSTOM_API_KEY: "custom-user",
       },
     });
   });

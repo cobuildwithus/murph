@@ -25,9 +25,10 @@ let hostedExecutionIsolatedRunnerForTests:
     options?: { signal?: AbortSignal },
   ) => Promise<HostedAssistantRuntimeJobResult>)
   | null = null;
-const hostedExecutionChildEnvExcludedKeys = new Set([
+const hostedExecutionChildControlEnvKeys = new Set([
   "HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS",
   "HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS",
+  "HOSTED_EXECUTION_RUNNER_ENV_PROFILES",
 ]);
 
 export function setHostedExecutionRunModeForTests(
@@ -99,13 +100,12 @@ export async function runHostedExecutionJob(
 function buildHostedExecutionJobRuntime(
   requestedRuntime: HostedAssistantRuntimeConfig,
 ): HostedAssistantRuntimeConfig {
-  // The worker already resolved runtime semantics into the typed envelope.
-  // The container only merges child-process transport env and strips control-only keys.
-  const forwardedEnv: Record<string, string> = {
-    ...buildHostedRunnerContainerEnv(process.env),
-    ...stripChildProcessExcludedRuntimeEnvKeys(requestedRuntime.forwardedEnv),
-  };
+  const forwardedEnv = requestedRuntime.forwardedEnv === undefined
+    ? buildHostedRunnerContainerEnv(process.env)
+    : stripChildProcessControlEnvKeys(requestedRuntime.forwardedEnv);
 
+  // The worker-owned runtime envelope is the source of truth when present.
+  // The container only falls back to ambient env for local/manual callers that omit it entirely.
   return buildHostedRunnerJobRuntime({
     commitTimeoutMs: requestedRuntime.commitTimeoutMs ?? null,
     forwardedEnv,
@@ -114,13 +114,13 @@ function buildHostedExecutionJobRuntime(
   });
 }
 
-function stripChildProcessExcludedRuntimeEnvKeys(
+function stripChildProcessControlEnvKeys(
   forwardedEnv: HostedAssistantRuntimeConfig["forwardedEnv"],
 ): Record<string, string> {
   const filtered: Record<string, string> = {};
 
   for (const [key, value] of Object.entries(forwardedEnv ?? {})) {
-    if (hostedExecutionChildEnvExcludedKeys.has(key)) {
+    if (hostedExecutionChildControlEnvKeys.has(key)) {
       continue;
     }
     filtered[key] = value;
