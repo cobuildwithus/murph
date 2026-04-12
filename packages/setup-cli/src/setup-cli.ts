@@ -63,6 +63,13 @@ import { incurErrorBridge } from './incur-error-bridge.js'
 
 const INITIAL_SETUP_WIZARD_INBOX_CONFIG_SCHEMA = 'murph.inbox-runtime-config.v1'
 const INITIAL_SETUP_WIZARD_INBOX_CONFIG_SCHEMA_VERSION = 1
+const initialSetupWizardInboxConfigEnvelopeSchema = z
+  .object({
+    schema: z.literal(INITIAL_SETUP_WIZARD_INBOX_CONFIG_SCHEMA),
+    schemaVersion: z.literal(INITIAL_SETUP_WIZARD_INBOX_CONFIG_SCHEMA_VERSION),
+    value: inboxRuntimeConfigSchema,
+  })
+  .strict()
 
 export {
   buildSetupWizardPublicUrlReview,
@@ -467,36 +474,9 @@ function resolveInitialSetupWizardInboxConfigPath(vault: string): string {
 }
 
 function parseInitialSetupWizardInboxConfig(raw: string) {
-  const parsed = JSON.parse(raw) as unknown
-
-  if (
-    typeof parsed === 'object' &&
-    parsed !== null &&
-    'schema' in parsed &&
-    'schemaVersion' in parsed &&
-    'value' in parsed
-  ) {
-    const schema =
-      typeof parsed.schema === 'string' ? parsed.schema.trim() : ''
-    const schemaVersion =
-      typeof parsed.schemaVersion === 'number' ? parsed.schemaVersion : NaN
-
-    if (schema !== INITIAL_SETUP_WIZARD_INBOX_CONFIG_SCHEMA) {
-      throw new TypeError(
-        `Inbox runtime config schema must be ${INITIAL_SETUP_WIZARD_INBOX_CONFIG_SCHEMA}.`,
-      )
-    }
-
-    if (schemaVersion !== INITIAL_SETUP_WIZARD_INBOX_CONFIG_SCHEMA_VERSION) {
-      throw new TypeError(
-        `Inbox runtime config schemaVersion must be ${INITIAL_SETUP_WIZARD_INBOX_CONFIG_SCHEMA_VERSION}.`,
-      )
-    }
-
-    return inboxRuntimeConfigSchema.parse(parsed.value)
-  }
-
-  return inboxRuntimeConfigSchema.parse(parsed)
+  return initialSetupWizardInboxConfigEnvelopeSchema.parse(
+    JSON.parse(raw) as unknown,
+  ).value
 }
 
 function buildSetupCtaCommands(result: SetupResult): Array<{

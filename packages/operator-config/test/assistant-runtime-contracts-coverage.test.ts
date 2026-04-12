@@ -199,7 +199,7 @@ test('assistant session parsing preserves v5 resume metadata and status automati
       resumeKind: 'openai-response-id',
       resumeRouteId: '   ',
     },
-    schema: 'murph.assistant-session.v5',
+    schema: 'murph.assistant-session.v1',
     sessionId: 'session_runtime_v5',
     target: {
       adapter: 'openai-compatible',
@@ -279,7 +279,7 @@ test('assistant session parsing preserves v5 resume metadata and status automati
       resumeKind: null,
       resumeRouteId: 'route-stored',
     },
-    schema: 'murph.assistant-session.v5',
+    schema: 'murph.assistant-session.v1',
     sessionId: 'session_resume_contract',
     target: {
       adapter: 'openai-compatible',
@@ -330,7 +330,7 @@ test('assistant session parsing handles null resume state and preserves codex re
     },
     createdAt: '2026-04-08T12:00:00.000Z',
     lastTurnAt: null,
-    schema: 'murph.assistant-session.v5',
+    schema: 'murph.assistant-session.v1',
     sessionId: 'session_without_resume_state',
     target: {
       adapter: 'codex-cli',
@@ -373,7 +373,7 @@ test('assistant session parsing handles null resume state and preserves codex re
       resumeKind: null,
       resumeRouteId: null,
     },
-    schema: 'murph.assistant-session.v5',
+    schema: 'murph.assistant-session.v1',
     sessionId: 'session_codex_resume_contract',
     target: {
       adapter: 'codex-cli',

@@ -284,7 +284,7 @@ describe("runtime-state sqlite", () => {
       expect(() =>
         applySqliteRuntimeMigrations(database, {
           storeName: "runtime-state test store",
-          schemaVersion: 2,
+          schemaVersion: 1,
           migrations: [
             {
               version: 1,

@@ -701,7 +701,7 @@ function createSession(input?: {
     createdAt: input?.createdAt ?? '2026-04-08T00:00:00.000Z',
     lastTurnAt: input?.lastTurnAt ?? null,
     resumeState: null,
-    schema: 'murph.assistant-session.v4',
+    schema: 'murph.assistant-session.v1',
     sessionId,
     target: {
       adapter: 'openai-compatible',

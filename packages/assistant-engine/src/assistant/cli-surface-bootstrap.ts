@@ -11,7 +11,7 @@ import { resolveAssistantStatePaths } from './store/paths.js'
 import { resolveAssistantStateDocumentPath } from './state.js'
 
 const assistantCliSurfaceBootstrapSchemaVersion =
-  'murph.assistant-cli-surface-bootstrap.v2'
+  'murph.assistant-cli-surface-bootstrap.v1'
 const assistantCliSurfaceBootstrapContractCharBudget = 40_000
 const assistantCliSurfaceBootstrapFamilyIndexEntryLimit = 8
 const assistantCliSurfaceBootstrapOptionalOptionLimit = 4

@@ -4,7 +4,7 @@ import { gunzipSync, gzipSync } from "node:zlib";
 
 import type { HostedExecutionBundleKind } from "./hosted-bundle-ref.ts";
 
-export const HOSTED_BUNDLE_SCHEMA = "murph.hosted-bundle.v2";
+export const HOSTED_BUNDLE_SCHEMA = "murph.hosted-bundle.v1";
 const WINDOWS_DRIVE_PREFIX_PATTERN = /^[A-Za-z]:/;
 const MAX_HOSTED_BUNDLE_ARCHIVE_COMPRESSED_BYTES = 64 * 1024 * 1024;
 const MAX_HOSTED_BUNDLE_ARCHIVE_UNCOMPRESSED_BYTES = 256 * 1024 * 1024;

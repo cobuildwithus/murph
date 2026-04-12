@@ -214,7 +214,7 @@ export function serializeAssistantSessionForPersistence(
   )
 
   return assistantPersistedSessionSchema.parse({
-    schema: 'murph.assistant-session.v5',
+    schema: 'murph.assistant-session.v1',
     sessionId: session.sessionId,
     target,
     resumeState,

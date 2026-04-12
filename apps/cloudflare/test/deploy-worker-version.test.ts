@@ -12,7 +12,6 @@ describe("runHostedWorkerDeployment", () => {
       readRenderedDeployConfig: vi.fn(async () => ({
         migrations: [
           { tag: "v1" },
-          { tag: "v2" },
           { tag: "v3" },
         ],
       })),
@@ -327,7 +326,7 @@ function createDependencies(
   const readRenderedDeployConfig = vi.fn(
     overrides.readRenderedDeployConfig
     ?? (async () => ({
-      migrations: [{ tag: "v1" }, { tag: "v2" }],
+      migrations: [{ tag: "v1" }],
     })),
   );
   const uploadVersion = vi.fn(

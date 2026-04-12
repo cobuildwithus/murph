@@ -60,7 +60,7 @@ describe("drainHostedOnboardingWebhookReceipts", () => {
         sideEffects: [],
         status: "processing" as const,
       },
-      version: 2,
+      version: 1,
     };
     mocks.listHostedWebhookReceiptContinuationCandidates.mockResolvedValue([
       {

@@ -140,7 +140,7 @@ test("hosted user root key helpers validate recipient kinds and parse errors", a
       updatedAt: "2026-04-09T00:00:00.000Z",
       userId: "user-1",
     }, "envelope"),
-    /envelope\.schema must be murph\.hosted-user-root-key-envelope\.v2\./u,
+    /envelope\.schema must be murph\.hosted-user-root-key-envelope\.v1\./u,
   );
 });
 

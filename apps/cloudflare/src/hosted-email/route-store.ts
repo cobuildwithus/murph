@@ -24,7 +24,7 @@ export interface HostedEmailUserRouteRecord {
 
 export interface HostedEmailVerifiedSenderRouteRecord {
   identityId: string;
-  schema: "murph.hosted-email-verified-sender-route.v2";
+  schema: "murph.hosted-email-verified-sender-route.v1";
   senderHash: string;
   senderKey: string;
   updatedAt: string;
@@ -56,7 +56,7 @@ interface HostedEmailRouteStoreInput {
 }
 
 const HOSTED_EMAIL_USER_ROUTE_SCHEMA = "murph.hosted-email-user-route.v1";
-const HOSTED_EMAIL_VERIFIED_SENDER_ROUTE_SCHEMA = "murph.hosted-email-verified-sender-route.v2";
+const HOSTED_EMAIL_VERIFIED_SENDER_ROUTE_SCHEMA = "murph.hosted-email-verified-sender-route.v1";
 
 export function createHostedEmailRouteStore(input: HostedEmailRouteStoreInput): HostedEmailRouteStore {
   return {

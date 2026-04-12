@@ -44,7 +44,7 @@ import {
 import { createInkKey, renderInkOutput } from './helpers.ts'
 
 const TEST_SESSION: AssistantSession = {
-  schema: 'murph.assistant-session.v4',
+  schema: 'murph.assistant-session.v1',
   sessionId: 'session-state-ui',
   target: {
     adapter: 'openai-compatible',
@@ -558,7 +558,7 @@ test('view-model helpers resolve submit actions, metadata, and transcript seeds 
       },
       'vault-a',
     ),
-    'gpt-5.4 high · vault-a',
+    'gpt-5.4 · vault-a',
   )
   assert.deepEqual(
     resolveChatMetadataBadges(
@@ -575,11 +575,6 @@ test('view-model helpers resolve submit actions, metadata, and transcript seeds 
         key: 'model',
         label: 'model',
         value: 'gpt-5.4',
-      },
-      {
-        key: 'reasoning',
-        label: 'reasoning',
-        value: 'high',
       },
       {
         key: 'vault',

@@ -1,6 +1,5 @@
 import {
   isWearablePreferenceProvider,
-  legacyPreferencesDocumentSchemaVersion,
   normalizeWearablePreferenceProviders,
   preferencesDocumentRelativePath,
   preferencesDocumentSchema,
@@ -38,43 +37,6 @@ export function resolvePreferencesDocumentPath(vaultRoot: string): string {
   return resolveVaultPath(vaultRoot, preferencesDocumentRelativePath).absolutePath;
 }
 
-function normalizePreferencesDocumentForRead(value: unknown): unknown {
-  if (!isPlainRecord(value)) {
-    return value;
-  }
-
-  if (value.schemaVersion !== legacyPreferencesDocumentSchemaVersion) {
-    return value;
-  }
-
-  const normalizedWorkoutUnitPreferences = normalizeWorkoutUnitPreferencesForRead(
-    value.workoutUnitPreferences,
-  );
-  const wearablePreferences = normalizeWearablePreferencesForRead(
-    value.wearablePreferences,
-  );
-
-  return {
-    ...value,
-    schemaVersion: preferencesDocumentSchemaVersion,
-    workoutUnitPreferences: normalizedWorkoutUnitPreferences,
-    wearablePreferences,
-  };
-}
-
-function normalizeWorkoutUnitPreferencesForRead(value: unknown): unknown {
-  if (!isPlainRecord(value)) {
-    return value;
-  }
-
-  if (!("distance" in value)) {
-    return value;
-  }
-
-  const { distance: _removedDistance, ...normalizedWorkoutUnitPreferences } = value;
-  return normalizedWorkoutUnitPreferences;
-}
-
 function normalizeWearablePreferencesForRead(value: unknown): WearablePreferences {
   if (!isPlainRecord(value) || !Array.isArray(value.desiredProviders)) {
     return { desiredProviders: [] };
@@ -106,9 +68,7 @@ export async function readPreferencesDocument(
   }
 
   const parsedDocument = preferencesDocumentSchema.parse(
-    normalizePreferencesDocumentForRead(
-      await readJsonFile(vaultRoot, resolved.relativePath),
-    ),
+    await readJsonFile(vaultRoot, resolved.relativePath),
   );
   const document: PreferencesDocument = {
     ...parsedDocument,

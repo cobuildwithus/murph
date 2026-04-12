@@ -197,7 +197,7 @@ test('local gateway projection derives route-backed conversations and transcript
     await saveAssistantSession(
       vaultRoot,
       assistantSessionSchema.parse({
-        schema: 'murph.assistant-session.v4',
+        schema: 'murph.assistant-session.v1',
         sessionId: 'asst_gateway_thread_labs',
         target: {
           adapter: 'codex-cli',
@@ -356,7 +356,7 @@ test('local gateway projection derives route-backed conversations and transcript
       JSON.stringify({
         kind: 'conversation',
         routeKey: 'channel:email|identity:murph%40example.com|thread:thread-labs',
-        version: 1,
+        version: 2,
       }),
       'utf8',
     ).toString('base64url')}`

@@ -124,7 +124,7 @@ function createAssistantServiceMock(): AssistantLocalService {
         sandbox: null,
       },
       resumeState: null,
-      schema: 'murph.assistant-session.v4',
+      schema: 'murph.assistant-session.v1',
       sessionId: 'session_http_test',
       target: {
         adapter: 'codex-cli',
@@ -259,7 +259,7 @@ function createAssistantServiceMock(): AssistantLocalService {
           sandbox: null,
         },
         resumeState: null,
-        schema: 'murph.assistant-session.v4',
+        schema: 'murph.assistant-session.v1',
         sessionId: 'session_http_test',
         target: {
           adapter: 'codex-cli',
@@ -326,7 +326,7 @@ function createAssistantServiceMock(): AssistantLocalService {
           sandbox: null,
         },
         resumeState: null,
-        schema: 'murph.assistant-session.v4',
+        schema: 'murph.assistant-session.v1',
         sessionId: 'session_http_test',
         target: {
           adapter: 'codex-cli',
@@ -386,7 +386,7 @@ function createAssistantServiceMock(): AssistantLocalService {
         sandbox: null,
       },
       resumeState: null,
-      schema: 'murph.assistant-session.v4',
+      schema: 'murph.assistant-session.v1',
       sessionId: 'session_http_test',
       target: {
         adapter: 'codex-cli',

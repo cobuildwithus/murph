@@ -11,7 +11,6 @@ const assistantRuntimeWriteLock = createAssistantStateWriteLock<AssistantStatePa
   ownerKeyPrefix: 'assistant-runtime-write',
   lockDirectory: '.runtime-write.lock',
   lockMetadataPath: '.runtime-write.lock/owner.json',
-  legacyLockMetadataPath: '.runtime-write-lock.json',
   invalidMetadataReason: 'Assistant runtime write-lock metadata is malformed.',
   heldLockErrorCode: 'ASSISTANT_RUNTIME_WRITE_LOCKED',
   formatHeldLockMessage(metadata: AssistantStateWriteLockMetadata | null) {

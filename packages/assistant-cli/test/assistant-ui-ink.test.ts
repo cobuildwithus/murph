@@ -108,7 +108,7 @@ import {
 } from './helpers.ts'
 
 const TEST_SESSION: AssistantSession = {
-  schema: 'murph.assistant-session.v4',
+  schema: 'murph.assistant-session.v1',
   sessionId: 'session-ink-ui',
   target: {
     adapter: 'openai-compatible',

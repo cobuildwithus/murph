@@ -357,7 +357,7 @@ describe('assistant session resolution', () => {
           sandbox: 'danger-full-access',
         },
         resumeState: null,
-        schema: 'murph.assistant-session.v4',
+        schema: 'murph.assistant-session.v1',
         sessionId: 'session-123',
         target: createDefaultLocalAssistantModelTarget(),
         turnCount: 0,

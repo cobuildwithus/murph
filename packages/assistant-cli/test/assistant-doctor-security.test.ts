@@ -31,7 +31,7 @@ vi.mock('@murphai/assistant-engine/assistant-runtime', async () => {
 import { inspectAndRepairAssistantStateSecrecy } from '../src/assistant/doctor-security.ts'
 
 const BASE_SESSION: AssistantSession = {
-  schema: 'murph.assistant-session.v4',
+  schema: 'murph.assistant-session.v1',
   sessionId: 'session-security-demo',
   target: {
     adapter: 'openai-compatible',

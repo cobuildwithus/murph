@@ -703,7 +703,7 @@ test('opaque id helpers preserve route tokens and reject malformed envelopes', (
     kind: 'attachment',
     routeToken: 'route-token-1',
     sourceToken: attachment.sourceToken,
-    version: 2,
+    version: 1,
   })
   assert.equal(assertGatewayAttachmentId(attachmentId), attachmentId)
   assert.equal(assertGatewayMessageId(outboxMessageId), outboxMessageId)
@@ -712,7 +712,7 @@ test('opaque id helpers preserve route tokens and reject malformed envelopes', (
     kind: 'conversation',
     routeToken: 'route-token-1',
     sourceToken: 'source-token',
-    version: 2,
+    version: 1,
   })
 
   assert.throws(
@@ -747,7 +747,7 @@ test('opaque id helpers normalize route tokens and reject invalid envelopes', ()
       readGatewayConversationSessionToken(
         encodeOpaqueEnvelope('gwcs_', {
           routeToken: 'route-token-1',
-          version: 2,
+          version: 1,
         }),
       ),
     /Gateway opaque id was missing the kind field\./u,
@@ -758,7 +758,7 @@ test('opaque id helpers normalize route tokens and reject invalid envelopes', ()
       readGatewayMessageRouteToken(
         encodeOpaqueEnvelope('gwcm_', {
           kind: 'capture-message',
-          version: 2,
+          version: 1,
         }),
       ),
     /Gateway opaque id was missing the route token\./u,
@@ -770,7 +770,7 @@ test('opaque id helpers normalize route tokens and reject invalid envelopes', ()
         encodeOpaqueEnvelope('gwca_', {
           kind: 'attachment',
           routeToken: 'route-token-1',
-          version: 2,
+          version: 1,
         }),
       ),
     /Gateway attachment id was missing the attachment reference\./u,
@@ -809,7 +809,7 @@ test('opaque id helpers normalize route tokens and reject invalid envelopes', ()
         encodeOpaqueEnvelope('gwcs_', {
           kind: 'conversation',
           routeToken: 'route-token-1',
-          version: 1,
+          version: 2,
         }),
       ),
     /Gateway opaque id version is unsupported\./u,
@@ -820,7 +820,7 @@ test('opaque id helpers normalize route tokens and reject invalid envelopes', ()
         encodeOpaqueEnvelope('gwcs_', {
           kind: 'outbox-message',
           routeToken: 'route-token-1',
-          version: 2,
+          version: 1,
         }),
       ),
     /Gateway session key is invalid\./u,
@@ -831,7 +831,7 @@ test('opaque id helpers normalize route tokens and reject invalid envelopes', ()
         encodeOpaqueEnvelope('gwcm_', {
           kind: 'attachment',
           routeToken: 'route-token-1',
-          version: 2,
+          version: 1,
         }),
       ),
     /Gateway message id is invalid\./u,

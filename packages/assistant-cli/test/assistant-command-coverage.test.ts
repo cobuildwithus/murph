@@ -104,7 +104,7 @@ import {
 } from '../src/commands/assistant.js'
 
 const TEST_SESSION: AssistantSession = {
-  schema: 'murph.assistant-session.v4',
+  schema: 'murph.assistant-session.v1',
   sessionId: 'session-command-coverage',
   target: {
     adapter: 'codex-cli',

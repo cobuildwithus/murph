@@ -1108,6 +1108,7 @@ test('interactive bare model clears stale saved model and provider metadata when
       whisperModel: 'base.en',
       assistantPreset: 'openai-compatible',
       assistantBaseUrl: 'http://127.0.0.1:11434/v1',
+      assistantProviderPreset: undefined,
     },
     preset: 'openai-compatible',
   })
@@ -1195,6 +1196,7 @@ test('model reuses existing backend defaults when only the model changes', async
       assistantBaseUrl: 'http://127.0.0.1:11434/v1',
       assistantApiKeyEnv: 'OLLAMA_API_KEY',
       assistantProviderName: 'ollama',
+      assistantProviderPreset: undefined,
     },
     preset: 'openai-compatible',
   })
@@ -1552,7 +1554,7 @@ function createMockChatResult(sessionId: string) {
     stoppedAt: '2026-03-17T23:21:22.167Z',
     turns: 0,
     session: {
-      schema: 'murph.assistant-session.v4' as const,
+      schema: 'murph.assistant-session.v1' as const,
       sessionId,
       target: {
         adapter: 'codex-cli' as const,

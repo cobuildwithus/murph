@@ -66,7 +66,7 @@ import type {
   AssistantTranscriptEntryInput,
 } from './store/types.js'
 
-const ASSISTANT_STATE_SCHEMA = 'murph.assistant-session.v5'
+const ASSISTANT_STATE_SCHEMA = 'murph.assistant-session.v1'
 
 export function isAssistantSessionNotFoundError(error: unknown): boolean {
   return Boolean(

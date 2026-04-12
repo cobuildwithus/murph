@@ -457,7 +457,7 @@ test('interactive onboard restores canonical wearable preferences into the wizar
     await writeFile(
       path.join(vaultRoot, 'bank', 'preferences.json'),
       JSON.stringify({
-        schemaVersion: 2,
+        schemaVersion: 1,
         updatedAt: '2026-04-10T00:00:00.000Z',
         workoutUnitPreferences: {},
         wearablePreferences: {
@@ -922,6 +922,27 @@ test('setup CLI initial wizard channels reuse saved state, fall back to inbox co
   )
 
   await rm(automationPath, { force: true })
+  await writeFile(
+    inboxConfigPath,
+    JSON.stringify({
+      connectors: [
+        {
+          id: 'email:primary',
+          source: 'email',
+          enabled: true,
+          accountId: 'primary',
+          options: {},
+        },
+      ],
+    }),
+    'utf8',
+  )
+
+  await assert.rejects(
+    resolveInitialSetupWizardChannels(vaultRoot, 'linux'),
+    /schema|schemaVersion|value/u,
+  )
+
   await writeFile(inboxConfigPath, '{not json', 'utf8')
 
   await assert.rejects(

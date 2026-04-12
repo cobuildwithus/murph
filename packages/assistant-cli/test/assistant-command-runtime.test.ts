@@ -64,7 +64,7 @@ afterAll(() => {
 })
 
 const TEST_SESSION = {
-  schema: 'murph.assistant-session.v4',
+  schema: 'murph.assistant-session.v1',
   sessionId: 'session-command-runtime-test',
   target: {
     adapter: 'codex-cli',

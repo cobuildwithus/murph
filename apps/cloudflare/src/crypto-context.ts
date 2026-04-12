@@ -1,4 +1,4 @@
-const CONTEXT_SALT = new TextEncoder().encode("murph.cloudflare.hosted.storage.v2");
+const CONTEXT_SALT = new TextEncoder().encode("murph.cloudflare.hosted.storage.v1");
 const utf8Encoder = new TextEncoder();
 
 export type HostedStorageScope =

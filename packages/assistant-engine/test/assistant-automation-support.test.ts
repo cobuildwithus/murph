@@ -121,7 +121,7 @@ function createAssistantAskResult(input: {
     prompt: 'reply to the inbox capture',
     response: input.response ?? 'Done.',
     session: {
-      schema: 'murph.assistant-session.v4',
+      schema: 'murph.assistant-session.v1',
       sessionId:
         input.sessionId ?? 'asst_1234567890abcdef1234567890abcd',
       target: {

@@ -78,7 +78,7 @@ test("reads and writes canonical workout unit preferences from the singleton pre
   });
 
   const serialized = await readFile(path.join(vaultRoot, "bank/preferences.json"), "utf8");
-  assert.match(serialized, /"schemaVersion": 2/u);
+  assert.match(serialized, /"schemaVersion": 1/u);
   assert.match(serialized, /"weight": "lb"/u);
 
   const noChange = await updateWorkoutUnitPreferences({
@@ -94,7 +94,7 @@ test("reads and writes canonical workout unit preferences from the singleton pre
   assert.equal(validation.valid, true);
 });
 
-test("reads legacy preference documents that still carry the removed distance key", async () => {
+test("rejects legacy preference documents that still carry the removed distance key", async () => {
   const vaultRoot = await createTempVault();
   await writeFile(
     path.join(vaultRoot, "bank/preferences.json"),
@@ -110,18 +110,10 @@ test("reads legacy preference documents that still carry the removed distance ke
     "utf8",
   );
 
-  const document = await readPreferencesDocument(vaultRoot);
-  assert.equal(document.exists, true);
-  assert.deepEqual(document.workoutUnitPreferences, {
-    weight: "kg",
-    bodyMeasurement: "cm",
-  });
-  assert.deepEqual(document.wearablePreferences, {
-    desiredProviders: [],
-  });
+  await assert.rejects(() => readPreferencesDocument(vaultRoot));
 
   const validation = await validateVault({ vaultRoot });
-  assert.equal(validation.valid, true);
+  assert.equal(validation.valid, false);
 });
 
 test("defaults updatedAt when writing new preferences without an explicit timestamp", async () => {
@@ -235,7 +227,7 @@ test("reads and writes canonical wearable preferences from the singleton prefere
   assert.equal(noChange.document.updatedAt, "2026-04-08T10:00:00.000Z");
 });
 
-test("reads legacy preference documents without wearable preferences and upgrades them in memory", async () => {
+test("rejects legacy preference documents without wearable preferences", async () => {
   const vaultRoot = await createTempVault();
   await writeFile(
     path.join(vaultRoot, "bank/preferences.json"),
@@ -249,12 +241,7 @@ test("reads legacy preference documents without wearable preferences and upgrade
     "utf8",
   );
 
-  const document = await readPreferencesDocument(vaultRoot);
-  assert.equal(document.exists, true);
-  assert.equal(document.schemaVersion, 2);
-  assert.deepEqual(document.wearablePreferences, {
-    desiredProviders: [],
-  });
+  await assert.rejects(() => readPreferencesDocument(vaultRoot));
 });
 
 test("rejects future preference schema versions instead of coercing them to the current shape", async () => {
@@ -262,7 +249,7 @@ test("rejects future preference schema versions instead of coercing them to the 
   await writeFile(
     path.join(vaultRoot, "bank/preferences.json"),
     `${JSON.stringify({
-      schemaVersion: 3,
+      schemaVersion: 2,
       updatedAt: "2026-04-08T10:00:00.000Z",
       workoutUnitPreferences: {
         weight: "kg",

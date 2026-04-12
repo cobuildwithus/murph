@@ -116,7 +116,7 @@ describe('assistant redaction helpers', () => {
     })
 
     const session = redactAssistantSessionForDisplay({
-      schema: 'murph.assistant-session.v4',
+      schema: 'murph.assistant-session.v1',
       alias: 'session-alpha',
       binding: {
         actorId: null,

@@ -468,7 +468,7 @@ test('setup wizard initial wearables prefer canonical wearable preferences', asy
     await writeFile(
       path.join(vaultRoot, 'bank', 'preferences.json'),
       JSON.stringify({
-        schemaVersion: 2,
+        schemaVersion: 1,
         updatedAt: '2026-04-10T00:00:00.000Z',
         workoutUnitPreferences: {},
         wearablePreferences: {
@@ -486,7 +486,7 @@ test('setup wizard initial wearables prefer canonical wearable preferences', asy
     await writeFile(
       path.join(vaultRoot, 'bank', 'preferences.json'),
       JSON.stringify({
-        schemaVersion: 2,
+        schemaVersion: 1,
         updatedAt: '2026-04-10T01:00:00.000Z',
         workoutUnitPreferences: {},
         wearablePreferences: {

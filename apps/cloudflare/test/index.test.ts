@@ -2952,7 +2952,7 @@ function createGatewayConversationSessionKeyForTests(routeToken: string): string
   return `gwcs_${Buffer.from(JSON.stringify({
     kind: "conversation",
     routeToken,
-    version: 2,
+    version: 1,
   }), "utf8").toString("base64url")}`;
 }
 
@@ -2961,7 +2961,7 @@ function createGatewayOutboxMessageIdForTests(routeToken: string, sourceToken: s
     kind: "outbox-message",
     routeToken,
     sourceToken,
-    version: 2,
+    version: 1,
   }), "utf8").toString("base64url")}`;
 }
 
@@ -2970,7 +2970,7 @@ function createGatewayAttachmentIdForTests(routeToken: string, sourceToken: stri
     kind: "attachment",
     routeToken,
     sourceToken,
-    version: 2,
+    version: 1,
   }), "utf8").toString("base64url")}`;
 }
 

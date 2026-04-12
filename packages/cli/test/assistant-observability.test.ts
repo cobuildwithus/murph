@@ -525,7 +525,7 @@ test('assistant doctor repairs assistant-state permissions but leaves inline leg
     sessionPath,
     `${JSON.stringify(
       {
-        schema: 'murph.assistant-session.v4',
+        schema: 'murph.assistant-session.v1',
         sessionId: 'asst_legacyrepair',
         target: {
           adapter: 'openai-compatible',

@@ -149,7 +149,7 @@ function createStubAssistantResult(vault: string): AssistantAskResult {
     prompt: 'Reply to the capture.',
     response: 'Acknowledged.',
     session: {
-      schema: 'murph.assistant-session.v4',
+      schema: 'murph.assistant-session.v1',
       sessionId: 'asst_session_1',
       target: {
         adapter: 'codex-cli',

@@ -49,7 +49,7 @@ const assistantdFetchMock = vi.fn(
 let nextAssistantdFetchId = 1
 
 const TEST_SESSION = {
-  schema: 'murph.assistant-session.v4',
+  schema: 'murph.assistant-session.v1',
   sessionId: 'session_daemon_test',
   target: {
     adapter: 'codex-cli',

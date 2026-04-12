@@ -93,7 +93,7 @@ import { runAssistantDoctor } from '../src/assistant/doctor.ts'
 const testNow = '2026-04-08T12:00:00.000Z'
 
 const BASE_SESSION: AssistantSession = {
-  schema: 'murph.assistant-session.v4',
+  schema: 'murph.assistant-session.v1',
   sessionId: 'session-doctor-demo',
   target: {
     adapter: 'codex-cli',

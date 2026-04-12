@@ -17,7 +17,7 @@ export const CONTRACT_SCHEMA_VERSION = Object.freeze({
   providerFrontmatter: "murph.frontmatter.provider.v1",
   recipeFrontmatter: "murph.frontmatter.recipe.v1",
   workoutFormatFrontmatter: "murph.frontmatter.workout-format.v1",
-  rawImportManifest: "murph.raw-import-manifest.v2",
+  rawImportManifest: "murph.raw-import-manifest.v1",
   protocolFrontmatter: "murph.frontmatter.protocol.v1",
   sample: "murph.sample.v1",
   sharePack: "murph.share-pack.v1",

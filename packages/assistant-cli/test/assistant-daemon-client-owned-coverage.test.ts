@@ -62,7 +62,7 @@ const TEST_MESSAGE_INPUT = {
 }
 
 const TEST_SESSION = {
-  schema: 'murph.assistant-session.v4',
+  schema: 'murph.assistant-session.v1',
   sessionId: 'session_123',
   target: {
     adapter: 'codex-cli',

@@ -291,7 +291,7 @@ export const assistantProviderFailoverRouteSchema = z
 
 export const assistantAliasStoreSchema = z
   .object({
-    version: z.literal(2),
+    version: z.literal(1),
     aliases: z.record(z.string(), assistantSessionIdSchema),
     conversationKeys: z.record(z.string(), assistantSessionIdSchema),
   })
@@ -323,7 +323,7 @@ export const assistantProviderBindingSchema = z
 
 export const assistantPersistedSessionSchema = z
   .object({
-    schema: z.enum(['murph.assistant-session.v4', 'murph.assistant-session.v5']),
+    schema: z.literal('murph.assistant-session.v1'),
     sessionId: assistantSessionIdSchema,
     target: assistantModelTargetSchema,
     resumeState: assistantSessionResumeStateSchema.nullable().default(null),

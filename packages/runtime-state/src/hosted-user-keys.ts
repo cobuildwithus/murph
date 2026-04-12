@@ -4,7 +4,7 @@ const HOSTED_USER_ROOT_KEY_WRAP_SALT = new TextEncoder().encode(
 const HOSTED_USER_ROOT_KEY_WRAP_SCOPE = "root-key-recipient";
 const HOSTED_USER_ROOT_KEY_BYTES = 32;
 
-export const HOSTED_USER_ROOT_KEY_ENVELOPE_SCHEMA = "murph.hosted-user-root-key-envelope.v2";
+export const HOSTED_USER_ROOT_KEY_ENVELOPE_SCHEMA = "murph.hosted-user-root-key-envelope.v1";
 export const HOSTED_USER_ROOT_KEY_RECIPIENT_KINDS = [
   "automation",
   "user-unlock",
