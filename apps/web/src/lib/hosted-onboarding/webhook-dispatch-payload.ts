@@ -1,10 +1,10 @@
 import type {
   HostedExecutionDispatchRequest,
-} from "@murphai/hosted-execution";
+} from "@murphai/hosted-execution/contracts";
 import { Prisma } from "@prisma/client";
 import {
   parseHostedExecutionDispatchRequest,
-} from "@murphai/hosted-execution";
+} from "@murphai/hosted-execution/parsers";
 
 import {
   deleteHostedStoredDispatchPayloadBestEffort as deleteHostedStoredDispatchPayloadBestEffortFromControl,

@@ -4,8 +4,10 @@ import {
   buildHostedExecutionGatewayMessageSendDispatch,
   buildHostedExecutionMemberActivatedDispatch,
   buildHostedExecutionOutboxPayload,
-  parseHostedExecutionDispatchRequest,
 } from "@murphai/hosted-execution";
+import {
+  parseHostedExecutionDispatchRequest,
+} from "@murphai/hosted-execution/parsers";
 
 import {
   type CloudflareHostedControlClientOptions,

@@ -1,5 +1,5 @@
 import type { SharePack } from "@murphai/contracts";
-import { parseHostedExecutionSharePack } from "@murphai/hosted-execution";
+import { parseHostedExecutionSharePack } from "@murphai/hosted-execution/parsers";
 
 import { createHostedExecutionVercelOidcBearerTokenProvider } from "../hosted-execution/auth-adapter";
 import { readHostedExecutionControlBaseUrl } from "../hosted-execution/environment";

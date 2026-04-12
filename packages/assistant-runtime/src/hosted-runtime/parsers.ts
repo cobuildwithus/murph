@@ -1,9 +1,11 @@
 import {
   parseHostedAssistantDeliveryEffects,
-  parseHostedExecutionBundleRef,
-  parseHostedExecutionRunnerRequest,
   type HostedExecutionRunnerResult,
 } from "@murphai/hosted-execution";
+import {
+  parseHostedExecutionBundleRef,
+  parseHostedExecutionRunnerRequest,
+} from "@murphai/hosted-execution/parsers";
 
 import type {
   HostedAssistantRuntimeDeviceSyncConfig,

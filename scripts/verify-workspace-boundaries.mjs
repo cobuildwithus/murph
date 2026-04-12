@@ -12,6 +12,7 @@ export async function main() {
   await verifyTypecheckTsconfigs(failures);
   await verifyWorkspacePackageExports(failures);
   await verifyAssistantEnginePublicSourceSurface(failures);
+  await verifyAssistantRuntimePublicSourceSurface(failures);
   await verifyFocusedOwnerSourceSurfaces(failures);
   await verifyWorkspacePackageExportTargets(failures);
   await verifyTsconfigPathMappings(failures);
@@ -223,6 +224,23 @@ async function verifyAssistantEnginePublicSourceSurface(failures) {
         `packages/assistant-engine/src/assistant-provider.ts re-exports ${JSON.stringify(specifier)}; assistant-provider must stay on provider runtime state and recovery instead of leaking CLI access or tool-catalog helpers.`,
       );
     }
+  }
+}
+
+async function verifyAssistantRuntimePublicSourceSurface(failures) {
+  const assistantRuntimeIndexPath = path.join(repoRoot, "packages", "assistant-runtime", "src", "index.ts");
+  const indexSource = await readFile(assistantRuntimeIndexPath, "utf8");
+
+  if (sourceMentionsSpecifier(indexSource, "./hosted-email-route.ts")) {
+    failures.push(
+      "packages/assistant-runtime/src/index.ts re-exports ./hosted-email-route.ts; hosted email self-target reconciliation is an internal runtime helper and must not leak through the assistant-runtime root barrel.",
+    );
+  }
+
+  if (sourceMentionsSpecifier(indexSource, "./hosted-email.ts")) {
+    failures.push(
+      "packages/assistant-runtime/src/index.ts re-exports ./hosted-email.ts; hosted email transport codecs should stay on @murphai/assistant-runtime/hosted-email so Cloudflare transport code does not depend on the ambient runtime root.",
+    );
   }
 }
 
@@ -717,6 +735,83 @@ function verifyWorkspaceImportPolicy({
   }
 
   if (
+    sourceMember === "apps/cloudflare"
+    && specifier === "@murphai/assistant-runtime"
+    && importsNamedBindingsFromSpecifier(source, specifier, [
+      "HostedEmailSendRequest",
+      "HostedEmailSendTargetKind",
+      "hostedEmailSendTargetKindValues",
+      "parseHostedEmailSendRequest",
+    ])
+  ) {
+    return `${path.relative(repoRoot, filePath)} imports hosted email transport codecs from ${JSON.stringify(specifier)}; Cloudflare transport code must use @murphai/assistant-runtime/hosted-email so the assistant-runtime root stays on the canonical hosted runtime surface.`;
+  }
+
+  if (
+    (
+      sourceMember === "packages/assistant-runtime"
+      || sourceMember === "apps/cloudflare"
+    )
+    && specifier === "@murphai/hosted-execution"
+    && importsNamedBindingsFromSpecifier(source, specifier, [
+      "readHostedEmailCapabilities",
+      "resolveHostedEmailSenderIdentity",
+    ])
+  ) {
+    return `${path.relative(repoRoot, filePath)} imports hosted email helpers from ${JSON.stringify(specifier)}; use @murphai/hosted-execution/hosted-email so hosted email policy and sender identity stay on their focused owner surface.`;
+  }
+
+  if (
+    (
+      sourceMember === "packages/assistant-runtime"
+      || sourceMember === "packages/cloudflare-hosted-control"
+      || sourceMember === "apps/cloudflare"
+      || sourceMember === "apps/web"
+    )
+    && specifier === "@murphai/hosted-execution"
+    && importsNamedBindingsFromSpecifier(source, specifier, [
+      "parseHostedExecutionDispatchRequest",
+      "parseHostedExecutionDispatchResult",
+      "parseHostedExecutionEventDispatchStatus",
+      "parseHostedExecutionOutboxPayload",
+      "parseHostedExecutionUserStatus",
+      "parseHostedExecutionSharePack",
+      "parseHostedExecutionBundlePayload",
+      "parseHostedExecutionBundleRef",
+      "parseHostedExecutionRunnerRequest",
+    ])
+  ) {
+    return `${path.relative(repoRoot, filePath)} imports hosted execution parsers from ${JSON.stringify(specifier)}; use @murphai/hosted-execution/parsers so parse helpers stay on the dedicated parser surface instead of the hosted-execution root barrel.`;
+  }
+
+  if (
+    (
+      sourceMember === "packages/cloudflare-hosted-control"
+      || sourceMember === "apps/cloudflare"
+      || sourceMember === "apps/web"
+    )
+    && specifier === "@murphai/hosted-execution"
+    && importsNamedBindingsFromSpecifier(source, specifier, [
+      "normalizeHostedExecutionBaseUrl",
+    ])
+  ) {
+    return `${path.relative(repoRoot, filePath)} imports hosted execution base-url normalization from ${JSON.stringify(specifier)}; use @murphai/hosted-execution/env so env normalization stays on the dedicated env surface.`;
+  }
+
+  if (
+    sourceMember === "apps/cloudflare"
+    && specifier === "@murphai/hosted-execution"
+    && importsNamedBindingsFromSpecifier(source, specifier, [
+      "HOSTED_EXECUTION_RUNNER_EMAIL_SEND_PATH",
+      "buildHostedExecutionRunnerCommitPath",
+      "buildHostedExecutionRunnerEmailMessagePath",
+      "buildHostedExecutionRunnerSideEffectPath",
+    ])
+  ) {
+    return `${path.relative(repoRoot, filePath)} imports runner route helpers from ${JSON.stringify(specifier)}; apps/cloudflare must use @murphai/hosted-execution/routes so runtime route construction stays on the focused route surface.`;
+  }
+
+  if (
     (sourceMember === "packages/assistant-runtime" || sourceMember === "packages/assistantd")
     && specifier === "@murphai/vault-usecases"
     && filePath.includes(`${path.sep}src${path.sep}`)
@@ -918,10 +1013,56 @@ function importsNamedBindingsFromSpecifier(source, specifier, bindingNames) {
     .map((name) => escapeRegExp(name))
     .join("|");
 
-  return new RegExp(
+  if (new RegExp(
     String.raw`^\s*import\s+type\s*\{[^}]*\b(?:${bindingPattern})\b[^}]*\}\s+from\s+["']${escapeRegExp(specifier)}["']|^\s*import\s*\{[^}]*\b(?:${bindingPattern})\b[^}]*\}\s+from\s+["']${escapeRegExp(specifier)}["']`,
     "mu",
-  ).test(source);
+  ).test(source)) {
+    return true;
+  }
+
+  const importedAliases = [
+    ...extractNamespaceImportAliasesFromSpecifier(source, specifier),
+    ...extractDefaultImportAliasesFromSpecifier(source, specifier),
+  ];
+
+  return importedAliases.some((alias) =>
+    new RegExp(
+      String.raw`\b${escapeRegExp(alias)}\s*\.\s*(?:${bindingPattern})\b`,
+      "u",
+    ).test(source),
+  );
+}
+
+function extractNamespaceImportAliasesFromSpecifier(source, specifier) {
+  const aliases = [];
+  const pattern = new RegExp(
+    String.raw`^\s*import\s+(?:type\s+)?\*\s+as\s+([A-Za-z_$][\w$]*)\s+from\s+["']${escapeRegExp(specifier)}["']`,
+    "gmu",
+  );
+
+  let match = pattern.exec(source);
+  while (match !== null) {
+    aliases.push(match[1]);
+    match = pattern.exec(source);
+  }
+
+  return aliases;
+}
+
+function extractDefaultImportAliasesFromSpecifier(source, specifier) {
+  const aliases = [];
+  const pattern = new RegExp(
+    String.raw`^\s*import\s+(?:type\s+)?([A-Za-z_$][\w$]*)\s*(?:,\s*(?:\{[^}]*\}|\*\s+as\s+[A-Za-z_$][\w$]*))?\s+from\s+["']${escapeRegExp(specifier)}["']`,
+    "gmu",
+  );
+
+  let match = pattern.exec(source);
+  while (match !== null) {
+    aliases.push(match[1]);
+    match = pattern.exec(source);
+  }
+
+  return aliases;
 }
 
 function collectWorkspaceExportTargets(exportValue) {

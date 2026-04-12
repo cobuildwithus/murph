@@ -8,7 +8,7 @@ import {
 } from "@murphai/device-syncd/config";
 import {
   readHostedEmailCapabilities,
-} from "@murphai/hosted-execution";
+} from "@murphai/hosted-execution/hosted-email";
 
 import {
   buildHostedRunnerContainerEnv,

@@ -3,13 +3,17 @@ import {
   type HostedRuntimePlatform,
 } from "@murphai/assistant-runtime";
 import {
+  parseHostedAssistantDeliveryRecord,
+} from "@murphai/hosted-execution";
+import {
   HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER,
+} from "@murphai/hosted-execution/contracts";
+import {
   HOSTED_EXECUTION_RUNNER_EMAIL_SEND_PATH,
   buildHostedExecutionRunnerCommitPath,
   buildHostedExecutionRunnerEmailMessagePath,
   buildHostedExecutionRunnerSideEffectPath,
-  parseHostedAssistantDeliveryRecord,
-} from "@murphai/hosted-execution";
+} from "@murphai/hosted-execution/routes";
 import {
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_PATH,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH,

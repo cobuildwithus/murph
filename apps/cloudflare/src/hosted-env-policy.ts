@@ -4,7 +4,7 @@ import {
 } from "@murphai/assistant-runtime/hosted-assistant-env";
 import {
   readHostedEmailCapabilities,
-} from "@murphai/hosted-execution";
+} from "@murphai/hosted-execution/hosted-email";
 
 const OPERATOR_ONLY_RUNNER_BINARY_ENV_KEYS = [
   "FFMPEG_COMMAND",
