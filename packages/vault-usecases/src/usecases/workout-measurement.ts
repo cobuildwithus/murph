@@ -1,6 +1,7 @@
 import {
   bodyMeasurementEntrySchema,
   type BodyMeasurementEntry,
+  type EventSource,
   type JsonObject,
   type StoredMedia,
   type WorkoutUnitPreferences,
@@ -25,7 +26,7 @@ interface MeasurementPayloadInput {
   measurements?: BodyMeasurementEntry[]
   media?: StoredMedia[]
   rawRefs?: string[]
-  source?: 'manual' | 'import' | 'device' | 'derived'
+  source?: EventSource
   tags?: string[]
   relatedIds?: string[]
   externalRef?: JsonObject
@@ -42,7 +43,7 @@ export interface AddWorkoutMeasurementInput {
   title?: string
   occurredAt?: string
   inputFile?: string
-  source?: 'manual' | 'import' | 'device' | 'derived'
+  source?: EventSource
   mediaPaths?: string[]
 }
 

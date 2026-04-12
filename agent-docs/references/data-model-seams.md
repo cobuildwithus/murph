@@ -1,6 +1,6 @@
 # Data Model Seams
 
-Last verified: 2026-04-09
+Last verified: 2026-04-12
 
 ## Implemented in this patch
 
@@ -356,6 +356,75 @@ This patch:
 **Why this is simpler:** one assistant-delivery effect now has one durable identity and one journal API. Adding another assistant-delivery field or changing journal behavior no longer requires keeping duplicated ids, duplicated method names, and duplicated route aliases aligned across hosted-execution, assistant-runtime, and Cloudflare.
 
 **Main refactor risk:** callers outside this repo that depend on the published `@murphai/hosted-execution` or `@murphai/assistant-runtime` surfaces may need coordinated updates if they were still reading `intentId` from hosted assistant-delivery payloads or implementing the legacy generic journal method names. The legacy parser tolerance should stay boundary-only rather than creeping back into the canonical write shape.
+
+### 20. Keep event-source vocabulary owned by contracts instead of restating it in CLI and workflow façades
+
+**Seam:** `packages/contracts/src/constants.ts` (`EVENT_SOURCES`), `packages/contracts/src/zod.ts` (`EventSource`, `eventSourceSchema`), `packages/vault-usecases/src/usecases/{intervention,workout,workout-measurement}.ts`, `packages/cli/src/commands/{document,intervention,meal,workout}.ts`
+
+The canonical event write model already had one owner for event-source vocabulary, but the CLI command layer and several workflow façades were still carrying parallel `z.enum(['manual', 'import', 'device', 'derived'])` schemas and inline string unions.
+That made one persisted concept look local again in each command or helper that touched it.
+
+This patch:
+
+- exports `eventSourceSchema` from `packages/contracts/src/zod.ts` next to the existing `EventSource` type and uses it inside the shared event base schema
+- switches the affected CLI commands to import the shared `eventSourceSchema` instead of defining local enums
+- switches the affected vault-usecase inputs to the shared `EventSource` type instead of inline unions
+
+**Why this is simpler:** one more event-source value now flows from the canonical owner through CLI parsing and workflow input types without a second edit pass. The persisted model, boundary parser, and façade inputs all point back at one source of truth.
+
+**Main refactor risk:** keep this shared owner narrow. Do not move command help text or workflow-specific source-defaulting rules into contracts just because the vocabulary is shared there.
+
+### 21. Keep public device-sync job records with the device-sync client contract instead of mirroring them in operator-config
+
+**Seam:** `packages/device-syncd/src/client.ts` (`DeviceSyncJobRecord`), `packages/device-syncd/src/types.ts`, `packages/operator-config/src/device-sync-client.ts`
+
+`reconcileAccount()` returns a public job record through the device-sync control plane, but the only exported public client types in `packages/device-syncd/src/client.ts` stopped at account/provider records.
+That forced `packages/operator-config/src/device-sync-client.ts` to carry a second handwritten `DeviceSyncJobRecord` just to model one daemon response.
+
+This patch:
+
+- promotes `DeviceSyncJobRecord` into `packages/device-syncd/src/client.ts`, where the rest of the public control-plane record shapes already live
+- reuses that shared type from `packages/device-syncd/src/types.ts` instead of keeping a second local interface there
+- reuses the same type in `packages/operator-config/src/device-sync-client.ts`
+
+**Why this is simpler:** the public daemon/client contract now owns the full response shape that CLI callers actually consume. Adding one more job-field no longer requires keeping daemon internals and operator-config in lockstep by hand.
+
+**Main refactor risk:** keep the public client record limited to fields that really cross the control plane. Do not let store-only lease or retry internals leak outward just because the type now lives beside other public client records.
+
+### 22. Keep hosted runtime usage-record responses owned by assistant-runtime instead of parsing them again in Cloudflare
+
+**Seam:** `packages/assistant-runtime/src/hosted-runtime/platform.ts` (`HostedRuntimeUsageRecordResponse`, `parseHostedRuntimeUsageRecordResponse`), `packages/assistant-runtime/src/hosted-runtime.ts`, `apps/cloudflare/src/{runtime-platform,index,user-runner,usage-store,worker-contracts,worker-routes/shared}.ts`
+
+The assistant-runtime platform already owned the `HostedRuntimeUsageExportPort` response type, but the Cloudflare runtime still carried a second local parser and a stringly repeated `{ recorded, usageIds }` shape through runner/store/stub contracts.
+That split a small but real hosted-runtime contract across the caller and callee.
+
+This patch:
+
+- adds `parseHostedRuntimeUsageRecordResponse(...)` next to the shared `HostedRuntimeUsageRecordResponse` type in `packages/assistant-runtime/src/hosted-runtime/platform.ts`
+- re-exports both from `packages/assistant-runtime/src/hosted-runtime.ts`
+- switches the Cloudflare runtime platform to reuse the shared parser
+- switches the local runner/store/stub signatures to the shared response type instead of parallel object literals
+
+**Why this is simpler:** the hosted runtime contract now has one owner for both its response shape and its boundary parser. One more usage-export field can flow through assistant-runtime and Cloudflare without copy/paste adapters.
+
+**Main refactor risk:** keep the owner at the platform contract layer only. Do not push Cloudflare transport concerns or storage-specific helpers back into assistant-runtime just to chase total dedupe.
+
+### 23. Keep assistant header persistence splitting owned by operator-config instead of forked again in assistant-engine
+
+**Seam:** `packages/operator-config/src/assistant/redaction.ts` (`AssistantHeaderPersistenceSplit`, `splitAssistantHeadersForPersistence`, `isSensitiveAssistantHeaderName`, `isSensitiveAssistantHeaderValue`), `packages/operator-config/package.json`, `packages/assistant-engine/src/assistant/redaction.ts`
+
+The header-persistence split is a trust-boundary model: which headers are safe to persist and which must stay secret.
+`packages/operator-config/src/assistant/redaction.ts` already owned that split for saved provider configuration, but `packages/assistant-engine/src/assistant/redaction.ts` had drifted into a second copy of the same boundary logic and the same split result type.
+
+This patch:
+
+- keeps the shared split owner in `packages/operator-config/src/assistant/redaction.ts`
+- publishes that owner through a dedicated `./assistant/redaction` subpath export in `packages/operator-config/package.json`
+- switches assistant-engine to reuse the shared split helpers and split type while keeping its engine-local display-redaction logic where it belongs
+
+**Why this is simpler:** there is again one owner for the persisted-vs-secret header boundary. Changing the header classification rules no longer requires parallel edits in operator-config and assistant-engine.
+
+**Main refactor risk:** keep only the shared persistence boundary in operator-config. Rich display redaction and transcript scrubbing can stay engine-local; otherwise the config package will start absorbing runtime-only behavior.
 
 ## Current targeted review findings
 

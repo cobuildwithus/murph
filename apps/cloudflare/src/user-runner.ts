@@ -1,4 +1,5 @@
 import type { CloudflareHostedUserEnvStatus } from "@murphai/cloudflare-hosted-control/contracts";
+import type { HostedRuntimeUsageRecordResponse } from "@murphai/assistant-runtime";
 import type {
   HostedExecutionBundleRef,
   HostedExecutionDispatchResult,
@@ -397,7 +398,7 @@ export class HostedUserRunner {
 
   async putPendingUsage(input: {
     usage: readonly Record<string, unknown>[];
-  }): Promise<{ recorded: number; usageIds: string[] }> {
+  }): Promise<HostedRuntimeUsageRecordResponse> {
     return this.withUserKeyEnvelopeLock(async () => {
       const userId = await this.requireBoundUserId();
       const { crypto } = await this.ensureRunnerStoresWhileHoldingKeyLock(userId);

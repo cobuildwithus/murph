@@ -1,4 +1,5 @@
 import type { CloudflareHostedUserEnvStatus } from "@murphai/cloudflare-hosted-control/contracts";
+import type { HostedRuntimeUsageRecordResponse } from "@murphai/assistant-runtime";
 import type {
   HostedExecutionDispatchRequest,
   HostedExecutionDispatchResult,
@@ -45,7 +46,7 @@ export interface UserRunnerDurableObjectStubLike extends WorkerUserRunnerStubLik
   }): Promise<HostedExecutionDeviceSyncRuntimeApplyResponse>;
   putPendingUsage(input: {
     usage: readonly Record<string, unknown>[];
-  }): Promise<{ recorded: number; usageIds: string[] }>;
+  }): Promise<HostedRuntimeUsageRecordResponse>;
   readPendingUsage(input?: { limit?: number | null }): Promise<Record<string, unknown>[]>;
   deleteStoredDispatchPayload(input: { payload: HostedExecutionOutboxPayload }): Promise<void>;
   dispatchStoredPayload(input: { payload: HostedExecutionOutboxPayload }): Promise<HostedExecutionDispatchResult>;

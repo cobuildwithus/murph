@@ -1,3 +1,4 @@
+import type { EventSource } from '@murphai/contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   inferDurationMinutes,
@@ -92,7 +93,7 @@ export interface AddInterventionRecordInput {
   vault: string
   text: string
   occurredAt?: string
-  source?: 'manual' | 'import' | 'device' | 'derived'
+  source?: EventSource
   durationMinutes?: number
   interventionType?: string
   protocolId?: string

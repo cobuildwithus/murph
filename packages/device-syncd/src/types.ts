@@ -1,6 +1,7 @@
 import type {
   DeviceSyncAccountStatus,
   DeviceSyncAccountRecord,
+  DeviceSyncJobRecord,
   DeviceSyncProviderDescriptor,
 } from "./client.ts";
 import type {
@@ -9,6 +10,7 @@ import type {
 } from "@murphai/importers/device-providers/provider-descriptors";
 
 export type { DeviceSyncAccountStatus } from "./client.ts";
+export type { DeviceSyncJobRecord } from "./client.ts";
 
 export const DEFAULT_DEVICE_SYNC_HTTP_BODY_LIMIT_BYTES = 1_048_576;
 export const DEVICE_SYNC_WEBHOOK_TRACE_COMPLETED = {
@@ -136,28 +138,6 @@ export interface DeviceSyncJobInput {
   availableAt?: string;
   maxAttempts?: number;
   dedupeKey?: string;
-}
-
-export interface DeviceSyncJobRecord {
-  id: string;
-  provider: string;
-  accountId: string;
-  kind: string;
-  payload: Record<string, unknown>;
-  priority: number;
-  availableAt: string;
-  attempts: number;
-  maxAttempts: number;
-  dedupeKey: string | null;
-  status: "queued" | "running" | "succeeded" | "dead";
-  leaseOwner: string | null;
-  leaseExpiresAt: string | null;
-  lastErrorCode: string | null;
-  lastErrorMessage: string | null;
-  createdAt: string;
-  updatedAt: string;
-  startedAt: string | null;
-  finishedAt: string | null;
 }
 
 export interface ProviderCallbackContext {

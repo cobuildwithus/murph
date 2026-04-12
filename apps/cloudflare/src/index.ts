@@ -2,6 +2,7 @@ import { DurableObject } from "cloudflare:workers";
 export { ContainerProxy } from "@cloudflare/containers";
 
 import type { CloudflareHostedUserEnvStatus } from "@murphai/cloudflare-hosted-control/contracts";
+import type { HostedRuntimeUsageRecordResponse } from "@murphai/assistant-runtime";
 import {
   emitHostedExecutionStructuredLog,
 } from "@murphai/hosted-execution";
@@ -314,7 +315,7 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
 
   async putPendingUsage(input: {
     usage: readonly Record<string, unknown>[];
-  }): Promise<{ recorded: number; usageIds: string[] }> {
+  }): Promise<HostedRuntimeUsageRecordResponse> {
     return this.runner.putPendingUsage(input);
   }
 
