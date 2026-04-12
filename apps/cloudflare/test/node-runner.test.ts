@@ -2657,8 +2657,22 @@ describe("runHostedExecutionJob", () => {
   it("falls back to ambient runner env only when the runtime envelope omits forwarded env entirely", () => {
     const previousNodeEnv = process.env.NODE_ENV;
     const previousOpenAiApiKey = process.env.OPENAI_API_KEY;
+    const previousAmbientHostedAssistantEnv = captureEnvVars([
+      ...HOSTED_ASSISTANT_CONFIG_ENV_NAMES,
+      "BRAVE_API_KEY",
+      "MURPH_WEB_FETCH_ENABLED",
+      "MURPH_WEB_SEARCH_MAX_RESULTS",
+      "MURPH_WEB_SEARCH_PROVIDER",
+      "MURPH_WEB_SEARCH_TIMEOUT_MS",
+      "VENICE_API_KEY",
+    ]);
     process.env.NODE_ENV = "production";
     process.env.OPENAI_API_KEY = "ambient-openai-key";
+    restoreEnvVars(
+      Object.fromEntries(
+        Object.keys(previousAmbientHostedAssistantEnv).map((key) => [key, undefined]),
+      ),
+    );
 
     try {
       const runtime = buildHostedExecutionJobRuntimeForTests({});
@@ -2672,6 +2686,7 @@ describe("runHostedExecutionJob", () => {
     } finally {
       restoreEnvVar("NODE_ENV", previousNodeEnv);
       restoreEnvVar("OPENAI_API_KEY", previousOpenAiApiKey);
+      restoreEnvVars(previousAmbientHostedAssistantEnv);
     }
   });
 
