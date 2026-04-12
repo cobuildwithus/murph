@@ -171,11 +171,8 @@ export async function finalizeHostedShareAcceptance(input: {
       lastEventId: input.eventId,
     },
     data: {
-      acceptedAt: new Date(),
-      acceptedByMemberId: input.memberId,
       consumedAt: new Date(),
       consumedByMemberId: input.memberId,
-      lastEventId: input.eventId,
     },
   });
 
