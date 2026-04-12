@@ -54,14 +54,11 @@ export function doesAssistantResumeBindingMatchRoute(input: {
     return false
   }
 
-  if (storedRouteId === input.route.routeId) {
-    return true
-  }
-
-  return areAssistantProviderOptionsCompatible({
-    current: input.route.providerOptions,
-    stored: input.binding.providerOptions,
-  })
+  // Minimal resume state stores only the provider session id plus the exact
+  // failover route id that minted it. Cross-route compatibility guesses can
+  // resume the wrong upstream session after failover, so exact matches are the
+  // only safe contract.
+  return storedRouteId === input.route.routeId
 }
 
 export function resolveNextAssistantProviderBinding(input: {
@@ -158,14 +155,4 @@ function resolveNextAssistantProviderState(input: {
   }
 
   return writeAssistantProviderStateResumeRouteId(null, input.routeId)
-}
-
-function areAssistantProviderOptionsCompatible(input: {
-  current: AssistantProviderSessionOptions
-  stored: AssistantProviderSessionOptions
-}): boolean {
-  return (
-    input.stored.continuityFingerprint === input.current.continuityFingerprint &&
-    input.stored.resumeKind === input.current.resumeKind
-  )
 }

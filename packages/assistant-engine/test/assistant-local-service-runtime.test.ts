@@ -564,6 +564,101 @@ test('updateAssistantSessionOptionsLocal resolves and saves the refreshed sessio
   assert.equal(mocks.saveAssistantSession.mock.calls[0]?.[1]?.providerBinding, null)
 })
 
+test('updateAssistantSessionOptionsLocal preserves codex target-only fields', async () => {
+  const updatedSession = createAssistantSession({
+    provider: 'codex-cli',
+    providerOptions: {
+      approvalPolicy: 'never',
+      apiKeyEnv: undefined,
+      baseUrl: undefined,
+      codexHome: '/tmp/codex-home',
+      continuityFingerprint: 'fingerprint-codex',
+      executionDriver: 'codex-cli',
+      headers: undefined,
+      model: 'gpt-5.5',
+      oss: false,
+      presetId: undefined,
+      profile: 'prod',
+      providerName: undefined,
+      reasoningEffort: 'high',
+      resumeKind: null,
+      sandbox: 'workspace-write',
+      webSearch: undefined,
+      zeroDataRetention: undefined,
+    },
+    sessionId: 'session-codex-updated',
+    target: {
+      adapter: 'codex-cli',
+      approvalPolicy: 'never',
+      codexCommand: '/opt/murph/bin/custom-codex',
+      codexHome: '/tmp/codex-home',
+      model: 'gpt-5.5',
+      oss: false,
+      profile: 'prod',
+      reasoningEffort: 'high',
+      sandbox: 'workspace-write',
+    },
+  })
+  const { mocks, updateAssistantSessionOptionsLocal } = await loadLocalServiceModule()
+
+  mocks.resolveAssistantSession.mockResolvedValueOnce({
+    session: createAssistantSession({
+      provider: 'codex-cli',
+      providerOptions: {
+        approvalPolicy: 'never',
+        apiKeyEnv: undefined,
+        baseUrl: undefined,
+        codexHome: '/tmp/codex-home',
+        continuityFingerprint: 'fingerprint-codex',
+        executionDriver: 'codex-cli',
+        headers: undefined,
+        model: 'gpt-5.4',
+        oss: false,
+        presetId: undefined,
+        profile: 'prod',
+        providerName: undefined,
+        reasoningEffort: 'high',
+        resumeKind: null,
+        sandbox: 'workspace-write',
+        webSearch: undefined,
+        zeroDataRetention: undefined,
+      },
+      sessionId: 'session-codex-updated',
+      target: {
+        adapter: 'codex-cli',
+        approvalPolicy: 'never',
+        codexCommand: '/opt/murph/bin/custom-codex',
+        codexHome: '/tmp/codex-home',
+        model: 'gpt-5.4',
+        oss: false,
+        profile: 'prod',
+        reasoningEffort: 'high',
+        sandbox: 'workspace-write',
+      },
+    }),
+  })
+  mocks.saveAssistantSession.mockResolvedValueOnce(updatedSession)
+
+  const result = await updateAssistantSessionOptionsLocal({
+    providerOptions: {
+      model: 'gpt-5.5',
+    },
+    sessionId: 'session-codex-updated',
+    vault: '/vaults/test',
+  })
+
+  assert.equal(result, updatedSession)
+  assert.equal(
+    mocks.saveAssistantSession.mock.calls[0]?.[1]?.target?.codexCommand,
+    '/opt/murph/bin/custom-codex',
+  )
+  assert.equal(
+    mocks.saveAssistantSession.mock.calls[0]?.[1]?.target?.codexHome,
+    '/tmp/codex-home',
+  )
+  assert.equal(mocks.saveAssistantSession.mock.calls[0]?.[1]?.target?.model, 'gpt-5.5')
+})
+
 test('openAssistantConversationLocal forwards defaults into session resolution', async () => {
   const { mocks, openAssistantConversationLocal } = await loadLocalServiceModule()
 
@@ -743,11 +838,60 @@ async function loadLocalServiceModule(input?: {
     resolveAssistantOperatorDefaults: mocks.resolveAssistantOperatorDefaults,
   }))
   vi.doMock('@murphai/operator-config/assistant-backend', () => ({
+    assistantBackendTargetToProviderConfigInput: (target: {
+      adapter: 'codex-cli' | 'openai-compatible'
+      apiKeyEnv?: string | null
+      approvalPolicy?: string | null
+      codexCommand?: string | null
+      codexHome?: string | null
+      endpoint?: string | null
+      headers?: Record<string, string> | null
+      model?: string | null
+      oss?: boolean
+      presetId?: string | null
+      profile?: string | null
+      providerName?: string | null
+      reasoningEffort?: string | null
+      sandbox?: string | null
+      webSearch?: string | null
+      zeroDataRetention?: boolean
+    }) =>
+      target.adapter === 'openai-compatible'
+        ? {
+            provider: 'openai-compatible',
+            apiKeyEnv: target.apiKeyEnv ?? null,
+            baseUrl: target.endpoint ?? null,
+            headers: target.headers ?? null,
+            model: target.model ?? null,
+            presetId: target.presetId ?? null,
+            providerName: target.providerName ?? null,
+            reasoningEffort: target.reasoningEffort ?? null,
+            webSearch: target.webSearch ?? null,
+            zeroDataRetention: target.zeroDataRetention === true ? true : null,
+          }
+        : {
+            provider: 'codex-cli',
+            approvalPolicy: target.approvalPolicy ?? null,
+            codexCommand: target.codexCommand ?? null,
+            codexHome: target.codexHome ?? null,
+            model: target.model ?? null,
+            oss: target.oss === true,
+            profile: target.profile ?? null,
+            reasoningEffort: target.reasoningEffort ?? null,
+            sandbox: target.sandbox ?? null,
+          },
     createAssistantModelTarget: (input: {
       apiKeyEnv?: string | null
+      approvalPolicy?: string | null
+      codexCommand?: string | null
+      codexHome?: string | null
       model?: string | null
+      oss?: boolean
+      profile?: string | null
       provider?: 'codex-cli' | 'openai-compatible' | null
       providerName?: string | null
+      reasoningEffort?: string | null
+      sandbox?: string | null
     }) =>
       input.provider === 'openai-compatible'
         ? {
@@ -761,7 +905,19 @@ async function loadLocalServiceModule(input?: {
             reasoningEffort: null,
             webSearch: null,
           }
-        : null,
+        : input.provider === 'codex-cli'
+          ? {
+              adapter: 'codex-cli',
+              approvalPolicy: input.approvalPolicy ?? null,
+              codexCommand: input.codexCommand ?? null,
+              codexHome: input.codexHome ?? null,
+              model: input.model ?? null,
+              oss: input.oss === true,
+              profile: input.profile ?? null,
+              reasoningEffort: input.reasoningEffort ?? null,
+              sandbox: input.sandbox ?? null,
+            }
+          : null,
     createDefaultLocalAssistantModelTarget: () => ({
       adapter: 'openai-compatible',
       model: 'gpt-5.4',
@@ -840,9 +996,12 @@ async function loadLocalServiceModule(input?: {
 }
 
 function createAssistantSession(input?: {
+  provider?: AssistantSession['provider']
   providerBinding?: AssistantSession['providerBinding']
+  providerOptions?: Partial<AssistantSession['providerOptions']>
   resumeState?: AssistantSession['resumeState']
   sessionId?: string
+  target?: AssistantSession['target']
 }): AssistantSession {
   return {
     alias: null,
@@ -860,7 +1019,7 @@ function createAssistantSession(input?: {
     },
     createdAt: '2026-04-08T00:00:00.000Z',
     lastTurnAt: null,
-    provider: 'openai-compatible',
+    provider: input?.provider ?? 'openai-compatible',
     providerBinding: input?.providerBinding ?? null,
     providerOptions: {
       apiKeyEnv: 'OPENAI_API_KEY',
@@ -874,21 +1033,24 @@ function createAssistantSession(input?: {
       resumeKind: null,
       sandbox: null,
       approvalPolicy: null,
+      ...input?.providerOptions,
     },
     resumeState: input?.resumeState ?? null,
     schema: 'murph.assistant-session.v1',
     sessionId: input?.sessionId ?? 'session-test',
-    target: {
-      adapter: 'openai-compatible',
-      apiKeyEnv: 'OPENAI_API_KEY',
-      endpoint: null,
-      headers: null,
-      model: 'gpt-5.4',
-      presetId: null,
-      providerName: 'OpenAI',
-      reasoningEffort: null,
-      webSearch: null,
-    },
+    target:
+      input?.target ??
+      {
+        adapter: 'openai-compatible',
+        apiKeyEnv: 'OPENAI_API_KEY',
+        endpoint: null,
+        headers: null,
+        model: 'gpt-5.4',
+        presetId: null,
+        providerName: 'OpenAI',
+        reasoningEffort: null,
+        webSearch: null,
+      },
     turnCount: 0,
     updatedAt: '2026-04-08T00:00:00.000Z',
   }

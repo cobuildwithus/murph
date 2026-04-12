@@ -59,7 +59,7 @@ afterEach(async () => {
 })
 
 describe('assistant provider seam helpers', () => {
-  it('matches resume bindings across route-id drift when continuity and resume kind remain compatible', () => {
+  it('matches resume bindings only when the stored route id matches exactly', () => {
     const previousBinding = createProviderBinding({
       providerOptions: {
         codexHome: null,
@@ -87,33 +87,43 @@ describe('assistant provider seam helpers', () => {
     expect(
       doesAssistantResumeBindingMatchRoute({
         binding: previousBinding,
-        route: rotatedRoute,
+        route: createRoute({
+          providerOptions: {
+            ...previousBinding.providerOptions,
+            headers: {
+              Authorization: 'Bearer token',
+              'X-Trace': '1',
+            },
+          },
+          routeId: 'route-primary',
+        }),
       }),
     ).toBe(true)
     expect(
       resolveAssistantRouteResumeBinding({
-        route: rotatedRoute,
+        route: createRoute({
+          providerOptions: {
+            ...previousBinding.providerOptions,
+            headers: {
+              Authorization: 'Bearer token',
+              'X-Trace': '1',
+            },
+          },
+          routeId: 'route-primary',
+        }),
         sessionBinding: previousBinding,
       }),
     ).toEqual(previousBinding)
 
-    const incompatibleRoute = createRoute({
-      providerOptions: {
-        ...rotatedRoute.providerOptions,
-        continuityFingerprint: 'fingerprint-other',
-      },
-      routeId: 'route-third',
-    })
-
     expect(
       doesAssistantResumeBindingMatchRoute({
         binding: previousBinding,
-        route: incompatibleRoute,
+        route: rotatedRoute,
       }),
     ).toBe(false)
     expect(
       resolveAssistantRouteResumeBinding({
-        route: incompatibleRoute,
+        route: rotatedRoute,
         sessionBinding: previousBinding,
       }),
     ).toBeNull()
@@ -476,7 +486,7 @@ describe('assistant provider seam helpers', () => {
     ).toBeNull()
   })
 
-  it('keeps resume compatibility strict for continuity mismatches while ignoring unrelated option churn', () => {
+  it('rejects route drift even when unrelated provider options stay compatible', () => {
     const binding = createProviderBinding({
       providerOptions: {
         codexHome: '/tmp/codex-home-a',
@@ -533,7 +543,7 @@ describe('assistant provider seam helpers', () => {
           routeId: 'route-headers-rotated',
         }),
       }),
-    ).toBe(true)
+    ).toBe(false)
   })
 })
 
