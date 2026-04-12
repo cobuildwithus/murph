@@ -103,12 +103,20 @@ export function resolveAssistantRuntimeTarget(
   const webSearch = normalizeAssistantWebSearchMode(input?.webSearch)
 
   if (provider === 'codex-cli') {
+    const continuityFingerprint = buildAssistantContinuityFingerprint({
+      approvalPolicy: input?.approvalPolicy,
+      codexHome: input?.codexHome,
+      model: input?.model,
+      oss: input?.oss,
+      profile: input?.profile,
+      provider: 'codex-cli',
+      reasoningEffort: input?.reasoningEffort,
+      sandbox: input?.sandbox,
+      webSearch: null,
+    })
+
     return {
-      continuityFingerprint: buildAssistantContinuityFingerprint({
-        ...input,
-        provider: 'codex-cli',
-        webSearch,
-      }),
+      continuityFingerprint,
       executionDriver: 'codex-cli',
       presetId: null,
       resumeKind: 'codex-session',
@@ -117,51 +125,41 @@ export function resolveAssistantRuntimeTarget(
       supportsProviderWebSearch: false,
       supportsReasoningEffort: true,
       supportsZeroDataRetention: false,
-      webSearch,
+      webSearch: null,
     }
   }
 
   const presetId = resolveAssistantTargetPresetId({
     presetId: input?.presetId,
   })
-  const executionDriver = resolveAssistantOpenAICompatibleDriver({
+  const runtimeBehavior = resolveAssistantOpenAICompatibleRuntimeBehavior({
+    model: input?.model,
     presetId,
   })
-  const resumeKind = resolveAssistantOpenAICompatibleResumeKind({
-    executionDriver,
+  const continuityFingerprint = buildAssistantContinuityFingerprint({
+    apiKeyEnv: input?.apiKeyEnv,
+    baseUrl: input?.baseUrl,
+    headers: input?.headers,
     model: input?.model,
-  })
-  const supportsProviderWebSearch = resolveAssistantProviderWebSearchSupport({
-    executionDriver,
-    model: input?.model,
-  })
-  const supportsGatewayWebSearch = executionDriver === 'gateway'
-  const supportsZeroDataRetention = resolveAssistantZeroDataRetentionSupport({
-    executionDriver,
     presetId,
-  })
-  const supportsReasoningEffort = resolveAssistantReasoningEffortSupport({
-    executionDriver,
-    model: input?.model,
+    provider: 'openai-compatible',
+    providerName: input?.providerName,
+    reasoningEffort: input?.reasoningEffort,
+    webSearch,
+    zeroDataRetention:
+      runtimeBehavior.supportsZeroDataRetention && input?.zeroDataRetention === true,
   })
 
   return {
-    continuityFingerprint: buildAssistantContinuityFingerprint({
-      ...input,
-      presetId,
-      provider: 'openai-compatible',
-      webSearch,
-      zeroDataRetention:
-        supportsZeroDataRetention && input?.zeroDataRetention === true,
-    }),
-    executionDriver,
+    continuityFingerprint,
+    executionDriver: runtimeBehavior.executionDriver,
     presetId,
-    resumeKind,
-    supportsGatewayWebSearch,
-    supportsNativeResume: resumeKind !== null,
-    supportsProviderWebSearch,
-    supportsReasoningEffort,
-    supportsZeroDataRetention,
+    resumeKind: runtimeBehavior.resumeKind,
+    supportsGatewayWebSearch: runtimeBehavior.supportsGatewayWebSearch,
+    supportsNativeResume: runtimeBehavior.resumeKind !== null,
+    supportsProviderWebSearch: runtimeBehavior.supportsProviderWebSearch,
+    supportsReasoningEffort: runtimeBehavior.supportsReasoningEffort,
+    supportsZeroDataRetention: runtimeBehavior.supportsZeroDataRetention,
     webSearch,
   }
 }
@@ -214,76 +212,52 @@ export function shouldAssistantTargetUseMurphWebSearch(
   return !resolved.supportsProviderWebSearch && !resolved.supportsGatewayWebSearch
 }
 
-function resolveAssistantOpenAICompatibleDriver(input: {
+interface AssistantOpenAICompatibleRuntimeBehavior {
+  executionDriver: AssistantExecutionDriver
+  resumeKind: AssistantResumeKind | null
+  supportsGatewayWebSearch: boolean
+  supportsProviderWebSearch: boolean
+  supportsReasoningEffort: boolean
+  supportsZeroDataRetention: boolean
+}
+
+function resolveAssistantOpenAICompatibleRuntimeBehavior(input: {
+  model?: string | null
   presetId: SetupAssistantProviderPreset | null
-}): AssistantExecutionDriver {
+}): AssistantOpenAICompatibleRuntimeBehavior {
+  const gatewayOpenAIModel =
+    input.presetId === 'vercel-ai-gateway' &&
+    isAssistantGatewayOpenAIModel(input.model)
+
   switch (input.presetId) {
     case 'openai':
-      return 'openai-responses'
+      return {
+        executionDriver: 'openai-responses',
+        resumeKind: 'openai-response-id',
+        supportsGatewayWebSearch: false,
+        supportsProviderWebSearch: true,
+        supportsReasoningEffort: true,
+        supportsZeroDataRetention: false,
+      }
     case 'vercel-ai-gateway':
-      return 'gateway'
+      return {
+        executionDriver: 'gateway',
+        resumeKind: gatewayOpenAIModel ? 'openai-response-id' : null,
+        supportsGatewayWebSearch: true,
+        supportsProviderWebSearch: gatewayOpenAIModel,
+        supportsReasoningEffort: gatewayOpenAIModel,
+        supportsZeroDataRetention: true,
+      }
     default:
-      return 'openai-compatible'
+      return {
+        executionDriver: 'openai-compatible',
+        resumeKind: null,
+        supportsGatewayWebSearch: false,
+        supportsProviderWebSearch: false,
+        supportsReasoningEffort: false,
+        supportsZeroDataRetention: false,
+      }
   }
-}
-
-function resolveAssistantOpenAICompatibleResumeKind(input: {
-  executionDriver: AssistantExecutionDriver
-  model?: string | null
-}): AssistantResumeKind | null {
-  switch (input.executionDriver) {
-    case 'openai-responses':
-      return 'openai-response-id'
-    case 'gateway':
-      return isAssistantGatewayOpenAIModel(input.model)
-        ? 'openai-response-id'
-        : null
-    case 'codex-cli':
-      return 'codex-session'
-    case 'openai-compatible':
-    default:
-      return null
-  }
-}
-
-function resolveAssistantProviderWebSearchSupport(input: {
-  executionDriver: AssistantExecutionDriver
-  model?: string | null
-}): boolean {
-  switch (input.executionDriver) {
-    case 'openai-responses':
-      return true
-    case 'gateway':
-      return isAssistantGatewayOpenAIModel(input.model)
-    default:
-      return false
-  }
-}
-
-function resolveAssistantReasoningEffortSupport(input: {
-  executionDriver: AssistantExecutionDriver
-  model?: string | null
-}): boolean {
-  switch (input.executionDriver) {
-    case 'codex-cli':
-    case 'openai-responses':
-      return true
-    case 'gateway':
-      return isAssistantGatewayOpenAIModel(input.model)
-    case 'openai-compatible':
-    default:
-      return false
-  }
-}
-
-function resolveAssistantZeroDataRetentionSupport(input: {
-  executionDriver: AssistantExecutionDriver
-  presetId: SetupAssistantProviderPreset | null
-}): boolean {
-  return (
-    input.executionDriver === 'gateway' &&
-    input.presetId === 'vercel-ai-gateway'
-  )
 }
 
 function isAssistantGatewayOpenAIModel(model: string | null | undefined): boolean {

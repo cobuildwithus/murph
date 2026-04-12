@@ -408,7 +408,10 @@ function buildAssistantRuntimeSession(
             : {}),
           ...(value.target.headers ? { headers: value.target.headers } : {}),
           ...(value.target.webSearch ? { webSearch: value.target.webSearch } : {}),
-          ...(value.target.zeroDataRetention ? { zeroDataRetention: true } : {}),
+          ...(resolvedRuntimeTarget.supportsZeroDataRetention &&
+          value.target.zeroDataRetention
+            ? { zeroDataRetention: true }
+            : {}),
         })
       : assistantProviderSessionOptionsSchema.parse({
           continuityFingerprint: resolvedRuntimeTarget.continuityFingerprint,

@@ -147,6 +147,7 @@ test('assistant backend helpers cover null, codex, and openai-compatible persist
     apiKeyEnv: ' VERCEL_AI_API_KEY ',
     baseUrl: ' https://ai-gateway.vercel.sh/v1 ',
     model: ' openai/gpt-5.4 ',
+    presetId: 'vercel-ai-gateway',
     providerName: ' vercel-ai-gateway ',
     zeroDataRetention: true,
   })
@@ -181,7 +182,7 @@ test('assistant backend helpers cover null, codex, and openai-compatible persist
     endpoint: 'https://ai-gateway.vercel.sh/v1',
     headers: null,
     model: 'openai/gpt-5.4',
-    presetId: null,
+    presetId: 'vercel-ai-gateway',
     providerName: 'vercel-ai-gateway',
     reasoningEffort: null,
     webSearch: null,

@@ -102,6 +102,7 @@ test('hosted assistant config parsing and readiness helpers normalize expected s
               apiKeyEnv: 'VERCEL_AI_API_KEY',
               baseUrl: 'https://ai-gateway.vercel.sh/v1',
               model: 'openai/gpt-5.4',
+              presetId: 'vercel-ai-gateway',
               zeroDataRetention: true,
             },
           }),
