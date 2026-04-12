@@ -13,6 +13,7 @@ import {
   parseHostedExecutionDeviceSyncRuntimeApplyRequest,
   parseHostedExecutionDeviceSyncRuntimeSnapshotRequest,
 } from "@murphai/device-syncd/hosted-runtime";
+import { toStringEnvSource } from "../string-env.ts";
 
 import {
   createHostedEmailUserAddress,
@@ -120,18 +121,15 @@ export async function handleUserEmailAddressRoute(
   encodedUserId: string,
 ): Promise<Response> {
   const userId = decodeRouteParam(encodedUserId);
-  const capabilities = readHostedEmailCapabilities(
-    context.env as unknown as Readonly<Record<string, string | undefined>>,
-  );
+  const stringEnv = toStringEnvSource(context.env);
+  const capabilities = readHostedEmailCapabilities(stringEnv);
   if (!capabilities.ingressReady || !capabilities.senderIdentity) {
     return json({
       error: "Hosted email ingress is not configured.",
     }, 503);
   }
 
-  const config = readHostedEmailConfig(
-    context.env as unknown as Readonly<Record<string, string | undefined>>,
-  );
+  const config = readHostedEmailConfig(stringEnv);
   const address = await createHostedEmailUserAddress({
     bucket: context.env.BUNDLES,
     config,

@@ -12,6 +12,7 @@ import {
 
 import { createHostedUserEnvStore } from "../bundle-store.ts";
 import { readHostedExecutionEnvironment } from "../env.ts";
+import { toStringEnvSource } from "../string-env.ts";
 import type {
   HostedEmailInboundRoute,
   HostedEmailWorkerRequest,
@@ -37,30 +38,26 @@ export async function handleHostedEmailIngress(
   message: HostedEmailWorkerRequest,
   env: WorkerEnvironmentSource,
 ): Promise<void> {
-  const environment = readHostedExecutionEnvironment(
-    env as unknown as Readonly<Record<string, string | undefined>>,
-  );
-  const capabilities = readHostedEmailCapabilities(
-    env as unknown as Readonly<Record<string, string | undefined>>,
-  );
+  const stringEnv = toStringEnvSource(env);
+  const environment = readHostedExecutionEnvironment(stringEnv);
+  const capabilities = readHostedEmailCapabilities(stringEnv);
   if (!capabilities.ingressReady) {
     message.setReject?.("Hosted email ingress is not configured.");
     return;
   }
 
-  const config = readHostedEmailConfig(
-    env as unknown as Readonly<Record<string, string | undefined>>,
-  );
+  const config = readHostedEmailConfig(stringEnv);
   const rawBytes = await readHostedEmailMessageBytes(message.raw);
   const parsedMessage = parseRawEmailMessage(rawBytes);
   const headerFrom = readRawEmailHeaderValue(rawBytes, "from");
+  const resolvedHeaderFrom = headerFrom.value ?? parsedMessage.from;
   const rejectReason = "Hosted email message was not accepted.";
   const route = await resolveHostedEmailIngressRoute({
     bucket: env.BUNDLES,
     config,
     envelopeFrom: message.from,
     hasRepeatedHeaderFrom: headerFrom.repeated,
-    headerFrom: headerFrom.value ?? parsedMessage.from,
+    headerFrom: resolvedHeaderFrom,
     key: environment.platformEnvelopeKey,
     keyId: environment.platformEnvelopeKeyId,
     keysById: environment.platformEnvelopeKeysById,
@@ -85,7 +82,7 @@ export async function handleHostedEmailIngress(
     env,
     envelopeFrom: message.from,
     hasRepeatedHeaderFrom: headerFrom.repeated,
-    headerFrom: headerFrom.value ?? parsedMessage.from,
+    headerFrom: resolvedHeaderFrom,
     route,
     userCrypto,
   })) {
@@ -129,7 +126,7 @@ async function authorizeHostedEmailIngress(input: {
   }).readUserEnv(input.route.userId);
   const userEnv = decodeHostedUserEnvPayload(
     userEnvPayload,
-    input.env as unknown as Readonly<Record<string, string | undefined>>,
+    toStringEnvSource(input.env),
   );
   const verifiedEmailAddress = readHostedVerifiedEmailFromEnv(userEnv)?.address ?? null;
 

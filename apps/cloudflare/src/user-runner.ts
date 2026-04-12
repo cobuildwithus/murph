@@ -40,6 +40,7 @@ import { createHostedDeviceSyncRuntimeStore } from "./device-sync-runtime-store.
 import { createHostedPendingUsageStore } from "./usage-store.ts";
 import { HostedGatewayProjectionStore } from "./gateway-store.js";
 import type { HostedExecutionEnvironment } from "./env.js";
+import { toStringEnvSource } from "./string-env.js";
 import {
   persistHostedExecutionCommit,
   type HostedExecutionCommitPayload,
@@ -657,13 +658,7 @@ export class HostedUserRunner {
   }
 
   private readWorkerStringEnvSource(): Readonly<Record<string, string | undefined>> {
-    const values: Record<string, string | undefined> = {};
-
-    for (const [key, value] of Object.entries(this.runnerRuntimeEnvSource)) {
-      values[key] = typeof value === "string" ? value : undefined;
-    }
-
-    return values;
+    return toStringEnvSource(this.runnerRuntimeEnvSource);
   }
 
   private async requireBoundUserId(): Promise<string> {

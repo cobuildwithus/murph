@@ -5,6 +5,7 @@ import {
   isHostedUserEnvKeyAllowed,
 } from "../src/hosted-env-policy.js";
 import { readHostedExecutionEnvironment } from "../src/env.js";
+import { toStringEnvSource } from "../src/string-env.js";
 import { createHostedExecutionTestEnv } from "./hosted-execution-fixtures";
 
 const REMOVED_BUNDLE_KEY_ALIAS = ["HB", "HOSTED", "BUNDLE", "KEY"].join("_");
@@ -108,6 +109,22 @@ describe("readHostedExecutionEnvironment", () => {
         HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: undefined,
       } as Record<string, string | undefined>)),
     ).toThrow(/HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK/u);
+  });
+
+  it("drops non-string worker bindings before config readers consume env", () => {
+    expect(toStringEnvSource({
+      BUNDLES: { fetch() {} },
+      HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS: "OPENAI_API_KEY",
+      HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: Buffer.alloc(32, 9).toString("base64url"),
+      OPENAI_API_KEY: "openai-secret",
+      PORT: 8787,
+    })).toEqual({
+      BUNDLES: undefined,
+      HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS: "OPENAI_API_KEY",
+      HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: Buffer.alloc(32, 9).toString("base64url"),
+      OPENAI_API_KEY: "openai-secret",
+      PORT: undefined,
+    });
   });
 });
 
