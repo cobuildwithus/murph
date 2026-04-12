@@ -409,6 +409,26 @@ test("device sync store rejects legacy schemas and consumes missing or expired O
   }
 });
 
+test("device sync store rejects pre-cutover sqlite user_version values", async () => {
+  const tempDir = await makeTempDirectory("murph-device-syncd-store-version");
+  const databasePath = path.join(tempDir, "state.sqlite");
+  const database = openSqliteRuntimeDatabase(databasePath);
+  database.exec("PRAGMA user_version = 2;");
+  database.close();
+
+  try {
+    assert.throws(
+      () => new SqliteDeviceSyncStore(databasePath),
+      /device sync runtime database schema version 2 is newer than supported version 1/u,
+    );
+  } finally {
+    await rm(tempDir, {
+      force: true,
+      recursive: true,
+    });
+  }
+});
+
 test("device sync store filters listed accounts by provider and returns unexpired OAuth state once", async () => {
   const tempDir = await makeTempDirectory("murph-device-syncd-store-listing");
   const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));

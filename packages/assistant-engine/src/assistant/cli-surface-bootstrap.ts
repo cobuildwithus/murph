@@ -110,8 +110,7 @@ async function readPersistedAssistantCliSurfaceContract(
       return contract.trim()
     }
 
-    const summary = value.summary
-    return typeof summary === 'string' && summary.trim().length > 0 ? summary.trim() : null
+    return null
   } catch (error) {
     if (isMissingFileError(error)) {
       return null
