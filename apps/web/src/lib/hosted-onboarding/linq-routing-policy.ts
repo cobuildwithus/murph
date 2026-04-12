@@ -1,10 +1,5 @@
 import { normalizePhoneNumber } from "./phone";
 
-export interface HostedLinqConversationPoolConfig {
-  maxActiveMembersPerPhoneNumber: number | null;
-  recipientPhones: readonly string[];
-}
-
 export type HostedLinqActiveRouteDecision =
   | {
       kind: "bind_home";

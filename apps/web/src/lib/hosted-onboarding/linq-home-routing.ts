@@ -105,7 +105,7 @@ export async function resolveHostedMemberActivationLinqRoute(input: {
   });
 
   return {
-    firstContactLinqChatId: null,
+    firstContactLinqChatId: createdChat.chatId,
   };
 }
 

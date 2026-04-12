@@ -57,6 +57,23 @@ describe("chooseHostedLinqConversationRecipientPhone", () => {
     ).toBe("+15550100002");
   });
 
+  it("falls back to the preferred line when every pooled line is already at capacity", () => {
+    expect(
+      chooseHostedLinqConversationRecipientPhone({
+        activeMembersByRecipientPhone: new Map([
+          ["+15550100001", 3],
+          ["+15550100002", 3],
+        ]),
+        maxActiveMembersPerPhoneNumber: 3,
+        preferredRecipientPhone: "+15550100001",
+        recipientPhones: [
+          "+15550100001",
+          "+15550100002",
+        ],
+      }),
+    ).toBe("+15550100001");
+  });
+
   it("falls back to the preferred line when the configured pool is empty", () => {
     expect(
       chooseHostedLinqConversationRecipientPhone({
