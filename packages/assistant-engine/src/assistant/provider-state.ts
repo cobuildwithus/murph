@@ -2,13 +2,14 @@ import { z } from 'zod'
 import {
   assistantPersistedSessionSchema,
   assistantProviderBindingSchema,
-  assistantProviderSessionOptionsSchema,
   assistantSessionResumeStateSchema,
   parseAssistantSessionRecord,
   type AssistantSession,
   type AssistantProviderBinding,
   type AssistantSessionResumeState,
 } from '@murphai/operator-config/assistant-cli-contracts'
+import { assistantBackendTargetToProviderConfigInput } from '@murphai/operator-config/assistant-backend'
+import { serializeAssistantProviderSessionOptions } from '@murphai/operator-config/assistant/provider-config'
 import { normalizeNullableString } from './shared.js'
 
 export function readAssistantProviderResumeRouteId(input: {
@@ -59,29 +60,9 @@ export function readAssistantProviderBinding(
   if (!normalizedResumeState) {
     return null
   }
-  const providerOptions =
-    target.adapter === 'openai-compatible'
-      ? assistantProviderSessionOptionsSchema.parse({
-          model: target.model,
-          reasoningEffort: target.reasoningEffort,
-          sandbox: null,
-          approvalPolicy: null,
-          profile: null,
-          oss: false,
-          ...(target.endpoint ? { baseUrl: target.endpoint } : {}),
-          ...(target.apiKeyEnv ? { apiKeyEnv: target.apiKeyEnv } : {}),
-          ...(target.providerName ? { providerName: target.providerName } : {}),
-          ...(target.headers ? { headers: target.headers } : {}),
-        })
-      : assistantProviderSessionOptionsSchema.parse({
-          model: target.model,
-          reasoningEffort: target.reasoningEffort,
-          sandbox: target.sandbox,
-          approvalPolicy: target.approvalPolicy,
-          profile: target.profile,
-          oss: target.oss,
-          ...(target.codexHome ? { codexHome: target.codexHome } : {}),
-        })
+  const providerOptions = serializeAssistantProviderSessionOptions(
+    assistantBackendTargetToProviderConfigInput(target),
+  )
 
   return assistantProviderBindingSchema.parse({
     provider: target.adapter,
@@ -120,8 +101,11 @@ export function readAssistantSessionResumeState(
   return normalizeAssistantSessionResumeState(
     'providerBinding' in input && input.providerBinding
       ? {
+          continuityFingerprint:
+            input.providerBinding.providerOptions.continuityFingerprint ?? null,
           providerSessionId: input.providerBinding.providerSessionId,
           resumeRouteId: input.providerBinding.providerState?.resumeRouteId ?? null,
+          resumeKind: input.providerBinding.providerOptions.resumeKind ?? null,
         }
       : null,
   )
@@ -154,8 +138,10 @@ export function writeAssistantSessionProviderSessionId(
   }
 
   return assistantSessionResumeStateSchema.parse({
+    continuityFingerprint: current?.continuityFingerprint ?? null,
     providerSessionId: normalizedProviderSessionId,
     resumeRouteId: normalizedResumeRouteId,
+    resumeKind: current?.resumeKind ?? null,
   })
 }
 
@@ -190,8 +176,11 @@ export function normalizeAssistantSessionResumeState(
 
   return providerSessionId || resumeRouteId
     ? assistantSessionResumeStateSchema.parse({
+        continuityFingerprint:
+          normalizeNullableString(value.continuityFingerprint) ?? null,
         providerSessionId,
         resumeRouteId,
+        resumeKind: normalizeNullableString(value.resumeKind) ?? null,
       })
     : null
 }
@@ -213,8 +202,11 @@ export function serializeAssistantSessionForPersistence(
   const bindingResumeState =
     session.providerBinding?.provider === target.adapter
       ? {
+          continuityFingerprint:
+            session.providerBinding.providerOptions.continuityFingerprint ?? null,
           providerSessionId: session.providerBinding.providerSessionId,
           resumeRouteId: session.providerBinding.providerState?.resumeRouteId ?? null,
+          resumeKind: session.providerBinding.providerOptions.resumeKind ?? null,
         }
       : null
   const resumeState = normalizeAssistantSessionResumeState(
@@ -222,7 +214,7 @@ export function serializeAssistantSessionForPersistence(
   )
 
   return assistantPersistedSessionSchema.parse({
-    schema: 'murph.assistant-session.v4',
+    schema: 'murph.assistant-session.v5',
     sessionId: session.sessionId,
     target,
     resumeState,
@@ -248,7 +240,9 @@ function writeAssistantSessionResumeRouteId(
   }
 
   return assistantSessionResumeStateSchema.parse({
+    continuityFingerprint: current?.continuityFingerprint ?? null,
     providerSessionId,
     resumeRouteId: normalizedRouteId,
+    resumeKind: current?.resumeKind ?? null,
   })
 }

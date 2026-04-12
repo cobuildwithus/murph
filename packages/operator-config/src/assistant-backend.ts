@@ -69,8 +69,10 @@ export function assistantModelTargetToProviderConfigInput(
         baseUrl: normalizeNullableString(target.endpoint),
         headers: normalizeAssistantHeaders(target.headers),
         model: normalizeNullableString(target.model),
+        presetId: target.presetId ?? null,
         providerName: normalizeNullableString(target.providerName),
         reasoningEffort: normalizeNullableString(target.reasoningEffort),
+        webSearch: target.webSearch ?? null,
         zeroDataRetention: target.zeroDataRetention === true ? true : null,
       }
     case 'codex-cli':
@@ -142,11 +144,13 @@ function convertAssistantProviderConfigToModelTarget(
         endpoint: config.baseUrl,
         headers: config.headers,
         model: config.model,
+        presetId: config.presetId,
         providerName: config.providerName,
         reasoningEffort: normalizeNullableEnumValue(
           config.reasoningEffort,
           assistantReasoningEffortValues,
         ),
+        webSearch: config.webSearch,
         ...(config.zeroDataRetention ? { zeroDataRetention: true } : {}),
       }
     case 'codex-cli':
@@ -184,9 +188,11 @@ function hasAssistantModelTargetValues(target: AssistantModelTarget): boolean {
         target.model ??
           target.endpoint ??
           target.apiKeyEnv ??
+          target.presetId ??
           target.providerName ??
           (target.headers && Object.keys(target.headers).length > 0 ? 'headers' : null) ??
           target.reasoningEffort ??
+          target.webSearch ??
           (target.zeroDataRetention ? 'zero-data-retention' : null),
       )
     case 'codex-cli':

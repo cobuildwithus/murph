@@ -23,6 +23,7 @@ import {
   normalizeAssistantHeaders,
   normalizeAssistantPersistedHeaders,
   normalizeAssistantProviderConfig,
+  resolveAssistantProviderRuntimeTarget,
   serializeAssistantProviderOperatorDefaults,
   serializeAssistantProviderSessionOptions,
   shouldUseAssistantOpenAIResponsesApi,
@@ -125,16 +126,21 @@ test('assistant provider config helpers infer, merge, compact, and serialize by 
     },
     model: 'codex-model',
     oss: false,
+    presetId: null,
     profile: null,
     provider: 'openai-compatible',
     providerName: 'OpenAI',
     reasoningEffort: 'high',
     sandbox: null,
+    webSearch: null,
     zeroDataRetention: null,
   })
+  const mergedOpenAiRuntime = resolveAssistantProviderRuntimeTarget(mergedOpenAi)
   assert.deepEqual(serializeAssistantProviderSessionOptions(mergedOpenAi), {
     apiKeyEnv: 'OPENAI_API_KEY',
     baseUrl: 'https://api.openai.com/v1',
+    continuityFingerprint: mergedOpenAiRuntime.continuityFingerprint,
+    executionDriver: 'openai-responses',
     headers: {
       Authorization: 'Bearer secret-value-1234',
       'X-Trace-Id': 'trace-id',
@@ -144,6 +150,7 @@ test('assistant provider config helpers infer, merge, compact, and serialize by 
     profile: null,
     providerName: 'OpenAI',
     reasoningEffort: 'high',
+    resumeKind: 'openai-response-id',
     sandbox: null,
     approvalPolicy: null,
   })
@@ -158,10 +165,12 @@ test('assistant provider config helpers infer, merge, compact, and serialize by 
     },
     model: 'codex-model',
     oss: false,
+    presetId: null,
     profile: null,
     providerName: 'OpenAI',
     reasoningEffort: 'high',
     sandbox: null,
+    webSearch: null,
     zeroDataRetention: null,
   })
   assert.equal(shouldUseAssistantOpenAIResponsesApi(mergedOpenAi), true)
@@ -206,11 +215,13 @@ test('assistant provider config helpers infer, merge, compact, and serialize by 
     headers: null,
     model: 'gpt-5',
     oss: true,
+    presetId: null,
     profile: 'default',
     provider: 'codex-cli',
     providerName: null,
     reasoningEffort: 'low',
     sandbox: 'workspace-write',
+    webSearch: null,
     zeroDataRetention: null,
   })
   assert.equal(
@@ -245,7 +256,7 @@ test('assistant provider config helpers infer, merge, compact, and serialize by 
       baseUrl: 'https://example.test/v1',
       apiKeyEnv: 'OPENAI_API_KEY',
     }),
-    false,
+    true,
   )
   assert.equal(supportsAssistantReasoningEffort({ provider: 'codex-cli' }), true)
   assert.equal(
@@ -298,8 +309,10 @@ test('hosted assistant helpers normalize equality, labels, and active-profile fa
         'X-Trace-Id': 'trace-id',
       },
       model: 'gpt-4.1',
+      presetId: null,
       providerName: null,
       reasoningEffort: null,
+      webSearch: null,
     },
   })
   assert.deepEqual(hostedAssistantProfileToProviderConfigInput(platformProfile), {
@@ -309,9 +322,11 @@ test('hosted assistant helpers normalize equality, labels, and active-profile fa
       'X-Team': 'team-a',
     },
     model: null,
+    presetId: null,
     provider: 'openai-compatible',
     providerName: 'Internal Gateway',
     reasoningEffort: null,
+    webSearch: null,
     zeroDataRetention: null,
   })
 

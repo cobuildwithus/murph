@@ -544,8 +544,10 @@ test('buildResolveAssistantSessionInput keeps locator shaping and operator defau
         endpoint: 'http://127.0.0.1:11434/v1',
         headers: null,
         model: 'gpt-oss:20b',
+        presetId: null,
         providerName: null,
         reasoningEffort: 'high',
+        webSearch: null,
       },
     },
   )
@@ -566,8 +568,10 @@ test('buildResolveAssistantSessionInput keeps locator shaping and operator defau
         endpoint: 'https://api.openai.com/v1',
         headers: null,
         model: 'gpt-5.4-mini',
+        presetId: null,
         providerName: 'openai',
         reasoningEffort: 'medium',
+        webSearch: null,
       },
     ),
     {
@@ -591,8 +595,10 @@ test('buildResolveAssistantSessionInput keeps locator shaping and operator defau
         endpoint: 'https://api.openai.com/v1',
         headers: null,
         model: 'gpt-5.4-mini',
+        presetId: null,
         providerName: 'openai',
         reasoningEffort: 'medium',
+        webSearch: null,
       },
     },
   )

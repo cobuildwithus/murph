@@ -114,12 +114,40 @@ describe('assistant store persistence seams', () => {
         Cookie: 'session-cookie',
       },
     })
-    await expect(
-      readAssistantSession({
-        paths,
-        sessionId: session.sessionId,
-      }),
-    ).resolves.toEqual(session)
+    const roundTrippedSession = await readAssistantSession({
+      paths,
+      sessionId: session.sessionId,
+    })
+    expect(roundTrippedSession).not.toBeNull()
+    if (!roundTrippedSession) {
+      throw new Error('Expected round-tripped assistant session.')
+    }
+    expect(roundTrippedSession).toMatchObject({
+      alias: session.alias,
+      binding: session.binding,
+      createdAt: session.createdAt,
+      lastTurnAt: session.lastTurnAt,
+      provider: session.provider,
+      providerBinding: null,
+      resumeState: null,
+      schema: 'murph.assistant-session.v5',
+      sessionId: session.sessionId,
+      target: session.target,
+      turnCount: session.turnCount,
+      updatedAt: session.updatedAt,
+    })
+    expect(roundTrippedSession.providerOptions).toMatchObject({
+      apiKeyEnv: 'OPENAI_API_KEY',
+      baseUrl: 'https://api.example.com/v1',
+      executionDriver: 'openai-responses',
+      model: 'gpt-5.4',
+      providerName: 'murph-openai',
+      reasoningEffort: 'medium',
+      resumeKind: 'openai-response-id',
+    })
+    expect(roundTrippedSession.providerOptions.continuityFingerprint).toEqual(
+      expect.any(String),
+    )
 
     const initialEntries = [
       createTranscriptEntry('user', 'first question', '2026-04-08T00:01:00.000Z'),

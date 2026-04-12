@@ -11,6 +11,15 @@ import {
   timeZoneSchema,
 } from './vault-cli-contracts.js'
 import { isValidAssistantOpaqueId } from './assistant/state-ids.js'
+import {
+  setupAssistantProviderPresetValues,
+} from './assistant/openai-compatible-provider-presets.js'
+import {
+  assistantExecutionDriverValues,
+  assistantResumeKindValues,
+  assistantWebSearchModeValues,
+  resolveAssistantRuntimeTarget,
+} from './assistant/target-runtime.js'
 
 export const assistantSandboxValues = [
   'read-only',
@@ -194,8 +203,10 @@ export const assistantOpenAiCompatibleModelTargetSchema = z
     endpoint: z.string().min(1).nullable().default(null),
     headers: assistantHeadersSchema.nullable().default(null),
     model: z.string().min(1).nullable().default(null),
+    presetId: z.enum(setupAssistantProviderPresetValues).nullable().default(null),
     providerName: z.string().min(1).nullable().default(null),
     reasoningEffort: z.enum(assistantReasoningEffortValues).nullable().default(null),
+    webSearch: z.enum(assistantWebSearchModeValues).nullable().default(null),
     zeroDataRetention: z.boolean().optional(),
   })
   .strict()
@@ -213,8 +224,10 @@ export const assistantSessionProviderStateSchema = z
 
 export const assistantSessionResumeStateSchema = z
   .object({
+    continuityFingerprint: z.string().min(1).nullable().optional(),
     providerSessionId: z.string().min(1).nullable().default(null),
     resumeRouteId: z.string().min(1).nullable().default(null),
+    resumeKind: z.enum(assistantResumeKindValues).nullable().optional(),
   })
   .strict()
 
@@ -224,6 +237,7 @@ export const assistantSessionIdSchema = z.string().refine(
 )
 
 export const assistantProviderSessionOptionsSchema = z.object({
+  continuityFingerprint: z.string().min(1).nullable().optional(),
   model: z.string().min(1).nullable(),
   reasoningEffort: z.string().min(1).nullable().default(null),
   sandbox: z.enum(assistantSandboxValues).nullable(),
@@ -233,8 +247,12 @@ export const assistantProviderSessionOptionsSchema = z.object({
   codexHome: z.string().min(1).nullable().optional(),
   baseUrl: z.string().min(1).nullable().optional(),
   apiKeyEnv: z.string().min(1).nullable().optional(),
+  executionDriver: z.enum(assistantExecutionDriverValues).nullable().optional(),
   providerName: z.string().min(1).nullable().optional(),
+  presetId: z.enum(setupAssistantProviderPresetValues).nullable().optional(),
+  resumeKind: z.enum(assistantResumeKindValues).nullable().optional(),
   headers: assistantHeadersSchema.nullable().optional(),
+  webSearch: z.enum(assistantWebSearchModeValues).nullable().optional(),
   zeroDataRetention: z.boolean().optional(),
 })
 
@@ -263,7 +281,9 @@ export const assistantProviderFailoverRouteSchema = z
     baseUrl: z.string().min(1).nullable().optional(),
     apiKeyEnv: z.string().min(1).nullable().optional(),
     providerName: z.string().min(1).nullable().optional(),
+    presetId: z.enum(setupAssistantProviderPresetValues).nullable().optional(),
     headers: assistantHeadersSchema.nullable().optional(),
+    webSearch: z.enum(assistantWebSearchModeValues).nullable().optional(),
     zeroDataRetention: z.boolean().optional(),
     cooldownMs: z.number().int().positive().nullable().default(null),
   })
@@ -303,7 +323,7 @@ export const assistantProviderBindingSchema = z
 
 export const assistantPersistedSessionSchema = z
   .object({
-    schema: z.literal('murph.assistant-session.v4'),
+    schema: z.enum(['murph.assistant-session.v4', 'murph.assistant-session.v5']),
     sessionId: assistantSessionIdSchema,
     target: assistantModelTargetSchema,
     resumeState: assistantSessionResumeStateSchema.nullable().default(null),
@@ -345,11 +365,54 @@ function buildAssistantRuntimeSession(
   value: AssistantPersistedSessionRecord,
 ): AssistantSession {
   const provider = value.target.adapter
+  const storedContinuityFingerprint =
+    value.resumeState?.continuityFingerprint !== undefined
+      ? value.resumeState.continuityFingerprint
+      : undefined
+  const storedResumeKind =
+    value.resumeState?.resumeKind !== undefined
+      ? value.resumeState.resumeKind
+      : undefined
+  const resolvedRuntimeTarget = resolveAssistantRuntimeTarget(
+    value.target.adapter === 'openai-compatible'
+      ? {
+          provider: 'openai-compatible',
+          apiKeyEnv: value.target.apiKeyEnv,
+          baseUrl: value.target.endpoint,
+          headers: value.target.headers,
+          model: value.target.model,
+          presetId: value.target.presetId,
+          providerName: value.target.providerName,
+          reasoningEffort: value.target.reasoningEffort,
+          webSearch: value.target.webSearch,
+          zeroDataRetention: value.target.zeroDataRetention === true,
+        }
+      : {
+          provider: 'codex-cli',
+          approvalPolicy: value.target.approvalPolicy,
+          codexHome: value.target.codexHome,
+          model: value.target.model,
+          oss: value.target.oss,
+          profile: value.target.profile,
+          reasoningEffort: value.target.reasoningEffort,
+          sandbox: value.target.sandbox,
+        },
+  )
   const providerOptions =
     value.target.adapter === 'openai-compatible'
       ? assistantProviderSessionOptionsSchema.parse({
+          continuityFingerprint:
+            storedContinuityFingerprint !== undefined
+              ? storedContinuityFingerprint
+              : resolvedRuntimeTarget.continuityFingerprint,
+          executionDriver: resolvedRuntimeTarget.executionDriver,
           model: value.target.model,
+          presetId: value.target.presetId,
           reasoningEffort: value.target.reasoningEffort,
+          resumeKind:
+            storedResumeKind !== undefined
+              ? storedResumeKind
+              : resolvedRuntimeTarget.resumeKind,
           sandbox: null,
           approvalPolicy: null,
           profile: null,
@@ -360,11 +423,21 @@ function buildAssistantRuntimeSession(
             ? { providerName: value.target.providerName }
             : {}),
           ...(value.target.headers ? { headers: value.target.headers } : {}),
+          ...(value.target.webSearch ? { webSearch: value.target.webSearch } : {}),
           ...(value.target.zeroDataRetention ? { zeroDataRetention: true } : {}),
         })
       : assistantProviderSessionOptionsSchema.parse({
+          continuityFingerprint:
+            storedContinuityFingerprint !== undefined
+              ? storedContinuityFingerprint
+              : resolvedRuntimeTarget.continuityFingerprint,
+          executionDriver: resolvedRuntimeTarget.executionDriver,
           model: value.target.model,
           reasoningEffort: value.target.reasoningEffort,
+          resumeKind:
+            storedResumeKind !== undefined
+              ? storedResumeKind
+              : resolvedRuntimeTarget.resumeKind,
           sandbox: value.target.sandbox,
           approvalPolicy: value.target.approvalPolicy,
           profile: value.target.profile,
@@ -374,7 +447,9 @@ function buildAssistantRuntimeSession(
   const providerBinding =
     value.resumeState &&
     (value.resumeState.providerSessionId !== null ||
-      value.resumeState.resumeRouteId !== null)
+      value.resumeState.resumeRouteId !== null ||
+      value.resumeState.continuityFingerprint !== null ||
+      value.resumeState.resumeKind !== null)
       ? assistantProviderBindingSchema.parse({
           provider,
           providerOptions,
@@ -403,6 +478,11 @@ function normalizeAssistantSessionResumeState(
     return null
   }
 
+  const continuityFingerprint =
+    typeof value.continuityFingerprint === 'string' &&
+    value.continuityFingerprint.trim().length > 0
+      ? value.continuityFingerprint.trim()
+      : null
   const providerSessionId =
     typeof value.providerSessionId === 'string' && value.providerSessionId.trim().length > 0
       ? value.providerSessionId.trim()
@@ -411,11 +491,17 @@ function normalizeAssistantSessionResumeState(
     typeof value.resumeRouteId === 'string' && value.resumeRouteId.trim().length > 0
       ? value.resumeRouteId.trim()
       : null
+  const resumeKind =
+    typeof value.resumeKind === 'string' && value.resumeKind.trim().length > 0
+      ? value.resumeKind.trim()
+      : null
 
-  return providerSessionId || resumeRouteId
+  return providerSessionId || resumeRouteId || continuityFingerprint || resumeKind
     ? assistantSessionResumeStateSchema.parse({
+        continuityFingerprint,
         providerSessionId,
         resumeRouteId,
+        resumeKind,
       })
     : null
 }
@@ -1313,6 +1399,11 @@ export type AssistantApprovalPolicy =
   (typeof assistantApprovalPolicyValues)[number]
 export type AssistantReasoningEffort =
   (typeof assistantReasoningEffortValues)[number]
+export type AssistantExecutionDriver =
+  (typeof assistantExecutionDriverValues)[number]
+export type AssistantResumeKind = (typeof assistantResumeKindValues)[number]
+export type AssistantWebSearchMode =
+  (typeof assistantWebSearchModeValues)[number]
 export type AssistantChatProvider =
   (typeof assistantChatProviderValues)[number]
 export type AssistantChannelDeliveryTargetKind = GatewayDeliveryTargetKind

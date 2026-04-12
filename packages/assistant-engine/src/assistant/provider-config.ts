@@ -1,9 +1,8 @@
 import type { AssistantModelSpec } from '../model-harness.js'
-import {
-  readAssistantEnvString,
-} from '@murphai/operator-config/assistant/shared'
+import { readAssistantEnvString } from '@murphai/operator-config/assistant/shared'
 import {
   normalizeAssistantProviderConfig,
+  resolveAssistantProviderRuntimeTarget,
   type AssistantProviderConfigInput,
 } from '@murphai/operator-config/assistant/provider-config'
 import { normalizeNullableString } from '@murphai/operator-config/text/shared'
@@ -17,9 +16,18 @@ export function resolveAssistantModelSpecFromProviderConfig(
     return null
   }
 
+  const resolvedRuntimeTarget = resolveAssistantProviderRuntimeTarget(normalized)
   const model = normalizeNullableString(normalized.model)
+  if (!model) {
+    return null
+  }
+
   const baseUrl = normalizeNullableString(normalized.baseUrl)
-  if (!model || !baseUrl) {
+  if (
+    !baseUrl &&
+    resolvedRuntimeTarget.executionDriver !== 'gateway' &&
+    resolvedRuntimeTarget.executionDriver !== 'openai-responses'
+  ) {
     return null
   }
 
@@ -27,7 +35,8 @@ export function resolveAssistantModelSpecFromProviderConfig(
   const apiKeyValue = readAssistantEnvString(env, apiKeyEnv) ?? undefined
 
   return {
-    baseUrl,
+    ...(baseUrl ? { baseUrl } : {}),
+    executionDriver: resolvedRuntimeTarget.executionDriver,
     model,
     ...(apiKeyValue ? { apiKey: apiKeyValue } : {}),
     ...(apiKeyEnv ? { apiKeyEnv } : {}),

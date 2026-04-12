@@ -417,6 +417,7 @@ describe('openAiCompatibleProviderDefinition.executeTurn', () => {
       apiKey: 'test-openai-key',
       apiKeyEnv: 'OPENAI_API_KEY',
       baseUrl: 'https://api.openai.com/v1',
+      executionDriver: 'openai-responses',
       model: 'gpt-4.1-mini',
       providerName: 'OpenAI',
     })
@@ -582,11 +583,6 @@ describe('openAiCompatibleProviderDefinition.executeTurn', () => {
       ],
       model: {
         provider: 'mock-language-model',
-      },
-      providerOptions: {
-        acmeProvider: {
-          reasoningEffort: 'low',
-        },
       },
       system: undefined,
       timeout: 600000,
@@ -820,7 +816,7 @@ describe('openAiCompatibleProviderDefinition.executeTurn', () => {
 
     expect(providerMocks.generateText).toHaveBeenCalledWith({
       abortSignal: undefined,
-      maxRetries: 2,
+      maxRetries: 0,
       messages: [
         {
           content: 'Use the gateway',
@@ -832,12 +828,22 @@ describe('openAiCompatibleProviderDefinition.executeTurn', () => {
       },
       providerOptions: {
         gateway: {
-          reasoningEffort: 'low',
           zeroDataRetention: true,
         },
+        openai: {
+          reasoningEffort: 'low',
+          store: false,
+        },
+      },
+      stopWhen: {
+        count: 8,
+        kind: 'step-count',
       },
       system: undefined,
       timeout: 600000,
+      tools: expect.objectContaining({
+        web_search: expect.any(Object),
+      }),
     })
   })
 })

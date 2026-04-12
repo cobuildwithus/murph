@@ -1,4 +1,5 @@
 import {
+  createGateway,
   generateObject,
   generateText,
   gateway,
@@ -24,7 +25,7 @@ import {
   type AssistantToolSpec,
 } from './inbox-model-contracts.js'
 import { errorMessage } from '@murphai/operator-config/text/shared'
-import { isAssistantOpenAIBaseUrl } from './assistant/shared.js'
+import type { AssistantExecutionDriver } from '@murphai/operator-config/assistant-cli-contracts'
 
 export type JsonRecord = Record<string, unknown>
 
@@ -467,6 +468,7 @@ export interface AssistantModelSpec {
   apiKey?: string
   apiKeyEnv?: string
   baseUrl?: string
+  executionDriver?: AssistantExecutionDriver
   headers?: Record<string, string>
   model: string
   providerName?: string
@@ -655,30 +657,53 @@ export async function generateAssistantObject<TSchema extends z.ZodTypeAny>(
 export function resolveAssistantLanguageModel(
   spec: AssistantModelSpec,
 ): LanguageModel {
-  if (spec.baseUrl) {
-    if (isAssistantOpenAIBaseUrl(spec.baseUrl)) {
+  switch (spec.executionDriver ?? 'openai-compatible') {
+    case 'openai-responses': {
       const provider = createOpenAI({
         name: normalizeAssistantProviderName(spec.providerName),
         apiKey: resolveAssistantApiKey(spec),
-        baseURL: spec.baseUrl,
-        headers: spec.headers,
+        ...(spec.baseUrl ? { baseURL: spec.baseUrl } : {}),
+        ...(spec.headers ? { headers: spec.headers } : {}),
         fetch: createAssistantOpenAIResponsesFetch(),
       })
 
       return provider.responses(spec.model)
     }
 
-    const provider = createOpenAICompatible({
-      name: normalizeAssistantProviderName(spec.providerName),
-      apiKey: resolveAssistantApiKey(spec),
-      baseURL: spec.baseUrl,
-      headers: spec.headers,
-    })
+    case 'gateway': {
+      const apiKey = resolveAssistantApiKey(spec)
+      const provider = spec.baseUrl || spec.headers || apiKey
+        ? createGateway({
+            ...(spec.baseUrl ? { baseURL: spec.baseUrl } : {}),
+            ...(spec.headers ? { headers: spec.headers } : {}),
+            ...(apiKey ? { apiKey } : {}),
+          })
+        : gateway
 
-    return provider(spec.model)
+      return provider(spec.model)
+    }
+
+    case 'codex-cli':
+      throw new Error('Codex models do not resolve through the AI SDK model harness.')
+
+    case 'openai-compatible':
+    default: {
+      if (!spec.baseUrl) {
+        throw new Error(
+          'OpenAI-compatible models require a base URL in the resolved model spec.',
+        )
+      }
+
+      const provider = createOpenAICompatible({
+        name: normalizeAssistantProviderName(spec.providerName),
+        apiKey: resolveAssistantApiKey(spec),
+        baseURL: spec.baseUrl,
+        ...(spec.headers ? { headers: spec.headers } : {}),
+      })
+
+      return provider(spec.model)
+    }
   }
-
-  return gateway(spec.model)
 }
 
 export function normalizeJsonRecord(value: unknown): JsonRecord {

@@ -4,6 +4,7 @@ import {
 } from '@murphai/operator-config/assistant-backend'
 import {
   assistantProviderBindingSchema,
+  assistantSessionResumeStateSchema,
   type AssistantSession,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import {
@@ -13,8 +14,6 @@ import {
 import {
   readAssistantProviderResumeRouteId,
   readAssistantProviderSessionId,
-  writeAssistantProviderResumeRouteId,
-  writeAssistantSessionProviderSessionId,
 } from './provider-state.js'
 import { createAssistantRuntimeStateService } from './runtime-state-service.js'
 import type {
@@ -78,13 +77,12 @@ export async function persistAssistantTurnAndSession(input: {
     previousResumeRouteId !== null
       ? previousResumeRouteId
       : input.providerResult.route.routeId
-  const nextResumeState = writeAssistantProviderResumeRouteId(
-    writeAssistantSessionProviderSessionId(
-      input.session.resumeState,
-      input.providerResult.providerSessionId,
-    ),
-    nextResumeRouteId,
-  )
+  const nextResumeState = assistantSessionResumeStateSchema.parse({
+    continuityFingerprint: nextProviderOptions.continuityFingerprint ?? null,
+    providerSessionId: input.providerResult.providerSessionId,
+    resumeRouteId: nextResumeRouteId,
+    resumeKind: nextProviderOptions.resumeKind ?? null,
+  })
   const nextProviderBinding =
     nextResumeState &&
     (nextResumeState.providerSessionId !== null || nextResumeState.resumeRouteId !== null)

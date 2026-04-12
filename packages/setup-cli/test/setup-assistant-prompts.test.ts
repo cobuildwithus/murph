@@ -99,6 +99,7 @@ test('setup assistant prompt flow uses discovered models and numeric model selec
     model: 'model-beta',
     baseUrl: 'https://openrouter.ai/api/v1',
     apiKeyEnv: 'OPENROUTER_API_KEY',
+    presetId: 'openrouter',
     providerName: 'openrouter',
     codexCommand: null,
     profile: null,
@@ -119,6 +120,62 @@ test('setup assistant prompt flow uses discovered models and numeric model selec
   ])
   assert.match(readOutput(), /Discovered models/u)
   assert.match(readOutput(), /Available models:/u)
+})
+
+test('setup assistant prompt flow recomputes inferred preset identity from the final endpoint', async () => {
+  promptState.answers = ['https://ai-gateway.vercel.sh/v1', 'VERCEL_AI_API_KEY', '1']
+  const { output } = createCapturedOutputStream()
+
+  const resolver = createSetupAssistantResolver({
+    assistantAccount: {
+      async resolve() {
+        return null
+      },
+    },
+    input: new PassThrough(),
+    output,
+    async resolveCodexHome() {
+      return {
+        codexHome: null,
+        discoveredHomes: [],
+      }
+    },
+  })
+
+  const assistant = await resolver.resolve({
+    allowPrompt: true,
+    commandName: 'murph setup',
+    options: createSetupOptions(),
+    preset: 'openai-compatible',
+  })
+
+  assert.deepEqual(assistant, {
+    preset: 'openai-compatible',
+    enabled: true,
+    provider: 'openai-compatible',
+    model: 'model-alpha',
+    baseUrl: 'https://ai-gateway.vercel.sh/v1',
+    apiKeyEnv: 'VERCEL_AI_API_KEY',
+    presetId: 'vercel-ai-gateway',
+    providerName: 'vercel-ai-gateway',
+    codexCommand: null,
+    profile: null,
+    reasoningEffort: null,
+    sandbox: null,
+    approvalPolicy: null,
+    oss: false,
+    account: null,
+    detail:
+      'Use model-alpha from Vercel AI Gateway. Murph will read the key from VERCEL_AI_API_KEY.',
+  })
+  assert.deepEqual(promptState.discoveredCalls, [
+    {
+      apiKeyEnv: 'VERCEL_AI_API_KEY',
+      baseUrl: 'https://ai-gateway.vercel.sh/v1',
+      provider: 'openai-compatible',
+      providerName: 'vercel-ai-gateway',
+    },
+  ])
 })
 
 test('setup assistant prompt flow retries required model entry and rejects unsupported reasoning effort', async () => {

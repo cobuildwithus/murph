@@ -141,6 +141,7 @@ export const setupConfiguredAssistantSchema = z.object({
   model: z.string().min(1).nullable(),
   baseUrl: z.string().min(1).nullable(),
   apiKeyEnv: z.string().min(1).nullable(),
+  presetId: setupAssistantProviderPresetSchema.nullable().optional(),
   providerName: z.string().min(1).nullable(),
   codexCommand: z.string().min(1).nullable(),
   codexHome: z.string().min(1).nullable().optional(),

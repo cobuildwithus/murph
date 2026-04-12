@@ -29,11 +29,13 @@ export type AssistantTurnRouteOverride = Pick<
   | 'headers'
   | 'model'
   | 'oss'
+  | 'presetId'
   | 'profile'
   | 'provider'
   | 'providerName'
   | 'reasoningEffort'
   | 'sandbox'
+  | 'webSearch'
   | 'zeroDataRetention'
 >
 
@@ -115,11 +117,13 @@ export function selectAssistantTurnRouteOverride(
       headers: selectedRoute.providerOptions.headers ?? null,
       model: selectedRoute.providerOptions.model ?? null,
       oss: selectedRoute.providerOptions.oss,
+      presetId: selectedRoute.providerOptions.presetId ?? null,
       profile: selectedRoute.providerOptions.profile ?? null,
       provider: selectedRoute.provider,
       providerName: selectedRoute.providerOptions.providerName ?? null,
       reasoningEffort: selectedRoute.providerOptions.reasoningEffort ?? null,
       sandbox: selectedRoute.providerOptions.sandbox ?? null,
+      webSearch: selectedRoute.providerOptions.webSearch ?? null,
       zeroDataRetention: selectedRoute.providerOptions.zeroDataRetention ?? null,
     },
     route: selectedRoute,

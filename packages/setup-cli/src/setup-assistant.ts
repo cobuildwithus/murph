@@ -206,6 +206,7 @@ export function createSetupAssistantResolver(
             model: null,
             baseUrl: null,
             apiKeyEnv: null,
+            presetId: null,
             providerName: null,
             codexCommand: null,
             profile: null,
@@ -255,6 +256,7 @@ export function createSetupAssistantResolver(
             model,
             baseUrl: null,
             apiKeyEnv: null,
+            presetId: null,
             providerName: null,
             codexCommand:
               normalizeNullableString(
@@ -288,7 +290,11 @@ export function createSetupAssistantResolver(
           const explicitZeroDataRetention =
             resolutionInput.options.assistantZeroDataRetention === true
 
-          const providerPreset =
+          const explicitProviderPreset = resolveOpenAICompatibleProviderPresetFromId(
+            normalizeNullableString(resolutionInput.options.assistantProviderPreset),
+          )
+          const initialProviderPreset =
+            explicitProviderPreset ??
             resolveSetupAssistantProviderPreset(resolutionInput.options) ??
             resolveOpenAICompatibleProviderPreset({
               baseUrl: DEFAULT_SETUP_OPENAI_COMPATIBLE_BASE_URL,
@@ -298,11 +304,11 @@ export function createSetupAssistantResolver(
             allowPrompt: resolutionInput.allowPrompt,
             defaultValue:
               normalizeNullableString(resolutionInput.options.assistantBaseUrl) ??
-              providerPreset.baseUrl ??
+              initialProviderPreset.baseUrl ??
               DEFAULT_SETUP_OPENAI_COMPATIBLE_BASE_URL,
             input,
             output,
-            prompt: buildSetupAssistantBaseUrlPrompt(providerPreset),
+            prompt: buildSetupAssistantBaseUrlPrompt(initialProviderPreset),
           })
 
           const apiKeyEnv = await resolveOptionalPromptedValue({
@@ -311,16 +317,26 @@ export function createSetupAssistantResolver(
               normalizeNullableString(
                 resolutionInput.options.assistantApiKeyEnv,
               ) ??
-              providerPreset.apiKeyEnv ??
+              initialProviderPreset.apiKeyEnv ??
               null,
             input,
             output,
-            prompt: buildSetupAssistantApiKeyEnvPrompt(providerPreset),
+            prompt: buildSetupAssistantApiKeyEnvPrompt(initialProviderPreset),
           })
+          const explicitProviderName = normalizeNullableString(
+            resolutionInput.options.assistantProviderName,
+          )
+          const resolvedProviderPreset =
+            explicitProviderPreset ??
+            resolveOpenAICompatibleProviderPreset({
+              apiKeyEnv,
+              baseUrl,
+              providerName: explicitProviderName,
+            }) ??
+            getOpenAICompatibleProviderPreset('custom')
           const providerName =
-            normalizeNullableString(
-              resolutionInput.options.assistantProviderName,
-            ) ?? providerPreset.providerName
+            explicitProviderName ??
+            resolvedProviderPreset.providerName
           const discovery =
             normalizeNullableString(resolutionInput.options.assistantModel) === null
               ? await discoverModels({
@@ -339,18 +355,28 @@ export function createSetupAssistantResolver(
             input,
             output,
           })
+          const targetCapabilities = resolveAssistantTargetCapabilities({
+            provider: 'openai-compatible',
+            apiKeyEnv,
+            baseUrl,
+            model,
+            presetId: resolvedProviderPreset.id,
+            providerName,
+          })
           if (
             explicitReasoningEffort &&
-            !resolveAssistantTargetCapabilities({
-              provider: 'openai-compatible',
-              apiKeyEnv,
-              baseUrl,
-              model,
-              providerName,
-            }).supportsReasoningEffort
+            !targetCapabilities.supportsReasoningEffort
           ) {
             throw new Error(
               'The resolved OpenAI-compatible target does not support assistantReasoningEffort.',
+            )
+          }
+          if (
+            explicitZeroDataRetention &&
+            !targetCapabilities.supportsZeroDataRetention
+          ) {
+            throw new Error(
+              'The resolved OpenAI-compatible target does not support assistantZeroDataRetention.',
             )
           }
 
@@ -361,6 +387,7 @@ export function createSetupAssistantResolver(
             model,
             baseUrl,
             apiKeyEnv,
+            presetId: resolvedProviderPreset.id,
             providerName,
             codexCommand: null,
             profile: null,
@@ -374,7 +401,7 @@ export function createSetupAssistantResolver(
               apiKeyEnv,
               baseUrl,
               model,
-              providerTitle: providerPreset.title,
+              providerTitle: resolvedProviderPreset.title,
               zeroDataRetention: explicitZeroDataRetention,
             }),
           }

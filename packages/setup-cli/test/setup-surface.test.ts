@@ -421,6 +421,7 @@ test('interactive onboard uses wizard defaults, runtime env hints, and setupHost
           model: null,
           oss: null,
           preset: 'skip',
+          presetId: null,
           profile: null,
           provider: null,
           providerName: null,

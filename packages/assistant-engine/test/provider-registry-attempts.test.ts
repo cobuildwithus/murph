@@ -34,6 +34,7 @@ describe('assistant provider registry attempts', () => {
       supportsNativeResume: true,
       supportsReasoningEffort: true,
       supportsRichUserMessageContent: false,
+      supportsZeroDataRetention: false,
     })
     expect(resolveAssistantProviderTargetExecutionCapabilities({ oss: true })).toEqual({
       murphCommandSurface: 'direct-cli',
@@ -42,6 +43,7 @@ describe('assistant provider registry attempts', () => {
       supportsNativeResume: true,
       supportsReasoningEffort: true,
       supportsRichUserMessageContent: false,
+      supportsZeroDataRetention: false,
       supportsToolRuntime: false,
     })
     expect(resolveAssistantProviderStaticModels({ oss: true })).toEqual(
@@ -58,9 +60,10 @@ describe('assistant provider registry attempts', () => {
       resolveAssistantProviderTargetCapabilities(inferredOpenAiTarget),
     ).toEqual({
       supportsModelDiscovery: true,
-      supportsNativeResume: true,
-      supportsReasoningEffort: true,
+      supportsNativeResume: false,
+      supportsReasoningEffort: false,
       supportsRichUserMessageContent: true,
+      supportsZeroDataRetention: false,
     })
     expect(
       resolveAssistantProviderTargetExecutionCapabilities(inferredOpenAiTarget),
@@ -68,9 +71,10 @@ describe('assistant provider registry attempts', () => {
       murphCommandSurface: 'bound-tools',
       requestFormat: 'messages',
       supportsModelDiscovery: true,
-      supportsNativeResume: true,
-      supportsReasoningEffort: true,
+      supportsNativeResume: false,
+      supportsReasoningEffort: false,
       supportsRichUserMessageContent: true,
+      supportsZeroDataRetention: false,
       supportsToolRuntime: true,
     })
     expect(resolveAssistantProviderStaticModels(inferredOpenAiTarget)).toEqual([])

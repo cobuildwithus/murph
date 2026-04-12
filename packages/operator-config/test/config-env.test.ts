@@ -35,6 +35,7 @@ import {
   tryParseHostedAssistantConfig,
 } from '../src/hosted-assistant-config.ts'
 import { normalizeHostedAssistantConfig } from '../src/assistant/hosted-config.ts'
+import { resolveAssistantRuntimeTarget } from '../src/assistant/target-runtime.ts'
 import {
   applySetupRuntimeEnvOverridesToProcess,
   describeSelectedSetupWearables,
@@ -271,8 +272,10 @@ test('assistant backend targets trim config input and strip sensitive headers be
       'X-Trace': ' trace-id ',
     },
     model: '  gpt-4o  ',
+    presetId: null,
     providerName: '  Example Provider  ',
     reasoningEffort: 'high',
+    webSearch: null,
   })
 
   assert.deepEqual(persistedOpenAiTarget, {
@@ -283,8 +286,10 @@ test('assistant backend targets trim config input and strip sensitive headers be
       'X-Trace': 'trace-id',
     },
     model: 'gpt-4o',
+    presetId: null,
     providerName: 'Example Provider',
     reasoningEffort: 'high',
+    webSearch: null,
   })
   assert.equal(
     assistantBackendTargetsEqual(
@@ -364,8 +369,10 @@ test('representative contract schemas stay wired to the owned setup/operator sea
           'X-Trace-Id': 'trace',
         },
         model: 'gpt-5.4',
+        presetId: null,
         providerName: 'Example',
         reasoningEffort: 'high',
+        webSearch: null,
       },
       turnCount: 3,
       updatedAt: '2026-04-08T12:05:00.000Z',
@@ -376,14 +383,18 @@ test('representative contract schemas stay wired to the owned setup/operator sea
         apiKeyEnv: 'OPENAI_API_KEY',
         approvalPolicy: null,
         baseUrl: 'https://api.example.test/v1',
+        continuityFingerprint: null,
+        executionDriver: 'openai-responses',
         headers: {
           'X-Trace-Id': 'trace',
         },
         model: 'gpt-5.4',
         oss: false,
+        presetId: null,
         profile: null,
         providerName: 'Example',
         reasoningEffort: 'high',
+        resumeKind: null,
         sandbox: null,
       },
       providerSessionId: 'provider-session',
@@ -475,8 +486,10 @@ test('representative contract schemas stay wired to the owned setup/operator sea
         endpoint: null,
         headers: null,
         model: 'gpt-5.4',
+        presetId: null,
         providerName: null,
         reasoningEffort: 'medium',
+        webSearch: null,
       },
       turnCount: 1,
       updatedAt: '2026-04-08T12:05:00.000Z',
@@ -485,10 +498,14 @@ test('representative contract schemas stay wired to the owned setup/operator sea
       provider: 'openai-compatible',
       providerOptions: {
         approvalPolicy: null,
+        continuityFingerprint: null,
+        executionDriver: 'openai-compatible',
         model: 'gpt-5.4',
         oss: false,
+        presetId: null,
         profile: null,
         reasoningEffort: 'medium',
+        resumeKind: null,
         sandbox: null,
       },
       providerSessionId: null,
@@ -516,8 +533,10 @@ test('hosted assistant config normalization keeps the active profile ready and s
             'X-Trace': ' trace-id ',
           },
           model: '  gpt-4o  ',
+          presetId: null,
           providerName: ' ',
           reasoningEffort: 'high',
+          webSearch: null,
         },
       },
     ],
@@ -540,8 +559,10 @@ test('hosted assistant config normalization keeps the active profile ready and s
             'X-Trace': 'trace-id',
           },
           model: 'gpt-4o',
+          presetId: null,
           providerName: null,
           reasoningEffort: 'high',
+          webSearch: null,
         },
       },
     ],
@@ -570,9 +591,11 @@ test('hosted assistant config normalization keeps the active profile ready and s
       'X-Trace': 'trace-id',
     },
     model: 'gpt-4o',
+    presetId: null,
     provider: 'openai-compatible',
     providerName: null,
     reasoningEffort: 'high',
+    webSearch: null,
     zeroDataRetention: null,
   })
   assert.deepEqual(resolveHostedAssistantOperatorDefaultsState(normalizedConfig), {

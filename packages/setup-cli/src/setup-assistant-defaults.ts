@@ -43,6 +43,7 @@ export function assistantSelectionToOperatorDefaults(
         oss: assistant.oss === true,
         baseUrl: assistant.baseUrl,
         apiKeyEnv: assistant.apiKeyEnv,
+        presetId: assistant.presetId ?? null,
         providerName: assistant.providerName,
         ...(assistant.zeroDataRetention === true
           ? { zeroDataRetention: true }
@@ -134,6 +135,7 @@ export function buildSetupAssistantOptionsFromDefaults(
 
       return {
         assistantPreset: 'openai-compatible',
+        assistantProviderPreset: savedDefaults?.presetId ?? undefined,
         assistantModel: savedDefaults?.model ?? undefined,
         assistantBaseUrl: savedDefaults?.baseUrl ?? undefined,
         assistantApiKeyEnv: savedDefaults?.apiKeyEnv ?? undefined,

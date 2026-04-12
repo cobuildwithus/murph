@@ -2,10 +2,11 @@ import { rm } from 'node:fs/promises'
 
 import { afterEach, describe, expect, it } from 'vitest'
 
-import type {
-  AssistantProviderBinding,
-  AssistantProviderSessionOptions,
-  AssistantSession,
+import {
+  parseAssistantSessionRecord,
+  type AssistantProviderBinding,
+  type AssistantProviderSessionOptions,
+  type AssistantSession,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import {
   type AssistantProviderProgressEvent,
@@ -250,7 +251,9 @@ describe('assistant provider seam helpers', () => {
     attachRecoveredAssistantSession(error, recoveredSession)
 
     expect(error.context.requestId).toBe('req_123')
-    expect(extractRecoveredAssistantSession(error)).toEqual(recoveredSession)
+    expect(extractRecoveredAssistantSession(error)).toEqual(
+      parseAssistantSessionRecord(serializeAssistantSessionForPersistence(recoveredSession)),
+    )
   })
 
   it('normalizes tool progress labels and merges unique provider activity labels', () => {
@@ -340,7 +343,9 @@ describe('assistant provider seam helpers', () => {
         resumeRouteId: ' route-primary ',
       }),
     ).toEqual({
+      continuityFingerprint: null,
       providerSessionId: null,
+      resumeKind: null,
       resumeRouteId: 'route-primary',
     })
     expect(
@@ -360,7 +365,9 @@ describe('assistant provider seam helpers', () => {
       resumeState: null,
     })
     expect(persisted.resumeState).toEqual({
+      continuityFingerprint: null,
       providerSessionId: 'provider_session_bound',
+      resumeKind: null,
       resumeRouteId: 'route-bound',
     })
 
@@ -376,7 +383,9 @@ describe('assistant provider seam helpers', () => {
         }),
       }),
     ).toEqual({
+      continuityFingerprint: null,
       providerSessionId: 'provider-session-from-binding',
+      resumeKind: null,
       resumeRouteId: 'route-from-binding',
     })
     expect(
@@ -613,8 +622,10 @@ function createAssistantSession(input?: {
         Authorization: 'Bearer token',
       },
       model: 'gpt-4.1',
+      presetId: null,
       providerName: 'murph-openai',
       reasoningEffort: 'high',
+      webSearch: null,
     },
     resumeState,
     alias: null,

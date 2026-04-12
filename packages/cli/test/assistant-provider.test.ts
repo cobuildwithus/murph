@@ -179,7 +179,9 @@ test('buildAssistantProviderDefaultsPatch keeps OpenAI-compatible public headers
             Authorization: 'Bearer override-token',
             'X-Foo': 'bar',
           },
+          presetId: null,
           reasoningEffort: null,
+          webSearch: null,
         },
         identityId: null,
         failoverRoutes: null,
@@ -213,7 +215,9 @@ test('buildAssistantProviderDefaultsPatch keeps OpenAI-compatible public headers
         headers: {
           'X-Foo': 'bar',
         },
+        presetId: null,
         reasoningEffort: null,
+        webSearch: null,
       },
     },
   )

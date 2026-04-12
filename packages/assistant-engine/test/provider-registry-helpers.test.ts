@@ -488,6 +488,7 @@ describe('assistant provider registry helpers', () => {
       supportsNativeResume: true,
       supportsReasoningEffort: true,
       supportsRichUserMessageContent: false,
+      supportsZeroDataRetention: false,
     })
 
     expect(
@@ -499,6 +500,7 @@ describe('assistant provider registry helpers', () => {
       supportsNativeResume: true,
       supportsReasoningEffort: false,
       supportsRichUserMessageContent: true,
+      supportsZeroDataRetention: false,
       supportsToolRuntime: true,
     })
 
@@ -511,6 +513,7 @@ describe('assistant provider registry helpers', () => {
       supportsNativeResume: true,
       supportsReasoningEffort: true,
       supportsRichUserMessageContent: true,
+      supportsZeroDataRetention: false,
     })
 
     expect(
@@ -524,6 +527,7 @@ describe('assistant provider registry helpers', () => {
       supportsNativeResume: true,
       supportsReasoningEffort: true,
       supportsRichUserMessageContent: true,
+      supportsZeroDataRetention: false,
       supportsToolRuntime: true,
     })
 
