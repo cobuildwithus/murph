@@ -131,8 +131,12 @@ describe("hosted deploy automation helpers", () => {
     ]);
     expect(config.migrations).toEqual([
       {
-        new_sqlite_classes: ["UserRunnerDurableObject", "RunnerContainer"],
+        new_sqlite_classes: ["UserRunnerDurableObject"],
         tag: "v1",
+      },
+      {
+        new_sqlite_classes: ["RunnerContainer"],
+        tag: "v2",
       },
     ]);
     expect(config.compatibility_flags).toEqual(["nodejs_compat"]);
@@ -447,7 +451,7 @@ describe("hosted deploy automation helpers", () => {
     expect(resolveHostedWorkerGradualDeploymentSupport(config)).toEqual({
       directDeployRequiredReason: null,
       gradualDeploymentsSupported: true,
-      migrationTags: ["v1"],
+      migrationTags: ["v1", "v2"],
     });
   });
 
@@ -472,7 +476,7 @@ describe("hosted deploy automation helpers", () => {
       directDeployRequiredReason:
         "Rendered Wrangler config includes unsupported Durable Object migration tag(s) `v3` for gradual versions/deployments. Use HOSTED_EXECUTION_DEPLOYMENT_MODE=direct for the migration rollout first.",
       gradualDeploymentsSupported: false,
-      migrationTags: ["v1", "v3"],
+      migrationTags: ["v1", "v2", "v3"],
     });
   });
 

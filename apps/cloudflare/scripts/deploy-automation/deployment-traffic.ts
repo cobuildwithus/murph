@@ -11,7 +11,7 @@ export interface HostedWorkerGradualDeploymentSupport {
   migrationTags: string[];
 }
 
-const HOSTED_WORKER_GRADUAL_DEPLOYMENT_SAFE_MIGRATION_TAGS = new Set(["v1"]);
+const HOSTED_WORKER_GRADUAL_DEPLOYMENT_SAFE_MIGRATION_TAGS = new Set(["v1", "v2"]);
 
 export function resolveHostedWorkerDeploymentTraffic(input: {
   candidateVersionId: string;
