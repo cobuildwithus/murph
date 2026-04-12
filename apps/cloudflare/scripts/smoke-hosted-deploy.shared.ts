@@ -8,7 +8,10 @@ import {
 import type {
   HostedExecutionUserStatus,
 } from "@murphai/hosted-execution";
-import { normalizeOptionalString } from "./deploy-automation/shared.ts";
+import {
+  normalizeOptionalString,
+  parseOptionalStrictInteger,
+} from "./deploy-automation/shared.ts";
 import {
   readBearerAuthorizationToken,
 } from "../src/auth-adapter.ts";
@@ -252,19 +255,13 @@ function didLastRunAdvance(
 }
 
 function readPositiveInteger(value: string | undefined, fallback: number, label: string): number {
-  const normalized = normalizeOptionalString(value);
+  const parsed = parseOptionalStrictInteger(value, `${label} must be a positive integer.`);
 
-  if (!normalized) {
+  if (parsed === null) {
     return fallback;
   }
 
-  if (!/^\d+$/u.test(normalized)) {
-    throw new Error(`${label} must be a positive integer.`);
-  }
-
-  const parsed = Number.parseInt(normalized, 10);
-
-  if (!Number.isInteger(parsed) || parsed < 1) {
+  if (parsed < 1) {
     throw new Error(`${label} must be a positive integer.`);
   }
 
