@@ -1,18 +1,10 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
-
 import { createHostedVerifiedEmailUserEnv } from "@murphai/runtime-state";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   decodeHostedUserEnvPayload,
   encodeHostedUserEnvPayload,
 } from "../src/user-env.ts";
-import type {
-  HostedEmailConfig,
-} from "../src/hosted-email.ts";
-import type {
-  HostedUserEnvStore,
-  R2BucketLike,
-} from "../src/bundle-store.ts";
 
 const mockedModules = vi.hoisted(() => {
   let storedPayload: Uint8Array | null = null;
@@ -39,7 +31,7 @@ const mockedModules = vi.hoisted(() => {
 });
 
 vi.mock("../src/bundle-store.js", () => ({
-  createHostedUserEnvStore: vi.fn(() => mockedModules.store as HostedUserEnvStore),
+  createHostedUserEnvStore: vi.fn(() => mockedModules.store),
 }));
 
 vi.mock("../src/hosted-email.js", () => ({
@@ -51,29 +43,9 @@ vi.mock("../src/hosted-email.js", () => ({
 
 const { RunnerUserEnvService } = await import("../src/user-runner/runner-user-env.ts");
 
-const hostedEmailConfig: HostedEmailConfig = {
-  apiBaseUrl: "https://api.cloudflare.com/client/v4",
-  cloudflareAccountId: null,
-  cloudflareApiToken: null,
-  defaultSubject: "Murph update",
-  domain: "example.com",
-  fromAddress: "assistant@example.com",
-  localPart: "assistant",
-  signingSecret: "test-signing-secret",
-};
-
-const unusedBucket: R2BucketLike = {
-  async get() {
-    return null;
-  },
-  async put() {
-    throw new Error("Unexpected bucket write in runner-user-env.test.ts");
-  },
-};
-
 function createService() {
   return new RunnerUserEnvService(
-    unusedBucket,
+    {} as never,
     new Uint8Array([1]),
     "user-env-key-id",
     {},
@@ -81,7 +53,16 @@ function createService() {
     "email-route-key-id",
     {},
     {},
-    hostedEmailConfig,
+    {
+      apiBaseUrl: "https://api.cloudflare.com/client/v4",
+      cloudflareAccountId: null,
+      cloudflareApiToken: null,
+      defaultSubject: "Murph update",
+      domain: "example.com",
+      fromAddress: "assistant@example.com",
+      localPart: "assistant",
+      signingSecret: "test-signing-secret",
+    },
   );
 }
 
@@ -107,6 +88,61 @@ describe("RunnerUserEnvService.updateUserEnv", () => {
     });
   });
 
+  it("avoids rewriting an unchanged hosted env while still reconciling the verified sender route", async () => {
+    const currentEnv = {
+      OPENAI_API_KEY: "sk-test",
+      ...createHostedVerifiedEmailUserEnv({
+        address: "old@example.com",
+        verifiedAt: "2026-04-01T00:00:00.000Z",
+      }),
+    };
+
+    setStoredEnv(currentEnv);
+
+    await expect(
+      createService().updateUserEnv("user_123", {
+        env: {
+          HOSTED_USER_VERIFIED_EMAIL: "old@example.com",
+          HOSTED_USER_VERIFIED_EMAIL_VERIFIED_AT: "2026-04-01T00:00:00.000Z",
+        },
+        mode: "merge",
+      }),
+    ).resolves.toEqual({
+      configuredUserEnvKeys: Object.keys(currentEnv).sort(),
+      userId: "user_123",
+    });
+
+    expect(mockedModules.store.writeUserEnv).not.toHaveBeenCalled();
+    expect(mockedModules.store.clearUserEnv).not.toHaveBeenCalled();
+    expect(mockedModules.reconcileHostedEmailVerifiedSenderRoute).toHaveBeenCalledTimes(1);
+    expect(readStoredEnv()).toEqual(currentEnv);
+  });
+
+  it("does not roll back verified sender routes when env persistence fails before any route mutation", async () => {
+    const currentEnv = createHostedVerifiedEmailUserEnv({
+      address: "old@example.com",
+      verifiedAt: "2026-04-01T00:00:00.000Z",
+    });
+    const nextEnv = createHostedVerifiedEmailUserEnv({
+      address: "new@example.com",
+      verifiedAt: "2026-04-02T00:00:00.000Z",
+    });
+
+    setStoredEnv(currentEnv);
+    mockedModules.store.writeUserEnv.mockRejectedValueOnce(new Error("env write failed"));
+
+    await expect(
+      createService().updateUserEnv("user_123", {
+        env: nextEnv,
+        mode: "merge",
+      }),
+    ).rejects.toThrow("env write failed");
+
+    expect(readStoredEnv()).toEqual(currentEnv);
+    expect(mockedModules.reconcileHostedEmailVerifiedSenderRoute).not.toHaveBeenCalled();
+    expect(mockedModules.store.writeUserEnv).toHaveBeenCalledTimes(2);
+  });
+
   it("rolls back the persisted user env when verified email route reconciliation fails", async () => {
     const currentEnv = createHostedVerifiedEmailUserEnv({
       address: "old@example.com",
@@ -130,6 +166,10 @@ describe("RunnerUserEnvService.updateUserEnv", () => {
     ).rejects.toThrow("route update failed");
 
     expect(readStoredEnv()).toEqual(currentEnv);
+    expect(mockedModules.store.writeUserEnv).toHaveBeenCalledTimes(2);
+    expect(
+      mockedModules.store.writeUserEnv.mock.invocationCallOrder[1],
+    ).toBeLessThan(mockedModules.reconcileHostedEmailVerifiedSenderRoute.mock.invocationCallOrder[1]);
     expect(mockedModules.reconcileHostedEmailVerifiedSenderRoute).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({
@@ -186,7 +226,75 @@ describe("RunnerUserEnvService.updateUserEnv", () => {
     );
   });
 
-  it("restores the previous verified email route when removing a verified email fails after route release", async () => {
+  it("does not recreate the previous verified email route after a partial clear when canonical rollback fails", async () => {
+    const currentEnv = createHostedVerifiedEmailUserEnv({
+      address: "old@example.com",
+      verifiedAt: "2026-04-01T00:00:00.000Z",
+    });
+
+    setStoredEnv(currentEnv);
+    mockedModules.store.clearUserEnv.mockImplementationOnce(async () => {
+      mockedModules.setStoredPayload(null);
+      throw new Error("env clear failed");
+    });
+    mockedModules.store.writeUserEnv.mockRejectedValueOnce(new Error("env rollback failed"));
+
+    await expect(
+      createService().updateUserEnv("user_123", {
+        env: {
+          HOSTED_USER_VERIFIED_EMAIL: null,
+          HOSTED_USER_VERIFIED_EMAIL_VERIFIED_AT: null,
+        },
+        mode: "merge",
+      }),
+    ).rejects.toThrow("Hosted user env update failed and rollback also failed for user_123.");
+
+    expect(readStoredEnv()).toEqual({});
+    expect(mockedModules.reconcileHostedEmailVerifiedSenderRoute).toHaveBeenCalledTimes(1);
+    expect(mockedModules.reconcileHostedEmailVerifiedSenderRoute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        nextVerifiedEmailAddress: null,
+        previousVerifiedEmailAddress: "old@example.com",
+        userId: "user_123",
+      }),
+    );
+  });
+
+  it("restores the previous user env even when route rollback fails after a later reconcile error", async () => {
+    const currentEnv = createHostedVerifiedEmailUserEnv({
+      address: "old@example.com",
+      verifiedAt: "2026-04-01T00:00:00.000Z",
+    });
+    const nextEnv = createHostedVerifiedEmailUserEnv({
+      address: "new@example.com",
+      verifiedAt: "2026-04-02T00:00:00.000Z",
+    });
+
+    setStoredEnv(currentEnv);
+    mockedModules.reconcileHostedEmailVerifiedSenderRoute
+      .mockRejectedValueOnce(new Error("route update failed"))
+      .mockRejectedValueOnce(new Error("route rollback failed"));
+
+    await expect(
+      createService().updateUserEnv("user_123", {
+        env: nextEnv,
+        mode: "merge",
+      }),
+    ).rejects.toThrow("Hosted user env update failed and rollback also failed for user_123.");
+
+    expect(readStoredEnv()).toEqual(currentEnv);
+    expect(mockedModules.store.writeUserEnv).toHaveBeenCalledTimes(2);
+    expect(mockedModules.reconcileHostedEmailVerifiedSenderRoute).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        nextVerifiedEmailAddress: "old@example.com",
+        previousVerifiedEmailAddress: "new@example.com",
+        userId: "user_123",
+      }),
+    );
+  });
+
+  it("does not recreate the previous verified email route when canonical rollback fails after a route-first mutation", async () => {
     const currentEnv = {
       OPENAI_API_KEY: "sk-test",
       ...createHostedVerifiedEmailUserEnv({
@@ -198,9 +306,7 @@ describe("RunnerUserEnvService.updateUserEnv", () => {
     setStoredEnv(currentEnv);
     mockedModules.store.writeUserEnv
       .mockRejectedValueOnce(new Error("env write failed"))
-      .mockImplementationOnce(async (_userId: string, plaintext: Uint8Array) => {
-        mockedModules.setStoredPayload(plaintext);
-      });
+      .mockRejectedValueOnce(new Error("env rollback failed"));
 
     await expect(
       createService().updateUserEnv("user_123", {
@@ -210,22 +316,14 @@ describe("RunnerUserEnvService.updateUserEnv", () => {
         },
         mode: "merge",
       }),
-    ).rejects.toThrow("env write failed");
+    ).rejects.toThrow("Hosted user env update failed and rollback also failed for user_123.");
 
     expect(readStoredEnv()).toEqual(currentEnv);
-    expect(mockedModules.reconcileHostedEmailVerifiedSenderRoute).toHaveBeenNthCalledWith(
-      1,
+    expect(mockedModules.reconcileHostedEmailVerifiedSenderRoute).toHaveBeenCalledTimes(1);
+    expect(mockedModules.reconcileHostedEmailVerifiedSenderRoute).toHaveBeenCalledWith(
       expect.objectContaining({
         nextVerifiedEmailAddress: null,
         previousVerifiedEmailAddress: "old@example.com",
-        userId: "user_123",
-      }),
-    );
-    expect(mockedModules.reconcileHostedEmailVerifiedSenderRoute).toHaveBeenNthCalledWith(
-      2,
-      expect.objectContaining({
-        nextVerifiedEmailAddress: "old@example.com",
-        previousVerifiedEmailAddress: null,
         userId: "user_123",
       }),
     );

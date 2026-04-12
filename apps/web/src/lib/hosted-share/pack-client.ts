@@ -1,3 +1,6 @@
+import {
+  buildCloudflareHostedControlSharePackPath,
+} from "@murphai/cloudflare-hosted-control/routes";
 import type { SharePack } from "@murphai/contracts";
 import { parseHostedExecutionSharePack } from "@murphai/hosted-execution/parsers";
 
@@ -30,11 +33,12 @@ export function requireHostedSharePackClient(): HostedSharePackClient {
   return {
     async deleteSharePack(userId, shareId) {
       await requester.requestJson({
+        allowNotFound: true,
         body: undefined,
         label: "delete share pack",
         method: "DELETE",
         parse: () => undefined,
-        path: buildHostedSharePackPath(userId, shareId),
+        path: buildCloudflareHostedControlSharePackPath(userId, shareId),
       });
     },
     async putSharePack(userId, shareId, pack) {
@@ -43,7 +47,7 @@ export function requireHostedSharePackClient(): HostedSharePackClient {
         label: "share pack write",
         method: "PUT",
         parse: parseHostedExecutionSharePack,
-        path: buildHostedSharePackPath(userId, shareId),
+        path: buildCloudflareHostedControlSharePackPath(userId, shareId),
       });
 
       if (!response) {
@@ -53,8 +57,4 @@ export function requireHostedSharePackClient(): HostedSharePackClient {
       return response;
     },
   };
-}
-
-function buildHostedSharePackPath(userId: string, shareId: string): string {
-  return `/internal/users/${encodeURIComponent(userId)}/shares/${encodeURIComponent(shareId)}/pack`;
 }

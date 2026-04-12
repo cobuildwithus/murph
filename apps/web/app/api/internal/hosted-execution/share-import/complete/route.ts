@@ -5,7 +5,6 @@ import { getPrisma } from "@/src/lib/prisma";
 import { deleteHostedSharePackObject } from "@/src/lib/hosted-share/pack-store";
 import {
   finalizeHostedShareAcceptance,
-  findHostedShareLinkById,
   normalizeOptionalString,
 } from "@/src/lib/hosted-share/shared";
 
@@ -15,9 +14,14 @@ export const POST = withJsonError(async (request: Request) => {
   const eventId = normalizeRequiredString(body.eventId, "eventId");
   const shareId = normalizeRequiredString(body.shareId, "shareId");
   const prisma = getPrisma();
-  const shareRecord = await findHostedShareLinkById(shareId, prisma);
+  const finalization = await finalizeHostedShareAcceptance({
+    eventId,
+    memberId,
+    prisma,
+    shareId,
+  });
 
-  if (!shareRecord) {
+  if (!finalization.shareFound) {
     throw hostedOnboardingError({
       code: "HOSTED_SHARE_NOT_FOUND",
       message: `Hosted share ${shareId} was not found.`,
@@ -25,30 +29,23 @@ export const POST = withJsonError(async (request: Request) => {
     });
   }
 
-  const finalized = await finalizeHostedShareAcceptance({
-    eventId,
-    memberId,
-    prisma,
-    shareId,
-  });
-
-  if (finalized) {
+  if (finalization.sharePackOwnerMemberId) {
     try {
       await deleteHostedSharePackObject({
-        ownerUserId: shareRecord.senderMemberId,
+        ownerUserId: finalization.sharePackOwnerMemberId,
         shareId,
       });
     } catch (error) {
-      console.error(
-        `Hosted share ${shareId} finalized but its Cloudflare pack could not be deleted.`,
-        error instanceof Error ? error.message : String(error),
+      throw new Error(
+        `Hosted share ${shareId} pack cleanup failed after finalize callback ${eventId}.`,
+        { cause: error },
       );
     }
   }
 
   return jsonOk({
     eventId,
-    finalized,
+    finalized: finalization.finalized,
     shareId,
   });
 });

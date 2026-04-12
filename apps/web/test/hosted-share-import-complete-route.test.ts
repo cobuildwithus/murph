@@ -5,7 +5,6 @@ import { createJsonPostRequest } from "./route-test-helpers";
 const mocks = vi.hoisted(() => ({
   deleteHostedSharePackObject: vi.fn(),
   finalizeHostedShareAcceptance: vi.fn(),
-  findHostedShareLinkById: vi.fn(),
   getPrisma: vi.fn(),
   requireHostedCloudflareCallbackRequest: vi.fn(),
 }));
@@ -28,7 +27,6 @@ vi.mock("@/src/lib/hosted-share/shared", async () => {
   return {
     ...actual,
     finalizeHostedShareAcceptance: mocks.finalizeHostedShareAcceptance,
-    findHostedShareLinkById: mocks.findHostedShareLinkById,
   };
 });
 
@@ -45,10 +43,10 @@ describe("hosted share-import complete route", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.deleteHostedSharePackObject.mockResolvedValue(undefined);
-    mocks.finalizeHostedShareAcceptance.mockResolvedValue(true);
-    mocks.findHostedShareLinkById.mockResolvedValue({
-      id: "share_123",
-      senderMemberId: "member_sender",
+    mocks.finalizeHostedShareAcceptance.mockResolvedValue({
+      finalized: false,
+      shareFound: true,
+      sharePackOwnerMemberId: "member_sender",
     });
     mocks.getPrisma.mockReturnValue({ prisma: true });
     mocks.requireHostedCloudflareCallbackRequest.mockImplementation(async (request: Request) => {
@@ -57,7 +55,7 @@ describe("hosted share-import complete route", () => {
     });
   });
 
-  it("finalizes the hosted share and deletes the sender pack through the signed callback lane", async () => {
+  it("retries Cloudflare pack cleanup for an already-consumed matching callback", async () => {
     const response = await hostedShareImportCompleteRoute.POST(
       createJsonPostRequest(
         "https://join.example.test/api/internal/hosted-execution/share-import/complete",
@@ -70,7 +68,6 @@ describe("hosted share-import complete route", () => {
 
     expect(response.status).toBe(200);
     expect(mocks.requireHostedCloudflareCallbackRequest).toHaveBeenCalledTimes(1);
-    expect(mocks.findHostedShareLinkById).toHaveBeenCalledWith("share_123", { prisma: true });
     expect(mocks.finalizeHostedShareAcceptance).toHaveBeenCalledWith({
       eventId: "evt_share",
       memberId: "member_recipient",
@@ -83,13 +80,17 @@ describe("hosted share-import complete route", () => {
     });
     await expect(response.json()).resolves.toEqual({
       eventId: "evt_share",
-      finalized: true,
+      finalized: false,
       shareId: "share_123",
     });
   });
 
-  it("keeps the finalize success response even when pack cleanup fails", async () => {
-    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+  it("surfaces pack cleanup failures so the callback can be retried", async () => {
+    mocks.finalizeHostedShareAcceptance.mockResolvedValue({
+      finalized: true,
+      shareFound: true,
+      sharePackOwnerMemberId: "member_sender",
+    });
     mocks.deleteHostedSharePackObject.mockRejectedValue(new Error("delete failed"));
 
     const response = await hostedShareImportCompleteRoute.POST(
@@ -102,16 +103,21 @@ describe("hosted share-import complete route", () => {
       ),
     );
 
-    expect(response.status).toBe(200);
-    expect(consoleError).toHaveBeenCalledWith(
-      "Hosted share share_123 finalized but its Cloudflare pack could not be deleted.",
-      "delete failed",
-    );
-    consoleError.mockRestore();
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toMatchObject({
+      error: expect.objectContaining({
+        code: "INTERNAL_ERROR",
+        message: "Internal error.",
+      }),
+    });
   });
 
-  it("does not delete the pack when the callback is stale for the current claim", async () => {
-    mocks.finalizeHostedShareAcceptance.mockResolvedValue(false);
+  it("returns 404 when the accepted share link no longer exists", async () => {
+    mocks.finalizeHostedShareAcceptance.mockResolvedValue({
+      finalized: false,
+      shareFound: false,
+      sharePackOwnerMemberId: null,
+    });
 
     const response = await hostedShareImportCompleteRoute.POST(
       createJsonPostRequest(
@@ -123,12 +129,12 @@ describe("hosted share-import complete route", () => {
       ),
     );
 
-    expect(response.status).toBe(200);
-    expect(mocks.deleteHostedSharePackObject).not.toHaveBeenCalled();
-    await expect(response.json()).resolves.toEqual({
-      eventId: "evt_share",
-      finalized: false,
-      shareId: "share_123",
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toMatchObject({
+      error: expect.objectContaining({
+        message: "Hosted share share_123 was not found.",
+      }),
     });
+    expect(mocks.deleteHostedSharePackObject).not.toHaveBeenCalled();
   });
 });
