@@ -33,10 +33,12 @@ export interface CreateAssistantSessionInput extends AssistantSessionLocator {
   model?: string | null
   now?: Date
   oss?: boolean
+  presetId?: string | null
   profile?: string | null
   provider?: AssistantChatProvider
   providerName?: string | null
   reasoningEffort?: string | null
+  webSearch?: string | null
   sandbox?: AssistantSandbox | null
   zeroDataRetention?: boolean | null
   target?: AssistantModelTarget | null

@@ -1,7 +1,9 @@
 import type { AssistantChatProvider } from '@murphai/operator-config/assistant-cli-contracts'
 import {
   normalizeAssistantProviderConfig,
+  supportsAssistantNativeResume,
   supportsAssistantReasoningEffort,
+  supportsAssistantZeroDataRetention,
   type AssistantProviderConfigInput,
 } from '@murphai/operator-config/assistant/provider-config'
 import {
@@ -77,7 +79,9 @@ export function resolveAssistantProviderTargetCapabilities(
   const normalized = normalizeAssistantProviderConfig(input)
   return stripAssistantProviderExecutionCapabilities({
     ...resolveAssistantProviderDefinition(normalized.provider).capabilities,
+    supportsNativeResume: supportsAssistantNativeResume(normalized),
     supportsReasoningEffort: supportsAssistantReasoningEffort(normalized),
+    supportsZeroDataRetention: supportsAssistantZeroDataRetention(normalized),
   })
 }
 
@@ -87,7 +91,9 @@ export function resolveAssistantProviderTargetExecutionCapabilities(
   const normalized = normalizeAssistantProviderConfig(input)
   return {
     ...resolveAssistantProviderDefinition(normalized.provider).capabilities,
+    supportsNativeResume: supportsAssistantNativeResume(normalized),
     supportsReasoningEffort: supportsAssistantReasoningEffort(normalized),
+    supportsZeroDataRetention: supportsAssistantZeroDataRetention(normalized),
   }
 }
 
@@ -272,5 +278,6 @@ function stripAssistantProviderExecutionCapabilities(
     supportsNativeResume: capabilities.supportsNativeResume,
     supportsReasoningEffort: capabilities.supportsReasoningEffort,
     supportsRichUserMessageContent: capabilities.supportsRichUserMessageContent,
+    supportsZeroDataRetention: capabilities.supportsZeroDataRetention,
   }
 }

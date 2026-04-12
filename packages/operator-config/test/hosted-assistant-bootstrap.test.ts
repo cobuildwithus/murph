@@ -128,9 +128,11 @@ test('hosted assistant config parsing and readiness helpers normalize expected s
     baseUrl: 'https://api.openai.com/v1',
     headers: null,
     model: 'gpt-5',
+    presetId: null,
     provider: 'openai-compatible',
     providerName: null,
     reasoningEffort: null,
+    webSearch: null,
     zeroDataRetention: null,
   })
   assert.deepEqual(resolveHostedAssistantProviderConfig(config), {
@@ -138,9 +140,11 @@ test('hosted assistant config parsing and readiness helpers normalize expected s
     baseUrl: 'https://api.openai.com/v1',
     headers: null,
     model: 'gpt-5',
+    presetId: null,
     provider: 'openai-compatible',
     providerName: null,
     reasoningEffort: null,
+    webSearch: null,
     zeroDataRetention: null,
   })
   assert.deepEqual(resolveHostedAssistantOperatorDefaultsState(config), {
@@ -290,7 +294,7 @@ test('hosted assistant bootstrap reads process env and accepts valid boolean and
     (error) =>
       error instanceof hostedConfigModule.HostedAssistantConfigurationError &&
       error.code === 'HOSTED_ASSISTANT_CONFIG_INVALID' &&
-      /HOSTED_ASSISTANT_ZERO_DATA_RETENTION can be used only with Vercel AI Gateway/u.test(
+      /HOSTED_ASSISTANT_ZERO_DATA_RETENTION can be used only with a hosted target that enforces zero data retention/u.test(
         error.message,
       ),
   )
@@ -441,10 +445,10 @@ test('hosted assistant bootstrap seeds or updates platform profiles from hosted 
   assert.deepEqual(unchanged, {
     configured: true,
     provider: 'openai-compatible',
-    seeded: false,
-    source: 'saved',
+    seeded: true,
+    source: 'hosted-env',
   })
-  assert.equal(unchangedModule.saveHostedAssistantConfig.mock.calls.length, 0)
+  assert.equal(unchangedModule.saveHostedAssistantConfig.mock.calls.length, 1)
 })
 
 test('hosted assistant bootstrap validates env combinations and unsupported provider settings', async () => {

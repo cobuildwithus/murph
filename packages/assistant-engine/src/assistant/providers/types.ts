@@ -47,6 +47,7 @@ export interface AssistantProviderCapabilities {
   supportsNativeResume: boolean
   supportsReasoningEffort: boolean
   supportsRichUserMessageContent: boolean
+  supportsZeroDataRetention: boolean
 }
 
 export type AssistantMurphCommandSurface = 'bound-tools' | 'direct-cli'
@@ -90,7 +91,10 @@ export interface AssistantProviderTurnInput {
   prompt?: string | null
   provider?: AssistantChatProvider | null
   providerName?: string | null
+  presetId?: string | null
   reasoningEffort?: string | null
+  webSearch?: string | null
+  zeroDataRetention?: boolean | null
   resumeProviderSessionId?: string | null
   sandbox?: AssistantSandbox | null
   sessionContext?: {

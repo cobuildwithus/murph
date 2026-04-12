@@ -1803,6 +1803,8 @@ test('assistant operator config keeps nested provider defaults across unrelated 
               Authorization: 'Bearer override-token',
               'X-Foo': 'bar',
             },
+            presetId: null,
+            webSearch: null,
           },
           identityId: 'assistant:primary',
           failoverRoutes: null,
@@ -1864,7 +1866,9 @@ test('assistant operator config keeps nested provider defaults across unrelated 
     headers: {
       'X-Foo': 'bar',
     },
+    presetId: null,
     reasoningEffort: null,
+    webSearch: null,
   })
 })
 
@@ -1922,7 +1926,9 @@ test('updating the saved backend target replaces the previous backend cleanly', 
     apiKeyEnv: 'OLLAMA_API_KEY',
     providerName: 'ollama',
     headers: null,
+    presetId: null,
     reasoningEffort: null,
+    webSearch: null,
   })
 })
 
@@ -7970,8 +7976,10 @@ test('assistant Ink resyncs the next turn selection after a failover-updated ses
       endpoint: 'http://127.0.0.1:11434/v1',
       headers: null,
       model: 'backup-model',
+      presetId: null,
       providerName: 'ollama',
       reasoningEffort: null,
+      webSearch: null,
     },
     resumeState: {
       providerSessionId: 'thread-backup',
@@ -8015,8 +8023,10 @@ test('assistant Ink preserves explicit selections when unrelated same-provider s
       endpoint: 'http://127.0.0.1:11434/v1',
       headers: null,
       model: null,
+      presetId: null,
       providerName: 'ollama-a',
       reasoningEffort: null,
+      webSearch: null,
     },
     resumeState: null,
     provider: 'openai-compatible',

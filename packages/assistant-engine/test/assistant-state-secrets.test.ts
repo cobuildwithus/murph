@@ -123,8 +123,10 @@ describe('assistant session secret sidecars', () => {
         'X-Trace': 'trace-123',
       },
       model: 'gpt-5.4',
+      presetId: null,
       providerName: 'murph-openai',
       reasoningEffort: 'medium',
+      webSearch: null,
     })
     expect(result.secrets).toEqual({
       schema: 'murph.assistant-session-secrets.v1',

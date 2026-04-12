@@ -23,6 +23,7 @@ export const codexCliProviderDefinition: AssistantProviderDefinition = {
     supportsNativeResume: true,
     supportsReasoningEffort: true,
     supportsRichUserMessageContent: false,
+    supportsZeroDataRetention: false,
     supportsToolRuntime: false,
   },
   async discoverModels() {

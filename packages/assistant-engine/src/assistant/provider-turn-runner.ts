@@ -18,7 +18,7 @@ import {
 } from '../assistant-cli-tools.js'
 import {
   executeAssistantProviderTurnAttempt,
-  resolveAssistantProviderExecutionCapabilities,
+  resolveAssistantProviderTargetExecutionCapabilities,
   type AssistantProviderAttemptMetadata,
   type AssistantProviderTurnExecutionResult,
 } from '../assistant-provider.js'
@@ -328,9 +328,12 @@ async function resolveAssistantRouteTurnPlan(input: {
     route: input.route,
     sessionBinding: readAssistantProviderBinding(input.session),
   })
+  const routeProviderCapabilities = resolveAssistantProviderTargetExecutionCapabilities({
+    provider: input.route.provider,
+    ...input.route.providerOptions,
+  })
   const resumeProviderSessionId =
-    resolveAssistantProviderExecutionCapabilities(input.route.provider)
-      .supportsNativeResume &&
+    routeProviderCapabilities.supportsNativeResume &&
     resumeBinding !== null
       ? resolveAssistantProviderResumeKey({
           binding: resumeBinding,
@@ -343,9 +346,7 @@ async function resolveAssistantRouteTurnPlan(input: {
     input.sharedPlan.firstTurnCheckInEligible &&
     shouldInjectBootstrapContext &&
     input.session.turnCount === 0
-  const providerCapabilities = resolveAssistantProviderExecutionCapabilities(
-    input.route.provider,
-  )
+  const providerCapabilities = routeProviderCapabilities
   const conversationMessages = removeTrailingCurrentUserPrompt(
     await loadAssistantConversationMessages({
       limit: 20,
@@ -437,7 +438,7 @@ async function resolveAssistantVaultOverviewBlock(
 }
 
 function resolveAssistantPromptCapabilityAvailability(input: {
-  providerCapabilities: ReturnType<typeof resolveAssistantProviderExecutionCapabilities>
+  providerCapabilities: ReturnType<typeof resolveAssistantProviderTargetExecutionCapabilities>
   toolCatalog: ReturnType<typeof createProviderTurnAssistantToolCatalog>
 }): AssistantPromptCapabilityAvailability {
   return {
@@ -466,7 +467,7 @@ function resolveAssistantPromptCapabilityAvailability(input: {
 }
 
 function hasRouteToolRuntimeAccess(input: {
-  providerCapabilities: ReturnType<typeof resolveAssistantProviderExecutionCapabilities>
+  providerCapabilities: ReturnType<typeof resolveAssistantProviderTargetExecutionCapabilities>
   toolCatalog: ReturnType<typeof createProviderTurnAssistantToolCatalog>
   toolNames: readonly string[]
 }): boolean {
@@ -477,7 +478,7 @@ function hasRouteToolRuntimeAccess(input: {
 }
 
 function resolveAssistantCommandAccessMode(input: {
-  providerCapabilities: ReturnType<typeof resolveAssistantProviderExecutionCapabilities>
+  providerCapabilities: ReturnType<typeof resolveAssistantProviderTargetExecutionCapabilities>
   toolCatalog: ReturnType<typeof createProviderTurnAssistantToolCatalog>
 }): AssistantMurphCommandAccessMode {
   switch (input.providerCapabilities.murphCommandSurface) {
@@ -573,7 +574,11 @@ async function executeAssistantProviderAttempt(input: {
       baseUrl: attemptPlan.route.providerOptions.baseUrl,
       apiKeyEnv: attemptPlan.route.providerOptions.apiKeyEnv,
       providerName: attemptPlan.route.providerOptions.providerName,
+      presetId: attemptPlan.route.providerOptions.presetId,
       headers: attemptPlan.route.providerOptions.headers,
+      webSearch: attemptPlan.route.providerOptions.webSearch,
+      zeroDataRetention:
+        attemptPlan.route.providerOptions.zeroDataRetention ?? null,
       conversationMessages: attemptPlan.routePlan.conversationMessages,
       onEvent: executionPlan.input.onProviderEvent ?? undefined,
       profile: attemptPlan.route.providerOptions.profile,

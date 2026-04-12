@@ -536,8 +536,10 @@ test('assistant doctor repairs assistant-state permissions but leaves inline leg
             'X-Visible': 'public-header',
           },
           model: 'gpt-4.1-mini',
+          presetId: null,
           providerName: 'legacy',
           reasoningEffort: null,
+          webSearch: null,
         },
         resumeState: {
           providerSessionId: 'provider-binding-1',

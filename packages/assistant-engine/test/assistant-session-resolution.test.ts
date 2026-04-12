@@ -175,10 +175,13 @@ describe('assistant session resolution', () => {
       sandbox: null,
       approvalPolicy: null,
       oss: false,
+      presetId: null,
       profile: null,
       baseUrl: 'https://gateway.example.com/v1',
       apiKeyEnv: 'OPENAI_API_KEY',
       providerName: 'Example Gateway',
+      webSearch: null,
+      zeroDataRetention: null,
       headers: {
         'X-Trace-Id': 'trace-123',
       },

@@ -129,10 +129,12 @@ test('operator config persists defaults, hosted config, and invalid hosted paylo
       },
       model: 'gpt-4.1',
       oss: false,
+      presetId: null,
       profile: null,
       providerName: 'Example API',
       reasoningEffort: 'medium',
       sandbox: null,
+      webSearch: null,
       zeroDataRetention: null,
     },
   )
@@ -492,8 +494,10 @@ test('operator config trims explicit self-target defaults and normalizes legacy 
         'X-Trace-Id': 'trace-1',
       },
       model: 'gpt-5.4',
+      presetId: null,
       providerName: 'Example Gateway',
       reasoningEffort: 'high',
+      webSearch: null,
     },
     failoverRoutes: [
       {

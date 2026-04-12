@@ -128,6 +128,7 @@ describe('model harness runtime helpers', () => {
       status: z.string(),
     })
     const model = resolveAssistantLanguageModel({
+      executionDriver: 'gateway',
       model: 'murph-mini',
     })
     const previewTools = createAssistantToolCatalogFromCapabilities(
@@ -186,6 +187,7 @@ describe('model harness runtime helpers', () => {
       status: z.string(),
     })
     const gatewayModel = resolveAssistantLanguageModel({
+      executionDriver: 'gateway',
       model: 'murph-gateway',
     })
 
@@ -246,6 +248,7 @@ describe('model harness runtime helpers', () => {
     const model = resolveAssistantLanguageModel({
       apiKeyEnv: 'ASSISTANT_API_KEY',
       baseUrl: 'https://api.openai.com/v1',
+      executionDriver: 'openai-responses',
       model: 'gpt-4.1-mini',
       providerName: ' Murph Hosted ',
     })
@@ -1422,6 +1425,7 @@ describe('inbox model harness', () => {
       captureId: 'capture-1',
       inboxServices,
       modelSpec: {
+        executionDriver: 'gateway',
         model: 'murph-mini',
       },
       requestId: 'req-1',
@@ -1513,6 +1517,7 @@ describe('inbox model harness', () => {
         captureId: 'capture-1',
         inboxServices,
         modelSpec: {
+          executionDriver: 'gateway',
           model: 'murph-mini',
         },
         vault: vaultRoot,

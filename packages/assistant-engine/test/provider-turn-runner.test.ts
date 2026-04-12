@@ -33,7 +33,7 @@ const runnerMocks = vi.hoisted(() => ({
   recoverAssistantSessionAfterProviderFailure: vi.fn(),
   resolveAssistantCliAccessContext: vi.fn(),
   resolveAssistantCliSurfaceBootstrapContext: vi.fn(),
-  resolveAssistantProviderExecutionCapabilities: vi.fn(),
+  resolveAssistantProviderTargetExecutionCapabilities: vi.fn(),
   resolveAssistantProviderResumeKey: vi.fn(),
   resolveAssistantRouteResumeBinding: vi.fn(),
   shouldAttemptAssistantProviderFailover: vi.fn(),
@@ -55,8 +55,8 @@ vi.mock('@murphai/core', () => ({
 vi.mock('../src/assistant-provider.ts', () => ({
   executeAssistantProviderTurnAttempt:
     runnerMocks.executeAssistantProviderTurnAttempt,
-  resolveAssistantProviderExecutionCapabilities:
-    runnerMocks.resolveAssistantProviderExecutionCapabilities,
+  resolveAssistantProviderTargetExecutionCapabilities:
+    runnerMocks.resolveAssistantProviderTargetExecutionCapabilities,
 }))
 
 vi.mock('../src/assistant/diagnostics.ts', () => ({
@@ -222,7 +222,7 @@ describe('executeProviderTurnWithRecovery', () => {
     runnerMocks.resolveAssistantCliSurfaceBootstrapContext
       .mockReset()
       .mockResolvedValue('cli-bootstrap')
-    runnerMocks.resolveAssistantProviderExecutionCapabilities
+    runnerMocks.resolveAssistantProviderTargetExecutionCapabilities
       .mockReset()
       .mockReturnValue({
         murphCommandSurface: 'bound-tools',
@@ -432,7 +432,7 @@ describe('executeProviderTurnWithRecovery', () => {
       routeId: 'route-primary',
     })
 
-    runnerMocks.resolveAssistantProviderExecutionCapabilities.mockReturnValue({
+    runnerMocks.resolveAssistantProviderTargetExecutionCapabilities.mockReturnValue({
       murphCommandSurface: 'direct-cli',
       supportsNativeResume: true,
       supportsToolRuntime: false,
@@ -1040,8 +1040,10 @@ function createAssistantSession(input?: {
         Authorization: 'Bearer token',
       },
       model: 'gpt-4.1',
+      presetId: null,
       providerName: 'murph-openai',
       reasoningEffort: 'high',
+      webSearch: null,
     },
     resumeState,
     alias: null,

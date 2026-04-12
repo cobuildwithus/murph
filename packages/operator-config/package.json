@@ -36,6 +36,11 @@
       "import": "./dist/assistant/provider-config.js",
       "default": "./dist/assistant/provider-config.js"
     },
+    "./assistant/target-runtime": {
+      "types": "./dist/assistant/target-runtime.d.ts",
+      "import": "./dist/assistant/target-runtime.js",
+      "default": "./dist/assistant/target-runtime.js"
+    },
     "./agentmail-runtime": {
       "types": "./dist/agentmail-runtime.d.ts",
       "import": "./dist/agentmail-runtime.js",

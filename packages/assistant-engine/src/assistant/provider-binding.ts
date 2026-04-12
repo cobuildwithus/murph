@@ -170,6 +170,21 @@ function areAssistantProviderOptionsCompatible(input: {
   current: AssistantProviderSessionOptions
   stored: AssistantProviderSessionOptions
 }): boolean {
+  const currentFingerprint = normalizeNullableString(
+    input.current.continuityFingerprint,
+  )
+  const storedFingerprint = normalizeNullableString(
+    input.stored.continuityFingerprint,
+  )
+
+  if (currentFingerprint !== null || storedFingerprint !== null) {
+    return (
+      currentFingerprint !== null &&
+      currentFingerprint === storedFingerprint &&
+      nullableValuesMatch(input.stored.resumeKind, input.current.resumeKind)
+    )
+  }
+
   return (
     nullableValuesMatch(input.stored.model, input.current.model) &&
     nullableValuesMatch(
@@ -192,6 +207,11 @@ function areAssistantProviderOptionsCompatible(input: {
       input.stored.providerName,
       input.current.providerName,
     ) &&
+    nullableValuesMatch(input.stored.presetId, input.current.presetId) &&
+    nullableValuesMatch(input.stored.executionDriver, input.current.executionDriver) &&
+    nullableValuesMatch(input.stored.resumeKind, input.current.resumeKind) &&
+    nullableValuesMatch(input.stored.webSearch, input.current.webSearch) &&
+    input.stored.zeroDataRetention === input.current.zeroDataRetention &&
     headersMatch(input.stored.headers, input.current.headers)
   )
 }
