@@ -5,10 +5,12 @@ import path from "node:path";
 import { test } from "vitest";
 import { openSqliteRuntimeDatabase } from "@murphai/runtime-state/node";
 
+import { sha256Text } from "../src/shared.ts";
 import { SqliteDeviceSyncStore } from "../src/store.ts";
 import { makeTempDirectory } from "./helpers.ts";
 
 interface WebhookTraceRow {
+  external_account_id: string;
   payload_json: string;
   processing_expires_at: string | null;
   status: string;
@@ -25,15 +27,16 @@ test("device sync store minimizes webhook trace payload retention without changi
         traceId: "trace-1",
         externalAccountId: "acct-1",
         eventType: "sleep.updated",
-        receivedAt: "2026-01-01T00:00:00.000Z",
-        processingExpiresAt: "2026-01-01T00:01:00.000Z",
+        receivedAt: "2026-04-01T00:00:00.000Z",
+        processingExpiresAt: "2026-04-01T00:01:00.000Z",
       }),
       "claimed",
     );
 
     assert.deepEqual(normalizeWebhookTraceRow(readWebhookTraceRow(store, "oura", "trace-1")), {
+      external_account_id: hashStoredWebhookTraceExternalAccountId("oura", "acct-1"),
       payload_json: "{}",
-      processing_expires_at: "2026-01-01T00:01:00.000Z",
+      processing_expires_at: "2026-04-01T00:01:00.000Z",
       status: "processing",
     });
 
@@ -43,25 +46,87 @@ test("device sync store minimizes webhook trace payload retention without changi
         traceId: "trace-1",
         externalAccountId: "acct-1",
         eventType: "sleep.updated",
-        receivedAt: "2026-01-01T00:02:00.000Z",
-        processingExpiresAt: "2026-01-01T00:03:00.000Z",
+        receivedAt: "2026-04-01T00:02:00.000Z",
+        processingExpiresAt: "2026-04-01T00:03:00.000Z",
       }),
       "claimed",
     );
 
     assert.deepEqual(normalizeWebhookTraceRow(readWebhookTraceRow(store, "oura", "trace-1")), {
+      external_account_id: hashStoredWebhookTraceExternalAccountId("oura", "acct-1"),
       payload_json: "{}",
-      processing_expires_at: "2026-01-01T00:03:00.000Z",
+      processing_expires_at: "2026-04-01T00:03:00.000Z",
       status: "processing",
     });
 
     store.completeWebhookTrace("oura", "trace-1");
 
     assert.deepEqual(normalizeWebhookTraceRow(readWebhookTraceRow(store, "oura", "trace-1")), {
+      external_account_id: hashStoredWebhookTraceExternalAccountId("oura", "acct-1"),
       payload_json: "{}",
       processing_expires_at: null,
       status: "processed",
     });
+  } finally {
+    store.close();
+    await rm(tempDir, {
+      force: true,
+      recursive: true,
+    });
+  }
+});
+
+test("device sync store prunes processed webhook traces older than the retention window", async () => {
+  const tempDir = await makeTempDirectory("murph-device-syncd-webhook-trace-prune");
+  const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));
+
+  try {
+    store.database.prepare(`
+      insert into webhook_trace (
+        provider,
+        trace_id,
+        external_account_id,
+        event_type,
+        received_at,
+        payload_json,
+        status,
+        processing_expires_at
+      ) values (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      "oura",
+      "trace-old-processed",
+      "legacy-acct",
+      "sleep.updated",
+      "2025-01-01T00:00:00.000Z",
+      "{}",
+      "processed",
+      null,
+    );
+
+    assert.equal(
+      store.claimWebhookTrace({
+        provider: "oura",
+        traceId: "trace-new",
+        externalAccountId: "acct-1",
+        eventType: "sleep.updated",
+        receivedAt: "2026-04-01T00:00:00.000Z",
+        processingExpiresAt: "2026-04-01T00:01:00.000Z",
+      }),
+      "claimed",
+    );
+
+    const remainingTraceIds = (
+      store.database.prepare(`
+        select trace_id
+        from webhook_trace
+        where provider = ?
+        order by trace_id asc
+      `).all("oura") as Array<{ trace_id?: string }>
+    )
+      .map((row) => row.trace_id)
+      .filter((traceId): traceId is string => typeof traceId === "string");
+
+    assert.deepEqual(remainingTraceIds, ["trace-new"]);
   } finally {
     store.close();
     await rm(tempDir, {
@@ -678,7 +743,7 @@ function readWebhookTraceRow(
   traceId: string,
 ): WebhookTraceRow | null {
   const row = store.database.prepare(`
-    select payload_json, processing_expires_at, status
+    select external_account_id, payload_json, processing_expires_at, status
     from webhook_trace
     where provider = ?
       and trace_id = ?
@@ -687,6 +752,7 @@ function readWebhookTraceRow(
   if (
     !row
     || typeof row !== "object"
+    || typeof row.external_account_id !== "string"
     || typeof row.payload_json !== "string"
     || (row.processing_expires_at !== null && typeof row.processing_expires_at !== "string")
     || typeof row.status !== "string"
@@ -695,6 +761,7 @@ function readWebhookTraceRow(
   }
 
   return {
+    external_account_id: row.external_account_id,
     payload_json: row.payload_json,
     processing_expires_at: row.processing_expires_at,
     status: row.status,
@@ -703,4 +770,17 @@ function readWebhookTraceRow(
 
 function normalizeWebhookTraceRow(row: WebhookTraceRow | null): WebhookTraceRow | null {
   return row ? { ...row } : null;
+}
+
+function hashStoredWebhookTraceExternalAccountId(
+  provider: string,
+  externalAccountId: string,
+): string {
+  return sha256Text(
+    JSON.stringify([
+      "device-sync-webhook-trace-external-account",
+      provider,
+      externalAccountId,
+    ]),
+  );
 }

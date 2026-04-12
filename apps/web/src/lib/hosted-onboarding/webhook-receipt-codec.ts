@@ -221,11 +221,27 @@ function serializeHostedWebhookSideEffectPayload(
         effect.effectId,
       ) as unknown as Prisma.InputJsonValue;
     case "linq_message_send":
+      return serializeHostedWebhookLinqMessagePayload(effect.payload);
     case "revnet_invoice_issue":
       return effect.payload as unknown as Prisma.InputJsonValue;
     default:
       return assertNeverHostedWebhookSideEffect(effect);
   }
+}
+
+function serializeHostedWebhookLinqMessagePayload(
+  payload: HostedWebhookLinqMessageSideEffect["payload"],
+): Prisma.InputJsonValue {
+  const legacyHomeRecipientPhone = payload.memberId ? null : payload.homeRecipientPhone;
+
+  return {
+    chatId: payload.chatId,
+    ...(legacyHomeRecipientPhone ? { homeRecipientPhone: legacyHomeRecipientPhone } : {}),
+    ...(payload.inviteId ? { inviteId: payload.inviteId } : {}),
+    ...(payload.memberId ? { memberId: payload.memberId } : {}),
+    ...(payload.replyToMessageId ? { replyToMessageId: payload.replyToMessageId } : {}),
+    template: payload.template,
+  } as Prisma.InputJsonValue;
 }
 
 function serializeHostedWebhookSideEffectResult(
@@ -264,6 +280,7 @@ function readHostedWebhookLinqMessagePayload(
     chatId,
     homeRecipientPhone: readNullableString(record?.homeRecipientPhone),
     inviteId: readNullableString(record?.inviteId),
+    memberId: readNullableString(record?.memberId),
     replyToMessageId: readNullableString(record?.replyToMessageId),
     template,
   };

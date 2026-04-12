@@ -1,13 +1,13 @@
 /**
  * Webhook-trace persistence owns claim/release/complete semantics for ingress
- * dedupe so the main sqlite store can delegate that lifecycle cleanly.
+ * dedupe while keeping non-canonical residue bounded and narrow.
  */
 
 import type { DatabaseSync } from "node:sqlite";
 
 import { withImmediateTransaction } from "@murphai/runtime-state/node";
 
-import { stringifyJson } from "../shared.ts";
+import { sha256Text, stringifyJson, subtractDays } from "../shared.ts";
 
 import type {
   ClaimDeviceSyncWebhookTraceInput,
@@ -21,6 +21,7 @@ interface StoredWebhookTraceRow {
   processing_expires_at: string | null;
 }
 
+const DEVICE_SYNC_PROCESSED_WEBHOOK_TRACE_RETENTION_DAYS = 30;
 const MINIMIZED_WEBHOOK_TRACE_PAYLOAD_JSON = stringifyJson({});
 
 export function claimDeviceSyncWebhookTrace(
@@ -28,6 +29,12 @@ export function claimDeviceSyncWebhookTrace(
   input: ClaimDeviceSyncWebhookTraceInput,
 ): DeviceSyncWebhookTraceClaimResult {
   return withImmediateTransaction(database, () => {
+    pruneProcessedDeviceSyncWebhookTraces(database, new Date().toISOString());
+
+    const storedExternalAccountId = hashStoredWebhookTraceExternalAccountId(
+      input.provider,
+      input.externalAccountId,
+    );
     const existing = database.prepare(`
       select provider, trace_id, status, processing_expires_at
       from webhook_trace
@@ -50,7 +57,7 @@ export function claimDeviceSyncWebhookTrace(
       `).run(
         input.provider,
         input.traceId,
-        input.externalAccountId,
+        storedExternalAccountId,
         input.eventType,
         input.receivedAt,
         MINIMIZED_WEBHOOK_TRACE_PAYLOAD_JSON,
@@ -87,7 +94,7 @@ export function claimDeviceSyncWebhookTrace(
           or processing_expires_at <= ?
         )
     `).run(
-      input.externalAccountId,
+      storedExternalAccountId,
       input.eventType,
       input.receivedAt,
       MINIMIZED_WEBHOOK_TRACE_PAYLOAD_JSON,
@@ -115,6 +122,8 @@ export function completeDeviceSyncWebhookTrace(
       and trace_id = ?
       and coalesce(status, 'processed') = 'processing'
   `).run(MINIMIZED_WEBHOOK_TRACE_PAYLOAD_JSON, provider, traceId);
+
+  pruneProcessedDeviceSyncWebhookTraces(database, new Date().toISOString());
 }
 
 export function releaseDeviceSyncWebhookTrace(
@@ -128,4 +137,35 @@ export function releaseDeviceSyncWebhookTrace(
       and trace_id = ?
       and coalesce(status, 'processed') = 'processing'
   `).run(provider, traceId);
+
+  pruneProcessedDeviceSyncWebhookTraces(database, new Date().toISOString());
+}
+
+function pruneProcessedDeviceSyncWebhookTraces(
+  database: DatabaseSync,
+  referenceTimestamp: string,
+): void {
+  database.prepare(`
+    delete from webhook_trace
+    where coalesce(status, 'processed') = 'processed'
+      and received_at < ?
+  `).run(
+    subtractDays(
+      referenceTimestamp,
+      DEVICE_SYNC_PROCESSED_WEBHOOK_TRACE_RETENTION_DAYS,
+    ),
+  );
+}
+
+function hashStoredWebhookTraceExternalAccountId(
+  provider: string,
+  externalAccountId: string,
+): string {
+  return sha256Text(
+    JSON.stringify([
+      "device-sync-webhook-trace-external-account",
+      provider,
+      externalAccountId,
+    ]),
+  );
 }

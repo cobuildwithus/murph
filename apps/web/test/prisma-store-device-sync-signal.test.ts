@@ -255,6 +255,15 @@ describe("PrismaDeviceSyncControlPlaneStore webhook traces", () => {
     const { store, traces } = createWebhookTraceStore([
       {
         provider: "oura",
+        traceId: "trace-prunable",
+        providerAccountBlindIndex: buildTestBlindIndex("oura", "acct-prunable"),
+        eventType: "sleep.updated",
+        status: "processed",
+        processingExpiresAt: null,
+        receivedAt: new Date("2025-01-01T00:00:00.000Z"),
+      },
+      {
+        provider: "oura",
         traceId: "trace-processed",
         providerAccountBlindIndex: buildTestBlindIndex("oura", "acct-processed"),
         eventType: "sleep.updated",
@@ -331,6 +340,7 @@ describe("PrismaDeviceSyncControlPlaneStore webhook traces", () => {
       processingExpiresAt: null,
     });
     expect(traces.get("oura:trace-expired")).toBeUndefined();
+    expect(traces.get("oura:trace-prunable")).toBeUndefined();
     expect(traces.get("oura:trace-processing")).toMatchObject({
       status: "processing",
       providerAccountBlindIndex: buildTestBlindIndex("oura", "acct-processing"),
@@ -446,6 +456,14 @@ function matchesWebhookTraceWhere(trace: MutableWebhookTrace, where: Record<stri
   }
 
   if (typeof where.status === "string" && trace.status !== where.status) {
+    return false;
+  }
+
+  if (
+    isRecord(where.receivedAt)
+    && where.receivedAt.lt instanceof Date
+    && trace.receivedAt.getTime() >= where.receivedAt.lt.getTime()
+  ) {
     return false;
   }
 

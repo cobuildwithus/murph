@@ -947,6 +947,27 @@ describe("handleHostedOnboardingLinqWebhook", () => {
           },
         }),
       },
+      hostedMemberRouting: {
+        findUnique: vi.fn().mockResolvedValue({
+          linqChatIdEncrypted: encryptHostedWebNullableString({
+            field: "hosted-member-routing.home-linq-chat-id",
+            memberId: "member_123",
+            value: "chat_home",
+          }),
+          linqRecipientPhoneEncrypted: encryptHostedWebNullableString({
+            field: "hosted-member-routing.home-linq-recipient-phone",
+            memberId: "member_123",
+            value: "+15550100001",
+          }),
+          memberId: "member_123",
+          pendingLinqChatIdEncrypted: null,
+          pendingLinqRecipientPhoneEncrypted: null,
+          telegramUserIdEncrypted: null,
+          telegramUserLookupKey: null,
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+        upsert: vi.fn(),
+      },
     });
 
     const response = await handleHostedOnboardingLinqWebhook({
@@ -983,6 +1004,28 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         replyToMessageId: "msg_123",
       }),
     );
+    expect(
+      (prisma as unknown as {
+        hostedWebhookReceiptSideEffect: {
+          upsert: ReturnType<typeof vi.fn>;
+        };
+      }).hostedWebhookReceiptSideEffect.upsert,
+    ).toHaveBeenCalledWith(expect.objectContaining({
+      create: expect.objectContaining({
+        payloadJson: expect.objectContaining({
+          chatId: "chat_other",
+          memberId: "member_123",
+          template: "conversation_home_redirect",
+        }),
+      }),
+    }));
+    expect(
+      (prisma as unknown as {
+        hostedWebhookReceiptSideEffect: {
+          upsert: ReturnType<typeof vi.fn>;
+        };
+      }).hostedWebhookReceiptSideEffect.upsert.mock.calls[0]?.[0]?.create?.payloadJson,
+    ).not.toHaveProperty("homeRecipientPhone");
     expect(
       (prisma as unknown as {
         hostedMemberRouting: {
@@ -1581,6 +1624,7 @@ function normalizeHostedWebhookSideEffectRecord(value: unknown): Record<string, 
     ...record,
     dispatchPayloadJson: record.kind === "hosted_execution_dispatch" ? record.payloadJson ?? null : null,
     linqChatId: record.kind === "linq_message_send" && typeof payload?.chatId === "string" ? payload.chatId : null,
+    linqMemberId: record.kind === "linq_message_send" && typeof payload?.memberId === "string" ? payload.memberId : null,
     linqInviteId: record.kind === "linq_message_send" && typeof payload?.inviteId === "string" ? payload.inviteId : null,
     linqReplyToMessageId:
       record.kind === "linq_message_send" && typeof payload?.replyToMessageId === "string"
