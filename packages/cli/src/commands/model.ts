@@ -60,7 +60,9 @@ const modelCommandOptionsSchema = z.object({
   show: z
     .boolean()
     .optional()
-    .describe('Show the saved default assistant backend without changing it. When set, no update options are allowed.'),
+    .describe(
+      'Show the saved default assistant backend configuration without changing it. This inspects persisted defaults, not live session state. When set, no update options are allowed.',
+    ),
   preset: modelCommandPresetSchema
     .optional()
     .describe(
@@ -198,7 +200,7 @@ export function registerModelCommands(
   cli.command('model', {
     args: z.object({}),
     description:
-      'Show or update the saved default assistant backend that Murph reuses for future chats and auto-reply.',
+      'Show or update the saved default assistant backend configuration that Murph reuses for future chats and auto-reply. This inspects saved defaults, not the provider or model used by recent turns.',
     examples: [
       {
         description: 'Show the currently saved default assistant backend.',
@@ -227,7 +229,7 @@ export function registerModelCommands(
       },
     ],
     hint:
-      'Run `murph model` in a TTY to reopen the provider/model picker, or pass `--preset` plus backend-specific options to update the saved backend non-interactively.',
+      'Run `murph model` in a TTY to reopen the provider/model picker. In non-interactive contexts, use `murph model --show` to inspect saved defaults, or pass `--preset` plus backend-specific options to update them.',
     options: modelCommandOptionsSchema,
     output: modelCommandResultSchema,
     async run({ options }) {
@@ -440,7 +442,7 @@ async function resolveModelCommandPreset(input: {
   if (!input.allowPrompt) {
     throw new VaultCliError(
       'invalid_option',
-      'Run `murph model --show` to inspect the saved backend, or pass `--preset` / provider options to update it non-interactively.',
+      'Run `murph model --show` to inspect saved defaults, or pass `--preset` / provider options to update them non-interactively.',
     )
   }
 
