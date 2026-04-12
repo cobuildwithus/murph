@@ -29,18 +29,9 @@ export function parseHostedEmailRouteCandidate(
   value: string | null | undefined,
   config: HostedEmailConfig,
 ): { address: string; detail: string } | null {
-  const detailFromAddress = parseHostedEmailAddressDetail(value ?? "", config);
-  if (detailFromAddress) {
-    const normalizedAddress = normalizeHostedEmailAddress(value);
-
-    if (!normalizedAddress) {
-      return null;
-    }
-
-    return {
-      address: normalizedAddress,
-      detail: detailFromAddress,
-    };
+  const addressCandidate = parseHostedEmailAddressCandidate(value, config);
+  if (addressCandidate) {
+    return addressCandidate;
   }
 
   const normalized = value?.trim() ?? "";
@@ -66,23 +57,33 @@ export function formatHostedEmailAddress(config: HostedEmailConfig, detail: stri
   return `${config.localPart}+${detail}@${config.domain}`;
 }
 
-function parseHostedEmailAddressDetail(address: string, config: HostedEmailConfig): string | null {
-  const normalized = normalizeHostedEmailAddress(address);
-  if (!normalized || !config.domain) {
+function parseHostedEmailAddressCandidate(
+  value: string | null | undefined,
+  config: HostedEmailConfig,
+): { address: string; detail: string } | null {
+  const address = normalizeHostedEmailAddress(value);
+  if (!address || !config.domain) {
     return null;
   }
 
   const expectedSuffix = `@${config.domain}`;
-  if (!normalized.endsWith(expectedSuffix)) {
+  if (!address.endsWith(expectedSuffix)) {
     return null;
   }
 
-  const localPart = normalized.slice(0, -expectedSuffix.length);
+  const localPart = address.slice(0, -expectedSuffix.length);
   const prefix = `${config.localPart}+`;
   if (!localPart.startsWith(prefix)) {
     return null;
   }
 
   const detail = localPart.slice(prefix.length).trim();
-  return detail.length > 0 ? detail : null;
+  if (!detail) {
+    return null;
+  }
+
+  return {
+    address,
+    detail,
+  };
 }

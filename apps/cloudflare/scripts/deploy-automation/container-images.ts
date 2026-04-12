@@ -82,10 +82,6 @@ function listHostedContainerImageTagsForCleanup(
   tags: readonly string[],
   keepPerRepository: number,
 ): string[] {
-  const sortedTags = [...new Set(tags)].sort(sortHostedContainerImageTagsDescending);
+  const sortedTags = [...new Set(tags)].sort((left, right) => right.localeCompare(left));
   return sortedTags.slice(keepPerRepository);
-}
-
-function sortHostedContainerImageTagsDescending(left: string, right: string): number {
-  return right.localeCompare(left);
 }

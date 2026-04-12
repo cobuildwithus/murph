@@ -184,10 +184,7 @@ async function hostedEmailVerifiedSenderRouteObjectKey(
 }
 
 function parseHostedEmailUserRouteRecord(value: unknown): HostedEmailUserRouteRecord {
-  const record = requireHostedEmailRouteRecordObject<HostedEmailUserRouteRecord>(
-    value,
-    "Hosted email user route",
-  );
+  const record = requireHostedEmailRouteRecordObject(value, "Hosted email user route");
   if (record.schema !== HOSTED_EMAIL_USER_ROUTE_SCHEMA) {
     throw new TypeError("Hosted email user route schema is invalid.");
   }
@@ -201,11 +198,10 @@ function parseHostedEmailUserRouteRecord(value: unknown): HostedEmailUserRouteRe
   };
 }
 
-function parseHostedEmailVerifiedSenderRouteRecord(value: unknown): HostedEmailVerifiedSenderRouteRecord {
-  const record = requireHostedEmailRouteRecordObject<HostedEmailVerifiedSenderRouteRecord>(
-    value,
-    "Hosted email verified sender route",
-  );
+function parseHostedEmailVerifiedSenderRouteRecord(
+  value: unknown,
+): HostedEmailVerifiedSenderRouteRecord {
+  const record = requireHostedEmailRouteRecordObject(value, "Hosted email verified sender route");
   if (record.schema !== HOSTED_EMAIL_VERIFIED_SENDER_ROUTE_SCHEMA) {
     throw new TypeError("Hosted email verified sender route schema is invalid.");
   }
@@ -235,15 +231,15 @@ function parseHostedEmailVerifiedSenderRouteRecord(value: unknown): HostedEmailV
   };
 }
 
-function requireHostedEmailRouteRecordObject<TRecord extends object>(
+function requireHostedEmailRouteRecordObject(
   value: unknown,
   label: string,
-): Partial<TRecord> {
+): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new TypeError(`${label} must be an object.`);
   }
 
-  return value as Partial<TRecord>;
+  return value as Record<string, unknown>;
 }
 
 function requireHostedEmailRecordString(value: unknown, label: string): string {
