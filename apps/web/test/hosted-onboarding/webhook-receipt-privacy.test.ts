@@ -30,22 +30,29 @@ vi.mock("@prisma/client", () => ({
   },
 }));
 
-vi.mock("@murphai/hosted-execution", () => ({
-  parseHostedExecutionDispatchRequest: (value: unknown) => {
-    if (!looksLikeDispatchRequest(value)) {
-      throw new TypeError("Hosted execution dispatch request is invalid.");
-    }
+vi.mock("@murphai/hosted-execution", async () => {
+  const actual = await vi.importActual<typeof import("@murphai/hosted-execution")>(
+    "@murphai/hosted-execution",
+  );
 
-    return cloneJson(value);
-  },
-  readHostedExecutionOutboxPayload: (value: unknown) => {
-    if (!looksLikeReferenceOutboxPayload(value)) {
-      return null;
-    }
+  return {
+    ...actual,
+    parseHostedExecutionDispatchRequest: (value: unknown) => {
+      if (!looksLikeDispatchRequest(value)) {
+        throw new TypeError("Hosted execution dispatch request is invalid.");
+      }
 
-    return cloneJson(value);
-  },
-}));
+      return cloneJson(value);
+    },
+    readHostedExecutionOutboxPayload: (value: unknown) => {
+      if (!looksLikeReferenceOutboxPayload(value)) {
+        return null;
+      }
+
+      return cloneJson(value);
+    },
+  };
+});
 
 vi.mock("../../src/lib/hosted-execution/control", () => ({
   deleteHostedStoredDispatchPayloadBestEffort,

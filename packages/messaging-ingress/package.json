@@ -11,10 +11,6 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "default": "./dist/index.js"
-    },
     "./linq-webhook": {
       "types": "./dist/linq-webhook.d.ts",
       "default": "./dist/linq-webhook.js"

@@ -12,8 +12,8 @@ importers:
         specifier: ^0.1.15
         version: 0.1.15
       '@cobuild/review-gpt':
-        specifier: ^0.5.57
-        version: 0.5.57(@cfworker/json-schema@4.1.1)
+        specifier: ^0.5.58
+        version: 0.5.58(@cfworker/json-schema@4.1.1)
       '@types/node':
         specifier: ^25.5.0
         version: 25.5.0
@@ -986,8 +986,8 @@ packages:
     resolution: {integrity: sha512-CjzP5OHu6RhOOjmPl/1djZNVEbjttt62rBSzvuPK7u9NrZ37F2lkHT+QmZ4Lb+ZDmMhPTqlwdyqnzwD0Gkhm1Q==}
     hasBin: true
 
-  '@cobuild/review-gpt@0.5.57':
-    resolution: {integrity: sha512-bG+G7h3B6mHkyRO4q6d5NkWjaTCKP4ClJSghlIqxarR5PTIIYPr1EdvxoXOQ3tD4FACAEBWFY/g04Su9xZ+tYA==}
+  '@cobuild/review-gpt@0.5.58':
+    resolution: {integrity: sha512-xdJMKEjzup3Da4lzLwuCBY9AvkHXpZpApbbz5xAmxGt5jNw7yKUJc64uWJd3TbPoLNxsE6PDIqf9sT4DUlm5Qw==}
     hasBin: true
 
   '@cobuild/wire@0.3.6':
@@ -8442,7 +8442,7 @@ snapshots:
 
   '@cobuild/repo-tools@0.1.15': {}
 
-  '@cobuild/review-gpt@0.5.57(@cfworker/json-schema@4.1.1)':
+  '@cobuild/review-gpt@0.5.58(@cfworker/json-schema@4.1.1)':
     dependencies:
       '@cobuild/repo-tools': 0.1.15
       incur: 0.3.25
@@ -13858,7 +13858,7 @@ snapshots:
 
   extension-port-stream@3.0.0:
     dependencies:
-      readable-stream: 4.7.0
+      readable-stream: 3.6.2
       webextension-polyfill: 0.10.0
 
   eyes@0.1.8: {}

@@ -140,7 +140,6 @@ test('setup assistant defaults round-trip between saved operator defaults and se
       providerName: 'openrouter',
       reasoningEffort: 'high',
       webSearch: null,
-      zeroDataRetention: true,
     },
     identityId: null,
     failoverRoutes: null,
@@ -171,7 +170,6 @@ test('setup assistant defaults round-trip between saved operator defaults and se
     assistantApiKeyEnv: 'OPENROUTER_API_KEY',
     assistantProviderName: 'openrouter',
     assistantReasoningEffort: 'high',
-    assistantZeroDataRetention: true,
   })
   assert.equal(
     formatSavedAssistantDefaultsSummary(codexDefaults),

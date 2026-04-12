@@ -29,6 +29,7 @@ function createSession(
     resumeState: null,
     provider: 'openai-compatible',
     providerOptions: {
+      continuityFingerprint: 'fingerprint-chat-controller',
       model: null,
       reasoningEffort: null,
       sandbox: null,
@@ -37,8 +38,10 @@ function createSession(
       oss: false,
       baseUrl: 'http://127.0.0.1:11434/v1',
       apiKeyEnv: 'OLLAMA_API_KEY',
+      executionDriver: 'openai-compatible',
       providerName: 'ollama',
       headers: null,
+      resumeKind: null,
     },
     alias: 'chat:demo',
     binding: {

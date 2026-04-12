@@ -101,7 +101,7 @@ test('root help exposes the Incur built-ins', async () => {
 
   assert.match(help, new RegExp(`vault-cli@${packageJson.version ?? '0.0.0'}`, 'u'))
   assert.match(help, /Integrations:/u)
-  assert.match(help, /chat\s+Open the same assistant chat UI as/u)
+  assert.match(help, /chat\s+Open the same interactive assistant chat UI as/u)
   assert.match(help, /search\s+Search commands for the shared local query projection/u)
   assert.match(help, /timeline\s+Build a descending cross-record timeline/u)
   assert.match(help, /completions\s+Generate shell completion script/u)

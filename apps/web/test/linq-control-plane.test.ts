@@ -83,9 +83,9 @@ const describe = baseDescribe.sequential;
 
 describe("HostedLinqControlPlane", () => {
   beforeAll(async () => {
+    vi.stubGlobal("fetch", mocks.fetch);
     linqControlPlane = await import("../src/lib/linq/control-plane");
     inboxd = await vi.importActual<MessagingIngressLinqModule>("@murphai/messaging-ingress/linq-webhook");
-    vi.stubGlobal("fetch", mocks.fetch);
   });
 
   afterEach(() => {
@@ -94,6 +94,7 @@ describe("HostedLinqControlPlane", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.stubGlobal("fetch", mocks.fetch);
     process.env.LINQ_API_BASE_URL = "https://linq.example.test/api/partner/v3";
     process.env.LINQ_API_TOKEN = "linq-token";
     process.env.LINQ_WEBHOOK_TIMESTAMP_TOLERANCE_MS = String(5 * 60_000);

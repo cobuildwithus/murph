@@ -111,6 +111,7 @@ export function resolveAssistantModelCatalog(input: {
   discovery?: AssistantModelDiscoveryResult | null
   headers?: Record<string, string> | null
   oss?: boolean | null
+  presetId?: string | null
   provider?: AssistantChatProvider | null
   providerName?: string | null
 }): AssistantModelCatalog {

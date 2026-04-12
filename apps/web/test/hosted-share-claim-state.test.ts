@@ -8,7 +8,10 @@ import {
 describe("hosted share claim transitions", () => {
   it("waits for the claim mutation before reading finalization state", async () => {
     let committed = false;
-    const updateMany = vi.fn(async () => {
+    const updateMany = vi.fn(async (_input: {
+      data: Record<string, unknown>;
+      where: Record<string, unknown>;
+    }) => {
       await Promise.resolve();
       committed = true;
       return { count: 1 };
@@ -40,12 +43,9 @@ describe("hosted share claim transitions", () => {
     expect(updateMany).toHaveBeenCalledTimes(1);
     expect(findUnique).toHaveBeenCalledTimes(1);
 
-    const [{ where, data }] = updateMany.mock.calls[0] as [
-      {
-        data: Record<string, unknown>;
-        where: Record<string, unknown>;
-      },
-    ];
+    const [firstCall] = updateMany.mock.calls;
+    expect(firstCall).toBeDefined();
+    const [{ where, data }] = firstCall!;
 
     expect(where).toEqual({
       acceptedByMemberId: "member_123",
@@ -61,7 +61,10 @@ describe("hosted share claim transitions", () => {
   });
 
   it("keeps the pack cleanup owner available for duplicate finalize callbacks", async () => {
-    const updateMany = vi.fn(async () => ({ count: 0 }));
+    const updateMany = vi.fn(async (_input: {
+      data: Record<string, unknown>;
+      where: Record<string, unknown>;
+    }) => ({ count: 0 }));
     const findUnique = vi.fn(async () => ({
       consumedAt: new Date("2026-04-12T00:00:00.000Z"),
       consumedByMemberId: "member_123",
@@ -89,7 +92,10 @@ describe("hosted share claim transitions", () => {
   });
 
   it("clears stale consumedByMemberId state when releasing a share acceptance", async () => {
-    const updateMany = vi.fn(async () => ({ count: 1 }));
+    const updateMany = vi.fn(async (_input: {
+      data: Record<string, unknown>;
+      where: Record<string, unknown>;
+    }) => ({ count: 1 }));
 
     const released = await releaseHostedShareAcceptance({
       eventId: "event_123",
@@ -105,12 +111,9 @@ describe("hosted share claim transitions", () => {
     expect(released).toBe(true);
     expect(updateMany).toHaveBeenCalledTimes(1);
 
-    const [{ where, data }] = updateMany.mock.calls[0] as [
-      {
-        data: Record<string, unknown>;
-        where: Record<string, unknown>;
-      },
-    ];
+    const [firstCall] = updateMany.mock.calls;
+    expect(firstCall).toBeDefined();
+    const [{ where, data }] = firstCall!;
 
     expect(where).toEqual({
       acceptedByMemberId: "member_123",
@@ -127,7 +130,10 @@ describe("hosted share claim transitions", () => {
   });
 
   it("fails closed on blank callback member ids without updating claim state", async () => {
-    const updateMany = vi.fn(async () => ({ count: 1 }));
+    const updateMany = vi.fn(async (_input: {
+      data: Record<string, unknown>;
+      where: Record<string, unknown>;
+    }) => ({ count: 1 }));
     const findUnique = vi.fn(async () => ({
       consumedAt: new Date("2026-04-12T00:00:00.000Z"),
       consumedByMemberId: "member_123",
@@ -167,7 +173,10 @@ describe("hosted share claim transitions", () => {
   });
 
   it("normalizes callback member ids before persisting and matching finalization state", async () => {
-    const updateMany = vi.fn(async () => ({ count: 1 }));
+    const updateMany = vi.fn(async (_input: {
+      data: Record<string, unknown>;
+      where: Record<string, unknown>;
+    }) => ({ count: 1 }));
     const findUnique = vi.fn(async () => ({
       consumedAt: new Date("2026-04-12T00:00:00.000Z"),
       consumedByMemberId: "member_123",
@@ -193,12 +202,9 @@ describe("hosted share claim transitions", () => {
       sharePackOwnerMemberId: "owner_123",
     });
 
-    const [{ where, data }] = updateMany.mock.calls[0] as [
-      {
-        data: Record<string, unknown>;
-        where: Record<string, unknown>;
-      },
-    ];
+    const [firstCall] = updateMany.mock.calls;
+    expect(firstCall).toBeDefined();
+    const [{ where, data }] = firstCall!;
 
     expect(where).toEqual({
       acceptedByMemberId: "member_123",

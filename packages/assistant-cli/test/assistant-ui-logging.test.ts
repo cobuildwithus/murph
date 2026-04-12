@@ -41,6 +41,7 @@ function createSession(
     resumeState: null,
     provider: 'openai-compatible',
     providerOptions: {
+      continuityFingerprint: 'fingerprint-ui-logging',
       model: null,
       reasoningEffort: null,
       sandbox: null,
@@ -49,7 +50,9 @@ function createSession(
       oss: false,
       baseUrl: 'http://127.0.0.1:11434/v1',
       apiKeyEnv: 'OLLAMA_API_KEY',
+      executionDriver: 'openai-compatible',
       providerName: 'ollama',
+      resumeKind: null,
       headers: null,
     },
     alias: 'chat:demo',

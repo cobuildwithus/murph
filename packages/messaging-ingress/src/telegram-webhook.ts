@@ -119,32 +119,33 @@ export function parseTelegramThreadTarget(target: string): TelegramThreadTarget 
 }
 
 export function serializeTelegramThreadTarget(input: TelegramThreadTarget): string {
-  const segments = [input.chatId];
+  const normalized = normalizeTelegramThreadTarget(input);
+  const segments = [normalized.chatId];
 
-  if (input.businessConnectionId) {
-    segments.push("business", encodeURIComponent(input.businessConnectionId));
+  if (normalized.businessConnectionId) {
+    segments.push("business", encodeURIComponent(normalized.businessConnectionId));
   }
 
-  if (input.messageThreadId) {
-    segments.push("topic", String(input.messageThreadId));
+  if (normalized.messageThreadId) {
+    segments.push("topic", String(normalized.messageThreadId));
   }
 
-  if (input.directMessagesTopicId) {
-    segments.push("dm-topic", String(input.directMessagesTopicId));
+  if (normalized.directMessagesTopicId) {
+    segments.push("dm-topic", String(normalized.directMessagesTopicId));
   }
 
   return segments.join(":");
 }
 
 export function buildTelegramThreadTarget(message: TelegramMessageLike): TelegramThreadTarget {
-  return {
+  return normalizeTelegramThreadTarget({
     businessConnectionId: normalizeTextValue(message.business_connection_id ?? null),
     chatId: String(message.chat.id),
     directMessagesTopicId: normalizeTelegramPositiveInteger(
       message.direct_messages_topic?.topic_id,
     ),
     messageThreadId: normalizeTelegramPositiveInteger(message.message_thread_id),
-  };
+  });
 }
 
 export function buildTelegramThreadId(message: TelegramMessageLike): string {
@@ -428,6 +429,20 @@ function nowUnixSeconds(): number {
 
 function normalizeTelegramPositiveInteger(value: number | null | undefined): number | null {
   return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : null;
+}
+
+function normalizeTelegramThreadTarget(input: TelegramThreadTarget): TelegramThreadTarget {
+  const directMessagesTopicId = normalizeTelegramPositiveInteger(input.directMessagesTopicId);
+
+  return {
+    businessConnectionId: normalizeTextValue(input.businessConnectionId ?? null),
+    chatId: input.chatId,
+    directMessagesTopicId,
+    messageThreadId:
+      directMessagesTopicId === null
+        ? normalizeTelegramPositiveInteger(input.messageThreadId)
+        : null,
+  };
 }
 
 function parseTelegramPositiveInteger(value: string): number | null {
