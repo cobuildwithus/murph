@@ -7,6 +7,7 @@ import {
   stopManagedDeviceSyncDaemon,
 } from "@murphai/operator-config/device-daemon"
 import { createDeviceSyncClient } from "@murphai/operator-config/device-sync-client"
+import { ALL_QUERY_ENTITY_FAMILIES } from "@murphai/query"
 
 import type {
   ListFilters,
@@ -584,7 +585,7 @@ function createIntegratedQueryServices(): QueryServices {
         normalizeRepeatableEnumFlagOption(
           recordType,
           "record-type",
-          query.ALL_QUERY_ENTITY_FAMILIES,
+          ALL_QUERY_ENTITY_FAMILIES,
         ) ?? []
       const readModel = await query.readVault(vault)
       const streams = normalizeRepeatableFlagOption(stream, "stream") ?? []
