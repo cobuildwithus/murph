@@ -117,6 +117,15 @@ async function verifyWorkspacePackageExports(failures) {
       }
 
       if (
+        packageJson.name === "@murphai/messaging-ingress"
+        && exportKey === "."
+      ) {
+        failures.push(
+          `${path.relative(repoRoot, packageJsonPath)} declares ${JSON.stringify(exportKey)} as a public entrypoint; messaging-ingress should expose provider-specific seams only instead of a root convenience barrel.`,
+        );
+      }
+
+      if (
         packageJson.name === "@murphai/murph"
         && exportKey === "./knowledge-cli-contracts"
       ) {
@@ -229,6 +238,11 @@ async function verifyFocusedOwnerSourceSurfaces(failures) {
       message:
         "packages/assistant-engine/src/knowledge/contracts.ts exists; assistant-engine knowledge helpers must depend on @murphai/query directly instead of reviving a local compatibility shim.",
     },
+    {
+      path: path.join(repoRoot, "packages", "cli", "src", "knowledge-cli-contracts.ts"),
+      message:
+        "packages/cli/src/knowledge-cli-contracts.ts exists; CLI knowledge command wiring should import query-owned schemas directly instead of carrying a second local knowledge-contract alias layer.",
+    },
   ];
   const sourceChecks = [
     {
@@ -302,12 +316,39 @@ async function verifyFocusedOwnerSourceSurfaces(failures) {
       predicate: sourceMentionsSpecifier,
     },
     {
+      path: path.join(repoRoot, "packages", "cli", "src", "commands", "knowledge.ts"),
+      failures: [
+        {
+          specifier: "../knowledge-cli-contracts.js",
+          message:
+            "packages/cli/src/commands/knowledge.ts imports ../knowledge-cli-contracts.js; CLI knowledge commands should consume query-owned schemas directly instead of routing through a package-local alias layer.",
+        },
+      ],
+      predicate: sourceMentionsSpecifier,
+    },
+    {
+      path: path.join(repoRoot, "packages", "cli", "src", "vault-cli-command-manifest.ts"),
+      failures: [
+        {
+          specifier: "./knowledge-cli-contracts.js",
+          message:
+            "packages/cli/src/vault-cli-command-manifest.ts imports ./knowledge-cli-contracts.js; CLI manifest metadata should reference query-owned knowledge schemas directly instead of a local alias boundary.",
+        },
+      ],
+      predicate: sourceMentionsSpecifier,
+    },
+    {
       path: path.join(repoRoot, "packages", "messaging-ingress", "src", "index.ts"),
       failures: [
         {
+          specifier: "./telegram-webhook.ts",
+          message:
+            "packages/messaging-ingress/src/index.ts mentions ./telegram-webhook.ts; Telegram ingress must stay on explicit telegram-webhook and telegram-webhook-payload subpaths instead of drifting back through a package-root barrel.",
+        },
+        {
           specifier: "./telegram-webhook-payload.ts",
           message:
-            "packages/messaging-ingress/src/index.ts mentions ./telegram-webhook-payload.ts; the package root should stay on linq plus higher-level Telegram webhook helpers instead of leaking raw payload parsing through a second boundary.",
+            "packages/messaging-ingress/src/index.ts mentions ./telegram-webhook-payload.ts; messaging-ingress must keep Telegram ingress on explicit subpaths instead of leaking raw payload parsing through a package-root barrel.",
         },
       ],
       predicate: sourceMentionsSpecifier,

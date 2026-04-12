@@ -177,7 +177,7 @@ Do not let `vault-usecases` start reaching into query internals or reintroducing
 
 ### 11. Keep knowledge result contracts owned by `@murphai/query`, with assistant/CLI as thin adapters
 
-**Seam:** `packages/query/src/knowledge-contracts.ts`, `packages/query/src/index.ts`, `packages/assistant-engine/src/{index.ts,knowledge.ts,knowledge/{documents.ts,service.ts}}`, `packages/cli/src/{knowledge-cli-contracts.ts,index.ts}`
+**Seam:** `packages/query/src/knowledge-contracts.ts`, `packages/query/src/index.ts`, `packages/assistant-engine/src/{index.ts,knowledge.ts,knowledge/{documents.ts,service.ts}}`, `packages/cli/src/{commands/knowledge.ts,vault-cli-command-manifest.ts,index.ts}`
 
 The query package already owned the stable knowledge read model, but result contracts were still split across assistant-engine and CLI-local schemas.
 That made one shared product contract drift across multiple packages even though the assistant and CLI layers already depend on the query runtime.
@@ -188,7 +188,7 @@ This patch:
 - removes the old `packages/operator-config/src/knowledge-contracts.ts` compatibility shim and its public export so operator-config no longer surfaces query-owned knowledge result contracts
 - removes the old `packages/assistant-engine/src/knowledge/contracts.ts` compatibility shim and has assistant-engine import query-owned result types directly
 - keeps assistant-engine's public `knowledge` barrel on service operations only, while document helpers stay package-local and callers import the shared `Knowledge*` result contracts directly from `@murphai/query`
-- keeps `packages/cli/src/knowledge-cli-contracts.ts` as a thin package-local schema surface for CLI command wiring, while removing it from the published CLI root so callers do not pick up query-owned contracts from `@murphai/murph`
+- hard-cuts `packages/cli/src/knowledge-cli-contracts.ts` and has the CLI knowledge command layer import query-owned schemas directly, so callers and internal command wiring both depend on `@murphai/query` as the only knowledge-contract owner
 
 **Why this is simpler:** query is now the only real owner of the knowledge result model, while assistant-engine and CLI keep only thin boundary seams.
 Adding or renaming a knowledge result field now has one type owner instead of multiple parallel copies, assistant-engine's public knowledge surface no longer invites callers to depend on the wrong owner package for shared contracts or document-normalization helpers, and the published CLI root no longer leaks a second knowledge-contract entrypoint.

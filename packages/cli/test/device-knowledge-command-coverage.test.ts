@@ -22,14 +22,14 @@ import {
 
 import { registerDeviceCommands } from '../src/commands/device.js'
 import type {
+  KnowledgeGetResult as KnowledgeShowResult,
   KnowledgeIndexRebuildResult,
   KnowledgeLintResult,
   KnowledgeListResult,
   KnowledgeLogTailResult,
   KnowledgeSearchResult,
-  KnowledgeShowResult,
   KnowledgeUpsertResult,
-} from '../src/knowledge-cli-contracts.js'
+} from '@murphai/query'
 import { createVaultCli } from '../src/vault-cli.js'
 import {
   createTempVaultContext,
