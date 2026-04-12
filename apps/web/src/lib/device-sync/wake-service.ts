@@ -11,6 +11,10 @@ import { shapeHostedDeviceSyncJobHintPayload } from "@murphai/device-syncd/hoste
 import type {
   HostedExecutionDeviceSyncJobHint,
 } from "@murphai/device-syncd/hosted-runtime";
+import {
+  sanitizeHostedRuntimeErrorCode,
+  sanitizeHostedRuntimeErrorText,
+} from "@murphai/device-syncd/hosted-runtime";
 import type {
   HostedExecutionDispatchRequest,
   HostedExecutionDeviceSyncWakeEvent,
@@ -34,8 +38,6 @@ import { PrismaDeviceSyncControlPlaneStore, type HostedPrismaTransactionClient }
 import { requireHostedDeviceSyncRuntimeClient } from "./runtime-client";
 import {
   normalizeNullableString,
-  sanitizeHostedRuntimeErrorCode,
-  sanitizeHostedRuntimeErrorText,
   sha256Hex,
   toIsoTimestamp,
 } from "./shared";

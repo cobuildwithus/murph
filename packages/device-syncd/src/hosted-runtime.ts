@@ -849,11 +849,11 @@ function sanitizeHostedRuntimeErrorString(
     : `${sanitized.slice(0, maxLength - 3).trimEnd()}...`;
 }
 
-function sanitizeHostedRuntimeErrorCode(value: string | null): string | null {
+export function sanitizeHostedRuntimeErrorCode(value: string | null): string | null {
   return sanitizeHostedRuntimeErrorString(value, HOSTED_RUNTIME_ERROR_CODE_MAX_LENGTH);
 }
 
-function sanitizeHostedRuntimeErrorText(value: string | null): string | null {
+export function sanitizeHostedRuntimeErrorText(value: string | null): string | null {
   return sanitizeHostedRuntimeErrorString(value, HOSTED_RUNTIME_ERROR_TEXT_MAX_LENGTH);
 }
 

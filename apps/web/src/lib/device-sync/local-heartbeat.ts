@@ -2,10 +2,11 @@ import { deviceSyncError } from "@murphai/device-syncd/public-ingress";
 
 import type { PublicDeviceSyncAccount } from "@murphai/device-syncd/public-ingress";
 import {
-  normalizeNullableString,
   sanitizeHostedRuntimeErrorCode,
   sanitizeHostedRuntimeErrorText,
-} from "./shared";
+} from "@murphai/device-syncd/hosted-runtime";
+
+import { normalizeNullableString } from "./shared";
 
 const HEARTBEAT_ALLOWED_FIELDS = new Set([
   "lastSyncStartedAt",

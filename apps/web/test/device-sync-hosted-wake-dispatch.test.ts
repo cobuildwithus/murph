@@ -668,7 +668,7 @@ describe("dispatchHostedDeviceSyncWake", () => {
     const activeConnection = buildHostedConnection();
     const disconnectedConnection = buildHostedConnection({
       lastErrorCode: "PROVIDER_REVOKE_FAILED",
-      lastErrorMessage: "authorization=Bearer [redacted] refresh_token=[redacted]",
+      lastErrorMessage: "authorization=[redacted] refresh_token=[redacted]",
       status: "disconnected",
     });
     const revokeAccess = vi.fn(async () => {
@@ -690,7 +690,7 @@ describe("dispatchHostedDeviceSyncWake", () => {
       },
       warning: {
         code: "PROVIDER_REVOKE_FAILED",
-        message: "authorization=Bearer [redacted] refresh_token=[redacted]",
+        message: "authorization=[redacted] refresh_token=[redacted]",
       },
     });
 
@@ -702,12 +702,12 @@ describe("dispatchHostedDeviceSyncWake", () => {
           expect.objectContaining({
             localState: expect.objectContaining({
               lastErrorCode: "PROVIDER_REVOKE_FAILED",
-              lastErrorMessage: "authorization=Bearer [redacted] refresh_token=[redacted]",
+              lastErrorMessage: "authorization=[redacted] refresh_token=[redacted]",
             }),
             seed: expect.objectContaining({
               localState: expect.objectContaining({
                 lastErrorCode: "PROVIDER_REVOKE_FAILED",
-                lastErrorMessage: "authorization=Bearer [redacted] refresh_token=[redacted]",
+                lastErrorMessage: "authorization=[redacted] refresh_token=[redacted]",
               }),
             }),
           }),
@@ -718,7 +718,7 @@ describe("dispatchHostedDeviceSyncWake", () => {
       expect.objectContaining({
         revokeWarning: {
           code: "PROVIDER_REVOKE_FAILED",
-          message: "authorization=Bearer [redacted] refresh_token=[redacted]",
+          message: "authorization=[redacted] refresh_token=[redacted]",
         },
       }),
     );
@@ -729,7 +729,7 @@ describe("dispatchHostedDeviceSyncWake", () => {
             hint: expect.objectContaining({
               revokeWarning: {
                 code: "PROVIDER_REVOKE_FAILED",
-                message: "authorization=Bearer [redacted] refresh_token=[redacted]",
+                message: "authorization=[redacted] refresh_token=[redacted]",
               },
             }),
           }),
