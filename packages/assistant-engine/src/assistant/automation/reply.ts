@@ -9,7 +9,6 @@ import {
   resolveAcceptedInboundMessageOperatorAuthority,
   type AssistantOperatorAuthority,
 } from '../operator-authority.js'
-import { resolveAssistantProviderCapabilities } from '../provider-registry.js'
 import type { AssistantExecutionContext } from '../execution-context.js'
 import type { AssistantOutboxDispatchMode } from '../outbox.js'
 import {
@@ -23,10 +22,11 @@ import { listAssistantTurnReceipts } from '../receipts.js'
 import { errorMessage, normalizeNullableString } from '../shared.js'
 import { sendAssistantMessage } from '../service.js'
 import {
-  type AssistantTurnRouteOverride,
   resolveAssistantTurnRoutesForMessage,
-  selectAssistantTurnRouteOverride,
 } from '../service-turn-routes.js'
+import {
+  assistantRoutesSupportRichUserMessageContent,
+} from '../rich-content-routing.js'
 import {
   listAssistantTranscriptEntries,
   resolveAssistantSession,
@@ -92,7 +92,6 @@ interface AssistantAutoReplyReplyDecision {
   operatorAuthority: AssistantOperatorAuthority
   primaryCapture: InboxShowResult['capture']
   prompt: string
-  providerOverride: AssistantAutoReplyProviderOverride | null
   userMessageContent: AssistantUserMessageContentPart[] | null
 }
 
@@ -116,8 +115,6 @@ interface AssistantAutoReplyScanState {
 type AssistantAutoReplySendResult = Awaited<
   ReturnType<typeof sendAssistantMessage>
 >
-
-type AssistantAutoReplyProviderOverride = AssistantTurnRouteOverride
 
 interface AssistantAutoReplyOutcomeSummary {
   failed: number
@@ -390,7 +387,6 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
       operatorAuthority: decision.operatorAuthority,
       primaryCapture: decision.primaryCapture,
       prompt: decision.prompt,
-      providerOverride: decision.providerOverride,
       replyCaptureId: input.context.firstCaptureId,
       userMessageContent: decision.userMessageContent,
       vault: input.vault,
@@ -756,22 +752,20 @@ async function evaluateAssistantAutoReplyGroup(input: {
   if (preparedInput.kind === 'skip') {
     return createAdvancingSkipDecision(preparedInput.reason)
   }
-  let providerOverride: AssistantAutoReplyProviderOverride | null = null
   if (
     preparedInput.requiresRichUserMessageContent
   ) {
-    const richRoute = await resolveAutoReplyRichContentRoute({
+    const richContentSupported = await canAutoReplyRouteRichContent({
       capture: primaryCapture,
       prompt: preparedInput.prompt,
       userMessageContent: preparedInput.userMessageContent,
       vault: input.vault,
     })
-    if (!richRoute.supported) {
+    if (!richContentSupported) {
       return createAdvancingSkipDecision(
         'capture has image/PDF evidence but the configured assistant provider only accepts text input',
       )
     }
-    providerOverride = richRoute.providerOverride
   }
 
   if (
@@ -792,7 +786,6 @@ async function evaluateAssistantAutoReplyGroup(input: {
     operatorAuthority: resolveAcceptedInboundMessageOperatorAuthority(),
     primaryCapture,
     prompt: preparedInput.prompt,
-    providerOverride,
     userMessageContent: preparedInput.userMessageContent,
   }
 }
@@ -831,7 +824,6 @@ async function executeAssistantAutoReply(input: {
   operatorAuthority: AssistantOperatorAuthority
   primaryCapture: InboxShowResult['capture']
   prompt: string
-  providerOverride: AssistantAutoReplyProviderOverride | null
   replyCaptureId: string
   userMessageContent: AssistantUserMessageContentPart[] | null
   vault: string
@@ -847,7 +839,6 @@ async function executeAssistantAutoReply(input: {
       operatorAuthority: input.operatorAuthority,
       persistUserPromptOnFailure: false,
       prompt: input.prompt,
-      ...(input.providerOverride ?? {}),
       userMessageContent: input.userMessageContent,
       includeFirstTurnCheckIn: true,
       deliverResponse: true,
@@ -1144,15 +1135,12 @@ function normalizeComparableText(text: string): string {
   return text.replace(/\s+/gu, ' ').trim()
 }
 
-async function resolveAutoReplyRichContentRoute(input: {
+async function canAutoReplyRouteRichContent(input: {
   capture: InboxShowResult['capture']
   prompt: string
   userMessageContent: AssistantUserMessageContentPart[] | null
   vault: string
-}): Promise<{
-  providerOverride: AssistantAutoReplyProviderOverride | null
-  supported: boolean
-}> {
+}): Promise<boolean> {
   const defaults = await resolveAssistantOperatorDefaults()
   const messageInput = {
     conversation: conversationRefFromCapture(input.capture),
@@ -1165,28 +1153,5 @@ async function resolveAutoReplyRichContentRoute(input: {
     defaults,
     createDefaultLocalAssistantModelTarget(),
   )
-  return selectAutoReplyRichContentRouteOverride(routes)
-}
-
-function selectAutoReplyRichContentRouteOverride(
-  routes: Parameters<typeof selectAssistantTurnRouteOverride>[0],
-): {
-  providerOverride: AssistantAutoReplyProviderOverride | null
-  supported: boolean
-} {
-  const richRoute = selectAssistantTurnRouteOverride(routes, (route) =>
-    resolveAssistantProviderCapabilities(route.provider ?? 'codex-cli')
-      .supportsRichUserMessageContent,
-  )
-  if (!richRoute.route) {
-    return {
-      providerOverride: null,
-      supported: false,
-    }
-  }
-
-  return {
-    providerOverride: richRoute.providerOverride,
-    supported: true,
-  }
+  return assistantRoutesSupportRichUserMessageContent(routes)
 }
