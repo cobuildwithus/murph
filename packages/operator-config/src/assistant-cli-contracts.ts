@@ -466,12 +466,17 @@ function normalizeAssistantSessionResumeState(
       ? value.resumeRouteId.trim()
       : null
 
-  return providerSessionId || resumeRouteId
-    ? assistantSessionResumeStateSchema.parse({
-        providerSessionId,
-        resumeRouteId,
-      })
-    : null
+  // A stored route id without an upstream provider session id cannot resume
+  // anything safely, so greenfield runtime sessions only keep fully resumable
+  // state.
+  if (!providerSessionId) {
+    return null
+  }
+
+  return assistantSessionResumeStateSchema.parse({
+    providerSessionId,
+    resumeRouteId,
+  })
 }
 
 export const assistantTranscriptEntrySchema = z.object({

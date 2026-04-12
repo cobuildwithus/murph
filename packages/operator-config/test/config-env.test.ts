@@ -505,29 +505,7 @@ test('representative contract schemas stay wired to the owned setup/operator sea
       turnCount: 1,
       updatedAt: '2026-04-08T12:05:00.000Z',
     }).providerBinding,
-    {
-      provider: 'openai-compatible',
-      providerOptions: {
-        approvalPolicy: null,
-        continuityFingerprint: resolveAssistantRuntimeTarget({
-          provider: 'openai-compatible',
-          model: 'gpt-5.4',
-          reasoningEffort: 'medium',
-        }).continuityFingerprint,
-        executionDriver: 'openai-compatible',
-        model: 'gpt-5.4',
-        oss: false,
-        presetId: null,
-        profile: null,
-        reasoningEffort: 'medium',
-        resumeKind: null,
-        sandbox: null,
-      },
-      providerSessionId: null,
-      providerState: {
-        resumeRouteId: 'route-only',
-      },
-    },
+    null,
   )
 })
 

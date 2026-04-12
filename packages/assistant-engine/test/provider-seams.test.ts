@@ -24,16 +24,12 @@ import {
   recoverAssistantSessionAfterProviderFailure,
 } from '../src/assistant/provider-turn-recovery.ts'
 import {
-  buildRecoveredAssistantProviderBindingSeed,
   doesAssistantResumeBindingMatchRoute,
   resolveAssistantProviderResumeKey,
-  resolveNextAssistantProviderBinding,
   resolveAssistantRouteResumeBinding,
 } from '../src/assistant/provider-binding.ts'
 import {
-  normalizeAssistantProviderBinding,
   normalizeAssistantSessionResumeState,
-  readAssistantProviderBinding,
   readAssistantProviderResumeRouteId,
   readAssistantProviderSessionId,
   readAssistantSessionResumeState,
@@ -129,53 +125,6 @@ describe('assistant provider seam helpers', () => {
     ).toBeNull()
   })
 
-  it('reuses the previous provider session only when the same route remains active', () => {
-    const previousBinding = createProviderBinding({
-      providerSessionId: 'provider_session_alpha',
-      resumeRouteId: 'route-primary',
-    })
-
-    const reused = resolveNextAssistantProviderBinding({
-      previousBinding,
-      provider: 'openai-compatible',
-      providerOptions: previousBinding.providerOptions,
-      providerSessionId: null,
-      providerState: null,
-      routeId: 'route-primary',
-    })
-
-    expect(reused.providerSessionId).toBe('provider_session_alpha')
-    expect(readAssistantProviderResumeRouteId({ providerBinding: reused })).toBe(
-      'route-primary',
-    )
-
-    const rotated = resolveNextAssistantProviderBinding({
-      previousBinding,
-      provider: 'openai-compatible',
-      providerOptions: previousBinding.providerOptions,
-      providerSessionId: 'provider_session_beta',
-      providerState: null,
-      routeId: 'route-secondary',
-    })
-
-    expect(rotated.providerSessionId).toBe('provider_session_beta')
-    expect(readAssistantProviderResumeRouteId({ providerBinding: rotated })).toBe(
-      'route-secondary',
-    )
-
-    const reset = resolveNextAssistantProviderBinding({
-      previousBinding,
-      provider: 'openai-compatible',
-      providerOptions: previousBinding.providerOptions,
-      providerSessionId: null,
-      providerState: null,
-      routeId: 'route-third',
-    })
-
-    expect(reset.providerSessionId).toBeNull()
-    expect(reset.providerState).toBeNull()
-  })
-
   it('recovers and persists a replacement provider session after connection loss', async () => {
     const { parentRoot, vaultRoot } = await createTempVaultContext(
       'murph-assistant-provider-recovery-',
@@ -210,7 +159,7 @@ describe('assistant provider seam helpers', () => {
     )
     expect(readAssistantProviderSessionId(persisted)).toBe('provider_session_new')
     expect(readAssistantProviderResumeRouteId(persisted)).toBe('route-recovered')
-    expect(readAssistantProviderBinding(persisted)).toMatchObject({
+    expect(persisted?.providerBinding).toMatchObject({
       provider: 'openai-compatible',
       providerSessionId: 'provider_session_new',
     })
@@ -323,38 +272,11 @@ describe('assistant provider seam helpers', () => {
     expect(summarizeAssistantProviderActivityLabels([], 0)).toEqual([])
   })
 
-  it('normalizes provider bindings and persists resume state from bindings when needed', () => {
-    const normalizedBinding = normalizeAssistantProviderBinding({
-      ...createProviderBinding({
-        providerSessionId: ' provider_session_alpha ',
-        resumeRouteId: ' route-primary ',
-      }),
-      providerState: {
-        resumeRouteId: ' route-primary ',
-      },
-    })
-
-    expect(normalizedBinding).toMatchObject({
-      providerSessionId: 'provider_session_alpha',
-      providerState: {
-        resumeRouteId: 'route-primary',
-      },
-    })
-
+  it('normalizes resumable state and persists resume state from bindings when needed', () => {
     expect(
       normalizeAssistantSessionResumeState({
         providerSessionId: '   ',
         resumeRouteId: ' route-primary ',
-      }),
-    ).toEqual({
-      providerSessionId: null,
-      resumeRouteId: 'route-primary',
-    })
-    expect(
-      readAssistantProviderBinding({
-        providerBinding: null,
-        resumeState: null,
-        target: null,
       }),
     ).toBeNull()
 
@@ -371,8 +293,6 @@ describe('assistant provider seam helpers', () => {
       resumeRouteId: 'route-bound',
     })
 
-    expect(normalizeAssistantProviderBinding(null)).toBeNull()
-    expect(readAssistantProviderBinding(null)).toBeNull()
     expect(normalizeAssistantSessionResumeState(null)).toBeNull()
     expect(readAssistantSessionResumeState(null)).toBeNull()
     expect(
@@ -386,47 +306,14 @@ describe('assistant provider seam helpers', () => {
       providerSessionId: 'provider-session-from-binding',
       resumeRouteId: 'route-from-binding',
     })
-    expect(
-      readAssistantProviderBinding({
-        target: createAssistantSession().target,
-      }),
-    ).toBeNull()
-    expect(
-      readAssistantProviderBinding({
-        resumeState: {
-          providerSessionId: ' codex-session ',
-          resumeRouteId: ' codex-route ',
-        },
-        target: {
-          adapter: 'codex-cli',
-          approvalPolicy: 'never',
-          codexCommand: null,
-          codexHome: '/tmp/codex-home',
-          model: 'codex-pro',
-          oss: true,
-          profile: 'research',
-          reasoningEffort: 'high',
-          sandbox: 'workspace-write',
-        },
-      }),
-    ).toMatchObject({
-      provider: 'codex-cli',
-      providerOptions: {
-        approvalPolicy: 'never',
-        codexHome: '/tmp/codex-home',
-        model: 'codex-pro',
-        oss: true,
-        profile: 'research',
-        reasoningEffort: 'high',
-        sandbox: 'workspace-write',
-      },
-      providerSessionId: 'codex-session',
-      providerState: {
-        resumeRouteId: 'codex-route',
-      },
-    })
     expect(writeAssistantProviderResumeRouteId(null, null)).toBeNull()
     expect(writeAssistantSessionProviderSessionId(null, null)).toBeNull()
+    expect(
+      writeAssistantProviderResumeRouteId(
+        writeAssistantSessionProviderSessionId(null, null),
+        'route-only',
+      ),
+    ).toBeNull()
 
     const missingTargetSession = createAssistantSession()
     Reflect.set(missingTargetSession, 'target', null)
@@ -446,19 +333,7 @@ describe('assistant provider seam helpers', () => {
     expect(serializeAssistantSessionForPersistence(mismatchedBindingSession).resumeState).toBeNull()
   })
 
-  it('classifies provider failure helpers and seeds recovered provider bindings', () => {
-    expect(
-      buildRecoveredAssistantProviderBindingSeed({
-        provider: 'openai-compatible',
-        providerOptions: createProviderOptions(),
-      }),
-    ).toEqual({
-      provider: 'openai-compatible',
-      providerOptions: createProviderOptions(),
-      providerSessionId: null,
-      providerState: null,
-    })
-
+  it('classifies provider failure helpers', () => {
     const error = {
       context: {
         connectionLost: true,

@@ -4,7 +4,6 @@ import {
 } from '@murphai/operator-config/assistant-backend'
 import {
   assistantProviderBindingSchema,
-  assistantSessionResumeStateSchema,
   type AssistantSession,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import {
@@ -12,8 +11,8 @@ import {
   serializeAssistantProviderSessionOptions,
 } from '@murphai/operator-config/assistant/provider-config'
 import {
-  readAssistantProviderResumeRouteId,
-  readAssistantProviderSessionId,
+  writeAssistantProviderResumeRouteId,
+  writeAssistantSessionProviderSessionId,
 } from './provider-state.js'
 import { createAssistantRuntimeStateService } from './runtime-state-service.js'
 import type {
@@ -21,6 +20,16 @@ import type {
   AssistantTurnSharedPlan,
   ExecutedAssistantProviderTurnResult,
 } from './service-contracts.js'
+
+export function resolveAssistantResumeStateFromProviderTurn(input: {
+  providerSessionId: string | null
+  routeId: string
+}): AssistantSession['resumeState'] {
+  return writeAssistantProviderResumeRouteId(
+    writeAssistantSessionProviderSessionId(null, input.providerSessionId),
+    input.routeId,
+  )
+}
 
 export async function persistAssistantTurnAndSession(input: {
   input: AssistantMessageInput
@@ -69,21 +78,12 @@ export async function persistAssistantTurnAndSession(input: {
     }) ?? input.session.target
   const nextProviderConfig = assistantBackendTargetToProviderConfigInput(nextTarget)
   const nextProviderOptions = serializeAssistantProviderSessionOptions(nextProviderConfig)
-  const previousProviderSessionId = readAssistantProviderSessionId(input.session)
-  const previousResumeRouteId = readAssistantProviderResumeRouteId(input.session)
-  const nextResumeRouteId =
-    previousProviderSessionId !== null &&
-    previousProviderSessionId === input.providerResult.providerSessionId &&
-    previousResumeRouteId !== null
-      ? previousResumeRouteId
-      : input.providerResult.route.routeId
-  const nextResumeState = assistantSessionResumeStateSchema.parse({
+  const nextResumeState = resolveAssistantResumeStateFromProviderTurn({
     providerSessionId: input.providerResult.providerSessionId,
-    resumeRouteId: nextResumeRouteId,
+    routeId: input.providerResult.route.routeId,
   })
   const nextProviderBinding =
-    nextResumeState &&
-    (nextResumeState.providerSessionId !== null || nextResumeState.resumeRouteId !== null)
+    nextResumeState !== null
       ? assistantProviderBindingSchema.parse({
           provider: nextTarget.adapter,
           providerSessionId: nextResumeState.providerSessionId,
