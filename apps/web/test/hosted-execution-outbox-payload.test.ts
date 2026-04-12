@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  areHostedExecutionOutboxPayloadsEquivalent,
   readHostedExecutionOutboxPayload,
-  readHostedExecutionOutboxPayloadIdentity,
   serializeHostedExecutionOutboxPayload,
   summarizeHostedExecutionOutboxPayload,
 } from "@/src/lib/hosted-execution/outbox-payload";
@@ -50,6 +50,11 @@ describe("hosted execution outbox payload storage", () => {
       .toBe("staged/dispatch-payloads/member_123/evt_wake_123");
     expect(JSON.stringify(payload)).not.toContain("sleep.updated");
     expect(JSON.stringify(payload)).not.toContain("trace_123");
+    expect(summarizeHostedExecutionOutboxPayload(
+      readHostedExecutionOutboxPayload(payload) as NonNullable<
+        ReturnType<typeof readHostedExecutionOutboxPayload>
+      >,
+    )).toBeNull();
   });
 
   it("stores member activation inline when first contact is omitted", () => {
@@ -111,7 +116,7 @@ describe("hosted execution outbox payload storage", () => {
     )).toThrow("Hosted execution gateway.message.send outbox payloads must use reference storage.");
   });
 
-  it("summarizes settled payloads down to a hashed identity", () => {
+  it("summarizes settled inline payloads down to a hashed inline dispatch ref", () => {
     const serialized = serializeHostedExecutionOutboxPayload({
       event: {
         kind: "vault.share.accepted",
@@ -134,17 +139,50 @@ describe("hosted execution outbox payload storage", () => {
     const summary = summarizeHostedExecutionOutboxPayload(payload);
 
     expect(summary).toMatchObject({
-      eventId: "evt_share_summary_123",
-      eventKind: "vault.share.accepted",
-      occurredAt: "2026-04-04T00:00:00.000Z",
-      schema: "murph.hosted-execution-outbox-payload-pruned.v1",
+      dispatchRef: {
+        eventId: "evt_share_summary_123",
+        eventKind: "vault.share.accepted",
+        occurredAt: "2026-04-04T00:00:00.000Z",
+        userId: "member_123",
+      },
+      schema: "murph.hosted-execution-inline-outbox-payload-pruned.v1",
       storage: "pruned",
-      userId: "member_123",
     });
     expect(summary).not.toHaveProperty("dispatch");
-    expect(readHostedExecutionOutboxPayloadIdentity(summary)).toEqual(
-      readHostedExecutionOutboxPayloadIdentity(serialized),
+    expect(areHostedExecutionOutboxPayloadsEquivalent(summary, serialized)).toBe(true);
+  });
+
+  it("rejects malformed pruned inline payload summaries", () => {
+    const serialized = serializeHostedExecutionOutboxPayload({
+      event: {
+        kind: "member.activated",
+        userId: "member_123",
+      },
+      eventId: "evt_activation_123",
+      occurredAt: "2026-04-04T00:00:00.000Z",
+    });
+    const summary = summarizeHostedExecutionOutboxPayload(
+      readHostedExecutionOutboxPayload(serialized) as NonNullable<
+        ReturnType<typeof readHostedExecutionOutboxPayload>
+      >,
     );
+
+    expect(summary).not.toBeNull();
+    if (!summary) {
+      throw new Error("Expected a pruned inline payload summary.");
+    }
+
+    expect(areHostedExecutionOutboxPayloadsEquivalent({
+      dispatchRef: {
+        eventId: "evt_activation_123",
+        eventKind: "device-sync.wake",
+        occurredAt: "2026-04-04T00:00:00.000Z",
+        userId: "member_123",
+      },
+      payloadHash: summary.payloadHash,
+      schema: "murph.hosted-execution-inline-outbox-payload-pruned.v1",
+      storage: "pruned",
+    }, serialized)).toBe(false);
   });
 });
 

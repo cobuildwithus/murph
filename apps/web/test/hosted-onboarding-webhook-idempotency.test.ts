@@ -243,10 +243,7 @@ describe("hosted onboarding webhook retry safety", () => {
       payTxHash: "0xabc123",
       paymentAmount: 1_000_000_000_000_000n,
     });
-    mocks.sendHostedLinqChatMessage.mockResolvedValue({
-      chatId: "chat_123",
-      messageId: "out_msg_123",
-    });
+    mocks.sendHostedLinqChatMessage.mockResolvedValue(undefined);
     mocks.stripeChargesRetrieve.mockResolvedValue({
       customer: "cus_123",
       payment_intent: "pi_123",
@@ -1279,10 +1276,7 @@ describe("hosted onboarding webhook retry safety", () => {
     );
     mocks.sendHostedLinqChatMessage
       .mockRejectedValueOnce(retryableRateLimitError)
-      .mockResolvedValueOnce({
-        chatId: "chat_123",
-        messageId: "out_msg_123",
-      });
+      .mockResolvedValueOnce(undefined);
     const member = {
       billingStatus: HostedBillingStatus.not_started,
       id: "member_123",
@@ -1375,7 +1369,7 @@ describe("hosted onboarding webhook retry safety", () => {
           lastErrorName: "HostedOnboardingError",
           lastErrorRetryable: null,
           lastReceivedAt: expect.any(Date),
-          plannedAt: expect.any(Date),
+          plannedAt: null,
           status: "failed",
         }),
       }),
@@ -1391,7 +1385,6 @@ describe("hosted onboarding webhook retry safety", () => {
         timestamp: null,
       }),
     ).resolves.toMatchObject({
-      duplicate: true,
       ok: true,
     });
 
@@ -1664,20 +1657,8 @@ describe("hosted onboarding webhook retry safety", () => {
         lastErrorMessage: "[redacted]",
         lastErrorName: "HostedOnboardingError",
         lastErrorRetryable: false,
-        plannedAt: expect.any(Date),
-        sideEffects: [
-          expect.objectContaining({
-            attemptCount: 1,
-            linqChatId: "chat_123",
-            linqInviteId: "invite_123",
-            linqReplyToMessageId: "msg_123",
-            linqResultChatId: null,
-            linqResultMessageId: null,
-            linqTemplate: "invite_signup",
-            lastErrorMessage: "[redacted]",
-            status: "sent_unconfirmed",
-          }),
-        ],
+        plannedAt: null,
+        sideEffects: [],
         status: "failed",
       }),
     );
@@ -1705,20 +1686,8 @@ describe("hosted onboarding webhook retry safety", () => {
         lastErrorMessage: "[redacted]",
         lastErrorName: "HostedOnboardingError",
         lastErrorRetryable: false,
-        plannedAt: expect.any(Date),
-        sideEffects: [
-          expect.objectContaining({
-            attemptCount: 1,
-            linqChatId: "chat_123",
-            linqInviteId: "invite_123",
-            linqReplyToMessageId: "msg_123",
-            linqResultChatId: null,
-            linqResultMessageId: null,
-            linqTemplate: "invite_signup",
-            lastErrorMessage: "[redacted]",
-            status: "sent_unconfirmed",
-          }),
-        ],
+        plannedAt: null,
+        sideEffects: [],
         status: "failed",
       }),
     );
@@ -1818,7 +1787,7 @@ describe("hosted onboarding webhook retry safety", () => {
         lastErrorMessage: "[redacted]",
         lastErrorName: "HostedOnboardingError",
         lastErrorRetryable: false,
-        plannedAt: expect.any(Date),
+        plannedAt: null,
         sideEffects: [],
         status: "failed",
       }),
@@ -1847,7 +1816,7 @@ describe("hosted onboarding webhook retry safety", () => {
         lastErrorMessage: "[redacted]",
         lastErrorName: "HostedOnboardingError",
         lastErrorRetryable: false,
-        plannedAt: expect.any(Date),
+        plannedAt: null,
         sideEffects: [],
         status: "failed",
       }),
@@ -2339,10 +2308,7 @@ function buildLinqMessageSideEffect(input: {
     result:
       input.status === "pending"
         ? null
-        : {
-            chatId: createHostedOpaqueIdentifier("linq.chat", input.chatId ?? "chat_123"),
-            messageId: createHostedOpaqueIdentifier("linq.message", input.messageId ?? "out_msg_123"),
-          },
+        : { delivered: true as const },
     sentAt:
       input.sentAt ??
       (input.status === "pending" ? null : "2026-03-26T12:00:01.000Z"),

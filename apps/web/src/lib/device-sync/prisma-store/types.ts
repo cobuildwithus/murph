@@ -57,7 +57,6 @@ export interface HostedTokenAuditRecord {
   provider: string;
   action: HostedTokenAuditAction;
   channel: HostedTokenAuditChannel;
-  sessionId: string | null;
   tokenVersion: number;
   keyVersion: string;
   expectedTokenVersion: number | null;
