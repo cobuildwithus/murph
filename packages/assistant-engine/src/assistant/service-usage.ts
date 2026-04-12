@@ -59,10 +59,6 @@ export async function persistPendingAssistantUsageEvent(input: {
       cachedInputTokens: usage.cachedInputTokens,
       cacheWriteTokens: usage.cacheWriteTokens,
       totalTokens: usage.totalTokens,
-      providerSessionId: input.providerResult.providerSessionId,
-      providerRequestId: usage.providerRequestId,
-      providerMetadataJson: usage.providerMetadataJson,
-      rawUsageJson: usage.rawUsageJson,
     },
   })
 }

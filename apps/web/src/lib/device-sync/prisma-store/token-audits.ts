@@ -14,6 +14,7 @@ export class PrismaHostedTokenAuditStore {
 
   async createTokenAudit(input: CreateHostedTokenAuditInput): Promise<HostedTokenAuditRecord> {
     const prisma = input.tx ?? this.prisma;
+    const hasSessionContext = Boolean(input.sessionId);
     const record = await prisma.deviceTokenAudit.create({
       data: {
         userId: input.userId,
@@ -21,7 +22,7 @@ export class PrismaHostedTokenAuditStore {
         provider: input.provider,
         action: input.action,
         channel: input.channel,
-        sessionId: input.sessionId ?? null,
+        sessionId: null,
         tokenVersion: input.tokenVersion,
         keyVersion: input.keyVersion,
         expectedTokenVersion: input.expectedTokenVersion ?? null,
@@ -32,7 +33,9 @@ export class PrismaHostedTokenAuditStore {
       },
     });
     const audit = mapHostedTokenAuditRecord(record);
-    emitHostedTokenAuditLog(audit);
+    emitHostedTokenAuditLog(audit, {
+      hasSessionContext,
+    });
     return audit;
   }
 }
@@ -56,13 +59,18 @@ function mapHostedTokenAuditRecord(record: HostedTokenAuditPrismaRecord): Hosted
   } satisfies HostedTokenAuditRecord;
 }
 
-function emitHostedTokenAuditLog(record: HostedTokenAuditRecord): void {
+function emitHostedTokenAuditLog(
+  record: HostedTokenAuditRecord,
+  options: {
+    hasSessionContext: boolean;
+  },
+): void {
   console.warn(JSON.stringify({
     event: "device_sync_token_audit",
     action: record.action,
     channel: record.channel,
     connectionScoped: true,
-    hasSessionContext: Boolean(record.sessionId),
+    hasSessionContext: options.hasSessionContext,
     provider: record.provider,
     tokenVersion: record.tokenVersion,
     keyVersion: record.keyVersion,

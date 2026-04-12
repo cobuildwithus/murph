@@ -64,8 +64,7 @@ export type HostedWebhookLinqMessageSideEffect = {
       | "invite_signup";
   };
   result: {
-    chatId: string | null;
-    messageId: string | null;
+    delivered: true;
   } | null;
   sentAt: string | null;
   status: HostedWebhookSideEffectStatus;

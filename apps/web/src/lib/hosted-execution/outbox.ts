@@ -25,6 +25,7 @@ import {
   dispatchHostedExecutionStatus,
   dispatchStoredHostedExecutionStatus,
 } from "./dispatch";
+import { formatHostedExecutionSafeLogError } from "./logging";
 import {
   buildHostedExecutionDispatchRef,
   type HostedExecutionOutboxPayload,
@@ -166,7 +167,7 @@ export async function drainHostedExecutionOutboxBestEffort(input: {
   } catch (error) {
     console.error(
       "Hosted execution outbox best-effort drain failed.",
-      error instanceof Error ? error.message : String(error),
+      formatHostedExecutionSafeLogError(error),
     );
   }
 }
@@ -300,7 +301,7 @@ async function processHostedExecutionOutboxRecord(
     const delivery = resolveHostedExecutionDeliveryOutcome(dispatchResult);
     const nextRecord = await finalizeHostedExecutionOutboxAttempt(prisma, record, {
       dispatchState: delivery.dispatchState,
-      lastError: delivery.lastError,
+      lastError: normalizeHostedExecutionOutboxLastError(delivery.lastError),
       nextAttemptAt: delivery.retryable
         ? new Date(Date.parse(nowIso) + computeRetryDelayMs(record.attemptCount))
         : null,
@@ -317,7 +318,7 @@ async function processHostedExecutionOutboxRecord(
     const permanentPayloadFailure = isPermanentHostedExecutionOutboxError(error);
     const nextRecord = await finalizeHostedExecutionOutboxAttempt(prisma, record, {
       dispatchState: readHostedExecutionEventDispatchState(record.dispatchState),
-      lastError: error instanceof Error ? error.message : String(error),
+      lastError: formatHostedExecutionSafeLogError(error),
       nextAttemptAt: permanentPayloadFailure
         ? null
         : new Date(Date.parse(nowIso) + computeRetryDelayMs(record.attemptCount)),
@@ -582,6 +583,10 @@ function areHostedExecutionDispatchPayloadRefsEquivalent(
   return left === right;
 }
 
+function normalizeHostedExecutionOutboxLastError(lastError: string | null): string | null {
+  return lastError === null ? null : formatHostedExecutionSafeLogError(lastError);
+}
+
 function resolveHostedExecutionDeliveryOutcome(
   dispatchResult: HostedExecutionDispatchResult,
 ): {
@@ -595,7 +600,7 @@ function resolveHostedExecutionDeliveryOutcome(
     return {
       dispatchState: DEFAULT_HOSTED_EXECUTION_EVENT_DISPATCH_STATE,
       deleteStoredPayload: false,
-      lastError: dispatchResult.status.lastError,
+      lastError: normalizeHostedExecutionOutboxLastError(dispatchResult.status.lastError),
       retryable: true,
       status: ExecutionOutboxStatus.delivery_failed,
     };
@@ -606,10 +611,11 @@ function resolveHostedExecutionDeliveryOutcome(
       return {
         dispatchState: dispatchResult.event.state,
         deleteStoredPayload: false,
-        lastError:
+        lastError: normalizeHostedExecutionOutboxLastError(
           dispatchResult.event.lastError
           ?? dispatchResult.status.lastError
           ?? "Hosted execution user queue is backpressured.",
+        ),
         retryable: true,
         status: ExecutionOutboxStatus.delivery_failed,
       };
