@@ -489,6 +489,7 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
           connectionId: "conn_123",
           status: "missing",
           tokenUpdate: "skipped_version_mismatch",
+          writeUpdate: "missing",
         },
       ],
       userId: "user_123",
