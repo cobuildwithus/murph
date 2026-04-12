@@ -1,11 +1,15 @@
 import { normalizeNullableString } from './shared.ts'
 import {
-  gatewayConversationDirectnessValues,
   gatewayConversationRouteSchema,
   type GatewayConversationDirectness,
   type GatewayConversationRoute,
   type GatewayReplyRouteKind,
 } from './contracts.ts'
+import {
+  inferFallbackGatewayReplyRoute,
+  inferThreadFirstGatewayReplyRoute,
+  normalizeGatewayConversationDirectness,
+} from './reply-routes.ts'
 
 export interface GatewayConversationRouteInput {
   channel?: string | null
@@ -202,21 +206,21 @@ function inferGatewayBindingDelivery(input: {
   switch (input.channel) {
     case 'telegram':
     case 'email':
-      return inferThreadFirstGatewayReply({
+      return inferThreadFirstGatewayReplyRoute({
         conversation: input.conversation ?? {},
         deliveryKind: input.deliveryKind ?? null,
         deliveryTarget: input.deliveryTarget ?? null,
         includeParticipant: true,
       })
     case 'linq':
-      return inferThreadFirstGatewayReply({
+      return inferThreadFirstGatewayReplyRoute({
         conversation: input.conversation ?? {},
         deliveryKind: input.deliveryKind ?? null,
         deliveryTarget: input.deliveryTarget ?? null,
         includeParticipant: false,
       })
     default:
-      return inferFallbackGatewayReply({
+      return inferFallbackGatewayReplyRoute({
         conversation: input.conversation ?? {},
         deliveryKind: input.deliveryKind ?? null,
         deliveryTarget: input.deliveryTarget ?? null,
@@ -405,17 +409,6 @@ function resolveGatewayConversationKey(input: {
     .join('|')
 }
 
-function normalizeGatewayConversationDirectness(
-  value: GatewayConversationDirectness | string | null | undefined,
-): GatewayConversationDirectness | null {
-  const normalized = normalizeNullableString(value)
-  return gatewayConversationDirectnessValues.includes(
-    normalized as GatewayConversationDirectness,
-  )
-    ? (normalized as GatewayConversationDirectness)
-    : null
-}
-
 function threadIsDirectFromGatewayDirectness(
   directness: GatewayConversationDirectness | null | undefined,
 ): boolean | null {
@@ -439,71 +432,4 @@ function gatewayConversationDirectnessFromThreadIsDirect(
     return 'group'
   }
   return null
-}
-
-function inferThreadFirstGatewayReply(input: {
-  conversation: GatewayConversationRef
-  deliveryKind?: GatewayReplyRouteKind | null
-  deliveryTarget?: string | null
-  includeParticipant: boolean
-}): { kind: GatewayReplyRouteKind; target: string } | null {
-  const explicit = resolveExplicitGatewayReply(input)
-  if (explicit) {
-    return explicit
-  }
-  if (input.conversation.threadId) {
-    return {
-      kind: 'thread',
-      target: input.conversation.threadId,
-    }
-  }
-  if (input.includeParticipant && input.conversation.participantId) {
-    return {
-      kind: 'participant',
-      target: input.conversation.participantId,
-    }
-  }
-  return null
-}
-
-function inferFallbackGatewayReply(input: {
-  conversation: GatewayConversationRef
-  deliveryKind?: GatewayReplyRouteKind | null
-  deliveryTarget?: string | null
-}): { kind: GatewayReplyRouteKind; target: string } | null {
-  const explicit = resolveExplicitGatewayReply(input)
-  if (explicit) {
-    return explicit
-  }
-  if (input.conversation.directness === 'group' && input.conversation.threadId) {
-    return {
-      kind: 'thread',
-      target: input.conversation.threadId,
-    }
-  }
-  if (input.conversation.participantId) {
-    return {
-      kind: 'participant',
-      target: input.conversation.participantId,
-    }
-  }
-  if (input.conversation.threadId) {
-    return {
-      kind: 'thread',
-      target: input.conversation.threadId,
-    }
-  }
-  return null
-}
-
-function resolveExplicitGatewayReply(input: {
-  deliveryKind?: GatewayReplyRouteKind | null
-  deliveryTarget?: string | null
-}): { kind: GatewayReplyRouteKind; target: string } | null {
-  const kind = input.deliveryKind ?? null
-  const target = normalizeNullableString(input.deliveryTarget)
-  if (!kind || !target) {
-    return null
-  }
-  return { kind, target }
 }

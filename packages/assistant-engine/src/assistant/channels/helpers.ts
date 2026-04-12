@@ -1,4 +1,10 @@
 import {
+  inferFallbackGatewayReplyRoute,
+  inferThreadFirstGatewayReplyRoute,
+  resolveExplicitGatewayReplyRoute,
+  type GatewayResolvedReplyRoute,
+} from '@murphai/gateway-core'
+import {
   assistantBindingDeliverySchema,
   assistantChannelDeliverySchema,
   type AssistantBindingDelivery,
@@ -141,17 +147,26 @@ export function createAssistantBindingDelivery(
   })
 }
 
+function assistantBindingDeliveryFromGatewayReply(
+  reply: GatewayResolvedReplyRoute | null,
+): AssistantBindingDelivery | null {
+  if (!reply) {
+    return null
+  }
+
+  return createAssistantBindingDelivery(reply.kind, reply.target)
+}
+
 export function resolveExplicitBindingDelivery(input: {
   deliveryKind?: AssistantBindingDeliveryKind | null
   deliveryTarget?: string | null
 }): AssistantBindingDelivery | null {
-  const explicitKind = input.deliveryKind ?? null
-  const explicitTarget = normalizeOptionalText(input.deliveryTarget)
-  if (!explicitKind || !explicitTarget) {
-    return null
-  }
-
-  return createAssistantBindingDelivery(explicitKind, explicitTarget)
+  return assistantBindingDeliveryFromGatewayReply(
+    resolveExplicitGatewayReplyRoute({
+      deliveryKind: input.deliveryKind ?? null,
+      deliveryTarget: input.deliveryTarget ?? null,
+    }),
+  )
 }
 
 export function inferThreadFirstBindingDelivery(
@@ -164,23 +179,18 @@ export function inferThreadFirstBindingDelivery(
     includeParticipant: boolean
   },
 ): AssistantBindingDelivery | null {
-  const explicitDelivery = resolveExplicitBindingDelivery(input)
-  if (explicitDelivery) {
-    return explicitDelivery
-  }
-
-  if (input.conversation.threadId) {
-    return createAssistantBindingDelivery('thread', input.conversation.threadId)
-  }
-
-  if (options.includeParticipant && input.conversation.participantId) {
-    return createAssistantBindingDelivery(
-      'participant',
-      input.conversation.participantId,
-    )
-  }
-
-  return null
+  return assistantBindingDeliveryFromGatewayReply(
+    inferThreadFirstGatewayReplyRoute({
+      conversation: {
+        directness: input.conversation.directness,
+        participantId: input.conversation.participantId,
+        threadId: input.conversation.threadId,
+      },
+      deliveryKind: input.deliveryKind ?? null,
+      deliveryTarget: input.deliveryTarget ?? null,
+      includeParticipant: options.includeParticipant,
+    }),
+  )
 }
 
 export function inferFallbackBindingDelivery(input: {
@@ -188,33 +198,17 @@ export function inferFallbackBindingDelivery(input: {
   deliveryKind?: AssistantBindingDeliveryKind | null
   deliveryTarget?: string | null
 }): AssistantBindingDelivery | null {
-  const explicitDelivery = resolveExplicitBindingDelivery(input)
-  if (explicitDelivery) {
-    return explicitDelivery
-  }
-
-  if (input.conversation.directness === 'group' && input.conversation.threadId) {
-    return assistantBindingDeliverySchema.parse({
-      kind: 'thread',
-      target: input.conversation.threadId,
-    })
-  }
-
-  if (input.conversation.participantId) {
-    return assistantBindingDeliverySchema.parse({
-      kind: 'participant',
-      target: input.conversation.participantId,
-    })
-  }
-
-  if (input.conversation.threadId) {
-    return assistantBindingDeliverySchema.parse({
-      kind: 'thread',
-      target: input.conversation.threadId,
-    })
-  }
-
-  return null
+  return assistantBindingDeliveryFromGatewayReply(
+    inferFallbackGatewayReplyRoute({
+      conversation: {
+        directness: input.conversation.directness,
+        participantId: input.conversation.participantId,
+        threadId: input.conversation.threadId,
+      },
+      deliveryKind: input.deliveryKind ?? null,
+      deliveryTarget: input.deliveryTarget ?? null,
+    }),
+  )
 }
 
 export function normalizeOptionalText(value: string | null | undefined): string | null {
