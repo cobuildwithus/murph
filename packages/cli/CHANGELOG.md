@@ -2,6 +2,110 @@
 
 All notable changes to `@murphai/murph` will be documented in this file.
 
+## [0.2.7] - 2026-04-12
+
+### Added
+- split hosted linq home routing
+- auto-launch hosted invite checkout
+
+### Fixed
+- restore green verification lanes
+- clarify model and assistant command wording
+- clarify food and supplement capture guidance
+- land hosted target-area review patch
+- honor device-sync runtime write conflicts
+- collapse assistant-delivery effect identity
+- harden resume-state persistence
+- keep target-area seam patch scoped
+- tighten target-area boundary seams
+- tighten env rollback and share finalization
+- narrow hosted local-heartbeat seam
+- harden hosted runtime apply CAS
+- harden hosted linq home routing
+- route rich user content by provider capability
+- tighten assistant target runtime persistence
+- preserve target config on session updates
+- land runtime log wake patch
+- minimize durable runtime payloads
+- harden env and share acceptance state
+- hard-cut target runtime cleanup
+- hard-cut greenfield legacy runtime state
+- return new linq home chat as first contact
+- refine hosted onboarding Stripe billing status seam
+- keep runner runtime env authoritative
+- tighten smoke env integer parsing
+- harden assistant api key env allowlist
+- harden listener port validation and shutdown
+- land target-area follow-up patch
+- harden target-area listener startup
+- tighten webhook summaries
+- avoid eager device-sync require setup
+- canonicalize deletion fallback ids
+- harden target-area follow-up
+- harden webhook wake ingress
+- land webhook follow-up patch
+- land web-fetch production follow-up
+- harden durable webhook and deletion ids
+- land target-area follow-up
+- harden runner bundle assembly
+- preserve typed hosted runner runtime
+- harden smoke validation and cli lookup
+- land watched audit follow-up patch
+- harden hosted runner env forwarding
+- keep canonical mapbox env name
+- align cloudflare mapbox secret name
+- send hosted signup straight to stripe checkout
+- unify staged canonical write runtime
+- restore list excerpts
+- harden directory lock publication
+- replace Linq product copy with iMessage
+- formalize list summary surfaces
+- finish memory resource-lock adoption
+- recover failed receipts in normal passes
+- slim list and tool payloads
+- tighten route point lookup resolution
+- frame automation cron turns
+- finish hosted settings server-first boundaries
+- refine hosted share and join success RSC boundaries
+- wake on self-authored imports
+- harden hiking routing and argv redaction
+- server-first settings auth
+
+### Changed
+- clean up hosted email worker boundaries
+- centralize string env narrowing
+- split store persistence helpers
+- tighten hosted execution subpaths
+- unify hosted runtime parsing
+- hard-cut versioned legacy state
+- bump review-gpt to 0.5.57
+- resolve target runtime explicitly
+- split activation and stripe dispatch owners
+- hard-cut CLI knowledge contract alias
+- hard-cut boundary leaks
+- share loopback control-plane auth helpers
+- cut stale knowledge contract shims
+- restore patch-release acceptance
+- restore green checks and clean worktree
+- split web fetch seams
+- harden telegram and knowledge seams
+- tighten ingress and knowledge owner seams
+- tighten helper failure handling
+- simplify smoke and cli launch paths
+- split runner bundle assembler
+- simplify resource lock ownership
+- cover concurrent vault summary resource locks
+- add canonical resource lock runtime
+- explicit list summary contract
+- close review-gpt bug-hunt preset ledger row
+- add review-gpt bug-hunt preset
+- trim hosted client residue
+- split CLI mapbox module
+- make hosted privy auth server-first
+- share hosted auto-reply reconciliation helper
+- close auto-reply ledger row
+- share auto-reply channel reconciliation
+
 ## [0.2.6] - 2026-04-10
 
 ### Fixed
