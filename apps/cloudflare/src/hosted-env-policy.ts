@@ -6,6 +6,8 @@ import {
   readHostedEmailCapabilities,
 } from "@murphai/hosted-execution/hosted-email";
 
+import { toStringEnvSource, type StringEnvSource } from "./string-env.ts";
+
 const OPERATOR_ONLY_RUNNER_BINARY_ENV_KEYS = [
   "FFMPEG_COMMAND",
   "PDFTOTEXT_COMMAND",
@@ -140,7 +142,6 @@ const DEFAULT_RUNNER_ENV_PROFILE_NAMES = [
 ] as const satisfies readonly RunnerEnvProfileName[];
 
 type RunnerEnvProfileName = keyof typeof RUNNER_ENV_PROFILE_KEYS;
-type StringEnvSource = Readonly<Record<string, string | undefined>>;
 type UnknownEnvSource = Readonly<Record<string, unknown>>;
 
 export function isHostedUserEnvKeyAllowed(
@@ -262,14 +263,4 @@ function parseHostedEnvCsvList(
     .map((entry) => entry.trim())
     .filter(Boolean)
     .map((entry) => normalize(entry));
-}
-
-function toStringEnvSource(source: UnknownEnvSource): StringEnvSource {
-  const values: Record<string, string | undefined> = {};
-
-  for (const [key, value] of Object.entries(source)) {
-    values[key] = typeof value === "string" ? value : undefined;
-  }
-
-  return values;
 }

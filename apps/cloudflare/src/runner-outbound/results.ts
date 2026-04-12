@@ -14,6 +14,7 @@ import {
 import { gatewayProjectionSnapshotSchema } from "@murphai/gateway-core";
 
 import { readHostedExecutionEnvironment } from "../env.ts";
+import { toStringEnvSource } from "../string-env.ts";
 import type { HostedExecutionCommitPayload } from "../execution-journal.ts";
 import { json, methodNotAllowed, notFound, readJsonObject } from "../json.ts";
 import {
@@ -147,9 +148,7 @@ async function handleRunnerEmailSendRequest(input: {
 }): Promise<Response> {
   const payload = await sendHostedEmailMessage({
     bucket: input.bucket,
-    config: readHostedEmailConfig(
-      input.env as unknown as Readonly<Record<string, string | undefined>>,
-    ),
+    config: readHostedEmailConfig(toStringEnvSource(input.env)),
     key: input.environment.platformEnvelopeKey,
     keyId: input.environment.platformEnvelopeKeyId,
     keysById: input.environment.platformEnvelopeKeysById,
