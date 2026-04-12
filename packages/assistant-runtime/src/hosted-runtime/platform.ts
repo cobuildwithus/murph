@@ -40,11 +40,37 @@ type HostedRuntimeAssistantDeliveryJournalPort = {
   writeAssistantDeliveryRecord(
     record: HostedAssistantDeliveryRecord,
   ): Promise<HostedAssistantDeliveryRecord>;
+  deletePreparedSideEffect?: (
+    input: Pick<HostedAssistantDeliverySideEffect, "effectId" | "fingerprint">,
+  ) => Promise<void>;
+  readSideEffect?: (
+    input: Pick<HostedAssistantDeliverySideEffect, "effectId" | "fingerprint">,
+  ) => Promise<HostedAssistantDeliveryRecord | null>;
+  writeSideEffect?: (record: HostedAssistantDeliveryRecord) => Promise<HostedAssistantDeliveryRecord>;
+};
+
+type HostedRuntimeLegacyJournalPort = {
+  deletePreparedSideEffect(
+    input: Pick<HostedAssistantDeliverySideEffect, "effectId" | "fingerprint">,
+  ): Promise<void>;
+  readSideEffect(
+    input: Pick<HostedAssistantDeliverySideEffect, "effectId" | "fingerprint">,
+  ): Promise<HostedAssistantDeliveryRecord | null>;
+  writeSideEffect(record: HostedAssistantDeliveryRecord): Promise<HostedAssistantDeliveryRecord>;
+  deletePreparedAssistantDelivery?: (
+    input: Pick<HostedAssistantDeliverySideEffect, "effectId" | "fingerprint">,
+  ) => Promise<void>;
+  readAssistantDeliveryRecord?: (
+    input: Pick<HostedAssistantDeliverySideEffect, "effectId" | "fingerprint">,
+  ) => Promise<HostedAssistantDeliveryRecord | null>;
+  writeAssistantDeliveryRecord?: (
+    record: HostedAssistantDeliveryRecord,
+  ) => Promise<HostedAssistantDeliveryRecord>;
 };
 
 export type HostedRuntimeEffectsPort =
   HostedRuntimeEffectsPortBase
-  & HostedRuntimeAssistantDeliveryJournalPort;
+  & (HostedRuntimeAssistantDeliveryJournalPort | HostedRuntimeLegacyJournalPort);
 
 export interface HostedRuntimeDeviceSyncPort {
   applyUpdates(input: {

@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 
 import {
   ExecutionOutboxStatus,
@@ -17,7 +18,6 @@ import {
   resolveHostedExecutionOutboxPayloadStorage,
   type HostedExecutionOutboxPayloadStorage,
 } from "@murphai/hosted-execution/outbox-payload";
-
 import {
   deleteHostedStoredDispatchPayloadBestEffort,
   maybeStageHostedExecutionDispatchPayload,
@@ -28,12 +28,10 @@ import {
 } from "./dispatch";
 import { formatHostedExecutionSafeLogError } from "./logging";
 import {
-  areHostedExecutionOutboxPayloadsEquivalent,
   buildHostedExecutionDispatchRef,
   type HostedExecutionOutboxPayload,
   readHostedExecutionOutboxPayload,
   serializeHostedExecutionOutboxPayload,
-  summarizeHostedExecutionOutboxPayload,
 } from "./outbox-payload";
 import { getPrisma } from "../prisma";
 
@@ -302,19 +300,13 @@ async function processHostedExecutionOutboxRecord(
       ? await dispatchStoredHostedExecutionStatus(preparedDispatch.payload)
       : await dispatchHostedExecutionStatus(preparedDispatch.dispatch);
     const delivery = resolveHostedExecutionDeliveryOutcome(dispatchResult);
-    const nextAttemptAt = delivery.retryable
-      ? new Date(Date.parse(nowIso) + computeRetryDelayMs(record.attemptCount))
-      : null;
     const nextRecord = await finalizeHostedExecutionOutboxAttempt(prisma, record, {
       dispatchState: delivery.dispatchState,
-      lastError: delivery.lastError,
-      nextAttemptAt,
-      payloadJson: resolveHostedExecutionPersistedPayloadJson({
-        nextAttemptAt,
-        payload: cleanupPayload,
-        payloadJson: persistedPayloadJson,
-        status: delivery.status,
-      }),
+      lastError: normalizeHostedExecutionOutboxLastError(delivery.lastError),
+      nextAttemptAt: delivery.retryable
+        ? new Date(Date.parse(nowIso) + computeRetryDelayMs(record.attemptCount))
+        : null,
+      payloadJson: persistedPayloadJson,
       status: delivery.status,
     });
     await cleanupHostedExecutionOutboxPayloadIfSettled(
@@ -325,19 +317,13 @@ async function processHostedExecutionOutboxRecord(
     return nextRecord;
   } catch (error) {
     const permanentPayloadFailure = isPermanentHostedExecutionOutboxError(error);
-    const nextAttemptAt = permanentPayloadFailure
-      ? null
-      : new Date(Date.parse(nowIso) + computeRetryDelayMs(record.attemptCount));
     const nextRecord = await finalizeHostedExecutionOutboxAttempt(prisma, record, {
       dispatchState: readHostedExecutionEventDispatchState(record.dispatchState),
       lastError: formatHostedExecutionSafeLogError(error),
-      nextAttemptAt,
-      payloadJson: resolveHostedExecutionPersistedPayloadJson({
-        nextAttemptAt,
-        payload: cleanupPayload,
-        payloadJson: persistedPayloadJson,
-        status: ExecutionOutboxStatus.delivery_failed,
-      }),
+      nextAttemptAt: permanentPayloadFailure
+        ? null
+        : new Date(Date.parse(nowIso) + computeRetryDelayMs(record.attemptCount)),
+      payloadJson: persistedPayloadJson,
       status: ExecutionOutboxStatus.delivery_failed,
     });
     await cleanupHostedExecutionOutboxPayloadIfSettled(
@@ -537,27 +523,6 @@ async function prepareHostedExecutionOutboxPayloadJson(
   throw createHostedExecutionOutboxPayloadRefError(dispatch.eventId);
 }
 
-function resolveHostedExecutionPersistedPayloadJson(input: {
-  nextAttemptAt: Date | null;
-  payload: HostedExecutionOutboxPayload | null;
-  payloadJson: Prisma.InputJsonValue;
-  status: ExecutionOutboxStatus;
-}): Prisma.InputJsonValue {
-  if (!input.payload || !shouldPruneHostedExecutionOutboxPayload(input)) {
-    return input.payloadJson;
-  }
-
-  return summarizeHostedExecutionOutboxPayload(input.payload) ?? input.payloadJson;
-}
-
-function shouldPruneHostedExecutionOutboxPayload(input: {
-  nextAttemptAt: Date | null;
-  status: ExecutionOutboxStatus;
-}): boolean {
-  return input.status === ExecutionOutboxStatus.dispatched
-    || (input.status === ExecutionOutboxStatus.delivery_failed && input.nextAttemptAt === null);
-}
-
 function assertHostedExecutionOutboxRecordMatches(
   record: Pick<
     ExecutionOutbox,
@@ -579,14 +544,44 @@ function assertHostedExecutionOutboxRecordMatches(
     || record.sourceType !== expected.sourceType
     || record.userId !== expected.userId
     || !areHostedExecutionOutboxPayloadsEquivalent(
-      record.payloadJson,
-      expected.payloadJson,
+      readHostedExecutionOutboxPayload(record.payloadJson),
+      readHostedExecutionOutboxPayload(expected.payloadJson),
     )
   ) {
     throw new Error(
       `Hosted execution outbox event ${expected.eventId} already exists with conflicting metadata.`,
     );
   }
+}
+
+function areHostedExecutionOutboxPayloadsEquivalent(
+  left: HostedExecutionOutboxPayload | null,
+  right: HostedExecutionOutboxPayload | null,
+): boolean {
+  if (!left || !right || left.storage !== right.storage) {
+    return false;
+  }
+
+  if (left.storage === "inline" && right.storage === "inline") {
+    return isDeepStrictEqual(left.dispatch, right.dispatch);
+  }
+
+  if (left.storage === "reference" && right.storage === "reference") {
+    if (!isDeepStrictEqual(left.dispatchRef, right.dispatchRef)) {
+      return false;
+    }
+
+    return areHostedExecutionDispatchPayloadRefsEquivalent(left.stagedPayloadId, right.stagedPayloadId);
+  }
+
+  return false;
+}
+
+function areHostedExecutionDispatchPayloadRefsEquivalent(
+  left: string | null,
+  right: string | null,
+): boolean {
+  return left === right;
 }
 
 function normalizeHostedExecutionOutboxLastError(lastError: string | null): string | null {
