@@ -138,7 +138,7 @@ const cliVitestProjectSeeds: readonly CliVitestProjectSeed[] = [
       "http-json-retry.test.ts",
       "inbox-incur-smoke.test.ts",
       "incur-smoke.test.ts",
-      "knowledge-cli-contracts.test.ts",
+      "knowledge-boundary.test.ts",
       "knowledge-documents.test.ts",
       "release-*.test.ts",
       "wearables-schema.test.ts",

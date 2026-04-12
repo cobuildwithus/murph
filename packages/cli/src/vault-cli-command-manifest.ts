@@ -41,14 +41,14 @@ import { registerModelCommands } from './commands/model.js'
 import { researchRunResultSchema } from './research-cli-contracts.js'
 import { mapboxRouteEstimateResultSchema } from './mapbox-route.js'
 import {
+  knowledgeGetResultSchema as knowledgeShowResultSchema,
   knowledgeIndexRebuildResultSchema,
-  knowledgeLogTailResultSchema,
   knowledgeLintResultSchema,
   knowledgeListResultSchema,
+  knowledgeLogTailResultSchema,
   knowledgeSearchResultSchema,
-  knowledgeShowResultSchema,
   knowledgeUpsertResultSchema,
-} from './knowledge-cli-contracts.js'
+} from '@murphai/query'
 import { registerReadCommands } from './commands/read.js'
 import { registerProtocolCommands } from './commands/protocol.js'
 import { registerSamplesCommands } from './commands/samples.js'

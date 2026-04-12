@@ -21,6 +21,6 @@ describe('assistant-engine knowledge boundary', () => {
     expect(Object.keys(knowledge)).not.toContain('assertKnowledgeSourcePathAllowed')
     expect(source).not.toContain('./knowledge/documents.js')
     expect(source).not.toContain('assertKnowledgeSourcePathAllowed')
-    expect(source).not.toContain('@murphai/query')
+    expect(source).not.toContain("from '@murphai/query'")
   })
 })

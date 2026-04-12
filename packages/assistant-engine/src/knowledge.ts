@@ -1,3 +1,9 @@
+/**
+ * Service-only knowledge entrypoint.
+ *
+ * Query-owned result contracts stay on @murphai/query so callers do not pick
+ * up shared knowledge schemas through @murphai/assistant-engine/knowledge.
+ */
 export {
   getKnowledgePage,
   lintKnowledgePages,
