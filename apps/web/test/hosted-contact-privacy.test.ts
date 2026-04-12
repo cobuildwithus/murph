@@ -278,6 +278,6 @@ describe("hosted contact privacy", () => {
         },
       ],
       userId: "user_123",
-    })).toThrow(/connectionId must be unique/i);
+    })).toThrow(/duplicate connectionId|must be unique/i);
   });
 });

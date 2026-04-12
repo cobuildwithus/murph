@@ -1,16 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
 
-const HOSTED_RUNTIME_ERROR_CODE_MAX_LENGTH = 128;
-const HOSTED_RUNTIME_ERROR_TEXT_MAX_LENGTH = 512;
-const HOSTED_RUNTIME_ERROR_CONTROL_CHAR_PATTERN = /[\u0000-\u001F\u007F]+/gu;
-const HOSTED_RUNTIME_ERROR_WHITESPACE_PATTERN = /\s+/gu;
-const HOSTED_RUNTIME_ERROR_INLINE_BEARER_PATTERN = /\bBearer\s+[A-Za-z0-9._~+/=-]+\b/giu;
-const HOSTED_RUNTIME_ERROR_JWT_PATTERN = /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9._-]+\.[A-Za-z0-9._-]+\b/gu;
-const HOSTED_RUNTIME_ERROR_QUERY_SECRET_PATTERN =
-  /([?&](?:access_token|refresh_token|id_token|token|apikey|api_key|client_secret|session|session_token|code|state)=)[^&#\s]+/giu;
-const HOSTED_RUNTIME_ERROR_NAMED_SECRET_PATTERN =
-  /\b(authorization|access[_-]?token|refresh[_-]?token|id[_-]?token|api[_-]?key|client[_-]?secret|session(?:[_-]?(?:token|id))?|cookie|set-cookie|password)\b(\s*[:=]\s*)((?:Bearer\s+)?[^\s,;]+)/giu;
-
 export function toIsoTimestamp(value: string | number | Date): string {
   const date = value instanceof Date ? value : new Date(value);
 
@@ -28,42 +17,6 @@ export function normalizeNullableString(value: string | null | undefined): strin
 
   const normalized = value.trim();
   return normalized ? normalized : null;
-}
-
-function sanitizeHostedRuntimeErrorString(
-  value: string | null | undefined,
-  maxLength: number,
-): string | null {
-  const normalized = normalizeNullableString(value);
-
-  if (!normalized) {
-    return null;
-  }
-
-  let sanitized = normalized
-    .replace(HOSTED_RUNTIME_ERROR_CONTROL_CHAR_PATTERN, " ")
-    .replace(HOSTED_RUNTIME_ERROR_QUERY_SECRET_PATTERN, "$1[redacted]")
-    .replace(HOSTED_RUNTIME_ERROR_NAMED_SECRET_PATTERN, "$1$2[redacted]")
-    .replace(HOSTED_RUNTIME_ERROR_JWT_PATTERN, "[redacted.jwt]")
-    .replace(HOSTED_RUNTIME_ERROR_INLINE_BEARER_PATTERN, "Bearer [redacted]")
-    .replace(HOSTED_RUNTIME_ERROR_WHITESPACE_PATTERN, " ")
-    .trim();
-
-  if (!sanitized) {
-    sanitized = "[redacted]";
-  }
-
-  return sanitized.length <= maxLength
-    ? sanitized
-    : `${sanitized.slice(0, maxLength - 3).trimEnd()}...`;
-}
-
-export function sanitizeHostedRuntimeErrorCode(value: string | null | undefined): string | null {
-  return sanitizeHostedRuntimeErrorString(value, HOSTED_RUNTIME_ERROR_CODE_MAX_LENGTH);
-}
-
-export function sanitizeHostedRuntimeErrorText(value: string | null | undefined): string | null {
-  return sanitizeHostedRuntimeErrorString(value, HOSTED_RUNTIME_ERROR_TEXT_MAX_LENGTH);
 }
 
 // Keep durable hosted SQL free of provider-sourced free-form text.

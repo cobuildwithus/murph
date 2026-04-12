@@ -5,6 +5,10 @@ import {
   type DeviceSyncAccountStatus,
   type PublicDeviceSyncAccount,
 } from "@murphai/device-syncd/public-ingress";
+import {
+  sanitizeHostedRuntimeErrorCode,
+  sanitizeHostedRuntimeErrorText,
+} from "@murphai/device-syncd/hosted-runtime";
 import type {
   HostedExecutionDeviceSyncRuntimeConnectionSeed,
   HostedExecutionDeviceSyncRuntimeConnectionSnapshot,
@@ -13,12 +17,11 @@ import type {
   HostedExecutionDeviceSyncRuntimeTokenBundle,
 } from "@murphai/device-syncd/hosted-runtime";
 
-import { sanitizeHostedRuntimeErrorCode, sanitizeHostedRuntimeErrorText } from "./shared";
-
+// Keep hosted runtime request parsing with the package that already owns the shared request model.
 export {
-  parseHostedDeviceSyncRuntimeApplyRequest,
-  parseHostedDeviceSyncRuntimeSnapshotRequest,
-} from "./internal-runtime-request";
+  parseHostedExecutionDeviceSyncRuntimeApplyRequest as parseHostedDeviceSyncRuntimeApplyRequest,
+  parseHostedExecutionDeviceSyncRuntimeSnapshotRequest as parseHostedDeviceSyncRuntimeSnapshotRequest,
+} from "@murphai/device-syncd/hosted-runtime";
 
 export interface HostedStaticDeviceSyncConnectionRecord {
   id: string;
