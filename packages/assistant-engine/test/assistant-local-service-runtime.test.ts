@@ -513,6 +513,30 @@ test('updateAssistantSessionOptionsLocal resolves and saves the refreshed sessio
   mocks.resolveAssistantSession.mockResolvedValueOnce({
     session: createAssistantSession({
       sessionId: 'session-updated',
+      providerBinding: {
+        provider: 'openai-compatible',
+        providerOptions: {
+          apiKeyEnv: 'OPENAI_API_KEY',
+          continuityFingerprint: 'fingerprint-openai',
+          executionDriver: 'openai-compatible',
+          model: 'gpt-5.4',
+          oss: false,
+          profile: null,
+          providerName: 'OpenAI',
+          reasoningEffort: null,
+          resumeKind: null,
+          sandbox: null,
+          approvalPolicy: null,
+        },
+        providerSessionId: 'provider-session-1',
+        providerState: {
+          resumeRouteId: 'route-1',
+        },
+      },
+      resumeState: {
+        providerSessionId: 'provider-session-1',
+        resumeRouteId: 'route-1',
+      },
     }),
   })
   mocks.saveAssistantSession.mockResolvedValueOnce(updatedSession)
@@ -534,6 +558,10 @@ test('updateAssistantSessionOptionsLocal resolves and saves the refreshed sessio
     mocks.saveAssistantSession.mock.calls[0]?.[1]?.providerOptions?.model,
     'gpt-5.4-mini',
   )
+  assert.equal(mocks.saveAssistantSession.mock.calls[0]?.[1]?.provider, 'openai-compatible')
+  assert.equal(mocks.saveAssistantSession.mock.calls[0]?.[1]?.target?.adapter, 'openai-compatible')
+  assert.equal(mocks.saveAssistantSession.mock.calls[0]?.[1]?.resumeState, null)
+  assert.equal(mocks.saveAssistantSession.mock.calls[0]?.[1]?.providerBinding, null)
 })
 
 test('openAssistantConversationLocal forwards defaults into session resolution', async () => {
@@ -715,6 +743,25 @@ async function loadLocalServiceModule(input?: {
     resolveAssistantOperatorDefaults: mocks.resolveAssistantOperatorDefaults,
   }))
   vi.doMock('@murphai/operator-config/assistant-backend', () => ({
+    createAssistantModelTarget: (input: {
+      apiKeyEnv?: string | null
+      model?: string | null
+      provider?: 'codex-cli' | 'openai-compatible' | null
+      providerName?: string | null
+    }) =>
+      input.provider === 'openai-compatible'
+        ? {
+            adapter: 'openai-compatible',
+            apiKeyEnv: input.apiKeyEnv ?? null,
+            endpoint: null,
+            headers: null,
+            model: input.model ?? null,
+            presetId: null,
+            providerName: input.providerName ?? null,
+            reasoningEffort: null,
+            webSearch: null,
+          }
+        : null,
     createDefaultLocalAssistantModelTarget: () => ({
       adapter: 'openai-compatible',
       model: 'gpt-5.4',
@@ -793,6 +840,8 @@ async function loadLocalServiceModule(input?: {
 }
 
 function createAssistantSession(input?: {
+  providerBinding?: AssistantSession['providerBinding']
+  resumeState?: AssistantSession['resumeState']
   sessionId?: string
 }): AssistantSession {
   return {
@@ -812,18 +861,21 @@ function createAssistantSession(input?: {
     createdAt: '2026-04-08T00:00:00.000Z',
     lastTurnAt: null,
     provider: 'openai-compatible',
-    providerBinding: null,
+    providerBinding: input?.providerBinding ?? null,
     providerOptions: {
       apiKeyEnv: 'OPENAI_API_KEY',
+      continuityFingerprint: 'fingerprint-openai',
+      executionDriver: 'openai-compatible',
       model: 'gpt-5.4',
       oss: false,
       profile: null,
       providerName: 'OpenAI',
       reasoningEffort: null,
+      resumeKind: null,
       sandbox: null,
       approvalPolicy: null,
     },
-    resumeState: null,
+    resumeState: input?.resumeState ?? null,
     schema: 'murph.assistant-session.v1',
     sessionId: input?.sessionId ?? 'session-test',
     target: {

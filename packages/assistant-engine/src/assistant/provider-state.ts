@@ -101,11 +101,8 @@ export function readAssistantSessionResumeState(
   return normalizeAssistantSessionResumeState(
     'providerBinding' in input && input.providerBinding
       ? {
-          continuityFingerprint:
-            input.providerBinding.providerOptions.continuityFingerprint ?? null,
           providerSessionId: input.providerBinding.providerSessionId,
           resumeRouteId: input.providerBinding.providerState?.resumeRouteId ?? null,
-          resumeKind: input.providerBinding.providerOptions.resumeKind ?? null,
         }
       : null,
   )
@@ -138,10 +135,8 @@ export function writeAssistantSessionProviderSessionId(
   }
 
   return assistantSessionResumeStateSchema.parse({
-    continuityFingerprint: current?.continuityFingerprint ?? null,
     providerSessionId: normalizedProviderSessionId,
     resumeRouteId: normalizedResumeRouteId,
-    resumeKind: current?.resumeKind ?? null,
   })
 }
 
@@ -176,11 +171,8 @@ export function normalizeAssistantSessionResumeState(
 
   return providerSessionId || resumeRouteId
     ? assistantSessionResumeStateSchema.parse({
-        continuityFingerprint:
-          normalizeNullableString(value.continuityFingerprint) ?? null,
         providerSessionId,
         resumeRouteId,
-        resumeKind: normalizeNullableString(value.resumeKind) ?? null,
       })
     : null
 }
@@ -202,11 +194,8 @@ export function serializeAssistantSessionForPersistence(
   const bindingResumeState =
     session.providerBinding?.provider === target.adapter
       ? {
-          continuityFingerprint:
-            session.providerBinding.providerOptions.continuityFingerprint ?? null,
           providerSessionId: session.providerBinding.providerSessionId,
           resumeRouteId: session.providerBinding.providerState?.resumeRouteId ?? null,
-          resumeKind: session.providerBinding.providerOptions.resumeKind ?? null,
         }
       : null
   const resumeState = normalizeAssistantSessionResumeState(
@@ -240,9 +229,7 @@ function writeAssistantSessionResumeRouteId(
   }
 
   return assistantSessionResumeStateSchema.parse({
-    continuityFingerprint: current?.continuityFingerprint ?? null,
     providerSessionId,
     resumeRouteId: normalizedRouteId,
-    resumeKind: current?.resumeKind ?? null,
   })
 }

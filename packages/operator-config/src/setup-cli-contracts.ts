@@ -189,7 +189,7 @@ export const setupCommandOptionsSchema = z.object({
     .describe('Optional onboarding assistant preset: Codex, OpenAI-compatible endpoint, or skip.'),
   assistantProviderPreset: setupAssistantProviderPresetSchema
     .optional()
-    .describe('Optional named OpenAI-compatible provider preset to save during setup, such as openrouter, venice, groq, ollama, or custom.'),
+    .describe('Optional named OpenAI-compatible provider preset to save during setup, such as openai, vercel-ai-gateway, openrouter, venice, groq, ollama, or custom. Named presets also enable provider-specific runtime behavior such as native resume, web search, and zero-data-retention when supported.'),
   assistantModel: z
     .string()
     .min(1)

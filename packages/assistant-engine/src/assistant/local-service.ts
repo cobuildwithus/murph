@@ -3,7 +3,10 @@ import {
   type AssistantAskResult,
   type AssistantSession,
 } from '@murphai/operator-config/assistant-cli-contracts'
-import { createDefaultLocalAssistantModelTarget } from '@murphai/operator-config/assistant-backend'
+import {
+  createAssistantModelTarget,
+  createDefaultLocalAssistantModelTarget,
+} from '@murphai/operator-config/assistant-backend'
 import {
   type ResolvedAssistantSession,
   appendAssistantTranscriptEntries,
@@ -336,10 +339,20 @@ export async function updateAssistantSessionOptionsLocal(input: {
       ...input.providerOptions,
     },
   )
+  const nextTarget =
+    createAssistantModelTarget(providerConfig) ?? session.session.target
+  const nextProviderOptions = serializeAssistantProviderSessionOptions(providerConfig)
+  const continuityChanged =
+    session.session.providerOptions.continuityFingerprint !==
+    nextProviderOptions.continuityFingerprint
 
   return saveAssistantSession(input.vault, {
     ...session.session,
-    providerOptions: serializeAssistantProviderSessionOptions(providerConfig),
+    provider: nextTarget.adapter,
+    providerBinding: continuityChanged ? null : session.session.providerBinding,
+    providerOptions: nextProviderOptions,
+    resumeState: continuityChanged ? null : session.session.resumeState,
+    target: nextTarget,
     updatedAt: new Date().toISOString(),
   })
 }

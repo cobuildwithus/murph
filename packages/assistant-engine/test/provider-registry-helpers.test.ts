@@ -497,7 +497,7 @@ describe('assistant provider registry helpers', () => {
       murphCommandSurface: 'bound-tools',
       requestFormat: 'messages',
       supportsModelDiscovery: true,
-      supportsNativeResume: true,
+      supportsNativeResume: false,
       supportsReasoningEffort: false,
       supportsRichUserMessageContent: true,
       supportsZeroDataRetention: false,
@@ -506,7 +506,9 @@ describe('assistant provider registry helpers', () => {
 
     expect(
       resolveAssistantProviderTargetCapabilities({
+        provider: 'openai-compatible',
         baseUrl: 'https://api.openai.com/v1',
+        presetId: 'openai',
       }),
     ).toEqual({
       supportsModelDiscovery: true,
@@ -518,7 +520,9 @@ describe('assistant provider registry helpers', () => {
 
     expect(
       resolveAssistantProviderTargetExecutionCapabilities({
+        provider: 'openai-compatible',
         baseUrl: 'https://api.openai.com/v1',
+        presetId: 'openai',
       }),
     ).toEqual({
       murphCommandSurface: 'bound-tools',

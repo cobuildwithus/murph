@@ -557,6 +557,7 @@ function createSession(input?: {
         'X-Trace': 'trace-123',
       },
       model: 'gpt-5.4',
+      presetId: 'openai',
       providerName: 'murph-openai',
       reasoningEffort: 'medium',
     },

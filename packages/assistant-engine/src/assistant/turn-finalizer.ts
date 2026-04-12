@@ -78,10 +78,8 @@ export async function persistAssistantTurnAndSession(input: {
       ? previousResumeRouteId
       : input.providerResult.route.routeId
   const nextResumeState = assistantSessionResumeStateSchema.parse({
-    continuityFingerprint: nextProviderOptions.continuityFingerprint ?? null,
     providerSessionId: input.providerResult.providerSessionId,
     resumeRouteId: nextResumeRouteId,
-    resumeKind: nextProviderOptions.resumeKind ?? null,
   })
   const nextProviderBinding =
     nextResumeState &&

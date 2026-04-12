@@ -1,14 +1,8 @@
 import {
-  getOpenAICompatibleProviderPreset,
-  resolveOpenAICompatibleProviderPreset,
   resolveOpenAICompatibleProviderPresetFromId,
   type SetupAssistantProviderPreset,
 } from './openai-compatible-provider-presets.js'
-import {
-  isAssistantOpenAIBaseUrl,
-  isAssistantVercelAIGatewayBaseUrl,
-  normalizeNullableString,
-} from './shared.js'
+import { normalizeNullableString } from './shared.js'
 
 export const assistantExecutionDriverValues = [
   'codex-cli',
@@ -57,7 +51,6 @@ export interface AssistantResolvedRuntimeTarget {
   continuityFingerprint: string
   executionDriver: AssistantExecutionDriver
   presetId: SetupAssistantProviderPreset | null
-  providerOptionNamespaces: readonly string[]
   resumeKind: AssistantResumeKind | null
   supportsGatewayWebSearch: boolean
   supportsNativeResume: boolean
@@ -98,23 +91,9 @@ export function normalizeAssistantWebSearchMode(
 }
 
 export function resolveAssistantTargetPresetId(
-  input: Pick<
-    AssistantRuntimeResolutionInput,
-    'apiKeyEnv' | 'baseUrl' | 'presetId' | 'providerName'
-  >,
+  input: Pick<AssistantRuntimeResolutionInput, 'presetId'>,
 ): SetupAssistantProviderPreset | null {
-  const explicitPreset = resolveOpenAICompatibleProviderPresetFromId(input.presetId)
-  if (explicitPreset) {
-    return explicitPreset.id
-  }
-
-  return (
-    resolveOpenAICompatibleProviderPreset({
-      apiKeyEnv: input.apiKeyEnv,
-      baseUrl: input.baseUrl,
-      providerName: input.providerName,
-    })?.id ?? null
-  )
+  return resolveOpenAICompatibleProviderPresetFromId(input.presetId)?.id ?? null
 }
 
 export function resolveAssistantRuntimeTarget(
@@ -132,7 +111,6 @@ export function resolveAssistantRuntimeTarget(
       }),
       executionDriver: 'codex-cli',
       presetId: null,
-      providerOptionNamespaces: [],
       resumeKind: 'codex-session',
       supportsGatewayWebSearch: false,
       supportsNativeResume: true,
@@ -144,13 +122,9 @@ export function resolveAssistantRuntimeTarget(
   }
 
   const presetId = resolveAssistantTargetPresetId({
-    apiKeyEnv: input?.apiKeyEnv,
-    baseUrl: input?.baseUrl,
     presetId: input?.presetId,
-    providerName: input?.providerName,
   })
   const executionDriver = resolveAssistantOpenAICompatibleDriver({
-    baseUrl: input?.baseUrl,
     presetId,
   })
   const resumeKind = resolveAssistantOpenAICompatibleResumeKind({
@@ -163,18 +137,12 @@ export function resolveAssistantRuntimeTarget(
   })
   const supportsGatewayWebSearch = executionDriver === 'gateway'
   const supportsZeroDataRetention = resolveAssistantZeroDataRetentionSupport({
-    baseUrl: input?.baseUrl,
     executionDriver,
     presetId,
   })
   const supportsReasoningEffort = resolveAssistantReasoningEffortSupport({
     executionDriver,
     model: input?.model,
-  })
-  const providerOptionNamespaces = resolveAssistantProviderOptionNamespaces({
-    executionDriver,
-    model: input?.model,
-    providerName: input?.providerName,
   })
 
   return {
@@ -188,7 +156,6 @@ export function resolveAssistantRuntimeTarget(
     }),
     executionDriver,
     presetId,
-    providerOptionNamespaces,
     resumeKind,
     supportsGatewayWebSearch,
     supportsNativeResume: resumeKind !== null,
@@ -248,36 +215,16 @@ export function shouldAssistantTargetUseMurphWebSearch(
 }
 
 function resolveAssistantOpenAICompatibleDriver(input: {
-  baseUrl?: string | null
   presetId: SetupAssistantProviderPreset | null
 }): AssistantExecutionDriver {
-  const preset = input.presetId
-    ? getOpenAICompatibleProviderPreset(input.presetId)
-    : null
-
-  switch (preset?.id) {
+  switch (input.presetId) {
     case 'openai':
       return 'openai-responses'
     case 'vercel-ai-gateway':
       return 'gateway'
-    case 'custom':
-      break
     default:
-      if (preset) {
-        return 'openai-compatible'
-      }
-      break
+      return 'openai-compatible'
   }
-
-  if (isAssistantOpenAIBaseUrl(input.baseUrl)) {
-    return 'openai-responses'
-  }
-
-  if (isAssistantVercelAIGatewayBaseUrl(input.baseUrl)) {
-    return 'gateway'
-  }
-
-  return 'openai-compatible'
 }
 
 function resolveAssistantOpenAICompatibleResumeKind(input: {
@@ -330,74 +277,13 @@ function resolveAssistantReasoningEffortSupport(input: {
 }
 
 function resolveAssistantZeroDataRetentionSupport(input: {
-  baseUrl?: string | null
   executionDriver: AssistantExecutionDriver
   presetId: SetupAssistantProviderPreset | null
 }): boolean {
   return (
     input.executionDriver === 'gateway' &&
-    (input.presetId === 'vercel-ai-gateway' ||
-      isAssistantVercelAIGatewayBaseUrl(input.baseUrl))
+    input.presetId === 'vercel-ai-gateway'
   )
-}
-
-function resolveAssistantProviderOptionNamespaces(input: {
-  executionDriver: AssistantExecutionDriver
-  model?: string | null
-  providerName?: string | null
-}): readonly string[] {
-  switch (input.executionDriver) {
-    case 'codex-cli':
-      return []
-    case 'openai-responses':
-      return ['openai']
-    case 'gateway': {
-      const upstream = resolveAssistantGatewayProviderNamespace(input.model)
-      return upstream ? ['gateway', upstream] : ['gateway']
-    }
-    case 'openai-compatible':
-    default:
-      return [normalizeAssistantProviderOptionNamespace(input.providerName)]
-  }
-}
-
-function resolveAssistantGatewayProviderNamespace(
-  model: string | null | undefined,
-): string | null {
-  const normalized = normalizeNullableString(model)
-  if (!normalized) {
-    return null
-  }
-
-  const slashIndex = normalized.indexOf('/')
-  if (slashIndex <= 0) {
-    return null
-  }
-
-  return normalizeAssistantProviderOptionNamespace(
-    normalized.slice(0, slashIndex),
-  )
-}
-
-function normalizeAssistantProviderOptionNamespace(
-  value: string | null | undefined,
-): string {
-  const normalized = normalizeNullableString(value)
-  const source = normalized ?? 'murph-assistant'
-  const segments = source
-    .split(/[^a-zA-Z0-9]+/u)
-    .map((segment) => segment.trim())
-    .filter(Boolean)
-
-  if (segments.length === 0) {
-    return 'murphAssistant'
-  }
-
-  const [first, ...rest] = segments
-  return [
-    first!.charAt(0).toLowerCase() + first!.slice(1),
-    ...rest.map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1)),
-  ].join('')
 }
 
 function isAssistantGatewayOpenAIModel(model: string | null | undefined): boolean {

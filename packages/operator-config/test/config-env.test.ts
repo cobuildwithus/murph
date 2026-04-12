@@ -338,6 +338,17 @@ test('representative contract schemas stay wired to the owned setup/operator sea
 
   assert.equal(assistantSessionIdSchema.safeParse('session_1').success, true)
   assert.equal(assistantSessionIdSchema.safeParse('../session').success, false)
+  const openAiCompatibleRuntime = resolveAssistantRuntimeTarget({
+    provider: 'openai-compatible',
+    apiKeyEnv: 'OPENAI_API_KEY',
+    baseUrl: 'https://api.example.test/v1',
+    headers: {
+      'X-Trace-Id': 'trace',
+    },
+    model: 'gpt-5.4',
+    providerName: 'Example',
+    reasoningEffort: 'high',
+  })
   assert.deepEqual(
     parseAssistantSessionRecord({
       alias: 'daily',
@@ -383,8 +394,8 @@ test('representative contract schemas stay wired to the owned setup/operator sea
         apiKeyEnv: 'OPENAI_API_KEY',
         approvalPolicy: null,
         baseUrl: 'https://api.example.test/v1',
-        continuityFingerprint: null,
-        executionDriver: 'openai-responses',
+        continuityFingerprint: openAiCompatibleRuntime.continuityFingerprint,
+        executionDriver: 'openai-compatible',
         headers: {
           'X-Trace-Id': 'trace',
         },
@@ -498,7 +509,11 @@ test('representative contract schemas stay wired to the owned setup/operator sea
       provider: 'openai-compatible',
       providerOptions: {
         approvalPolicy: null,
-        continuityFingerprint: null,
+        continuityFingerprint: resolveAssistantRuntimeTarget({
+          provider: 'openai-compatible',
+          model: 'gpt-5.4',
+          reasoningEffort: 'medium',
+        }).continuityFingerprint,
         executionDriver: 'openai-compatible',
         model: 'gpt-5.4',
         oss: false,

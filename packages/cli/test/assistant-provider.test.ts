@@ -129,7 +129,7 @@ test('serializeAssistantProviderSessionOptions sanitizes settings for the select
   if (typeof continuityFingerprint !== 'string') {
     throw new Error('Expected continuity fingerprint for OpenAI-compatible provider options.')
   }
-  assert.match(continuityFingerprint, /"presetId":"ollama"/u)
+  assert.match(continuityFingerprint, /"presetId":null/u)
   assert.deepEqual(rest, {
     model: 'gpt-oss:20b',
     reasoningEffort: null,
@@ -275,7 +275,7 @@ test('resolveAssistantProviderCapabilities reports shared backend-facing capabil
   })
   assert.deepEqual(resolveAssistantProviderCapabilities('openai-compatible'), {
     supportsModelDiscovery: true,
-    supportsNativeResume: true,
+    supportsNativeResume: false,
     supportsReasoningEffort: false,
     supportsRichUserMessageContent: true,
     supportsZeroDataRetention: false,
@@ -288,6 +288,7 @@ test('resolveAssistantTargetCapabilities enables reasoning effort for OpenAI-com
       provider: 'openai-compatible',
       baseUrl: 'https://api.openai.com/v1',
       model: 'gpt-5.4',
+      presetId: 'openai',
       providerName: 'openai',
     }),
     {
@@ -353,6 +354,7 @@ test('resolveAssistantModelCatalog exposes reasoning options for official OpenAI
   const catalog = resolveAssistantModelCatalog({
     provider: 'openai-compatible',
     baseUrl: 'https://api.openai.com/v1',
+    presetId: 'openai',
     providerName: 'openai',
     currentModel: 'gpt-5.4',
     currentReasoningEffort: 'medium',
@@ -370,6 +372,7 @@ test('resolveAssistantModelCatalog normalizes discovery objects for official Ope
   const catalog = resolveAssistantModelCatalog({
     provider: 'openai-compatible',
     baseUrl: 'https://api.openai.com/v1',
+    presetId: 'openai',
     providerName: 'openai',
     currentModel: 'gpt-5.4',
     discovery: {
@@ -912,6 +915,7 @@ test('executeAssistantProviderTurn chains official OpenAI responses and stores t
     workingDirectory: '/tmp/vault',
     baseUrl: 'https://api.openai.com/v1',
     apiKeyEnv: 'OPENAI_API_KEY',
+    presetId: 'openai',
     providerName: 'openai',
     model: 'gpt-5',
     systemPrompt: 'system prompt',
@@ -943,6 +947,7 @@ test('executeAssistantProviderTurn forwards reasoning effort to official OpenAI 
     workingDirectory: '/tmp/vault',
     baseUrl: 'https://api.openai.com/v1',
     apiKeyEnv: 'OPENAI_API_KEY',
+    presetId: 'openai',
     providerName: 'openai',
     model: 'gpt-5.4',
     reasoningEffort: 'medium',

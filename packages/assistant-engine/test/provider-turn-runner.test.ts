@@ -1001,6 +1001,8 @@ function createProviderOptions(
   overrides?: Partial<AssistantProviderSessionOptions>,
 ): AssistantProviderSessionOptions {
   return {
+    continuityFingerprint: 'fingerprint-default',
+    executionDriver: 'openai-compatible',
     model: 'gpt-4.1',
     reasoningEffort: 'high',
     sandbox: null,
@@ -1010,6 +1012,7 @@ function createProviderOptions(
     baseUrl: 'https://api.example.test/v1',
     apiKeyEnv: 'OPENAI_API_KEY',
     providerName: 'murph-openai',
+    resumeKind: null,
     headers: null,
     ...overrides,
   }

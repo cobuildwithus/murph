@@ -59,33 +59,27 @@ afterEach(async () => {
 })
 
 describe('assistant provider seam helpers', () => {
-  it('matches resume bindings across route-id drift when provider options remain compatible', () => {
+  it('matches resume bindings across route-id drift when continuity and resume kind remain compatible', () => {
     const previousBinding = createProviderBinding({
       providerOptions: {
-        approvalPolicy: 'never',
         codexHome: null,
+        continuityFingerprint: 'fingerprint-shared',
         headers: {
           Authorization: 'Bearer token',
           'X-Trace': '1',
         },
-        model: 'gpt-4.1',
-        providerName: 'murph-openai',
-        sandbox: 'workspace-write',
       },
       providerSessionId: 'provider_session_alpha',
       resumeRouteId: 'route-primary',
     })
     const rotatedRoute = createRoute({
       providerOptions: {
-        approvalPolicy: 'never',
         codexHome: '/tmp/local-codex-home',
+        continuityFingerprint: 'fingerprint-shared',
         headers: {
           'X-Trace': '1',
           Authorization: 'Bearer token',
         },
-        model: 'gpt-4.1',
-        providerName: 'murph-openai',
-        sandbox: 'workspace-write',
       },
       routeId: 'route-secondary',
     })
@@ -106,7 +100,7 @@ describe('assistant provider seam helpers', () => {
     const incompatibleRoute = createRoute({
       providerOptions: {
         ...rotatedRoute.providerOptions,
-        providerName: 'different-provider',
+        continuityFingerprint: 'fingerprint-other',
       },
       routeId: 'route-third',
     })
@@ -343,9 +337,7 @@ describe('assistant provider seam helpers', () => {
         resumeRouteId: ' route-primary ',
       }),
     ).toEqual({
-      continuityFingerprint: null,
       providerSessionId: null,
-      resumeKind: null,
       resumeRouteId: 'route-primary',
     })
     expect(
@@ -365,9 +357,7 @@ describe('assistant provider seam helpers', () => {
       resumeState: null,
     })
     expect(persisted.resumeState).toEqual({
-      continuityFingerprint: null,
       providerSessionId: 'provider_session_bound',
-      resumeKind: null,
       resumeRouteId: 'route-bound',
     })
 
@@ -383,9 +373,7 @@ describe('assistant provider seam helpers', () => {
         }),
       }),
     ).toEqual({
-      continuityFingerprint: null,
       providerSessionId: 'provider-session-from-binding',
-      resumeKind: null,
       resumeRouteId: 'route-from-binding',
     })
     expect(
@@ -488,10 +476,11 @@ describe('assistant provider seam helpers', () => {
     ).toBeNull()
   })
 
-  it('keeps resume compatibility strict for codex-home mismatches while tolerating empty headers', () => {
+  it('keeps resume compatibility strict for continuity mismatches while ignoring unrelated option churn', () => {
     const binding = createProviderBinding({
       providerOptions: {
         codexHome: '/tmp/codex-home-a',
+        continuityFingerprint: 'fingerprint-shared',
         headers: {},
       },
       providerSessionId: 'provider_session_alpha',
@@ -519,6 +508,7 @@ describe('assistant provider seam helpers', () => {
             ...binding.providerOptions,
             codexHome: '/tmp/codex-home-b',
             headers: null,
+            continuityFingerprint: 'fingerprint-rotated',
           },
           routeId: 'route-rotated',
         }),
@@ -529,6 +519,7 @@ describe('assistant provider seam helpers', () => {
       doesAssistantResumeBindingMatchRoute({
         binding: createProviderBinding({
           providerOptions: {
+            continuityFingerprint: 'fingerprint-shared',
             headers: {},
           },
           providerSessionId: 'provider_session_beta',
@@ -536,6 +527,7 @@ describe('assistant provider seam helpers', () => {
         }),
         route: createRoute({
           providerOptions: {
+            continuityFingerprint: 'fingerprint-shared',
             headers: null,
           },
           routeId: 'route-headers-rotated',
@@ -585,6 +577,8 @@ function createProviderOptions(
   overrides?: Partial<AssistantProviderSessionOptions>,
 ): AssistantProviderSessionOptions {
   return {
+    continuityFingerprint: 'fingerprint-default',
+    executionDriver: 'openai-compatible',
     model: 'gpt-4.1',
     reasoningEffort: 'high',
     sandbox: null,
@@ -594,6 +588,7 @@ function createProviderOptions(
     baseUrl: 'https://api.example.test/v1',
     apiKeyEnv: 'OPENAI_API_KEY',
     providerName: 'murph-openai',
+    resumeKind: null,
     headers: null,
     ...overrides,
   }
