@@ -133,7 +133,7 @@ export function sanitizeAssistantProviderConfig(
 ): AssistantProviderConfig {
   switch (provider) {
     case 'openai-compatible':
-      return {
+      return sanitizeOpenAiCompatibleProviderConfig({
         provider,
         approvalPolicy: null,
         apiKeyEnv: normalizeNullableString(input?.apiKeyEnv),
@@ -150,7 +150,7 @@ export function sanitizeAssistantProviderConfig(
         sandbox: null,
         webSearch: normalizeAssistantWebSearchMode(input?.webSearch),
         zeroDataRetention: input?.zeroDataRetention === true ? true : null,
-      }
+      })
     case 'codex-cli':
     default:
       return {
@@ -173,6 +173,21 @@ export function sanitizeAssistantProviderConfig(
         webSearch: null,
         zeroDataRetention: null,
       }
+  }
+}
+
+function sanitizeOpenAiCompatibleProviderConfig(
+  config: AssistantProviderConfig,
+): AssistantProviderConfig {
+  const resolved = resolveAssistantRuntimeTarget(config)
+
+  return {
+    ...config,
+    presetId: resolved.presetId,
+    zeroDataRetention:
+      resolved.supportsZeroDataRetention && config.zeroDataRetention === true
+        ? true
+        : null,
   }
 }
 
