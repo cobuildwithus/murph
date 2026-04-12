@@ -52,6 +52,15 @@ export async function handleHostedEmailIngress(
   const headerFrom = readRawEmailHeaderValue(rawBytes, "from");
   const resolvedHeaderFrom = headerFrom.value ?? parsedMessage.from;
   const rejectReason = "Hosted email message was not accepted.";
+  const shouldRejectOnIngressFailure = shouldRejectHostedEmailIngressFailure({
+    config,
+    to: message.to,
+  });
+  const rejectIngressFailure = () => {
+    if (shouldRejectOnIngressFailure) {
+      message.setReject?.(rejectReason);
+    }
+  };
   const route = await resolveHostedEmailIngressRoute({
     bucket: env.BUNDLES,
     config,
@@ -65,9 +74,7 @@ export async function handleHostedEmailIngress(
   });
 
   if (!route) {
-    if (shouldRejectHostedEmailIngressFailure({ config, to: message.to })) {
-      message.setReject?.(rejectReason);
-    }
+    rejectIngressFailure();
     return;
   }
 
@@ -86,9 +93,7 @@ export async function handleHostedEmailIngress(
     route,
     userCrypto,
   })) {
-    if (shouldRejectHostedEmailIngressFailure({ config, to: message.to })) {
-      message.setReject?.(rejectReason);
-    }
+    rejectIngressFailure();
     return;
   }
 
