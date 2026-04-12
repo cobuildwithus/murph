@@ -27,7 +27,10 @@ import {
   resolveHostedLinqRecipientPhoneNumber,
   summarizeHostedLinqMessage,
 } from "./linq";
-import { resolveHostedLinqActiveRouteDecision } from "./linq-routing-policy";
+import {
+  resolveHostedLinqActiveRouteDecision,
+  resolveHostedLinqHomeBindingRecipientPhone,
+} from "./linq-routing-policy";
 import { minimizeLinqMessageReceivedEvent } from "@murphai/messaging-ingress/linq-webhook";
 import {
   createHostedPhoneLookupKey,
@@ -131,7 +134,12 @@ export async function planHostedOnboardingLinqWebhook(input: {
       memberId: existingMember.id,
       occurredAt,
       prisma: input.prisma,
-      recipientPhone: recipientPhoneNumber ?? member.routing?.linqRecipientPhone ?? null,
+      recipientPhone: resolveHostedLinqHomeBindingRecipientPhone({
+        homeChatId: member.routing?.linqChatId ?? null,
+        homeRecipientPhone: member.routing?.linqRecipientPhone ?? null,
+        incomingChatId: summary.chatId,
+        incomingRecipientPhone: recipientPhoneNumber,
+      }),
     });
 
     if (dailyState.inboundCount > 100) {

@@ -27,6 +27,16 @@ export async function resolveHostedMemberActivationLinqRoute(input: {
   const routing = input.member.routing;
 
   if (routing?.linqChatId) {
+    if (routing.pendingLinqChatId) {
+      await upsertHostedMemberHomeLinqBinding({
+        clearPending: true,
+        linqChatId: routing.linqChatId,
+        memberId: input.member.core.id,
+        prisma: input.prisma,
+        recipientPhone: routing.linqRecipientPhone,
+      });
+    }
+
     return {
       firstContactLinqChatId: routing.linqChatId,
     };

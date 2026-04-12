@@ -4,6 +4,7 @@ import {
   chooseHostedLinqConversationRecipientPhone,
   normalizeHostedLinqConversationRecipientPhones,
   resolveHostedLinqActiveRouteDecision,
+  resolveHostedLinqHomeBindingRecipientPhone,
 } from "@/src/lib/hosted-onboarding/linq-routing-policy";
 
 describe("normalizeHostedLinqConversationRecipientPhones", () => {
@@ -138,5 +139,40 @@ describe("resolveHostedLinqActiveRouteDecision", () => {
     ).toEqual({
       kind: "ignore_unknown_home",
     });
+  });
+});
+
+describe("resolveHostedLinqHomeBindingRecipientPhone", () => {
+  it("keeps the saved home recipient phone when the incoming chat already matches the durable home chat", () => {
+    expect(
+      resolveHostedLinqHomeBindingRecipientPhone({
+        homeChatId: "chat_home",
+        homeRecipientPhone: "+15550100001",
+        incomingChatId: "chat_home",
+        incomingRecipientPhone: "+15550100002",
+      }),
+    ).toBe("+15550100001");
+  });
+
+  it("fills the saved home recipient phone from inbound metadata when the matching home chat is missing one", () => {
+    expect(
+      resolveHostedLinqHomeBindingRecipientPhone({
+        homeChatId: "chat_home",
+        homeRecipientPhone: null,
+        incomingChatId: "chat_home",
+        incomingRecipientPhone: "+15550100002",
+      }),
+    ).toBe("+15550100002");
+  });
+
+  it("prefers the inbound recipient phone when rebinding onto a different chat", () => {
+    expect(
+      resolveHostedLinqHomeBindingRecipientPhone({
+        homeChatId: "chat_home",
+        homeRecipientPhone: "+15550100001",
+        incomingChatId: "chat_other",
+        incomingRecipientPhone: "+15550100002",
+      }),
+    ).toBe("+15550100002");
   });
 });

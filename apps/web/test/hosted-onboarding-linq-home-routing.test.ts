@@ -48,6 +48,33 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
     mocks.upsertHostedMemberHomeLinqBinding.mockResolvedValue(undefined);
   });
 
+  it("clears stale pending state when a durable home chat already exists", async () => {
+    await expect(
+      resolveHostedMemberActivationLinqRoute({
+        member: buildMember({
+          linqChatId: "chat_home",
+          linqRecipientPhone: "+15550100001",
+          pendingLinqChatId: "chat_pending",
+          pendingLinqRecipientPhone: "+15550100002",
+        }),
+        prisma: {} as never,
+        sourceEventId: "evt_123",
+        sourceType: "stripe_checkout",
+      }),
+    ).resolves.toEqual({
+      firstContactLinqChatId: "chat_home",
+    });
+
+    expect(mocks.createHostedLinqChat).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberHomeLinqBinding).toHaveBeenCalledWith({
+      clearPending: true,
+      linqChatId: "chat_home",
+      memberId: "member_123",
+      prisma: {} as never,
+      recipientPhone: "+15550100001",
+    });
+  });
+
   it("reuses a pending Linq thread when its recipient matches the chosen home line", async () => {
     mocks.getHostedOnboardingEnvironment.mockReturnValue({
       linqConversationPhoneNumbers: ["+15550100001", "+15550100002"],
