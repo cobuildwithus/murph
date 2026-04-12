@@ -4,6 +4,7 @@ import {
   type AssistantSession,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import {
+  assistantBackendTargetToProviderConfigInput,
   createAssistantModelTarget,
   createDefaultLocalAssistantModelTarget,
 } from '@murphai/operator-config/assistant-backend'
@@ -330,10 +331,10 @@ export async function updateAssistantSessionOptionsLocal(input: {
 
   const providerConfig = mergeAssistantProviderConfigsForProvider(
     session.session.provider,
-    {
-      provider: session.session.provider,
-      ...session.session.providerOptions,
-    },
+    // Persisted targets carry the full durable provider config. Session
+    // providerOptions are a derived runtime projection and omit target-only
+    // fields such as the Codex executable path.
+    assistantBackendTargetToProviderConfigInput(session.session.target),
     {
       provider: session.session.provider,
       ...input.providerOptions,
