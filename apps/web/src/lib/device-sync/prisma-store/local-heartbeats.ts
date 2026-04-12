@@ -1,6 +1,10 @@
 import { PrismaClient } from "@prisma/client";
 
 import { deviceSyncError, type PublicDeviceSyncAccount } from "@murphai/device-syncd/public-ingress";
+import {
+  didHostedExecutionDeviceSyncRuntimeApplyConnectionWrite,
+  findHostedExecutionDeviceSyncRuntimeApplyEntry,
+} from "@murphai/device-syncd/hosted-runtime";
 
 import {
   buildHostedLocalHeartbeatRuntimeLocalStateUpdate,
@@ -39,12 +43,21 @@ export class PrismaHostedLocalHeartbeatStore {
         },
       ],
     });
-    const update = response.updates.find((entry) => entry.connectionId === connectionId) ?? null;
+    const update = findHostedExecutionDeviceSyncRuntimeApplyEntry(response, connectionId);
 
     if (update?.status === "missing") {
       throw deviceSyncError({
         code: "RUNTIME_STATE_CONFLICT",
         message: `Hosted device-sync runtime is missing connection ${connectionId}.`,
+        retryable: true,
+        httpStatus: 409,
+      });
+    }
+
+    if (!didHostedExecutionDeviceSyncRuntimeApplyConnectionWrite(update)) {
+      throw deviceSyncError({
+        code: "RUNTIME_STATE_CONFLICT",
+        message: `Hosted device-sync runtime rejected a stale local heartbeat for connection ${connectionId}.`,
         retryable: true,
         httpStatus: 409,
       });

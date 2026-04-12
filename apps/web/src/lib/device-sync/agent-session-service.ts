@@ -1,4 +1,8 @@
 import { deviceSyncError, isDeviceSyncError } from "@murphai/device-syncd/public-ingress";
+import {
+  didHostedExecutionDeviceSyncRuntimeApplyConnectionWrite,
+  findHostedExecutionDeviceSyncRuntimeApplyEntry,
+} from "@murphai/device-syncd/hosted-runtime";
 
 import type {
   DeviceSyncAccount,
@@ -304,7 +308,6 @@ export class HostedDeviceSyncAgentSessionService {
             localState: {
               clearError: true,
             },
-            observedUpdatedAt: currentConnection.updatedAt,
             observedTokenVersion: currentTokenBundle.tokenVersion,
             seed: buildHostedDeviceSyncRuntimeSeedFromPublicAccount({
               account: {
@@ -550,7 +553,6 @@ export class HostedDeviceSyncAgentSessionService {
                 lastSyncErrorAt: input.now,
                 ...(error.accountStatus === "disconnected" ? { nextReconcileAt: null } : {}),
               },
-              observedUpdatedAt: input.account.updatedAt,
               observedTokenVersion: input.currentTokenBundle.tokenVersion,
               seed: buildHostedDeviceSyncRuntimeSeedFromPublicAccount({
                 account: seedAccount,
@@ -569,13 +571,15 @@ export class HostedDeviceSyncAgentSessionService {
             },
           ],
         });
-        const appliedUpdate = applyResponse.updates.find(
-          (entry) => entry.connectionId === input.account.id,
-        ) ?? null;
+        const appliedUpdate = findHostedExecutionDeviceSyncRuntimeApplyEntry(
+          applyResponse,
+          input.account.id,
+        );
 
         if (
           !appliedUpdate
           || appliedUpdate.status === "missing"
+          || !didHostedExecutionDeviceSyncRuntimeApplyConnectionWrite(appliedUpdate)
           || appliedUpdate.connection?.status !== error.accountStatus
           || (
             error.accountStatus === "disconnected"

@@ -208,6 +208,7 @@ function createHeartbeatStore(seed: Partial<RuntimeConnection["localState"]> = {
           connectionId: update.connectionId,
           status: "updated",
           tokenUpdate: "unchanged",
+          writeUpdate: "applied",
         },
       ],
       userId: "user-123",
@@ -324,6 +325,34 @@ describe("PrismaDeviceSyncControlPlaneStore local heartbeat updates", () => {
     });
     expect(runtimeConnection.localState.lastSyncStartedAt).toBe("2026-03-25T02:00:00.000Z");
     expect(controlClientMocks.applyDeviceSyncRuntimeUpdates).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when hosted runtime reports a stale heartbeat write conflict", async () => {
+    const { runtimeConnection, store } = createHeartbeatStore({
+      lastWebhookAt: "2026-03-25T01:00:00.000Z",
+    });
+
+    controlClientMocks.applyDeviceSyncRuntimeUpdates.mockResolvedValueOnce({
+      appliedAt: "2026-03-25T01:30:00.000Z",
+      updates: [
+        {
+          connection: cloneRuntimeConnection(runtimeConnection).connection,
+          connectionId: "dsc_123",
+          status: "updated",
+          tokenUpdate: "unchanged",
+          writeUpdate: "skipped_version_mismatch",
+        },
+      ],
+      userId: "user-123",
+    });
+
+    await expect(store.updateConnectionFromLocalHeartbeat("user-123", "dsc_123", {
+      lastWebhookAt: "2026-03-25T01:30:00.000Z",
+    })).rejects.toMatchObject({
+      code: "RUNTIME_STATE_CONFLICT",
+      httpStatus: 409,
+      retryable: true,
+    });
   });
 
 });
