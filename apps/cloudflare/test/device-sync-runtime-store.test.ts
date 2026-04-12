@@ -143,7 +143,7 @@ describe("createHostedDeviceSyncRuntimeStore", () => {
       ],
     });
 
-    await store.applyUpdates({
+    const response = await store.applyUpdates({
       userId,
       occurredAt: staleHeartbeatAt,
       updates: [
@@ -158,6 +158,8 @@ describe("createHostedDeviceSyncRuntimeStore", () => {
       ],
     });
 
+    expect(response.updates[0]?.writeUpdate).toBe("skipped_version_mismatch");
+
     const snapshot = await store.readSnapshot({ userId });
     expect(snapshot.connections).toHaveLength(1);
     expect(snapshot.connections[0]?.connection.updatedAt).toBe(firstHeartbeatAt);
@@ -166,7 +168,7 @@ describe("createHostedDeviceSyncRuntimeStore", () => {
     expect(snapshot.connections[0]?.localState.lastErrorMessage).toBeNull();
   });
 
-  it("skips disconnect-like mutations when the observed token version is stale", async () => {
+  it("skips disconnect-like mutations when the observed token version is stale even without observedUpdatedAt", async () => {
     const { store } = createRuntimeStoreHarness();
     const userId = "user_token_version";
     const connectionId = "dsc_token_version";
@@ -205,7 +207,6 @@ describe("createHostedDeviceSyncRuntimeStore", () => {
       updates: [
         {
           connectionId,
-          observedUpdatedAt: createdAt,
           observedTokenVersion: 1,
           connection: {
             status: "disconnected",
@@ -220,6 +221,9 @@ describe("createHostedDeviceSyncRuntimeStore", () => {
     });
 
     expect(response.updates[0]?.tokenUpdate).toBe("skipped_version_mismatch");
+    expect(response.updates[0]?.writeUpdate).toBe("skipped_version_mismatch");
+    expect(response.updates[0]?.connection?.status).toBe("active");
+    expect(response.updates[0]?.connection?.updatedAt).toBe(createdAt);
 
     const snapshot = await store.readSnapshot({ userId });
     expect(snapshot.connections).toHaveLength(1);
@@ -229,6 +233,92 @@ describe("createHostedDeviceSyncRuntimeStore", () => {
     expect(snapshot.connections[0]?.tokenBundle?.tokenVersion).toBe(2);
     expect(snapshot.connections[0]?.tokenBundle?.accessToken).toBe("access-2");
     expect(snapshot.connections[0]?.tokenBundle?.refreshToken).toBe("refresh-2");
+  });
+
+  it("treats missing current tokens as a token-version mismatch for stale reactivation attempts", async () => {
+    const { store } = createRuntimeStoreHarness();
+    const userId = "user_cleared_token_guard";
+    const connectionId = "dsc_cleared_token_guard";
+    const createdAt = "2026-04-03T00:00:00.000Z";
+    const disconnectedAt = "2026-04-03T00:05:00.000Z";
+    const staleRefreshAt = "2026-04-03T00:10:00.000Z";
+
+    await store.applyUpdates({
+      userId,
+      occurredAt: createdAt,
+      updates: [
+        {
+          connectionId,
+          seed: createSeed({
+            accessToken: "access-3",
+            accessTokenExpiresAt: "2026-04-04T00:00:00.000Z",
+            connectionId,
+            createdAt,
+            refreshToken: "refresh-3",
+            tokenVersion: 2,
+          }),
+          tokenBundle: {
+            accessToken: "access-3",
+            accessTokenExpiresAt: "2026-04-04T00:00:00.000Z",
+            keyVersion: "v1",
+            refreshToken: "refresh-3",
+            tokenVersion: 2,
+          },
+        },
+      ],
+    });
+
+    await store.applyUpdates({
+      userId,
+      occurredAt: disconnectedAt,
+      updates: [
+        {
+          connectionId,
+          observedTokenVersion: 2,
+          connection: {
+            status: "disconnected",
+          },
+          tokenBundle: null,
+        },
+      ],
+    });
+
+    const response = await store.applyUpdates({
+      userId,
+      occurredAt: staleRefreshAt,
+      updates: [
+        {
+          connectionId,
+          connection: {
+            status: "active",
+          },
+          localState: {
+            clearError: true,
+          },
+          observedTokenVersion: 2,
+          tokenBundle: {
+            accessToken: "access-3b",
+            accessTokenExpiresAt: null,
+            keyVersion: "v1",
+            refreshToken: "refresh-3",
+            tokenVersion: 2,
+          },
+        },
+      ],
+    });
+
+    expect(response.updates[0]?.tokenUpdate).toBe("skipped_version_mismatch");
+    expect(response.updates[0]?.writeUpdate).toBe("skipped_version_mismatch");
+    expect(response.updates[0]?.connection?.status).toBe("disconnected");
+    expect(response.updates[0]?.connection?.accessTokenExpiresAt).toBeNull();
+    expect(response.updates[0]?.connection?.updatedAt).toBe(disconnectedAt);
+
+    const snapshot = await store.readSnapshot({ userId });
+    expect(snapshot.connections).toHaveLength(1);
+    expect(snapshot.connections[0]?.connection.status).toBe("disconnected");
+    expect(snapshot.connections[0]?.connection.accessTokenExpiresAt).toBeNull();
+    expect(snapshot.connections[0]?.connection.updatedAt).toBe(disconnectedAt);
+    expect(snapshot.connections[0]?.tokenBundle).toBeNull();
   });
 
   it("sanitizes metadata from both seeds and later connection updates", async () => {

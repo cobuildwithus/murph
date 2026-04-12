@@ -280,13 +280,14 @@ describe("dispatchHostedDeviceSyncWake", () => {
             scopes: ["heartrate"],
             status: "disconnected",
             updatedAt: "2026-03-26T12:00:00.000Z",
-          },
-          connectionId: "dsc_123",
-          status: "updated",
-          tokenUpdate: "cleared",
         },
-      ],
-      userId: "user-123",
+        connectionId: "dsc_123",
+        status: "updated",
+        tokenUpdate: "cleared",
+        writeUpdate: "applied",
+      },
+    ],
+    userId: "user-123",
     });
     mocks.ensureWebhookSubscriptions.mockResolvedValue(undefined);
     mocks.prisma.$transaction.mockImplementation(async (callback: (tx: typeof mocks.prismaTx) => Promise<unknown>) =>
