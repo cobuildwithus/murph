@@ -34,11 +34,19 @@ export async function updateHostedMemberStripeBillingIfFresh(input: {
   stripeSubscriptionId?: string | null;
   suspendedAtOverride?: Date | null;
 }): Promise<HostedMemberSnapshot | null> {
-  const canonicalBillingStatus = requiresHostedCanonicalStripeBillingStatus(
+  const requiresCanonicalBillingStatus = requiresHostedCanonicalStripeBillingStatus(
     input.dispatchContext.sourceType,
-  )
+  );
+  const canonicalLookupMember =
+    requiresCanonicalBillingStatus && !input.stripeSubscriptionId
+      ? (await readHostedMemberSnapshot({
+          memberId: input.member.core.id,
+          prisma: input.prisma,
+        })) ?? input.member
+      : input.member;
+  const canonicalBillingStatus = requiresCanonicalBillingStatus
     ? await readHostedCanonicalStripeBillingStatus({
-        member: input.member,
+        member: canonicalLookupMember,
         stripeSubscriptionId: input.stripeSubscriptionId,
       })
     : null;
