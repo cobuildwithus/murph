@@ -339,6 +339,24 @@ The hosted-execution package still owns the outer dispatch event; it just stops 
 **Main refactor risk:** keep the shared ownership limited to the nested wake-hint subshape.
 Do not move hosted dispatch ids, event kinds, or transport policy into `device-syncd`, or the hosted execution boundary will blur in the other direction.
 
+### 19. Collapse hosted assistant-delivery identity to one id and hard-cut the duplicate journal API
+
+**Seam:** `packages/hosted-execution/src/side-effects.ts`, `packages/assistant-runtime/src/hosted-runtime/{callbacks,platform}.ts`, `apps/cloudflare/src/{runtime-platform,runner-outbound/results,side-effect-journal}.ts`
+
+`HostedAssistantDeliverySideEffect` and `HostedAssistantDeliveryRecord` were still carrying both `effectId` and `intentId` even though the shared owner forced those fields to be identical. The hosted runtime also still exposed both assistant-delivery-specific journal methods and a second generic `*SideEffect` API for the same journal, while the Cloudflare runner still accepted both `/effects/:effectId` and `/intents/:effectId` for the same resource.
+
+This patch:
+
+- keeps `effectId` as the canonical hosted assistant-delivery identity and removes the duplicate `intentId` field from the shared effect/record shapes
+- keeps the parser tolerant of older payloads/records that still include `intentId`, but now requires it to match `effectId` when present
+- maps assistant outbox `intentId` to hosted `effectId` only at the assistant-runtime adapter edge instead of persisting both names through the hosted stack
+- removes the duplicate generic journal method names from `HostedRuntimeEffectsPort` and the matching duplicate Cloudflare runtime implementation branches
+- removes the dead `/intents/:effectId` alias from the runner outbound route so the hosted journal has one public path shape
+
+**Why this is simpler:** one assistant-delivery effect now has one durable identity and one journal API. Adding another assistant-delivery field or changing journal behavior no longer requires keeping duplicated ids, duplicated method names, and duplicated route aliases aligned across hosted-execution, assistant-runtime, and Cloudflare.
+
+**Main refactor risk:** callers outside this repo that depend on the published `@murphai/hosted-execution` or `@murphai/assistant-runtime` surfaces may need coordinated updates if they were still reading `intentId` from hosted assistant-delivery payloads or implementing the legacy generic journal method names. The legacy parser tolerance should stay boundary-only rather than creeping back into the canonical write shape.
+
 ## Current targeted review findings
 
 The notes below are the remaining review-only pass after the simplifications landed above.

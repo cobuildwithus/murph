@@ -65,15 +65,15 @@ describe("ingestHostedEmailMessage", () => {
         { ...dispatch, event: dispatch.event },
         {
           async commit() {},
-          async deletePreparedSideEffect() {},
+          async deletePreparedAssistantDelivery() {},
           async readRawEmailMessage() {
             return null;
           },
-          async readSideEffect() {
+          async readAssistantDeliveryRecord() {
             return null;
           },
           async sendEmail() {},
-          async writeSideEffect(record) {
+          async writeAssistantDeliveryRecord(record) {
             return record;
           },
         },
@@ -122,15 +122,15 @@ describe("ingestHostedEmailMessage", () => {
       { ...dispatch, event: dispatch.event },
       {
         async commit() {},
-        async deletePreparedSideEffect() {},
+        async deletePreparedAssistantDelivery() {},
         async readRawEmailMessage() {
           return rawMessage;
         },
-        async readSideEffect() {
+        async readAssistantDeliveryRecord() {
           return null;
         },
         async sendEmail() {},
-        async writeSideEffect(record) {
+        async writeAssistantDeliveryRecord(record) {
           return record;
         },
       },

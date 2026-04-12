@@ -221,7 +221,7 @@ describe("hosted storage object keys", () => {
       userId: "user_side_effect_123",
       record: buildHostedAssistantDeliveryPreparedRecord({
         dedupeKey: "fingerprint_1",
-        intentId: "effect_1",
+        effectId: "effect_1",
         recordedAt: "2026-04-03T00:00:00.000Z",
       }),
     });

@@ -2,7 +2,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   HOSTED_ASSISTANT_DELIVERY_KIND,
-  assertHostedAssistantDeliveryRecordConsistency,
   buildHostedAssistantDeliveryPreparedRecord,
   buildHostedAssistantDeliverySentRecord,
   buildHostedAssistantDeliverySideEffect,
@@ -194,22 +193,20 @@ describe("hosted execution side-effects", () => {
   it("builds and parses assistant delivery side effects and records", () => {
     expect(buildHostedAssistantDeliverySideEffect({
       dedupeKey: "dedupe_123",
-      intentId: "intent_123",
+      effectId: "intent_123",
     })).toEqual({
       effectId: "intent_123",
       fingerprint: "dedupe_123",
-      intentId: "intent_123",
       kind: "assistant.delivery",
     });
 
     expect(buildHostedAssistantDeliveryPreparedRecord({
       dedupeKey: "dedupe_123",
-      intentId: "intent_123",
+      effectId: "intent_123",
       recordedAt: "2026-04-08T00:00:00.000Z",
     })).toEqual({
       effectId: "intent_123",
       fingerprint: "dedupe_123",
-      intentId: "intent_123",
       kind: "assistant.delivery",
       recordedAt: "2026-04-08T00:00:00.000Z",
       state: "prepared",
@@ -218,32 +215,30 @@ describe("hosted execution side-effects", () => {
     expect(buildHostedAssistantDeliverySentRecord({
       dedupeKey: "dedupe_123",
       delivery,
-      intentId: "intent_123",
+      effectId: "intent_123",
     })).toEqual({
       delivery,
       effectId: "intent_123",
       fingerprint: "dedupe_123",
-      intentId: "intent_123",
       kind: "assistant.delivery",
       recordedAt: "2026-04-08T00:00:00.000Z",
       state: "sent",
     });
 
     expect(parseHostedExecutionSideEffect({
-      effectId: "effect_123",
+      effectId: "intent_123",
       fingerprint: "fingerprint_123",
       intentId: "intent_123",
       kind: "assistant.delivery",
     })).toEqual({
-      effectId: "effect_123",
+      effectId: "intent_123",
       fingerprint: "fingerprint_123",
-      intentId: "intent_123",
       kind: "assistant.delivery",
     });
 
     expect(parseHostedExecutionSideEffectRecord({
       delivery,
-      effectId: "effect_123",
+      effectId: "intent_123",
       fingerprint: "fingerprint_123",
       intentId: "intent_123",
       kind: "assistant.delivery",
@@ -251,9 +246,8 @@ describe("hosted execution side-effects", () => {
       state: "sent",
     })).toEqual({
       delivery,
-      effectId: "effect_123",
+      effectId: "intent_123",
       fingerprint: "fingerprint_123",
-      intentId: "intent_123",
       kind: "assistant.delivery",
       recordedAt: "2026-04-08T00:00:00.000Z",
       state: "sent",
@@ -267,13 +261,11 @@ describe("hosted execution side-effects", () => {
       {
         effectId: "effect_123",
         fingerprint: "fingerprint_123",
-        intentId: "intent_123",
         kind: "assistant.delivery",
       },
       {
         effectId: "effect_123",
         fingerprint: "fingerprint_123",
-        intentId: "intent_123",
         kind: "assistant.delivery",
       },
     )).toBe(true);
@@ -281,13 +273,11 @@ describe("hosted execution side-effects", () => {
       {
         effectId: "effect_123",
         fingerprint: "fingerprint_123",
-        intentId: "intent_123",
         kind: "assistant.delivery",
       },
       {
         effectId: "effect_123",
         fingerprint: "other",
-        intentId: "intent_123",
         kind: "assistant.delivery",
       },
     )).toBe(false);
@@ -302,13 +292,11 @@ describe("hosted execution side-effects", () => {
       {
         effectId: "effect_123",
         fingerprint: "fingerprint_123",
-        intentId: "intent_123",
         kind: "assistant.delivery",
       },
       {
         effectId: "effect_123",
         fingerprint: "fingerprint_123",
-        intentId: "intent_123",
         kind: "assistant.delivery",
       },
     )).toBe(true);
@@ -326,7 +314,7 @@ describe("hosted execution side-effects", () => {
     })).toThrow(/Unsupported hosted execution side effect kind: other/i);
 
     expect(() => parseHostedExecutionSideEffectRecord({
-      effectId: "effect_123",
+      effectId: "intent_123",
       fingerprint: "fingerprint_123",
       intentId: "intent_123",
       kind: "assistant.delivery",
@@ -336,7 +324,7 @@ describe("hosted execution side-effects", () => {
 
     expect(() => buildHostedAssistantDeliveryPreparedRecord({
       dedupeKey: "dedupe_123",
-      intentId: "intent_123",
+      effectId: "intent_123",
       recordedAt: "",
     })).toThrow(/recordedAt must be a non-empty string/i);
 
@@ -346,7 +334,7 @@ describe("hosted execution side-effects", () => {
         ...delivery,
         messageLength: -1,
       },
-      intentId: "intent_123",
+      effectId: "intent_123",
     })).toThrow(/messageLength must be a non-negative integer/i);
 
     expect(() => parseHostedExecutionSideEffectRecord({
@@ -354,7 +342,7 @@ describe("hosted execution side-effects", () => {
         ...delivery,
         targetKind: "group",
       },
-      effectId: "effect_123",
+      effectId: "intent_123",
       fingerprint: "fingerprint_123",
       intentId: "intent_123",
       kind: "assistant.delivery",
@@ -374,7 +362,7 @@ describe("hosted execution side-effects", () => {
   it("exposes assistant-delivery-specific aliases and guards", () => {
     const preparedRecord = buildHostedAssistantDeliveryPreparedRecord({
       dedupeKey: "dedupe_123",
-      intentId: "intent_123",
+      effectId: "intent_123",
       recordedAt: "2026-04-08T00:00:00.000Z",
     });
 
@@ -385,20 +373,19 @@ describe("hosted execution side-effects", () => {
       kind: "assistant.delivery",
     })).toEqual(buildHostedAssistantDeliverySideEffect({
       dedupeKey: "dedupe_123",
-      intentId: "intent_123",
+      effectId: "intent_123",
     }));
     expect(parseHostedAssistantDeliverySideEffects([preparedRecord])).toEqual([{
       effectId: "intent_123",
       fingerprint: "dedupe_123",
-      intentId: "intent_123",
       kind: "assistant.delivery",
     }]);
     expect(parseHostedAssistantDeliveryRecord(preparedRecord)).toEqual(preparedRecord);
     expect(isHostedAssistantDeliveryKind(HOSTED_ASSISTANT_DELIVERY_KIND)).toBe(true);
     expect(isHostedAssistantDeliveryKind("other")).toBe(false);
-    expect(() => assertHostedAssistantDeliveryRecordConsistency({
+    expect(() => parseHostedAssistantDeliveryRecord({
       ...preparedRecord,
       intentId: "different_intent",
-    })).toThrow(/must reuse the same intentId as effectId/i);
+    })).toThrow(/intentId must match effectId when present/i);
   });
 });

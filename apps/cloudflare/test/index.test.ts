@@ -279,8 +279,13 @@ describe("cloudflare worker routes", () => {
     );
     expect(harness.bucket.keys()).toHaveLength(3);
     const journalStore = await createHostedExecutionJournalStoreForTest(harness.env, "member_123");
+    const canonicalSideEffects = sideEffects.map(({ effectId, fingerprint, kind }) => ({
+      effectId,
+      fingerprint,
+      kind,
+    }));
     await expect(journalStore.readCommittedResult("member_123", "evt_commit")).resolves.toMatchObject({
-      sideEffects,
+      sideEffects: canonicalSideEffects,
     });
   });
 
@@ -527,7 +532,7 @@ describe("cloudflare worker routes", () => {
     expect(response.status).toBe(200);
 
     const readResponse = await callRunnerOutbound(
-      new Request("http://results.worker/intents/outbox_123?fingerprint=dedupe_123", {
+      new Request("http://results.worker/effects/outbox_123?fingerprint=dedupe_123", {
         method: "GET",
       }),
       env,
@@ -538,7 +543,6 @@ describe("cloudflare worker routes", () => {
       effectId: "outbox_123",
       record: {
         effectId: "outbox_123",
-        intentId: "outbox_123",
         kind: "assistant.delivery",
         state: "prepared",
       },
@@ -549,7 +553,7 @@ describe("cloudflare worker routes", () => {
     const env = createWorkerEnv();
 
     await callRunnerOutbound(
-      new Request("http://results.worker/intents/outbox_a?fingerprint=dedupe_123", {
+      new Request("http://results.worker/effects/outbox_a?fingerprint=dedupe_123", {
         body: JSON.stringify({
           ...createPreparedSideEffectRecord({
             effectId: "outbox_a",
@@ -684,7 +688,7 @@ describe("cloudflare worker routes", () => {
     });
 
     const response = await callRunnerOutbound(
-      new Request(`http://results.worker/intents/${record.effectId}?fingerprint=${record.fingerprint}`, {
+      new Request(`http://results.worker/effects/${record.effectId}?fingerprint=${record.fingerprint}`, {
         method: "GET",
       }),
       env,
@@ -699,7 +703,6 @@ describe("cloudflare worker routes", () => {
           target: "thread_123",
         },
         effectId: "outbox_rotated",
-        intentId: "outbox_rotated",
         kind: "assistant.delivery",
         state: "sent",
       },
@@ -2121,7 +2124,7 @@ describe("cloudflare worker routes", () => {
     });
 
     const wrongMethodOutboxResponse = await callRunnerOutbound(
-      new Request("http://results.worker/intents/outbox_123", {
+      new Request("http://results.worker/effects/outbox_123", {
         method: "POST",
       }),
       createWorkerEnv(),
@@ -2494,7 +2497,6 @@ function createPreparedSideEffectRecord(input: {
   return {
     effectId: input.effectId,
     fingerprint: input.fingerprint,
-    intentId: input.effectId,
     kind: "assistant.delivery" as const,
     recordedAt: "2026-03-26T12:00:05.000Z",
     state: "prepared" as const,

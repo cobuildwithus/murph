@@ -86,7 +86,7 @@ export function createHostedAssistantDeliveryJournalStore(
     },
 
     async write(writeInput) {
-      const record = parseHostedAssistantDeliveryRecord(writeInput.record);
+      const record = writeInput.record;
       const objectKey = await hostedSideEffectRecordKey(
         input.key,
         writeInput.userId,
