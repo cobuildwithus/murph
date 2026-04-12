@@ -282,14 +282,7 @@ function readHostedWebhookLinqMessageResult(
     return { delivered: true };
   }
 
-  const chatId = readNullableString(record.chatId);
-  const messageId = readNullableString(record.messageId);
-
-  if (chatId === null && messageId === null) {
-    return null;
-  }
-
-  return { delivered: true };
+  throw new Error("Hosted webhook Linq message side effect result is invalid.");
 }
 
 function readHostedWebhookRevnetIssuancePayload(

@@ -48,7 +48,6 @@ function mapHostedTokenAuditRecord(record: HostedTokenAuditPrismaRecord): Hosted
     provider: record.provider,
     action: record.action as HostedTokenAuditRecord["action"],
     channel: record.channel as HostedTokenAuditRecord["channel"],
-    sessionId: record.sessionId,
     tokenVersion: record.tokenVersion,
     keyVersion: record.keyVersion,
     expectedTokenVersion: record.expectedTokenVersion,

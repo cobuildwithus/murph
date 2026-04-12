@@ -1,13 +1,17 @@
 import { ExecutionOutboxStatus } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { ExecutionOutbox, PrismaClient } from "@prisma/client";
+import type { ExecutionOutbox, Prisma, PrismaClient } from "@prisma/client";
 import type {
   HostedExecutionDispatchRequest,
   HostedExecutionDispatchResult,
   HostedExecutionEventDispatchState,
 } from "@murphai/hosted-execution";
-import { serializeHostedExecutionOutboxPayload } from "@/src/lib/hosted-execution/outbox-payload";
+import {
+  readHostedExecutionOutboxPayload,
+  serializeHostedExecutionOutboxPayload,
+  summarizeHostedExecutionOutboxPayload,
+} from "@/src/lib/hosted-execution/outbox-payload";
 
 const mocks = vi.hoisted(() => ({
   deleteHostedStoredDispatchPayloadBestEffort: vi.fn(),
@@ -293,6 +297,40 @@ describe("drainHostedExecutionOutbox", () => {
       eventId: dispatch.eventId,
       eventKind: dispatch.event.kind,
       payloadJson: JSON.parse(JSON.stringify(serializeHostedExecutionOutboxPayload(dispatch))),
+      sourceId: "share_123",
+      sourceType: "hosted_share_link",
+      userId: dispatch.event.userId,
+    }));
+
+    await expect(enqueueHostedExecutionOutbox({
+      dispatch,
+      sourceId: "share_123",
+      sourceType: "hosted_share_link",
+      tx: prisma as never,
+    })).resolves.toMatchObject({
+      eventId: dispatch.eventId,
+    });
+  });
+
+  it("accepts idempotent re-enqueue when an existing inline payload row is already pruned", async () => {
+    const dispatch = createShareDispatch();
+    const payload = readHostedExecutionOutboxPayload(serializeHostedExecutionOutboxPayload(dispatch));
+
+    expect(payload).not.toBeNull();
+    if (!payload) {
+      throw new Error("Expected an inline payload.");
+    }
+
+    const prunedPayloadJson = summarizeHostedExecutionOutboxPayload(payload);
+    expect(prunedPayloadJson).not.toBeNull();
+    if (!prunedPayloadJson) {
+      throw new Error("Expected a pruned payload summary.");
+    }
+
+    const prisma = createEnqueueOutboxPrisma(createOutboxRecord({
+      eventId: dispatch.eventId,
+      eventKind: dispatch.event.kind,
+      payloadJson: toStoredOutboxPayloadJson(prunedPayloadJson),
       sourceId: "share_123",
       sourceType: "hosted_share_link",
       userId: dispatch.event.userId,
@@ -615,6 +653,10 @@ function createOutboxRecord(input: {
     updatedAt: new Date("2026-03-28T11:00:00.000Z"),
     userId: input.userId,
   };
+}
+
+function toStoredOutboxPayloadJson(value: Prisma.InputJsonValue): ExecutionOutbox["payloadJson"] {
+  return JSON.parse(JSON.stringify(value)) as Prisma.JsonValue;
 }
 
 function isHostedExecutionEventDispatchState(

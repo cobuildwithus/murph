@@ -278,10 +278,6 @@ function readHostedWebhookLinqMessageSideEffectResult(
     return value;
   }
 
-  if ("chatId" in value && "messageId" in value) {
-    return { delivered: true };
-  }
-
   throw new Error("Hosted webhook Linq message side effect received an invalid terminal result.");
 }
 

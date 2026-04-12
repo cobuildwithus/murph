@@ -110,7 +110,7 @@ export async function sendHostedLinqChatMessage(input: {
   message: string;
   replyToMessageId?: string | null;
   signal?: AbortSignal;
-}): Promise<{ chatId: string | null; messageId: string | null }> {
+}): Promise<void> {
   const { apiBaseUrl, apiToken } = requireHostedOnboardingLinqConfig();
   const replyToMessageId = normalizeNullableString(input.replyToMessageId);
   let response: Response;
@@ -148,15 +148,6 @@ export async function sendHostedLinqChatMessage(input: {
       retryable: isRetryableHostedLinqStatus(response.status),
     });
   }
-
-  const payload = (await response.json()) as Record<string, unknown>;
-  return {
-    chatId: normalizeNullableString(payload.chat_id),
-    messageId:
-      payload.message && typeof payload.message === "object"
-        ? normalizeNullableString((payload.message as Record<string, unknown>).id)
-        : null,
-  };
 }
 
 export async function createHostedLinqChat(input: {

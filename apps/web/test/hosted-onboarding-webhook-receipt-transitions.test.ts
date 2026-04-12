@@ -35,6 +35,7 @@ import {
   getHostedWebhookSideEffect,
   markHostedWebhookReceiptSideEffectFailed,
   markHostedWebhookReceiptSideEffectSent,
+  markHostedWebhookReceiptSideEffectSentUnconfirmed,
   queueHostedWebhookReceiptSideEffects,
 } from "../src/lib/hosted-onboarding/webhook-receipt-transitions";
 import { isHostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
@@ -93,6 +94,33 @@ describe("hosted webhook receipt transitions", () => {
 
     assert.equal(nextEffect.status, "sent_unconfirmed");
     assert.equal(nextEffect.lastError?.message, "Delivery confirmation timed out.");
+  });
+
+  it("fails closed on legacy Linq side-effect terminal result payloads", () => {
+    const sideEffect = createHostedWebhookLinqMessageSideEffect({
+      chatId: "chat_123",
+      inviteId: "invite_123",
+      replyToMessageId: "msg_123",
+      sourceEventId: "evt_legacy",
+      template: "invite_signup",
+    });
+
+    assert.throws(
+      () =>
+        markHostedWebhookReceiptSideEffectSentUnconfirmed(
+          buildReceiptState({ sideEffects: [sideEffect] }),
+          sideEffect.effectId,
+          {
+            error: new Error("sent but not confirmed"),
+            result: {
+              chatId: "chat_123",
+              messageId: "msg_123",
+            } as never,
+            sentAt: "2026-03-26T12:00:30.000Z",
+          },
+        ),
+      /invalid terminal result/u,
+    );
   });
 
   it("stores pending Linq dispatch payloads from creation time and drops them once queued", () => {
