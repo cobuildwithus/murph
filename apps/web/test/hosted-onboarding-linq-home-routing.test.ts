@@ -84,7 +84,7 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
     });
   });
 
-  it("creates a new pooled home chat when there is no usable pending Linq thread", async () => {
+  it("returns the new pooled home chat as first contact when there is no usable pending Linq thread", async () => {
     mocks.getHostedOnboardingEnvironment.mockReturnValue({
       linqConversationPhoneNumbers: ["+15550100001", "+15550100002"],
       linqMaxActiveMembersPerConversationPhone: 3,
@@ -107,7 +107,7 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
         sourceType: "stripe_checkout",
       }),
     ).resolves.toEqual({
-      firstContactLinqChatId: null,
+      firstContactLinqChatId: "chat_created",
     });
 
     expect(mocks.createHostedLinqChat).toHaveBeenCalledWith({
