@@ -66,7 +66,6 @@ const wrapperCases = [
     [
       'ASSISTANT_PROVIDER_DEFINITIONS',
       'listAssistantProviders',
-      'readAssistantProviderBinding',
       'recoverAssistantSessionAfterProviderFailure',
     ],
   ],

@@ -1240,7 +1240,7 @@ describe("assistant turn finalizer seam", () => {
         providerBinding: expect.objectContaining({
           providerSessionId: "provider-session-existing",
           providerState: {
-            resumeRouteId: "route-existing",
+            resumeRouteId: "route-backup",
           },
         }),
         providerOptions: expect.objectContaining({
@@ -1251,7 +1251,7 @@ describe("assistant turn finalizer seam", () => {
       })
     );
     expect(saved.providerBinding?.providerState?.resumeRouteId).toBe(
-      "route-existing"
+      "route-backup"
     );
   });
 

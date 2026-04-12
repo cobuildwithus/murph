@@ -47,9 +47,6 @@ import {
   recoverAssistantSessionAfterProviderFailure,
 } from './provider-turn-recovery.js'
 import {
-  readAssistantProviderBinding,
-} from './provider-state.js'
-import {
   resolveAssistantProviderResumeKey,
   resolveAssistantRouteResumeBinding,
 } from './provider-binding.js'
@@ -334,7 +331,7 @@ async function resolveAssistantRouteTurnPlan(input: {
   const workingDirectory = input.sharedPlan.requestedWorkingDirectory
   const resumeBinding = resolveAssistantRouteResumeBinding({
     route: input.route,
-    sessionBinding: readAssistantProviderBinding(input.session),
+    sessionBinding: input.session.providerBinding ?? null,
   })
   const routeProviderCapabilities = resolveAssistantProviderTargetExecutionCapabilities({
     provider: input.route.provider,

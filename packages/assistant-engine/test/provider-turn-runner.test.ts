@@ -26,7 +26,6 @@ const runnerMocks = vi.hoisted(() => ({
   maybeThrowInjectedAssistantFault: vi.fn(),
   normalizeAssistantExecutionContext: vi.fn(),
   readAssistantFailoverState: vi.fn(),
-  readAssistantProviderBinding: vi.fn(),
   recordAssistantDiagnosticEvent: vi.fn(),
   recordAssistantFailoverRouteFailure: vi.fn(),
   recordAssistantFailoverRouteSuccess: vi.fn(),
@@ -113,10 +112,6 @@ vi.mock('../src/assistant/provider-turn-recovery.ts', () => ({
     runnerMocks.recoverAssistantSessionAfterProviderFailure,
 }))
 
-vi.mock('../src/assistant/provider-state.ts', () => ({
-  readAssistantProviderBinding: runnerMocks.readAssistantProviderBinding,
-}))
-
 vi.mock('../src/assistant/provider-binding.ts', () => ({
   resolveAssistantProviderResumeKey:
     runnerMocks.resolveAssistantProviderResumeKey,
@@ -201,11 +196,6 @@ describe('executeProviderTurnWithRecovery', () => {
     runnerMocks.readAssistantFailoverState
       .mockReset()
       .mockResolvedValue(createFailoverState())
-    runnerMocks.readAssistantProviderBinding
-      .mockReset()
-      .mockImplementation((session: AssistantSession | null | undefined) =>
-        session?.providerBinding ?? null,
-      )
     runnerMocks.recordAssistantDiagnosticEvent
       .mockReset()
       .mockResolvedValue(undefined)
