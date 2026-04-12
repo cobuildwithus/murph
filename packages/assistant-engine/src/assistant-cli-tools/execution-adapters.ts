@@ -9,8 +9,8 @@ import { resolveAssistantVaultPath } from '@murphai/vault-usecases/assistant-vau
 import { sanitizeChildProcessEnv } from '../child-process-env.js'
 import { resolveRuntimePaths } from '@murphai/runtime-state/node'
 import {
+  HOSTED_ASSISTANT_ALLOWED_API_KEY_ENV_NAMES,
   HOSTED_ASSISTANT_CONFIG_ENV_NAMES,
-  readHostedAssistantApiKeyEnvName,
 } from '@murphai/operator-config/hosted-assistant-config'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { assistantMemoryTurnEnvKeys } from '../assistant/memory/turn-context.js'
@@ -33,26 +33,16 @@ interface AssistantCliLauncher {
 }
 
 const assistantCliAllowedEnvKeys = new Set<string>([
-  'ANTHROPIC_API_KEY',
+  ...HOSTED_ASSISTANT_ALLOWED_API_KEY_ENV_NAMES,
   'APPDATA',
   'BRAVE_API_KEY',
-  'CEREBRAS_API_KEY',
   'ComSpec',
-  'DEEPSEEK_API_KEY',
   'DEVICE_SYNC_PUBLIC_BASE_URL',
   'DEVICE_SYNC_SECRET',
   'FFMPEG_COMMAND',
-  'FIREWORKS_API_KEY',
-  'GOOGLE_API_KEY',
-  'GOOGLE_GENERATIVE_AI_API_KEY',
-  'GROQ_API_KEY',
-  'HF_TOKEN',
   'HOME',
   'HOMEDRIVE',
   'HOMEPATH',
-  'HUGGINGFACEHUB_API_TOKEN',
-  'HUGGINGFACE_API_KEY',
-  'HUGGING_FACE_HUB_TOKEN',
   'LANG',
   'LANGUAGE',
   'LC_ALL',
@@ -60,11 +50,8 @@ const assistantCliAllowedEnvKeys = new Set<string>([
   'LINQ_API_BASE_URL',
   'LINQ_API_TOKEN',
   'LINQ_WEBHOOK_SECRET',
-  'LITELLM_PROXY_API_KEY',
-  'LM_STUDIO_API_KEY',
   'LOCALAPPDATA',
   'MAPBOX_ACCESS_TOKEN',
-  'MISTRAL_API_KEY',
   'MURPH_WEB_FETCH_ENABLED',
   'MURPH_WEB_FETCH_MAX_CHARS',
   'MURPH_WEB_FETCH_MAX_REDIRECTS',
@@ -75,17 +62,11 @@ const assistantCliAllowedEnvKeys = new Set<string>([
   'MURPH_WEB_SEARCH_TIMEOUT_MS',
   'NODE_ENV',
   'NODE_EXTRA_CA_CERTS',
-  'NVIDIA_API_KEY',
-  'NGC_API_KEY',
-  'OLLAMA_API_KEY',
-  'OPENAI_API_KEY',
-  'OPENROUTER_API_KEY',
   'OURA_CLIENT_ID',
   'OURA_CLIENT_SECRET',
   'PATH',
   'PATHEXT',
   'PDFTOTEXT_COMMAND',
-  'PERPLEXITY_API_KEY',
   'PROGRAMDATA',
   'SSL_CERT_DIR',
   'SSL_CERT_FILE',
@@ -98,40 +79,19 @@ const assistantCliAllowedEnvKeys = new Set<string>([
   'TELEGRAM_FILE_BASE_URL',
   'TMP',
   'TMPDIR',
-  'TOGETHER_API_KEY',
   'TZ',
   'USERPROFILE',
   'VAULT',
-  'VERCEL_AI_API_KEY',
-  'VENICE_API_KEY',
-  'VLLM_API_KEY',
   'WHISPER_COMMAND',
   'WHISPER_MODEL_PATH',
   'WHOOP_CLIENT_ID',
   'WHOOP_CLIENT_SECRET',
-  'XAI_API_KEY',
   'XDG_CACHE_HOME',
   'XDG_CONFIG_HOME',
   'XDG_DATA_HOME',
   ...assistantMemoryTurnEnvKeys,
   ...HOSTED_ASSISTANT_CONFIG_ENV_NAMES,
 ])
-
-const assistantCliDisallowedReferencedEnvKeys = new Set([
-  'HOME',
-  'NODE_OPTIONS',
-  'PATH',
-  'PORT',
-  'PWD',
-  'VAULT',
-])
-
-const assistantCliDisallowedReferencedEnvPrefixes = [
-  'AGENTMAIL_',
-  'CF_',
-  'HOSTED_EXECUTION_',
-  'WRANGLER_',
-]
 
 export async function readAssistantCliLlmsManifest(input: {
   cliEnv?: NodeJS.ProcessEnv
@@ -319,7 +279,7 @@ function shouldDisableAssistantCliConfigAutodiscovery(
   return Boolean(input.executionContext?.hosted?.memberId)
 }
 
-function buildAssistantCliProcessEnv(input: {
+export function buildAssistantCliProcessEnv(input: {
   ambientEnv?: NodeJS.ProcessEnv
   cliEnv?: NodeJS.ProcessEnv
 }): NodeJS.ProcessEnv {
@@ -328,20 +288,6 @@ function buildAssistantCliProcessEnv(input: {
 
   copyAllowedAssistantCliEnvEntries(env, ambientEnv)
   copyAllowedAssistantCliEnvEntries(env, input.cliEnv)
-
-  const hostedAssistantApiKeyEnv = readHostedAssistantApiKeyEnvName(env)
-  if (
-    hostedAssistantApiKeyEnv &&
-    isAllowedAssistantCliReferencedEnvKey(hostedAssistantApiKeyEnv)
-  ) {
-    const referencedValue = normalizeNullableString(
-      input.cliEnv?.[hostedAssistantApiKeyEnv] ?? ambientEnv[hostedAssistantApiKeyEnv],
-    )
-
-    if (referencedValue) {
-      env[hostedAssistantApiKeyEnv] = referencedValue
-    }
-  }
 
   env.NO_COLOR = '1'
 
@@ -353,21 +299,18 @@ function copyAllowedAssistantCliEnvEntries(
   source: NodeJS.ProcessEnv | undefined,
 ): void {
   for (const [key, value] of Object.entries(source ?? {})) {
+    const normalizedKey = key.toUpperCase() === 'PATH' ? 'PATH' : key
+
     if (
       typeof value !== 'string' ||
       value.length === 0 ||
-      !assistantCliAllowedEnvKeys.has(key)
+      !assistantCliAllowedEnvKeys.has(normalizedKey)
     ) {
       continue
     }
 
-    target[key] = value
+    target[normalizedKey] = value
   }
-}
-
-function isAllowedAssistantCliReferencedEnvKey(key: string): boolean {
-  return !assistantCliDisallowedReferencedEnvKeys.has(key) &&
-    !assistantCliDisallowedReferencedEnvPrefixes.some((prefix) => key.startsWith(prefix))
 }
 
 export async function readAssistantTextFile(
@@ -535,7 +478,7 @@ async function resolveExecutableOnPath(
     return (await isExecutable(command)) ? command : null
   }
 
-  const pathValue = env.PATH ?? ''
+  const pathValue = env.PATH ?? env.Path ?? ''
   const entries = pathValue
     .split(path.delimiter)
     .map((entry) => entry.trim())

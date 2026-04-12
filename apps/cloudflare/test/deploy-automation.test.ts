@@ -267,7 +267,7 @@ describe("hosted deploy automation helpers", () => {
     });
   });
 
-  it("keeps a referenced hosted assistant api key env only when it is runner-safe", () => {
+  it("keeps only known hosted assistant provider env names in deploy automation", () => {
     expect(buildHostedWorkerSecretsPayload({
       HOSTED_ASSISTANT_API_KEY_ENV: "OPENAI_API_KEY",
       HOSTED_ASSISTANT_MODEL: "gpt-4.1-mini",
@@ -293,9 +293,16 @@ describe("hosted deploy automation helpers", () => {
       HOSTED_EXECUTION_RECOVERY_RECIPIENT_PUBLIC_JWK: "recovery-public-jwk",
       HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
       OPENAI_ENTERPRISE_API_KEY: "sk-enterprise",
-    })).toMatchObject({
-      OPENAI_ENTERPRISE_API_KEY: "sk-enterprise",
-    });
+    }).OPENAI_ENTERPRISE_API_KEY).toBeUndefined();
+
+    expect(readHostedDeployAutomationEnvironment({
+      CF_BUNDLES_BUCKET: "hosted-bundles",
+      CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
+      CF_WORKER_NAME: "hosted-worker",
+      HOSTED_ASSISTANT_API_KEY_ENV: "OPENAI_ENTERPRISE_API_KEY",
+      HOSTED_ASSISTANT_MODEL: "gpt-4.1-mini",
+      HOSTED_ASSISTANT_PROVIDER: "openai",
+    }).workerVars.HOSTED_ASSISTANT_API_KEY_ENV).toBeUndefined();
 
     expect(readHostedDeployAutomationEnvironment({
       CF_BUNDLES_BUCKET: "hosted-bundles",
