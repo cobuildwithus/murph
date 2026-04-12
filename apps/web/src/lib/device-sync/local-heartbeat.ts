@@ -35,14 +35,6 @@ type HostedLocalHeartbeatState = Pick<
   "lastSyncStartedAt" | "lastSyncCompletedAt" | "lastSyncErrorAt" | "lastErrorCode" | "lastErrorMessage"
 >;
 
-export interface HostedLocalHeartbeatUpdate {
-  lastSyncStartedAt?: Date;
-  lastSyncCompletedAt?: Date;
-  lastSyncErrorAt?: Date | null;
-  lastErrorCode?: string | null;
-  lastErrorMessage?: string | null;
-}
-
 export function parseHostedLocalHeartbeatPatch(
   body: Record<string, unknown>,
   now: Date = new Date(),
@@ -59,6 +51,10 @@ export function parseHostedLocalHeartbeatPatch(
     }
 
     throw invalidLocalHeartbeat(`Local heartbeat received unsupported fields: ${unexpectedFields.join(", ")}.`);
+  }
+
+  if (Object.keys(body).length === 0) {
+    throw invalidLocalHeartbeat("Local heartbeat must include at least one supported field.");
   }
 
   const patch: HostedLocalHeartbeatPatch = {};
@@ -94,10 +90,10 @@ export function parseHostedLocalHeartbeatPatch(
   return patch;
 }
 
-export function buildHostedLocalHeartbeatUpdate(
+export function buildHostedLocalHeartbeatRuntimeLocalStateUpdate(
   existing: HostedLocalHeartbeatState,
   patch: HostedLocalHeartbeatPatch,
-): HostedLocalHeartbeatUpdate {
+): HostedLocalHeartbeatPatch {
   const nextStartedMs = patch.lastSyncStartedAt ? Date.parse(patch.lastSyncStartedAt) : null;
   const nextCompletedMs = patch.lastSyncCompletedAt ? Date.parse(patch.lastSyncCompletedAt) : null;
   const nextErrorMs = patch.lastSyncErrorAt ? Date.parse(patch.lastSyncErrorAt) : null;
@@ -119,29 +115,23 @@ export function buildHostedLocalHeartbeatUpdate(
     throw invalidLocalHeartbeat("Local heartbeat lastSyncErrorAt may not be earlier than lastSyncStartedAt.");
   }
 
-  const update: HostedLocalHeartbeatUpdate = {};
-
-  if (patch.lastSyncStartedAt !== undefined) {
-    update.lastSyncStartedAt = new Date(patch.lastSyncStartedAt);
-  }
-
-  if (patch.lastSyncCompletedAt !== undefined) {
-    update.lastSyncCompletedAt = new Date(patch.lastSyncCompletedAt);
-  }
-
-  if (patch.lastSyncErrorAt !== undefined) {
-    update.lastSyncErrorAt = new Date(patch.lastSyncErrorAt);
-  }
-
-  if (patch.lastErrorCode !== undefined) {
-    update.lastErrorCode = patch.lastErrorCode;
-  }
-
-  if (patch.lastErrorMessage !== undefined) {
-    update.lastErrorMessage = patch.lastErrorMessage;
-  }
-
-  return update;
+  return {
+    ...(patch.lastSyncStartedAt !== undefined
+      ? { lastSyncStartedAt: patch.lastSyncStartedAt }
+      : {}),
+    ...(patch.lastSyncCompletedAt !== undefined
+      ? { lastSyncCompletedAt: patch.lastSyncCompletedAt }
+      : {}),
+    ...(patch.lastSyncErrorAt !== undefined
+      ? { lastSyncErrorAt: patch.lastSyncErrorAt }
+      : {}),
+    ...(patch.lastErrorCode !== undefined
+      ? { lastErrorCode: patch.lastErrorCode }
+      : {}),
+    ...(patch.lastErrorMessage !== undefined
+      ? { lastErrorMessage: patch.lastErrorMessage }
+      : {}),
+  };
 }
 
 function parseHeartbeatTimestamp(field: string, value: unknown, now: Date): string {

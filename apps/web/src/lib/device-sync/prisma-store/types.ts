@@ -102,13 +102,3 @@ export interface CreateHostedSignalInput {
   createdAt?: string;
   tx?: HostedPrismaTransactionClient;
 }
-
-export interface UpdateLocalHeartbeatInput {
-  lastSyncStartedAt?: string | null;
-  lastSyncCompletedAt?: string | null;
-  lastSyncErrorAt?: string | null;
-  lastErrorCode?: string | null;
-  lastErrorMessage?: string | null;
-  nextReconcileAt?: string | null;
-  clearError?: boolean;
-}

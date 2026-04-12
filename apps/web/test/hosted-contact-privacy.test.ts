@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 
+import { parseHostedExecutionDeviceSyncRuntimeApplyRequest } from "@murphai/device-syncd/hosted-runtime";
 import { minimizeLinqMessageReceivedEvent } from "@murphai/messaging-ingress/linq-webhook";
 
-import { parseHostedDeviceSyncRuntimeApplyRequest } from "@/src/lib/device-sync/internal-runtime";
 import { sanitizeHostedLinqEventForStorage } from "@/src/lib/hosted-onboarding/contact-privacy";
 
 describe("hosted contact privacy", () => {
@@ -262,7 +262,7 @@ describe("hosted contact privacy", () => {
   });
 
   it("rejects duplicate connection updates in a single runtime apply request", () => {
-    expect(() => parseHostedDeviceSyncRuntimeApplyRequest({
+    expect(() => parseHostedExecutionDeviceSyncRuntimeApplyRequest({
       updates: [
         {
           connectionId: "conn_123",

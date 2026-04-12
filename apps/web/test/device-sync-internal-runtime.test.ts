@@ -1,3 +1,7 @@
+import {
+  parseHostedExecutionDeviceSyncRuntimeApplyRequest,
+  parseHostedExecutionDeviceSyncRuntimeSnapshotRequest,
+} from "@murphai/device-syncd/hosted-runtime";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -122,14 +126,7 @@ describe("device-sync hosted runtime helpers", () => {
   });
 
   it("binds device-sync runtime requests to the trusted hosted execution user and normalizes timestamps", async () => {
-    const {
-      parseHostedDeviceSyncRuntimeApplyRequest,
-      parseHostedDeviceSyncRuntimeSnapshotRequest,
-    } = await import(
-      "@/src/lib/device-sync/internal-runtime"
-    );
-
-    expect(parseHostedDeviceSyncRuntimeSnapshotRequest({
+    expect(parseHostedExecutionDeviceSyncRuntimeSnapshotRequest({
       provider: "oura",
       userId: "user-123",
     }, "user-123")).toEqual({
@@ -137,7 +134,7 @@ describe("device-sync hosted runtime helpers", () => {
       userId: "user-123",
     });
 
-    expect(parseHostedDeviceSyncRuntimeApplyRequest({
+    expect(parseHostedExecutionDeviceSyncRuntimeApplyRequest({
       occurredAt: "2026-03-26T12:00:00Z",
       updates: [
         {
@@ -178,14 +175,8 @@ describe("device-sync hosted runtime helpers", () => {
     });
   });
 
-  it("ignores removed flat runtime update fields and only reads canonical nested updates", async () => {
-    const {
-      parseHostedDeviceSyncRuntimeApplyRequest,
-    } = await import(
-      "@/src/lib/device-sync/internal-runtime"
-    );
-
-    expect(parseHostedDeviceSyncRuntimeApplyRequest({
+  it("ignores removed flat runtime update fields and only reads canonical nested updates", () => {
+    expect(parseHostedExecutionDeviceSyncRuntimeApplyRequest({
       updates: [
         {
           connection: {
@@ -222,7 +213,6 @@ describe("device-sync hosted runtime helpers", () => {
     const {
       buildHostedDeviceSyncRuntimeSeedFromPublicAccount,
       buildHostedPublicDeviceSyncAccount,
-      parseHostedDeviceSyncRuntimeApplyRequest,
     } = await import(
       "@/src/lib/device-sync/internal-runtime"
     );
@@ -244,7 +234,7 @@ describe("device-sync hosted runtime helpers", () => {
       lastErrorMessage: "authorization=[redacted] refresh_token=[redacted] [redacted.jwt]",
     });
 
-    expect(parseHostedDeviceSyncRuntimeApplyRequest({
+    expect(parseHostedExecutionDeviceSyncRuntimeApplyRequest({
       updates: [
         {
           connectionId: "dsc_123",

@@ -17,12 +17,6 @@ import type {
   HostedExecutionDeviceSyncRuntimeTokenBundle,
 } from "@murphai/device-syncd/hosted-runtime";
 
-// Keep hosted runtime request parsing with the package that already owns the shared request model.
-export {
-  parseHostedExecutionDeviceSyncRuntimeApplyRequest as parseHostedDeviceSyncRuntimeApplyRequest,
-  parseHostedExecutionDeviceSyncRuntimeSnapshotRequest as parseHostedDeviceSyncRuntimeSnapshotRequest,
-} from "@murphai/device-syncd/hosted-runtime";
-
 export interface HostedStaticDeviceSyncConnectionRecord {
   id: string;
   userId: string;

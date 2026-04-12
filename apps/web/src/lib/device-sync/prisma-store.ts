@@ -9,6 +9,7 @@ import type {
   UpsertPublicDeviceSyncConnectionInput,
 } from "@murphai/device-syncd/public-ingress";
 import type { HostedSecretCodec } from "./crypto";
+import type { HostedLocalHeartbeatPatch } from "./local-heartbeat";
 import type { AuthenticatedHostedUser, HostedBrowserAssertionNonceStore } from "./auth";
 import { PrismaHostedAgentSessionStore } from "./prisma-store/agent-sessions";
 import { PrismaHostedBrowserAssertionNonceStore } from "./prisma-store/browser-assertion-nonces";
@@ -23,7 +24,6 @@ import type {
   HostedPrismaTransactionClient,
   HostedSignalRecord,
   HostedTokenAuditRecord,
-  UpdateLocalHeartbeatInput,
 } from "./prisma-store/types";
 import { PrismaHostedSignalStore } from "./prisma-store/signals";
 import { PrismaHostedTokenAuditStore } from "./prisma-store/token-audits";
@@ -44,7 +44,6 @@ export type {
   HostedPrismaTransactionClient,
   HostedSignalRecord,
   HostedTokenAuditRecord,
-  UpdateLocalHeartbeatInput,
 } from "./prisma-store/types";
 
 export class PrismaDeviceSyncControlPlaneStore
@@ -210,7 +209,7 @@ export class PrismaDeviceSyncControlPlaneStore
   async updateConnectionFromLocalHeartbeat(
     userId: string,
     connectionId: string,
-    patch: UpdateLocalHeartbeatInput,
+    patch: HostedLocalHeartbeatPatch,
   ): Promise<PublicDeviceSyncAccount | null> {
     return this.localHeartbeats.updateConnectionFromLocalHeartbeat(userId, connectionId, patch);
   }

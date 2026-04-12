@@ -13,9 +13,9 @@ import {
   type HostedDeviceSyncControlPlaneContext,
 } from "./control-plane-context";
 import type { HostedDeviceSyncWakeSource } from "./hosted-dispatch";
+import type { HostedLocalHeartbeatPatch } from "./local-heartbeat";
 import {
   type HostedAgentSessionRecord,
-  type UpdateLocalHeartbeatInput,
 } from "./prisma-store";
 import type { HostedAgentSessionBearer } from "../hosted-agent-sessions";
 import {
@@ -160,7 +160,7 @@ export class HostedDeviceSyncControlPlane {
   async recordLocalHeartbeat(
     userId: string,
     connectionId: string,
-    patch: UpdateLocalHeartbeatInput,
+    patch: HostedLocalHeartbeatPatch,
   ) {
     return this.agentSessions.recordLocalHeartbeat(userId, connectionId, patch);
   }
