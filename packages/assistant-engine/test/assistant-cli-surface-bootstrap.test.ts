@@ -324,7 +324,7 @@ test('resolveAssistantCliSurfaceBootstrapContext falls back to a persisted summa
     schemaVersion: string
   }
   assert.equal(persisted.contract, generatedContract)
-  assert.equal(persisted.schemaVersion, 'murph.assistant-cli-surface-bootstrap.v2')
+  assert.equal(persisted.schemaVersion, 'murph.assistant-cli-surface-bootstrap.v1')
   assert.match(persisted.generatedAt, /^\d{4}-\d{2}-\d{2}T/u)
 })
 

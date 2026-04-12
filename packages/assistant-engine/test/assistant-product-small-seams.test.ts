@@ -1624,7 +1624,7 @@ function createAssistantSession(input?: {
     providerBinding: null,
     providerOptions,
     resumeState: null,
-    schema: 'murph.assistant-session.v4',
+    schema: 'murph.assistant-session.v1',
     sessionId: input?.sessionId ?? 'session-test',
     target,
     turnCount: input?.turnCount ?? 0,

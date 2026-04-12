@@ -12,7 +12,7 @@ import {
 import type { AssistantLocalService } from '../src/service.js'
 
 const TEST_SESSION = {
-  schema: 'murph.assistant-session.v4',
+  schema: 'murph.assistant-session.v1',
   sessionId: 'session_http_test',
   target: {
     adapter: 'codex-cli',

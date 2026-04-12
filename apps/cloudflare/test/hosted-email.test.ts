@@ -145,7 +145,7 @@ describe("hosted email routing and transport", () => {
 
     expect(storedRecord).toMatchObject({
       identityId: TEST_CONFIG.fromAddress,
-      schema: "murph.hosted-email-verified-sender-route.v2",
+      schema: "murph.hosted-email-verified-sender-route.v1",
       senderHash: await deriveVerifiedSenderHash(TEST_CONFIG.signingSecret!, verifiedEmailAddress),
       senderKey: await deriveVerifiedSenderKey(TEST_CONFIG.signingSecret!, verifiedEmailAddress),
       userId: "user_123",
@@ -253,7 +253,7 @@ describe("hosted email routing and transport", () => {
       key: TEST_KEY,
       keyId: TEST_KEY_ID,
       to: TEST_CONFIG.fromAddress!,
-    })).rejects.toThrow("Hosted email verified sender route schema is invalid.");
+    })).rejects.toThrow("Hosted email verified sender route senderHash must be a non-empty string.");
 
     await expect(reconcileHostedEmailVerifiedSenderRoute({
       bucket,
@@ -263,7 +263,7 @@ describe("hosted email routing and transport", () => {
       nextVerifiedEmailAddress: verifiedEmailAddress,
       previousVerifiedEmailAddress: null,
       userId: "legacy-user",
-    })).rejects.toThrow("Hosted email verified sender route schema is invalid.");
+    })).rejects.toThrow("Hosted email verified sender route senderHash must be a non-empty string.");
 
     expect(await readStoredVerifiedSenderRoute({
       bucket,

@@ -23,7 +23,7 @@ import { HostedGatewayProjectionStore } from "../src/gateway-store.ts";
 import type { DurableObjectStateLike } from "../src/user-runner/types.js";
 
 const EMAIL_THREAD_SESSION_KEY =
-  "gwcs_eyJraW5kIjoiY29udmVyc2F0aW9uIiwicm91dGVUb2tlbiI6ImQ3ZTZiMDU4Y2MzZWZmMWQ5NzNjZGM5YTM0ZjVjNGJjYWU3YzQxNjBlNzRjY2MwZmIyZDU5NGU3ZGEyYjkzNmQiLCJ2ZXJzaW9uIjoyfQ";
+  "gwcs_eyJraW5kIjoiY29udmVyc2F0aW9uIiwicm91dGVUb2tlbiI6ImQ3ZTZiMDU4Y2MzZWZmMWQ5NzNjZGM5YTM0ZjVjNGJjYWU3YzQxNjBlNzRjY2MwZmIyZDU5NGU3ZGEyYjkzNmQiLCJ2ZXJzaW9uIjoxfQ";
 const GATEWAY_STATE_STORAGE_AAD = buildHostedStorageAad({
   key: "gateway.state",
   purpose: "gateway-store",

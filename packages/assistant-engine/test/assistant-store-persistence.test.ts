@@ -130,7 +130,7 @@ describe('assistant store persistence seams', () => {
       provider: session.provider,
       providerBinding: null,
       resumeState: null,
-      schema: 'murph.assistant-session.v5',
+      schema: 'murph.assistant-session.v1',
       sessionId: session.sessionId,
       target: session.target,
       turnCount: session.turnCount,
@@ -233,7 +233,7 @@ describe('assistant store persistence seams', () => {
     await ensureAssistantState(paths)
 
     await expect(readAssistantIndexStore(paths)).resolves.toEqual({
-      version: 2,
+      version: 1,
       aliases: {},
       conversationKeys: {},
     })
@@ -257,7 +257,7 @@ describe('assistant store persistence seams', () => {
     await synchronizeAssistantIndexes(paths, current, previous)
 
     await expect(readAssistantIndexStore(paths)).resolves.toEqual({
-      version: 2,
+      version: 1,
       aliases: {
         beta: 'session-index-shared',
       },
@@ -266,7 +266,7 @@ describe('assistant store persistence seams', () => {
       },
     })
     expect(JSON.parse(await readFile(paths.indexesPath, 'utf8'))).toEqual({
-      version: 2,
+      version: 1,
       aliases: {
         beta: 'session-index-shared',
       },
@@ -293,7 +293,7 @@ describe('assistant store persistence seams', () => {
     await writeFile(paths.indexesPath, '{bad-indexes', 'utf8')
 
     await expect(readAssistantIndexStore(paths)).resolves.toEqual({
-      version: 2,
+      version: 1,
       aliases: {
         'good-alias': 'session-good',
       },
@@ -545,7 +545,7 @@ function createSession(input?: {
       : input.conversationKey
 
   return parseAssistantSessionRecord({
-    schema: 'murph.assistant-session.v4',
+    schema: 'murph.assistant-session.v1',
     sessionId,
     target: {
       adapter: 'openai-compatible',

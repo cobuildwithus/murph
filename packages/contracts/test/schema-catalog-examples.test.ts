@@ -259,7 +259,7 @@ describe("schema catalog and example seam", () => {
       ],
     });
     expect(safeParseContract(rawImportManifestContract, {
-      schemaVersion: "murph.raw-import-manifest.v2",
+      schemaVersion: "murph.raw-import-manifest.v1",
       importId: "xfm_0123456789ABCDEFGHJKMNPQRS",
       importKind: "device_batch",
       importedAt: "2026-04-08T10:11:12.000Z",
@@ -271,7 +271,7 @@ describe("schema catalog and example seam", () => {
     })).toEqual({
       success: true,
       data: {
-        schemaVersion: "murph.raw-import-manifest.v2",
+        schemaVersion: "murph.raw-import-manifest.v1",
         importId: "xfm_0123456789ABCDEFGHJKMNPQRS",
         importKind: "device_batch",
         importedAt: "2026-04-08T10:11:12.000Z",
@@ -283,7 +283,7 @@ describe("schema catalog and example seam", () => {
       },
     });
     expect(safeParseContract(rawImportManifestContract, {
-      schemaVersion: "murph.raw-import-manifest.v2",
+      schemaVersion: "murph.raw-import-manifest.v1",
       importId: "bad",
       importKind: "document",
       importedAt: "2026-04-08T10:11:12.000Z",
@@ -303,7 +303,7 @@ describe("schema catalog and example seam", () => {
       ]),
     });
     expect(safeParseContract(rawImportManifestContract, {
-      schemaVersion: "murph.raw-import-manifest.v2",
+      schemaVersion: "murph.raw-import-manifest.v1",
       importId: "xfm_0123456789ABCDEFGHJKMNPQRS",
       importKind: "workout_batch",
       importedAt: "2026-04-08T10:11:12.000Z",
@@ -319,7 +319,7 @@ describe("schema catalog and example seam", () => {
     })).toEqual({
       success: true,
       data: {
-        schemaVersion: "murph.raw-import-manifest.v2",
+        schemaVersion: "murph.raw-import-manifest.v1",
         importId: "xfm_0123456789ABCDEFGHJKMNPQRS",
         importKind: "workout_batch",
         importedAt: "2026-04-08T10:11:12.000Z",

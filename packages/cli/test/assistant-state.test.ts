@@ -1055,7 +1055,7 @@ test('resolveAssistantSession ignores legacy aliases.json fallback state', async
     path.join(statePaths.sessionsDirectory, 'asst_existing.json'),
     `${JSON.stringify(
       {
-        schema: 'murph.assistant-session.v4',
+        schema: 'murph.assistant-session.v1',
         sessionId: 'asst_existing',
         target: {
           adapter: 'codex-cli',
@@ -1186,7 +1186,7 @@ function restoreEnvironmentVariable(
 
 test('assistant session schema rejects path-like session identifiers before persistence', () => {
   const valid = {
-    schema: 'murph.assistant-session.v4',
+    schema: 'murph.assistant-session.v1',
     sessionId: 'session_safe_123',
     target: {
       adapter: 'codex-cli',

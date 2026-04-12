@@ -35,27 +35,6 @@ export async function acquireAssistantAutomationRunLock(input: {
     pid: process.pid,
     startedAt: new Date().toISOString(),
   } satisfies AssistantAutomationRunLockMetadata
-  const currentInspection = await inspectAssistantAutomationRunLockDirectory({
-    lockPath,
-    metadataPath,
-  })
-  if (currentInspection.state === 'stale' && currentInspection.metadata === null) {
-    const legacyInspection = await inspectAssistantAutomationRunLockDirectory({
-      lockPath,
-      metadataPath: resolveAssistantAutomationRunLegacyMetadataPath(input.paths),
-    })
-    if (legacyInspection.state === 'active') {
-      throw createAssistantAlreadyRunningError({
-        metadata: legacyInspection.metadata,
-        sameProcess: false,
-      })
-    }
-
-    if (legacyInspection.state === 'stale') {
-      await clearAssistantAutomationRunLock(input.paths)
-    }
-  }
-
   if (activeAutomationRoots.has(input.paths.assistantStateRoot)) {
     throw createAssistantAlreadyRunningError({
       metadata: activeAutomationRoots.get(input.paths.assistantStateRoot) ?? metadata,
@@ -124,12 +103,8 @@ export async function inspectAssistantAutomationRunLock(
     lockPath: resolveAssistantAutomationRunLockPath(paths),
     metadataPath: resolveAssistantAutomationRunLockMetadataPath(paths),
   })
-  const effectiveInspection =
-    inspection.state === 'stale' && inspection.metadata === null
-      ? await inspectAssistantAutomationRunLockFallback(paths, inspection)
-      : inspection
 
-  if (effectiveInspection.state === 'unlocked') {
+  if (inspection.state === 'unlocked') {
     return {
       state: 'unlocked',
       pid: null,
@@ -141,12 +116,12 @@ export async function inspectAssistantAutomationRunLock(
   }
 
   return {
-    state: effectiveInspection.state,
-    pid: effectiveInspection.metadata?.pid ?? null,
-    startedAt: effectiveInspection.metadata?.startedAt ?? null,
-    mode: effectiveInspection.metadata?.mode ?? null,
-    command: effectiveInspection.metadata?.command ?? null,
-    reason: effectiveInspection.state === 'stale' ? effectiveInspection.reason : null,
+    state: inspection.state,
+    pid: inspection.metadata?.pid ?? null,
+    startedAt: inspection.metadata?.startedAt ?? null,
+    mode: inspection.metadata?.mode ?? null,
+    command: inspection.metadata?.command ?? null,
+    reason: inspection.state === 'stale' ? inspection.reason : null,
   }
 }
 
@@ -161,11 +136,6 @@ export async function clearAssistantAutomationRunLock(
       retryDelay: 10,
     }),
     rm(resolveAssistantAutomationRunLockMetadataPath(paths), {
-      force: true,
-      maxRetries: 3,
-      retryDelay: 10,
-    }),
-    rm(resolveAssistantAutomationRunLegacyMetadataPath(paths), {
       force: true,
       maxRetries: 3,
       retryDelay: 10,
@@ -198,22 +168,6 @@ function resolveAssistantAutomationRunLockPath(paths: AssistantStatePaths): stri
 
 function resolveAssistantAutomationRunLockMetadataPath(paths: AssistantStatePaths): string {
   return path.join(paths.assistantStateRoot, '.automation-run.lock', 'owner.json')
-}
-
-function resolveAssistantAutomationRunLegacyMetadataPath(paths: AssistantStatePaths): string {
-  return path.join(paths.assistantStateRoot, '.automation-run-lock.json')
-}
-
-async function inspectAssistantAutomationRunLockFallback(
-  paths: AssistantStatePaths,
-  inspection: Awaited<ReturnType<typeof inspectAssistantAutomationRunLockDirectory>>,
-) {
-  const legacyInspection = await inspectAssistantAutomationRunLockDirectory({
-    lockPath: resolveAssistantAutomationRunLockPath(paths),
-    metadataPath: resolveAssistantAutomationRunLegacyMetadataPath(paths),
-  })
-
-  return legacyInspection.state === 'unlocked' ? inspection : legacyInspection
 }
 
 async function inspectAssistantAutomationRunLockDirectory(input: {

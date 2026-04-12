@@ -9,7 +9,7 @@ import {
 } from "./crypto.js";
 
 const HOSTED_PENDING_USAGE_DIRTY_USER_SCHEMA = "murph.hosted-pending-usage-dirty.v1";
-const HOSTED_PENDING_USAGE_RECORD_SCHEMA = "murph.hosted-pending-usage-record.v2";
+const HOSTED_PENDING_USAGE_RECORD_SCHEMA = "murph.hosted-pending-usage-record.v1";
 const HOSTED_PENDING_USAGE_DIRTY_PREFIX = "transient/assistant-usage-dirty/";
 const HOSTED_PENDING_USAGE_RECORD_PREFIX = "transient/assistant-usage/";
 

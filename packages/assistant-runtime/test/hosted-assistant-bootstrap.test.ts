@@ -140,7 +140,7 @@ describe("ensureHostedAssistantOperatorDefaults", () => {
             endpoint: "https://api.openai.com/v1",
             headers: null,
             model: "gpt-4.1-mini",
-            presetId: null,
+            presetId: "openai",
             providerName: "openai",
           },
         },
@@ -179,7 +179,7 @@ describe("ensureHostedAssistantOperatorDefaults", () => {
           target: {
             adapter: "openai-compatible",
             model: "gpt-5.4",
-            presetId: null,
+            presetId: "openai",
             providerName: "openai",
             reasoningEffort: "medium",
             webSearch: null,
@@ -222,7 +222,7 @@ describe("ensureHostedAssistantOperatorDefaults", () => {
             apiKeyEnv: "VENICE_API_KEY",
             endpoint: "https://api.venice.ai/api/v1",
             model: "openai-gpt-54",
-            presetId: null,
+            presetId: "venice",
             providerName: "venice",
             reasoningEffort: "medium",
             webSearch: null,
@@ -346,15 +346,15 @@ describe("ensureHostedAssistantOperatorDefaults", () => {
         {
           id: "platform-default",
           managedBy: "platform",
-          target: {
-            adapter: "openai-compatible",
-            apiKeyEnv: "OPENAI_API_KEY",
-            endpoint: "https://api.openai.com/v1",
-            model: "gpt-4.1-mini",
-            presetId: null,
-            providerName: "openai",
-          },
+        target: {
+          adapter: "openai-compatible",
+          apiKeyEnv: "OPENAI_API_KEY",
+          endpoint: "https://api.openai.com/v1",
+          model: "gpt-4.1-mini",
+          presetId: "openai",
+          providerName: "openai",
         },
+      },
       ],
     });
 

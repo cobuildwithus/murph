@@ -105,64 +105,82 @@ beforeEach(() => {
 })
 
 test('serializeAssistantProviderSessionOptions sanitizes settings for the selected provider', () => {
-  assert.deepEqual(
-    serializeAssistantProviderSessionOptions({
-      provider: 'openai-compatible',
-      model: ' gpt-oss:20b ',
-      codexHome: ' /tmp/codex-1 ',
-      sandbox: 'read-only',
-      approvalPolicy: 'never',
-      profile: ' primary ',
-      baseUrl: ' http://127.0.0.1:11434/v1 ',
-      apiKeyEnv: ' OLLAMA_API_KEY ',
-      providerName: ' ollama ',
-      headers: {
-        'X-Foo ': ' bar ',
-        ' X-Bar': 'baz',
-      },
-      oss: true,
-    }),
-    {
-      model: 'gpt-oss:20b',
-      reasoningEffort: null,
-      sandbox: null,
-      approvalPolicy: null,
-      profile: null,
-      oss: false,
-      baseUrl: 'http://127.0.0.1:11434/v1',
-      apiKeyEnv: 'OLLAMA_API_KEY',
-      providerName: 'ollama',
-      headers: {
-        'X-Bar': 'baz',
-        'X-Foo': 'bar',
-      },
+  const actual = serializeAssistantProviderSessionOptions({
+    provider: 'openai-compatible',
+    model: ' gpt-oss:20b ',
+    codexHome: ' /tmp/codex-1 ',
+    sandbox: 'read-only',
+    approvalPolicy: 'never',
+    profile: ' primary ',
+    baseUrl: ' http://127.0.0.1:11434/v1 ',
+    apiKeyEnv: ' OLLAMA_API_KEY ',
+    providerName: ' ollama ',
+    headers: {
+      'X-Foo ': ' bar ',
+      ' X-Bar': 'baz',
     },
-  )
+    oss: true,
+  })
+
+  const { continuityFingerprint, ...rest } = actual
+  assert.equal(actual.executionDriver, 'openai-compatible')
+  assert.equal(actual.resumeKind, null)
+  assert.equal(typeof continuityFingerprint, 'string')
+  if (typeof continuityFingerprint !== 'string') {
+    throw new Error('Expected continuity fingerprint for OpenAI-compatible provider options.')
+  }
+  assert.match(continuityFingerprint, /"presetId":"ollama"/u)
+  assert.deepEqual(rest, {
+    model: 'gpt-oss:20b',
+    reasoningEffort: null,
+    sandbox: null,
+    approvalPolicy: null,
+    profile: null,
+    oss: false,
+    baseUrl: 'http://127.0.0.1:11434/v1',
+    apiKeyEnv: 'OLLAMA_API_KEY',
+    providerName: 'ollama',
+    headers: {
+      'X-Bar': 'baz',
+      'X-Foo': 'bar',
+    },
+    executionDriver: 'openai-compatible',
+    resumeKind: null,
+  })
 })
 
 test('serializeAssistantProviderSessionOptions preserves an explicit Codex home for Codex targets', () => {
-  assert.deepEqual(
-    serializeAssistantProviderSessionOptions({
-      provider: 'codex-cli',
-      model: ' gpt-5.4 ',
-      codexCommand: ' codex ',
-      codexHome: ' /tmp/codex-1 ',
-      profile: ' primary ',
-      reasoningEffort: ' high ',
-      sandbox: 'workspace-write',
-      approvalPolicy: 'on-request',
-      oss: false,
-    }),
-    {
-      model: 'gpt-5.4',
-      reasoningEffort: 'high',
-      sandbox: 'workspace-write',
-      approvalPolicy: 'on-request',
-      profile: 'primary',
-      oss: false,
-      codexHome: '/tmp/codex-1',
-    },
-  )
+  const actual = serializeAssistantProviderSessionOptions({
+    provider: 'codex-cli',
+    model: ' gpt-5.4 ',
+    codexCommand: ' codex ',
+    codexHome: ' /tmp/codex-1 ',
+    profile: ' primary ',
+    reasoningEffort: ' high ',
+    sandbox: 'workspace-write',
+    approvalPolicy: 'on-request',
+    oss: false,
+  })
+
+  const { continuityFingerprint, ...rest } = actual
+  assert.equal(actual.executionDriver, 'codex-cli')
+  assert.equal(actual.resumeKind, 'codex-session')
+  assert.equal(typeof continuityFingerprint, 'string')
+  if (typeof continuityFingerprint !== 'string') {
+    throw new Error('Expected continuity fingerprint for Codex provider options.')
+  }
+  assert.match(continuityFingerprint, /"provider":"codex-cli"/u)
+  assert.deepEqual(rest, {
+    model: 'gpt-5.4',
+    reasoningEffort: 'high',
+    sandbox: 'workspace-write',
+    approvalPolicy: 'on-request',
+    profile: 'primary',
+    oss: false,
+    codexHome: '/tmp/codex-1',
+    executionDriver: 'codex-cli',
+    resumeKind: 'codex-session',
+  })
 })
 
 test('buildAssistantProviderDefaultsPatch keeps OpenAI-compatible public headers when only the model changes', () => {
@@ -253,12 +271,14 @@ test('resolveAssistantProviderCapabilities reports shared backend-facing capabil
     supportsNativeResume: true,
     supportsReasoningEffort: true,
     supportsRichUserMessageContent: false,
+    supportsZeroDataRetention: false,
   })
   assert.deepEqual(resolveAssistantProviderCapabilities('openai-compatible'), {
     supportsModelDiscovery: true,
     supportsNativeResume: true,
     supportsReasoningEffort: false,
     supportsRichUserMessageContent: true,
+    supportsZeroDataRetention: false,
   })
 })
 
@@ -275,6 +295,7 @@ test('resolveAssistantTargetCapabilities enables reasoning effort for OpenAI-com
       supportsNativeResume: true,
       supportsReasoningEffort: true,
       supportsRichUserMessageContent: true,
+      supportsZeroDataRetention: false,
     },
   )
   assert.deepEqual(
@@ -286,9 +307,10 @@ test('resolveAssistantTargetCapabilities enables reasoning effort for OpenAI-com
     }),
     {
       supportsModelDiscovery: true,
-      supportsNativeResume: true,
-      supportsReasoningEffort: true,
+      supportsNativeResume: false,
+      supportsReasoningEffort: false,
       supportsRichUserMessageContent: true,
+      supportsZeroDataRetention: false,
     },
   )
 })
@@ -324,7 +346,7 @@ test('resolveAssistantModelCatalog uses discovered OpenAI-compatible models and 
     ['gpt-oss:20b', 'llama3.3:70b'],
   )
   assert.equal(catalog.providerLabel, 'Ollama')
-  assert.equal(catalog.reasoningOptions.length, 4)
+  assert.equal(catalog.reasoningOptions.length, 0)
 })
 
 test('resolveAssistantModelCatalog exposes reasoning options for official OpenAI-compatible targets', () => {
@@ -397,7 +419,7 @@ test('resolveAssistantModelCatalog keeps the current OpenAI-compatible model sel
   })
 
   assert.equal(catalog.modelOptions[0]?.value, 'llama3.3:70b')
-  assert.equal(catalog.reasoningOptions.length, 4)
+  assert.equal(catalog.reasoningOptions.length, 0)
 })
 
 test('defaultDiscoverOpenAICompatibleModels normalizes and dedupes model ids from the models endpoint', async () => {
@@ -759,6 +781,7 @@ test('executeAssistantProviderTurn dispatches to the OpenAI-compatible adapter w
       apiKey: 'secret-token',
       apiKeyEnv: 'OLLAMA_API_KEY',
       baseUrl: 'http://127.0.0.1:11434/v1',
+      executionDriver: 'openai-compatible',
       headers: {
         'X-Foo': 'bar',
       },
@@ -954,11 +977,7 @@ test('executeAssistantProviderTurn forwards reasoning effort to Venice chat comp
   })
 
   const generateCall = providerMocks.generateText.mock.calls[0]?.[0]
-  assert.deepEqual(generateCall?.providerOptions, {
-    venice: {
-      reasoningEffort: 'medium',
-    },
-  })
+  assert.equal(generateCall?.providerOptions, undefined)
 })
 
 test('executeAssistantProviderTurn uses the prebuilt canonical assistant tool catalog for OpenAI-compatible tool-runtime turns', async () => {
@@ -1406,6 +1425,7 @@ test('executeAssistantProviderTurn infers the OpenAI-compatible provider when en
     {
       apiKeyEnv: 'OLLAMA_API_KEY',
       baseUrl: 'http://127.0.0.1:11434/v1',
+      executionDriver: 'openai-compatible',
       headers: {
         'X-Foo': 'bar',
       },
@@ -1630,7 +1650,7 @@ test('createSetupAssistantResolver accepts reasoning effort for OpenAI-compatibl
   assert.equal(resolved.reasoningEffort, 'medium')
 })
 
-test('createSetupAssistantResolver accepts reasoning effort for Venice', async () => {
+test('createSetupAssistantResolver rejects reasoning effort for Venice', async () => {
   const resolver = createSetupAssistantResolver({
     assistantAccount: {
       resolve: async () => null,
@@ -1639,20 +1659,20 @@ test('createSetupAssistantResolver accepts reasoning effort for Venice', async (
     output: new PassThrough(),
   })
 
-  const resolved = await resolver.resolve({
-    allowPrompt: false,
-    commandName: 'setup',
-    preset: 'openai-compatible',
-    options: {
-      assistantProviderPreset: 'venice',
-      assistantModel: 'openai-gpt-54',
-      assistantReasoningEffort: 'medium',
-    } as any,
-  })
-
-  assert.equal(resolved.baseUrl, 'https://api.venice.ai/api/v1')
-  assert.equal(resolved.providerName, 'venice')
-  assert.equal(resolved.reasoningEffort, 'medium')
+  await assert.rejects(
+    () =>
+      resolver.resolve({
+        allowPrompt: false,
+        commandName: 'setup',
+        preset: 'openai-compatible',
+        options: {
+          assistantProviderPreset: 'venice',
+          assistantModel: 'openai-gpt-54',
+          assistantReasoningEffort: 'medium',
+        } as any,
+      }),
+    /does not support assistantReasoningEffort/u,
+  )
 })
 
 test('executeAssistantProviderTurn enables reasoning summary traces when requested', async () => {

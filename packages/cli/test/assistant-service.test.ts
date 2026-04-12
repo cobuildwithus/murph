@@ -538,6 +538,9 @@ test('buildResolveAssistantSessionInput keeps locator shaping and operator defau
       providerName: null,
       headers: null,
       reasoningEffort: 'high',
+      presetId: null,
+      webSearch: null,
+      zeroDataRetention: null,
       target: {
         adapter: 'openai-compatible',
         apiKeyEnv: null,
@@ -589,6 +592,9 @@ test('buildResolveAssistantSessionInput keeps locator shaping and operator defau
       providerName: 'openai',
       headers: null,
       reasoningEffort: 'medium',
+      presetId: null,
+      webSearch: null,
+      zeroDataRetention: null,
       target: {
         adapter: 'openai-compatible',
         apiKeyEnv: 'OPENAI_API_KEY',

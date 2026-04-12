@@ -362,7 +362,7 @@ async function createAssistantPaths(prefix: string) {
 
 function createOpenAiSession(): AssistantSession {
   return parseAssistantSessionRecord({
-    schema: 'murph.assistant-session.v4',
+    schema: 'murph.assistant-session.v1',
     sessionId: 'session-alpha',
     target: {
       adapter: 'openai-compatible',
@@ -397,7 +397,7 @@ function createOpenAiSession(): AssistantSession {
 
 function createCodexSession(): AssistantSession {
   return parseAssistantSessionRecord({
-    schema: 'murph.assistant-session.v4',
+    schema: 'murph.assistant-session.v1',
     sessionId: 'session-codex',
     target: {
       adapter: 'codex-cli',

@@ -56,11 +56,7 @@ export function buildHostedWranglerDeployConfig(
     migrations: [
       {
         tag: "v1",
-        new_sqlite_classes: ["UserRunnerDurableObject"],
-      },
-      {
-        tag: "v2",
-        new_sqlite_classes: ["RunnerContainer"],
+        new_sqlite_classes: ["UserRunnerDurableObject", "RunnerContainer"],
       },
     ],
     r2_buckets: [

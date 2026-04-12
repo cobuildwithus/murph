@@ -824,7 +824,7 @@ function createAssistantSession(input?: {
       approvalPolicy: null,
     },
     resumeState: null,
-    schema: 'murph.assistant-session.v4',
+    schema: 'murph.assistant-session.v1',
     sessionId: input?.sessionId ?? 'session-test',
     target: {
       adapter: 'openai-compatible',

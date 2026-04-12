@@ -549,7 +549,7 @@ describe('assistant service-result seam', () => {
       prompt: 'Hello',
       response: 'Hi there',
       session: parseAssistantSessionRecord({
-        schema: 'murph.assistant-session.v4',
+        schema: 'murph.assistant-session.v1',
         sessionId: 'session-service-result',
         target: {
           adapter: 'openai-compatible',

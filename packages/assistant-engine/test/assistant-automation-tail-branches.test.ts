@@ -160,9 +160,9 @@ describe('assistant automation tail branch coverage', () => {
       command: null,
       mode: null,
       pid: null,
-      reason: 'Assistant automation run lock metadata is malformed.',
+      reason: null,
       startedAt: null,
-      state: 'stale',
+      state: 'unlocked',
     })
   })
 

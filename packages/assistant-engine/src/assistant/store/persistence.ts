@@ -49,7 +49,7 @@ import { resolveAssistantOpaqueStateFilePath } from '../state-ids.js'
 import type { AssistantStatePaths } from './paths.js'
 import type { ResolvedAssistantSession } from './types.js'
 
-export const ASSISTANT_INDEX_STORE_VERSION = 2
+export const ASSISTANT_INDEX_STORE_VERSION = 1
 export const ASSISTANT_AUTOMATION_STATE_VERSION = 1
 
 const assistantSessionCache = createAssistantBoundedRuntimeCache<string, AssistantSession | null>({

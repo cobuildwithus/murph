@@ -612,7 +612,7 @@ function createAssistantSession(input?: {
       : null
 
   return {
-    schema: 'murph.assistant-session.v4',
+    schema: 'murph.assistant-session.v1',
     sessionId: 'session_provider_seam_test',
     target: {
       adapter: 'openai-compatible',

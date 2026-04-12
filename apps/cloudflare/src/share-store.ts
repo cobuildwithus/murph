@@ -5,7 +5,7 @@ import { buildHostedStorageAad } from "./crypto-context.js";
 import { hostedSharePackObjectKey } from "./storage-paths.js";
 import { readEncryptedR2Json, writeEncryptedR2Json } from "./crypto.js";
 
-const HOSTED_SHARE_PACK_SCHEMA = "murph.hosted-share-pack.v2";
+const HOSTED_SHARE_PACK_SCHEMA = "murph.hosted-share-pack.v1";
 
 type HostedExecutionSharePack = ReturnType<typeof parseHostedExecutionSharePack>;
 

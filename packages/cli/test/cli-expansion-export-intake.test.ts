@@ -225,7 +225,7 @@ test.sequential(
       assert.equal(requireData(manifestResult).lookupId, requireData(imported).assessmentId)
       assert.equal(requireData(manifestResult).kind, 'assessment')
       assert.equal(requireData(manifestResult).manifestFile, requireData(imported).manifestFile)
-      assert.equal(requireData(manifestResult).manifest.schemaVersion, 'murph.raw-import-manifest.v2')
+      assert.equal(requireData(manifestResult).manifest.schemaVersion, 'murph.raw-import-manifest.v1')
       assert.equal(requireData(manifestResult).manifest.importId, requireData(imported).assessmentId)
       assert.equal(requireData(manifestResult).manifest.importKind, 'assessment')
       assert.deepEqual(requireData(manifestResult).manifest.owner, {

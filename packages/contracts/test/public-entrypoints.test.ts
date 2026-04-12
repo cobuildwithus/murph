@@ -66,7 +66,7 @@ describe("@murphai/contracts public entrypoint", () => {
 
   it("covers the contracts helper seams exposed through the public package", () => {
     expect(createEmptyPreferencesDocument(new Date("2026-04-08T10:11:12.000Z"))).toEqual({
-      schemaVersion: 2,
+      schemaVersion: 1,
       updatedAt: "2026-04-08T10:11:12.000Z",
       workoutUnitPreferences: {},
       wearablePreferences: {
@@ -195,7 +195,7 @@ describe("@murphai/contracts public entrypoint", () => {
     );
 
     expect(createEmptyPreferencesDocument(new Date("2026-04-08T00:00:00.000Z"))).toEqual({
-      schemaVersion: 2,
+      schemaVersion: 1,
       updatedAt: "2026-04-08T00:00:00.000Z",
       workoutUnitPreferences: {},
       wearablePreferences: {
@@ -208,7 +208,9 @@ describe("@murphai/contracts public entrypoint", () => {
         updatedAt: "2026-04-08T00:00:00.000Z",
         workoutUnitPreferences: {
           weight: "kg",
-          distance: "mi",
+        },
+        wearablePreferences: {
+          desiredProviders: [],
         },
       }),
     ).toEqual({
@@ -218,7 +220,9 @@ describe("@murphai/contracts public entrypoint", () => {
         updatedAt: "2026-04-08T00:00:00.000Z",
         workoutUnitPreferences: {
           weight: "kg",
-          distance: "mi",
+        },
+        wearablePreferences: {
+          desiredProviders: [],
         },
       },
     });

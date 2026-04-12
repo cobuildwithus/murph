@@ -359,7 +359,7 @@ test('representative contract schemas stay wired to the owned setup/operator sea
         providerSessionId: ' provider-session ',
         resumeRouteId: ' route-1 ',
       },
-      schema: 'murph.assistant-session.v4',
+      schema: 'murph.assistant-session.v1',
       sessionId: 'session_1',
       target: {
         adapter: 'openai-compatible',
@@ -442,7 +442,7 @@ test('representative contract schemas stay wired to the owned setup/operator sea
       createdAt: '2026-04-08T12:00:00.000Z',
       lastTurnAt: null,
       resumeState: null,
-      schema: 'murph.assistant-session.v4',
+      schema: 'murph.assistant-session.v1',
       sessionId: 'session_codex',
       target: {
         adapter: 'codex-cli',
@@ -478,7 +478,7 @@ test('representative contract schemas stay wired to the owned setup/operator sea
         providerSessionId: '   ',
         resumeRouteId: ' route-only ',
       },
-      schema: 'murph.assistant-session.v4',
+      schema: 'murph.assistant-session.v1',
       sessionId: 'session_route_only',
       target: {
         adapter: 'openai-compatible',

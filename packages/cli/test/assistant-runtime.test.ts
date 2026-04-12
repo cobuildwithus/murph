@@ -428,7 +428,7 @@ function createMockCodexRuntimeSession(input: {
     providerBinding: input.providerBinding ?? null,
     providerOptions,
     resumeState,
-    schema: 'murph.assistant-session.v4' as const,
+    schema: 'murph.assistant-session.v1' as const,
     sessionId: input.sessionId,
     target: {
       adapter: 'codex-cli' as const,
@@ -7928,7 +7928,7 @@ test('runAssistantChat surfaces Ink chat errors to the caller', async () => {
 
 test('assistant Ink resyncs the next turn selection after a failover-updated session', () => {
   const previousSession = {
-    schema: 'murph.assistant-session.v4',
+    schema: 'murph.assistant-session.v1',
     sessionId: 'asst_failover_prev',
     target: {
       adapter: 'codex-cli',
@@ -8015,7 +8015,7 @@ test('assistant Ink resyncs the next turn selection after a failover-updated ses
 
 test('assistant Ink preserves explicit selections when unrelated same-provider session options change', () => {
   const previousSession = {
-    schema: 'murph.assistant-session.v4',
+    schema: 'murph.assistant-session.v1',
     sessionId: 'asst_same_provider_route_change',
     target: {
       adapter: 'openai-compatible',
@@ -8304,7 +8304,7 @@ test('assistant Ink view-model preserves prior progress rows when later turns us
 
 test('assistant Ink view-model exposes codex-style footer metadata and busy copy', () => {
   const session = {
-    schema: 'murph.assistant-session.v4',
+    schema: 'murph.assistant-session.v1',
     sessionId: 'asst_demo',
     target: {
       adapter: 'codex-cli',
@@ -8841,7 +8841,7 @@ test('assistant Ink queued prompt disposition replays completed follow-ups and r
 
 test('assistant Ink view-model falls back to default model labels when needed', () => {
   const ossSession = {
-    schema: 'murph.assistant-session.v4',
+    schema: 'murph.assistant-session.v1',
     sessionId: 'asst_demo',
     target: {
       adapter: 'codex-cli',

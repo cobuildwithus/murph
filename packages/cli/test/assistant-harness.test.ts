@@ -350,6 +350,7 @@ test('assistant tool catalogs reject duplicate bound tool names from one host se
 
 test('resolveAssistantLanguageModel uses gateway when no baseUrl is provided', () => {
   const model = resolveAssistantLanguageModel({
+    executionDriver: 'gateway',
     model: 'anthropic/claude-sonnet-4-5',
   })
 
@@ -365,6 +366,7 @@ test('resolveAssistantLanguageModel uses the OpenAI responses provider for the o
   process.env[TEST_API_KEY_ENV] = 'secret-key'
 
   const model = resolveAssistantLanguageModel({
+    executionDriver: 'openai-responses',
     model: 'gpt-5',
     baseUrl: 'https://api.openai.com/v1',
     apiKeyEnv: TEST_API_KEY_ENV,
@@ -418,6 +420,7 @@ test('resolveAssistantLanguageModel injects automatic OpenAI response compaction
 
   try {
     const model = resolveAssistantLanguageModel({
+      executionDriver: 'openai-responses',
       model: 'gpt-5',
       baseUrl: 'https://api.openai.com/v1',
       apiKeyEnv: TEST_API_KEY_ENV,

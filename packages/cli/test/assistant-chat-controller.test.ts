@@ -13,7 +13,7 @@ function createSession(
   overrides: Partial<AssistantSession> = {},
 ): AssistantSession {
   return {
-    schema: 'murph.assistant-session.v4',
+    schema: 'murph.assistant-session.v1',
     sessionId: 'asst_demo',
     target: {
       adapter: 'openai-compatible',

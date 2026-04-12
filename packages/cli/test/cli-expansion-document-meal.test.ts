@@ -284,7 +284,7 @@ test.sequential(
       assert.equal(requireData(manifest).lookupId, currentDocument.lookupId)
       assert.equal(requireData(manifest).kind, 'document')
       assert.match(requireData(manifest).manifestFile, /\/manifest\.json$/u)
-      assert.equal(requireData(manifest).manifest.schemaVersion, 'murph.raw-import-manifest.v2')
+      assert.equal(requireData(manifest).manifest.schemaVersion, 'murph.raw-import-manifest.v1')
       assert.equal(requireData(manifest).manifest.importKind, 'document')
       assert.equal(requireData(manifest).manifest.importId, currentDocument.documentId)
       assert.deepEqual(requireData(manifest).manifest.owner, {
