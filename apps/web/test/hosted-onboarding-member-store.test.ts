@@ -31,7 +31,7 @@ import {
   lookupHostedMemberRoutingByTelegramUserLookupKey,
   readHostedMemberRoutingState,
   type HostedMemberRoutingStateSnapshot,
-  upsertHostedMemberLinqChatBinding,
+  upsertHostedMemberHomeLinqBinding,
   upsertHostedMemberTelegramRoutingBinding,
 } from "@/src/lib/hosted-onboarding/hosted-member-routing-store";
 
@@ -66,7 +66,10 @@ describe("hosted-member-store", () => {
     };
     const routing: HostedMemberRoutingStateSnapshot = {
       linqChatId: "linq_chat_123",
+      linqRecipientPhone: null,
       memberId: core.id,
+      pendingLinqChatId: null,
+      pendingLinqRecipientPhone: null,
       telegramUserLookupKey: "telegram_lookup_123",
     };
     const billingRef: HostedMemberStripeBillingRefSnapshot = {
@@ -263,16 +266,20 @@ describe("hosted-member-store", () => {
       hostedMemberRouting: {
         findUnique: vi.fn().mockResolvedValue({
           linqChatIdEncrypted: encryptHostedWebNullableString({
-            field: "hosted-member-routing.linq-chat-id",
+            field: "hosted-member-routing.home-linq-chat-id",
             memberId: "member_123",
             value: "chat_123",
           }),
+          linqRecipientPhoneEncrypted: null,
           member: {
             billingStatus: HostedBillingStatus.active,
             id: "member_123",
             suspendedAt: null,
           },
           memberId: "member_123",
+          pendingLinqChatIdEncrypted: null,
+          pendingLinqRecipientPhoneEncrypted: null,
+          telegramUserIdEncrypted: null,
           telegramUserLookupKey: "hbidx:telegram-user:v1:abc123",
         }),
       },
@@ -301,12 +308,16 @@ describe("hosted-member-store", () => {
   it("looks up routing by raw Telegram user id through read candidates", async () => {
     const findFirst = vi.fn().mockResolvedValue({
       linqChatIdEncrypted: null,
+      linqRecipientPhoneEncrypted: null,
       member: {
         billingStatus: HostedBillingStatus.active,
         id: "member_123",
         suspendedAt: null,
       },
       memberId: "member_123",
+      pendingLinqChatIdEncrypted: null,
+      pendingLinqRecipientPhoneEncrypted: null,
+      telegramUserIdEncrypted: null,
       telegramUserLookupKey: "hbidx:telegram-user:v1:abc123",
     });
     const prisma = {
@@ -342,6 +353,7 @@ describe("hosted-member-store", () => {
       },
       select: {
         linqChatIdEncrypted: true,
+        linqRecipientPhoneEncrypted: true,
         member: {
           select: {
             billingStatus: true,
@@ -350,6 +362,8 @@ describe("hosted-member-store", () => {
           },
         },
         memberId: true,
+        pendingLinqChatIdEncrypted: true,
+        pendingLinqRecipientPhoneEncrypted: true,
         telegramUserLookupKey: true,
         telegramUserIdEncrypted: true,
       },
@@ -361,12 +375,16 @@ describe("hosted-member-store", () => {
       hostedMemberRouting: {
         findUnique: vi.fn().mockResolvedValue({
           linqChatIdEncrypted: encryptHostedWebNullableString({
-            field: "hosted-member-routing.linq-chat-id",
+            field: "hosted-member-routing.home-linq-chat-id",
             memberId: "member_123",
             value: "chat_123",
           }),
           linqChatLookupKey: "hbidx:linq-chat:v1:abc123",
+          linqRecipientPhoneEncrypted: null,
           memberId: "member_123",
+          pendingLinqChatIdEncrypted: null,
+          pendingLinqRecipientPhoneEncrypted: null,
+          telegramUserIdEncrypted: null,
           telegramUserLookupKey: "tg_user_123",
         }),
       },
@@ -379,12 +397,15 @@ describe("hosted-member-store", () => {
       }),
     ).resolves.toEqual({
       linqChatId: "chat_123",
+      linqRecipientPhone: null,
       memberId: "member_123",
+      pendingLinqChatId: null,
+      pendingLinqRecipientPhone: null,
       telegramUserLookupKey: "tg_user_123",
     });
   });
 
-  it("upserts Linq chat bindings into the routing table with encrypted local storage", async () => {
+  it("upserts home Linq chat bindings into the routing table with encrypted local storage", async () => {
     const updateMany = vi.fn().mockResolvedValue({ count: 0 });
     const upsert = vi.fn().mockResolvedValue({});
     const prisma = {
@@ -394,13 +415,15 @@ describe("hosted-member-store", () => {
       },
     } as never;
 
-    await upsertHostedMemberLinqChatBinding({
+    await upsertHostedMemberHomeLinqBinding({
       linqChatId: "chat_123",
       memberId: "member_123",
       prisma,
+      recipientPhone: "+15550100001",
     });
 
-    expect(updateMany).toHaveBeenCalledWith({
+    expect(updateMany).toHaveBeenCalledTimes(2);
+    expect(updateMany).toHaveBeenNthCalledWith(1, {
       where: {
         linqChatLookupKey: expect.stringMatching(/^hbidx:linq-chat:v1:/u),
         NOT: {
@@ -410,6 +433,22 @@ describe("hosted-member-store", () => {
       data: {
         linqChatIdEncrypted: null,
         linqChatLookupKey: null,
+        linqRecipientPhoneEncrypted: null,
+        linqRecipientPhoneLookupKey: null,
+      },
+    });
+    expect(updateMany).toHaveBeenNthCalledWith(2, {
+      where: {
+        pendingLinqChatLookupKey: expect.stringMatching(/^hbidx:linq-chat:v1:/u),
+        NOT: {
+          memberId: "member_123",
+        },
+      },
+      data: {
+        pendingLinqChatIdEncrypted: null,
+        pendingLinqChatLookupKey: null,
+        pendingLinqRecipientPhoneEncrypted: null,
+        pendingLinqRecipientPhoneLookupKey: null,
       },
     });
     expect(upsert).toHaveBeenCalledWith({
@@ -419,13 +458,21 @@ describe("hosted-member-store", () => {
       create: {
         linqChatIdEncrypted: expect.stringMatching(/^hbds:/u),
         linqChatLookupKey: expect.stringMatching(/^hbidx:linq-chat:v1:/u),
+        linqRecipientPhoneEncrypted: expect.stringMatching(/^hbds:/u),
+        linqRecipientPhoneLookupKey: expect.stringMatching(/^hbidx:phone:v1:/u),
         memberId: "member_123",
+        pendingLinqChatIdEncrypted: null,
+        pendingLinqChatLookupKey: null,
+        pendingLinqRecipientPhoneEncrypted: null,
+        pendingLinqRecipientPhoneLookupKey: null,
         telegramUserLookupKey: null,
         telegramUserIdEncrypted: null,
       },
       update: {
         linqChatIdEncrypted: expect.stringMatching(/^hbds:/u),
         linqChatLookupKey: expect.stringMatching(/^hbidx:linq-chat:v1:/u),
+        linqRecipientPhoneEncrypted: expect.stringMatching(/^hbds:/u),
+        linqRecipientPhoneLookupKey: expect.stringMatching(/^hbidx:phone:v1:/u),
       },
     });
   });
@@ -448,14 +495,15 @@ describe("hosted-member-store", () => {
     } as never;
 
     await expect(
-      upsertHostedMemberLinqChatBinding({
+      upsertHostedMemberHomeLinqBinding({
         linqChatId: "chat_123",
         memberId: "member_123",
         prisma,
+        recipientPhone: "+15550100001",
       }),
     ).resolves.toBeUndefined();
 
-    expect(updateMany).toHaveBeenCalledTimes(2);
+    expect(updateMany).toHaveBeenCalledTimes(4);
     expect(upsert).toHaveBeenCalledTimes(2);
   });
 
@@ -480,7 +528,13 @@ describe("hosted-member-store", () => {
       create: {
         linqChatIdEncrypted: null,
         linqChatLookupKey: null,
+        linqRecipientPhoneEncrypted: null,
+        linqRecipientPhoneLookupKey: null,
         memberId: "member_123",
+        pendingLinqChatIdEncrypted: null,
+        pendingLinqChatLookupKey: null,
+        pendingLinqRecipientPhoneEncrypted: null,
+        pendingLinqRecipientPhoneLookupKey: null,
         telegramUserIdEncrypted: expect.stringMatching(/^hbds:/u),
         telegramUserLookupKey: expect.stringMatching(/^hbidx:telegram-user:v1:/u),
       },
@@ -964,12 +1018,16 @@ describe("hosted-member-store", () => {
           },
           routing: {
             linqChatIdEncrypted: encryptHostedWebNullableString({
-              field: "hosted-member-routing.linq-chat-id",
+              field: "hosted-member-routing.home-linq-chat-id",
               memberId: "member_123",
               value: "chat_123",
             }),
             linqChatLookupKey: "hbidx:linq-chat:v1:abc123",
+            linqRecipientPhoneEncrypted: null,
             memberId: "member_123",
+            pendingLinqChatIdEncrypted: null,
+            pendingLinqRecipientPhoneEncrypted: null,
+            telegramUserIdEncrypted: null,
             telegramUserLookupKey: "tg_user_123",
           },
         }),
@@ -1012,7 +1070,10 @@ describe("hosted-member-store", () => {
       },
       routing: {
         linqChatId: "chat_123",
+        linqRecipientPhone: null,
         memberId: "member_123",
+        pendingLinqChatId: null,
+        pendingLinqRecipientPhone: null,
         telegramUserLookupKey: "tg_user_123",
       },
     });

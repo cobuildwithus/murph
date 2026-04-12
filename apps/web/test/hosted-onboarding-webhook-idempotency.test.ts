@@ -409,17 +409,25 @@ describe("hosted onboarding webhook retry safety", () => {
     expect(prisma.hostedInvite.findFirst).toHaveBeenCalledTimes(1);
     expect(prisma.hostedMember.create).not.toHaveBeenCalled();
     expect(prisma.hostedMemberRouting.upsert).toHaveBeenCalledWith({
-      create: {
-        linqChatIdEncrypted: expect.stringMatching(/^hbds:/u),
-        linqChatLookupKey: createHostedLinqChatLookupKey("chat_123"),
+      create: expect.objectContaining({
+        linqChatIdEncrypted: null,
+        linqChatLookupKey: null,
+        linqRecipientPhoneEncrypted: null,
+        linqRecipientPhoneLookupKey: null,
         memberId: "member_123",
+        pendingLinqChatIdEncrypted: expect.stringMatching(/^hbds:/u),
+        pendingLinqChatLookupKey: createHostedLinqChatLookupKey("chat_123"),
+        pendingLinqRecipientPhoneEncrypted: expect.stringMatching(/^hbds:/u),
+        pendingLinqRecipientPhoneLookupKey: expect.stringMatching(/^hbidx:phone:v1:/u),
         telegramUserIdEncrypted: null,
         telegramUserLookupKey: null,
-      },
-      update: {
-        linqChatIdEncrypted: expect.stringMatching(/^hbds:/u),
-        linqChatLookupKey: createHostedLinqChatLookupKey("chat_123"),
-      },
+      }),
+      update: expect.objectContaining({
+        pendingLinqChatIdEncrypted: expect.stringMatching(/^hbds:/u),
+        pendingLinqChatLookupKey: createHostedLinqChatLookupKey("chat_123"),
+        pendingLinqRecipientPhoneEncrypted: expect.stringMatching(/^hbds:/u),
+        pendingLinqRecipientPhoneLookupKey: expect.stringMatching(/^hbidx:phone:v1:/u),
+      }),
       where: {
         memberId: "member_123",
       },
@@ -1244,7 +1252,7 @@ describe("hosted onboarding webhook retry safety", () => {
     }
     expect(prisma.hostedWebhookReceipt.findUnique).toHaveBeenCalledTimes(3);
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
-    expect(prisma.hostedMember.findUnique).toHaveBeenCalledTimes(1);
+    expect(prisma.hostedMember.findUnique).toHaveBeenCalledTimes(2);
     expect(receiptCalls.at(-1)).toEqual(
       expect.objectContaining({
         data: expect.objectContaining({

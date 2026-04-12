@@ -262,6 +262,7 @@ function readHostedWebhookLinqMessagePayload(
 
   return {
     chatId,
+    homeRecipientPhone: readNullableString(record?.homeRecipientPhone),
     inviteId: readNullableString(record?.inviteId),
     replyToMessageId: readNullableString(record?.replyToMessageId),
     template,
@@ -349,7 +350,10 @@ function readFiniteNumber(value: unknown): number | null {
 function readHostedWebhookLinqMessageTemplate(
   value: unknown,
 ): HostedWebhookLinqMessageSideEffect["payload"]["template"] | null {
-  return value === "daily_quota" || value === "invite_signin" || value === "invite_signup"
+  return value === "conversation_home_redirect"
+    || value === "daily_quota"
+    || value === "invite_signin"
+    || value === "invite_signup"
     ? value
     : null;
 }
