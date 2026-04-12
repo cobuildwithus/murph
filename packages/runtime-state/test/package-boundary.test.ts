@@ -10,6 +10,7 @@ describe("@murphai/runtime-state package boundary", () => {
     const rootBarrel = await readFile(new URL("../src/index.ts", import.meta.url), "utf8");
 
     expect(runtimeState.generateUlid).toBeTypeOf("function");
+    expect(runtimeState.isValidAssistantOpaqueId).toBeTypeOf("function");
     expect("openSqliteRuntimeDatabase" in runtimeState).toBe(false);
     expect("resolveRuntimePaths" in runtimeState).toBe(false);
     expect("snapshotHostedExecutionContext" in runtimeState).toBe(false);

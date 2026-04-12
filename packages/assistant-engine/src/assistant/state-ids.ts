@@ -1,8 +1,9 @@
 import path from 'node:path'
+import { isValidAssistantOpaqueId } from '@murphai/runtime-state'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { normalizeNullableString } from './shared.js'
 
-const ASSISTANT_OPAQUE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,191}$/u
+export { isValidAssistantOpaqueId } from '@murphai/runtime-state'
 type AssistantOpaqueIdKind =
   | 'session'
   | 'turn'
@@ -30,13 +31,6 @@ export function assertAssistantCronJobId(value: string | null | undefined): stri
 
 export function assertAssistantCronRunId(value: string | null | undefined): string {
   return assertAssistantOpaqueId('cron run', value)
-}
-
-export function isValidAssistantOpaqueId(
-  value: string | null | undefined,
-): boolean {
-  const normalized = normalizeNullableString(value)
-  return normalized !== null && ASSISTANT_OPAQUE_ID_PATTERN.test(normalized)
 }
 
 export function resolveAssistantOpaqueStateFilePath(input: {
@@ -73,7 +67,7 @@ function assertAssistantOpaqueId(
   value: string | null | undefined,
 ): string {
   const normalized = normalizeNullableString(value)
-  if (normalized && ASSISTANT_OPAQUE_ID_PATTERN.test(normalized)) {
+  if (normalized !== null && isValidAssistantOpaqueId(normalized)) {
     return normalized
   }
 

@@ -1,5 +1,4 @@
 import {
-  ALL_QUERY_ENTITY_FAMILIES as SHARED_QUERY_ENTITY_FAMILIES,
   type BuildExportPackOptions as SharedBuildExportPackOptions,
   type CanonicalEntity as SharedCanonicalEntity,
   type CanonicalEntityFamily as SharedCanonicalEntityFamily,
@@ -31,8 +30,6 @@ import {
 } from '@murphai/query/id-families'
 import { loadRuntimeModule } from './runtime-import.js'
 
-export const ALL_QUERY_ENTITY_FAMILIES = SHARED_QUERY_ENTITY_FAMILIES
-
 export type QueryEntityFamily = SharedCanonicalEntityFamily
 export type QueryCanonicalEntity = SharedCanonicalEntity
 export type QueryEntity = QueryCanonicalEntity
@@ -63,7 +60,6 @@ type SharedQueryRuntimeModule = typeof import('@murphai/query')
 
 export type QueryRuntimeModule = Pick<
   SharedQueryRuntimeModule,
-  | 'ALL_QUERY_ENTITY_FAMILIES'
   | 'buildExportPack'
   | 'buildTimeline'
   | 'describeLookupConstraint'

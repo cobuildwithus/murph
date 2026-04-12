@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { isValidAssistantOpaqueId } from '@murphai/runtime-state'
 import {
   gatewayDeliveryTargetKindValues,
   gatewayReplyRouteKindValues,
@@ -10,7 +11,6 @@ import {
   pathSchema,
   timeZoneSchema,
 } from './vault-cli-contracts.js'
-import { isValidAssistantOpaqueId } from './assistant/state-ids.js'
 import {
   setupAssistantProviderPresetValues,
 } from './assistant/openai-compatible-provider-presets.js'

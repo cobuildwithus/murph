@@ -245,7 +245,7 @@ async function verifyAssistantRuntimePublicSourceSurface(failures) {
 }
 
 async function verifyFocusedOwnerSourceSurfaces(failures) {
-  const deletedKnowledgeCompatibilityFiles = [
+  const deletedCompatibilityFiles = [
     {
       path: path.join(repoRoot, "packages", "operator-config", "src", "knowledge-contracts.ts"),
       message:
@@ -255,6 +255,11 @@ async function verifyFocusedOwnerSourceSurfaces(failures) {
       path: path.join(repoRoot, "packages", "assistant-engine", "src", "knowledge", "contracts.ts"),
       message:
         "packages/assistant-engine/src/knowledge/contracts.ts exists; assistant-engine knowledge helpers must depend on @murphai/query directly instead of reviving a local compatibility shim.",
+    },
+    {
+      path: path.join(repoRoot, "packages", "operator-config", "src", "assistant", "state-ids.ts"),
+      message:
+        "packages/operator-config/src/assistant/state-ids.ts exists; shared assistant opaque id validation is owned by @murphai/runtime-state and must not return through an operator-config helper copy.",
     },
     {
       path: path.join(repoRoot, "packages", "cli", "src", "knowledge-cli-contracts.ts"),
@@ -302,6 +307,50 @@ async function verifyFocusedOwnerSourceSurfaces(failures) {
           specifier: "@murphai/query",
           message:
             "packages/assistant-engine/src/knowledge.ts mentions @murphai/query; knowledge result contracts are owned by @murphai/query and should be imported from there directly instead of re-exporting them through @murphai/assistant-engine/knowledge.",
+        },
+      ],
+      predicate: sourceMentionsSpecifier,
+    },
+    {
+      path: path.join(repoRoot, "packages", "assistant-engine", "src", "assistant", "state-ids.ts"),
+      failures: [
+        {
+          specifier: "export function isValidAssistantOpaqueId",
+          message:
+            "packages/assistant-engine/src/assistant/state-ids.ts declares isValidAssistantOpaqueId locally; shared assistant opaque id validation is owned by @murphai/runtime-state and should only be re-exported here.",
+        },
+      ],
+      predicate: sourceMentionsSpecifier,
+    },
+    {
+      path: path.join(repoRoot, "packages", "operator-config", "src", "assistant-cli-contracts.ts"),
+      failures: [
+        {
+          specifier: "./assistant/state-ids.js",
+          message:
+            "packages/operator-config/src/assistant-cli-contracts.ts imports ./assistant/state-ids.js; assistant opaque id validation should come from @murphai/runtime-state instead of an operator-config helper copy.",
+        },
+      ],
+      predicate: sourceMentionsSpecifier,
+    },
+    {
+      path: path.join(repoRoot, "packages", "vault-usecases", "src", "query-runtime.ts"),
+      failures: [
+        {
+          specifier: "export const ALL_QUERY_ENTITY_FAMILIES",
+          message:
+            "packages/vault-usecases/src/query-runtime.ts re-exports ALL_QUERY_ENTITY_FAMILIES; query entity-family metadata is owned by @murphai/query and should not flow through the vault-usecases runtime helper layer.",
+        },
+      ],
+      predicate: sourceMentionsSpecifier,
+    },
+    {
+      path: path.join(repoRoot, "packages", "vault-usecases", "src", "runtime.ts"),
+      failures: [
+        {
+          specifier: "ALL_QUERY_ENTITY_FAMILIES",
+          message:
+            "packages/vault-usecases/src/runtime.ts mentions ALL_QUERY_ENTITY_FAMILIES; query entity-family metadata should stay on @murphai/query instead of leaking through @murphai/vault-usecases/runtime.",
         },
       ],
       predicate: sourceMentionsSpecifier,
@@ -416,7 +465,7 @@ async function verifyFocusedOwnerSourceSurfaces(failures) {
     }
   }
 
-  for (const check of deletedKnowledgeCompatibilityFiles) {
+  for (const check of deletedCompatibilityFiles) {
     if (await pathExists(check.path)) {
       failures.push(check.message);
     }
@@ -931,6 +980,15 @@ function verifyWorkspaceImportPolicy({
     && filePath.includes(`${path.sep}src${path.sep}`)
   ) {
     return `${path.relative(repoRoot, filePath)} imports ${JSON.stringify(specifier)} from the vault-usecases root; headless assistant runtimes must depend on @murphai/vault-usecases/vault-services or @murphai/vault-usecases/runtime so they do not couple to CLI descriptor exports.`;
+  }
+
+  if (
+    specifier === "@murphai/vault-usecases/runtime"
+    && importsNamedBindingsFromSpecifier(source, specifier, [
+      "ALL_QUERY_ENTITY_FAMILIES",
+    ])
+  ) {
+    return `${path.relative(repoRoot, filePath)} imports query entity-family metadata from ${JSON.stringify(specifier)}; import ALL_QUERY_ENTITY_FAMILIES from @murphai/query so the constant stays on its query-owned surface instead of the vault-usecases runtime helper layer.`;
   }
 
   if (

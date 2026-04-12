@@ -1,3 +1,4 @@
+export * from "./assistant-ids.ts";
 export {
   parseHostedExecutionBundleRef,
   sameHostedBundlePayloadRef,
