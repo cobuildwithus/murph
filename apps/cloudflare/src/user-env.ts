@@ -1,7 +1,9 @@
+import type {
+  CloudflareHostedUserEnvUpdate,
+} from "@murphai/cloudflare-hosted-control/contracts";
 import {
   parseCloudflareHostedUserEnvUpdate,
-  type CloudflareHostedUserEnvUpdate,
-} from "@murphai/cloudflare-hosted-control";
+} from "@murphai/cloudflare-hosted-control/parsers";
 
 import { isHostedUserEnvKeyAllowed } from "./hosted-env-policy.ts";
 

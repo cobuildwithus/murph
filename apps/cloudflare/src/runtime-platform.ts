@@ -4,7 +4,7 @@ import {
 } from "@murphai/assistant-runtime";
 import {
   parseHostedAssistantDeliveryRecord,
-} from "@murphai/hosted-execution";
+} from "@murphai/hosted-execution/side-effects";
 import {
   HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER,
 } from "@murphai/hosted-execution/contracts";
@@ -167,20 +167,6 @@ export function buildHostedExecutionRuntimePlatform(input: {
 
         assertHostedOk(response, `Hosted side-effect delete ${sideEffect.effectId}`);
       },
-      async deletePreparedSideEffect(sideEffect) {
-        const url = createHostedAssistantDeliveryUrl(sideEffect);
-        const response = await fetchHostedResponse({
-          description: `Hosted side-effect delete ${sideEffect.effectId}`,
-          fetchImpl,
-          init: {
-            method: "DELETE",
-          },
-          timeoutMs,
-          url,
-        });
-
-        assertHostedOk(response, `Hosted side-effect delete ${sideEffect.effectId}`);
-      },
       async readRawEmailMessage(rawMessageKey) {
         const response = await fetchHostedResponse({
           description: `Hosted raw email read ${rawMessageKey}`,
@@ -212,19 +198,6 @@ export function buildHostedExecutionRuntimePlatform(input: {
         const record = readHostedRecordField(payload, "record");
         return record === null ? null : parseHostedAssistantDeliveryRecord(record);
       },
-      async readSideEffect(sideEffect) {
-        const payload = await fetchHostedJson({
-          allowNotFound: false,
-          description: `Hosted side-effect read ${sideEffect.effectId}`,
-          fetchImpl,
-          method: "GET",
-          timeoutMs,
-          url: createHostedAssistantDeliveryUrl(sideEffect),
-        });
-
-        const record = readHostedRecordField(payload, "record");
-        return record === null ? null : parseHostedAssistantDeliveryRecord(record);
-      },
       async sendEmail(request) {
         const payload = await fetchHostedJson({
           body: request,
@@ -242,20 +215,6 @@ export function buildHostedExecutionRuntimePlatform(input: {
         return target ? { target } : undefined;
       },
       async writeAssistantDeliveryRecord(record) {
-        const payload = await fetchHostedJson({
-          body: record,
-          description: `Hosted side-effect write ${record.effectId}`,
-          fetchImpl,
-          method: "PUT",
-          timeoutMs,
-          url: createHostedAssistantDeliveryUrl(record),
-        });
-
-        return parseHostedAssistantDeliveryRecord(
-          requireRecordField(payload, "record"),
-        );
-      },
-      async writeSideEffect(record) {
         const payload = await fetchHostedJson({
           body: record,
           description: `Hosted side-effect write ${record.effectId}`,

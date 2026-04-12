@@ -128,6 +128,18 @@ export function readHostedExecutionStagedPayloadId(
   return readText(value);
 }
 
+export function resolveHostedExecutionOutboxPayloadEventId(
+  payload: HostedExecutionOutboxPayload,
+): string {
+  return payload.storage === "inline" ? payload.dispatch.eventId : payload.dispatchRef.eventId;
+}
+
+export function resolveHostedExecutionOutboxPayloadUserId(
+  payload: HostedExecutionOutboxPayload,
+): string {
+  return payload.storage === "inline" ? payload.dispatch.event.userId : payload.dispatchRef.userId;
+}
+
 export function resolveHostedExecutionDispatchPayloadStorage(
   dispatch: HostedExecutionDispatchRequest,
   requested: HostedExecutionOutboxPayloadStorage | "auto",

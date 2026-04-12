@@ -786,6 +786,65 @@ function verifyWorkspaceImportPolicy({
 
   if (
     (
+      sourceMember === "apps/cloudflare"
+      || sourceMember === "apps/web"
+    )
+    && specifier === "@murphai/hosted-execution"
+    && importsNamedBindingsFromSpecifier(source, specifier, [
+      "HostedExecutionOutboxPayload",
+      "HostedExecutionOutboxPayloadStorage",
+      "HostedExecutionReferenceOutboxPayload",
+      "buildHostedExecutionOutboxPayload",
+      "readHostedExecutionOutboxPayload",
+      "readHostedExecutionStagedPayloadId",
+      "resolveHostedExecutionOutboxPayloadEventId",
+      "resolveHostedExecutionOutboxPayloadStorage",
+      "resolveHostedExecutionOutboxPayloadUserId",
+    ])
+  ) {
+    return `${path.relative(repoRoot, filePath)} imports hosted execution outbox payload helpers from ${JSON.stringify(specifier)}; use @murphai/hosted-execution/outbox-payload so staged payload envelopes stay on their dedicated owner surface.`;
+  }
+
+  if (
+    (
+      sourceMember === "apps/cloudflare"
+      || sourceMember === "apps/web"
+    )
+    && specifier === "@murphai/hosted-execution"
+    && importsNamedBindingsFromSpecifier(source, specifier, [
+      "HostedExecutionDispatchRef",
+      "buildHostedExecutionDispatchRef",
+      "readHostedExecutionDispatchRef",
+    ])
+  ) {
+    return `${path.relative(repoRoot, filePath)} imports hosted execution dispatch-ref helpers from ${JSON.stringify(specifier)}; use @murphai/hosted-execution/dispatch-ref so stored-dispatch identity stays on the focused ref surface.`;
+  }
+
+  if (
+    (
+      sourceMember === "packages/assistant-runtime"
+      || sourceMember === "apps/cloudflare"
+    )
+    && specifier === "@murphai/hosted-execution"
+    && importsNamedBindingsFromSpecifier(source, specifier, [
+      "HostedAssistantDeliveryEffect",
+      "HostedAssistantDeliveryRecord",
+      "HostedAssistantDeliverySideEffect",
+      "assertHostedAssistantDeliveryRecordConsistency",
+      "buildHostedAssistantDeliveryEffect",
+      "buildHostedAssistantDeliveryPreparedRecord",
+      "buildHostedAssistantDeliverySentRecord",
+      "parseHostedAssistantDeliveryEffects",
+      "parseHostedAssistantDeliveryRecord",
+      "sameHostedAssistantDeliveryReceipt",
+      "sameHostedAssistantDeliverySideEffectIdentity",
+    ])
+  ) {
+    return `${path.relative(repoRoot, filePath)} imports hosted assistant delivery helpers from ${JSON.stringify(specifier)}; use @murphai/hosted-execution/side-effects so assistant delivery records stay on their dedicated owner surface.`;
+  }
+
+  if (
+    (
       sourceMember === "packages/cloudflare-hosted-control"
       || sourceMember === "apps/cloudflare"
       || sourceMember === "apps/web"
@@ -796,6 +855,61 @@ function verifyWorkspaceImportPolicy({
     ])
   ) {
     return `${path.relative(repoRoot, filePath)} imports hosted execution base-url normalization from ${JSON.stringify(specifier)}; use @murphai/hosted-execution/env so env normalization stays on the dedicated env surface.`;
+  }
+
+  if (
+    (
+      sourceMember === "apps/cloudflare"
+      || sourceMember === "apps/web"
+    )
+    && specifier === "@murphai/cloudflare-hosted-control"
+    && importsNamedBindingsFromSpecifier(source, specifier, [
+      "buildCloudflareHostedControlPendingUsageUsersPath",
+      "buildCloudflareHostedControlSharePackPath",
+      "buildCloudflareHostedControlUserPendingUsagePath",
+      "buildCloudflareHostedControlUserRunPath",
+      "buildCloudflareHostedControlUserStatusPath",
+    ])
+  ) {
+    return `${path.relative(repoRoot, filePath)} imports Cloudflare hosted-control route helpers from ${JSON.stringify(specifier)}; use @murphai/cloudflare-hosted-control/routes so route ownership stays on the dedicated control-route surface.`;
+  }
+
+  if (
+    (
+      sourceMember === "apps/cloudflare"
+      || sourceMember === "apps/web"
+    )
+    && specifier === "@murphai/cloudflare-hosted-control"
+    && importsNamedBindingsFromSpecifier(source, specifier, [
+      "CloudflareHostedManagedUserCryptoStatus",
+      "CloudflareHostedUserEnvStatus",
+      "CloudflareHostedUserEnvUpdate",
+    ])
+  ) {
+    return `${path.relative(repoRoot, filePath)} imports Cloudflare hosted-control contract types from ${JSON.stringify(specifier)}; use @murphai/cloudflare-hosted-control/contracts so mutable control contracts stay on the dedicated contract surface.`;
+  }
+
+  if (
+    sourceMember === "apps/cloudflare"
+    && specifier === "@murphai/cloudflare-hosted-control"
+    && importsNamedBindingsFromSpecifier(source, specifier, [
+      "parseCloudflareHostedManagedUserCryptoStatus",
+      "parseCloudflareHostedUserEnvStatus",
+      "parseCloudflareHostedUserEnvUpdate",
+    ])
+  ) {
+    return `${path.relative(repoRoot, filePath)} imports Cloudflare hosted-control parsers from ${JSON.stringify(specifier)}; use @murphai/cloudflare-hosted-control/parsers so parsing stays on the dedicated codec surface.`;
+  }
+
+  if (
+    sourceMember === "apps/web"
+    && specifier === "@murphai/cloudflare-hosted-control"
+    && importsNamedBindingsFromSpecifier(source, specifier, [
+      "CloudflareHostedControlClient",
+      "createCloudflareHostedControlClient",
+    ])
+  ) {
+    return `${path.relative(repoRoot, filePath)} imports the Cloudflare hosted-control client from ${JSON.stringify(specifier)}; use @murphai/cloudflare-hosted-control/client so requester logic stays on the dedicated client surface.`;
   }
 
   if (

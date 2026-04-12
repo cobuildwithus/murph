@@ -1,3 +1,8 @@
+import {
+  buildCloudflareHostedControlPendingUsageUsersPath,
+  buildCloudflareHostedControlUserPendingUsagePath,
+} from "@murphai/cloudflare-hosted-control/routes";
+
 import { createHostedExecutionVercelOidcBearerTokenProvider } from "./auth-adapter";
 import { readHostedExecutionControlBaseUrl } from "./environment";
 import { createHostedExecutionWebJsonRequester } from "./request-client";
@@ -32,7 +37,7 @@ export function requireHostedPendingUsageClient(): HostedPendingUsageClient {
         label: "delete pending usage",
         method: "DELETE",
         parse: () => undefined,
-        path: buildHostedPendingUsagePath(userId),
+        path: buildCloudflareHostedControlUserPendingUsagePath(userId),
       });
     },
     async getPendingUsage(userId, limit) {
@@ -44,7 +49,7 @@ export function requireHostedPendingUsageClient(): HostedPendingUsageClient {
         label: "pending usage",
         method: "GET",
         parse: parsePendingUsageRecords,
-        path: buildHostedPendingUsagePath(userId),
+        path: buildCloudflareHostedControlUserPendingUsagePath(userId),
         search,
       });
 
@@ -59,21 +64,13 @@ export function requireHostedPendingUsageClient(): HostedPendingUsageClient {
         label: "pending usage dirty users",
         method: "GET",
         parse: parsePendingUsageDirtyUsers,
-        path: buildHostedPendingUsageUsersPath(),
+        path: buildCloudflareHostedControlPendingUsageUsersPath(),
         search,
       });
 
       return response ?? [];
     },
   };
-}
-
-function buildHostedPendingUsagePath(userId: string): string {
-  return `/internal/users/${encodeURIComponent(userId)}/usage/pending`;
-}
-
-function buildHostedPendingUsageUsersPath(): string {
-  return "/internal/usage/pending-users";
 }
 
 function parsePendingUsageDirtyUsers(value: unknown): string[] {

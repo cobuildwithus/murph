@@ -1,12 +1,14 @@
 import {
   buildHostedExecutionDispatchRef,
+  type HostedExecutionDispatchRef,
+} from "@murphai/hosted-execution/dispatch-ref";
+import {
   buildHostedExecutionOutboxPayload,
   readHostedExecutionOutboxPayload,
   resolveHostedExecutionOutboxPayloadStorage,
-  type HostedExecutionDispatchRef,
   type HostedExecutionOutboxPayload,
   type HostedExecutionReferenceOutboxPayload,
-} from "@murphai/hosted-execution";
+} from "@murphai/hosted-execution/outbox-payload";
 import type {
   HostedExecutionDispatchRequest,
 } from "@murphai/hosted-execution/contracts";

@@ -1,10 +1,9 @@
 import {
-  assertHostedAssistantDeliveryRecordConsistency,
   parseHostedAssistantDeliveryRecord,
   sameHostedAssistantDeliveryReceipt,
   sameHostedAssistantDeliverySideEffectIdentity,
   type HostedAssistantDeliveryRecord,
-} from "@murphai/hosted-execution";
+} from "@murphai/hosted-execution/side-effects";
 
 import type { R2BucketLike } from "./bundle-store.ts";
 import {
@@ -88,7 +87,6 @@ export function createHostedAssistantDeliveryJournalStore(
 
     async write(writeInput) {
       const record = parseHostedAssistantDeliveryRecord(writeInput.record);
-      assertHostedAssistantDeliveryRecordConsistency(record);
       const objectKey = await hostedSideEffectRecordKey(
         input.key,
         writeInput.userId,
@@ -181,7 +179,6 @@ function assertAssistantDeliveryQueryMatchesRecord(
 ): void {
   if (
     record.effectId === query.effectId
-    && record.intentId === query.effectId
     && record.fingerprint === query.fingerprint
   ) {
     return;

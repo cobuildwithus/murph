@@ -1,3 +1,7 @@
+import { readFile } from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
 import { describe, expect, it } from "vitest";
 
 import {
@@ -11,6 +15,8 @@ import {
   buildHostedExecutionOutboxPayload,
   readHostedExecutionOutboxPayload,
   resolveHostedExecutionDispatchPayloadStorage,
+  resolveHostedExecutionOutboxPayloadEventId,
+  resolveHostedExecutionOutboxPayloadUserId,
 } from "../src/outbox-payload.js";
 const occurredAt = "2026-04-04T00:00:00.000Z";
 
@@ -208,5 +214,51 @@ describe("resolveHostedExecutionDispatchPayloadStorage", () => {
       },
       storage: "reference",
     })).toBeNull();
+  });
+
+  it("resolves event and user identity for inline and reference payloads", () => {
+    const inlinePayload = buildHostedExecutionOutboxPayload(
+      buildHostedExecutionMemberActivatedDispatch({
+        eventId: "member-activated-3",
+        memberId: "user-inline",
+        occurredAt,
+      }),
+    );
+    const referencePayload = buildHostedExecutionOutboxPayload(
+      buildHostedExecutionGatewayMessageSendDispatch({
+        eventId: "gateway-6",
+        occurredAt,
+        sessionKey: "session-identity",
+        text: "hello",
+        userId: "user-reference",
+      }),
+      {
+        stagedPayloadId: "staged-gateway-identity",
+        storage: "reference",
+      },
+    );
+
+    expect(resolveHostedExecutionOutboxPayloadUserId(inlinePayload)).toBe("user-inline");
+    expect(resolveHostedExecutionOutboxPayloadEventId(inlinePayload)).toBe("member-activated-3");
+    expect(resolveHostedExecutionOutboxPayloadUserId(referencePayload)).toBe("user-reference");
+    expect(resolveHostedExecutionOutboxPayloadEventId(referencePayload)).toBe("gateway-6");
+  });
+
+  it("publishes focused subpath exports for boundary-owned helpers", async () => {
+    const packageJsonPath = path.resolve(
+      path.dirname(fileURLToPath(import.meta.url)),
+      "..",
+      "package.json",
+    );
+    const packageJson = JSON.parse(await readFile(packageJsonPath, "utf8")) as {
+      exports?: Record<string, unknown>;
+    };
+
+    expect(packageJson.exports).toMatchObject({
+      "./bundles": expect.any(Object),
+      "./dispatch-ref": expect.any(Object),
+      "./outbox-payload": expect.any(Object),
+      "./side-effects": expect.any(Object),
+    });
   });
 });

@@ -6,7 +6,7 @@ import {
   buildHostedAssistantDeliveryPreparedRecord,
   buildHostedAssistantDeliverySentRecord,
   buildHostedAssistantDeliverySideEffect,
-} from "@murphai/hosted-execution";
+} from "@murphai/hosted-execution/side-effects";
 
 const mocks = vi.hoisted(() => ({
   dispatchAssistantOutboxIntent: vi.fn(),

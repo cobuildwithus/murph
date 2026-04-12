@@ -7,12 +7,16 @@ import type {
   ConfiguredDeviceSyncProviderConfigs,
 } from "@murphai/device-syncd/config";
 import type {
-  HostedAssistantDeliveryEffect,
-  HostedExecutionBundleRefState,
   HostedExecutionDispatchRequest,
   HostedExecutionRunnerRequest,
   HostedExecutionRunnerResult,
-} from "@murphai/hosted-execution";
+} from "@murphai/hosted-execution/contracts";
+import type {
+  HostedExecutionBundleRefState,
+} from "@murphai/hosted-execution/bundles";
+import type {
+  HostedAssistantDeliveryEffect,
+} from "@murphai/hosted-execution/side-effects";
 
 import type {
   HostedRuntimePlatform,

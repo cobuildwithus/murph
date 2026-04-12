@@ -1,7 +1,7 @@
 import {
   buildCloudflareHostedControlUserRunPath,
   buildCloudflareHostedControlUserStatusPath,
-} from "@murphai/cloudflare-hosted-control";
+} from "@murphai/cloudflare-hosted-control/routes";
 import {
   parseHostedExecutionUserStatus,
 } from "@murphai/hosted-execution/parsers";

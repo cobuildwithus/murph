@@ -6,10 +6,13 @@ import {
   parseCloudflareHostedUserEnvUpdate,
 } from "../src/parsers.ts";
 import {
+  buildCloudflareHostedControlPendingUsageUsersPath,
+  buildCloudflareHostedControlSharePackPath,
   buildCloudflareHostedControlUserCryptoContextPath,
   buildCloudflareHostedControlUserDispatchPayloadPath,
   buildCloudflareHostedControlUserEventStatusPath,
   buildCloudflareHostedControlUserEnvPath,
+  buildCloudflareHostedControlUserPendingUsagePath,
   buildCloudflareHostedControlUserRunPath,
   buildCloudflareHostedControlUserStatusPath,
   buildCloudflareHostedControlUserStoredDispatchPath,
@@ -117,8 +120,17 @@ describe("@murphai/cloudflare-hosted-control contracts, parsers, and routes", ()
     expect(buildCloudflareHostedControlUserEnvPath(userId)).toBe(
       `/internal/users/${encodedUserId}/env`,
     );
+    expect(buildCloudflareHostedControlUserPendingUsagePath(userId)).toBe(
+      `/internal/users/${encodedUserId}/usage/pending`,
+    );
     expect(buildCloudflareHostedControlUserRunPath(userId)).toBe(
       `/internal/users/${encodedUserId}/run`,
+    );
+    expect(buildCloudflareHostedControlPendingUsageUsersPath()).toBe(
+      "/internal/usage/pending-users",
+    );
+    expect(buildCloudflareHostedControlSharePackPath(userId, "share/with spaces?#%")).toBe(
+      `/internal/users/${encodedUserId}/shares/${encodeURIComponent("share/with spaces?#%")}/pack`,
     );
     expect(buildCloudflareHostedControlUserStatusPath(userId)).toBe(
       `/internal/users/${encodedUserId}/status`,

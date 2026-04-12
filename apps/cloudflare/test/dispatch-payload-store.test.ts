@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   buildHostedExecutionDeviceSyncWakeDispatch,
-  buildHostedExecutionDispatchRef,
   type HostedExecutionDispatchRequest,
 } from "@murphai/hosted-execution";
+import {
+  buildHostedExecutionDispatchRef,
+} from "@murphai/hosted-execution/dispatch-ref";
 
 import {
   createHostedExecutionDispatchPayloadStore,

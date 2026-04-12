@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildHostedAssistantDeliveryPreparedRecord,
   buildHostedAssistantDeliverySentRecord,
-} from "@murphai/hosted-execution";
+} from "@murphai/hosted-execution/side-effects";
 
 import {
   buildHostedStorageAad,

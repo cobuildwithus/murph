@@ -1,12 +1,16 @@
 import {
   createCloudflareHostedControlClient,
   type CloudflareHostedControlClient,
-  type CloudflareHostedManagedUserCryptoStatus,
-} from "@murphai/cloudflare-hosted-control";
-import {
-  type HostedExecutionDispatchRequest,
-  type HostedExecutionOutboxPayload,
-} from "@murphai/hosted-execution";
+} from "@murphai/cloudflare-hosted-control/client";
+import type {
+  CloudflareHostedManagedUserCryptoStatus,
+} from "@murphai/cloudflare-hosted-control/contracts";
+import type {
+  HostedExecutionDispatchRequest,
+} from "@murphai/hosted-execution/contracts";
+import type {
+  HostedExecutionOutboxPayload,
+} from "@murphai/hosted-execution/outbox-payload";
 import { createHostedVerifiedEmailUserEnv } from "@murphai/runtime-state";
 
 import { createHostedExecutionVercelOidcBearerTokenProvider } from "./auth-adapter";
