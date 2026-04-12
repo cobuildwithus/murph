@@ -40,7 +40,6 @@ export type HostedExecutionSideEffectRecordState = HostedAssistantDeliveryRecord
 export interface HostedAssistantDeliverySideEffect {
   effectId: string;
   fingerprint: string;
-  intentId: string;
   kind: HostedAssistantDeliveryKind;
 }
 
@@ -64,7 +63,6 @@ export type HostedExecutionAssistantDelivery = HostedAssistantDeliveryReceipt;
 interface HostedAssistantDeliveryRecordBase {
   effectId: string;
   fingerprint: string;
-  intentId: string;
   kind: HostedAssistantDeliveryKind;
   recordedAt: string;
 }
@@ -94,12 +92,11 @@ export type HostedExecutionSideEffectRecord = HostedAssistantDeliveryRecord;
 
 export function buildHostedAssistantDeliverySideEffect(input: {
   dedupeKey: string;
-  intentId: string;
+  effectId: string;
 }): HostedAssistantDeliverySideEffect {
   return {
-    effectId: input.intentId,
+    effectId: input.effectId,
     fingerprint: input.dedupeKey,
-    intentId: input.intentId,
     kind: HOSTED_ASSISTANT_DELIVERY_KIND,
   };
 }
@@ -109,7 +106,7 @@ export const buildHostedAssistantDeliveryEffect =
 
 export function buildHostedAssistantDeliveryPreparedRecord(input: {
   dedupeKey: string;
-  intentId: string;
+  effectId: string;
   recordedAt: string;
 }): HostedAssistantDeliveryPreparedRecord {
   return {
@@ -122,7 +119,7 @@ export function buildHostedAssistantDeliveryPreparedRecord(input: {
 export function buildHostedAssistantDeliverySentRecord(input: {
   dedupeKey: string;
   delivery: HostedAssistantDeliveryReceipt;
-  intentId: string;
+  effectId: string;
 }): HostedAssistantDeliverySentRecord {
   return {
     ...buildHostedAssistantDeliverySideEffect(input),
@@ -145,12 +142,14 @@ export function parseHostedExecutionSideEffect(value: unknown): HostedExecutionS
   switch (kind) {
     case HOSTED_ASSISTANT_DELIVERY_KIND:
       return {
-        effectId: requireString(record.effectId, "Hosted assistant side effect effectId"),
+        effectId: requireHostedAssistantDeliveryEffectId(
+          record,
+          "Hosted assistant side effect",
+        ),
         fingerprint: requireString(
           record.fingerprint,
           "Hosted assistant side effect fingerprint",
         ),
-        intentId: requireString(record.intentId, "Hosted assistant side effect intentId"),
         kind,
       };
     default:
@@ -178,17 +177,13 @@ export function parseHostedExecutionSideEffectRecord(
   switch (kind) {
     case HOSTED_ASSISTANT_DELIVERY_KIND: {
       const baseRecord = {
-        effectId: requireString(
-          record.effectId,
-          "Hosted assistant side effect record effectId",
+        effectId: requireHostedAssistantDeliveryEffectId(
+          record,
+          "Hosted assistant side effect record",
         ),
         fingerprint: requireString(
           record.fingerprint,
           "Hosted assistant side effect record fingerprint",
-        ),
-        intentId: requireString(
-          record.intentId,
-          "Hosted assistant side effect record intentId",
         ),
         kind,
         recordedAt: requireString(
@@ -226,17 +221,13 @@ export function parseHostedAssistantDeliverySideEffect(
   const record = requireObject(value, "Hosted assistant delivery side effect");
 
   return {
-    effectId: requireString(
-      record.effectId,
-      "Hosted assistant delivery side effect effectId",
+    effectId: requireHostedAssistantDeliveryEffectId(
+      record,
+      "Hosted assistant delivery side effect",
     ),
     fingerprint: requireString(
       record.fingerprint,
       "Hosted assistant delivery side effect fingerprint",
-    ),
-    intentId: requireString(
-      record.intentId,
-      "Hosted assistant delivery side effect intentId",
     ),
     kind: requireHostedAssistantDeliveryKind(
       record.kind,
@@ -274,17 +265,13 @@ export function parseHostedAssistantDeliveryRecord(
     "Hosted assistant delivery record state",
   );
   const baseRecord = {
-    effectId: requireString(
-      record.effectId,
-      "Hosted assistant delivery record effectId",
+    effectId: requireHostedAssistantDeliveryEffectId(
+      record,
+      "Hosted assistant delivery record",
     ),
     fingerprint: requireString(
       record.fingerprint,
       "Hosted assistant delivery record fingerprint",
-    ),
-    intentId: requireString(
-      record.intentId,
-      "Hosted assistant delivery record intentId",
     ),
     kind,
     recordedAt: requireString(
@@ -309,32 +296,21 @@ export function parseHostedAssistantDeliveryRecord(
 }
 
 export function sameHostedExecutionSideEffectIdentity(
-  left: Pick<HostedExecutionSideEffectRecord, "effectId" | "fingerprint" | "intentId" | "kind">,
-  right: Pick<HostedExecutionSideEffectRecord, "effectId" | "fingerprint" | "intentId" | "kind">,
+  left: Pick<HostedExecutionSideEffectRecord, "effectId" | "fingerprint" | "kind">,
+  right: Pick<HostedExecutionSideEffectRecord, "effectId" | "fingerprint" | "kind">,
 ): boolean {
   return (
     left.effectId === right.effectId
     && left.fingerprint === right.fingerprint
-    && left.intentId === right.intentId
     && left.kind === right.kind
   );
 }
 
 export function sameHostedAssistantDeliverySideEffectIdentity(
-  left: Pick<HostedAssistantDeliveryRecord, "effectId" | "fingerprint" | "intentId" | "kind">,
-  right: Pick<HostedAssistantDeliveryRecord, "effectId" | "fingerprint" | "intentId" | "kind">,
+  left: Pick<HostedAssistantDeliveryRecord, "effectId" | "fingerprint" | "kind">,
+  right: Pick<HostedAssistantDeliveryRecord, "effectId" | "fingerprint" | "kind">,
 ): boolean {
   return sameHostedExecutionSideEffectIdentity(left, right);
-}
-
-export function assertHostedAssistantDeliveryRecordConsistency(
-  record: HostedAssistantDeliveryRecord,
-): void {
-  if (record.effectId !== record.intentId) {
-    throw new TypeError(
-      `Hosted assistant delivery ${record.effectId} must reuse the same intentId as effectId.`,
-    );
-  }
 }
 
 export function sameHostedAssistantDeliveryReceipt(
@@ -374,6 +350,20 @@ function requireString(value: unknown, label: string): string {
   }
 
   return value;
+}
+
+function requireHostedAssistantDeliveryEffectId(
+  record: Record<string, unknown>,
+  label: string,
+): string {
+  const effectId = requireString(record.effectId, `${label} effectId`);
+  const legacyIntentId = readOptionalString(record.intentId, `${label} intentId`);
+
+  if (legacyIntentId !== null && legacyIntentId !== effectId) {
+    throw new TypeError(`${label} intentId must match effectId when present.`);
+  }
+
+  return effectId;
 }
 
 function requireNonNegativeInteger(value: unknown, label: string): number {
@@ -491,6 +481,14 @@ function parseHostedAssistantDeliveryReceipt(
       `${label}.targetKind`,
     ),
   };
+}
+
+function readOptionalString(value: unknown, label: string): string | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+
+  return requireString(value, label);
 }
 
 function requireNullableString(value: unknown, label: string): string | null {

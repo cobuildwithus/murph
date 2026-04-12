@@ -89,7 +89,6 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       },
       effectId: "intent_123",
       fingerprint: "dedupe_123",
-      intentId: "intent_123",
       kind: "assistant.delivery" as const,
       recordedAt: "2026-04-08T00:00:00.000Z",
       state: "sent" as const,

@@ -2368,7 +2368,6 @@ describe("runHostedExecutionJob", () => {
             {
               effectId: intentId,
               fingerprint: "dedupe_hosted_resume",
-              intentId,
               kind: "assistant.delivery",
             },
           ],
@@ -2380,7 +2379,6 @@ describe("runHostedExecutionJob", () => {
             {
               effectId: intentId,
               fingerprint: "dedupe_hosted_resume",
-              intentId,
               kind: "assistant.delivery",
             },
           ],

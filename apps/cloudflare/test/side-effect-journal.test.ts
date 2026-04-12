@@ -256,7 +256,7 @@ function createPreparedRecord(input: {
 }) {
   return buildHostedAssistantDeliveryPreparedRecord({
     dedupeKey: input.fingerprint,
-    intentId: input.effectId,
+    effectId: input.effectId,
     recordedAt: "2026-03-29T10:00:05.000Z",
   });
 }
@@ -277,7 +277,7 @@ function createSentRecord(input: {
       target: "thread_123",
       targetKind: "thread",
     },
-    intentId: input.effectId,
+    effectId: input.effectId,
   });
 }
 

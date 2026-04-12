@@ -29,17 +29,17 @@ function createHostedRuntimePlatformStub(): HostedRuntimePlatform {
     },
     effectsPort: {
       async commit() {},
-      async deletePreparedSideEffect() {},
+      async deletePreparedAssistantDelivery() {},
       async readRawEmailMessage() {
         return null;
       },
-      async readSideEffect() {
+      async readAssistantDeliveryRecord() {
         return null;
       },
       async sendEmail() {
         return undefined;
       },
-      async writeSideEffect(record) {
+      async writeAssistantDeliveryRecord(record) {
         return record;
       },
     },

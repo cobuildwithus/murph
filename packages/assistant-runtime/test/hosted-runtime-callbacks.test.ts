@@ -43,7 +43,7 @@ describe("hosted runtime callbacks", () => {
   it("rebuilds committed resume state from the request payload", () => {
     const sideEffect = buildHostedAssistantDeliverySideEffect({
       dedupeKey: "dedupe_123",
-      intentId: "intent_123",
+      effectId: "intent_123",
     });
 
     const resumed = resumeHostedCommittedExecution({
@@ -98,15 +98,15 @@ describe("hosted runtime callbacks", () => {
       },
       effectsPort: {
         commit,
-        async deletePreparedSideEffect() {},
+        async deletePreparedAssistantDelivery() {},
         async readRawEmailMessage() {
           return null;
         },
-        async readSideEffect() {
+        async readAssistantDeliveryRecord() {
           return null;
         },
         async sendEmail() {},
-        async writeSideEffect(record) {
+        async writeAssistantDeliveryRecord(record) {
           return record;
         },
       },
@@ -147,15 +147,15 @@ describe("hosted runtime callbacks", () => {
           async commit() {
             throw new Error("boom");
           },
-          async deletePreparedSideEffect() {},
+          async deletePreparedAssistantDelivery() {},
           async readRawEmailMessage() {
             return null;
           },
-          async readSideEffect() {
+          async readAssistantDeliveryRecord() {
             return null;
           },
           async sendEmail() {},
-          async writeSideEffect(record) {
+          async writeAssistantDeliveryRecord(record) {
             return record;
           },
         },
@@ -185,7 +185,7 @@ describe("hosted runtime callbacks", () => {
     expect(mocks.listAssistantOutboxIntents).toHaveBeenCalledWith("/tmp/vault");
     assert.equal(sideEffects.length, 20);
     assert.deepEqual(
-      sideEffects.map((effect) => effect.intentId),
+      sideEffects.map((effect) => effect.effectId),
       intents.slice(0, 20).map((intent) => intent.intentId),
     );
   });
@@ -204,7 +204,7 @@ describe("hosted runtime callbacks", () => {
     assert.deepEqual(sideEffects, [
       buildHostedAssistantDeliverySideEffect({
         dedupeKey: "dedupe_send",
-        intentId: "intent_send",
+        effectId: "intent_send",
       }),
     ]);
   });
@@ -229,22 +229,22 @@ describe("hosted runtime callbacks", () => {
       },
       effectsPort: {
         async commit() {},
-        async deletePreparedSideEffect() {},
+        async deletePreparedAssistantDelivery() {},
         async readRawEmailMessage() {
           return null;
         },
-        async readSideEffect() {
+        async readAssistantDeliveryRecord() {
           return null;
         },
         async sendEmail() {},
-        async writeSideEffect(record) {
+        async writeAssistantDeliveryRecord(record) {
           return record;
         },
       },
       sideEffects: [
         buildHostedAssistantDeliverySideEffect({
           dedupeKey: "dedupe_123",
-          intentId: "intent_123",
+          effectId: "intent_123",
         }),
       ],
       vaultRoot: "/tmp/vault",
@@ -263,7 +263,7 @@ describe("hosted runtime callbacks", () => {
     const writes: object[] = [];
     const preparedRecord = buildHostedAssistantDeliveryPreparedRecord({
       dedupeKey: "dedupe_123",
-      intentId: "intent_123",
+      effectId: "intent_123",
       recordedAt: "2026-04-08T00:00:00.000Z",
     });
     const sentRecord = buildHostedAssistantDeliverySentRecord({
@@ -278,7 +278,7 @@ describe("hosted runtime callbacks", () => {
         target: "user@example.com",
         targetKind: "explicit",
       },
-      intentId: "intent_123",
+      effectId: "intent_123",
     });
 
     mocks.dispatchAssistantOutboxIntent.mockImplementation(async (input) => {
@@ -305,10 +305,10 @@ describe("hosted runtime callbacks", () => {
       },
       effectsPort: {
         ...createHostedRuntimeEffectsPortStub(),
-        async readSideEffect() {
+        async readAssistantDeliveryRecord() {
           return sentRecord;
         },
-        async writeSideEffect(record) {
+        async writeAssistantDeliveryRecord(record) {
           writes.push(record);
           return record;
         },
@@ -316,7 +316,7 @@ describe("hosted runtime callbacks", () => {
       sideEffects: [
         buildHostedAssistantDeliverySideEffect({
           dedupeKey: "dedupe_123",
-          intentId: "intent_123",
+          effectId: "intent_123",
         }),
       ],
       vaultRoot: "/tmp/vault",
@@ -390,10 +390,10 @@ describe("hosted runtime callbacks", () => {
         },
         effectsPort: {
           ...createHostedRuntimeEffectsPortStub(),
-          async readSideEffect() {
+          async readAssistantDeliveryRecord() {
             return null;
           },
-          async writeSideEffect(record) {
+          async writeAssistantDeliveryRecord(record) {
             writes.push(record);
             return record;
           },
@@ -401,7 +401,7 @@ describe("hosted runtime callbacks", () => {
         sideEffects: [
           buildHostedAssistantDeliverySideEffect({
             dedupeKey: "dedupe_123",
-            intentId: "intent_123",
+            effectId: "intent_123",
           }),
         ],
         vaultRoot: "/tmp/vault",
@@ -418,7 +418,7 @@ describe("hosted runtime callbacks", () => {
       assert.deepEqual(writes, [
         buildHostedAssistantDeliveryPreparedRecord({
           dedupeKey: "dedupe_123",
-          intentId: "intent_123",
+          effectId: "intent_123",
           recordedAt: "2026-04-08T02:03:04.000Z",
         }),
       ]);
@@ -468,14 +468,14 @@ describe("hosted runtime callbacks", () => {
         occurredAt: "2026-04-08T00:00:00.000Z",
       },
       effectsPort: createHostedRuntimeEffectsPortStub({
-        async deletePreparedSideEffect(input) {
+        async deletePreparedAssistantDelivery(input) {
           deleted.push(input);
         },
       }),
       sideEffects: [
         buildHostedAssistantDeliverySideEffect({
           dedupeKey: "dedupe_123",
-          intentId: "intent_123",
+          effectId: "intent_123",
         }),
       ],
       vaultRoot: "/tmp/vault",
@@ -509,7 +509,7 @@ describe("hosted runtime callbacks", () => {
       | undefined;
     const preparedRecord = buildHostedAssistantDeliveryPreparedRecord({
       dedupeKey: "dedupe_123",
-      intentId: "intent_123",
+      effectId: "intent_123",
       recordedAt: "2026-04-08T00:00:00.000Z",
     });
 
@@ -537,14 +537,14 @@ describe("hosted runtime callbacks", () => {
       },
       effectsPort: {
         ...createHostedRuntimeEffectsPortStub(),
-        async readSideEffect() {
+        async readAssistantDeliveryRecord() {
           return preparedRecord;
         },
       },
       sideEffects: [
         buildHostedAssistantDeliverySideEffect({
           dedupeKey: "dedupe_123",
-          intentId: "intent_123",
+          effectId: "intent_123",
         }),
       ],
       vaultRoot: "/tmp/vault",
@@ -594,7 +594,7 @@ describe("hosted runtime callbacks", () => {
       | undefined;
     const preparedRecord = buildHostedAssistantDeliveryPreparedRecord({
       dedupeKey: "dedupe_123",
-      intentId: "intent_123",
+      effectId: "intent_123",
       recordedAt: "2026-04-08T00:00:00.000Z",
     });
 
@@ -621,14 +621,14 @@ describe("hosted runtime callbacks", () => {
         occurredAt: "2026-04-08T00:00:00.000Z",
       },
       effectsPort: createHostedRuntimeEffectsPortStub({
-        async readSideEffect() {
+        async readAssistantDeliveryRecord() {
           return preparedRecord;
         },
       }),
       sideEffects: [
         buildHostedAssistantDeliverySideEffect({
           dedupeKey: "dedupe_123",
-          intentId: "intent_123",
+          effectId: "intent_123",
         }),
       ],
       vaultRoot: "/tmp/vault",
@@ -678,7 +678,7 @@ describe("hosted runtime callbacks", () => {
         target: "user@example.com",
         targetKind: "explicit",
       },
-      intentId: "intent_123",
+      effectId: "intent_123",
     });
 
     mocks.dispatchAssistantOutboxIntent.mockImplementation(async (input) => {
@@ -705,10 +705,10 @@ describe("hosted runtime callbacks", () => {
       },
       effectsPort: {
         ...createHostedRuntimeEffectsPortStub(),
-        async readSideEffect() {
+        async readAssistantDeliveryRecord() {
           return sentRecord;
         },
-        async writeSideEffect(record) {
+        async writeAssistantDeliveryRecord(record) {
           writes.push(record);
           return record;
         },
@@ -716,7 +716,7 @@ describe("hosted runtime callbacks", () => {
       sideEffects: [
         buildHostedAssistantDeliverySideEffect({
           dedupeKey: "dedupe_123",
-          intentId: "intent_123",
+          effectId: "intent_123",
         }),
       ],
       vaultRoot: "/tmp/vault",
@@ -753,7 +753,7 @@ describe("hosted runtime callbacks", () => {
     const writes: object[] = [];
     const preparedRecord = buildHostedAssistantDeliveryPreparedRecord({
       dedupeKey: "dedupe_123",
-      intentId: "intent_123",
+      effectId: "intent_123",
       recordedAt: "2026-04-08T00:00:00.000Z",
     });
 
@@ -780,10 +780,10 @@ describe("hosted runtime callbacks", () => {
         occurredAt: "2026-04-08T00:00:00.000Z",
       },
       effectsPort: createHostedRuntimeEffectsPortStub({
-        async readSideEffect() {
+        async readAssistantDeliveryRecord() {
           return preparedRecord;
         },
-        async writeSideEffect(record) {
+        async writeAssistantDeliveryRecord(record) {
           writes.push(record);
           return record;
         },
@@ -791,7 +791,7 @@ describe("hosted runtime callbacks", () => {
       sideEffects: [
         buildHostedAssistantDeliverySideEffect({
           dedupeKey: "dedupe_123",
-          intentId: "intent_123",
+          effectId: "intent_123",
         }),
       ],
       vaultRoot: "/tmp/vault",
@@ -839,7 +839,7 @@ describe("hosted runtime callbacks", () => {
           target: "user@example.com",
           targetKind: "explicit",
         },
-        intentId: "intent_123",
+        effectId: "intent_123",
       }),
     ]);
   });
@@ -853,7 +853,7 @@ describe("hosted runtime callbacks", () => {
     const journalError = new Error("journal unavailable");
     const preparedRecord = buildHostedAssistantDeliveryPreparedRecord({
       dedupeKey: "dedupe_123",
-      intentId: "intent_123",
+      effectId: "intent_123",
       recordedAt: "2026-04-08T00:00:00.000Z",
     });
 
@@ -880,17 +880,17 @@ describe("hosted runtime callbacks", () => {
         occurredAt: "2026-04-08T00:00:00.000Z",
       },
       effectsPort: createHostedRuntimeEffectsPortStub({
-        async readSideEffect() {
+        async readAssistantDeliveryRecord() {
           return preparedRecord;
         },
-        async writeSideEffect() {
+        async writeAssistantDeliveryRecord() {
           throw journalError;
         },
       }),
       sideEffects: [
         buildHostedAssistantDeliverySideEffect({
           dedupeKey: "dedupe_123",
-          intentId: "intent_123",
+          effectId: "intent_123",
         }),
       ],
       vaultRoot: "/tmp/vault",
@@ -937,13 +937,13 @@ describe("hosted runtime callbacks", () => {
     const effectsPort = createHostedRuntimeEffectsPortStub();
     const preparedRecord = buildHostedAssistantDeliveryPreparedRecord({
       dedupeKey: "dedupe_123",
-      intentId: "intent_123",
+      effectId: "intent_123",
       recordedAt: "2026-04-08T00:00:00.000Z",
     });
 
-    Reflect.deleteProperty(effectsPort, "deletePreparedSideEffect");
-    Reflect.deleteProperty(effectsPort, "readSideEffect");
-    Reflect.deleteProperty(effectsPort, "writeSideEffect");
+    Reflect.deleteProperty(effectsPort, "deletePreparedAssistantDelivery");
+    Reflect.deleteProperty(effectsPort, "readAssistantDeliveryRecord");
+    Reflect.deleteProperty(effectsPort, "writeAssistantDeliveryRecord");
 
     mocks.dispatchAssistantOutboxIntent.mockImplementation(async (input) => {
       observedDispatchHooks = input.dispatchHooks;
@@ -971,7 +971,7 @@ describe("hosted runtime callbacks", () => {
       sideEffects: [
         buildHostedAssistantDeliverySideEffect({
           dedupeKey: "dedupe_123",
-          intentId: "intent_123",
+          effectId: "intent_123",
         }),
       ],
       vaultRoot: "/tmp/vault",

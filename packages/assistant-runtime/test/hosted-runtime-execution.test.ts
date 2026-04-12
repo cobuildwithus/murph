@@ -117,7 +117,6 @@ beforeEach(() => {
     {
       effectId: "intent_123",
       fingerprint: "dedupe_123",
-      intentId: "intent_123",
       kind: "assistant.delivery",
     },
   ]);
@@ -210,15 +209,15 @@ describe("executeHostedDispatchForCommit", () => {
           },
           effectsPort: {
             async commit() {},
-            async deletePreparedSideEffect() {},
+            async deletePreparedAssistantDelivery() {},
             async readRawEmailMessage() {
               return null;
             },
-            async readSideEffect() {
+            async readAssistantDeliveryRecord() {
               return null;
             },
             async sendEmail() {},
-            async writeSideEffect(record) {
+            async writeAssistantDeliveryRecord(record) {
               return record;
             },
           },
@@ -273,7 +272,6 @@ describe("executeHostedDispatchForCommit", () => {
       {
         effectId: "intent_123",
         fingerprint: "dedupe_123",
-        intentId: "intent_123",
         kind: "assistant.delivery",
       },
     ]);
@@ -329,7 +327,6 @@ describe("completeHostedExecutionAfterCommit", () => {
           {
             effectId: "intent_123",
             fingerprint: "dedupe_123",
-            intentId: "intent_123",
             kind: "assistant.delivery",
           },
         ],
@@ -337,7 +334,6 @@ describe("completeHostedExecutionAfterCommit", () => {
           {
             effectId: "intent_123",
             fingerprint: "dedupe_123",
-            intentId: "intent_123",
             kind: "assistant.delivery",
           },
         ],
@@ -373,15 +369,15 @@ describe("completeHostedExecutionAfterCommit", () => {
           },
           effectsPort: {
             async commit() {},
-            async deletePreparedSideEffect() {},
+            async deletePreparedAssistantDelivery() {},
             async readRawEmailMessage() {
               return null;
             },
-            async readSideEffect() {
+            async readAssistantDeliveryRecord() {
               return null;
             },
             async sendEmail() {},
-            async writeSideEffect(record) {
+            async writeAssistantDeliveryRecord(record) {
               return record;
             },
           },
@@ -421,7 +417,6 @@ describe("completeHostedExecutionAfterCommit", () => {
         {
           effectId: "intent_123",
           fingerprint: "dedupe_123",
-          intentId: "intent_123",
           kind: "assistant.delivery",
         },
       ],

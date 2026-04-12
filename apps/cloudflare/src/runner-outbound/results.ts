@@ -56,7 +56,7 @@ export async function handleRunnerResultsRequest(input: {
     return forwardRunnerCommit(input.userId, eventId, await readJsonObject(input.request), input.env);
   }
 
-  const sideEffectMatch = /^\/(?:intents|effects)\/(?<effectId>[^/]+)$/u.exec(input.url.pathname);
+  const sideEffectMatch = /^\/effects\/(?<effectId>[^/]+)$/u.exec(input.url.pathname);
   if (sideEffectMatch?.groups) {
     if (input.request.method !== "DELETE" && input.request.method !== "GET" && input.request.method !== "PUT") {
       return methodNotAllowed();
@@ -238,12 +238,6 @@ async function handleRunnerAssistantDeliveryRequest(input: {
     if (nextRecord.effectId !== input.effectId) {
       return json({
         error: `effectId mismatch: expected ${input.effectId}, received ${nextRecord.effectId}.`,
-      }, 400);
-    }
-
-    if (nextRecord.intentId !== input.effectId) {
-      return json({
-        error: `intentId mismatch: expected ${input.effectId}, received ${nextRecord.intentId}.`,
       }, 400);
     }
 
