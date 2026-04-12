@@ -66,6 +66,22 @@ export function chooseHostedLinqConversationRecipientPhone(input: {
   return recipientPhones[0] ?? preferredRecipientPhone;
 }
 
+export function resolveHostedLinqHomeBindingRecipientPhone(input: {
+  homeChatId: string | null;
+  homeRecipientPhone: string | null;
+  incomingChatId: string;
+  incomingRecipientPhone: string | null;
+}): string | null {
+  const incomingRecipientPhone = normalizePhoneNumber(input.incomingRecipientPhone);
+  const homeRecipientPhone = normalizePhoneNumber(input.homeRecipientPhone);
+
+  if (input.homeChatId && input.homeChatId === input.incomingChatId) {
+    return homeRecipientPhone ?? incomingRecipientPhone;
+  }
+
+  return incomingRecipientPhone ?? homeRecipientPhone;
+}
+
 export function resolveHostedLinqActiveRouteDecision(input: {
   homeChatId: string | null;
   homeRecipientPhone: string | null;
