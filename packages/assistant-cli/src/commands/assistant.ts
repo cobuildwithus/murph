@@ -240,7 +240,7 @@ function createAssistantStatusCommandDefinition(input?: {
     args: emptyArgsSchema,
     description:
       input?.description ??
-      'Show a compact assistant runtime snapshot including recent turn receipts and the outbound outbox backlog.',
+      'Show a compact assistant runtime snapshot including recent turn receipts and the outbound outbox backlog. Use this to inspect the provider and model actually used by recent or active assistant turns.',
     hint:
       input?.hint ??
       'Use this when the assistant feels stuck, duplicated a send, or you want the latest receipt timeline without opening the local runtime files under `.runtime/operations/assistant/`.',
@@ -249,7 +249,9 @@ function createAssistantStatusCommandDefinition(input?: {
         .string()
         .min(1)
         .optional()
-        .describe('Optional assistant session id to scope the recent turn receipts.'),
+        .describe(
+          'Optional assistant session id to scope the runtime snapshot to one session and inspect the provider/model used there.',
+        ),
       limit: z
         .number()
         .int()
@@ -487,10 +489,10 @@ function createAssistantChatCommandDefinition(input?: {
     args: assistantChatArgsSchema,
     description:
       input?.description ??
-      'Open an Ink terminal chat UI backed by the chosen provider while Murph stores session metadata plus a local transcript outside the canonical vault.',
+      'Open an Ink terminal chat UI backed by the chosen provider while Murph stores session metadata plus a local transcript outside the canonical vault. This command requires interactive terminal input.',
     hint:
       input?.hint ??
-      'Type /exit to close the chat loop or /session to print the current Murph session id.',
+      'Requires an interactive terminal. Type /exit to close the chat loop or /session to print the current Murph session id.',
     options: assistantChatOptionsSchema,
     output: assistantChatResultSchema,
     outputPolicy: 'agent-only' as const,
@@ -1015,9 +1017,9 @@ export function registerAssistantCommands(
       'chat',
       createAssistantChatCommandDefinition({
         description:
-          'Open the same assistant chat UI as `assistant chat` directly from the CLI root.',
+          'Open the same interactive assistant chat UI as `assistant chat` directly from the CLI root.',
         hint:
-          'Shorthand for `assistant chat`. Type /exit to close the chat loop or /session to print the current Murph session id.',
+          'Shorthand for `assistant chat`. Requires an interactive terminal. Type /exit to close the chat loop or /session to print the current Murph session id.',
       }),
     )
     cli.command(
@@ -1033,9 +1035,9 @@ export function registerAssistantCommands(
       'status',
       createAssistantStatusCommandDefinition({
         description:
-          'Show the same assistant runtime snapshot as `assistant status` directly from the CLI root.',
+          'Show the same assistant runtime snapshot as `assistant status` directly from the CLI root, including the provider and model used by recent turns.',
         hint:
-          'Shorthand for `assistant status`. Use this to inspect recent turn receipts, session freshness, and pending outbox work.',
+          'Shorthand for `assistant status`. Use this to inspect live or recent runtime evidence such as recent turn receipts, the provider/model used, session freshness, and pending outbox work.',
       }),
     )
     cli.command(
