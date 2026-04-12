@@ -6,7 +6,6 @@ import {
 } from "@prisma/client";
 import type Stripe from "stripe";
 
-import { provisionManagedUserCryptoInHostedExecution } from "../hosted-execution/control";
 import {
   applyStripeCheckoutCompleted,
   applyStripeCheckoutExpired,
@@ -18,9 +17,13 @@ import {
 } from "./stripe-billing-events";
 import {
   activateHostedMemberFromConfirmedRevnetIssuance,
-  type HostedStripeDispatchContext,
-} from "./stripe-billing-policy";
+  runHostedMemberActivationPostCommitEffects,
+} from "./member-activation";
 import { resolveStripeCustomerContext } from "./stripe-billing-lookup";
+import {
+  buildHostedStripeDispatchContext,
+  type HostedStripeDispatchContext,
+} from "./stripe-dispatch";
 import {
   coerceStripeObjectId,
 } from "./billing";
@@ -296,14 +299,7 @@ async function processHostedStripeEventRecord(
   postCommitProvisionUserId: string | null;
 }> {
   const payload = event.data.object;
-  const dispatchContext: HostedStripeDispatchContext = {
-    eventCreatedAt: Number.isFinite(event.created) ? new Date(event.created * 1000) : new Date(),
-    occurredAt: Number.isFinite(event.created)
-      ? new Date(event.created * 1000).toISOString()
-      : new Date().toISOString(),
-    sourceEventId: event.id,
-    sourceType: normalizeHostedStripeDispatchSourceType(event.type),
-  };
+  const dispatchContext: HostedStripeDispatchContext = buildHostedStripeDispatchContext(event);
 
   switch (event.type) {
     case "checkout.session.completed":
@@ -381,10 +377,6 @@ async function prepareHostedStripeEventProcessingContext(
   };
 }
 
-function normalizeHostedStripeDispatchSourceType(eventType: string): string {
-  return `stripe.${eventType}`;
-}
-
 function readHostedStripeEventChargeId(type: string, object: Record<string, unknown>): string | null {
   if (type === "refund.created") {
     return coerceStripeObjectId(object.charge as never);
@@ -457,7 +449,7 @@ async function processClaimedHostedStripeEvent(
         transaction as Prisma.TransactionClient,
       );
     });
-    await runHostedStripeEventPostCommitEffects(result);
+    await runHostedMemberActivationPostCommitEffects(result);
     await prisma.hostedStripeEvent.update({
       where: {
         eventId: claimed.eventId,
@@ -511,16 +503,6 @@ async function processClaimedHostedStripeEvent(
 
 async function fetchHostedStripeEventForReconciliation(eventId: string): Promise<Stripe.Event> {
   return requireHostedStripeApi().events.retrieve(eventId);
-}
-
-async function runHostedStripeEventPostCommitEffects(input: {
-  postCommitProvisionUserId: string | null;
-}): Promise<void> {
-  if (!input.postCommitProvisionUserId) {
-    return;
-  }
-
-  await provisionManagedUserCryptoInHostedExecution(input.postCommitProvisionUserId);
 }
 
 function buildDueHostedStripeEventWhere(now: Date): Prisma.HostedStripeEventWhereInput {

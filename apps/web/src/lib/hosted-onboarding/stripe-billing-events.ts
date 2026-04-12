@@ -1,6 +1,5 @@
 import {
   HostedBillingStatus,
-  type Prisma,
 } from "@prisma/client";
 import type Stripe from "stripe";
 
@@ -11,19 +10,21 @@ import {
 } from "./billing";
 import { isHostedAccessBlockedBillingStatus } from "./entitlement";
 import { writeHostedMemberStripeBillingRef } from "./hosted-member-billing-store";
-import { normalizeNullableString } from "./shared";
+import {
+  activateHostedMemberForPositiveSource,
+} from "./member-activation";
+import { normalizeNullableString, type HostedOnboardingPrismaClient } from "./shared";
 import {
   findMemberForStripeObject,
   findMemberForStripeReversal,
 } from "./stripe-billing-lookup";
 import {
-  activateHostedMemberForPositiveSource,
   suspendHostedMemberForBillingReversal,
-  type HostedStripeDispatchContext,
   updateHostedMemberStripeBillingIfFresh,
 } from "./stripe-billing-policy";
-
-type HostedOnboardingPrismaClient = Prisma.TransactionClient;
+import {
+  type HostedStripeDispatchContext,
+} from "./stripe-dispatch";
 
 type HostedStripeActivationOutcome = {
   activatedMemberId: string | null;
@@ -154,7 +155,6 @@ export async function applyStripeInvoicePaid(
     member: updatedMember,
     prisma,
     skipIfBillingAlreadyActive: hadActiveBilling,
-    sourceType: "stripe.invoice.paid",
   });
 
   return {
