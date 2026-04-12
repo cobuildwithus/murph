@@ -1,8 +1,9 @@
-import type {
-  AssistantApprovalPolicy,
-  AssistantChatProvider,
-  AssistantProviderSessionOptions,
-  AssistantSandbox,
+import {
+  assistantProviderSessionOptionsSchema,
+  type AssistantApprovalPolicy,
+  type AssistantChatProvider,
+  type AssistantProviderSessionOptions,
+  type AssistantSandbox,
 } from '../assistant-cli-contracts.js'
 import { splitAssistantHeadersForPersistence } from './redaction.js'
 import { normalizeNullableString } from './shared.js'
@@ -248,7 +249,7 @@ export function serializeAssistantProviderSessionOptions(
   const normalized = normalizeAssistantProviderConfig(input)
   const resolved = resolveAssistantRuntimeTarget(normalized)
 
-  return {
+  return assistantProviderSessionOptionsSchema.parse({
     continuityFingerprint: resolved.continuityFingerprint,
     executionDriver: resolved.executionDriver,
     model: normalized.model,
@@ -262,8 +263,8 @@ export function serializeAssistantProviderSessionOptions(
     ...(normalized.baseUrl ? { baseUrl: normalized.baseUrl } : {}),
     ...(normalized.apiKeyEnv ? { apiKeyEnv: normalized.apiKeyEnv } : {}),
     ...(normalized.providerName ? { providerName: normalized.providerName } : {}),
-    ...(normalized.provider === 'openai-compatible' && normalized.presetId
-      ? { presetId: normalized.presetId }
+    ...(normalized.provider === 'openai-compatible' && resolved.presetId
+      ? { presetId: resolved.presetId }
       : {}),
     ...(normalized.provider === 'openai-compatible' && normalized.headers
       ? { headers: normalized.headers }
@@ -274,7 +275,7 @@ export function serializeAssistantProviderSessionOptions(
     ...(normalized.provider === 'openai-compatible' && normalized.zeroDataRetention
       ? { zeroDataRetention: true }
       : {}),
-  }
+  })
 }
 
 export function serializeAssistantProviderOperatorDefaults(

@@ -99,6 +99,8 @@ describe('assistant redaction helpers', () => {
   it('redacts provider and session headers only on supported target shapes', () => {
     const providerOptions = redactAssistantProviderOptionsForDisplay({
       approvalPolicy: 'never',
+      continuityFingerprint: 'fingerprint-provider',
+      executionDriver: 'openai-compatible',
       headers: {
         Authorization: 'Bearer provider-secret',
         'X-Trace': 'trace-123',
@@ -108,6 +110,7 @@ describe('assistant redaction helpers', () => {
       profile: null,
       providerName: 'murph-openai',
       reasoningEffort: 'medium',
+      resumeKind: null,
       sandbox: 'workspace-write',
     })
     expect(providerOptions.headers).toEqual({
@@ -134,6 +137,8 @@ describe('assistant redaction helpers', () => {
         provider: 'openai-compatible',
         providerOptions: {
           approvalPolicy: 'never',
+          continuityFingerprint: 'fingerprint-bound',
+          executionDriver: 'openai-compatible',
           headers: {
             Authorization: 'Bearer bound-secret',
             'X-Trace': 'trace-456',
@@ -143,6 +148,7 @@ describe('assistant redaction helpers', () => {
           profile: null,
           providerName: 'murph-openai',
           reasoningEffort: 'medium',
+          resumeKind: null,
           sandbox: 'workspace-write',
         },
         providerSessionId: 'provider-session',
@@ -150,6 +156,8 @@ describe('assistant redaction helpers', () => {
       },
       providerOptions: {
         approvalPolicy: 'never',
+        continuityFingerprint: 'fingerprint-session',
+        executionDriver: 'openai-compatible',
         headers: {
           Authorization: 'Bearer session-secret',
           'X-Trace': 'trace-789',
@@ -159,6 +167,7 @@ describe('assistant redaction helpers', () => {
         profile: null,
         providerName: 'murph-openai',
         reasoningEffort: 'medium',
+        resumeKind: null,
         sandbox: 'workspace-write',
       },
       resumeState: null,

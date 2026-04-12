@@ -789,6 +789,7 @@ test('sendAssistantMessage chains official OpenAI responses while retaining loca
       providerOptions: {
         apiKeyEnv: 'OPENAI_API_KEY',
         baseUrl: 'https://api.openai.com/v1',
+        presetId: 'openai',
         model: 'gpt-5',
         providerName: 'openai',
       },
@@ -812,6 +813,7 @@ test('sendAssistantMessage chains official OpenAI responses while retaining loca
       provider: 'openai-compatible',
       baseUrl: 'https://api.openai.com/v1',
       apiKeyEnv: 'OPENAI_API_KEY',
+      presetId: 'openai',
       providerName: 'openai',
       model: 'gpt-5',
       prompt: `What changed on day ${index + 1}?`,

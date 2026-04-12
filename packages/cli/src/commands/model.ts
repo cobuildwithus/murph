@@ -72,7 +72,7 @@ const modelCommandOptionsSchema = z.object({
       `${describePresetScopedOption(
         'Optional named OpenAI-compatible provider preset.',
         'openai-compatible',
-      )} Seeds endpoint defaults for prompts or non-interactive saves.`,
+      )} Named presets carry provider-specific runtime behavior in addition to endpoint defaults.`,
     ),
   model: optionalNonEmptyStringOption(
     'Default model to save for the selected backend. In non-interactive mode, pair this with `--preset` unless Murph can reuse the currently saved backend.',

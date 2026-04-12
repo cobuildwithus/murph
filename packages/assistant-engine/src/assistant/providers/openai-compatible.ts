@@ -48,7 +48,7 @@ export const openAiCompatibleProviderDefinition: AssistantProviderDefinition = {
     murphCommandSurface: 'bound-tools',
     requestFormat: 'messages',
     supportsModelDiscovery: true,
-    supportsNativeResume: true,
+    supportsNativeResume: false,
     supportsReasoningEffort: false,
     supportsRichUserMessageContent: true,
     supportsZeroDataRetention: false,

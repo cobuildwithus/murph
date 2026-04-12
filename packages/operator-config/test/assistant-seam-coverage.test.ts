@@ -385,6 +385,7 @@ test('assistant provider helpers cover null inference and empty header canonical
     supportsAssistantReasoningEffort({
       provider: 'openai-compatible',
       baseUrl: 'https://api.openai.com/v1',
+      presetId: 'openai',
     }),
     true,
   )
@@ -392,6 +393,7 @@ test('assistant provider helpers cover null inference and empty header canonical
     supportsAssistantZeroDataRetention({
       provider: 'openai-compatible',
       baseUrl: 'https://ai-gateway.vercel.sh/v1',
+      presetId: 'vercel-ai-gateway',
       zeroDataRetention: true,
     }),
     true,

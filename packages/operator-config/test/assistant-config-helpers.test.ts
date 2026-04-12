@@ -140,7 +140,7 @@ test('assistant provider config helpers infer, merge, compact, and serialize by 
     apiKeyEnv: 'OPENAI_API_KEY',
     baseUrl: 'https://api.openai.com/v1',
     continuityFingerprint: mergedOpenAiRuntime.continuityFingerprint,
-    executionDriver: 'openai-responses',
+    executionDriver: 'openai-compatible',
     headers: {
       Authorization: 'Bearer secret-value-1234',
       'X-Trace-Id': 'trace-id',
@@ -150,7 +150,7 @@ test('assistant provider config helpers infer, merge, compact, and serialize by 
     profile: null,
     providerName: 'OpenAI',
     reasoningEffort: 'high',
-    resumeKind: 'openai-response-id',
+    resumeKind: null,
     sandbox: null,
     approvalPolicy: null,
   })
@@ -173,8 +173,8 @@ test('assistant provider config helpers infer, merge, compact, and serialize by 
     webSearch: null,
     zeroDataRetention: null,
   })
-  assert.equal(shouldUseAssistantOpenAIResponsesApi(mergedOpenAi), true)
-  assert.equal(supportsAssistantReasoningEffort(mergedOpenAi), true)
+  assert.equal(shouldUseAssistantOpenAIResponsesApi(mergedOpenAi), false)
+  assert.equal(supportsAssistantReasoningEffort(mergedOpenAi), false)
   assert.equal(supportsAssistantZeroDataRetention(mergedOpenAi), false)
   assert.deepEqual(
     compactAssistantProviderConfigInput({
@@ -255,6 +255,7 @@ test('assistant provider config helpers infer, merge, compact, and serialize by 
     shouldUseAssistantOpenAIResponsesApi({
       baseUrl: 'https://example.test/v1',
       apiKeyEnv: 'OPENAI_API_KEY',
+      presetId: 'openai',
     }),
     true,
   )
@@ -263,6 +264,7 @@ test('assistant provider config helpers infer, merge, compact, and serialize by 
     supportsAssistantZeroDataRetention({
       provider: 'openai-compatible',
       baseUrl: 'https://ai-gateway.vercel.sh/v1',
+      presetId: 'vercel-ai-gateway',
       zeroDataRetention: true,
     }),
     true,
