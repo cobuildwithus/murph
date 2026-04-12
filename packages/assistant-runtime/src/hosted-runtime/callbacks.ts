@@ -105,7 +105,7 @@ export async function collectHostedAssistantDeliverySideEffects(
     .map((intent: Awaited<ReturnType<typeof listAssistantOutboxIntents>>[number]) =>
       buildHostedAssistantDeliveryEffect({
         dedupeKey: intent.dedupeKey,
-        effectId: intent.intentId,
+        intentId: intent.intentId,
       }),
     );
 }
@@ -161,7 +161,7 @@ async function dispatchHostedCommittedAssistantDelivery(input: {
           userId: input.userId,
         })
       : undefined,
-    intentId: input.assistantDeliveryEffect.effectId,
+    intentId: input.assistantDeliveryEffect.intentId,
     vault: input.vaultRoot,
   });
 }
@@ -182,7 +182,7 @@ function createHostedAssistantDeliveryDispatchHooks(input: {
         method: "DELETE",
         sideEffect: buildHostedAssistantDeliveryEffect({
           dedupeKey: intent.dedupeKey,
-          effectId: intent.intentId,
+          intentId: intent.intentId,
         }),
         userId: input.userId,
       });
@@ -210,7 +210,7 @@ function createHostedAssistantDeliveryDispatchHooks(input: {
         method: "PUT",
         record: buildHostedAssistantDeliveryPreparedRecord({
           dedupeKey: intent.dedupeKey,
-          effectId: intent.intentId,
+          intentId: intent.intentId,
           recordedAt: intent.lastAttemptAt ?? new Date().toISOString(),
         }),
         userId: input.userId,
@@ -222,7 +222,7 @@ function createHostedAssistantDeliveryDispatchHooks(input: {
     }) => {
       const sideEffect = buildHostedAssistantDeliveryEffect({
         dedupeKey: intent.dedupeKey,
-        effectId: intent.intentId,
+        intentId: intent.intentId,
       });
       const record = await callHostedAssistantDeliveryJournal({
         commit: input.commit,
@@ -301,7 +301,7 @@ async function persistHostedAssistantDeliveryRecord(input: {
         ...input.delivery,
         idempotencyKey: input.delivery.idempotencyKey,
       },
-      effectId: input.intent.intentId,
+      intentId: input.intent.intentId,
     }),
     userId: input.userId,
   });
@@ -343,7 +343,7 @@ async function callHostedAssistantDeliveryJournal(input:
   const sideEffect = input.method === "PUT"
     ? buildHostedAssistantDeliveryEffect({
         dedupeKey: input.record.fingerprint,
-        effectId: input.record.effectId,
+        intentId: input.record.intentId,
       })
     : input.sideEffect;
   try {
@@ -371,21 +371,41 @@ async function deletePreparedAssistantDelivery(
   effectsPort: HostedRuntimeEffectsPort,
   input: Pick<HostedAssistantDeliveryEffect, "effectId" | "fingerprint">,
 ): Promise<void> {
-  await effectsPort.deletePreparedAssistantDelivery(input);
+  const deletePrepared =
+    effectsPort.deletePreparedAssistantDelivery ?? effectsPort.deletePreparedSideEffect;
+
+  if (!deletePrepared) {
+    throw new Error("Hosted runtime effectsPort is missing deletePreparedAssistantDelivery.");
+  }
+
+  await deletePrepared(input);
 }
 
 async function readAssistantDeliveryRecord(
   effectsPort: HostedRuntimeEffectsPort,
   input: Pick<HostedAssistantDeliveryEffect, "effectId" | "fingerprint">,
 ): Promise<HostedAssistantDeliveryRecord | null> {
-  return await effectsPort.readAssistantDeliveryRecord(input);
+  const readRecord = effectsPort.readAssistantDeliveryRecord ?? effectsPort.readSideEffect;
+
+  if (!readRecord) {
+    throw new Error("Hosted runtime effectsPort is missing readAssistantDeliveryRecord.");
+  }
+
+  return await readRecord(input);
 }
 
 async function writeAssistantDeliveryRecord(
   effectsPort: HostedRuntimeEffectsPort,
   record: HostedAssistantDeliveryRecord,
 ): Promise<HostedAssistantDeliveryRecord> {
-  return await effectsPort.writeAssistantDeliveryRecord(record);
+  const writeRecord =
+    effectsPort.writeAssistantDeliveryRecord ?? effectsPort.writeSideEffect;
+
+  if (!writeRecord) {
+    throw new Error("Hosted runtime effectsPort is missing writeAssistantDeliveryRecord.");
+  }
+
+  return await writeRecord(record);
 }
 
 function createHostedAssistantDeliveryConfirmationPendingError(input: {
