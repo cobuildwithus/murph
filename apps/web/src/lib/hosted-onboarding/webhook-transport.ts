@@ -73,20 +73,21 @@ async function performHostedWebhookSideEffect(
   },
 ): Promise<
   | { dispatched: true }
-  | { chatId: string | null; messageId: string | null }
+  | { delivered: true }
   | { handled: true }
 > {
   switch (effect.kind) {
     case "hosted_execution_dispatch":
       throw new Error("Hosted execution dispatch effects must be queued through the execution outbox.");
     case "linq_message_send":
-      return sendHostedLinqChatMessage({
+      await sendHostedLinqChatMessage({
         chatId: effect.payload.chatId,
         idempotencyKey: effect.effectId,
         message: await buildHostedLinqSideEffectMessage(effect, options.prisma),
         replyToMessageId: effect.payload.replyToMessageId,
         signal: options.signal,
       });
+      return { delivered: true };
     case "revnet_invoice_issue": {
       const member = await readHostedMemberSnapshot({
         memberId: effect.payload.memberId,

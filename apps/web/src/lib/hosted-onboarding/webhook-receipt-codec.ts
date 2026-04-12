@@ -278,6 +278,10 @@ function readHostedWebhookLinqMessageResult(
     return null;
   }
 
+  if (record.delivered === true) {
+    return { delivered: true };
+  }
+
   const chatId = readNullableString(record.chatId);
   const messageId = readNullableString(record.messageId);
 
@@ -285,10 +289,7 @@ function readHostedWebhookLinqMessageResult(
     return null;
   }
 
-  return {
-    chatId,
-    messageId,
-  };
+  return { delivered: true };
 }
 
 function readHostedWebhookRevnetIssuancePayload(

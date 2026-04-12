@@ -274,8 +274,12 @@ function readHostedWebhookDispatchSideEffectResult(
 function readHostedWebhookLinqMessageSideEffectResult(
   value: HostedWebhookSideEffectResult,
 ): NonNullable<HostedWebhookLinqMessageSideEffect["result"]> {
-  if ("chatId" in value && "messageId" in value) {
+  if ("delivered" in value && value.delivered === true) {
     return value;
+  }
+
+  if ("chatId" in value && "messageId" in value) {
+    return { delivered: true };
   }
 
   throw new Error("Hosted webhook Linq message side effect received an invalid terminal result.");

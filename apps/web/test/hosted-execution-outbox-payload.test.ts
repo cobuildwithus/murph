@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { serializeHostedExecutionOutboxPayload } from "@/src/lib/hosted-execution/outbox-payload";
+import {
+  readHostedExecutionOutboxPayload,
+  readHostedExecutionOutboxPayloadIdentity,
+  serializeHostedExecutionOutboxPayload,
+  summarizeHostedExecutionOutboxPayload,
+} from "@/src/lib/hosted-execution/outbox-payload";
 
 describe("hosted execution outbox payload storage", () => {
   it("stores hosted share acceptance inline as a tiny share ref", () => {
@@ -104,6 +109,42 @@ describe("hosted execution outbox payload storage", () => {
         storage: "inline",
       },
     )).toThrow("Hosted execution gateway.message.send outbox payloads must use reference storage.");
+  });
+
+  it("summarizes settled payloads down to a hashed identity", () => {
+    const serialized = serializeHostedExecutionOutboxPayload({
+      event: {
+        kind: "vault.share.accepted",
+        share: {
+          ownerUserId: "member_sender",
+          shareId: "hshare_123",
+        },
+        userId: "member_123",
+      },
+      eventId: "evt_share_summary_123",
+      occurredAt: "2026-04-04T00:00:00.000Z",
+    });
+    const payload = readHostedExecutionOutboxPayload(serialized);
+
+    expect(payload).not.toBeNull();
+    if (!payload) {
+      return;
+    }
+
+    const summary = summarizeHostedExecutionOutboxPayload(payload);
+
+    expect(summary).toMatchObject({
+      eventId: "evt_share_summary_123",
+      eventKind: "vault.share.accepted",
+      occurredAt: "2026-04-04T00:00:00.000Z",
+      schema: "murph.hosted-execution-outbox-payload-pruned.v1",
+      storage: "pruned",
+      userId: "member_123",
+    });
+    expect(summary).not.toHaveProperty("dispatch");
+    expect(readHostedExecutionOutboxPayloadIdentity(summary)).toEqual(
+      readHostedExecutionOutboxPayloadIdentity(serialized),
+    );
   });
 });
 

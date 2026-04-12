@@ -79,10 +79,7 @@ describe("hosted webhook receipt transitions", () => {
         name: "Error",
         retryable: true,
       },
-      result: {
-        chatId: "chat_123",
-        messageId: "out_123",
-      },
+      result: { delivered: true as const },
       sentAt: "2026-03-26T12:00:30.000Z",
       status: "sent_unconfirmed" as const,
     };
