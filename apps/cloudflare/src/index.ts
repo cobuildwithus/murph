@@ -4,12 +4,16 @@ export { ContainerProxy } from "@cloudflare/containers";
 import type { CloudflareHostedUserEnvStatus } from "@murphai/cloudflare-hosted-control";
 import {
   emitHostedExecutionStructuredLog,
-  parseHostedExecutionDispatchRequest,
-  type HostedExecutionDispatchRequest,
-  type HostedExecutionDispatchResult,
   type HostedExecutionOutboxPayload,
-  type HostedExecutionUserStatus,
 } from "@murphai/hosted-execution";
+import type {
+  HostedExecutionDispatchRequest,
+  HostedExecutionDispatchResult,
+  HostedExecutionUserStatus,
+} from "@murphai/hosted-execution/contracts";
+import {
+  parseHostedExecutionDispatchRequest,
+} from "@murphai/hosted-execution/parsers";
 import type {
   HostedExecutionDeviceSyncRuntimeApplyRequest,
   HostedExecutionDeviceSyncRuntimeApplyResponse,

@@ -1,12 +1,16 @@
-import { parseHostedEmailSendRequest } from "@murphai/assistant-runtime";
+import { parseHostedEmailSendRequest } from "@murphai/assistant-runtime/hosted-email";
 import {
-  HOSTED_EXECUTION_RUNNER_EMAIL_SEND_PATH,
   parseHostedAssistantDeliveryRecord,
   parseHostedAssistantDeliveryEffects,
+} from "@murphai/hosted-execution";
+import type { HostedExecutionBundleRef } from "@murphai/hosted-execution/contracts";
+import {
   parseHostedExecutionBundlePayload,
   parseHostedExecutionBundleRef,
-  type HostedExecutionBundleRef,
-} from "@murphai/hosted-execution";
+} from "@murphai/hosted-execution/parsers";
+import {
+  HOSTED_EXECUTION_RUNNER_EMAIL_SEND_PATH,
+} from "@murphai/hosted-execution/routes";
 import { gatewayProjectionSnapshotSchema } from "@murphai/gateway-core";
 
 import { readHostedExecutionEnvironment } from "../env.ts";

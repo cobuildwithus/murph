@@ -4,10 +4,10 @@ import {
 } from "@murphai/cloudflare-hosted-control";
 import {
   parseHostedExecutionUserStatus,
-} from "@murphai/hosted-execution";
+} from "@murphai/hosted-execution/parsers";
 import type {
   HostedExecutionUserStatus,
-} from "@murphai/hosted-execution";
+} from "@murphai/hosted-execution/contracts";
 import {
   normalizeOptionalString,
   parseOptionalStrictInteger,

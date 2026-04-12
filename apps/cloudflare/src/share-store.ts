@@ -1,4 +1,4 @@
-import { parseHostedExecutionSharePack } from "@murphai/hosted-execution";
+import { parseHostedExecutionSharePack } from "@murphai/hosted-execution/parsers";
 
 import type { R2BucketLike } from "./bundle-store.js";
 import { buildHostedStorageAad } from "./crypto-context.js";

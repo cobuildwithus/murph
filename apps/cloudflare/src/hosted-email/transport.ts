@@ -4,7 +4,7 @@
  * longer keeps a compatibility lane for legacy per-thread aliases.
  */
 
-import type { HostedEmailSendRequest } from "@murphai/assistant-runtime";
+import type { HostedEmailSendRequest } from "@murphai/assistant-runtime/hosted-email";
 import {
   createHostedEmailThreadTarget,
   ensureHostedEmailReplySubject,

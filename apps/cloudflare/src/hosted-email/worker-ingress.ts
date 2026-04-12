@@ -1,6 +1,6 @@
 import {
   readHostedEmailCapabilities,
-} from "@murphai/hosted-execution";
+} from "@murphai/hosted-execution/hosted-email";
 import {
   isHostedEmailInboundSenderAuthorized,
   readHostedVerifiedEmailFromEnv,

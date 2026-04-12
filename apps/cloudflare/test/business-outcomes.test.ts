@@ -9,8 +9,10 @@ import {
   HOSTED_EXECUTION_TIMESTAMP_HEADER,
   HOSTED_EXECUTION_USER_ID_HEADER,
   buildHostedExecutionLinqMessageReceivedDispatch,
-  parseHostedExecutionDispatchRequest,
 } from "@murphai/hosted-execution";
+import {
+  parseHostedExecutionDispatchRequest,
+} from "@murphai/hosted-execution/parsers";
 
 import {
   applyHostedBusinessOutcomeIfNeeded,

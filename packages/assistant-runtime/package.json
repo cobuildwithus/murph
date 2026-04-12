@@ -20,6 +20,11 @@
       "types": "./dist/hosted-assistant-env.d.ts",
       "import": "./dist/hosted-assistant-env.js",
       "default": "./dist/hosted-assistant-env.js"
+    },
+    "./hosted-email": {
+      "types": "./dist/hosted-email.d.ts",
+      "import": "./dist/hosted-email.js",
+      "default": "./dist/hosted-email.js"
     }
   },
   "files": [

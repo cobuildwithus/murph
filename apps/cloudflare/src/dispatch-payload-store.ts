@@ -1,14 +1,18 @@
 import {
   buildHostedExecutionDispatchRef,
   buildHostedExecutionOutboxPayload,
-  parseHostedExecutionDispatchRequest,
   readHostedExecutionOutboxPayload,
   resolveHostedExecutionOutboxPayloadStorage,
   type HostedExecutionDispatchRef,
-  type HostedExecutionDispatchRequest,
   type HostedExecutionOutboxPayload,
   type HostedExecutionReferenceOutboxPayload,
 } from "@murphai/hosted-execution";
+import type {
+  HostedExecutionDispatchRequest,
+} from "@murphai/hosted-execution/contracts";
+import {
+  parseHostedExecutionDispatchRequest,
+} from "@murphai/hosted-execution/parsers";
 
 import type { R2BucketLike } from "./bundle-store.js";
 import { buildHostedStorageAad } from "./crypto-context.js";
