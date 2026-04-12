@@ -5,7 +5,10 @@ import {
   resolveHostedWorkerGradualDeploymentSupport,
   resolveHostedWorkerDeploymentTraffic,
 } from "./deploy-automation/deployment-traffic.ts";
-import { normalizeOptionalString } from "./deploy-automation/shared.ts";
+import {
+  normalizeOptionalString,
+  parseOptionalStrictInteger,
+} from "./deploy-automation/shared.ts";
 
 type EnvSource = Readonly<Record<string, string | undefined>>;
 
@@ -339,15 +342,12 @@ function readDeploymentMode(value: string | undefined): DeploymentMode {
 }
 
 function readRolloutPercentage(value: string | undefined): number {
-  const normalized = normalizeOptionalString(value) ?? "10";
+  const parsed = parseOptionalStrictInteger(
+    value,
+    "HOSTED_EXECUTION_GRADUAL_ROLLOUT_PERCENTAGE must be an integer between 0 and 100.",
+  ) ?? 10;
 
-  if (!/^-?\d+$/u.test(normalized)) {
-    throw new Error("HOSTED_EXECUTION_GRADUAL_ROLLOUT_PERCENTAGE must be an integer between 0 and 100.");
-  }
-
-  const parsed = Number.parseInt(normalized, 10);
-
-  if (!Number.isInteger(parsed) || parsed < 0 || parsed > 100) {
+  if (parsed < 0 || parsed > 100) {
     throw new Error("HOSTED_EXECUTION_GRADUAL_ROLLOUT_PERCENTAGE must be an integer between 0 and 100.");
   }
 

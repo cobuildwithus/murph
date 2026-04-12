@@ -31,4 +31,16 @@ describe('buildAssistantCliProcessEnv', () => {
 
     expect(env.VERCEL_AI_API_KEY).toBe('vercel-secret')
   })
+
+  it('canonicalizes Windows Path into PATH for child launcher resolution', () => {
+    const env = buildAssistantCliProcessEnv({
+      ambientEnv: {
+        HOME: '/tmp/murph-home',
+        Path: 'C:\\Windows\\System32',
+      } as NodeJS.ProcessEnv,
+    })
+
+    expect(env.PATH).toMatch(/C:\\Windows\\System32$/)
+    expect(env.Path).toBeUndefined()
+  })
 })

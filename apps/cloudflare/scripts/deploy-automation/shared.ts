@@ -30,3 +30,26 @@ export function parseJsonValue<T>(value: string, label: string): T {
     );
   }
 }
+
+export function parseOptionalStrictInteger(
+  value: string | undefined,
+  errorMessage: string,
+): number | null {
+  const normalized = normalizeOptionalString(value);
+
+  if (!normalized) {
+    return null;
+  }
+
+  if (!/^-?\d+$/u.test(normalized)) {
+    throw new Error(errorMessage);
+  }
+
+  const parsed = Number.parseInt(normalized, 10);
+
+  if (!Number.isInteger(parsed)) {
+    throw new Error(errorMessage);
+  }
+
+  return parsed;
+}
