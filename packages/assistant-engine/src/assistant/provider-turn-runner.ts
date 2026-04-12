@@ -59,6 +59,10 @@ import {
 import {
   appendAssistantTurnReceiptEvent,
 } from './turns.js'
+import {
+  prioritizeAssistantRoutesForRichUserMessageContent,
+  resolveAssistantRouteUserMessageContent,
+} from './rich-content-routing.js'
 import { createIntegratedVaultServices } from '@murphai/vault-usecases/vault-services'
 import { createAssistantFoodAutoLogHooks } from './food-auto-log-hooks.js'
 import type { AssistantMessageInput } from './service-contracts.js'
@@ -284,10 +288,14 @@ async function resolveAssistantProviderAttemptPlan(input: {
   failoverState: AssistantProviderFailoverState
   session: AssistantSession
 }): Promise<AssistantProviderAttemptPlan | null> {
-  const prioritizedRoutes = prioritizeAssistantFailoverRoutes(
-    input.executionPlan.routes.filter(
+  const remainingRoutes = prioritizeAssistantRoutesForRichUserMessageContent({
+    routes: input.executionPlan.routes.filter(
       (route) => !input.attemptedRouteIds.has(route.routeId),
     ),
+    userMessageContent: input.executionPlan.input.userMessageContent,
+  })
+  const prioritizedRoutes = prioritizeAssistantFailoverRoutes(
+    remainingRoutes,
     input.failoverState,
   )
   const route = prioritizedRoutes[0] ?? null
@@ -552,7 +560,10 @@ async function executeAssistantProviderAttempt(input: {
         ...executionPlan.memoryTurnEnv,
       },
       userPrompt: executionPlan.input.prompt,
-      userMessageContent: executionPlan.input.userMessageContent,
+      userMessageContent: resolveAssistantRouteUserMessageContent({
+        route: attemptPlan.route,
+        userMessageContent: executionPlan.input.userMessageContent,
+      }),
       continuityContext: attemptPlan.routePlan.continuityContext,
       systemPrompt: attemptPlan.routePlan.systemPrompt,
       toolRuntime,

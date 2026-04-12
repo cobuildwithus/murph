@@ -59,6 +59,9 @@ import {
   normalizeAssistantAskResultForReturn,
   serializeAssistantSessionForResult,
 } from './service-result.js'
+import {
+  prioritizeAssistantRoutesForRichUserMessageContent,
+} from './rich-content-routing.js'
 import { persistFailedAssistantPromptAttempt } from './prompt-attempts.js'
 import { resolveAssistantTurnRoutes } from './service-turn-routes.js'
 import { persistPendingAssistantUsageEvent } from './service-usage.js'
@@ -147,7 +150,10 @@ export async function sendAssistantMessageLocal(
         message: input,
       })
       const sharedPlan = await buildAssistantTurnSharedPlan(input, resolved)
-      const routes = resolveAssistantTurnRoutes(input, defaults, resolved)
+      const routes = prioritizeAssistantRoutesForRichUserMessageContent({
+        routes: resolveAssistantTurnRoutes(input, defaults, resolved),
+        userMessageContent: input.userMessageContent,
+      })
       const primaryRoute = routes[0] ?? null
       const receipt = await createAssistantTurnReceipt({
         vault: input.vault,
