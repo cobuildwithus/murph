@@ -1,4 +1,5 @@
 import { Cli, z } from 'incur'
+import { eventSourceSchema } from '@murphai/contracts'
 import {
   isoTimestampSchema,
   listResultSchema,
@@ -22,8 +23,6 @@ import {
   createEntityDeleteCommandConfig,
   createEventBackedEntityEditCommandConfig,
 } from './record-mutation-command-helpers.js'
-
-const eventSourceSchema = z.enum(['manual', 'import', 'device', 'derived'])
 
 export function registerMealCommands(cli: Cli.Cli, _services: VaultServices) {
   registerArtifactBackedEntityGroup(cli, {

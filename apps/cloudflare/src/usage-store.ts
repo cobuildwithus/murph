@@ -1,3 +1,5 @@
+import type { HostedRuntimeUsageRecordResponse } from "@murphai/assistant-runtime";
+
 import {
   buildHostedStorageAad,
   deriveHostedStorageOpaqueId,
@@ -35,7 +37,7 @@ export interface HostedPendingUsageStore {
   appendUsage(input: {
     usage: readonly Record<string, unknown>[];
     userId: string;
-  }): Promise<{ recorded: number; usageIds: string[] }>;
+  }): Promise<HostedRuntimeUsageRecordResponse>;
   deleteUsage(input: {
     usageIds: readonly string[];
     userId: string;

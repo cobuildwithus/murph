@@ -22,6 +22,7 @@ import type {
   HostedExecutionDeviceSyncRuntimeSnapshotRequest,
   HostedExecutionDeviceSyncRuntimeSnapshotResponse,
 } from "@murphai/device-syncd/hosted-runtime";
+import type { HostedRuntimeUsageRecordResponse } from "@murphai/assistant-runtime";
 
 import type { R2BucketLike } from "./bundle-store.ts";
 import type {
@@ -56,7 +57,7 @@ export interface WorkerUserRunnerStubLike {
   }): Promise<HostedExecutionDeviceSyncRuntimeSnapshotResponse>;
   putPendingUsage?(input: {
     usage: readonly Record<string, unknown>[];
-  }): Promise<{ recorded: number; usageIds: string[] }>;
+  }): Promise<HostedRuntimeUsageRecordResponse>;
   readPendingUsage?(input?: { limit?: number | null }): Promise<Record<string, unknown>[]>;
   deletePendingUsage?(input: { usageIds: readonly string[] }): Promise<void>;
 }

@@ -1,4 +1,5 @@
 import { Cli, z } from 'incur'
+import { eventSourceSchema } from '@murphai/contracts'
 import {
   documentImportResultSchema,
   isoTimestampSchema,
@@ -18,8 +19,6 @@ import {
   createEntityDeleteCommandConfig,
   createEventBackedEntityEditCommandConfig,
 } from './record-mutation-command-helpers.js'
-
-const eventSourceSchema = z.enum(['manual', 'import', 'device', 'derived'])
 
 export function registerDocumentCommands(
   cli: Cli.Cli,

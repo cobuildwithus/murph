@@ -1,4 +1,5 @@
 import {
+  parseHostedRuntimeUsageRecordResponse,
   readHostedRunnerCommitTimeoutMs,
   type HostedRuntimePlatform,
 } from "@murphai/assistant-runtime";
@@ -28,11 +29,6 @@ import {
   CLOUDFLARE_HOSTED_RUNTIME_INTERNAL_HOSTNAMES,
 } from "./internal-hosts.ts";
 import { CLOUDFLARE_HOSTED_USAGE_RECORD_PATH } from "./outbound-routes.ts";
-
-interface HostedExecutionAiUsageRecordResponse {
-  recorded: number;
-  usageIds: string[];
-}
 
 export function buildHostedExecutionRuntimePlatform(input: {
   boundUserId: string;
@@ -245,7 +241,7 @@ export function buildHostedExecutionRuntimePlatform(input: {
           ),
         });
 
-        return parseHostedExecutionAiUsageRecordResponse(payload);
+        return parseHostedRuntimeUsageRecordResponse(payload);
       },
     },
   };
@@ -353,30 +349,6 @@ function assertHostedOk(response: Response, description: string): void {
   }
 
   throw new Error(`${description} failed with HTTP ${response.status}.`);
-}
-
-function parseHostedExecutionAiUsageRecordResponse(
-  value: unknown,
-): HostedExecutionAiUsageRecordResponse {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError("Hosted AI usage export response must be an object.");
-  }
-
-  const recorded = (value as { recorded?: unknown }).recorded;
-  const usageIds = (value as { usageIds?: unknown }).usageIds;
-
-  if (typeof recorded !== "number" || !Number.isFinite(recorded)) {
-    throw new TypeError("Hosted AI usage export response.recorded must be a finite number.");
-  }
-
-  if (!Array.isArray(usageIds) || usageIds.some((entry) => typeof entry !== "string")) {
-    throw new TypeError("Hosted AI usage export response.usageIds must be a string array.");
-  }
-
-  return {
-    recorded,
-    usageIds,
-  };
 }
 
 function readHostedRecordField(

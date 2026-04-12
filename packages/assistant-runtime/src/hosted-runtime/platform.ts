@@ -75,3 +75,27 @@ export interface HostedRuntimeUsageRecordResponse {
   recorded: number;
   usageIds: string[];
 }
+
+export function parseHostedRuntimeUsageRecordResponse(
+  value: unknown,
+): HostedRuntimeUsageRecordResponse {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError("Hosted runtime usage response must be an object.");
+  }
+
+  const recorded = (value as { recorded?: unknown }).recorded;
+  const usageIds = (value as { usageIds?: unknown }).usageIds;
+
+  if (typeof recorded !== "number" || !Number.isFinite(recorded)) {
+    throw new TypeError("Hosted runtime usage response.recorded must be a finite number.");
+  }
+
+  if (!Array.isArray(usageIds) || usageIds.some((entry) => typeof entry !== "string")) {
+    throw new TypeError("Hosted runtime usage response.usageIds must be a string array.");
+  }
+
+  return {
+    recorded,
+    usageIds,
+  };
+}

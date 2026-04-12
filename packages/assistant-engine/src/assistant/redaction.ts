@@ -2,19 +2,20 @@ import type {
   AssistantProviderSessionOptions,
   AssistantSession,
 } from '@murphai/operator-config/assistant-cli-contracts'
+import {
+  isSensitiveAssistantHeaderName as isSensitiveSharedAssistantHeaderName,
+  isSensitiveAssistantHeaderValue as isSensitiveSharedAssistantHeaderValue,
+  splitAssistantHeadersForPersistence as splitSharedAssistantHeadersForPersistence,
+  type AssistantHeaderPersistenceSplit as SharedAssistantHeaderPersistenceSplit,
+} from '@murphai/operator-config/assistant/redaction'
 
 const REDACTED_SECRET_TEXT = '[REDACTED]' as const
 
-const SENSITIVE_HEADER_NAME_PATTERN =
-  /(?:^|[-_])(?:authorization|cookie|token|secret|api[-_]?key|session[-_]?key)(?:$|[-_])/iu
 const SENSITIVE_HEADER_VALUE_PATTERN = /\b(?:Bearer|Basic)\s+[A-Za-z0-9._~+/=-]{8,}\b/gu
 const SENSITIVE_INLINE_ASSIGNMENT_PATTERN =
   /((?:authorization|proxy-authorization|cookie|set-cookie|api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|password|secret|token)\s*[:=]\s*["']?)([^"'\s,;\]}]{4,})/giu
 
-export interface AssistantHeaderPersistenceSplit {
-  persistedHeaders: Record<string, string> | null
-  secretHeaders: Record<string, string> | null
-}
+export type AssistantHeaderPersistenceSplit = SharedAssistantHeaderPersistenceSplit
 
 export function redactAssistantStateString(value: string): string {
   return value
@@ -57,30 +58,7 @@ export function containsInlineAssistantSecretMaterial(value: string): boolean {
 export function splitAssistantHeadersForPersistence(
   headers: Record<string, string> | null | undefined,
 ): AssistantHeaderPersistenceSplit {
-  if (!headers || Object.keys(headers).length === 0) {
-    return {
-      persistedHeaders: null,
-      secretHeaders: null,
-    }
-  }
-
-  const persistedHeaders: Record<string, string> = {}
-  const secretHeaders: Record<string, string> = {}
-
-  for (const [key, rawValue] of Object.entries(headers)) {
-    const value = typeof rawValue === 'string' ? rawValue : String(rawValue)
-    if (isSensitiveAssistantHeaderName(key) || isSensitiveAssistantHeaderValue(value)) {
-      secretHeaders[key] = value
-      continue
-    }
-    persistedHeaders[key] = value
-  }
-
-  return {
-    persistedHeaders:
-      Object.keys(persistedHeaders).length > 0 ? persistedHeaders : null,
-    secretHeaders: Object.keys(secretHeaders).length > 0 ? secretHeaders : null,
-  }
+  return splitSharedAssistantHeadersForPersistence(headers)
 }
 
 export function mergeAssistantHeaders(
@@ -153,13 +131,13 @@ export function redactAssistantSessionsForDisplay(
 }
 
 export function isSensitiveAssistantHeaderName(name: string): boolean {
-  return SENSITIVE_HEADER_NAME_PATTERN.test(name)
+  return isSensitiveSharedAssistantHeaderName(name)
 }
 
 export function isSensitiveAssistantHeaderValue(value: string): boolean {
-  return SENSITIVE_HEADER_VALUE_PATTERN.test(value)
+  return isSensitiveSharedAssistantHeaderValue(value)
 }
 
 function isSensitiveAssistantFieldName(name: string): boolean {
-  return SENSITIVE_HEADER_NAME_PATTERN.test(name)
+  return isSensitiveAssistantHeaderName(name)
 }

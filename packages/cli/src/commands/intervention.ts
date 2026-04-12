@@ -1,4 +1,5 @@
 import { Cli, z } from 'incur'
+import { eventSourceSchema } from '@murphai/contracts'
 import { withBaseOptions } from '@murphai/operator-config/command-helpers'
 import {
   interventionAddResultSchema,
@@ -14,8 +15,6 @@ import {
   createDirectEntityDeleteCommandDefinition,
   createDirectEventBackedEntityEditCommandDefinition,
 } from './record-mutation-command-helpers.js'
-
-const eventSourceSchema = z.enum(['manual', 'import', 'device', 'derived'])
 const protocolIdSchema = z
   .string()
   .regex(/^prot_[0-9A-Za-z]+$/u, 'Expected a canonical protocol id in prot_* form.')

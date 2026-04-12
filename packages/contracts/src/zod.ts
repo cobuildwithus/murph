@@ -520,13 +520,15 @@ export const bloodTestResultSchema = z
     }
   });
 
+export const eventSourceSchema = z.enum(EVENT_SOURCES);
+
 const baseEventShape = {
   schemaVersion: z.literal(CONTRACT_SCHEMA_VERSION.event),
   id: idSchema(ID_PREFIXES.event),
   occurredAt: isoDateTimeString(),
   recordedAt: isoDateTimeString(),
   dayKey: patternedString(DAY_KEY_PATTERN),
-  source: z.enum(EVENT_SOURCES),
+  source: eventSourceSchema,
   title: boundedString(1, 160),
 } satisfies z.ZodRawShape;
 

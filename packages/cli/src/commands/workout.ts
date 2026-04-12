@@ -1,4 +1,5 @@
 import { Cli, z } from 'incur'
+import { eventSourceSchema } from '@murphai/contracts'
 import { withBaseOptions } from '@murphai/operator-config/command-helpers'
 import {
   inputFileOptionSchema,
@@ -57,8 +58,6 @@ import {
   commonDateRangeOptionDescriptions,
   commonListLimitOptionSchema,
 } from './command-factory-primitives.js'
-
-const eventSourceSchema = z.enum(['manual', 'import', 'device', 'derived'])
 
 export function registerWorkoutCommands(
   cli: Cli.Cli,

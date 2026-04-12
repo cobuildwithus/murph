@@ -64,6 +64,7 @@ export type {
   HostedRuntimeDeviceSyncPort,
   HostedRuntimeEffectsPort,
   HostedRuntimePlatform,
+  HostedRuntimeUsageRecordResponse,
   HostedRuntimeUsageExportPort,
 } from "./hosted-runtime/platform.ts";
 export {
@@ -72,6 +73,9 @@ export {
   resolveHostedRuntimeTsconfigPath,
   resolveHostedRuntimeTsxImportSpecifier,
 } from "./hosted-runtime/environment.ts";
+export {
+  parseHostedRuntimeUsageRecordResponse,
+} from "./hosted-runtime/platform.ts";
 export {
   readHostedRunnerCommitTimeoutMs,
 } from "./hosted-runtime/timeouts.ts";

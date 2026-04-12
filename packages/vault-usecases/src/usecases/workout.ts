@@ -1,4 +1,5 @@
 import {
+  type EventSource,
   type ActivityStrengthExercise,
   type JsonObject,
   type WorkoutSession,
@@ -128,7 +129,7 @@ export interface AddWorkoutRecordInput {
   text?: string
   inputFile?: string
   occurredAt?: string
-  source?: 'manual' | 'import' | 'device' | 'derived'
+  source?: EventSource
   durationMinutes?: number
   activityType?: string
   distanceKm?: number

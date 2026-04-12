@@ -36,6 +36,11 @@
       "import": "./dist/assistant/provider-config.js",
       "default": "./dist/assistant/provider-config.js"
     },
+    "./assistant/redaction": {
+      "types": "./dist/assistant/redaction.d.ts",
+      "import": "./dist/assistant/redaction.js",
+      "default": "./dist/assistant/redaction.js"
+    },
     "./assistant/target-runtime": {
       "types": "./dist/assistant/target-runtime.d.ts",
       "import": "./dist/assistant/target-runtime.js",
