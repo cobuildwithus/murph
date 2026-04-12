@@ -12,8 +12,10 @@ import {
 import {
   buildHostedExecutionGatewayMessageSendDispatch,
   deriveHostedExecutionErrorCode,
-  type HostedAssistantDeliveryEffect,
 } from "@murphai/hosted-execution";
+import type {
+  HostedAssistantDeliveryEffect,
+} from "@murphai/hosted-execution/side-effects";
 import {
   encodeHostedBundleBase64,
   listHostedBundleArtifacts,

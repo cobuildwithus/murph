@@ -4,9 +4,10 @@ import type {
   HostedExecutionEventDispatchStatus,
   HostedExecutionUserStatus,
 } from "@murphai/hosted-execution/contracts";
-import type {
-  HostedExecutionOutboxPayload,
-} from "@murphai/hosted-execution";
+import {
+  resolveHostedExecutionOutboxPayloadUserId,
+  type HostedExecutionOutboxPayload,
+} from "@murphai/hosted-execution/outbox-payload";
 import {
   normalizeHostedExecutionBaseUrl,
 } from "@murphai/hosted-execution/env";
@@ -238,10 +239,6 @@ function requireHostedExecutionBaseUrl(value: string): string {
   }
 
   return normalized;
-}
-
-function resolveHostedExecutionOutboxPayloadUserId(payload: HostedExecutionOutboxPayload): string {
-  return payload.storage === "inline" ? payload.dispatch.event.userId : payload.dispatchRef.userId;
 }
 
 function createHostedExecutionBearerAuthorizationHeaderProvider(

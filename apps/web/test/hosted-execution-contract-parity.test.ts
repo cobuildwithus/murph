@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import {
   HOSTED_EXECUTION_EVENT_KINDS,
   buildHostedExecutionAssistantCronTickDispatch,
-  buildHostedExecutionDispatchRef,
   buildHostedExecutionDeviceSyncWakeDispatch,
   buildHostedExecutionEmailMessageReceivedDispatch,
   buildHostedExecutionGatewayMessageSendDispatch,
@@ -12,10 +11,13 @@ import {
   buildHostedExecutionTelegramMessageReceivedDispatch,
   buildHostedExecutionVaultShareAcceptedDispatch,
   parseHostedExecutionEvent,
-  readHostedExecutionDispatchRef,
   type HostedExecutionDispatchRequest,
   type HostedExecutionEventKind,
 } from "@murphai/hosted-execution";
+import {
+  buildHostedExecutionDispatchRef,
+  readHostedExecutionDispatchRef,
+} from "@murphai/hosted-execution/dispatch-ref";
 
 import { serializeHostedExecutionOutboxPayload } from "@/src/lib/hosted-execution/outbox-payload";
 

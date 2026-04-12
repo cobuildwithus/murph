@@ -2,7 +2,7 @@ import {
   listHostedBundleArtifacts,
   sameHostedBundlePayloadRef,
 } from "@murphai/runtime-state/node";
-import type { HostedExecutionBundleRef } from "@murphai/hosted-execution";
+import type { HostedExecutionBundleRef } from "@murphai/hosted-execution/contracts";
 
 import {
   createHostedArtifactStore,

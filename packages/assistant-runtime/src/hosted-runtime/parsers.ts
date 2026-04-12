@@ -1,7 +1,9 @@
+import type {
+  HostedExecutionRunnerResult,
+} from "@murphai/hosted-execution/contracts";
 import {
   parseHostedAssistantDeliveryEffects,
-  type HostedExecutionRunnerResult,
-} from "@murphai/hosted-execution";
+} from "@murphai/hosted-execution/side-effects";
 import {
   parseHostedExecutionBundleRef,
   parseHostedExecutionRunnerRequest,

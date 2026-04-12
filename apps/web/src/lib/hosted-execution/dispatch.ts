@@ -1,10 +1,14 @@
 import {
   HOSTED_EXECUTION_DISPATCH_NOT_CONFIGURED_ERROR,
-  type HostedExecutionOutboxPayload,
   type HostedExecutionDispatchResult,
   type HostedExecutionDispatchRequest,
   type HostedExecutionUserStatus,
-} from "@murphai/hosted-execution";
+} from "@murphai/hosted-execution/contracts";
+import {
+  resolveHostedExecutionOutboxPayloadEventId,
+  resolveHostedExecutionOutboxPayloadUserId,
+  type HostedExecutionOutboxPayload,
+} from "@murphai/hosted-execution/outbox-payload";
 import {
   createHostedExecutionDispatchClient,
 } from "@murphai/hosted-execution/client";
@@ -39,8 +43,8 @@ export async function dispatchStoredHostedExecutionStatus(
 
   if (!client) {
     return buildHostedExecutionNotConfiguredStatus({
-      eventId: payload.storage === "inline" ? payload.dispatch.eventId : payload.dispatchRef.eventId,
-      userId: payload.storage === "inline" ? payload.dispatch.event.userId : payload.dispatchRef.userId,
+      eventId: resolveHostedExecutionOutboxPayloadEventId(payload),
+      userId: resolveHostedExecutionOutboxPayloadUserId(payload),
     });
   }
 

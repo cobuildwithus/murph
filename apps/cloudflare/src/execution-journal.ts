@@ -2,12 +2,14 @@ import {
   gatewayProjectionSnapshotSchema,
   type GatewayProjectionSnapshot,
 } from "@murphai/gateway-core";
+import type {
+  HostedExecutionBundleRef,
+  HostedExecutionRunnerResult,
+} from "@murphai/hosted-execution/contracts";
 import {
-  type HostedAssistantDeliveryEffect,
-  type HostedExecutionBundleRef,
   parseHostedAssistantDeliveryEffects,
-  type HostedExecutionRunnerResult,
-} from "@murphai/hosted-execution";
+  type HostedAssistantDeliveryEffect,
+} from "@murphai/hosted-execution/side-effects";
 import {
   parseHostedExecutionBundleRef,
   sameHostedBundlePayloadRef,

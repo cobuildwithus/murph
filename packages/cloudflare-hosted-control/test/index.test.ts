@@ -8,10 +8,13 @@ import {
   parseCloudflareHostedUserEnvUpdate,
 } from "../src/parsers.ts";
 import {
+  buildCloudflareHostedControlPendingUsageUsersPath,
+  buildCloudflareHostedControlSharePackPath,
   buildCloudflareHostedControlUserCryptoContextPath,
   buildCloudflareHostedControlUserDispatchPayloadPath,
   buildCloudflareHostedControlUserEventStatusPath,
   buildCloudflareHostedControlUserEnvPath,
+  buildCloudflareHostedControlUserPendingUsagePath,
   buildCloudflareHostedControlUserRunPath,
   buildCloudflareHostedControlUserStatusPath,
   buildCloudflareHostedControlUserStoredDispatchPath,
@@ -29,10 +32,13 @@ describe("src/index", () => {
       buildCloudflareHostedControlUserRunPath,
     );
     expect(Object.keys(cloudflareHostedControl).sort()).toEqual([
+      "buildCloudflareHostedControlPendingUsageUsersPath",
+      "buildCloudflareHostedControlSharePackPath",
       "buildCloudflareHostedControlUserCryptoContextPath",
       "buildCloudflareHostedControlUserDispatchPayloadPath",
       "buildCloudflareHostedControlUserEnvPath",
       "buildCloudflareHostedControlUserEventStatusPath",
+      "buildCloudflareHostedControlUserPendingUsagePath",
       "buildCloudflareHostedControlUserRunPath",
       "buildCloudflareHostedControlUserStatusPath",
       "buildCloudflareHostedControlUserStoredDispatchPath",
@@ -50,8 +56,17 @@ describe("src/index", () => {
     expect(cloudflareHostedControl.buildCloudflareHostedControlUserEnvPath).toBe(
       buildCloudflareHostedControlUserEnvPath,
     );
+    expect(cloudflareHostedControl.buildCloudflareHostedControlUserPendingUsagePath).toBe(
+      buildCloudflareHostedControlUserPendingUsagePath,
+    );
     expect(cloudflareHostedControl.buildCloudflareHostedControlUserEventStatusPath).toBe(
       buildCloudflareHostedControlUserEventStatusPath,
+    );
+    expect(cloudflareHostedControl.buildCloudflareHostedControlPendingUsageUsersPath).toBe(
+      buildCloudflareHostedControlPendingUsageUsersPath,
+    );
+    expect(cloudflareHostedControl.buildCloudflareHostedControlSharePackPath).toBe(
+      buildCloudflareHostedControlSharePackPath,
     );
     expect(cloudflareHostedControl.buildCloudflareHostedControlUserStatusPath).toBe(
       buildCloudflareHostedControlUserStatusPath,

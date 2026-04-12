@@ -1,11 +1,13 @@
-import type { CloudflareHostedUserEnvStatus } from "@murphai/cloudflare-hosted-control";
+import type { CloudflareHostedUserEnvStatus } from "@murphai/cloudflare-hosted-control/contracts";
 import type {
   HostedExecutionDispatchRequest,
   HostedExecutionDispatchResult,
   HostedExecutionEventDispatchStatus,
-  HostedExecutionOutboxPayload,
   HostedExecutionUserStatus,
-} from "@murphai/hosted-execution";
+} from "@murphai/hosted-execution/contracts";
+import type {
+  HostedExecutionOutboxPayload,
+} from "@murphai/hosted-execution/outbox-payload";
 import type {
   HostedExecutionDeviceSyncRuntimeApplyRequest,
   HostedExecutionDeviceSyncRuntimeApplyResponse,

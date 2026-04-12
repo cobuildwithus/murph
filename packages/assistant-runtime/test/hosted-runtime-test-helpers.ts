@@ -7,7 +7,7 @@ import type {
 } from "@murphai/runtime-state/node";
 import type {
   HostedAssistantDeliveryRecord,
-} from "@murphai/hosted-execution";
+} from "@murphai/hosted-execution/side-effects";
 
 import type {
   HostedRuntimeEffectsPort,
@@ -110,15 +110,15 @@ export function createHostedRuntimeEffectsPortStub(
 ): HostedRuntimeEffectsPort {
   return {
     async commit() {},
-    async deletePreparedSideEffect() {},
+    async deletePreparedAssistantDelivery() {},
     async readRawEmailMessage() {
       return null;
     },
-    async readSideEffect(): Promise<HostedAssistantDeliveryRecord | null> {
+    async readAssistantDeliveryRecord(): Promise<HostedAssistantDeliveryRecord | null> {
       return null;
     },
     async sendEmail() {},
-    async writeSideEffect(
+    async writeAssistantDeliveryRecord(
       record: HostedAssistantDeliveryRecord,
     ): Promise<HostedAssistantDeliveryRecord> {
       return record;

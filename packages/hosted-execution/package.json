@@ -30,6 +30,14 @@
       "types": "./dist/contracts.d.ts",
       "default": "./dist/contracts.js"
     },
+    "./bundles": {
+      "types": "./dist/bundles.d.ts",
+      "default": "./dist/bundles.js"
+    },
+    "./dispatch-ref": {
+      "types": "./dist/dispatch-ref.d.ts",
+      "default": "./dist/dispatch-ref.js"
+    },
     "./env": {
       "types": "./dist/env.d.ts",
       "default": "./dist/env.js"
@@ -38,6 +46,10 @@
       "types": "./dist/hosted-email.d.ts",
       "default": "./dist/hosted-email.js"
     },
+    "./outbox-payload": {
+      "types": "./dist/outbox-payload.d.ts",
+      "default": "./dist/outbox-payload.js"
+    },
     "./parsers": {
       "types": "./dist/parsers.d.ts",
       "default": "./dist/parsers.js"
@@ -45,6 +57,10 @@
     "./routes": {
       "types": "./dist/routes.d.ts",
       "default": "./dist/routes.js"
+    },
+    "./side-effects": {
+      "types": "./dist/side-effects.d.ts",
+      "default": "./dist/side-effects.js"
     }
   },
   "files": [
