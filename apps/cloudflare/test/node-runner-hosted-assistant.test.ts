@@ -40,7 +40,7 @@ describe("hosted assistant runner env policy", () => {
     });
   });
 
-  it("forwards a custom hosted assistant api key alias when explicitly referenced", () => {
+  it("does not forward a custom hosted assistant api key alias when explicitly referenced", () => {
     const env = buildHostedRunnerContainerEnv({
       HOSTED_ASSISTANT_API_KEY_ENV: "OPENAI_ENTERPRISE_API_KEY",
       HOSTED_ASSISTANT_MODEL: "gpt-4.1-mini",
@@ -52,8 +52,8 @@ describe("hosted assistant runner env policy", () => {
       HOSTED_ASSISTANT_API_KEY_ENV: "OPENAI_ENTERPRISE_API_KEY",
       HOSTED_ASSISTANT_MODEL: "gpt-4.1-mini",
       HOSTED_ASSISTANT_PROVIDER: "openai",
-      OPENAI_ENTERPRISE_API_KEY: "secret-value",
     });
+    expect(env.OPENAI_ENTERPRISE_API_KEY).toBeUndefined();
   });
 
   it("forwards Vercel AI Gateway bootstrap vars and gateway key aliases", () => {

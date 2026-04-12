@@ -1,6 +1,6 @@
 import {
+  HOSTED_ASSISTANT_ALLOWED_API_KEY_ENV_NAMES,
   HOSTED_ASSISTANT_CONFIG_ENV_NAMES,
-  readHostedAssistantApiKeyEnvName,
 } from "@murphai/assistant-runtime/hosted-assistant-env";
 import {
   readHostedEmailCapabilities,
@@ -86,33 +86,9 @@ export const HOSTED_EXECUTION_RUNNER_ENV_PROFILES_ENV =
 
 const RUNNER_ENV_PROFILE_KEYS = {
   assistant: [
-    "ANTHROPIC_API_KEY",
-    "CEREBRAS_API_KEY",
-    "DEEPSEEK_API_KEY",
-    "FIREWORKS_API_KEY",
-    "GOOGLE_API_KEY",
-    "GOOGLE_GENERATIVE_AI_API_KEY",
-    "GROQ_API_KEY",
-    "HF_TOKEN",
+    ...HOSTED_ASSISTANT_ALLOWED_API_KEY_ENV_NAMES,
     "HOSTED_ASSISTANT_ZERO_DATA_RETENTION",
-    "HUGGINGFACEHUB_API_TOKEN",
-    "HUGGINGFACE_API_KEY",
-    "HUGGING_FACE_HUB_TOKEN",
-    "LITELLM_PROXY_API_KEY",
-    "LM_STUDIO_API_KEY",
-    "MISTRAL_API_KEY",
     "NODE_ENV",
-    "NVIDIA_API_KEY",
-    "NGC_API_KEY",
-    "OLLAMA_API_KEY",
-    "OPENAI_API_KEY",
-    "OPENROUTER_API_KEY",
-    "PERPLEXITY_API_KEY",
-    "TOGETHER_API_KEY",
-    "VERCEL_AI_API_KEY",
-    "VENICE_API_KEY",
-    "VLLM_API_KEY",
-    "XAI_API_KEY",
     ...HOSTED_ASSISTANT_CONFIG_ENV_NAMES,
   ],
   "device-sync": [
@@ -208,21 +184,6 @@ export function buildHostedRunnerContainerEnv(
     values[key] = value;
   }
 
-  const hostedAssistantApiKeyEnv = readHostedAssistantApiKeyEnvName(source);
-  const hostedAssistantApiKeyValue = hostedAssistantApiKeyEnv
-    ? source[hostedAssistantApiKeyEnv]
-    : undefined;
-
-  if (
-    enabledProfileNames.has("assistant")
-    && hostedAssistantApiKeyEnv
-    && isAllowedHostedAssistantReferencedRunnerEnvKey(hostedAssistantApiKeyEnv)
-    && typeof hostedAssistantApiKeyValue === "string"
-    && hostedAssistantApiKeyValue.length > 0
-  ) {
-    values[hostedAssistantApiKeyEnv] = hostedAssistantApiKeyValue;
-  }
-
   if (!values.NODE_ENV) {
     values.NODE_ENV = "production";
   }
@@ -250,11 +211,6 @@ export function filterHostedRunnerUserEnv(
       && isHostedUserEnvKeyAllowed(key, source)
     ),
   );
-}
-
-export function isAllowedHostedAssistantReferencedRunnerEnvKey(key: string): boolean {
-  return !DISALLOWED_USER_ENV_KEYS.has(key)
-    && !DISALLOWED_USER_ENV_PREFIXES.some((prefix) => key.startsWith(prefix));
 }
 
 function resolveHostedRunnerEnvProfileNames(

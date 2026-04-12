@@ -400,7 +400,7 @@ describe('executeAssistantCliCommand', () => {
         json: {
           ambientOpenAi: 'ambient-openai-key',
           apiEnv: 'OPENAI_ENTERPRISE_API_KEY',
-          customApi: 'cli-enterprise-key',
+          customApi: '',
           fetchEnabled: '1',
           nodeOptions: '',
           turnId: 'turn-123',

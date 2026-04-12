@@ -1,7 +1,9 @@
-import { readHostedAssistantApiKeyEnvName } from "@murphai/assistant-runtime/hosted-assistant-env";
+import {
+  isHostedAssistantApiKeyEnvName,
+  readHostedAssistantApiKeyEnvName,
+} from "@murphai/assistant-runtime/hosted-assistant-env";
 import {
   HOSTED_EXECUTION_RUNNER_ENV_PROFILES_ENV,
-  isAllowedHostedAssistantReferencedRunnerEnvKey,
 } from "../../src/hosted-env-policy.ts";
 
 import {
@@ -279,7 +281,7 @@ function resolveHostedWorkerVar(
   if (
     key === "HOSTED_ASSISTANT_API_KEY_ENV"
     && value
-    && !isAllowedHostedAssistantReferencedRunnerEnvKey(value)
+    && !isHostedAssistantApiKeyEnvName(value)
   ) {
     return null;
   }

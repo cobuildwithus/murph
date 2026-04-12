@@ -21,9 +21,10 @@ import {
 import {
   resolveOpenAICompatibleProviderPresetFromId,
   resolveOpenAICompatibleProviderPresetFromProviderName,
+  type SetupAssistantProviderPreset,
 } from './assistant/openai-compatible-provider-presets.js'
+import { resolveAssistantRuntimeTarget } from './assistant/target-runtime.js'
 import type { AssistantProviderConfigInput } from './assistant/provider-config.js'
-import { isAssistantVercelAIGatewayBaseUrl } from './assistant/shared.js'
 import {
   readOperatorConfig,
   saveHostedAssistantConfig,
@@ -57,6 +58,38 @@ export const HOSTED_ASSISTANT_CONFIG_ENV_NAMES = [
   HOSTED_ASSISTANT_OSS_ENV,
   HOSTED_ASSISTANT_ZERO_DATA_RETENTION_ENV,
 ] as const
+
+export const HOSTED_ASSISTANT_ALLOWED_API_KEY_ENV_NAMES = [
+  'ANTHROPIC_API_KEY',
+  'CEREBRAS_API_KEY',
+  'DEEPSEEK_API_KEY',
+  'FIREWORKS_API_KEY',
+  'GOOGLE_API_KEY',
+  'GOOGLE_GENERATIVE_AI_API_KEY',
+  'GROQ_API_KEY',
+  'HF_TOKEN',
+  'HUGGINGFACEHUB_API_TOKEN',
+  'HUGGINGFACE_API_KEY',
+  'HUGGING_FACE_HUB_TOKEN',
+  'LITELLM_PROXY_API_KEY',
+  'LM_STUDIO_API_KEY',
+  'MISTRAL_API_KEY',
+  'NVIDIA_API_KEY',
+  'NGC_API_KEY',
+  'OLLAMA_API_KEY',
+  'OPENAI_API_KEY',
+  'OPENROUTER_API_KEY',
+  'PERPLEXITY_API_KEY',
+  'TOGETHER_API_KEY',
+  'VERCEL_AI_API_KEY',
+  'VENICE_API_KEY',
+  'VLLM_API_KEY',
+  'XAI_API_KEY',
+] as const
+
+const hostedAssistantAllowedApiKeyEnvNameSet = new Set<string>(
+  HOSTED_ASSISTANT_ALLOWED_API_KEY_ENV_NAMES,
+)
 
 const HOSTED_ASSISTANT_PLATFORM_PROFILE_ID = 'platform-default'
 
@@ -339,6 +372,13 @@ export function readHostedAssistantApiKeyEnvName(
   return normalizeHostedAssistantString(source[HOSTED_ASSISTANT_API_KEY_ENV])
 }
 
+export function isHostedAssistantApiKeyEnvName(
+  value: string | null | undefined,
+): boolean {
+  const normalized = normalizeHostedAssistantString(value)
+  return normalized !== null && hostedAssistantAllowedApiKeyEnvNameSet.has(normalized)
+}
+
 function resolveHostedAssistantEnvProfile(
   env: Readonly<Record<string, string | undefined>> | undefined,
   existingActiveProfile: HostedAssistantProfile | null,
@@ -429,17 +469,27 @@ function resolveHostedAssistantSeedPlan(
     )
   }
 
-  const usesVercelAIGateway = isAssistantVercelAIGatewayBaseUrl(baseUrl)
+  const runtimeTarget = resolveAssistantRuntimeTarget({
+    provider: 'openai-compatible',
+    apiKeyEnv: raw.apiKeyEnv ?? providerSelection.presetApiKeyEnv,
+    baseUrl,
+    model: raw.model,
+    presetId: providerSelection.presetId,
+    providerName: raw.providerName ?? providerSelection.presetProviderName,
+    reasoningEffort: raw.reasoningEffort,
+    zeroDataRetention: raw.zeroDataRetention === true,
+  })
 
-  if (raw.zeroDataRetention !== null && !usesVercelAIGateway) {
+  if (raw.zeroDataRetention !== null && !runtimeTarget.supportsZeroDataRetention) {
     throw new HostedAssistantConfigurationError(
       'HOSTED_ASSISTANT_CONFIG_INVALID',
-      `${HOSTED_ASSISTANT_ZERO_DATA_RETENTION_ENV} can be used only with Vercel AI Gateway.`,
+      `${HOSTED_ASSISTANT_ZERO_DATA_RETENTION_ENV} can be used only with a hosted target that enforces zero data retention.`,
     )
   }
 
-  const zeroDataRetention =
-    usesVercelAIGateway ? (raw.zeroDataRetention ?? true) : raw.zeroDataRetention
+  const zeroDataRetention = runtimeTarget.supportsZeroDataRetention
+    ? (raw.zeroDataRetention ?? true)
+    : raw.zeroDataRetention
 
   return {
     providerConfig: {
@@ -447,6 +497,7 @@ function resolveHostedAssistantSeedPlan(
       apiKeyEnv: raw.apiKeyEnv ?? providerSelection.presetApiKeyEnv,
       baseUrl,
       model: raw.model,
+      presetId: providerSelection.presetId,
       providerName: raw.providerName ?? providerSelection.presetProviderName,
       reasoningEffort: raw.reasoningEffort,
       ...(zeroDataRetention === true ? { zeroDataRetention: true } : {}),
@@ -515,6 +566,7 @@ function resolveHostedAssistantProviderPreset(providerToken: string): {
   label: string
   presetApiKeyEnv: string | null
   presetBaseUrl: string | null
+  presetId: SetupAssistantProviderPreset
   presetProviderName: string | null
 } {
   if (providerToken === 'codex-cli') {
@@ -539,6 +591,7 @@ function resolveHostedAssistantProviderPreset(providerToken: string): {
     label: preset.id,
     presetApiKeyEnv: preset.apiKeyEnv,
     presetBaseUrl: preset.baseUrl,
+    presetId: preset.id,
     presetProviderName: preset.providerName,
   }
 }
