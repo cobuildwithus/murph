@@ -459,7 +459,6 @@ describe("handleRunnerOutboundRequest", () => {
         body: JSON.stringify({
           effectId: "outbox_999",
           fingerprint: "dedupe_123",
-          intentId: "outbox_123",
           kind: "assistant.delivery",
           recordedAt: "2026-03-26T12:00:05.000Z",
           state: "prepared",

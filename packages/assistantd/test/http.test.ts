@@ -11,6 +11,18 @@ import {
 } from '../src/http.js'
 import type { AssistantLocalService } from '../src/service.js'
 
+const TEST_PROVIDER_OPTIONS = {
+  continuityFingerprint: 'fingerprint-http-test',
+  executionDriver: 'codex-cli',
+  approvalPolicy: null,
+  model: null,
+  oss: false,
+  profile: null,
+  reasoningEffort: null,
+  resumeKind: 'codex-session',
+  sandbox: null,
+} as const
+
 const TEST_SESSION = {
   schema: 'murph.assistant-session.v1',
   sessionId: 'session_http_test',
@@ -26,14 +38,7 @@ const TEST_SESSION = {
   },
   resumeState: null,
   provider: 'codex-cli',
-  providerOptions: {
-    model: null,
-    reasoningEffort: null,
-    sandbox: null,
-    approvalPolicy: null,
-    profile: null,
-    oss: false,
-  },
+  providerOptions: { ...TEST_PROVIDER_OPTIONS },
   providerBinding: null,
   alias: 'chat:test',
   binding: {

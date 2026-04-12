@@ -16,7 +16,7 @@ import {
   resolveLinqWebhookOccurredAt,
   summarizeLinqMessageReceivedEvent,
   verifyAndParseLinqWebhookRequest,
-} from "../src/index.ts";
+} from "../src/linq-webhook.ts";
 
 test("verifyAndParseLinqWebhookRequest validates the Linq signature envelope", () => {
   const payload = JSON.stringify(buildV2026MessageReceivedWebhook({

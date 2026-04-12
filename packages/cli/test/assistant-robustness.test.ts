@@ -547,12 +547,15 @@ test('buildAssistantFailoverRoutes dedupes routes that only differ by null versu
   const routes = buildAssistantFailoverRoutes({
     provider: 'codex-cli',
     providerOptions: {
+      continuityFingerprint: 'fingerprint-robustness-codex',
       model: 'gpt-oss:20b',
       reasoningEffort: null,
       sandbox: null,
       approvalPolicy: null,
       profile: null,
       oss: false,
+      executionDriver: 'codex-cli',
+      resumeKind: 'codex-session',
     },
     backups: [
       {
@@ -596,6 +599,7 @@ test('buildAssistantFailoverRoutes dedupes identical routes even when their name
   const routes = buildAssistantFailoverRoutes({
     provider: 'openai-compatible',
     providerOptions: {
+      continuityFingerprint: 'fingerprint-robustness-openai',
       model: 'gpt-oss:20b',
       reasoningEffort: null,
       sandbox: null,
@@ -603,6 +607,8 @@ test('buildAssistantFailoverRoutes dedupes identical routes even when their name
       profile: null,
       oss: false,
       baseUrl: 'http://127.0.0.1:11434/v1',
+      executionDriver: 'openai-compatible',
+      resumeKind: null,
     },
     backups: [
       {
@@ -784,6 +790,7 @@ test('sendAssistantMessage fails over across provider routes and records cooldow
     const cooldownRoutes = buildAssistantFailoverRoutes({
       provider: 'codex-cli',
       providerOptions: {
+        continuityFingerprint: 'fingerprint-robustness-cooldown-route',
         model: 'gpt-oss:20b',
         reasoningEffort: null,
         sandbox: null,
@@ -792,7 +799,9 @@ test('sendAssistantMessage fails over across provider routes and records cooldow
         oss: false,
         baseUrl: null,
         apiKeyEnv: null,
+        executionDriver: 'codex-cli',
         providerName: null,
+        resumeKind: 'codex-session',
       },
       backups: [
         {
@@ -1109,6 +1118,7 @@ test('recordAssistantFailoverRouteFailure honors longer route cooldowns over the
   const routes = buildAssistantFailoverRoutes({
     provider: 'codex-cli',
     providerOptions: {
+      continuityFingerprint: 'fingerprint-robustness-cooldown',
       model: 'gpt-oss:20b',
       reasoningEffort: null,
       sandbox: null,
@@ -1117,7 +1127,9 @@ test('recordAssistantFailoverRouteFailure honors longer route cooldowns over the
       oss: false,
       baseUrl: null,
       apiKeyEnv: null,
+      executionDriver: 'codex-cli',
       providerName: null,
+      resumeKind: 'codex-session',
     },
     backups: [
       {

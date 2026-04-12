@@ -3727,12 +3727,8 @@ test('sendAssistantMessage cold-starts when an OpenAI Responses binding is missi
     ...resolved.session,
     provider: 'openai-compatible',
     providerOptions: {
+      ...resolved.session.providerOptions,
       model: 'gpt-5',
-      reasoningEffort: null,
-      sandbox: null,
-      approvalPolicy: null,
-      profile: null,
-      oss: false,
       baseUrl: 'https://api.openai.com/v1',
       apiKeyEnv: 'OPENAI_API_KEY',
       providerName: 'openai',
@@ -3741,12 +3737,8 @@ test('sendAssistantMessage cold-starts when an OpenAI Responses binding is missi
       provider: 'openai-compatible',
       providerSessionId: 'resp_legacy',
       providerOptions: {
+        ...resolved.session.providerOptions,
         model: 'gpt-5',
-        reasoningEffort: null,
-        sandbox: null,
-        approvalPolicy: null,
-        profile: null,
-        oss: false,
         baseUrl: 'https://api.openai.com/v1',
         apiKeyEnv: 'OPENAI_API_KEY',
         providerName: 'openai',
@@ -3805,12 +3797,8 @@ test('sendAssistantMessage does not reuse an OpenAI Responses session when route
     ...resolved.session,
     provider: 'openai-compatible',
     providerOptions: {
+      ...resolved.session.providerOptions,
       model: 'gpt-5',
-      reasoningEffort: null,
-      sandbox: null,
-      approvalPolicy: null,
-      profile: null,
-      oss: false,
       baseUrl: 'https://api.openai.com/v1',
       apiKeyEnv: 'OPENAI_API_KEY',
     },
@@ -3818,12 +3806,8 @@ test('sendAssistantMessage does not reuse an OpenAI Responses session when route
       provider: 'openai-compatible',
       providerSessionId: 'resp_old_route',
       providerOptions: {
+        ...resolved.session.providerOptions,
         model: 'gpt-5',
-        reasoningEffort: null,
-        sandbox: null,
-        approvalPolicy: null,
-        profile: null,
-        oss: false,
         baseUrl: 'https://api.openai.com/v1',
         apiKeyEnv: 'OPENAI_API_KEY',
       },
@@ -3874,6 +3858,7 @@ test('sendAssistantMessage does not reuse an OpenAI Responses session on a coole
   await mkdir(vaultRoot, { recursive: true })
 
   const providerOptions = {
+    continuityFingerprint: 'fingerprint-cli-service-openai',
     model: 'gpt-5',
     reasoningEffort: null,
     sandbox: null,
@@ -3882,7 +3867,9 @@ test('sendAssistantMessage does not reuse an OpenAI Responses session on a coole
     oss: false,
     baseUrl: 'https://api.openai.com/v1',
     apiKeyEnv: 'OPENAI_API_KEY',
+    executionDriver: 'openai-compatible',
     providerName: 'openai',
+    resumeKind: null,
   } as const
   const failoverRoutes = [
     {

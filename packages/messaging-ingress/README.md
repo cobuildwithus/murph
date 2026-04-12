@@ -7,6 +7,8 @@ message extraction, summary helpers, and sparse allowlisted payload minimization
 It does not own polling drivers, local runtime state, hosted member lookup,
 privacy redaction, or execution dispatch orchestration.
 
+Use `@murphai/messaging-ingress/linq-webhook` for Linq webhook verification,
+summary helpers, and sparse payload minimization.
 Use `@murphai/messaging-ingress/telegram-webhook` for Telegram thread targeting,
 summaries, and shared types. Use `@murphai/messaging-ingress/telegram-webhook-payload`
 for raw Telegram webhook parsing and sparse payload minimization.

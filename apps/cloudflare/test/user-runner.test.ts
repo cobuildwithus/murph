@@ -836,11 +836,7 @@ describe("HostedUserRunner", () => {
         occurredAt: "2026-03-29T10:05:00.000Z",
         outputTokens: 4,
         provider: "codex-cli",
-        providerMetadataJson: null,
         providerName: null,
-        providerRequestId: null,
-        providerSessionId: "sess_usage_flush",
-        rawUsageJson: null,
         reasoningTokens: null,
         requestedModel: "gpt-5.4",
         routeId: "primary",
@@ -1938,6 +1934,11 @@ describe("HostedUserRunner", () => {
         kind: "assistant.delivery" as const,
       },
     ];
+    const expectedResumeSideEffects = sideEffects.map(({ effectId, fingerprint, kind }) => ({
+      effectId,
+      fingerprint,
+      kind,
+    }));
     const committedPayload = createRunnerSuccessPayload({
       agentState: Buffer.from("agent-state-committed").toString("base64"),
       sideEffects,
@@ -1963,9 +1964,9 @@ describe("HostedUserRunner", () => {
         const requestBody = JSON.parse(String(init?.body));
         expect(readRunnerJobRequest(requestBody).resume).toEqual({
           committedResult: {
-            assistantDeliveryEffects: sideEffects,
+            assistantDeliveryEffects: expectedResumeSideEffects,
             result: committedPayload.result,
-            sideEffects,
+            sideEffects: expectedResumeSideEffects,
           },
         });
         await finalizeResultForRunnerRequest({
@@ -1999,7 +2000,7 @@ describe("HostedUserRunner", () => {
     });
     expect(countRunnerContainerCalls(storage.runnerContainerFetch, "/internal/destroy")).toBe(0);
 
-    vi.setSystemTime(new Date("2026-03-26T12:00:11.000Z"));
+    vi.setSystemTime(new Date("2026-03-26T12:00:10.000Z"));
     await runner.alarm();
 
     const finalStatus = await runner.status();

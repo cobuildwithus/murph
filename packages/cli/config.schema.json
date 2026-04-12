@@ -680,7 +680,7 @@
                           "maxLength": 128
                         },
                         "session": {
-                          "description": "Optional assistant session id to scope the recent turn receipts.",
+                          "description": "Optional assistant session id to scope the runtime snapshot to one session and inspect the provider/model used there.",
                           "type": "string",
                           "minLength": 1
                         },
@@ -1020,7 +1020,7 @@
                   "maxLength": 128
                 },
                 "session": {
-                  "description": "Optional assistant session id to scope the recent turn receipts.",
+                  "description": "Optional assistant session id to scope the runtime snapshot to one session and inspect the provider/model used there.",
                   "type": "string",
                   "minLength": 1
                 },
@@ -1983,7 +1983,7 @@
               "additionalProperties": false,
               "properties": {
                 "show": {
-                  "description": "Show the saved default assistant backend without changing it. When set, no update options are allowed.",
+                  "description": "Show the saved default assistant backend configuration without changing it. This inspects persisted defaults, not live session state. When set, no update options are allowed.",
                   "type": "boolean"
                 },
                 "preset": {
@@ -1995,7 +1995,7 @@
                   ]
                 },
                 "providerPreset": {
-                  "description": "Optional named OpenAI-compatible provider preset. Only applies with `--preset openai-compatible`. Seeds endpoint defaults for prompts or non-interactive saves.",
+                  "description": "Optional named OpenAI-compatible provider preset. Only applies with `--preset openai-compatible`. Named presets carry provider-specific runtime behavior in addition to endpoint defaults.",
                   "type": "string",
                   "enum": [
                     "openai",

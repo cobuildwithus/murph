@@ -53,6 +53,7 @@ export function useAssistantModelCatalogState(input: {
     headers: input.session.providerOptions.headers ?? null,
     apiKeyEnv: input.session.providerOptions.apiKeyEnv,
     oss: input.session.providerOptions.oss,
+    presetId: input.session.providerOptions.presetId,
     providerName: input.session.providerOptions.providerName,
   })
 

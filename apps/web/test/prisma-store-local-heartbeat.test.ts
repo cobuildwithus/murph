@@ -329,7 +329,7 @@ describe("PrismaDeviceSyncControlPlaneStore local heartbeat updates", () => {
 
   it("fails closed when hosted runtime reports a stale heartbeat write conflict", async () => {
     const { runtimeConnection, store } = createHeartbeatStore({
-      lastWebhookAt: "2026-03-25T01:00:00.000Z",
+      lastSyncStartedAt: "2026-03-25T01:00:00.000Z",
     });
 
     controlClientMocks.applyDeviceSyncRuntimeUpdates.mockResolvedValueOnce({
@@ -347,7 +347,7 @@ describe("PrismaDeviceSyncControlPlaneStore local heartbeat updates", () => {
     });
 
     await expect(store.updateConnectionFromLocalHeartbeat("user-123", "dsc_123", {
-      lastWebhookAt: "2026-03-25T01:30:00.000Z",
+      lastSyncStartedAt: "2026-03-25T01:30:00.000Z",
     })).rejects.toMatchObject({
       code: "RUNTIME_STATE_CONFLICT",
       httpStatus: 409,

@@ -7,7 +7,7 @@ import {
 
 import {
   summarizeTelegramUpdate,
-} from "../src/index.ts";
+} from "../src/telegram-webhook.ts";
 import {
   minimizeTelegramUpdate,
   parseTelegramWebhookUpdate,

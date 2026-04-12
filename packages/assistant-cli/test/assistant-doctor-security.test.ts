@@ -50,6 +50,7 @@ const BASE_SESSION: AssistantSession = {
   resumeState: null,
   provider: 'openai-compatible',
   providerOptions: {
+    continuityFingerprint: 'fingerprint-doctor-security',
     model: null,
     reasoningEffort: null,
     sandbox: null,
@@ -58,7 +59,9 @@ const BASE_SESSION: AssistantSession = {
     oss: false,
     baseUrl: 'http://127.0.0.1:11434/v1',
     apiKeyEnv: 'OPENAI_API_KEY',
+    executionDriver: 'openai-compatible',
     providerName: 'ollama',
+    resumeKind: null,
     headers: {
       Authorization: 'Bearer secret-token-12345678',
       'X-Workspace': 'murph',

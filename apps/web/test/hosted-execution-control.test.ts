@@ -7,7 +7,7 @@ const mocks = vi.hoisted(() => ({
   tokenProvider: vi.fn(),
 }));
 
-vi.mock("@murphai/cloudflare-hosted-control", () => ({
+vi.mock("@murphai/cloudflare-hosted-control/client", () => ({
   createCloudflareHostedControlClient: mocks.createCloudflareHostedControlClient,
 }));
 

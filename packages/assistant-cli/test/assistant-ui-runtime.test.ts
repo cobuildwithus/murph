@@ -112,6 +112,7 @@ const TEST_SESSION: AssistantSession = {
   resumeState: null,
   provider: 'openai-compatible',
   providerOptions: {
+    continuityFingerprint: 'fingerprint-ui-runtime',
     model: null,
     reasoningEffort: null,
     sandbox: null,
@@ -120,7 +121,9 @@ const TEST_SESSION: AssistantSession = {
     oss: false,
     baseUrl: 'http://127.0.0.1:11434/v1',
     apiKeyEnv: 'OPENAI_API_KEY',
+    executionDriver: 'openai-compatible',
     providerName: 'local',
+    resumeKind: null,
     headers: null,
   },
   providerBinding: null,

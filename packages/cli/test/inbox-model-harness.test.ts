@@ -164,6 +164,7 @@ function createStubAssistantResult(vault: string): AssistantAskResult {
       resumeState: null,
       provider: 'codex-cli',
       providerOptions: {
+        continuityFingerprint: 'fingerprint-inbox-model-harness',
         model: 'gpt-5.4',
         reasoningEffort: null,
         sandbox: null,
@@ -172,7 +173,9 @@ function createStubAssistantResult(vault: string): AssistantAskResult {
         oss: false,
         baseUrl: undefined,
         apiKeyEnv: undefined,
+        executionDriver: 'codex-cli',
         providerName: undefined,
+        resumeKind: 'codex-session',
       },
       providerBinding: null,
       alias: null,

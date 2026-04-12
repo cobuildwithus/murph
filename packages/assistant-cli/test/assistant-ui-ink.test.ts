@@ -124,6 +124,7 @@ const TEST_SESSION: AssistantSession = {
   resumeState: null,
   provider: 'openai-compatible',
   providerOptions: {
+    continuityFingerprint: 'fingerprint-ui-ink',
     model: 'gpt-5.4',
     reasoningEffort: 'medium',
     sandbox: null,
@@ -132,7 +133,9 @@ const TEST_SESSION: AssistantSession = {
     oss: false,
     baseUrl: 'http://127.0.0.1:11434/v1',
     apiKeyEnv: 'OPENAI_API_KEY',
+    executionDriver: 'openai-compatible',
     providerName: 'local',
+    resumeKind: null,
     headers: null,
   },
   providerBinding: null,
@@ -458,111 +461,130 @@ test(
   10_000,
 )
 
-test('runAssistantChatWithInk uses codex home config paths on non-macOS and renders the model switcher when active', async () => {
-  const originalStdinDescriptor = Object.getOwnPropertyDescriptor(process, 'stdin')
-  const originalPlatformDescriptor = Object.getOwnPropertyDescriptor(process, 'platform')
-  const stdin = createInkTestInput()
-  const codexSession = {
-    ...TEST_SESSION,
-    provider: 'codex-cli' as const,
-    providerOptions: {
-      model: null,
-      reasoningEffort: null,
-      sandbox: null,
-      approvalPolicy: null,
-      profile: null,
-      oss: false,
-      codexHome: '/tmp/codex-home',
-    },
-  }
+test(
+  'runAssistantChatWithInk uses codex home config paths on non-macOS and renders the model switcher when active',
+  async () => {
+    const originalStdinDescriptor = Object.getOwnPropertyDescriptor(process, 'stdin')
+    const originalPlatformDescriptor = Object.getOwnPropertyDescriptor(process, 'platform')
+    const stdin = createInkTestInput()
+    const codexSession: AssistantSession = {
+      ...TEST_SESSION,
+      target: {
+        adapter: 'codex-cli',
+        approvalPolicy: null,
+        codexCommand: null,
+        codexHome: '/tmp/codex-home',
+        model: null,
+        oss: false,
+        profile: null,
+        reasoningEffort: null,
+        sandbox: null,
+      },
+      provider: 'codex-cli' as const,
+      providerOptions: {
+        continuityFingerprint: 'fingerprint-ui-ink-codex',
+        model: null,
+        reasoningEffort: null,
+        sandbox: null,
+        approvalPolicy: null,
+        profile: null,
+        oss: false,
+        codexHome: '/tmp/codex-home',
+        executionDriver: 'codex-cli',
+        resumeKind: 'codex-session',
+      },
+    }
 
-  inkUiMocks.openAssistantConversation.mockResolvedValueOnce({
-    session: codexSession,
-  })
-  inkUiMocks.resolveAssistantProviderDefaults.mockReturnValueOnce({
-    codexHome: '/tmp/fallback-home',
-    model: 'fallback-model',
-    profile: 'fallback-profile',
-  })
-  inkUiMocks.useAssistantChatController.mockReturnValueOnce({
-    activeModel: 'gpt-5.4',
-    activeReasoningEffort: 'medium',
-    bindingSummary: null,
-    busy: false,
-    cancelModelSwitcher: () => {},
-    composerValue: '',
-    confirmModelSwitcher: () => {},
-    editLastQueuedPrompt: () => {},
-    entries: [],
-    lastQueuedPrompt: null,
-    latestSessionRef: {
-      current: codexSession,
-    },
-    latestTurnsRef: {
-      current: 0,
-    },
-    metadataBadges: [],
-    modelSwitcherState: {
-      mode: 'model',
-      modelIndex: 0,
-      modelOptions: [
-        {
-          description: 'Fast default',
-          label: 'GPT-5.4',
-          value: 'gpt-5.4',
-        },
-      ],
-      models: [],
-      reasoningIndex: 0,
-      reasoningOptions: [],
-    },
-    moveModelSwitcherSelection: () => {},
-    queuedPromptCount: 0,
-    session: codexSession,
-    setComposerValue: () => undefined,
-    status: null,
-    submitPrompt: () => 'keep',
-  })
-
-  Object.defineProperty(process, 'stdin', {
-    configurable: true,
-    value: stdin,
-  })
-  Object.defineProperty(process, 'platform', {
-    configurable: true,
-    value: 'linux',
-  })
-
-  try {
-    const resultPromise = runAssistantChatWithInk({
-      initialPrompt: null,
-      model: 'cli-model',
-      profile: 'cli-profile',
-      vault: '/tmp/vault',
-    } as never)
-
-    await flushAsyncWork(8)
-
-    const instance = inkUiMocks.render.mock.results.at(-1)?.value
-    assert.ok(instance)
-    instance.unmount()
-
-    await resultPromise
-    assert.deepEqual(inkUiMocks.resolveCodexDisplayOptions.mock.calls.at(-1)?.[0], {
-      configPath: '/tmp/codex-home/config.toml',
-      model: 'cli-model',
-      profile: 'cli-profile',
+    inkUiMocks.openAssistantConversation.mockResolvedValueOnce({
+      session: codexSession,
     })
-  } finally {
-    if (originalPlatformDescriptor) {
-      Object.defineProperty(process, 'platform', originalPlatformDescriptor)
+    inkUiMocks.resolveAssistantProviderDefaults.mockReturnValueOnce({
+      codexHome: '/tmp/fallback-home',
+      model: 'fallback-model',
+      profile: 'fallback-profile',
+    })
+    inkUiMocks.useAssistantChatController.mockReturnValueOnce({
+      activeModel: 'gpt-5.4',
+      activeReasoningEffort: 'medium',
+      bindingSummary: null,
+      busy: false,
+      cancelModelSwitcher: () => {},
+      composerValue: '',
+      confirmModelSwitcher: () => {},
+      editLastQueuedPrompt: () => {},
+      entries: [],
+      lastQueuedPrompt: null,
+      latestSessionRef: {
+        current: codexSession,
+      },
+      latestTurnsRef: {
+        current: 0,
+      },
+      metadataBadges: [],
+      modelSwitcherState: {
+        mode: 'model',
+        modelIndex: 0,
+        modelOptions: [
+          {
+            description: 'Fast default',
+            label: 'GPT-5.4',
+            value: 'gpt-5.4',
+          },
+        ],
+        models: [],
+        reasoningIndex: 0,
+        reasoningOptions: [],
+      },
+      moveModelSwitcherSelection: () => {},
+      queuedPromptCount: 0,
+      session: codexSession,
+      setComposerValue: () => undefined,
+      status: null,
+      submitPrompt: () => 'keep',
+    })
+
+    Object.defineProperty(process, 'stdin', {
+      configurable: true,
+      value: stdin,
+    })
+    Object.defineProperty(process, 'platform', {
+      configurable: true,
+      value: 'linux',
+    })
+
+    try {
+      const resultPromise = runAssistantChatWithInk({
+        initialPrompt: null,
+        model: 'cli-model',
+        profile: 'cli-profile',
+        vault: '/tmp/vault',
+      } as never)
+
+      await flushAsyncWork(8)
+
+      const instance = inkUiMocks.render.mock.results.at(-1)?.value
+      assert.ok(instance)
+      instance.unmount()
+
+      await flushAsyncWork(4)
+      await resultPromise
+      assert.deepEqual(inkUiMocks.resolveCodexDisplayOptions.mock.calls.at(-1)?.[0], {
+        configPath: '/tmp/codex-home/config.toml',
+        model: 'cli-model',
+        profile: 'cli-profile',
+      })
+    } finally {
+      if (originalPlatformDescriptor) {
+        Object.defineProperty(process, 'platform', originalPlatformDescriptor)
+      }
+      if (originalStdinDescriptor) {
+        Object.defineProperty(process, 'stdin', originalStdinDescriptor)
+      }
+      stdin.destroy()
     }
-    if (originalStdinDescriptor) {
-      Object.defineProperty(process, 'stdin', originalStdinDescriptor)
-    }
-    stdin.destroy()
-  }
-})
+  },
+  10_000,
+)
 
 test('runAssistantChatWithInk rejects when Ink render initialization throws', async () => {
   const originalStdinDescriptor = Object.getOwnPropertyDescriptor(process, 'stdin')

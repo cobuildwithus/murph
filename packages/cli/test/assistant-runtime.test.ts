@@ -378,19 +378,25 @@ function createMockCodexRuntimeSession(input: {
     } | null
     providerOptions: {
       approvalPolicy: 'never' | 'on-request' | 'on-failure' | 'untrusted' | null
+      continuityFingerprint?: string
+      executionDriver?: 'codex-cli'
       model: string | null
       oss: boolean
       profile: string | null
       reasoningEffort: 'low' | 'medium' | 'high' | 'xhigh' | null
+      resumeKind?: 'codex-session'
       sandbox: 'read-only' | 'workspace-write' | 'danger-full-access' | null
     }
   } | null
   providerOptions?: {
     approvalPolicy?: 'never' | 'on-request' | 'on-failure' | 'untrusted' | null
+    continuityFingerprint?: string
+    executionDriver?: 'codex-cli'
     model?: string | null
     oss?: boolean
     profile?: string | null
     reasoningEffort?: 'low' | 'medium' | 'high' | 'xhigh' | null
+    resumeKind?: 'codex-session'
     sandbox?: 'read-only' | 'workspace-write' | 'danger-full-access' | null
   }
   resumeState?: {
@@ -401,21 +407,36 @@ function createMockCodexRuntimeSession(input: {
   turnCount: number
   updatedAt: string
 }) {
-  const providerOptions = {
+  const defaultCodexProviderOptions = {
+    continuityFingerprint: 'fingerprint-cli-runtime-codex',
+    executionDriver: 'codex-cli' as const,
     model: null,
     reasoningEffort: null,
     sandbox: 'read-only' as const,
     approvalPolicy: 'never' as const,
     profile: null,
     oss: false,
+    resumeKind: 'codex-session' as const,
+  }
+  const providerOptions = {
+    ...defaultCodexProviderOptions,
     ...input.providerOptions,
   }
+  const providerBinding = input.providerBinding
+    ? {
+        ...input.providerBinding,
+        providerOptions: {
+          ...defaultCodexProviderOptions,
+          ...input.providerBinding.providerOptions,
+        },
+      }
+    : null
   const resumeState =
     input.resumeState ??
-    (input.providerBinding
+    (providerBinding
       ? {
-          providerSessionId: input.providerBinding.providerSessionId,
-          resumeRouteId: input.providerBinding.providerState?.resumeRouteId ?? null,
+          providerSessionId: providerBinding.providerSessionId,
+          resumeRouteId: providerBinding.providerState?.resumeRouteId ?? null,
         }
       : null)
 
@@ -425,7 +446,7 @@ function createMockCodexRuntimeSession(input: {
     createdAt: input.createdAt,
     lastTurnAt: input.lastTurnAt,
     provider: 'codex-cli' as const,
-    providerBinding: input.providerBinding ?? null,
+    providerBinding,
     providerOptions,
     resumeState,
     schema: 'murph.assistant-session.v1' as const,
@@ -4435,12 +4456,15 @@ test('scanAssistantAutoReplyOnce anchors grouped linq replies to the newest grou
         providerSessionId: 'thread-linq-batch',
         providerState: null,
         providerOptions: {
+          continuityFingerprint: 'fingerprint-cli-runtime-binding',
+          executionDriver: 'codex-cli',
           model: null,
           reasoningEffort: null,
           sandbox: 'read-only',
           approvalPolicy: 'never',
           profile: null,
           oss: false,
+          resumeKind: 'codex-session',
         },
       },
       sessionId: input.sessionId,
@@ -5755,12 +5779,15 @@ test('scanAssistantAutoReplyOnce only auto-replies to Telegram direct chats', as
         providerSessionId: 'thread-telegram-scope',
         providerState: null,
         providerOptions: {
+          continuityFingerprint: 'fingerprint-cli-runtime-binding',
+          executionDriver: 'codex-cli',
           model: null,
           reasoningEffort: null,
           sandbox: 'read-only',
           approvalPolicy: 'never',
           profile: null,
           oss: false,
+          resumeKind: 'codex-session',
         },
       },
       sessionId: input.sessionId,
@@ -5984,12 +6011,15 @@ test('scanAssistantAutoReplyOnce aborts stalled provider turns and retries the s
         providerSessionId: 'thread-stall-1',
         providerState: null,
         providerOptions: {
+          continuityFingerprint: 'fingerprint-cli-runtime-binding',
+          executionDriver: 'codex-cli',
           model: null,
           reasoningEffort: null,
           sandbox: 'read-only',
           approvalPolicy: 'never',
           profile: null,
           oss: false,
+          resumeKind: 'codex-session',
         },
       },
       sessionId: input.sessionId,
@@ -6584,12 +6614,15 @@ test('scanAssistantAutoReplyOnce keeps scanning after a failed Telegram delivery
           providerSessionId: 'thread-telegram-failure',
           providerState: null,
           providerOptions: {
+            continuityFingerprint: 'fingerprint-cli-runtime-binding',
+            executionDriver: 'codex-cli',
             model: null,
             reasoningEffort: null,
             sandbox: 'read-only',
             approvalPolicy: 'never',
             profile: null,
             oss: false,
+            resumeKind: 'codex-session',
           },
         },
         sessionId: input.sessionId,
@@ -7066,12 +7099,15 @@ test('scanAssistantAutoReplyOnce groups Telegram media albums into one assistant
         providerSessionId: 'thread-telegram-album',
         providerState: null,
         providerOptions: {
+          continuityFingerprint: 'fingerprint-cli-runtime-binding',
+          executionDriver: 'codex-cli',
           model: null,
           reasoningEffort: null,
           sandbox: 'read-only',
           approvalPolicy: 'never',
           profile: null,
           oss: false,
+          resumeKind: 'codex-session',
         },
       },
       sessionId: input.sessionId,
@@ -7283,12 +7319,15 @@ test('scanAssistantAutoReplyOnce does not group Telegram media albums across acc
         providerSessionId: 'thread-telegram-album-accounts',
         providerState: null,
         providerOptions: {
+          continuityFingerprint: 'fingerprint-cli-runtime-binding',
+          executionDriver: 'codex-cli',
           model: null,
           reasoningEffort: null,
           sandbox: 'read-only',
           approvalPolicy: 'never',
           profile: null,
           oss: false,
+          resumeKind: 'codex-session',
         },
       },
       sessionId: input.sessionId,
@@ -7948,12 +7987,15 @@ test('assistant Ink resyncs the next turn selection after a failover-updated ses
     },
     provider: 'codex-cli',
     providerOptions: {
+      continuityFingerprint: 'fingerprint-cli-runtime-failover',
       model: 'gpt-5.4',
       reasoningEffort: 'high',
       sandbox: 'workspace-write',
       approvalPolicy: 'on-request',
       profile: null,
       oss: false,
+      executionDriver: 'codex-cli',
+      resumeKind: 'codex-session',
     },
     alias: 'chat:failover-sync',
     binding: {
@@ -8033,6 +8075,7 @@ test('assistant Ink preserves explicit selections when unrelated same-provider s
     resumeState: null,
     provider: 'openai-compatible',
     providerOptions: {
+      continuityFingerprint: 'fingerprint-cli-runtime-openai',
       model: null,
       reasoningEffort: null,
       sandbox: null,
@@ -8041,8 +8084,10 @@ test('assistant Ink preserves explicit selections when unrelated same-provider s
       oss: false,
       baseUrl: 'http://127.0.0.1:11434/v1',
       apiKeyEnv: 'OLLAMA_API_KEY',
+      executionDriver: 'openai-compatible',
       providerName: 'ollama-a',
       headers: null,
+      resumeKind: null,
     },
     alias: 'chat:same-provider-route-change',
     binding: {
@@ -8321,12 +8366,15 @@ test('assistant Ink view-model exposes codex-style footer metadata and busy copy
     resumeState: null,
     provider: 'codex-cli',
     providerOptions: {
+      continuityFingerprint: 'fingerprint-cli-runtime-view',
       model: 'gpt-5.4',
       reasoningEffort: null,
       sandbox: 'read-only',
       approvalPolicy: 'never',
       profile: null,
       oss: false,
+      executionDriver: 'codex-cli',
+      resumeKind: 'codex-session',
     },
     alias: null,
     binding: {
@@ -8858,12 +8906,15 @@ test('assistant Ink view-model falls back to default model labels when needed', 
     resumeState: null,
     provider: 'codex-cli',
     providerOptions: {
+      continuityFingerprint: 'fingerprint-cli-runtime-oss',
       model: null,
       reasoningEffort: null,
       sandbox: 'read-only',
       approvalPolicy: 'never',
       profile: null,
       oss: true,
+      executionDriver: 'codex-cli',
+      resumeKind: 'codex-session',
     },
     alias: null,
     binding: {
