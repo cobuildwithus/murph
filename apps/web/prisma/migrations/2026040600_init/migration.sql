@@ -191,6 +191,12 @@ CREATE TABLE "hosted_member_routing" (
     "member_id" TEXT NOT NULL,
     "linq_chat_lookup_key" TEXT,
     "linq_chat_id_encrypted" TEXT,
+    "linq_recipient_phone_lookup_key" TEXT,
+    "linq_recipient_phone_encrypted" TEXT,
+    "pending_linq_chat_lookup_key" TEXT,
+    "pending_linq_chat_id_encrypted" TEXT,
+    "pending_linq_recipient_phone_lookup_key" TEXT,
+    "pending_linq_recipient_phone_encrypted" TEXT,
     "telegram_user_lookup_key" TEXT,
     "telegram_user_id_encrypted" TEXT,
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -516,6 +522,15 @@ CREATE UNIQUE INDEX "hosted_member_routing_member_id_key" ON "hosted_member_rout
 
 -- CreateIndex
 CREATE UNIQUE INDEX "hosted_member_routing_linq_chat_lookup_key_key" ON "hosted_member_routing"("linq_chat_lookup_key");
+
+-- CreateIndex
+CREATE INDEX "hosted_member_routing_linq_recipient_phone_lookup_key_idx" ON "hosted_member_routing"("linq_recipient_phone_lookup_key");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "hosted_member_routing_pending_linq_chat_lookup_key_key" ON "hosted_member_routing"("pending_linq_chat_lookup_key");
+
+-- CreateIndex
+CREATE INDEX "hosted_member_routing_pending_linq_recipient_phone_lookup_key_idx" ON "hosted_member_routing"("pending_linq_recipient_phone_lookup_key");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "hosted_member_routing_telegram_user_lookup_key_key" ON "hosted_member_routing"("telegram_user_lookup_key");

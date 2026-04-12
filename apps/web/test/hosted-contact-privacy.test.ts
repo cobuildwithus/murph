@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { minimizeLinqMessageReceivedEvent } from "@murphai/messaging-ingress";
+import { minimizeLinqMessageReceivedEvent } from "@murphai/messaging-ingress/linq-webhook";
 
 import { parseHostedDeviceSyncRuntimeApplyRequest } from "@/src/lib/device-sync/internal-runtime";
 import { sanitizeHostedLinqEventForStorage } from "@/src/lib/hosted-onboarding/contact-privacy";

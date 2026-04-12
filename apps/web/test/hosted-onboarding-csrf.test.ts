@@ -86,6 +86,8 @@ function createHostedOnboardingEnvironment(
     isProduction: false,
     linqApiBaseUrl: "https://linq.example.test",
     linqApiToken: null,
+    linqConversationPhoneNumbers: [],
+    linqMaxActiveMembersPerConversationPhone: null,
     linqWebhookSecret: null,
     linqWebhookTimestampToleranceMs: 300_000,
     privyAppId: null,

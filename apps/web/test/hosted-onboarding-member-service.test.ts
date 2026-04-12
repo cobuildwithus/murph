@@ -23,7 +23,7 @@ import {
 import {
   ensureHostedMemberForPhone,
 } from "@/src/lib/hosted-onboarding/member-identity-service";
-import { upsertHostedMemberLinqChatBinding } from "@/src/lib/hosted-onboarding/hosted-member-routing-store";
+import { upsertHostedMemberHomeLinqBinding } from "@/src/lib/hosted-onboarding/hosted-member-routing-store";
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", async () => {
   const actual = await vi.importActual<typeof import("@/src/lib/hosted-onboarding/runtime")>(
@@ -606,8 +606,8 @@ describe("abortHostedInvitePhoneCode", () => {
   });
 });
 
-describe("upsertHostedMemberLinqChatBinding", () => {
-  it("stores the latest Linq chat id in the additive routing table for future activation welcomes", async () => {
+describe("upsertHostedMemberHomeLinqBinding", () => {
+  it("stores the latest Linq home chat id in the routing table for future activation welcomes", async () => {
     const updateMany = vi.fn().mockResolvedValue({ count: 0 });
     const upsert = vi.fn().mockResolvedValue({});
     const prisma = {
@@ -617,16 +617,19 @@ describe("upsertHostedMemberLinqChatBinding", () => {
       },
     } as never;
 
-    await upsertHostedMemberLinqChatBinding({
+    await upsertHostedMemberHomeLinqBinding({
       linqChatId: "chat_new",
       memberId: "member_123",
       prisma,
+      recipientPhone: "+15550100001",
     });
 
-    expect(updateMany).toHaveBeenCalledWith({
+    expect(updateMany).toHaveBeenNthCalledWith(1, {
       data: {
         linqChatIdEncrypted: null,
         linqChatLookupKey: null,
+        linqRecipientPhoneEncrypted: null,
+        linqRecipientPhoneLookupKey: null,
       },
       where: {
         NOT: {
@@ -635,17 +638,39 @@ describe("upsertHostedMemberLinqChatBinding", () => {
         linqChatLookupKey: expect.stringMatching(/^hbidx:linq-chat:v1:/u),
       },
     });
+    expect(updateMany).toHaveBeenNthCalledWith(2, {
+      data: {
+        pendingLinqChatIdEncrypted: null,
+        pendingLinqChatLookupKey: null,
+        pendingLinqRecipientPhoneEncrypted: null,
+        pendingLinqRecipientPhoneLookupKey: null,
+      },
+      where: {
+        NOT: {
+          memberId: "member_123",
+        },
+        pendingLinqChatLookupKey: expect.stringMatching(/^hbidx:linq-chat:v1:/u),
+      },
+    });
     expect(upsert).toHaveBeenCalledWith({
       create: {
         linqChatIdEncrypted: expect.stringMatching(/^hbds:/u),
         linqChatLookupKey: expect.stringMatching(/^hbidx:linq-chat:v1:/u),
+        linqRecipientPhoneEncrypted: expect.stringMatching(/^hbds:/u),
+        linqRecipientPhoneLookupKey: expect.stringMatching(/^hbidx:phone:v1:/u),
         memberId: "member_123",
+        pendingLinqChatIdEncrypted: null,
+        pendingLinqChatLookupKey: null,
+        pendingLinqRecipientPhoneEncrypted: null,
+        pendingLinqRecipientPhoneLookupKey: null,
         telegramUserIdEncrypted: null,
         telegramUserLookupKey: null,
       },
       update: {
         linqChatIdEncrypted: expect.stringMatching(/^hbds:/u),
         linqChatLookupKey: expect.stringMatching(/^hbidx:linq-chat:v1:/u),
+        linqRecipientPhoneEncrypted: expect.stringMatching(/^hbds:/u),
+        linqRecipientPhoneLookupKey: expect.stringMatching(/^hbidx:phone:v1:/u),
       },
       where: {
         memberId: "member_123",
@@ -653,7 +678,7 @@ describe("upsertHostedMemberLinqChatBinding", () => {
     });
   });
 
-  it("ignores empty chat ids", async () => {
+  it("rejects empty chat ids", async () => {
     const upsert = vi.fn();
     const updateMany = vi.fn();
     const prisma = {
@@ -663,14 +688,14 @@ describe("upsertHostedMemberLinqChatBinding", () => {
       },
     } as never;
 
-    await upsertHostedMemberLinqChatBinding({
-      linqChatId: null,
-      memberId: "member_123",
-      prisma,
-    });
-
-    expect(updateMany).not.toHaveBeenCalled();
-    expect(upsert).not.toHaveBeenCalled();
+    await expect(
+      upsertHostedMemberHomeLinqBinding({
+        linqChatId: null as never,
+        memberId: "member_123",
+        prisma,
+        recipientPhone: null,
+      }),
+    ).rejects.toThrow("Hosted Linq routing requires a non-empty chat id.");
   });
 });
 

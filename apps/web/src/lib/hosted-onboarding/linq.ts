@@ -312,6 +312,16 @@ export function resolveHostedLinqParticipantPhoneNumber(
   );
 }
 
+export function resolveHostedLinqRecipientPhoneNumber(
+  event: HostedLinqMessageReceivedEvent,
+): string | null {
+  return (
+    normalizePhoneNumber(event.data.recipient_phone)
+    ?? normalizePhoneNumber(event.data.recipient_handle?.handle)
+    ?? normalizePhoneNumber(event.data.chat?.owner_handle?.handle)
+  );
+}
+
 export function resolveHostedLinqOccurredAt(event: HostedLinqMessageReceivedEvent): string {
   return resolveLinqWebhookOccurredAt(event);
 }
@@ -333,6 +343,21 @@ ${input.joinUrl}`;
 
 export function buildHostedDailyQuotaReply(): string {
   return "You have reached Murph's daily text limit of 100 messages. Try again tomorrow.";
+}
+
+export function buildHostedLinqConversationHomeWelcome(): string {
+  return `You're all set — save this as your Murph number.
+
+Text me here anytime from now on and I'll keep the conversation on this thread.`;
+}
+
+export function buildHostedLinqConversationHomeRedirectReply(input: {
+  homeRecipientPhone: string;
+}): string {
+  return `You're already set up with Murph.
+
+Save this number and text me here instead:
+${input.homeRecipientPhone}`;
 }
 
 function resolveHostedLinqOutboundFallbackPhoneNumber(

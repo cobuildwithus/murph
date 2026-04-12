@@ -1,11 +1,4 @@
 import {
-  type HostedLinqWebhookEvent,
-  requireHostedLinqMessageReceivedEvent,
-  resolveHostedLinqOccurredAt,
-  resolveHostedLinqParticipantPhoneNumber,
-  summarizeHostedLinqMessage,
-} from "./linq";
-import {
   buildHostedInviteUrl,
   issueHostedInvite,
 } from "./invite-service";
@@ -15,14 +8,27 @@ import {
 } from "./entitlement";
 import { ensureHostedMemberForPhone } from "./member-identity-service";
 import { lookupHostedMemberIdentityByPhoneNumber } from "./hosted-member-identity-store";
-import { upsertHostedMemberLinqChatBinding } from "./hosted-member-routing-store";
+import { readHostedMemberSnapshot } from "./hosted-member-store";
+import {
+  upsertHostedMemberHomeLinqBinding,
+  upsertHostedMemberPendingLinqBinding,
+} from "./hosted-member-routing-store";
 import {
   claimHostedLinqOnboardingLinkNotice,
   claimHostedLinqQuotaReplyNotice,
   incrementHostedLinqInboundDailyState,
   incrementHostedLinqOutboundDailyState,
 } from "./linq-daily-state";
-import { minimizeLinqMessageReceivedEvent } from "@murphai/messaging-ingress";
+import {
+  type HostedLinqWebhookEvent,
+  requireHostedLinqMessageReceivedEvent,
+  resolveHostedLinqOccurredAt,
+  resolveHostedLinqParticipantPhoneNumber,
+  resolveHostedLinqRecipientPhoneNumber,
+  summarizeHostedLinqMessage,
+} from "./linq";
+import { resolveHostedLinqActiveRouteDecision } from "./linq-routing-policy";
+import { minimizeLinqMessageReceivedEvent } from "@murphai/messaging-ingress/linq-webhook";
 import {
   createHostedPhoneLookupKey,
   sanitizeHostedLinqEventForStorage,
@@ -56,10 +62,14 @@ export async function planHostedOnboardingLinqWebhook(input: {
   const summary = summarizeHostedLinqMessage(messageEvent);
   const occurredAt = resolveHostedLinqOccurredAt(messageEvent);
   const participantPhoneNumber = resolveHostedLinqParticipantPhoneNumber(messageEvent);
+  const recipientPhoneNumber = resolveHostedLinqRecipientPhoneNumber(messageEvent);
+
   if (!participantPhoneNumber) {
     return buildIgnoredLinqWebhookPlan(summary.isFromMe ? "own-message" : "invalid-phone");
   }
+
   const phoneLookupKey = createHostedPhoneLookupKey(participantPhoneNumber);
+
   if (!phoneLookupKey) {
     return buildIgnoredLinqWebhookPlan("invalid-phone");
   }
@@ -87,11 +97,41 @@ export async function planHostedOnboardingLinqWebhook(input: {
   }
 
   if (existingMember && hasHostedMemberActiveAccess(existingMember)) {
-    const dailyState = await bindHostedMemberLinqChatAndTrackInbound({
+    const member = await readHostedMemberSnapshot({
+      memberId: existingMember.id,
+      prisma: input.prisma,
+    });
+
+    if (!member) {
+      return buildIgnoredLinqWebhookPlan("missing-member");
+    }
+
+    const routeDecision = resolveHostedLinqActiveRouteDecision({
+      homeChatId: member.routing?.linqChatId ?? null,
+      homeRecipientPhone: member.routing?.linqRecipientPhone ?? null,
+      incomingChatId: summary.chatId,
+      incomingRecipientPhone: recipientPhoneNumber,
+    });
+
+    if (routeDecision.kind === "redirect_to_home") {
+      return buildConversationHomeRedirectResponse({
+        chatId: summary.chatId,
+        homeRecipientPhone: routeDecision.homeRecipientPhone,
+        messageId: summary.messageId,
+        sourceEventId: input.event.event_id,
+      });
+    }
+
+    if (routeDecision.kind === "ignore_unknown_home") {
+      return buildIgnoredLinqWebhookPlan("unknown-home-line");
+    }
+
+    const dailyState = await bindHostedMemberHomeLinqChatAndTrackInbound({
       chatId: summary.chatId,
       memberId: existingMember.id,
       occurredAt,
       prisma: input.prisma,
+      recipientPhone: recipientPhoneNumber ?? member.routing?.linqRecipientPhone ?? null,
     });
 
     if (dailyState.inboundCount > 100) {
@@ -142,11 +182,12 @@ export async function planHostedOnboardingLinqWebhook(input: {
     phoneNumber: participantPhoneNumber,
     prisma: input.prisma,
   });
-  const dailyState = await bindHostedMemberLinqChatAndTrackInbound({
+  const dailyState = await bindHostedMemberPendingLinqChatAndTrackInbound({
     chatId: summary.chatId,
     memberId: member.id,
     occurredAt,
     prisma: input.prisma,
+    recipientPhone: recipientPhoneNumber,
   });
 
   if (dailyState.onboardingLinkSentAt) {
@@ -171,10 +212,10 @@ export async function planHostedOnboardingLinqWebhook(input: {
 
   return buildSignupLinkResponse({
     activeSubscription: hasHostedMemberActiveAccess(member),
+    chatId: summary.chatId,
     inviteCode: invite.inviteCode,
     inviteId: invite.id,
     messageId: summary.messageId,
-    chatId: summary.chatId,
     sourceEventId: input.event.event_id,
   });
 }
@@ -221,6 +262,30 @@ function buildSignupLinkResponse(input: {
   };
 }
 
+function buildConversationHomeRedirectResponse(input: {
+  chatId: string;
+  homeRecipientPhone: string;
+  messageId: string;
+  sourceEventId: string;
+}): HostedWebhookPlan<HostedOnboardingLinqWebhookResponse> {
+  return {
+    desiredSideEffects: [
+      createHostedWebhookLinqMessageSideEffect({
+        chatId: input.chatId,
+        homeRecipientPhone: input.homeRecipientPhone,
+        inviteId: null,
+        replyToMessageId: input.messageId,
+        sourceEventId: input.sourceEventId,
+        template: "conversation_home_redirect",
+      }),
+    ],
+    response: {
+      ok: true,
+      reason: "redirected-to-home-line",
+    },
+  };
+}
+
 function buildQuotaReplyResponse(input: {
   chatId: string;
   messageId: string;
@@ -243,16 +308,40 @@ function buildQuotaReplyResponse(input: {
   };
 }
 
-async function bindHostedMemberLinqChatAndTrackInbound(input: {
+async function bindHostedMemberHomeLinqChatAndTrackInbound(input: {
   chatId: string;
   memberId: string;
   occurredAt: string;
   prisma: HostedWebhookReceiptPersistenceClient;
+  recipientPhone: string | null;
 }) {
-  await upsertHostedMemberLinqChatBinding({
+  await upsertHostedMemberHomeLinqBinding({
+    clearPending: true,
     linqChatId: input.chatId,
     memberId: input.memberId,
     prisma: input.prisma,
+    recipientPhone: input.recipientPhone,
+  });
+
+  return incrementHostedLinqInboundDailyState({
+    memberId: input.memberId,
+    occurredAt: input.occurredAt,
+    prisma: input.prisma,
+  });
+}
+
+async function bindHostedMemberPendingLinqChatAndTrackInbound(input: {
+  chatId: string;
+  memberId: string;
+  occurredAt: string;
+  prisma: HostedWebhookReceiptPersistenceClient;
+  recipientPhone: string | null;
+}) {
+  await upsertHostedMemberPendingLinqBinding({
+    linqChatId: input.chatId,
+    memberId: input.memberId,
+    prisma: input.prisma,
+    recipientPhone: input.recipientPhone,
   });
 
   return incrementHostedLinqInboundDailyState({

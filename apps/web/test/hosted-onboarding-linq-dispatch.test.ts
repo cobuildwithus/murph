@@ -2,7 +2,11 @@ import type { HostedExecutionDispatchRequest } from "@murphai/hosted-execution";
 import { HostedBillingStatus } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { buildHostedInviteReply } from "@/src/lib/hosted-onboarding/linq";
+import { encryptHostedWebNullableString } from "@/src/lib/hosted-web/encryption";
+import {
+  buildHostedInviteReply,
+  buildHostedLinqConversationHomeRedirectReply,
+} from "@/src/lib/hosted-onboarding/linq";
 
 const mocks = vi.hoisted(() => ({
   deleteHostedStoredDispatchPayloadBestEffort: vi.fn(),
@@ -96,6 +100,8 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", async () => {
       isProduction: false,
       linqApiBaseUrl: "https://linq.example.test",
       linqApiToken: "linq-token",
+      linqConversationPhoneNumbers: [],
+      linqMaxActiveMembersPerConversationPhone: null,
       linqWebhookSecret: null,
       linqWebhookTimestampToleranceMs: 5 * 60_000,
       publicBaseUrl: "https://join.example.test",
@@ -297,7 +303,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       reason: "dispatched-active-member",
     });
     expect(prisma.$transaction).toHaveBeenCalledTimes(2);
-    expect(transactionHostedMemberFindUnique).toHaveBeenCalledTimes(1);
+    expect(transactionHostedMemberFindUnique).toHaveBeenCalledTimes(2);
     expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
       expect.objectContaining({
         dispatch: expect.objectContaining({
@@ -901,6 +907,159 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         replyToMessageId: "msg_123",
       }),
     );
+  });
+
+  it("redirects active users who text a non-home Murph line without rebinding the home chat", async () => {
+    const prisma = asPrismaTransactionClient({
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventType: "message.received",
+            receiptAttemptCount: 1,
+            receiptStatus: "processing",
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({
+          billingStatus: HostedBillingStatus.active,
+          id: "member_123",
+          invites: [],
+          phoneLookupKey: "+15551234567",
+          routing: {
+            linqChatIdEncrypted: encryptHostedWebNullableString({
+              field: "hosted-member-routing.home-linq-chat-id",
+              memberId: "member_123",
+              value: "chat_home",
+            }),
+            linqRecipientPhoneEncrypted: encryptHostedWebNullableString({
+              field: "hosted-member-routing.home-linq-recipient-phone",
+              memberId: "member_123",
+              value: "+15550100001",
+            }),
+            memberId: "member_123",
+            pendingLinqChatIdEncrypted: null,
+            pendingLinqRecipientPhoneEncrypted: null,
+            telegramUserIdEncrypted: null,
+            telegramUserLookupKey: null,
+          },
+        }),
+      },
+    });
+
+    const response = await handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        data: {
+          chat: {
+            id: "chat_other",
+            owner_handle: {
+              handle: "+15550100002",
+              id: "handle_owner_other",
+              is_me: true,
+              service: "sms",
+            },
+          },
+        },
+        eventId: "evt_redirect",
+      }),
+      signature: null,
+      timestamp: null,
+    });
+
+    expect(response).toMatchObject({
+      ok: true,
+      reason: "redirected-to-home-line",
+    });
+    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        chatId: "chat_other",
+        message: buildHostedLinqConversationHomeRedirectReply({
+          homeRecipientPhone: "+15550100001",
+        }),
+        replyToMessageId: "msg_123",
+      }),
+    );
+    expect(
+      (prisma as unknown as {
+        hostedMemberRouting: {
+          upsert: ReturnType<typeof vi.fn>;
+        };
+      }).hostedMemberRouting.upsert,
+    ).not.toHaveBeenCalled();
+  });
+
+  it("ignores sparse non-home webhook payloads when the saved home line is known but the incoming line is missing", async () => {
+    const prisma = asPrismaTransactionClient({
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventType: "message.received",
+            receiptAttemptCount: 1,
+            receiptStatus: "processing",
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({
+          billingStatus: HostedBillingStatus.active,
+          id: "member_123",
+          invites: [],
+          phoneLookupKey: "+15551234567",
+          routing: {
+            linqChatIdEncrypted: encryptHostedWebNullableString({
+              field: "hosted-member-routing.home-linq-chat-id",
+              memberId: "member_123",
+              value: "chat_home",
+            }),
+            linqRecipientPhoneEncrypted: encryptHostedWebNullableString({
+              field: "hosted-member-routing.home-linq-recipient-phone",
+              memberId: "member_123",
+              value: "+15550100001",
+            }),
+            memberId: "member_123",
+            pendingLinqChatIdEncrypted: null,
+            pendingLinqRecipientPhoneEncrypted: null,
+            telegramUserIdEncrypted: null,
+            telegramUserLookupKey: null,
+          },
+        }),
+      },
+    });
+
+    const response = await handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        data: {
+          chat: {
+            id: "chat_other",
+          },
+        },
+        eventId: "evt_sparse_redirect",
+      }),
+      signature: null,
+      timestamp: null,
+    });
+
+    expect(response).toMatchObject({
+      ignored: true,
+      ok: true,
+      reason: "unknown-home-line",
+    });
+    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+    expect(
+      (prisma as unknown as {
+        hostedMemberRouting: {
+          upsert: ReturnType<typeof vi.fn>;
+        };
+      }).hostedMemberRouting.upsert,
+    ).not.toHaveBeenCalled();
   });
 
   it("suppresses repeat signup links after the first send that day", async () => {

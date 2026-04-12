@@ -244,16 +244,25 @@ model HostedMemberIdentity {
 }
 
 model HostedMemberRouting {
-  memberId              String       @unique @map("member_id")
-  /// Hosted Linq onboarding and auto-reply reuse one direct thread per member.
-  linqChatLookupKey     String?      @unique @map("linq_chat_lookup_key")
-  linqChatIdEncrypted   String?      @map("linq_chat_id_encrypted")
-  telegramUserLookupKey String?      @unique @map("telegram_user_lookup_key")
-  telegramUserIdEncrypted String?    @map("telegram_user_id_encrypted")
-  createdAt             DateTime     @default(now()) @map("created_at")
-  updatedAt             DateTime     @updatedAt @map("updated_at")
-  member                HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  memberId                       String       @unique @map("member_id")
+  /// Sticky post-activation Linq home thread for the member's long-lived Murph number.
+  linqChatLookupKey              String?      @unique @map("linq_chat_lookup_key")
+  linqChatIdEncrypted            String?      @map("linq_chat_id_encrypted")
+  linqRecipientPhoneLookupKey    String?      @map("linq_recipient_phone_lookup_key")
+  linqRecipientPhoneEncrypted    String?      @map("linq_recipient_phone_encrypted")
+  /// Pre-activation Linq acquisition/referral thread before a home line is chosen.
+  pendingLinqChatLookupKey       String?      @unique @map("pending_linq_chat_lookup_key")
+  pendingLinqChatIdEncrypted     String?      @map("pending_linq_chat_id_encrypted")
+  pendingLinqRecipientPhoneLookupKey String?  @map("pending_linq_recipient_phone_lookup_key")
+  pendingLinqRecipientPhoneEncrypted String?  @map("pending_linq_recipient_phone_encrypted")
+  telegramUserLookupKey          String?      @unique @map("telegram_user_lookup_key")
+  telegramUserIdEncrypted        String?      @map("telegram_user_id_encrypted")
+  createdAt                      DateTime     @default(now()) @map("created_at")
+  updatedAt                      DateTime     @updatedAt @map("updated_at")
+  member                         HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
 
+  @@index([linqRecipientPhoneLookupKey])
+  @@index([pendingLinqRecipientPhoneLookupKey])
   @@map("hosted_member_routing")
 }
 
