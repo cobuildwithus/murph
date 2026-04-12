@@ -2,7 +2,7 @@ import { parseHostedEmailSendRequest } from "@murphai/assistant-runtime/hosted-e
 import {
   parseHostedAssistantDeliveryRecord,
   parseHostedAssistantDeliveryEffects,
-} from "@murphai/hosted-execution";
+} from "@murphai/hosted-execution/side-effects";
 import type { HostedExecutionBundleRef } from "@murphai/hosted-execution/contracts";
 import {
   parseHostedExecutionBundlePayload,
@@ -14,7 +14,6 @@ import {
 import { gatewayProjectionSnapshotSchema } from "@murphai/gateway-core";
 
 import { readHostedExecutionEnvironment } from "../env.ts";
-import { toStringEnvSource } from "../string-env.ts";
 import type { HostedExecutionCommitPayload } from "../execution-journal.ts";
 import { json, methodNotAllowed, notFound, readJsonObject } from "../json.ts";
 import {
@@ -26,6 +25,7 @@ import {
   HostedAssistantDeliveryConflictError,
   createHostedAssistantDeliveryJournalStore,
 } from "../side-effect-journal.ts";
+import { asWorkerStringEnvironment } from "../worker-contracts.ts";
 import {
   decodeRouteParam,
   readOptionalString,
@@ -148,7 +148,7 @@ async function handleRunnerEmailSendRequest(input: {
 }): Promise<Response> {
   const payload = await sendHostedEmailMessage({
     bucket: input.bucket,
-    config: readHostedEmailConfig(toStringEnvSource(input.env)),
+    config: readHostedEmailConfig(asWorkerStringEnvironment(input.env)),
     key: input.environment.platformEnvelopeKey,
     keyId: input.environment.platformEnvelopeKeyId,
     keysById: input.environment.platformEnvelopeKeysById,

@@ -12,7 +12,6 @@ import {
 
 import { createHostedUserEnvStore } from "../bundle-store.ts";
 import { readHostedExecutionEnvironment } from "../env.ts";
-import { toStringEnvSource } from "../string-env.ts";
 import type {
   HostedEmailInboundRoute,
   HostedEmailWorkerRequest,
@@ -32,13 +31,14 @@ import {
   resolveUserRunnerStub,
   type WorkerEnvironmentSource,
 } from "../worker-routes/shared.ts";
+import { asWorkerStringEnvironment } from "../worker-contracts.ts";
 import { buildHostedExecutionEmailMessageReceivedDispatch } from "@murphai/hosted-execution";
 
 export async function handleHostedEmailIngress(
   message: HostedEmailWorkerRequest,
   env: WorkerEnvironmentSource,
 ): Promise<void> {
-  const stringEnv = toStringEnvSource(env);
+  const stringEnv = asWorkerStringEnvironment(env);
   const environment = readHostedExecutionEnvironment(stringEnv);
   const capabilities = readHostedEmailCapabilities(stringEnv);
   if (!capabilities.ingressReady) {
@@ -126,7 +126,7 @@ async function authorizeHostedEmailIngress(input: {
   }).readUserEnv(input.route.userId);
   const userEnv = decodeHostedUserEnvPayload(
     userEnvPayload,
-    toStringEnvSource(input.env),
+    asWorkerStringEnvironment(input.env),
   );
   const verifiedEmailAddress = readHostedVerifiedEmailFromEnv(userEnv)?.address ?? null;
 

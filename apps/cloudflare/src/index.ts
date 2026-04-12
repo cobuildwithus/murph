@@ -1,11 +1,13 @@
 import { DurableObject } from "cloudflare:workers";
 export { ContainerProxy } from "@cloudflare/containers";
 
-import type { CloudflareHostedUserEnvStatus } from "@murphai/cloudflare-hosted-control";
+import type { CloudflareHostedUserEnvStatus } from "@murphai/cloudflare-hosted-control/contracts";
 import {
   emitHostedExecutionStructuredLog,
-  type HostedExecutionOutboxPayload,
 } from "@murphai/hosted-execution";
+import type {
+  HostedExecutionOutboxPayload,
+} from "@murphai/hosted-execution/outbox-payload";
 import type {
   HostedExecutionDispatchRequest,
   HostedExecutionDispatchResult,
@@ -34,7 +36,6 @@ import {
   verifyHostedExecutionVercelOidcRequest,
 } from "./auth-adapter.ts";
 import { readHostedExecutionEnvironment } from "./env.ts";
-import { toStringEnvSource } from "./string-env.ts";
 import type {
   HostedExecutionCommittedResult,
 } from "./execution-journal.ts";
@@ -68,8 +69,9 @@ import {
   handleUserEnvRoute,
   handleUserStoredDispatchRoute,
 } from "./worker-routes/internal-user.ts";
-import type {
-  WorkerUserRunnerCommitInput,
+import {
+  asWorkerStringEnvironment,
+  type WorkerUserRunnerCommitInput,
 } from "./worker-contracts.ts";
 import {
   readCachedRequestText,
@@ -257,7 +259,7 @@ export default {
         return publicResponse;
       }
 
-      const stringEnv = toStringEnvSource(env);
+      const stringEnv = asWorkerStringEnvironment(env);
       const environment = readHostedExecutionEnvironment(stringEnv);
       return (
         await dispatchDeclarativeRoute(workerInternalRoutes, {
@@ -283,7 +285,7 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
     super(state as never, env as never);
     this.runner = new HostedUserRunner(
       state,
-      readHostedExecutionEnvironment(toStringEnvSource(env)),
+      readHostedExecutionEnvironment(asWorkerStringEnvironment(env)),
       env.BUNDLES,
       env,
       env.RUNNER_CONTAINER,

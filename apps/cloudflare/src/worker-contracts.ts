@@ -15,7 +15,7 @@ import type {
 } from "@murphai/gateway-core";
 import type {
   HostedExecutionBundleRef,
-} from "@murphai/hosted-execution";
+} from "@murphai/hosted-execution/contracts";
 import type {
   HostedExecutionDeviceSyncRuntimeApplyRequest,
   HostedExecutionDeviceSyncRuntimeApplyResponse,
@@ -28,6 +28,7 @@ import type {
   HostedExecutionCommitPayload,
   HostedExecutionCommittedResult,
 } from "./execution-journal.ts";
+import { toStringEnvSource, type StringEnvSource } from "./string-env.ts";
 
 export interface WorkerUserRunnerCommitInput {
   eventId: string;
@@ -113,4 +114,10 @@ export interface WorkerEnvironmentContract<
   HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK?: string;
   HOSTED_WEB_BASE_URL?: string;
   USER_RUNNER: WorkerUserRunnerNamespaceLike<TStub>;
+}
+
+export function asWorkerStringEnvironment(
+  source: Readonly<Record<string, unknown>>,
+): StringEnvSource {
+  return toStringEnvSource(source);
 }

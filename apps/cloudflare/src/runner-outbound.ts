@@ -1,6 +1,6 @@
 import { createHostedArtifactStore } from "./bundle-store.ts";
 import { readHostedExecutionEnvironment } from "./env.ts";
-import { toStringEnvSource } from "./string-env.ts";
+import { asWorkerStringEnvironment } from "./worker-contracts.ts";
 import { CLOUDFLARE_HOSTED_RUNTIME_HOSTS } from "./internal-hosts.ts";
 import { json, methodNotAllowed, notFound, readJsonObject } from "./json.ts";
 import { CLOUDFLARE_HOSTED_USAGE_RECORD_PATH } from "./outbound-routes.ts";
@@ -23,7 +23,7 @@ export async function handleRunnerOutboundRequest(
   userId: string,
   internalWorkerProxyToken: string | null = null,
 ): Promise<Response> {
-  const environment = readHostedExecutionEnvironment(toStringEnvSource(env));
+  const environment = readHostedExecutionEnvironment(asWorkerStringEnvironment(env));
   const url = new URL(request.url);
   const authorizationError = requireRunnerInternalProxyAuthorization(
     request,
