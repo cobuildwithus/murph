@@ -2753,6 +2753,7 @@ function createUserRunnerStub() {
         connectionId: update.connectionId,
         status: "updated" as const,
         tokenUpdate: "unchanged" as const,
+        writeUpdate: "applied" as const,
       })),
       userId: input.request.userId,
     })),

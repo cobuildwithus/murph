@@ -158,6 +158,96 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
     });
   });
 
+  it("normalizes timestamps and sanitizes secret-bearing local-state fields", () => {
+    expect(
+      parseHostedExecutionDeviceSyncRuntimeApplyRequest({
+        occurredAt: "2026-04-12T10:15:00+10:00",
+        updates: [
+          {
+            connectionId: "conn_01",
+            localState: {
+              lastErrorCode: "Authorization: Bearer secret-token",
+              lastErrorMessage: "refresh_token=super-secret",
+              lastSyncErrorAt: "2026-04-12T10:20:00+10:00",
+            },
+            observedTokenVersion: 1,
+            seed: {
+              connection: {
+                accessTokenExpiresAt: null,
+                connectedAt: "2026-04-12T09:00:00+10:00",
+                createdAt: "2026-04-12T08:00:00+10:00",
+                displayName: "Morning sync",
+                externalAccountId: "acct_01",
+                id: "conn_01",
+                metadata: {
+                  nickname: "watch",
+                },
+                provider: "oura",
+                scopes: ["daily"],
+                status: "active",
+                updatedAt: "2026-04-12T10:10:00+10:00",
+              },
+              localState: {
+                lastErrorCode: null,
+                lastErrorMessage: null,
+                lastSyncCompletedAt: null,
+                lastSyncErrorAt: null,
+                lastSyncStartedAt: null,
+                lastWebhookAt: null,
+                nextReconcileAt: null,
+              },
+              tokenBundle: null,
+            },
+            tokenBundle: null,
+          },
+        ],
+        userId: "user_01",
+      }),
+    ).toEqual({
+      occurredAt: "2026-04-12T00:15:00.000Z",
+      updates: [
+        {
+          connectionId: "conn_01",
+          localState: {
+            lastErrorCode: "Authorization: [redacted]",
+            lastErrorMessage: "refresh_token=[redacted]",
+            lastSyncErrorAt: "2026-04-12T00:20:00.000Z",
+          },
+          observedTokenVersion: 1,
+          seed: {
+            connection: {
+              accessTokenExpiresAt: null,
+              connectedAt: "2026-04-11T23:00:00.000Z",
+              createdAt: "2026-04-11T22:00:00.000Z",
+              displayName: "Morning sync",
+              externalAccountId: "acct_01",
+              id: "conn_01",
+              metadata: {
+                nickname: "watch",
+              },
+              provider: "oura",
+              scopes: ["daily"],
+              status: "active",
+              updatedAt: "2026-04-12T00:10:00.000Z",
+            },
+            localState: {
+              lastErrorCode: null,
+              lastErrorMessage: null,
+              lastSyncCompletedAt: null,
+              lastSyncErrorAt: null,
+              lastSyncStartedAt: null,
+              lastWebhookAt: null,
+              nextReconcileAt: null,
+            },
+            tokenBundle: null,
+          },
+          tokenBundle: null,
+        },
+      ],
+      userId: "user_01",
+    });
+  });
+
   it("redacts secret-bearing error fields in runtime apply payloads and seeds", () => {
     const parsed = parseHostedExecutionDeviceSyncRuntimeApplyRequest({
       updates: [
@@ -504,6 +594,70 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
         userId: "user_123",
       }),
     ).toThrowError(/lastSyncErrorAt must be an ISO timestamp/u);
+  });
+
+  it("backfills write results for legacy runtime apply responses", () => {
+    expect(parseHostedExecutionDeviceSyncRuntimeApplyResponse({
+      appliedAt: "2026-04-07T02:00:00.000Z",
+      updates: [
+        {
+          connection: {
+            accessTokenExpiresAt: null,
+            connectedAt: "2026-04-07T00:00:00.000Z",
+            createdAt: "2026-04-07T00:00:00.000Z",
+            displayName: "Applied",
+            externalAccountId: "ext_applied",
+            id: "conn_applied",
+            metadata: {},
+            provider: "oura",
+            scopes: ["daily"],
+            status: "active",
+            updatedAt: "2026-04-07T02:00:00.000Z",
+          },
+          connectionId: "conn_applied",
+          status: "updated",
+          tokenUpdate: "unchanged",
+        },
+        {
+          connection: {
+            accessTokenExpiresAt: null,
+            connectedAt: "2026-04-07T00:00:00.000Z",
+            createdAt: "2026-04-07T00:00:00.000Z",
+            displayName: "Unchanged",
+            externalAccountId: "ext_unchanged",
+            id: "conn_unchanged",
+            metadata: {},
+            provider: "oura",
+            scopes: ["daily"],
+            status: "active",
+            updatedAt: "2026-04-07T01:59:00.000Z",
+          },
+          connectionId: "conn_unchanged",
+          status: "updated",
+          tokenUpdate: "unchanged",
+        },
+        {
+          connection: null,
+          connectionId: "conn_missing",
+          status: "missing",
+          tokenUpdate: "missing",
+        },
+      ],
+      userId: "user_123",
+    }).updates).toEqual([
+      expect.objectContaining({
+        connectionId: "conn_applied",
+        writeUpdate: "applied",
+      }),
+      expect.objectContaining({
+        connectionId: "conn_unchanged",
+        writeUpdate: "unchanged",
+      }),
+      expect.objectContaining({
+        connectionId: "conn_missing",
+        writeUpdate: "missing",
+      }),
+    ]);
   });
 
   it("normalizes hosted wake helpers without mutating the original hint payload", () => {

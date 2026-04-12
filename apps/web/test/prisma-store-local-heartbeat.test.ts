@@ -165,13 +165,11 @@ function createHeartbeatStore(seed: Partial<RuntimeConnection["localState"]> = {
     updates: Array<{
       connectionId: string;
       localState?: {
-        clearError?: boolean;
         lastErrorCode?: string | null;
         lastErrorMessage?: string | null;
         lastSyncCompletedAt?: string | null;
         lastSyncErrorAt?: string | null;
         lastSyncStartedAt?: string | null;
-        nextReconcileAt?: string | null;
       };
     }>;
   }) => {
@@ -179,12 +177,6 @@ function createHeartbeatStore(seed: Partial<RuntimeConnection["localState"]> = {
 
     if (!update) {
       throw new Error("Expected heartbeat update payload.");
-    }
-
-    if (update.localState?.clearError) {
-      runtimeConnection.localState.lastErrorCode = null;
-      runtimeConnection.localState.lastErrorMessage = null;
-      runtimeConnection.localState.lastSyncErrorAt = null;
     }
 
     if (update.localState?.lastErrorCode !== undefined) {
@@ -206,11 +198,6 @@ function createHeartbeatStore(seed: Partial<RuntimeConnection["localState"]> = {
     if (update.localState?.lastSyncStartedAt !== undefined) {
       runtimeConnection.localState.lastSyncStartedAt = update.localState.lastSyncStartedAt ?? null;
     }
-
-    if (update.localState?.nextReconcileAt !== undefined) {
-      runtimeConnection.localState.nextReconcileAt = update.localState.nextReconcileAt ?? null;
-    }
-
     runtimeConnection.connection.updatedAt = request.occurredAt;
 
     return {
@@ -257,7 +244,7 @@ describe("PrismaDeviceSyncControlPlaneStore local heartbeat updates", () => {
     vi.clearAllMocks();
   });
 
-  it("treats clearError as authoritative even when error fields are also present", async () => {
+  it("forwards the exact validated heartbeat update shape to hosted runtime", async () => {
     const { runtimeConnection, store, updateConnection } = createHeartbeatStore({
       lastErrorCode: "OLD_CODE",
       lastErrorMessage: "Old failure",
@@ -265,34 +252,45 @@ describe("PrismaDeviceSyncControlPlaneStore local heartbeat updates", () => {
     });
 
     const updated = await store.updateConnectionFromLocalHeartbeat("user-123", "dsc_123", {
-      clearError: true,
-      lastErrorCode: "IGNORED_CODE",
-      lastErrorMessage: "Ignored message",
+      lastErrorCode: "NEW_CODE",
+      lastErrorMessage: "New failure",
       lastSyncCompletedAt: "2026-03-25T01:30:00.000Z",
     });
 
     expect(updated).toMatchObject({
       id: "dsc_123",
-      lastErrorCode: "IGNORED_CODE",
-      lastErrorMessage: "Ignored message",
+      lastErrorCode: "NEW_CODE",
+      lastErrorMessage: "New failure",
       lastSyncCompletedAt: "2026-03-25T01:30:00.000Z",
-      lastSyncErrorAt: null,
+      lastSyncErrorAt: "2026-03-25T01:00:00.000Z",
     });
     expect(runtimeConnection.localState).toMatchObject({
-      lastErrorCode: "IGNORED_CODE",
-      lastErrorMessage: "Ignored message",
+      lastErrorCode: "NEW_CODE",
+      lastErrorMessage: "New failure",
       lastSyncCompletedAt: "2026-03-25T01:30:00.000Z",
-      lastSyncErrorAt: null,
+      lastSyncErrorAt: "2026-03-25T01:00:00.000Z",
     });
+    expect(controlClientMocks.applyDeviceSyncRuntimeUpdates).toHaveBeenCalledWith("user-123", expect.objectContaining({
+      updates: [
+        expect.objectContaining({
+          connectionId: "dsc_123",
+          localState: {
+            lastErrorCode: "NEW_CODE",
+            lastErrorMessage: "New failure",
+            lastSyncCompletedAt: "2026-03-25T01:30:00.000Z",
+          },
+        }),
+      ],
+    }));
     expect(updateConnection).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
-        lastErrorCode: "IGNORED_CODE",
-        lastErrorMessage: null,
+        lastErrorCode: "NEW_CODE",
+        lastSyncCompletedAt: expect.any(Date),
       }),
     }));
   });
 
-  it("only applies the provided error fields when clearError is not set", async () => {
+  it("only applies the provided error fields", async () => {
     const { runtimeConnection, store } = createHeartbeatStore({
       lastErrorCode: "OLD_CODE",
       lastErrorMessage: "Old failure",
@@ -327,6 +325,7 @@ describe("PrismaDeviceSyncControlPlaneStore local heartbeat updates", () => {
     expect(runtimeConnection.localState.lastSyncStartedAt).toBe("2026-03-25T02:00:00.000Z");
     expect(controlClientMocks.applyDeviceSyncRuntimeUpdates).not.toHaveBeenCalled();
   });
+
 });
 
 function cloneRuntimeConnection(connection: RuntimeConnection): RuntimeConnection {

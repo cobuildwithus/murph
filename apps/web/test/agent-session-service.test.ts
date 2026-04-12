@@ -100,13 +100,14 @@ describe("HostedDeviceSyncAgentSessionService.refreshTokenBundle", () => {
             scopes: ["offline"],
             status: "reauthorization_required",
             updatedAt: "2026-04-01T00:10:00.000Z",
-          },
-          connectionId: "conn-1",
-          status: "updated",
-          tokenUpdate: "unchanged",
         },
-      ],
-      userId: "user-1",
+        connectionId: "conn-1",
+        status: "updated",
+        tokenUpdate: "unchanged",
+        writeUpdate: "applied",
+      },
+    ],
+    userId: "user-1",
     });
     const tx = {
       deviceConnection: {
@@ -263,7 +264,6 @@ describe("HostedDeviceSyncAgentSessionService.refreshTokenBundle", () => {
             lastErrorMessage: "WHOOP refresh token is missing.",
           }),
           observedTokenVersion: 7,
-          observedUpdatedAt: "2026-03-20T00:00:00.000Z",
         }),
       ],
     });
@@ -362,13 +362,14 @@ describe("HostedDeviceSyncAgentSessionService.refreshTokenBundle", () => {
             scopes: ["offline"],
             status: "active",
             updatedAt: "2026-04-01T00:10:00.000Z",
-          },
-          connectionId: "conn-1",
-          status: "updated",
-          tokenUpdate: "skipped_version_mismatch",
         },
-      ],
-      userId: "user-1",
+        connectionId: "conn-1",
+        status: "updated",
+        tokenUpdate: "skipped_version_mismatch",
+        writeUpdate: "skipped_version_mismatch",
+      },
+    ],
+    userId: "user-1",
     });
     const tx = {
       deviceConnection: {

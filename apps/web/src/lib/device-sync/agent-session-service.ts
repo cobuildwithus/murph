@@ -19,13 +19,13 @@ import {
   findHostedDeviceSyncRuntimeConnection,
   requireHostedDeviceSyncRuntimeTokenBundle,
 } from "./internal-runtime";
+import type { HostedLocalHeartbeatPatch } from "./local-heartbeat";
 import { requireHostedDeviceSyncProvider } from "./providers";
 import {
   hostedConnectionRecordArgs,
   type HostedAgentSessionRecord,
   type HostedPrismaTransactionClient,
   mapHostedConnectionRecord,
-  type UpdateLocalHeartbeatInput,
   PrismaDeviceSyncControlPlaneStore,
 } from "./prisma-store";
 import { requireHostedDeviceSyncRuntimeClient } from "./runtime-client";
@@ -435,7 +435,7 @@ export class HostedDeviceSyncAgentSessionService {
   async recordLocalHeartbeat(
     userId: string,
     connectionId: string,
-    patch: UpdateLocalHeartbeatInput,
+    patch: HostedLocalHeartbeatPatch,
   ) {
     const connection = await this.store.updateConnectionFromLocalHeartbeat(userId, connectionId, patch);
 

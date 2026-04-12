@@ -8,12 +8,12 @@ import {
   type PublicDeviceSyncAccount,
 } from "@murphai/device-syncd/public-ingress";
 import { shapeHostedDeviceSyncJobHintPayload } from "@murphai/device-syncd/hosted-hints";
-import type {
-  HostedExecutionDeviceSyncJobHint,
-} from "@murphai/device-syncd/hosted-runtime";
 import {
+  didHostedExecutionDeviceSyncRuntimeApplyConnectionWrite,
+  findHostedExecutionDeviceSyncRuntimeApplyEntry,
   sanitizeHostedRuntimeErrorCode,
   sanitizeHostedRuntimeErrorText,
+  type HostedExecutionDeviceSyncJobHint,
 } from "@murphai/device-syncd/hosted-runtime";
 import type {
   HostedExecutionDispatchRequest,
@@ -137,7 +137,6 @@ export async function disconnectHostedDeviceSyncConnection(input: {
           lastErrorMessage: disconnectLocalState.lastErrorMessage,
           nextReconcileAt: null,
         },
-        observedUpdatedAt: runtimeConnection?.connection.updatedAt ?? existing.updatedAt,
         observedTokenVersion: runtimeConnection?.tokenBundle?.tokenVersion ?? null,
         seed: buildHostedDeviceSyncRuntimeSeedFromPublicAccount({
           account: {
@@ -162,11 +161,12 @@ export async function disconnectHostedDeviceSyncConnection(input: {
       },
     ],
   });
-  const appliedUpdate = applyResponse.updates.find((entry) => entry.connectionId === input.connectionId) ?? null;
+  const appliedUpdate = findHostedExecutionDeviceSyncRuntimeApplyEntry(applyResponse, input.connectionId);
 
   if (
     !appliedUpdate
     || appliedUpdate.status === "missing"
+    || !didHostedExecutionDeviceSyncRuntimeApplyConnectionWrite(appliedUpdate)
     || appliedUpdate.tokenUpdate === "skipped_version_mismatch"
     || appliedUpdate.connection?.status !== "disconnected"
   ) {

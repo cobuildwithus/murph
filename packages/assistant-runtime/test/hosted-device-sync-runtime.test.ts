@@ -1296,6 +1296,7 @@ describe("hosted device-sync runtime", () => {
               connectionId: update.connectionId,
               status: "updated",
               tokenUpdate: "applied",
+              writeUpdate: "applied",
             })),
             userId: "member_123",
           };
