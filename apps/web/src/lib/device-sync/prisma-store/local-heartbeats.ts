@@ -43,6 +43,7 @@ export class PrismaHostedLocalHeartbeatStore {
             ...(patch.lastSyncStartedAt !== undefined ? { lastSyncStartedAt: patch.lastSyncStartedAt } : {}),
             ...(patch.nextReconcileAt !== undefined ? { nextReconcileAt: patch.nextReconcileAt } : {}),
           },
+          observedUpdatedAt: existing.updatedAt,
         },
       ],
     });

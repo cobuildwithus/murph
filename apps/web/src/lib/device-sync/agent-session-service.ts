@@ -304,6 +304,8 @@ export class HostedDeviceSyncAgentSessionService {
             localState: {
               clearError: true,
             },
+            observedUpdatedAt: currentConnection.updatedAt,
+            observedTokenVersion: currentTokenBundle.tokenVersion,
             seed: buildHostedDeviceSyncRuntimeSeedFromPublicAccount({
               account: {
                 ...currentConnection,
@@ -534,7 +536,7 @@ export class HostedDeviceSyncAgentSessionService {
           status: error.accountStatus,
         };
 
-        await requireHostedDeviceSyncRuntimeClient().applyDeviceSyncRuntimeUpdates(input.userId, {
+        const applyResponse = await requireHostedDeviceSyncRuntimeClient().applyDeviceSyncRuntimeUpdates(input.userId, {
           occurredAt: input.now,
           updates: [
             {
@@ -548,6 +550,8 @@ export class HostedDeviceSyncAgentSessionService {
                 lastSyncErrorAt: input.now,
                 ...(error.accountStatus === "disconnected" ? { nextReconcileAt: null } : {}),
               },
+              observedUpdatedAt: input.account.updatedAt,
+              observedTokenVersion: input.currentTokenBundle.tokenVersion,
               seed: buildHostedDeviceSyncRuntimeSeedFromPublicAccount({
                 account: seedAccount,
                 externalAccountId: input.account.externalAccountId,
@@ -565,6 +569,27 @@ export class HostedDeviceSyncAgentSessionService {
             },
           ],
         });
+        const appliedUpdate = applyResponse.updates.find(
+          (entry) => entry.connectionId === input.account.id,
+        ) ?? null;
+
+        if (
+          !appliedUpdate
+          || appliedUpdate.status === "missing"
+          || appliedUpdate.connection?.status !== error.accountStatus
+          || (
+            error.accountStatus === "disconnected"
+            && appliedUpdate.tokenUpdate === "skipped_version_mismatch"
+          )
+        ) {
+          throw deviceSyncError({
+            code: "RUNTIME_STATE_CONFLICT",
+            message: `Hosted device-sync runtime did not persist the ${error.accountStatus} state for connection ${input.account.id}.`,
+            retryable: true,
+            httpStatus: 409,
+          });
+        }
+
         await this.store.createSignal({
           userId: input.userId,
           connectionId: input.account.id,

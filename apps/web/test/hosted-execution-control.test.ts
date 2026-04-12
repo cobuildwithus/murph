@@ -89,7 +89,7 @@ describe("hosted verified email sync helper", () => {
     expect(updateUserEnv).toHaveBeenCalledTimes(1);
     expect(run).toHaveBeenCalledTimes(1);
     expect(consoleError).toHaveBeenCalledWith(
-      "Hosted verified email sync saved user env but could not trigger a hosted run for member_123.",
+      "Hosted verified email sync saved user env but could not trigger a hosted run.",
       "worker unavailable",
     );
   });
