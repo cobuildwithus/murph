@@ -1,5 +1,5 @@
 import { readHostedVerifiedEmailFromEnv } from "@murphai/runtime-state";
-import type { CloudflareHostedUserEnvStatus } from "@murphai/cloudflare-hosted-control";
+import type { CloudflareHostedUserEnvStatus } from "@murphai/cloudflare-hosted-control/contracts";
 
 import {
   ensureHostedEmailVerifiedSenderRouteAvailable,
@@ -64,13 +64,29 @@ export class RunnerUserEnvService {
     });
 
     const userEnvStore = this.createUserEnvStore();
-    const shouldDeactivateVerifiedEmailRoute = Boolean(
-      previousVerifiedEmailAddress && !nextVerifiedEmailAddress,
-    );
+
+    if (sameHostedUserEnv(currentUserEnv, nextUserEnv)) {
+      await this.reconcileVerifiedEmailRoute({
+        nextVerifiedEmailAddress,
+        previousVerifiedEmailAddress,
+        userId,
+      });
+
+      return {
+        configuredUserEnvKeys,
+        userId,
+      };
+    }
+
+    const routeMutatedBeforeEnvPersist = this.shouldReconcileVerifiedEmailRouteBeforePersist({
+      nextVerifiedEmailAddress,
+      previousVerifiedEmailAddress,
+    });
     let mutationAttempted = false;
+    let shouldRestoreVerifiedEmailRoute = routeMutatedBeforeEnvPersist;
 
     try {
-      if (shouldDeactivateVerifiedEmailRoute) {
+      if (routeMutatedBeforeEnvPersist) {
         mutationAttempted = true;
         await this.reconcileVerifiedEmailRoute({
           nextVerifiedEmailAddress,
@@ -82,7 +98,8 @@ export class RunnerUserEnvService {
       mutationAttempted = true;
       await this.persistHostedUserEnv(userEnvStore, userId, nextUserEnv);
 
-      if (!shouldDeactivateVerifiedEmailRoute) {
+      if (!routeMutatedBeforeEnvPersist) {
+        shouldRestoreVerifiedEmailRoute = true;
         mutationAttempted = true;
         await this.reconcileVerifiedEmailRoute({
           nextVerifiedEmailAddress,
@@ -100,6 +117,7 @@ export class RunnerUserEnvService {
           currentUserEnv,
           nextVerifiedEmailAddress,
           previousVerifiedEmailAddress,
+          shouldRestoreVerifiedEmailRoute,
           store: userEnvStore,
           userId,
         });
@@ -144,18 +162,42 @@ export class RunnerUserEnvService {
     currentUserEnv: Record<string, string>;
     nextVerifiedEmailAddress: string | null;
     previousVerifiedEmailAddress: string | null;
+    shouldRestoreVerifiedEmailRoute: boolean;
     store: HostedUserEnvStore;
     userId: string;
   }): Promise<void> {
-    if (input.previousVerifiedEmailAddress !== input.nextVerifiedEmailAddress) {
-      await this.reconcileVerifiedEmailRoute({
-        nextVerifiedEmailAddress: input.previousVerifiedEmailAddress,
-        previousVerifiedEmailAddress: input.nextVerifiedEmailAddress,
-        userId: input.userId,
-      });
+    // The encrypted hosted user env is the source of truth. Restore it before
+    // derived verified-sender routing, and stop if that canonical rollback fails.
+    await this.persistHostedUserEnv(input.store, input.userId, input.currentUserEnv);
+
+    if (!input.shouldRestoreVerifiedEmailRoute) {
+      return;
     }
 
-    await this.persistHostedUserEnv(input.store, input.userId, input.currentUserEnv);
+    await this.restoreVerifiedEmailRouteIfNeeded({
+      nextVerifiedEmailAddress: input.previousVerifiedEmailAddress,
+      previousVerifiedEmailAddress: input.nextVerifiedEmailAddress,
+      userId: input.userId,
+    });
+  }
+
+  private shouldReconcileVerifiedEmailRouteBeforePersist(input: {
+    nextVerifiedEmailAddress: string | null;
+    previousVerifiedEmailAddress: string | null;
+  }): boolean {
+    return Boolean(input.previousVerifiedEmailAddress && !input.nextVerifiedEmailAddress);
+  }
+
+  private async restoreVerifiedEmailRouteIfNeeded(input: {
+    nextVerifiedEmailAddress: string | null;
+    previousVerifiedEmailAddress: string | null;
+    userId: string;
+  }): Promise<void> {
+    if (input.previousVerifiedEmailAddress === input.nextVerifiedEmailAddress) {
+      return;
+    }
+
+    await this.reconcileVerifiedEmailRoute(input);
   }
 
   private async reconcileVerifiedEmailRoute(input: {
@@ -183,4 +225,18 @@ export class RunnerUserEnvService {
       keysById: this.userEnvEncryptionKeysById,
     });
   }
+}
+
+function sameHostedUserEnv(
+  left: Record<string, string>,
+  right: Record<string, string>,
+): boolean {
+  const leftEntries = Object.entries(left);
+  const rightEntries = Object.entries(right);
+
+  if (leftEntries.length !== rightEntries.length) {
+    return false;
+  }
+
+  return leftEntries.every(([key, value]) => right[key] === value);
 }

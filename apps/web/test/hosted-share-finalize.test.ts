@@ -9,7 +9,7 @@ describe("finalizeHostedShareAcceptance", () => {
         acceptedAt?: Date;
         acceptedByMemberId?: string;
         consumedAt: Date;
-        consumedByMemberId: string;
+        consumedByMemberId?: string;
         lastEventId?: string;
       };
       where: {
@@ -19,17 +19,28 @@ describe("finalizeHostedShareAcceptance", () => {
         lastEventId: string;
       };
     }) => Promise<{ count: number }>>(async () => ({ count: 1 }));
+    const findUnique = vi.fn(async () => ({
+      consumedAt: new Date("2026-04-12T00:00:00.000Z"),
+      consumedByMemberId: "member_123",
+      lastEventId: "evt_accepted",
+      senderMemberId: "owner_123",
+    }));
 
     await expect(finalizeHostedShareAcceptance({
       eventId: "evt_accepted",
       memberId: "member_123",
       prisma: {
         hostedShareLink: {
+          findUnique,
           updateMany,
         },
       } as never,
       shareId: "share_123",
-    })).resolves.toBe(true);
+    })).resolves.toEqual({
+      finalized: true,
+      shareFound: true,
+      sharePackOwnerMemberId: "owner_123",
+    });
 
     expect(updateMany).toHaveBeenCalledWith({
       data: {

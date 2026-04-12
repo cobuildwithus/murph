@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 
-import type { Prisma } from "@prisma/client";
+import type { HostedShareLink, Prisma } from "@prisma/client";
 import {
   buildHostedExecutionVaultShareAcceptedDispatch,
   type HostedExecutionDispatchRequest,
@@ -108,14 +108,6 @@ export function findHostedShareLinkByCode(shareCode: string, prisma: HostedShare
   });
 }
 
-export function findHostedShareLinkById(shareId: string, prisma: HostedSharePrismaClient) {
-  return prisma.hostedShareLink.findUnique({
-    where: {
-      id: shareId,
-    },
-  });
-}
-
 export async function requireHostedShareLink(shareCode: string, prisma: HostedSharePrismaClient) {
   const record = await findHostedShareLinkByCode(shareCode, prisma);
 
@@ -132,25 +124,28 @@ export async function requireHostedShareLink(shareCode: string, prisma: HostedSh
 
 export async function releaseHostedShareAcceptance(input: {
   eventId: string;
-  memberId: string;
+  memberId: string | null | undefined;
   prisma: HostedSharePrismaClient;
   shareId: string;
 }): Promise<boolean> {
-  const released = await input.prisma.hostedShareLink.updateMany({
-    where: {
-      acceptedByMemberId: input.memberId,
-      consumedAt: null,
-      id: input.shareId,
-      lastEventId: input.eventId,
-    },
+  return updateHostedShareAcceptanceClaim({
     data: {
       acceptedAt: null,
       acceptedByMemberId: null,
+      consumedByMemberId: null,
       lastEventId: null,
     },
+    eventId: input.eventId,
+    memberId: input.memberId,
+    prisma: input.prisma,
+    shareId: input.shareId,
   });
+}
 
-  return released.count === 1;
+export interface HostedShareAcceptanceFinalizationResult {
+  finalized: boolean;
+  shareFound: boolean;
+  sharePackOwnerMemberId: string | null;
 }
 
 export async function finalizeHostedShareAcceptance(input: {
@@ -158,25 +153,38 @@ export async function finalizeHostedShareAcceptance(input: {
   memberId: string | null;
   prisma: HostedSharePrismaClient;
   shareId: string;
-}): Promise<boolean> {
-  if (!input.memberId) {
-    return false;
+}): Promise<HostedShareAcceptanceFinalizationResult> {
+  const memberId = normalizeOptionalString(input.memberId);
+
+  if (!memberId) {
+    return {
+      finalized: false,
+      shareFound: false,
+      sharePackOwnerMemberId: null,
+    };
   }
 
-  const finalized = await input.prisma.hostedShareLink.updateMany({
-    where: {
-      acceptedByMemberId: input.memberId,
-      consumedAt: null,
-      id: input.shareId,
-      lastEventId: input.eventId,
-    },
+  const finalized = await updateHostedShareAcceptanceClaim({
     data: {
       consumedAt: new Date(),
-      consumedByMemberId: input.memberId,
+      consumedByMemberId: memberId,
     },
+    eventId: input.eventId,
+    memberId,
+    prisma: input.prisma,
+    shareId: input.shareId,
+  });
+  const finalizationState = await readHostedShareAcceptanceFinalizationState({
+    eventId: input.eventId,
+    memberId,
+    prisma: input.prisma,
+    shareId: input.shareId,
   });
 
-  return finalized.count === 1;
+  return {
+    finalized,
+    ...finalizationState,
+  };
 }
 
 export function generateHostedShareCode(): string {
@@ -250,6 +258,96 @@ export function normalizeOptionalString(value: string | null | undefined): strin
 
 export function requireHostedSharePublicBaseUrl(): string {
   return requireHostedOnboardingPublicBaseUrl();
+}
+
+async function updateHostedShareAcceptanceClaim(input: {
+  data: Prisma.HostedShareLinkUpdateManyMutationInput;
+  eventId: string;
+  memberId: string | null | undefined;
+  prisma: HostedSharePrismaClient;
+  shareId: string;
+}): Promise<boolean> {
+  const memberId = normalizeOptionalString(input.memberId);
+
+  if (!memberId) {
+    return false;
+  }
+
+  const updated = await input.prisma.hostedShareLink.updateMany({
+    where: buildHostedShareAcceptanceClaimWhere({
+      eventId: input.eventId,
+      memberId,
+      shareId: input.shareId,
+    }),
+    data: input.data,
+  });
+
+  return updated.count === 1;
+}
+
+async function readHostedShareAcceptanceFinalizationState(input: {
+  eventId: string;
+  memberId: string | null | undefined;
+  prisma: HostedSharePrismaClient;
+  shareId: string;
+}): Promise<Omit<HostedShareAcceptanceFinalizationResult, "finalized">> {
+  const record = await input.prisma.hostedShareLink.findUnique({
+    select: {
+      consumedAt: true,
+      consumedByMemberId: true,
+      lastEventId: true,
+      senderMemberId: true,
+    },
+    where: {
+      id: input.shareId,
+    },
+  });
+
+  if (!record) {
+    return {
+      shareFound: false,
+      sharePackOwnerMemberId: null,
+    };
+  }
+
+  return {
+    shareFound: true,
+    sharePackOwnerMemberId: isHostedShareConsumedForAcceptanceEvent({
+      eventId: input.eventId,
+      memberId: input.memberId,
+      record,
+    })
+      ? record.senderMemberId
+      : null,
+  };
+}
+
+function buildHostedShareAcceptanceClaimWhere(input: {
+  eventId: string;
+  memberId: string;
+  shareId: string;
+}): Prisma.HostedShareLinkWhereInput {
+  return {
+    acceptedByMemberId: input.memberId,
+    consumedAt: null,
+    id: input.shareId,
+    lastEventId: input.eventId,
+  } satisfies Prisma.HostedShareLinkWhereInput;
+}
+
+function isHostedShareConsumedForAcceptanceEvent(input: {
+  eventId: string;
+  memberId: string | null | undefined;
+  record: Pick<HostedShareLink, "consumedAt" | "consumedByMemberId" | "lastEventId">;
+}): boolean {
+  const memberId = normalizeOptionalString(input.memberId);
+
+  return Boolean(
+    memberId
+    && input.record.consumedAt
+    && input.record.consumedByMemberId === memberId
+    && input.record.lastEventId === input.eventId,
+  );
 }
 
 function readHostedSharePreviewCount(value: unknown, field: string): number {
