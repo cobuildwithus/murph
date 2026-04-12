@@ -36,6 +36,7 @@ function buildLinqSideEffectRecord(
       chatId: "chat-1",
       homeRecipientPhone: null,
       inviteId: null,
+      memberId: null,
       replyToMessageId: null,
       template: "daily_quota",
     },
@@ -71,5 +72,34 @@ describe("readHostedWebhookReceiptState", () => {
         messageId: "message-1",
       })],
     })).toThrow("Hosted webhook Linq message side effect result is invalid.");
+  });
+
+  it("reads member-backed Linq redirect payloads while keeping legacy phone optional", () => {
+    const redirectState = readHostedWebhookReceiptState({
+      receipt: buildReceiptRecord(),
+      sideEffects: [{
+        ...buildLinqSideEffectRecord(null),
+        payloadJson: {
+          chatId: "chat-redirect",
+          memberId: "member_123",
+          replyToMessageId: "msg_123",
+          template: "conversation_home_redirect",
+        },
+      }],
+    });
+    const [redirectSideEffect] = redirectState.sideEffects;
+
+    if (!redirectSideEffect || redirectSideEffect.kind !== "linq_message_send") {
+      throw new Error("Expected a Linq redirect side effect.");
+    }
+
+    expect(redirectSideEffect.payload).toEqual({
+      chatId: "chat-redirect",
+      homeRecipientPhone: null,
+      inviteId: null,
+      memberId: "member_123",
+      replyToMessageId: "msg_123",
+      template: "conversation_home_redirect",
+    });
   });
 });

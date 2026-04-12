@@ -2301,7 +2301,9 @@ function buildLinqMessageSideEffect(input: {
     lastError: input.lastError ?? null,
     payload: {
       chatId: input.chatId ?? "chat_123",
+      homeRecipientPhone: null,
       inviteId: input.inviteId,
+      memberId: null,
       replyToMessageId: input.replyToMessageId ?? "msg_123",
       template: input.template ?? "invite_signup",
     },
@@ -2975,6 +2977,7 @@ function normalizeStoredWebhookSideEffectRecord(value: unknown): Record<string, 
     ...effect,
     dispatchPayloadJson: effect.kind === "hosted_execution_dispatch" ? effect.payloadJson ?? null : null,
     linqChatId: effect.kind === "linq_message_send" && typeof payload?.chatId === "string" ? payload.chatId : null,
+    linqMemberId: effect.kind === "linq_message_send" && typeof payload?.memberId === "string" ? payload.memberId : null,
     linqInviteId: effect.kind === "linq_message_send" && typeof payload?.inviteId === "string" ? payload.inviteId : null,
     linqReplyToMessageId:
       effect.kind === "linq_message_send" && typeof payload?.replyToMessageId === "string"

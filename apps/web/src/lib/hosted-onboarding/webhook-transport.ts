@@ -3,6 +3,7 @@ import type { Prisma, PrismaClient } from "@prisma/client";
 import { enqueueHostedExecutionOutboxPayload } from "../hosted-execution/outbox";
 import { hostedOnboardingError } from "./errors";
 import { sanitizeHostedOnboardingLogString } from "./http";
+import { readHostedMemberRoutingState } from "./hosted-member-routing-store";
 import { readHostedMemberSnapshot } from "./hosted-member-store";
 import { buildHostedInviteUrl } from "./invite-service";
 import {
@@ -126,7 +127,9 @@ async function buildHostedLinqSideEffectMessage(
   }
 
   if (effect.payload.template === "conversation_home_redirect") {
-    if (!effect.payload.homeRecipientPhone) {
+    const homeRecipientPhone = await resolveHostedHomeRecipientPhone(effect, prisma);
+
+    if (!homeRecipientPhone) {
       throw hostedOnboardingError({
         code: "LINQ_HOME_PHONE_REQUIRED",
         message: `Hosted webhook side effect ${effect.effectId} requires a home recipient phone.`,
@@ -136,7 +139,7 @@ async function buildHostedLinqSideEffectMessage(
     }
 
     return buildHostedLinqConversationHomeRedirectReply({
-      homeRecipientPhone: effect.payload.homeRecipientPhone,
+      homeRecipientPhone,
     });
   }
 
@@ -182,6 +185,24 @@ async function buildHostedLinqSideEffectMessage(
     activeSubscription: effect.payload.template === "invite_signin",
     joinUrl: buildHostedInviteUrl(invite.inviteCode),
   });
+}
+
+async function resolveHostedHomeRecipientPhone(
+  effect: Extract<HostedWebhookSideEffect, { kind: "linq_message_send" }>,
+  prisma: HostedWebhookReceiptPersistenceClient,
+): Promise<string | null> {
+  if (effect.payload.memberId) {
+    const routing = await readHostedMemberRoutingState({
+      memberId: effect.payload.memberId,
+      prisma,
+    });
+
+    if (routing?.linqRecipientPhone) {
+      return routing.linqRecipientPhone;
+    }
+  }
+
+  return effect.payload.homeRecipientPhone;
 }
 
 async function markHostedInviteSentBestEffort(

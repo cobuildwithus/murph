@@ -56,6 +56,7 @@ export type HostedWebhookLinqMessageSideEffect = {
     chatId: string;
     homeRecipientPhone: string | null;
     inviteId: string | null;
+    memberId: string | null;
     replyToMessageId: string | null;
     template:
       | "conversation_home_redirect"
@@ -182,6 +183,7 @@ export function createHostedWebhookLinqMessageSideEffect(input: {
   chatId: string;
   homeRecipientPhone?: string | null;
   inviteId: string | null;
+  memberId?: string | null;
   replyToMessageId?: string | null;
   sourceEventId: string;
   template: HostedWebhookLinqMessageSideEffect["payload"]["template"];
@@ -194,8 +196,9 @@ export function createHostedWebhookLinqMessageSideEffect(input: {
     lastError: null,
     payload: {
       chatId: input.chatId,
-      homeRecipientPhone: input.homeRecipientPhone ?? null,
+      homeRecipientPhone: input.memberId ? null : input.homeRecipientPhone ?? null,
       inviteId: input.inviteId,
+      memberId: input.memberId ?? null,
       replyToMessageId: input.replyToMessageId ?? null,
       template: input.template,
     },

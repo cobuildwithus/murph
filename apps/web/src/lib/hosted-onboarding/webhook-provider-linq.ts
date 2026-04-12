@@ -119,7 +119,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
     if (routeDecision.kind === "redirect_to_home") {
       return buildConversationHomeRedirectResponse({
         chatId: summary.chatId,
-        homeRecipientPhone: routeDecision.homeRecipientPhone,
+        memberId: existingMember.id,
         messageId: summary.messageId,
         sourceEventId: input.event.event_id,
       });
@@ -272,7 +272,7 @@ function buildSignupLinkResponse(input: {
 
 function buildConversationHomeRedirectResponse(input: {
   chatId: string;
-  homeRecipientPhone: string;
+  memberId: string;
   messageId: string;
   sourceEventId: string;
 }): HostedWebhookPlan<HostedOnboardingLinqWebhookResponse> {
@@ -280,8 +280,8 @@ function buildConversationHomeRedirectResponse(input: {
     desiredSideEffects: [
       createHostedWebhookLinqMessageSideEffect({
         chatId: input.chatId,
-        homeRecipientPhone: input.homeRecipientPhone,
         inviteId: null,
+        memberId: input.memberId,
         replyToMessageId: input.messageId,
         sourceEventId: input.sourceEventId,
         template: "conversation_home_redirect",
