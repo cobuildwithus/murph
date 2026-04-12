@@ -8,6 +8,7 @@ import {
 } from "../hosted-email.js";
 import {
   createHostedUserEnvStore,
+  type HostedUserEnvStore,
   type R2BucketLike,
 } from "../bundle-store.js";
 import {
@@ -50,6 +51,7 @@ export class RunnerUserEnvService {
     });
     const previousVerifiedEmailAddress = readHostedVerifiedEmailFromEnv(currentUserEnv)?.address ?? null;
     const nextVerifiedEmailAddress = readHostedVerifiedEmailFromEnv(nextUserEnv)?.address ?? null;
+    const configuredUserEnvKeys = listHostedUserEnvKeys(nextUserEnv);
 
     await ensureHostedEmailVerifiedSenderRouteAvailable({
       bucket: this.bucket,
@@ -62,49 +64,115 @@ export class RunnerUserEnvService {
     });
 
     const userEnvStore = this.createUserEnvStore();
+    const shouldDeactivateVerifiedEmailRoute = Boolean(
+      previousVerifiedEmailAddress && !nextVerifiedEmailAddress,
+    );
+    let mutationAttempted = false;
 
-    if (Object.keys(nextUserEnv).length === 0) {
-      await userEnvStore.clearUserEnv(userId);
-      await reconcileHostedEmailVerifiedSenderRoute({
-        bucket: this.bucket,
-        config: this.hostedEmailConfig,
-        key: this.emailRouteEncryptionKey,
-        keyId: this.emailRouteEncryptionKeyId,
-        keysById: this.emailRouteEncryptionKeysById,
-        nextVerifiedEmailAddress,
-        previousVerifiedEmailAddress,
-        userId,
-      });
-      return {
-        configuredUserEnvKeys: [],
-        userId,
-      };
+    try {
+      if (shouldDeactivateVerifiedEmailRoute) {
+        mutationAttempted = true;
+        await this.reconcileVerifiedEmailRoute({
+          nextVerifiedEmailAddress,
+          previousVerifiedEmailAddress,
+          userId,
+        });
+      }
+
+      mutationAttempted = true;
+      await this.persistHostedUserEnv(userEnvStore, userId, nextUserEnv);
+
+      if (!shouldDeactivateVerifiedEmailRoute) {
+        mutationAttempted = true;
+        await this.reconcileVerifiedEmailRoute({
+          nextVerifiedEmailAddress,
+          previousVerifiedEmailAddress,
+          userId,
+        });
+      }
+    } catch (error) {
+      if (!mutationAttempted) {
+        throw error;
+      }
+
+      try {
+        await this.restoreHostedUserEnvState({
+          currentUserEnv,
+          nextVerifiedEmailAddress,
+          previousVerifiedEmailAddress,
+          store: userEnvStore,
+          userId,
+        });
+      } catch (rollbackError) {
+        throw new AggregateError(
+          [error, rollbackError],
+          `Hosted user env update failed and rollback also failed for ${userId}.`,
+        );
+      }
+
+      throw error;
+    }
+
+    return {
+      configuredUserEnvKeys,
+      userId,
+    };
+  }
+
+  private async persistHostedUserEnv(
+    store: HostedUserEnvStore,
+    userId: string,
+    env: Record<string, string>,
+  ): Promise<void> {
+    if (Object.keys(env).length === 0) {
+      await store.clearUserEnv(userId);
+      return;
     }
 
     const payload = encodeHostedUserEnvPayload({
-      env: nextUserEnv,
+      env,
     });
 
     if (!payload) {
       throw new Error("Expected a hosted user env payload for a non-empty hosted user env.");
     }
 
-    await userEnvStore.writeUserEnv(userId, payload);
+    await store.writeUserEnv(userId, payload);
+  }
+
+  private async restoreHostedUserEnvState(input: {
+    currentUserEnv: Record<string, string>;
+    nextVerifiedEmailAddress: string | null;
+    previousVerifiedEmailAddress: string | null;
+    store: HostedUserEnvStore;
+    userId: string;
+  }): Promise<void> {
+    if (input.previousVerifiedEmailAddress !== input.nextVerifiedEmailAddress) {
+      await this.reconcileVerifiedEmailRoute({
+        nextVerifiedEmailAddress: input.previousVerifiedEmailAddress,
+        previousVerifiedEmailAddress: input.nextVerifiedEmailAddress,
+        userId: input.userId,
+      });
+    }
+
+    await this.persistHostedUserEnv(input.store, input.userId, input.currentUserEnv);
+  }
+
+  private async reconcileVerifiedEmailRoute(input: {
+    nextVerifiedEmailAddress: string | null;
+    previousVerifiedEmailAddress: string | null;
+    userId: string;
+  }): Promise<void> {
     await reconcileHostedEmailVerifiedSenderRoute({
       bucket: this.bucket,
       config: this.hostedEmailConfig,
       key: this.emailRouteEncryptionKey,
       keyId: this.emailRouteEncryptionKeyId,
       keysById: this.emailRouteEncryptionKeysById,
-      nextVerifiedEmailAddress,
-      previousVerifiedEmailAddress,
-      userId,
+      nextVerifiedEmailAddress: input.nextVerifiedEmailAddress,
+      previousVerifiedEmailAddress: input.previousVerifiedEmailAddress,
+      userId: input.userId,
     });
-
-    return {
-      configuredUserEnvKeys: listHostedUserEnvKeys(nextUserEnv),
-      userId,
-    };
   }
 
   private createUserEnvStore() {
