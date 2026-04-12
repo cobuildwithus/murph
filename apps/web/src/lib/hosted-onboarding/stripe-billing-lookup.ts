@@ -1,5 +1,3 @@
-import { type Prisma } from "@prisma/client";
-
 import { coerceStripeObjectId } from "./billing";
 import {
   lookupHostedMemberStripeBillingRefByStripeCustomerId,
@@ -11,12 +9,12 @@ import {
   readHostedMemberSnapshot,
 } from "./hosted-member-store";
 import { requireHostedStripeApi } from "./runtime";
+import { type HostedOnboardingPrismaClient } from "./shared";
 
 /**
  * Owns Stripe-object-to-member lookup and customer-context reads so billing
  * policy can stay focused on freshness rules and entitlement transitions.
  */
-type HostedOnboardingPrismaClient = Prisma.TransactionClient;
 
 export async function findMemberForStripeObject(input: {
   clientReferenceId: string | null;
