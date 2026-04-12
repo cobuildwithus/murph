@@ -1,6 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite'
 
-export const GATEWAY_STORE_SQLITE_SCHEMA_VERSION = 4
+export const GATEWAY_STORE_SQLITE_SCHEMA_VERSION = 1
 
 export const SNAPSHOT_GENERATED_AT_META_KEY = 'snapshot.generatedAt'
 

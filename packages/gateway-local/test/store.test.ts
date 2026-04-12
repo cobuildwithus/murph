@@ -15,6 +15,7 @@ import {
   gatewayConversationRouteFromBinding,
   resolveGatewayConversationRouteKey,
 } from "@murphai/gateway-core";
+import { openSqliteRuntimeDatabase, resolveGatewayRuntimePaths } from "@murphai/runtime-state/node";
 import { afterEach, test } from "vitest";
 
 import { LocalGatewayProjectionStore } from "../src/store.js";
@@ -192,6 +193,21 @@ test("source-sync stores normalized capture rows and attachments", () => {
   } finally {
     database.close();
   }
+});
+
+test("gateway local projection store rejects pre-cutover sqlite user_version values", () => {
+  const tempRoot = mkdtempSync(path.join(tmpdir(), "murph-gateway-local-version-"));
+  tempRoots.push(tempRoot);
+
+  const databasePath = resolveGatewayRuntimePaths(tempRoot).gatewayDbPath;
+  const database = openSqliteRuntimeDatabase(databasePath);
+  database.exec("PRAGMA user_version = 4;");
+  database.close();
+
+  assert.throws(
+    () => new LocalGatewayProjectionStore(tempRoot),
+    /gateway local projection database schema version 4 is newer than supported version 1/u,
+  );
 });
 
 test("snapshot rebuild derives conversations, merges self-captures into sent outbox rows, and persists metadata", () => {

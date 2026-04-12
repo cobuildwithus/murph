@@ -236,7 +236,7 @@ test('resolveAssistantCliSurfaceBootstrapContext reuses a persisted contract pay
   assert.equal(readAssistantCliLlmsManifest.mock.calls.length, 0)
 })
 
-test('resolveAssistantCliSurfaceBootstrapContext falls back to a persisted summary and writes newly generated full manifests', async () => {
+test('resolveAssistantCliSurfaceBootstrapContext ignores persisted summary-only docs and rewrites them with a generated contract', async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext(
     'murph-assistant-cli-surface-contract-generated-',
   )
@@ -286,15 +286,8 @@ test('resolveAssistantCliSurfaceBootstrapContext falls back to a persisted summa
     resolveAssistantCliSurfaceBootstrapContext,
   } = await import('../src/assistant/cli-surface-bootstrap.ts')
 
-  const summaryContract = await resolveAssistantCliSurfaceBootstrapContext({
-    sessionId: 'session-summary',
-    vault: vaultRoot,
-  })
-  assert.equal(summaryContract, 'Persisted summary contract')
-  assert.equal(readAssistantCliLlmsManifest.mock.calls.length, 0)
-
   const generatedContract = await resolveAssistantCliSurfaceBootstrapContext({
-    sessionId: 'session-generated',
+    sessionId: 'session-summary',
     vault: vaultRoot,
   })
 
@@ -312,13 +305,7 @@ test('resolveAssistantCliSurfaceBootstrapContext falls back to a persisted summa
     ],
   ])
 
-  const generatedDocPath = resolveAssistantStateDocumentPath(
-    {
-      stateDirectory,
-    },
-    'sessions/session-generated/cli-surface-bootstrap',
-  )
-  const persisted = JSON.parse(await readFile(generatedDocPath, 'utf8')) as {
+  const persisted = JSON.parse(await readFile(summaryDocPath, 'utf8')) as {
     contract: string
     generatedAt: string
     schemaVersion: string

@@ -142,7 +142,7 @@ interface StoredWebhookTraceRow {
   processing_expires_at: string | null;
 }
 
-const DEVICE_SYNC_STORE_SQLITE_SCHEMA_VERSION = 2;
+const DEVICE_SYNC_STORE_SQLITE_SCHEMA_VERSION = 1;
 const MINIMIZED_WEBHOOK_TRACE_PAYLOAD_JSON = stringifyJson({});
 function mapAccountRow(row: StoredAccountRow | undefined): StoredDeviceSyncAccount | null {
   if (!row) {
