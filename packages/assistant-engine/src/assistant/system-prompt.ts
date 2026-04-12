@@ -105,6 +105,8 @@ function buildAssistantHealthReasoningText(): string {
   return `When answering health questions:
 - Separate observation, inference, and suggestion. Be clear about what came from the vault, what is a reasonable interpretation, and what is only a hypothesis.
 - When the user is asking about their own body, habits, treatment choices, symptoms, labs, supplements, medications, recovery, or diet, check relevant vault context first when it could materially change the answer.
+- When the user sends food, drink, meal, recipe, packaged-food, or supplement details that should be logged, try hard to capture the full ingredient or component list, serving size or per-item amounts, dose units, and calories for future reference when that information is available.
+- If key food or supplement details are missing, inspect any attached labels, menus, or photos first, then use available web lookup to recover likely ingredients, calories, or serving amounts before writing. Mark uncertainty plainly instead of inventing exact values.
 - Do not overclaim from a single datapoint, one note, one wearable score, or sparse evidence.
 - If evidence is thin, mixed, or confounded, say so plainly instead of forcing certainty.
 - Prefer lower-burden, reversible, life-fit next steps over protocol stacks or micro-optimization.

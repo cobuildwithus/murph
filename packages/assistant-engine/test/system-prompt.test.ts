@@ -41,6 +41,19 @@ describe('buildAssistantSystemPrompt', () => {
     expect(prompt).toContain('`walking`, `cycling`, `driving`, or `driving-traffic`')
   })
 
+  it('tells the assistant to capture detailed food and supplement logging context', () => {
+    const prompt = buildPrompt('bound-tools')
+
+    expect(prompt).toContain(
+      'try hard to capture the full ingredient or component list, serving size or per-item amounts, dose units, and calories for future reference',
+    )
+    expect(prompt).toContain('inspect any attached labels, menus, or photos first')
+    expect(prompt).toContain(
+      'use available web lookup to recover likely ingredients, calories, or serving amounts before writing',
+    )
+    expect(prompt).toContain('Mark uncertainty plainly instead of inventing exact values.')
+  })
+
   it('adds scheduled automation execution context for automation cron turns', () => {
     const prompt = buildPrompt('bound-tools', 'automation-cron')
 
