@@ -37,24 +37,23 @@ export {
 } from "./hosted-env-policy.ts";
 
 export function buildHostedRunnerJobRuntimeConfig(input: {
+  configSource?: Readonly<Record<string, string | undefined>>;
   forwardedEnv: Readonly<Record<string, string>>;
   resolvedConfig?: HostedAssistantRuntimeResolvedConfig;
-  runtimeConfigSource?: Readonly<Record<string, string | undefined>>;
-  userEnvSource?: Readonly<Record<string, string | undefined>>;
   userEnv: Readonly<Record<string, string>>;
 }): HostedAssistantRuntimeConfig {
-  const runtimeConfigSource = input.runtimeConfigSource ?? input.forwardedEnv;
+  const configSource = input.configSource ?? input.forwardedEnv;
 
   return buildHostedRunnerJobRuntime({
     commitTimeoutMs: Number.parseInt(
-      runtimeConfigSource.HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS ?? "",
+      configSource.HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS ?? "",
       10,
     ),
     forwardedEnv: input.forwardedEnv,
     resolvedConfig: input.resolvedConfig,
     userEnv: filterHostedRunnerUserEnv(
       input.userEnv,
-      input.userEnvSource ?? runtimeConfigSource,
+      configSource,
     ),
   });
 }

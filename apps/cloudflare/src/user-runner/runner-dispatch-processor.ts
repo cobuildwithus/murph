@@ -468,9 +468,8 @@ export class RunnerDispatchProcessor {
         ...(resume ? { resume } : {}),
       },
       runtime: buildHostedRunnerJobRuntimeConfig({
+        configSource: this.dependencies.readRunnerRuntimeConfigSource(),
         forwardedEnv,
-        runtimeConfigSource: this.dependencies.readRunnerRuntimeConfigSource(),
-        userEnvSource: this.dependencies.readRunnerRuntimeConfigSource(),
         userEnv,
       }),
     };

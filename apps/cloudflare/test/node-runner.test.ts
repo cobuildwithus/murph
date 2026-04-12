@@ -2620,6 +2620,92 @@ describe("runHostedExecutionJob", () => {
     }
   });
 
+  it("trusts the worker-supplied runtime envelope instead of rehydrating ambient runner env", () => {
+    const previousRunnerEnvProfiles = process.env.HOSTED_EXECUTION_RUNNER_ENV_PROFILES;
+    const previousOpenAiApiKey = process.env.OPENAI_API_KEY;
+    const previousTelegramBotToken = process.env.TELEGRAM_BOT_TOKEN;
+    process.env.HOSTED_EXECUTION_RUNNER_ENV_PROFILES = "telegram";
+    process.env.OPENAI_API_KEY = "ambient-openai-key";
+    process.env.TELEGRAM_BOT_TOKEN = "ambient-telegram-token";
+
+    try {
+      const runtime = buildHostedExecutionJobRuntimeForTests({
+        forwardedEnv: {
+          HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "telegram",
+          OPENAI_API_KEY: "job-openai-key",
+        },
+        resolvedConfig: {
+          channelCapabilities: {
+            emailSendReady: false,
+            telegramBotConfigured: false,
+          },
+          deviceSync: null,
+        },
+      });
+
+      expect(runtime.forwardedEnv).toEqual({
+        OPENAI_API_KEY: "job-openai-key",
+      });
+      expect(runtime.resolvedConfig).toEqual({
+        channelCapabilities: {
+          emailSendReady: false,
+          telegramBotConfigured: false,
+        },
+        deviceSync: null,
+      });
+    } finally {
+      restoreEnvVar("HOSTED_EXECUTION_RUNNER_ENV_PROFILES", previousRunnerEnvProfiles);
+      restoreEnvVar("OPENAI_API_KEY", previousOpenAiApiKey);
+      restoreEnvVar("TELEGRAM_BOT_TOKEN", previousTelegramBotToken);
+    }
+  });
+
+  it("falls back to ambient runner env only when the runtime envelope omits forwarded env entirely", () => {
+    const previousNodeEnv = process.env.NODE_ENV;
+    const previousOpenAiApiKey = process.env.OPENAI_API_KEY;
+    process.env.NODE_ENV = "production";
+    process.env.OPENAI_API_KEY = "ambient-openai-key";
+
+    try {
+      const runtime = buildHostedExecutionJobRuntimeForTests({});
+
+      expect(runtime.forwardedEnv).toEqual({
+        HOSTED_EMAIL_INGRESS_READY: "false",
+        HOSTED_EMAIL_SEND_READY: "false",
+        NODE_ENV: "production",
+        OPENAI_API_KEY: "ambient-openai-key",
+      });
+    } finally {
+      restoreEnvVar("NODE_ENV", previousNodeEnv);
+      restoreEnvVar("OPENAI_API_KEY", previousOpenAiApiKey);
+    }
+  });
+
+  it("treats an explicitly empty forwarded env envelope as authoritative", () => {
+    const previousNodeEnv = process.env.NODE_ENV;
+    const previousOpenAiApiKey = process.env.OPENAI_API_KEY;
+    process.env.NODE_ENV = "production";
+    process.env.OPENAI_API_KEY = "ambient-openai-key";
+
+    try {
+      const runtime = buildHostedExecutionJobRuntimeForTests({
+        forwardedEnv: {},
+      });
+
+      expect(runtime.forwardedEnv).toEqual({});
+      expect(runtime.resolvedConfig).toEqual({
+        channelCapabilities: {
+          emailSendReady: false,
+          telegramBotConfigured: false,
+        },
+        deviceSync: null,
+      });
+    } finally {
+      restoreEnvVar("NODE_ENV", previousNodeEnv);
+      restoreEnvVar("OPENAI_API_KEY", previousOpenAiApiKey);
+    }
+  });
+
   it("derives explicit runtime capabilities from the forwarded runner env", () => {
     const runtime = buildHostedExecutionJobRuntimeForTests({
       forwardedEnv: {

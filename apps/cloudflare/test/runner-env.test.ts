@@ -214,17 +214,14 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
     });
   });
 
-  it("builds per-job runtime config from forwarded env instead of ambient process env", () => {
+  it("uses the shared config source for both timeout and allowed user env filtering", () => {
     expect(buildHostedRunnerJobRuntimeConfig({
-      forwardedEnv: {
-        OPENAI_API_KEY: "sk-worker",
-      },
-      runtimeConfigSource: {
+      configSource: {
         HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS: "CUSTOM_API_KEY",
         HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: "45000",
       },
-      userEnvSource: {
-        HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS: "CUSTOM_API_KEY",
+      forwardedEnv: {
+        OPENAI_API_KEY: "sk-worker",
       },
       userEnv: {
         CUSTOM_API_KEY: "custom-user",
@@ -256,8 +253,7 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
       forwardedEnv: {
         TELEGRAM_BOT_TOKEN: "telegram-token",
       },
-      runtimeConfigSource: {},
-      userEnvSource: {},
+      configSource: {},
       resolvedConfig: {
         channelCapabilities: {
           emailSendReady: false,
