@@ -691,6 +691,93 @@ describe("HostedGatewayProjectionStore", () => {
 
     expect(writes).toEqual([]);
   });
+
+  it("does not rewrite durable state when an equivalent snapshot is replayed with reordered keys", async () => {
+    const writes: string[] = [];
+    const { store } = createStore({
+      onPut(key) {
+        writes.push(key);
+      },
+    });
+    const baseSnapshot = gatewayProjectionSnapshotSchema.parse({
+      schema: "murph.gateway-projection-snapshot.v1",
+      generatedAt: "2026-04-07T00:00:00.000Z",
+      conversations: [{
+        schema: "murph.gateway-conversation.v1",
+        sessionKey: EMAIL_THREAD_SESSION_KEY,
+        title: "Thread",
+        titleSource: "thread-title",
+        lastMessagePreview: "hello",
+        lastActivityAt: "2026-04-07T00:00:00.000Z",
+        messageCount: 1,
+        canSend: true,
+        route: {
+          channel: "email",
+          identityId: "identity-1",
+          participantId: "participant-1",
+          threadId: "thread-1",
+          directness: "direct",
+          reply: {
+            kind: "thread",
+            target: "thread-1",
+          },
+        },
+      }],
+      messages: [{
+        schema: "murph.gateway-message.v1",
+        messageId: "message-1",
+        sessionKey: EMAIL_THREAD_SESSION_KEY,
+        direction: "inbound",
+        createdAt: "2026-04-07T00:00:00.000Z",
+        actorDisplayName: "Alex",
+        text: "hello",
+        attachments: [],
+      }],
+      permissions: [],
+    });
+
+    await store.applySnapshot(baseSnapshot);
+    writes.length = 0;
+
+    await store.applySnapshot({
+      schema: "murph.gateway-projection-snapshot.v1",
+      generatedAt: "2026-04-07T00:00:00.000Z",
+      conversations: [{
+        schema: "murph.gateway-conversation.v1",
+        sessionKey: EMAIL_THREAD_SESSION_KEY,
+        titleSource: "thread-title",
+        title: "Thread",
+        lastActivityAt: "2026-04-07T00:00:00.000Z",
+        lastMessagePreview: "hello",
+        messageCount: 1,
+        canSend: true,
+        route: {
+          threadId: "thread-1",
+          participantId: "participant-1",
+          channel: "email",
+          directness: "direct",
+          identityId: "identity-1",
+          reply: {
+            target: "thread-1",
+            kind: "thread",
+          },
+        },
+      }],
+      messages: [{
+        schema: "murph.gateway-message.v1",
+        messageId: "message-1",
+        sessionKey: EMAIL_THREAD_SESSION_KEY,
+        direction: "inbound",
+        createdAt: "2026-04-07T00:00:00.000Z",
+        actorDisplayName: "Alex",
+        text: "hello",
+        attachments: [],
+      }],
+      permissions: [],
+    });
+
+    expect(writes).toEqual([]);
+  });
 });
 
 describe("gateway permission overrides", () => {

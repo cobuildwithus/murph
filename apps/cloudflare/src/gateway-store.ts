@@ -42,6 +42,7 @@ import {
   upsertGatewayPermissionOverride,
   type GatewayPermissionResolutionOverride,
 } from "./gateway-store-permissions.js";
+import { sameStructuredJsonValue } from "./structured-json.js";
 import type { DurableObjectStateLike } from "./user-runner/types.js";
 
 const GATEWAY_STATE_SCHEMA = "murph.hosted-gateway-state.v1";
@@ -109,7 +110,7 @@ export class HostedGatewayProjectionStore {
         mergeGatewayPermissionOverrides(parsed, nextOverrides) ?? parsed,
         DEFAULT_GATEWAY_EVENT_RETENTION,
       );
-      const baseSnapshotChanged = !sameStructuredValue(current.baseSnapshot, parsed);
+      const baseSnapshotChanged = !sameStructuredJsonValue(current.baseSnapshot, parsed);
       const overridesChanged = !sameGatewayPermissionResolutionOverrides(
         current.permissionOverrides,
         nextOverrides,
@@ -361,8 +362,4 @@ function createEmptyGatewaySnapshot(): GatewayProjectionSnapshot {
     messages: [],
     permissions: [],
   };
-}
-
-function sameStructuredValue(left: unknown, right: unknown): boolean {
-  return JSON.stringify(left) === JSON.stringify(right);
 }

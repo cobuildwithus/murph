@@ -29,6 +29,7 @@ import {
   hostedExecutionJournalObjectKey,
 } from "./storage-paths.js";
 import { readEncryptedR2Json, writeEncryptedR2Json } from "./crypto.js";
+import { sameStructuredJsonValue } from "./structured-json.js";
 
 export interface HostedExecutionRunnerCommitRequest {
   bundleRef: HostedExecutionBundleRef | null;
@@ -199,32 +200,41 @@ export async function persistHostedExecutionFinalBundles(input: {
     );
   }
 
-  const bundleStore = createHostedBundleStore({
-    bucket: input.bucket,
-    key: input.key,
-    keyId: input.keyId,
-    keysById: input.keysById,
-  });
-  const nextBundleRef = await writeHostedBase64BundleIfChanged({
-    bundleStore,
-    currentRef: existing.bundleRef,
-    kind: "vault",
-    value: input.payload.bundle,
-  });
+  const expectedBundleRef = resolveExpectedCommittedBundleRef(
+    existing.bundleRef,
+    input.payload.bundle,
+  );
+  const expectedGatewayProjectionSnapshot =
+    input.payload.gatewayProjectionSnapshot ?? existing.gatewayProjectionSnapshot ?? null;
 
-  if (
-    sameHostedBundlePayloadRef(nextBundleRef, existing.bundleRef)
-    && existing.finalizedAt !== null
-  ) {
+  if (existing.finalizedAt !== null) {
+    assertEquivalentDuplicateFinalize(existing, {
+      eventId: input.eventId,
+      expectedBundleRef,
+      expectedGatewayProjectionSnapshot,
+    });
     return existing;
   }
+
+  const nextBundleRef = sameHostedBundlePayloadRef(expectedBundleRef, existing.bundleRef)
+    ? existing.bundleRef
+    : await writeHostedBase64BundleIfChanged({
+        bundleStore: createHostedBundleStore({
+          bucket: input.bucket,
+          key: input.key,
+          keyId: input.keyId,
+          keysById: input.keysById,
+        }),
+        currentRef: existing.bundleRef,
+        kind: "vault",
+        value: input.payload.bundle,
+      });
 
   const finalizedResult: HostedExecutionCommittedResult = {
     ...existing,
     bundleRef: nextBundleRef,
-    finalizedAt: existing.finalizedAt ?? new Date().toISOString(),
-    gatewayProjectionSnapshot:
-      input.payload.gatewayProjectionSnapshot ?? existing.gatewayProjectionSnapshot,
+    finalizedAt: new Date().toISOString(),
+    gatewayProjectionSnapshot: expectedGatewayProjectionSnapshot,
   };
   await journalStore.writeCommittedResult(input.userId, input.eventId, finalizedResult);
   return finalizedResult;
@@ -276,6 +286,32 @@ function requireCommittedResultString(value: unknown, label: string): string {
   return value;
 }
 
+function assertEquivalentDuplicateFinalize(
+  existing: HostedExecutionCommittedResult,
+  input: {
+    eventId: string;
+    expectedBundleRef: HostedExecutionBundleRefIdentity | null;
+    expectedGatewayProjectionSnapshot: GatewayProjectionSnapshot | null;
+  },
+): void {
+  if (!sameHostedBundlePayloadRef(existing.bundleRef, input.expectedBundleRef)) {
+    throw new Error(
+      `Hosted execution finalize ${input.eventId} vault bundle ref does not match the existing durable finalize.`,
+    );
+  }
+
+  if (
+    !sameStructuredJsonValue(
+      existing.gatewayProjectionSnapshot ?? null,
+      input.expectedGatewayProjectionSnapshot,
+    )
+  ) {
+    throw new Error(
+      `Hosted execution finalize ${input.eventId} gateway projection snapshot does not match the existing durable finalize.`,
+    );
+  }
+}
+
 function assertEquivalentDuplicateCommit(
   existing: HostedExecutionCommittedResult,
   input: {
@@ -291,7 +327,7 @@ function assertEquivalentDuplicateCommit(
     );
   }
 
-  if (!sameStructuredValue(existing.result, input.payload.result)) {
+  if (!sameStructuredJsonValue(existing.result, input.payload.result)) {
     throw new Error(
       `Hosted execution commit ${input.eventId} result does not match the existing durable commit.`,
     );
@@ -301,7 +337,7 @@ function assertEquivalentDuplicateCommit(
     input.payload.assistantDeliveryEffects,
     "Hosted execution commit payload.assistantDeliveryEffects",
   );
-  if (!sameStructuredValue(existing.assistantDeliveryEffects, expectedAssistantDeliveryEffects)) {
+  if (!sameStructuredJsonValue(existing.assistantDeliveryEffects, expectedAssistantDeliveryEffects)) {
     throw new Error(
       `Hosted execution commit ${input.eventId} assistant deliveries do not match the existing durable commit.`,
     );
@@ -309,7 +345,7 @@ function assertEquivalentDuplicateCommit(
 
   const expectedGatewayProjectionSnapshot = input.payload.gatewayProjectionSnapshot ?? null;
   if (
-    !sameStructuredValue(
+    !sameStructuredJsonValue(
       existing.gatewayProjectionSnapshot ?? null,
       expectedGatewayProjectionSnapshot,
     )
@@ -346,26 +382,6 @@ function resolveExpectedCommittedBundleRef(
   return sameHostedBundlePayloadRef(currentRef, decoded.ref)
     ? currentRef
     : decoded.ref;
-}
-
-function sameStructuredValue(left: unknown, right: unknown): boolean {
-  return JSON.stringify(canonicalizeJson(left)) === JSON.stringify(canonicalizeJson(right));
-}
-
-function canonicalizeJson(value: unknown): unknown {
-  if (Array.isArray(value)) {
-    return value.map((entry) => canonicalizeJson(entry));
-  }
-
-  if (!value || typeof value !== "object") {
-    return value;
-  }
-
-  return Object.fromEntries(
-    Object.entries(value as Record<string, unknown>)
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([key, entry]) => [key, canonicalizeJson(entry)]),
-  );
 }
 
 function rejectRemovedHostedExecutionField(
