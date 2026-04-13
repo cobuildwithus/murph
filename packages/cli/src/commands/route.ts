@@ -15,16 +15,20 @@ export function registerRouteCommands(cli: Cli.Cli) {
 
   route.command('estimate', {
     description:
-      'Estimate one route between two points. Accept addresses, place names, hiking POIs such as trailheads or huts, and lon,lat coordinate literals.',
+      'Estimate one route between two points. Accept addresses, place names, hiking POIs such as trailheads or huts, and lon,lat coordinate literals. More specific text can improve geocoding, but provider display labels may still stay broad.',
     args: z.object({
       origin: z
         .string()
         .min(1)
-        .describe('Origin as plain text or a lon,lat literal such as 144.9631,-37.8136.'),
+        .describe(
+          'Origin as plain text or a lon,lat literal such as 144.9631,-37.8136; for more precise text matches, include suburb/state/postcode, or use coordinates when you need the routed point pinned exactly.',
+        ),
       destination: z
         .string()
         .min(1)
-        .describe('Destination as plain text or a lon,lat literal such as 144.9780,-37.8640.'),
+        .describe(
+          'Destination as plain text or a lon,lat literal such as 144.9780,-37.8640; for more precise text matches, include suburb/state/postcode, or use coordinates when you need the routed point pinned exactly.',
+        ),
     }),
     options: z.object({
       waypoint: z
@@ -47,13 +51,15 @@ export function registerRouteCommands(cli: Cli.Cli) {
         .array(isoCountryCodeSchema)
         .max(10)
         .optional()
-        .describe('Optional ISO 3166-1 alpha-2 country hints for geocoding. Repeat --country to add more than one.'),
+        .describe(
+          'Optional ISO 3166-1 alpha-2 country hints for geocoding when plain-text places are ambiguous. Repeat --country to add more than one.',
+        ),
       language: z
         .string()
         .min(1)
         .max(10)
         .optional()
-        .describe('Optional language hint for geocoding display names.'),
+        .describe('Optional language hint for provider geocoding display names.'),
       elevationSampleSpacingMeters: z
         .number()
         .positive()
@@ -102,7 +108,7 @@ export function registerRouteCommands(cli: Cli.Cli) {
       },
     ],
     hint:
-      'Set MAPBOX_ACCESS_TOKEN in the runtime environment before using this command. Route geometry is omitted by default, elevation is approximate when enabled, and text lookups stay temporary.',
+      'Set MAPBOX_ACCESS_TOKEN in the runtime environment before using this command. Route geometry is omitted by default, elevation is approximate when enabled, and text lookups stay temporary. More specific text or coordinates can improve point matching, but provider labels may still be broader than the routed point.',
     output: mapboxRouteEstimateResultSchema,
     async run({ args, options }) {
       return await estimateMapboxRoute({

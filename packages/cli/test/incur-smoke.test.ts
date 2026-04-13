@@ -458,8 +458,16 @@ test('route estimate schema exposes the Mapbox-backed routing inputs', async () 
     /plain text or a lon,lat literal/u,
   )
   assert.match(
+    String(schema.args.properties.origin?.description ?? ''),
+    /include suburb\/state\/postcode, or use coordinates when you need the routed point pinned exactly/u,
+  )
+  assert.match(
     String(schema.args.properties.destination?.description ?? ''),
     /plain text or a lon,lat literal/u,
+  )
+  assert.match(
+    String(schema.args.properties.destination?.description ?? ''),
+    /include suburb\/state\/postcode, or use coordinates when you need the routed point pinned exactly/u,
   )
   assert.match(
     String(schema.options.properties.profile?.description ?? ''),
@@ -478,6 +486,14 @@ test('route estimate schema exposes the Mapbox-backed routing inputs', async () 
   assert.equal('language' in schema.options.properties, true)
   assert.equal('elevationSampleSpacingMeters' in schema.options.properties, true)
   assert.equal('maxElevationSamples' in schema.options.properties, true)
+
+  const help = await runRawCli(['route', 'estimate', '--help'])
+
+  assert.match(help, /More specific text can improve geocoding, but provider display labels may still stay broad/u)
+  assert.match(
+    help,
+    /More specific text or coordinates can improve point matching, but provider labels may still be broader than the routed point/u,
+  )
 })
 
 test('model schema explains preset-gated non-interactive updates', async () => {
