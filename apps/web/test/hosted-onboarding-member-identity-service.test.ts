@@ -182,6 +182,7 @@ describe("hosted-onboarding member-identity-service", () => {
             type: "wallet",
           },
         }),
+        parallelizeReads: true,
         prisma: prisma as never,
       }),
     ).resolves.toEqual({

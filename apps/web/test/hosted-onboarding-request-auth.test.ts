@@ -18,6 +18,8 @@ import {
   requireHostedPrivyCompletionRequestAuthContext,
   requireHostedPrivyActiveRequestAuthContext,
   requireHostedPrivyRequestAuthContext,
+  requireHostedPrivyVerifiedSessionRequestAuthContext,
+  resolveHostedPrivySessionRequestAuthContext,
   resolveHostedPrivyRequestAuthContext,
 } from "@/src/lib/hosted-onboarding/request-auth";
 
@@ -99,6 +101,20 @@ describe("hosted Privy request auth", () => {
     });
   });
 
+  it("resolves a session-only auth context without member lookup", async () => {
+    await expect(
+      resolveHostedPrivySessionRequestAuthContext(createAuthenticatedRequest()),
+    ).resolves.toMatchObject({
+      identity: {
+        userId: "did:privy:user_123",
+      },
+      verifiedPrivyUser: {
+        id: "did:privy:user_123",
+      },
+    });
+    expect(mocks.lookupHostedMemberForPrivyIdentity).not.toHaveBeenCalled();
+  });
+
   it("returns the authenticated hosted member when the cookie-backed session verifies", async () => {
     await expect(requireHostedPrivyRequestAuthContext(createAuthenticatedRequest(), prisma)).resolves.toMatchObject({
       memberLookup: {
@@ -115,12 +131,27 @@ describe("hosted Privy request auth", () => {
       },
     });
     expect(mocks.resolveHostedPrivySessionFromRequest).toHaveBeenCalledWith(expect.any(Request));
+    expect(mocks.lookupHostedMemberForPrivyIdentity).toHaveBeenCalledWith(expect.objectContaining({
+      parallelizeReads: true,
+      prisma,
+    }));
+  });
+
+  it("requires the hosted Privy identity cookie for the session-only auth path", async () => {
+    mocks.resolveHostedPrivySessionFromRequest.mockResolvedValue(null);
+
+    await expect(
+      requireHostedPrivyVerifiedSessionRequestAuthContext(createAuthenticatedRequest()),
+    ).rejects.toMatchObject({
+      code: "AUTH_REQUIRED",
+      httpStatus: 401,
+    });
   });
 
   it("allows the completion route to verify the cookie-backed session before a member exists", async () => {
     mocks.lookupHostedMemberForPrivyIdentity.mockResolvedValue(null);
 
-    await expect(requireHostedPrivyCompletionRequestAuthContext(createAuthenticatedRequest(), prisma)).resolves.toMatchObject({
+    await expect(requireHostedPrivyCompletionRequestAuthContext(createAuthenticatedRequest())).resolves.toMatchObject({
       identity: {
         phone: {
           number: "+14155552671",
@@ -130,11 +161,11 @@ describe("hosted Privy request auth", () => {
           address: "0xD8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
         },
       },
-      member: null,
       verifiedPrivyUser: {
         id: "did:privy:user_123",
       },
     });
+    expect(mocks.lookupHostedMemberForPrivyIdentity).not.toHaveBeenCalled();
   });
 
   it("allows the completion route to proceed with a phone-only Privy session when RevNet is disabled", async () => {
@@ -160,7 +191,7 @@ describe("hosted Privy request auth", () => {
     });
     mocks.lookupHostedMemberForPrivyIdentity.mockResolvedValue(null);
 
-    await expect(requireHostedPrivyCompletionRequestAuthContext(createAuthenticatedRequest(), prisma)).resolves.toMatchObject({
+    await expect(requireHostedPrivyCompletionRequestAuthContext(createAuthenticatedRequest())).resolves.toMatchObject({
       identity: {
         phone: {
           number: "+14155552671",
@@ -168,9 +199,8 @@ describe("hosted Privy request auth", () => {
         userId: "did:privy:user_123",
         wallet: null,
       },
-      member: null,
     });
-    expect(mocks.lookupHostedMemberForPrivyIdentity).toHaveBeenCalledTimes(1);
+    expect(mocks.lookupHostedMemberForPrivyIdentity).not.toHaveBeenCalled();
   });
 
   it("blocks suspended members from active hosted mutations", async () => {

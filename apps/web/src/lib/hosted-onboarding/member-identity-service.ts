@@ -365,6 +365,7 @@ export async function reconcileHostedPrivyIdentityOnMember(input: {
 
 export async function lookupHostedMemberForPrivyIdentity(input: {
   identity: HostedPrivyIdentity;
+  parallelizeReads?: boolean;
   prisma: HostedOnboardingPrismaClient;
 }): Promise<HostedMemberPrivyIdentityLookup | null> {
   const matches = new Map<string, HostedMemberPrivyIdentityLookup>();
@@ -372,38 +373,48 @@ export async function lookupHostedMemberForPrivyIdentity(input: {
     ? normalizeHostedWalletAddress(input.identity.wallet.address)
     : null;
   const phoneLookupKey = createHostedPhoneLookupKey(input.identity.phone.number);
-
-  if (input.identity.userId) {
-    const memberByPrivyUserId = await lookupHostedMemberIdentityByPrivyUserId({
-      privyUserId: input.identity.userId,
-      prisma: input.prisma,
-    });
-
-    if (memberByPrivyUserId) {
-      addHostedMemberPrivyIdentityMatch(matches, memberByPrivyUserId);
-    }
-  }
-
-  const memberByPhoneNumber = phoneLookupKey
-    ? await lookupHostedMemberIdentityByPhoneNumber({
+  const lookupByPrivyUserId = input.identity.userId
+    ? () => lookupHostedMemberIdentityByPrivyUserId({
+        privyUserId: input.identity.userId,
+        prisma: input.prisma,
+      })
+    : null;
+  const lookupByPhoneNumber = phoneLookupKey
+    ? () => lookupHostedMemberIdentityByPhoneNumber({
         phoneNumber: input.identity.phone.number,
         prisma: input.prisma,
       })
     : null;
+  const lookupByWalletAddress = normalizedWalletAddress
+    ? () => lookupHostedMemberIdentityByWalletAddress({
+        prisma: input.prisma,
+        walletAddress: normalizedWalletAddress,
+      })
+    : null;
+
+  const [memberByPrivyUserId, memberByPhoneNumber, memberByWalletAddress] =
+    input.parallelizeReads
+      ? await Promise.all([
+          lookupByPrivyUserId?.() ?? Promise.resolve(null),
+          lookupByPhoneNumber?.() ?? Promise.resolve(null),
+          lookupByWalletAddress?.() ?? Promise.resolve(null),
+        ])
+      : [
+          lookupByPrivyUserId ? await lookupByPrivyUserId() : null,
+          lookupByPhoneNumber ? await lookupByPhoneNumber() : null,
+          lookupByWalletAddress ? await lookupByWalletAddress() : null,
+        ];
+
+  if (memberByPrivyUserId) {
+    addHostedMemberPrivyIdentityMatch(matches, memberByPrivyUserId);
+  }
 
   if (memberByPhoneNumber) {
     addHostedMemberPrivyIdentityMatch(matches, memberByPhoneNumber);
   }
 
-  if (normalizedWalletAddress) {
-    const memberByWalletAddress = await lookupHostedMemberIdentityByWalletAddress({
-      prisma: input.prisma,
-      walletAddress: normalizedWalletAddress,
-    });
-
-    if (memberByWalletAddress) {
-      addHostedMemberPrivyIdentityMatch(matches, memberByWalletAddress);
-    }
+  if (memberByWalletAddress) {
+    addHostedMemberPrivyIdentityMatch(matches, memberByWalletAddress);
   }
 
   if (matches.size > 1) {
