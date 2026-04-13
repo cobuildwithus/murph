@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
   createHostedLinqChatLookupKey,
@@ -15,7 +15,26 @@ import {
   readHostedContactPrivacyCurrentVersion,
 } from "../src/lib/hosted-onboarding/contact-privacy";
 
+const TEST_KEYRING_ENTRIES = {
+  v1: "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=",
+  v2: "MTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTE=",
+} as const;
+
 describe("hosted member lookup keys", () => {
+  let restoreKeyring: (() => void) | null = null;
+
+  beforeEach(() => {
+    restoreKeyring = configureHostedContactPrivacyKeyringForTest({
+      currentVersion: "v1",
+      entries: { ...TEST_KEYRING_ENTRIES },
+    });
+  });
+
+  afterEach(() => {
+    restoreKeyring?.();
+    restoreKeyring = null;
+  });
+
   it("creates blind lookup keys that do not expose raw identifiers", () => {
     const privy = createHostedPrivyUserLookupKey("did:privy:abc123");
     const linq = createHostedLinqChatLookupKey("chat_123");
@@ -54,10 +73,7 @@ describe("hosted member lookup keys", () => {
   it("supports ordered read candidates from the configured keyring", () => {
     const restore = configureHostedContactPrivacyKeyringForTest({
       currentVersion: "v2",
-      entries: {
-        v1: "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=",
-        v2: "MTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTE=",
-      },
+      entries: { ...TEST_KEYRING_ENTRIES },
     });
 
     try {
@@ -75,10 +91,7 @@ describe("hosted member lookup keys", () => {
   it("matches a stored legacy phone lookup key against the same raw phone value", () => {
     const restore = configureHostedContactPrivacyKeyringForTest({
       currentVersion: "v2",
-      entries: {
-        v1: "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=",
-        v2: "MTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTE=",
-      },
+      entries: { ...TEST_KEYRING_ENTRIES },
     });
 
     try {
