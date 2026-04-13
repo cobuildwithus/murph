@@ -210,6 +210,7 @@ describe("completeHostedPrivyVerification", () => {
     expect(result).toEqual({
       inviteCode: "invite-code",
       joinUrl: "https://join.example.test/join/invite-code",
+      memberId: inviteMember.id,
       stage: "checkout",
     });
   });
@@ -363,6 +364,7 @@ describe("completeHostedPrivyVerification", () => {
     ).resolves.toEqual({
       inviteCode: "public-phone-only-invite",
       joinUrl: "https://join.example.test/join/public-phone-only-invite",
+      memberId: "member_phone_only",
       stage: "checkout",
     });
 
@@ -712,6 +714,7 @@ describe("completeHostedPrivyVerification", () => {
     ).resolves.toEqual({
       inviteCode: "invite-code",
       joinUrl: "https://join.example.test/join/invite-code",
+      memberId: inviteMember.id,
       stage: "checkout",
     });
 

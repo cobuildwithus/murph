@@ -21,6 +21,7 @@ vi.mock("@/src/lib/hosted-execution/auth-adapter", () => ({
 }));
 
 describe("hosted verified email sync helper", () => {
+  const provisionManagedUserCrypto = vi.fn();
   const run = vi.fn();
   const updateUserEnv = vi.fn();
 
@@ -29,9 +30,11 @@ describe("hosted verified email sync helper", () => {
     mocks.readHostedExecutionControlBaseUrl.mockReturnValue("https://dispatch.example.test");
     mocks.createHostedExecutionVercelOidcBearerTokenProvider.mockReturnValue(mocks.tokenProvider);
     mocks.createCloudflareHostedControlClient.mockReturnValue({
+      provisionManagedUserCrypto,
       run,
       updateUserEnv,
     });
+    provisionManagedUserCrypto.mockResolvedValue({});
     run.mockResolvedValue({});
     updateUserEnv.mockResolvedValue({});
   });
@@ -112,5 +115,72 @@ describe("hosted verified email sync helper", () => {
       httpStatus: 500,
     });
     expect(mocks.createCloudflareHostedControlClient).not.toHaveBeenCalled();
+  });
+});
+
+describe("managed user crypto warmup helper", () => {
+  const provisionManagedUserCrypto = vi.fn();
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.readHostedExecutionControlBaseUrl.mockReturnValue("https://dispatch.example.test");
+    mocks.createHostedExecutionVercelOidcBearerTokenProvider.mockReturnValue(mocks.tokenProvider);
+    mocks.createCloudflareHostedControlClient.mockReturnValue({
+      provisionManagedUserCrypto,
+    });
+    provisionManagedUserCrypto.mockResolvedValue({});
+  });
+
+  it("best-effort pre-provisions the managed user crypto context when control is configured", async () => {
+    const { preProvisionManagedUserCryptoInHostedExecutionBestEffort } = await import(
+      "@/src/lib/hosted-execution/control"
+    );
+
+    await expect(
+      preProvisionManagedUserCryptoInHostedExecutionBestEffort({
+        trigger: "privy-complete-checkout",
+        userId: "member_123",
+      }),
+    ).resolves.toBe(true);
+
+    expect(provisionManagedUserCrypto).toHaveBeenCalledWith("member_123");
+  });
+
+  it("returns false without throwing when hosted execution control is not configured", async () => {
+    mocks.readHostedExecutionControlBaseUrl.mockReturnValue(null);
+
+    const { preProvisionManagedUserCryptoInHostedExecutionBestEffort } = await import(
+      "@/src/lib/hosted-execution/control"
+    );
+
+    await expect(
+      preProvisionManagedUserCryptoInHostedExecutionBestEffort({
+        trigger: "billing-checkout-route",
+        userId: "member_123",
+      }),
+    ).resolves.toBe(false);
+
+    expect(mocks.createCloudflareHostedControlClient).not.toHaveBeenCalled();
+  });
+
+  it("logs a sanitized error and returns false when pre-provisioning fails", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    provisionManagedUserCrypto.mockRejectedValue(new Error("worker unavailable"));
+
+    const { preProvisionManagedUserCryptoInHostedExecutionBestEffort } = await import(
+      "@/src/lib/hosted-execution/control"
+    );
+
+    await expect(
+      preProvisionManagedUserCryptoInHostedExecutionBestEffort({
+        trigger: "billing-checkout-route",
+        userId: "member_123",
+      }),
+    ).resolves.toBe(false);
+
+    expect(consoleError).toHaveBeenCalledWith(
+      "Hosted managed user crypto warmup failed during billing-checkout-route.",
+      "worker unavailable",
+    );
   });
 });
