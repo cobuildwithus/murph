@@ -17,7 +17,7 @@ import {
 import { type PrivyLinkedAccountLike } from "./privy-shared";
 import { resolveHostedPrivySessionFromRequest } from "./hosted-session";
 
-export interface HostedPrivyRequestAuthContext {
+export interface HostedPrivyMemberAuthContext {
   identity: HostedPrivyIdentity;
   linkedAccounts: PrivyLinkedAccountLike[];
   memberLookup: HostedMemberPrivyIdentityLookup | null;
@@ -25,19 +25,19 @@ export interface HostedPrivyRequestAuthContext {
   verifiedPrivyUser: HostedPrivyUser;
 }
 
-export interface HostedPrivySessionRequestAuthContext {
+export interface HostedPrivySessionAuthContext {
   identity: HostedPrivyIdentity;
   linkedAccounts: PrivyLinkedAccountLike[];
   verifiedPrivyUser: HostedPrivyUser;
 }
 
-export interface HostedPrivyAuthenticatedRequestContext extends Omit<HostedPrivyRequestAuthContext, "member"> {
+export interface HostedPrivyAuthenticatedMemberAuthContext extends Omit<HostedPrivyMemberAuthContext, "member"> {
   member: HostedMember;
 }
 
-export async function resolveHostedPrivySessionRequestAuthContext(
+export async function resolveHostedPrivySessionAuth(
   request: Request,
-): Promise<HostedPrivySessionRequestAuthContext | null> {
+): Promise<HostedPrivySessionAuthContext | null> {
   const session = await resolveHostedPrivySessionFromRequest(request);
 
   if (!session) {
@@ -51,11 +51,11 @@ export async function resolveHostedPrivySessionRequestAuthContext(
   };
 }
 
-export async function resolveHostedPrivyRequestAuthContext(
+export async function resolveHostedPrivyMemberAuth(
   request: Request,
   prisma: PrismaClient = getPrisma(),
-): Promise<HostedPrivyRequestAuthContext | null> {
-  const session = await resolveHostedPrivySessionRequestAuthContext(request);
+): Promise<HostedPrivyMemberAuthContext | null> {
+  const session = await resolveHostedPrivySessionAuth(request);
 
   if (!session) {
     return null;
@@ -76,11 +76,11 @@ export async function resolveHostedPrivyRequestAuthContext(
   };
 }
 
-export async function requireHostedPrivyRequestAuthContext(
+export async function requireHostedPrivyMemberAuth(
   request: Request,
   prisma: PrismaClient = getPrisma(),
-): Promise<HostedPrivyAuthenticatedRequestContext> {
-  const context = await requireHostedPrivyVerifiedRequestAuthContext(request, prisma);
+): Promise<HostedPrivyAuthenticatedMemberAuthContext> {
+  const context = await requireHostedPrivyVerifiedMemberAuth(request, prisma);
   if (!context.member) {
     throw hostedOnboardingError({
       code: "HOSTED_MEMBER_NOT_FOUND",
@@ -95,11 +95,11 @@ export async function requireHostedPrivyRequestAuthContext(
   };
 }
 
-export async function requireHostedPrivyVerifiedRequestAuthContext(
+export async function requireHostedPrivyVerifiedMemberAuth(
   request: Request,
   prisma: PrismaClient = getPrisma(),
-): Promise<HostedPrivyRequestAuthContext> {
-  const context = await resolveHostedPrivyRequestAuthContext(request, prisma);
+): Promise<HostedPrivyMemberAuthContext> {
+  const context = await resolveHostedPrivyMemberAuth(request, prisma);
 
   if (!context) {
     throw hostedOnboardingError({
@@ -112,10 +112,10 @@ export async function requireHostedPrivyVerifiedRequestAuthContext(
   return context;
 }
 
-export async function requireHostedPrivyVerifiedSessionRequestAuthContext(
+export async function requireHostedPrivySessionAuth(
   request: Request,
-): Promise<HostedPrivySessionRequestAuthContext> {
-  const context = await resolveHostedPrivySessionRequestAuthContext(request);
+): Promise<HostedPrivySessionAuthContext> {
+  const context = await resolveHostedPrivySessionAuth(request);
 
   if (!context) {
     throw hostedOnboardingError({
@@ -128,21 +128,21 @@ export async function requireHostedPrivyVerifiedSessionRequestAuthContext(
   return context;
 }
 
-export async function requireHostedPrivyCompletionRequestAuthContext(
+export async function requireHostedPrivyCompletionAuth(
   request: Request,
-): Promise<HostedPrivySessionRequestAuthContext> {
+): Promise<HostedPrivySessionAuthContext> {
   try {
-    return await requireHostedPrivyVerifiedSessionRequestAuthContext(request);
+    return await requireHostedPrivySessionAuth(request);
   } catch (error) {
     throw remapHostedPrivyCompletionLagError(error);
   }
 }
 
-export async function requireHostedPrivyActiveRequestAuthContext(
+export async function requireHostedPrivyActiveMemberAuth(
   request: Request,
   prisma: PrismaClient = getPrisma(),
-): Promise<HostedPrivyAuthenticatedRequestContext> {
-  const context = await requireHostedPrivyRequestAuthContext(request, prisma);
+): Promise<HostedPrivyAuthenticatedMemberAuthContext> {
+  const context = await requireHostedPrivyMemberAuth(request, prisma);
   assertHostedMemberActiveAccessAllowed(context.member);
   return context;
 }

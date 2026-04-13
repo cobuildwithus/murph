@@ -15,12 +15,12 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-session", () => ({
 }));
 
 import {
-  requireHostedPrivyCompletionRequestAuthContext,
-  requireHostedPrivyActiveRequestAuthContext,
-  requireHostedPrivyRequestAuthContext,
-  requireHostedPrivyVerifiedSessionRequestAuthContext,
-  resolveHostedPrivySessionRequestAuthContext,
-  resolveHostedPrivyRequestAuthContext,
+  requireHostedPrivyCompletionAuth,
+  requireHostedPrivyActiveMemberAuth,
+  requireHostedPrivyMemberAuth,
+  requireHostedPrivySessionAuth,
+  resolveHostedPrivySessionAuth,
+  resolveHostedPrivyMemberAuth,
 } from "@/src/lib/hosted-onboarding/request-auth";
 
 describe("hosted Privy request auth", () => {
@@ -79,7 +79,7 @@ describe("hosted Privy request auth", () => {
     mocks.resolveHostedPrivySessionFromRequest.mockResolvedValue(null);
 
     await expect(
-      resolveHostedPrivyRequestAuthContext(
+      resolveHostedPrivyMemberAuth(
         new Request("https://join.example.test/api/settings/email/sync"),
         prisma,
       ),
@@ -91,7 +91,7 @@ describe("hosted Privy request auth", () => {
     mocks.resolveHostedPrivySessionFromRequest.mockResolvedValue(null);
 
     await expect(
-      requireHostedPrivyRequestAuthContext(
+      requireHostedPrivyMemberAuth(
         new Request("https://join.example.test/api/settings/email/sync"),
         prisma,
       ),
@@ -103,7 +103,7 @@ describe("hosted Privy request auth", () => {
 
   it("resolves a session-only auth context without member lookup", async () => {
     await expect(
-      resolveHostedPrivySessionRequestAuthContext(createAuthenticatedRequest()),
+      resolveHostedPrivySessionAuth(createAuthenticatedRequest()),
     ).resolves.toMatchObject({
       identity: {
         userId: "did:privy:user_123",
@@ -116,7 +116,7 @@ describe("hosted Privy request auth", () => {
   });
 
   it("returns the authenticated hosted member when the cookie-backed session verifies", async () => {
-    await expect(requireHostedPrivyRequestAuthContext(createAuthenticatedRequest(), prisma)).resolves.toMatchObject({
+    await expect(requireHostedPrivyMemberAuth(createAuthenticatedRequest(), prisma)).resolves.toMatchObject({
       memberLookup: {
         matchedBy: [
           "privyUserId",
@@ -141,7 +141,7 @@ describe("hosted Privy request auth", () => {
     mocks.resolveHostedPrivySessionFromRequest.mockResolvedValue(null);
 
     await expect(
-      requireHostedPrivyVerifiedSessionRequestAuthContext(createAuthenticatedRequest()),
+      requireHostedPrivySessionAuth(createAuthenticatedRequest()),
     ).rejects.toMatchObject({
       code: "AUTH_REQUIRED",
       httpStatus: 401,
@@ -151,7 +151,7 @@ describe("hosted Privy request auth", () => {
   it("allows the completion route to verify the cookie-backed session before a member exists", async () => {
     mocks.lookupHostedMemberForPrivyIdentity.mockResolvedValue(null);
 
-    await expect(requireHostedPrivyCompletionRequestAuthContext(createAuthenticatedRequest())).resolves.toMatchObject({
+    await expect(requireHostedPrivyCompletionAuth(createAuthenticatedRequest())).resolves.toMatchObject({
       identity: {
         phone: {
           number: "+14155552671",
@@ -191,7 +191,7 @@ describe("hosted Privy request auth", () => {
     });
     mocks.lookupHostedMemberForPrivyIdentity.mockResolvedValue(null);
 
-    await expect(requireHostedPrivyCompletionRequestAuthContext(createAuthenticatedRequest())).resolves.toMatchObject({
+    await expect(requireHostedPrivyCompletionAuth(createAuthenticatedRequest())).resolves.toMatchObject({
       identity: {
         phone: {
           number: "+14155552671",
@@ -212,7 +212,7 @@ describe("hosted Privy request auth", () => {
       }),
     );
 
-    await expect(requireHostedPrivyActiveRequestAuthContext(createAuthenticatedRequest(), prisma)).rejects.toMatchObject({
+    await expect(requireHostedPrivyActiveMemberAuth(createAuthenticatedRequest(), prisma)).rejects.toMatchObject({
       code: "HOSTED_MEMBER_SUSPENDED",
       httpStatus: 403,
     });
@@ -227,7 +227,7 @@ describe("hosted Privy request auth", () => {
       }),
     );
 
-    await expect(requireHostedPrivyActiveRequestAuthContext(createAuthenticatedRequest(), prisma)).rejects.toMatchObject({
+    await expect(requireHostedPrivyActiveMemberAuth(createAuthenticatedRequest(), prisma)).rejects.toMatchObject({
       code: "HOSTED_ACCESS_REQUIRED",
       httpStatus: 403,
     });

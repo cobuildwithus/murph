@@ -1,6 +1,6 @@
 import { resolveDecodedRouteParam } from "@/src/lib/http";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
-import { resolveHostedPrivyRequestAuthContext } from "@/src/lib/hosted-onboarding/request-auth";
+import { resolveHostedPrivyMemberAuth } from "@/src/lib/hosted-onboarding/request-auth";
 import { buildHostedSharePageData } from "@/src/lib/hosted-share/service";
 import { getPrisma } from "@/src/lib/prisma";
 
@@ -9,7 +9,7 @@ export const GET = withJsonError(async (
   context: { params: Promise<{ shareCode: string }> },
 ) => {
   const prisma = getPrisma();
-  const auth = await resolveHostedPrivyRequestAuthContext(request, prisma);
+  const auth = await resolveHostedPrivyMemberAuth(request, prisma);
   const shareCode = await resolveDecodedRouteParam(context.params, "shareCode");
   const url = new URL(request.url);
 

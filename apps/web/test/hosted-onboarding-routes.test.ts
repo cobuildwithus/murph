@@ -13,9 +13,9 @@ const mocks = vi.hoisted(() => ({
   createHostedBillingCheckout: vi.fn(),
   preProvisionManagedUserCryptoInHostedExecutionBestEffort: vi.fn(),
   prepareHostedInvitePhoneCode: vi.fn(),
-  requireHostedPrivyCompletionRequestAuthContext: vi.fn(),
+  requireHostedPrivyCompletionAuth: vi.fn(),
   requireHostedInviteCodeFromRequest: vi.fn(),
-  requireHostedPrivyRequestAuthContext: vi.fn(),
+  requireHostedPrivyMemberAuth: vi.fn(),
   runtimeEnv: {
     hostedOnboardingPublicBaseUrl: "https://join.example.test" as string | null,
   },
@@ -75,8 +75,8 @@ vi.mock("@/src/lib/hosted-onboarding/csrf", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({
-  requireHostedPrivyCompletionRequestAuthContext: mocks.requireHostedPrivyCompletionRequestAuthContext,
-  requireHostedPrivyRequestAuthContext: mocks.requireHostedPrivyRequestAuthContext,
+  requireHostedPrivyCompletionAuth: mocks.requireHostedPrivyCompletionAuth,
+  requireHostedPrivyMemberAuth: mocks.requireHostedPrivyMemberAuth,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/route-helpers", () => ({
@@ -126,7 +126,7 @@ describe("hosted onboarding routes", () => {
         void (result as Promise<void>).catch(() => {});
       }
     });
-    mocks.requireHostedPrivyCompletionRequestAuthContext.mockResolvedValue({
+    mocks.requireHostedPrivyCompletionAuth.mockResolvedValue({
       identity: {
         phone: {
           number: "+15551234567",
@@ -167,7 +167,7 @@ describe("hosted onboarding routes", () => {
       phoneNumber: "+15551234567",
       sendAttemptId: "send_attempt_123",
     });
-    mocks.requireHostedPrivyRequestAuthContext.mockResolvedValue({
+    mocks.requireHostedPrivyMemberAuth.mockResolvedValue({
       linkedAccounts: [
         {
           address: "user@example.com",
@@ -297,7 +297,7 @@ describe("hosted onboarding routes", () => {
   });
 
   it("rejects hosted Privy completion requests that are missing the Privy identity cookie", async () => {
-    mocks.requireHostedPrivyCompletionRequestAuthContext.mockRejectedValue(
+    mocks.requireHostedPrivyCompletionAuth.mockRejectedValue(
       hostedOnboardingError({
         code: "AUTH_REQUIRED",
         httpStatus: 401,
@@ -331,7 +331,7 @@ describe("hosted onboarding routes", () => {
   });
 
   it("checks the hosted Privy cookie-backed session before parsing malformed request JSON", async () => {
-    mocks.requireHostedPrivyCompletionRequestAuthContext.mockRejectedValue(
+    mocks.requireHostedPrivyCompletionAuth.mockRejectedValue(
       hostedOnboardingError({
         code: "AUTH_REQUIRED",
         httpStatus: 401,
@@ -352,7 +352,7 @@ describe("hosted onboarding routes", () => {
 
     expect(response.status).toBe(401);
     expect(response.headers.get("Cache-Control")).toBe("no-store");
-    expect(mocks.requireHostedPrivyCompletionRequestAuthContext).toHaveBeenCalledTimes(1);
+    expect(mocks.requireHostedPrivyCompletionAuth).toHaveBeenCalledTimes(1);
     expect(mocks.completeHostedPrivyVerification).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       error: {
@@ -364,7 +364,7 @@ describe("hosted onboarding routes", () => {
   });
 
   it("does not accept a body identity token when the hosted Privy identity cookie is missing", async () => {
-    mocks.requireHostedPrivyCompletionRequestAuthContext.mockRejectedValue(
+    mocks.requireHostedPrivyCompletionAuth.mockRejectedValue(
       hostedOnboardingError({
         code: "AUTH_REQUIRED",
         httpStatus: 401,
@@ -398,7 +398,7 @@ describe("hosted onboarding routes", () => {
   });
 
   it("serializes retryable server-side Privy lag errors during completion", async () => {
-    mocks.requireHostedPrivyCompletionRequestAuthContext.mockRejectedValue(
+    mocks.requireHostedPrivyCompletionAuth.mockRejectedValue(
       hostedOnboardingError({
         code: "PRIVY_WALLET_NOT_READY",
         httpStatus: 409,
@@ -713,7 +713,7 @@ describe("hosted onboarding routes", () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get("Cache-Control")).toBe("no-store");
-    expect(mocks.requireHostedPrivyRequestAuthContext).toHaveBeenCalledWith(request);
+    expect(mocks.requireHostedPrivyMemberAuth).toHaveBeenCalledWith(request);
     expect(mocks.createHostedBillingCheckout).toHaveBeenCalledWith({
       inviteCode: "invite-code",
       member: { id: "member_123" },
@@ -738,7 +738,7 @@ describe("hosted onboarding routes", () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get("Cache-Control")).toBe("no-store");
-    expect(mocks.requireHostedPrivyRequestAuthContext).toHaveBeenCalledWith(request);
+    expect(mocks.requireHostedPrivyMemberAuth).toHaveBeenCalledWith(request);
     expect(mocks.createHostedBillingCheckout).toHaveBeenCalledWith({
       inviteCode: "invite-code",
       member: { id: "member_123" },
@@ -770,7 +770,7 @@ describe("hosted onboarding routes", () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get("Cache-Control")).toBe("no-store");
-    expect(mocks.requireHostedPrivyRequestAuthContext).toHaveBeenCalledWith(request);
+    expect(mocks.requireHostedPrivyMemberAuth).toHaveBeenCalledWith(request);
     expect(mocks.createHostedBillingCheckout).toHaveBeenCalledWith({
       inviteCode: "invite-code",
       member: { id: "member_123" },
