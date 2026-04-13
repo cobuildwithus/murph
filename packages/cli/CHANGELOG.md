@@ -2,6 +2,60 @@
 
 All notable changes to `@murphai/murph` will be documented in this file.
 
+## [0.2.8] - 2026-04-13
+
+### Added
+- add hosted onboarding timing logs
+- warm hosted onboarding Cloudflare provisioning
+
+### Fixed
+- tighten outbox payload and retry route handling
+- harden session secret seams
+- harden execution journal finalize replay
+- preserve invoked launcher name
+- centralize callback redirect cleanup
+- anchor outbox retry timing and simplify setup seams
+- decouple hosted privy layout env
+- remove dead deploy vars
+- default hosted linq pool cap
+- remove bogus staging deploy option
+- unblock release-check coverage lanes
+- degrade invalid privy homepage sessions
+- allow local dev contact privacy fallback
+- improve dev error logging
+- minimize webhook traces and preserve redirect fallback
+- hard-cut assistant and query helper barrels
+- harden callback redirect validation
+- minimize webhook trace residue
+- canonicalize execution journal comparisons
+- restore deploy migration history
+
+### Changed
+- stabilize hosted contact privacy fixtures
+- align oauth state fixture with deleteMany semantics
+- cover hosted device-sync settings callback cleanup
+- remove stale active patch plan
+- clean stale coordination state
+- remove greenfield compatibility branches
+- record cloudflare fixture hard-cut verification
+- simplify privy auth helper names
+- refresh hosted prisma bootstrap migration
+- record privy reset helper removal
+- hard-cut privy auth helper names
+- trim hosted privy auth lookups
+- simplify dev script names
+- default dev to vercel env injection
+- remove local secret file flow
+- land watched audit patch
+- centralize channel policy
+- Hard-cut package boundary ownership leaks
+- remove legacy internal wrapper shims
+- unify shared data-model owners
+- split setup and outbox helper seams
+- simplify hosted email helpers
+- centralize reply route inference
+- stabilize ambient runner env fallback
+
 ## [0.2.7] - 2026-04-12
 
 ### Added
