@@ -2,6 +2,7 @@ import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
 import {
+  assistantSessionSecretsSchema,
   parseAssistantSessionRecord,
   type AssistantSession,
 } from '@murphai/operator-config/assistant-cli-contracts'
@@ -136,7 +137,6 @@ describe('assistant session secret sidecars', () => {
         Authorization: 'Bearer secret-token',
         Cookie: 'session-cookie',
       },
-      providerBindingHeaders: null,
     })
   })
 
@@ -151,17 +151,13 @@ describe('assistant session secret sidecars', () => {
     expect(mergeAssistantSessionSecrets(session, null)).toBe(session)
   })
 
-  it('merges secret headers into provider options even for non-openai targets', () => {
+  it('leaves non-openai sessions unchanged even if a legacy secret sidecar is present', () => {
     const session = createCodexSession()
     const secrets = extractAssistantSessionSecretsForPersistence(createOpenAiSession()).secrets
 
     const merged = mergeAssistantSessionSecrets(session, secrets)
 
-    expect(merged.target).toEqual(session.target)
-    expect(merged.providerOptions.headers).toEqual({
-      Authorization: 'Bearer secret-token',
-      Cookie: 'session-cookie',
-    })
+    expect(merged).toBe(session)
   })
 
   it('merges sidecar headers back into persisted sessions and provider options', () => {
@@ -182,6 +178,71 @@ describe('assistant session secret sidecars', () => {
       Authorization: 'Bearer secret-token',
       Cookie: 'session-cookie',
       'X-Trace': 'trace-123',
+    })
+  })
+
+  it('rebuilds provider binding headers from the target owner when resuming an openai session', () => {
+    const session = parseAssistantSessionRecord({
+      schema: 'murph.assistant-session.v1',
+      sessionId: 'sess_headers_roundtrip',
+      target: {
+        adapter: 'openai-compatible',
+        apiKeyEnv: null,
+        endpoint: 'https://api.example.com/v1',
+        headers: {
+          'X-Trace-Id': 'trace-123',
+        },
+        model: 'gpt-test',
+        presetId: null,
+        providerName: null,
+        reasoningEffort: null,
+        webSearch: null,
+      },
+      resumeState: {
+        providerSessionId: 'provider-session-123',
+        resumeRouteId: 'resume-route-123',
+      },
+      alias: null,
+      binding: {
+        conversationKey: null,
+        channel: null,
+        identityId: null,
+        actorId: null,
+        threadId: null,
+        threadIsDirect: null,
+        delivery: null,
+      },
+      createdAt: '2026-04-13T00:00:00.000Z',
+      updatedAt: '2026-04-13T00:00:00.000Z',
+      lastTurnAt: null,
+      turnCount: 0,
+    })
+    const secrets = assistantSessionSecretsSchema.parse({
+      schema: 'murph.assistant-session-secrets.v1',
+      sessionId: session.sessionId,
+      updatedAt: session.updatedAt,
+      providerHeaders: {
+        'X-Upstream-Auth': 'Bearer firstsecret123',
+      },
+    })
+
+    const merged = mergeAssistantSessionSecrets(session, secrets)
+
+    expect(merged.target.adapter).toBe('openai-compatible')
+    if (merged.target.adapter !== 'openai-compatible') {
+      throw new Error('Expected an openai-compatible session target.')
+    }
+    expect(merged.target.headers).toEqual({
+      'X-Trace-Id': 'trace-123',
+      'X-Upstream-Auth': 'Bearer firstsecret123',
+    })
+    expect(merged.providerOptions.headers).toEqual({
+      'X-Trace-Id': 'trace-123',
+      'X-Upstream-Auth': 'Bearer firstsecret123',
+    })
+    expect(merged.providerBinding?.providerOptions.headers).toEqual({
+      'X-Trace-Id': 'trace-123',
+      'X-Upstream-Auth': 'Bearer firstsecret123',
     })
   })
 

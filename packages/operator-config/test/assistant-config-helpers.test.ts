@@ -33,6 +33,7 @@ import {
 import {
   isSensitiveAssistantHeaderName,
   isSensitiveAssistantHeaderValue,
+  mergeAssistantHeaders,
   splitAssistantHeadersForPersistence,
 } from '../src/assistant/redaction.ts'
 
@@ -59,8 +60,11 @@ test('assistant header helpers canonicalize, dedupe, sort, and redact persistenc
   assert.equal(isSensitiveAssistantHeaderName('x-api-key'), true)
   assert.equal(isSensitiveAssistantHeaderName('x-trace-id'), false)
   assert.equal(isSensitiveAssistantHeaderValue('Bearer secret-token-1234'), true)
+  assert.equal(isSensitiveAssistantHeaderValue('Basic second-secret-4567'), true)
+  assert.equal(isSensitiveAssistantHeaderValue('Bearer third-secret-8901'), true)
   assert.equal(isSensitiveAssistantHeaderValue('trace-id-1234'), false)
-  assert.deepEqual(splitAssistantHeadersForPersistence(normalizedHeaders), {
+  const split = splitAssistantHeadersForPersistence(normalizedHeaders)
+  assert.deepEqual(split, {
     persistedHeaders: {
       'X-Trace-Id': 'replacement-trace-id',
       'X-User': 'user-123',
@@ -72,6 +76,10 @@ test('assistant header helpers canonicalize, dedupe, sort, and redact persistenc
       'X-Custom-Token': 'custom-token',
     },
   })
+  assert.deepEqual(
+    mergeAssistantHeaders(split.persistedHeaders, split.secretHeaders),
+    normalizedHeaders,
+  )
   assert.deepEqual(normalizeAssistantPersistedHeaders(normalizedHeaders), {
     'X-Trace-Id': 'replacement-trace-id',
     'X-User': 'user-123',

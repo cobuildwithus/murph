@@ -22,11 +22,11 @@ test("hosted runtime config fails closed when the platform is not injected", () 
   );
 });
 
-test("hosted runtime usage parser accepts a finite count and string usage ids", () => {
+test("hosted runtime usage parser accepts a non-negative integer count and trims usage ids", () => {
   assert.deepEqual(
     parseHostedRuntimeUsageRecordResponse({
       recorded: 2,
-      usageIds: ["usage_1", "usage_2"],
+      usageIds: [" usage_1 ", "usage_2"],
     }),
     {
       recorded: 2,
@@ -42,23 +42,30 @@ test("hosted runtime usage parser rejects non-object payloads", () => {
   );
 });
 
-test("hosted runtime usage parser rejects non-finite recorded counts", () => {
+test("hosted runtime usage parser rejects fractional recorded counts", () => {
   assert.throws(
     () => parseHostedRuntimeUsageRecordResponse({
-      recorded: Number.NaN,
+      recorded: 1.5,
       usageIds: [],
     }),
-    /recorded must be a finite number/u,
+    /recorded must be a non-negative integer/u,
   );
 });
 
-test("hosted runtime usage parser rejects non-string usage ids", () => {
+test("hosted runtime usage parser rejects non-string or blank usage ids", () => {
   assert.throws(
     () => parseHostedRuntimeUsageRecordResponse({
       recorded: 1,
       usageIds: ["usage_1", 2],
     }),
-    /usageIds must be a string array/u,
+    /usageIds must be a string array of non-empty values/u,
+  );
+  assert.throws(
+    () => parseHostedRuntimeUsageRecordResponse({
+      recorded: 1,
+      usageIds: ["   "],
+    }),
+    /usageIds must be a string array of non-empty values/u,
   );
 });
 
