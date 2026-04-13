@@ -1,15 +1,17 @@
 import { Prisma } from "@prisma/client";
-import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
 import { hostedWebConfigurationError } from "../src/lib/hosted-web/encryption";
 
 const mocks = vi.hoisted(() => ({
+  after: vi.fn(),
   abortHostedInvitePhoneCode: vi.fn(),
   assertHostedOnboardingMutationOrigin: vi.fn(),
   completeHostedPrivyVerification: vi.fn(),
   confirmHostedInvitePhoneCode: vi.fn(),
   createHostedBillingCheckout: vi.fn(),
+  preProvisionManagedUserCryptoInHostedExecutionBestEffort: vi.fn(),
   prepareHostedInvitePhoneCode: vi.fn(),
   requireHostedPrivyCompletionRequestAuthContext: vi.fn(),
   requireHostedInviteCodeFromRequest: vi.fn(),
@@ -18,6 +20,15 @@ const mocks = vi.hoisted(() => ({
     hostedOnboardingPublicBaseUrl: "https://join.example.test" as string | null,
   },
 }));
+
+vi.mock("next/server", async () => {
+  const actual = await vi.importActual<typeof import("next/server")>("next/server");
+
+  return {
+    ...actual,
+    after: mocks.after,
+  };
+});
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", async () => {
   const actual = await vi.importActual<typeof import("@/src/lib/hosted-onboarding/runtime")>(
@@ -39,6 +50,11 @@ vi.mock("@/src/lib/hosted-onboarding/member-service", () => ({
 
 vi.mock("@/src/lib/hosted-onboarding/billing-service", () => ({
   createHostedBillingCheckout: mocks.createHostedBillingCheckout,
+}));
+
+vi.mock("@/src/lib/hosted-execution/control", () => ({
+  preProvisionManagedUserCryptoInHostedExecutionBestEffort:
+    mocks.preProvisionManagedUserCryptoInHostedExecutionBestEffort,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/invite-service", async () => {
@@ -84,6 +100,11 @@ let sendCodeRoute: SendCodeRouteModule;
 const SAME_ORIGIN_HEADERS = {
   origin: "https://join.example.test",
 };
+const ORIGINAL_NODE_ENV = process.env.NODE_ENV;
+
+function setHostedOnboardingTestNodeEnv(value: string | undefined): void {
+  Reflect.set(process.env, "NODE_ENV", value);
+}
 
 describe("hosted onboarding routes", () => {
   beforeAll(async () => {
@@ -96,7 +117,15 @@ describe("hosted onboarding routes", () => {
   });
 
   beforeEach(() => {
+    setHostedOnboardingTestNodeEnv(ORIGINAL_NODE_ENV);
     vi.clearAllMocks();
+    mocks.after.mockImplementation((callback: () => void | Promise<void>) => {
+      const result = callback();
+
+      if (result && typeof (result as Promise<void>).catch === "function") {
+        void (result as Promise<void>).catch(() => {});
+      }
+    });
     mocks.requireHostedPrivyCompletionRequestAuthContext.mockResolvedValue({
       identity: {
         phone: {
@@ -120,12 +149,14 @@ describe("hosted onboarding routes", () => {
     mocks.completeHostedPrivyVerification.mockResolvedValue({
       inviteCode: "invite-code",
       joinUrl: "https://join.example.test/join/invite-code",
+      memberId: "member_123",
       stage: "checkout",
     });
     mocks.createHostedBillingCheckout.mockResolvedValue({
       alreadyActive: false,
       url: "https://billing.example.test/session_123",
     });
+    mocks.preProvisionManagedUserCryptoInHostedExecutionBestEffort.mockResolvedValue(true);
     mocks.confirmHostedInvitePhoneCode.mockResolvedValue({
       ok: true,
     });
@@ -151,6 +182,10 @@ describe("hosted onboarding routes", () => {
       },
       inviteCode: "invite-code",
     });
+  });
+
+  afterEach(() => {
+    setHostedOnboardingTestNodeEnv(ORIGINAL_NODE_ENV);
   });
 
   it("marks cookie-backed Privy verification responses as no-store", async () => {
@@ -745,6 +780,118 @@ describe("hosted onboarding routes", () => {
       alreadyActive: false,
       url: "https://billing.example.test/session_123",
     });
+  });
+
+  it("logs sanitized development diagnostics for unexpected hosted billing checkout failures", async () => {
+    setHostedOnboardingTestNodeEnv("development");
+
+    class StripeAuthenticationError extends Error {
+      constructor(message: string) {
+        super(message);
+        this.name = "StripeAuthenticationError";
+      }
+    }
+
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const billingError = new StripeAuthenticationError(
+      "Stripe auth failed for sk_test_123 from https://api.stripe.com while reading /Users/test/app",
+    ) as StripeAuthenticationError & {
+      detail: string;
+      headers: Record<string, string>;
+      requestId: string;
+      statusCode: number;
+      type: string;
+    };
+    billingError.type = "StripeAuthenticationError";
+    billingError.statusCode = 401;
+    billingError.requestId = "req_123";
+    billingError.detail = "See https://dashboard.stripe.com/test/logs/req_123";
+    billingError.headers = {
+      authorization: "Bearer sk_test_123",
+      requestId: "req_123",
+    };
+    mocks.createHostedBillingCheckout.mockRejectedValue(billingError);
+
+    const response = await billingCheckoutRoute.POST(
+      new Request("https://join.example.test/api/hosted-onboarding/billing/checkout", {
+        body: JSON.stringify({
+          inviteCode: "invite-code",
+        }),
+        headers: SAME_ORIGIN_HEADERS,
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "INTERNAL_ERROR",
+        message: "Internal error.",
+      },
+    });
+    const loggedPayload = errorSpy.mock.calls[0]?.[1];
+    expect(loggedPayload).toBeDefined();
+    expect(errorSpy).toHaveBeenCalledWith(
+      "Hosted onboarding route failed.",
+      expect.objectContaining({
+        errorType: "StripeAuthenticationError",
+        internalMessage: "Hosted onboarding route failed unexpectedly.",
+        errorMessage:
+          "Stripe auth failed for <redacted-secret> from <redacted-url> while reading <redacted-path>",
+        errorStack: expect.stringContaining(
+          "StripeAuthenticationError: Stripe auth failed for <redacted-secret> from <redacted-url> while reading <redacted-path>",
+        ),
+        errorDetails: expect.objectContaining({
+          detail: "See <redacted-url>",
+          headers: {
+            authorization: "[redacted]",
+            requestId: "req_123",
+          },
+          name: "StripeAuthenticationError",
+          requestId: "req_123",
+          statusCode: 401,
+          type: "StripeAuthenticationError",
+        }),
+      }),
+    );
+    expect(loggedPayload).toMatchObject({
+      errorStack: expect.not.stringContaining("file:///"),
+    });
+  });
+
+  it("keeps unexpected hosted billing checkout failures compact outside development", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    mocks.createHostedBillingCheckout.mockRejectedValue(
+      new Error(
+        "Stripe auth failed for sk_test_123 from https://api.stripe.com while reading /Users/test/app",
+      ),
+    );
+
+    const response = await billingCheckoutRoute.POST(
+      new Request("https://join.example.test/api/hosted-onboarding/billing/checkout", {
+        body: JSON.stringify({
+          inviteCode: "invite-code",
+        }),
+        headers: SAME_ORIGIN_HEADERS,
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "INTERNAL_ERROR",
+        message: "Internal error.",
+      },
+    });
+    expect(errorSpy).toHaveBeenCalledWith("Hosted onboarding route failed.", {
+      errorType: "Error",
+      internalMessage: "Hosted onboarding route failed unexpectedly.",
+    });
+    const loggedPayload = errorSpy.mock.calls[0]?.[1];
+    expect(loggedPayload).not.toHaveProperty("errorDetails");
+    expect(loggedPayload).not.toHaveProperty("errorMessage");
+    expect(loggedPayload).not.toHaveProperty("errorStack");
   });
 
 });
