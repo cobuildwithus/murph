@@ -21,6 +21,7 @@ import {
   buildHostedWebContentSecurityPolicy,
   buildHostedWebSecurityHeaders,
   resolveHostedPrivyOrigin,
+  resolveHostedPrivyOrigins,
   resolvePrivyBaseDomainOrigin,
 } from "../next.config";
 
@@ -179,6 +180,28 @@ test("resolveHostedPrivyOrigin falls back to the Vercel production URL when no h
   );
 });
 
+test("resolveHostedPrivyOrigins adds the base-domain fallback for common hosted-web subdomains", () => {
+  assert.deepEqual(
+    resolveHostedPrivyOrigins(createProcessEnv({
+      HOSTED_ONBOARDING_PUBLIC_BASE_URL: "https://app.withmurph.ai",
+    })),
+    [
+      "https://privy.app.withmurph.ai",
+      "https://privy.withmurph.ai",
+    ],
+  );
+});
+
+test("resolveHostedPrivyOrigins prefers PRIVY_BASE_DOMAIN over hosted public subdomain fallbacks", () => {
+  assert.deepEqual(
+    resolveHostedPrivyOrigins(createProcessEnv({
+      HOSTED_ONBOARDING_PUBLIC_BASE_URL: "https://app.withmurph.ai",
+      PRIVY_BASE_DOMAIN: "withmurph.ai",
+    })),
+    ["https://privy.withmurph.ai"],
+  );
+});
+
 test("buildHostedWebContentSecurityPolicy includes Privy, WalletConnect, and hosted browser protections", () => {
   const csp = buildHostedWebContentSecurityPolicy({
     NODE_ENV: "production",
@@ -199,6 +222,23 @@ test("buildHostedWebContentSecurityPolicy includes Privy, WalletConnect, and hos
   assert.match(csp, /connect-src [^;]*https:\/\/explorer-api\.walletconnect\.com/);
   assert.match(csp, /upgrade-insecure-requests/);
   assert.doesNotMatch(csp, /'unsafe-eval'/);
+});
+
+test("buildHostedWebContentSecurityPolicy includes the base-domain Privy fallback for common hosted-web subdomains", () => {
+  for (const hostedPublicBaseUrl of [
+    "https://app.withmurph.ai",
+    "https://www.withmurph.ai",
+    "https://web.withmurph.ai",
+  ]) {
+    const csp = buildHostedWebContentSecurityPolicy(createProcessEnv({
+      NODE_ENV: "production",
+      HOSTED_ONBOARDING_PUBLIC_BASE_URL: hostedPublicBaseUrl,
+    }));
+
+    assert.match(csp, /child-src [^;]*https:\/\/privy\.withmurph\.ai/);
+    assert.match(csp, /frame-src [^;]*https:\/\/privy\.withmurph\.ai/);
+    assert.match(csp, /connect-src [^;]*https:\/\/privy\.withmurph\.ai/);
+  }
 });
 
 test("buildHostedWebContentSecurityPolicy keeps Next development relaxations scoped to development", () => {
