@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import type { HostedInviteStatusPayload } from "@/src/lib/hosted-onboarding/types";
 
+import { JOIN_INVITE_ACTIVATION_PENDING_COPY } from "./join-invite-copy";
 import { requestHostedBillingSuccess } from "./client-api";
 import { useHostedInviteStatusRefresh } from "./invite-status-client";
 
@@ -42,7 +43,7 @@ export function JoinInviteSuccessClient({
   useHostedInviteStatusRefresh({
     inviteCode,
     onError: (error: unknown) => {
-      setErrorMessage(error instanceof Error ? error.message : "Unable to refresh activation status.");
+      setErrorMessage(error instanceof Error ? error.message : "Unable to refresh setup status.");
     },
     onStatus: (payload) => {
       setErrorMessage(null);
@@ -81,7 +82,7 @@ export function JoinInviteSuccessClient({
           return;
         }
 
-        setErrorMessage(error instanceof Error ? error.message : "Unable to refresh activation status.");
+        setErrorMessage(error instanceof Error ? error.message : "Unable to refresh setup status.");
       });
 
     return () => {
@@ -139,8 +140,8 @@ function resolveHostedInviteSuccessState(status: HostedInviteStatusPayload): Hos
       return {
         buttonLabel: "Continue",
         description: status.activationPending
-          ? "Payment is confirmed. Murph is still booting your hosted runtime in Cloudflare and sending your first text. You can continue now while that finishes."
-          : "Murph finished your hosted activation. Head back to your invite page to continue.",
+          ? JOIN_INVITE_ACTIVATION_PENDING_COPY.successDescription
+          : "Murph finished setting things up. Head back to your invite page to continue.",
         pending: false,
         title: "Your account is ready",
         variant: "active",
@@ -148,7 +149,7 @@ function resolveHostedInviteSuccessState(status: HostedInviteStatusPayload): Hos
     case "verify":
       return {
         buttonLabel: "Back to invite",
-        description: "We’re finishing sign-in and checking your hosted activation status now.",
+        description: "We’re finishing sign-in and checking your setup status now.",
         pending: true,
         title: "Finishing sign-in",
         variant: "pending",
@@ -156,8 +157,7 @@ function resolveHostedInviteSuccessState(status: HostedInviteStatusPayload): Hos
     case "checkout":
       return {
         buttonLabel: "Back to invite",
-        description:
-          "We’re confirming your subscription and finishing hosted activation now. This usually takes under a minute.",
+        description: "We’re confirming your subscription and setting up your encrypted vault and assistant now.",
         pending: true,
         title: "Payment received",
         variant: "pending",
@@ -181,7 +181,7 @@ function resolveHostedInviteSuccessState(status: HostedInviteStatusPayload): Hos
     case "blocked":
       return {
         buttonLabel: "Back to invite",
-        description: "We couldn’t finish activation automatically. Head back to your invite page for the latest status.",
+        description: "We couldn’t finish setup automatically. Head back to your invite page for the latest status.",
         pending: false,
         title: "Unable to continue",
         variant: "terminal",

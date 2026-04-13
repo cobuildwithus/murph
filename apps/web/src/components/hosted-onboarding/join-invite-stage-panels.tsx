@@ -19,6 +19,7 @@ import type {
 
 import { HostedInvitePhoneAuth } from "./hosted-invite-phone-auth";
 import { JOIN_INVITE_ACTIVE_FEATURE_CARDS } from "./join-invite-active-feature-cards";
+import { JOIN_INVITE_ACTIVATION_PENDING_COPY } from "./join-invite-copy";
 import type { JoinInviteShareImportState } from "./join-invite-state";
 import { describeHostedSharePreview } from "../hosted-share/hosted-share-preview";
 
@@ -89,7 +90,7 @@ export function JoinInviteVerificationPanel({
         <Alert variant="destructive">
           <AlertTitle>Unable to refresh your signup state</AlertTitle>
           <AlertDescription>
-            We couldn&apos;t pick up your verified phone session yet. Check again to continue.
+            We couldn&apos;t pick up your verified session yet. Check again to continue.
           </AlertDescription>
           <div className="mt-3">
             <Button
@@ -110,7 +111,7 @@ export function JoinInviteVerificationPanel({
       <Alert className="border-stone-200 bg-stone-50">
         <LoaderCircleIcon className="mt-0.5 size-4 animate-spin" />
         <AlertTitle>Checking your signup state</AlertTitle>
-        <AlertDescription>One moment while we pick up your hosted session.</AlertDescription>
+        <AlertDescription>One moment while we pick up your session.</AlertDescription>
       </Alert>
     );
   }
@@ -131,9 +132,10 @@ export function JoinInviteVerificationPanel({
 export function JoinInviteBlockedAlert() {
   return (
     <Alert className="border-amber-200 bg-amber-50 text-amber-900">
-      <AlertTitle>This hosted account needs support.</AlertTitle>
+      <AlertTitle>This account needs support.</AlertTitle>
       <AlertDescription>
-        This hosted account cannot continue from this invite right now. Contact support to restore access.
+        This account can&apos;t continue from this invite right now. Contact support and we&apos;ll help restore
+        access.
       </AlertDescription>
     </Alert>
   );
@@ -178,13 +180,10 @@ export function JoinInviteActivePanel({
         <div className="flex items-start gap-3 rounded-xl border border-olive/20 bg-olive/5 px-5 py-4 text-olive">
           <LoaderCircleIcon className="mt-0.5 h-5 w-5 shrink-0 animate-spin" />
           <div className="space-y-1">
-            <p className="text-sm font-semibold">Your account is ready. Murph is still warming up.</p>
-            <p className="text-sm leading-relaxed">
-              We&apos;re booting your hosted runtime in Cloudflare and sending your first text now. You can continue
-              below while that finishes.
-            </p>
+            <p className="text-sm font-semibold">{JOIN_INVITE_ACTIVATION_PENDING_COPY.activePanelTitle}</p>
+            <p className="text-sm leading-relaxed">{JOIN_INVITE_ACTIVATION_PENDING_COPY.activePanelDescription}</p>
             {sharePreview ? (
-              <p className="text-sm leading-relaxed">We&apos;ll add your shared bundle after the warmup finishes.</p>
+              <p className="text-sm leading-relaxed">{JOIN_INVITE_ACTIVATION_PENDING_COPY.shareImportDescription}</p>
             ) : null}
           </div>
         </div>

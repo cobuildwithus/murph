@@ -93,7 +93,7 @@ test("verify-stage invite copy stays neutral and does not expose the masked phon
   assert.match(markup, /data-hosted-invite-phone-auth="true"/);
 });
 
-test("verify-stage invite shows the hosted session check while the server session is still settling", () => {
+test("verify-stage invite shows the session check while the server session is still settling", () => {
   const markup = renderToStaticMarkup(
     createElement(JoinInviteClient, {
       initialStatus: createStatus({
@@ -114,11 +114,11 @@ test("verify-stage invite shows the hosted session check while the server sessio
   );
 
   assert.match(markup, /Checking your signup state/);
-  assert.match(markup, /One moment while we pick up your hosted session\./);
+  assert.match(markup, /One moment while we pick up your session\./);
   assert.doesNotMatch(markup, /data-hosted-invite-phone-auth=/);
 });
 
-test("verify-stage invite keeps polling while the hosted session is still settling", () => {
+test("verify-stage invite keeps polling while the session is still settling", () => {
   renderToStaticMarkup(
     createElement(JoinInviteClient, {
       initialStatus: createStatus({
@@ -462,7 +462,7 @@ test("active invite state renders message and settings actions with client navig
   assert.match(markup, /Manage settings/);
 });
 
-test("active invite state explains when Cloudflare warmup is still running", () => {
+test("active invite state explains when vault and assistant setup is still running", () => {
   const markup = renderToStaticMarkup(
     createElement(JoinInviteClient, {
       initialStatus: createStatus({
@@ -489,9 +489,9 @@ test("active invite state explains when Cloudflare warmup is still running", () 
     }),
   );
 
-  assert.match(markup, /Your account is ready\. Murph is still booting your hosted runtime in Cloudflare/);
-  assert.match(markup, /Your account is ready\. Murph is still warming up\./);
-  assert.match(markup, /We&#x27;ll add your shared bundle after the warmup finishes\./);
+  assert.match(markup, /Your account is ready\. We’re setting up your private, encrypted vault/);
+  assert.match(markup, /Your account is ready\. Murph is getting your space ready\./);
+  assert.match(markup, /We’ll add your shared bundle as soon as your vault is ready\./);
 });
 
 test("invite share preview renders the generic bundle copy from the tiny summary", () => {

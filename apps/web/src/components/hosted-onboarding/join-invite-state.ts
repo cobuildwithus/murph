@@ -7,6 +7,8 @@ import type {
   HostedPrivyCompletionPayload,
 } from "@/src/lib/hosted-onboarding/types";
 
+import { JOIN_INVITE_ACTIVATION_PENDING_COPY } from "./join-invite-copy";
+
 export type JoinInviteShareImportState = "idle" | "processing" | "completed";
 
 export function resolveInviteStatusAfterPrivyCompletion(
@@ -110,7 +112,7 @@ export function resolveJoinInviteTitle(status: HostedInviteStatusPayload): strin
 export function resolveJoinInviteSubtitle(status: HostedInviteStatusPayload): string {
   switch (status.stage) {
     case "invalid":
-      return "Text the Murph number again and we’ll send you a fresh hosted link.";
+      return "Text the Murph number again and we’ll send you a fresh link.";
     case "expired":
       return "Text the Murph number again and we’ll send you a fresh link.";
     case "verify":
@@ -118,10 +120,10 @@ export function resolveJoinInviteSubtitle(status: HostedInviteStatusPayload): st
     case "checkout":
       return "Your phone is confirmed. Finish checkout to start using Murph.";
     case "blocked":
-      return "This hosted account cannot continue from the invite right now. Contact support to restore access.";
+      return "This account can’t continue from this invite right now. Contact support and we’ll help restore access.";
     case "active":
       return status.activationPending
-        ? "Your account is ready. Murph is still booting your hosted runtime in Cloudflare and sending your first text."
+        ? JOIN_INVITE_ACTIVATION_PENDING_COPY.subtitle
         : "Congrats, you’re all set. Here’s what to expect next.";
     default:
       return "Murph signup";
