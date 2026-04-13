@@ -15,6 +15,7 @@ import {
 const assistantCliBlockedCommandPaths = new Set([
   'assistant ask',
   'assistant chat',
+  'assistant deliver',
   'assistant run',
   'chat',
   'run',

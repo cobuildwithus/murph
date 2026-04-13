@@ -82,14 +82,13 @@ test("automation previews normalize each schedule shape and route selector field
         automationId: "automation_01JNW7YJ7MNE7M9Q2QWQK4Z3F8",
         slug: "run-once",
         title: "Run once",
-        prompt: "Plan one run.\n",
+        instructions: "Plan one run.\n",
         schedule: {
           kind: "at",
           at: "2026-04-08T09:00:00.000Z",
         },
         route: {
           channel: "sms",
-          deliverResponse: false,
           deliveryTarget: "phone-thread",
           identityId: null,
           participantId: "participant-01",
@@ -102,7 +101,6 @@ test("automation previews normalize each schedule shape and route selector field
       },
       route: {
         channel: "sms",
-        deliverResponse: false,
         deliveryTarget: "phone-thread",
         identityId: null,
         participantId: "participant-01",
@@ -117,7 +115,7 @@ test("automation previews normalize each schedule shape and route selector field
         automationId: "automation_01JNW7YJ7MNE7M9Q2QWQK4Z3F9",
         slug: "heartbeat",
         title: "Heartbeat",
-        prompt: "Ping the assistant.\n",
+        instructions: "Ping the assistant.\n",
         schedule: {
           kind: "every",
           everyMs: 15_000,
@@ -129,7 +127,6 @@ test("automation previews normalize each schedule shape and route selector field
       },
       route: {
         channel: "telegram",
-        deliverResponse: true,
         deliveryTarget: null,
         identityId: null,
         participantId: null,
@@ -144,7 +141,7 @@ test("automation previews normalize each schedule shape and route selector field
         automationId: "automation_01JNW7YJ7MNE7M9Q2QWQK4Z3FA",
         slug: "cron-check",
         title: "Cron check",
-        prompt: "Summarize the cron status.\n",
+        instructions: "Summarize the cron status.\n",
         schedule: {
           kind: "cron",
           expression: "0 9 * * 1",
@@ -152,7 +149,6 @@ test("automation previews normalize each schedule shape and route selector field
         },
         route: {
           channel: "telegram",
-          deliverResponse: true,
           deliveryTarget: "telegram-thread",
           identityId: "identity-01",
           participantId: null,
@@ -168,7 +164,6 @@ test("automation previews normalize each schedule shape and route selector field
       },
       route: {
         channel: "telegram",
-        deliverResponse: true,
         deliveryTarget: "telegram-thread",
         identityId: "identity-01",
         participantId: null,
@@ -183,7 +178,7 @@ test("automation previews normalize each schedule shape and route selector field
         automationId: "automation_01JNW7YJ7MNE7M9Q2QWQK4Z3FB",
         slug: "daily-check",
         title: "Daily check",
-        prompt: "Send the daily checkpoint.\n",
+        instructions: "Send the daily checkpoint.\n",
         schedule: {
           kind: "dailyLocal",
           localTime: "07:30",
@@ -197,7 +192,6 @@ test("automation previews normalize each schedule shape and route selector field
       },
       route: {
         channel: "telegram",
-        deliverResponse: true,
         deliveryTarget: null,
         identityId: null,
         participantId: null,
@@ -216,7 +210,7 @@ test("automation previews normalize each schedule shape and route selector field
         continuityPolicy: undefined,
         summary: undefined,
         tags: undefined,
-        prompt: "Check the defaulted preview fields.\n",
+        instructions: "Check the defaulted preview fields.\n",
         schedule: {
           kind: "cron",
           expression: "0 9 * * 1",
@@ -224,7 +218,6 @@ test("automation previews normalize each schedule shape and route selector field
         },
         route: {
           channel: "telegram",
-          deliverResponse: true,
           deliveryTarget: null,
           identityId: null,
           participantId: null,
@@ -238,7 +231,6 @@ test("automation previews normalize each schedule shape and route selector field
       },
       route: {
         channel: "telegram",
-        deliverResponse: true,
         deliveryTarget: null,
         identityId: null,
         participantId: null,
@@ -325,7 +317,7 @@ test("automation schedule normalization rejects malformed schedule shapes", asyn
             automationId: "automation_01JNW7YJ7MNE7M9Q2QWQK4Z3FG",
             slug: "bad-schedule",
             title: "Bad schedule",
-            prompt: "Check the schedule branch.",
+            instructions: "Check the schedule branch.",
             schedule,
           }),
         }),
@@ -350,7 +342,7 @@ test("automation list and read lookups keep filters, blanks, and misses determin
       slug: "alpha-check-in",
       status: "active",
       summary: "Alpha digest.",
-      prompt: "Write the alpha digest.",
+      instructions: "Write the alpha digest.",
       tags: ["alpha", "digest"],
     }),
   });
@@ -364,7 +356,7 @@ test("automation list and read lookups keep filters, blanks, and misses determin
       slug: "beta-hand-off",
       status: "paused",
       summary: "Beta handoff tracker.",
-      prompt: "Track the beta handoff blockers.",
+      instructions: "Track the beta handoff blockers.",
       tags: ["beta", "handoff"],
     }),
   });
@@ -447,7 +439,7 @@ test("automation upserts normalize route strings, generated ids, preserve fallba
       continuityPolicy: undefined,
       summary: "Seed summary.",
       tags: undefined,
-      prompt: "Create the route normalization record.\n",
+      instructions: "Create the route normalization record.\n",
       schedule: {
         kind: "cron",
         expression: "0 9 * * 1",
@@ -455,7 +447,6 @@ test("automation upserts normalize route strings, generated ids, preserve fallba
       },
       route: {
         channel: "telegram",
-        deliverResponse: false,
         deliveryTarget: 123,
         identityId: "  identity-01  ",
         participantId: "participant-01",
@@ -470,7 +461,6 @@ test("automation upserts normalize route strings, generated ids, preserve fallba
   assert.equal(created.record.continuityPolicy, "preserve");
   assert.deepEqual(created.record.route, {
     channel: "telegram",
-    deliverResponse: false,
     deliveryTarget: "123",
     identityId: "identity-01",
     participantId: "participant-01",
@@ -491,7 +481,7 @@ test("automation upserts normalize route strings, generated ids, preserve fallba
       continuityPolicy: undefined,
       summary: undefined,
       tags: [],
-      prompt: "Update the route normalization record.\n",
+      instructions: "Update the route normalization record.\n",
       schedule: undefined,
       route: undefined,
     }),
@@ -519,7 +509,7 @@ test("automation loading rejects malformed registry documents", async () => {
       automationId: "automation_01JNW7YJ7MNE7M9Q2QWQK4Z3FZ",
       slug: "broken",
       title: "Broken automation",
-      prompt: "This record should fail schema validation.\n",
+      instructions: "This record should fail schema validation.\n",
     }),
   ).replace(/^docType: .*$/m, "docType: note");
 

@@ -1255,6 +1255,67 @@ describe("assistant turn finalizer seam", () => {
     );
   });
 
+  it("clears provider resume state when requested and only persists the assistant transcript", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-08T15:30:00.000Z"));
+    runtimeState.sessions.save.mockImplementation(
+      async (session: AssistantSession) => session
+    );
+
+    const session = createAssistantSession({
+      resumeState: {
+        providerSessionId: "provider-session-existing",
+        resumeRouteId: "route-existing",
+      },
+      turnCount: 2,
+    });
+
+    const saved = await persistAssistantTurnAndSession({
+      assistantTranscriptText: "Send the reminder once.",
+      input: {
+        prompt: "Send the reminder once.",
+        vault: "/vault",
+      },
+      plan: createSharedPlan({
+        persistUserPromptOnFailure: false,
+      }),
+      persistUserPromptToTranscript: false,
+      providerResult: createProviderResult({
+        providerSessionId: "provider-session-existing",
+        response: "raw provider output",
+        route: createRoute({ routeId: "route-notification" }),
+        session,
+      }),
+      resumeStatePolicy: "clear",
+      session,
+      turnCreatedAt: "2026-04-08T15:29:00.000Z",
+      turnId: "turn-finalizer-clear",
+    });
+
+    expect(runtimeState.turns.appendEvent).not.toHaveBeenCalled();
+    expect(runtimeState.transcripts.append).toHaveBeenCalledTimes(1);
+    expect(runtimeState.transcripts.append).toHaveBeenCalledWith(
+      session.sessionId,
+      [
+        {
+          kind: "assistant",
+          text: "Send the reminder once.",
+        },
+      ]
+    );
+    expect(runtimeState.sessions.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        lastTurnAt: "2026-04-08T15:30:00.000Z",
+        providerBinding: null,
+        resumeState: null,
+        turnCount: 3,
+        updatedAt: "2026-04-08T15:30:00.000Z",
+      })
+    );
+    expect(saved.providerBinding).toBeNull();
+    expect(saved.resumeState).toBeNull();
+  });
+
   it("skips duplicate user persistence when failure persistence already happened and rewrites the resume route on provider change", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-08T15:00:00.000Z"));

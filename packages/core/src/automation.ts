@@ -67,7 +67,7 @@ export interface AutomationRecord {
   tags: string[];
   createdAt: string;
   updatedAt: string;
-  prompt: string;
+  instructions: string;
   relativePath: string;
   markdown: string;
 }
@@ -188,7 +188,6 @@ function normalizeAutomationRoute(value: unknown): AutomationRoute {
 
   return {
     channel: requireString(object.channel, "route.channel", 120),
-    deliverResponse: object.deliverResponse === true,
     deliveryTarget: normalizeNullableRouteString(object.deliveryTarget),
     identityId: normalizeNullableRouteString(object.identityId),
     participantId: normalizeNullableRouteString(object.participantId),
@@ -196,13 +195,13 @@ function normalizeAutomationRoute(value: unknown): AutomationRoute {
   };
 }
 
-function normalizeAutomationPrompt(value: unknown): string {
-  const prompt = requireString(value, "prompt", 40_000).replace(/\s+$/u, "");
-  if (!prompt.trim()) {
-    throw new VaultError("VAULT_INVALID_INPUT", "prompt must contain text.");
+function normalizeAutomationInstructions(value: unknown): string {
+  const instructions = requireString(value, "instructions", 40_000).replace(/\s+$/u, "");
+  if (!instructions.trim()) {
+    throw new VaultError("VAULT_INVALID_INPUT", "instructions must contain text.");
   }
 
-  return prompt;
+  return instructions;
 }
 
 function normalizeAutomationTags(value: unknown): string[] {
@@ -235,7 +234,7 @@ function normalizeAutomationSummary(value: unknown): string | null {
 function buildAutomationMarkdown(record: AutomationRecord): string {
   return stringifyFrontmatterDocument({
     attributes: buildAutomationFrontmatter(record),
-    body: record.prompt,
+    body: record.instructions,
   });
 }
 
@@ -271,7 +270,6 @@ function buildAutomationScheduleFrontmatter(schedule: AutomationSchedule): Front
 function buildAutomationRouteFrontmatter(route: AutomationRoute): FrontmatterObject {
   return {
     channel: route.channel,
-    deliverResponse: route.deliverResponse,
     deliveryTarget: route.deliveryTarget,
     identityId: route.identityId,
     participantId: route.participantId,
@@ -328,7 +326,7 @@ function parseAutomationRecord(
     tags: normalizeAutomationTags(attributes.tags),
     createdAt: requireString(attributes.createdAt, "createdAt", 64),
     updatedAt: requireString(attributes.updatedAt, "updatedAt", 64),
-    prompt: normalizeAutomationPrompt(parsedDocument.body),
+    instructions: normalizeAutomationInstructions(parsedDocument.body),
     relativePath,
     markdown,
   };
@@ -364,7 +362,7 @@ function matchesAutomationText(record: AutomationRecord, text: string | undefine
     record.title,
     record.status,
     record.summary,
-    record.prompt,
+    record.instructions,
     JSON.stringify(record.schedule),
     JSON.stringify(record.route),
     record.continuityPolicy,
@@ -410,14 +408,13 @@ export function scaffoldAutomationPayload(): AutomationScaffoldPayload {
     },
     route: {
       channel: "telegram",
-      deliverResponse: true,
       deliveryTarget: null,
       identityId: null,
       participantId: null,
       sourceThreadId: null,
     },
-    prompt: "Write the scheduled assistant prompt here.",
-    summary: "Weekly scheduled assistant prompt.",
+    instructions: "Write the scheduled assistant instructions here.",
+    summary: "Weekly scheduled assistant notification instructions.",
     tags: ["assistant", "scheduled"],
   };
 }
@@ -527,7 +524,7 @@ export async function upsertAutomation(
     tags: normalizeAutomationTags(input.tags) ?? existingRecord?.tags ?? [],
     createdAt,
     updatedAt,
-    prompt: normalizeAutomationPrompt(input.prompt),
+    instructions: normalizeAutomationInstructions(input.instructions),
     relativePath: target.relativePath,
     markdown: "",
   };
@@ -536,7 +533,7 @@ export async function upsertAutomation(
     vaultRoot: input.vaultRoot,
     target,
     attributes: buildAutomationFrontmatter(record),
-    body: record.prompt,
+    body: record.instructions,
     recordFromParts: parseAutomationRecord,
     operationType: "automation_upsert",
     summary: `Upsert automation ${record.automationId}`,
@@ -574,7 +571,7 @@ export function buildAutomationMarkdownPreview(
     tags: normalizeAutomationTags(input.tags),
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
-    prompt: normalizeAutomationPrompt(input.prompt),
+    instructions: normalizeAutomationInstructions(input.instructions),
     relativePath: `${AUTOMATIONS_DIRECTORY}/${slug}.md`,
     markdown: "",
   };

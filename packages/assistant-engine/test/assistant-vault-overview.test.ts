@@ -197,7 +197,7 @@ it('builds a navigation-only overview from canonical, raw, and source-root cover
     now: new Date('2026-04-08T00:00:00.000Z'),
     title: 'Weekly check-in',
     summary: 'Send a weekly summary.',
-    prompt: 'Send a weekly summary.',
+    instructions: 'Send a weekly summary.',
     schedule: {
       kind: 'cron',
       expression: '0 9 * * 1',
@@ -205,7 +205,6 @@ it('builds a navigation-only overview from canonical, raw, and source-root cover
     },
     route: {
       channel: 'telegram',
-      deliverResponse: false,
       deliveryTarget: 'self',
       identityId: 'identity-01',
       participantId: 'participant-01',

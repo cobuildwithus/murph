@@ -164,7 +164,6 @@ describe("automation helpers", () => {
       continuityPolicy: "preserve",
       route: {
         channel: "slack",
-        deliverResponse: false,
         deliveryTarget: "456",
         identityId: "456",
         participantId: null,
@@ -176,7 +175,6 @@ describe("automation helpers", () => {
       continuityPolicy: "fresh",
       route: {
         channel: "email",
-        deliverResponse: true,
         deliveryTarget: "123",
       },
       status: "paused",
@@ -379,7 +377,7 @@ describe("automation helpers", () => {
     );
 
     await expect(listAutomations(emptyPromptVault)).rejects.toThrow(
-      /prompt body must contain text\./u,
+      /instructions body must contain text\./u,
     );
   });
 });

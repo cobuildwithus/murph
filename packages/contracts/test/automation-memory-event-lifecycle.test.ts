@@ -24,10 +24,9 @@ import { eventRecordSchema } from "../src/zod.ts";
 describe("automation contract seams", () => {
   it("applies scaffold defaults while preserving parsed schedule and route fields", () => {
     const parsed = automationScaffoldPayloadSchema.parse({
-      prompt: "Summarize the day",
+      instructions: "Summarize the day",
       route: {
         channel: "email",
-        deliverResponse: true,
         deliveryTarget: "thread_123",
         identityId: null,
         participantId: null,
@@ -43,10 +42,9 @@ describe("automation contract seams", () => {
 
     expect(parsed).toMatchObject({
       continuityPolicy: "preserve",
-      prompt: "Summarize the day",
+      instructions: "Summarize the day",
       route: {
         channel: "email",
-        deliverResponse: true,
         deliveryTarget: "thread_123",
       },
       schedule: {

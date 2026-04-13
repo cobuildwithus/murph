@@ -112,6 +112,14 @@ export function createProviderTurnAssistantToolCatalog(
   )
 }
 
+export function createNotificationTurnAssistantToolCatalog(
+  input: AssistantToolContext,
+): AssistantToolCatalog {
+  return bindAssistantCapabilitiesToDefaultToolCatalog(
+    listNotificationTurnAssistantCapabilities(input),
+  )
+}
+
 function listDefaultAssistantCapabilities(
   input: AssistantToolContext,
   options: AssistantToolCatalogOptions = {},
@@ -143,6 +151,20 @@ function listProviderTurnAssistantCapabilities(
     ...createWebSearchToolDefinitions(),
     ...createWebFetchToolDefinitions(),
     ...createWebPdfReadToolDefinitions(),
+  ]
+}
+
+function listNotificationTurnAssistantCapabilities(
+  input: AssistantToolContext,
+): AssistantCapabilityDefinition[] {
+  return [
+    ...createAssistantKnowledgeReadToolDefinitions(input),
+    ...createVaultTextReadToolDefinitions(input),
+    ...createQueryAndReadToolDefinitions(input, {
+      includeVaultTextReadTool: false,
+      includeQueryTools: true,
+      includeWebSearchTools: true,
+    }),
   ]
 }
 

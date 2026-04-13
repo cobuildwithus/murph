@@ -66,7 +66,7 @@ import {
   writeAssistantCronAutomationRuntimeStore,
   type AssistantCronAutomationRuntimeRecord,
 } from './cron/runtime-state.ts'
-import { sendAssistantMessageLocal } from '../assistant-service.ts'
+import { sendAssistantNotificationLocal } from '../assistant-service.ts'
 import { getAssistantChannelAdapter } from './channel-adapters.ts'
 import { resolveAssistantBindingDelivery } from './bindings.ts'
 import { applyAssistantSelfDeliveryTargetDefaults } from '@murphai/operator-config/operator-config'
@@ -184,7 +184,9 @@ export interface InstallAssistantCronPresetResult {
   resolvedVariables: Record<string, string>
 }
 
-interface CanonicalAssistantCronJobRecord extends AutomationQueryRecord {
+interface CanonicalAssistantCronJobRecord
+  extends Omit<AutomationQueryRecord, 'prompt' | 'status'> {
+  instructions: string
   status: 'active' | 'paused'
 }
 
@@ -295,7 +297,7 @@ export async function addAssistantCronJob(
           status: enabled ? 'active' : 'paused',
           schedule,
           route: buildCanonicalAutomationRoute(target),
-          prompt,
+          instructions: prompt,
         }),
       )
       const runtimeStore = await readAssistantCronAutomationRuntimeStore(paths)
@@ -310,10 +312,7 @@ export async function addAssistantCronJob(
       await writeAssistantCronAutomationRuntimeStore(paths, runtimeStore)
 
       return projectCanonicalAssistantCronJob({
-        automation: {
-          ...created.record,
-          status: created.record.status as 'active' | 'paused',
-        },
+        automation: requireCanonicalAssistantCronRecord(created.record),
         runtimeState,
       })
     })
@@ -395,10 +394,10 @@ async function listCanonicalAssistantCronRecords(
     status: [...status],
   })
 
-  return records.filter(
-    (record): record is CanonicalAssistantCronJobRecord =>
-      record.status === 'active' || record.status === 'paused',
-  )
+  return records.flatMap((record) => {
+    const normalized = normalizeCanonicalAssistantCronRecord(record)
+    return normalized ? [normalized] : []
+  })
 }
 
 async function findCanonicalAssistantCronRecord(
@@ -406,18 +405,51 @@ async function findCanonicalAssistantCronRecord(
   lookup: string,
 ): Promise<CanonicalAssistantCronJobRecord | null> {
   const record = await showCanonicalAutomation(vault, lookup)
-  if (!record || record.status === 'archived') {
-    return null
-  }
+  return record ? normalizeCanonicalAssistantCronRecord(record) : null
+}
 
+function normalizeCanonicalAssistantCronRecord(
+  record: AutomationQueryRecord & {
+    instructions?: string
+    prompt?: string
+  },
+): CanonicalAssistantCronJobRecord | null {
   if (record.status !== 'active' && record.status !== 'paused') {
     return null
   }
 
+  const instructions =
+    typeof record.instructions === 'string' ? record.instructions : record.prompt
+  if (typeof instructions !== 'string') {
+    throw new VaultCliError(
+      'ASSISTANT_CRON_INVALID_AUTOMATION',
+      `Canonical automation "${record.automationId}" is missing scheduled instructions.`,
+    )
+  }
+
+  const { prompt: _prompt, ...rest } = record
   return {
-    ...record,
+    ...rest,
+    instructions,
     status: record.status,
   }
+}
+
+function requireCanonicalAssistantCronRecord(
+  record: AutomationQueryRecord & {
+    instructions?: string
+    prompt?: string
+  },
+): CanonicalAssistantCronJobRecord {
+  const normalized = normalizeCanonicalAssistantCronRecord(record)
+  if (!normalized) {
+    throw new VaultCliError(
+      'ASSISTANT_CRON_INVALID_AUTOMATION',
+      `Canonical automation "${record.automationId}" is not active or paused.`,
+    )
+  }
+
+  return normalized
 }
 
 function createInitialCanonicalAutomationRuntimeState(
@@ -476,7 +508,7 @@ function projectCanonicalAssistantCronJob(input: {
     name: input.automation.title,
     enabled: input.automation.status === 'active',
     keepAfterRun: input.automation.schedule.kind !== 'at',
-    prompt: input.automation.prompt,
+    prompt: input.automation.instructions,
     schedule: toAssistantCronSchedule(input.automation.schedule),
     target,
     createdAt: input.automation.createdAt,
@@ -496,7 +528,6 @@ function buildCanonicalAutomationRoute(
 ): CanonicalAssistantCronJobRecord['route'] {
   return {
     channel: target.channel ?? '',
-    deliverResponse: true,
     deliveryTarget: target.deliveryTarget,
     identityId: target.identityId,
     participantId: target.participantId,
@@ -510,7 +541,7 @@ function buildCanonicalAutomationUpsertInput(input: {
     CanonicalAssistantCronJobRecord,
     'continuityPolicy' | 'slug' | 'summary' | 'tags'
   > | null
-  prompt: string
+  instructions: string
   route: CanonicalAssistantCronJobRecord['route']
   schedule: AssistantCronSchedule
   status: CanonicalAssistantCronJobRecord['status'] | 'archived'
@@ -528,7 +559,7 @@ function buildCanonicalAutomationUpsertInput(input: {
     route: input.route,
     continuityPolicy: input.automation?.continuityPolicy ?? 'preserve',
     tags: input.automation?.tags ?? ['assistant', 'scheduled'],
-    prompt: input.prompt,
+    instructions: input.instructions,
   }
 }
 
@@ -646,7 +677,7 @@ export async function removeAssistantCronJob(
         status: 'archived',
         schedule: toAssistantCronSchedule(resolved.automation.schedule),
         route: resolved.automation.route,
-        prompt: resolved.automation.prompt,
+        instructions: resolved.automation.instructions,
       }),
     )
 
@@ -732,7 +763,7 @@ export async function setAssistantCronJobEnabled(
         status: enabled ? 'active' : 'paused',
         schedule: toAssistantCronSchedule(resolved.automation.schedule),
         route: resolved.automation.route,
-        prompt: resolved.automation.prompt,
+        instructions: resolved.automation.instructions,
       }),
     )
     const runtimeStore = await readAssistantCronAutomationRuntimeStore(paths)
@@ -748,10 +779,7 @@ export async function setAssistantCronJobEnabled(
     await writeAssistantCronAutomationRuntimeStore(paths, runtimeStore)
 
     return projectCanonicalAssistantCronJob({
-      automation: {
-        ...updatedAutomation.record,
-        status: updatedAutomation.record.status as 'active' | 'paused',
-      },
+      automation: requireCanonicalAssistantCronRecord(updatedAutomation.record),
       runtimeState: updatedRuntimeState,
     })
   })
@@ -909,7 +937,7 @@ export async function setAssistantCronJobTarget(
         status: resolved.automation.status,
         schedule: toAssistantCronSchedule(resolved.automation.schedule),
         route: buildCanonicalAutomationRoute(afterTarget.target),
-        prompt: resolved.automation.prompt,
+        instructions: resolved.automation.instructions,
       }),
     )
     const runtimeStore = await readAssistantCronAutomationRuntimeStore(paths)
@@ -922,10 +950,7 @@ export async function setAssistantCronJobTarget(
     upsertAssistantCronAutomationRuntimeRecord(runtimeStore, updatedRuntimeState)
     await writeAssistantCronAutomationRuntimeStore(paths, runtimeStore)
     const updatedJob = projectCanonicalAssistantCronJob({
-      automation: {
-        ...updatedAutomation.record,
-        status: updatedAutomation.record.status as 'active' | 'paused',
-      },
+      automation: requireCanonicalAssistantCronRecord(updatedAutomation.record),
       runtimeState: updatedRuntimeState,
     })
 
@@ -1144,7 +1169,7 @@ function validateAssistantCronDeliveryTarget(
   if (!channel) {
     throw new VaultCliError(
       'ASSISTANT_CRON_DELIVERY_REQUIRED',
-      'Assistant cron jobs must declare an outbound channel and delivery route. Pass --channel plus --sourceThread, --participant, or --deliveryTarget. Cron jobs always deliver their response.',
+      'Assistant cron jobs must declare an outbound channel and delivery route. Pass --channel plus --sourceThread, --participant, or --deliveryTarget. Cron jobs send a single notification message to the bound route.',
     )
   }
 
@@ -1158,7 +1183,7 @@ function validateAssistantCronDeliveryTarget(
   if (input.deliverResponse === false) {
     throw new VaultCliError(
       'ASSISTANT_CRON_DELIVERY_REQUIRED',
-      'Assistant cron jobs always deliver their response. Remove the deliverResponse override and bind an explicit outbound route.',
+      'Assistant cron jobs always use bound notification delivery. Remove the deliverResponse override and bind an explicit outbound route.',
     )
   }
 
@@ -1307,9 +1332,9 @@ async function executeClaimedAssistantCronJob(input: {
         foodId: claimedJob.foodAutoLog.foodId,
       })
     } else {
-      const result = await sendAssistantMessageLocal({
+      const result = await sendAssistantNotificationLocal({
         vault: input.vault,
-        prompt: buildAssistantCronExecutionPrompt(claimedJob),
+        instructions: buildAssistantCronExecutionInstructions(claimedJob),
         executionContext: input.executionContext,
         sessionId: claimedJob.target.sessionId,
         alias: claimedJob.target.alias,
@@ -1318,7 +1343,6 @@ async function executeClaimedAssistantCronJob(input: {
         identityId: claimedJob.target.identityId,
         participantId: claimedJob.target.participantId,
         sourceThreadId: claimedJob.target.sourceThreadId,
-        deliverResponse: claimedJob.target.deliverResponse,
         deliveryDispatchMode: input.deliveryDispatchMode,
         deliveryTarget: claimedJob.target.deliveryTarget,
         turnTrigger: 'automation-cron',
@@ -1438,7 +1462,7 @@ async function executeClaimedAssistantCronJob(input: {
           status: 'archived',
           schedule: toAssistantCronSchedule(input.job.automation.schedule),
           route: input.job.automation.route,
-          prompt: input.job.automation.prompt,
+          instructions: input.job.automation.instructions,
         }),
       )
       removeAssistantCronAutomationRuntimeRecord(
@@ -1471,7 +1495,7 @@ async function executeClaimedAssistantCronJob(input: {
   }
 }
 
-function buildAssistantCronExecutionPrompt(job: AssistantCronJob): string {
+function buildAssistantCronExecutionInstructions(job: AssistantCronJob): string {
   return job.prompt
 }
 

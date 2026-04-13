@@ -20,7 +20,7 @@ type MockAutomationRecord = {
   automationId: string
   continuityPolicy: 'preserve' | 'reset'
   createdAt: string
-  prompt: string
+  instructions: string
   route: {
     channel: string
     deliverResponse: boolean
@@ -105,6 +105,7 @@ vi.mock('@murphai/vault-usecases/records', () => ({
 }))
 
 vi.mock('../src/assistant-service.ts', () => ({
+  sendAssistantNotificationLocal: cronMocks.sendAssistantMessageLocal,
   sendAssistantMessageLocal: cronMocks.sendAssistantMessageLocal,
 }))
 
@@ -285,7 +286,7 @@ beforeEach(() => {
     async (input: {
       automationId?: string
       continuityPolicy?: 'preserve' | 'reset'
-      prompt: string
+      instructions: string
       route: MockAutomationRecord['route']
       schedule: AssistantCronSchedule
       slug?: string
@@ -306,7 +307,7 @@ beforeEach(() => {
         const updated: MockAutomationRecord = {
           ...existing,
           continuityPolicy: input.continuityPolicy ?? existing.continuityPolicy,
-          prompt: input.prompt,
+          instructions: input.instructions,
           route: { ...input.route },
           schedule: input.schedule,
           slug: input.slug,
@@ -326,7 +327,7 @@ beforeEach(() => {
         automationId: `automation-${cronMocks.nextAutomationId++}`,
         continuityPolicy: input.continuityPolicy ?? 'preserve',
         createdAt: now,
-        prompt: input.prompt,
+        instructions: input.instructions,
         route: { ...input.route },
         schedule: input.schedule,
         slug: input.slug,

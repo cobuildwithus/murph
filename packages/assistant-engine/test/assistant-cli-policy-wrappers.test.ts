@@ -60,6 +60,20 @@ describe('assistant CLI policy wrappers', () => {
     })
   })
 
+  it('blocks assistant deliver command paths before launch', async () => {
+    await expect(
+      prepareAssistantCliExecutionRequest({
+        args: ['assistant', 'deliver'],
+        vault: '/tmp/active-vault',
+      }),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_CLI_COMMAND_BLOCKED',
+      context: {
+        commandPath: 'assistant deliver',
+      },
+    })
+  })
+
   it('injects default format json, preserves builtin text surfaces, and redacts paths', async () => {
     const defaulted = await prepareAssistantCliExecutionRequest({
       args: ['status'],
