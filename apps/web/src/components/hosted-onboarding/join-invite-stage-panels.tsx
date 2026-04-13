@@ -22,6 +22,8 @@ import { JOIN_INVITE_ACTIVE_FEATURE_CARDS } from "./join-invite-active-feature-c
 import type { JoinInviteShareImportState } from "./join-invite-state";
 import { describeHostedSharePreview } from "../hosted-share/hosted-share-preview";
 
+const MESSAGES_APP_HREF = "sms:";
+
 interface JoinInviteVerificationPanelProps {
   awaitingInviteSessionResolution: boolean;
   inviteCode: string;
@@ -228,9 +230,20 @@ export function JoinInviteActivePanel({
         </div>
       ) : null}
 
-      <Button render={<Link href="/settings" />} nativeButton={false} variant="outline" size="lg">
-        Manage settings
-      </Button>
+      <div className="flex flex-col items-start gap-3">
+        <Button render={<a href={MESSAGES_APP_HREF} />} nativeButton={false} size="lg">
+          Open Messages
+        </Button>
+        <Button
+          render={<Link href="/settings" />}
+          nativeButton={false}
+          variant="link"
+          size="sm"
+          className="h-auto p-0 text-sm font-medium text-stone-500 hover:text-stone-900"
+        >
+          Manage settings
+        </Button>
+      </div>
     </div>
   );
 }
