@@ -172,4 +172,33 @@ describe("json route helper factory", () => {
       internalMessage: "route failed unexpectedly",
     });
   });
+
+  it("can opt into warning-level log details without changing the response", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const helpers = httpModule.createJsonRouteHelpers({
+      internalMessage: "route failed unexpectedly",
+      logMessage: "route failed",
+      warnLogDetails: (error) =>
+        error instanceof TypeError
+          ? {
+              errorMessage: "request body must be an object",
+            }
+          : null,
+    });
+
+    const response = helpers.jsonError(new TypeError("body shape wrong"));
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "INVALID_REQUEST",
+        message: "Invalid request.",
+      },
+    });
+    expect(warnSpy).toHaveBeenCalledWith("route failed", {
+      errorMessage: "request body must be an object",
+      errorType: "TypeError",
+      internalMessage: "route failed unexpectedly",
+    });
+  });
 });
