@@ -8,6 +8,7 @@ import {
   invokeHostedExecutionContainerRunner,
   RunnerContainer,
 } from "../src/runner-container.ts";
+import { CLOUDFLARE_HOSTED_RUNTIME_HOSTS } from "../src/internal-hosts.ts";
 
 describe("RunnerContainer", () => {
   it("reuses a warm per-user shell across back-to-back invocations", async () => {
@@ -79,6 +80,37 @@ describe("RunnerContainer", () => {
     expect(outboundTokens[0]).not.toBe(outboundTokens[1]);
     expect(outboundTokens[1]).not.toBe(outboundTokens[2]);
     expect(outboundTokens[2]).not.toBe(outboundTokens[3]);
+
+    const outboundMethods = setOutboundByHosts.mock.calls.map(([mapping]) =>
+      readRunnerMethodsByHost(mapping as Record<string, unknown>)
+    );
+    const expectedOutboundMethods = Object.fromEntries(
+      Object.values(CLOUDFLARE_HOSTED_RUNTIME_HOSTS).map((host) => [host, "internalWorkerProxy"]),
+    );
+    expect(outboundMethods).toHaveLength(4);
+    expect(outboundMethods).toEqual(new Array(4).fill(expectedOutboundMethods));
+
+    const outboundAssignments = setOutboundByHosts.mock.calls.map(([mapping]) =>
+      readRunnerOutboundAssignments(mapping as Record<string, unknown>),
+    );
+    const expectedOutboundAssignments = Object.fromEntries(
+      Object.values(CLOUDFLARE_HOSTED_RUNTIME_HOSTS).map((host) => [
+        host,
+        {
+          internalWorkerProxyToken: expect.any(String),
+          method: "internalWorkerProxy",
+          userId: "member_123",
+        },
+      ]),
+    );
+    expect(outboundAssignments).toHaveLength(4);
+    expect(outboundAssignments).toEqual(new Array(4).fill(expectedOutboundAssignments));
+  });
+
+  it("registers exactly one stable outbound handler method for the runner boundary", () => {
+    expect(Object.keys(RunnerContainer.outboundHandlers ?? {})).toEqual([
+      "internalWorkerProxy",
+    ]);
   });
 
   it("destroys the warm shell on container activity expiry and cold-starts the next run", async () => {
@@ -641,6 +673,56 @@ function readRunnerProxyToken(mapping: Record<string, unknown>): string | null {
     };
   } | undefined;
   return firstEntry?.params?.internalWorkerProxyToken ?? null;
+}
+
+function readRunnerMethodsByHost(
+  mapping: Record<string, unknown>,
+): Record<string, string | null> {
+  return Object.fromEntries(
+    Object.entries(mapping).map(([host, value]) => {
+      const method =
+        typeof value === "object" && value !== null && "method" in value
+          ? (value as { method?: unknown }).method
+          : null;
+      return [host, typeof method === "string" ? method : null];
+    }),
+  );
+}
+
+function readRunnerOutboundAssignments(
+  mapping: Record<string, unknown>,
+): Record<
+  string,
+  {
+    internalWorkerProxyToken: string | null;
+    method: string | null;
+    userId: string | null;
+  }
+> {
+  return Object.fromEntries(
+    Object.entries(mapping).map(([host, value]) => {
+      const assignment =
+        typeof value === "object" && value !== null ? (value as {
+          method?: unknown;
+          params?: {
+            internalWorkerProxyToken?: unknown;
+            userId?: unknown;
+          };
+        }) : undefined;
+
+      return [
+        host,
+        {
+          internalWorkerProxyToken:
+            typeof assignment?.params?.internalWorkerProxyToken === "string"
+              ? assignment.params.internalWorkerProxyToken
+              : null,
+          method: typeof assignment?.method === "string" ? assignment.method : null,
+          userId: typeof assignment?.params?.userId === "string" ? assignment.params.userId : null,
+        },
+      ];
+    }),
+  );
 }
 
 function createRunnerRequest(
