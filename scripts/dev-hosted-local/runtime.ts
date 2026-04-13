@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn } from "node:child_process";
 import { readFile, rm } from "node:fs/promises";
 import http from "node:http";
 import https from "node:https";
@@ -16,6 +16,7 @@ import {
   webDir,
 } from "./constants.ts";
 import type {
+  HostedLocalChildProcess,
   HostedWebDevServerLockMetadata,
   NamedChildProcess,
 } from "./types.ts";
@@ -214,7 +215,10 @@ export async function waitForHealthyHttpEndpoint(input: {
   );
 }
 
-export function terminateChildProcess(child: ChildProcess, signal: NodeJS.Signals): void {
+export function terminateChildProcess(
+  child: HostedLocalChildProcess,
+  signal: NodeJS.Signals,
+): void {
   if (child.exitCode !== null || child.pid === undefined) {
     return;
   }

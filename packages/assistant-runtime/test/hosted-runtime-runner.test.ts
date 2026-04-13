@@ -17,7 +17,6 @@ const HOSTED_RUN_CONTEXT = {
 } as const;
 
 const mocks = vi.hoisted(() => ({
-  commitHostedExecutionResult: vi.fn(),
   completeHostedExecutionAfterCommit: vi.fn(),
   createHostedArtifactResolver: vi.fn(),
   decodeHostedBundleBase64: vi.fn(),
@@ -68,7 +67,6 @@ vi.mock("@murphai/operator-config/linq-runtime", () => ({
 }));
 
 vi.mock("../src/hosted-runtime/callbacks.ts", () => ({
-  commitHostedExecutionResult: mocks.commitHostedExecutionResult,
   resumeHostedCommittedExecution: mocks.resumeHostedCommittedExecution,
 }));
 
@@ -197,7 +195,6 @@ beforeEach(() => {
   mocks.executeHostedDispatchForCommit.mockResolvedValue(committedExecution);
   mocks.resumeHostedCommittedExecution.mockReturnValue(committedExecution);
   mocks.completeHostedExecutionAfterCommit.mockResolvedValue(finalResult);
-  mocks.commitHostedExecutionResult.mockResolvedValue(undefined);
   mocks.materializeHostedExecutionArtifacts.mockResolvedValue(undefined);
   mocks.startLinqChatTypingIndicator.mockResolvedValue(undefined);
   mocks.stopLinqChatTypingIndicator.mockResolvedValue(undefined);
@@ -313,7 +310,6 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
     });
     expect(mocks.executeHostedDispatchForCommit).toHaveBeenCalledTimes(1);
     expect(mocks.resumeHostedCommittedExecution).not.toHaveBeenCalled();
-    expect(mocks.commitHostedExecutionResult).not.toHaveBeenCalled();
     expect(mocks.completeHostedExecutionAfterCommit).not.toHaveBeenCalled();
     expect(mocks.withHostedProcessEnvironment).toHaveBeenCalledWith(
       {
@@ -657,7 +653,6 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
     assert.deepEqual(result, finalResult);
     expect(mocks.resumeHostedCommittedExecution).toHaveBeenCalledTimes(1);
     expect(mocks.executeHostedDispatchForCommit).not.toHaveBeenCalled();
-    expect(mocks.commitHostedExecutionResult).not.toHaveBeenCalled();
     expect(mocks.completeHostedExecutionAfterCommit).toHaveBeenCalledTimes(1);
   });
 
@@ -913,7 +908,6 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
       ),
     ).rejects.toThrow(/device-sync control plane is not configured/u);
 
-    expect(mocks.commitHostedExecutionResult).not.toHaveBeenCalled();
     expect(mocks.completeHostedExecutionAfterCommit).not.toHaveBeenCalled();
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({

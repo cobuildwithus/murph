@@ -5,7 +5,6 @@ import { resolveAssistantStatePaths } from "@murphai/runtime-state/node";
 
 const mocks = vi.hoisted(() => ({
   collectHostedAssistantDeliverySideEffects: vi.fn(),
-  commitHostedExecutionResult: vi.fn(),
   createHostedArtifactResolver: vi.fn(),
   createHostedArtifactUploadSink: vi.fn(),
   decodeHostedBundleBase64: vi.fn(),
@@ -79,7 +78,6 @@ vi.mock("../src/hosted-runtime/artifacts.ts", () => ({
 vi.mock("../src/hosted-runtime/callbacks.ts", () => ({
   collectHostedAssistantDeliverySideEffects:
     mocks.collectHostedAssistantDeliverySideEffects,
-  commitHostedExecutionResult: mocks.commitHostedExecutionResult,
   drainHostedCommittedAssistantDeliveriesAfterCommit:
     mocks.drainHostedCommittedAssistantDeliveriesAfterCommit,
   resumeHostedCommittedExecution: mocks.resumeHostedCommittedExecution,
@@ -295,7 +293,6 @@ describe("executeHostedDispatchForCommit", () => {
             async put() {},
           },
           effectsPort: {
-            async commit() {},
             async deletePreparedAssistantDelivery() {},
             async readRawEmailMessage() {
               return null;
@@ -345,7 +342,6 @@ describe("completeHostedExecutionAfterCommit", () => {
     });
 
     const result = await completeHostedExecutionAfterCommit({
-      commit: null,
       committedExecution: {
         committedGatewayProjectionSnapshot: {
           schema: "murph.gateway-projection-snapshot.v1",
@@ -388,7 +384,6 @@ describe("completeHostedExecutionAfterCommit", () => {
             async put() {},
           },
           effectsPort: {
-            async commit() {},
             async deletePreparedAssistantDelivery() {},
             async readRawEmailMessage() {
               return null;
@@ -411,7 +406,6 @@ describe("completeHostedExecutionAfterCommit", () => {
     });
 
     expect(mocks.drainHostedCommittedAssistantDeliveriesAfterCommit).toHaveBeenCalledWith({
-      commit: null,
       dispatch: {
         event: {
           kind: "assistant.cron.tick",
@@ -455,6 +449,7 @@ describe("completeHostedExecutionAfterCommit", () => {
         messages: [],
         permissions: [],
       },
+      phase: "completed",
       result: {
         bundle: Buffer.from(Uint8Array.from([9, 9, 9])).toString("base64"),
         result: {

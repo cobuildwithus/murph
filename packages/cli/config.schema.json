@@ -1172,7 +1172,7 @@
                           }
                         },
                         "text": {
-                          "description": "Optional lexical filter across title, prompt, route, and metadata.",
+                          "description": "Optional lexical filter across title, instructions, route, and metadata.",
                           "type": "string",
                           "minLength": 1
                         },

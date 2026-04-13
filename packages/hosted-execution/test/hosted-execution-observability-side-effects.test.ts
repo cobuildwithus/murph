@@ -5,10 +5,14 @@ import {
   buildHostedAssistantDeliveryPreparedRecord,
   buildHostedAssistantDeliverySentRecord,
   buildHostedAssistantDeliverySideEffect,
+  buildHostedExecutionSafeErrorDetails,
   buildHostedExecutionStructuredLogRecord,
   deriveHostedExecutionErrorCode,
   emitHostedExecutionStructuredLog,
   isHostedAssistantDeliveryKind,
+  isHostedExecutionRunLevel,
+  isHostedExecutionRunPhase,
+  normalizeHostedExecutionErrorMessage,
   normalizeHostedExecutionOperatorMessage,
   parseHostedAssistantDeliveryRecord,
   parseHostedAssistantDeliverySideEffect,
@@ -16,6 +20,8 @@ import {
   parseHostedExecutionSideEffect,
   parseHostedExecutionSideEffectRecord,
   parseHostedExecutionSideEffects,
+  readHostedExecutionSafeErrorName,
+  sanitizeHostedExecutionStructuredLogDetails,
   sameHostedAssistantDeliverySideEffectIdentity,
   sameHostedExecutionAssistantDelivery,
   sameHostedExecutionSideEffectIdentity,
@@ -48,6 +54,20 @@ describe("hosted execution observability", () => {
     for (const [error, expected] of cases) {
       expect(deriveHostedExecutionErrorCode(error)).toBe(expected);
     }
+  });
+
+  it("validates run phases, levels, and raw error-message normalization", () => {
+    expect(isHostedExecutionRunPhase("claimed")).toBe(true);
+    expect(isHostedExecutionRunPhase("not-a-phase")).toBe(false);
+    expect(isHostedExecutionRunLevel("warn")).toBe(true);
+    expect(isHostedExecutionRunLevel("verbose")).toBe(false);
+
+    expect(normalizeHostedExecutionErrorMessage(new Error("  boom  "))).toBe("boom");
+    expect(
+      normalizeHostedExecutionErrorMessage(Object.assign(new Error("   "), { name: "RangeError" })),
+    ).toBe("RangeError");
+    expect(normalizeHostedExecutionErrorMessage("  plain failure  ")).toBe("plain failure");
+    expect(normalizeHostedExecutionErrorMessage("   ")).toBe("Unknown hosted execution error.");
   });
 
   it("normalizes operator messages with redaction, whitespace cleanup, defaults, and truncation", () => {
@@ -252,6 +272,72 @@ describe("hosted execution observability", () => {
       phase: "completed",
     });
     expect(infoSpy).not.toHaveBeenCalled();
+  });
+
+  it("sanitizes nested structured log details and safe error metadata", () => {
+    const nested = Array.from({ length: 40 }, (_, index) => `value-${index}`);
+    const sanitized = sanitizeHostedExecutionStructuredLogDetails({
+      "ok-key": {
+        nested,
+        infinite: Number.POSITIVE_INFINITY,
+        deep: {
+          one: {
+            two: {
+              three: {
+                four: {
+                  dropped: "too deep",
+                },
+              },
+            },
+          },
+        },
+      },
+      "bad key!": "dropped",
+    });
+
+    expect(sanitized).toEqual({
+      "ok-key": {
+        nested: nested.slice(0, 32),
+      },
+    });
+    expect(sanitizeHostedExecutionStructuredLogDetails(["not-an-object"] as never)).toBeNull();
+
+    const error = Object.assign(new Error("Top level detail"), {
+      cause: "authorization: Bearer abc123",
+      code: "E_RUNTIME_SECRET",
+      details: {
+        token: "secret-token",
+        nested: {
+          email: "operator@example.com",
+        },
+      },
+      status: 502,
+    });
+    error.stack = [
+      "Error: Top level detail",
+      "    at first (/Users/example/project/index.ts:10:5)",
+      "    at second (/home/example/app/runtime.ts:4:1)",
+    ].join("\n");
+
+    expect(buildHostedExecutionSafeErrorDetails(error)).toEqual({
+      errorCause: "authorization=Bearer [redacted]",
+      errorCodeDetail: "E_RUNTIME_SECRET",
+      errorDetail: "Top level detail",
+      errorStatus: 502,
+      nested: {
+        email: "[redacted-email]",
+      },
+      stackPreview: [
+        "at first (<REDACTED_PATH>)",
+        "at second (<REDACTED_PATH>)",
+      ],
+      token: "secret-token",
+    });
+    expect(buildHostedExecutionSafeErrorDetails("not-an-error")).toBeNull();
+    expect(readHostedExecutionSafeErrorName(Object.assign(new Error("x"), { name: "Error" }))).toBe("Error");
+    expect(
+      readHostedExecutionSafeErrorName(Object.assign(new Error("x"), { name: "CustomSecretError" })),
+    ).toBeNull();
   });
 });
 

@@ -28,7 +28,6 @@ function createHostedRuntimePlatformStub(): HostedRuntimePlatform {
       async put() {},
     },
     effectsPort: {
-      async commit() {},
       async deletePreparedAssistantDelivery() {},
       async readRawEmailMessage() {
         return null;

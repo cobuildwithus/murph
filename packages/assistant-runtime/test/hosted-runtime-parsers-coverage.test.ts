@@ -11,7 +11,6 @@ describe("hosted runtime parser coverage", () => {
     const parsed = parseHostedAssistantRuntimeJobInput({
       request: {
         bundle: null,
-        commit: null,
         dispatch: {
           event: {
             kind: "member.activated",
@@ -27,7 +26,6 @@ describe("hosted runtime parser coverage", () => {
     expect(parsed).toEqual({
       request: {
         bundle: null,
-        commit: null,
         dispatch: {
           event: {
             kind: "member.activated",
