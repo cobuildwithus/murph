@@ -57,6 +57,8 @@ const DEFAULT_CONTAINER_INSTANCE_TYPE: NamedContainerInstanceType = "standard-1"
 const DEFAULT_CONTAINER_MAX_INSTANCES = 50;
 const DEFAULT_LOG_HEAD_SAMPLING_RATE = 1;
 const DEFAULT_TRACE_HEAD_SAMPLING_RATE = 1;
+const DEFAULT_HOSTED_EXECUTION_RUNNER_ENV_PROFILES =
+  "device-sync,hosted-email,linq,mapbox,telegram";
 const NAMED_CONTAINER_INSTANCE_TYPES = [
   "basic",
   "dev",
@@ -286,7 +288,19 @@ function resolveHostedWorkerVar(
     return null;
   }
 
-  return value ?? (key === "MURPH_WEB_FETCH_ENABLED" ? "true" : null);
+  if (value) {
+    return value;
+  }
+
+  if (key === "MURPH_WEB_FETCH_ENABLED") {
+    return "true";
+  }
+
+  if (key === HOSTED_EXECUTION_RUNNER_ENV_PROFILES_ENV) {
+    return DEFAULT_HOSTED_EXECUTION_RUNNER_ENV_PROFILES;
+  }
+
+  return null;
 }
 
 function requirePositiveNumber(value: unknown, label: string): number {

@@ -98,6 +98,7 @@ Optional tuning variables:
 - `HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS` (default `120000`)
 - `CF_TRACE_HEAD_SAMPLING_RATE` (default `1`)
 - `CF_ALLOWED_USER_ENV_KEYS`
+- `HOSTED_EXECUTION_RUNNER_ENV_PROFILES` (optional override; deploy automation defaults to `device-sync,hosted-email,linq,mapbox,telegram` when unset)
 - `HOSTED_ASSISTANT_PROVIDER`, `HOSTED_ASSISTANT_MODEL`, and the rest of the `HOSTED_ASSISTANT_*` seed vars when you want hosted member activation to persist one explicit platform-managed assistant profile into `~/.murph/config.json` instead of relying on runtime fallback
 
 Keep both observability sampling knobs at `0` unless you are intentionally collecting a bounded debug window.
