@@ -59,6 +59,9 @@ const tsconfigTypecheck = JSON.parse(
   await readFile(path.join(packageDir, 'tsconfig.typecheck.json'), 'utf8'),
 ) as TsConfigShape
 const packageLocalTsFiles = await listFiles(packageDir, ['src', 'scripts', 'test'])
+const packageLocalRelativePaths = packageLocalTsFiles.map((filePath) =>
+  path.relative(packageDir, filePath),
+)
 
 assert(
   packageJson.name === '@murphai/murph',
@@ -116,6 +119,12 @@ assert(
   JSON.stringify(Object.keys(packageJson.bin ?? {}).sort()) ===
     JSON.stringify(['murph', 'vault-cli']),
   'package.json must expose only the murph and vault-cli binaries.',
+)
+assert(
+  packageLocalRelativePaths.every(
+    (relativePath) => !relativePath.includes('runner-vault-cli'),
+  ),
+  'packages/cli must not reintroduce runner-vault-cli compatibility files now that murph and vault-cli share dist/bin.js.',
 )
 assert(
   packageJson.exports?.['.']?.default === './dist/index.js',

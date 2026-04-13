@@ -3579,7 +3579,7 @@ test.sequential('murph alias routes empty and help invocations to onboarding hel
   assert.doesNotMatch(help, /search\s+Search commands for the local read model/u)
   assert.match(emptyInvocation, /Murph local machine onboarding helpers\./u)
   assert.doesNotMatch(inboxHelp, /Murph local machine onboarding helpers\./u)
-  assert.match(inboxHelp, /vault-cli inbox doctor/u)
+  assert.match(inboxHelp, /murph inbox doctor/u)
 }, SETUP_ALIAS_TIMEOUT_MS)
 
 test.sequential('murph loads VAULT from a local .env file', async () => {

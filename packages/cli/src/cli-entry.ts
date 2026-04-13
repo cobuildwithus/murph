@@ -34,12 +34,11 @@ export async function runMurphCliAction(
   argv: string[],
   options: MurphCliRunOptions = {},
 ): Promise<void> {
-  const cliModule = await import('./index.js')
+  const vaultCliModule = await import('./vault-cli.js')
   const operatorConfigModule = await import('@murphai/operator-config/operator-config')
   const setupCliModule = await import('@murphai/setup-cli/setup-cli')
   const setupRuntimeEnvModule = await import('@murphai/operator-config/setup-runtime-env')
 
-  const cli = cliModule.default
   const {
     applyDefaultVaultToArgs,
     expandConfiguredVaultPath,
@@ -57,16 +56,19 @@ export async function runMurphCliAction(
   } = setupCliModule
   const { SETUP_RUNTIME_ENV_NOTICE } = setupRuntimeEnvModule
 
-  const setupProgramName = detectSetupProgramName(options.argv0 ?? process.argv[1])
+  const programName = detectSetupProgramName(options.argv0 ?? process.argv[1])
+  const cli = vaultCliModule.createVaultCliWithOptions({
+    commandName: programName,
+  })
   const homeDirectory = resolveOperatorHomeDirectory()
   const serveOptions = createCliServeOptions(options.exit)
 
-  if (isSetupInvocation(argv, setupProgramName)) {
+  if (isSetupInvocation(argv, programName)) {
     const successfulSetup = {
       current: null as SuccessfulSetupContext | null,
     }
     const setupCli = createSetupCli({
-      commandName: setupProgramName,
+      commandName: programName,
       onSetupSuccess(context) {
         successfulSetup.current = context
       },

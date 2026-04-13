@@ -14,7 +14,7 @@ import {
 
 const originalEmitWarning = process.emitWarning;
 const mockedCliEntryModules = [
-  "../src/index.js",
+  "../src/vault-cli.js",
   "@murphai/operator-config/operator-config",
   "@murphai/setup-cli/setup-cli",
   "@murphai/operator-config/setup-runtime-env",
@@ -28,8 +28,8 @@ function mockCliActionModules(input: {
   setupCliModule: Record<string, unknown>;
   setupRuntimeEnvModule?: Record<string, unknown>;
 }) {
-  vi.doMock("../src/index.js", () => ({
-    default: input.cli,
+  vi.doMock("../src/vault-cli.js", () => ({
+    createVaultCliWithOptions: vi.fn(() => input.cli),
   }));
   vi.doMock("@murphai/operator-config/operator-config", () => input.operatorConfigModule);
   vi.doMock("@murphai/setup-cli/setup-cli", () => input.setupCliModule);
