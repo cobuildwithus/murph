@@ -1,5 +1,3 @@
--- Murph hosted Prisma baseline generated from prisma/schema.prisma on 2026-04-09.
-
 -- CreateSchema
 CREATE SCHEMA IF NOT EXISTS "public";
 
@@ -524,16 +522,16 @@ CREATE UNIQUE INDEX "hosted_member_routing_member_id_key" ON "hosted_member_rout
 CREATE UNIQUE INDEX "hosted_member_routing_linq_chat_lookup_key_key" ON "hosted_member_routing"("linq_chat_lookup_key");
 
 -- CreateIndex
-CREATE INDEX "hosted_member_routing_linq_recipient_phone_lookup_key_idx" ON "hosted_member_routing"("linq_recipient_phone_lookup_key");
-
--- CreateIndex
 CREATE UNIQUE INDEX "hosted_member_routing_pending_linq_chat_lookup_key_key" ON "hosted_member_routing"("pending_linq_chat_lookup_key");
 
 -- CreateIndex
-CREATE INDEX "hosted_member_routing_pending_linq_recipient_phone_lookup_key_idx" ON "hosted_member_routing"("pending_linq_recipient_phone_lookup_key");
+CREATE UNIQUE INDEX "hosted_member_routing_telegram_user_lookup_key_key" ON "hosted_member_routing"("telegram_user_lookup_key");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "hosted_member_routing_telegram_user_lookup_key_key" ON "hosted_member_routing"("telegram_user_lookup_key");
+CREATE INDEX "hosted_member_routing_linq_recipient_phone_lookup_key_idx" ON "hosted_member_routing"("linq_recipient_phone_lookup_key");
+
+-- CreateIndex
+CREATE INDEX "hosted_member_routing_pending_linq_recipient_phone_lookup_k_idx" ON "hosted_member_routing"("pending_linq_recipient_phone_lookup_key");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "hosted_member_billing_ref_member_id_key" ON "hosted_member_billing_ref"("member_id");
@@ -687,3 +685,4 @@ ALTER TABLE "hosted_linq_daily_state" ADD CONSTRAINT "hosted_linq_daily_state_me
 
 -- AddForeignKey
 ALTER TABLE "linq_webhook_event" ADD CONSTRAINT "linq_webhook_event_binding_id_fkey" FOREIGN KEY ("binding_id") REFERENCES "linq_recipient_binding"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
