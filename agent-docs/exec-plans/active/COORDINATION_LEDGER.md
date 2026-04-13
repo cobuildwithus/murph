@@ -6,4 +6,3 @@ Use `Notes` to mark a lane as exclusive when overlap is unsafe, such as a large 
 
 | Agent | Scope | Plan | Files | Symbols | Status | Notes |
 | --- | --- | --- | --- | --- | --- | --- |
-| Codex | Root local hosted dev lane | `agent-docs/exec-plans/active/2026-04-13-local-hosted-dev-lane.md` | `package.json`, `scripts/dev-hosted-local.ts`, `apps/web/src/lib/hosted-execution/environment.ts`, `apps/web/test/hosted-execution-environment.test.ts`, `apps/cloudflare/.dev.vars.example`, `README.md` | `readHostedExecutionDispatchEnvironment`, `readHostedExecutionControlBaseUrl` | in_progress | Preserve unrelated dirty `apps/web` onboarding edits already in worktree; avoid touching those files unless required. |
