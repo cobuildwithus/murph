@@ -24,6 +24,10 @@ export interface HostedVerifiedEmailSyncResult {
   verifiedAt: string;
 }
 
+export type HostedManagedUserCryptoWarmupTrigger =
+  | "billing-checkout-route"
+  | "privy-complete-checkout";
+
 export function readHostedExecutionControlClientIfConfigured(): CloudflareHostedControlClient | null {
   const baseUrl = readHostedExecutionControlBaseUrl();
 
@@ -118,4 +122,26 @@ export async function provisionManagedUserCryptoInHostedExecution(
   userId: string,
 ): Promise<CloudflareHostedManagedUserCryptoStatus> {
   return requireHostedExecutionControlClient().provisionManagedUserCrypto(userId);
+}
+
+export async function preProvisionManagedUserCryptoInHostedExecutionBestEffort(input: {
+  trigger: HostedManagedUserCryptoWarmupTrigger;
+  userId: string;
+}): Promise<boolean> {
+  const client = readHostedExecutionControlClientIfConfigured();
+
+  if (!client) {
+    return false;
+  }
+
+  try {
+    await client.provisionManagedUserCrypto(input.userId);
+    return true;
+  } catch (error) {
+    console.error(
+      `Hosted managed user crypto warmup failed during ${input.trigger}.`,
+      formatHostedExecutionSafeLogError(error),
+    );
+    return false;
+  }
 }

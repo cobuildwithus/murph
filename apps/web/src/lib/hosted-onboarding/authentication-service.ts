@@ -24,7 +24,12 @@ export async function completeHostedPrivyVerification(input: {
   inviteCode?: string | null;
   now?: Date;
   prisma?: PrismaClient;
-}) {
+}): Promise<{
+  inviteCode: string;
+  joinUrl: string;
+  memberId: string;
+  stage: "active" | "activating" | "checkout" | "blocked";
+}> {
   const prisma = input.prisma ?? getPrisma();
   const now = input.now ?? new Date();
   const invite = input.inviteCode
@@ -69,6 +74,7 @@ export async function completeHostedPrivyVerification(input: {
   return {
     inviteCode: activeInvite.inviteCode,
     joinUrl: buildHostedInviteUrl(activeInvite.inviteCode),
+    memberId: member.id,
     stage,
   };
 }
