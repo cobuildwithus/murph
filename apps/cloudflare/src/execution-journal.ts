@@ -2,6 +2,7 @@ import {
   gatewayProjectionSnapshotSchema,
   type GatewayProjectionSnapshot,
 } from "@murphai/gateway-core";
+import { emitHostedExecutionStructuredLog } from "@murphai/hosted-execution";
 import type {
   HostedExecutionBundleRef,
   HostedExecutionRunnerResult,
@@ -141,6 +142,21 @@ export async function persistHostedExecutionCommit(input: {
   const existing = await journalStore.readCommittedResult(input.userId, input.eventId);
 
   if (existing) {
+    emitHostedExecutionStructuredLog({
+      component: "runner",
+      details: {
+        existingAssistantDeliveryCount: existing.assistantDeliveryEffects.length,
+        existingCommittedAt: existing.committedAt,
+        existingFinalizedAt: existing.finalizedAt,
+        incomingAssistantDeliveryCount: requireAssistantDeliveryEffects(
+          input.payload.assistantDeliveryEffects,
+          "Hosted execution duplicate commit payload.assistantDeliveryEffects",
+        ).length,
+      },
+      eventId: input.eventId,
+      message: "Hosted duplicate durable commit attempt encountered an existing commit.",
+      phase: "commit.recorded",
+    });
     assertEquivalentDuplicateCommit(existing, input);
     return existing;
   }
@@ -338,6 +354,12 @@ function assertEquivalentDuplicateCommit(
     "Hosted execution commit payload.assistantDeliveryEffects",
   );
   if (!sameStructuredJsonValue(existing.assistantDeliveryEffects, expectedAssistantDeliveryEffects)) {
+    emitHostedDuplicateCommitMismatchLog({
+      eventId: input.eventId,
+      existing,
+      mismatch: "assistant_delivery_effects",
+      payload: input.payload,
+    });
     throw new Error(
       `Hosted execution commit ${input.eventId} assistant deliveries do not match the existing durable commit.`,
     );
@@ -364,6 +386,84 @@ function assertEquivalentDuplicateCommit(
       `Hosted execution commit ${input.eventId} vault bundle ref does not match the existing durable commit.`,
     );
   }
+}
+
+type HostedDuplicateCommitMismatchKind =
+  | "assistant_delivery_effects";
+
+function emitHostedDuplicateCommitMismatchLog(input: {
+  eventId: string;
+  existing: HostedExecutionCommittedResult;
+  mismatch: HostedDuplicateCommitMismatchKind;
+  payload: HostedExecutionCommitPayload;
+}): void {
+  const existingAssistantDeliveriesInOrder = summarizeHostedAssistantDeliveryEffects(
+    input.existing.assistantDeliveryEffects,
+  );
+  const incomingAssistantDeliveriesInOrder = summarizeHostedAssistantDeliveryEffects(
+    requireAssistantDeliveryEffects(
+      input.payload.assistantDeliveryEffects,
+      "Hosted execution duplicate commit payload.assistantDeliveryEffects",
+    ),
+  );
+  const existingAssistantDeliveriesSorted = sortHostedAssistantDeliveryEffectsSummary(
+    existingAssistantDeliveriesInOrder,
+  );
+  const incomingAssistantDeliveriesSorted = sortHostedAssistantDeliveryEffectsSummary(
+    incomingAssistantDeliveriesInOrder,
+  );
+
+  emitHostedExecutionStructuredLog({
+    component: "runner",
+    details: {
+      existingAssistantDeliveryCount: existingAssistantDeliveriesInOrder.length,
+      existingAssistantDeliveriesInOrder,
+      existingAssistantDeliveriesSorted,
+      existingCommittedAt: input.existing.committedAt,
+      existingFinalizedAt: input.existing.finalizedAt,
+      incomingAssistantDeliveryCount: incomingAssistantDeliveriesInOrder.length,
+      incomingAssistantDeliveriesInOrder,
+      incomingAssistantDeliveriesSorted,
+      mismatch: input.mismatch,
+      sortedAssistantDeliveriesMatch: sameStructuredJsonValue(
+        existingAssistantDeliveriesSorted,
+        incomingAssistantDeliveriesSorted,
+      ),
+    },
+    eventId: input.eventId,
+    level: "error",
+    message: "Hosted duplicate durable commit payload diverged from the existing commit.",
+    phase: "failed",
+  });
+}
+
+function summarizeHostedAssistantDeliveryEffects(
+  effects: readonly HostedAssistantDeliveryEffect[],
+): {
+  effectId: string;
+  fingerprint: string;
+}[] {
+  return effects.map((effect) => ({
+    effectId: effect.effectId,
+    fingerprint: effect.fingerprint,
+  }));
+}
+
+function sortHostedAssistantDeliveryEffectsSummary(input: readonly {
+  effectId: string;
+  fingerprint: string;
+}[]): {
+  effectId: string;
+  fingerprint: string;
+}[] {
+  return [...input].sort((left, right) => {
+    const effectIdOrder = left.effectId.localeCompare(right.effectId);
+    if (effectIdOrder !== 0) {
+      return effectIdOrder;
+    }
+
+    return left.fingerprint.localeCompare(right.fingerprint);
+  });
 }
 
 function resolveExpectedCommittedBundleRef(
