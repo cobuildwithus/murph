@@ -33,7 +33,7 @@ export function JoinInviteSuccessClient({
 }: JoinInviteSuccessClientProps) {
   const [status, setStatus] = useState(initialStatus);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const shouldPoll = status.stage === "verify" || status.stage === "checkout" || status.stage === "activating";
+  const shouldPoll = status.stage === "verify" || status.stage === "checkout" || status.activationPending;
 
   useHostedInviteStatusRefresh({
     inviteCode,
@@ -96,7 +96,9 @@ function resolveHostedInviteSuccessState(status: HostedInviteStatusPayload): Hos
     case "active":
       return {
         buttonLabel: "Continue",
-        description: "Murph finished your hosted activation. Head back to your invite page to continue.",
+        description: status.activationPending
+          ? "Payment is confirmed. Murph is still booting your hosted runtime in Cloudflare and sending your first text. You can continue now while that finishes."
+          : "Murph finished your hosted activation. Head back to your invite page to continue.",
         pending: false,
         title: "Your account is ready",
         variant: "active",
@@ -110,7 +112,6 @@ function resolveHostedInviteSuccessState(status: HostedInviteStatusPayload): Hos
         variant: "pending",
       };
     case "checkout":
-    case "activating":
       return {
         buttonLabel: "Back to invite",
         description:

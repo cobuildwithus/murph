@@ -8,7 +8,6 @@ import {
 import type { JoinInviteShareImportState } from "./join-invite-state";
 import {
   JoinInviteActivePanel,
-  JoinInviteActivatingPanel,
   JoinInviteBlockedAlert,
   JoinInviteCheckoutButton,
   JoinInviteSignedInMismatchAlert,
@@ -103,10 +102,9 @@ export function JoinInviteStageContent({
         />
       ) : null}
 
-      {status.stage === "activating" ? <JoinInviteActivatingPanel sharePreview={sharePreview} /> : null}
-
       {status.stage === "active" ? (
         <JoinInviteActivePanel
+          activationPending={status.activationPending}
           pendingAction={pendingAction}
           shareImportState={shareImportState}
           sharePreview={sharePreview}

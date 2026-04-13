@@ -97,7 +97,7 @@ describe("getHostedInviteStatus", () => {
     });
   });
 
-  it("keeps the invite in activating while the shared activation outcome is still queued after transport handoff", async () => {
+  it("keeps the invite active while exposing queued background activation after transport handoff", async () => {
     const prisma = {
       executionOutbox: {
         findFirst: vi.fn().mockResolvedValue({
@@ -124,11 +124,12 @@ describe("getHostedInviteStatus", () => {
         prisma,
       }),
     ).resolves.toMatchObject({
+      activationPending: true,
       session: {
         authenticated: true,
         matchesInvite: true,
       },
-      stage: "activating",
+      stage: "active",
     });
   });
 
@@ -168,6 +169,7 @@ describe("getHostedInviteStatus", () => {
         prisma,
       }),
     ).resolves.toMatchObject({
+      activationPending: false,
       stage: "active",
     });
   });
@@ -208,6 +210,7 @@ describe("getHostedInviteStatus", () => {
         prisma,
       }),
     ).resolves.toMatchObject({
+      activationPending: false,
       stage: "active",
     });
   });
@@ -239,6 +242,7 @@ describe("getHostedInviteStatus", () => {
         prisma,
       }),
     ).resolves.toMatchObject({
+      activationPending: false,
       stage: "active",
     });
   });

@@ -14,6 +14,7 @@ import { readHostedExecutionControlClientIfConfigured } from "../hosted-executio
 type HostedActivationProgressPrismaClient = PrismaClient | Prisma.TransactionClient;
 
 const HOSTED_MEMBER_ACTIVATION_EVENT_KIND = "member.activated";
+const HOSTED_MEMBER_ACTIVATION_STATUS_TIMEOUT_MS = 1_500;
 const HOSTED_EXECUTION_EVENT_DISPATCH_STATE_SET = new Set<HostedExecutionEventDispatchState>(
   HOSTED_EXECUTION_EVENT_DISPATCH_STATES,
 );
@@ -57,7 +58,9 @@ export async function isHostedMemberActivationPending(input: {
     return true;
   }
 
-  const controlClient = readHostedExecutionControlClientIfConfigured();
+  const controlClient = readHostedExecutionControlClientIfConfigured(
+    HOSTED_MEMBER_ACTIVATION_STATUS_TIMEOUT_MS,
+  );
 
   if (!controlClient) {
     return true;

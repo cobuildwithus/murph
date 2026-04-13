@@ -35,7 +35,9 @@ export type HostedManagedUserCryptoWarmupTrigger =
 
 export type HostedDeferredWorkScheduler = (callback: () => Promise<void> | void) => void;
 
-export function readHostedExecutionControlClientIfConfigured(): CloudflareHostedControlClient | null {
+export function readHostedExecutionControlClientIfConfigured(
+  timeoutMs?: number,
+): CloudflareHostedControlClient | null {
   const baseUrl = readHostedExecutionControlBaseUrl();
 
   if (!baseUrl) {
@@ -45,6 +47,7 @@ export function readHostedExecutionControlClientIfConfigured(): CloudflareHosted
   return createCloudflareHostedControlClient({
     baseUrl,
     getBearerToken: createHostedExecutionVercelOidcBearerTokenProvider(),
+    ...(typeof timeoutMs === "number" ? { timeoutMs } : {}),
   });
 }
 

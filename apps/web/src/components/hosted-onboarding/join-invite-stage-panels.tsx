@@ -159,32 +159,14 @@ export function JoinInviteCheckoutButton({
   );
 }
 
-export function JoinInviteActivatingPanel({ sharePreview }: { sharePreview: HostedSharePreview | null }) {
-  return (
-    <div className="rounded-xl border border-olive/20 bg-olive/5 px-5 py-4 text-olive">
-      <div className="flex items-start gap-3">
-        <LoaderCircleIcon className="mt-0.5 h-5 w-5 shrink-0 animate-spin" />
-        <div className="space-y-1">
-          <p className="text-sm font-semibold">Payment received. We&apos;re setting up your account.</p>
-          <p className="text-sm leading-relaxed">
-            Keep this page open. Murph is finishing hosted activation now and will switch you through as soon as it&apos;s
-            ready.
-          </p>
-          {sharePreview ? (
-            <p className="text-sm leading-relaxed">We&apos;ll add your shared bundle after setup finishes.</p>
-          ) : null}
-        </div>
-      </div>
-    </div>
-  );
-}
-
 export function JoinInviteActivePanel({
+  activationPending,
   pendingAction,
   shareImportState,
   sharePreview,
   onAcceptShare,
 }: {
+  activationPending: boolean;
   pendingAction: "checkout" | "share" | null;
   shareImportState: JoinInviteShareImportState;
   sharePreview: HostedSharePreview | null;
@@ -192,12 +174,28 @@ export function JoinInviteActivePanel({
 }) {
   return (
     <div className="space-y-6">
-      <div className="flex items-center gap-3 rounded-xl border border-olive/20 bg-olive/5 px-5 py-4">
-        <CheckCircleIcon className="h-6 w-6 shrink-0 text-olive" />
-        <p className="text-sm leading-relaxed text-olive">
-          You should receive a text message from Murph shortly. Just reply to start chatting.
-        </p>
-      </div>
+      {activationPending ? (
+        <div className="flex items-start gap-3 rounded-xl border border-olive/20 bg-olive/5 px-5 py-4 text-olive">
+          <LoaderCircleIcon className="mt-0.5 h-5 w-5 shrink-0 animate-spin" />
+          <div className="space-y-1">
+            <p className="text-sm font-semibold">Your account is ready. Murph is still warming up.</p>
+            <p className="text-sm leading-relaxed">
+              We&apos;re booting your hosted runtime in Cloudflare and sending your first text now. You can continue
+              below while that finishes.
+            </p>
+            {sharePreview ? (
+              <p className="text-sm leading-relaxed">We&apos;ll add your shared bundle after the warmup finishes.</p>
+            ) : null}
+          </div>
+        </div>
+      ) : (
+        <div className="flex items-center gap-3 rounded-xl border border-olive/20 bg-olive/5 px-5 py-4">
+          <CheckCircleIcon className="h-6 w-6 shrink-0 text-olive" />
+          <p className="text-sm leading-relaxed text-olive">
+            You should receive a text message from Murph shortly. Just reply to start chatting.
+          </p>
+        </div>
+      )}
 
       <div>
         <p className="mb-4 text-sm font-semibold uppercase tracking-[0.15em] text-olive">Things Murph can help with</p>

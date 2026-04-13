@@ -209,6 +209,7 @@ describe("completeHostedPrivyVerification", () => {
     expect(prisma.hostedMember.update).not.toHaveBeenCalled();
     expect(prisma.hostedInvite.update).not.toHaveBeenCalled();
     expect(result).toEqual({
+      activationPending: false,
       inviteCode: "invite-code",
       joinUrl: "https://join.example.test/join/invite-code",
       memberId: inviteMember.id,
@@ -363,6 +364,7 @@ describe("completeHostedPrivyVerification", () => {
         prisma,
       }),
     ).resolves.toEqual({
+      activationPending: false,
       inviteCode: "public-phone-only-invite",
       joinUrl: "https://join.example.test/join/public-phone-only-invite",
       memberId: "member_phone_only",
@@ -713,6 +715,7 @@ describe("completeHostedPrivyVerification", () => {
         prisma,
       }),
     ).resolves.toEqual({
+      activationPending: false,
       inviteCode: "invite-code",
       joinUrl: "https://join.example.test/join/invite-code",
       memberId: inviteMember.id,
@@ -746,6 +749,11 @@ function asCompleteHostedPrivyVerificationPrisma<T extends Record<string, unknow
         update?: ((input: { data?: Record<string, unknown>; where?: Record<string, unknown> }) => Promise<unknown>) | undefined;
       }
     | undefined;
+  const executionOutbox = prismaWithQueryRaw.executionOutbox as unknown as
+    | {
+        findFirst?: ((input: { where?: Record<string, unknown> }) => Promise<unknown>) | undefined;
+      }
+    | undefined;
 
   if (!("hostedMember" in prismaWithQueryRaw) || !prismaWithQueryRaw.hostedMember || typeof hostedMember?.findUnique !== "function") {
     Object.defineProperty(prismaWithQueryRaw, "hostedMember", {
@@ -766,6 +774,16 @@ function asCompleteHostedPrivyVerificationPrisma<T extends Record<string, unknow
 
           return null;
         }),
+      },
+    });
+  }
+
+  if (!("executionOutbox" in prismaWithQueryRaw) || !prismaWithQueryRaw.executionOutbox || typeof executionOutbox?.findFirst !== "function") {
+    Object.defineProperty(prismaWithQueryRaw, "executionOutbox", {
+      configurable: true,
+      value: {
+        ...(executionOutbox ?? {}),
+        findFirst: vi.fn().mockResolvedValue(null),
       },
     });
   }

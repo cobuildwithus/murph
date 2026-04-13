@@ -59,6 +59,7 @@ describe("hosted onboarding Privy completion route", () => {
     });
     mocks.assertHostedOnboardingMutationOrigin.mockReturnValue(undefined);
     mocks.completeHostedPrivyVerification.mockResolvedValue({
+      activationPending: false,
       inviteCode: "invite_123",
       joinUrl: "https://join.example.test/join/invite_123",
       memberId: "member_123",
@@ -114,6 +115,7 @@ describe("hosted onboarding Privy completion route", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
+      activationPending: false,
       inviteCode: "invite_123",
       joinUrl: "https://join.example.test/join/invite_123",
       ok: true,
@@ -139,6 +141,7 @@ describe("hosted onboarding Privy completion route", () => {
 
   it("skips the background warmup when the member is already active", async () => {
     mocks.completeHostedPrivyVerification.mockResolvedValueOnce({
+      activationPending: false,
       inviteCode: "invite_123",
       joinUrl: "https://join.example.test/join/invite_123",
       memberId: "member_123",
@@ -156,6 +159,7 @@ describe("hosted onboarding Privy completion route", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
+      activationPending: false,
       inviteCode: "invite_123",
       joinUrl: "https://join.example.test/join/invite_123",
       ok: true,
@@ -185,6 +189,7 @@ describe("hosted onboarding Privy completion route", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
+      activationPending: false,
       inviteCode: "invite_123",
       joinUrl: "https://join.example.test/join/invite_123",
       ok: true,
