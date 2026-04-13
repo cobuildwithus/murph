@@ -81,16 +81,26 @@ describe("PrismaDeviceSyncControlPlaneStore oauth state ingress", () => {
           callback: (transaction: {
             deviceOauthSession: {
               findUnique: ({ where }: { where: { state: string } }) => Promise<MutableOAuthSession | null>;
-              delete: ({ where }: { where: { state: string } }) => Promise<void>;
+              deleteMany: ({ where }: { where: { state: string; provider?: string } }) => Promise<{ count: number }>;
             };
           }) => Promise<TResult>,
         ) =>
           callback({
             deviceOauthSession: {
               findUnique: async ({ where }) => cloneOAuthSession(sessions.get(where.state) ?? null),
-              delete: async ({ where }) => {
+              deleteMany: async ({ where }) => {
+                const record = sessions.get(where.state);
+
+                if (!record) {
+                  return { count: 0 };
+                }
+
+                if (where.provider && record.provider !== where.provider) {
+                  return { count: 0 };
+                }
+
                 sessions.delete(where.state);
-                return undefined;
+                return { count: 1 };
               },
             },
           }),
@@ -134,16 +144,26 @@ describe("PrismaDeviceSyncControlPlaneStore oauth state ingress", () => {
           callback: (transaction: {
             deviceOauthSession: {
               findUnique: ({ where }: { where: { state: string } }) => Promise<MutableOAuthSession | null>;
-              delete: ({ where }: { where: { state: string } }) => Promise<void>;
+              deleteMany: ({ where }: { where: { state: string; provider?: string } }) => Promise<{ count: number }>;
             };
           }) => Promise<TResult>,
         ) =>
           callback({
             deviceOauthSession: {
               findUnique: async ({ where }) => cloneOAuthSession(sessions.get(where.state) ?? null),
-              delete: async ({ where }) => {
+              deleteMany: async ({ where }) => {
+                const record = sessions.get(where.state);
+
+                if (!record) {
+                  return { count: 0 };
+                }
+
+                if (where.provider && record.provider !== where.provider) {
+                  return { count: 0 };
+                }
+
                 sessions.delete(where.state);
-                return undefined;
+                return { count: 1 };
               },
             },
           }),
@@ -177,16 +197,26 @@ describe("PrismaDeviceSyncControlPlaneStore oauth state ingress", () => {
           callback: (transaction: {
             deviceOauthSession: {
               findUnique: ({ where }: { where: { state: string } }) => Promise<MutableOAuthSession | null>;
-              delete: ({ where }: { where: { state: string } }) => Promise<void>;
+              deleteMany: ({ where }: { where: { state: string; provider?: string } }) => Promise<{ count: number }>;
             };
           }) => Promise<TResult>,
         ) =>
           callback({
             deviceOauthSession: {
               findUnique: async ({ where }) => cloneOAuthSession(sessions.get(where.state) ?? null),
-              delete: async ({ where }) => {
+              deleteMany: async ({ where }) => {
+                const record = sessions.get(where.state);
+
+                if (!record) {
+                  return { count: 0 };
+                }
+
+                if (where.provider && record.provider !== where.provider) {
+                  return { count: 0 };
+                }
+
                 sessions.delete(where.state);
-                return undefined;
+                return { count: 1 };
               },
             },
           }),
