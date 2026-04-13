@@ -9,14 +9,14 @@ import {
 } from "@/src/lib/hosted-onboarding/logging";
 import { completeHostedPrivyVerification } from "@/src/lib/hosted-onboarding/member-service";
 import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
-import { requireHostedPrivyCompletionAuth } from "@/src/lib/hosted-onboarding/request-auth";
+import { requirePrivyCompletionSession } from "@/src/lib/hosted-onboarding/request-auth";
 
 export const POST = withJsonError(async (request: Request) => {
   const timing = startHostedOnboardingTiming("hosted-onboarding.route.privy-complete");
 
   try {
     assertHostedOnboardingMutationOrigin(request);
-    const auth = await requireHostedPrivyCompletionAuth(request);
+    const auth = await requirePrivyCompletionSession(request);
     const body = await readOptionalJsonObject(request);
     const result = await completeHostedPrivyVerification({
       identity: auth.identity,

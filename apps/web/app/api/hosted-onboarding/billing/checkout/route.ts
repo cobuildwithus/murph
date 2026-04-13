@@ -9,7 +9,7 @@ import {
   finishHostedOnboardingTiming,
   startHostedOnboardingTiming,
 } from "@/src/lib/hosted-onboarding/logging";
-import { requireHostedPrivyMemberAuth } from "@/src/lib/hosted-onboarding/request-auth";
+import { requirePrivyMemberAuth } from "@/src/lib/hosted-onboarding/request-auth";
 import { requireHostedInviteCodeFromRequest } from "@/src/lib/hosted-onboarding/route-helpers";
 
 export const POST = withJsonError(async (request: Request) => {
@@ -17,7 +17,7 @@ export const POST = withJsonError(async (request: Request) => {
 
   try {
     assertHostedOnboardingMutationOrigin(request);
-    const auth = await requireHostedPrivyMemberAuth(request);
+    const auth = await requirePrivyMemberAuth(request);
     const { body, inviteCode } = await requireHostedInviteCodeFromRequest(request);
     const checkout = await createHostedBillingCheckout({
       inviteCode,

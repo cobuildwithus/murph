@@ -6,12 +6,12 @@ import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { upsertHostedMemberTelegramRoutingBinding } from "@/src/lib/hosted-onboarding/hosted-member-routing-store";
 import { jsonOk, withJsonError, readOptionalJsonObject } from "@/src/lib/hosted-onboarding/http";
 import { resolveHostedPrivyTelegramAccountSelection } from "@/src/lib/hosted-onboarding/privy-shared";
-import { requireHostedPrivyActiveMemberAuth } from "@/src/lib/hosted-onboarding/request-auth";
+import { requireActivePrivyMemberAuth } from "@/src/lib/hosted-onboarding/request-auth";
 import { buildHostedTelegramBotLink } from "@/src/lib/hosted-onboarding/telegram";
 
 export const POST = withJsonError(async (request: Request) => {
     assertHostedOnboardingMutationOrigin(request);
-    const auth = await requireHostedPrivyActiveMemberAuth(request);
+    const auth = await requireActivePrivyMemberAuth(request);
     const body = await readOptionalJsonObject(request);
     const expectedTelegramUserId = normalizeComparableTelegramUserId(
       typeof body.expectedTelegramUserId === "string" ? body.expectedTelegramUserId : null,

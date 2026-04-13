@@ -2,14 +2,14 @@ import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboardin
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { readHostedMemberStripeBillingRef } from "@/src/lib/hosted-onboarding/hosted-member-billing-store";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
-import { requireHostedPrivyActiveMemberAuth } from "@/src/lib/hosted-onboarding/request-auth";
+import { requireActivePrivyMemberAuth } from "@/src/lib/hosted-onboarding/request-auth";
 import { requireHostedStripeApi } from "@/src/lib/hosted-onboarding/runtime";
 import { getPrisma } from "@/src/lib/prisma";
 
 export const POST = withJsonError(async (request: Request) => {
   assertHostedOnboardingMutationOrigin(request);
   const prisma = getPrisma();
-  const auth = await requireHostedPrivyActiveMemberAuth(request, prisma);
+  const auth = await requireActivePrivyMemberAuth(request, prisma);
   const billingRef = await readHostedMemberStripeBillingRef({
     memberId: auth.member.id,
     prisma,

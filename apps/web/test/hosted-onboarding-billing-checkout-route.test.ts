@@ -6,7 +6,7 @@ const mocks = vi.hoisted(() => ({
   createHostedBillingCheckout: vi.fn(),
   preProvisionManagedUserCryptoInHostedExecutionBestEffort: vi.fn(),
   requireHostedInviteCodeFromRequest: vi.fn(),
-  requireHostedPrivyMemberAuth: vi.fn(),
+  requirePrivyMemberAuth: vi.fn(),
 }));
 
 vi.mock("next/server", async () => {
@@ -32,7 +32,7 @@ vi.mock("@/src/lib/hosted-onboarding/csrf", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({
-  requireHostedPrivyMemberAuth: mocks.requireHostedPrivyMemberAuth,
+  requirePrivyMemberAuth: mocks.requirePrivyMemberAuth,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/route-helpers", () => ({
@@ -70,7 +70,7 @@ describe("hosted onboarding billing checkout route", () => {
       },
       inviteCode: "invite_123",
     });
-    mocks.requireHostedPrivyMemberAuth.mockResolvedValue({
+    mocks.requirePrivyMemberAuth.mockResolvedValue({
       member: {
         id: "member_123",
       },

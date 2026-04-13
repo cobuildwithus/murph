@@ -3,11 +3,11 @@ import { assertContract, sharePackSchema } from "@murphai/contracts";
 import { createHostedShareLink } from "@/src/lib/hosted-share/service";
 import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
 import { jsonOk, readJsonObject, withJsonError } from "@/src/lib/hosted-onboarding/http";
-import { requireHostedPrivyActiveMemberAuth } from "@/src/lib/hosted-onboarding/request-auth";
+import { requireActivePrivyMemberAuth } from "@/src/lib/hosted-onboarding/request-auth";
 
 export const POST = withJsonError(async (request: Request) => {
   assertHostedOnboardingMutationOrigin(request);
-  const auth = await requireHostedPrivyActiveMemberAuth(request);
+  const auth = await requireActivePrivyMemberAuth(request);
   const body = await readJsonObject(request);
 
   return jsonOk(

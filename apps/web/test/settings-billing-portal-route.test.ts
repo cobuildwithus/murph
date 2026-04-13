@@ -4,7 +4,7 @@ const mocks = vi.hoisted(() => ({
   assertHostedOnboardingMutationOrigin: vi.fn(),
   getPrisma: vi.fn(),
   readHostedMemberStripeBillingRef: vi.fn(),
-  requireHostedPrivyActiveMemberAuth: vi.fn(),
+  requireActivePrivyMemberAuth: vi.fn(),
   requireHostedStripeApi: vi.fn(),
 }));
 
@@ -21,7 +21,7 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-billing-store", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({
-  requireHostedPrivyActiveMemberAuth: mocks.requireHostedPrivyActiveMemberAuth,
+  requireActivePrivyMemberAuth: mocks.requireActivePrivyMemberAuth,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
@@ -36,7 +36,7 @@ beforeEach(async () => {
   vi.clearAllMocks();
   mocks.assertHostedOnboardingMutationOrigin.mockImplementation(() => {});
   mocks.getPrisma.mockReturnValue({} as never);
-  mocks.requireHostedPrivyActiveMemberAuth.mockResolvedValue({
+  mocks.requireActivePrivyMemberAuth.mockResolvedValue({
     member: {
       id: "member_123",
     },
@@ -74,7 +74,7 @@ test("creates a Stripe billing portal session for the active hosted member", asy
   await expect(response.json()).resolves.toEqual({
     url: "https://stripe.example.test/portal/session_123",
   });
-  expect(mocks.requireHostedPrivyActiveMemberAuth).toHaveBeenCalledWith(
+  expect(mocks.requireActivePrivyMemberAuth).toHaveBeenCalledWith(
     expect.any(Request),
     expect.any(Object),
   );
