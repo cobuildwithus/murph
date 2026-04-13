@@ -42,7 +42,7 @@ Then load only the task-relevant docs listed below.
 - Treat supplied patches as behavioral intent, not overwrite authority.
 - If a change introduces or changes a durable repo rule, update the durable doc in the same turn.
 - Required completion-workflow audit subagent passes are repo-policy pre-authorized. Treat this workflow doc plus `AGENTS.md` as standing permission to spawn those required audit subagents when a repo task reaches that workflow; do not stop only to ask for a second explicit "use subagents" instruction.
-- `scripts/finish-task` resolves the file/directory paths you pass into exact changed file paths, closes the active plan, moves it to `agent-docs/exec-plans/completed/`, and creates a scoped commit containing the closed-plan artifact plus those resolved paths.
+- `scripts/finish-task` resolves the file/directory paths you pass into exact changed file paths, removes the one coordination-ledger row whose `Plan` cell exactly matches the active plan path, closes the active plan, moves it to `agent-docs/exec-plans/completed/`, and creates a scoped commit containing the closed-plan artifact plus those resolved paths. It fails closed if that ledger match is missing or ambiguous.
 
 ## Quick Path
 
