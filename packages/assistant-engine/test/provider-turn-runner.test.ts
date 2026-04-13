@@ -464,13 +464,16 @@ describe('executeProviderTurnWithRecovery', () => {
     ).toHaveLength(100)
   })
 
-  it('reuses the native provider session when the active route can resume without bootstrap context', async () => {
+  it('reuses openai response ids without replaying transcript history when bootstrap context is not required', async () => {
     const session = createAssistantSession({
       providerSessionId: 'provider-session-primary',
       resumeRouteId: 'route-primary',
       turnCount: 3,
     })
     const route = createRoute({
+      providerOptions: {
+        resumeKind: 'openai-response-id',
+      },
       routeId: 'route-primary',
     })
 
@@ -486,12 +489,6 @@ describe('executeProviderTurnWithRecovery', () => {
       'provider-session-primary',
     )
     toolCatalog.hasTool.mockReturnValue(false)
-    runnerMocks.listAssistantTranscriptEntries.mockResolvedValue(
-      Array.from({ length: 25 }, (_, index) => ({
-        kind: index % 2 === 0 ? 'assistant' : 'user',
-        text: `Resume message ${index + 1}`,
-      })),
-    )
     runnerMocks.executeAssistantProviderTurnAttempt.mockResolvedValue(
       createSuccessfulAttemptResult({
         providerSessionId: 'provider-session-primary',
@@ -536,7 +533,72 @@ describe('executeProviderTurnWithRecovery', () => {
       }),
     )
     expect(runnerMocks.buildAssistantVaultOverviewBlock).not.toHaveBeenCalled()
+    expect(runnerMocks.listAssistantTranscriptEntries).not.toHaveBeenCalled()
     expect(toolCatalog.hasTool).not.toHaveBeenCalled()
+    expect(runnerMocks.executeAssistantProviderTurnAttempt).toHaveBeenCalledWith(
+      expect.objectContaining({
+        conversationMessages: undefined,
+        resumeProviderSessionId: 'provider-session-primary',
+        sessionContext: undefined,
+        systemPrompt: 'prompt:none:later:no-bootstrap:no-overview',
+      }),
+    )
+  })
+
+  it('keeps a small transcript tail for codex-session resume so stale-session fallback can bootstrap', async () => {
+    const session = createAssistantSession({
+      providerSessionId: 'provider-session-primary',
+      resumeRouteId: 'route-primary',
+      turnCount: 3,
+    })
+    const route = createRoute({
+      providerOptions: {
+        resumeKind: 'codex-session',
+      },
+      routeId: 'route-primary',
+    })
+
+    runnerMocks.resolveAssistantProviderTargetExecutionCapabilities.mockReturnValue({
+      murphCommandSurface: 'direct-cli',
+      supportsNativeResume: true,
+      supportsToolRuntime: false,
+    })
+    runnerMocks.resolveAssistantRouteResumeBinding.mockReturnValue(
+      session.providerBinding,
+    )
+    runnerMocks.resolveAssistantProviderResumeKey.mockReturnValue(
+      'provider-session-primary',
+    )
+    runnerMocks.listAssistantTranscriptEntries.mockResolvedValue(
+      Array.from({ length: 25 }, (_, index) => ({
+        kind: index % 2 === 0 ? 'assistant' : 'user',
+        text: `Resume message ${index + 1}`,
+      })),
+    )
+    runnerMocks.executeAssistantProviderTurnAttempt.mockResolvedValue(
+      createSuccessfulAttemptResult({
+        providerSessionId: 'provider-session-primary',
+        response: 'Resumed answer',
+      }),
+    )
+
+    await executeProviderTurnWithRecovery({
+      input: createMessageInput({
+        prompt: 'Current prompt',
+      }),
+      plan: createTurnPlan({
+        firstTurnCheckInEligible: true,
+      }),
+      resolvedSession: session,
+      routes: [route],
+      turnCreatedAt: '2026-04-08T00:00:00.000Z',
+      turnId: 'turn-native-resume-codex-tail',
+    })
+
+    expect(runnerMocks.listAssistantTranscriptEntries).toHaveBeenCalledWith(
+      '/tmp/test-vault',
+      session.sessionId,
+    )
     expect(runnerMocks.executeAssistantProviderTurnAttempt).toHaveBeenCalledWith(
       expect.objectContaining({
         conversationMessages: expect.arrayContaining([
@@ -550,12 +612,10 @@ describe('executeProviderTurnWithRecovery', () => {
           },
         ]),
         resumeProviderSessionId: 'provider-session-primary',
-        sessionContext: undefined,
-        systemPrompt: 'prompt:none:later:no-bootstrap:no-overview',
       }),
     )
     expect(
-      runnerMocks.executeAssistantProviderTurnAttempt.mock.calls[0]?.[0]
+      runnerMocks.executeAssistantProviderTurnAttempt.mock.calls.at(-1)?.[0]
         ?.conversationMessages,
     ).toHaveLength(20)
   })

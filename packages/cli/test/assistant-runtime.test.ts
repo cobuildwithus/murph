@@ -744,7 +744,7 @@ beforeEach(() => {
 
 
 
-test('sendAssistantMessage keeps older local history in raw transcript files without synthetic continuity summaries', async () => {
+test('sendAssistantMessage keeps older local history in raw transcript files while retaining codex resume replay fallback', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-long-history-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
@@ -788,6 +788,16 @@ test('sendAssistantMessage keeps older local history in raw transcript files wit
   assert.equal(latestProviderCall?.continuityContext, null)
   assert.equal((latestProviderCall?.conversationMessages?.length ?? 0) > 0, true)
 
+  const transcriptEntries = await listAssistantTranscriptEntries(
+    vaultRoot,
+    latest.session.sessionId,
+  )
+  assert.equal(transcriptEntries.length, 18)
+  assert.equal(transcriptEntries[0]?.kind, 'user')
+  assert.equal(transcriptEntries[0]?.text, 'What changed on day 1?')
+  assert.equal(transcriptEntries.at(-1)?.kind, 'assistant')
+  assert.equal(transcriptEntries.at(-1)?.text, 'acknowledged')
+
   const statePaths = resolveAssistantStatePaths(vaultRoot)
   const stateEntries = await readdir(statePaths.assistantStateRoot)
   assert.equal(stateEntries.includes('distillations'), false)
@@ -796,7 +806,7 @@ test('sendAssistantMessage keeps older local history in raw transcript files wit
   assert.ok(receipts[0])
 })
 
-test('sendAssistantMessage chains official OpenAI responses while retaining local transcript continuity without distillation', async () => {
+test('sendAssistantMessage chains official OpenAI responses without replaying local transcript continuity', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-openai-responses-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
@@ -848,18 +858,19 @@ test('sendAssistantMessage chains official OpenAI responses while retaining loca
   )
   assert.equal(providerCalls[0]?.resumeProviderSessionId, null)
   assert.equal(providerCalls[1]?.resumeProviderSessionId, 'resp_1')
-  assert.deepEqual(providerCalls[1]?.conversationMessages, [
-    {
-      content: 'What changed on day 1?',
-      role: 'user',
-    },
-    {
-      content: 'acknowledged 1',
-      role: 'assistant',
-    },
-  ])
+  assert.equal(providerCalls[1]?.conversationMessages, undefined)
   assert.equal(providerCalls[1]?.continuityContext, null)
   assert.equal(typeof providerCalls[1]?.systemPrompt, 'string')
+
+  const transcriptEntries = await listAssistantTranscriptEntries(
+    vaultRoot,
+    latest.session.sessionId,
+  )
+  assert.equal(transcriptEntries.length, 18)
+  assert.equal(transcriptEntries[0]?.kind, 'user')
+  assert.equal(transcriptEntries[0]?.text, 'What changed on day 1?')
+  assert.equal(transcriptEntries[1]?.kind, 'assistant')
+  assert.equal(transcriptEntries[1]?.text, 'acknowledged 1')
 
   const receipts = await listAssistantTurnReceipts(vaultRoot)
   assert.ok(receipts[0])
