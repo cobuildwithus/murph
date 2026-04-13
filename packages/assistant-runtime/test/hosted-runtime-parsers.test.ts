@@ -43,7 +43,7 @@ describe("parseHostedAssistantRuntimeJobInput", () => {
               nextWakeAt: null,
               summary: "completed",
             },
-            sideEffects: [],
+            assistantDeliveryEffects: [],
           },
         },
       },
@@ -68,7 +68,6 @@ describe("parseHostedAssistantRuntimeJobInput", () => {
     expect(parsed.request.bundle).toBe("vault-bundle");
     expect(parsed.request.commit?.bundleRef?.key).toBe("bundles/user/vault.json");
     expect(parsed.request.resume?.committedResult.assistantDeliveryEffects).toEqual([]);
-    expect(parsed.request.resume?.committedResult.sideEffects).toEqual([]);
     expect(parsed.runtime?.userEnv).toEqual({ OPENAI_API_KEY: "secret" });
   });
 
@@ -112,5 +111,31 @@ describe("parseHostedAssistantRuntimeJobInput", () => {
         },
       },
     })).toThrow(/runtime config\.webControlPlane is no longer supported/i);
+  });
+
+  it("rejects the removed resume sideEffects alias", () => {
+    expect(() => parseHostedAssistantRuntimeJobInput({
+      request: {
+        bundle: null,
+        dispatch: {
+          event: {
+            kind: "member.activated",
+            userId: "member_123",
+          },
+          eventId: "evt_legacy_side_effects",
+          occurredAt: "2026-04-01T00:00:00.000Z",
+        },
+        resume: {
+          committedResult: {
+            result: {
+              eventsHandled: 1,
+              nextWakeAt: null,
+              summary: "completed",
+            },
+            sideEffects: [],
+          },
+        },
+      },
+    })).toThrow(/committedResult\.sideEffects is no longer supported/i);
   });
 });

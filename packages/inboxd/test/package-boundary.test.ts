@@ -100,7 +100,7 @@ for (const subpath of publishedSubpaths) {
   });
 }
 
-test("@murphai/inboxd root barrel no longer exposes iMessage helpers", async () => {
+test("@murphai/inboxd root barrel no longer exposes removed compatibility or raw-only helpers", async () => {
   const modulePath = await resolveImportSpecifier({
     exportKey: ".",
     packageImport: "@murphai/inboxd",
@@ -113,9 +113,9 @@ test("@murphai/inboxd root barrel no longer exposes iMessage helpers", async () 
     "-e",
     [
       `const mod = await import(${JSON.stringify(modulePath)});`,
-      `for (const key of ["createImessageConnector", "loadImessageKitDriver", "normalizeImessageAttachment", "normalizeImessageMessage"]) {`,
+      `for (const key of ["appendImportAudit", "appendInboxCaptureEvent", "createImessageConnector", "loadImessageKitDriver", "normalizeImessageAttachment", "normalizeImessageMessage", "persistRawCapture"]) {`,
       "  if (key in mod) {",
-      '    throw new Error(`unexpected iMessage export: ${key}`);',
+      '    throw new Error(`unexpected removed export: ${key}`);',
       "  }",
       "}",
     ].join(" "),
@@ -124,5 +124,5 @@ test("@murphai/inboxd root barrel no longer exposes iMessage helpers", async () 
   });
 
   assert.equal(result.stdout.trim(), "");
-  assert.doesNotMatch(result.stderr, /unexpected iMessage export/u);
+  assert.doesNotMatch(result.stderr, /unexpected removed export/u);
 });

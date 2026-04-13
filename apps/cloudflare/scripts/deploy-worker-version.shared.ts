@@ -271,6 +271,8 @@ function resolveHostedWorkerDeploymentSettings(
   env: EnvSource,
   now: () => Date,
 ): HostedWorkerDeploymentSettings {
+  // Direct deploy is the default operator path. Gradual version/deployment splits
+  // remain available only through the lower-level helper env contract.
   const mode = readDeploymentMode(env.HOSTED_EXECUTION_DEPLOYMENT_MODE);
   const includeSecrets = readBooleanEnv(env.HOSTED_EXECUTION_INCLUDE_SECRETS, true);
   const deployContext = normalizeOptionalString(env.HOSTED_EXECUTION_DEPLOY_CONTEXT)

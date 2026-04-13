@@ -95,6 +95,7 @@ const RUNNER_ENV_PROFILE_KEYS = {
   ],
   "device-sync": [
     "DEVICE_SYNC_PUBLIC_BASE_URL",
+    // Current hosted runtime still needs the device-sync token-bundle codec secret.
     "DEVICE_SYNC_SECRET",
     "OURA_CLIENT_ID",
     "OURA_CLIENT_SECRET",

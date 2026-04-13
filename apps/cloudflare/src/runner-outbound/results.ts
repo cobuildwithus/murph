@@ -265,8 +265,13 @@ function parseHostedExecutionCommitRequest(payload: Record<string, unknown>): Ho
   currentBundleRef: HostedExecutionBundleRef | null;
 } {
   const result = requireRecord(payload.result, "result");
+  rejectRemovedCommitField(payload, "sideEffects");
 
   return {
+    assistantDeliveryEffects: requireAssistantDeliveryEffects(
+      payload.assistantDeliveryEffects,
+      "assistantDeliveryEffects",
+    ),
     bundle: parseHostedExecutionBundlePayload(payload.bundle, "bundle"),
     currentBundleRef: parseHostedExecutionBundleRef(payload.currentBundleRef, "currentBundleRef"),
     gatewayProjectionSnapshot:
@@ -278,10 +283,27 @@ function parseHostedExecutionCommitRequest(payload: Record<string, unknown>): Ho
       nextWakeAt: readOptionalString(result.nextWakeAt, "result.nextWakeAt"),
       summary: requireString(result.summary, "result.summary"),
     },
-    assistantDeliveryEffects: parseHostedAssistantDeliveryEffects(
-      payload.assistantDeliveryEffects ?? payload.sideEffects,
-    ),
   };
+}
+
+function rejectRemovedCommitField(
+  record: Record<string, unknown>,
+  field: string,
+): void {
+  if (record[field] !== undefined) {
+    throw new TypeError(`${field} is no longer supported.`);
+  }
+}
+
+function requireAssistantDeliveryEffects(
+  value: unknown,
+  label: string,
+) {
+  if (!Array.isArray(value)) {
+    throw new TypeError(`${label} must be an array.`);
+  }
+
+  return parseHostedAssistantDeliveryEffects(value);
 }
 
 function copyBytesToArrayBuffer(bytes: Uint8Array): ArrayBuffer {

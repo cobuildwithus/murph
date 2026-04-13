@@ -476,6 +476,7 @@ describe("HostedUserRunner", () => {
         keyId: crypto.rootKeyId,
         keysById: crypto.keysById,
         payload: {
+          assistantDeliveryEffects: [],
           bundle: Buffer.from(nextVaultBundle!).toString("base64"),
           result: {
             eventsHandled: 1,
@@ -541,7 +542,6 @@ describe("HostedUserRunner", () => {
         eventsHandled: 1,
         summary: "ok",
       },
-      sideEffects: [],
       userId: "member_123",
     };
 
@@ -560,6 +560,7 @@ describe("HostedUserRunner", () => {
       key: environment.platformEnvelopeKey,
       keyId: environment.platformEnvelopeKeyId,
       payload: {
+        assistantDeliveryEffects: [],
         bundle: Buffer.from("vault").toString("base64"),
         result: {
           eventsHandled: 1,
@@ -577,6 +578,7 @@ describe("HostedUserRunner", () => {
         key: environment.platformEnvelopeKey,
         keyId: environment.platformEnvelopeKeyId,
         payload: {
+          assistantDeliveryEffects: [],
           bundle: Buffer.from("vault").toString("base64"),
           result: {
             eventsHandled: 1,
@@ -598,6 +600,7 @@ describe("HostedUserRunner", () => {
       key: environment.platformEnvelopeKey,
       keyId: environment.platformEnvelopeKeyId,
       payload: {
+        assistantDeliveryEffects: [],
         bundle: Buffer.from("vault").toString("base64"),
         result: {
           eventsHandled: 1,
@@ -650,6 +653,7 @@ describe("HostedUserRunner", () => {
     await runner.commit({
       eventId: "evt_duplicate_runner_commit",
       payload: {
+        assistantDeliveryEffects: [],
         bundle: Buffer.from("vault").toString("base64"),
         currentBundleRef: null,
         result: {
@@ -663,6 +667,7 @@ describe("HostedUserRunner", () => {
       runner.commit({
         eventId: "evt_duplicate_runner_commit",
         payload: {
+          assistantDeliveryEffects: [],
           bundle: Buffer.from("vault-updated").toString("base64"),
           currentBundleRef: null,
           result: {
@@ -685,6 +690,7 @@ describe("HostedUserRunner", () => {
     await runner.commit({
       eventId: "evt_gateway_projection",
       payload: {
+        assistantDeliveryEffects: [],
         bundle: Buffer.from("vault").toString("base64"),
         currentBundleRef: null,
         gatewayProjectionSnapshot: {
@@ -913,7 +919,6 @@ describe("HostedUserRunner", () => {
         eventsHandled: 1,
         summary: "commit recorded",
       },
-      sideEffects: [],
       userId: "member_123",
     });
 
@@ -934,6 +939,7 @@ describe("HostedUserRunner", () => {
     await runner.commit({
       eventId: "evt_gateway_stale_projection",
       payload: {
+        assistantDeliveryEffects: [],
         bundle: Buffer.from("vault-newer").toString("base64"),
         currentBundleRef: null,
         gatewayProjectionSnapshot: createGatewayProjectionSnapshot({
@@ -1060,7 +1066,6 @@ describe("HostedUserRunner", () => {
         eventsHandled: 1,
         summary: "recovered",
       },
-      sideEffects: [],
       userId: dispatch.event.userId,
     });
 
@@ -1369,7 +1374,6 @@ describe("HostedUserRunner", () => {
         eventsHandled: 1,
         summary: "recovered email",
       },
-      sideEffects: [],
       userId,
     });
 
@@ -1930,7 +1934,6 @@ describe("HostedUserRunner", () => {
       {
         effectId: "outbox_retry",
         fingerprint: "dedupe_retry",
-        intentId: "outbox_retry",
         kind: "assistant.delivery" as const,
       },
     ];
@@ -1941,7 +1944,7 @@ describe("HostedUserRunner", () => {
     }));
     const committedPayload = createRunnerSuccessPayload({
       agentState: Buffer.from("agent-state-committed").toString("base64"),
-      sideEffects,
+      assistantDeliveryEffects: sideEffects,
       summary: "committed",
       vault: Buffer.from("vault-committed").toString("base64"),
     });
@@ -1966,7 +1969,6 @@ describe("HostedUserRunner", () => {
           committedResult: {
             assistantDeliveryEffects: expectedResumeSideEffects,
             result: committedPayload.result,
-            sideEffects: expectedResumeSideEffects,
           },
         });
         await finalizeResultForRunnerRequest({
@@ -2090,6 +2092,7 @@ describe("HostedUserRunner", () => {
       const commitPromise = runner.commit({
         eventId: "evt_transition_lock",
         payload: {
+          assistantDeliveryEffects: [],
           bundle: Buffer.from("vault").toString("base64"),
           currentBundleRef: null,
           result: {
@@ -2104,6 +2107,7 @@ describe("HostedUserRunner", () => {
       const secondCommitPromise = runner.commit({
         eventId: "evt_transition_lock",
         payload: {
+          assistantDeliveryEffects: [],
           bundle: Buffer.from("vault").toString("base64"),
           currentBundleRef: null,
           result: {
@@ -2738,6 +2742,7 @@ describe("HostedUserRunner", () => {
       keyId: crypto.rootKeyId,
       keysById: crypto.keysById,
       payload: {
+        assistantDeliveryEffects: [],
         bundle: Buffer.from("vault").toString("base64"),
         result: {
           eventsHandled: 1,
@@ -2809,6 +2814,7 @@ describe("HostedUserRunner", () => {
       keyId: crypto.rootKeyId,
       keysById: crypto.keysById,
       payload: {
+        assistantDeliveryEffects: [],
         bundle: Buffer.from("vault").toString("base64"),
         result: {
           eventsHandled: 1,
@@ -3748,7 +3754,7 @@ interface RunnerSuccessPayload {
     nextWakeAt?: string | null;
     summary: string;
   };
-  sideEffects: HostedAssistantDeliveryEffect[];
+  assistantDeliveryEffects: HostedAssistantDeliveryEffect[];
 }
 
 type RunnerSuccessPayloadLike = Partial<
@@ -3774,16 +3780,16 @@ function normalizeRunnerSuccessPayload(
       ...(nextWakeAt !== undefined ? { nextWakeAt } : {}),
       summary: input.result?.summary ?? "ok",
     },
-    sideEffects: input.sideEffects ?? [],
+    assistantDeliveryEffects: input.assistantDeliveryEffects ?? [],
   };
 }
 
 function createRunnerSuccessPayload(input: Partial<{
   agentState: string | null;
+  assistantDeliveryEffects: HostedAssistantDeliveryEffect[];
   eventsHandled: number;
   gatewayProjectionSnapshot: GatewayProjectionSnapshot | null;
   nextWakeAt: string | null;
-  sideEffects: HostedAssistantDeliveryEffect[];
   summary: string;
   vault: string | null;
 }> = {}): RunnerSuccessPayload {
@@ -3798,7 +3804,7 @@ function createRunnerSuccessPayload(input: Partial<{
       nextWakeAt: input.nextWakeAt,
       summary: input.summary,
     },
-    sideEffects: input.sideEffects,
+    assistantDeliveryEffects: input.assistantDeliveryEffects,
   });
 }
 
@@ -3914,11 +3920,10 @@ async function commitResultForRunnerRequest(input: {
     keyId: crypto.rootKeyId,
     keysById: crypto.keysById,
     payload: {
-      assistantDeliveryEffects: payload.sideEffects,
+      assistantDeliveryEffects: payload.assistantDeliveryEffects,
       bundle: payload.bundles.vault ?? payload.bundles.agentState ?? null,
       gatewayProjectionSnapshot: payload.gatewayProjectionSnapshot,
       result: payload.result,
-      sideEffects: payload.sideEffects,
     },
     userId: requestBody.dispatch.event.userId,
   });

@@ -273,8 +273,10 @@ function parseHostedAssistantRuntimeResume(
     record.committedResult,
     "Hosted assistant runtime resume state.committedResult",
   );
-  const assistantDeliveryEffects = parseHostedAssistantDeliveryEffects(
-    committedResult.assistantDeliveryEffects ?? committedResult.sideEffects,
+  rejectRemovedHostedAssistantRuntimeField(
+    committedResult,
+    "sideEffects",
+    "Hosted assistant runtime resume state.committedResult",
   );
 
   return {
@@ -283,8 +285,10 @@ function parseHostedAssistantRuntimeResume(
         committedResult.result,
         "Hosted assistant runtime resume state.committedResult.result",
       ),
-      assistantDeliveryEffects,
-      sideEffects: assistantDeliveryEffects,
+      assistantDeliveryEffects: requireHostedAssistantDeliveryEffects(
+        committedResult.assistantDeliveryEffects,
+        "Hosted assistant runtime resume state.committedResult.assistantDeliveryEffects",
+      ),
     },
   };
 }
@@ -397,10 +401,22 @@ function readNullableString(value: unknown, label: string): string | null {
 function rejectRemovedHostedAssistantRuntimeField(
   record: Record<string, unknown>,
   field: string,
+  label = "Hosted assistant runtime config",
 ): void {
   if (record[field] !== undefined) {
     throw new TypeError(
-      `Hosted assistant runtime config.${field} is no longer supported.`,
+      `${label}.${field} is no longer supported.`,
     );
   }
+}
+
+function requireHostedAssistantDeliveryEffects(
+  value: unknown,
+  label: string,
+) {
+  if (!Array.isArray(value)) {
+    throw new TypeError(`${label} must be an array.`);
+  }
+
+  return parseHostedAssistantDeliveryEffects(value);
 }

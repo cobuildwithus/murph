@@ -244,7 +244,6 @@ export class RunnerDispatchProcessor {
               committedResult: {
                 assistantDeliveryEffects: committed.assistantDeliveryEffects,
                 result: committed.result,
-                sideEffects: committed.assistantDeliveryEffects,
               },
             }
             : null,
@@ -432,7 +431,6 @@ export class RunnerDispatchProcessor {
         assistantDeliveryEffects:
           HostedExecutionCommittedResult["assistantDeliveryEffects"];
         result: HostedExecutionCommittedResult["result"];
-        sideEffects?: HostedExecutionCommittedResult["assistantDeliveryEffects"];
       };
     } | null = null,
   ): Promise<HostedAssistantRuntimeJobResult> {

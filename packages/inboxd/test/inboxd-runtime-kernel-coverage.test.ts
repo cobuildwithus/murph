@@ -9,9 +9,15 @@ import { initializeVault } from "@murphai/core";
 import * as indexSurface from "../src/index.ts";
 import * as runtimeSurface from "../src/runtime.ts";
 import {
+  buildInboxCaptureAuditPath,
   buildInboxCaptureAuditRecord,
+  buildInboxCaptureAuditPathForStoredAt,
+  buildInboxCaptureEventPath,
+  buildInboxCaptureEventPathForOccurredAt,
   buildInboxCaptureEventRecord,
   buildInboxCaptureRecord,
+  buildInboxCaptureLedgerPath,
+  buildInboxCaptureLedgerPathForOccurredAt,
 } from "../src/indexing/persist/canonical-records.ts";
 import type {
   InboundCapture,
@@ -253,6 +259,30 @@ test("canonical inbox record builders sanitize attachment paths, truncate long n
       "ledger/events/2026/2026-03.jsonl",
       "audit/2026/2026-03.jsonl",
     ],
+  );
+  assert.equal(
+    buildInboxCaptureLedgerPathForOccurredAt(inbound.occurredAt),
+    "ledger/inbox-captures/2026/2026-03.jsonl",
+  );
+  assert.equal(
+    buildInboxCaptureLedgerPath({ input: inbound }),
+    "ledger/inbox-captures/2026/2026-03.jsonl",
+  );
+  assert.equal(
+    buildInboxCaptureEventPathForOccurredAt(inbound.occurredAt),
+    "ledger/events/2026/2026-03.jsonl",
+  );
+  assert.equal(
+    buildInboxCaptureEventPath({ input: inbound }),
+    "ledger/events/2026/2026-03.jsonl",
+  );
+  assert.equal(
+    buildInboxCaptureAuditPathForStoredAt(stored.storedAt),
+    "audit/2026/2026-03.jsonl",
+  );
+  assert.equal(
+    buildInboxCaptureAuditPath({ stored }),
+    "audit/2026/2026-03.jsonl",
   );
 });
 

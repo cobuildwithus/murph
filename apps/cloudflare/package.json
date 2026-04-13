@@ -48,9 +48,6 @@
     "worker:deployment:status": "pnpm exec wrangler deployments status",
     "worker:dev": "pnpm exec wrangler dev",
     "worker:secret:bulk": "pnpm exec wrangler secret bulk",
-    "worker:version:deploy": "pnpm exec wrangler versions deploy",
-    "worker:version:upload:apply": "pnpm exec wrangler versions upload",
-    "worker:version:upload": "pnpm deploy:artifacts && pnpm worker:version:upload:apply",
     "prepack": "pnpm build"
   },
   "dependencies": {

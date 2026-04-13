@@ -1,13 +1,11 @@
 import path from "node:path";
 import { createHash } from "node:crypto";
-import { mkdir, readFile, realpath, rename, stat } from "node:fs/promises";
+import { readFile, realpath, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 
 import {
   assertContract,
   inboxCaptureRecordSchema,
-  type AuditRecord,
-  type EventRecord,
   type InboxCaptureRecord as CanonicalInboxCaptureRecord,
 } from "@murphai/contracts";
 import {
@@ -16,7 +14,9 @@ import {
   type CanonicalRawContentInput,
   type CanonicalRawCopyInput,
   loadVault,
+  listWriteOperationMetadataPaths,
   readJsonlRecords,
+  readStoredWriteOperation,
   VAULT_LAYOUT,
   walkVaultFiles,
   withCanonicalWriteLockScope,
@@ -27,7 +27,6 @@ import {
   buildAttachmentId,
   createDeterministicInboxCaptureId,
   createInboxCaptureIdentityKey,
-  assertVaultPathOnDisk,
   normalizeStoredAttachments,
   normalizeAccountKey,
   normalizeRelativePath,
@@ -36,23 +35,14 @@ import {
   sanitizeFileName,
   sanitizeSegment,
   sha256File,
-  walkNamedFiles,
 } from "../shared.ts";
 import type { InboxRuntimeStore } from "../kernel/sqlite.ts";
 import {
   INBOX_CAPTURE_LEDGER_DIRECTORY,
-  buildInboxCaptureAuditPathForStoredAt,
-  buildInboxCaptureAuditRecord,
-  buildInboxCaptureEventPathForOccurredAt,
-  buildInboxCaptureEventRecord,
-  buildInboxCaptureLedgerPath,
   buildInboxCaptureLedgerPathForOccurredAt,
   buildInboxCaptureRecord,
 } from "./persist/canonical-records.js";
-
-const STORED_CAPTURE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]*$/u;
-const QUARANTINED_INVALID_CAPTURE_ID_SUFFIX = "quarantined-invalid-capture-id";
-export interface PersistRawCaptureInput {
+export interface PersistCanonicalInboxCaptureInput {
   vaultRoot: string;
   captureId: string;
   eventId: string;
@@ -69,11 +59,6 @@ export interface StoredCaptureEnvelope {
   stored: StoredCapture;
 }
 
-interface EnvelopeEntry {
-  absolutePath: string;
-  envelope: StoredCaptureEnvelope;
-}
-
 interface PreparedRawCapturePersistence {
   stored: StoredCapture;
   sanitizedInput: InboundCapture;
@@ -81,7 +66,18 @@ interface PreparedRawCapturePersistence {
   rawContents: CanonicalRawContentInput[];
 }
 
-export type PersistCanonicalInboxCaptureInput = PersistRawCaptureInput;
+interface EnvelopeEntry {
+  relativePath: string;
+  envelope: StoredCaptureEnvelope;
+}
+
+interface RecoverableInboxCaptureOperation {
+  capturePath: string;
+  envelopePath: string;
+  updatedAt: string;
+}
+
+type StoredWriteOperation = Awaited<ReturnType<typeof readStoredWriteOperation>>;
 
 export interface PersistCanonicalInboxCaptureResult {
   stored: StoredCapture;
@@ -89,26 +85,6 @@ export interface PersistCanonicalInboxCaptureResult {
     relativePath: string;
     record: CanonicalInboxCaptureRecord;
   };
-}
-
-class UnsafeStoredCaptureIdError extends Error {
-  readonly captureId: string;
-  readonly canonicalCaptureId: string;
-  readonly absolutePath: string;
-
-  constructor(input: {
-    captureId: string;
-    canonicalCaptureId: string;
-    absolutePath: string;
-  }) {
-    super(
-      `Stored inbox envelope at ${input.absolutePath} contains unsafe captureId "${input.captureId}".`,
-    );
-    this.name = "UnsafeStoredCaptureIdError";
-    this.captureId = input.captureId;
-    this.canonicalCaptureId = input.canonicalCaptureId;
-    this.absolutePath = input.absolutePath;
-  }
 }
 
 export async function ensureInboxVault(vaultRoot: string): Promise<void> {
@@ -185,7 +161,7 @@ async function prepareRawCapturePersistence({
   eventId,
   input,
   storedAt = new Date().toISOString(),
-}: Omit<PersistRawCaptureInput, "vaultRoot">): Promise<PreparedRawCapturePersistence> {
+}: Omit<PersistCanonicalInboxCaptureInput, "vaultRoot">): Promise<PreparedRawCapturePersistence> {
   const sourceDirectory = buildInboxCaptureDirectory(input, captureId);
   const attachmentDirectory = path.posix.join(sourceDirectory, "attachments");
   const storedAttachments: StoredAttachment[] = [];
@@ -349,32 +325,6 @@ async function prepareRawCapturePersistence({
   };
 }
 
-export async function persistRawCapture({
-  vaultRoot,
-  captureId,
-  eventId,
-  input,
-  storedAt = new Date().toISOString(),
-}: PersistRawCaptureInput): Promise<StoredCapture> {
-  const prepared = await prepareRawCapturePersistence({
-    captureId,
-    eventId,
-    input,
-    storedAt,
-  });
-
-  await applyCanonicalWriteBatch({
-    vaultRoot,
-    operationType: "inbox_capture_raw_persist",
-    summary: `Persist inbox capture ${captureId}`,
-    occurredAt: prepared.stored.storedAt,
-    rawCopies: prepared.rawCopies,
-    rawContents: prepared.rawContents,
-  });
-
-  return prepared.stored;
-}
-
 export async function persistCanonicalInboxCapture({
   vaultRoot,
   captureId,
@@ -435,51 +385,38 @@ export async function findStoredCaptureEnvelope(input: {
     return inboxCaptureRecordToStoredCaptureEnvelope(storedRecord);
   }
 
-  const expectedPath = await resolveVaultPath(
-    input.vaultRoot,
-    buildInboxEnvelopePath(input.inbound, captureId),
-  );
-  const expectedEnvelope = await readStoredCaptureEnvelope(expectedPath);
+  const expectedEnvelopePath = buildInboxEnvelopePath(input.inbound, captureId);
+  const expectedCapturePath = buildInboxCaptureLedgerPathForOccurredAt(input.inbound.occurredAt);
+  const recoverableOperations = await listRecoverableInboxCaptureOperations(input.vaultRoot);
+  const recoverableOperation = recoverableOperations.get(expectedEnvelopePath);
 
-  if (expectedEnvelope) {
-    return expectedEnvelope;
+  if (!recoverableOperation || recoverableOperation.capturePath !== expectedCapturePath) {
+    return null;
   }
 
-  const accountRoot = await resolveVaultPath(input.vaultRoot, buildInboxAccountDirectory(input.inbound));
-  const envelopeFiles = await walkInboxEnvelopeFiles(accountRoot);
-  let selected: EnvelopeEntry | null = null;
-  const identityKey = createInboxCaptureIdentityKey(input.inbound);
-
-  for (const envelopePath of envelopeFiles) {
-    const envelope = await readStoredCaptureEnvelope(envelopePath);
-
-    if (!envelope || createInboxCaptureIdentityKey(envelope.input) !== identityKey) {
-      continue;
-    }
-
-    const entry = { absolutePath: envelopePath, envelope };
-    if (!selected || compareEnvelopeEntries(entry, selected) < 0) {
-      selected = entry;
-    }
-  }
-
-  return selected?.envelope ?? null;
+  return await readStoredCaptureEnvelope({
+    vaultRoot: input.vaultRoot,
+    relativePath: expectedEnvelopePath,
+  });
 }
 
 export async function ensureStoredCaptureCanonicalEvidence(input: {
   vaultRoot: string;
   envelope: StoredCaptureEnvelope;
 }): Promise<void> {
-  const capturePath = buildInboxCaptureLedgerPath(input.envelope);
+  const relativePath = buildInboxCaptureLedgerPathForOccurredAt(input.envelope.input.occurredAt);
+
   await withCanonicalWriteLockScope(input.vaultRoot, async () => {
     const lock = await acquireCanonicalWriteLock(input.vaultRoot);
 
     try {
-      const captureRecords = await readInboxCaptureRecordsIfPresent({
+      const records = await readInboxCaptureRecordsIfPresent({
         vaultRoot: input.vaultRoot,
-        relativePath: capturePath,
+        relativePath,
       });
-      if (findMatchingInboxCaptureRecord(captureRecords, input.envelope)) {
+      const identityKey = createInboxCaptureIdentityKey(input.envelope.input);
+
+      if (selectMatchingInboxCaptureRecord(records, identityKey, input.envelope.captureId)) {
         return;
       }
 
@@ -490,7 +427,7 @@ export async function ensureStoredCaptureCanonicalEvidence(input: {
         occurredAt: input.envelope.stored.storedAt,
         jsonlAppends: [
           {
-            relativePath: capturePath,
+            relativePath,
             record: buildInboxCaptureRecord({
               eventId: input.envelope.eventId,
               inbound: input.envelope.input,
@@ -503,74 +440,6 @@ export async function ensureStoredCaptureCanonicalEvidence(input: {
       await lock.release();
     }
   });
-}
-
-export async function appendInboxCaptureEvent(input: {
-  vaultRoot: string;
-  eventId: string;
-  occurredAt: string;
-  inbound: InboundCapture;
-  stored: StoredCapture;
-}): Promise<{ relativePath: string; record: EventRecord }> {
-  const vault = await loadVault({ vaultRoot: input.vaultRoot });
-  const relativePath = buildInboxCaptureEventPathForOccurredAt(input.occurredAt);
-  const record = buildInboxCaptureEventRecord({
-    eventId: input.eventId,
-    inbound: input.inbound,
-    stored: input.stored,
-    timeZone: vault.metadata.timezone,
-  });
-
-  await applyCanonicalWriteBatch({
-    vaultRoot: input.vaultRoot,
-    operationType: "inbox_capture_event_append",
-    summary: `Append inbox capture event ${input.eventId}`,
-    occurredAt: input.stored.storedAt,
-    jsonlAppends: [
-      {
-        relativePath,
-        record,
-      },
-    ],
-  });
-
-  return { relativePath, record };
-}
-
-export async function appendImportAudit(input: {
-  vaultRoot: string;
-  auditId: string;
-  eventId: string;
-  inbound: InboundCapture;
-  stored: StoredCapture;
-  capturePath?: string;
-  eventPath: string;
-}): Promise<{ relativePath: string; record: AuditRecord }> {
-  const relativePath = buildInboxCaptureAuditPathForStoredAt(input.stored.storedAt);
-
-  const record = buildInboxCaptureAuditRecord({
-    auditId: input.auditId,
-    eventId: input.eventId,
-    inbound: input.inbound,
-    stored: input.stored,
-    capturePath: input.capturePath,
-    eventPath: input.eventPath,
-  });
-
-  await applyCanonicalWriteBatch({
-    vaultRoot: input.vaultRoot,
-    operationType: "inbox_capture_audit_append",
-    summary: `Append inbox capture audit ${input.auditId}`,
-    occurredAt: input.stored.storedAt,
-    jsonlAppends: [
-      {
-        relativePath,
-        record,
-      },
-    ],
-  });
-
-  return { relativePath, record };
 }
 
 export async function rebuildRuntimeFromVault(input: {
@@ -595,53 +464,29 @@ export async function rebuildRuntimeFromVault(input: {
     restoredIdentityKeys.add(record.identityKey);
   }
 
-  const inboxRoot = await resolveVaultPath(input.vaultRoot, VAULT_LAYOUT.rawInboxDirectory);
+  const recoverableOperations = await listRecoverableInboxCaptureOperations(input.vaultRoot);
+  const recoveredEnvelopes = await listRecoverableRawCaptureEnvelopes(
+    input.vaultRoot,
+    restoredIdentityKeys,
+    recoverableOperations,
+  );
 
-  try {
-    await mkdir(inboxRoot, { recursive: true });
-  } catch {
-    return;
-  }
-
-  await assertVaultPathOnDisk(input.vaultRoot, inboxRoot);
-  const envelopeFiles = await walkInboxEnvelopeFiles(inboxRoot);
-  const canonicalEntries = new Map<string, EnvelopeEntry>();
-
-  for (const envelopePath of envelopeFiles) {
-    const envelope = await readStoredCaptureEnvelope(envelopePath);
-    if (!envelope) {
-      continue;
-    }
-
-    const identityKey = createInboxCaptureIdentityKey(envelope.input);
-    if (restoredIdentityKeys.has(identityKey)) {
-      continue;
-    }
-
-    const entry = { absolutePath: envelopePath, envelope };
-    const current = canonicalEntries.get(identityKey);
-
-    if (!current || compareEnvelopeEntries(entry, current) < 0) {
-      canonicalEntries.set(identityKey, entry);
-    }
-  }
-
-  for (const entry of [...canonicalEntries.values()].sort(compareEnvelopeEntries)) {
+  for (const envelope of recoveredEnvelopes) {
     await ensureStoredCaptureCanonicalEvidence({
       vaultRoot: input.vaultRoot,
-      envelope: entry.envelope,
+      envelope,
     });
     const captureId = input.runtime.upsertCaptureIndex({
-      captureId: entry.envelope.captureId,
-      eventId: entry.envelope.eventId,
-      input: entry.envelope.input,
-      stored: entry.envelope.stored,
+      captureId: envelope.captureId,
+      eventId: envelope.eventId,
+      input: envelope.input,
+      stored: envelope.stored,
     });
     input.runtime.enqueueDerivedJobs({
       captureId,
-      stored: entry.envelope.stored,
+      stored: envelope.stored,
     });
-    restoredIdentityKeys.add(createInboxCaptureIdentityKey(entry.envelope.input));
+    restoredIdentityKeys.add(createInboxCaptureIdentityKey(envelope.input));
   }
 }
 
@@ -668,31 +513,19 @@ function buildInboxEnvelopePath(input: InboundCapture, captureId: string): strin
   return normalizeRelativePath(path.posix.join(buildInboxCaptureDirectory(input, captureId), "envelope.json"));
 }
 
-async function walkInboxEnvelopeFiles(directory: string): Promise<string[]> {
-  try {
-    return (await walkNamedFiles(directory, "envelope.json", { skipDirectories: ["attachments"] })).sort();
-  } catch (error) {
-    if (isMissingFileError(error)) {
-      return [];
-    }
+async function readStoredCaptureEnvelope(input: {
+  vaultRoot: string;
+  relativePath: string;
+}): Promise<StoredCaptureEnvelope | null> {
+  const absolutePath = await resolveVaultPath(input.vaultRoot, input.relativePath);
 
-    throw error;
-  }
-}
-
-async function readStoredCaptureEnvelope(absolutePath: string): Promise<StoredCaptureEnvelope | null> {
   try {
     return normalizeStoredCaptureEnvelope(
-      JSON.parse(await readFile(absolutePath, "utf8")) as StoredCaptureEnvelope,
-      absolutePath,
+      JSON.parse(await readFile(absolutePath, "utf8")),
+      input.relativePath,
     );
   } catch (error) {
     if (isMissingFileError(error)) {
-      return null;
-    }
-
-    if (error instanceof UnsafeStoredCaptureIdError) {
-      await quarantineStoredCaptureEnvelope(absolutePath);
       return null;
     }
 
@@ -701,56 +534,92 @@ async function readStoredCaptureEnvelope(absolutePath: string): Promise<StoredCa
 }
 
 function normalizeStoredCaptureEnvelope(
-  envelope: StoredCaptureEnvelope,
-  absolutePath: string,
+  value: unknown,
+  relativePath: string,
 ): StoredCaptureEnvelope {
-  if (!envelope || typeof envelope !== "object") {
-    throw new TypeError(`Expected stored inbox envelope object at ${absolutePath}.`);
+  const context = `stored inbox envelope at ${relativePath}`;
+  const envelope = expectRecord(value, context);
+
+  if (envelope.schema !== "murph.inbox-envelope.v1") {
+    throw new TypeError(`Expected canonical "schema" in ${context}.`);
   }
 
-  if (!envelope.stored || typeof envelope.stored !== "object") {
-    throw new TypeError(`Missing canonical "stored" payload in stored inbox envelope at ${absolutePath}.`);
+  const inbound = buildSanitizedInboundCapture(
+    normalizeStoredCaptureInboundInput(envelope.input, `${context}.input`),
+  );
+  const captureId = createDeterministicInboxCaptureId(inbound);
+  const eventId = requireStringField(envelope, "eventId", context);
+  const storedAt = requireStringField(envelope, "storedAt", context);
+
+  if (requireStringField(envelope, "captureId", context) !== captureId) {
+    throw new TypeError(`Stored inbox envelope at ${relativePath} must use the deterministic captureId.`);
   }
 
-  if (!envelope.input || typeof envelope.input !== "object") {
-    throw new TypeError(`Missing canonical "input" payload in stored inbox envelope at ${absolutePath}.`);
+  const storedRecord = expectRecord(envelope.stored, `${context}.stored`);
+  const sourceDirectory = requireStringField(storedRecord, "sourceDirectory", `${context}.stored`);
+  const envelopePath = requireStringField(storedRecord, "envelopePath", `${context}.stored`);
+  const attachmentsValue = storedRecord.attachments;
+
+  if (!Array.isArray(attachmentsValue)) {
+    throw new TypeError(`Expected canonical "attachments" array in ${context}.stored.`);
   }
 
-  if (typeof envelope.input.source !== "string" || envelope.input.source.trim().length === 0) {
-    throw new TypeError(`Missing canonical "input.source" in stored inbox envelope at ${absolutePath}.`);
+  if (requireStringField(storedRecord, "captureId", `${context}.stored`) !== captureId) {
+    throw new TypeError(`Stored inbox envelope at ${relativePath} has a mismatched stored.captureId.`);
   }
 
-  if (typeof envelope.input.externalId !== "string" || envelope.input.externalId.trim().length === 0) {
-    throw new TypeError(`Missing canonical "input.externalId" in stored inbox envelope at ${absolutePath}.`);
+  if (requireStringField(storedRecord, "eventId", `${context}.stored`) !== eventId) {
+    throw new TypeError(`Stored inbox envelope at ${relativePath} has a mismatched stored.eventId.`);
   }
 
-  if (!Array.isArray(envelope.stored.attachments)) {
-    throw new TypeError(
-      `Missing canonical "stored.attachments" array in stored inbox envelope at ${absolutePath}.`,
-    );
+  if (requireStringField(storedRecord, "storedAt", `${context}.stored`) !== storedAt) {
+    throw new TypeError(`Stored inbox envelope at ${relativePath} has a mismatched stored.storedAt.`);
   }
 
-  const canonicalCaptureId = createDeterministicInboxCaptureId(envelope.input);
-  const captureId = normalizeStoredCaptureId({
-    captureId: envelope.captureId,
-    canonicalCaptureId,
-    absolutePath,
+  const expectedSourceDirectory = buildInboxCaptureDirectory(inbound, captureId);
+  if (sourceDirectory !== expectedSourceDirectory) {
+    throw new TypeError(`Stored inbox envelope at ${relativePath} has a mismatched stored.sourceDirectory.`);
+  }
+
+  const expectedEnvelopePath = buildInboxEnvelopePath(inbound, captureId);
+  if (envelopePath !== expectedEnvelopePath) {
+    throw new TypeError(`Stored inbox envelope at ${relativePath} has a mismatched stored.envelopePath.`);
+  }
+
+  const attachments = normalizeStoredAttachments(
+    captureId,
+    attachmentsValue,
+    `${context}.stored.attachments`,
+  ).map((attachment) => {
+    const expectedAttachmentId = buildAttachmentId(captureId, attachment.ordinal);
+
+    if (attachment.attachmentId !== expectedAttachmentId) {
+      throw new TypeError(
+        `Stored inbox envelope at ${relativePath} has a mismatched attachmentId for ordinal ${attachment.ordinal}.`,
+      );
+    }
+
+    return {
+      ...attachment,
+      attachmentId: expectedAttachmentId,
+      originalPath: null,
+    };
   });
 
-  return {
-    ...envelope,
-    captureId,
-    stored: {
-      ...envelope.stored,
-      captureId,
-      eventId: envelope.eventId,
-      attachments: normalizeStoredAttachmentsForCaptureId({
+  return inboxCaptureRecordToStoredCaptureEnvelope(
+    buildInboxCaptureRecord({
+      eventId,
+      inbound,
+      stored: {
         captureId,
-        attachments: envelope.stored.attachments,
-        absolutePath,
-      }),
-    },
-  };
+        eventId,
+        storedAt,
+        sourceDirectory,
+        envelopePath,
+        attachments,
+      },
+    }),
+  );
 }
 
 async function readJsonlRecordsIfPresent(input: {
@@ -772,28 +641,113 @@ async function readJsonlRecordsIfPresent(input: {
   }
 }
 
-function compareEnvelopeEntries(left: EnvelopeEntry, right: EnvelopeEntry): number {
-  const idComparison = comparePreferenceScore(left) - comparePreferenceScore(right);
-  if (idComparison !== 0) {
-    return idComparison;
+async function listRecoverableRawCaptureEnvelopes(
+  vaultRoot: string,
+  restoredIdentityKeys: ReadonlySet<string>,
+  recoverableOperations: ReadonlyMap<string, RecoverableInboxCaptureOperation>,
+): Promise<StoredCaptureEnvelope[]> {
+  const selectedByIdentityKey = new Map<string, EnvelopeEntry>();
+
+  for (const relativePath of [...recoverableOperations.keys()].sort()) {
+    const envelope = await readStoredCaptureEnvelope({ vaultRoot, relativePath });
+
+    if (!envelope) {
+      continue;
+    }
+
+    const identityKey = createInboxCaptureIdentityKey(envelope.input);
+    if (restoredIdentityKeys.has(identityKey)) {
+      continue;
+    }
+
+    const current = selectedByIdentityKey.get(identityKey);
+    const candidate = { relativePath, envelope };
+
+    if (!current || compareEnvelopeEntries(candidate, current) < 0) {
+      selectedByIdentityKey.set(identityKey, candidate);
+    }
   }
 
+  return [...selectedByIdentityKey.values()].sort(compareEnvelopeEntries).map((entry) => entry.envelope);
+}
+
+async function listRecoverableInboxCaptureOperations(
+  vaultRoot: string,
+): Promise<Map<string, RecoverableInboxCaptureOperation>> {
+  const relativePaths = await listWriteOperationMetadataPaths(vaultRoot);
+  const selected = new Map<string, RecoverableInboxCaptureOperation>();
+
+  for (const relativePath of relativePaths) {
+    let operation: StoredWriteOperation;
+
+    try {
+      operation = await readStoredWriteOperation(vaultRoot, relativePath);
+    } catch {
+      continue;
+    }
+
+    const recoverable = selectRecoverableInboxCaptureOperation(operation);
+    if (!recoverable) {
+      continue;
+    }
+
+    const current = selected.get(recoverable.envelopePath);
+    if (!current || current.updatedAt.localeCompare(recoverable.updatedAt) < 0) {
+      selected.set(recoverable.envelopePath, recoverable);
+    }
+  }
+
+  return selected;
+}
+
+function selectRecoverableInboxCaptureOperation(
+  operation: StoredWriteOperation,
+): RecoverableInboxCaptureOperation | null {
+  if (operation.operationType !== "inbox_capture_persist") {
+    return null;
+  }
+
+  if (operation.status === "committed" || operation.status === "rolled_back") {
+    return null;
+  }
+
+  const envelopeAction = operation.actions.find(
+    (action) =>
+      action.kind === "raw_copy" &&
+      action.targetRelativePath.startsWith(`${VAULT_LAYOUT.rawInboxDirectory}/`) &&
+      action.targetRelativePath.endsWith("/envelope.json") &&
+      (action.state === "applied" || action.state === "reused"),
+  );
+  const captureAction = operation.actions.find(
+    (action) =>
+      action.kind === "jsonl_append" &&
+      action.targetRelativePath.startsWith(`${INBOX_CAPTURE_LEDGER_DIRECTORY}/`) &&
+      action.state === "staged",
+  );
+
+  if (!envelopeAction || !captureAction) {
+    return null;
+  }
+
+  return {
+    envelopePath: envelopeAction.targetRelativePath,
+    capturePath: captureAction.targetRelativePath,
+    updatedAt: operation.updatedAt,
+  };
+}
+
+function compareEnvelopeEntries(left: EnvelopeEntry, right: EnvelopeEntry): number {
   const storedAtComparison = left.envelope.stored.storedAt.localeCompare(right.envelope.stored.storedAt);
   if (storedAtComparison !== 0) {
     return storedAtComparison;
   }
 
-  const captureComparison = left.envelope.captureId.localeCompare(right.envelope.captureId);
-  if (captureComparison !== 0) {
-    return captureComparison;
+  const captureIdComparison = left.envelope.captureId.localeCompare(right.envelope.captureId);
+  if (captureIdComparison !== 0) {
+    return captureIdComparison;
   }
 
-  return left.absolutePath.localeCompare(right.absolutePath);
-}
-
-function comparePreferenceScore(entry: EnvelopeEntry): number {
-  const canonicalCaptureId = createDeterministicInboxCaptureId(entry.envelope.input);
-  return path.basename(path.dirname(entry.absolutePath)) === canonicalCaptureId ? 0 : 1;
+  return left.relativePath.localeCompare(right.relativePath);
 }
 
 function inboxCaptureRecordToStoredCaptureEnvelope(record: CanonicalInboxCaptureRecord): StoredCaptureEnvelope {
@@ -967,14 +921,6 @@ function compareInboxCaptureRecords(
   return left.envelopePath.localeCompare(right.envelopePath);
 }
 
-function findMatchingInboxCaptureRecord(
-  records: ReadonlyArray<CanonicalInboxCaptureRecord>,
-  envelope: StoredCaptureEnvelope,
-): CanonicalInboxCaptureRecord | null {
-  const identityKey = createInboxCaptureIdentityKey(envelope.input);
-  return selectMatchingInboxCaptureRecord(records, identityKey, envelope.captureId);
-}
-
 type PersistableInboundAttachment = Omit<InboundCapture["attachments"][number], "data">;
 
 function stripEphemeralAttachmentFields(
@@ -999,81 +945,164 @@ function buildUnstoredAttachment(input: {
   };
 }
 
-function normalizeStoredCaptureId(input: {
-  captureId: unknown;
-  canonicalCaptureId: string;
-  absolutePath: string;
-}): string {
-  const captureId = typeof input.captureId === "string" ? input.captureId.trim() : "";
+function normalizeStoredCaptureInboundInput(value: unknown, context: string): InboundCapture {
+  const input = expectRecord(value, context);
+  const thread = expectRecord(input.thread, `${context}.thread`);
+  const actor = expectRecord(input.actor, `${context}.actor`);
+  const raw = expectRecord(input.raw, `${context}.raw`);
+  const attachmentsValue = input.attachments;
 
-  if (!captureId) {
-    throw new TypeError(`Missing canonical "captureId" in stored inbox envelope at ${input.absolutePath}.`);
+  if (!Array.isArray(attachmentsValue)) {
+    throw new TypeError(`Expected canonical "attachments" array in ${context}.`);
   }
 
-  if (!STORED_CAPTURE_ID_PATTERN.test(captureId)) {
-    throw new UnsafeStoredCaptureIdError({
-      captureId,
-      canonicalCaptureId: input.canonicalCaptureId,
-      absolutePath: input.absolutePath,
-    });
-  }
-
-  return input.canonicalCaptureId;
+  return {
+    source: requireStringField(input, "source", context),
+    externalId: requireStringField(input, "externalId", context),
+    accountId: readOptionalNullableStringField(input, "accountId", context),
+    thread: {
+      id: requireStringField(thread, "id", `${context}.thread`),
+      title: readOptionalNullableStringField(thread, "title", `${context}.thread`),
+      isDirect: readOptionalBooleanField(thread, "isDirect", `${context}.thread`),
+    },
+    actor: {
+      id: readOptionalNullableStringField(actor, "id", `${context}.actor`),
+      displayName: readOptionalNullableStringField(actor, "displayName", `${context}.actor`),
+      isSelf: requireBooleanField(actor, "isSelf", `${context}.actor`),
+    },
+    occurredAt: requireStringField(input, "occurredAt", context),
+    receivedAt: readOptionalNullableStringField(input, "receivedAt", context),
+    text: readOptionalNullableStringField(input, "text", context) ?? null,
+    attachments: attachmentsValue.map((attachment, index) =>
+      normalizeStoredCaptureInboundAttachment(attachment, `${context}.attachments[${index}]`),
+    ),
+    raw,
+  };
 }
 
-function normalizeStoredAttachmentsForCaptureId(input: {
-  captureId: string;
-  attachments: ReadonlyArray<StoredAttachment>;
-  absolutePath: string;
-}): StoredAttachment[] {
-  const normalizedAttachments = normalizeStoredAttachments(
-    input.captureId,
-    input.attachments,
-    `stored inbox envelope at ${input.absolutePath}`,
-  );
+function normalizeStoredCaptureInboundAttachment(
+  value: unknown,
+  context: string,
+): InboundCapture["attachments"][number] {
+  const attachment = expectRecord(value, context);
+  const kind = requireStringField(attachment, "kind", context);
 
-  return normalizedAttachments.map((attachment) => ({
-    ...attachment,
-    attachmentId: buildAttachmentId(input.captureId, attachment.ordinal),
-  }));
-}
-
-async function quarantineStoredCaptureEnvelope(absolutePath: string): Promise<void> {
-  const quarantinePath = await resolveQuarantinedEnvelopePath(absolutePath);
-
-  try {
-    await rename(absolutePath, quarantinePath);
-  } catch (error) {
-    if (isMissingFileError(error)) {
-      return;
-    }
-
-    throw error;
-  }
-}
-
-async function resolveQuarantinedEnvelopePath(absolutePath: string): Promise<string> {
-  const parsed = path.parse(absolutePath);
-
-  for (let index = 0; index < 1000; index += 1) {
-    const suffix = index === 0 ? "" : `-${index}`;
-    const candidate = path.join(
-      parsed.dir,
-      `${parsed.name}.${QUARANTINED_INVALID_CAPTURE_ID_SUFFIX}${suffix}${parsed.ext}`,
-    );
-
-    try {
-      await stat(candidate);
-    } catch (error) {
-      if (isMissingFileError(error)) {
-        return candidate;
-      }
-
-      throw error;
-    }
+  if (!isInboundAttachmentKind(kind)) {
+    throw new TypeError(`Unsupported canonical attachment kind "${kind}" in ${context}.`);
   }
 
-  throw new TypeError(`Unable to quarantine stored inbox envelope at ${absolutePath}.`);
+  return {
+    externalId: readOptionalNullableStringField(attachment, "externalId", context),
+    kind,
+    mime: readOptionalNullableStringField(attachment, "mime", context),
+    originalPath: null,
+    fileName: readOptionalNullableStringField(attachment, "fileName", context),
+    byteSize: readOptionalNullableNumberField(attachment, "byteSize", context),
+  };
+}
+
+function expectRecord(value: unknown, context: string): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError(`Expected object in ${context}.`);
+  }
+
+  return value as Record<string, unknown>;
+}
+
+function requireStringField(
+  value: Record<string, unknown>,
+  field: string,
+  context: string,
+): string {
+  const fieldValue = value[field];
+
+  if (typeof fieldValue !== "string" || fieldValue.trim().length === 0) {
+    throw new TypeError(`Expected canonical "${field}" string in ${context}.`);
+  }
+
+  return fieldValue;
+}
+
+function requireBooleanField(
+  value: Record<string, unknown>,
+  field: string,
+  context: string,
+): boolean {
+  const fieldValue = value[field];
+
+  if (typeof fieldValue !== "boolean") {
+    throw new TypeError(`Expected canonical "${field}" boolean in ${context}.`);
+  }
+
+  return fieldValue;
+}
+
+function readOptionalBooleanField(
+  value: Record<string, unknown>,
+  field: string,
+  context: string,
+): boolean | undefined {
+  const fieldValue = value[field];
+
+  if (fieldValue === undefined) {
+    return undefined;
+  }
+
+  if (typeof fieldValue !== "boolean") {
+    throw new TypeError(`Expected canonical "${field}" boolean in ${context}.`);
+  }
+
+  return fieldValue;
+}
+
+function readOptionalNullableStringField(
+  value: Record<string, unknown>,
+  field: string,
+  context: string,
+): string | null | undefined {
+  const fieldValue = value[field];
+
+  if (fieldValue === undefined) {
+    return undefined;
+  }
+
+  if (fieldValue === null) {
+    return null;
+  }
+
+  if (typeof fieldValue !== "string") {
+    throw new TypeError(`Expected canonical "${field}" string in ${context}.`);
+  }
+
+  return fieldValue;
+}
+
+function readOptionalNullableNumberField(
+  value: Record<string, unknown>,
+  field: string,
+  context: string,
+): number | null | undefined {
+  const fieldValue = value[field];
+
+  if (fieldValue === undefined) {
+    return undefined;
+  }
+
+  if (fieldValue === null) {
+    return null;
+  }
+
+  if (typeof fieldValue !== "number" || !Number.isFinite(fieldValue)) {
+    throw new TypeError(`Expected canonical "${field}" number in ${context}.`);
+  }
+
+  return fieldValue;
+}
+
+function isInboundAttachmentKind(
+  value: string,
+): value is InboundCapture["attachments"][number]["kind"] {
+  return ["image", "audio", "video", "document", "other"].includes(value);
 }
 
 function isMissingFileError(error: unknown): error is NodeJS.ErrnoException {

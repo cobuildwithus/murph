@@ -31,6 +31,7 @@ export class RunnerContainerTestDouble extends DurableObject {
         `http://results.worker/events/${encodeURIComponent(payload.job.request.dispatch.eventId)}/commit`,
         {
           body: JSON.stringify({
+            assistantDeliveryEffects: [],
             bundle: runnerResult.result.bundle,
             currentBundleRef: payload.job.request.commit?.bundleRef ?? null,
             gatewayProjectionSnapshot: runnerResult.finalGatewayProjectionSnapshot,

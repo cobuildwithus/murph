@@ -36,7 +36,6 @@ export interface HostedExecutionRunnerCommitRequest {
 
 export interface HostedExecutionCommittedResult {
   assistantDeliveryEffects: HostedAssistantDeliveryEffect[];
-  sideEffects?: HostedAssistantDeliveryEffect[];
   bundleRef: HostedExecutionBundleRef | null;
   committedAt: string;
   eventId: string;
@@ -47,8 +46,7 @@ export interface HostedExecutionCommittedResult {
 }
 
 export interface HostedExecutionCommitPayload {
-  assistantDeliveryEffects?: HostedAssistantDeliveryEffect[];
-  sideEffects?: HostedAssistantDeliveryEffect[];
+  assistantDeliveryEffects: HostedAssistantDeliveryEffect[];
   bundle: HostedExecutionRunnerResult["bundle"];
   gatewayProjectionSnapshot?: GatewayProjectionSnapshot | null;
   result: HostedExecutionRunnerResult["result"];
@@ -153,8 +151,9 @@ export async function persistHostedExecutionCommit(input: {
     keysById: input.keysById,
   });
   const committedAt = new Date().toISOString();
-  const assistantDeliveryEffects = parseHostedAssistantDeliveryEffects(
-    input.payload.assistantDeliveryEffects ?? input.payload.sideEffects,
+  const assistantDeliveryEffects = requireAssistantDeliveryEffects(
+    input.payload.assistantDeliveryEffects,
+    "Hosted execution commit payload.assistantDeliveryEffects",
   );
   const committedResult: HostedExecutionCommittedResult = {
     assistantDeliveryEffects,
@@ -169,7 +168,6 @@ export async function persistHostedExecutionCommit(input: {
     finalizedAt: null,
     gatewayProjectionSnapshot: input.payload.gatewayProjectionSnapshot ?? null,
     result: input.payload.result,
-    sideEffects: assistantDeliveryEffects,
     userId: input.userId,
   };
 
@@ -235,11 +233,18 @@ export async function persistHostedExecutionFinalBundles(input: {
 function normalizeHostedExecutionCommittedResult(
   value: HostedExecutionCommittedResult,
 ): HostedExecutionCommittedResult {
-  const assistantDeliveryEffects = parseHostedAssistantDeliveryEffects(
-    (value as { assistantDeliveryEffects?: unknown; sideEffects?: unknown })
-      .assistantDeliveryEffects
-    ?? (value as { assistantDeliveryEffects?: unknown; sideEffects?: unknown })
-      .sideEffects,
+  const record = value as {
+    assistantDeliveryEffects?: unknown;
+    sideEffects?: unknown;
+  };
+  rejectRemovedHostedExecutionField(
+    record,
+    "sideEffects",
+    "Hosted execution committed result",
+  );
+  const assistantDeliveryEffects = requireAssistantDeliveryEffects(
+    record.assistantDeliveryEffects,
+    "Hosted execution committed result.assistantDeliveryEffects",
   );
   return {
     ...value,
@@ -256,7 +261,6 @@ function normalizeHostedExecutionCommittedResult(
         : gatewayProjectionSnapshotSchema.parse(
             (value as { gatewayProjectionSnapshot: unknown }).gatewayProjectionSnapshot,
           ),
-    sideEffects: assistantDeliveryEffects,
     userId: requireCommittedResultString(
       (value as { userId?: unknown }).userId,
       "Hosted execution committed result userId",
@@ -293,8 +297,9 @@ function assertEquivalentDuplicateCommit(
     );
   }
 
-  const expectedAssistantDeliveryEffects = parseHostedAssistantDeliveryEffects(
-    input.payload.assistantDeliveryEffects ?? input.payload.sideEffects,
+  const expectedAssistantDeliveryEffects = requireAssistantDeliveryEffects(
+    input.payload.assistantDeliveryEffects,
+    "Hosted execution commit payload.assistantDeliveryEffects",
   );
   if (!sameStructuredValue(existing.assistantDeliveryEffects, expectedAssistantDeliveryEffects)) {
     throw new Error(
@@ -361,4 +366,25 @@ function canonicalizeJson(value: unknown): unknown {
       .sort(([left], [right]) => left.localeCompare(right))
       .map(([key, entry]) => [key, canonicalizeJson(entry)]),
   );
+}
+
+function rejectRemovedHostedExecutionField(
+  record: Record<string, unknown>,
+  field: string,
+  label: string,
+): void {
+  if (record[field] !== undefined) {
+    throw new TypeError(`${label}.${field} is no longer supported.`);
+  }
+}
+
+function requireAssistantDeliveryEffects(
+  value: unknown,
+  label: string,
+): HostedAssistantDeliveryEffect[] {
+  if (!Array.isArray(value)) {
+    throw new TypeError(`${label} must be an array.`);
+  }
+
+  return parseHostedAssistantDeliveryEffects(value);
 }

@@ -123,7 +123,7 @@ describe("hosted runtime parser coverage", () => {
             eventsHandled: Number.POSITIVE_INFINITY,
             summary: "",
           },
-          sideEffects: [],
+          assistantDeliveryEffects: [],
         },
       },
     })).toThrow(/eventsHandled must be a finite number/u);
@@ -160,7 +160,7 @@ describe("hosted runtime parser coverage", () => {
             nextWakeAt: false,
             summary: "completed",
           },
-          sideEffects: [],
+          assistantDeliveryEffects: [],
         },
       },
     })).toThrow(/nextWakeAt must be a non-empty string/u);
@@ -182,10 +182,34 @@ describe("hosted runtime parser coverage", () => {
             nextWakeAt: null,
             summary: "",
           },
-          sideEffects: [],
+          assistantDeliveryEffects: [],
         },
       },
     })).toThrow(/summary must be a non-empty string/u);
+  });
+
+  it("rejects removed resume sideEffects aliases", () => {
+    expect(() => parseHostedAssistantRuntimeJobRequest({
+      bundle: null,
+      dispatch: {
+        event: {
+          kind: "member.activated",
+          userId: "member_123",
+        },
+        eventId: "evt_removed_side_effects",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+      },
+      resume: {
+        committedResult: {
+          result: {
+            eventsHandled: 1,
+            nextWakeAt: null,
+            summary: "completed",
+          },
+          sideEffects: [],
+        },
+      },
+    })).toThrow(/committedResult\.sideEffects is no longer supported/u);
   });
 
   it("rejects the remaining removed runtime callback override fields", () => {

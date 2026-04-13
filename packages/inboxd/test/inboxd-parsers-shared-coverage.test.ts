@@ -33,11 +33,8 @@ const mocks = vi.hoisted(() => ({
   listInboxCaptureMutationsMock: vi.fn(),
   openInboxRuntimeMock: vi.fn(),
   readInboxCaptureMutationHeadMock: vi.fn(),
-  appendImportAuditMock: vi.fn(),
-  appendInboxCaptureEventMock: vi.fn(),
   ensureInboxVaultMock: vi.fn(),
   persistCanonicalInboxCaptureMock: vi.fn(),
-  persistRawCaptureMock: vi.fn(),
   rebuildRuntimeFromVaultMock: vi.fn(),
 }));
 
@@ -58,11 +55,8 @@ vi.mock("../src/kernel/sqlite.ts", () => ({
 }));
 
 vi.mock("../src/indexing/persist.ts", () => ({
-  appendImportAudit: mocks.appendImportAuditMock,
-  appendInboxCaptureEvent: mocks.appendInboxCaptureEventMock,
   ensureInboxVault: mocks.ensureInboxVaultMock,
   persistCanonicalInboxCapture: mocks.persistCanonicalInboxCaptureMock,
-  persistRawCapture: mocks.persistRawCaptureMock,
   rebuildRuntimeFromVault: mocks.rebuildRuntimeFromVaultMock,
 }));
 
@@ -95,11 +89,8 @@ afterEach(() => {
   mocks.listInboxCaptureMutationsMock.mockReset();
   mocks.openInboxRuntimeMock.mockReset();
   mocks.readInboxCaptureMutationHeadMock.mockReset();
-  mocks.appendImportAuditMock.mockReset();
-  mocks.appendInboxCaptureEventMock.mockReset();
   mocks.ensureInboxVaultMock.mockReset();
   mocks.persistCanonicalInboxCaptureMock.mockReset();
-  mocks.persistRawCaptureMock.mockReset();
   mocks.rebuildRuntimeFromVaultMock.mockReset();
 });
 

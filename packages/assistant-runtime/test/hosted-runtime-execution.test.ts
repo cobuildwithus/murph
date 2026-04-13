@@ -7,10 +7,10 @@ const mocks = vi.hoisted(() => ({
   assistantGatewayLocalProjectionSourceReader: Symbol(
     "assistantGatewayLocalProjectionSourceReader",
   ),
-  collectHostedExecutionSideEffects: vi.fn(),
+  collectHostedAssistantDeliverySideEffects: vi.fn(),
   createHostedArtifactUploadSink: vi.fn(),
   decodeHostedBundleBase64: vi.fn(),
-  drainHostedCommittedSideEffectsAfterCommit: vi.fn(),
+  drainHostedCommittedAssistantDeliveriesAfterCommit: vi.fn(),
   emitHostedExecutionStructuredLog: vi.fn(),
   encodeHostedBundleBase64: vi.fn(),
   executeHostedDispatchEvent: vi.fn(),
@@ -69,9 +69,10 @@ vi.mock("../src/hosted-runtime/artifacts.ts", () => ({
 }));
 
 vi.mock("../src/hosted-runtime/callbacks.ts", () => ({
-  collectHostedExecutionSideEffects: mocks.collectHostedExecutionSideEffects,
-  drainHostedCommittedSideEffectsAfterCommit:
-    mocks.drainHostedCommittedSideEffectsAfterCommit,
+  collectHostedAssistantDeliverySideEffects:
+    mocks.collectHostedAssistantDeliverySideEffects,
+  drainHostedCommittedAssistantDeliveriesAfterCommit:
+    mocks.drainHostedCommittedAssistantDeliveriesAfterCommit,
 }));
 
 vi.mock("../src/hosted-runtime/events.ts", () => ({
@@ -113,7 +114,7 @@ beforeEach(() => {
   mocks.snapshotHostedExecutionContext.mockResolvedValue({
     bundle: Uint8Array.from([9, 9, 9]),
   });
-  mocks.collectHostedExecutionSideEffects.mockResolvedValue([
+  mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValue([
     {
       effectId: "intent_123",
       fingerprint: "dedupe_123",
@@ -146,7 +147,7 @@ beforeEach(() => {
     nextWakeAt: "2026-04-08T00:30:00.000Z",
     parserProcessed: 3,
   });
-  mocks.drainHostedCommittedSideEffectsAfterCommit.mockResolvedValue(undefined);
+  mocks.drainHostedCommittedAssistantDeliveriesAfterCommit.mockResolvedValue(undefined);
   mocks.exportHostedPendingAssistantUsage.mockResolvedValue({
     exported: 1,
     failed: 0,
@@ -267,8 +268,8 @@ describe("executeHostedDispatchForCommit", () => {
       preservedArtifacts: [],
       vaultRoot: "/tmp/vault-root",
     });
-    expect(mocks.collectHostedExecutionSideEffects).toHaveBeenCalledWith("/tmp/vault-root");
-    assert.deepEqual(result.committedSideEffects, [
+    expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith("/tmp/vault-root");
+    assert.deepEqual(result.committedAssistantDeliveryEffects, [
       {
         effectId: "intent_123",
         fingerprint: "dedupe_123",
@@ -324,13 +325,6 @@ describe("completeHostedExecutionAfterCommit", () => {
           },
         },
         committedAssistantDeliveryEffects: [
-          {
-            effectId: "intent_123",
-            fingerprint: "dedupe_123",
-            kind: "assistant.delivery",
-          },
-        ],
-        committedSideEffects: [
           {
             effectId: "intent_123",
             fingerprint: "dedupe_123",
@@ -394,7 +388,7 @@ describe("completeHostedExecutionAfterCommit", () => {
       },
     });
 
-    expect(mocks.drainHostedCommittedSideEffectsAfterCommit).toHaveBeenCalledWith({
+    expect(mocks.drainHostedCommittedAssistantDeliveriesAfterCommit).toHaveBeenCalledWith({
       commit: {
         bundleRef: {
           hash: "hash_123",
@@ -413,7 +407,7 @@ describe("completeHostedExecutionAfterCommit", () => {
         occurredAt: "2026-04-08T00:00:00.000Z",
       },
       effectsPort: expect.any(Object),
-      sideEffects: [
+      assistantDeliveryEffects: [
         {
           effectId: "intent_123",
           fingerprint: "dedupe_123",

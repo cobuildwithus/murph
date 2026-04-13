@@ -16,21 +16,15 @@ describe("hosted assistant delivery contracts", () => {
     expect(hostedAssistantDeliveryTargetKindValues).toEqual(gatewayDeliveryTargetKindValues);
   });
 
-  it("keeps assistant-delivery parsing aligned with the compatibility aliases", () => {
+  it("parses canonical assistant-delivery side effects", () => {
     const payload = [{
-      effectId: "intent-1",
-      fingerprint: "dedupe-1",
-      intentId: "intent-1",
-      kind: "assistant.delivery",
-    }];
-    const canonicalPayload = [{
       effectId: "intent-1",
       fingerprint: "dedupe-1",
       kind: "assistant.delivery",
     }];
 
-    expect(parseHostedAssistantDeliverySideEffects(payload)).toEqual(canonicalPayload);
-    expect(parseHostedExecutionSideEffects(payload)).toEqual(canonicalPayload);
+    expect(parseHostedAssistantDeliverySideEffects(payload)).toEqual(payload);
+    expect(parseHostedExecutionSideEffects(payload)).toEqual(payload);
   });
 
   it("builds canonical effects and prepared records without a duplicate intentId", () => {
@@ -74,7 +68,6 @@ describe("hosted assistant delivery contracts", () => {
       },
       effectId: "intent-1",
       fingerprint: "dedupe-1",
-      intentId: "intent-1",
       kind: "assistant.delivery",
       recordedAt: "2026-04-08T00:00:00.000Z",
       state: "sent",
@@ -88,16 +81,16 @@ describe("hosted assistant delivery contracts", () => {
     expect(record.delivery.targetKind).toBe("participant");
   });
 
-  it("rejects legacy records when intentId diverges from effectId", () => {
+  it("rejects removed hosted assistant-delivery intentId fields", () => {
     expect(() =>
       parseHostedAssistantDeliveryRecord({
         effectId: "intent-1",
         fingerprint: "dedupe-1",
-        intentId: "intent-2",
+        intentId: "intent-1",
         kind: "assistant.delivery",
         recordedAt: "2026-04-08T00:00:00.000Z",
         state: "prepared",
       })
-    ).toThrow("intentId must match effectId");
+    ).toThrow("intentId is no longer supported");
   });
 });

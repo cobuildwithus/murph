@@ -2006,7 +2006,6 @@ describe("runHostedExecutionJob", () => {
               },
               effectId: intentId,
               fingerprint: "dedupe_hosted",
-              intentId,
               kind: "assistant.delivery",
               recordedAt: "2026-03-26T12:00:05.000Z",
               state: "sent",
@@ -2119,7 +2118,6 @@ describe("runHostedExecutionJob", () => {
         ) {
           expect(JSON.parse(String(init?.body))).toMatchObject({
             assistantDeliveryEffects: [],
-            sideEffects: [],
           });
           return new Response(JSON.stringify({ ok: true }), { status: 200 });
         }
@@ -2371,13 +2369,6 @@ describe("runHostedExecutionJob", () => {
             eventsHandled: 1,
             summary: "committed",
           },
-          sideEffects: [
-            {
-              effectId: intentId,
-              fingerprint: "dedupe_hosted_resume",
-              kind: "assistant.delivery",
-            },
-          ],
         },
       },
     });

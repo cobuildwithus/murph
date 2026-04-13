@@ -477,6 +477,7 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
             connectionId: "conn_123",
             status: "missing",
             tokenUpdate: "skipped_version_mismatch",
+            writeUpdate: "missing",
           },
         ],
         userId: "user_123",
@@ -536,11 +537,28 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
             connectionId: "conn_123",
             status: "broken",
             tokenUpdate: "missing",
+            writeUpdate: "missing",
           },
         ],
         userId: "user_123",
       }),
     ).toThrowError(/status is invalid/u);
+
+    expect(() =>
+      parseHostedExecutionDeviceSyncRuntimeApplyResponse({
+        appliedAt: "2026-04-07T02:00:00.000Z",
+        updates: [
+          {
+            connection: null,
+            connectionId: "conn_123",
+            status: "missing",
+            tokenUpdate: "missing",
+            writeUpdate: "legacy_inferred",
+          },
+        ],
+        userId: "user_123",
+      }),
+    ).toThrowError(/writeUpdate is invalid/u);
 
     expect(() =>
       parseHostedExecutionDeviceSyncRuntimeApplyRequest({
@@ -597,7 +615,7 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
     ).toThrowError(/lastSyncErrorAt must be an ISO timestamp/u);
   });
 
-  it("backfills write results for legacy runtime apply responses", () => {
+  it("requires explicit writeUpdate values in runtime apply responses", () => {
     expect(parseHostedExecutionDeviceSyncRuntimeApplyResponse({
       appliedAt: "2026-04-07T02:00:00.000Z",
       updates: [
@@ -618,6 +636,7 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
           connectionId: "conn_applied",
           status: "updated",
           tokenUpdate: "unchanged",
+          writeUpdate: "applied",
         },
         {
           connection: {
@@ -636,12 +655,14 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
           connectionId: "conn_unchanged",
           status: "updated",
           tokenUpdate: "unchanged",
+          writeUpdate: "unchanged",
         },
         {
           connection: null,
           connectionId: "conn_missing",
           status: "missing",
           tokenUpdate: "missing",
+          writeUpdate: "missing",
         },
       ],
       userId: "user_123",
@@ -659,6 +680,33 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
         writeUpdate: "missing",
       }),
     ]);
+
+    expect(() =>
+      parseHostedExecutionDeviceSyncRuntimeApplyResponse({
+        appliedAt: "2026-04-07T02:00:00.000Z",
+        updates: [
+          {
+            connection: {
+              accessTokenExpiresAt: null,
+              connectedAt: "2026-04-07T00:00:00.000Z",
+              createdAt: "2026-04-07T00:00:00.000Z",
+              displayName: "Legacy",
+              externalAccountId: "ext_legacy",
+              id: "conn_legacy",
+              metadata: {},
+              provider: "oura",
+              scopes: ["daily"],
+              status: "active",
+              updatedAt: "2026-04-07T02:00:00.000Z",
+            },
+            connectionId: "conn_legacy",
+            status: "updated",
+            tokenUpdate: "unchanged",
+          },
+        ],
+        userId: "user_123",
+      }),
+    ).toThrowError(/writeUpdate must be a non-empty string/u);
   });
 
   it("normalizes hosted wake helpers without mutating the original hint payload", () => {

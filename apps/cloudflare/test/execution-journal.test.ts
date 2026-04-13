@@ -43,6 +43,7 @@ describe("persistHostedExecutionCommit", () => {
     const first = await persistHostedExecutionCommit({
       ...baseCommit,
       payload: {
+        assistantDeliveryEffects: [],
         bundle: null,
         gatewayProjectionSnapshot: {
           schema: "murph.gateway-projection-snapshot.v1",
@@ -63,6 +64,7 @@ describe("persistHostedExecutionCommit", () => {
       persistHostedExecutionCommit({
         ...baseCommit,
         payload: {
+          assistantDeliveryEffects: [],
           bundle: null,
           gatewayProjectionSnapshot: {
             permissions: [],

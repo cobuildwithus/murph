@@ -12,7 +12,7 @@ on:
           - production
           - staging
       sync_worker_secrets:
-        description: Include the rendered Worker secrets file during upload or deploy
+        description: Include the rendered Worker secrets file during deploy
         required: true
         default: true
         type: boolean
@@ -184,6 +184,6 @@ jobs:
             echo "- Worker URL: \`${CF_PUBLIC_BASE_URL:-not-set}\`"
             echo "- Container instance type: \`${CF_CONTAINER_INSTANCE_TYPE}\`"
             echo "- Native container image: Wrangler-built from \`Dockerfile.cloudflare-hosted-runner\` during deploy"
-            echo "- Final version traffic: \`${{ steps.deploy.outputs.final_version_traffic || 'not-deployed' }}\`"
+            echo "- Deployed versions: \`${{ steps.deploy.outputs.final_version_traffic || 'not-deployed' }}\`"
             echo "- Smoke user id: \`${{ inputs.smoke_user_id || 'not-set' }}\`"
           } >> "$GITHUB_STEP_SUMMARY"

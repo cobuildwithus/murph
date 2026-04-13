@@ -236,7 +236,6 @@ describe("cloudflare worker routes", () => {
       {
         effectId: "outbox_123",
         fingerprint: "dedupe_123",
-        intentId: "outbox_123",
         kind: "assistant.delivery" as const,
       },
     ];
@@ -250,7 +249,7 @@ describe("cloudflare worker routes", () => {
             eventsHandled: 1,
             summary: "ok",
           },
-          sideEffects,
+          assistantDeliveryEffects: sideEffects,
         }),
         headers: {
           "content-type": "application/json; charset=utf-8",
@@ -285,7 +284,7 @@ describe("cloudflare worker routes", () => {
       kind,
     }));
     await expect(journalStore.readCommittedResult("member_123", "evt_commit")).resolves.toMatchObject({
-      sideEffects: canonicalSideEffects,
+      assistantDeliveryEffects: canonicalSideEffects,
     });
   });
 
@@ -392,6 +391,7 @@ describe("cloudflare worker routes", () => {
     await callRunnerOutbound(
       new Request("http://results.worker/events/evt_finalize/commit", {
         body: JSON.stringify({
+          assistantDeliveryEffects: [],
           bundle: Buffer.from("vault-committed").toString("base64"),
           currentBundleRef: null,
           result: {
@@ -440,6 +440,7 @@ describe("cloudflare worker routes", () => {
     await callRunnerOutbound(
       new Request("http://results.worker/events/evt_finalize_auth/commit", {
         body: JSON.stringify({
+          assistantDeliveryEffects: [],
           bundle: Buffer.from("vault-committed").toString("base64"),
           currentBundleRef: null,
           result: {
@@ -472,6 +473,7 @@ describe("cloudflare worker routes", () => {
     await expect(() => callRunnerOutbound(
       new Request("http://results.worker/events/evt_bad_commit/commit", {
         body: JSON.stringify({
+          assistantDeliveryEffects: [],
           bundle: 42,
           currentBundleRef: {},
           result: {
@@ -2475,7 +2477,6 @@ function createRunnerSuccessPayload() {
       eventsHandled: 1,
       summary: "ok",
     },
-    sideEffects: [],
   };
 }
 
@@ -2781,7 +2782,6 @@ function createUserRunnerStub() {
         eventsHandled: 1,
         summary: "ok",
       },
-      sideEffects: [],
       userId: "member_123",
     })),
     dispatchWithOutcome: vi.fn(async (input: HostedExecutionDispatchRequest) =>

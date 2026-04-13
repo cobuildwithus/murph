@@ -487,7 +487,6 @@ describe("RunnerQueueStore", () => {
         eventsHandled: 1,
         summary: "ok",
       },
-      sideEffects: [],
       userId: "member_123",
     };
 
@@ -538,7 +537,6 @@ describe("RunnerQueueStore", () => {
         eventsHandled: 1,
         summary: "ok",
       },
-      sideEffects: [],
       userId: "member_123",
     };
 

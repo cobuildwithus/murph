@@ -177,9 +177,8 @@ export async function runHostedAssistantRuntimeJobInProcessDetailed(
               effectsPort: runtime.platform.effectsPort,
               gatewayProjectionSnapshot: committedExecution.committedGatewayProjectionSnapshot,
               result: committedExecution.committedResult,
-              sideEffects:
-                committedExecution.committedSideEffects
-                ?? committedExecution.committedAssistantDeliveryEffects,
+              assistantDeliveryEffects:
+                committedExecution.committedAssistantDeliveryEffects,
             });
             emitHostedExecutionStructuredLog({
               component: "runtime",

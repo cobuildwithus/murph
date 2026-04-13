@@ -23,9 +23,9 @@ vi.mock("@murphai/assistant-engine", () => ({
 }));
 
 import {
-  collectHostedExecutionSideEffects,
+  collectHostedAssistantDeliverySideEffects,
   commitHostedExecutionResult,
-  drainHostedCommittedSideEffectsAfterCommit,
+  drainHostedCommittedAssistantDeliveriesAfterCommit,
   resumeHostedCommittedExecution,
 } from "../src/hosted-runtime/callbacks.ts";
 import {
@@ -65,7 +65,6 @@ describe("hosted runtime callbacks", () => {
             nextWakeAt: null,
             summary: "completed",
           },
-          sideEffects: [sideEffect],
         },
       },
     });
@@ -76,7 +75,7 @@ describe("hosted runtime callbacks", () => {
       nextWakeAt: null,
       summary: "completed",
     });
-    assert.deepEqual(resumed.committedSideEffects, [sideEffect]);
+    assert.deepEqual(resumed.committedAssistantDeliveryEffects, [sideEffect]);
     assert.equal(
       resumed.committedGatewayProjectionSnapshot.schema,
       "murph.gateway-projection-snapshot.v1",
@@ -118,7 +117,7 @@ describe("hosted runtime callbacks", () => {
           summary: "completed",
         },
       },
-      sideEffects: [],
+      assistantDeliveryEffects: [],
     });
 
     expect(commit).not.toHaveBeenCalled();
@@ -167,7 +166,7 @@ describe("hosted runtime callbacks", () => {
             summary: "completed",
           },
         },
-        sideEffects: [],
+        assistantDeliveryEffects: [],
       }),
     ).rejects.toThrow(/durable commit failed for member_123\/evt_commit/u);
   });
@@ -180,7 +179,7 @@ describe("hosted runtime callbacks", () => {
     mocks.listAssistantOutboxIntents.mockResolvedValue(intents);
     mocks.shouldDispatchAssistantOutboxIntent.mockReturnValue(true);
 
-    const sideEffects = await collectHostedExecutionSideEffects("/tmp/vault");
+    const sideEffects = await collectHostedAssistantDeliverySideEffects("/tmp/vault");
 
     expect(mocks.listAssistantOutboxIntents).toHaveBeenCalledWith("/tmp/vault");
     assert.equal(sideEffects.length, 20);
@@ -199,7 +198,7 @@ describe("hosted runtime callbacks", () => {
       .mockReturnValueOnce(false)
       .mockReturnValueOnce(true);
 
-    const sideEffects = await collectHostedExecutionSideEffects("/tmp/vault");
+    const sideEffects = await collectHostedAssistantDeliverySideEffects("/tmp/vault");
 
     assert.deepEqual(sideEffects, [
       buildHostedAssistantDeliverySideEffect({
@@ -216,7 +215,7 @@ describe("hosted runtime callbacks", () => {
       observedDispatchHooks = input.dispatchHooks;
     });
 
-    await drainHostedCommittedSideEffectsAfterCommit({
+    await drainHostedCommittedAssistantDeliveriesAfterCommit({
       commit: null,
       dispatch: {
         event: {
@@ -241,7 +240,7 @@ describe("hosted runtime callbacks", () => {
           return record;
         },
       },
-      sideEffects: [
+      assistantDeliveryEffects: [
         buildHostedAssistantDeliverySideEffect({
           dedupeKey: "dedupe_123",
           effectId: "intent_123",
@@ -285,7 +284,7 @@ describe("hosted runtime callbacks", () => {
       observedDispatchHooks = input.dispatchHooks;
     });
 
-    await drainHostedCommittedSideEffectsAfterCommit({
+    await drainHostedCommittedAssistantDeliveriesAfterCommit({
       commit: {
         bundleRef: {
           hash: "hash_123",
@@ -313,7 +312,7 @@ describe("hosted runtime callbacks", () => {
           return record;
         },
       },
-      sideEffects: [
+      assistantDeliveryEffects: [
         buildHostedAssistantDeliverySideEffect({
           dedupeKey: "dedupe_123",
           effectId: "intent_123",
@@ -370,7 +369,7 @@ describe("hosted runtime callbacks", () => {
         observedDispatchHooks = input.dispatchHooks;
       });
 
-      await drainHostedCommittedSideEffectsAfterCommit({
+      await drainHostedCommittedAssistantDeliveriesAfterCommit({
         commit: {
           bundleRef: {
             hash: "hash_123",
@@ -398,7 +397,7 @@ describe("hosted runtime callbacks", () => {
             return record;
           },
         },
-        sideEffects: [
+        assistantDeliveryEffects: [
           buildHostedAssistantDeliverySideEffect({
             dedupeKey: "dedupe_123",
             effectId: "intent_123",
@@ -449,7 +448,7 @@ describe("hosted runtime callbacks", () => {
       observedDispatchHooks = input.dispatchHooks;
     });
 
-    await drainHostedCommittedSideEffectsAfterCommit({
+    await drainHostedCommittedAssistantDeliveriesAfterCommit({
       commit: {
         bundleRef: {
           hash: "hash_123",
@@ -472,7 +471,7 @@ describe("hosted runtime callbacks", () => {
           deleted.push(input);
         },
       }),
-      sideEffects: [
+      assistantDeliveryEffects: [
         buildHostedAssistantDeliverySideEffect({
           dedupeKey: "dedupe_123",
           effectId: "intent_123",
@@ -517,7 +516,7 @@ describe("hosted runtime callbacks", () => {
       observedDispatchHooks = input.dispatchHooks;
     });
 
-    await drainHostedCommittedSideEffectsAfterCommit({
+    await drainHostedCommittedAssistantDeliveriesAfterCommit({
       commit: {
         bundleRef: {
           hash: "hash_123",
@@ -541,7 +540,7 @@ describe("hosted runtime callbacks", () => {
           return preparedRecord;
         },
       },
-      sideEffects: [
+      assistantDeliveryEffects: [
         buildHostedAssistantDeliverySideEffect({
           dedupeKey: "dedupe_123",
           effectId: "intent_123",
@@ -602,7 +601,7 @@ describe("hosted runtime callbacks", () => {
       observedDispatchHooks = input.dispatchHooks;
     });
 
-    await drainHostedCommittedSideEffectsAfterCommit({
+    await drainHostedCommittedAssistantDeliveriesAfterCommit({
       commit: {
         bundleRef: {
           hash: "hash_123",
@@ -625,7 +624,7 @@ describe("hosted runtime callbacks", () => {
           return preparedRecord;
         },
       }),
-      sideEffects: [
+      assistantDeliveryEffects: [
         buildHostedAssistantDeliverySideEffect({
           dedupeKey: "dedupe_123",
           effectId: "intent_123",
@@ -685,7 +684,7 @@ describe("hosted runtime callbacks", () => {
       observedDispatchHooks = input.dispatchHooks;
     });
 
-    await drainHostedCommittedSideEffectsAfterCommit({
+    await drainHostedCommittedAssistantDeliveriesAfterCommit({
       commit: {
         bundleRef: {
           hash: "hash_123",
@@ -713,7 +712,7 @@ describe("hosted runtime callbacks", () => {
           return record;
         },
       },
-      sideEffects: [
+      assistantDeliveryEffects: [
         buildHostedAssistantDeliverySideEffect({
           dedupeKey: "dedupe_123",
           effectId: "intent_123",
@@ -761,7 +760,7 @@ describe("hosted runtime callbacks", () => {
       observedDispatchHooks = input.dispatchHooks;
     });
 
-    await drainHostedCommittedSideEffectsAfterCommit({
+    await drainHostedCommittedAssistantDeliveriesAfterCommit({
       commit: {
         bundleRef: {
           hash: "hash_123",
@@ -788,7 +787,7 @@ describe("hosted runtime callbacks", () => {
           return record;
         },
       }),
-      sideEffects: [
+      assistantDeliveryEffects: [
         buildHostedAssistantDeliverySideEffect({
           dedupeKey: "dedupe_123",
           effectId: "intent_123",
@@ -861,7 +860,7 @@ describe("hosted runtime callbacks", () => {
       observedDispatchHooks = input.dispatchHooks;
     });
 
-    await drainHostedCommittedSideEffectsAfterCommit({
+    await drainHostedCommittedAssistantDeliveriesAfterCommit({
       commit: {
         bundleRef: {
           hash: "hash_123",
@@ -887,7 +886,7 @@ describe("hosted runtime callbacks", () => {
           throw journalError;
         },
       }),
-      sideEffects: [
+      assistantDeliveryEffects: [
         buildHostedAssistantDeliverySideEffect({
           dedupeKey: "dedupe_123",
           effectId: "intent_123",
@@ -949,7 +948,7 @@ describe("hosted runtime callbacks", () => {
       observedDispatchHooks = input.dispatchHooks;
     });
 
-    await drainHostedCommittedSideEffectsAfterCommit({
+    await drainHostedCommittedAssistantDeliveriesAfterCommit({
       commit: {
         bundleRef: {
           hash: "hash_123",
@@ -968,7 +967,7 @@ describe("hosted runtime callbacks", () => {
         occurredAt: "2026-04-08T00:00:00.000Z",
       },
       effectsPort,
-      sideEffects: [
+      assistantDeliveryEffects: [
         buildHostedAssistantDeliverySideEffect({
           dedupeKey: "dedupe_123",
           effectId: "intent_123",

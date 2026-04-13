@@ -240,6 +240,7 @@ describe("cloudflare worker runtime suite", () => {
     const commitResponse = await callRunnerOutbound(
       new Request(`http://results.worker/events/${eventId}/commit`, {
         body: JSON.stringify({
+          assistantDeliveryEffects: [],
           bundle: btoa("vault-commit"),
           currentBundleRef: null,
           result: {
