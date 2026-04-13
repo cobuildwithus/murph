@@ -651,6 +651,8 @@ describe("hosted onboarding routes", () => {
       },
     });
     expect(errorSpy).toHaveBeenCalledWith("Hosted onboarding route failed.", {
+      errorCode: "P2022",
+      errorMessage: "column missing",
       errorType: "PrismaClientKnownRequestError",
       internalMessage: "Hosted onboarding route failed unexpectedly.",
       prismaClientVersion: "test",
@@ -693,6 +695,9 @@ describe("hosted onboarding routes", () => {
       },
     });
     expect(errorSpy).toHaveBeenCalledWith("Hosted onboarding route failed.", {
+      errorCode: "P1001",
+      errorMessage:
+        "connect failed for <redacted-url> from <redacted-path> while notifying <redacted-email> at <redacted-phone>",
       errorType: "PrismaClientInitializationError",
       internalMessage: "Hosted onboarding route failed unexpectedly.",
       prismaClientVersion: "7.5.0",
@@ -921,7 +926,7 @@ describe("hosted onboarding routes", () => {
     });
   });
 
-  it("keeps unexpected hosted billing checkout failures compact outside development", async () => {
+  it("keeps unexpected hosted billing checkout failures sanitized outside development", async () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     mocks.createHostedBillingCheckout.mockRejectedValue(
       new Error(
@@ -947,12 +952,13 @@ describe("hosted onboarding routes", () => {
       },
     });
     expect(errorSpy).toHaveBeenCalledWith("Hosted onboarding route failed.", {
+      errorMessage:
+        "Stripe auth failed for <redacted-secret> from <redacted-url> while reading <redacted-path>",
       errorType: "Error",
       internalMessage: "Hosted onboarding route failed unexpectedly.",
     });
     const loggedPayload = errorSpy.mock.calls[0]?.[1];
     expect(loggedPayload).not.toHaveProperty("errorDetails");
-    expect(loggedPayload).not.toHaveProperty("errorMessage");
     expect(loggedPayload).not.toHaveProperty("errorStack");
   });
 
