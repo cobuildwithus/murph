@@ -25,6 +25,7 @@ import {
   readEncryptedR2Json,
   writeEncryptedR2Json,
 } from "./crypto.js";
+import { stringifyStructuredJson } from "./structured-json.js";
 
 export type HostedExecutionDispatchPayloadRef = Pick<
   HostedExecutionReferenceOutboxPayload,
@@ -208,25 +209,9 @@ function assertHostedDispatchMatchesRef(
 async function createHostedDispatchPayloadSignature(
   dispatch: HostedExecutionDispatchRequest,
 ): Promise<string> {
-  const canonicalJson = JSON.stringify(canonicalizeJson(parseHostedExecutionDispatchRequest(dispatch)));
+  const canonicalJson = stringifyStructuredJson(parseHostedExecutionDispatchRequest(dispatch));
   const digest = await crypto.subtle.digest("SHA-256", textEncoder.encode(canonicalJson));
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
-}
-
-function canonicalizeJson(value: unknown): unknown {
-  if (Array.isArray(value)) {
-    return value.map((entry) => canonicalizeJson(entry));
-  }
-
-  if (!value || typeof value !== "object") {
-    return value;
-  }
-
-  return Object.fromEntries(
-    Object.entries(value as Record<string, unknown>)
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([key, entry]) => [key, canonicalizeJson(entry)]),
-  );
 }
 
 export function resolveHostedRunnerDispatchPayloadStorage(
