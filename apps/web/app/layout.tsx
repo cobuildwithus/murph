@@ -16,6 +16,7 @@ import { cn } from "@/lib/utils";
 const geist = Geist({subsets:['latin'],variable:'--font-sans'});
 
 const GITHUB_REPO_URL = "https://github.com/cobuildwithus/murph";
+const SUPPORT_EMAIL = "support@withmurph.ai";
 
 const outfit = Outfit({
   subsets: ["latin"],
@@ -45,14 +46,22 @@ export default function RootLayout(input: { children: React.ReactNode }) {
                 <p className="max-w-2xl leading-relaxed">
                   Murph is open source and licensed under Apache 2.0.
                 </p>
-                <a
-                  href={GITHUB_REPO_URL}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="font-semibold text-olive transition-colors hover:text-stone-900"
-                >
-                  View the code on GitHub
-                </a>
+                <div className="flex flex-wrap items-center gap-3">
+                  <a
+                    href={`mailto:${SUPPORT_EMAIL}`}
+                    className="inline-flex items-center rounded-full border border-olive/15 bg-white/80 px-4 py-2 font-medium text-stone-700 transition-colors hover:border-olive/35 hover:text-stone-900"
+                  >
+                    Contact support
+                  </a>
+                  <a
+                    href={GITHUB_REPO_URL}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="font-semibold text-olive transition-colors hover:text-stone-900"
+                  >
+                    View the code on GitHub
+                  </a>
+                </div>
               </div>
             </footer>
           </div>
