@@ -157,7 +157,7 @@ The hosted control plane consumes each assertion nonce once, so replayed asserti
 
 ## Secret hygiene and rotation
 
-- Keep the committed `.env.example` file placeholder-only. For local hosted-web work, use Vercel-backed process injection such as `cd apps/web && vercel env run -- pnpm dev` or `cd apps/web && pnpm dev:vercel` instead of storing real hosted secrets in repo-local `.env.local` or `.env` files.
+- Keep the committed `.env.example` file placeholder-only. For local hosted-web work, use Vercel-backed process injection via `cd apps/web && pnpm dev` instead of storing real hosted secrets in repo-local `.env.local` or `.env` files. Use `pnpm dev:local` only for placeholder-only or manually exported shell env.
 - A raw filesystem archive of a repo clone is still an exposure when ignored local `apps/web/.env.local`, `apps/web/.env`, `.next`, `.next-dev`, or `.next-smoke` output exists, even when git has no tracked secret diff. Use the guarded `pnpm zip:src` / `scripts/package-audit-context.sh` flow for source sharing instead of archiving the clone directly; that path stages git-visible files, now includes the tracked `config/workspace-source-resolution.ts` helper, and filters blocked local residue from the bundle.
 - Treat `DATABASE_URL`, `DEVICE_SYNC_ENCRYPTION_KEY`, `GARMIN_CLIENT_SECRET`, `WHOOP_CLIENT_SECRET`, `OURA_CLIENT_SECRET`, and `OURA_WEBHOOK_VERIFICATION_TOKEN` as rotation-required if a real hosted `.env.local`, `.env`, or deploy secret was ever exposed.
 - Treat a leaked raw clone/archive that included the local hosted `.env.local` or `.env` the same way as a direct secret exposure.
@@ -179,7 +179,7 @@ The hosted Prisma schema is still a pre-launch baseline. `2026040600_init` alrea
 ## Local verification
 
 - `pnpm --dir apps/web lint` runs the explicit ESLint CLI with `eslint-config-next`.
-- For local dev with hosted secrets, run `cd apps/web && vercel env run -- pnpm dev` or `cd apps/web && pnpm dev:vercel` so Vercel injects the linked project's development env into that process without writing a local env file. Direct `pnpm dev` still works for placeholder-only or explicitly exported shell env.
+- For local dev with hosted secrets, run `cd apps/web && pnpm dev` so Vercel injects the linked project's development env into that process without writing a local env file. Use `pnpm dev:local` only for placeholder-only or explicitly exported shell env.
 - `apps/web/prisma.config.ts` now reads `DATABASE_URL` from the process environment only. If you need hosted-web Prisma commands against Vercel-managed env, run them through `vercel env run -- ...` as well.
 - `pnpm --dir apps/web dev` now keeps interactive Next dev artifacts under `apps/web/.next-dev`.
 - The Next 16 Turbopack filesystem cache is disabled by default for local `next dev` in this repo; set `MURPH_NEXT_DEV_FILESYSTEM_CACHE=1` only when you explicitly want on-disk dev cache reuse.

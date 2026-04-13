@@ -7,9 +7,10 @@
     "node": ">=24.14.1"
   },
   "scripts": {
-    "dev": "pnpm --dir ../.. exec tsx apps/web/scripts/dev-local.ts",
-    "dev:vercel": "vercel env run -- pnpm dev",
-    "dev:turbopack": "pnpm --dir ../.. exec tsx apps/web/scripts/dev-local.ts --turbopack",
+    "dev": "vercel env run -- pnpm dev:local",
+    "dev:local": "pnpm --dir ../.. exec tsx apps/web/scripts/dev-local.ts",
+    "dev:turbopack": "vercel env run -- pnpm dev:turbopack:local",
+    "dev:turbopack:local": "pnpm --dir ../.. exec tsx apps/web/scripts/dev-local.ts --turbopack",
     "build": "prisma generate && next build",
     "lint": "eslint .",
     "start": "next start",
