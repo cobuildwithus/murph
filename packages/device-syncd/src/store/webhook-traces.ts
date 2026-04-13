@@ -7,7 +7,7 @@ import type { DatabaseSync } from "node:sqlite";
 
 import { withImmediateTransaction } from "@murphai/runtime-state/node";
 
-import { sha256Text, stringifyJson, subtractDays } from "../shared.ts";
+import { stringifyJson, subtractDays } from "../shared.ts";
 
 import type {
   ClaimDeviceSyncWebhookTraceInput,
@@ -22,6 +22,9 @@ interface StoredWebhookTraceRow {
 }
 
 const DEVICE_SYNC_PROCESSED_WEBHOOK_TRACE_RETENTION_DAYS = 30;
+// Webhook dedupe never queries trace rows by external account id, so keep only
+// a fixed placeholder instead of any user-linked identifier.
+const MINIMIZED_WEBHOOK_TRACE_EXTERNAL_ACCOUNT_ID = "_minimized_";
 const MINIMIZED_WEBHOOK_TRACE_PAYLOAD_JSON = stringifyJson({});
 
 export function claimDeviceSyncWebhookTrace(
@@ -31,10 +34,6 @@ export function claimDeviceSyncWebhookTrace(
   return withImmediateTransaction(database, () => {
     pruneProcessedDeviceSyncWebhookTraces(database, new Date().toISOString());
 
-    const storedExternalAccountId = hashStoredWebhookTraceExternalAccountId(
-      input.provider,
-      input.externalAccountId,
-    );
     const existing = database.prepare(`
       select provider, trace_id, status, processing_expires_at
       from webhook_trace
@@ -57,7 +56,7 @@ export function claimDeviceSyncWebhookTrace(
       `).run(
         input.provider,
         input.traceId,
-        storedExternalAccountId,
+        MINIMIZED_WEBHOOK_TRACE_EXTERNAL_ACCOUNT_ID,
         input.eventType,
         input.receivedAt,
         MINIMIZED_WEBHOOK_TRACE_PAYLOAD_JSON,
@@ -94,7 +93,7 @@ export function claimDeviceSyncWebhookTrace(
           or processing_expires_at <= ?
         )
     `).run(
-      storedExternalAccountId,
+      MINIMIZED_WEBHOOK_TRACE_EXTERNAL_ACCOUNT_ID,
       input.eventType,
       input.receivedAt,
       MINIMIZED_WEBHOOK_TRACE_PAYLOAD_JSON,
@@ -154,18 +153,5 @@ function pruneProcessedDeviceSyncWebhookTraces(
       referenceTimestamp,
       DEVICE_SYNC_PROCESSED_WEBHOOK_TRACE_RETENTION_DAYS,
     ),
-  );
-}
-
-function hashStoredWebhookTraceExternalAccountId(
-  provider: string,
-  externalAccountId: string,
-): string {
-  return sha256Text(
-    JSON.stringify([
-      "device-sync-webhook-trace-external-account",
-      provider,
-      externalAccountId,
-    ]),
   );
 }

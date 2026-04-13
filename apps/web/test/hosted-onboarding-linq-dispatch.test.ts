@@ -1014,18 +1014,12 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       create: expect.objectContaining({
         payloadJson: expect.objectContaining({
           chatId: "chat_other",
+          homeRecipientPhone: "+15550100001",
           memberId: "member_123",
           template: "conversation_home_redirect",
         }),
       }),
     }));
-    expect(
-      (prisma as unknown as {
-        hostedWebhookReceiptSideEffect: {
-          upsert: ReturnType<typeof vi.fn>;
-        };
-      }).hostedWebhookReceiptSideEffect.upsert.mock.calls[0]?.[0]?.create?.payloadJson,
-    ).not.toHaveProperty("homeRecipientPhone");
     expect(
       (prisma as unknown as {
         hostedMemberRouting: {

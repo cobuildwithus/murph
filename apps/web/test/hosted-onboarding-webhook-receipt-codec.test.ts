@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
-import type { Prisma } from "@prisma/client";
+import { Prisma, type Prisma as PrismaNamespace } from "@prisma/client";
 
-import { readHostedWebhookReceiptState } from "@/src/lib/hosted-onboarding/webhook-receipt-codec";
+import {
+  readHostedWebhookReceiptState,
+  serializeHostedWebhookReceiptSideEffect,
+} from "@/src/lib/hosted-onboarding/webhook-receipt-codec";
+import { createHostedWebhookLinqMessageSideEffect } from "@/src/lib/hosted-onboarding/webhook-receipt-types";
 
 const RECEIVED_AT = new Date("2026-04-12T00:00:00.000Z");
 
@@ -21,7 +25,7 @@ function buildReceiptRecord() {
 }
 
 function buildLinqSideEffectRecord(
-  resultJson: Prisma.InputJsonValue | Prisma.JsonValue | null,
+  resultJson: PrismaNamespace.InputJsonValue | PrismaNamespace.JsonValue | null,
 ) {
   return {
     attemptCount: 0,
@@ -34,9 +38,6 @@ function buildLinqSideEffectRecord(
     lastErrorRetryable: null,
     payloadJson: {
       chatId: "chat-1",
-      homeRecipientPhone: null,
-      inviteId: null,
-      memberId: null,
       replyToMessageId: null,
       template: "daily_quota",
     },
@@ -74,32 +75,58 @@ describe("readHostedWebhookReceiptState", () => {
     })).toThrow("Hosted webhook Linq message side effect result is invalid.");
   });
 
-  it("reads member-backed Linq redirect payloads while keeping legacy phone optional", () => {
-    const redirectState = readHostedWebhookReceiptState({
+  it("round-trips redirect payloads with both member routing and fallback phone state", () => {
+    const effect = createHostedWebhookLinqMessageSideEffect({
+      chatId: "chat-1",
+      homeRecipientPhone: "+15555550100",
+      memberId: "member-1",
+      replyToMessageId: "message-1",
+      sourceEventId: "event-1",
+      template: "conversation_home_redirect",
+    });
+    const serialized = serializeHostedWebhookReceiptSideEffect(effect);
+    const resultJson =
+      serialized.resultJson === Prisma.DbNull
+        ? null
+        : serialized.resultJson as PrismaNamespace.InputJsonValue | PrismaNamespace.JsonValue | null;
+
+    const state = readHostedWebhookReceiptState({
       receipt: buildReceiptRecord(),
-      sideEffects: [{
-        ...buildLinqSideEffectRecord(null),
-        payloadJson: {
-          chatId: "chat-redirect",
-          memberId: "member_123",
-          replyToMessageId: "msg_123",
+      sideEffects: [
+        {
+          effectId: effect.effectId,
+          ...serialized,
+          resultJson,
+        },
+      ],
+    });
+
+    expect(state.sideEffects).toEqual([
+      expect.objectContaining({
+        kind: "linq_message_send",
+        payload: {
+          chatId: "chat-1",
+          homeRecipientPhone: "+15555550100",
+          memberId: "member-1",
+          replyToMessageId: "message-1",
           template: "conversation_home_redirect",
         },
-      }],
+      }),
+    ]);
+  });
+
+  it("serializes daily quota payloads without unrelated invite or member fields", () => {
+    const effect = createHostedWebhookLinqMessageSideEffect({
+      chatId: "chat-1",
+      replyToMessageId: "message-1",
+      sourceEventId: "event-1",
+      template: "daily_quota",
     });
-    const [redirectSideEffect] = redirectState.sideEffects;
 
-    if (!redirectSideEffect || redirectSideEffect.kind !== "linq_message_send") {
-      throw new Error("Expected a Linq redirect side effect.");
-    }
-
-    expect(redirectSideEffect.payload).toEqual({
-      chatId: "chat-redirect",
-      homeRecipientPhone: null,
-      inviteId: null,
-      memberId: "member_123",
-      replyToMessageId: "msg_123",
-      template: "conversation_home_redirect",
+    expect(serializeHostedWebhookReceiptSideEffect(effect).payloadJson).toEqual({
+      chatId: "chat-1",
+      replyToMessageId: "message-1",
+      template: "daily_quota",
     });
   });
 });

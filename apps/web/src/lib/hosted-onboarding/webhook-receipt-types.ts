@@ -29,6 +29,32 @@ export type HostedWebhookSideEffectErrorState = {
 
 export type HostedWebhookSideEffectStatus = "pending" | "sent_unconfirmed";
 
+export type HostedWebhookLinqConversationHomeRedirectPayload = {
+  chatId: string;
+  homeRecipientPhone: string | null;
+  memberId: string | null;
+  replyToMessageId: string | null;
+  template: "conversation_home_redirect";
+};
+
+export type HostedWebhookLinqDailyQuotaPayload = {
+  chatId: string;
+  replyToMessageId: string | null;
+  template: "daily_quota";
+};
+
+export type HostedWebhookLinqInviteMessagePayload = {
+  chatId: string;
+  inviteId: string;
+  replyToMessageId: string | null;
+  template: "invite_signin" | "invite_signup";
+};
+
+export type HostedWebhookLinqMessagePayload =
+  | HostedWebhookLinqConversationHomeRedirectPayload
+  | HostedWebhookLinqDailyQuotaPayload
+  | HostedWebhookLinqInviteMessagePayload;
+
 export type HostedWebhookDispatchSideEffectPayload = HostedWebhookDispatchPayload;
 export type HostedWebhookStoredDispatchSideEffectPayload = HostedWebhookStoredDispatchPayload;
 
@@ -52,18 +78,7 @@ export type HostedWebhookLinqMessageSideEffect = {
   kind: "linq_message_send";
   lastAttemptAt: string | null;
   lastError: HostedWebhookSideEffectErrorState | null;
-  payload: {
-    chatId: string;
-    homeRecipientPhone: string | null;
-    inviteId: string | null;
-    memberId: string | null;
-    replyToMessageId: string | null;
-    template:
-      | "conversation_home_redirect"
-      | "daily_quota"
-      | "invite_signin"
-      | "invite_signup";
-  };
+  payload: HostedWebhookLinqMessagePayload;
   result: {
     delivered: true;
   } | null;
@@ -151,6 +166,29 @@ export type HostedWebhookPlan<TResult extends HostedWebhookResponsePayload> = {
   response: TResult;
 };
 
+export type CreateHostedWebhookLinqMessageSideEffectInput =
+  | {
+      chatId: string;
+      homeRecipientPhone?: string | null;
+      memberId: string;
+      replyToMessageId?: string | null;
+      sourceEventId: string;
+      template: "conversation_home_redirect";
+    }
+  | {
+      chatId: string;
+      replyToMessageId?: string | null;
+      sourceEventId: string;
+      template: "daily_quota";
+    }
+  | {
+      chatId: string;
+      inviteId: string;
+      replyToMessageId?: string | null;
+      sourceEventId: string;
+      template: "invite_signin" | "invite_signup";
+    };
+
 export class HostedWebhookReceiptSideEffectDrainError extends Error {
   readonly claimedReceipt: HostedWebhookReceiptClaim;
   readonly cause: unknown;
@@ -179,29 +217,18 @@ export function createHostedWebhookDispatchSideEffect(input: {
   };
 }
 
-export function createHostedWebhookLinqMessageSideEffect(input: {
-  chatId: string;
-  homeRecipientPhone?: string | null;
-  inviteId: string | null;
-  memberId?: string | null;
-  replyToMessageId?: string | null;
-  sourceEventId: string;
-  template: HostedWebhookLinqMessageSideEffect["payload"]["template"];
-}): HostedWebhookLinqMessageSideEffect {
+export function createHostedWebhookLinqMessageSideEffect(
+  input: CreateHostedWebhookLinqMessageSideEffectInput,
+): HostedWebhookLinqMessageSideEffect {
+  const replyToMessageId = input.replyToMessageId ?? null;
+
   return {
     attemptCount: 0,
     effectId: `linq-message:${input.sourceEventId}`,
     kind: "linq_message_send",
     lastAttemptAt: null,
     lastError: null,
-    payload: {
-      chatId: input.chatId,
-      homeRecipientPhone: input.memberId ? null : input.homeRecipientPhone ?? null,
-      inviteId: input.inviteId,
-      memberId: input.memberId ?? null,
-      replyToMessageId: input.replyToMessageId ?? null,
-      template: input.template,
-    },
+    payload: buildHostedWebhookLinqMessagePayload(input, replyToMessageId),
     result: null,
     sentAt: null,
     status: "pending",
@@ -234,4 +261,34 @@ export function createHostedWebhookRevnetIssuanceSideEffect(input: {
     sentAt: null,
     status: "pending",
   };
+}
+
+function buildHostedWebhookLinqMessagePayload(
+  input: CreateHostedWebhookLinqMessageSideEffectInput,
+  replyToMessageId: string | null,
+): HostedWebhookLinqMessagePayload {
+  switch (input.template) {
+    case "conversation_home_redirect":
+      return {
+        chatId: input.chatId,
+        homeRecipientPhone: input.homeRecipientPhone ?? null,
+        memberId: input.memberId,
+        replyToMessageId,
+        template: input.template,
+      };
+    case "daily_quota":
+      return {
+        chatId: input.chatId,
+        replyToMessageId,
+        template: input.template,
+      };
+    case "invite_signin":
+    case "invite_signup":
+      return {
+        chatId: input.chatId,
+        inviteId: input.inviteId,
+        replyToMessageId,
+        template: input.template,
+      };
+  }
 }

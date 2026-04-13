@@ -5,9 +5,10 @@ import path from "node:path";
 import { test } from "vitest";
 import { openSqliteRuntimeDatabase } from "@murphai/runtime-state/node";
 
-import { sha256Text } from "../src/shared.ts";
 import { SqliteDeviceSyncStore } from "../src/store.ts";
 import { makeTempDirectory } from "./helpers.ts";
+
+const MINIMIZED_WEBHOOK_TRACE_EXTERNAL_ACCOUNT_ID = "_minimized_";
 
 interface WebhookTraceRow {
   external_account_id: string;
@@ -34,7 +35,7 @@ test("device sync store minimizes webhook trace payload retention without changi
     );
 
     assert.deepEqual(normalizeWebhookTraceRow(readWebhookTraceRow(store, "oura", "trace-1")), {
-      external_account_id: hashStoredWebhookTraceExternalAccountId("oura", "acct-1"),
+      external_account_id: MINIMIZED_WEBHOOK_TRACE_EXTERNAL_ACCOUNT_ID,
       payload_json: "{}",
       processing_expires_at: "2026-04-01T00:01:00.000Z",
       status: "processing",
@@ -53,7 +54,7 @@ test("device sync store minimizes webhook trace payload retention without changi
     );
 
     assert.deepEqual(normalizeWebhookTraceRow(readWebhookTraceRow(store, "oura", "trace-1")), {
-      external_account_id: hashStoredWebhookTraceExternalAccountId("oura", "acct-1"),
+      external_account_id: MINIMIZED_WEBHOOK_TRACE_EXTERNAL_ACCOUNT_ID,
       payload_json: "{}",
       processing_expires_at: "2026-04-01T00:03:00.000Z",
       status: "processing",
@@ -62,7 +63,7 @@ test("device sync store minimizes webhook trace payload retention without changi
     store.completeWebhookTrace("oura", "trace-1");
 
     assert.deepEqual(normalizeWebhookTraceRow(readWebhookTraceRow(store, "oura", "trace-1")), {
-      external_account_id: hashStoredWebhookTraceExternalAccountId("oura", "acct-1"),
+      external_account_id: MINIMIZED_WEBHOOK_TRACE_EXTERNAL_ACCOUNT_ID,
       payload_json: "{}",
       processing_expires_at: null,
       status: "processed",
@@ -834,17 +835,4 @@ function readWebhookTraceRow(
 
 function normalizeWebhookTraceRow(row: WebhookTraceRow | null): WebhookTraceRow | null {
   return row ? { ...row } : null;
-}
-
-function hashStoredWebhookTraceExternalAccountId(
-  provider: string,
-  externalAccountId: string,
-): string {
-  return sha256Text(
-    JSON.stringify([
-      "device-sync-webhook-trace-external-account",
-      provider,
-      externalAccountId,
-    ]),
-  );
 }
