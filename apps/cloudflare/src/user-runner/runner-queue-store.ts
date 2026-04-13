@@ -86,8 +86,8 @@ interface BundleRefSwapInput {
 }
 
 interface LeaseOwnerInput {
-  allowAnyRunForEvent?: boolean;
   eventId: string;
+  policy?: "matching-run" | "same-event";
   run: HostedExecutionRunContext | null;
 }
 
@@ -364,10 +364,10 @@ export class RunnerQueueStore {
     const bundleState = this.selectBundleStateSync();
     assignRunnerBundleRefs(bundleState, committed.bundleRef);
     this.deleteBackpressuredEventSync(committed.eventId);
-    if (leaseOwner?.allowAnyRunForEvent) {
+    if (leaseOwner?.policy === "same-event") {
       this.clearActiveRunLeaseSync(meta, {
-        allowAnyRunForEvent: true,
         eventId: committed.eventId,
+        policy: "same-event",
         run: leaseOwner.run ?? null,
       });
     }
@@ -819,7 +819,7 @@ export class RunnerQueueStore {
       return;
     }
 
-    if (owner.allowAnyRunForEvent) {
+    if (owner.policy === "same-event") {
       meta.in_flight = 0;
       this.clearActiveRunMetaSync(meta);
       return;

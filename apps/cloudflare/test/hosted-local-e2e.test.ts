@@ -22,9 +22,13 @@ import {
 
 import { runSmokeHostedDeploy } from "../scripts/smoke-hosted-deploy.shared.js";
 import { repoRoot } from "../vitest.shared.js";
+import { resolveHostedLocalDevConfig } from "../../../scripts/dev-hosted-local/config.ts";
+import {
+  terminateChildProcess,
+  waitForHealthyHttpEndpoint,
+} from "../../../scripts/dev-hosted-local/runtime.ts";
+import { resolveVercelOidcToken } from "../../../scripts/dev-hosted-local/vercel.ts";
 
-const workerBaseUrl = "http://127.0.0.1:8901";
-const webBaseUrl = "http://127.0.0.1:3212";
 const nextEnvPath = path.join(repoRoot, "apps/web/next-env.d.ts");
 const userId = `member_local_e2e_${Date.now()}`;
 const activationDispatch = buildHostedExecutionMemberActivatedDispatch({
@@ -32,6 +36,16 @@ const activationDispatch = buildHostedExecutionMemberActivatedDispatch({
   memberId: userId,
   occurredAt: new Date().toISOString(),
 });
+const devEnv: NodeJS.ProcessEnv = {
+  ...process.env,
+  MURPH_DEV_SKIP_PRISMA_MIGRATE: "1",
+  MURPH_DEV_WEB_PORT: "3212",
+  MURPH_DEV_WORKER_PORT: "8901",
+  NEXT_DIST_DIR_MODE: "smoke",
+};
+const devConfig = resolveHostedLocalDevConfig(devEnv);
+const workerBaseUrl = `${devConfig.workerProtocol}://${devConfig.workerHost}:${devConfig.workerPort}`;
+const webBaseUrl = `http://${devConfig.webHost}:${devConfig.webPort}`;
 let devStdout = "";
 let devStderr = "";
 let oidcToken = "";
@@ -44,17 +58,14 @@ describe("hosted local end-to-end", () => {
   beforeAll(async () => {
     originalNextEnvContents = await readFile(nextEnvPath, "utf8");
     workerPersistDir = await mkdtemp(path.join(os.tmpdir(), "murph-hosted-local-e2e-"));
+    const runtimeEnv: NodeJS.ProcessEnv = {
+      ...devEnv,
+      MURPH_DEV_CF_PERSIST_DIR: workerPersistDir,
+    };
     devChild = spawn("pnpm", ["dev"], {
       cwd: repoRoot,
       detached: process.platform !== "win32",
-      env: {
-        ...process.env,
-        MURPH_DEV_SKIP_PRISMA_MIGRATE: "1",
-        MURPH_DEV_WEB_PORT: "3212",
-        MURPH_DEV_WORKER_PORT: "8901",
-        MURPH_DEV_CF_PERSIST_DIR: workerPersistDir,
-        NEXT_DIST_DIR_MODE: "smoke",
-      },
+      env: runtimeEnv,
       stdio: ["ignore", "pipe", "pipe"],
     });
 
@@ -67,9 +78,31 @@ describe("hosted local end-to-end", () => {
       devStderr += chunk;
     });
 
-    oidcToken = await waitForLocalOidcToken();
-    await waitForHealthy(`${workerBaseUrl}/health`);
-    await waitForHealthy(`${webBaseUrl}/`);
+    try {
+      oidcToken = await resolveVercelOidcToken(runtimeEnv);
+      await Promise.all([
+        waitForHealthyHttpEndpoint({
+          host: devConfig.workerHost,
+          label: "cloudflare",
+          path: "/health",
+          port: devConfig.workerPort,
+          protocol: devConfig.workerProtocol,
+        }),
+        waitForHealthyHttpEndpoint({
+          host: devConfig.webHost,
+          label: "web",
+          path: "/",
+          port: devConfig.webPort,
+          protocol: "http",
+        }),
+      ]);
+    } catch (error) {
+      throw new Error([
+        error instanceof Error ? error.message : String(error),
+        `stdout tail: ${tail(devStdout)}`,
+        `stderr tail: ${tail(devStderr)}`,
+      ].join("\n"));
+    }
   });
 
   afterAll(async () => {
@@ -79,19 +112,7 @@ describe("hosted local end-to-end", () => {
         setTimeout(resolve, 15_000).unref();
       });
 
-      if (process.platform !== "win32") {
-        try {
-          process.kill(-devChild.pid, "SIGTERM");
-        } catch {
-          // best-effort cleanup
-        }
-      }
-
-      try {
-        devChild.kill("SIGTERM");
-      } catch {
-        // already stopped
-      }
+      terminateChildProcess(devChild, "SIGTERM");
 
       await exitPromise;
     }
@@ -206,78 +227,6 @@ async function waitForHostedCompletion(userId: string) {
     `stdout tail: ${tail(devStdout)}`,
     `stderr tail: ${tail(devStderr)}`,
   ].join("\n"));
-}
-
-async function waitForHealthy(url: string): Promise<void> {
-  const startedAt = Date.now();
-
-  while ((Date.now() - startedAt) < 300_000) {
-    try {
-      const response = await fetch(url);
-      if (response.ok) {
-        return;
-      }
-    } catch {
-      // wait for startup
-    }
-
-    await sleep(1_000);
-  }
-
-  throw new Error([
-    `Timed out waiting for ${url}.`,
-    `stdout tail: ${tail(devStdout)}`,
-    `stderr tail: ${tail(devStderr)}`,
-  ].join("\n"));
-}
-
-async function waitForLocalOidcToken(): Promise<string> {
-  const normalized = process.env.VERCEL_OIDC_TOKEN?.trim();
-  if (normalized) {
-    return normalized;
-  }
-
-  const child = spawn("pnpm", [
-    "--dir",
-    "apps/web",
-    "exec",
-    "node",
-    "-e",
-    [
-      "const { getVercelOidcToken } = require('@vercel/oidc');",
-      "getVercelOidcToken()",
-      "  .then((token) => process.stdout.write(token))",
-      "  .catch((error) => {",
-      "    console.error(error instanceof Error ? error.message : String(error));",
-      "    process.exit(1);",
-      "  });",
-    ].join(""),
-  ], {
-    cwd: repoRoot,
-    env: process.env,
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-
-  const stdout: Buffer[] = [];
-  const stderr: Buffer[] = [];
-  child.stdout?.on("data", (chunk) => stdout.push(Buffer.from(chunk)));
-  child.stderr?.on("data", (chunk) => stderr.push(Buffer.from(chunk)));
-
-  const code = await new Promise<number | null>((resolve, reject) => {
-    child.once("error", reject);
-    child.once("exit", resolve);
-  });
-
-  if (code !== 0) {
-    throw new Error(`Failed to resolve local Vercel OIDC token: ${Buffer.concat(stderr).toString("utf8").trim()}`);
-  }
-
-  const token = Buffer.concat(stdout).toString("utf8").trim();
-  if (!token) {
-    throw new Error("Local Vercel OIDC token command returned an empty token.");
-  }
-
-  return token;
 }
 
 function sleep(delayMs: number): Promise<void> {

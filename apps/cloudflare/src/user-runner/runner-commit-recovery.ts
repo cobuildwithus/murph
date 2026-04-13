@@ -19,7 +19,7 @@ export interface RecoveredCommittedPendingDispatch {
 }
 
 interface CommitLeaseOwner {
-  allowAnyRunForEvent?: boolean;
+  policy?: "matching-run" | "same-event";
   run: HostedExecutionRunContext | null;
 }
 
@@ -59,14 +59,14 @@ export class RunnerCommitRecovery {
           committed,
           committedEventId: pending.eventId,
           record: await this.syncCommittedBundlesWithoutConsuming(record.userId, committed, {
-            allowAnyRunForEvent: true,
+            policy: "same-event",
             run: null,
           }),
         };
       }
 
       await this.syncCommittedBundlesWithoutConsuming(record.userId, committed, {
-        allowAnyRunForEvent: true,
+        policy: "same-event",
         run: null,
       });
     }
@@ -95,8 +95,8 @@ export class RunnerCommitRecovery {
       userId,
       committed,
       () => this.queueStore.applyCommittedDispatch(committed, {
-        allowAnyRunForEvent: leaseOwner?.allowAnyRunForEvent,
         eventId: committed.eventId,
+        policy: leaseOwner?.policy,
         run: leaseOwner?.run ?? null,
       }),
     );
@@ -111,8 +111,8 @@ export class RunnerCommitRecovery {
       userId,
       committed,
       () => this.queueStore.syncCommittedBundles(committed, {
-        allowAnyRunForEvent: leaseOwner?.allowAnyRunForEvent,
         eventId: committed.eventId,
+        policy: leaseOwner?.policy,
         run: leaseOwner?.run ?? null,
       }),
     );

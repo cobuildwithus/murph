@@ -7,8 +7,6 @@ import { HostedAssistantConfigurationError } from "@murphai/assistant-runtime/ho
 
 import {
   classifyRunnerJobError,
-  setHostedContainerExitSchedulerForTests,
-  setHostedContainerProcessApiForTests,
   startHostedContainerEntrypoint,
 } from "../src/container-entrypoint.js";
 import {
@@ -20,8 +18,6 @@ const servers: Array<Awaited<ReturnType<typeof startHostedContainerEntrypoint>>>
 
 afterEach(async () => {
   setHostedExecutionIsolatedRunnerForTests(null);
-  setHostedContainerExitSchedulerForTests(null);
-  setHostedContainerProcessApiForTests(null);
   vi.restoreAllMocks();
   await Promise.all(servers.splice(0).map(async (server) => {
     server.closeAllConnections?.();
@@ -565,8 +561,6 @@ describe("startHostedContainerEntrypoint", () => {
   });
 
   it("ignores non-descendant sibling processes during warm-container cleanup", async () => {
-    const previousControlToken = process.env.HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN;
-    process.env.HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN = "runner-token";
     const siblingPid = process.pid + 1000;
 
     const readdir = vi.fn(async () => [
@@ -580,7 +574,6 @@ describe("startHostedContainerEntrypoint", () => {
 
       throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
     });
-    setHostedContainerProcessApiForTests({ readFile, readdir });
     const runnerSpy = vi.spyOn(nodeRunner, "runHostedExecutionJob").mockResolvedValue({
       finalGatewayProjectionSnapshot: null,
       result: {
@@ -593,42 +586,43 @@ describe("startHostedContainerEntrypoint", () => {
       },
     });
 
-    try {
-      const server = await startHostedContainerEntrypoint({ controlToken: "runner-token", port: 0 });
-      servers.push(server);
-      const address = server.address();
+    const server = await startHostedContainerEntrypoint({
+      controlToken: "runner-token",
+      port: 0,
+      runtime: {
+        processApi: { readFile, readdir },
+        processIsolation: true,
+      },
+    });
+    servers.push(server);
+    const address = server.address();
 
-      if (!address || typeof address === "string") {
-        throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
-      }
-
-      const response = await fetch(`http://127.0.0.1:${address.port}/__internal/run`, {
-        body: JSON.stringify(buildJobBody({
-          dispatch: {
-            event: { kind: "assistant.cron.tick", reason: "manual", userId: "u1" },
-            eventId: "evt_sibling_cleanup",
-            occurredAt: "2026-03-26T12:00:00.000Z",
-          },
-        })),
-        headers: {
-          authorization: "Bearer runner-token",
-          "content-type": "application/json; charset=utf-8",
-        },
-        method: "POST",
-      });
-
-      expect(response.status).toBe(200);
-      expect(runnerSpy).toHaveBeenCalledTimes(1);
-      expect(readdir).toHaveBeenCalled();
-      expect(readFile).toHaveBeenCalled();
-    } finally {
-      process.env.HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN = previousControlToken;
+    if (!address || typeof address === "string") {
+      throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
     }
+
+    const response = await fetch(`http://127.0.0.1:${address.port}/__internal/run`, {
+      body: JSON.stringify(buildJobBody({
+        dispatch: {
+          event: { kind: "assistant.cron.tick", reason: "manual", userId: "u1" },
+          eventId: "evt_sibling_cleanup",
+          occurredAt: "2026-03-26T12:00:00.000Z",
+        },
+      })),
+      headers: {
+        authorization: "Bearer runner-token",
+        "content-type": "application/json; charset=utf-8",
+      },
+      method: "POST",
+    });
+
+    expect(response.status).toBe(200);
+    expect(runnerSpy).toHaveBeenCalledTimes(1);
+    expect(readdir).toHaveBeenCalled();
+    expect(readFile).toHaveBeenCalled();
   });
 
   it("still rejects lingering descendant processes after the cleanup pass", async () => {
-    const previousControlToken = process.env.HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN;
-    process.env.HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN = "runner-token";
     const childPid = process.pid + 2000;
 
     const kill = vi.fn();
@@ -644,8 +638,6 @@ describe("startHostedContainerEntrypoint", () => {
 
       throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
     });
-    setHostedContainerExitSchedulerForTests(exit);
-    setHostedContainerProcessApiForTests({ kill, readFile, readdir });
     vi.spyOn(nodeRunner, "runHostedExecutionJob").mockResolvedValue({
       finalGatewayProjectionSnapshot: null,
       result: {
@@ -658,42 +650,46 @@ describe("startHostedContainerEntrypoint", () => {
       },
     });
 
-    try {
-      const server = await startHostedContainerEntrypoint({ controlToken: "runner-token", port: 0 });
-      servers.push(server);
-      const address = server.address();
+    const server = await startHostedContainerEntrypoint({
+      controlToken: "runner-token",
+      port: 0,
+      runtime: {
+        exitScheduler: exit,
+        processApi: { kill, readFile, readdir },
+        processIsolation: true,
+      },
+    });
+    servers.push(server);
+    const address = server.address();
 
-      if (!address || typeof address === "string") {
-        throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
-      }
-
-      const response = await fetch(`http://127.0.0.1:${address.port}/__internal/run`, {
-        body: JSON.stringify(buildJobBody({
-          dispatch: {
-            event: { kind: "assistant.cron.tick", reason: "manual", userId: "u1" },
-            eventId: "evt_descendant_cleanup",
-            occurredAt: "2026-03-26T12:00:00.000Z",
-          },
-        })),
-        headers: {
-          authorization: "Bearer runner-token",
-          "content-type": "application/json; charset=utf-8",
-        },
-        method: "POST",
-      });
-
-      expect(response.status).toBe(500);
-      const payload = await response.json() as ClassifiedRunnerPayload;
-      expect(payload).toMatchObject({
-        code: "runtime_error",
-        error: "Hosted execution runtime failed.",
-      });
-      expect(payload.details?.errorDetail).toContain(String(childPid));
-      expect(kill).toHaveBeenCalledWith(childPid, "SIGKILL");
-      expect(exit).toHaveBeenCalledTimes(1);
-    } finally {
-      process.env.HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN = previousControlToken;
+    if (!address || typeof address === "string") {
+      throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
     }
+
+    const response = await fetch(`http://127.0.0.1:${address.port}/__internal/run`, {
+      body: JSON.stringify(buildJobBody({
+        dispatch: {
+          event: { kind: "assistant.cron.tick", reason: "manual", userId: "u1" },
+          eventId: "evt_descendant_cleanup",
+          occurredAt: "2026-03-26T12:00:00.000Z",
+        },
+      })),
+      headers: {
+        authorization: "Bearer runner-token",
+        "content-type": "application/json; charset=utf-8",
+      },
+      method: "POST",
+    });
+
+    expect(response.status).toBe(500);
+    const payload = await response.json() as ClassifiedRunnerPayload;
+    expect(payload).toMatchObject({
+      code: "runtime_error",
+      error: "Hosted execution runtime failed.",
+    });
+    expect(payload.details?.errorDetail).toContain(String(childPid));
+    expect(kill).toHaveBeenCalledWith(childPid, "SIGKILL");
+    expect(exit).toHaveBeenCalledTimes(1);
   });
 });
 
