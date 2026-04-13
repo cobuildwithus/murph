@@ -4,11 +4,11 @@ import { preProvisionManagedUserCryptoInHostedExecutionBestEffort } from "@/src/
 import { jsonOk, withJsonError, readOptionalJsonObject } from "@/src/lib/hosted-onboarding/http";
 import { completeHostedPrivyVerification } from "@/src/lib/hosted-onboarding/member-service";
 import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
-import { requireHostedPrivyCompletionRequestAuthContext } from "@/src/lib/hosted-onboarding/request-auth";
+import { requireHostedPrivyCompletionAuth } from "@/src/lib/hosted-onboarding/request-auth";
 
 export const POST = withJsonError(async (request: Request) => {
   assertHostedOnboardingMutationOrigin(request);
-  const auth = await requireHostedPrivyCompletionRequestAuthContext(request);
+  const auth = await requireHostedPrivyCompletionAuth(request);
   const body = await readOptionalJsonObject(request);
   const result = await completeHostedPrivyVerification({
     identity: auth.identity,

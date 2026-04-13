@@ -5,7 +5,7 @@ const mocks = vi.hoisted(() => ({
   assertHostedOnboardingMutationOrigin: vi.fn(),
   completeHostedPrivyVerification: vi.fn(),
   preProvisionManagedUserCryptoInHostedExecutionBestEffort: vi.fn(),
-  requireHostedPrivyCompletionRequestAuthContext: vi.fn(),
+  requireHostedPrivyCompletionAuth: vi.fn(),
 }));
 
 vi.mock("next/server", async () => {
@@ -31,8 +31,8 @@ vi.mock("@/src/lib/hosted-onboarding/member-service", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({
-  requireHostedPrivyCompletionRequestAuthContext:
-    mocks.requireHostedPrivyCompletionRequestAuthContext,
+  requireHostedPrivyCompletionAuth:
+    mocks.requireHostedPrivyCompletionAuth,
 }));
 
 type PrivyCompleteRouteModule = typeof import("../app/api/hosted-onboarding/privy/complete/route");
@@ -61,7 +61,7 @@ describe("hosted onboarding Privy completion route", () => {
       stage: "checkout",
     });
     mocks.preProvisionManagedUserCryptoInHostedExecutionBestEffort.mockResolvedValue(true);
-    mocks.requireHostedPrivyCompletionRequestAuthContext.mockResolvedValue({
+    mocks.requireHostedPrivyCompletionAuth.mockResolvedValue({
       identity: {
         phone: {
           number: "+15550000000",

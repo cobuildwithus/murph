@@ -5,13 +5,13 @@ import {
 } from "@/src/lib/device-sync/settings-surface";
 import { jsonOk, withJsonError } from "@/src/lib/device-sync/settings-http";
 import { resolveDecodedRouteParam } from "@/src/lib/http";
-import { requireHostedPrivyActiveRequestAuthContext } from "@/src/lib/hosted-onboarding/request-auth";
+import { requireHostedPrivyActiveMemberAuth } from "@/src/lib/hosted-onboarding/request-auth";
 
 export const GET = withJsonError(async (
   request: Request,
   context: { params: Promise<{ connectionId: string }> },
 ) => {
-  const auth = await requireHostedPrivyActiveRequestAuthContext(request);
+  const auth = await requireHostedPrivyActiveMemberAuth(request);
   const connectionId = await resolveDecodedRouteParam(context.params, "connectionId");
   const controlPlane = createHostedDeviceSyncControlPlane(request);
   const [{ connection }, { providers }] = await Promise.all([
