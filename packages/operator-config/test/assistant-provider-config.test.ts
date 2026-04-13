@@ -35,7 +35,7 @@ describe('assistant provider config runtime resolution', () => {
     expect(normalized.zeroDataRetention).toBe(true)
 
     const resolved = resolveAssistantProviderRuntimeTarget(normalized)
-    expect(resolved.executionDriver).toBe('gateway')
+    expect(resolved.executionDriver).toBe('responses')
     expect(resolved.supportsZeroDataRetention).toBe(true)
 
     const sessionOptions = serializeAssistantProviderSessionOptions(normalized)
@@ -49,7 +49,7 @@ describe('assistant provider config runtime resolution', () => {
       model: 'openai/gpt-5.1',
     })
 
-    expect(resolved.executionDriver).toBe('gateway')
+    expect(resolved.executionDriver).toBe('responses')
     expect(resolved.resumeKind).toBe('openai-response-id')
     expect(resolved.supportsProviderWebSearch).toBe(true)
     expect(resolved.supportsGatewayWebSearch).toBe(true)

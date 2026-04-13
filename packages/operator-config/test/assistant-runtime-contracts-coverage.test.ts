@@ -18,7 +18,8 @@ import {
 } from '../src/assistant/target-runtime.ts'
 
 test('assistant target runtime resolves drivers, namespaces, and web-search fallbacks', () => {
-  assert.equal(normalizeAssistantExecutionDriver(' gateway '), 'gateway')
+  assert.equal(normalizeAssistantExecutionDriver(' gateway '), 'responses')
+  assert.equal(normalizeAssistantExecutionDriver(' openai-responses '), 'responses')
   assert.equal(normalizeAssistantExecutionDriver('unknown'), null)
   assert.equal(normalizeAssistantResumeKind(' openai-response-id '), 'openai-response-id')
   assert.equal(normalizeAssistantResumeKind('invalid'), null)
@@ -68,7 +69,7 @@ test('assistant target runtime resolves drivers, namespaces, and web-search fall
     reasoningEffort: 'high',
   }
   const openAiTarget = resolveAssistantRuntimeTarget(explicitOpenAiTargetInput)
-  assert.equal(openAiTarget.executionDriver, 'openai-responses')
+  assert.equal(openAiTarget.executionDriver, 'responses')
   assert.equal(openAiTarget.resumeKind, 'openai-response-id')
   assert.equal(openAiTarget.supportsProviderWebSearch, true)
   assert.equal(openAiTarget.supportsReasoningEffort, true)
@@ -103,7 +104,7 @@ test('assistant target runtime resolves drivers, namespaces, and web-search fall
     zeroDataRetention: true,
   }
   const gatewayOpenAi = resolveAssistantRuntimeTarget(gatewayOpenAiInput)
-  assert.equal(gatewayOpenAi.executionDriver, 'gateway')
+  assert.equal(gatewayOpenAi.executionDriver, 'responses')
   assert.equal(gatewayOpenAi.resumeKind, 'openai-response-id')
   assert.equal(gatewayOpenAi.supportsGatewayWebSearch, true)
   assert.equal(gatewayOpenAi.supportsProviderWebSearch, true)
@@ -126,7 +127,7 @@ test('assistant target runtime resolves drivers, namespaces, and web-search fall
     webSearch: 'gateway',
   }
   const gatewayAnthropic = resolveAssistantRuntimeTarget(gatewayAnthropicInput)
-  assert.equal(gatewayAnthropic.executionDriver, 'gateway')
+  assert.equal(gatewayAnthropic.executionDriver, 'responses')
   assert.equal(gatewayAnthropic.resumeKind, null)
   assert.equal(gatewayAnthropic.supportsProviderWebSearch, false)
   assert.equal(gatewayAnthropic.supportsReasoningEffort, false)
@@ -215,7 +216,7 @@ test('assistant session parsing resolves runtime options from explicit target id
   assert.equal(parsedSession.resumeState, null)
   assert.equal(parsedSession.providerBinding, null)
   assert.equal(parsedSession.providerOptions.continuityFingerprint, runtimeTarget.continuityFingerprint)
-  assert.equal(parsedSession.providerOptions.executionDriver, 'openai-responses')
+  assert.equal(parsedSession.providerOptions.executionDriver, 'responses')
   assert.equal(parsedSession.providerOptions.resumeKind, 'openai-response-id')
   assert.equal(parsedSession.providerOptions.webSearch, 'provider')
 
