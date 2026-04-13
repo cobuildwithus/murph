@@ -14,12 +14,12 @@ const privacyFeatures = [
     body: "Web lookups go through Brave Search — no tracking, no ad profiling, no data harvesting.",
   },
   {
-    label: "Venice AI inference",
+    label: "Zero Data Retention",
     body: (
       <>
         Cloud inference runs through{" "}
         <a href="https://venice.ai" target="_blank" rel="noreferrer" className="underline transition-colors hover:text-white">Venice AI</a>
-        {" "}with zero data logging. Your conversations don&apos;t train anyone&apos;s model.
+        {". "}Your data does not train AI models, and your prompts and conversation data are not stored by the provider.
       </>
     ),
   },
@@ -29,7 +29,7 @@ const privacyFeatures = [
   },
   {
     label: "Encrypted by default",
-    body: "Hosted runs use encrypted cloud snapshots. Everything is locked down so only you can access it.",
+    body: "Hosted runs use encrypted cloud snapshots with restricted system access and privacy-first defaults.",
   },
 ] satisfies { label: string; body: React.ReactNode }[];
 
