@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   assertHostedOnboardingMutationOrigin: vi.fn(),
   completeHostedPrivyVerification: vi.fn(),
   preProvisionManagedUserCryptoInHostedExecutionBestEffort: vi.fn(),
+  scheduleManagedUserCryptoWarmupBestEffort: vi.fn(),
   requirePrivyCompletionSession: vi.fn(),
 }));
 
@@ -20,6 +21,8 @@ vi.mock("next/server", async () => {
 vi.mock("@/src/lib/hosted-execution/control", () => ({
   preProvisionManagedUserCryptoInHostedExecutionBestEffort:
     mocks.preProvisionManagedUserCryptoInHostedExecutionBestEffort,
+  scheduleManagedUserCryptoWarmupBestEffort:
+    mocks.scheduleManagedUserCryptoWarmupBestEffort,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/csrf", () => ({
@@ -62,6 +65,28 @@ describe("hosted onboarding Privy completion route", () => {
       stage: "checkout",
     });
     mocks.preProvisionManagedUserCryptoInHostedExecutionBestEffort.mockResolvedValue(true);
+    mocks.scheduleManagedUserCryptoWarmupBestEffort.mockImplementation(
+      (input: {
+        schedule: (callback: () => Promise<void> | void) => void;
+        trigger: string;
+        userId: string;
+      }) => {
+        const { schedule, ...warmupInput } = input;
+        try {
+          schedule(() =>
+            mocks.preProvisionManagedUserCryptoInHostedExecutionBestEffort(warmupInput),
+          );
+          return "after";
+        } catch (error) {
+          console.error(
+            `Hosted managed user crypto warmup scheduling failed during ${warmupInput.trigger}. Falling back to inline dispatch.`,
+            error instanceof Error ? error.message : String(error),
+          );
+          void mocks.preProvisionManagedUserCryptoInHostedExecutionBestEffort(warmupInput);
+          return "fallback-inline";
+        }
+      },
+    );
     mocks.requirePrivyCompletionSession.mockResolvedValue({
       identity: {
         phone: {
@@ -138,5 +163,41 @@ describe("hosted onboarding Privy completion route", () => {
     });
     expect(mocks.after).not.toHaveBeenCalled();
     expect(mocks.preProvisionManagedUserCryptoInHostedExecutionBestEffort).not.toHaveBeenCalled();
+  });
+
+  it("keeps the completion response successful when after scheduling throws", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    mocks.after.mockImplementation(() => {
+      throw new TypeError("after unavailable");
+    });
+
+    const response = await privyCompleteRoute.POST(
+      new Request("https://join.example.test/api/hosted-onboarding/privy/complete", {
+        body: JSON.stringify({
+          inviteCode: "invite_123",
+        }),
+        headers: {
+          origin: "https://join.example.test",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      inviteCode: "invite_123",
+      joinUrl: "https://join.example.test/join/invite_123",
+      ok: true,
+      stage: "checkout",
+    });
+    expect(mocks.after).toHaveBeenCalledTimes(1);
+    expect(mocks.preProvisionManagedUserCryptoInHostedExecutionBestEffort).toHaveBeenCalledWith({
+      trigger: "privy-complete-checkout",
+      userId: "member_123",
+    });
+    expect(errorSpy).toHaveBeenCalledWith(
+      "Hosted managed user crypto warmup scheduling failed during privy-complete-checkout. Falling back to inline dispatch.",
+      "after unavailable",
+    );
   });
 });

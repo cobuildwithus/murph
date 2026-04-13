@@ -33,6 +33,8 @@ export type HostedManagedUserCryptoWarmupTrigger =
   | "billing-checkout-route"
   | "privy-complete-checkout";
 
+export type HostedDeferredWorkScheduler = (callback: () => Promise<void> | void) => void;
+
 export function readHostedExecutionControlClientIfConfigured(): CloudflareHostedControlClient | null {
   const baseUrl = readHostedExecutionControlBaseUrl();
 
@@ -158,5 +160,27 @@ export async function preProvisionManagedUserCryptoInHostedExecutionBestEffort(i
       formatHostedExecutionSafeLogError(error),
     );
     return false;
+  }
+}
+
+export function scheduleManagedUserCryptoWarmupBestEffort(input: {
+  schedule: HostedDeferredWorkScheduler;
+  trigger: HostedManagedUserCryptoWarmupTrigger;
+  userId: string;
+}): "after" | "fallback-inline" {
+  const runWarmup = () => preProvisionManagedUserCryptoInHostedExecutionBestEffort(input);
+
+  try {
+    input.schedule(async () => {
+      await runWarmup();
+    });
+    return "after";
+  } catch (error) {
+    console.error(
+      `Hosted managed user crypto warmup scheduling failed during ${input.trigger}. Falling back to inline dispatch.`,
+      formatHostedExecutionSafeLogError(error),
+    );
+    void runWarmup();
+    return "fallback-inline";
   }
 }
