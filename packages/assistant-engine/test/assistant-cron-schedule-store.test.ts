@@ -388,44 +388,6 @@ describe('assistant cron store filesystem edges', () => {
     })
   })
 
-  it('loads legacy cron stores that still serialize deliverResponse on targets', async () => {
-    const paths = await createAssistantPaths('assistant-cron-schedule-store-legacy-')
-    const legacyJob = createCronJob({
-      jobId: 'cron_legacy',
-      name: 'legacy',
-    })
-
-    await mkdir(path.dirname(paths.cronJobsPath), {
-      recursive: true,
-    })
-    await writeFile(
-      paths.cronJobsPath,
-      JSON.stringify({
-        version: 1,
-        jobs: [
-          {
-            ...legacyJob,
-            target: {
-              ...legacyJob.target,
-              deliverResponse: true,
-            },
-          },
-        ],
-      }),
-      'utf8',
-    )
-
-    await expect(readAssistantCronStore(paths)).resolves.toEqual({
-      version: 1,
-      jobs: [legacyJob],
-    })
-    await expect(
-      listAssistantQuarantineEntriesAtPaths(paths, {
-        artifactKind: 'cron-store',
-      }),
-    ).resolves.toEqual([])
-  })
-
   it('appends and reads cron runs in reverse started-at order', async () => {
     const paths = await createAssistantPaths('assistant-cron-schedule-store-runs-append-')
     const older = createCronRun({

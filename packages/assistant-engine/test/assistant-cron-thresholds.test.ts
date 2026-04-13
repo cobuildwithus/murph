@@ -25,7 +25,6 @@ type MockAutomationRecord = {
   instructions: string
   route: {
     channel: string
-    deliverResponse: boolean
     deliveryTarget: string | null
     identityId: string | null
     participantId: string | null
