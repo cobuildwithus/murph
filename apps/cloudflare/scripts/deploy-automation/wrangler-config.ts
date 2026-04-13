@@ -73,8 +73,15 @@ export function buildHostedWranglerDeployConfig(
     observability: {
       enabled: true,
       head_sampling_rate: environment.logHeadSamplingRate,
+      logs: {
+        enabled: true,
+        invocation_logs: true,
+        persist: true,
+        head_sampling_rate: environment.logHeadSamplingRate,
+      },
       traces: {
         enabled: true,
+        persist: true,
         head_sampling_rate: environment.traceHeadSamplingRate,
       },
     },
