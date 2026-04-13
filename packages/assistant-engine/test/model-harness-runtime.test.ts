@@ -16,10 +16,6 @@ const harnessMocks = vi.hoisted(() => ({
   createInboxRoutingAssistantToolCatalog: vi.fn(),
   createOpenAI: vi.fn(),
   createOpenAICompatible: vi.fn(),
-  gateway: vi.fn((model: string) => ({
-    provider: 'gateway',
-    model,
-  })),
   generateObject: vi.fn(),
   generateText: vi.fn(),
   stepCountIs: vi.fn((count: number) => ({
@@ -35,7 +31,6 @@ vi.mock('ai', () => ({
   },
   generateObject: harnessMocks.generateObject,
   generateText: harnessMocks.generateText,
-  gateway: harnessMocks.gateway,
   stepCountIs: harnessMocks.stepCountIs,
   tool: harnessMocks.tool,
 }))
@@ -88,13 +83,12 @@ beforeEach(() => {
   harnessMocks.stepCountIs.mockClear()
   harnessMocks.OutputObject.mockClear()
   harnessMocks.tool.mockClear()
-  harnessMocks.gateway.mockClear()
   harnessMocks.createInboxRoutingAssistantToolCatalog.mockReset()
   harnessMocks.createOpenAI.mockReset()
   harnessMocks.createOpenAICompatible.mockReset()
   harnessMocks.createOpenAI.mockImplementation((options) => ({
     responses: (model: string) => ({
-      provider: 'openai-responses',
+      provider: 'responses',
       model,
       options,
     }),
@@ -128,7 +122,7 @@ describe('model harness runtime helpers', () => {
       status: z.string(),
     })
     const model = resolveAssistantLanguageModel({
-      executionDriver: 'gateway',
+      executionDriver: 'responses',
       model: 'murph-mini',
     })
     const previewTools = createAssistantToolCatalogFromCapabilities(
@@ -182,23 +176,26 @@ describe('model harness runtime helpers', () => {
     })
   })
 
-  it('requires prompt or messages and resolves gateway plus provider-backed models', async () => {
+  it('requires prompt or messages and resolves responses plus provider-backed models', async () => {
     const schema = z.object({
       status: z.string(),
     })
-    const gatewayModel = resolveAssistantLanguageModel({
-      executionDriver: 'gateway',
-      model: 'murph-gateway',
+    const responsesModel = resolveAssistantLanguageModel({
+      executionDriver: 'responses',
+      model: 'gpt-5.4-mini',
     })
 
-    expect(gatewayModel).toEqual({
-      model: 'murph-gateway',
-      provider: 'gateway',
+    expect(responsesModel).toEqual({
+      model: 'gpt-5.4-mini',
+      options: expect.objectContaining({
+        name: 'murph-assistant',
+      }),
+      provider: 'responses',
     })
 
     await expect(
       generateAssistantObject({
-        model: gatewayModel,
+        model: responsesModel,
         schema,
       }),
     ).rejects.toThrow(
@@ -248,7 +245,7 @@ describe('model harness runtime helpers', () => {
     const model = resolveAssistantLanguageModel({
       apiKeyEnv: 'ASSISTANT_API_KEY',
       baseUrl: 'https://api.openai.com/v1',
-      executionDriver: 'openai-responses',
+      executionDriver: 'responses',
       model: 'gpt-4.1-mini',
       providerName: ' Murph Hosted ',
     })
@@ -260,7 +257,7 @@ describe('model harness runtime helpers', () => {
         baseURL: 'https://api.openai.com/v1',
         name: 'Murph Hosted',
       }),
-      provider: 'openai-responses',
+      provider: 'responses',
     })
 
     const fetchWrapper = harnessMocks.createOpenAI.mock.calls[0]?.[0]?.fetch as
@@ -280,6 +277,63 @@ describe('model harness runtime helpers', () => {
     const injectedBody = JSON.parse(String(firstFetchCall?.[1]?.body))
     expect(injectedBody).toMatchObject({
       input: 'hello',
+    })
+    expect(injectedBody.context_management).toEqual([
+      {
+        compact_threshold: 200000,
+        type: 'compaction',
+      },
+    ])
+    expect(injectedBody.providerOptions).toBeUndefined()
+  })
+
+  it('injects Vercel gateway provider options into responses requests without using AI SDK gateway provider options', async () => {
+    const fetchMock: Mock<
+      (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => Promise<Response>
+    > = vi.fn(async () => new Response('{}'))
+    vi.stubGlobal('fetch', fetchMock)
+    process.env.ASSISTANT_API_KEY = 'gateway-secret'
+
+    resolveAssistantLanguageModel({
+      apiKeyEnv: 'ASSISTANT_API_KEY',
+      baseUrl: 'https://ai-gateway.vercel.sh/v1',
+      executionDriver: 'responses',
+      model: 'openai/gpt-5.4',
+      providerName: 'vercel-ai-gateway',
+      responsesProviderOptions: {
+        gateway: {
+          zeroDataRetention: true,
+        },
+      },
+    })
+
+    const fetchWrapper = harnessMocks.createOpenAI.mock.calls[0]?.[0]?.fetch as
+      | ((input: string, init?: RequestInit) => Promise<Response>)
+      | undefined
+    expect(fetchWrapper).toBeTypeOf('function')
+
+    await fetchWrapper?.('https://ai-gateway.vercel.sh/v1/responses', {
+      body: JSON.stringify({
+        input: 'hello',
+        providerOptions: {
+          openai: {
+            store: false,
+          },
+        },
+      }),
+      method: 'POST',
+    })
+
+    const firstFetchCall = fetchMock.mock.calls[0]
+    expect(firstFetchCall).toBeTruthy()
+    const injectedBody = JSON.parse(String(firstFetchCall?.[1]?.body))
+    expect(injectedBody.providerOptions).toEqual({
+      gateway: {
+        zeroDataRetention: true,
+      },
+      openai: {
+        store: false,
+      },
     })
     expect(injectedBody.context_management).toEqual([
       {
@@ -1425,7 +1479,7 @@ describe('inbox model harness', () => {
       captureId: 'capture-1',
       inboxServices,
       modelSpec: {
-        executionDriver: 'gateway',
+        executionDriver: 'responses',
         model: 'murph-mini',
       },
       requestId: 'req-1',
@@ -1439,7 +1493,7 @@ describe('inbox model harness', () => {
       model: {
         baseUrl: null,
         model: 'murph-mini',
-        providerMode: 'gateway',
+        providerMode: 'openai-compatible',
         providerName: null,
       },
       preparedInputMode: 'multimodal',
@@ -1517,7 +1571,7 @@ describe('inbox model harness', () => {
         captureId: 'capture-1',
         inboxServices,
         modelSpec: {
-          executionDriver: 'gateway',
+          executionDriver: 'responses',
           model: 'murph-mini',
         },
         vault: vaultRoot,

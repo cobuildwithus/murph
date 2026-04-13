@@ -138,7 +138,7 @@ describe('assistant store persistence seams', () => {
     expect(roundTrippedSession.providerOptions).toMatchObject({
       apiKeyEnv: 'OPENAI_API_KEY',
       baseUrl: 'https://api.example.com/v1',
-      executionDriver: 'openai-responses',
+      executionDriver: 'responses',
       model: 'gpt-5.4',
       providerName: 'murph-openai',
       reasoningEffort: 'medium',

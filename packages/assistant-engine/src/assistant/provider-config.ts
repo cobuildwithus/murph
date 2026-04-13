@@ -23,11 +23,7 @@ export function resolveAssistantModelSpecFromProviderConfig(
   }
 
   const baseUrl = normalizeNullableString(normalized.baseUrl)
-  if (
-    !baseUrl &&
-    resolvedRuntimeTarget.executionDriver !== 'gateway' &&
-    resolvedRuntimeTarget.executionDriver !== 'openai-responses'
-  ) {
+  if (!baseUrl && resolvedRuntimeTarget.executionDriver !== 'responses') {
     return null
   }
 
@@ -42,5 +38,15 @@ export function resolveAssistantModelSpecFromProviderConfig(
     ...(apiKeyEnv ? { apiKeyEnv } : {}),
     ...(normalized.headers ? { headers: normalized.headers } : {}),
     ...(normalized.providerName ? { providerName: normalized.providerName } : {}),
+    ...(normalized.presetId === 'vercel-ai-gateway' &&
+    normalized.zeroDataRetention === true
+      ? {
+          responsesProviderOptions: {
+            gateway: {
+              zeroDataRetention: true,
+            },
+          },
+        }
+      : {}),
   }
 }

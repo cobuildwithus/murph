@@ -1,8 +1,6 @@
 import {
-  createGateway,
   generateObject,
   generateText,
-  gateway,
   Output,
   stepCountIs,
   tool,
@@ -450,6 +448,12 @@ export interface AssistantModelMessage {
   content: string | AssistantModelContentPart[]
 }
 
+export interface AssistantResponsesRequestProviderOptions {
+  gateway?: {
+    zeroDataRetention?: boolean
+  }
+}
+
 export interface AssistantToolCatalog {
   createAiSdkTools(
     mode?: AssistantToolExecutionMode,
@@ -472,6 +476,7 @@ export interface AssistantModelSpec {
   headers?: Record<string, string>
   model: string
   providerName?: string
+  responsesProviderOptions?: AssistantResponsesRequestProviderOptions
 }
 
 export interface GenerateAssistantObjectInput<TSchema extends z.ZodTypeAny> {
@@ -658,29 +663,16 @@ export function resolveAssistantLanguageModel(
   spec: AssistantModelSpec,
 ): LanguageModel {
   switch (spec.executionDriver ?? 'openai-compatible') {
-    case 'openai-responses': {
+    case 'responses': {
       const provider = createOpenAI({
         name: normalizeAssistantProviderName(spec.providerName),
         apiKey: resolveAssistantApiKey(spec),
         ...(spec.baseUrl ? { baseURL: spec.baseUrl } : {}),
         ...(spec.headers ? { headers: spec.headers } : {}),
-        fetch: createAssistantOpenAIResponsesFetch(),
+        fetch: createAssistantOpenAIResponsesFetch(spec),
       })
 
       return provider.responses(spec.model)
-    }
-
-    case 'gateway': {
-      const apiKey = resolveAssistantApiKey(spec)
-      const provider = spec.baseUrl || spec.headers || apiKey
-        ? createGateway({
-            ...(spec.baseUrl ? { baseURL: spec.baseUrl } : {}),
-            ...(spec.headers ? { headers: spec.headers } : {}),
-            ...(apiKey ? { apiKey } : {}),
-          })
-        : gateway
-
-      return provider(spec.model)
     }
 
     case 'codex-cli':
@@ -876,10 +868,12 @@ function resolveAssistantPromptOrMessages(
 }
 
 function createAssistantOpenAIResponsesFetch(
+  spec: AssistantModelSpec,
   baseFetch: typeof fetch = globalThis.fetch.bind(globalThis),
 ): typeof fetch {
   return async (input: AssistantFetchInput, init?: AssistantFetchInit) => {
-    const nextInit = await maybeInjectAssistantOpenAIResponsesCompaction(
+    const nextInit = await maybeMutateAssistantOpenAIResponsesRequest(
+      spec,
       input,
       init,
     )
@@ -887,11 +881,12 @@ function createAssistantOpenAIResponsesFetch(
   }
 }
 
-async function maybeInjectAssistantOpenAIResponsesCompaction(
+async function maybeMutateAssistantOpenAIResponsesRequest(
+  spec: AssistantModelSpec,
   input: AssistantFetchInput,
   init?: AssistantFetchInit,
 ): Promise<AssistantFetchInit | undefined> {
-  if (!shouldInjectAssistantOpenAIResponsesCompaction(input, init)) {
+  if (!shouldMutateAssistantOpenAIResponsesRequest(input, init)) {
     return init
   }
 
@@ -908,20 +903,73 @@ async function maybeInjectAssistantOpenAIResponsesCompaction(
     return init
   }
 
-  if ('context_management' in payload) {
+  const nextPayload = applyAssistantOpenAIResponsesRequestMutations(payload, spec)
+  if (!nextPayload) {
     return init
   }
 
   return {
     ...init,
-    body: JSON.stringify({
-      ...payload,
-      context_management: OPENAI_RESPONSES_AUTO_COMPACTION_CONTEXT,
-    }),
+    body: JSON.stringify(nextPayload),
   }
 }
 
-function shouldInjectAssistantOpenAIResponsesCompaction(
+function applyAssistantOpenAIResponsesRequestMutations(
+  payload: Record<string, unknown>,
+  spec: AssistantModelSpec,
+): Record<string, unknown> | null {
+  let nextPayload: Record<string, unknown> | null = null
+
+  if (!('context_management' in payload)) {
+    nextPayload = {
+      ...payload,
+      context_management: OPENAI_RESPONSES_AUTO_COMPACTION_CONTEXT,
+    }
+  }
+
+  const mergedProviderOptions = mergeAssistantResponsesProviderOptions(
+    nextPayload?.providerOptions ?? payload.providerOptions,
+    spec.responsesProviderOptions,
+  )
+  if (mergedProviderOptions) {
+    nextPayload = {
+      ...(nextPayload ?? payload),
+      providerOptions: mergedProviderOptions,
+    }
+  }
+
+  return nextPayload
+}
+
+function mergeAssistantResponsesProviderOptions(
+  current: unknown,
+  injected: AssistantResponsesRequestProviderOptions | undefined,
+): Record<string, unknown> | null {
+  if (injected?.gateway?.zeroDataRetention !== true) {
+    return null
+  }
+
+  const nextProviderOptions = isAssistantPlainObject(current)
+    ? {
+        ...current,
+      }
+    : {}
+  const currentGatewayOptions = isAssistantPlainObject(nextProviderOptions.gateway)
+    ? {
+        ...nextProviderOptions.gateway,
+      }
+    : {}
+
+  if (currentGatewayOptions.zeroDataRetention === true) {
+    return null
+  }
+
+  currentGatewayOptions.zeroDataRetention = true
+  nextProviderOptions.gateway = currentGatewayOptions
+  return nextProviderOptions
+}
+
+function shouldMutateAssistantOpenAIResponsesRequest(
   input: AssistantFetchInput,
   init?: AssistantFetchInit,
 ): boolean {
@@ -981,6 +1029,10 @@ async function readAssistantFetchBody(
   }
 
   return null
+}
+
+function isAssistantPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 function resolveAssistantApiKey(spec: AssistantModelSpec): string | undefined {

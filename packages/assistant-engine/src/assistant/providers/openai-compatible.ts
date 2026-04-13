@@ -205,8 +205,8 @@ export const openAiCompatibleProviderDefinition: AssistantProviderDefinition = {
     try {
       const messages = buildAssistantProviderMessages(input)
       const providerOptions = resolveOpenAiCompatibleProviderOptions({
+        languageModelSpec,
         providerConfig,
-        resolvedRuntimeTarget,
         resumeProviderSessionId: input.resumeProviderSessionId,
       })
 
@@ -350,8 +350,8 @@ function resolveOpenAiCompatibleGatewayProvider(spec: AssistantModelSpec) {
 }
 
 function resolveOpenAiCompatibleProviderOptions(input: {
+  languageModelSpec: AssistantModelSpec
   providerConfig: AssistantProviderConfig
-  resolvedRuntimeTarget: ReturnType<typeof resolveAssistantProviderRuntimeTarget>
   resumeProviderSessionId: string | null | undefined
 }): Record<string, Record<string, boolean | string>> | undefined {
   const reasoningEffort = supportsAssistantReasoningEffort(input.providerConfig)
@@ -362,8 +362,8 @@ function resolveOpenAiCompatibleProviderOptions(input: {
   )
   const namespaces: Record<string, Record<string, boolean | string>> = {}
 
-  switch (input.resolvedRuntimeTarget.executionDriver) {
-    case 'openai-responses': {
+  switch (input.languageModelSpec.executionDriver ?? 'openai-compatible') {
+    case 'responses': {
       const openAiOptions: Record<string, boolean | string> = {
         store: false,
       }
@@ -379,37 +379,6 @@ function resolveOpenAiCompatibleProviderOptions(input: {
       namespaces.openai = openAiOptions
       break
     }
-    case 'gateway': {
-      const upstreamProviderNamespace =
-        resolveOpenAiCompatibleGatewayProviderNamespace(input.providerConfig.model)
-
-      if (upstreamProviderNamespace) {
-        const upstreamOptions: Record<string, boolean | string> = {}
-
-        if (reasoningEffort) {
-          upstreamOptions.reasoningEffort = reasoningEffort
-        }
-
-        if (upstreamProviderNamespace === 'openai') {
-          upstreamOptions.store = false
-
-          if (normalizedResumeProviderSessionId) {
-            upstreamOptions.previousResponseId = normalizedResumeProviderSessionId
-          }
-        }
-
-        if (Object.keys(upstreamOptions).length > 0) {
-          namespaces[upstreamProviderNamespace] = upstreamOptions
-        }
-      }
-
-      if (input.providerConfig.zeroDataRetention === true) {
-        namespaces.gateway = {
-          zeroDataRetention: true,
-        }
-      }
-      break
-    }
     case 'openai-compatible':
     default: {
       if (reasoningEffort) {
@@ -422,22 +391,6 @@ function resolveOpenAiCompatibleProviderOptions(input: {
   }
 
   return Object.keys(namespaces).length > 0 ? namespaces : undefined
-}
-
-function resolveOpenAiCompatibleGatewayProviderNamespace(
-  model: string | null | undefined,
-): string | null {
-  const normalizedModel = normalizeNullableString(model)
-  if (!normalizedModel) {
-    return null
-  }
-
-  const slashIndex = normalizedModel.indexOf('/')
-  if (slashIndex <= 0) {
-    return null
-  }
-
-  return normalizedModel.slice(0, slashIndex)
 }
 
 function createOpenAiCompatibleToolRawEvent(input: {
