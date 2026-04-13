@@ -204,10 +204,12 @@ export const openAiCompatibleProviderDefinition: AssistantProviderDefinition = {
 
     try {
       const messages = buildAssistantProviderMessages(input)
+      const usesResponsesApi =
+        (languageModelSpec.executionDriver ?? 'openai-compatible') === 'responses'
       const providerOptions = resolveOpenAiCompatibleProviderOptions({
-        languageModelSpec,
         providerConfig,
         resumeProviderSessionId: input.resumeProviderSessionId,
+        usesResponsesApi,
       })
 
       const result = await generateText({
@@ -350,9 +352,9 @@ function resolveOpenAiCompatibleGatewayProvider(spec: AssistantModelSpec) {
 }
 
 function resolveOpenAiCompatibleProviderOptions(input: {
-  languageModelSpec: AssistantModelSpec
   providerConfig: AssistantProviderConfig
   resumeProviderSessionId: string | null | undefined
+  usesResponsesApi: boolean
 }): Record<string, Record<string, boolean | string>> | undefined {
   const reasoningEffort = supportsAssistantReasoningEffort(input.providerConfig)
     ? normalizeNullableString(input.providerConfig.reasoningEffort)
@@ -360,37 +362,33 @@ function resolveOpenAiCompatibleProviderOptions(input: {
   const normalizedResumeProviderSessionId = normalizeNullableString(
     input.resumeProviderSessionId,
   )
-  const namespaces: Record<string, Record<string, boolean | string>> = {}
-
-  switch (input.languageModelSpec.executionDriver ?? 'openai-compatible') {
-    case 'responses': {
-      const openAiOptions: Record<string, boolean | string> = {
-        store: false,
-      }
-
-      if (reasoningEffort) {
-        openAiOptions.reasoningEffort = reasoningEffort
-      }
-
-      if (normalizedResumeProviderSessionId) {
-        openAiOptions.previousResponseId = normalizedResumeProviderSessionId
-      }
-
-      namespaces.openai = openAiOptions
-      break
+  if (input.usesResponsesApi) {
+    const openAiOptions: Record<string, boolean | string> = {
+      store: false,
     }
-    case 'openai-compatible':
-    default: {
-      if (reasoningEffort) {
-        namespaces[normalizeAssistantProviderOptionKey(input.providerConfig.providerName)] = {
-          reasoningEffort,
-        }
-      }
-      break
+
+    if (reasoningEffort) {
+      openAiOptions.reasoningEffort = reasoningEffort
+    }
+
+    if (normalizedResumeProviderSessionId) {
+      openAiOptions.previousResponseId = normalizedResumeProviderSessionId
+    }
+
+    return {
+      openai: openAiOptions,
     }
   }
 
-  return Object.keys(namespaces).length > 0 ? namespaces : undefined
+  if (!reasoningEffort) {
+    return undefined
+  }
+
+  return {
+    [normalizeAssistantProviderOptionKey(input.providerConfig.providerName)]: {
+      reasoningEffort,
+    },
+  }
 }
 
 function createOpenAiCompatibleToolRawEvent(input: {

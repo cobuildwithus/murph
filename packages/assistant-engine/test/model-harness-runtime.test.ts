@@ -300,10 +300,8 @@ describe('model harness runtime helpers', () => {
       executionDriver: 'responses',
       model: 'openai/gpt-5.4',
       providerName: 'vercel-ai-gateway',
-      responsesProviderOptions: {
-        gateway: {
-          zeroDataRetention: true,
-        },
+      responsesRequestPolicy: {
+        gatewayZeroDataRetention: true,
       },
     })
 
