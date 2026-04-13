@@ -9,10 +9,10 @@ import {
 } from "../src/runner-env.js";
 
 describe("buildHostedRunnerContainerEnv", () => {
-  it("forwards non-automation runner env without leaking worker proxy base URLs", () => {
+  it("forwards non-automation runner env without leaking unrelated worker vars", () => {
     expect(buildHostedRunnerContainerEnv({
       FFMPEG_COMMAND: "/usr/local/bin/ffmpeg",
-      HOSTED_DEVICE_SYNC_CONTROL_BASE_URL: "https://web.example.test",
+      HOSTED_WEB_BASE_URL: "https://web.example.test",
     })).toEqual({
       FFMPEG_COMMAND: "/usr/local/bin/ffmpeg",
       HOSTED_EMAIL_INGRESS_READY: "false",
