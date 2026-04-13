@@ -1,5 +1,9 @@
 import { createHostedArtifactStore } from "./bundle-store.ts";
 import { readHostedExecutionEnvironment } from "./env.ts";
+import {
+  deriveHostedExecutionErrorCode,
+  emitHostedExecutionStructuredLog,
+} from "@murphai/hosted-execution";
 import { asWorkerStringEnvironment } from "./worker-contracts.ts";
 import { CLOUDFLARE_HOSTED_RUNTIME_HOSTS } from "./internal-hosts.ts";
 import { json, methodNotAllowed, notFound, readJsonObject } from "./json.ts";
@@ -23,70 +27,90 @@ export async function handleRunnerOutboundRequest(
   userId: string,
   internalWorkerProxyToken: string | null = null,
 ): Promise<Response> {
-  const environment = readHostedExecutionEnvironment(asWorkerStringEnvironment(env));
-  const url = new URL(request.url);
-  const authorizationError = requireRunnerInternalProxyAuthorization(
-    request,
-    url.hostname,
-    internalWorkerProxyToken,
-  );
-  if (authorizationError) {
-    return authorizationError;
-  }
-
-  if (url.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.effectsPort) {
-    return handleRunnerResultsRequest({
-      bucket: env.BUNDLES,
-      env,
-      environment,
+  try {
+    const environment = readHostedExecutionEnvironment(asWorkerStringEnvironment(env));
+    const url = new URL(request.url);
+    const authorizationError = requireRunnerInternalProxyAuthorization(
       request,
-      url,
-      userId,
-    });
-  }
-
-  if (url.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.artifactStore) {
-    const match = /^\/objects\/(?<sha256>[a-f0-9]{64})$/u.exec(url.pathname);
-    if (!match?.groups) {
-      return notFound();
+      url.hostname,
+      internalWorkerProxyToken,
+    );
+    if (authorizationError) {
+      return authorizationError;
     }
 
-    if (request.method !== "GET" && request.method !== "PUT") {
-      return methodNotAllowed();
+    if (url.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.effectsPort) {
+      return handleRunnerResultsRequest({
+        bucket: env.BUNDLES,
+        env,
+        environment,
+        request,
+        url,
+        userId,
+      });
     }
 
-    return handleRunnerArtifactRequest({
-      bucket: env.BUNDLES,
-      env,
-      environment,
-      request,
-      sha256: match.groups.sha256,
-      userId,
-    });
-  }
+    if (url.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.artifactStore) {
+      const match = /^\/objects\/(?<sha256>[a-f0-9]{64})$/u.exec(url.pathname);
+      if (!match?.groups) {
+        return notFound();
+      }
 
-  if (url.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.deviceSyncPort) {
-    return handleRunnerDeviceSyncControlRequest({
-      env,
-      environment,
-      request,
-      url,
-      userId,
-    });
-  }
+      if (request.method !== "GET" && request.method !== "PUT") {
+        return methodNotAllowed();
+      }
 
-  if (url.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.usageExportPort) {
-    return handleRunnerUsageRecordRequest({
-      bucket: env.BUNDLES,
-      env,
-      environment,
-      request,
-      url,
-      userId,
-    });
-  }
+      return handleRunnerArtifactRequest({
+        bucket: env.BUNDLES,
+        env,
+        environment,
+        request,
+        sha256: match.groups.sha256,
+        userId,
+      });
+    }
 
-  return notFound();
+    if (url.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.deviceSyncPort) {
+      return handleRunnerDeviceSyncControlRequest({
+        env,
+        environment,
+        request,
+        url,
+        userId,
+      });
+    }
+
+    if (url.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.usageExportPort) {
+      return handleRunnerUsageRecordRequest({
+        bucket: env.BUNDLES,
+        env,
+        environment,
+        request,
+        url,
+        userId,
+      });
+    }
+
+    return notFound();
+  } catch (error) {
+    emitHostedExecutionStructuredLog({
+      component: "runner",
+      details: {
+        method: request.method,
+        url: request.url,
+        userId,
+      },
+      error,
+      message: "Hosted runner outbound request failed.",
+      phase: "dispatch.running",
+    });
+
+    return json({
+      code: deriveHostedExecutionErrorCode(error),
+      error: error instanceof Error ? error.message : String(error),
+      ...(error instanceof Error ? { errorName: error.name } : {}),
+    }, 500);
+  }
 }
 
 async function handleRunnerArtifactRequest(input: {

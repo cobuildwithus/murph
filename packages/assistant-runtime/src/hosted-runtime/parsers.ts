@@ -15,7 +15,6 @@ import type {
   HostedAssistantRuntimeConfig,
   HostedAssistantRuntimeJobInput,
   HostedAssistantRuntimeJobRequest,
-  HostedExecutionCommitCallback,
 } from "./models.ts";
 
 export function parseHostedAssistantRuntimeJobInput(
@@ -36,24 +35,22 @@ export function parseHostedAssistantRuntimeJobRequest(
 ): HostedAssistantRuntimeJobRequest {
   const record = requireObject(value, "Hosted assistant runtime job request");
   const request = parseHostedExecutionRunnerRequest(record);
-  const commit = record.commit === undefined
-    ? undefined
-    : record.commit === null
-      ? null
-      : parseHostedExecutionCommitCallback(record.commit);
   const resume = record.resume === undefined
     ? undefined
     : record.resume === null
       ? null
       : parseHostedAssistantRuntimeResume(record.resume);
 
-  if (commit && !request.run) {
-    throw new TypeError("Hosted assistant runtime commit callback requires request.run.");
-  }
-
   return {
     ...request,
-    ...(commit === undefined ? {} : { commit }),
+    ...(record.currentBundleRef === undefined
+      ? {}
+      : {
+          currentBundleRef: parseHostedExecutionBundleRef(
+            record.currentBundleRef,
+            "Hosted assistant runtime job request.currentBundleRef",
+          ),
+        }),
     ...(resume === undefined ? {} : { resume }),
   };
 }
@@ -105,19 +102,6 @@ export function parseHostedAssistantRuntimeConfig(
             "Hosted assistant runtime config.userEnv",
           ),
         }),
-  };
-}
-
-function parseHostedExecutionCommitCallback(
-  value: unknown,
-): HostedExecutionCommitCallback {
-  const record = requireObject(value, "Hosted assistant runtime commit callback");
-
-  return {
-    bundleRef: parseHostedExecutionBundleRef(
-      record.bundleRef,
-      "Hosted assistant runtime commit callback.bundleRef",
-    ),
   };
 }
 

@@ -1,21 +1,19 @@
 import { parseHostedEmailSendRequest } from "@murphai/assistant-runtime/hosted-email";
 import {
+  deriveHostedExecutionErrorCode,
+} from "@murphai/hosted-execution";
+import {
   parseHostedAssistantDeliveryRecord,
   parseHostedAssistantDeliveryEffects,
 } from "@murphai/hosted-execution/side-effects";
-import type { HostedExecutionBundleRef } from "@murphai/hosted-execution/contracts";
 import {
   parseHostedExecutionBundlePayload,
-  parseHostedExecutionBundleRef,
-  parseHostedExecutionRunContext,
 } from "@murphai/hosted-execution/parsers";
 import {
   HOSTED_EXECUTION_RUNNER_EMAIL_SEND_PATH,
 } from "@murphai/hosted-execution/routes";
-import { gatewayProjectionSnapshotSchema } from "@murphai/gateway-core";
 
 import { readHostedExecutionEnvironment } from "../env.ts";
-import type { HostedExecutionCommitPayload } from "../execution-journal.ts";
 import { json, methodNotAllowed, notFound, readJsonObject } from "../json.ts";
 import {
   readHostedEmailConfig,
@@ -47,16 +45,6 @@ export async function handleRunnerResultsRequest(input: {
   url: URL;
   userId: string;
 }): Promise<Response> {
-  const commitMatch = /^\/events\/(?<eventId>[^/]+)\/commit$/u.exec(input.url.pathname);
-  if (commitMatch?.groups) {
-    if (input.request.method !== "POST") {
-      return methodNotAllowed();
-    }
-
-    const eventId = decodeRouteParam(commitMatch.groups.eventId);
-    return forwardRunnerCommit(input.userId, eventId, await readJsonObject(input.request), input.env);
-  }
-
   const sideEffectMatch = /^\/effects\/(?<effectId>[^/]+)$/u.exec(input.url.pathname);
   if (sideEffectMatch?.groups) {
     if (input.request.method !== "DELETE" && input.request.method !== "GET" && input.request.method !== "PUT") {
@@ -163,23 +151,6 @@ async function handleRunnerEmailSendRequest(input: {
   });
 }
 
-async function forwardRunnerCommit(
-  userId: string,
-  eventId: string,
-  payload: Record<string, unknown>,
-  env: RunnerOutboundEnvironmentSource,
-): Promise<Response> {
-  const stub = await resolveRunnerOutboundUserRunnerStub(env, userId);
-
-  return json({
-    committed: await stub.commit({
-      eventId,
-      ...parseHostedExecutionCommitRequest(payload),
-    }),
-    ok: true,
-  });
-}
-
 async function handleRunnerAssistantDeliveryRequest(input: {
   bucket: RunnerOutboundEnvironmentSource["BUNDLES"];
   env: RunnerOutboundEnvironmentSource;
@@ -260,59 +231,6 @@ async function handleRunnerAssistantDeliveryRequest(input: {
 
     throw error;
   }
-}
-
-function parseHostedExecutionCommitRequest(payload: Record<string, unknown>): {
-  payload: HostedExecutionCommitPayload & {
-    currentBundleRef: HostedExecutionBundleRef | null;
-  };
-  run: ReturnType<typeof parseHostedExecutionRunContext> | null;
-} {
-  const result = requireRecord(payload.result, "result");
-  rejectRemovedCommitField(payload, "sideEffects");
-
-  return {
-    payload: {
-      assistantDeliveryEffects: requireAssistantDeliveryEffects(
-        payload.assistantDeliveryEffects,
-        "assistantDeliveryEffects",
-      ),
-      bundle: parseHostedExecutionBundlePayload(payload.bundle, "bundle"),
-      currentBundleRef: parseHostedExecutionBundleRef(payload.currentBundleRef, "currentBundleRef"),
-      gatewayProjectionSnapshot:
-        payload.gatewayProjectionSnapshot === undefined || payload.gatewayProjectionSnapshot === null
-          ? null
-          : gatewayProjectionSnapshotSchema.parse(payload.gatewayProjectionSnapshot),
-      result: {
-        eventsHandled: requireNumber(result.eventsHandled, "result.eventsHandled"),
-        nextWakeAt: readOptionalString(result.nextWakeAt, "result.nextWakeAt"),
-        summary: requireString(result.summary, "result.summary"),
-      },
-    },
-    run: payload.run === undefined || payload.run === null
-      ? null
-      : parseHostedExecutionRunContext(payload.run),
-  };
-}
-
-function rejectRemovedCommitField(
-  record: Record<string, unknown>,
-  field: string,
-): void {
-  if (record[field] !== undefined) {
-    throw new TypeError(`${field} is no longer supported.`);
-  }
-}
-
-function requireAssistantDeliveryEffects(
-  value: unknown,
-  label: string,
-) {
-  if (!Array.isArray(value)) {
-    throw new TypeError(`${label} must be an array.`);
-  }
-
-  return parseHostedAssistantDeliveryEffects(value);
 }
 
 function copyBytesToArrayBuffer(bytes: Uint8Array): ArrayBuffer {

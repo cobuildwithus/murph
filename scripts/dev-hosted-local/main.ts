@@ -118,9 +118,8 @@ export async function main(): Promise<void> {
       spawnChildProcess("cloudflare", "pnpm", [
         "--dir",
         "apps/cloudflare",
-        "exec",
-        "wrangler",
-        "dev",
+        "worker:dev:prepared",
+        "--",
         "--ip",
         config.workerHost,
         "--port",

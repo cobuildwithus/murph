@@ -262,13 +262,11 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
       {
         request: {
           bundle: "incoming-bundle",
-          commit: {
-            bundleRef: {
-              hash: "hash_123",
-              key: "bundles/member/vault.json",
-              size: 42,
-              updatedAt: "2026-04-08T00:00:00.000Z",
-            },
+          currentBundleRef: {
+            hash: "hash_123",
+            key: "bundles/member/vault.json",
+            size: 42,
+            updatedAt: "2026-04-08T00:00:00.000Z",
           },
           dispatch: {
             event: {
@@ -304,41 +302,19 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
       },
     );
 
-    assert.deepEqual(result, finalResult);
+    assert.deepEqual(result, {
+      committedAssistantDeliveryEffects: committedExecution.committedAssistantDeliveryEffects,
+      committedGatewayProjectionSnapshot: committedExecution.committedGatewayProjectionSnapshot,
+      phase: "committed",
+      result: committedExecution.committedResult,
+    });
     expect(deviceSyncPort.createConnectLink).toHaveBeenCalledWith({
       provider: "oura",
     });
     expect(mocks.executeHostedDispatchForCommit).toHaveBeenCalledTimes(1);
     expect(mocks.resumeHostedCommittedExecution).not.toHaveBeenCalled();
-    expect(mocks.commitHostedExecutionResult).toHaveBeenCalledWith({
-      commit: {
-        bundleRef: {
-          hash: "hash_123",
-          key: "bundles/member/vault.json",
-          size: 42,
-          updatedAt: "2026-04-08T00:00:00.000Z",
-        },
-      },
-      dispatch: {
-        event: {
-          kind: "member.activated",
-          userId: "member_123",
-        },
-        eventId: "evt_123",
-        occurredAt: "2026-04-08T00:00:00.000Z",
-      },
-      effectsPort: expect.any(Object),
-      gatewayProjectionSnapshot: committedExecution.committedGatewayProjectionSnapshot,
-      result: committedExecution.committedResult,
-      run: HOSTED_RUN_CONTEXT,
-      assistantDeliveryEffects: committedExecution.committedAssistantDeliveryEffects,
-    });
-    expect(mocks.completeHostedExecutionAfterCommit).toHaveBeenCalledWith(
-      expect.objectContaining({
-        committedExecution,
-        materializedArtifactPaths: new Set(["vault/raw/a.bin", "vault/raw/b.bin"]),
-      }),
-    );
+    expect(mocks.commitHostedExecutionResult).not.toHaveBeenCalled();
+    expect(mocks.completeHostedExecutionAfterCommit).not.toHaveBeenCalled();
     expect(mocks.withHostedProcessEnvironment).toHaveBeenCalledWith(
       {
         envOverrides: {
@@ -359,8 +335,8 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
             emailSendReady: true,
             telegramBotConfigured: true,
           },
-          commitCallbackConfigured: true,
           commitTimeoutMs: 45_000,
+          currentBundleRefPresent: true,
           forwardedEnvCategories: expect.objectContaining({
             assistantConfigured: true,
             hostedEmailConfigured: false,
@@ -500,11 +476,7 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
     );
 
     expect(mocks.materializeHostedExecutionArtifacts).toHaveBeenCalledTimes(1);
-    expect(mocks.completeHostedExecutionAfterCommit).toHaveBeenCalledWith(
-      expect.objectContaining({
-        materializedArtifactPaths: new Set(["vault/raw/a.bin"]),
-      }),
-    );
+    expect(mocks.completeHostedExecutionAfterCommit).not.toHaveBeenCalled();
   });
 
   it("does not block hosted execution while Linq typing startup is in flight and stops after committed delivery draining", async () => {
@@ -572,7 +544,7 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
 
     await vi.waitFor(() => {
       expect(mocks.executeHostedDispatchForCommit).toHaveBeenCalledTimes(1);
-      expect(mocks.completeHostedExecutionAfterCommit).toHaveBeenCalledTimes(1);
+      expect(mocks.completeHostedExecutionAfterCommit).not.toHaveBeenCalled();
     });
     expect(mocks.stopLinqChatTypingIndicator).not.toHaveBeenCalled();
 
@@ -599,7 +571,7 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
         },
       },
     );
-    expect(steps).toEqual(["start", "execute", "complete", "stop"]);
+    expect(steps).toEqual(["start", "execute", "stop"]);
   });
 
   it("passes a null artifact materializer when the decoded bundle is absent", async () => {
@@ -736,9 +708,14 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
       },
     );
 
-    assert.deepEqual(result, finalResult);
+    assert.deepEqual(result, {
+      committedAssistantDeliveryEffects: committedExecution.committedAssistantDeliveryEffects,
+      committedGatewayProjectionSnapshot: committedExecution.committedGatewayProjectionSnapshot,
+      phase: "committed",
+      result: committedExecution.committedResult,
+    });
     expect(mocks.executeHostedDispatchForCommit).toHaveBeenCalledTimes(1);
-    expect(mocks.completeHostedExecutionAfterCommit).toHaveBeenCalledTimes(1);
+    expect(mocks.completeHostedExecutionAfterCommit).not.toHaveBeenCalled();
     expect(mocks.stopLinqChatTypingIndicator).not.toHaveBeenCalled();
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -821,7 +798,7 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
 
     await vi.waitFor(() => {
       expect(mocks.executeHostedDispatchForCommit).toHaveBeenCalledTimes(1);
-      expect(mocks.completeHostedExecutionAfterCommit).toHaveBeenCalledTimes(1);
+      expect(mocks.completeHostedExecutionAfterCommit).not.toHaveBeenCalled();
     });
     expect(typingSignal.aborted).toBe(false);
     expect(globalThis.fetch).toHaveBeenCalledTimes(1);
@@ -830,7 +807,7 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
     await runPromise;
 
     expect(globalThis.fetch).toHaveBeenCalledTimes(1);
-    expect(steps).toEqual(["start", "execute", "complete"]);
+    expect(steps).toEqual(["start", "execute"]);
   });
 
   it("swallows Telegram typing startup failures and still completes the hosted run", async () => {
@@ -882,9 +859,14 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
       },
     );
 
-    assert.deepEqual(result, finalResult);
+    assert.deepEqual(result, {
+      committedAssistantDeliveryEffects: committedExecution.committedAssistantDeliveryEffects,
+      committedGatewayProjectionSnapshot: committedExecution.committedGatewayProjectionSnapshot,
+      phase: "committed",
+      result: committedExecution.committedResult,
+    });
     expect(mocks.executeHostedDispatchForCommit).toHaveBeenCalledTimes(1);
-    expect(mocks.completeHostedExecutionAfterCommit).toHaveBeenCalledTimes(1);
+    expect(mocks.completeHostedExecutionAfterCommit).not.toHaveBeenCalled();
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
         level: "warn",

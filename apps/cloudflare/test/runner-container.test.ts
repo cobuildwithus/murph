@@ -555,9 +555,6 @@ describe("RunnerContainer", () => {
       internalWorkerProxyToken: expect.any(String),
       job: {
         request: {
-          commit: {
-            bundleRef: null,
-          },
           resume: {
             committedResult: {
               assistantDeliveryEffects: [],

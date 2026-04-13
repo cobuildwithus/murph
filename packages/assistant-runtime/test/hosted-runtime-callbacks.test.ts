@@ -88,151 +88,6 @@ describe("hosted runtime callbacks", () => {
     );
   });
 
-  it("skips durable commit callbacks when no commit handler is present", async () => {
-    const commit = vi.fn();
-
-    await commitHostedExecutionResult({
-      commit: null,
-      dispatch: {
-        event: {
-          kind: "member.activated",
-          userId: "member_123",
-        },
-        eventId: "evt_no_commit",
-        occurredAt: "2026-04-08T00:00:00.000Z",
-      },
-      effectsPort: {
-        commit,
-        async deletePreparedAssistantDelivery() {},
-        async readRawEmailMessage() {
-          return null;
-        },
-        async readAssistantDeliveryRecord() {
-          return null;
-        },
-        async sendEmail() {},
-        async writeAssistantDeliveryRecord(record) {
-          return record;
-        },
-      },
-      result: {
-        bundle: "bundle_123",
-        result: {
-          eventsHandled: 1,
-          nextWakeAt: null,
-          summary: "completed",
-        },
-      },
-      assistantDeliveryEffects: [],
-      run: HOSTED_RUN_CONTEXT,
-    });
-
-    expect(commit).not.toHaveBeenCalled();
-  });
-
-  it("wraps durable commit callback failures with user and event context", async () => {
-    await expect(
-      commitHostedExecutionResult({
-        commit: {
-          bundleRef: {
-            hash: "hash_123",
-            key: "bundles/member/vault.json",
-            size: 42,
-            updatedAt: "2026-04-08T00:00:00.000Z",
-          },
-        },
-        dispatch: {
-          event: {
-            kind: "member.activated",
-            userId: "member_123",
-          },
-          eventId: "evt_commit",
-          occurredAt: "2026-04-08T00:00:00.000Z",
-        },
-        effectsPort: {
-          async commit() {
-            throw new Error("boom");
-          },
-          async deletePreparedAssistantDelivery() {},
-          async readRawEmailMessage() {
-            return null;
-          },
-          async readAssistantDeliveryRecord() {
-            return null;
-          },
-          async sendEmail() {},
-          async writeAssistantDeliveryRecord(record) {
-            return record;
-          },
-        },
-        result: {
-          bundle: "bundle_123",
-        result: {
-          eventsHandled: 1,
-          nextWakeAt: null,
-          summary: "completed",
-        },
-      },
-      assistantDeliveryEffects: [],
-      run: HOSTED_RUN_CONTEXT,
-    }),
-    ).rejects.toThrow(/durable commit failed for member_123\/evt_commit/u);
-  });
-
-  it("keeps durable commit wrapper messages free of raw cause details", async () => {
-    const rawCause = new Error("Authorization: Bearer secret-token user@example.com");
-
-    const thrown = await commitHostedExecutionResult({
-      commit: {
-        bundleRef: {
-          hash: "hash_123",
-          key: "bundles/member/vault.json",
-          size: 42,
-          updatedAt: "2026-04-08T00:00:00.000Z",
-        },
-      },
-      dispatch: {
-        event: {
-          kind: "member.activated",
-          userId: "member_123",
-        },
-        eventId: "evt_commit_redacted",
-        occurredAt: "2026-04-08T00:00:00.000Z",
-      },
-      effectsPort: {
-        async commit() {
-          throw rawCause;
-        },
-        async deletePreparedAssistantDelivery() {},
-        async readRawEmailMessage() {
-          return null;
-        },
-        async readAssistantDeliveryRecord() {
-          return null;
-        },
-        async sendEmail() {},
-        async writeAssistantDeliveryRecord(record) {
-          return record;
-        },
-      },
-      result: {
-        bundle: "bundle_123",
-        result: {
-          eventsHandled: 1,
-          nextWakeAt: null,
-          summary: "completed",
-        },
-      },
-      assistantDeliveryEffects: [],
-      run: HOSTED_RUN_CONTEXT,
-    }).catch((error: unknown) => error);
-
-    assert.ok(thrown instanceof Error);
-    assert.match(thrown.message, /member_123\/evt_commit_redacted/u);
-    assert.doesNotMatch(thrown.message, /secret-token|user@example\.com/u);
-    assert.equal(thrown.cause, rawCause);
-  });
-
   it("collects only dispatchable side effects and caps the committed batch size", async () => {
     const intents = Array.from({ length: 25 }, (_, index) => ({
       dedupeKey: `dedupe_${index}`,
@@ -270,7 +125,7 @@ describe("hosted runtime callbacks", () => {
     ]);
   });
 
-  it("passes no journal hooks when draining committed side effects without a commit callback", async () => {
+  it("always passes journal hooks when draining committed side effects", async () => {
     let observedDispatchHooks: object | undefined;
 
     mocks.dispatchAssistantOutboxIntent.mockImplementation(async (input) => {
@@ -278,7 +133,6 @@ describe("hosted runtime callbacks", () => {
     });
 
     await drainHostedCommittedAssistantDeliveriesAfterCommit({
-      commit: null,
       dispatch: {
         event: {
           kind: "assistant.cron.tick",
@@ -289,7 +143,6 @@ describe("hosted runtime callbacks", () => {
         occurredAt: "2026-04-08T00:00:00.000Z",
       },
       effectsPort: {
-        async commit() {},
         async deletePreparedAssistantDelivery() {},
         async readRawEmailMessage() {
           return null;
@@ -311,7 +164,7 @@ describe("hosted runtime callbacks", () => {
       vaultRoot: "/tmp/vault",
     });
 
-    expect(observedDispatchHooks).toBeUndefined();
+    expect(observedDispatchHooks).toBeDefined();
   });
 
   it("writes prepared and sent delivery records through the hosted side-effect journal hooks", async () => {

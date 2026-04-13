@@ -11,9 +11,7 @@ import type {
   HostedExecutionRunnerRequest,
   HostedExecutionRunnerResult,
 } from "@murphai/hosted-execution/contracts";
-import type {
-  HostedExecutionBundleRefState,
-} from "@murphai/hosted-execution/bundles";
+import type { HostedExecutionBundleRefState } from "@murphai/hosted-execution/bundles";
 import type {
   HostedAssistantDeliveryEffect,
 } from "@murphai/hosted-execution/side-effects";
@@ -21,10 +19,6 @@ import type {
 import type {
   HostedRuntimePlatform,
 } from "./platform.ts";
-
-export interface HostedExecutionCommitCallback {
-  bundleRef: HostedExecutionBundleRefState;
-}
 
 export interface HostedAssistantRuntimeChannelCapabilities {
   emailSendReady: boolean;
@@ -50,11 +44,11 @@ export interface HostedAssistantRuntimeConfig {
 }
 
 export interface HostedAssistantRuntimeJobRequest extends HostedExecutionRunnerRequest {
-  commit?: HostedExecutionCommitCallback | null;
+  currentBundleRef?: HostedExecutionBundleRefState;
   resume?: {
     committedResult: {
-      result: HostedExecutionRunnerResult["result"];
       assistantDeliveryEffects: HostedAssistantDeliveryEffect[];
+      result: HostedExecutionRunnerResult["result"];
     };
   } | null;
 }
@@ -89,14 +83,29 @@ export interface NormalizedHostedAssistantRuntimeConfig {
 
 export interface HostedCommittedExecutionState {
   committedGatewayProjectionSnapshot: GatewayProjectionSnapshot;
-  committedResult: HostedExecutionRunnerResult;
   committedAssistantDeliveryEffects: HostedAssistantDeliveryEffect[];
+  committedResult: HostedExecutionRunnerResult;
 }
 
-export interface HostedAssistantRuntimeJobResult {
-  finalGatewayProjectionSnapshot: GatewayProjectionSnapshot | null;
+export interface HostedAssistantRuntimeCommittedJobResult {
+  committedAssistantDeliveryEffects: HostedAssistantDeliveryEffect[];
+  committedGatewayProjectionSnapshot: GatewayProjectionSnapshot | null;
+  finalGatewayProjectionSnapshot?: null;
+  phase: "committed";
   result: HostedExecutionRunnerResult;
 }
+
+export interface HostedAssistantRuntimeCompletedJobResult {
+  committedAssistantDeliveryEffects?: HostedAssistantDeliveryEffect[];
+  committedGatewayProjectionSnapshot?: GatewayProjectionSnapshot | null;
+  finalGatewayProjectionSnapshot: GatewayProjectionSnapshot | null;
+  phase?: "completed";
+  result: HostedExecutionRunnerResult;
+}
+
+export type HostedAssistantRuntimeJobResult =
+  | HostedAssistantRuntimeCommittedJobResult
+  | HostedAssistantRuntimeCompletedJobResult;
 
 export type HostedShareImportResult = Awaited<ReturnType<typeof importSharePackIntoVault>>;
 

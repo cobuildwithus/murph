@@ -102,7 +102,7 @@ That means:
 - those worker-owned outbound proxy hosts now require an in-memory per-run proxy token from the trusted Worker/container bridge in addition to the bound `userId`, so random code inside one warm runner shell cannot call them directly with `curl` or borrowed env once the worker rotates that token away after the run
 - the worker-owned hosted-AI-usage proxy host injects the Durable Object's bound `userId` into the worker-side usage buffer path, and any later web import still happens from the Durable Object with the broader web control token kept out of the runner environment
 - worker-owned callback and web-control base URLs now normalize to HTTPS by default and only permit explicit loopback or internal worker-host HTTP exceptions
-- the runner process posts the durable commit callback plus hosted email and assistant-delivery journal requests through one internal `http://results.worker` seam; the fuller final result now returns directly to the Durable Object, so bundle finalization no longer needs a second worker callback hop
+- the Durable Object now owns the durable hosted commit directly from the runner's first committed-phase result; the remaining internal `http://results.worker` seam is only for true outward effects such as hosted email and assistant-delivery journal access
 - the container-local bridge is intentionally thin; the execution core lives in `packages/assistant-runtime`
 - the queue Durable Object invokes the per-user container on demand, may keep that outer shell warm for a short idle TTL, and still runs each hosted execution inside a fresh isolated child process with the outbound proxy token rotated away after completion; if any unexpected processes remain, the shell exits instead of being reused
 
@@ -196,4 +196,4 @@ The Cloudflare app now keeps two focused Vitest lanes:
 
 - Only assistant delivery is implemented as a hosted side-effect kind today. Future provider mutations, callbacks, or outbound deliveries should extend the same committed side-effect journal rather than bypassing it.
 - Cloudflare container lifecycle now keeps only the outer per-user shell warm for a short idle TTL. The actual Murph execution remains a fresh isolated child process each time, and ambiguous warm state still fails closed by destroying the shell.
-- The remaining `results.worker` seam is now only for the durable commit callback plus true outward effects such as hosted email and side-effect journal access. Future outward mutations should extend that same committed side-effect journal instead of adding separate reliability lanes.
+- The remaining `results.worker` seam is now only for true outward effects such as hosted email and side-effect journal access. Future outward mutations should extend that same committed side-effect journal instead of adding separate reliability lanes.

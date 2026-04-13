@@ -19,7 +19,6 @@ import {
 import type { AssistantExecutionContext } from "@murphai/assistant-engine";
 
 import {
-  commitHostedExecutionResult,
   resumeHostedCommittedExecution,
 } from "./hosted-runtime/callbacks.ts";
 import {
@@ -53,12 +52,13 @@ export {
 export type {
   HostedAssistantRuntimeChannelCapabilities,
   HostedAssistantRuntimeConfig,
+  HostedAssistantRuntimeCompletedJobResult,
+  HostedAssistantRuntimeCommittedJobResult,
   HostedAssistantRuntimeDeviceSyncConfig,
   HostedAssistantRuntimeJobInput,
   HostedAssistantRuntimeJobResult,
   HostedAssistantRuntimeJobRequest,
   HostedAssistantRuntimeResolvedConfig,
-  HostedExecutionCommitCallback,
 } from "./hosted-runtime/models.ts";
 export type {
   HostedRuntimeArtifactStore,
@@ -155,53 +155,53 @@ export async function runHostedAssistantRuntimeJobInProcessDetailed(
         });
 
         try {
-          const committedExecution = input.request.resume?.committedResult
-            ? resumeHostedCommittedExecution(input.request)
-            : await executeHostedDispatchForCommit({
-                artifactMaterializer: incomingBundle
-                  ? createHostedArtifactMaterializer({
-                      artifactResolver,
-                      bundle: incomingBundle,
-                      materializedArtifactPaths,
-                      workspaceRoot: nextWorkspaceRoot,
-                    })
-                  : null,
-                materializedArtifactPaths,
-                request: input.request,
-                restored,
-                runtime,
-                executionContext,
-                runtimeEnv,
-              });
-
           if (!input.request.resume?.committedResult) {
-            await commitHostedExecutionResult({
-              commit: input.request.commit ?? null,
-              dispatch: input.request.dispatch,
-              effectsPort: runtime.platform.effectsPort,
-              gatewayProjectionSnapshot: committedExecution.committedGatewayProjectionSnapshot,
-              result: committedExecution.committedResult,
-              assistantDeliveryEffects:
-                committedExecution.committedAssistantDeliveryEffects,
-              run: input.request.run ?? null,
+            const committedExecution = await executeHostedDispatchForCommit({
+              artifactMaterializer: incomingBundle
+                ? createHostedArtifactMaterializer({
+                    artifactResolver,
+                    bundle: incomingBundle,
+                    materializedArtifactPaths,
+                    workspaceRoot: nextWorkspaceRoot,
+                  })
+                : null,
+              materializedArtifactPaths,
+              request: input.request,
+              restored,
+              runtime,
+              executionContext,
+              runtimeEnv,
             });
+
             emitHostedExecutionStructuredLog({
               component: "runtime",
               dispatch: input.request.dispatch,
-              message: "Hosted runtime recorded a durable commit callback.",
+              details: {
+                assistantDeliveryEffectCount:
+                  committedExecution.committedAssistantDeliveryEffects.length,
+              },
+              message: "Hosted runtime prepared a durable commit for the worker.",
               phase: "commit.recorded",
               run: input.request.run ?? null,
             });
+
+            return {
+              committedAssistantDeliveryEffects:
+                committedExecution.committedAssistantDeliveryEffects,
+              committedGatewayProjectionSnapshot:
+                committedExecution.committedGatewayProjectionSnapshot ?? null,
+              phase: "committed",
+              result: committedExecution.committedResult,
+            };
           }
 
           const finalResult = await completeHostedExecutionAfterCommit({
-            commit: input.request.commit ?? null,
             dispatch: input.request.dispatch,
             materializedArtifactPaths,
             run: input.request.run ?? null,
             runtime,
             restored,
-            committedExecution,
+            committedExecution: resumeHostedCommittedExecution(input.request),
           });
 
           emitHostedExecutionStructuredLog({
@@ -268,7 +268,7 @@ function buildHostedRuntimeStartDetails(
       emailSendReady: runtime.resolvedConfig.channelCapabilities.emailSendReady,
       telegramBotConfigured: runtime.resolvedConfig.channelCapabilities.telegramBotConfigured,
     },
-    commitCallbackConfigured: Boolean(input.request.commit),
+    currentBundleRefPresent: input.request.currentBundleRef !== undefined,
     commitTimeoutMs: runtime.commitTimeoutMs,
     deviceSync: {
       configured: runtime.resolvedConfig.deviceSync !== null,

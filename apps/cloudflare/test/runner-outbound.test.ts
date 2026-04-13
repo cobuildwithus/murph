@@ -478,6 +478,7 @@ describe("handleRunnerOutboundRequest", () => {
       error: "effectId mismatch: expected outbox_123, received outbox_999.",
     });
   });
+
 });
 
 function createRunnerProxyHeaders(headers: Record<string, string> = {}) {
@@ -496,9 +497,6 @@ function createRunnerOutboundEnv(
       return {
         async bootstrapUser() {
           return { userId: "member_123" };
-        },
-        async commit() {
-          throw new Error("not used");
         },
         async applyDeviceSyncRuntimeUpdates(input: { request: { userId: string } }) {
           return {

@@ -85,13 +85,6 @@ interface BundleRefSwapInput {
   nextBundleRef: RunnerStateRecord["bundleRef"];
 }
 
-interface CommitRunAuthorization {
-  accepted: boolean;
-  activeRun: HostedExecutionRunContext | null;
-  pending: boolean;
-  reason: "active" | "late" | "legacy_active" | "missing" | "stale";
-}
-
 interface LeaseOwnerInput {
   allowAnyRunForEvent?: boolean;
   eventId: string;
@@ -371,10 +364,13 @@ export class RunnerQueueStore {
     const bundleState = this.selectBundleStateSync();
     assignRunnerBundleRefs(bundleState, committed.bundleRef);
     this.deleteBackpressuredEventSync(committed.eventId);
-    this.clearActiveRunLeaseSync(meta, leaseOwner ?? {
-      eventId: committed.eventId,
-      run: null,
-    });
+    if (leaseOwner?.allowAnyRunForEvent) {
+      this.clearActiveRunLeaseSync(meta, {
+        allowAnyRunForEvent: true,
+        eventId: committed.eventId,
+        run: leaseOwner.run ?? null,
+      });
+    }
     this.clearLastErrorMetaSync(meta);
     meta.last_run_at = committed.committedAt;
     this.writeMetaRowSync(meta);
@@ -534,55 +530,6 @@ export class RunnerQueueStore {
     }
 
     return this.readStateFromMetaSync(meta);
-  }
-
-  async authorizeCommitRun(input: {
-    eventId: string;
-    run: HostedExecutionRunContext | null;
-  }): Promise<CommitRunAuthorization> {
-    await this.ready;
-    this.pruneExpiredConsumedEventsSync();
-
-    const meta = this.requireMetaRowSync();
-    const activeRun = this.readActiveRunContextSync(meta);
-    if (activeRun) {
-      const pending = this.readPendingDispatchRowByEventIdSync(input.eventId) !== null;
-      const sameEvent = meta.active_run_event_id === input.eventId;
-      const sameRun = input.run ? sameHostedExecutionRun(activeRun, input.run) : false;
-      const legacyActive = sameEvent
-        && pending
-        && input.run === null
-        && activeRun.attempt === 1;
-
-      return {
-        accepted: sameRun || legacyActive,
-        activeRun,
-        pending,
-        reason: sameRun
-          ? "active"
-          : legacyActive
-            ? "legacy_active"
-            : "stale",
-      };
-    }
-
-    if (!input.run) {
-      return {
-        accepted: false,
-        activeRun: null,
-        pending: this.readPendingDispatchRowByEventIdSync(input.eventId) !== null,
-        reason: "missing",
-      };
-    }
-
-    const pending = this.readPendingDispatchRowByEventIdSync(input.eventId);
-    const acceptedLate = pending !== null && pending.attempts === input.run.attempt;
-    return {
-      accepted: acceptedLate,
-      activeRun: null,
-      pending: pending !== null,
-      reason: acceptedLate ? "late" : "missing",
-    };
   }
 
   async recordRunPhase(input: {
