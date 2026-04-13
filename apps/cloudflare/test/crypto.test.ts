@@ -204,7 +204,6 @@ describe("hosted storage object keys", () => {
         eventsHandled: 1,
         summary: "ok",
       },
-      sideEffects: [],
       userId: "user_journal_123",
     });
     const storedJournalKey = findStoredObjectKey(bucket, (key) =>

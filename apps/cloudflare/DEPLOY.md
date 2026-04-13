@@ -167,7 +167,7 @@ Optional hosted email bridge secrets:
 
 `apps/web/README.md` is the canonical operator doc for hosted public-origin precedence and Cloudflare callback-key alignment. This deploy guide only lists the Worker-side envs that must match that hosted-web contract.
 
-The checked-in scaffold and rendered deploy config declare the Cloudflare callback signing key, platform envelope key, automation recipient keypair, and recovery recipient public JWK in Wrangler's experimental `secrets.required` field, so `wrangler deploy` and `wrangler versions upload` fail early when any of them are missing from the Worker.
+The checked-in scaffold and rendered deploy config declare the Cloudflare callback signing key, platform envelope key, automation recipient keypair, and recovery recipient public JWK in Wrangler's experimental `secrets.required` field, so `wrangler deploy` fails early when any of them are missing from the Worker. The lower-level version-upload path inherits the same rendered secret contract when operators intentionally use that manual recovery lane.
 
 The worker now authenticates `apps/web -> apps/cloudflare` dispatch/control traffic with Vercel OIDC bearer identity derived from the configured team slug, project name, and environment. For Cloudflare-owned callbacks back into `apps/web`, configure the matching Worker-side private key in `HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK` and keep `HOSTED_WEB_BASE_URL` plus the active callback key id aligned with the hosted-web contract documented in `apps/web/README.md`. The outer native container shell may now stay warm per user for a short idle TTL, but the worker still injects a supervisor-only runner control token into that shell, rotates the per-run outbound proxy token after every run, rejects concurrent internal run requests, keeps the actual Murph execution one-shot inside an isolated child process, and exits the warm shell fail-closed if any unexpected processes survive after cleanup.
 
@@ -183,7 +183,7 @@ The worker now authenticates `apps/web -> apps/cloudflare` dispatch/control traf
 
 Add whichever hosted features you actually want the containerized runner to support globally:
 
-- `DEVICE_SYNC_SECRET`
+- `DEVICE_SYNC_SECRET` only when hosted device-sync runtime sync is enabled; this is the runner's token-bundle codec secret, not the local daemon `DEVICE_SYNC_CONTROL_TOKEN`
 - `WHOOP_CLIENT_ID`
 - `WHOOP_CLIENT_SECRET`
 - `OURA_CLIENT_ID`
@@ -203,7 +203,7 @@ Add whichever hosted features you actually want the containerized runner to supp
 - `XAI_API_KEY`
 - `MISTRAL_API_KEY`
 
-Hosted email on this path is Cloudflare-native. Keep `HOSTED_EMAIL_*` configured when you want hosted ingress or sends; the worker keeps a fixed public sender identity, new outbound mail reuses one stable per-user reply alias instead of writing fresh per-thread routes, registered members can initiate new threads by emailing that fixed public sender address once their verified email has been synced into hosted execution, and ingress still re-authorizes the verified owner before raw-message persistence or hosted dispatch. `MAPBOX_ACCESS_TOKEN` is optional and only needed when you want hosted route estimation through `vault-cli route estimate`. `AGENTMAIL_*` is intentionally not part of the hosted deploy surface. `TELEGRAM_WEBHOOK_SECRET` belongs to `apps/web` on Vercel for hosted Telegram webhook verification and is not part of the Cloudflare worker secret set.
+Hosted email on this path is Cloudflare-native. Keep `HOSTED_EMAIL_*` configured when you want hosted ingress or sends; the worker keeps a fixed public sender identity, new outbound mail reuses one stable per-user reply alias instead of writing fresh per-thread routes, registered members can initiate new threads by emailing that fixed public sender address once their verified email has been synced into hosted execution, and ingress still re-authorizes the verified owner before raw-message persistence or hosted dispatch. `MAPBOX_ACCESS_TOKEN` is optional and only needed when you want hosted route estimation through `vault-cli route estimate`. `AGENTMAIL_*` is intentionally not part of the hosted deploy surface. `DEVICE_SYNC_CONTROL_TOKEN` is part of the local daemon contract and is not a Cloudflare worker deploy input. `TELEGRAM_WEBHOOK_SECRET` belongs to `apps/web` on Vercel for hosted Telegram webhook verification and is not part of the Cloudflare worker secret set.
 
 ## Local dry run before touching production
 
@@ -262,9 +262,9 @@ You should now have:
 
 If you want to stage manually before GitHub Actions:
 
-### First deploys and Durable Object migrations
+### Direct deploy path
 
-Use a direct deploy when the Worker does not exist yet or the generated config includes a new Durable Object migration:
+Use a direct deploy for first deploys, Durable Object migrations, and the normal hosted operator path:
 
 ```bash
 pnpm --dir apps/cloudflare worker:deploy -- \
@@ -273,8 +273,6 @@ pnpm --dir apps/cloudflare worker:deploy -- \
 ```
 
 That script prepares the rendered deploy artifacts first, then runs `wrangler deploy`. `wrangler deploy` builds the native container image from `Dockerfile.cloudflare-hosted-runner`, pushes it through Cloudflare's deploy path, and deploys the worker. The deploy automation now prepares `apps/cloudflare/.deploy/runner-bundle/` first, sets the Docker build context to `apps/cloudflare`, and lets the Docker build copy the already-built runtime leaf artifact while `wrangler.generated.jsonc` and `worker-secrets.json` remain sibling deploy inputs outside the image. Docker still needs to be available on the machine running that command.
-
-### Normal deploys
 
 Use the deploy helper so the rendered config, prebuilt runner bundle, and secrets file stay aligned with the actual `wrangler deploy` call:
 
@@ -285,7 +283,8 @@ pnpm --dir apps/cloudflare deploy:worker -- --config ./.deploy/wrangler.generate
 ```
 
 The deploy helper writes a deployment result summary under `apps/cloudflare/.deploy/deployment-result.json`.
-The underlying script still understands version/deployment splits for manual recovery flows, but the normal operator path is now a direct cut.
+
+The deploy helper still retains the lower-level version/deployment split behind environment flags for manual recovery only. That is not the normal deploy story for first hosted launch, and it is intentionally omitted from the default package scripts.
 
 ## Cleaning up old container images
 
@@ -328,7 +327,7 @@ The workflow is intentionally manual (`workflow_dispatch`) so you do not acciden
 Open Actions, then `Deploy Cloudflare Hosted Execution`, and choose:
 
 - `environment`: defaults to `production`; choose `staging` only when that GitHub environment is configured
-- `sync_worker_secrets`: whether to include the rendered Worker secrets file in the upload or deploy command
+- `sync_worker_secrets`: whether to include the rendered Worker secrets file in the deploy command
 - `deploy_worker`: whether to actually deploy the Worker
 - `smoke_user_id`: optional hosted user id to trigger one manual `/run` smoke test
 
@@ -342,7 +341,7 @@ The workflow does this in order:
 6. runs the focused `apps/cloudflare verify` path against that prepared deploy state
 7. optionally runs a direct Worker deploy through the rendered config
 8. runs the worker health and smoke checks
-9. writes the final deployment traffic into the GitHub Actions step summary
+9. writes the deployed version list into the GitHub Actions step summary
 
 ## First production deploy checklist
 
@@ -356,7 +355,6 @@ Before the first real production deploy, confirm all of these are true:
 - Workers Logs and Workers Traces are enabled and visible in the Cloudflare dashboard for the target Worker
 - the R2 bucket names in the generated config are correct
 - the platform envelope key is present and stable
-- the intended canary percentage is decided ahead of time, and you know which signal will be used to promote to 100% or roll back
 - one seeded hosted user can complete:
   - manual `/run`
   - a Linq inbound message
@@ -367,9 +365,9 @@ The first deploy can take a few minutes before native container starts succeed r
 
 ## What to do right after first deploy
 
-This deploy automation gets you to a real native-container staging posture, but two production-hardening items still matter:
+This deploy automation gets you to a real native-container first-hosted-deploy posture, but two production-hardening items still matter:
 
-1. keep widening direct scenario coverage for the hosted execution lane, especially real Cloudflare deploy smoke paths and promotion criteria for gradual rollouts
+1. keep widening direct scenario coverage for the hosted execution lane, especially real Cloudflare deploy smoke paths, rollback criteria, and first-deploy operational checks
 2. extend the current durable assistant outbox approach if other externally visible hosted side effects need the same replay-safe treatment
 
-Until those broader guarantees exist, treat the current lane as controlled rollout infrastructure rather than an excuse to skip operational caution.
+Until those broader guarantees exist, treat the current lane as a direct deploy with focused operational smoke criteria rather than as a mature progressive-rollout system.

@@ -64,7 +64,9 @@ export function buildHostedRunnerResolvedConfig(
   const providerConfigs = readConfiguredDeviceSyncProviderConfigs(forwardedEnv);
   const emailCapabilities = readHostedEmailCapabilities(forwardedEnv);
   const deviceSyncPublicBaseUrl = normalizeEnvString(forwardedEnv.DEVICE_SYNC_PUBLIC_BASE_URL);
-  const deviceSyncSecret = normalizeEnvString(forwardedEnv.DEVICE_SYNC_SECRET);
+  // This codec secret protects hosted device-sync token bundles inside the runner.
+  // It is distinct from the local daemon's DEVICE_SYNC_CONTROL_TOKEN contract.
+  const deviceSyncCodecSecret = normalizeEnvString(forwardedEnv.DEVICE_SYNC_SECRET);
 
   return {
     channelCapabilities: {
@@ -73,12 +75,12 @@ export function buildHostedRunnerResolvedConfig(
     },
     deviceSync:
       deviceSyncPublicBaseUrl
-      && deviceSyncSecret
+      && deviceSyncCodecSecret
       && hasConfiguredDeviceSyncProviderConfigs(providerConfigs)
         ? {
             providerConfigs,
             publicBaseUrl: deviceSyncPublicBaseUrl,
-            secret: deviceSyncSecret,
+            secret: deviceSyncCodecSecret,
           }
         : null,
   };

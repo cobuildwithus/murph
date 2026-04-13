@@ -4,12 +4,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { resolveAssistantStatePaths } from "@murphai/runtime-state/node";
 
 const mocks = vi.hoisted(() => ({
-  collectHostedExecutionSideEffects: vi.fn(),
+  collectHostedAssistantDeliverySideEffects: vi.fn(),
   commitHostedExecutionResult: vi.fn(),
   createHostedArtifactResolver: vi.fn(),
   createHostedArtifactUploadSink: vi.fn(),
   decodeHostedBundleBase64: vi.fn(),
-  drainHostedCommittedSideEffectsAfterCommit: vi.fn(),
+  drainHostedCommittedAssistantDeliveriesAfterCommit: vi.fn(),
   emitHostedExecutionStructuredLog: vi.fn(),
   encodeHostedBundleBase64: vi.fn(),
   executeHostedDispatchEvent: vi.fn(),
@@ -77,10 +77,11 @@ vi.mock("../src/hosted-runtime/artifacts.ts", () => ({
 }));
 
 vi.mock("../src/hosted-runtime/callbacks.ts", () => ({
-  collectHostedExecutionSideEffects: mocks.collectHostedExecutionSideEffects,
+  collectHostedAssistantDeliverySideEffects:
+    mocks.collectHostedAssistantDeliverySideEffects,
   commitHostedExecutionResult: mocks.commitHostedExecutionResult,
-  drainHostedCommittedSideEffectsAfterCommit:
-    mocks.drainHostedCommittedSideEffectsAfterCommit,
+  drainHostedCommittedAssistantDeliveriesAfterCommit:
+    mocks.drainHostedCommittedAssistantDeliveriesAfterCommit,
   resumeHostedCommittedExecution: mocks.resumeHostedCommittedExecution,
 }));
 
@@ -145,7 +146,7 @@ beforeEach(() => {
   mocks.snapshotHostedExecutionContext.mockResolvedValue({
     bundle: Uint8Array.from([9, 9, 9]),
   });
-  mocks.collectHostedExecutionSideEffects.mockResolvedValue([]);
+  mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValue([]);
   mocks.exportGatewayProjectionSnapshotLocal.mockResolvedValue({
     schema: "murph.gateway-projection-snapshot.v1",
     generatedAt: "2026-04-08T00:10:00.000Z",
@@ -153,7 +154,7 @@ beforeEach(() => {
     messages: [],
     permissions: [],
   });
-  mocks.drainHostedCommittedSideEffectsAfterCommit.mockResolvedValue(undefined);
+  mocks.drainHostedCommittedAssistantDeliveriesAfterCommit.mockResolvedValue(undefined);
   mocks.exportHostedPendingAssistantUsage.mockResolvedValue({
     exported: 0,
     failed: 0,
@@ -362,7 +363,6 @@ describe("completeHostedExecutionAfterCommit", () => {
           },
         },
         committedAssistantDeliveryEffects: [],
-        committedSideEffects: [],
       },
       dispatch: {
         event: {
@@ -410,7 +410,7 @@ describe("completeHostedExecutionAfterCommit", () => {
       },
     });
 
-    expect(mocks.drainHostedCommittedSideEffectsAfterCommit).toHaveBeenCalledWith({
+    expect(mocks.drainHostedCommittedAssistantDeliveriesAfterCommit).toHaveBeenCalledWith({
       commit: null,
       dispatch: {
         event: {
@@ -422,7 +422,7 @@ describe("completeHostedExecutionAfterCommit", () => {
         occurredAt: "2026-04-08T00:00:00.000Z",
       },
       effectsPort: expect.any(Object),
-      sideEffects: [],
+      assistantDeliveryEffects: [],
       vaultRoot: "/tmp/vault-root",
     });
     expect(mocks.exportHostedPendingAssistantUsage).toHaveBeenCalledWith({

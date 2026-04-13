@@ -228,7 +228,6 @@ describe("hosted execution side-effects", () => {
     expect(parseHostedExecutionSideEffect({
       effectId: "intent_123",
       fingerprint: "fingerprint_123",
-      intentId: "intent_123",
       kind: "assistant.delivery",
     })).toEqual({
       effectId: "intent_123",
@@ -240,7 +239,6 @@ describe("hosted execution side-effects", () => {
       delivery,
       effectId: "intent_123",
       fingerprint: "fingerprint_123",
-      intentId: "intent_123",
       kind: "assistant.delivery",
       recordedAt: "2026-04-08T00:00:00.000Z",
       state: "sent",
@@ -309,14 +307,12 @@ describe("hosted execution side-effects", () => {
     expect(() => parseHostedExecutionSideEffect({
       effectId: "effect_123",
       fingerprint: "fingerprint_123",
-      intentId: "intent_123",
       kind: "other",
     })).toThrow(/Unsupported hosted execution side effect kind: other/i);
 
     expect(() => parseHostedExecutionSideEffectRecord({
       effectId: "intent_123",
       fingerprint: "fingerprint_123",
-      intentId: "intent_123",
       kind: "assistant.delivery",
       recordedAt: "2026-04-08T00:00:00.000Z",
       state: "unknown",
@@ -344,7 +340,6 @@ describe("hosted execution side-effects", () => {
       },
       effectId: "intent_123",
       fingerprint: "fingerprint_123",
-      intentId: "intent_123",
       kind: "assistant.delivery",
       recordedAt: "2026-04-08T00:00:00.000Z",
       state: "sent",
@@ -352,7 +347,6 @@ describe("hosted execution side-effects", () => {
     expect(() => parseHostedExecutionSideEffectRecord({
       effectId: "effect_123",
       fingerprint: "fingerprint_123",
-      intentId: "intent_123",
       kind: "other",
       recordedAt: "2026-04-08T00:00:00.000Z",
       state: "prepared",
@@ -369,7 +363,6 @@ describe("hosted execution side-effects", () => {
     expect(parseHostedAssistantDeliverySideEffect({
       effectId: "intent_123",
       fingerprint: "dedupe_123",
-      intentId: "intent_123",
       kind: "assistant.delivery",
     })).toEqual(buildHostedAssistantDeliverySideEffect({
       dedupeKey: "dedupe_123",
@@ -386,6 +379,6 @@ describe("hosted execution side-effects", () => {
     expect(() => parseHostedAssistantDeliveryRecord({
       ...preparedRecord,
       intentId: "different_intent",
-    })).toThrow(/intentId must match effectId when present/i);
+    })).toThrow(/intentId is no longer supported/i);
   });
 });

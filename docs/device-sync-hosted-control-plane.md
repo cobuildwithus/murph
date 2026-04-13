@@ -1,410 +1,241 @@
-# Device Sync Hosted Control Plane Proposal
+# Device Sync Hosted Control Plane
 
-Last verified against repo layout: 2026-04-07
+Last verified against repo layout: 2026-04-13
 
-## What exists today
+## Current split
 
-`packages/device-syncd` currently combines three concerns in one local runtime:
-- public OAuth callback and webhook ingress
-- durable integration state such as OAuth state, encrypted provider tokens, webhook traces, and queued jobs in `.runtime/device-syncd.sqlite`
-- local data-plane execution that fetches provider payloads and imports normalized snapshots into the vault through `@murphai/importers`
+Murph now treats hosted device sync as a split system:
 
-That works well for local-first setups, but it makes production callback/webhook hosting awkward because the public surface is attached to the same long-lived local process that owns vault writes.
+- `apps/web` is the public integration control plane for OAuth callbacks, webhooks, user-authenticated settings flows, agent pairing, and durable hosted metadata in Postgres
+- `apps/cloudflare` owns the canonical decryptable hosted runtime snapshot and token escrow for device-sync connections, plus the signed internal read/apply routes the hosted runner uses
+- local `device-syncd` remains the data plane that fetches provider payloads, normalizes them through `@murphai/importers`, and writes canonical health records into the local vault
 
-## Recommended split
+This is no longer a future rollout plan. It is the current hosted direction indexed elsewhere in the repo.
 
-Keep one shared provider-integrations core, but split execution into a hosted control plane and a local data plane.
+## Shared ingress seam
 
-### Shared core
+`@murphai/device-syncd/public-ingress` is the reusable callback/webhook core shared across local and hosted surfaces. It owns:
 
-Use the shared `DeviceSyncPublicIngress` layer for:
 - provider connect URL creation
 - OAuth state validation
 - OAuth callback handling
-- provider webhook verification/parsing
+- provider webhook verification and parsing
 - duplicate webhook trace suppression
-- callback/webhook dispatch into store-specific side effects
+- dispatch into store-specific side effects
 
-This shared layer is intentionally reusable by both:
-- the existing local/tunneled `device-syncd` runtime
-- a future hosted Next.js/Vercel control plane
+That seam is reused by both:
 
-### Hosted control plane (Vercel)
+- local `device-syncd` when operators expose or tunnel callback/webhook routes
+- the hosted Vercel control plane in `apps/web`
 
-Responsibilities:
-- user-authenticated provider connect UI
+It does not own canonical health-data import. The data plane still lives below the hosted control plane.
+
+## Hosted responsibilities
+
+### `apps/web`
+
+`apps/web` is responsible for:
+
+- provider connect UI and authenticated settings routes
 - OAuth start/callback routes
 - public webhook routes
-- provider account ownership mapping through blind indexes plus opaque connection ids
-- durable Postgres-owned typed connection summaries plus sparse signal/token-audit history for ordinary hosted-web reads
-- Cloudflare-owned encrypted token escrow under the user root key
-- webhook subscription management where needed
-- minimal durable control state such as OAuth sessions, webhook traces, typed wake signals, disconnect state, and local-agent pairing state
-- optional token refresh helper so provider app secrets stay server-side
+- provider-account ownership mapping through blind indexes plus opaque connection ids
+- durable Postgres-owned connection summaries, webhook traces, token-audit history, sparse wake signals, and agent-session state
+- token export and refresh flows for the local agent
+- disconnect, pairing, and other hosted operational control flows
 
-Non-responsibilities:
-- no canonical health data store
-- no provider payload normalization/import into the vault
-- no direct writes into Murph canonical records
+`apps/web` must not:
 
-### Local data plane (`device-syncd` or successor local agent)
+- expose raw provider tokens to browsers
+- become a canonical health-data store
+- write health records into the vault directly
 
-Responsibilities:
-- local token cache
-- scheduled reconcile/backfill execution
-- direct WHOOP/Oura data fetches whenever possible
-- normalization/import through `@murphai/importers`
-- the only component that writes health records into the local vault
-- sparse synchronization with the hosted control plane for token export/refresh and pending-sync markers
+### `apps/cloudflare`
 
-## Trust-boundary change
+`apps/cloudflare` is responsible for:
 
-### Before
+- Cloudflare-owned encrypted per-user device-sync runtime snapshots
+- canonical decryptable token escrow under the user root key
+- signed internal runtime snapshot and apply routes
+- hosted-runner access to current device-sync runtime state during hosted jobs
 
-`device-syncd` is both:
-- the public internet-facing callback/webhook receiver
-- the local daemon with access to the vault and canonical import path
+The Cloudflare runtime is the owner of decryptable hosted token bundles. Postgres keeps durable metadata and control-plane facts only.
 
-### After
+### Local `device-syncd`
 
-#### Hosted boundary
+Local `device-syncd` remains responsible for:
 
-The hosted app becomes the internet-facing integration control plane. It may hold:
+- local token cache and reconcile state
+- scheduled reconcile and backfill execution
+- direct WHOOP and Oura API fetches when the local data plane is active
+- normalization and import through `@murphai/importers`
+- all canonical vault writes for wearable data
+
+## Trust boundary
+
+### Hosted boundary
+
+The hosted boundary may hold:
+
 - provider client credentials
 - per-user connection metadata and token-audit history in Postgres
-- encrypted user provider tokens in the Cloudflare runtime store
-- webhook traces and pending-sync markers
+- encrypted provider tokens and mutable runtime state in Cloudflare-owned storage
+- sparse webhook traces and wake signals
 
-It must **not** expose raw provider tokens to browsers, and it must **not** gain canonical vault write authority.
+It must fail closed on auth and never gain canonical vault-write authority.
 
-#### Local boundary
+### Local boundary
 
-The local app remains the only canonical-writer. It may hold:
+The local boundary may hold:
+
 - a local cache of provider tokens
 - local reconcile state and import history
 - local sync schedules
 - the vault path and canonical write capability
 
-The local agent authenticates to the hosted backend with a server-to-server credential that is tied to one Murph user account and never shared with the browser runtime.
+Local agents authenticate to hosted APIs with a server-to-server credential tied to one Murph user account and never shared with the browser runtime.
 
-## Is Postgres needed?
+## Durable state placement
 
-For a real hosted Vercel deployment, yes.
+### Postgres in `apps/web`
 
-A durable database is needed because Vercel functions do not provide a stable local filesystem for:
+Postgres is required for hosted device sync because Vercel does not provide stable local disk for:
+
 - OAuth state round-trips
 - connection ownership mapping
 - public connection metadata and token-audit history
 - webhook dedupe
-- pending-sync signals
-- local-agent pairing/session records
+- sparse wake signals
+- local-agent pairing and session records
 
-Use Postgres for hosted integration state only.
+Recommended durable tables remain:
 
-### What should live in Postgres
+- `device_connection`
+- `device_token_audit`
+- `device_oauth_session`
+- `device_webhook_trace`
+- `device_sync_signal`
+- `device_agent_session`
+- optional `device_webhook_subscription`
 
-Recommended tables:
+Postgres should keep only opaque ids, blind indexes, typed summaries, sparse signals, and audit history. It should not store raw provider tokens, raw provider payloads, or canonical health facts.
 
-#### `device_connection`
-- `id`
-- `user_id`
-- `provider` (`whoop` | `oura`)
-- `provider_account_blind_index`
-- `status`
-- `connected_at`
-- `last_webhook_at`
-- `last_sync_started_at`
-- `last_sync_completed_at`
-- `last_sync_error_at`
-- `last_error_code`
-- `next_reconcile_at`
-- `created_at`, `updated_at`
+### Cloudflare device-sync runtime store
 
-#### `device_token_audit`
-- `id`
-- `user_id`
-- `connection_id`
-- `provider`
-- `action`
-- `channel`
-- `session_id`
-- `token_version`
-- `key_version`
-- `expected_token_version`
-- `force_refresh`
-- `refresh_outcome`
-- `token_version_changed`
-- `created_at`
+Cloudflare storage keeps:
 
-Keep durable connection identity/mapping rows in Postgres, but keep them narrow: opaque connection ids, blind indexes, typed status/timestamp summaries, and audit history only. Ordinary hosted settings reads should come from `device_connection` directly instead of replaying signal blobs or calling Cloudflare. Raw provider account ids, provider labels, raw provider tokens, and provider payloads should not live in Postgres.
-
-#### Cloudflare device-sync runtime store
-- per-user encrypted runtime snapshot under the user root key
+- per-user encrypted runtime snapshots under the user root key
 - connection snapshots plus local observation state
 - canonical encrypted token bundles and token-version fencing
-- signed worker control routes for read/apply plus metadata-only snapshot merges from `apps/web`
+- signed internal read/apply routes plus metadata-only snapshot merges from `apps/web`
 
-### Secret hygiene and rotation
+### Local runtime
 
-- Keep real hosted control-plane credentials in an untracked local `.env` for development or the deployment platform's secret manager. The repo-owned `apps/web/.env.example` file should remain placeholder-only.
-- A raw filesystem zip/tar of a repo clone is still an exposure when ignored local `apps/web/.env` or `.next` artifacts exist, even if git itself is clean. Use the guarded source-bundle path (`scripts/package-audit-context.sh` / `pnpm zip:src`) for review handoff instead of archiving the clone directly; it stages git-visible files and filters blocked local residue from the bundle.
-- If any real hosted `.env` or deploy secret was exposed, rotate at least:
-  - the Postgres credential behind `DATABASE_URL`
-  - `DEVICE_SYNC_ENCRYPTION_KEY` and `DEVICE_SYNC_ENCRYPTION_KEY_VERSION`
-  - `WHOOP_CLIENT_SECRET`
-  - `OURA_CLIENT_SECRET`
-  - `OURA_WEBHOOK_VERIFICATION_TOKEN`
-- Treat a leaked raw clone/archive that contained the local hosted `.env` the same way as a direct secret exposure for rotation and re-authorization decisions.
-- Today the hosted app records `key_version` with each `device_token_audit` row, while the canonical decryptable token bundles live in Cloudflare's encrypted runtime store under the user root key.
-- That means encryption-key rotation now needs one of two operational paths:
-  - re-encrypt every affected Cloudflare-escrowed token bundle while the old key is still available, then switch the deployment to the new key/version
-  - revoke or delete the old escrowed token bundles and force each affected provider connection through a fresh authorization flow
-- If the old database credential and the old encryption key may both have been exposed together, treat the existing escrowed provider tokens as compromised and prefer revocation/re-authorization over silent carry-forward.
+The local vault runtime keeps:
 
-#### `device_oauth_session`
-- `state`
-- `user_id`
-- `provider`
-- `return_to`
-- `expires_at`
-- `created_at`
+- local token cache
+- reconcile and import history
+- schedule and job state
 
-#### `device_webhook_trace`
-- `provider`
-- `trace_id` or provider-native dedupe key
-- `provider_account_blind_index`
-- `event_type`
-- `received_at`
+This local runtime remains the only place that writes wearable facts into the vault.
 
-#### `device_sync_signal`
-Append-only mailbox for the local app or hosted runner to hydrate with a cursor:
-- `id` / sequence
-- `connection_id`
-- `provider`
-- `kind` (`connected`, `webhook_hint`, `disconnected`, `reauthorization_required`)
-- `occurred_at`
-- `trace_id`
-- `event_type`
-- `resource_category`
-- `reason`
-- `next_reconcile_at`
-- `revoke_warning_code`
-- `created_at`
-
-`device_sync_signal` should stay a sparse typed wake mailbox. It may carry just enough typed metadata to wake the local agent or hosted runner, but it should not store raw provider webhook bodies, raw provider account ids, provider labels, or provider tokens.
-
-#### `device_agent_session`
-- `id`
-- `user_id`
-- `label`
-- hashed agent token or opaque credential id
-- `expires_at`
-- `last_seen_at`
-- `revoked_at`
-- `revoke_reason`
-- `replaced_by_session_id`
-- `created_at`
-
-#### optional `device_webhook_subscription`
-Especially useful for Oura:
-- `provider`
-- `data_type`
-- `event_type`
-- `callback_url`
-- provider subscription id
-- verification status / last verified at
-- `created_at`, `updated_at`
-
-### What should not live in Postgres
-- canonical health records
-- imported WHOOP/Oura collection payloads as the source of truth
-- normalized samples/events that belong in the local vault
-- long-term raw health snapshots unless you explicitly choose a debug/audit retention policy
-
-## High-level API shape
+## API shape
 
 ### Hosted public routes
-
-These are internet-facing and provider-facing only.
 
 - `GET /api/device-sync/oauth/:provider/start`
 - `GET /api/device-sync/oauth/:provider/callback`
 - `POST /api/device-sync/webhooks/whoop`
 - `POST /api/device-sync/webhooks/oura`
 
-### Hosted settings-authenticated wearable routes
+These are internet-facing and provider-facing only.
 
-These are the only browser-facing wearable-management routes.
-
-They rely on the hosted onboarding Privy identity-token flow plus the hosted onboarding `Origin` checks, not the signed browser-assertion contract used by the lower-level bridge routes.
-
-Ordinary reads on these routes should come from durable hosted-web metadata in Postgres, primarily the typed `device_connection` summary row. Live Cloudflare runtime inspection belongs only on explicit operational routes and internal runtime endpoints.
+### Hosted settings-authenticated routes
 
 - `GET /api/settings/device-sync`
 - `GET /api/settings/device-sync/connections/:connectionId/status`
 - `POST /api/settings/device-sync/providers/:provider/connect`
 - `POST /api/settings/device-sync/connections/:connectionId/disconnect`
 
-The browser should see provider label, display name, status, scopes, last webhook time, and local-sync-needed indicators. It should never see raw provider tokens, raw `externalAccountId` values, or raw hosted connection ids; settings-facing `id` values should be opaque handles.
+These are the only browser-facing wearable-management routes. Ordinary reads should come from durable hosted metadata in Postgres. Live Cloudflare runtime inspection belongs only on explicit operational routes.
 
 ### Hosted assertion-authenticated browser bridge routes
 
-These are browser-initiated but intentionally lower-level than the settings wearable surface.
-
-Browser auth for these routes should come from a trusted front-end/auth proxy that mints a fresh signed assertion per request. The signed payload should include the user claims plus `iat`, `exp`, `nonce`, `aud`, `method`, `path`, and `origin`, with a lifetime no longer than a few minutes. Sensitive mutations such as agent pairing should reject replayed assertions by consuming each nonce once server-side.
-
 - `POST /api/device-sync/agents/pair`
 
-### Hosted local-agent routes
+These are browser-initiated but lower-level than the settings surface. They must use short-lived signed assertions with replay protection.
 
-Authenticated by a local-agent credential, not by browser cookies.
+### Hosted local-agent routes
 
 - `GET /api/device-sync/agent/signals?after=<cursor>`
 - `POST /api/device-sync/agent/connections/:connectionId/export-token-bundle`
 - `POST /api/device-sync/agent/connections/:connectionId/refresh-token-bundle`
 - `POST /api/device-sync/agent/session/revoke`
-- `POST /api/device-sync/agent/signals/ack` (optional if you keep cursor-only semantics)
+- `POST /api/device-sync/agent/signals/ack`
 - `POST /api/device-sync/agent/connections/:connectionId/local-heartbeat`
+
+These are authenticated by local-agent credentials, not browser cookies.
 
 ### Hosted internal runner/control routes
 
-Authenticated by signed server-to-server control traffic that is never exposed to the browser.
+- `GET|POST /internal/users/:userId/device-sync/runtime` on the Cloudflare worker
+- `PUT /internal/users/:userId/device-sync/runtime/snapshot` on the Cloudflare worker
+- `POST /api/internal/device-sync/providers/:provider/connect-link` on `apps/web`
 
-- `GET|POST /internal/users/:userId/device-sync/runtime` on the Cloudflare worker for canonical runtime reads and token/status apply operations
-- `PUT /internal/users/:userId/device-sync/runtime/snapshot` on the Cloudflare worker for metadata-only snapshot merges from `apps/web`
-- `POST /api/internal/device-sync/providers/:provider/connect-link` on `apps/web` for short-lived hosted wearable OAuth links
+These routes are authenticated by signed server-to-server traffic that never reaches the browser. They let Cloudflare remain the owner of decryptable token escrow while `apps/web` drives OAuth, export/refresh, disconnect, and short-lived connect-link issuance.
 
-These routes let Cloudflare remain the canonical owner of decryptable device-sync token escrow while `apps/web` seeds metadata, drives OAuth/export/refresh/disconnect flows, and mints short-lived connect links without exposing broad hosted-web credentials inside the runner child.
+## Token strategy
 
-Current hosted agent-session behavior:
-- `POST /api/device-sync/agents/pair` creates a 24-hour bearer session.
-- Agent bearer lookup fails closed when the session is expired or revoked.
-- `export-token-bundle` and `refresh-token-bundle` both return a replacement bearer in `agentSession.bearerToken` plus the new session expiry.
-- The previous bearer is revoked immediately when export/refresh rotates the session.
-- `POST /api/device-sync/agent/session/revoke` lets the local agent explicitly invalidate its current bearer.
+The current hosted token strategy is:
 
-## What should move out of `device-syncd`
+1. Cloudflare runtime storage keeps encrypted token bundles durably under the user root key.
+2. The local agent exports a token bundle when needed, caches it locally, and persists the replacement agent bearer from the response.
+3. The local data plane fetches provider data directly until access-token refresh or bearer renewal is needed.
+4. When refresh or renewal is needed, the local agent calls the hosted refresh endpoint with its latest bearer.
+5. Hosted web refreshes provider tokens atomically, writes the updated token bundle into Cloudflare, and returns the next token bundle plus next agent bearer session.
+6. The local agent discards the prior bearer immediately and continues syncing locally.
 
-Move to the hosted control plane in hosted mode:
-- public OAuth callback routes
-- public webhook routes
-- OAuth session persistence
-- per-user provider connection ownership mapping through blind indexes
-- Cloudflare-owned encrypted token escrow plus signed runtime read/apply routes
-- webhook dedupe traces
-- pending-sync mailbox/signals for the local app
-- provider webhook subscription management
-- settings-facing connect/disconnect metadata surface
-- optional token-refresh helper if client secrets remain hosted-only
+This keeps provider payload fetches local without proxying normal health-data traffic through hosted services.
 
-## What should stay local
-
-Keep local-only:
-- actual WHOOP/Oura health payload fetches where feasible
-- reconcile/backfill execution
-- local token cache
-- import scheduling tied to the vault
-- all normalization/import logic
-- all canonical vault writes
-- any local-only fallback mode where the operator tunnels callback URLs back to the local daemon
-
-## WHOOP and Oura specifics
+## Provider split
 
 ### WHOOP
 
-Recommended hosted responsibilities:
+Hosted responsibilities:
+
 - OAuth callback
 - webhook verification and dedupe
 - blind-index account mapping
 - Cloudflare-owned token escrow
 - optional refresh helper
 
-Recommended local responsibilities:
-- fetch WHOOP collections and resources directly from WHOOP APIs
-- import delete/resource changes into the vault based on hosted webhook hints
+Local responsibilities:
 
-WHOOP refresh-token rotation means only one side should be authoritative for refreshes at a time. If the hosted app owns the client secret, the safest design is a hosted refresh endpoint plus local caching.
+- fetch WHOOP collections and resources directly
+- import delete and resource changes into the vault from hosted hints
 
 ### Oura
 
-Recommended hosted responsibilities:
+Hosted responsibilities:
+
 - OAuth callback
 - Cloudflare-owned token escrow
-- webhook subscription management if you enable Oura webhooks
+- webhook subscription management when Oura webhooks are enabled
 - optional refresh helper
 
-Recommended local responsibilities:
+Local responsibilities:
+
 - polling-first reconcile against recent windows
-- optional use of hosted webhook signals when Oura webhook subscriptions are configured
+- optional use of hosted webhook signals
 - local imports into the vault
 
-Oura works fine in a polling-first mode, so hosted webhook support for Oura is helpful but not required for basic correctness.
+## Local-only daemon contract
 
-## Can local remain the only place that fetches provider health data?
+`device-syncd` still requires its own local daemon env contract:
 
-Mostly yes, with two important caveats.
+- `DEVICE_SYNC_SECRET` is the daemon's local bootstrap and service secret
+- `DEVICE_SYNC_CONTROL_TOKEN` is the daemon's loopback control-plane bearer token
 
-### What can stay local
-- fetching WHOOP health collections/resources
-- fetching Oura health collections/resources
-- normalization/import into the local vault
+Those are local-daemon concerns. They are not the browser-facing hosted control-plane contract.
 
-### What still has to happen in the hosted app
-- OAuth authorization-code exchange
-- minimal provider identity lookup needed to map the provider account to the signed-in Murph user
-- webhook verification/receipt
-- webhook subscription management
-- token refresh assistance if the provider app client secret is kept server-side
-
-So the local app can remain the only **health-data** fetcher, but the hosted app still needs to perform some provider **control-plane** interactions.
-
-## Recommended token strategy
-
-If the hosted app owns the provider client secret, do **not** ship that client secret to local apps.
-
-Use this pattern instead:
-1. Cloudflare runtime storage keeps encrypted token bundles durably under the user root key
-2. local app exports a token bundle once, caches it locally, and persists the replacement agent bearer returned by the response
-3. local app fetches provider data directly until access-token refresh or bearer renewal is needed
-4. when refresh or renewal is needed, local app calls the hosted refresh endpoint with its latest bearer
-5. hosted web refreshes provider tokens atomically when needed, writes the updated token bundle into Cloudflare, and returns the new token bundle plus the next bearer session
-6. local app discards the prior bearer immediately and continues syncing locally without proxying provider payloads through hosted
-
-If the local agent lets its bearer expire, the hosted app rejects export/refresh/signals/heartbeat calls until the agent is paired again.
-
-That preserves a local-first data plane without requiring every sync request to transit the hosted app.
-
-## Current baseline note
-
-The hosted device-sync SQL hard-cut is currently treated as a pre-launch schema baseline. Until there is a live hosted Postgres deployment to preserve, the repo rewrites the initial Prisma migration to the current shape instead of layering separate cleanup migrations over a legacy hosted schema.
-
-## Sparse synchronization model
-
-To avoid constant hosted chatter:
-- local app polls the sparse typed `device_sync_signal` mailbox on startup, on manual sync, and on a modest timer
-- hosted app never proxies normal provider data payloads
-- hosted app is only consulted for control-plane events: pending signals, token export, token refresh, disconnect state, explicit session revoke, and bearer rotation/renewal through export or refresh
-
-## Implementation phases
-
-### Phase 1
-- extract reusable callback/webhook core from `device-syncd`
-- keep current local/tunneled flow working
-
-### Phase 2
-- build hosted control plane on Vercel using the shared ingress core and Postgres
-- add agent pairing and sparse token/signal APIs
-
-### Phase 3
-- let local `device-syncd` run as data plane only when a hosted control plane is configured
-- keep local public-ingress mode as an opt-in fallback for self-hosters and tunnel users
-
-## Recommendation summary
-
-The best split is:
-- **hosted Vercel app = integration control plane**
-- **local daemon = provider data plane + vault importer**
-- **Postgres = durable hosted integration/auth state only**
-- **shared callback/webhook logic = one reusable ingress layer, not duplicated between hosted and local modes**
-
-That preserves the local vault as the source of truth while making OAuth callbacks and provider webhooks production-friendly.
+The hosted Cloudflare runner currently still uses a device-sync codec secret internally when it hydrates token bundles inside the hosted runtime. That is separate from the local daemon control token and should not be documented as a browser or local-agent bearer.

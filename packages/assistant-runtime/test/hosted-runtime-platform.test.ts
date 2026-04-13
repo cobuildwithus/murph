@@ -10,6 +10,7 @@ import {
 } from "@murphai/runtime-state/node";
 
 import { normalizeHostedAssistantRuntimeConfig } from "../src/hosted-runtime/environment.ts";
+import { parseHostedRuntimeUsageRecordResponse } from "../src/hosted-runtime/platform.ts";
 import { exportHostedPendingAssistantUsage } from "../src/hosted-runtime/usage.ts";
 import type { HostedRuntimePlatform } from "../src/hosted-runtime/platform.ts";
 import { createHostedRuntimeWorkspace } from "./hosted-runtime-test-helpers.ts";
@@ -18,6 +19,46 @@ test("hosted runtime config fails closed when the platform is not injected", () 
   assert.throws(
     () => normalizeHostedAssistantRuntimeConfig(undefined, null),
     /platform must be injected/u,
+  );
+});
+
+test("hosted runtime usage parser accepts a finite count and string usage ids", () => {
+  assert.deepEqual(
+    parseHostedRuntimeUsageRecordResponse({
+      recorded: 2,
+      usageIds: ["usage_1", "usage_2"],
+    }),
+    {
+      recorded: 2,
+      usageIds: ["usage_1", "usage_2"],
+    },
+  );
+});
+
+test("hosted runtime usage parser rejects non-object payloads", () => {
+  assert.throws(
+    () => parseHostedRuntimeUsageRecordResponse(null),
+    /must be an object/u,
+  );
+});
+
+test("hosted runtime usage parser rejects non-finite recorded counts", () => {
+  assert.throws(
+    () => parseHostedRuntimeUsageRecordResponse({
+      recorded: Number.NaN,
+      usageIds: [],
+    }),
+    /recorded must be a finite number/u,
+  );
+});
+
+test("hosted runtime usage parser rejects non-string usage ids", () => {
+  assert.throws(
+    () => parseHostedRuntimeUsageRecordResponse({
+      recorded: 1,
+      usageIds: ["usage_1", 2],
+    }),
+    /usageIds must be a string array/u,
   );
 });
 

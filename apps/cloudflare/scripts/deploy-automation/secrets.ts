@@ -15,6 +15,7 @@ export const HOSTED_WORKER_REQUIRED_SECRET_NAMES = [
 const HOSTED_WORKER_OPTIONAL_SECRET_NAMES = [
   ...HOSTED_ASSISTANT_ALLOWED_API_KEY_ENV_NAMES,
   "BRAVE_API_KEY",
+  // Hosted device-sync still uses a codec secret for token-bundle hydration inside the runner.
   "DEVICE_SYNC_SECRET",
   "HOSTED_EMAIL_CLOUDFLARE_API_TOKEN",
   "HOSTED_EMAIL_SIGNING_SECRET",

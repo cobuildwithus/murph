@@ -208,7 +208,6 @@ describe("opaque storage path rotation", () => {
           eventsHandled: 1,
           summary: "ok",
         },
-        sideEffects: [],
         userId,
       },
     });
@@ -248,7 +247,6 @@ describe("opaque storage path rotation", () => {
         eventsHandled: 1,
         summary: "ok",
       },
-      sideEffects: [],
       userId,
     });
 

@@ -275,7 +275,7 @@ export function parseHostedExecutionDeviceSyncRuntimeApplyResponse(
     updates: requireArray(
       record.updates,
       "Hosted device-sync runtime apply response updates",
-    ).map((entry, index) => parseHostedExecutionDeviceSyncRuntimeApplyEntry(entry, index, appliedAt)),
+    ).map((entry, index) => parseHostedExecutionDeviceSyncRuntimeApplyEntry(entry, index)),
     userId: requireString(record.userId, "Hosted device-sync runtime apply response userId"),
   };
 }
@@ -484,7 +484,6 @@ function parseHostedExecutionDeviceSyncRuntimeConnectionSnapshot(
 function parseHostedExecutionDeviceSyncRuntimeApplyEntry(
   value: unknown,
   index: number,
-  appliedAt: string,
 ): HostedExecutionDeviceSyncRuntimeApplyResponse["updates"][number] {
   const record = requireObject(value, `Hosted device-sync runtime apply response updates[${index}]`);
   const status = requireString(
@@ -517,14 +516,7 @@ function parseHostedExecutionDeviceSyncRuntimeApplyEntry(
         record.connection,
         `Hosted device-sync runtime apply response updates[${index}].connection`,
       );
-  const writeUpdate = parseHostedExecutionDeviceSyncRuntimeWriteUpdate({
-    appliedAt,
-    connection,
-    rawWriteUpdate,
-    status,
-    tokenUpdate,
-    index,
-  });
+  const writeUpdate = parseHostedExecutionDeviceSyncRuntimeWriteUpdate(rawWriteUpdate, index);
 
   return {
     connection,
@@ -538,47 +530,27 @@ function parseHostedExecutionDeviceSyncRuntimeApplyEntry(
   };
 }
 
-function parseHostedExecutionDeviceSyncRuntimeWriteUpdate(input: {
-  appliedAt: string;
-  connection: HostedExecutionDeviceSyncRuntimeConnectionStateSnapshot | null;
-  rawWriteUpdate: unknown;
-  status: HostedExecutionDeviceSyncRuntimeApplyEntry["status"];
-  tokenUpdate: HostedExecutionDeviceSyncRuntimeApplyEntry["tokenUpdate"];
-  index: number;
-}): HostedExecutionDeviceSyncRuntimeApplyEntry["writeUpdate"] {
-  if (input.rawWriteUpdate !== undefined) {
-    const writeUpdate = requireString(
-      input.rawWriteUpdate,
-      `Hosted device-sync runtime apply response updates[${input.index}].writeUpdate`,
+function parseHostedExecutionDeviceSyncRuntimeWriteUpdate(
+  rawWriteUpdate: unknown,
+  index: number,
+): HostedExecutionDeviceSyncRuntimeApplyEntry["writeUpdate"] {
+  const writeUpdate = requireString(
+    rawWriteUpdate,
+    `Hosted device-sync runtime apply response updates[${index}].writeUpdate`,
+  );
+
+  if (
+    writeUpdate !== "applied"
+    && writeUpdate !== "missing"
+    && writeUpdate !== "skipped_version_mismatch"
+    && writeUpdate !== "unchanged"
+  ) {
+    throw new TypeError(
+      `Hosted device-sync runtime apply response updates[${index}].writeUpdate is invalid.`,
     );
-
-    if (
-      writeUpdate !== "applied"
-      && writeUpdate !== "missing"
-      && writeUpdate !== "skipped_version_mismatch"
-      && writeUpdate !== "unchanged"
-    ) {
-      throw new TypeError(
-        `Hosted device-sync runtime apply response updates[${input.index}].writeUpdate is invalid.`,
-      );
-    }
-
-    return writeUpdate;
   }
 
-  if (input.status === "missing") {
-    return "missing";
-  }
-
-  if (input.tokenUpdate === "skipped_version_mismatch") {
-    return "skipped_version_mismatch";
-  }
-
-  if (input.status === "created") {
-    return "applied";
-  }
-
-  return input.connection?.updatedAt === input.appliedAt ? "applied" : "unchanged";
+  return writeUpdate;
 }
 
 function parseHostedExecutionDeviceSyncRuntimeConnection(

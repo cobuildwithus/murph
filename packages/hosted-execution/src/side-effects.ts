@@ -356,14 +356,11 @@ function requireHostedAssistantDeliveryEffectId(
   record: Record<string, unknown>,
   label: string,
 ): string {
-  const effectId = requireString(record.effectId, `${label} effectId`);
-  const legacyIntentId = readOptionalString(record.intentId, `${label} intentId`);
-
-  if (legacyIntentId !== null && legacyIntentId !== effectId) {
-    throw new TypeError(`${label} intentId must match effectId when present.`);
+  if (record.intentId !== undefined) {
+    throw new TypeError(`${label} intentId is no longer supported.`);
   }
 
-  return effectId;
+  return requireString(record.effectId, `${label} effectId`);
 }
 
 function requireNonNegativeInteger(value: unknown, label: string): number {
@@ -481,14 +478,6 @@ function parseHostedAssistantDeliveryReceipt(
       `${label}.targetKind`,
     ),
   };
-}
-
-function readOptionalString(value: unknown, label: string): string | null {
-  if (value === undefined || value === null) {
-    return null;
-  }
-
-  return requireString(value, label);
 }
 
 function requireNullableString(value: unknown, label: string): string | null {

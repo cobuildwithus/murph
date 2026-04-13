@@ -55,7 +55,6 @@ export interface HostedAssistantRuntimeJobRequest extends HostedExecutionRunnerR
     committedResult: {
       result: HostedExecutionRunnerResult["result"];
       assistantDeliveryEffects: HostedAssistantDeliveryEffect[];
-      sideEffects?: HostedAssistantDeliveryEffect[];
     };
   } | null;
 }
@@ -92,7 +91,6 @@ export interface HostedCommittedExecutionState {
   committedGatewayProjectionSnapshot: GatewayProjectionSnapshot;
   committedResult: HostedExecutionRunnerResult;
   committedAssistantDeliveryEffects: HostedAssistantDeliveryEffect[];
-  committedSideEffects?: HostedAssistantDeliveryEffect[];
 }
 
 export interface HostedAssistantRuntimeJobResult {

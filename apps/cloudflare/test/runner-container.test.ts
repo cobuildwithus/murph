@@ -378,7 +378,6 @@ describe("RunnerContainer", () => {
             eventsHandled: 1,
             summary: "already committed",
           },
-          sideEffects: [],
         },
       },
       run: {
@@ -419,7 +418,6 @@ describe("RunnerContainer", () => {
           resume: {
             committedResult: {
               assistantDeliveryEffects: [],
-              sideEffects: [],
               result: {
                 eventsHandled: 1,
                 summary: "already committed",

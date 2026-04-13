@@ -129,7 +129,6 @@ const committedExecution: HostedCommittedExecutionState = {
     },
   },
   committedAssistantDeliveryEffects: deliveryEffects,
-  committedSideEffects: deliveryEffects,
 };
 const finalResult: HostedAssistantRuntimeJobResult = {
   finalGatewayProjectionSnapshot: {
@@ -324,7 +323,7 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
       effectsPort: expect.any(Object),
       gatewayProjectionSnapshot: committedExecution.committedGatewayProjectionSnapshot,
       result: committedExecution.committedResult,
-      sideEffects: committedExecution.committedSideEffects,
+      assistantDeliveryEffects: committedExecution.committedAssistantDeliveryEffects,
     });
     expect(mocks.completeHostedExecutionAfterCommit).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -571,7 +570,6 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
               assistantDeliveryEffects:
                 committedExecution.committedAssistantDeliveryEffects,
               result: committedExecution.committedResult.result,
-              sideEffects: committedExecution.committedSideEffects,
             },
           },
         },
@@ -869,7 +867,6 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
               assistantDeliveryEffects:
                 committedExecution.committedAssistantDeliveryEffects,
               result: committedExecution.committedResult.result,
-              sideEffects: committedExecution.committedSideEffects,
             },
           },
         },

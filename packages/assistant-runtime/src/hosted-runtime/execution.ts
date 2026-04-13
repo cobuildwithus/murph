@@ -23,8 +23,8 @@ import { exportGatewayProjectionSnapshotLocal } from "@murphai/gateway-local";
 import { reconcileHostedVerifiedEmailSelfTarget } from "../hosted-email-route.ts";
 import { createHostedArtifactUploadSink } from "./artifacts.ts";
 import {
-  collectHostedExecutionSideEffects,
-  drainHostedCommittedSideEffectsAfterCommit,
+  collectHostedAssistantDeliverySideEffects,
+  drainHostedCommittedAssistantDeliveriesAfterCommit,
 } from "./callbacks.ts";
 import { executeHostedDispatchEvent } from "./events.ts";
 import { runHostedMaintenanceLoop } from "./maintenance.ts";
@@ -92,7 +92,7 @@ export async function executeHostedDispatchForCommit(input: {
     }),
     vaultRoot: input.restored.vaultRoot,
   });
-  const committedAssistantDeliveryEffects = await collectHostedExecutionSideEffects(
+  const committedAssistantDeliveryEffects = await collectHostedAssistantDeliverySideEffects(
     input.restored.vaultRoot,
   );
   const committedGatewayProjectionSnapshot = await exportGatewayProjectionSnapshotLocal(
@@ -116,7 +116,6 @@ export async function executeHostedDispatchForCommit(input: {
       },
     },
     committedAssistantDeliveryEffects,
-    committedSideEffects: committedAssistantDeliveryEffects,
   };
 }
 
@@ -139,13 +138,11 @@ export async function completeHostedExecutionAfterCommit(input: {
     phase: "side-effects.draining",
     run: input.run ?? null,
   });
-  await drainHostedCommittedSideEffectsAfterCommit({
+  await drainHostedCommittedAssistantDeliveriesAfterCommit({
     commit: input.commit,
     dispatch: input.dispatch,
     effectsPort: input.runtime.platform.effectsPort,
-    sideEffects:
-      input.committedExecution.committedSideEffects
-      ?? input.committedExecution.committedAssistantDeliveryEffects,
+    assistantDeliveryEffects: input.committedExecution.committedAssistantDeliveryEffects,
     vaultRoot: input.restored.vaultRoot,
   });
   await exportHostedPendingAssistantUsage({

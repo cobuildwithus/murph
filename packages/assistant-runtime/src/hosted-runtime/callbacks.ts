@@ -36,8 +36,7 @@ export function resumeHostedCommittedExecution(
   request: HostedAssistantRuntimeJobRequest,
 ): HostedCommittedExecutionState {
   const committedAssistantDeliveryEffects = parseHostedAssistantDeliveryEffects(
-    request.resume!.committedResult.assistantDeliveryEffects
-      ?? request.resume!.committedResult.sideEffects,
+    request.resume!.committedResult.assistantDeliveryEffects,
   );
 
   return {
@@ -53,7 +52,6 @@ export function resumeHostedCommittedExecution(
       result: request.resume!.committedResult.result,
     },
     committedAssistantDeliveryEffects,
-    committedSideEffects: committedAssistantDeliveryEffects,
   };
 }
 
@@ -63,24 +61,20 @@ export async function commitHostedExecutionResult(input: {
   effectsPort: HostedRuntimeEffectsPort;
   gatewayProjectionSnapshot?: GatewayProjectionSnapshot | null;
   result: HostedExecutionRunnerResult;
-  assistantDeliveryEffects?: HostedAssistantDeliveryEffect[];
-  sideEffects?: HostedAssistantDeliveryEffect[];
+  assistantDeliveryEffects: HostedAssistantDeliveryEffect[];
 }): Promise<void> {
   if (!input.commit) {
     return;
   }
 
-  const assistantDeliveryEffects = input.assistantDeliveryEffects ?? input.sideEffects ?? [];
-
   try {
     await input.effectsPort.commit({
       eventId: input.dispatch.eventId,
       payload: {
-        assistantDeliveryEffects,
+        assistantDeliveryEffects: input.assistantDeliveryEffects,
         currentBundleRef: input.commit.bundleRef,
         gatewayProjectionSnapshot: input.gatewayProjectionSnapshot ?? null,
         ...input.result,
-        sideEffects: assistantDeliveryEffects,
       },
     });
   } catch (error) {
@@ -110,19 +104,14 @@ export async function collectHostedAssistantDeliverySideEffects(
     );
 }
 
-export const collectHostedExecutionSideEffects = collectHostedAssistantDeliverySideEffects;
-
 export async function drainHostedCommittedAssistantDeliveriesAfterCommit(input: {
   commit: HostedExecutionCommitCallback | null;
   dispatch: HostedExecutionDispatchRequest;
   effectsPort: HostedRuntimeEffectsPort;
-  assistantDeliveryEffects?: HostedAssistantDeliveryEffect[];
-  sideEffects?: HostedAssistantDeliveryEffect[];
+  assistantDeliveryEffects: HostedAssistantDeliveryEffect[];
   vaultRoot: string;
 }): Promise<void> {
-  const assistantDeliveryEffects = input.assistantDeliveryEffects ?? input.sideEffects ?? [];
-
-  for (const assistantDeliveryEffect of assistantDeliveryEffects) {
+  for (const assistantDeliveryEffect of input.assistantDeliveryEffects) {
     await dispatchHostedCommittedAssistantDelivery({
       commit: input.commit,
       effectsPort: input.effectsPort,
@@ -132,9 +121,6 @@ export async function drainHostedCommittedAssistantDeliveriesAfterCommit(input: 
     });
   }
 }
-
-export const drainHostedCommittedSideEffectsAfterCommit =
-  drainHostedCommittedAssistantDeliveriesAfterCommit;
 
 async function dispatchHostedCommittedAssistantDelivery(input: {
   commit: HostedExecutionCommitCallback;
