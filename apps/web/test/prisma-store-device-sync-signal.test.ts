@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import { buildHostedProviderAccountBlindIndex } from "@/src/lib/device-sync/crypto";
 import { PrismaDeviceSyncControlPlaneStore } from "@/src/lib/device-sync/prisma-store";
 
+const MINIMIZED_HOSTED_WEBHOOK_TRACE_ACCOUNT_SENTINEL = "_minimized_";
+
 type MutableSignal = {
   id: number;
   userId: string;
@@ -366,7 +368,7 @@ describe("PrismaDeviceSyncControlPlaneStore webhook traces", () => {
 
     expect(traces.get("oura:trace-raced")).toMatchObject({
       status: "processing",
-      providerAccountBlindIndex: buildTestBlindIndex("oura", "acct-raced"),
+      providerAccountBlindIndex: MINIMIZED_HOSTED_WEBHOOK_TRACE_ACCOUNT_SENTINEL,
     });
   });
 });

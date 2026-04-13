@@ -119,6 +119,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
     if (routeDecision.kind === "redirect_to_home") {
       return buildConversationHomeRedirectResponse({
         chatId: summary.chatId,
+        homeRecipientPhone: routeDecision.homeRecipientPhone,
         memberId: existingMember.id,
         messageId: summary.messageId,
         sourceEventId: input.event.event_id,
@@ -272,6 +273,7 @@ function buildSignupLinkResponse(input: {
 
 function buildConversationHomeRedirectResponse(input: {
   chatId: string;
+  homeRecipientPhone: string;
   memberId: string;
   messageId: string;
   sourceEventId: string;
@@ -280,7 +282,9 @@ function buildConversationHomeRedirectResponse(input: {
     desiredSideEffects: [
       createHostedWebhookLinqMessageSideEffect({
         chatId: input.chatId,
-        inviteId: null,
+        // Keep the current home line as an operational fallback so deferred
+        // receipt sends do not depend on routing still being present later.
+        homeRecipientPhone: input.homeRecipientPhone,
         memberId: input.memberId,
         replyToMessageId: input.messageId,
         sourceEventId: input.sourceEventId,
@@ -303,7 +307,6 @@ function buildQuotaReplyResponse(input: {
     desiredSideEffects: [
       createHostedWebhookLinqMessageSideEffect({
         chatId: input.chatId,
-        inviteId: null,
         replyToMessageId: input.messageId,
         sourceEventId: input.sourceEventId,
         template: "daily_quota",

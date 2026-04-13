@@ -15,6 +15,9 @@ import {
 import { maybeIssueHostedRevnetForStripeInvoice } from "./stripe-revnet-issuance";
 import type {
   HostedWebhookDispatchEnqueueInput,
+  HostedWebhookLinqConversationHomeRedirectPayload,
+  HostedWebhookLinqInviteMessagePayload,
+  HostedWebhookLinqMessagePayload,
   HostedWebhookReceiptPersistenceClient,
   HostedWebhookReceiptHandlers,
   HostedWebhookSideEffect,
@@ -29,7 +32,7 @@ export function createHostedWebhookReceiptHandlers(): HostedWebhookReceiptHandle
       effect: HostedWebhookSideEffect;
       prisma: HostedWebhookReceiptPersistenceClient;
     }) => {
-      if (effect.kind === "linq_message_send" && effect.payload.inviteId) {
+      if (effect.kind === "linq_message_send" && isHostedInviteLinqMessagePayload(effect.payload)) {
         await markHostedInviteSentBestEffort(effect.payload.inviteId, prisma);
       }
     },
@@ -122,49 +125,71 @@ async function buildHostedLinqSideEffectMessage(
   effect: Extract<HostedWebhookSideEffect, { kind: "linq_message_send" }>,
   prisma: HostedWebhookReceiptPersistenceClient,
 ): Promise<string> {
-  if (effect.payload.template === "daily_quota") {
-    return buildHostedDailyQuotaReply();
-  }
+  switch (effect.payload.template) {
+    case "daily_quota":
+      return buildHostedDailyQuotaReply();
+    case "conversation_home_redirect": {
+      const homeRecipientPhone = await resolveHostedHomeRecipientPhone(effect.payload, prisma);
 
-  if (effect.payload.template === "conversation_home_redirect") {
-    const homeRecipientPhone = await resolveHostedHomeRecipientPhone(effect, prisma);
+      if (!homeRecipientPhone) {
+        throw hostedOnboardingError({
+          code: "LINQ_HOME_PHONE_REQUIRED",
+          message: `Hosted webhook side effect ${effect.effectId} requires a home recipient phone.`,
+          httpStatus: 500,
+          retryable: false,
+        });
+      }
 
-    if (!homeRecipientPhone) {
-      throw hostedOnboardingError({
-        code: "LINQ_HOME_PHONE_REQUIRED",
-        message: `Hosted webhook side effect ${effect.effectId} requires a home recipient phone.`,
-        httpStatus: 500,
-        retryable: false,
+      return buildHostedLinqConversationHomeRedirectReply({
+        homeRecipientPhone,
       });
     }
+    case "invite_signin":
+    case "invite_signup":
+      return buildHostedInviteSideEffectMessage({
+        effectId: effect.effectId,
+        payload: effect.payload,
+        prisma,
+      });
+  }
+}
 
-    return buildHostedLinqConversationHomeRedirectReply({
-      homeRecipientPhone,
+async function resolveHostedHomeRecipientPhone(
+  payload: HostedWebhookLinqConversationHomeRedirectPayload,
+  prisma: HostedWebhookReceiptPersistenceClient,
+): Promise<string | null> {
+  if (payload.memberId) {
+    const routing = await readHostedMemberRoutingState({
+      memberId: payload.memberId,
+      prisma,
     });
+
+    if (routing?.linqRecipientPhone) {
+      return routing.linqRecipientPhone;
+    }
   }
 
-  if (!effect.payload.inviteId) {
-    throw hostedOnboardingError({
-      code: "HOSTED_INVITE_REQUIRED",
-      message: `Hosted webhook side effect ${effect.effectId} requires an invite id.`,
-      httpStatus: 500,
-      retryable: false,
-    });
-  }
+  return payload.homeRecipientPhone;
+}
 
+async function buildHostedInviteSideEffectMessage(input: {
+  effectId: string;
+  payload: HostedWebhookLinqInviteMessagePayload;
+  prisma: HostedWebhookReceiptPersistenceClient;
+}): Promise<string> {
   const inviteLookup =
-    "findUnique" in prisma.hostedInvite && typeof prisma.hostedInvite.findUnique === "function"
-      ? prisma.hostedInvite.findUnique({
+    "findUnique" in input.prisma.hostedInvite && typeof input.prisma.hostedInvite.findUnique === "function"
+      ? input.prisma.hostedInvite.findUnique({
           where: {
-            id: effect.payload.inviteId,
+            id: input.payload.inviteId,
           },
           select: {
             inviteCode: true,
           },
         })
-      : prisma.hostedInvite.findFirst({
+      : input.prisma.hostedInvite.findFirst({
           where: {
-            id: effect.payload.inviteId,
+            id: input.payload.inviteId,
           },
           select: {
             inviteCode: true,
@@ -175,34 +200,22 @@ async function buildHostedLinqSideEffectMessage(
   if (!invite) {
     throw hostedOnboardingError({
       code: "HOSTED_INVITE_NOT_FOUND",
-      message: `Hosted invite ${effect.payload.inviteId} was not found for webhook side effect ${effect.effectId}.`,
+      message: `Hosted invite ${input.payload.inviteId} was not found for webhook side effect ${input.effectId}.`,
       httpStatus: 500,
       retryable: false,
     });
   }
 
   return buildHostedInviteReply({
-    activeSubscription: effect.payload.template === "invite_signin",
+    activeSubscription: input.payload.template === "invite_signin",
     joinUrl: buildHostedInviteUrl(invite.inviteCode),
   });
 }
 
-async function resolveHostedHomeRecipientPhone(
-  effect: Extract<HostedWebhookSideEffect, { kind: "linq_message_send" }>,
-  prisma: HostedWebhookReceiptPersistenceClient,
-): Promise<string | null> {
-  if (effect.payload.memberId) {
-    const routing = await readHostedMemberRoutingState({
-      memberId: effect.payload.memberId,
-      prisma,
-    });
-
-    if (routing?.linqRecipientPhone) {
-      return routing.linqRecipientPhone;
-    }
-  }
-
-  return effect.payload.homeRecipientPhone;
+function isHostedInviteLinqMessagePayload(
+  payload: HostedWebhookLinqMessagePayload,
+): payload is HostedWebhookLinqInviteMessagePayload {
+  return payload.template === "invite_signin" || payload.template === "invite_signup";
 }
 
 async function markHostedInviteSentBestEffort(

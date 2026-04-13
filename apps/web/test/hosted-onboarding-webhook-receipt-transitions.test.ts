@@ -276,6 +276,9 @@ describe("hosted webhook receipt transitions", () => {
       sourceEventId: "evt_123",
       template: "invite_signup",
     });
+    if (!("inviteId" in sideEffect.payload)) {
+      throw new Error("Expected an invite-backed Linq side effect.");
+    }
     const persistedState = serializeHostedWebhookReceiptStateRecords(buildReceiptState());
 
     try {

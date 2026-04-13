@@ -232,16 +232,30 @@ function serializeHostedWebhookSideEffectPayload(
 function serializeHostedWebhookLinqMessagePayload(
   payload: HostedWebhookLinqMessageSideEffect["payload"],
 ): Prisma.InputJsonValue {
-  const legacyHomeRecipientPhone = payload.memberId ? null : payload.homeRecipientPhone;
-
-  return {
-    chatId: payload.chatId,
-    ...(legacyHomeRecipientPhone ? { homeRecipientPhone: legacyHomeRecipientPhone } : {}),
-    ...(payload.inviteId ? { inviteId: payload.inviteId } : {}),
-    ...(payload.memberId ? { memberId: payload.memberId } : {}),
-    ...(payload.replyToMessageId ? { replyToMessageId: payload.replyToMessageId } : {}),
-    template: payload.template,
-  } as Prisma.InputJsonValue;
+  switch (payload.template) {
+    case "conversation_home_redirect":
+      return {
+        chatId: payload.chatId,
+        ...(payload.homeRecipientPhone ? { homeRecipientPhone: payload.homeRecipientPhone } : {}),
+        ...(payload.memberId ? { memberId: payload.memberId } : {}),
+        ...(payload.replyToMessageId ? { replyToMessageId: payload.replyToMessageId } : {}),
+        template: payload.template,
+      } as Prisma.InputJsonValue;
+    case "daily_quota":
+      return {
+        chatId: payload.chatId,
+        ...(payload.replyToMessageId ? { replyToMessageId: payload.replyToMessageId } : {}),
+        template: payload.template,
+      } as Prisma.InputJsonValue;
+    case "invite_signin":
+    case "invite_signup":
+      return {
+        chatId: payload.chatId,
+        inviteId: payload.inviteId,
+        ...(payload.replyToMessageId ? { replyToMessageId: payload.replyToMessageId } : {}),
+        template: payload.template,
+      } as Prisma.InputJsonValue;
+  }
 }
 
 function serializeHostedWebhookSideEffectResult(
@@ -276,14 +290,39 @@ function readHostedWebhookLinqMessagePayload(
     return null;
   }
 
-  return {
-    chatId,
-    homeRecipientPhone: readNullableString(record?.homeRecipientPhone),
-    inviteId: readNullableString(record?.inviteId),
-    memberId: readNullableString(record?.memberId),
-    replyToMessageId: readNullableString(record?.replyToMessageId),
-    template,
-  };
+  const replyToMessageId = readNullableString(record?.replyToMessageId);
+
+  switch (template) {
+    case "conversation_home_redirect":
+      return {
+        chatId,
+        homeRecipientPhone: readNullableString(record?.homeRecipientPhone),
+        memberId: readNullableString(record?.memberId),
+        replyToMessageId,
+        template,
+      };
+    case "daily_quota":
+      return {
+        chatId,
+        replyToMessageId,
+        template,
+      };
+    case "invite_signin":
+    case "invite_signup": {
+      const inviteId = readRequiredString(record?.inviteId);
+
+      if (!inviteId) {
+        return null;
+      }
+
+      return {
+        chatId,
+        inviteId,
+        replyToMessageId,
+        template,
+      };
+    }
+  }
 }
 
 function readHostedWebhookLinqMessageResult(

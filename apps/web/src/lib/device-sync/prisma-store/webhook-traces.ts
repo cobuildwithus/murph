@@ -5,26 +5,24 @@ import type {
   DeviceSyncWebhookTraceClaimResult,
 } from "@murphai/device-syncd/public-ingress";
 
-import { buildHostedProviderAccountBlindIndex } from "../crypto";
 import { isUniqueViolation } from "./prisma-errors";
 import type { HostedPrismaTransactionClient } from "./types";
 
 const HOSTED_PROCESSED_WEBHOOK_TRACE_RETENTION_DAYS = 30;
+// Hosted webhook dedupe is keyed by provider + trace id, so trace rows do not
+// need a user-linked provider-account blind index.
+const MINIMIZED_HOSTED_WEBHOOK_TRACE_ACCOUNT_SENTINEL = "_minimized_";
 
 export class PrismaHostedWebhookTraceStore {
   readonly prisma: PrismaClient;
-  private readonly providerAccountBlindIndexKey: Buffer | null;
 
-  constructor(input: { prisma: PrismaClient; providerAccountBlindIndexKey?: Buffer | null }) {
+  constructor(input: { prisma: PrismaClient }) {
     this.prisma = input.prisma;
-    this.providerAccountBlindIndexKey = input.providerAccountBlindIndexKey ?? null;
   }
 
   async claimWebhookTrace(input: ClaimDeviceSyncWebhookTraceInput): Promise<DeviceSyncWebhookTraceClaimResult> {
     const claimedAt = new Date(input.receivedAt);
     const processingExpiresAt = new Date(input.processingExpiresAt);
-    const providerAccountBlindIndex = this.buildProviderAccountBlindIndex(input.provider, input.externalAccountId);
-
     await this.pruneProcessedWebhookTraces(this.prisma, new Date());
 
     for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -33,7 +31,7 @@ export class PrismaHostedWebhookTraceStore {
           data: {
             provider: input.provider,
             traceId: input.traceId,
-            providerAccountBlindIndex,
+            providerAccountBlindIndex: MINIMIZED_HOSTED_WEBHOOK_TRACE_ACCOUNT_SENTINEL,
             eventType: input.eventType,
             processingExpiresAt,
             receivedAt: claimedAt,
@@ -89,7 +87,7 @@ export class PrismaHostedWebhookTraceStore {
           ],
         },
         data: {
-          providerAccountBlindIndex,
+          providerAccountBlindIndex: MINIMIZED_HOSTED_WEBHOOK_TRACE_ACCOUNT_SENTINEL,
           eventType: input.eventType,
           processingExpiresAt,
           receivedAt: claimedAt,
@@ -134,18 +132,6 @@ export class PrismaHostedWebhookTraceStore {
     });
 
     await this.pruneProcessedWebhookTraces(this.prisma, new Date());
-  }
-
-  private buildProviderAccountBlindIndex(provider: string, externalAccountId: string): string {
-    if (!this.providerAccountBlindIndexKey) {
-      throw new TypeError("Hosted device-sync provider account blind-index key is required.");
-    }
-
-    return buildHostedProviderAccountBlindIndex({
-      key: this.providerAccountBlindIndexKey,
-      provider,
-      externalAccountId,
-    });
   }
 
   private async pruneProcessedWebhookTraces(
