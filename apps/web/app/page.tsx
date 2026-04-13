@@ -11,14 +11,12 @@ import { PrivacySection } from "@/src/components/homepage/privacy-section";
 import { QuickStartSection } from "@/src/components/homepage/quick-start-section";
 import { TrustStrip } from "@/src/components/homepage/trust-strip";
 import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
-import {
-  resolveHostedInstallScriptUrl,
-} from "@/src/lib/hosted-onboarding/landing";
+import { resolveHostedInstallScriptUrl } from "@/src/lib/hosted-onboarding/landing";
 
 export const metadata: Metadata = {
   title: "Murph — Health assistant that fits your real life",
   description:
-    "Track meals, sync wearables, spot patterns, and get answers about your health via Telegram, iMessage, or email.",
+    "Track meals, sync wearables, spot patterns, and get answers about your health via iMessage, Telegram, or email.",
 };
 
 export default async function HomePage() {
