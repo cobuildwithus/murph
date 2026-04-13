@@ -20,6 +20,12 @@ export interface JsonErrorMapping {
 
 export type JsonErrorMatcher = (error: unknown) => JsonErrorMapping | null;
 export type JsonErrorLogDetailProvider = (error: unknown) => Record<string, unknown> | null;
+export type JsonLogStringSanitizer = (
+  value: string | null | undefined,
+  maxLength?: number,
+) => string | null;
+
+const JSON_LOG_STRING_MAX_LENGTH = 240;
 
 interface JsonErrorResponseOptions {
   defaultHeaders?: HeadersInit;
@@ -27,6 +33,7 @@ interface JsonErrorResponseOptions {
   internalMessage: string;
   logMessage: string;
   logDetails?: JsonErrorLogDetailProvider;
+  sanitizeLogString?: JsonLogStringSanitizer;
   warnLogDetails?: JsonErrorLogDetailProvider;
   matchers?: JsonErrorMatcher[];
 }
@@ -36,6 +43,7 @@ export interface JsonRouteHelpersOptions {
   internalMessage: string;
   logMessage: string;
   logDetails?: JsonErrorLogDetailProvider;
+  sanitizeLogString?: JsonLogStringSanitizer;
   warnLogDetails?: JsonErrorLogDetailProvider;
   matchers?: JsonErrorMatcher[];
 }
@@ -226,6 +234,7 @@ export function createJsonRouteHelpers(
       internalMessage: options.internalMessage,
       logMessage: options.logMessage,
       logDetails: options.logDetails,
+      sanitizeLogString: options.sanitizeLogString,
       warnLogDetails: options.warnLogDetails,
       matchers: options.matchers,
     });
@@ -324,13 +333,15 @@ function logJsonError(
   options: JsonErrorResponseOptions,
 ): void {
   const log = level === "warn" ? console.warn : console.error;
+  const defaultDetails = describeErrorForLog(error, options.sanitizeLogString);
+  const customDetails =
+    level === "error" ? (options.logDetails?.(error) ?? {}) : (options.warnLogDetails?.(error) ?? {});
 
   log(options.logMessage, {
     errorType: describeLoggedErrorType(error),
     internalMessage: options.internalMessage,
-    ...(level === "error"
-      ? (options.logDetails?.(error) ?? {})
-      : (options.warnLogDetails?.(error) ?? {})),
+    ...(defaultDetails ?? {}),
+    ...customDetails,
   });
 }
 
@@ -346,4 +357,130 @@ function describeLoggedErrorType(error: unknown): string {
   }
 
   return error === null ? "null" : typeof error;
+}
+
+export function sanitizeJsonLogString(
+  value: string | null | undefined,
+  maxLength = JSON_LOG_STRING_MAX_LENGTH,
+): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value
+    .trim()
+    .replace(/\s+/gu, " ")
+    .replace(
+      /(["']?(?:authorization|secret|token|password|cookie|set-cookie|api[-_]?key)["']?\s*[:=]\s*["']?)([^"',\s}]+)/giu,
+      "$1<redacted-secret>",
+    )
+    .replace(/\b(Basic|Bearer)\s+[A-Z0-9._~+/=-]+\b/giu, "$1 <redacted-secret>")
+    .replace(/\b(?:sk|pk|rk)_(?:live|test)_[A-Z0-9]+\b/giu, "<redacted-secret>")
+    .replace(/\bwhsec_[A-Z0-9]+\b/giu, "<redacted-secret>")
+    .replace(/\bfile:\/\/\S+/giu, "<redacted-path>")
+    .replace(/\bhttps?:\/\/\S+/giu, "<redacted-url>")
+    .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/giu, "<redacted-email>")
+    .replace(/\+\d[\d().\s-]{7,}\d/gu, "<redacted-phone>")
+    .replace(/(^|[\s(])\/[^\s)]+/gu, "$1<redacted-path>")
+    .replace(/\b[A-Z]:\\[^\s]+/gu, "<redacted-path>");
+
+  return normalized ? normalized.slice(0, maxLength) : null;
+}
+
+export function describeErrorForLog(
+  error: unknown,
+  sanitizeLogString: JsonLogStringSanitizer = sanitizeJsonLogString,
+): Record<string, unknown> | null {
+  if (error instanceof Error) {
+    const details: Record<string, unknown> = {};
+
+    assignSanitizedLogField(details, "errorMessage", error.message, sanitizeLogString);
+    assignErrorProperty(details, "errorCode", error, "code", sanitizeLogString);
+    assignErrorProperty(details, "errorCode", error, "errorCode", sanitizeLogString);
+    assignErrorProperty(details, "errorDigest", error, "digest", sanitizeLogString);
+    assignErrorProperty(details, "errorErrno", error, "errno", sanitizeLogString);
+    assignErrorProperty(details, "errorStatus", error, "status", sanitizeLogString);
+    assignErrorProperty(details, "errorStatusCode", error, "statusCode", sanitizeLogString);
+    assignErrorProperty(details, "errorSyscall", error, "syscall", sanitizeLogString);
+
+    const errorCause = error.cause;
+
+    if (errorCause !== undefined) {
+      details.errorCauseType = describeLoggedErrorType(errorCause);
+
+      if (errorCause instanceof Error) {
+        assignSanitizedLogField(
+          details,
+          "errorCauseMessage",
+          errorCause.message,
+          sanitizeLogString,
+        );
+      } else if (typeof errorCause === "string") {
+        assignSanitizedLogField(details, "errorCauseMessage", errorCause, sanitizeLogString);
+      }
+    }
+
+    return Object.keys(details).length > 0 ? details : null;
+  }
+
+  if (typeof error === "string") {
+    const errorValue = sanitizeLogString(error);
+    return errorValue ? { errorValue } : null;
+  }
+
+  if (typeof error === "number" || typeof error === "boolean") {
+    return { errorValue: error };
+  }
+
+  if (typeof error === "bigint") {
+    return { errorValue: error.toString() };
+  }
+
+  return null;
+}
+
+function assignErrorProperty(
+  target: Record<string, unknown>,
+  targetKey: string,
+  error: Error,
+  property: string,
+  sanitizeLogString: JsonLogStringSanitizer,
+): void {
+  if (targetKey in target) {
+    return;
+  }
+
+  const value = getErrorProperty(error, property);
+
+  if (typeof value === "number" || typeof value === "boolean") {
+    target[targetKey] = value;
+    return;
+  }
+
+  if (typeof value === "bigint") {
+    target[targetKey] = value.toString();
+    return;
+  }
+
+  if (typeof value === "string") {
+    assignSanitizedLogField(target, targetKey, value, sanitizeLogString);
+  }
+}
+
+function assignSanitizedLogField(
+  target: Record<string, unknown>,
+  key: string,
+  value: string | null | undefined,
+  sanitizeLogString: JsonLogStringSanitizer,
+): void {
+  const sanitizedValue = sanitizeLogString(value);
+
+  if (sanitizedValue) {
+    target[key] = sanitizedValue;
+  }
+}
+
+function getErrorProperty(error: Error, property: string): unknown {
+  const value = Reflect.get(error, property);
+  return value === error ? "[circular]" : value;
 }

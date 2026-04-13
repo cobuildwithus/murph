@@ -5,6 +5,7 @@ import {
   mapDomainJsonError,
   readOptionalJsonObject,
   readJsonObject,
+  sanitizeJsonLogString,
 } from "../http";
 import { isHostedWebConfigurationError } from "../hosted-web/encryption";
 import { isHostedOnboardingError } from "./errors";
@@ -55,16 +56,6 @@ function describeHostedOnboardingErrorForLog(error: unknown): Record<string, unk
   }
 
   return null;
-}
-
-function describeHostedOnboardingWarningErrorForLog(error: unknown): Record<string, unknown> | null {
-  if (!(error instanceof Error)) {
-    return null;
-  }
-
-  const errorMessage = sanitizeHostedOnboardingLogString(error.message);
-
-  return errorMessage ? { errorMessage } : null;
 }
 
 function describeHostedOnboardingPrismaErrorForLog(error: unknown): Record<string, unknown> | null {
@@ -165,24 +156,7 @@ export function sanitizeHostedOnboardingLogString(
   value: string | null | undefined,
   maxLength = HOSTED_ONBOARDING_LOG_STRING_MAX_LENGTH,
 ): string | null {
-  if (typeof value !== "string") {
-    return null;
-  }
-
-  const normalized = value
-    .trim()
-    .replace(/\s+/gu, " ")
-    .replace(/\b(Basic|Bearer)\s+[A-Z0-9._~+/=-]+\b/giu, "$1 <redacted-secret>")
-    .replace(/\b(?:sk|pk|rk)_(?:live|test)_[A-Z0-9]+\b/giu, "<redacted-secret>")
-    .replace(/\bwhsec_[A-Z0-9]+\b/giu, "<redacted-secret>")
-    .replace(/\bfile:\/\/\S+/giu, "<redacted-path>")
-    .replace(/\bhttps?:\/\/\S+/giu, "<redacted-url>")
-    .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/giu, "<redacted-email>")
-    .replace(/\+\d[\d().\s-]{7,}\d/gu, "<redacted-phone>")
-    .replace(/(^|[\s(])\/[^\s)]+/gu, "$1<redacted-path>")
-    .replace(/\b[A-Z]:\\[^\s]+/gu, "<redacted-path>");
-
-  return normalized ? normalized.slice(0, maxLength) : null;
+  return sanitizeJsonLogString(value, maxLength);
 }
 
 export function sanitizeHostedOnboardingPersistedErrorCode(
@@ -304,8 +278,8 @@ const hostedOnboardingJsonRouteHelpers = createJsonRouteHelpers({
   internalMessage: "Hosted onboarding route failed unexpectedly.",
   logMessage: "Hosted onboarding route failed.",
   logDetails: describeHostedOnboardingErrorForLog,
-  warnLogDetails: describeHostedOnboardingWarningErrorForLog,
   matchers: [mapHostedOnboardingError, mapHostedWebConfigurationError],
+  sanitizeLogString: sanitizeHostedOnboardingLogString,
 });
 
 export const jsonOk = hostedOnboardingJsonRouteHelpers.jsonOk;

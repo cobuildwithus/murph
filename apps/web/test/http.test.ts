@@ -140,6 +140,7 @@ describe("json route helper factory", () => {
     });
     expect(errorSpy).toHaveBeenCalledWith("route failed", {
       errorCode: "E_DEMO",
+      errorMessage: "boom",
       errorMeta: {
         operation: "send-code",
       },
@@ -148,7 +149,7 @@ describe("json route helper factory", () => {
     });
   });
 
-  it("does not attach optional log details to warning-level client errors", async () => {
+  it("includes the shared sanitized summary for warning-level client errors without reusing error-only details", async () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     const helpers = httpModule.createJsonRouteHelpers({
       internalMessage: "route failed unexpectedly",
@@ -168,6 +169,7 @@ describe("json route helper factory", () => {
       },
     });
     expect(warnSpy).toHaveBeenCalledWith("route failed", {
+      errorMessage: "bad json",
       errorType: "SyntaxError",
       internalMessage: "route failed unexpectedly",
     });
@@ -181,7 +183,7 @@ describe("json route helper factory", () => {
       warnLogDetails: (error) =>
         error instanceof TypeError
           ? {
-              errorMessage: "request body must be an object",
+              errorHint: "request body must be an object",
             }
           : null,
     });
@@ -196,7 +198,43 @@ describe("json route helper factory", () => {
       },
     });
     expect(warnSpy).toHaveBeenCalledWith("route failed", {
-      errorMessage: "request body must be an object",
+      errorHint: "request body must be an object",
+      errorMessage: "body shape wrong",
+      errorType: "TypeError",
+      internalMessage: "route failed unexpectedly",
+    });
+  });
+
+  it("summarizes unexpected errors with sanitized shared fields before route-specific extras", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const helpers = httpModule.createJsonRouteHelpers({
+      internalMessage: "route failed unexpectedly",
+      logMessage: "route failed",
+    });
+    const error = new TypeError(
+      "Invalid callback state for https://example.test/callback?token=secret from /Users/test/app while emailing operator@example.test",
+    );
+
+    Reflect.set(error, "code", "E_STATE_BAD");
+    Reflect.set(error, "statusCode", 400);
+    error.cause = new Error("Bearer sk_test_123");
+
+    const response = helpers.jsonError(error);
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "INVALID_REQUEST",
+        message: "Invalid request.",
+      },
+    });
+    expect(warnSpy).toHaveBeenCalledWith("route failed", {
+      errorCauseMessage: "Bearer <redacted-secret>",
+      errorCauseType: "Error",
+      errorCode: "E_STATE_BAD",
+      errorMessage:
+        "Invalid callback state for <redacted-url> from <redacted-path> while emailing <redacted-email>",
+      errorStatusCode: 400,
       errorType: "TypeError",
       internalMessage: "route failed unexpectedly",
     });

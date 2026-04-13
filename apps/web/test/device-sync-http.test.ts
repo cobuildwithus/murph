@@ -160,10 +160,13 @@ describe("device sync callback redirect helpers", () => {
 
     expect(warnSpy).toHaveBeenCalledTimes(2);
     expect(warnSpy).toHaveBeenNthCalledWith(1, "Hosted device-sync route failed.", {
+      errorMessage: "Unexpected token ] in JSON at position 3 access_token=<redacted-secret>",
       errorType: "SyntaxError",
       internalMessage: "Hosted device-sync route failed unexpectedly.",
     });
     expect(warnSpy).toHaveBeenNthCalledWith(2, "Hosted device-sync route failed.", {
+      errorMessage:
+        "Expected a shorter callback state value. request_body={\"apiKey\":\"<redacted-secret>\"}",
       errorType: "RangeError",
       internalMessage: "Hosted device-sync route failed unexpectedly.",
     });
@@ -217,6 +220,7 @@ describe("device sync callback redirect helpers", () => {
     });
     expect(errorSpy).toHaveBeenCalledOnce();
     expect(errorSpy).toHaveBeenCalledWith("Hosted device-sync route failed.", {
+      errorMessage: "request_body={\"token\":\"<redacted-secret>\"}",
       errorType: "Error",
       internalMessage: "Hosted device-sync route failed unexpectedly.",
     });
