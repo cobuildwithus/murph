@@ -11,19 +11,9 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       internalWorkerProxyToken: "runner-proxy-token",
     });
 
-    await platform.effectsPort.commit({
-      eventId: "evt_123",
-      payload: {
-        result: {
-          eventsHandled: 1,
-          summary: "ok",
-        },
-      },
-      run: {
-        attempt: 1,
-        runId: "run_123",
-        startedAt: "2026-04-08T00:00:00.000Z",
-      },
+    await platform.effectsPort.deletePreparedAssistantDelivery({
+      effectId: "effect_123",
+      fingerprint: "fingerprint_123",
     });
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -33,17 +23,13 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     }
     const [request] = firstCall as unknown as [RequestInfo | URL, RequestInit?];
     expect(request).toBeInstanceOf(Request);
-    expect((request as Request).url).toBe("http://results.worker/events/evt_123/commit");
+    expect((request as Request).url).toBe(
+      "http://results.worker/effects/effect_123?fingerprint=fingerprint_123",
+    );
     expect((request as Request).headers.get("x-hosted-execution-runner-proxy-token")).toBe(
       "runner-proxy-token",
     );
-    await expect((request as Request).json()).resolves.toMatchObject({
-      run: {
-        attempt: 1,
-        runId: "run_123",
-        startedAt: "2026-04-08T00:00:00.000Z",
-      },
-    });
+    expect((request as Request).method).toBe("DELETE");
   });
 
   it("binds device-sync requests to the hosted member id at the Cloudflare port seam", async () => {

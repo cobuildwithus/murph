@@ -22,6 +22,38 @@ import { runHostedExecutionJob } from "./node-runner.js";
 
 let activeHostedRunnerJobCount = 0;
 
+interface HostedContainerProcessDirectoryEntryLike {
+  isDirectory(): boolean;
+  name: string;
+}
+
+interface HostedContainerProcessApi {
+  kill(pid: number, signal: NodeJS.Signals): void;
+  readFile(path: string, encoding: BufferEncoding): Promise<string>;
+  readdir(path: string): Promise<HostedContainerProcessDirectoryEntryLike[]>;
+}
+
+const defaultHostedContainerProcessApi: HostedContainerProcessApi = {
+  kill(pid, signal) {
+    process.kill(pid, signal);
+  },
+  async readFile(path, encoding) {
+    return await readFile(path, encoding);
+  },
+  async readdir(path) {
+    return await readdir(path, { encoding: "utf8", withFileTypes: true });
+  },
+};
+
+let hostedContainerProcessApi: HostedContainerProcessApi = defaultHostedContainerProcessApi;
+const defaultHostedContainerExitScheduler = () => {
+  process.exitCode = 1;
+  setImmediate(() => {
+    process.exit(1);
+  });
+};
+let hostedContainerExitScheduler: () => void = defaultHostedContainerExitScheduler;
+
 class HostedRunnerShellIsolationError extends Error {
   constructor(message: string) {
     super(message);
@@ -172,6 +204,23 @@ export async function startHostedContainerEntrypoint(input: {
   return server;
 }
 
+export function setHostedContainerProcessApiForTests(
+  overrides: Partial<HostedContainerProcessApi> | null,
+): void {
+  hostedContainerProcessApi = overrides
+    ? {
+      ...defaultHostedContainerProcessApi,
+      ...overrides,
+    }
+    : defaultHostedContainerProcessApi;
+}
+
+export function setHostedContainerExitSchedulerForTests(
+  scheduler: (() => void) | null,
+): void {
+  hostedContainerExitScheduler = scheduler ?? defaultHostedContainerExitScheduler;
+}
+
 function parseHostedExecutionContainerRunRequest(value: unknown): {
   internalWorkerProxyToken: string | null;
   job: HostedAssistantRuntimeJobInput;
@@ -275,14 +324,14 @@ async function enforceHostedContainerProcessIsolation(): Promise<void> {
     return;
   }
 
-  const firstPass = await listUnexpectedHostedContainerProcessIds();
+  const firstPass = await listUnexpectedHostedContainerDescendantProcessIds(process.pid);
   if (firstPass.length === 0) {
     return;
   }
 
   for (const pid of firstPass) {
     try {
-      process.kill(pid, "SIGKILL");
+      hostedContainerProcessApi.kill(pid, "SIGKILL");
     } catch {
       // Re-check after the cleanup pass.
     }
@@ -290,7 +339,7 @@ async function enforceHostedContainerProcessIsolation(): Promise<void> {
 
   await new Promise((resolve) => setTimeout(resolve, 25));
 
-  const secondPass = await listUnexpectedHostedContainerProcessIds();
+  const secondPass = await listUnexpectedHostedContainerDescendantProcessIds(process.pid);
   if (secondPass.length > 0) {
     throw new HostedRunnerShellIsolationError(
       `Hosted runner shell still has unexpected live processes after cleanup: ${secondPass.join(", ")}.`,
@@ -298,17 +347,20 @@ async function enforceHostedContainerProcessIsolation(): Promise<void> {
   }
 }
 
-async function listUnexpectedHostedContainerProcessIds(): Promise<number[]> {
+async function listUnexpectedHostedContainerDescendantProcessIds(rootPid: number): Promise<number[]> {
   let entries;
   try {
-    entries = await readdir("/proc", { encoding: "utf8", withFileTypes: true });
+    entries = await hostedContainerProcessApi.readdir("/proc");
   } catch (error) {
     throw new HostedRunnerShellIsolationError(
       `Hosted runner shell could not inspect /proc for warm-container cleanup: ${String(error)}.`,
     );
   }
 
-  const unexpected: number[] = [];
+  const processStates = new Map<number, {
+    ppid: number | null;
+    state: string | null;
+  }>();
 
   for (const entry of entries) {
     if (!entry.isDirectory()) {
@@ -316,41 +368,70 @@ async function listUnexpectedHostedContainerProcessIds(): Promise<number[]> {
     }
 
     const pid = Number.parseInt(entry.name, 10);
-    if (!Number.isInteger(pid) || pid <= 1 || pid === process.pid) {
+    if (!Number.isInteger(pid) || pid <= 1 || pid === rootPid) {
       continue;
     }
 
-    const processState = await readHostedContainerProcessState(pid);
-    if (processState === "Z") {
-      continue;
+    processStates.set(pid, await readHostedContainerProcessState(pid));
+  }
+
+  const unexpected: number[] = [];
+  const frontier = [rootPid];
+  const visited = new Set<number>(frontier);
+
+  while (frontier.length > 0) {
+    const currentPid = frontier.shift();
+    if (currentPid === undefined) {
+      break;
     }
 
-    unexpected.push(pid);
+    for (const [pid, state] of processStates) {
+      if (state.ppid !== currentPid || visited.has(pid)) {
+        continue;
+      }
+
+      visited.add(pid);
+      frontier.push(pid);
+
+      if (state.state === "Z") {
+        continue;
+      }
+
+      unexpected.push(pid);
+    }
   }
 
   return unexpected;
 }
 
-async function readHostedContainerProcessState(pid: number): Promise<string | null> {
+async function readHostedContainerProcessState(pid: number): Promise<{
+  ppid: number | null;
+  state: string | null;
+}> {
   try {
-    const stat = await readFile(`/proc/${pid}/stat`, "utf8");
+    const stat = await hostedContainerProcessApi.readFile(`/proc/${pid}/stat`, "utf8");
     const commandEnd = stat.lastIndexOf(") ");
 
     if (commandEnd === -1 || commandEnd + 2 >= stat.length) {
-      return null;
+      return { ppid: null, state: null };
     }
 
-    return stat.charAt(commandEnd + 2);
+    const remainder = stat.slice(commandEnd + 2).trim();
+    const [state, ppidRaw] = remainder.split(/\s+/u, 2);
+
+    return {
+      ppid: Number.isInteger(Number.parseInt(ppidRaw ?? "", 10))
+        ? Number.parseInt(ppidRaw ?? "", 10)
+        : null,
+      state: typeof state === "string" && state.length > 0 ? state : null,
+    };
   } catch {
-    return null;
+    return { ppid: null, state: null };
   }
 }
 
 function scheduleHostedContainerExit(): void {
-  process.exitCode = 1;
-  setImmediate(() => {
-    process.exit(1);
-  });
+  hostedContainerExitScheduler();
 }
 
 function createRequestAbortController(

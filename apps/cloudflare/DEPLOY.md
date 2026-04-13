@@ -4,7 +4,7 @@ This document is the concrete deploy path for the current hosted architecture:
 
 - `apps/web` stays the public onboarding, billing, auth, and webhook control plane.
 - `apps/cloudflare` owns per-user orchestration, encrypted bundle persistence, and operator/internal control routes.
-- `UserRunnerDurableObject` now orchestrates per-user work while a companion `RunnerContainer` class handles the native Cloudflare container lifecycle, startup readiness, short idle warmth, and per-run env injection before running the one-shot Murph job inside an isolated child process, recording the durable commit callback, and returning the fuller final result directly to the Durable Object for bundle finalization and outward-effect replay.
+- `UserRunnerDurableObject` now orchestrates per-user work while a companion `RunnerContainer` class handles the native Cloudflare container lifecycle, startup readiness, short idle warmth, and per-run env injection before running the one-shot Murph job inside an isolated child process, returning a committed-phase result for the Durable Object to persist before the resumed finalize phase replays outward effects.
 
 This deploy flow intentionally keeps the local-first agent largely unchanged. The hosted layer wraps the same filesystem-oriented runtime instead of inventing a second persistence model.
 

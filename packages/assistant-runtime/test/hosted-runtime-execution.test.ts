@@ -389,14 +389,6 @@ describe("completeHostedExecutionAfterCommit", () => {
     });
 
     expect(mocks.drainHostedCommittedAssistantDeliveriesAfterCommit).toHaveBeenCalledWith({
-      commit: {
-        bundleRef: {
-          hash: "hash_123",
-          key: "bundles/member/vault.json",
-          size: 42,
-          updatedAt: "2026-04-08T00:00:00.000Z",
-        },
-      },
       dispatch: {
         event: {
           kind: "assistant.cron.tick",
@@ -453,6 +445,7 @@ describe("completeHostedExecutionAfterCommit", () => {
         messages: [],
         permissions: [],
       },
+      phase: "completed",
       result: {
         bundle: Buffer.from(Uint8Array.from([9, 9, 9])).toString("base64"),
         result: {

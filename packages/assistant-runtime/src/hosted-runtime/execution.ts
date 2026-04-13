@@ -29,10 +29,9 @@ import {
 import { executeHostedDispatchEvent } from "./events.ts";
 import { runHostedMaintenanceLoop } from "./maintenance.ts";
 import type {
-  HostedAssistantRuntimeJobResult,
+  HostedAssistantRuntimeCompletedJobResult,
   HostedAssistantRuntimeJobRequest,
   HostedCommittedExecutionState,
-  HostedExecutionCommitCallback,
   HostedRestoredExecutionContext,
   NormalizedHostedAssistantRuntimeConfig,
   HostedWorkspaceArtifactMaterializer,
@@ -120,7 +119,6 @@ export async function executeHostedDispatchForCommit(input: {
 }
 
 export async function completeHostedExecutionAfterCommit(input: {
-  commit: HostedExecutionCommitCallback | null;
   dispatch: HostedExecutionDispatchRequest;
   materializedArtifactPaths?: ReadonlySet<string>;
   run?: HostedExecutionRunContext | null;
@@ -130,7 +128,7 @@ export async function completeHostedExecutionAfterCommit(input: {
   >;
   restored: HostedRestoredExecutionContext;
   committedExecution: HostedCommittedExecutionState;
-}): Promise<HostedAssistantRuntimeJobResult> {
+}): Promise<HostedAssistantRuntimeCompletedJobResult> {
   emitHostedExecutionStructuredLog({
     component: "runtime",
     dispatch: input.dispatch,
@@ -139,7 +137,6 @@ export async function completeHostedExecutionAfterCommit(input: {
     run: input.run ?? null,
   });
   await drainHostedCommittedAssistantDeliveriesAfterCommit({
-    commit: input.commit,
     dispatch: input.dispatch,
     effectsPort: input.runtime.platform.effectsPort,
     assistantDeliveryEffects: input.committedExecution.committedAssistantDeliveryEffects,
@@ -183,6 +180,7 @@ export async function completeHostedExecutionAfterCommit(input: {
 
   return {
     finalGatewayProjectionSnapshot,
+    phase: "completed",
     result: finalResult,
   };
 }

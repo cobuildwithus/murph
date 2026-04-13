@@ -599,6 +599,62 @@ describe("RunnerQueueStore", () => {
     expect(result.lastErrorCode).toBeNull();
   });
 
+  it("keeps the active run lease while syncing committed bundles for the same in-flight run", async () => {
+    const state = createState();
+    const { store } = createQueueHarness(state);
+    await store.bootstrapUser("member_123");
+    await store.enqueueDispatch({
+      event: {
+        kind: "assistant.cron.tick",
+        reason: "manual",
+        userId: "member_123",
+      },
+      eventId: "evt_commit_sync",
+      occurredAt: "2026-03-29T10:00:00.000Z",
+    });
+
+    const claimed = await store.claimNextDuePendingDispatch(Date.now());
+
+    if (!claimed.run) {
+      throw new Error("Expected claimNextDuePendingDispatch to return an active run.");
+    }
+
+    const committed: HostedExecutionCommittedResult = {
+      assistantDeliveryEffects: [],
+      bundleRef: {
+        hash: "bundle_hash",
+        key: "bundles/member_123/bundle.enc",
+        size: 64,
+        updatedAt: "2026-03-29T10:00:01.000Z",
+      },
+      committedAt: "2026-03-29T10:00:01.000Z",
+      eventId: "evt_commit_sync",
+      finalizedAt: null,
+      gatewayProjectionSnapshot: null,
+      result: {
+        eventsHandled: 1,
+        nextWakeAt: "2026-03-29T10:15:00.000Z",
+        summary: "ok",
+      },
+      userId: "member_123",
+    };
+
+    const synced = await store.syncCommittedBundles(committed, {
+      eventId: committed.eventId,
+      run: claimed.run,
+    });
+
+    expect(synced.inFlight).toBe(true);
+    expect(synced.run).toMatchObject({
+      attempt: claimed.run.attempt,
+      eventId: committed.eventId,
+      phase: "claimed",
+      runId: claimed.run.runId,
+      startedAt: claimed.run.startedAt,
+    });
+    expect(synced.bundleRef).toEqual(committed.bundleRef);
+  });
+
   it("records a bounded run trace and derives stable error codes", async () => {
     const state = createState();
     const { store } = createQueueHarness(state);
@@ -645,195 +701,6 @@ describe("RunnerQueueStore", () => {
     });
   });
 
-  it("authorizes late commits only until a newer claimed run takes over the event", async () => {
-    const state = createState();
-    const { store } = createQueueHarness(state);
-    await store.bootstrapUser("member_123");
-
-    await store.enqueueDispatch({
-      event: {
-        kind: "assistant.cron.tick",
-        reason: "manual",
-        userId: "member_123",
-      },
-      eventId: "evt_commit_fence",
-      occurredAt: "2026-03-29T10:00:00.000Z",
-    });
-    state.storage.sql!.exec(
-      "UPDATE pending_events SET attempts = ? WHERE event_id = ?",
-      1,
-      "evt_commit_fence",
-    );
-
-    const lateRun = {
-      attempt: 1,
-      runId: "run_late",
-      startedAt: "2026-03-29T10:00:00.000Z",
-    };
-    expect(await store.authorizeCommitRun({
-      eventId: "evt_commit_fence",
-      run: lateRun,
-    })).toEqual({
-      accepted: true,
-      activeRun: null,
-      pending: true,
-      reason: "late",
-    });
-
-    const claim = await store.claimNextDuePendingDispatch(Date.now() + 1_000);
-    expect(claim.run).toMatchObject({
-      attempt: 2,
-      runId: expect.any(String),
-      startedAt: expect.any(String),
-    });
-    if (!claim.run) {
-      throw new Error("Expected a claimed run lease.");
-    }
-
-    expect(await store.authorizeCommitRun({
-      eventId: "evt_commit_fence",
-      run: claim.run,
-    })).toEqual({
-      accepted: true,
-      activeRun: claim.run,
-      pending: true,
-      reason: "active",
-    });
-    expect(await store.authorizeCommitRun({
-      eventId: "evt_commit_fence",
-      run: lateRun,
-    })).toEqual({
-      accepted: false,
-      activeRun: claim.run,
-      pending: true,
-      reason: "stale",
-    });
-
-    const committed = {
-      assistantDeliveryEffects: [],
-      bundleRef: null,
-      committedAt: "2026-03-29T10:01:00.000Z",
-      eventId: "evt_commit_fence",
-      finalizedAt: null,
-      gatewayProjectionSnapshot: null,
-      result: {
-        eventsHandled: 1,
-        summary: "ok",
-      },
-      userId: "member_123",
-    } satisfies HostedExecutionCommittedResult;
-
-    await store.applyCommittedDispatch(committed);
-    expect(await store.authorizeCommitRun({
-      eventId: "evt_commit_fence",
-      run: claim.run,
-    })).toEqual({
-      accepted: true,
-      activeRun: claim.run,
-      pending: false,
-      reason: "active",
-    });
-
-    await store.applyCommittedDispatch(committed, {
-      eventId: "evt_commit_fence",
-      run: claim.run,
-    });
-
-    expect(await store.authorizeCommitRun({
-      eventId: "evt_commit_fence",
-      run: claim.run,
-    })).toEqual({
-      accepted: false,
-      activeRun: null,
-      pending: false,
-      reason: "missing",
-    });
-  });
-
-  it("accepts legacy ownerless commits only while the same event still owns the active lease", async () => {
-    const state = createState();
-    const { store } = createQueueHarness(state);
-    await store.bootstrapUser("member_123");
-
-    await store.enqueueDispatch({
-      event: {
-        kind: "assistant.cron.tick",
-        reason: "manual",
-        userId: "member_123",
-      },
-      eventId: "evt_legacy_commit",
-      occurredAt: "2026-03-29T10:00:00.000Z",
-    });
-
-    const claim = await store.claimNextDuePendingDispatch(Date.now() + 1_000);
-    if (!claim.run) {
-      throw new Error("Expected a claimed run lease.");
-    }
-
-    expect(await store.authorizeCommitRun({
-      eventId: "evt_legacy_commit",
-      run: null,
-    })).toEqual({
-      accepted: true,
-      activeRun: claim.run,
-      pending: true,
-      reason: "legacy_active",
-    });
-
-    await store.reschedulePendingFailure({
-      error: new Error("timeout"),
-      eventId: "evt_legacy_commit",
-      maxEventAttempts: 3,
-      retryDelayMs: 30_000,
-    });
-
-    expect(await store.authorizeCommitRun({
-      eventId: "evt_legacy_commit",
-      run: null,
-    })).toEqual({
-      accepted: false,
-      activeRun: null,
-      pending: true,
-      reason: "missing",
-    });
-  });
-
-  it("rejects legacy ownerless commits once a newer retry attempt owns the same event", async () => {
-    const state = createState();
-    const { store } = createQueueHarness(state);
-    await store.bootstrapUser("member_123");
-
-    await store.enqueueDispatch({
-      event: {
-        kind: "assistant.cron.tick",
-        reason: "manual",
-        userId: "member_123",
-      },
-      eventId: "evt_legacy_stale",
-      occurredAt: "2026-03-29T10:00:00.000Z",
-    });
-    state.storage.sql!.exec(
-      "UPDATE pending_events SET attempts = ? WHERE event_id = ?",
-      1,
-      "evt_legacy_stale",
-    );
-
-    const claim = await store.claimNextDuePendingDispatch(Date.now() + 1_000);
-    if (!claim.run) {
-      throw new Error("Expected a claimed run lease.");
-    }
-
-    expect(await store.authorizeCommitRun({
-      eventId: "evt_legacy_stale",
-      run: null,
-    })).toEqual({
-      accepted: false,
-      activeRun: claim.run,
-      pending: true,
-      reason: "stale",
-    });
-  });
-
   it("clears a same-event active lease during committed recovery when the journal already owns the event", async () => {
     const state = createState();
     const { store } = createQueueHarness(state);
@@ -872,16 +739,13 @@ describe("RunnerQueueStore", () => {
       run: null,
     });
 
-    expect(await store.authorizeCommitRun({
-      eventId: "evt_recovered_commit",
-      run: claim.run,
-    })).toEqual({
-      accepted: false,
-      activeRun: null,
-      pending: false,
-      reason: "missing",
-    });
-    expect((await store.readState()).inFlight).toBe(false);
+    const stateAfterRecovery = await store.readState();
+    expect(stateAfterRecovery.inFlight).toBe(false);
+    expect(stateAfterRecovery.pendingEventCount).toBe(0);
+
+    const nextClaim = await store.claimNextDuePendingDispatch(Date.now() + 1_000);
+    expect(nextClaim.pendingDispatch).toBeNull();
+    expect(nextClaim.run).toBeNull();
   });
 
   it("does not clear one event's live lease while cleaning up another committed event", async () => {
@@ -927,16 +791,6 @@ describe("RunnerQueueStore", () => {
       userId: "member_123",
     });
     await store.rememberCommittedEvent("evt_other_duplicate");
-
-    expect(await store.authorizeCommitRun({
-      eventId: "evt_active",
-      run: activeClaim.run,
-    })).toEqual({
-      accepted: true,
-      activeRun: activeClaim.run,
-      pending: true,
-      reason: "active",
-    });
 
     const nextClaim = await store.claimNextDuePendingDispatch(Date.now() + 1_000);
     expect(nextClaim.pendingDispatch).toBeNull();

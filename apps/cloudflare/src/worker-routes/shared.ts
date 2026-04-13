@@ -17,7 +17,6 @@ import type {
 } from "@murphai/device-syncd/hosted-runtime";
 
 import { readHostedExecutionEnvironment } from "../env.ts";
-import type { HostedExecutionCommittedResult } from "../execution-journal.js";
 import { requireJsonObject } from "../json.ts";
 import type { HostedExecutionContainerNamespaceLike } from "../runner-container.js";
 import {
@@ -26,7 +25,6 @@ import {
 import type { HostedUserEnvUpdate } from "../user-env.ts";
 import type {
   WorkerEnvironmentContract,
-  WorkerUserRunnerCommitInput,
   WorkerUserRunnerStubLike,
 } from "../worker-contracts.ts";
 
@@ -54,7 +52,6 @@ export interface UserRunnerDurableObjectStubLike extends WorkerUserRunnerStubLik
   storeDispatchPayload(input: { dispatch: HostedExecutionDispatchRequest }): Promise<HostedExecutionOutboxPayload>;
   updateUserEnv(update: HostedUserEnvUpdate): Promise<CloudflareHostedUserEnvStatus>;
   deletePendingUsage(input: { usageIds: readonly string[] }): Promise<void>;
-  commit(input: WorkerUserRunnerCommitInput): Promise<HostedExecutionCommittedResult>;
 }
 
 export interface WorkerEnvironmentSource

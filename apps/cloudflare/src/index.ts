@@ -37,9 +37,6 @@ import {
   verifyHostedExecutionVercelOidcRequest,
 } from "./auth-adapter.ts";
 import { readHostedExecutionEnvironment } from "./env.ts";
-import type {
-  HostedExecutionCommittedResult,
-} from "./execution-journal.ts";
 import {
   json,
   methodNotAllowed,
@@ -72,7 +69,6 @@ import {
 } from "./worker-routes/internal-user.ts";
 import {
   asWorkerStringEnvironment,
-  type WorkerUserRunnerCommitInput,
 } from "./worker-contracts.ts";
 import {
   readCachedRequestText,
@@ -351,10 +347,6 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
 
   async dispatchWithOutcome(input: HostedExecutionDispatchRequest): Promise<HostedExecutionDispatchResult> {
     return this.runner.dispatchWithOutcome(input);
-  }
-
-  async commit(input: WorkerUserRunnerCommitInput): Promise<HostedExecutionCommittedResult> {
-    return this.runner.commit(input);
   }
 
   async gatewayListConversations(input?: GatewayListConversationsInput) {

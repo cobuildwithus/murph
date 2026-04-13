@@ -17,9 +17,6 @@ import type {
   HostedExecutionBundleRef,
 } from "@murphai/hosted-execution/contracts";
 import type {
-  HostedExecutionRunContext,
-} from "@murphai/hosted-execution";
-import type {
   HostedExecutionDeviceSyncRuntimeApplyRequest,
   HostedExecutionDeviceSyncRuntimeApplyResponse,
   HostedExecutionDeviceSyncRuntimeSnapshotRequest,
@@ -30,22 +27,12 @@ import type { HostedRuntimeUsageRecordResponse } from "@murphai/assistant-runtim
 import type { R2BucketLike } from "./bundle-store.ts";
 import type {
   HostedExecutionCommitPayload,
-  HostedExecutionCommittedResult,
 } from "./execution-journal.ts";
 import { toStringEnvSource, type StringEnvSource } from "./string-env.ts";
-
-export interface WorkerUserRunnerCommitInput {
-  eventId: string;
-  payload: HostedExecutionCommitPayload & {
-    currentBundleRef: HostedExecutionBundleRef | null;
-  };
-  run: HostedExecutionRunContext | null;
-}
 
 export interface WorkerUserRunnerStubLike {
   bootstrapUser?(userId: string): Promise<{ userId: string }>;
   provisionManagedUserCrypto?(userId: string): Promise<{ recipientKinds: string[]; rootKeyId: string; userId: string }>;
-  commit(input: WorkerUserRunnerCommitInput): Promise<HostedExecutionCommittedResult>;
   gatewayFetchAttachments?(input: GatewayFetchAttachmentsInput): Promise<GatewayAttachment[]>;
   gatewayGetConversation?(input: GatewayGetConversationInput): Promise<GatewayConversation | null>;
   gatewayListConversations?(input?: GatewayListConversationsInput): Promise<GatewayListConversationsResult>;

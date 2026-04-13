@@ -75,6 +75,7 @@ describe("runHostedExecutionJobIsolatedDetailed", () => {
 
 function createRunnerResult() {
   return {
+    phase: "completed" as const,
     result: {
       bundle: null,
       result: {

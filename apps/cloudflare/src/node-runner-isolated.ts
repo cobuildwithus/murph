@@ -172,7 +172,7 @@ function isHostedAssistantRuntimeJobResult(
   }
 
   const candidate = value as Record<string, unknown>;
-  if (!("finalGatewayProjectionSnapshot" in candidate)) {
+  if (candidate.phase !== "committed" && candidate.phase !== "completed") {
     return false;
   }
 

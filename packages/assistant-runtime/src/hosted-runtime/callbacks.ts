@@ -1,6 +1,5 @@
 import type {
   HostedExecutionDispatchRequest,
-  HostedExecutionRunnerResult,
 } from "@murphai/hosted-execution/contracts";
 import {
   buildHostedAssistantDeliveryEffect,
@@ -10,7 +9,6 @@ import {
   type HostedAssistantDeliveryRecord,
   type HostedAssistantDeliveryEffect,
 } from "@murphai/hosted-execution/side-effects";
-import type { GatewayProjectionSnapshot } from "@murphai/gateway-core";
 import {
   dispatchAssistantOutboxIntent,
   listAssistantOutboxIntents,
@@ -23,7 +21,6 @@ import type { AssistantOutboxIntent } from "@murphai/operator-config/assistant-c
 
 import type {
   HostedCommittedExecutionState,
-  HostedExecutionCommitCallback,
   HostedAssistantRuntimeJobRequest,
 } from "./models.ts";
 import type {
@@ -55,44 +52,6 @@ export function resumeHostedCommittedExecution(
   };
 }
 
-export async function commitHostedExecutionResult(input: {
-  commit: HostedExecutionCommitCallback | null;
-  dispatch: HostedExecutionDispatchRequest;
-  effectsPort: HostedRuntimeEffectsPort;
-  gatewayProjectionSnapshot?: GatewayProjectionSnapshot | null;
-  result: HostedExecutionRunnerResult;
-  assistantDeliveryEffects: HostedAssistantDeliveryEffect[];
-  run: HostedAssistantRuntimeJobRequest["run"] | null;
-}): Promise<void> {
-  if (!input.commit) {
-    return;
-  }
-
-  if (!input.run) {
-    throw new Error(
-      `Hosted runner durable commit requires run metadata for ${input.dispatch.event.userId}/${input.dispatch.eventId}.`,
-    );
-  }
-
-  try {
-    await input.effectsPort.commit({
-      eventId: input.dispatch.eventId,
-      payload: {
-        assistantDeliveryEffects: input.assistantDeliveryEffects,
-        currentBundleRef: input.commit.bundleRef,
-        gatewayProjectionSnapshot: input.gatewayProjectionSnapshot ?? null,
-        ...input.result,
-      },
-      run: input.run,
-    });
-  } catch (error) {
-    throw new Error(
-      `Hosted runner durable commit failed for ${input.dispatch.event.userId}/${input.dispatch.eventId}.`,
-      { cause: error },
-    );
-  }
-}
-
 export async function collectHostedAssistantDeliverySideEffects(
   vaultRoot: string,
 ): Promise<HostedAssistantDeliveryEffect[]> {
@@ -113,7 +72,6 @@ export async function collectHostedAssistantDeliverySideEffects(
 }
 
 export async function drainHostedCommittedAssistantDeliveriesAfterCommit(input: {
-  commit: HostedExecutionCommitCallback | null;
   dispatch: HostedExecutionDispatchRequest;
   effectsPort: HostedRuntimeEffectsPort;
   assistantDeliveryEffects: HostedAssistantDeliveryEffect[];
@@ -121,7 +79,6 @@ export async function drainHostedCommittedAssistantDeliveriesAfterCommit(input: 
 }): Promise<void> {
   for (const assistantDeliveryEffect of input.assistantDeliveryEffects) {
     await dispatchHostedCommittedAssistantDelivery({
-      commit: input.commit,
       effectsPort: input.effectsPort,
       assistantDeliveryEffect,
       userId: input.dispatch.event.userId,
@@ -131,13 +88,6 @@ export async function drainHostedCommittedAssistantDeliveriesAfterCommit(input: 
 }
 
 async function dispatchHostedCommittedAssistantDelivery(input: {
-  commit: HostedExecutionCommitCallback;
-  effectsPort: HostedRuntimeEffectsPort;
-  assistantDeliveryEffect: HostedAssistantDeliveryEffect;
-  userId: string;
-  vaultRoot: string;
-} | {
-  commit: null;
   effectsPort: HostedRuntimeEffectsPort;
   assistantDeliveryEffect: HostedAssistantDeliveryEffect;
   userId: string;
@@ -148,20 +98,16 @@ async function dispatchHostedCommittedAssistantDelivery(input: {
       sendEmail: (request: Parameters<HostedRuntimeEffectsPort["sendEmail"]>[0]) =>
         input.effectsPort.sendEmail(request),
     },
-    dispatchHooks: input.commit
-      ? createHostedAssistantDeliveryDispatchHooks({
-          commit: input.commit,
-          effectsPort: input.effectsPort,
-          userId: input.userId,
-        })
-      : undefined,
+    dispatchHooks: createHostedAssistantDeliveryDispatchHooks({
+      effectsPort: input.effectsPort,
+      userId: input.userId,
+    }),
     intentId: input.assistantDeliveryEffect.effectId,
     vault: input.vaultRoot,
   });
 }
 
 function createHostedAssistantDeliveryDispatchHooks(input: {
-  commit: HostedExecutionCommitCallback;
   effectsPort: HostedRuntimeEffectsPort;
   userId: string;
 }): AssistantOutboxDispatchHooks {
@@ -171,7 +117,6 @@ function createHostedAssistantDeliveryDispatchHooks(input: {
       vault: string;
     }) => {
       await callHostedAssistantDeliveryJournal({
-        commit: input.commit,
         effectsPort: input.effectsPort,
         method: "DELETE",
         sideEffect: buildHostedAssistantDeliveryEffect({
@@ -187,7 +132,6 @@ function createHostedAssistantDeliveryDispatchHooks(input: {
       vault: string;
     }) => {
       await persistHostedAssistantDeliveryRecord({
-        commit: input.commit,
         delivery,
         effectsPort: input.effectsPort,
         intent,
@@ -199,7 +143,6 @@ function createHostedAssistantDeliveryDispatchHooks(input: {
       vault: string;
     }) => {
       await callHostedAssistantDeliveryJournal({
-        commit: input.commit,
         effectsPort: input.effectsPort,
         method: "PUT",
         record: buildHostedAssistantDeliveryPreparedRecord({
@@ -219,7 +162,6 @@ function createHostedAssistantDeliveryDispatchHooks(input: {
         effectId: intent.intentId,
       });
       const record = await callHostedAssistantDeliveryJournal({
-        commit: input.commit,
         effectsPort: input.effectsPort,
         method: "GET",
         sideEffect,
@@ -253,7 +195,6 @@ function createHostedAssistantDeliveryDispatchHooks(input: {
 
       try {
         await persistHostedAssistantDeliveryRecord({
-          commit: input.commit,
           delivery: localDelivery,
           effectsPort: input.effectsPort,
           intent,
@@ -273,7 +214,6 @@ function createHostedAssistantDeliveryDispatchHooks(input: {
 }
 
 async function persistHostedAssistantDeliveryRecord(input: {
-  commit: HostedExecutionCommitCallback;
   delivery: AssistantChannelDelivery;
   effectsPort: HostedRuntimeEffectsPort;
   intent: Pick<AssistantOutboxIntent, "dedupeKey" | "intentId">;
@@ -286,7 +226,6 @@ async function persistHostedAssistantDeliveryRecord(input: {
   }
 
   await callHostedAssistantDeliveryJournal({
-    commit: input.commit,
     effectsPort: input.effectsPort,
     method: "PUT",
     record: buildHostedAssistantDeliverySentRecord({
@@ -321,14 +260,12 @@ function readLocallyRecordedAssistantDelivery(
 
 async function callHostedAssistantDeliveryJournal(input:
   | {
-      commit: HostedExecutionCommitCallback;
       effectsPort: HostedRuntimeEffectsPort;
       method: "DELETE" | "GET";
       sideEffect: HostedAssistantDeliveryEffect;
       userId: string;
     }
   | {
-      commit: HostedExecutionCommitCallback;
       effectsPort: HostedRuntimeEffectsPort;
       method: "PUT";
       record: HostedAssistantDeliveryRecord;

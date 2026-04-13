@@ -78,13 +78,13 @@ type NodeRunnerTestInput =
         vault: HostedExecutionBundlePayload;
       };
     commit?: {
-      bundleRef?: NonNullable<HostedAssistantRuntimeJobInput["request"]["commit"]>["bundleRef"] | null;
+      bundleRef?: HostedAssistantRuntimeJobInput["request"]["currentBundleRef"] | null;
       bundleRefs?: {
         agentState: null;
-        vault: NonNullable<HostedAssistantRuntimeJobInput["request"]["commit"]>["bundleRef"] | null;
+        vault: HostedAssistantRuntimeJobInput["request"]["currentBundleRef"] | null;
       };
     };
-  } & Omit<HostedAssistantRuntimeJobInput["request"], "bundle" | "commit">;
+  } & Omit<HostedAssistantRuntimeJobInput["request"], "bundle" | "currentBundleRef">;
 
 async function snapshotHostedExecutionContext(
   input: Parameters<typeof snapshotHostedExecutionContextActual>[0],
@@ -173,25 +173,47 @@ async function runHostedExecutionJob(
     ...(forwardedEnv === undefined ? {} : { forwardedEnv }),
     ...(userEnv === undefined ? {} : { userEnv }),
   };
+  const normalizedRequest: HostedAssistantRuntimeJobInput["request"] = {
+    ...request,
+    bundle:
+      bundles === null || typeof bundles === "string"
+        ? bundles
+        : (bundles.vault ?? bundles.agentState),
+    ...(commit === undefined ? {} : {
+      currentBundleRef: commit.bundleRef ?? commit.bundleRefs?.vault ?? null,
+    }),
+  };
 
-  const result = await runHostedExecutionJobInternal({
-    request: {
-      ...request,
-      bundle:
-        bundles === null || typeof bundles === "string"
-          ? bundles
-          : (bundles.vault ?? bundles.agentState),
-      ...(commit === undefined ? {} : {
-        commit: {
-          bundleRef: commit.bundleRef ?? commit.bundleRefs?.vault ?? null,
-        },
-      }),
-    },
+  let result = await runHostedExecutionJobInternal({
+    request: normalizedRequest,
     ...(Object.keys(runtime).length === 0 ? {} : { runtime }),
   }, {
     ...(internalWorkerProxyToken === undefined ? {} : { internalWorkerProxyToken }),
     ...options,
   });
+
+  if (result.phase === "committed" && normalizedRequest.resume === undefined) {
+    result = await runHostedExecutionJobInternal({
+      request: {
+        ...normalizedRequest,
+        bundle: result.result.bundle,
+        resume: {
+          committedResult: {
+            assistantDeliveryEffects: result.committedAssistantDeliveryEffects,
+            result: result.result.result,
+          },
+        },
+      },
+      ...(Object.keys(runtime).length === 0 ? {} : { runtime }),
+    }, {
+      ...(internalWorkerProxyToken === undefined ? {} : { internalWorkerProxyToken }),
+      ...options,
+    });
+  }
+
+  if (result.phase !== "completed") {
+    throw new Error("Expected the node-runner test helper to resolve a completed hosted result.");
+  }
 
   return {
     finalGatewayProjectionSnapshot: result.finalGatewayProjectionSnapshot,
@@ -1779,45 +1801,50 @@ describe("runHostedExecutionJob", () => {
     const previousAllowedUserEnvKeys = process.env.HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS;
     process.env.HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS = "CUSTOM_API_KEY";
 
-    const firstRunStarted = createDeferred<void>();
-    const secondRunStarted = createDeferred<void>();
-    const firstCommitSeen = createDeferred<void>();
-    const secondCommitSeen = createDeferred<void>();
-    const releaseFirstCommit = createDeferred<void>();
+    const firstPhaseStarted = createDeferred<void>();
+    const secondPhaseStarted = createDeferred<void>();
+    const releaseFirstPhase = createDeferred<void>();
     const seenApiKeys = new Map<string, string | undefined>();
-    let startedRunCount = 0;
-    let commitCount = 0;
-    let commitsInFlight = 0;
-    let maxCommitsInFlight = 0;
+    let startedInvocationCount = 0;
+    let firstPhaseCount = 0;
+    let firstPhasesInFlight = 0;
+    let maxFirstPhasesInFlight = 0;
 
     setHostedExecutionRunStartHookForTests(() => {
-      startedRunCount += 1;
-      if (startedRunCount === 1) {
-        firstRunStarted.resolve();
-      } else if (startedRunCount === 2) {
-        secondRunStarted.resolve();
-      }
+      startedInvocationCount += 1;
     });
     setHostedExecutionIsolatedRunnerForTests(async (input) => {
       const userId = input.job.request.dispatch.event.userId;
       const runtime = input.job.runtime ?? {};
       seenApiKeys.set(userId, runtime.userEnv?.CUSTOM_API_KEY);
-      const commitBaseUrl = runtime.forwardedEnv?.HOSTED_EXECUTION_TEST_COMMIT_BASE_URL;
-
-      if (typeof commitBaseUrl !== "string") {
-        throw new Error("Expected the isolated test runner to receive the commit callback base URL.");
+      if (input.job.request.resume) {
+        return {
+          finalGatewayProjectionSnapshot: null,
+          phase: "completed",
+          result: {
+            bundle: null,
+            result: {
+              eventsHandled: 1,
+              summary: `ok:${userId}`,
+            },
+          },
+        };
       }
 
-      const response = await fetch(`${commitBaseUrl}/commit`, {
-        method: "POST",
-      });
-
-      if (!response.ok) {
-        throw new Error(`Expected the isolated test commit callback to succeed, got HTTP ${response.status}.`);
+      firstPhaseCount += 1;
+      firstPhasesInFlight += 1;
+      maxFirstPhasesInFlight = Math.max(maxFirstPhasesInFlight, firstPhasesInFlight);
+      if (firstPhaseCount === 1) {
+        firstPhaseStarted.resolve();
+        await releaseFirstPhase.promise;
+      } else if (firstPhaseCount === 2) {
+        secondPhaseStarted.resolve();
       }
 
       return {
-        finalGatewayProjectionSnapshot: null,
+        committedAssistantDeliveryEffects: [],
+        committedGatewayProjectionSnapshot: null,
+        phase: "committed",
         result: {
           bundle: null,
           result: {
@@ -1828,39 +1855,7 @@ describe("runHostedExecutionJob", () => {
       };
     });
 
-    const server = createServer(async (request, response) => {
-      if (request.url?.includes("/commit")) {
-        commitCount += 1;
-        commitsInFlight += 1;
-        maxCommitsInFlight = Math.max(maxCommitsInFlight, commitsInFlight);
-
-        if (commitCount === 1) {
-          firstCommitSeen.resolve();
-          await releaseFirstCommit.promise;
-        } else if (commitCount === 2) {
-          secondCommitSeen.resolve();
-        }
-
-        response.statusCode = 200;
-        response.setHeader("content-type", "application/json; charset=utf-8");
-        response.end(JSON.stringify({ ok: true }));
-        commitsInFlight -= 1;
-        return;
-      }
-
-      response.statusCode = 404;
-      response.end("Not found");
-    });
-    await new Promise<void>((resolve) => {
-      server.listen(0, () => resolve());
-    });
-
     try {
-      const address = server.address();
-      if (!address || typeof address === "string") {
-        throw new Error("Expected the hosted test server to expose a TCP port.");
-      }
-
       const firstRun = runHostedExecutionJob({
         bundles: {
           agentState: null,
@@ -1879,9 +1874,6 @@ describe("runHostedExecutionJob", () => {
         },
         userEnv: {
           CUSTOM_API_KEY: "user-one-key",
-        },
-        forwardedEnv: {
-          HOSTED_EXECUTION_TEST_COMMIT_BASE_URL: `http://127.0.0.1:${address.port}`,
         },
       });
 
@@ -1904,36 +1896,29 @@ describe("runHostedExecutionJob", () => {
         userEnv: {
           CUSTOM_API_KEY: "user-two-key",
         },
-        forwardedEnv: {
-          HOSTED_EXECUTION_TEST_COMMIT_BASE_URL: `http://127.0.0.1:${address.port}`,
-        },
       });
 
       await Promise.all([
-        firstRunStarted.promise,
-        secondRunStarted.promise,
-        firstCommitSeen.promise,
+        firstPhaseStarted.promise,
+        secondPhaseStarted.promise,
       ]);
-      await secondCommitSeen.promise;
 
-      releaseFirstCommit.resolve();
+      releaseFirstPhase.resolve();
       await Promise.all([firstRun, secondRun]);
 
-      expect(startedRunCount).toBe(2);
-      expect(commitCount).toBe(2);
-      expect(maxCommitsInFlight).toBe(2);
+      expect(startedInvocationCount).toBe(4);
+      expect(firstPhaseCount).toBe(2);
+      expect(maxFirstPhasesInFlight).toBe(2);
       expect(seenApiKeys).toEqual(new Map([
         ["member_1", "user-one-key"],
         ["member_2", "user-two-key"],
       ]));
     } finally {
-      server.close();
-      await once(server, "close");
       restoreEnvVar("HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS", previousAllowedUserEnvKeys);
     }
   });
 
-  it("reconciles journaled hosted assistant deliveries only after the durable commit callback", async () => {
+  it("reconciles journaled hosted assistant deliveries only after the Durable Object resumes the committed result", async () => {
     const parent = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-outbox-"));
     const operatorHomeRoot = path.join(parent, "home");
     const vaultRoot = path.join(parent, "vault");
@@ -1987,10 +1972,6 @@ describe("runHostedExecutionJob", () => {
       vi.fn(async (url, init) => {
         fetchCalls.push(`${init?.method ?? "GET"} ${String(url)}`);
 
-        if (String(url).startsWith("http://results.worker/events/")) {
-          return new Response(JSON.stringify({ ok: true }), { status: 200 });
-        }
-
         if (
           String(url).startsWith(
             "http://results.worker/effects/",
@@ -2042,7 +2023,6 @@ describe("runHostedExecutionJob", () => {
     });
 
     expect(fetchCalls).toEqual([
-      "POST http://results.worker/events/evt_outbox/commit",
       "GET http://results.worker/effects/outbox_hosted_reconcile?fingerprint=dedupe_hosted",
     ]);
 
@@ -2117,16 +2097,6 @@ describe("runHostedExecutionJob", () => {
 
         if (
           String(url)
-          === "http://results.worker/events/evt_outbox_send/commit"
-        ) {
-          expect(JSON.parse(String(init?.body))).toMatchObject({
-            assistantDeliveryEffects: [],
-          });
-          return new Response(JSON.stringify({ ok: true }), { status: 200 });
-        }
-
-        if (
-          String(url)
           === "http://results.worker/effects/outbox_hosted_send?fingerprint=dedupe_hosted_send"
           && (init?.method ?? "GET") === "GET"
         ) {
@@ -2173,9 +2143,7 @@ describe("runHostedExecutionJob", () => {
         },
       });
 
-      expect(fetchCalls).toEqual([
-        "POST http://results.worker/events/evt_outbox_send/commit",
-      ]);
+      expect(fetchCalls).toEqual([]);
       expect(hostedCliMocks.dispatchAssistantOutboxIntent).not.toHaveBeenCalled();
 
       const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-outbox-journal-restored-"));
@@ -2381,7 +2349,6 @@ describe("runHostedExecutionJob", () => {
       "GET http://results.worker/effects/outbox_hosted_resume?fingerprint=dedupe_hosted_resume",
       "PUT http://results.worker/effects/outbox_hosted_resume?fingerprint=dedupe_hosted_resume",
     ]);
-    expect(fetchCalls).not.toContain("POST http://results.worker/events/evt_outbox_resume/commit");
     expect(result.result).toEqual({
       eventsHandled: 1,
       summary: "committed",
@@ -2404,152 +2371,6 @@ describe("runHostedExecutionJob", () => {
     );
     expect(savedIntent.status).toBe("sent");
     expect(savedIntent.delivery).toEqual(delivery);
-  });
-
-  it("posts a durable commit before returning when a commit callback is configured", async () => {
-    const previousCommitTimeout = process.env.HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS;
-    process.env.HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS = "15000";
-    const commitFetch = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ ok: true }), {
-        status: 200,
-      }),
-    );
-    vi.stubGlobal("fetch", commitFetch);
-    const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
-
-    try {
-      const result = await runHostedExecutionJob({
-        bundles: {
-          agentState: null,
-          vault: null,
-        },
-        commit: {
-          bundleRefs: {
-            agentState: null,
-            vault: null,
-          },
-        },
-        dispatch: {
-          event: {
-            kind: "member.activated",
-            userId: "member_123",
-          },
-          eventId: "evt_commit",
-          occurredAt: "2026-03-26T12:10:00.000Z",
-        },
-      });
-
-      expect(commitFetch).toHaveBeenCalledTimes(1);
-      expect(timeoutSpy).toHaveBeenCalledWith(30_000);
-      const [commitUrl, commitInit] = commitFetch.mock.calls[0] ?? [];
-      expect(String(commitUrl)).toBe(
-        "http://results.worker/events/evt_commit/commit",
-      );
-      expect(commitInit?.headers).toMatchObject({
-        "content-type": "application/json; charset=utf-8",
-      });
-      expect(JSON.parse(String(commitInit?.body))).toMatchObject({
-        currentBundleRef: null,
-        result: result.result,
-        bundle: result.bundles.vault,
-      });
-      expect(result.gatewayProjectionSnapshot).toMatchObject({
-        conversations: [],
-        generatedAt: expect.any(String),
-        messages: [],
-        permissions: [],
-        schema: "murph.gateway-projection-snapshot.v1",
-      });
-    } finally {
-      restoreEnvVar("HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS", previousCommitTimeout);
-    }
-  });
-
-  it("uses the worker-resolved commit timeout instead of ambient or forwarded env overrides", async () => {
-    const previousCommitTimeout = process.env.HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS;
-    process.env.HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS = "15000";
-    const commitFetch = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ ok: true }), {
-        status: 200,
-      }),
-    );
-    vi.stubGlobal("fetch", commitFetch);
-    const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
-
-    try {
-      await runHostedExecutionJob({
-        bundles: {
-          agentState: null,
-          vault: null,
-        },
-        commitTimeoutMs: 45_000,
-        commit: {
-          bundleRefs: {
-            agentState: null,
-            vault: null,
-          },
-        },
-        dispatch: {
-          event: {
-            kind: "member.activated",
-            userId: "member_123",
-          },
-          eventId: "evt_commit_forwarded_timeout",
-          occurredAt: "2026-03-26T12:10:00.000Z",
-        },
-        forwardedEnv: {
-          HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: "5000",
-        },
-      });
-
-      expect(commitFetch).toHaveBeenCalledTimes(1);
-      expect(timeoutSpy).toHaveBeenCalledWith(45_000);
-    } finally {
-      restoreEnvVar("HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS", previousCommitTimeout);
-    }
-  });
-
-  it("ignores ambient and forwarded env commit-timeout overrides when no typed timeout is provided", async () => {
-    const previousCommitTimeout = process.env.HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS;
-    process.env.HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS = "15000";
-    const commitFetch = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ ok: true }), {
-        status: 200,
-      }),
-    );
-    vi.stubGlobal("fetch", commitFetch);
-    const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
-
-    try {
-      await runHostedExecutionJob({
-        bundles: {
-          agentState: null,
-          vault: null,
-        },
-        commit: {
-          bundleRefs: {
-            agentState: null,
-            vault: null,
-          },
-        },
-        dispatch: {
-          event: {
-            kind: "member.activated",
-            userId: "member_123",
-          },
-          eventId: "evt_commit_default_timeout",
-          occurredAt: "2026-03-26T12:10:00.000Z",
-        },
-        forwardedEnv: {
-          HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: "5000",
-        },
-      });
-
-      expect(commitFetch).toHaveBeenCalledTimes(1);
-      expect(timeoutSpy).toHaveBeenCalledWith(30_000);
-    } finally {
-      restoreEnvVar("HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS", previousCommitTimeout);
-    }
   });
 
   it("preserves worker-resolved runtime fields while keeping control-only keys out of child env", () => {
@@ -2829,87 +2650,6 @@ describe("runHostedExecutionJob", () => {
       },
       deviceSync: null,
     });
-  });
-
-  it("does not block a concurrent hosted run when another hosted commit fails", async () => {
-    const firstRunStarted = createDeferred<void>();
-    const secondRunStarted = createDeferred<void>();
-    const firstCommitEntered = createDeferred<void>();
-    const releaseFirstCommit = createDeferred<void>();
-    let startedRunCount = 0;
-
-    setHostedExecutionRunStartHookForTests(() => {
-      startedRunCount += 1;
-      if (startedRunCount === 1) {
-        firstRunStarted.resolve();
-      } else if (startedRunCount === 2) {
-        secondRunStarted.resolve();
-      }
-    });
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockImplementationOnce(async () => {
-        firstCommitEntered.resolve();
-        await releaseFirstCommit.promise;
-        return new Response("commit failed", { status: 500 });
-      }),
-    );
-
-    try {
-      const firstRun = runHostedExecutionJob({
-        bundles: {
-          agentState: null,
-          vault: null,
-        },
-        commit: {
-          bundleRefs: {
-            agentState: null,
-            vault: null,
-          },
-        },
-        dispatch: {
-          event: {
-            kind: "member.activated",
-            userId: "member_123",
-          },
-          eventId: "evt_commit",
-          occurredAt: "2026-03-26T12:10:00.000Z",
-        },
-      });
-
-      await firstRunStarted.promise;
-      await firstCommitEntered.promise;
-
-      const secondRun = runHostedExecutionJob({
-        bundles: {
-          agentState: null,
-          vault: null,
-        },
-        dispatch: {
-          event: {
-            kind: "member.activated",
-            userId: "member_456",
-          },
-          eventId: "evt_after_failure",
-          occurredAt: "2026-03-26T12:10:01.000Z",
-        },
-      });
-
-      await secondRunStarted.promise;
-      expect(startedRunCount).toBe(2);
-
-      releaseFirstCommit.resolve();
-      await expect(firstRun).rejects.toThrow(
-        "Hosted runner durable commit failed for member_123/evt_commit.",
-      );
-
-      const secondResult = await secondRun;
-
-      expect(startedRunCount).toBe(2);
-      expect(secondResult.result.summary).toContain("Processed member activation");
-    } finally {
-      setHostedExecutionRunStartHookForTests(null);
-    }
   });
 
 });

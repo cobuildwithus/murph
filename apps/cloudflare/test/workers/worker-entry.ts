@@ -7,7 +7,6 @@ import type { HostedExecutionContainerNamespaceLike } from "../../src/runner-con
 import { HostedUserRunner } from "../../src/user-runner.ts";
 import { parseHostedUserEnvUpdate } from "../../src/user-env.ts";
 import type { WorkerEnvironmentSource } from "../../src/worker-routes/shared.ts";
-import type { WorkerUserRunnerCommitInput } from "../../src/worker-contracts.ts";
 
 import type {
   HostedExecutionDispatchRequest,
@@ -43,10 +42,6 @@ export class VitestUserRunnerDurableObject extends DurableObject {
 
   async dispatchWithOutcome(input: HostedExecutionDispatchRequest): Promise<HostedExecutionDispatchResult> {
     return this.runner.dispatchWithOutcome(input);
-  }
-
-  async commit(input: WorkerUserRunnerCommitInput) {
-    return this.runner.commit(input);
   }
 
   async status(): Promise<HostedExecutionUserStatus> {

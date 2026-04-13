@@ -15,7 +15,6 @@ import type { HostedAssistantRuntimeJobResult } from "@murphai/assistant-runtime
 import { createHostedUserEnvStore } from "../src/bundle-store.ts";
 import { writeEncryptedR2Json } from "../src/crypto.ts";
 import { readHostedExecutionEnvironment } from "../src/env.ts";
-import { createHostedExecutionJournalStore, persistHostedExecutionCommit } from "../src/execution-journal.ts";
 import { reconcileHostedEmailVerifiedSenderRoute } from "../src/hosted-email.ts";
 import worker, { ContainerProxy as ExportedContainerProxy, UserRunnerDurableObject } from "../src/index.ts";
 import { createHostedShareStore } from "../src/share-store.ts";
@@ -229,102 +228,6 @@ describe("cloudflare worker routes", () => {
     expect(stub.dispatch).not.toHaveBeenCalled();
   });
 
-  it("persists runner commits through the outbound results.worker handler", async () => {
-    const harness = createUserRunnerDurableObject();
-    await resolveHostedUserCryptoContextForTest(harness.env, "member_123");
-    await seedPendingRunnerCommitEvent(harness.storage, "evt_commit");
-    const sideEffects = [
-      {
-        effectId: "outbox_123",
-        fingerprint: "dedupe_123",
-        kind: "assistant.delivery" as const,
-      },
-    ];
-
-    const response = await callRunnerOutbound(
-      new Request("http://results.worker/events/evt_commit/commit", {
-        body: JSON.stringify({
-          bundle: Buffer.from("vault").toString("base64"),
-          currentBundleRef: null,
-          result: {
-            eventsHandled: 1,
-            summary: "ok",
-          },
-          run: createRunnerCommitContext(),
-          assistantDeliveryEffects: sideEffects,
-        }),
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-        },
-        method: "POST",
-      }),
-      harness.env,
-    );
-
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toMatchObject({
-      committed: {
-        eventId: "evt_commit",
-        result: {
-          summary: "ok",
-        },
-      },
-      ok: true,
-    });
-    expectHostedBundleKeys(harness.bucket.keys(), ["vault"]);
-    expect(harness.bucket.keys()).toContainEqual(expect.stringMatching(
-      /^transient\/execution-journal\/[0-9a-f]+\/[0-9a-f]+\.json$/u,
-    ));
-    await expect(hostedUserKeyEnvelopeObjectKeyForTest(harness.env, "member_123")).resolves.toSatisfy(
-      (expectedKey) => harness.bucket.keys().includes(expectedKey),
-    );
-    expect(harness.bucket.keys()).toHaveLength(3);
-    const journalStore = await createHostedExecutionJournalStoreForTest(harness.env, "member_123");
-    const canonicalSideEffects = sideEffects.map(({ effectId, fingerprint, kind }) => ({
-      effectId,
-      fingerprint,
-      kind,
-    }));
-    await expect(journalStore.readCommittedResult("member_123", "evt_commit")).resolves.toMatchObject({
-      assistantDeliveryEffects: canonicalSideEffects,
-    });
-  });
-
-  it("accepts legacy runner commits without run metadata while the same event still owns the active lease", async () => {
-    const harness = createUserRunnerDurableObject();
-    await resolveHostedUserCryptoContextForTest(harness.env, "member_123");
-    await seedPendingRunnerCommitEvent(harness.storage, "evt_legacy_commit", {
-      run: createRunnerCommitContext(),
-    });
-
-    const response = await callRunnerOutbound(
-      new Request("http://results.worker/events/evt_legacy_commit/commit", {
-        body: JSON.stringify({
-          assistantDeliveryEffects: [],
-          bundle: Buffer.from("vault").toString("base64"),
-          currentBundleRef: null,
-          result: {
-            eventsHandled: 1,
-            summary: "ok",
-          },
-        }),
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-        },
-        method: "POST",
-      }),
-      harness.env,
-    );
-
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toMatchObject({
-      committed: {
-        eventId: "evt_legacy_commit",
-      },
-      ok: true,
-    });
-  });
-
   it("stores and reads encrypted hosted artifact objects through the outbound artifacts.worker handler", async () => {
     const harness = createUserRunnerDurableObject();
     await resolveHostedUserCryptoContextForTest(harness.env, "member_123");
@@ -421,23 +324,13 @@ describe("cloudflare worker routes", () => {
     );
   });
 
-  it("hard-cuts the removed runner finalize route from the outbound results.worker handler", async () => {
+  it("hard-cuts the removed commit and finalize routes from the outbound results.worker handler", async () => {
     const harness = createUserRunnerDurableObject();
     await resolveHostedUserCryptoContextForTest(harness.env, "member_123");
-    await seedPendingRunnerCommitEvent(harness.storage, "evt_finalize");
 
-    await callRunnerOutbound(
+    const commitResponse = await callRunnerOutbound(
       new Request("http://results.worker/events/evt_finalize/commit", {
-        body: JSON.stringify({
-          assistantDeliveryEffects: [],
-          bundle: Buffer.from("vault-committed").toString("base64"),
-          currentBundleRef: null,
-          result: {
-            eventsHandled: 1,
-            summary: "committed",
-          },
-          run: createRunnerCommitContext(),
-        }),
+        body: JSON.stringify({}),
         headers: {
           "content-type": "application/json; charset=utf-8",
         },
@@ -445,7 +338,6 @@ describe("cloudflare worker routes", () => {
       }),
       harness.env,
     );
-
     const finalizeResponse = await callRunnerOutbound(
       new Request("http://results.worker/events/evt_finalize/finalize", {
         body: JSON.stringify({
@@ -458,45 +350,12 @@ describe("cloudflare worker routes", () => {
       }),
       harness.env,
     );
-    const journalStore = await createHostedExecutionJournalStoreForTest(harness.env, "member_123");
-
+    expect(commitResponse.status).toBe(404);
     expect(finalizeResponse.status).toBe(404);
-    await expect(journalStore.readCommittedResult("member_123", "evt_finalize")).resolves.toMatchObject({
-      bundleRef: {
-        size: "vault-committed".length,
-      },
-      finalizedAt: null,
-      result: {
-        summary: "committed",
-      },
-    });
   });
 
-  it("keeps malformed outbound callbacks from mutating journal state even when runner auth is unset", async () => {
+  it("keeps removed outbound callback routes hidden from public and internal callers", async () => {
     const harness = createUserRunnerDurableObject();
-    const journalStore = await createHostedExecutionJournalStoreForTest(harness.env, "member_123");
-    await seedPendingRunnerCommitEvent(harness.storage, "evt_finalize_auth");
-
-    await callRunnerOutbound(
-      new Request("http://results.worker/events/evt_finalize_auth/commit", {
-        body: JSON.stringify({
-          assistantDeliveryEffects: [],
-          bundle: Buffer.from("vault-committed").toString("base64"),
-          currentBundleRef: null,
-          result: {
-            eventsHandled: 1,
-            summary: "committed",
-          },
-          run: createRunnerCommitContext(),
-        }),
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-        },
-        method: "POST",
-      }),
-      harness.env,
-    );
-
     const removedFinalizeResponse = await callRunnerOutbound(
       new Request("http://results.worker/events/evt_finalize_auth/finalize", {
         body: JSON.stringify({
@@ -511,17 +370,10 @@ describe("cloudflare worker routes", () => {
     );
     expect(removedFinalizeResponse.status).toBe(404);
 
-    await expect(() => callRunnerOutbound(
+    const removedCommitResponse = await callRunnerOutbound(
       new Request("http://results.worker/events/evt_bad_commit/commit", {
         body: JSON.stringify({
-          assistantDeliveryEffects: [],
-          bundle: 42,
-          currentBundleRef: {},
-          result: {
-            eventsHandled: 1,
-            summary: "bad",
-          },
-          run: createRunnerCommitContext(),
+          ignored: true,
         }),
         headers: {
           "content-type": "application/json; charset=utf-8",
@@ -529,7 +381,8 @@ describe("cloudflare worker routes", () => {
         method: "POST",
       }),
       harness.env,
-    )).rejects.toThrow("bundle must be a string or null.");
+    );
+    expect(removedCommitResponse.status).toBe(404);
 
     const publicCommitResponse = await worker.fetch(
       new Request("https://runner.example.test/internal/runner-events/member_123/evt_commit/commit", {
@@ -546,13 +399,6 @@ describe("cloudflare worker routes", () => {
       createWorkerEnv(),
     );
     expect(publicOutboxResponse.status).toBe(404);
-
-    await expect(journalStore.readCommittedResult("member_123", "evt_finalize_auth")).resolves.toMatchObject({
-      finalizedAt: null,
-      result: {
-        summary: "committed",
-      },
-    });
   });
 
   it("persists side-effect journal records through the side-effects route and reads them back through the outbox route", async () => {
@@ -2510,18 +2356,6 @@ function createDispatch(eventId: string): HostedExecutionDispatchRequest {
   };
 }
 
-function createRunnerSuccessPayload() {
-  return {
-    assistantDeliveryEffects: [],
-    bundle: null,
-    gatewayProjectionSnapshot: null,
-    result: {
-      eventsHandled: 1,
-      summary: "ok",
-    },
-  };
-}
-
 function createOutboxDelivery() {
   return {
     channel: "telegram",
@@ -2577,174 +2411,6 @@ async function sideEffectRecordObjectKey(
   });
 
   return `transient/side-effects/${userSegment}/${effectSegment}.json`;
-}
-
-function expectHostedBundleKeys(
-  keys: string[],
-  kinds: Array<"vault">,
-): void {
-  for (const kind of kinds) {
-    expect(keys).toContainEqual(expect.stringMatching(
-      new RegExp(`^bundles/${kind}/[0-9a-f]+\\.bundle\\.json$`, "u"),
-    ));
-  }
-}
-
-function createRunnerCommitContext() {
-  return {
-    attempt: 1,
-    runId: "run_123",
-    startedAt: "2026-04-08T00:00:00.000Z",
-  };
-}
-
-async function seedPendingRunnerCommitEvent(
-  storage: ReturnType<typeof createStorage>,
-  eventId: string,
-  options: {
-    run?: ReturnType<typeof createRunnerCommitContext>;
-  } = {},
-): Promise<void> {
-  storage.state.storage.sql.exec(
-    `INSERT OR REPLACE INTO pending_events (
-      event_id,
-      payload_key,
-      attempts,
-      available_at,
-      enqueued_at,
-      last_error_code
-    ) VALUES (?, ?, ?, ?, ?, ?)`,
-    eventId,
-    `transient/dispatch-payloads/${eventId}.json`,
-    1,
-    "2026-04-08T00:00:00.000Z",
-    "2026-04-08T00:00:00.000Z",
-    null,
-  );
-
-  if (!options.run) {
-    return;
-  }
-
-  storage.state.storage.sql.exec(
-    `INSERT OR REPLACE INTO runner_meta (
-      singleton,
-      user_id,
-      active_run_event_id,
-      active_run_id,
-      active_run_attempt,
-      active_run_started_at,
-      runtime_bootstrapped,
-      in_flight,
-      last_error_at,
-      last_error_code,
-      last_run_at,
-      next_wake_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    1,
-    "member_123",
-    eventId,
-    options.run.runId,
-    options.run.attempt,
-    options.run.startedAt,
-    0,
-    1,
-    null,
-    null,
-    null,
-    null,
-  );
-}
-
-async function createCommittedRunnerSuccessResponse(input: {
-  bucket: ReturnType<typeof createBucketStore>;
-  environment?: ReturnType<typeof createWorkerEnv>;
-  payload: ReturnType<typeof createRunnerSuccessPayload>;
-  requestBody: {
-    commit: {
-      bundleRef: { hash: string; key: string; size: number; updatedAt: string } | null;
-    };
-    dispatch: {
-      event: {
-        userId: string;
-      };
-      eventId: string;
-    };
-  };
-}): Promise<Response> {
-  const environment = input.environment ?? createWorkerEnv();
-  const crypto = await resolveHostedUserCryptoContextForTest(
-    environment,
-    input.requestBody.dispatch.event.userId,
-  );
-
-  await persistHostedExecutionCommit({
-    bucket: input.bucket.api,
-    currentBundleRef: input.requestBody.commit.bundleRef,
-    eventId: input.requestBody.dispatch.eventId,
-    key: crypto.rootKey,
-    keyId: crypto.rootKeyId,
-    keysById: crypto.keysById,
-    payload: input.payload,
-    userId: input.requestBody.dispatch.event.userId,
-  });
-
-  return new Response(JSON.stringify(input.payload), {
-    status: 200,
-  });
-}
-
-async function createRunnerContainerInvokeSuccessResponse(input: {
-  bucket: ReturnType<typeof createBucketStore>;
-  environment?: ReturnType<typeof createWorkerEnv>;
-  payload: ReturnType<typeof createRunnerSuccessPayload>;
-  request: Request;
-}): Promise<Response> {
-  const url = new URL(input.request.url);
-
-  if (url.pathname === "/internal/destroy") {
-    return new Response(null, { status: 204 });
-  }
-
-  if (url.pathname !== "/internal/invoke") {
-    return new Response("Not found", { status: 404 });
-  }
-
-  const requestBody = JSON.parse(await input.request.clone().text()) as {
-    job: {
-      request: {
-        commit: {
-          bundleRef: { hash: string; key: string; size: number; updatedAt: string } | null;
-        };
-        dispatch: {
-          event: {
-            userId: string;
-          };
-          eventId: string;
-        };
-      };
-    };
-  };
-
-  return createCommittedRunnerSuccessResponse({
-    bucket: input.bucket,
-    environment: input.environment,
-    payload: input.payload,
-    requestBody: requestBody.job.request,
-  });
-}
-
-async function createHostedExecutionJournalStoreForTest(
-  env: ReturnType<typeof createWorkerEnv> | ReturnType<typeof createUserRunnerDurableObject>["env"],
-  userId: string,
-) {
-  const crypto = await resolveHostedUserCryptoContextForTest(env, userId);
-  return createHostedExecutionJournalStore({
-    bucket: env.BUNDLES,
-    key: crypto.rootKey,
-    keyId: crypto.rootKeyId,
-    keysById: crypto.keysById,
-  });
 }
 
 async function hostedArtifactObjectKeyForTest(
@@ -2877,21 +2543,6 @@ function createUserRunnerStub() {
     })),
     deletePendingUsage: vi.fn(async () => {}),
     deleteStoredDispatchPayload: vi.fn(async () => {}),
-    commit: vi.fn(async (input: {
-      eventId: string;
-    }) => ({
-      assistantDeliveryEffects: [],
-      bundleRef: null,
-      committedAt: "2026-03-26T12:00:00.000Z",
-      eventId: input.eventId,
-      finalizedAt: null,
-      gatewayProjectionSnapshot: null,
-      result: {
-        eventsHandled: 1,
-        summary: "ok",
-      },
-      userId: "member_123",
-    })),
     dispatchWithOutcome: vi.fn(async (input: HostedExecutionDispatchRequest) =>
       buildDispatchResultFixture(input.event.userId, input.eventId)),
     dispatch: vi.fn(async (input: HostedExecutionDispatchRequest) => ({

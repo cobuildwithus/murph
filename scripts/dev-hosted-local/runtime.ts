@@ -8,6 +8,7 @@ import process from "node:process";
 
 import {
   HEALTH_POLL_INTERVAL_MS,
+  HEALTH_REQUEST_TIMEOUT_MS,
   HEALTH_TIMEOUT_MS,
   HOSTED_WEB_DEV_DIST_DIR,
   HOSTED_WEB_SMOKE_DIST_DIR,
@@ -329,7 +330,7 @@ async function requestStatus(input: {
       },
     );
 
-    req.setTimeout(5_000, () => {
+    req.setTimeout(HEALTH_REQUEST_TIMEOUT_MS, () => {
       req.destroy(new Error("request timed out"));
     });
     req.on("error", reject);

@@ -11,7 +11,6 @@ import {
 } from "@murphai/hosted-execution/contracts";
 import {
   HOSTED_EXECUTION_RUNNER_EMAIL_SEND_PATH,
-  buildHostedExecutionRunnerCommitPath,
   buildHostedExecutionRunnerEmailMessagePath,
   buildHostedExecutionRunnerSideEffectPath,
 } from "@murphai/hosted-execution/routes";
@@ -129,29 +128,6 @@ export function buildHostedExecutionRuntimePlatform(input: {
       },
     },
     effectsPort: {
-      async commit({ eventId, payload, run }) {
-        const response = await fetchHostedResponse({
-          description: `Hosted commit ${eventId}`,
-          fetchImpl,
-          init: {
-            body: JSON.stringify({
-              ...payload,
-              run,
-            }),
-            headers: {
-              "content-type": "application/json; charset=utf-8",
-            },
-            method: "POST",
-          },
-          timeoutMs,
-          url: new URL(
-            buildHostedExecutionRunnerCommitPath(eventId),
-            `${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.effectsPort}/`,
-          ),
-        });
-
-        assertHostedOk(response, `Hosted commit ${eventId}`);
-      },
       async deletePreparedAssistantDelivery(sideEffect) {
         const url = createHostedAssistantDeliveryUrl(sideEffect);
         const response = await fetchHostedResponse({

@@ -646,410 +646,6 @@ describe("HostedUserRunner", () => {
     expect(bucket.putCount()).toBe(writesBeforeFinalize);
   });
 
-  it("rejects duplicate runner commits whose payload diverges from the first write", async () => {
-    const runner = new HostedUserRunner(storage.state, environment, bucket.api);
-    await runner.provisionManagedUserCrypto("member_123");
-    await seedPendingCommitEvent({
-      bucket,
-      environment,
-      eventId: "evt_duplicate_runner_commit",
-      storage,
-      userId: "member_123",
-    });
-
-    await runner.commit({
-      eventId: "evt_duplicate_runner_commit",
-      payload: {
-        assistantDeliveryEffects: [],
-        bundle: Buffer.from("vault").toString("base64"),
-        currentBundleRef: null,
-        result: {
-          eventsHandled: 1,
-          summary: "ok",
-        },
-      },
-      run: createRunnerCommitContext(),
-    });
-
-    await expect(
-      runner.commit({
-        eventId: "evt_duplicate_runner_commit",
-        payload: {
-          assistantDeliveryEffects: [],
-          bundle: Buffer.from("vault-updated").toString("base64"),
-          currentBundleRef: null,
-          result: {
-            eventsHandled: 1,
-            summary: "ok",
-          },
-        },
-        run: createRunnerCommitContext(),
-      }),
-    ).rejects.toThrow(
-      "Hosted execution commit evt_duplicate_runner_commit vault bundle ref does not match the existing durable commit.",
-    );
-  });
-
-  it("rejects runner commits when no active or pending run could own the event", async () => {
-    const runner = new HostedUserRunner(storage.state, environment, bucket.api);
-    await runner.provisionManagedUserCrypto("member_123");
-
-    await expect(
-      runner.commit({
-        eventId: "evt_missing_owner",
-        payload: {
-          assistantDeliveryEffects: [],
-          bundle: Buffer.from("vault").toString("base64"),
-          currentBundleRef: null,
-          result: {
-            eventsHandled: 1,
-            summary: "ok",
-          },
-        },
-        run: createRunnerCommitContext(),
-      }),
-    ).rejects.toThrow(
-      "Hosted execution commit evt_missing_owner does not match any active or pending runner attempt.",
-    );
-  });
-
-  it("accepts legacy runner commits without run metadata while the same event still owns the active lease", async () => {
-    const runner = new HostedUserRunner(storage.state, environment, bucket.api);
-    await runner.provisionManagedUserCrypto("member_123");
-    await seedPendingCommitEvent({
-      bucket,
-      environment,
-      eventId: "evt_legacy_runner_commit",
-      storage,
-      userId: "member_123",
-    });
-
-    await expect(
-      runner.commit({
-        eventId: "evt_legacy_runner_commit",
-        payload: {
-          assistantDeliveryEffects: [],
-          bundle: Buffer.from("vault").toString("base64"),
-          currentBundleRef: null,
-          result: {
-            eventsHandled: 1,
-            summary: "ok",
-          },
-        },
-        run: null,
-      }),
-    ).resolves.toMatchObject({
-      eventId: "evt_legacy_runner_commit",
-      result: {
-        summary: "ok",
-      },
-    });
-  });
-
-  it("rejects legacy runner commits without run metadata after the active lease is gone", async () => {
-    const runner = new HostedUserRunner(storage.state, environment, bucket.api);
-    await runner.provisionManagedUserCrypto("member_123");
-    await seedRunnerQueueState({
-      bucket,
-      environment,
-      inFlight: false,
-      pendingEvents: [{
-        attempts: 1,
-        availableAt: "2026-03-26T12:01:00.000Z",
-        dispatch: createDispatch("evt_legacy_runner_missing"),
-        enqueuedAt: "2026-03-26T12:00:00.000Z",
-        lastError: "timeout",
-      }],
-      storage,
-      userId: "member_123",
-    });
-
-    await expect(
-      runner.commit({
-        eventId: "evt_legacy_runner_missing",
-        payload: {
-          assistantDeliveryEffects: [],
-          bundle: Buffer.from("vault").toString("base64"),
-          currentBundleRef: null,
-          result: {
-            eventsHandled: 1,
-            summary: "ok",
-          },
-        },
-        run: null,
-      }),
-    ).rejects.toThrow(
-      "Hosted execution commit evt_legacy_runner_missing does not match any active or pending runner attempt.",
-    );
-  });
-
-  it("rejects legacy runner commits without run metadata once a newer retry owns the same event", async () => {
-    const runner = new HostedUserRunner(storage.state, environment, bucket.api);
-    await runner.provisionManagedUserCrypto("member_123");
-    await seedRunnerQueueState({
-      activeRunLease: {
-        attempt: 2,
-        eventId: "evt_legacy_runner_stale",
-        runId: "run_new",
-        startedAt: "2026-03-26T12:01:00.000Z",
-      },
-      bucket,
-      environment,
-      inFlight: true,
-      pendingEvents: [{
-        attempts: 1,
-        availableAt: "2026-03-26T12:01:00.000Z",
-        dispatch: createDispatch("evt_legacy_runner_stale"),
-        enqueuedAt: "2026-03-26T12:00:00.000Z",
-        lastError: "timeout",
-      }],
-      storage,
-      userId: "member_123",
-    });
-
-    await expect(
-      runner.commit({
-        eventId: "evt_legacy_runner_stale",
-        payload: {
-          assistantDeliveryEffects: [],
-          bundle: Buffer.from("vault").toString("base64"),
-          currentBundleRef: null,
-          result: {
-            eventsHandled: 1,
-            summary: "ok",
-          },
-        },
-        run: null,
-      }),
-    ).rejects.toThrow(
-      "Hosted execution commit evt_legacy_runner_stale does not match the active runner lease.",
-    );
-  });
-
-  it("rejects stale runner commits once a newer claimed run owns the pending event", async () => {
-    const runner = new HostedUserRunner(storage.state, environment, bucket.api);
-    await runner.provisionManagedUserCrypto("member_123");
-    await seedRunnerQueueState({
-      activeRunLease: {
-        attempt: 2,
-        eventId: "evt_stale_commit",
-        runId: "run_new",
-        startedAt: "2026-03-26T12:01:00.000Z",
-      },
-      bucket,
-      environment,
-      inFlight: true,
-      pendingEvents: [{
-        attempts: 1,
-        availableAt: "2026-03-26T12:01:00.000Z",
-        dispatch: createDispatch("evt_stale_commit"),
-        enqueuedAt: "2026-03-26T12:00:00.000Z",
-        lastError: "timeout",
-      }],
-      storage,
-      userId: "member_123",
-    });
-
-    await expect(
-      runner.commit({
-        eventId: "evt_stale_commit",
-        payload: {
-          assistantDeliveryEffects: [],
-          bundle: Buffer.from("vault").toString("base64"),
-          currentBundleRef: null,
-          result: {
-            eventsHandled: 1,
-            summary: "ok",
-          },
-        },
-        run: createRunnerCommitContext({
-          attempt: 1,
-          runId: "run_old",
-          startedAt: "2026-03-26T12:00:00.000Z",
-        }),
-      }),
-    ).rejects.toThrow(
-      "Hosted execution commit evt_stale_commit came from a stale runner attempt.",
-    );
-
-    await expect(
-      runner.commit({
-        eventId: "evt_stale_commit",
-        payload: {
-          assistantDeliveryEffects: [],
-          bundle: Buffer.from("vault").toString("base64"),
-          currentBundleRef: null,
-          result: {
-            eventsHandled: 1,
-            summary: "ok",
-          },
-        },
-        run: createRunnerCommitContext({
-          attempt: 2,
-          runId: "run_new",
-          startedAt: "2026-03-26T12:01:00.000Z",
-        }),
-      }),
-    ).resolves.toMatchObject({
-      eventId: "evt_stale_commit",
-      result: {
-        summary: "ok",
-      },
-    });
-  });
-
-  it("projects gateway snapshots into the hot hosted gateway store during commit and finalize", async () => {
-    const runner = new HostedUserRunner(storage.state, environment, bucket.api);
-    const routeKey = "channel:email|identity:murph%40example.com|thread:thread-labs";
-    const sessionKey = createGatewayConversationSessionKey(routeKey);
-    await runner.provisionManagedUserCrypto("member_123");
-    await seedPendingCommitEvent({
-      bucket,
-      environment,
-      eventId: "evt_gateway_projection",
-      storage,
-      userId: "member_123",
-    });
-
-    await runner.commit({
-      eventId: "evt_gateway_projection",
-      payload: {
-        assistantDeliveryEffects: [],
-        bundle: Buffer.from("vault").toString("base64"),
-        currentBundleRef: null,
-        gatewayProjectionSnapshot: {
-          conversations: [{
-            canSend: true,
-            lastActivityAt: "2026-03-26T12:00:00.000Z",
-            lastMessagePreview: "Here is the latest lab PDF.",
-            messageCount: 1,
-            route: {
-              channel: "email",
-              directness: "group",
-              identityId: "murph@example.com",
-              participantId: "contact:alex",
-              reply: {
-                kind: "thread",
-                target: "thread-labs",
-              },
-              threadId: "thread-labs",
-            },
-            schema: "murph.gateway-conversation.v1",
-            sessionKey,
-            title: "Lab thread",
-            titleSource: "thread-title",
-          }],
-          generatedAt: "2026-03-26T12:00:00.000Z",
-          messages: [{
-            actorDisplayName: "Alex",
-            attachments: [],
-            createdAt: "2026-03-26T12:00:00.000Z",
-            direction: "inbound",
-            messageId: "gwcm_projection_initial",
-            schema: "murph.gateway-message.v1",
-            sessionKey,
-            text: "Here is the latest lab PDF.",
-          }],
-          permissions: [],
-          schema: "murph.gateway-projection-snapshot.v1",
-        },
-        result: {
-          eventsHandled: 1,
-          summary: "ok",
-        },
-      },
-      run: createRunnerCommitContext(),
-    });
-
-    const listed = await runner.gatewayListConversations({ limit: 10 });
-    expect(listed.conversations).toHaveLength(1);
-    expect(listed.conversations[0]?.sessionKey).toBe(sessionKey);
-
-    const baselineEvents = await runner.gatewayPollEvents({ cursor: 0, limit: 10 });
-    expect(baselineEvents.events).toHaveLength(0);
-
-    const crypto = await resolveHostedUserCryptoContextForTest({
-      bucket,
-      environment,
-      userId: "member_123",
-    });
-    await persistHostedExecutionFinalBundles({
-      bucket: bucket.api,
-      eventId: "evt_gateway_projection",
-      key: crypto.rootKey,
-      keyId: crypto.rootKeyId,
-      keysById: crypto.keysById,
-      payload: {
-        bundle: Buffer.from("vault-final").toString("base64"),
-        gatewayProjectionSnapshot: {
-          conversations: [{
-            canSend: true,
-            lastActivityAt: "2026-03-26T12:05:00.000Z",
-            lastMessagePreview: "Please send the latest PDF.",
-            messageCount: 2,
-            route: {
-              channel: "email",
-              directness: "group",
-              identityId: "murph@example.com",
-              participantId: "contact:alex",
-              reply: {
-                kind: "thread",
-                target: "thread-labs",
-              },
-              threadId: "thread-labs",
-            },
-            schema: "murph.gateway-conversation.v1",
-            sessionKey,
-            title: "Lab thread",
-            titleSource: "thread-title",
-          }],
-          generatedAt: "2026-03-26T12:05:00.000Z",
-          messages: [{
-            actorDisplayName: "Alex",
-            attachments: [],
-            createdAt: "2026-03-26T12:00:00.000Z",
-            direction: "inbound",
-            messageId: "gwcm_projection_initial",
-            schema: "murph.gateway-message.v1",
-            sessionKey,
-            text: "Here is the latest lab PDF.",
-          }, {
-            actorDisplayName: null,
-            attachments: [],
-            createdAt: "2026-03-26T12:05:00.000Z",
-            direction: "outbound",
-            messageId: "gwcm_projection_followup",
-            schema: "murph.gateway-message.v1",
-            sessionKey,
-            text: "Please send the latest PDF.",
-          }],
-          permissions: [],
-          schema: "murph.gateway-projection-snapshot.v1",
-        },
-      },
-      userId: "member_123",
-    });
-    await runner.dispatch({
-      event: {
-        kind: "assistant.cron.tick",
-        reason: "manual",
-        userId: "member_123",
-      },
-      eventId: "evt_gateway_projection",
-      occurredAt: "2026-03-26T12:05:00.000Z",
-    });
-
-    const messages = await runner.gatewayReadMessages({
-      oldestFirst: true,
-      sessionKey,
-    });
-    expect(messages.messages).toHaveLength(2);
-    expect(messages.messages[1]?.messageId).toBe("gwcm_projection_followup");
-
-    const updatedEvents = await runner.gatewayPollEvents({ cursor: 0, limit: 10 });
-    expect(updatedEvents.events.map((event) => event.kind)).toContain("message.created");
-    expect(updatedEvents.events.map((event) => event.kind)).toContain("conversation.updated");
-  });
 
   it("stores pending hosted AI usage in worker-owned storage and supports read/delete", async () => {
     const runner = new HostedUserRunner(storage.state, environment, bucket.api);
@@ -1157,95 +753,6 @@ describe("HostedUserRunner", () => {
     expect(listed.conversations[0]?.lastMessagePreview).toBe("Committed before finalize.");
   });
 
-  it("ignores stale gateway snapshots so finalize cannot rewind the hot projection", async () => {
-    const runner = new HostedUserRunner(storage.state, environment, bucket.api);
-    await runner.provisionManagedUserCrypto("member_123");
-    await seedPendingCommitEvent({
-      bucket,
-      environment,
-      eventId: "evt_gateway_stale_projection",
-      storage,
-      userId: "member_123",
-    });
-
-    await runner.commit({
-      eventId: "evt_gateway_stale_projection",
-      payload: {
-        assistantDeliveryEffects: [],
-        bundle: Buffer.from("vault-newer").toString("base64"),
-        currentBundleRef: null,
-        gatewayProjectionSnapshot: createGatewayProjectionSnapshot({
-          generatedAt: "2026-03-26T12:05:00.000Z",
-          lastActivityAt: "2026-03-26T12:05:00.000Z",
-          lastMessagePreview: "Newer projection",
-          messages: [{
-            actorDisplayName: "Alex",
-            createdAt: "2026-03-26T12:00:00.000Z",
-            direction: "inbound",
-            messageId: "gwcm_projection_initial",
-            text: "Initial projection",
-          }, {
-            actorDisplayName: null,
-            createdAt: "2026-03-26T12:05:00.000Z",
-            direction: "outbound",
-            messageId: "gwcm_projection_newer",
-            text: "Newer projection",
-          }],
-          messageCount: 2,
-          title: "Lab thread",
-        }),
-        result: {
-          eventsHandled: 1,
-          summary: "ok",
-        },
-      },
-      run: createRunnerCommitContext(),
-    });
-
-    const crypto = await resolveHostedUserCryptoContextForTest({
-      bucket,
-      environment,
-      userId: "member_123",
-    });
-    await persistHostedExecutionFinalBundles({
-      bucket: bucket.api,
-      eventId: "evt_gateway_stale_projection",
-      key: crypto.rootKey,
-      keyId: crypto.rootKeyId,
-      keysById: crypto.keysById,
-      payload: {
-        bundle: Buffer.from("vault-older").toString("base64"),
-        gatewayProjectionSnapshot: createGatewayProjectionSnapshot({
-          generatedAt: "2026-03-26T12:00:00.000Z",
-          lastActivityAt: "2026-03-26T12:00:00.000Z",
-          lastMessagePreview: "Initial projection",
-          messages: [{
-            actorDisplayName: "Alex",
-            createdAt: "2026-03-26T12:00:00.000Z",
-            direction: "inbound",
-            messageId: "gwcm_projection_initial",
-            text: "Initial projection",
-          }],
-          messageCount: 1,
-          title: "Lab thread",
-        }),
-      },
-      userId: "member_123",
-    });
-    await runner.dispatch(createDispatch("evt_gateway_stale_projection"));
-
-    const listed = await runner.gatewayListConversations({ limit: 10 });
-    expect(listed.conversations).toHaveLength(1);
-    expect(listed.conversations[0]?.lastMessagePreview).toBe("Newer projection");
-    expect(listed.conversations[0]?.messageCount).toBe(2);
-
-    const messages = await runner.gatewayReadMessages({
-      oldestFirst: true,
-      sessionKey: listed.conversations[0]!.sessionKey,
-    });
-    expect(messages.messages).toHaveLength(2);
-    expect(messages.messages[1]?.messageId).toBe("gwcm_projection_newer");
-  });
 
   it("recovers finalized committed results after automation-key rotation via the user root key envelope", async () => {
     const rotatedEnvironment = {
@@ -1796,9 +1303,7 @@ describe("HostedUserRunner", () => {
     const invokePayload = JSON.parse(await invokeRequest.text()) as {
       job: {
         request: {
-          commit: {
-            bundleRef: null | { hash: string; key: string; size: number; updatedAt: string };
-          };
+          currentBundleRef: null | { hash: string; key: string; size: number; updatedAt: string };
           run: {
             attempt: number;
             runId: string;
@@ -1808,7 +1313,7 @@ describe("HostedUserRunner", () => {
       };
     };
 
-    expect(invokePayload.job.request.commit.bundleRef).toBeNull();
+    expect(invokePayload.job.request.currentBundleRef).toBeNull();
     expect(invokePayload.job.request.run).toMatchObject({
       attempt: 1,
       runId: expect.any(String),
@@ -2105,8 +1610,8 @@ describe("HostedUserRunner", () => {
       expect(deletedArtifactKeys).toContain(
         await hostedArtifactObjectKey(crypto.rootKey, "member_cleanup_failure", previousArtifact!.ref.sha256),
       );
-      expect(deletedArtifactKeys).toHaveLength(2);
-      expect(new Set(deletedArtifactKeys).size).toBe(2);
+      expect(deletedArtifactKeys).toHaveLength(4);
+      expect(new Set(deletedArtifactKeys).size).toBe(4);
     } finally {
       await rm(workspaceRoot, { force: true, recursive: true });
     }
@@ -2455,80 +1960,6 @@ describe("HostedUserRunner", () => {
 
     expect(second.bundleRef).toEqual(first.bundleRef);
     expect(bucket.putCount()).toBe(writeCountAfterFirstRun + 3);
-  });
-
-  it("serializes duplicate commit attempts for the same event through one transition lock", async () => {
-    const originalPut = bucket.api.put;
-    const firstWriteStarted = createDeferred<void>();
-    const releaseFirstWrite = createDeferred<void>();
-    let blocked = false;
-
-    try {
-      const runner = new HostedUserRunner(storage.state, environment, bucket.api);
-      await runner.provisionManagedUserCrypto("member_123");
-      await seedPendingCommitEvent({
-        bucket,
-        environment,
-        eventId: "evt_transition_lock",
-        storage,
-        userId: "member_123",
-      });
-      bucket.api.put = vi.fn(async (key: string, value: string) => {
-        if (!blocked) {
-          blocked = true;
-          firstWriteStarted.resolve();
-          await releaseFirstWrite.promise;
-        }
-
-        await originalPut.call(bucket.api, key, value);
-      });
-
-      const commitPromise = runner.commit({
-        eventId: "evt_transition_lock",
-        payload: {
-          assistantDeliveryEffects: [],
-          bundle: Buffer.from("vault").toString("base64"),
-          currentBundleRef: null,
-          result: {
-            eventsHandled: 1,
-            summary: "ok",
-          },
-        },
-        run: createRunnerCommitContext(),
-      });
-
-      await firstWriteStarted.promise;
-      let secondCommitSettled = false;
-      const secondCommitPromise = runner.commit({
-        eventId: "evt_transition_lock",
-        payload: {
-          assistantDeliveryEffects: [],
-          bundle: Buffer.from("vault").toString("base64"),
-          currentBundleRef: null,
-          result: {
-            eventsHandled: 1,
-            summary: "ok",
-          },
-        },
-        run: createRunnerCommitContext(),
-      }).finally(() => {
-        secondCommitSettled = true;
-      });
-
-      await Promise.resolve();
-      expect(secondCommitSettled).toBe(false);
-
-      releaseFirstWrite.resolve();
-      await expect(commitPromise).resolves.toMatchObject({
-        eventId: "evt_transition_lock",
-      });
-      await expect(secondCommitPromise).resolves.toMatchObject({
-        eventId: "evt_transition_lock",
-        finalizedAt: null,
-      });
-    } finally {
-      bucket.api.put = originalPut;
-    }
   });
 
   it("retries failed events and eventually poisons them after repeated runner failures", async () => {
@@ -3063,7 +2494,7 @@ describe("HostedUserRunner", () => {
       state: "duplicate_consumed",
       userId: "member_123",
     });
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it("reports poisoned events through the shared dispatch outcome surface without rerunning them", async () => {
@@ -3291,7 +2722,7 @@ describe("HostedUserRunner", () => {
       eventId: "evt_per_run_runner_token",
       phase: "completed",
     });
-    expect(countRunnerContainerCalls(storage.runnerContainerFetch, "/internal/invoke")).toBe(1);
+    expect(countRunnerContainerCalls(storage.runnerContainerFetch, "/internal/invoke")).toBe(2);
   });
 
   it("keeps replay suppression after a durable-object restart", async () => {
@@ -3328,7 +2759,7 @@ describe("HostedUserRunner", () => {
       occurredAt: "2026-03-26T12:30:00.000Z",
     });
 
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
   });
 
   it("allows consumed event ids to be retried after the 30-day exact tombstone expires", async () => {
@@ -3367,7 +2798,7 @@ describe("HostedUserRunner", () => {
       occurredAt: "2026-04-26T12:00:01.000Z",
     });
 
-    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(fetchSpy).toHaveBeenCalledTimes(4);
   });
 
   it("keeps poisoned event ids blocked even after the old replay TTL window passes", async () => {
@@ -3523,6 +2954,12 @@ describe("HostedUserRunner", () => {
     );
 
     expect(invokePayloads).toEqual([
+      {
+        eventId: "evt_rotated_user_env",
+        userEnv: {
+          OPENAI_API_KEY: "sk-legacy",
+        },
+      },
       {
         eventId: "evt_rotated_user_env",
         userEnv: {
@@ -4277,6 +3714,7 @@ function createRunnerSuccessPayload(input: Partial<{
 function serializeRunnerSuccessPayload(
   payload: RunnerSuccessPayloadLike,
 ): {
+  phase: "completed";
   finalGatewayProjectionSnapshot: GatewayProjectionSnapshot | null;
   result: {
     bundle: string | null;
@@ -4287,6 +3725,31 @@ function serializeRunnerSuccessPayload(
 
   return {
     finalGatewayProjectionSnapshot: normalized.gatewayProjectionSnapshot,
+    phase: "completed",
+    result: {
+      bundle: normalized.bundles.vault ?? normalized.bundles.agentState,
+      result: normalized.result,
+    },
+  };
+}
+
+function serializeRunnerCommittedPayload(
+  payload: RunnerSuccessPayloadLike,
+): {
+  committedAssistantDeliveryEffects: HostedAssistantDeliveryEffect[];
+  committedGatewayProjectionSnapshot: GatewayProjectionSnapshot | null;
+  phase: "committed";
+  result: {
+    bundle: string | null;
+    result: RunnerSuccessPayload["result"];
+  };
+} {
+  const normalized = normalizeRunnerSuccessPayload(payload);
+
+  return {
+    committedAssistantDeliveryEffects: normalized.assistantDeliveryEffects,
+    committedGatewayProjectionSnapshot: normalized.gatewayProjectionSnapshot,
+    phase: "committed",
     result: {
       bundle: normalized.bundles.vault ?? normalized.bundles.agentState,
       result: normalized.result,
@@ -4301,31 +3764,28 @@ async function createCommittedRunnerSuccessResponse(input: {
   payload?: RunnerSuccessPayloadLike;
 }): Promise<Response> {
   const payload = normalizeRunnerSuccessPayload(input.payload);
+  const requestBody = JSON.parse(String(input.init?.body));
 
-  await commitResultForRunnerRequest({
-    bucket: input.bucket,
-    environment: input.environment,
-    payload,
-    requestBody: JSON.parse(String(input.init?.body)),
-  });
-
-  return new Response(JSON.stringify(serializeRunnerSuccessPayload(payload)), {
+  return new Response(JSON.stringify(
+    readRunnerJobRequest(requestBody).resume
+      ? serializeRunnerSuccessPayload(payload)
+      : serializeRunnerCommittedPayload(payload),
+  ), {
     status: 200,
   });
 }
 
 function readDispatchedEventIds(fetchMock: ReturnType<typeof vi.fn>): string[] {
-  return fetchMock.mock.calls.map(([, init]) => {
+  return fetchMock.mock.calls.flatMap(([, init]) => {
     const body = typeof init?.body === "string" ? init.body : "";
+    const request = readRunnerJobRequest(JSON.parse(body));
 
-    return readRunnerJobRequest(JSON.parse(body)).dispatch.eventId;
+    return request.resume ? [] : [request.dispatch.eventId];
   });
 }
 
 function readRunnerJobRequest(value: unknown): {
-  commit?: {
-    bundleRef: { hash: string; key: string; size: number; updatedAt: string } | null;
-  };
+  currentBundleRef?: { hash: string; key: string; size: number; updatedAt: string } | null;
   dispatch: {
     event: {
       userId: string;
@@ -4352,9 +3812,7 @@ function readRunnerJobRequest(value: unknown): {
   }
 
   return request as {
-    commit?: {
-      bundleRef: { hash: string; key: string; size: number; updatedAt: string } | null;
-    };
+    currentBundleRef?: { hash: string; key: string; size: number; updatedAt: string } | null;
     dispatch: {
       event: {
         userId: string;
@@ -4380,7 +3838,7 @@ async function commitResultForRunnerRequest(input: {
   });
   await persistHostedExecutionCommit({
     bucket: input.bucket.api,
-    currentBundleRef: requestBody.commit?.bundleRef ?? null,
+    currentBundleRef: requestBody.currentBundleRef ?? null,
     eventId: requestBody.dispatch.eventId,
     key: crypto.rootKey,
     keyId: crypto.rootKeyId,

@@ -1,4 +1,5 @@
 import type {
+  HostedExecutionBundleRef,
   HostedExecutionDispatchRequest,
   HostedExecutionRunContext,
   HostedExecutionRunLevel,
@@ -226,6 +227,11 @@ export class RunnerDispatchProcessor {
           nextPending.dispatch.eventId,
         );
         if (committed && !isCommittedResultFinalized(committed)) {
+          record = await commitRecovery.syncCommittedBundlesWithoutConsuming(
+            record.userId,
+            committed,
+            { run },
+          );
           await (await this.dependencies.ensureRunnerStores(record.userId)).gatewayStore.applySnapshot(
             committed.gatewayProjectionSnapshot ?? null,
           );
@@ -252,8 +258,17 @@ export class RunnerDispatchProcessor {
             }
             : null,
         );
-        const durableCommit = await (await this.dependencies.ensureRunnerStores(record.userId))
-          .commitRecovery.readCommittedDispatch(record.userId, nextPending.dispatch.eventId);
+        const durableCommit = runnerResult.phase === "committed"
+          ? await this.persistReturnedRunnerCommit({
+            assistantDeliveryEffects: runnerResult.committedAssistantDeliveryEffects,
+            currentBundleRef: (await this.dependencies.queueStore.readBundleMetaState()).bundleRef,
+            dispatch: nextPending.dispatch,
+            gatewayProjectionSnapshot: runnerResult.committedGatewayProjectionSnapshot,
+            result: runnerResult.result,
+            run,
+          })
+          : await (await this.dependencies.ensureRunnerStores(record.userId))
+            .commitRecovery.readCommittedDispatch(record.userId, nextPending.dispatch.eventId);
         if (!durableCommit) {
           throw new Error("Hosted runner returned before recording a durable commit.");
         }
@@ -264,10 +279,28 @@ export class RunnerDispatchProcessor {
           phase: "commit.recorded",
           run,
         });
+        record = await (await this.dependencies.ensureRunnerStores(record.userId))
+          .commitRecovery.syncCommittedBundlesWithoutConsuming(record.userId, durableCommit, { run });
+        const finalRunnerResult = runnerResult.phase === "completed"
+          ? runnerResult
+          : await this.invokeRunner(
+            record.userId,
+            nextPending.dispatch,
+            run,
+            {
+              committedResult: {
+                assistantDeliveryEffects: durableCommit.assistantDeliveryEffects,
+                result: durableCommit.result,
+              },
+            },
+          );
+        if (finalRunnerResult.phase !== "completed") {
+          throw new Error("Hosted runner returned a duplicate committed result during finalize.");
+        }
         await this.finalizeReturnedRunnerResult({
           eventId: nextPending.dispatch.eventId,
-          finalGatewayProjectionSnapshot: runnerResult.finalGatewayProjectionSnapshot,
-          result: runnerResult.result,
+          finalGatewayProjectionSnapshot: finalRunnerResult.finalGatewayProjectionSnapshot,
+          result: finalRunnerResult.result,
         });
         const finalizedCommit = await (await this.dependencies.ensureRunnerStores(record.userId))
           .commitRecovery.readCommittedDispatch(record.userId, nextPending.dispatch.eventId);
@@ -461,9 +494,7 @@ export class RunnerDispatchProcessor {
     const job: HostedAssistantRuntimeJobInput = {
       request: {
         bundle: await bundleSync.readBundlesForRunner(),
-        commit: {
-          bundleRef: bundleState.bundleRef,
-        },
+        currentBundleRef: bundleState.bundleRef,
         dispatch,
         ...(sharePack ? { sharePack } : {}),
         run,
@@ -574,6 +605,37 @@ export class RunnerDispatchProcessor {
       runnerContainerNamespace: this.dependencies.runnerContainerNamespace,
       timeoutMs: this.dependencies.env.runnerTimeoutMs,
       userId,
+    });
+  }
+
+  private async persistReturnedRunnerCommit(input: {
+    assistantDeliveryEffects: HostedExecutionCommittedResult["assistantDeliveryEffects"];
+    currentBundleRef: HostedExecutionBundleRef | null;
+    dispatch: HostedExecutionDispatchRequest;
+    gatewayProjectionSnapshot: HostedExecutionCommitPayload["gatewayProjectionSnapshot"];
+    result: HostedAssistantRuntimeJobResult["result"];
+    run: HostedExecutionRunContext;
+  }): Promise<HostedExecutionCommittedResult> {
+    return this.dependencies.applyHostedTransition({
+      eventId: input.dispatch.eventId,
+      gatewayProjectionSnapshot: input.gatewayProjectionSnapshot ?? null,
+      run: async (userId, stores) => {
+        return persistHostedExecutionCommit({
+          bucket: this.dependencies.bucket,
+          currentBundleRef: input.currentBundleRef,
+          eventId: input.dispatch.eventId,
+          key: stores.crypto.rootKey,
+          keyId: stores.crypto.rootKeyId,
+          keysById: stores.crypto.keysById,
+          payload: {
+            assistantDeliveryEffects: input.assistantDeliveryEffects,
+            bundle: input.result.bundle,
+            gatewayProjectionSnapshot: input.gatewayProjectionSnapshot ?? null,
+            result: input.result.result,
+          },
+          userId,
+        });
+      },
     });
   }
 
