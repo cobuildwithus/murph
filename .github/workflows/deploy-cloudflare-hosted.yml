@@ -10,7 +10,6 @@ on:
         type: choice
         options:
           - production
-          - staging
       sync_worker_secrets:
         description: Include the rendered Worker secrets file during deploy
         required: true
