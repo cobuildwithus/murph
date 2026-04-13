@@ -32,16 +32,23 @@ export function resolveAssistantResumeStateFromProviderTurn(input: {
 }
 
 export async function persistAssistantTurnAndSession(input: {
+  assistantTranscriptText?: string | null
   input: AssistantMessageInput
   plan: AssistantTurnSharedPlan
+  persistUserPromptToTranscript?: boolean
   providerResult: ExecutedAssistantProviderTurnResult
+  resumeStatePolicy?: 'clear' | 'update'
   session: AssistantSession
   turnCreatedAt: string
   turnId: string
 }): Promise<AssistantSession> {
   const state = createAssistantRuntimeStateService(input.input.vault)
+  const persistUserPromptToTranscript = input.persistUserPromptToTranscript ?? true
+  const assistantTranscriptText = input.assistantTranscriptText
+    ?? input.providerResult.response
+  const resumeStatePolicy = input.resumeStatePolicy ?? 'update'
 
-  if (!input.plan.persistUserPromptOnFailure) {
+  if (!input.plan.persistUserPromptOnFailure && persistUserPromptToTranscript) {
     await state.transcripts.append(
       input.session.sessionId,
       [
@@ -60,15 +67,17 @@ export async function persistAssistantTurnAndSession(input: {
     })
   }
 
-  await state.transcripts.append(
-    input.session.sessionId,
-    [
-      {
-        kind: 'assistant',
-        text: input.providerResult.response,
-      },
-    ],
-  )
+  if (assistantTranscriptText !== null) {
+    await state.transcripts.append(
+      input.session.sessionId,
+      [
+        {
+          kind: 'assistant',
+          text: assistantTranscriptText,
+        },
+      ],
+    )
+  }
 
   const updatedAt = new Date().toISOString()
   const nextTarget =
@@ -78,10 +87,13 @@ export async function persistAssistantTurnAndSession(input: {
     }) ?? input.session.target
   const nextProviderConfig = assistantBackendTargetToProviderConfigInput(nextTarget)
   const nextProviderOptions = serializeAssistantProviderSessionOptions(nextProviderConfig)
-  const nextResumeState = resolveAssistantResumeStateFromProviderTurn({
-    providerSessionId: input.providerResult.providerSessionId,
-    routeId: input.providerResult.route.routeId,
-  })
+  const nextResumeState =
+    resumeStatePolicy === 'clear'
+      ? null
+      : resolveAssistantResumeStateFromProviderTurn({
+          providerSessionId: input.providerResult.providerSessionId,
+          routeId: input.providerResult.route.routeId,
+        })
   const nextProviderBinding =
     nextResumeState !== null
       ? assistantProviderBindingSchema.parse({

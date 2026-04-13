@@ -28,14 +28,13 @@ test("automation scaffold payload uses the canonical default shape", () => {
     },
     route: {
       channel: "telegram",
-      deliverResponse: true,
       deliveryTarget: null,
       identityId: null,
       participantId: null,
       sourceThreadId: null,
     },
-    prompt: "Write the scheduled assistant prompt here.",
-    summary: "Weekly scheduled assistant prompt.",
+    instructions: "Write the scheduled assistant instructions here.",
+    summary: "Weekly scheduled assistant notification instructions.",
     tags: ["assistant", "scheduled"],
   });
 
@@ -52,7 +51,7 @@ test("automation record schema accepts the canonical automation shape", () => {
     slug: "weekly-check-in",
     title: "Weekly check-in",
     status: "active",
-    summary: "Weekly scheduled assistant prompt.",
+    summary: "Weekly scheduled assistant notification instructions.",
     schedule: {
       kind: "cron",
       expression: "0 9 * * 1",
@@ -60,7 +59,6 @@ test("automation record schema accepts the canonical automation shape", () => {
     },
     route: {
       channel: "telegram",
-      deliverResponse: true,
       deliveryTarget: null,
       identityId: null,
       participantId: null,
@@ -70,13 +68,13 @@ test("automation record schema accepts the canonical automation shape", () => {
     tags: ["assistant", "scheduled"],
     createdAt: "2026-04-06T00:00:00.000Z",
     updatedAt: "2026-04-06T00:00:00.000Z",
-    prompt: "Write the scheduled assistant prompt here.",
+    instructions: "Write the scheduled assistant instructions here.",
     relativePath: "bank/automations/weekly-check-in.md",
-    markdown: "---\n...\n---\nWrite the scheduled assistant prompt here.\n",
+    markdown: "---\n...\n---\nWrite the scheduled assistant instructions here.\n",
   });
 
   assert.equal(parsed.slug, "weekly-check-in");
-  assert.equal(parsed.route.deliverResponse, true);
+  assert.equal(parsed.route.channel, "telegram");
   assert.equal(parsed.schedule.kind, "cron");
 });
 
@@ -86,7 +84,7 @@ test("automation record schema rejects invalid slugs", () => {
     slug: "Weekly check-in",
     title: "Weekly check-in",
     status: "active",
-    summary: "Weekly scheduled assistant prompt.",
+    summary: "Weekly scheduled assistant notification instructions.",
     schedule: {
       kind: "cron",
       expression: "0 9 * * 1",
@@ -94,7 +92,6 @@ test("automation record schema rejects invalid slugs", () => {
     },
     route: {
       channel: "telegram",
-      deliverResponse: true,
       deliveryTarget: null,
       identityId: null,
       participantId: null,
@@ -104,9 +101,9 @@ test("automation record schema rejects invalid slugs", () => {
     tags: ["assistant", "scheduled"],
     createdAt: "2026-04-06T00:00:00.000Z",
     updatedAt: "2026-04-06T00:00:00.000Z",
-    prompt: "Write the scheduled assistant prompt here.",
+    instructions: "Write the scheduled assistant instructions here.",
     relativePath: "bank/automations/weekly-check-in.md",
-    markdown: "---\n...\n---\nWrite the scheduled assistant prompt here.\n",
+    markdown: "---\n...\n---\nWrite the scheduled assistant instructions here.\n",
   }));
 });
 
@@ -149,7 +146,7 @@ test("automation commands round-trip upsert, show, and list through the register
       title: "Daily mobility",
       slug: "daily-mobility",
       summary: "Mobility prompt.",
-      prompt: "Check mobility work.",
+      instructions: "Check mobility work.",
     };
     const payloadPath = path.join(parentRoot, "automation.json");
     await writeFile(payloadPath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");

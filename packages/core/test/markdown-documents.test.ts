@@ -166,7 +166,7 @@ describe("markdown document primitives", () => {
       automationId: created.record.automationId,
       title: created.record.title,
       slug: "renamed-weekly-check-in",
-      prompt: created.record.prompt,
+      instructions: created.record.instructions,
       schedule: created.record.schedule,
       route: created.record.route,
       continuityPolicy: created.record.continuityPolicy,
@@ -206,7 +206,7 @@ describe("markdown document primitives", () => {
 
     expect(parsed.attributes.automationId).toBe(result.record.automationId);
     expect(parsed.attributes.slug).toBe(result.record.slug);
-    expect(parsed.body).toContain(result.record.prompt);
+    expect(parsed.body).toContain(result.record.instructions);
   });
 
   it("lists automations with status/text filters and limit", async () => {
@@ -222,7 +222,7 @@ describe("markdown document primitives", () => {
         slug: "sleep-check-in",
         summary: "Weekly sleep digest.",
         status: "active",
-        prompt: "Report the sleep recovery highlights.",
+        instructions: "Report the sleep recovery highlights.",
         tags: ["sleep", "recovery"],
       }),
     });
@@ -236,7 +236,7 @@ describe("markdown document primitives", () => {
         slug: "project-handoff",
         summary: "Paused handoff tracker.",
         status: "paused",
-        prompt: "Track project handoff blockers.",
+        instructions: "Track project handoff blockers.",
         tags: ["project", "handoff"],
       }),
     });
@@ -250,7 +250,7 @@ describe("markdown document primitives", () => {
         slug: "archive-sweep",
         summary: "Legacy cleanup.",
         status: "archived",
-        prompt: "Retire stale automation notes.",
+        instructions: "Retire stale automation notes.",
         tags: ["cleanup"],
       }),
     });
@@ -297,7 +297,7 @@ describe("markdown document primitives", () => {
         slug: "sleep-check-in",
         summary: "Weekly sleep digest.",
         status: "active",
-        prompt: "Report the sleep recovery highlights.",
+        instructions: "Report the sleep recovery highlights.",
         tags: ["sleep", "recovery"],
       }),
     });
@@ -311,7 +311,7 @@ describe("markdown document primitives", () => {
         slug: "project-handoff",
         summary: "Paused handoff tracker.",
         status: "paused",
-        prompt: "Track project handoff blockers.",
+        instructions: "Track project handoff blockers.",
         tags: ["project", "handoff"],
       }),
     });
@@ -322,7 +322,7 @@ describe("markdown document primitives", () => {
     });
 
     expect(readById.slug).toBe("sleep-check-in");
-    expect(readById.prompt).toBe("Report the sleep recovery highlights.");
+    expect(readById.instructions).toBe("Report the sleep recovery highlights.");
 
     const shownBySlug = await showAutomation({
       vaultRoot,
@@ -352,7 +352,7 @@ describe("markdown document primitives", () => {
       summary: "  Trimmed summary  ",
       status: "paused",
       continuityPolicy: "fresh",
-      prompt: "Draft a nightly digest.  \n",
+      instructions: "Draft a nightly digest.  \n",
       tags: ["nightly", "nightly", "assistant"],
     });
 
@@ -377,7 +377,7 @@ describe("markdown document primitives", () => {
     });
 
     expect(readRecord.relativePath).toBe(previewRelativePath);
-    expect(readRecord.prompt).toBe("Draft a nightly digest.");
+    expect(readRecord.instructions).toBe("Draft a nightly digest.");
     expect(readRecord.status).toBe("paused");
     expect(readRecord.summary).toBe("Trimmed summary");
     expect(readRecord.tags).toEqual(["nightly", "assistant"]);

@@ -14,6 +14,7 @@ import {
   resolveAssistantCliAccessContext,
 } from '../assistant-cli-access.js'
 import {
+  createNotificationTurnAssistantToolCatalog,
   createProviderTurnAssistantToolCatalog,
 } from '../assistant-cli-tools.js'
 import {
@@ -27,7 +28,10 @@ import type {
 } from './providers/types.js'
 import { recordAssistantDiagnosticEvent } from './diagnostics.js'
 import { normalizeAssistantExecutionContext } from './execution-context.js'
-import { buildAssistantSystemPrompt } from './system-prompt.js'
+import {
+  buildAssistantNotificationDecisionSystemPrompt,
+  buildAssistantSystemPrompt,
+} from './system-prompt.js'
 import { errorMessage } from './shared.js'
 import { resolveAssistantCliSurfaceBootstrapContext } from './cli-surface-bootstrap.js'
 import { buildAssistantVaultOverviewBlock } from './vault-overview.js'
@@ -99,8 +103,36 @@ interface AssistantPromptTimeContext {
   currentTimeZone: string
 }
 
+export type AssistantProviderTurnPromptProfile =
+  | 'conversation'
+  | 'notification-decision'
+
+export type AssistantProviderTurnToolProfile =
+  | 'provider-turn'
+  | 'notification-turn'
+
+export type AssistantProviderTurnNativeResumePolicy =
+  | 'default'
+  | 'disabled'
+
+export interface AssistantProviderTurnExecutionProfile {
+  nativeResumePolicy?: AssistantProviderTurnNativeResumePolicy
+  promptProfile?: AssistantProviderTurnPromptProfile
+  toolProfile?: AssistantProviderTurnToolProfile
+}
+
 const ASSISTANT_BOOTSTRAP_TRANSCRIPT_REPLAY_MESSAGE_LIMIT = 100
 const ASSISTANT_NATIVE_RESUME_TRANSCRIPT_REPLAY_MESSAGE_LIMIT = 20
+
+function resolveAssistantProviderTurnExecutionProfile(
+  profile: AssistantProviderTurnExecutionProfile | null | undefined,
+): Required<AssistantProviderTurnExecutionProfile> {
+  return {
+    nativeResumePolicy: profile?.nativeResumePolicy ?? 'default',
+    promptProfile: profile?.promptProfile ?? 'conversation',
+    toolProfile: profile?.toolProfile ?? 'provider-turn',
+  }
+}
 
 export interface ExecutedAssistantProviderTurnResult
   extends AssistantProviderTurnExecutionResult {
@@ -119,6 +151,7 @@ type AssistantProviderFailoverState = Awaited<
 interface AssistantProviderTurnExecutionPlan {
   input: AssistantMessageInput
   memoryTurnEnv: NodeJS.ProcessEnv
+  profile: Required<AssistantProviderTurnExecutionProfile>
   primaryRoute: ResolvedAssistantFailoverRoute | null
   promptTimeContext: AssistantPromptTimeContext
   toolCatalog: ReturnType<typeof createProviderTurnAssistantToolCatalog>
@@ -169,6 +202,7 @@ export type AssistantProviderTurnRecoveryOutcome =
 export async function executeProviderTurnWithRecovery(input: {
   input: AssistantMessageInput
   plan: AssistantTurnSharedPlan
+  profile?: AssistantProviderTurnExecutionProfile | null
   resolvedSession: AssistantSession
   routes: readonly ResolvedAssistantFailoverRoute[]
   turnCreatedAt: string
@@ -239,6 +273,7 @@ export async function executeProviderTurnWithRecovery(input: {
 async function buildAssistantProviderTurnExecutionPlan(input: {
   input: AssistantMessageInput
   plan: AssistantTurnSharedPlan
+  profile?: AssistantProviderTurnExecutionProfile | null
   resolvedSession: AssistantSession
   routes: readonly ResolvedAssistantFailoverRoute[]
   turnCreatedAt: string
@@ -252,7 +287,12 @@ async function buildAssistantProviderTurnExecutionPlan(input: {
     turnId: `${input.resolvedSession.sessionId}:${input.turnCreatedAt}`,
     vault: input.input.vault,
   })
-  const toolCatalog = createProviderTurnAssistantToolCatalog({
+  const profile = resolveAssistantProviderTurnExecutionProfile(input.profile)
+  const toolCatalog = (
+    profile.toolProfile === 'notification-turn'
+      ? createNotificationTurnAssistantToolCatalog
+      : createProviderTurnAssistantToolCatalog
+  )({
     allowSensitiveHealthContext: input.plan.allowSensitiveHealthContext,
     cliEnv: {
       ...input.plan.cliAccess.env,
@@ -272,6 +312,7 @@ async function buildAssistantProviderTurnExecutionPlan(input: {
   return {
     input: input.input,
     memoryTurnEnv,
+    profile,
     primaryRoute: input.routes[0] ?? null,
     promptTimeContext,
     toolCatalog,
@@ -313,6 +354,7 @@ async function resolveAssistantProviderAttemptPlan(input: {
     route,
     routePlan: await resolveAssistantRouteTurnPlan({
       input: input.executionPlan.input,
+      profile: input.executionPlan.profile,
       promptTimeContext: input.executionPlan.promptTimeContext,
       route,
       session: input.session,
@@ -326,6 +368,7 @@ async function resolveAssistantProviderAttemptPlan(input: {
 async function resolveAssistantRouteTurnPlan(input: {
   toolCatalog: ReturnType<typeof createProviderTurnAssistantToolCatalog>
   input: AssistantMessageInput
+  profile: Required<AssistantProviderTurnExecutionProfile>
   promptTimeContext: AssistantPromptTimeContext
   route: ResolvedAssistantFailoverRoute
   session: AssistantSession
@@ -340,7 +383,9 @@ async function resolveAssistantRouteTurnPlan(input: {
     provider: input.route.provider,
     ...input.route.providerOptions,
   })
+  const nativeResumeEnabled = input.profile.nativeResumePolicy !== 'disabled'
   const resumeProviderSessionId =
+    nativeResumeEnabled &&
     routeProviderCapabilities.supportsNativeResume &&
     resumeBinding !== null
       ? resolveAssistantProviderResumeKey({
@@ -351,6 +396,7 @@ async function resolveAssistantRouteTurnPlan(input: {
   const shouldInjectBootstrapContext = resumeProviderSessionId === null
   const resolvedChannel = input.input.channel ?? input.session.binding.channel
   const shouldInjectFirstTurnCheckIn =
+    input.profile.promptProfile === 'conversation' &&
     input.sharedPlan.firstTurnCheckInEligible &&
     shouldInjectBootstrapContext &&
     input.session.turnCount === 0
@@ -376,15 +422,16 @@ async function resolveAssistantRouteTurnPlan(input: {
     providerCapabilities,
     toolCatalog: input.toolCatalog,
   })
-  const assistantCliContract = shouldInjectBootstrapContext
-    ? await resolveAssistantCliSurfaceBootstrapContext({
-        cliEnv: input.sharedPlan.cliAccess.env,
-        executionContext: input.input.executionContext,
-        sessionId: input.session.sessionId,
-        vault: input.input.vault,
-        workingDirectory,
-      })
-    : null
+  const assistantCliContract =
+    shouldInjectBootstrapContext && input.profile.promptProfile === 'conversation'
+      ? await resolveAssistantCliSurfaceBootstrapContext({
+          cliEnv: input.sharedPlan.cliAccess.env,
+          executionContext: input.input.executionContext,
+          sessionId: input.session.sessionId,
+          vault: input.input.vault,
+          workingDirectory,
+        })
+      : null
   const vaultOverview = shouldInjectBootstrapContext
     ? await resolveAssistantVaultOverviewBlock(input.input.vault)
     : null
@@ -402,23 +449,32 @@ async function resolveAssistantRouteTurnPlan(input: {
         }
       : undefined,
     workingDirectory,
-    systemPrompt: buildAssistantSystemPrompt({
-      assistantCliContract,
-      allowSensitiveHealthContext: input.sharedPlan.allowSensitiveHealthContext,
-      assistantCommandAccessMode:
-        promptCapabilityAvailability.assistantCommandAccessMode,
-      assistantHostedDeviceConnectAvailable:
-        promptCapabilityAvailability.assistantHostedDeviceConnectAvailable,
-      assistantKnowledgeToolsAvailable:
-        promptCapabilityAvailability.assistantKnowledgeToolsAvailable,
-      cliAccess: input.sharedPlan.cliAccess,
-      channel: resolvedChannel,
-      currentLocalDate: input.promptTimeContext.currentLocalDate,
-      currentTimeZone: input.promptTimeContext.currentTimeZone,
-      firstTurnCheckIn: shouldInjectFirstTurnCheckIn,
-      turnTrigger: input.input.turnTrigger ?? null,
-      vaultOverview,
-    }),
+    systemPrompt:
+      input.profile.promptProfile === 'notification-decision'
+        ? buildAssistantNotificationDecisionSystemPrompt({
+            allowSensitiveHealthContext: input.sharedPlan.allowSensitiveHealthContext,
+            channel: resolvedChannel,
+            currentLocalDate: input.promptTimeContext.currentLocalDate,
+            currentTimeZone: input.promptTimeContext.currentTimeZone,
+            vaultOverview,
+          })
+        : buildAssistantSystemPrompt({
+            assistantCliContract,
+            allowSensitiveHealthContext: input.sharedPlan.allowSensitiveHealthContext,
+            assistantCommandAccessMode:
+              promptCapabilityAvailability.assistantCommandAccessMode,
+            assistantHostedDeviceConnectAvailable:
+              promptCapabilityAvailability.assistantHostedDeviceConnectAvailable,
+            assistantKnowledgeToolsAvailable:
+              promptCapabilityAvailability.assistantKnowledgeToolsAvailable,
+            cliAccess: input.sharedPlan.cliAccess,
+            channel: resolvedChannel,
+            currentLocalDate: input.promptTimeContext.currentLocalDate,
+            currentTimeZone: input.promptTimeContext.currentTimeZone,
+            firstTurnCheckIn: shouldInjectFirstTurnCheckIn,
+            turnTrigger: input.input.turnTrigger ?? null,
+            vaultOverview,
+          }),
   }
 }
 

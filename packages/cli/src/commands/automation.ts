@@ -38,7 +38,7 @@ export const automationRecordSchema = z
     tags: z.array(z.string().min(1)),
     createdAt: z.string().min(1),
     updatedAt: z.string().min(1),
-    prompt: z.string().min(1),
+    instructions: z.string().min(1),
     relativePath: pathSchema,
     markdown: z.string().min(1),
   })
@@ -126,7 +126,7 @@ export function registerAutomationCommands(cli: Cli.Cli) {
         .string()
         .min(1)
         .optional()
-        .describe("Optional lexical filter across title, prompt, route, and metadata."),
+        .describe("Optional lexical filter across title, instructions, route, and metadata."),
       limit: z.number().int().positive().max(200).default(50),
     }),
     output: automationListResultSchema,

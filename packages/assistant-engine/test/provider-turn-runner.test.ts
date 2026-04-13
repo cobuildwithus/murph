@@ -12,11 +12,13 @@ const runnerMocks = vi.hoisted(() => ({
   appendAssistantTurnReceiptEvent: vi.fn(),
   attachRecoveredAssistantSession: vi.fn(),
   buildAssistantSystemPrompt: vi.fn(),
+  buildAssistantNotificationDecisionSystemPrompt: vi.fn(),
   buildAssistantVaultOverviewBlock: vi.fn(),
   createAssistantFoodAutoLogHooks: vi.fn(),
   createAssistantMemoryTurnContextEnv: vi.fn(),
   createIntegratedVaultServices: vi.fn(),
   createProviderTurnAssistantToolCatalog: vi.fn(),
+  createNotificationTurnAssistantToolCatalog: vi.fn(),
   errorMessage: vi.fn(),
   executeAssistantProviderTurnAttempt: vi.fn(),
   getAssistantFailoverCooldownUntil: vi.fn(),
@@ -43,6 +45,8 @@ vi.mock('../src/assistant-cli-access.ts', () => ({
 }))
 
 vi.mock('../src/assistant-cli-tools.ts', () => ({
+  createNotificationTurnAssistantToolCatalog:
+    runnerMocks.createNotificationTurnAssistantToolCatalog,
   createProviderTurnAssistantToolCatalog:
     runnerMocks.createProviderTurnAssistantToolCatalog,
 }))
@@ -67,6 +71,8 @@ vi.mock('../src/assistant/execution-context.ts', () => ({
 }))
 
 vi.mock('../src/assistant/system-prompt.ts', () => ({
+  buildAssistantNotificationDecisionSystemPrompt:
+    runnerMocks.buildAssistantNotificationDecisionSystemPrompt,
   buildAssistantSystemPrompt: runnerMocks.buildAssistantSystemPrompt,
 }))
 
@@ -141,12 +147,25 @@ describe('executeProviderTurnWithRecovery', () => {
   const toolCatalog = {
     hasTool: vi.fn<(toolName: string) => boolean>(),
   }
+  const notificationToolCatalog = {
+    hasTool: vi.fn<(toolName: string) => boolean>(),
+  }
 
   beforeEach(() => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-08T14:30:00.000Z'))
     runnerMocks.appendAssistantTurnReceiptEvent.mockReset().mockResolvedValue(undefined)
     runnerMocks.attachRecoveredAssistantSession.mockReset()
+    runnerMocks.buildAssistantNotificationDecisionSystemPrompt
+      .mockReset()
+      .mockImplementation((input: {
+        channel: string | null
+        currentLocalDate: string
+        currentTimeZone: string
+        vaultOverview?: string | null
+      }) =>
+        `notification:${input.channel ?? 'none'}:${input.currentLocalDate}:${input.currentTimeZone}:${input.vaultOverview ?? 'no-overview'}`,
+      )
     runnerMocks.buildAssistantSystemPrompt
       .mockReset()
       .mockImplementation((input: {
@@ -172,9 +191,13 @@ describe('executeProviderTurnWithRecovery', () => {
       kind: 'vault-services',
     })
     toolCatalog.hasTool.mockReset().mockReturnValue(true)
+    notificationToolCatalog.hasTool.mockReset().mockReturnValue(true)
     runnerMocks.createProviderTurnAssistantToolCatalog
       .mockReset()
       .mockReturnValue(toolCatalog)
+    runnerMocks.createNotificationTurnAssistantToolCatalog
+      .mockReset()
+      .mockReturnValue(notificationToolCatalog)
     runnerMocks.errorMessage
       .mockReset()
       .mockImplementation((error: unknown) =>
@@ -367,6 +390,93 @@ describe('executeProviderTurnWithRecovery', () => {
       expect.objectContaining({
         kind: 'provider.failover.applied',
         level: 'warn',
+      }),
+    )
+  })
+
+  it('uses the notification-decision profile, notification tool catalog, and disabled native resume for notification turns', async () => {
+    const route = createRoute({
+      routeId: 'route-notification',
+      providerOptions: {
+        resumeKind: 'openai-response-id',
+      },
+    })
+    const session = createAssistantSession({
+      providerSessionId: 'provider-session-notification',
+      resumeRouteId: 'route-notification',
+      turnCount: 2,
+    })
+
+    runnerMocks.resolveAssistantProviderTargetExecutionCapabilities.mockReturnValue({
+      murphCommandSurface: 'bound-tools',
+      supportsNativeResume: true,
+      supportsToolRuntime: true,
+    })
+    runnerMocks.resolveAssistantRouteResumeBinding.mockReturnValue(
+      session.providerBinding,
+    )
+    runnerMocks.executeAssistantProviderTurnAttempt.mockResolvedValue(
+      createSuccessfulAttemptResult({
+        providerSessionId: 'provider-session-notification',
+        response: '{"kind":"skip","privateSummary":"No notification needed."}',
+      }),
+    )
+
+    const outcome = await executeProviderTurnWithRecovery({
+      input: createMessageInput({
+        channel: 'chat',
+        prompt: 'Check the notification decision.',
+        turnTrigger: 'automation-cron',
+      }),
+      plan: createTurnPlan({
+        allowSensitiveHealthContext: true,
+        firstTurnCheckInEligible: true,
+      }),
+      profile: {
+        nativeResumePolicy: 'disabled',
+        promptProfile: 'notification-decision',
+        toolProfile: 'notification-turn',
+      },
+      resolvedSession: session,
+      routes: [route],
+      turnCreatedAt: '2026-04-08T00:00:00.000Z',
+      turnId: 'turn-notification-profile',
+    })
+
+    expect(outcome).toMatchObject({
+      kind: 'succeeded',
+      providerTurn: {
+        firstTurnCheckInInjected: false,
+        route,
+      },
+    })
+    expect(runnerMocks.createProviderTurnAssistantToolCatalog).not.toHaveBeenCalled()
+    expect(runnerMocks.createNotificationTurnAssistantToolCatalog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cliEnv: {
+          CLI_TOKEN: 'test-cli-token',
+          MEMORY_CONTEXT: 'enabled',
+        },
+      }),
+    )
+    expect(runnerMocks.buildAssistantSystemPrompt).not.toHaveBeenCalled()
+    expect(runnerMocks.buildAssistantNotificationDecisionSystemPrompt).toHaveBeenCalledWith(
+      expect.objectContaining({
+        allowSensitiveHealthContext: true,
+        channel: 'chat',
+        currentLocalDate: '2026-04-08',
+        currentTimeZone: 'America/Los_Angeles',
+        vaultOverview:
+          'Vault overview for navigation only:\n- Canonical coverage includes 1 meal event.',
+      }),
+    )
+    expect(runnerMocks.resolveAssistantCliSurfaceBootstrapContext).not.toHaveBeenCalled()
+    expect(runnerMocks.resolveAssistantProviderResumeKey).not.toHaveBeenCalled()
+    expect(runnerMocks.executeAssistantProviderTurnAttempt).toHaveBeenCalledWith(
+      expect.objectContaining({
+        resumeProviderSessionId: null,
+        systemPrompt:
+          'notification:chat:2026-04-08:America/Los_Angeles:Vault overview for navigation only:\n- Canonical coverage includes 1 meal event.',
       }),
     )
   })

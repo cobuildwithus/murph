@@ -22,6 +22,7 @@ vi.mock('@murphai/assistant-engine/assistant-service', async () => {
 
   return {
     ...actual,
+    sendAssistantNotificationLocal: cronServiceMocks.sendAssistantMessage,
     sendAssistantMessage: cronServiceMocks.sendAssistantMessage,
     sendAssistantMessageLocal: cronServiceMocks.sendAssistantMessage,
   }
@@ -185,7 +186,7 @@ test('assistant cron preset installs materialize regular cron jobs with resolved
   assert.equal(automation?.status, 'active')
   assert.equal(automation?.route.channel, 'telegram')
   assert.equal(automation?.route.sourceThreadId, '123456789')
-  assert.match(automation?.prompt ?? '', /10 minute seated meditation before work/u)
+  assert.match(automation?.instructions ?? '', /10 minute seated meditation before work/u)
 })
 
 test('assistant cron jobs reuse the sole saved self-delivery target when no route flags are provided', async () => {
@@ -324,7 +325,7 @@ test('assistant cron jobs require explicit outbound delivery routing', async () 
           ...testCronDeliveryTarget,
           deliverResponse: false,
         }),
-      /always deliver their response/u,
+      /always use bound notification delivery/u,
     )
   } finally {
     process.env.HOME = originalHome
@@ -590,8 +591,8 @@ test('assistant cron manual runs record history and remove completed one-shot jo
   assert.equal(result.run.sessionId, 'asst_cron_manual')
   assert.equal(result.run.response, 'Drink water now.')
   assert.equal(
-    cronServiceMocks.sendAssistantMessage.mock.calls[0]?.[0]?.deliverResponse,
-    true,
+    cronServiceMocks.sendAssistantMessage.mock.calls[0]?.[0]?.instructions,
+    'Remind me to drink water.',
   )
   assert.equal(
     cronServiceMocks.sendAssistantMessage.mock.calls[0]?.[0]?.channel,
