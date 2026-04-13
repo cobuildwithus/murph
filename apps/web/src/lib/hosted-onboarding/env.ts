@@ -59,8 +59,9 @@ export function readHostedOnboardingEnvironment(
     linqApiBaseUrl: linq.apiBaseUrl,
     linqApiToken: linq.apiToken,
     linqConversationPhoneNumbers: readHostedLinqConversationPhoneNumbers(source),
-    linqMaxActiveMembersPerConversationPhone: readOptionalPositiveInteger(
+    linqMaxActiveMembersPerConversationPhone: readPositiveInteger(
       readEnv(source, "HOSTED_ONBOARDING_LINQ_MAX_ACTIVE_MEMBERS_PER_PHONE_NUMBER"),
+      1000,
       "HOSTED_ONBOARDING_LINQ_MAX_ACTIVE_MEMBERS_PER_PHONE_NUMBER",
     ),
     linqWebhookSecret: linq.webhookSecret,
@@ -197,20 +198,6 @@ function readPositiveInteger(value: string | null, fallback: number, label: stri
 
   if (parsed === null) {
     return fallback;
-  }
-
-  if (parsed < 1) {
-    throw new RangeError(`${label} must be greater than zero.`);
-  }
-
-  return parsed;
-}
-
-function readOptionalPositiveInteger(value: string | null, label: string): number | null {
-  const parsed = parseInteger(value);
-
-  if (parsed === null) {
-    return null;
   }
 
   if (parsed < 1) {
