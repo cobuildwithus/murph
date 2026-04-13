@@ -439,7 +439,7 @@ test("already-active checkout refreshes return to verify when the invite session
   await view.cleanup();
 });
 
-test("active invite state links to hosted settings with client navigation markup", () => {
+test("active invite state renders message and settings actions with client navigation markup", () => {
   const markup = renderToStaticMarkup(
     createElement(JoinInviteClient, {
       initialStatus: createStatus({
@@ -456,6 +456,8 @@ test("active invite state links to hosted settings with client navigation markup
     }),
   );
 
+  assert.ok(markup.includes('href="sms:"'));
+  assert.match(markup, /Open Messages/);
   assert.ok(markup.includes('href="/settings"'));
   assert.match(markup, /Manage settings/);
 });
