@@ -1125,7 +1125,7 @@ text: Legacy gym day template.
 )
 
 test(
-  'workout add captures activity_session events and fails fast on ambiguous durations',
+  'workout add captures activity_session events and fails fast on ambiguous, mixed, or missing durations',
   async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-workout-'))
 
@@ -1261,6 +1261,63 @@ test(
         ambiguous.error.message ?? '',
         /Pass --duration <minutes> to record it explicitly/u,
       )
+
+      const mixedActivities = await runCli([
+        'workout',
+        'add',
+        'Morning run to the beach, followed by a quick 10-minute swim, then back home. Approx 8.56 km total.',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(mixedActivities.ok, false)
+      assert.equal(mixedActivities.error.code, 'invalid_option')
+      assert.match(
+        mixedActivities.error.message ?? '',
+        /Workout note includes multiple activities or segments/u,
+      )
+
+      const missingDuration = await runCli([
+        'workout',
+        'add',
+        'Easy run around the neighborhood.',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(missingDuration.ok, false)
+      assert.equal(missingDuration.error.code, 'invalid_option')
+      assert.match(
+        missingDuration.error.message ?? '',
+        /Workout duration is missing/u,
+      )
+
+      const segmentedSameSport = await runCli([
+        'workout',
+        'add',
+        '10-minute warmup jog then easy run home.',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(segmentedSameSport.ok, false)
+      assert.equal(segmentedSameSport.error.code, 'invalid_option')
+      assert.match(
+        segmentedSameSport.error.message ?? '',
+        /Workout note includes multiple activities or segments/u,
+      )
+
+      const mixedWithExplicitDuration = await runCli<WorkoutAddEnvelope>([
+        'workout',
+        'add',
+        'Morning run to the beach, followed by a quick 10-minute swim, then back home. Approx 8.56 km total.',
+        '--duration',
+        '70',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(mixedWithExplicitDuration.ok, true)
+      assert.equal(requireData(mixedWithExplicitDuration).activityType, 'running')
+      assert.equal(requireData(mixedWithExplicitDuration).durationMinutes, 70)
+      assert.equal(requireData(mixedWithExplicitDuration).title, '70-minute run')
+      assert.equal(requireData(mixedWithExplicitDuration).distanceKm, 8.56)
 
       const strengthWorkout = await runCli<WorkoutAddEnvelope>([
         'workout',

@@ -437,6 +437,7 @@ The examples below are the full successful non-verbose `--format json` response 
 ```
 
 The freeform note is preserved verbatim in `note`. Top-level `activityType`, `durationMinutes`, and optional `distanceKm` stay as summary fields, while all rich workout detail lives under the canonical nested `workout` payload.
+For freeform capture, Murph only infers `durationMinutes` when the note states one clear total workout duration. Mixed-activity notes, segmented notes, or notes without a clear total duration must pass `--duration`.
 
 ### `workout format save`
 
