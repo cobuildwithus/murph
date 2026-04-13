@@ -6,6 +6,8 @@ This repo now has durable owner-specific idempotency lanes for every currently i
 
 - encrypted `vault` and `agent-state` bundle refs are only advanced through the durable commit path
 - repeated worker and runner retries can recover from a lost runner response by replaying the durable commit journal
+- Cloudflare runner commit callbacks are now fenced to the durable claimed run lease for the pending event, so late stale `/commit` callbacks from obsolete attempts fail closed instead of challenging or recreating committed state
+- During Cloudflare's gradual worker/container rollout, the worker still accepts legacy `/commit` callbacks that omit `run` metadata, but only while the active lease for that exact event is still present; ownerless late commits fail closed
 - already-committed events are treated as consumed and will not re-run the same bundle commit indefinitely
 - hosted one-shot runs now collect due outbound side effects before the durable commit and persist those side effects alongside the committed hosted result
 - hosted assistant replies still create durable assistant outbox intents during the one-shot run, but post-commit delivery now resumes from the committed side-effect journal instead of treating assistant sends as a separate special-case path

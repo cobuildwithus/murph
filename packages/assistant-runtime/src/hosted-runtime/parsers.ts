@@ -36,19 +36,25 @@ export function parseHostedAssistantRuntimeJobRequest(
 ): HostedAssistantRuntimeJobRequest {
   const record = requireObject(value, "Hosted assistant runtime job request");
   const request = parseHostedExecutionRunnerRequest(record);
+  const commit = record.commit === undefined
+    ? undefined
+    : record.commit === null
+      ? null
+      : parseHostedExecutionCommitCallback(record.commit);
+  const resume = record.resume === undefined
+    ? undefined
+    : record.resume === null
+      ? null
+      : parseHostedAssistantRuntimeResume(record.resume);
+
+  if (commit && !request.run) {
+    throw new TypeError("Hosted assistant runtime commit callback requires request.run.");
+  }
 
   return {
     ...request,
-    ...(record.commit === undefined
-      ? {}
-      : {
-          commit: record.commit === null ? null : parseHostedExecutionCommitCallback(record.commit),
-        }),
-    ...(record.resume === undefined
-      ? {}
-      : {
-          resume: record.resume === null ? null : parseHostedAssistantRuntimeResume(record.resume),
-        }),
+    ...(commit === undefined ? {} : { commit }),
+    ...(resume === undefined ? {} : { resume }),
   };
 }
 

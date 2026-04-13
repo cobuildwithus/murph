@@ -1,4 +1,7 @@
-import type { HostedExecutionDispatchRequest } from "@murphai/hosted-execution";
+import type {
+  HostedExecutionDispatchRequest,
+  HostedExecutionRunContext,
+} from "@murphai/hosted-execution";
 
 import type { R2BucketLike } from "../bundle-store.js";
 import type { HostedExecutionCommittedResult } from "../execution-journal.js";
@@ -13,6 +16,11 @@ export interface RecoveredCommittedPendingDispatch {
   committed: HostedExecutionCommittedResult;
   committedEventId: string;
   record: RunnerStateRecord;
+}
+
+interface CommitLeaseOwner {
+  allowAnyRunForEvent?: boolean;
+  run: HostedExecutionRunContext | null;
 }
 
 export class RunnerCommitRecovery {
@@ -50,11 +58,17 @@ export class RunnerCommitRecovery {
           cleanupDispatch: pending.dispatch,
           committed,
           committedEventId: pending.eventId,
-          record: await this.syncCommittedBundlesWithoutConsuming(record.userId, committed),
+          record: await this.syncCommittedBundlesWithoutConsuming(record.userId, committed, {
+            allowAnyRunForEvent: true,
+            run: null,
+          }),
         };
       }
 
-      await this.syncCommittedBundlesWithoutConsuming(record.userId, committed);
+      await this.syncCommittedBundlesWithoutConsuming(record.userId, committed, {
+        allowAnyRunForEvent: true,
+        run: null,
+      });
     }
 
     return null;
@@ -75,22 +89,32 @@ export class RunnerCommitRecovery {
   async applyCommittedDispatch(
     userId: string,
     committed: HostedExecutionCommittedResult,
+    leaseOwner: CommitLeaseOwner | null = null,
   ): Promise<RunnerStateRecord> {
     return this.applyCommittedQueueTransition(
       userId,
       committed,
-      () => this.queueStore.applyCommittedDispatch(committed),
+      () => this.queueStore.applyCommittedDispatch(committed, {
+        allowAnyRunForEvent: leaseOwner?.allowAnyRunForEvent,
+        eventId: committed.eventId,
+        run: leaseOwner?.run ?? null,
+      }),
     );
   }
 
   async syncCommittedBundlesWithoutConsuming(
     userId: string,
     committed: HostedExecutionCommittedResult,
+    leaseOwner: CommitLeaseOwner | null = null,
   ): Promise<RunnerStateRecord> {
     return this.applyCommittedQueueTransition(
       userId,
       committed,
-      () => this.queueStore.syncCommittedBundles(committed),
+      () => this.queueStore.syncCommittedBundles(committed, {
+        allowAnyRunForEvent: leaseOwner?.allowAnyRunForEvent,
+        eventId: committed.eventId,
+        run: leaseOwner?.run ?? null,
+      }),
     );
   }
 

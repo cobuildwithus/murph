@@ -10,6 +10,12 @@ import type {
   HostedAssistantRuntimeJobResult,
 } from "../src/hosted-runtime/models.ts";
 
+const HOSTED_RUN_CONTEXT = {
+  attempt: 1,
+  runId: "run_123",
+  startedAt: "2026-04-08T00:00:00.000Z",
+} as const;
+
 const mocks = vi.hoisted(() => ({
   commitHostedExecutionResult: vi.fn(),
   completeHostedExecutionAfterCommit: vi.fn(),
@@ -272,6 +278,7 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
             eventId: "evt_123",
             occurredAt: "2026-04-08T00:00:00.000Z",
           },
+          run: HOSTED_RUN_CONTEXT,
         },
         runtime: {
           commitTimeoutMs: 45_000,
@@ -323,6 +330,7 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
       effectsPort: expect.any(Object),
       gatewayProjectionSnapshot: committedExecution.committedGatewayProjectionSnapshot,
       result: committedExecution.committedResult,
+      run: HOSTED_RUN_CONTEXT,
       assistantDeliveryEffects: committedExecution.committedAssistantDeliveryEffects,
     });
     expect(mocks.completeHostedExecutionAfterCommit).toHaveBeenCalledWith(

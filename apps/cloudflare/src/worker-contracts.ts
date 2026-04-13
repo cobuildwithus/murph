@@ -17,6 +17,9 @@ import type {
   HostedExecutionBundleRef,
 } from "@murphai/hosted-execution/contracts";
 import type {
+  HostedExecutionRunContext,
+} from "@murphai/hosted-execution";
+import type {
   HostedExecutionDeviceSyncRuntimeApplyRequest,
   HostedExecutionDeviceSyncRuntimeApplyResponse,
   HostedExecutionDeviceSyncRuntimeSnapshotRequest,
@@ -36,6 +39,7 @@ export interface WorkerUserRunnerCommitInput {
   payload: HostedExecutionCommitPayload & {
     currentBundleRef: HostedExecutionBundleRef | null;
   };
+  run: HostedExecutionRunContext | null;
 }
 
 export interface WorkerUserRunnerStubLike {

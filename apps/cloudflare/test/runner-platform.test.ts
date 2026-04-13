@@ -19,6 +19,11 @@ describe("buildHostedExecutionRuntimePlatform", () => {
           summary: "ok",
         },
       },
+      run: {
+        attempt: 1,
+        runId: "run_123",
+        startedAt: "2026-04-08T00:00:00.000Z",
+      },
     });
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -32,6 +37,13 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect((request as Request).headers.get("x-hosted-execution-runner-proxy-token")).toBe(
       "runner-proxy-token",
     );
+    await expect((request as Request).json()).resolves.toMatchObject({
+      run: {
+        attempt: 1,
+        runId: "run_123",
+        startedAt: "2026-04-08T00:00:00.000Z",
+      },
+    });
   });
 
   it("binds device-sync requests to the hosted member id at the Cloudflare port seam", async () => {

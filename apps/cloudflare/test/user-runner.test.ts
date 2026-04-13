@@ -649,6 +649,13 @@ describe("HostedUserRunner", () => {
   it("rejects duplicate runner commits whose payload diverges from the first write", async () => {
     const runner = new HostedUserRunner(storage.state, environment, bucket.api);
     await runner.provisionManagedUserCrypto("member_123");
+    await seedPendingCommitEvent({
+      bucket,
+      environment,
+      eventId: "evt_duplicate_runner_commit",
+      storage,
+      userId: "member_123",
+    });
 
     await runner.commit({
       eventId: "evt_duplicate_runner_commit",
@@ -661,6 +668,7 @@ describe("HostedUserRunner", () => {
           summary: "ok",
         },
       },
+      run: createRunnerCommitContext(),
     });
 
     await expect(
@@ -675,10 +683,176 @@ describe("HostedUserRunner", () => {
             summary: "ok",
           },
         },
+        run: createRunnerCommitContext(),
       }),
     ).rejects.toThrow(
       "Hosted execution commit evt_duplicate_runner_commit vault bundle ref does not match the existing durable commit.",
     );
+  });
+
+  it("rejects runner commits when no active or pending run could own the event", async () => {
+    const runner = new HostedUserRunner(storage.state, environment, bucket.api);
+    await runner.provisionManagedUserCrypto("member_123");
+
+    await expect(
+      runner.commit({
+        eventId: "evt_missing_owner",
+        payload: {
+          assistantDeliveryEffects: [],
+          bundle: Buffer.from("vault").toString("base64"),
+          currentBundleRef: null,
+          result: {
+            eventsHandled: 1,
+            summary: "ok",
+          },
+        },
+        run: createRunnerCommitContext(),
+      }),
+    ).rejects.toThrow(
+      "Hosted execution commit evt_missing_owner does not match any active or pending runner attempt.",
+    );
+  });
+
+  it("accepts legacy runner commits without run metadata while the same event still owns the active lease", async () => {
+    const runner = new HostedUserRunner(storage.state, environment, bucket.api);
+    await runner.provisionManagedUserCrypto("member_123");
+    await seedPendingCommitEvent({
+      bucket,
+      environment,
+      eventId: "evt_legacy_runner_commit",
+      storage,
+      userId: "member_123",
+    });
+
+    await expect(
+      runner.commit({
+        eventId: "evt_legacy_runner_commit",
+        payload: {
+          assistantDeliveryEffects: [],
+          bundle: Buffer.from("vault").toString("base64"),
+          currentBundleRef: null,
+          result: {
+            eventsHandled: 1,
+            summary: "ok",
+          },
+        },
+        run: null,
+      }),
+    ).resolves.toMatchObject({
+      eventId: "evt_legacy_runner_commit",
+      result: {
+        summary: "ok",
+      },
+    });
+  });
+
+  it("rejects legacy runner commits without run metadata after the active lease is gone", async () => {
+    const runner = new HostedUserRunner(storage.state, environment, bucket.api);
+    await runner.provisionManagedUserCrypto("member_123");
+    await seedRunnerQueueState({
+      bucket,
+      environment,
+      inFlight: false,
+      pendingEvents: [{
+        attempts: 1,
+        availableAt: "2026-03-26T12:01:00.000Z",
+        dispatch: createDispatch("evt_legacy_runner_missing"),
+        enqueuedAt: "2026-03-26T12:00:00.000Z",
+        lastError: "timeout",
+      }],
+      storage,
+      userId: "member_123",
+    });
+
+    await expect(
+      runner.commit({
+        eventId: "evt_legacy_runner_missing",
+        payload: {
+          assistantDeliveryEffects: [],
+          bundle: Buffer.from("vault").toString("base64"),
+          currentBundleRef: null,
+          result: {
+            eventsHandled: 1,
+            summary: "ok",
+          },
+        },
+        run: null,
+      }),
+    ).rejects.toThrow(
+      "Hosted execution commit evt_legacy_runner_missing does not match any active or pending runner attempt.",
+    );
+  });
+
+  it("rejects stale runner commits once a newer claimed run owns the pending event", async () => {
+    const runner = new HostedUserRunner(storage.state, environment, bucket.api);
+    await runner.provisionManagedUserCrypto("member_123");
+    await seedRunnerQueueState({
+      activeRunLease: {
+        attempt: 2,
+        eventId: "evt_stale_commit",
+        runId: "run_new",
+        startedAt: "2026-03-26T12:01:00.000Z",
+      },
+      bucket,
+      environment,
+      inFlight: true,
+      pendingEvents: [{
+        attempts: 1,
+        availableAt: "2026-03-26T12:01:00.000Z",
+        dispatch: createDispatch("evt_stale_commit"),
+        enqueuedAt: "2026-03-26T12:00:00.000Z",
+        lastError: "timeout",
+      }],
+      storage,
+      userId: "member_123",
+    });
+
+    await expect(
+      runner.commit({
+        eventId: "evt_stale_commit",
+        payload: {
+          assistantDeliveryEffects: [],
+          bundle: Buffer.from("vault").toString("base64"),
+          currentBundleRef: null,
+          result: {
+            eventsHandled: 1,
+            summary: "ok",
+          },
+        },
+        run: createRunnerCommitContext({
+          attempt: 1,
+          runId: "run_old",
+          startedAt: "2026-03-26T12:00:00.000Z",
+        }),
+      }),
+    ).rejects.toThrow(
+      "Hosted execution commit evt_stale_commit came from a stale runner attempt.",
+    );
+
+    await expect(
+      runner.commit({
+        eventId: "evt_stale_commit",
+        payload: {
+          assistantDeliveryEffects: [],
+          bundle: Buffer.from("vault").toString("base64"),
+          currentBundleRef: null,
+          result: {
+            eventsHandled: 1,
+            summary: "ok",
+          },
+        },
+        run: createRunnerCommitContext({
+          attempt: 2,
+          runId: "run_new",
+          startedAt: "2026-03-26T12:01:00.000Z",
+        }),
+      }),
+    ).resolves.toMatchObject({
+      eventId: "evt_stale_commit",
+      result: {
+        summary: "ok",
+      },
+    });
   });
 
   it("projects gateway snapshots into the hot hosted gateway store during commit and finalize", async () => {
@@ -686,6 +860,13 @@ describe("HostedUserRunner", () => {
     const routeKey = "channel:email|identity:murph%40example.com|thread:thread-labs";
     const sessionKey = createGatewayConversationSessionKey(routeKey);
     await runner.provisionManagedUserCrypto("member_123");
+    await seedPendingCommitEvent({
+      bucket,
+      environment,
+      eventId: "evt_gateway_projection",
+      storage,
+      userId: "member_123",
+    });
 
     await runner.commit({
       eventId: "evt_gateway_projection",
@@ -734,6 +915,7 @@ describe("HostedUserRunner", () => {
           summary: "ok",
         },
       },
+      run: createRunnerCommitContext(),
     });
 
     const listed = await runner.gatewayListConversations({ limit: 10 });
@@ -935,6 +1117,13 @@ describe("HostedUserRunner", () => {
   it("ignores stale gateway snapshots so finalize cannot rewind the hot projection", async () => {
     const runner = new HostedUserRunner(storage.state, environment, bucket.api);
     await runner.provisionManagedUserCrypto("member_123");
+    await seedPendingCommitEvent({
+      bucket,
+      environment,
+      eventId: "evt_gateway_stale_projection",
+      storage,
+      userId: "member_123",
+    });
 
     await runner.commit({
       eventId: "evt_gateway_stale_projection",
@@ -967,6 +1156,7 @@ describe("HostedUserRunner", () => {
           summary: "ok",
         },
       },
+      run: createRunnerCommitContext(),
     });
 
     const crypto = await resolveHostedUserCryptoContextForTest({
@@ -2014,6 +2204,100 @@ describe("HostedUserRunner", () => {
     expect(countRunnerContainerCalls(storage.runnerContainerFetch, "/internal/destroy")).toBe(0);
   });
 
+  it("recovers a committed pending event after a crash even when the same event's lease was still persisted", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-26T12:00:00.000Z"));
+    const dispatch = {
+      event: {
+        kind: "assistant.cron.tick" as const,
+        reason: "manual" as const,
+        userId: "member_123",
+      },
+      eventId: "evt_resume_after_crash",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+    };
+    const committedPayload = createRunnerSuccessPayload({
+      agentState: Buffer.from("agent-state-committed").toString("base64"),
+      summary: "committed",
+      vault: Buffer.from("vault-committed").toString("base64"),
+    });
+    const finalPayload = createRunnerSuccessPayload({
+      agentState: Buffer.from("agent-state-final").toString("base64"),
+      summary: "final",
+      vault: Buffer.from("vault-final").toString("base64"),
+    });
+
+    await seedRunnerQueueState({
+      activeRunLease: {
+        attempt: 1,
+        eventId: dispatch.eventId,
+        runId: "run_crashed",
+        startedAt: dispatch.occurredAt,
+      },
+      bucket,
+      environment,
+      inFlight: true,
+      pendingEvents: [{
+        attempts: 0,
+        availableAt: dispatch.occurredAt,
+        dispatch,
+        enqueuedAt: dispatch.occurredAt,
+        lastError: null,
+      }],
+      storage,
+      userId: dispatch.event.userId,
+    });
+    const crypto = await resolveHostedUserCryptoContextForTest({
+      bucket,
+      environment,
+      userId: dispatch.event.userId,
+    });
+    await persistHostedExecutionCommit({
+      bucket: bucket.api,
+      currentBundleRef: null,
+      eventId: dispatch.eventId,
+      key: crypto.rootKey,
+      keyId: crypto.rootKeyId,
+      keysById: crypto.keysById,
+      payload: {
+        assistantDeliveryEffects: [],
+        bundle: committedPayload.bundles.vault,
+        result: committedPayload.result,
+      },
+      userId: dispatch.event.userId,
+    });
+
+    const fetchSpy = vi.fn(async (_url, init) => {
+      const requestBody = JSON.parse(String(init?.body));
+      expect(readRunnerJobRequest(requestBody).resume).toEqual({
+        committedResult: {
+          assistantDeliveryEffects: [],
+          result: committedPayload.result,
+        },
+      });
+      await finalizeResultForRunnerRequest({
+        bucket,
+        environment,
+        payload: finalPayload,
+        requestBody,
+      });
+
+      return new Response(JSON.stringify(serializeRunnerSuccessPayload(finalPayload)), {
+        status: 200,
+      });
+    });
+    vi.stubGlobal("fetch", fetchSpy);
+    const runner = new HostedUserRunner(storage.state, environment, bucket.api);
+
+    await runner.alarm();
+
+    const status = await runner.status();
+    expect(status.pendingEventCount).toBe(0);
+    expect(status.retryingEventId).toBeNull();
+    expect(status.inFlight).toBe(false);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
 
   it("reuses existing bundle refs when the runner returns unchanged bundle payloads", async () => {
     const encodedAgent = Buffer.from("agent-state").toString("base64");
@@ -2079,6 +2363,13 @@ describe("HostedUserRunner", () => {
     try {
       const runner = new HostedUserRunner(storage.state, environment, bucket.api);
       await runner.provisionManagedUserCrypto("member_123");
+      await seedPendingCommitEvent({
+        bucket,
+        environment,
+        eventId: "evt_transition_lock",
+        storage,
+        userId: "member_123",
+      });
       bucket.api.put = vi.fn(async (key: string, value: string) => {
         if (!blocked) {
           blocked = true;
@@ -2100,6 +2391,7 @@ describe("HostedUserRunner", () => {
             summary: "ok",
           },
         },
+        run: createRunnerCommitContext(),
       });
 
       await firstWriteStarted.promise;
@@ -2115,6 +2407,7 @@ describe("HostedUserRunner", () => {
             summary: "ok",
           },
         },
+        run: createRunnerCommitContext(),
       }).finally(() => {
         secondCommitSettled = true;
       });
@@ -3434,6 +3727,12 @@ function createStorage() {
 
 async function seedRunnerQueueState(
   input: {
+    activeRunLease?: {
+      attempt: number;
+      eventId: string;
+      runId: string;
+      startedAt: string;
+    } | null;
     runtimeBootstrapped?: boolean;
     backpressuredEventIds?: string[];
     bucket: ReturnType<typeof createBucket>;
@@ -3505,15 +3804,23 @@ async function seedRunnerQueueState(
     `INSERT INTO runner_meta (
       singleton,
       user_id,
+      active_run_event_id,
+      active_run_id,
+      active_run_attempt,
+      active_run_started_at,
       runtime_bootstrapped,
       in_flight,
       last_error_at,
       last_error_code,
       last_run_at,
       next_wake_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     1,
     input.userId,
+    input.activeRunLease?.eventId ?? null,
+    input.activeRunLease?.runId ?? null,
+    input.activeRunLease?.attempt ?? null,
+    input.activeRunLease?.startedAt ?? null,
     input.runtimeBootstrapped ? 1 : 0,
     input.inFlight ? 1 : 0,
     input.lastErrorAt ?? null,
@@ -3726,6 +4033,50 @@ function createDispatch(eventId: string) {
     eventId,
     occurredAt: "2026-03-26T12:00:00.000Z",
   };
+}
+
+function createRunnerCommitContext(overrides: Partial<{
+  attempt: number;
+  runId: string;
+  startedAt: string;
+}> = {}) {
+  return {
+    attempt: overrides.attempt ?? 1,
+    runId: overrides.runId ?? "run_123",
+    startedAt: overrides.startedAt ?? "2026-03-26T12:00:00.000Z",
+  };
+}
+
+async function seedPendingCommitEvent(input: {
+  bucket: ReturnType<typeof createBucket>;
+  environment: HostedExecutionEnvironment;
+  eventId: string;
+  run?: ReturnType<typeof createRunnerCommitContext>;
+  storage: ReturnType<typeof createStorage>;
+  userId: string;
+}): Promise<void> {
+  const dispatch = createDispatch(input.eventId);
+  const run = input.run ?? createRunnerCommitContext();
+  await seedRunnerQueueState({
+    activeRunLease: {
+      attempt: run.attempt,
+      eventId: input.eventId,
+      runId: run.runId,
+      startedAt: run.startedAt,
+    },
+    bucket: input.bucket,
+    environment: input.environment,
+    inFlight: true,
+    pendingEvents: [{
+      attempts: 0,
+      availableAt: dispatch.occurredAt,
+      dispatch,
+      enqueuedAt: dispatch.occurredAt,
+      lastError: null,
+    }],
+    storage: input.storage,
+    userId: input.userId,
+  });
 }
 
 function createReferenceDispatch(eventId: string) {

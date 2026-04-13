@@ -232,6 +232,7 @@ describe("cloudflare worker routes", () => {
   it("persists runner commits through the outbound results.worker handler", async () => {
     const harness = createUserRunnerDurableObject();
     await resolveHostedUserCryptoContextForTest(harness.env, "member_123");
+    await seedPendingRunnerCommitEvent(harness.storage, "evt_commit");
     const sideEffects = [
       {
         effectId: "outbox_123",
@@ -249,6 +250,7 @@ describe("cloudflare worker routes", () => {
             eventsHandled: 1,
             summary: "ok",
           },
+          run: createRunnerCommitContext(),
           assistantDeliveryEffects: sideEffects,
         }),
         headers: {
@@ -285,6 +287,41 @@ describe("cloudflare worker routes", () => {
     }));
     await expect(journalStore.readCommittedResult("member_123", "evt_commit")).resolves.toMatchObject({
       assistantDeliveryEffects: canonicalSideEffects,
+    });
+  });
+
+  it("accepts legacy runner commits without run metadata while the same event still owns the active lease", async () => {
+    const harness = createUserRunnerDurableObject();
+    await resolveHostedUserCryptoContextForTest(harness.env, "member_123");
+    await seedPendingRunnerCommitEvent(harness.storage, "evt_legacy_commit", {
+      run: createRunnerCommitContext(),
+    });
+
+    const response = await callRunnerOutbound(
+      new Request("http://results.worker/events/evt_legacy_commit/commit", {
+        body: JSON.stringify({
+          assistantDeliveryEffects: [],
+          bundle: Buffer.from("vault").toString("base64"),
+          currentBundleRef: null,
+          result: {
+            eventsHandled: 1,
+            summary: "ok",
+          },
+        }),
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "POST",
+      }),
+      harness.env,
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      committed: {
+        eventId: "evt_legacy_commit",
+      },
+      ok: true,
     });
   });
 
@@ -387,6 +424,7 @@ describe("cloudflare worker routes", () => {
   it("hard-cuts the removed runner finalize route from the outbound results.worker handler", async () => {
     const harness = createUserRunnerDurableObject();
     await resolveHostedUserCryptoContextForTest(harness.env, "member_123");
+    await seedPendingRunnerCommitEvent(harness.storage, "evt_finalize");
 
     await callRunnerOutbound(
       new Request("http://results.worker/events/evt_finalize/commit", {
@@ -398,6 +436,7 @@ describe("cloudflare worker routes", () => {
             eventsHandled: 1,
             summary: "committed",
           },
+          run: createRunnerCommitContext(),
         }),
         headers: {
           "content-type": "application/json; charset=utf-8",
@@ -436,6 +475,7 @@ describe("cloudflare worker routes", () => {
   it("keeps malformed outbound callbacks from mutating journal state even when runner auth is unset", async () => {
     const harness = createUserRunnerDurableObject();
     const journalStore = await createHostedExecutionJournalStoreForTest(harness.env, "member_123");
+    await seedPendingRunnerCommitEvent(harness.storage, "evt_finalize_auth");
 
     await callRunnerOutbound(
       new Request("http://results.worker/events/evt_finalize_auth/commit", {
@@ -447,6 +487,7 @@ describe("cloudflare worker routes", () => {
             eventsHandled: 1,
             summary: "committed",
           },
+          run: createRunnerCommitContext(),
         }),
         headers: {
           "content-type": "application/json; charset=utf-8",
@@ -480,6 +521,7 @@ describe("cloudflare worker routes", () => {
             eventsHandled: 1,
             summary: "bad",
           },
+          run: createRunnerCommitContext(),
         }),
         headers: {
           "content-type": "application/json; charset=utf-8",
@@ -2546,6 +2588,72 @@ function expectHostedBundleKeys(
       new RegExp(`^bundles/${kind}/[0-9a-f]+\\.bundle\\.json$`, "u"),
     ));
   }
+}
+
+function createRunnerCommitContext() {
+  return {
+    attempt: 1,
+    runId: "run_123",
+    startedAt: "2026-04-08T00:00:00.000Z",
+  };
+}
+
+async function seedPendingRunnerCommitEvent(
+  storage: ReturnType<typeof createStorage>,
+  eventId: string,
+  options: {
+    run?: ReturnType<typeof createRunnerCommitContext>;
+  } = {},
+): Promise<void> {
+  storage.state.storage.sql.exec(
+    `INSERT OR REPLACE INTO pending_events (
+      event_id,
+      payload_key,
+      attempts,
+      available_at,
+      enqueued_at,
+      last_error_code
+    ) VALUES (?, ?, ?, ?, ?, ?)`,
+    eventId,
+    `transient/dispatch-payloads/${eventId}.json`,
+    1,
+    "2026-04-08T00:00:00.000Z",
+    "2026-04-08T00:00:00.000Z",
+    null,
+  );
+
+  if (!options.run) {
+    return;
+  }
+
+  storage.state.storage.sql.exec(
+    `INSERT OR REPLACE INTO runner_meta (
+      singleton,
+      user_id,
+      active_run_event_id,
+      active_run_id,
+      active_run_attempt,
+      active_run_started_at,
+      runtime_bootstrapped,
+      in_flight,
+      last_error_at,
+      last_error_code,
+      last_run_at,
+      next_wake_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    1,
+    "member_123",
+    eventId,
+    options.run.runId,
+    options.run.attempt,
+    options.run.startedAt,
+    0,
+    1,
+    null,
+    null,
+    null,
+    null,
+  );
 }
 
 async function createCommittedRunnerSuccessResponse(input: {

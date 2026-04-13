@@ -183,6 +183,7 @@ export async function runHostedAssistantRuntimeJobInProcessDetailed(
               result: committedExecution.committedResult,
               assistantDeliveryEffects:
                 committedExecution.committedAssistantDeliveryEffects,
+              run: input.request.run ?? null,
             });
             emitHostedExecutionStructuredLog({
               component: "runtime",

@@ -29,6 +29,10 @@ import {
 
 export interface RunnerMetaRow {
   [key: string]: DurableObjectSqlValue;
+  active_run_attempt: number | null;
+  active_run_event_id: string | null;
+  active_run_id: string | null;
+  active_run_started_at: string | null;
   runtime_bootstrapped: number;
   in_flight: number;
   last_error_at: string | null;
@@ -97,6 +101,10 @@ export function classifyMalformedPendingDispatchError(error: unknown): {
 
 export function createDefaultRunnerMetaRow(userId: string): RunnerMetaRow {
   return {
+    active_run_attempt: null,
+    active_run_event_id: null,
+    active_run_id: null,
+    active_run_started_at: null,
     runtime_bootstrapped: 0,
     in_flight: 0,
     last_error_at: null,

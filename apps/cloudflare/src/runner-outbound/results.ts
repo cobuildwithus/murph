@@ -7,6 +7,7 @@ import type { HostedExecutionBundleRef } from "@murphai/hosted-execution/contrac
 import {
   parseHostedExecutionBundlePayload,
   parseHostedExecutionBundleRef,
+  parseHostedExecutionRunContext,
 } from "@murphai/hosted-execution/parsers";
 import {
   HOSTED_EXECUTION_RUNNER_EMAIL_SEND_PATH,
@@ -173,7 +174,7 @@ async function forwardRunnerCommit(
   return json({
     committed: await stub.commit({
       eventId,
-      payload: parseHostedExecutionCommitRequest(payload),
+      ...parseHostedExecutionCommitRequest(payload),
     }),
     ok: true,
   });
@@ -261,28 +262,36 @@ async function handleRunnerAssistantDeliveryRequest(input: {
   }
 }
 
-function parseHostedExecutionCommitRequest(payload: Record<string, unknown>): HostedExecutionCommitPayload & {
-  currentBundleRef: HostedExecutionBundleRef | null;
+function parseHostedExecutionCommitRequest(payload: Record<string, unknown>): {
+  payload: HostedExecutionCommitPayload & {
+    currentBundleRef: HostedExecutionBundleRef | null;
+  };
+  run: ReturnType<typeof parseHostedExecutionRunContext> | null;
 } {
   const result = requireRecord(payload.result, "result");
   rejectRemovedCommitField(payload, "sideEffects");
 
   return {
-    assistantDeliveryEffects: requireAssistantDeliveryEffects(
-      payload.assistantDeliveryEffects,
-      "assistantDeliveryEffects",
-    ),
-    bundle: parseHostedExecutionBundlePayload(payload.bundle, "bundle"),
-    currentBundleRef: parseHostedExecutionBundleRef(payload.currentBundleRef, "currentBundleRef"),
-    gatewayProjectionSnapshot:
-      payload.gatewayProjectionSnapshot === undefined || payload.gatewayProjectionSnapshot === null
-        ? null
-        : gatewayProjectionSnapshotSchema.parse(payload.gatewayProjectionSnapshot),
-    result: {
-      eventsHandled: requireNumber(result.eventsHandled, "result.eventsHandled"),
-      nextWakeAt: readOptionalString(result.nextWakeAt, "result.nextWakeAt"),
-      summary: requireString(result.summary, "result.summary"),
+    payload: {
+      assistantDeliveryEffects: requireAssistantDeliveryEffects(
+        payload.assistantDeliveryEffects,
+        "assistantDeliveryEffects",
+      ),
+      bundle: parseHostedExecutionBundlePayload(payload.bundle, "bundle"),
+      currentBundleRef: parseHostedExecutionBundleRef(payload.currentBundleRef, "currentBundleRef"),
+      gatewayProjectionSnapshot:
+        payload.gatewayProjectionSnapshot === undefined || payload.gatewayProjectionSnapshot === null
+          ? null
+          : gatewayProjectionSnapshotSchema.parse(payload.gatewayProjectionSnapshot),
+      result: {
+        eventsHandled: requireNumber(result.eventsHandled, "result.eventsHandled"),
+        nextWakeAt: readOptionalString(result.nextWakeAt, "result.nextWakeAt"),
+        summary: requireString(result.summary, "result.summary"),
+      },
     },
+    run: payload.run === undefined || payload.run === null
+      ? null
+      : parseHostedExecutionRunContext(payload.run),
   };
 }
 
