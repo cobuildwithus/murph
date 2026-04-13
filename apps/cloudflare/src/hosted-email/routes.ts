@@ -38,6 +38,13 @@ export interface HostedEmailInboundRoute {
   userId: string;
 }
 
+interface HostedEmailRouteStoreContext {
+  bucket: R2BucketLike;
+  key: Uint8Array;
+  keyId: string;
+  keysById?: Readonly<Record<string, Uint8Array>>;
+}
+
 export async function resolveHostedEmailIngressRoute(input: {
   bucket: R2BucketLike;
   config: HostedEmailConfig;
@@ -87,12 +94,7 @@ export async function ensureHostedEmailVerifiedSenderRouteAvailable(input: {
     return;
   }
 
-  const store = createHostedEmailRouteStore({
-    bucket: input.bucket,
-    cryptoKey: input.key,
-    cryptoKeyId: input.keyId,
-    cryptoKeysById: input.keysById,
-  });
+  const store = createHostedEmailRoutingStore(input);
   const routeState = await readHostedEmailVerifiedSenderRouteState({
     secret: verifiedSenderConfig.signingSecret,
     senderAddress: verifiedEmailAddress,
@@ -118,24 +120,20 @@ export async function reconcileHostedEmailVerifiedSenderRoute(input: {
 
   const previousVerifiedEmailAddress = normalizeHostedEmailAddress(input.previousVerifiedEmailAddress);
   const nextVerifiedEmailAddress = normalizeHostedEmailAddress(input.nextVerifiedEmailAddress);
-  const store = createHostedEmailRouteStore({
-    bucket: input.bucket,
-    cryptoKey: input.key,
-    cryptoKeyId: input.keyId,
-    cryptoKeysById: input.keysById,
-  });
+  const store = createHostedEmailRoutingStore(input);
 
-  const shouldMovePreviousRoute = Boolean(
-    previousVerifiedEmailAddress && previousVerifiedEmailAddress !== nextVerifiedEmailAddress,
-  );
+  const previousVerifiedEmailAddressToDelete = previousVerifiedEmailAddress
+    && previousVerifiedEmailAddress !== nextVerifiedEmailAddress
+    ? previousVerifiedEmailAddress
+    : null;
 
   if (!nextVerifiedEmailAddress) {
-    if (shouldMovePreviousRoute) {
+    if (previousVerifiedEmailAddressToDelete) {
       await deleteHostedEmailVerifiedSenderRoute({
         secret: verifiedSenderConfig.signingSecret,
         store,
         userId: input.userId,
-        verifiedEmailAddress: previousVerifiedEmailAddress!,
+        verifiedEmailAddress: previousVerifiedEmailAddressToDelete,
       });
     }
     return;
@@ -159,12 +157,12 @@ export async function reconcileHostedEmailVerifiedSenderRoute(input: {
     });
   }
 
-  if (shouldMovePreviousRoute) {
+  if (previousVerifiedEmailAddressToDelete) {
     await deleteHostedEmailVerifiedSenderRoute({
       secret: verifiedSenderConfig.signingSecret,
       store,
       userId: input.userId,
-      verifiedEmailAddress: previousVerifiedEmailAddress!,
+      verifiedEmailAddress: previousVerifiedEmailAddressToDelete,
     });
   }
 }
@@ -182,12 +180,7 @@ export async function createHostedEmailUserAddress(input: {
   }
 
   const aliasKey = await deriveStableHostedEmailKey(input.config.signingSecret, `user:${input.userId}`);
-  const store = createHostedEmailRouteStore({
-    bucket: input.bucket,
-    cryptoKey: input.key,
-    cryptoKeyId: input.keyId,
-    cryptoKeysById: input.keysById,
-  });
+  const store = createHostedEmailRoutingStore(input);
   const existing = await store.readUserRoute(aliasKey);
   if (existing && existing.userId !== input.userId) {
     throw new Error("Hosted email user route is already assigned to a different user.");
@@ -218,12 +211,7 @@ export async function resolveHostedEmailInboundRoute(input: {
     return null;
   }
 
-  const store = createHostedEmailRouteStore({
-    bucket: input.bucket,
-    cryptoKey: input.key,
-    cryptoKeyId: input.keyId,
-    cryptoKeysById: input.keysById,
-  });
+  const store = createHostedEmailRoutingStore(input);
 
   const candidate = parseHostedEmailRouteCandidate(input.to, input.config);
   if (!candidate) {
@@ -274,12 +262,7 @@ async function resolveHostedEmailDirectSenderRoute(input: {
     return null;
   }
 
-  const store = createHostedEmailRouteStore({
-    bucket: input.bucket,
-    cryptoKey: input.key,
-    cryptoKeyId: input.keyId,
-    cryptoKeysById: input.keysById,
-  });
+  const store = createHostedEmailRoutingStore(input);
   const routeState = await readHostedEmailVerifiedSenderRouteState({
     secret: verifiedSenderConfig.signingSecret,
     senderAddress,
@@ -299,6 +282,15 @@ async function resolveHostedEmailDirectSenderRoute(input: {
 interface HostedEmailVerifiedSenderConfig {
   publicSenderAddress: string;
   signingSecret: string;
+}
+
+function createHostedEmailRoutingStore(input: HostedEmailRouteStoreContext): HostedEmailRouteStore {
+  return createHostedEmailRouteStore({
+    bucket: input.bucket,
+    cryptoKey: input.key,
+    cryptoKeyId: input.keyId,
+    cryptoKeysById: input.keysById,
+  });
 }
 
 function resolveHostedEmailVerifiedSenderConfig(
