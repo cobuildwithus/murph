@@ -1,55 +1,95 @@
 import { describe, expect, it } from 'vitest'
 
 import {
-  inferFallbackBindingDelivery,
-  inferThreadFirstBindingDelivery,
-  resolveExplicitBindingDelivery,
-} from '../src/assistant/channels/helpers.js'
+  getAssistantChannelAdapter,
+  inferAssistantBindingDelivery,
+} from '../src/assistant/channels/registry.js'
 
-describe('assistant channel binding delivery helpers', () => {
-  it('parses explicit binding delivery through the shared gateway route helpers', () => {
+describe('assistant channel adapter delivery inference', () => {
+  it('uses the shared gateway-owned telegram and email fallback policy', () => {
     expect(
-      resolveExplicitBindingDelivery({
-        deliveryKind: 'participant',
-        deliveryTarget: ' contact:alex ',
+      getAssistantChannelAdapter('telegram')?.inferBindingDelivery({
+        conversation: {
+          participantId: 'tg-user',
+        },
       }),
     ).toEqual({
       kind: 'participant',
-      target: 'contact:alex',
+      target: 'tg-user',
+    })
+
+    expect(
+      getAssistantChannelAdapter('email')?.inferBindingDelivery({
+        conversation: {
+          participantId: 'person@example.com',
+        },
+      }),
+    ).toEqual({
+      kind: 'participant',
+      target: 'person@example.com',
     })
   })
 
-  it('keeps thread-first channels bound to the conversation thread', () => {
+  it('keeps telegram and email thread-first when both thread and participant exist', () => {
     expect(
-      inferThreadFirstBindingDelivery(
-        {
-          conversation: {
-            participantId: 'contact:alex',
-            threadId: 'thread-42',
-          },
+      getAssistantChannelAdapter('telegram')?.inferBindingDelivery({
+        conversation: {
+          participantId: 'tg-user',
+          threadId: 'tg-thread',
         },
-        {
-          includeParticipant: true,
-        },
-      ),
+      }),
     ).toEqual({
       kind: 'thread',
-      target: 'thread-42',
+      target: 'tg-thread',
     })
-  })
 
-  it('keeps fallback bindings actor-first for direct conversations', () => {
     expect(
-      inferFallbackBindingDelivery({
+      getAssistantChannelAdapter('email')?.inferBindingDelivery({
         conversation: {
-          directness: 'direct',
-          participantId: 'contact:alex',
-          threadId: 'thread-42',
+          participantId: 'person@example.com',
+          threadId: 'email-thread',
         },
       }),
     ).toEqual({
-      kind: 'participant',
-      target: 'contact:alex',
+      kind: 'thread',
+      target: 'email-thread',
+    })
+  })
+
+  it('keeps linq thread-only by default', () => {
+    expect(
+      getAssistantChannelAdapter('linq')?.inferBindingDelivery({
+        conversation: {
+          participantId: 'linq-user',
+        },
+      }),
+    ).toBeNull()
+
+    expect(
+      getAssistantChannelAdapter('linq')?.inferBindingDelivery({
+        conversation: {
+          threadId: 'linq-thread',
+        },
+      }),
+    ).toEqual({
+      kind: 'thread',
+      target: 'linq-thread',
+    })
+  })
+
+  it('uses the same fallback policy when no channel adapter exists', () => {
+    expect(
+      inferAssistantBindingDelivery({
+        channel: 'custom-chat',
+        conversation: {
+          directness: 'group',
+          participantId: 'group-user',
+          threadId: 'group-thread',
+        },
+      }),
+    ).toEqual({
+      kind: 'thread',
+      target: 'group-thread',
     })
   })
 })

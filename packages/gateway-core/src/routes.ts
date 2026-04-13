@@ -6,8 +6,7 @@ import {
   type GatewayReplyRouteKind,
 } from './contracts.ts'
 import {
-  inferFallbackGatewayReplyRoute,
-  inferThreadFirstGatewayReplyRoute,
+  inferGatewayReplyRouteForChannel,
   normalizeGatewayConversationDirectness,
 } from './reply-routes.ts'
 
@@ -157,7 +156,7 @@ export function gatewayConversationRouteCanSend(
   route: GatewayConversationRouteInput | GatewayConversationRoute | null | undefined,
 ): boolean {
   const normalized = normalizeGatewayConversationRoute(route)
-  const inferredDelivery = inferGatewayBindingDelivery({
+  const inferredDelivery = inferGatewayReplyRouteForChannel({
     channel: normalized.channel,
     conversation: gatewayConversationRouteToConversationRef(normalized),
     deliveryKind: normalized.reply.kind,
@@ -189,43 +188,12 @@ export function gatewayBindingDeliveryFromRoute(
   route: GatewayConversationRouteInput | GatewayConversationRoute | null | undefined,
 ): { kind: GatewayReplyRouteKind; target: string } | null {
   const normalized = normalizeGatewayConversationRoute(route)
-  return inferGatewayBindingDelivery({
+  return inferGatewayReplyRouteForChannel({
     channel: normalized.channel,
     conversation: gatewayConversationRouteToConversationRef(normalized),
     deliveryKind: normalized.reply.kind,
     deliveryTarget: normalized.reply.target,
   })
-}
-
-function inferGatewayBindingDelivery(input: {
-  channel?: string | null
-  conversation?: GatewayConversationRef | null
-  deliveryKind?: GatewayReplyRouteKind | null
-  deliveryTarget?: string | null
-}) {
-  switch (input.channel) {
-    case 'telegram':
-    case 'email':
-      return inferThreadFirstGatewayReplyRoute({
-        conversation: input.conversation ?? {},
-        deliveryKind: input.deliveryKind ?? null,
-        deliveryTarget: input.deliveryTarget ?? null,
-        includeParticipant: true,
-      })
-    case 'linq':
-      return inferThreadFirstGatewayReplyRoute({
-        conversation: input.conversation ?? {},
-        deliveryKind: input.deliveryKind ?? null,
-        deliveryTarget: input.deliveryTarget ?? null,
-        includeParticipant: false,
-      })
-    default:
-      return inferFallbackGatewayReplyRoute({
-        conversation: input.conversation ?? {},
-        deliveryKind: input.deliveryKind ?? null,
-        deliveryTarget: input.deliveryTarget ?? null,
-      })
-  }
 }
 
 function gatewayConversationRouteFromConversationRef(

@@ -30,6 +30,11 @@ export interface GatewayThreadFirstReplyRouteInferenceInput
   includeParticipant: boolean
 }
 
+export interface GatewayChannelReplyRouteInferenceInput
+  extends GatewayReplyRouteInferenceInput {
+  channel?: string | null
+}
+
 export function normalizeGatewayConversationDirectness(
   value: GatewayConversationDirectness | string | null | undefined,
 ): GatewayConversationDirectness | null {
@@ -113,6 +118,34 @@ export function inferFallbackGatewayReplyRoute(
   }
 
   return null
+}
+
+export function inferGatewayReplyRouteForChannel(
+  input: GatewayChannelReplyRouteInferenceInput,
+): GatewayResolvedReplyRoute | null {
+  switch (normalizeNullableString(input.channel)) {
+    case 'telegram':
+    case 'email':
+      return inferThreadFirstGatewayReplyRoute({
+        conversation: input.conversation ?? {},
+        deliveryKind: input.deliveryKind ?? null,
+        deliveryTarget: input.deliveryTarget ?? null,
+        includeParticipant: true,
+      })
+    case 'linq':
+      return inferThreadFirstGatewayReplyRoute({
+        conversation: input.conversation ?? {},
+        deliveryKind: input.deliveryKind ?? null,
+        deliveryTarget: input.deliveryTarget ?? null,
+        includeParticipant: false,
+      })
+    default:
+      return inferFallbackGatewayReplyRoute({
+        conversation: input.conversation ?? {},
+        deliveryKind: input.deliveryKind ?? null,
+        deliveryTarget: input.deliveryTarget ?? null,
+      })
+  }
 }
 
 function normalizeGatewayReplyRouteContext(

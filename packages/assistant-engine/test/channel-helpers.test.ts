@@ -7,14 +7,12 @@ import { ASSISTANT_CHANNEL_ADAPTERS } from '../src/assistant/channels/descriptor
 import {
   createAssistantBindingDelivery,
   createAssistantChannelAdapter,
-  inferFallbackBindingDelivery,
-  inferThreadFirstBindingDelivery,
+  inferBindingDeliveryForChannel,
   normalizeOptionalText,
   readDeliveredProviderMessageId,
   readDeliveredProviderThreadId,
   readDeliveredTarget,
   resolveDeliveryCandidates,
-  resolveExplicitBindingDelivery,
   resolveRequiredDeliveryCandidate,
 } from '../src/assistant/channels/helpers.ts'
 import { inferAssistantBindingDelivery } from '../src/assistant/channels/registry.ts'
@@ -79,7 +77,7 @@ describe('channel helper seams', () => {
     }
   })
 
-  it('resolves explicit and inferred binding delivery in thread-first and fallback order', () => {
+  it('resolves explicit and inferred binding delivery through the gateway-owned channel helper', () => {
     const conversation = createConversation({
       directness: 'direct',
       participantId: 'participant-1',
@@ -87,7 +85,9 @@ describe('channel helper seams', () => {
     })
 
     expect(
-      resolveExplicitBindingDelivery({
+      inferBindingDeliveryForChannel({
+        channel: 'telegram',
+        conversation,
         deliveryKind: 'thread',
         deliveryTarget: '  explicit-thread  ',
       }),
@@ -97,75 +97,65 @@ describe('channel helper seams', () => {
     })
 
     expect(
-      resolveExplicitBindingDelivery({
+      inferBindingDeliveryForChannel({
+        channel: 'telegram',
+        conversation,
         deliveryKind: 'thread',
         deliveryTarget: '   ',
       }),
-    ).toBeNull()
-
-    expect(
-      inferThreadFirstBindingDelivery(
-        {
-          conversation,
-          deliveryKind: 'participant',
-          deliveryTarget: '  explicit-participant  ',
-        },
-        {
-          includeParticipant: true,
-        },
-      ),
-    ).toEqual({
-      kind: 'participant',
-      target: 'explicit-participant',
-    })
-
-    expect(
-      inferThreadFirstBindingDelivery(
-        {
-          conversation,
-        },
-        {
-          includeParticipant: true,
-        },
-      ),
     ).toEqual({
       kind: 'thread',
       target: 'thread-1',
     })
 
     expect(
-      inferThreadFirstBindingDelivery(
-        {
-          conversation: createConversation({
-            participantId: 'participant-2',
-            threadId: null,
-          }),
-        },
-        {
-          includeParticipant: true,
-        },
-      ),
+      inferBindingDeliveryForChannel({
+        channel: 'telegram',
+        conversation,
+        deliveryKind: 'participant',
+        deliveryTarget: '  explicit-participant  ',
+      }),
+    ).toEqual({
+      kind: 'participant',
+      target: 'explicit-participant',
+    })
+
+    expect(
+      inferBindingDeliveryForChannel({
+        channel: 'telegram',
+        conversation,
+      }),
+    ).toEqual({
+      kind: 'thread',
+      target: 'thread-1',
+    })
+
+    expect(
+      inferBindingDeliveryForChannel({
+        channel: 'telegram',
+        conversation: createConversation({
+          participantId: 'participant-2',
+          threadId: null,
+        }),
+      }),
     ).toEqual({
       kind: 'participant',
       target: 'participant-2',
     })
 
     expect(
-      inferThreadFirstBindingDelivery(
-        {
-          conversation: createConversation({
-            participantId: 'participant-2',
-            threadId: null,
-          }),
-        },
-        {
-          includeParticipant: false,
-        },
-      ),
+      inferBindingDeliveryForChannel({
+        channel: 'linq',
+        conversation: createConversation({
+          participantId: 'participant-2',
+          threadId: null,
+        }),
+      }),
     ).toBeNull()
 
     expect(
-      inferFallbackBindingDelivery({
+      inferBindingDeliveryForChannel({
+        channel: 'custom-channel',
         conversation: createConversation({
           directness: 'group',
           participantId: 'participant-3',
@@ -178,7 +168,8 @@ describe('channel helper seams', () => {
     })
 
     expect(
-      inferFallbackBindingDelivery({
+      inferBindingDeliveryForChannel({
+        channel: 'custom-channel',
         conversation: createConversation({
           directness: 'direct',
           participantId: 'participant-4',
@@ -191,7 +182,8 @@ describe('channel helper seams', () => {
     })
 
     expect(
-      inferFallbackBindingDelivery({
+      inferBindingDeliveryForChannel({
+        channel: 'custom-channel',
         conversation: createConversation({
           directness: 'direct',
           participantId: null,
@@ -204,7 +196,8 @@ describe('channel helper seams', () => {
     })
 
     expect(
-      inferFallbackBindingDelivery({
+      inferBindingDeliveryForChannel({
+        channel: 'custom-channel',
         conversation: createConversation({
           directness: 'direct',
           participantId: null,
@@ -293,9 +286,6 @@ describe('channel helper seams', () => {
       canAutoReply() {
         return null
       },
-      inferBindingDelivery(input) {
-        return inferFallbackBindingDelivery(input)
-      },
       isReadyForSetup() {
         return true
       },
@@ -347,9 +337,6 @@ describe('channel helper seams', () => {
       channel: 'telegram',
       canAutoReply() {
         return null
-      },
-      inferBindingDelivery(input) {
-        return inferFallbackBindingDelivery(input)
       },
       isReadyForSetup() {
         return true

@@ -1,7 +1,5 @@
 import {
-  inferFallbackGatewayReplyRoute,
-  inferThreadFirstGatewayReplyRoute,
-  resolveExplicitGatewayReplyRoute,
+  inferGatewayReplyRouteForChannel,
   type GatewayResolvedReplyRoute,
 } from '@murphai/gateway-core'
 import {
@@ -22,10 +20,20 @@ import type {
 export function createAssistantChannelAdapter(
   spec: AssistantChannelAdapterSpec,
 ): AssistantChannelAdapter {
+  const inferBindingDelivery =
+    spec.inferBindingDelivery ??
+    ((input) =>
+      inferBindingDeliveryForChannel({
+        channel: spec.channel,
+        conversation: input.conversation,
+        deliveryKind: input.deliveryKind ?? null,
+        deliveryTarget: input.deliveryTarget ?? null,
+      }))
+
   return {
     channel: spec.channel,
     canAutoReply: spec.canAutoReply,
-    inferBindingDelivery: spec.inferBindingDelivery,
+    inferBindingDelivery,
     isReadyForSetup: spec.isReadyForSetup,
     ...(spec.startTypingIndicator
       ? {
@@ -157,49 +165,15 @@ function assistantBindingDeliveryFromGatewayReply(
   return createAssistantBindingDelivery(reply.kind, reply.target)
 }
 
-export function resolveExplicitBindingDelivery(input: {
-  deliveryKind?: AssistantBindingDeliveryKind | null
-  deliveryTarget?: string | null
-}): AssistantBindingDelivery | null {
-  return assistantBindingDeliveryFromGatewayReply(
-    resolveExplicitGatewayReplyRoute({
-      deliveryKind: input.deliveryKind ?? null,
-      deliveryTarget: input.deliveryTarget ?? null,
-    }),
-  )
-}
-
-export function inferThreadFirstBindingDelivery(
-  input: {
-    conversation: ConversationRef
-    deliveryKind?: AssistantBindingDeliveryKind | null
-    deliveryTarget?: string | null
-  },
-  options: {
-    includeParticipant: boolean
-  },
-): AssistantBindingDelivery | null {
-  return assistantBindingDeliveryFromGatewayReply(
-    inferThreadFirstGatewayReplyRoute({
-      conversation: {
-        directness: input.conversation.directness,
-        participantId: input.conversation.participantId,
-        threadId: input.conversation.threadId,
-      },
-      deliveryKind: input.deliveryKind ?? null,
-      deliveryTarget: input.deliveryTarget ?? null,
-      includeParticipant: options.includeParticipant,
-    }),
-  )
-}
-
-export function inferFallbackBindingDelivery(input: {
+export function inferBindingDeliveryForChannel(input: {
+  channel?: string | null
   conversation: ConversationRef
   deliveryKind?: AssistantBindingDeliveryKind | null
   deliveryTarget?: string | null
 }): AssistantBindingDelivery | null {
   return assistantBindingDeliveryFromGatewayReply(
-    inferFallbackGatewayReplyRoute({
+    inferGatewayReplyRouteForChannel({
+      channel: input.channel ?? input.conversation.channel ?? null,
       conversation: {
         directness: input.conversation.directness,
         participantId: input.conversation.participantId,

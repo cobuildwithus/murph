@@ -120,7 +120,7 @@ export type AssistantChannelName = AssistantChannelAdapter['channel']
 export interface AssistantChannelAdapterSpec {
   canAutoReply: AssistantChannelAdapter['canAutoReply']
   channel: AssistantChannelName
-  inferBindingDelivery: AssistantChannelAdapter['inferBindingDelivery']
+  inferBindingDelivery?: AssistantChannelAdapter['inferBindingDelivery']
   isReadyForSetup: AssistantChannelAdapter['isReadyForSetup']
   startTypingIndicator?: (input: {
     candidate: AssistantDeliveryCandidate
