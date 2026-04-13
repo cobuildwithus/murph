@@ -4,6 +4,7 @@ import { type HostedMember } from "@prisma/client";
 import { cache } from "react";
 
 import { getPrisma } from "../prisma";
+import { isHostedOnboardingError } from "./errors";
 import { lookupHostedMemberForPrivyIdentity, type HostedMemberPrivyIdentityLookup } from "./member-identity-service";
 import { getHostedPrivySession, type HostedPrivySession } from "./hosted-session";
 import { type PrivyLinkedAccountLike } from "./privy-shared";
@@ -16,17 +17,31 @@ export interface HostedPageAuthSnapshot {
   session: HostedPrivySession | null;
 }
 
+function buildAnonymousHostedPageAuthSnapshot(): HostedPageAuthSnapshot {
+  return {
+    authenticated: false,
+    authenticatedMember: null,
+    linkedAccounts: [],
+    memberLookup: null,
+    session: null,
+  };
+}
+
 const resolveHostedPageAuthSnapshot = cache(async (): Promise<HostedPageAuthSnapshot> => {
-  const session = await getHostedPrivySession();
+  let session: HostedPrivySession | null;
+
+  try {
+    session = await getHostedPrivySession();
+  } catch (error) {
+    if (isHostedPageAuthSessionError(error)) {
+      return buildAnonymousHostedPageAuthSnapshot();
+    }
+
+    throw error;
+  }
 
   if (!session) {
-    return {
-      authenticated: false,
-      authenticatedMember: null,
-      linkedAccounts: [],
-      memberLookup: null,
-      session: null,
-    };
+    return buildAnonymousHostedPageAuthSnapshot();
   }
 
   const memberLookup = await lookupHostedMemberForPrivyIdentity({
@@ -46,4 +61,8 @@ const resolveHostedPageAuthSnapshot = cache(async (): Promise<HostedPageAuthSnap
 
 export async function getHostedPageAuthSnapshot(): Promise<HostedPageAuthSnapshot> {
   return resolveHostedPageAuthSnapshot();
+}
+
+function isHostedPageAuthSessionError(error: unknown): boolean {
+  return isHostedOnboardingError(error) && error.code === "PRIVY_AUTH_FAILED";
 }
