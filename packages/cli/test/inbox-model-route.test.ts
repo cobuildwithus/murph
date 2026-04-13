@@ -290,7 +290,7 @@ test('routeInboxCaptureWithModel previews and applies text-only document plans w
     })
 
     assert.equal(preview.apply, false)
-    assert.equal(preview.model.providerMode, 'gateway')
+    assert.equal(preview.model.providerMode, 'openai-compatible')
     assert.equal(preview.preparedInputMode, 'text-only')
     assert.equal(preview.inputMode, 'text-only')
     assert.equal(preview.fallbackError, null)

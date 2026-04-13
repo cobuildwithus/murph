@@ -18,8 +18,7 @@ import {
 } from '../src/assistant/target-runtime.ts'
 
 test('assistant target runtime resolves drivers, namespaces, and web-search fallbacks', () => {
-  assert.equal(normalizeAssistantExecutionDriver(' gateway '), 'responses')
-  assert.equal(normalizeAssistantExecutionDriver(' openai-responses '), 'responses')
+  assert.equal(normalizeAssistantExecutionDriver(' responses '), 'responses')
   assert.equal(normalizeAssistantExecutionDriver('unknown'), null)
   assert.equal(normalizeAssistantResumeKind(' openai-response-id '), 'openai-response-id')
   assert.equal(normalizeAssistantResumeKind('invalid'), null)
