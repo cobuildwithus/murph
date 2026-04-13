@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   hasHostedPrivyClientConfig,
   parseHostedSignupPhoneNumber,
+  requireHostedPrivyClientAppId,
   resolveHostedInstallScriptUrl,
   resolveHostedPrivyClientAppId,
   resolveHostedSignupPhoneNumber,
@@ -29,8 +30,14 @@ describe("hosted onboarding landing helpers", () => {
 
   it("derives Privy client readiness from the public app id only", () => {
     expect(resolveHostedPrivyClientAppId({} as NodeJS.ProcessEnv)).toBeNull();
+    expect(() => requireHostedPrivyClientAppId({} as NodeJS.ProcessEnv)).toThrow(
+      /NEXT_PUBLIC_PRIVY_APP_ID/u,
+    );
     expect(hasHostedPrivyClientConfig(createProcessEnv({}))).toBe(false);
     expect(hasHostedPrivyClientConfig(createProcessEnv({ NEXT_PUBLIC_PRIVY_APP_ID: "cm_app_123" }))).toBe(true);
+    expect(
+      requireHostedPrivyClientAppId(createProcessEnv({ NEXT_PUBLIC_PRIVY_APP_ID: "cm_app_123" })),
+    ).toBe("cm_app_123");
   });
 
   it("derives the hosted install-script URL from the public base URL", () => {
