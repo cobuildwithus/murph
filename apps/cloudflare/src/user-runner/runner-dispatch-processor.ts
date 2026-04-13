@@ -180,6 +180,10 @@ export class RunnerDispatchProcessor {
   async runQueuedEvents(userId: string): Promise<HostedExecutionUserStatus> {
     await this.dependencies.ensureRunnerStores(userId);
     let record = await this.dependencies.queueStore.readState();
+    if (record.inFlight && record.run) {
+      return toUserStatus(record);
+    }
+
     let processedDispatch = false;
     const recovered = await this.recoverCommittedPendingDispatchAndCleanup(record);
     if (recovered) {
