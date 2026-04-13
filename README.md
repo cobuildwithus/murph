@@ -202,12 +202,20 @@ murph device daemon start --vault ./vault
 ### Developer flows
 
 ```bash
+pnpm dev
 pnpm typecheck
 pnpm test
 pnpm verify:acceptance
-pnpm --dir apps/web dev
 pnpm --dir apps/cloudflare verify
 ```
+
+`pnpm dev` is the repo-root local hosted lane. It pulls the linked Vercel development env for `apps/web`, runs hosted-web Prisma generate plus migrate, and starts both `apps/web` and the local Cloudflare worker together. One-time local prerequisites:
+
+- `cd apps/web && vercel link`
+- log into Vercel CLI and enable project OIDC for the linked web project
+- optional: copy `apps/cloudflare/.dev.vars.example` to `apps/cloudflare/.dev.vars` when you want to pin local Worker secrets or add provider-specific Worker vars; otherwise `pnpm dev` generates a local-only Worker env on the fly
+- either keep `DATABASE_URL` in the linked Vercel development env or run local Postgres on `127.0.0.1:5432` so the default local database URL works
+- keep the linked Vercel development env populated with the real hosted signup secrets you need locally, such as Privy and Stripe test credentials
 
 The repo verification baseline for docs/process-only and ordinary repo work remains:
 
