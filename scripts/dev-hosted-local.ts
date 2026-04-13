@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { generateKeyPairSync, randomBytes } from "node:crypto";
-import { access, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdtemp, readFile, rm } from "node:fs/promises";
 import http from "node:http";
 import https from "node:https";
 import net from "node:net";
@@ -14,7 +14,12 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."
 const webDir = path.join(repoRoot, "apps", "web");
 const cloudflareDir = path.join(repoRoot, "apps", "cloudflare");
 const cloudflareDevVarsPath = path.join(cloudflareDir, ".dev.vars");
-const vercelProjectPath = path.join(webDir, ".vercel", "project.json");
+const vercelLinkCandidatePaths = [
+  path.join(webDir, ".vercel", "project.json"),
+  path.join(webDir, ".vercel", "repo.json"),
+  path.join(repoRoot, ".vercel", "project.json"),
+  path.join(repoRoot, ".vercel", "repo.json"),
+] as const;
 
 const DEFAULT_WEB_HOST = "127.0.0.1";
 const DEFAULT_WEB_PORT = 3000;
@@ -61,11 +66,6 @@ interface HostedExecutionOidcIdentity {
   teamSlug: string;
 }
 
-interface PreparedCloudflareLocalEnv {
-  cleanup: () => Promise<void>;
-  values: Record<string, string>;
-}
-
 interface HostedWebDevServerLockMetadata {
   command: string;
   pid: number;
@@ -90,10 +90,7 @@ await main();
 async function main(): Promise<void> {
   const config = resolveHostedLocalDevConfig(process.env);
 
-  await ensurePathExists(vercelProjectPath, [
-    "apps/web is not linked to a Vercel project.",
-    "Run `cd apps/web && vercel link` once before using `pnpm dev`.",
-  ].join(" "));
+  await ensureVercelLinkExists();
   await assertHostedWebDevServerAvailable(process.env);
   await assertPortAvailable(config.webHost, config.webPort, [
     `Local hosted web port ${config.webPort} is already in use on ${config.webHost}.`,
@@ -107,7 +104,6 @@ async function main(): Promise<void> {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "murph-dev-env-"));
   const pulledEnvPath = path.join(tempDir, ".env.local");
   const initialEnv = { ...process.env } satisfies NodeJS.ProcessEnv;
-  let preparedCloudflareEnv: PreparedCloudflareLocalEnv | null = null;
 
   try {
     if (!config.skipVercelPull) {
@@ -132,11 +128,10 @@ async function main(): Promise<void> {
 
     const vercelOidcToken = await resolveVercelOidcToken(vercelEnv);
     const oidcIdentity = parseHostedExecutionOidcIdentity(vercelOidcToken);
-    preparedCloudflareEnv = await resolveCloudflareLocalEnv({
+    const cloudflareDevVars = await resolveCloudflareLocalEnv({
       config,
       oidcIdentity,
     });
-    const cloudflareDevVars = preparedCloudflareEnv.values;
     const localOverrides = buildHostedLocalDevOverrides(config, cloudflareDevVars);
     const runtimeEnv: NodeJS.ProcessEnv = {
       ...vercelEnv,
@@ -198,8 +193,10 @@ async function main(): Promise<void> {
       ], workerRuntimeEnv),
       spawnChildProcess("web", "pnpm", [
         "--dir",
-        "apps/web",
-        "dev:local-env",
+        ".",
+        "exec",
+        "tsx",
+        "apps/web/scripts/dev-local.ts",
         "--",
         "--hostname",
         config.webHost,
@@ -281,7 +278,6 @@ async function main(): Promise<void> {
 
     throw new Error(`${exited.name} exited with code ${exited.child.exitCode ?? "unknown"}.`);
   } finally {
-    await preparedCloudflareEnv?.cleanup();
     await rm(tempDir, { force: true, recursive: true });
   }
 }
@@ -345,7 +341,7 @@ function buildWranglerVarArgs(cloudflareDevVars: Record<string, string>): string
 async function resolveCloudflareLocalEnv(input: {
   config: HostedLocalDevConfig;
   oidcIdentity: HostedExecutionOidcIdentity;
-}): Promise<PreparedCloudflareLocalEnv> {
+}): Promise<Record<string, string>> {
   const originalContents = await tryReadTextFile(cloudflareDevVarsPath);
   const existing = originalContents === null
     ? {}
@@ -394,19 +390,7 @@ async function resolveCloudflareLocalEnv(input: {
     HOSTED_WEB_BASE_URL: webOrigin,
   };
 
-  await writeFile(cloudflareDevVarsPath, serializeEnvFile(merged), "utf8");
-
-  return {
-    cleanup: async () => {
-      if (originalContents === null) {
-        await rm(cloudflareDevVarsPath, { force: true });
-        return;
-      }
-
-      await writeFile(cloudflareDevVarsPath, originalContents, "utf8");
-    },
-    values: merged,
-  };
+  return merged;
 }
 
 function assertLocalWorkerOidcEnvironment(cloudflareDevVars: Record<string, string>): void {
@@ -599,14 +583,6 @@ function createEcP256JwkPairJson(): {
     privateJwkJson: JSON.stringify(pair.privateKey),
     publicJwkJson: JSON.stringify(pair.publicKey),
   };
-}
-
-function serializeEnvFile(values: Record<string, string>): string {
-  const entries = Object.entries(values)
-    .filter(([, value]) => value.trim().length > 0)
-    .sort(([left], [right]) => left.localeCompare(right));
-
-  return `${entries.map(([key, value]) => `${key}=${value}`).join("\n")}\n`;
 }
 
 async function assertHostedWebDevServerAvailable(env: NodeJS.ProcessEnv): Promise<void> {
@@ -1002,6 +978,24 @@ async function ensurePathExists(filePath: string, message: string): Promise<void
   } catch {
     throw new Error(message);
   }
+}
+
+async function ensureVercelLinkExists(): Promise<void> {
+  for (const filePath of vercelLinkCandidatePaths) {
+    try {
+      await access(filePath);
+      return;
+    } catch {
+      // Try the next candidate.
+    }
+  }
+
+  throw new Error(
+    [
+      "This repo is not linked to the hosted web Vercel project.",
+      "Run `cd apps/web && vercel link`, or run `vercel link --repo` from the repo root, before using `pnpm dev`.",
+    ].join(" "),
+  );
 }
 
 function parsePort(value: string | undefined, fallback: number, label: string): number {

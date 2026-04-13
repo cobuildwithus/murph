@@ -35,8 +35,9 @@ HOSTED_EXECUTION_RETRY_DELAY_MS=30000
 HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS=30000
 HOSTED_EXECUTION_RUNNER_TIMEOUT_MS=60000
 
-# `pnpm dev` pulls Vercel development env for apps/web, overrides localhost URLs at runtime,
-# and starts this worker on http://127.0.0.1:8787 by default.
+# `pnpm dev` pulls Vercel development env for apps/web, injects required worker secrets through
+# Wrangler's documented local process-env path when this file is absent, applies localhost worker/web
+# var overrides with CLI `--var`, and starts this worker on http://127.0.0.1:8787 by default.
 
 # Optional explicit native-container size for local/generated Wrangler config.
 # Supported values are the named Wrangler presets such as `basic` or a JSON object like:
