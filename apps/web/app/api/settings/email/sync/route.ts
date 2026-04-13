@@ -5,11 +5,11 @@ import { jsonOk, withJsonError, readOptionalJsonObject } from "@/src/lib/hosted-
 import {
   extractHostedPrivyVerifiedEmailAccount,
 } from "@/src/lib/hosted-onboarding/privy-shared";
-import { requireHostedPrivyActiveMemberAuth } from "@/src/lib/hosted-onboarding/request-auth";
+import { requireActivePrivyMemberAuth } from "@/src/lib/hosted-onboarding/request-auth";
 
 export const POST = withJsonError(async (request: Request) => {
     assertHostedOnboardingMutationOrigin(request);
-    const auth = await requireHostedPrivyActiveMemberAuth(request);
+    const auth = await requireActivePrivyMemberAuth(request);
     const body = await readOptionalJsonObject(request);
     const expectedEmailAddress = normalizeComparableEmail(
       typeof body.expectedEmailAddress === "string" ? body.expectedEmailAddress : null,

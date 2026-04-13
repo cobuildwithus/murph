@@ -10,7 +10,7 @@ const mocks = vi.hoisted(() => ({
   drainHostedOnboardingWebhookReceipts: vi.fn(),
   getPrisma: vi.fn(),
   requireVercelCronRequest: vi.fn(),
-  resolveHostedPrivyMemberAuth: vi.fn(),
+  getPrivyMemberAuth: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-execution/vercel-cron", () => ({
@@ -42,7 +42,7 @@ vi.mock("@/src/lib/prisma", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({
-  resolveHostedPrivyMemberAuth: mocks.resolveHostedPrivyMemberAuth,
+  getPrivyMemberAuth: mocks.getPrivyMemberAuth,
 }));
 
 type HostedExecutionCronRouteModule = typeof import("../app/api/internal/hosted-execution/outbox/cron/route");
@@ -67,7 +67,7 @@ describe("hosted execution async routes", () => {
     vi.clearAllMocks();
     mocks.requireVercelCronRequest.mockReturnValue(undefined);
     mocks.getPrisma.mockReturnValue({ prisma: true });
-    mocks.resolveHostedPrivyMemberAuth.mockResolvedValue({
+    mocks.getPrivyMemberAuth.mockResolvedValue({
       member: {
         id: "member_123",
       },
@@ -301,7 +301,7 @@ describe("hosted execution async routes", () => {
       },
     };
     mocks.getPrisma.mockReturnValue(prisma);
-    mocks.resolveHostedPrivyMemberAuth.mockResolvedValue(auth);
+    mocks.getPrivyMemberAuth.mockResolvedValue(auth);
     mocks.buildHostedSharePageData.mockResolvedValue({
       inviteCode: "invite code",
       session: {
@@ -323,7 +323,7 @@ describe("hosted execution async routes", () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get("Cache-Control")).toBe("no-store");
-    expect(mocks.resolveHostedPrivyMemberAuth).toHaveBeenCalledWith(expect.any(Request), prisma);
+    expect(mocks.getPrivyMemberAuth).toHaveBeenCalledWith(expect.any(Request), prisma);
     expect(mocks.buildHostedSharePageData).toHaveBeenCalledWith({
       authenticatedMember: { id: "member_123" },
       inviteCode: "invite code",

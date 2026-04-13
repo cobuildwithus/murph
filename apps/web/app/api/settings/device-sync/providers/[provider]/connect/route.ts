@@ -2,7 +2,7 @@ import { createHostedDeviceSyncControlPlane } from "@/src/lib/device-sync/contro
 import { resolveDecodedRouteParam } from "@/src/lib/http";
 import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
 import { readOptionalJsonObject } from "@/src/lib/hosted-onboarding/http";
-import { requireHostedPrivyActiveMemberAuth } from "@/src/lib/hosted-onboarding/request-auth";
+import { requireActivePrivyMemberAuth } from "@/src/lib/hosted-onboarding/request-auth";
 
 import { jsonOk, withJsonError } from "@/src/lib/device-sync/settings-http";
 
@@ -27,7 +27,7 @@ export const POST = withJsonError(async (
   context: { params: Promise<{ provider: string }> },
 ) => {
   assertHostedOnboardingMutationOrigin(request);
-  const auth = await requireHostedPrivyActiveMemberAuth(request);
+  const auth = await requireActivePrivyMemberAuth(request);
   const body = await readOptionalJsonObject(request);
   const provider = await resolveDecodedRouteParam(context.params, "provider");
   const controlPlane = createHostedDeviceSyncControlPlane(request);

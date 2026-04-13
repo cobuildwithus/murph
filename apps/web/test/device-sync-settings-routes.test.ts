@@ -9,7 +9,7 @@ const mocks = vi.hoisted(() => ({
   disconnectConnection: vi.fn(),
   getConnectionStatus: vi.fn(),
   listConnections: vi.fn(),
-  requireHostedPrivyActiveMemberAuth: vi.fn(),
+  requireActivePrivyMemberAuth: vi.fn(),
   startConnection: vi.fn(),
 }));
 
@@ -22,7 +22,7 @@ vi.mock("@/src/lib/hosted-onboarding/csrf", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({
-  requireHostedPrivyActiveMemberAuth: mocks.requireHostedPrivyActiveMemberAuth,
+  requireActivePrivyMemberAuth: mocks.requireActivePrivyMemberAuth,
 }));
 
 type SettingsDeviceSyncRouteModule = typeof import("../app/api/settings/device-sync/route");
@@ -48,7 +48,7 @@ describe("device sync settings routes", () => {
     vi.setSystemTime(new Date("2026-04-03T12:00:00.000Z"));
     vi.clearAllMocks();
     mocks.assertHostedOnboardingMutationOrigin.mockImplementation(() => {});
-    mocks.requireHostedPrivyActiveMemberAuth.mockResolvedValue({
+    mocks.requireActivePrivyMemberAuth.mockResolvedValue({
       member: {
         id: "member_123",
       },
@@ -136,7 +136,7 @@ describe("device sync settings routes", () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get("Cache-Control")).toBe("no-store");
-    expect(mocks.requireHostedPrivyActiveMemberAuth).toHaveBeenCalledWith(expect.any(Request));
+    expect(mocks.requireActivePrivyMemberAuth).toHaveBeenCalledWith(expect.any(Request));
     expect(mocks.listConnections).toHaveBeenCalledWith("member_123");
     await expect(response.json()).resolves.toMatchObject({
       ok: true,
@@ -190,7 +190,7 @@ describe("device sync settings routes", () => {
       },
     });
     expect(mocks.assertHostedOnboardingMutationOrigin).not.toHaveBeenCalled();
-    expect(mocks.requireHostedPrivyActiveMemberAuth).not.toHaveBeenCalled();
+    expect(mocks.requireActivePrivyMemberAuth).not.toHaveBeenCalled();
     expect(mocks.startConnection).not.toHaveBeenCalled();
   });
 
@@ -237,7 +237,7 @@ describe("device sync settings routes", () => {
   });
 
   it("requires hosted auth before starting a connect flow", async () => {
-    mocks.requireHostedPrivyActiveMemberAuth.mockRejectedValue(hostedOnboardingError({
+    mocks.requireActivePrivyMemberAuth.mockRejectedValue(hostedOnboardingError({
       code: "AUTH_REQUIRED",
       httpStatus: 401,
       message: "Verify your phone to continue.",
@@ -294,7 +294,7 @@ describe("device sync settings routes", () => {
     );
 
     expect(response.status).toBe(403);
-    expect(mocks.requireHostedPrivyActiveMemberAuth).not.toHaveBeenCalled();
+    expect(mocks.requireActivePrivyMemberAuth).not.toHaveBeenCalled();
     expect(mocks.startConnection).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       error: {
@@ -306,7 +306,7 @@ describe("device sync settings routes", () => {
   });
 
   it("requires hosted auth before disconnecting a source", async () => {
-    mocks.requireHostedPrivyActiveMemberAuth.mockRejectedValue(hostedOnboardingError({
+    mocks.requireActivePrivyMemberAuth.mockRejectedValue(hostedOnboardingError({
       code: "AUTH_REQUIRED",
       httpStatus: 401,
       message: "Verify your phone to continue.",
@@ -353,7 +353,7 @@ describe("device sync settings routes", () => {
     );
 
     expect(response.status).toBe(403);
-    expect(mocks.requireHostedPrivyActiveMemberAuth).not.toHaveBeenCalled();
+    expect(mocks.requireActivePrivyMemberAuth).not.toHaveBeenCalled();
     expect(mocks.disconnectConnection).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       error: {
