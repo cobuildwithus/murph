@@ -78,27 +78,13 @@ type RunnerOutboundHandlerContext = OutboundHandlerContext<{
 
 type RunnerContainerEnvironmentSource = Readonly<Record<string, unknown>>;
 
-type RunnerOutboundHandlerName =
-  | "artifactsWorker"
-  | "deviceSyncWorker"
-  | "resultsWorker"
-  | "usageWorker";
+// Cloudflare rolls Worker code ahead of container instances, so keep the
+// worker/container outbound contract to one stable handler method.
+const RUNNER_OUTBOUND_HANDLER_METHOD = "internalWorkerProxy";
 
-const RUNNER_OUTBOUND_HOSTS = {
-  [CLOUDFLARE_HOSTED_RUNTIME_HOSTS.artifactStore]: "artifactsWorker",
-  [CLOUDFLARE_HOSTED_RUNTIME_HOSTS.effectsPort]: "resultsWorker",
-  [CLOUDFLARE_HOSTED_RUNTIME_HOSTS.deviceSyncPort]: "deviceSyncWorker",
-  [CLOUDFLARE_HOSTED_RUNTIME_HOSTS.usageExportPort]: "usageWorker",
-} as const satisfies Record<string, RunnerOutboundHandlerName>;
+const RUNNER_OUTBOUND_HOSTS = Object.values(CLOUDFLARE_HOSTED_RUNTIME_HOSTS);
 
 export class RunnerContainer extends Container {
-  static override outboundHandlers = {
-    artifactsWorker: createRunnerOutboundHandler(),
-    deviceSyncWorker: createRunnerOutboundHandler(),
-    resultsWorker: createRunnerOutboundHandler(),
-    usageWorker: createRunnerOutboundHandler(),
-  };
-
   defaultPort = RUNNER_PORT;
   requiredPorts = [RUNNER_PORT];
   pingEndpoint = RUNNER_PING_ENDPOINT;
@@ -296,10 +282,10 @@ export class RunnerContainer extends Container {
   ): Promise<void> {
     await this.setOutboundByHosts(
       Object.fromEntries(
-        Object.entries(RUNNER_OUTBOUND_HOSTS).map(([host, method]) => [
+        RUNNER_OUTBOUND_HOSTS.map((host) => [
           host,
           {
-            method,
+            method: RUNNER_OUTBOUND_HANDLER_METHOD,
             params: {
               internalWorkerProxyToken,
               userId,
@@ -359,6 +345,10 @@ export class RunnerContainer extends Container {
     return next;
   }
 }
+
+RunnerContainer.outboundHandlers = {
+  [RUNNER_OUTBOUND_HANDLER_METHOD]: createRunnerOutboundHandler(),
+};
 
 export async function invokeHostedExecutionContainerRunner(
   input: HostedExecutionContainerRunnerInput,
