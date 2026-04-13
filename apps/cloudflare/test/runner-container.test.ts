@@ -10,16 +10,8 @@ import {
 
 describe("RunnerContainer", () => {
   it("reuses a warm per-user shell across back-to-back invocations", async () => {
-    const setAlarm = vi.fn(async () => {});
-    const deleteAlarm = vi.fn(async () => {});
     const { container, containerFetch, destroy, setOutboundByHosts, startAndWaitForPorts } =
       createContainerDouble({
-        state: {
-          storage: {
-            deleteAlarm,
-            setAlarm,
-          },
-        },
         containerFetch: vi.fn(async (url: string) => {
           if (url.endsWith("/health")) {
             return new Response(JSON.stringify({ ok: true }), {
@@ -58,8 +50,6 @@ describe("RunnerContainer", () => {
     expect(secondResponse).toEqual(createRunnerResult());
     expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
     expect(destroy).not.toHaveBeenCalled();
-    expect(setAlarm).toHaveBeenCalledTimes(2);
-    expect(deleteAlarm.mock.calls.length).toBeGreaterThanOrEqual(2);
 
     const coldStartToken =
       startAndWaitForPorts.mock.calls[0]?.[0]?.startOptions?.envVars?.HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN;
@@ -90,15 +80,8 @@ describe("RunnerContainer", () => {
     expect(outboundTokens[2]).not.toBe(outboundTokens[3]);
   });
 
-  it("destroys the warm shell on idle alarm and cold-starts the next run", async () => {
-    const { container, destroy, startAndWaitForPorts } = createContainerDouble({
-      state: {
-        storage: {
-          async deleteAlarm() {},
-          async setAlarm() {},
-        },
-      },
-    });
+  it("destroys the warm shell on container activity expiry and cold-starts the next run", async () => {
+    const { container, destroy, startAndWaitForPorts } = createContainerDouble();
 
     await container.invoke({
       job: {
@@ -110,7 +93,7 @@ describe("RunnerContainer", () => {
     const firstToken =
       startAndWaitForPorts.mock.calls[0]?.[0]?.startOptions?.envVars?.HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN;
 
-    await container.alarm();
+    await container.onActivityExpired();
     expect(destroy).toHaveBeenCalledTimes(1);
 
     await container.invoke({
@@ -127,15 +110,31 @@ describe("RunnerContainer", () => {
     expect(firstToken).not.toBe(secondToken);
   });
 
+  it("keeps activity-expiry cleanup best-effort when destroy fails", async () => {
+    const destroy = vi.fn(async () => {
+      throw new Error("destroy failed");
+    });
+    const { container, startAndWaitForPorts } = createContainerDouble({
+      destroy,
+    });
+
+    await container.invoke({
+      job: {
+        request: createRunnerRequest(),
+      },
+      timeoutMs: 60_000,
+      userId: "member_123",
+    });
+
+    await expect(container.onActivityExpired()).resolves.toBeUndefined();
+
+    expect(destroy).toHaveBeenCalled();
+    expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
+  });
+
   it("destroys an already-running shell with ambiguous supervisor state before reusing it", async () => {
     const { container, destroy, startAndWaitForPorts } = createContainerDouble({
       initialStatus: "running",
-      state: {
-        storage: {
-          async deleteAlarm() {},
-          async setAlarm() {},
-        },
-      },
     });
 
     await container.invoke({
@@ -159,12 +158,6 @@ describe("RunnerContainer", () => {
     try {
       let healthFailures = 0;
       const { container, startAndWaitForPorts } = createContainerDouble({
-        state: {
-          storage: {
-            async deleteAlarm() {},
-            async setAlarm() {},
-          },
-        },
         containerFetch: vi.fn(async (url: string) => {
           if (url.endsWith("/health")) {
             healthFailures += 1;
@@ -216,14 +209,7 @@ describe("RunnerContainer", () => {
   });
 
   it("caps readiness waits to the caller timeout budget when the budget is small", async () => {
-    const { container, startAndWaitForPorts } = createContainerDouble({
-      state: {
-        storage: {
-          async deleteAlarm() {},
-          async setAlarm() {},
-        },
-      },
-    });
+    const { container, startAndWaitForPorts } = createContainerDouble();
 
     const response = await container.invoke({
       job: {
@@ -311,6 +297,95 @@ describe("RunnerContainer", () => {
     expect(startAndWaitForPorts).not.toHaveBeenCalled();
   });
 
+  it("waits for explicit destroy to settle through the stopping state", async () => {
+    vi.useFakeTimers();
+
+    try {
+      let status: "running" | "stopping" | "stopped" = "running";
+      const destroy = vi.fn(async () => {
+        status = "stopping";
+        setTimeout(() => {
+          status = "stopped";
+        }, 250);
+      });
+      const getState = vi.fn(async () => ({
+        lastChange: Date.now(),
+        status,
+      }));
+      const { container } = createContainerDouble({
+        destroy,
+        getState,
+        initialStatus: "running",
+      });
+
+      const destroyPromise = container.destroyInstance();
+      await vi.advanceTimersByTimeAsync(300);
+
+      await expect(destroyPromise).resolves.toBeUndefined();
+      expect(destroy).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("fails closed when explicit destroy throws", async () => {
+    const destroy = vi.fn(async () => {
+      throw new Error("destroy failed");
+    });
+    const { container } = createContainerDouble({
+      destroy,
+      initialStatus: "running",
+    });
+
+    await expect(container.destroyInstance()).rejects.toThrow(
+      "Hosted runner container failed to destroy cleanly.",
+    );
+    expect(destroy).toHaveBeenCalledTimes(1);
+  });
+
+  it("does best-effort cleanup on activity expiry when destroy throws", async () => {
+    const destroy = vi.fn(async () => {
+      throw new Error("destroy failed");
+    });
+    const { container } = createContainerDouble({
+      destroy,
+      initialStatus: "running",
+    });
+
+    await expect(container.onActivityExpired()).resolves.toBeUndefined();
+    expect(destroy).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails closed before reuse when destroying an ambiguous warm shell throws", async () => {
+    const destroy = vi.fn(async () => {
+      throw new Error("destroy failed");
+    });
+    const { container, startAndWaitForPorts } = createContainerDouble({
+      destroy,
+      initialStatus: "running",
+    });
+
+    await expect(container.invoke({
+      job: {
+        request: createRunnerRequest("evt_destroy_failure"),
+      },
+      timeoutMs: 30_000,
+      userId: "member_123",
+    })).rejects.toThrow("Hosted runner container failed to destroy cleanly.");
+    expect(destroy.mock.calls.length).toBeGreaterThanOrEqual(1);
+    expect(startAndWaitForPorts).not.toHaveBeenCalled();
+  });
+
+  it("maps the configured idle TTL onto the container sleepAfter lifecycle", () => {
+    const { container } = createContainerDouble({
+      env: {
+        HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "2500",
+      },
+    });
+
+    expect(container.sleepAfter).toBe("3s");
+  });
+
   it("destroys running containers but skips stopped ones", async () => {
     const running = createContainerDouble({
       initialStatus: "running",
@@ -358,14 +433,7 @@ describe("RunnerContainer", () => {
   });
 
   it("preserves extended runner request fields when the container is invoked over durable-object RPC", async () => {
-    const { container, containerFetch } = createContainerDouble({
-      state: {
-        storage: {
-          async deleteAlarm() {},
-          async setAlarm() {},
-        },
-      },
-    });
+    const { container, containerFetch } = createContainerDouble();
     const extendedRequest = {
       ...createRunnerRequest("evt_extended"),
       commit: {
@@ -466,6 +534,7 @@ function createContainerDouble(input: {
   containerFetch?: ReturnType<typeof vi.fn>;
   destroy?: ReturnType<typeof vi.fn>;
   env?: Record<string, unknown>;
+  getState?: ReturnType<typeof vi.fn>;
   initialStatus?: "running" | "stopped" | "stopped_with_code";
   setOutboundByHosts?: ReturnType<typeof vi.fn>;
   startAndWaitForPorts?: ReturnType<typeof vi.fn>;
@@ -495,7 +564,7 @@ function createContainerDouble(input: {
   const destroy = input.destroy ?? vi.fn(async () => {
     currentStatus = "stopped";
   });
-  const getState = vi.fn(async () => ({
+  const getState = input.getState ?? vi.fn(async () => ({
     lastChange: Date.now(),
     status: currentStatus,
   }));
