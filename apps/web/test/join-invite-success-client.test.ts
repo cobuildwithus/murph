@@ -55,7 +55,7 @@ test("verify-stage success page keeps the copy neutral while sign-in settles", (
   );
 
   assert.match(markup, /Finishing sign-in/);
-  assert.match(markup, /We’re finishing sign-in and checking your hosted activation status now\./);
+  assert.match(markup, /We’re finishing sign-in and checking your setup status now\./);
   assert.doesNotMatch(markup, /Payment received/);
   assert.match(markup, /Back to invite/);
 });
@@ -71,12 +71,12 @@ test("blocked success page does not pretend setup is still running", () => {
   );
 
   assert.match(markup, /Unable to continue/);
-  assert.match(markup, /We couldn’t finish activation automatically\./);
+  assert.match(markup, /We couldn’t finish setup automatically\./);
   assert.doesNotMatch(markup, /Payment received/);
   assert.doesNotMatch(markup, /We&#x27;ll keep checking automatically/);
 });
 
-test("active success page explains when Cloudflare warmup is still running", () => {
+test("active success page explains when vault and assistant setup is still running", () => {
   const markup = renderToStaticMarkup(
     createElement(JoinInviteSuccessShell, {
       initialStatus: createStatus("active", true),
@@ -88,7 +88,7 @@ test("active success page explains when Cloudflare warmup is still running", () 
 
   assert.match(markup, /Your account is ready/);
   assert.match(markup, /Payment is confirmed\./);
-  assert.match(markup, /booting your hosted runtime in Cloudflare/);
+  assert.match(markup, /setting up your private, encrypted vault/);
   assert.doesNotMatch(markup, /We&#x27;ll keep checking automatically/);
 });
 
