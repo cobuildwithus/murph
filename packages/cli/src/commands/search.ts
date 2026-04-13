@@ -1,6 +1,6 @@
 import { Cli, z } from 'incur'
 import { emptyArgsSchema, withBaseOptions } from '@murphai/operator-config/command-helpers'
-import { ALL_QUERY_ENTITY_FAMILIES } from '@murphai/query'
+import { ALL_QUERY_ENTITY_FAMILIES } from '@murphai/query/entity-families'
 import { loadQueryRuntime } from '@murphai/vault-usecases/runtime'
 import {
   isoTimestampSchema,

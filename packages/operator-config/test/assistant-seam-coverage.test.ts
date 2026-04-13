@@ -57,7 +57,7 @@ import {
   isAssistantVercelAIGatewayBaseUrl,
   readAssistantEnvString,
 } from '../src/assistant/shared.ts'
-import { isValidAssistantOpaqueId } from '@murphai/runtime-state'
+import { isValidAssistantOpaqueId } from '@murphai/runtime-state/assistant-ids'
 
 test('assistant shared and state-id helpers handle empty, invalid, and valid inputs', () => {
   const nonStringEnv = { ...process.env }

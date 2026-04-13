@@ -317,10 +317,32 @@ async function verifyFocusedOwnerSourceSurfaces(failures) {
         {
           specifier: "export function isValidAssistantOpaqueId",
           message:
-            "packages/assistant-engine/src/assistant/state-ids.ts declares isValidAssistantOpaqueId locally; shared assistant opaque id validation is owned by @murphai/runtime-state and should only be re-exported here.",
+            "packages/assistant-engine/src/assistant/state-ids.ts declares isValidAssistantOpaqueId locally; shared assistant opaque id helpers are owned by @murphai/runtime-state/assistant-ids and must not be duplicated here.",
         },
       ],
-      predicate: sourceMentionsSpecifier,
+      predicate: sourceMentionsText,
+    },
+    {
+      path: path.join(repoRoot, "packages", "assistant-engine", "src", "assistant", "state-ids.ts"),
+      failures: [
+        {
+          specifier: "@murphai/runtime-state/assistant-ids",
+          message:
+            "packages/assistant-engine/src/assistant/state-ids.ts re-exports @murphai/runtime-state/assistant-ids; assistant opaque id helpers should stay on the dedicated runtime-state subpath instead of leaking through the assistant-engine state surface.",
+        },
+      ],
+      predicate: sourceReexportsSpecifier,
+    },
+    {
+      path: path.join(repoRoot, "packages", "runtime-state", "src", "index.ts"),
+      failures: [
+        {
+          specifier: "assistant-ids",
+          message:
+            "packages/runtime-state/src/index.ts mentions assistant-ids; assistant opaque id helpers should stay on the dedicated @murphai/runtime-state/assistant-ids subpath instead of the broad runtime-state root barrel.",
+        },
+      ],
+      predicate: sourceMentionsText,
     },
     {
       path: path.join(repoRoot, "packages", "operator-config", "src", "assistant-cli-contracts.ts"),
@@ -328,7 +350,7 @@ async function verifyFocusedOwnerSourceSurfaces(failures) {
         {
           specifier: "./assistant/state-ids.js",
           message:
-            "packages/operator-config/src/assistant-cli-contracts.ts imports ./assistant/state-ids.js; assistant opaque id validation should come from @murphai/runtime-state instead of an operator-config helper copy.",
+            "packages/operator-config/src/assistant-cli-contracts.ts imports ./assistant/state-ids.js; assistant opaque id validation should come from @murphai/runtime-state/assistant-ids instead of an operator-config helper copy.",
         },
       ],
       predicate: sourceMentionsSpecifier,
@@ -339,7 +361,7 @@ async function verifyFocusedOwnerSourceSurfaces(failures) {
         {
           specifier: "export const ALL_QUERY_ENTITY_FAMILIES",
           message:
-            "packages/vault-usecases/src/query-runtime.ts re-exports ALL_QUERY_ENTITY_FAMILIES; query entity-family metadata is owned by @murphai/query and should not flow through the vault-usecases runtime helper layer.",
+            "packages/vault-usecases/src/query-runtime.ts re-exports ALL_QUERY_ENTITY_FAMILIES; query entity-family metadata is owned by @murphai/query/entity-families and should not flow through the vault-usecases runtime helper layer.",
         },
       ],
       predicate: sourceMentionsSpecifier,
@@ -350,10 +372,21 @@ async function verifyFocusedOwnerSourceSurfaces(failures) {
         {
           specifier: "ALL_QUERY_ENTITY_FAMILIES",
           message:
-            "packages/vault-usecases/src/runtime.ts mentions ALL_QUERY_ENTITY_FAMILIES; query entity-family metadata should stay on @murphai/query instead of leaking through @murphai/vault-usecases/runtime.",
+            "packages/vault-usecases/src/runtime.ts mentions ALL_QUERY_ENTITY_FAMILIES; query entity-family metadata should stay on @murphai/query/entity-families instead of leaking through @murphai/vault-usecases/runtime.",
         },
       ],
       predicate: sourceMentionsSpecifier,
+    },
+    {
+      path: path.join(repoRoot, "packages", "query", "src", "index.ts"),
+      failures: [
+        {
+          specifier: "ALL_QUERY_ENTITY_FAMILIES",
+          message:
+            "packages/query/src/index.ts mentions ALL_QUERY_ENTITY_FAMILIES; query entity-family metadata should stay on the dedicated @murphai/query/entity-families subpath instead of the broad query root barrel.",
+        },
+      ],
+      predicate: sourceMentionsText,
     },
     {
       path: path.join(repoRoot, "packages", "device-syncd", "src", "public-ingress.ts"),
@@ -983,12 +1016,31 @@ function verifyWorkspaceImportPolicy({
   }
 
   if (
+    specifier === "@murphai/runtime-state"
+    && importsNamedBindingsFromSpecifier(source, specifier, [
+      "isValidAssistantOpaqueId",
+      "normalizeAssistantOpaqueId",
+    ])
+  ) {
+    return `${path.relative(repoRoot, filePath)} imports assistant opaque id helpers from ${JSON.stringify(specifier)}; use @murphai/runtime-state/assistant-ids so the dedicated helper stays off the broad runtime-state root barrel.`;
+  }
+
+  if (
+    specifier === "@murphai/query"
+    && importsNamedBindingsFromSpecifier(source, specifier, [
+      "ALL_QUERY_ENTITY_FAMILIES",
+    ])
+  ) {
+    return `${path.relative(repoRoot, filePath)} imports query entity-family metadata from ${JSON.stringify(specifier)}; use @murphai/query/entity-families so the constant stays on its dedicated query-owned surface instead of the broad query root barrel.`;
+  }
+
+  if (
     specifier === "@murphai/vault-usecases/runtime"
     && importsNamedBindingsFromSpecifier(source, specifier, [
       "ALL_QUERY_ENTITY_FAMILIES",
     ])
   ) {
-    return `${path.relative(repoRoot, filePath)} imports query entity-family metadata from ${JSON.stringify(specifier)}; import ALL_QUERY_ENTITY_FAMILIES from @murphai/query so the constant stays on its query-owned surface instead of the vault-usecases runtime helper layer.`;
+    return `${path.relative(repoRoot, filePath)} imports query entity-family metadata from ${JSON.stringify(specifier)}; import ALL_QUERY_ENTITY_FAMILIES from @murphai/query/entity-families so the constant stays on its query-owned surface instead of the vault-usecases runtime helper layer.`;
   }
 
   if (
@@ -1178,6 +1230,10 @@ function sourceReexportsSpecifier(source, specifier) {
 
 function sourceMentionsSpecifier(source, specifier) {
   return extractModuleSpecifiers(source).includes(specifier);
+}
+
+function sourceMentionsText(source, snippet) {
+  return source.includes(snippet);
 }
 
 function importsNamedBindingsFromSpecifier(source, specifier, bindingNames) {

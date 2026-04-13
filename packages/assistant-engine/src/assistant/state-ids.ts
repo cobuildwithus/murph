@@ -1,9 +1,7 @@
 import path from 'node:path'
-import { isValidAssistantOpaqueId } from '@murphai/runtime-state'
+import { normalizeAssistantOpaqueId } from '@murphai/runtime-state/assistant-ids'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
-import { normalizeNullableString } from './shared.js'
 
-export { isValidAssistantOpaqueId } from '@murphai/runtime-state'
 type AssistantOpaqueIdKind =
   | 'session'
   | 'turn'
@@ -66,8 +64,8 @@ function assertAssistantOpaqueId(
   kind: AssistantOpaqueIdKind,
   value: string | null | undefined,
 ): string {
-  const normalized = normalizeNullableString(value)
-  if (normalized !== null && isValidAssistantOpaqueId(normalized)) {
+  const normalized = normalizeAssistantOpaqueId(value)
+  if (normalized !== null) {
     return normalized
   }
 

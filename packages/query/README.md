@@ -6,4 +6,6 @@ The first retrieval milestone now lives here too: lexical `searchVault()` over t
 
 It also owns Murph's semantic wearable read model: deduplicated daily sleep, activity, recovery, body-state, source-health, and assistant-facing day summaries derived from imported wearable evidence.
 
+Shared query entity-family metadata now lives on the dedicated `@murphai/query/entity-families` subpath so CLI and contract callers do not need the full query root barrel just to validate record-family flags.
+
 For health registry families, query now consumes the shared projection metadata exported from `@murphai/contracts` instead of maintaining a second per-kind taxonomy table locally.

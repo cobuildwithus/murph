@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 
 import * as runtimeState from "@murphai/runtime-state";
+import * as assistantIds from "@murphai/runtime-state/assistant-ids";
 import * as runtimeStateNode from "@murphai/runtime-state/node";
 
 import { describe, expect, it } from "vitest";
@@ -10,7 +11,8 @@ describe("@murphai/runtime-state package boundary", () => {
     const rootBarrel = await readFile(new URL("../src/index.ts", import.meta.url), "utf8");
 
     expect(runtimeState.generateUlid).toBeTypeOf("function");
-    expect(runtimeState.isValidAssistantOpaqueId).toBeTypeOf("function");
+    expect("normalizeAssistantOpaqueId" in runtimeState).toBe(false);
+    expect("isValidAssistantOpaqueId" in runtimeState).toBe(false);
     expect("openSqliteRuntimeDatabase" in runtimeState).toBe(false);
     expect("resolveRuntimePaths" in runtimeState).toBe(false);
     expect("snapshotHostedExecutionContext" in runtimeState).toBe(false);
@@ -39,6 +41,21 @@ describe("@murphai/runtime-state package boundary", () => {
     expect(packageJson.exports?.["./node"]).toEqual({
       default: "./dist/node/index.js",
       types: "./dist/node/index.d.ts",
+    });
+  });
+
+  it("exposes assistant opaque id helpers through the dedicated assistant-ids subpath", async () => {
+    const packageJson = JSON.parse(
+      await readFile(new URL("../package.json", import.meta.url), "utf8"),
+    ) as {
+      exports?: Record<string, { default?: string; types?: string }>;
+    };
+
+    expect(assistantIds.normalizeAssistantOpaqueId).toBeTypeOf("function");
+    expect(assistantIds.isValidAssistantOpaqueId).toBeTypeOf("function");
+    expect(packageJson.exports?.["./assistant-ids"]).toEqual({
+      default: "./dist/assistant-ids.js",
+      types: "./dist/assistant-ids.d.ts",
     });
   });
 });

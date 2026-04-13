@@ -7,7 +7,7 @@ import {
   stopManagedDeviceSyncDaemon,
 } from "@murphai/operator-config/device-daemon"
 import { createDeviceSyncClient } from "@murphai/operator-config/device-sync-client"
-import { ALL_QUERY_ENTITY_FAMILIES } from "@murphai/query"
+import { ALL_QUERY_ENTITY_FAMILIES } from "@murphai/query/entity-families"
 
 import type {
   ListFilters,

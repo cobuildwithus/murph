@@ -5,7 +5,6 @@ import type {
 import type { SearchFilters, SearchResult } from "./search-shared.ts";
 
 export {
-  ALL_QUERY_ENTITY_FAMILIES,
   createVaultReadModel,
   entityRelationTargetIds,
   getExperiment,

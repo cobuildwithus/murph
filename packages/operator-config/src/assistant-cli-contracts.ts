@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { isValidAssistantOpaqueId } from '@murphai/runtime-state'
+import { normalizeAssistantOpaqueId } from '@murphai/runtime-state/assistant-ids'
 import {
   gatewayDeliveryTargetKindValues,
   gatewayReplyRouteKindValues,
@@ -229,10 +229,18 @@ export const assistantSessionResumeStateSchema = z
   })
   .strict()
 
-export const assistantSessionIdSchema = z.string().refine(
-  (value) => isValidAssistantOpaqueId(value),
-  'Assistant session ids must be opaque runtime ids without path separators or traversal segments.',
-)
+function createAssistantOpaqueIdSchema(kind: string) {
+  return z.string().trim().refine(
+    (value) => normalizeAssistantOpaqueId(value) !== null,
+    `Assistant ${kind} ids must be opaque runtime ids without path separators or traversal segments.`,
+  )
+}
+
+export const assistantSessionIdSchema = createAssistantOpaqueIdSchema('session')
+export const assistantTurnIdSchema = createAssistantOpaqueIdSchema('turn')
+export const assistantOutboxIntentIdSchema = createAssistantOpaqueIdSchema('outbox intent')
+export const assistantCronJobIdSchema = createAssistantOpaqueIdSchema('cron job')
+export const assistantCronRunIdSchema = createAssistantOpaqueIdSchema('cron run')
 
 export const assistantProviderSessionOptionsSchema = z.object({
   continuityFingerprint: z.string().min(1),
@@ -257,7 +265,7 @@ export const assistantProviderSessionOptionsSchema = z.object({
 export const assistantSessionSecretsSchema = z
   .object({
     schema: z.literal('murph.assistant-session-secrets.v1'),
-    sessionId: z.string().min(1),
+    sessionId: assistantSessionIdSchema,
     updatedAt: isoTimestampSchema,
     providerHeaders: assistantHeadersSchema.nullable().default(null),
     providerBindingHeaders: assistantHeadersSchema.nullable().default(null),
@@ -532,7 +540,7 @@ export const assistantTurnTimelineEventSchema = z
 export const assistantTurnReceiptSchema = z
   .object({
     schema: z.literal('murph.assistant-turn-receipt.v1'),
-    turnId: z.string().min(1),
+    turnId: assistantTurnIdSchema,
     sessionId: assistantSessionIdSchema,
     provider: z.enum(assistantChatProviderValues),
     providerModel: z.string().min(1).nullable(),
@@ -548,7 +556,7 @@ export const assistantTurnReceiptSchema = z
       'blocked',
       'failed',
     ]),
-    deliveryIntentId: z.string().min(1).nullable(),
+    deliveryIntentId: assistantOutboxIntentIdSchema.nullable(),
     startedAt: isoTimestampSchema,
     updatedAt: isoTimestampSchema,
     completedAt: isoTimestampSchema.nullable(),
@@ -562,9 +570,9 @@ export const assistantOutboxIntentStatusValues = assistantOutboxStatusValues
 export const assistantOutboxIntentSchema = z
   .object({
     schema: z.literal('murph.assistant-outbox-intent.v1'),
-    intentId: z.string().min(1),
+    intentId: assistantOutboxIntentIdSchema,
     sessionId: assistantSessionIdSchema,
-    turnId: z.string().min(1),
+    turnId: assistantTurnIdSchema,
     createdAt: isoTimestampSchema,
     updatedAt: isoTimestampSchema,
     lastAttemptAt: isoTimestampSchema.nullable(),
@@ -600,9 +608,9 @@ export const assistantDiagnosticEventSchema = z
     kind: z.string().min(1),
     message: z.string().min(1),
     code: z.string().min(1).nullable(),
-    sessionId: z.string().min(1).nullable(),
-    turnId: z.string().min(1).nullable(),
-    intentId: z.string().min(1).nullable(),
+    sessionId: assistantSessionIdSchema.nullable(),
+    turnId: assistantTurnIdSchema.nullable(),
+    intentId: assistantOutboxIntentIdSchema.nullable(),
     dataJson: z.string().nullable(),
   })
   .strict()
@@ -871,7 +879,7 @@ export const assistantCronScheduleInputSchema = z.discriminatedUnion('kind', [
 
 export const assistantCronTargetSchema = z
   .object({
-    sessionId: z.string().min(1).nullable(),
+    sessionId: assistantSessionIdSchema.nullable(),
     alias: z.string().min(1).nullable(),
     channel: z.string().min(1).nullable(),
     identityId: z.string().min(1).nullable(),
@@ -914,7 +922,7 @@ export const assistantCronFoodAutoLogSchema = z
 export const assistantCronJobSchema = z
   .object({
     schema: z.literal('murph.assistant-cron-job.v1'),
-    jobId: z.string().min(1),
+    jobId: assistantCronJobIdSchema,
     name: z.string().min(1),
     enabled: z.boolean(),
     keepAfterRun: z.boolean(),
@@ -931,13 +939,13 @@ export const assistantCronJobSchema = z
 export const assistantCronRunRecordSchema = z
   .object({
     schema: z.literal('murph.assistant-cron-run.v1'),
-    runId: z.string().min(1),
-    jobId: z.string().min(1),
+    runId: assistantCronRunIdSchema,
+    jobId: assistantCronJobIdSchema,
     trigger: z.enum(assistantCronTriggerValues),
     status: z.enum(assistantCronRunStatusValues),
     startedAt: isoTimestampSchema,
     finishedAt: isoTimestampSchema,
-    sessionId: z.string().min(1).nullable(),
+    sessionId: assistantSessionIdSchema.nullable(),
     response: z.string().nullable(),
     responseLength: z.number().int().nonnegative(),
     error: z.string().nullable(),
@@ -976,7 +984,7 @@ export const assistantAskResultSchema = z.object({
   session: assistantSessionOutputSchema,
   delivery: assistantChannelDeliverySchema.nullable(),
   deliveryDeferred: z.boolean().default(false),
-  deliveryIntentId: z.string().min(1).nullable().default(null),
+  deliveryIntentId: assistantOutboxIntentIdSchema.nullable().default(null),
   deliveryError: assistantDeliveryErrorSchema.nullable(),
 })
 
@@ -1060,12 +1068,12 @@ export const assistantCronRunsResultSchema = z.object({
   stateRoot: pathSchema,
   jobsPath: pathSchema,
   runsRoot: pathSchema,
-  jobId: z.string().min(1),
+  jobId: assistantCronJobIdSchema,
   runs: z.array(assistantCronRunRecordSchema),
 })
 
 export const assistantCronTargetSnapshotSchema = z.object({
-  jobId: z.string().min(1),
+  jobId: assistantCronJobIdSchema,
   jobName: z.string().min(1),
   target: assistantCronTargetSchema,
   bindingDelivery: assistantBindingDeliverySchema.nullable(),

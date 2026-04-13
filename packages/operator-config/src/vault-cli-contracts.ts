@@ -1,5 +1,5 @@
 import { isValidIanaTimeZone } from '@murphai/contracts'
-import { ALL_QUERY_ENTITY_FAMILIES } from '@murphai/query'
+import { ALL_QUERY_ENTITY_FAMILIES } from '@murphai/query/entity-families'
 import { z } from 'zod'
 
 function describeQueryRecordTypes(values: readonly string[]): string {
