@@ -22,6 +22,15 @@ const mocks = vi.hoisted(() => ({
       "data-hosted-device-sync-settings-content": "true",
     }),
   ),
+  HostedDeviceSyncSettingsStatusCard: vi.fn((props: { description: string; title: string }) =>
+    createElement(
+      "div",
+      {
+        "data-hosted-device-sync-settings-status-card": "true",
+        "data-description": props.description,
+        "data-title": props.title,
+      },
+    )),
   HostedSettingsSessionState: vi.fn(() =>
     createElement("div", {
       "data-hosted-settings-session-state": "true",
@@ -36,21 +45,22 @@ vi.mock("@/src/components/hosted-onboarding/client-api", () => ({
   requestHostedOnboardingJson: mocks.requestHostedOnboardingJson,
 }));
 
-vi.mock("./hosted-device-sync-settings-sections", () => ({
+vi.mock("@/src/components/settings/hosted-device-sync-settings-sections", () => ({
   HostedDeviceSyncDisconnectDialog: mocks.HostedDeviceSyncDisconnectDialog,
   HostedDeviceSyncSettingsContent: mocks.HostedDeviceSyncSettingsContent,
+  HostedDeviceSyncSettingsStatusCard: mocks.HostedDeviceSyncSettingsStatusCard,
 }));
 
-vi.mock("./hosted-device-sync-settings-utils", () => ({
+vi.mock("@/src/components/settings/hosted-device-sync-settings-utils", () => ({
   describeDeviceSyncCallbackError: mocks.describeDeviceSyncCallbackError,
   sourceKey: mocks.sourceKey,
 }));
 
-vi.mock("./hosted-settings-session-state", () => ({
+vi.mock("@/src/components/settings/hosted-settings-session-state", () => ({
   HostedSettingsSessionState: mocks.HostedSettingsSessionState,
 }));
 
-vi.mock("./hosted-settings-utils", () => ({
+vi.mock("@/src/components/settings/hosted-settings-utils", () => ({
   formatHostedDeviceSyncProviderLabel: mocks.formatHostedDeviceSyncProviderLabel,
   toErrorMessage: mocks.toErrorMessage,
 }));
@@ -123,6 +133,43 @@ test("HostedDeviceSyncSettingsClient clears shared callback params from the curr
   expect(redirected.searchParams.get("deviceSyncAccountId")).toBeNull();
   expect(redirected.searchParams.get("deviceSyncError")).toBeNull();
   expect(redirected.searchParams.get("deviceSyncErrorMessage")).toBeNull();
+});
+
+test("HostedDeviceSyncSettingsClient renders an unavailable state instead of the empty state for blocked initial loads", async () => {
+  const { document, window } = loadLinkedom().parseHTML(
+    "<html><body><div id='root'></div></body></html>",
+  );
+  installHostedDeviceSyncClientGlobals(window, document);
+  mockWindowLocation(window, "https://app.example.test/settings");
+
+  const container = document.getElementById("root");
+  assert.ok(container);
+
+  const root: Root = createRoot(container);
+  cleanupRender = async () => {
+    await act(async () => {
+      root.unmount();
+    });
+  };
+
+  await act(async () => {
+    root.render(
+      createElement(HostedDeviceSyncSettingsClient, {
+        authenticated: true,
+        initialLoadError: {
+          code: "HOSTED_ACCESS_REQUIRED",
+          message: "Your subscription is canceled. Open billing to resume access.",
+        },
+        initialResponse: null,
+      }),
+    );
+  });
+
+  expect(mocks.HostedDeviceSyncSettingsStatusCard).toHaveBeenCalledWith(expect.objectContaining({
+    description: "Your subscription is canceled. Open billing to resume access.",
+    title: "Wearables unavailable",
+  }), undefined);
+  expect(mocks.HostedDeviceSyncSettingsContent).not.toHaveBeenCalled();
 });
 
 function loadLinkedom(): {

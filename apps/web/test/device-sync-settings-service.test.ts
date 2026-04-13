@@ -66,18 +66,18 @@ test("buildHostedDeviceSyncSettingsResponse reads device sync connections server
   });
 });
 
-test("buildHostedDeviceSyncSettingsResponse rejects hosted members without active access before reading connections", async () => {
+test("buildHostedDeviceSyncSettingsResponse explains canceled access before reading connections", async () => {
   const { buildHostedDeviceSyncSettingsResponse } = await import("@/src/lib/device-sync/settings-service");
 
   await expect(buildHostedDeviceSyncSettingsResponse({
     member: {
-      billingStatus: "incomplete",
+      billingStatus: "canceled",
       id: "member_123",
       suspendedAt: null,
     },
   })).rejects.toMatchObject({
     code: "HOSTED_ACCESS_REQUIRED",
-    message: "Finish hosted activation before continuing.",
+    message: "Your subscription is canceled. Open billing to resume access.",
   });
 
   expect(mocks.createHostedDeviceSyncControlPlane).not.toHaveBeenCalled();

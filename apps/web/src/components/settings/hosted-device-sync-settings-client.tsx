@@ -5,7 +5,10 @@ import { useCallback, useEffect, useState } from "react";
 import { DEVICE_SYNC_CALLBACK_QUERY_PARAM_KEYS } from "@murphai/device-syncd/callback-redirect";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { requestHostedOnboardingJson } from "@/src/components/hosted-onboarding/client-api";
+import {
+  HostedOnboardingApiError,
+  requestHostedOnboardingJson,
+} from "@/src/components/hosted-onboarding/client-api";
 import {
   formatHostedDeviceSyncProviderLabel,
   type HostedDeviceSyncSettingsResponse,
@@ -15,13 +18,14 @@ import {
 import {
   HostedDeviceSyncDisconnectDialog,
   HostedDeviceSyncSettingsContent,
+  HostedDeviceSyncSettingsStatusCard,
 } from "./hosted-device-sync-settings-sections";
 import {
   describeDeviceSyncCallbackError,
   sourceKey,
 } from "./hosted-device-sync-settings-utils";
 import { HostedSettingsSessionState } from "./hosted-settings-session-state";
-import { toErrorMessage } from "./hosted-settings-utils";
+import type { HostedDeviceSyncSettingsInitialLoadError } from "./hosted-device-sync-settings";
 
 interface HostedDeviceSyncConnectResponse {
   authorizationUrl: string;
@@ -33,11 +37,18 @@ interface HostedDeviceSyncDisconnectResponse {
 
 export function HostedDeviceSyncSettingsClient(props: {
   authenticated: boolean;
-  initialLoadError: string | null;
+  initialLoadError: HostedDeviceSyncSettingsInitialLoadError | null;
   initialResponse: HostedDeviceSyncSettingsResponse | null;
 }) {
   const [sources, setSources] = useState<HostedDeviceSyncSettingsSource[]>(props.initialResponse?.sources ?? []);
-  const [errorMessage, setErrorMessage] = useState<string | null>(props.initialLoadError);
+  const [errorState, setErrorState] = useState<HostedDeviceSyncSettingsErrorState | null>(
+    props.initialLoadError
+      ? {
+          ...props.initialLoadError,
+          phase: "load",
+        }
+      : null,
+  );
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [pendingActionKey, setPendingActionKey] = useState<string | null>(null);
   const [disconnectTarget, setDisconnectTarget] = useState<HostedDeviceSyncSettingsSource | null>(null);
@@ -56,9 +67,11 @@ export function HostedDeviceSyncSettingsClient(props: {
         url: "/api/settings/device-sync",
       });
       setSources(response.sources);
-      setErrorMessage(null);
+      setErrorState(null);
     } catch (error) {
-      setErrorMessage(toErrorMessage(error, "Could not load your wearables right now."));
+      setErrorState(
+        createHostedDeviceSyncErrorState(error, "Could not load your wearables right now.", "load"),
+      );
     } finally {
       setIsRefreshing(false);
     }
@@ -82,10 +95,14 @@ export function HostedDeviceSyncSettingsClient(props: {
     if (status === "connected") {
       setSuccessMessage(`Connected ${provider}.`);
       setWarningMessage(null);
-      setErrorMessage(null);
+      setErrorState(null);
       void loadSources();
     } else if (status === "error") {
-      setErrorMessage(describeDeviceSyncCallbackError(provider, errorCode));
+      setErrorState({
+        code: null,
+        message: describeDeviceSyncCallbackError(provider, errorCode),
+        phase: "action",
+      });
       setSuccessMessage(null);
     }
 
@@ -97,7 +114,7 @@ export function HostedDeviceSyncSettingsClient(props: {
 
   async function handleConnect(source: HostedDeviceSyncSettingsSource) {
     setPendingActionKey(sourceKey(source, "connect"));
-    setErrorMessage(null);
+    setErrorState(null);
     setSuccessMessage(null);
     setWarningMessage(null);
 
@@ -111,7 +128,13 @@ export function HostedDeviceSyncSettingsClient(props: {
       });
       window.location.assign(result.authorizationUrl);
     } catch (error) {
-      setErrorMessage(toErrorMessage(error, `We could not start the ${source.providerLabel} connection right now.`));
+      setErrorState(
+        createHostedDeviceSyncErrorState(
+          error,
+          `We could not start the ${source.providerLabel} connection right now.`,
+          "action",
+        ),
+      );
       setPendingActionKey(null);
     }
   }
@@ -129,7 +152,7 @@ export function HostedDeviceSyncSettingsClient(props: {
     }
 
     setPendingActionKey(sourceKey(source, "disconnect"));
-    setErrorMessage(null);
+    setErrorState(null);
     setSuccessMessage(null);
     setWarningMessage(null);
 
@@ -149,11 +172,23 @@ export function HostedDeviceSyncSettingsClient(props: {
 
       await loadSources();
     } catch (error) {
-      setErrorMessage(toErrorMessage(error, `We could not disconnect ${source.providerLabel} right now.`));
+      setErrorState(
+        createHostedDeviceSyncErrorState(
+          error,
+          `We could not disconnect ${source.providerLabel} right now.`,
+          "action",
+        ),
+      );
     } finally {
       setPendingActionKey(null);
     }
   }
+
+  const errorMessage = errorState?.message ?? null;
+  const showUnavailableState = props.authenticated && errorState?.phase === "load" && sources.length === 0;
+  const errorAlertTitle = errorState?.phase === "load"
+    ? "Unable to load wearable sources"
+    : "Unable to update wearable sources";
 
   return (
     <div className="space-y-5">
@@ -173,7 +208,7 @@ export function HostedDeviceSyncSettingsClient(props: {
 
       {errorMessage ? (
         <Alert variant="destructive">
-          <AlertTitle>Unable to update wearable sources</AlertTitle>
+          <AlertTitle>{errorAlertTitle}</AlertTitle>
           <AlertDescription>{errorMessage}</AlertDescription>
         </Alert>
       ) : null}
@@ -182,6 +217,14 @@ export function HostedDeviceSyncSettingsClient(props: {
         <HostedSettingsSessionState
           authenticated={props.authenticated}
           signedOutDescription="Sign in to manage your wearables."
+        />
+      ) : showUnavailableState ? (
+        <HostedDeviceSyncSettingsStatusCard
+          actionLabel={isHostedDeviceSyncBlockedState(errorState) ? null : "Refresh status"}
+          description={errorMessage ?? "Could not load your wearables right now."}
+          disabled={isRefreshing}
+          title={isHostedDeviceSyncBlockedState(errorState) ? "Wearables unavailable" : "Could not load wearables"}
+          onAction={isHostedDeviceSyncBlockedState(errorState) ? undefined : loadSources}
         />
       ) : (
         <HostedDeviceSyncSettingsContent
@@ -207,4 +250,54 @@ export function HostedDeviceSyncSettingsClient(props: {
       />
     </div>
   );
+}
+
+type HostedDeviceSyncSettingsErrorState = HostedDeviceSyncSettingsInitialLoadError & {
+  phase: "action" | "load";
+};
+
+function createHostedDeviceSyncErrorState(
+  error: unknown,
+  fallback: string,
+  phase: HostedDeviceSyncSettingsErrorState["phase"],
+): HostedDeviceSyncSettingsErrorState {
+  if (error instanceof HostedOnboardingApiError) {
+    return {
+      code: error.code,
+      message: error.message || fallback,
+      phase,
+    };
+  }
+
+  if (error instanceof Error && error.message) {
+    return {
+      code: readOptionalErrorCode(error),
+      message: error.message,
+      phase,
+    };
+  }
+
+  if (typeof error === "string" && error.trim()) {
+    return {
+      code: null,
+      message: error.trim(),
+      phase,
+    };
+  }
+
+  return {
+    code: null,
+    message: fallback,
+    phase,
+  };
+}
+
+function isHostedDeviceSyncBlockedState(
+  errorState: HostedDeviceSyncSettingsErrorState | null,
+): boolean {
+  return errorState?.code === "HOSTED_ACCESS_REQUIRED" || errorState?.code === "HOSTED_MEMBER_SUSPENDED";
+}
+
+function readOptionalErrorCode(error: Error): string | null {
+  return "code" in error && typeof error.code === "string" ? error.code : null;
 }
