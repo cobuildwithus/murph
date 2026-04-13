@@ -25,21 +25,45 @@ export interface HostedPrivyRequestAuthContext {
   verifiedPrivyUser: HostedPrivyUser;
 }
 
+export interface HostedPrivySessionRequestAuthContext {
+  identity: HostedPrivyIdentity;
+  linkedAccounts: PrivyLinkedAccountLike[];
+  verifiedPrivyUser: HostedPrivyUser;
+}
+
 export interface HostedPrivyAuthenticatedRequestContext extends Omit<HostedPrivyRequestAuthContext, "member"> {
   member: HostedMember;
+}
+
+export async function resolveHostedPrivySessionRequestAuthContext(
+  request: Request,
+): Promise<HostedPrivySessionRequestAuthContext | null> {
+  const session = await resolveHostedPrivySessionFromRequest(request);
+
+  if (!session) {
+    return null;
+  }
+
+  return {
+    identity: session.identity,
+    linkedAccounts: session.linkedAccounts,
+    verifiedPrivyUser: session.verifiedPrivyUser,
+  };
 }
 
 export async function resolveHostedPrivyRequestAuthContext(
   request: Request,
   prisma: PrismaClient = getPrisma(),
 ): Promise<HostedPrivyRequestAuthContext | null> {
-  const session = await resolveHostedPrivySessionFromRequest(request);
+  const session = await resolveHostedPrivySessionRequestAuthContext(request);
 
   if (!session) {
     return null;
   }
+
   const memberLookup = await lookupHostedMemberForPrivyIdentity({
     identity: session.identity,
+    parallelizeReads: true,
     prisma,
   });
 
@@ -88,12 +112,27 @@ export async function requireHostedPrivyVerifiedRequestAuthContext(
   return context;
 }
 
+export async function requireHostedPrivyVerifiedSessionRequestAuthContext(
+  request: Request,
+): Promise<HostedPrivySessionRequestAuthContext> {
+  const context = await resolveHostedPrivySessionRequestAuthContext(request);
+
+  if (!context) {
+    throw hostedOnboardingError({
+      code: "AUTH_REQUIRED",
+      message: "Verify your phone to continue.",
+      httpStatus: 401,
+    });
+  }
+
+  return context;
+}
+
 export async function requireHostedPrivyCompletionRequestAuthContext(
   request: Request,
-  prisma: PrismaClient = getPrisma(),
-): Promise<HostedPrivyRequestAuthContext> {
+): Promise<HostedPrivySessionRequestAuthContext> {
   try {
-    return await requireHostedPrivyVerifiedRequestAuthContext(request, prisma);
+    return await requireHostedPrivyVerifiedSessionRequestAuthContext(request);
   } catch (error) {
     throw remapHostedPrivyCompletionLagError(error);
   }
