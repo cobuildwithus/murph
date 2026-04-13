@@ -15,13 +15,7 @@ const privacyFeatures = [
   },
   {
     label: "Zero Data Retention",
-    body: (
-      <>
-        Cloud inference runs through{" "}
-        <a href="https://venice.ai" target="_blank" rel="noreferrer" className="underline transition-colors hover:text-white">Venice AI</a>
-        {". "}Your data does not train AI models, and your prompts and conversation data are not stored by the provider.
-      </>
-    ),
+    body: "Cloud inference uses a zero-data-retention provider. Your data does not train AI models, and your prompts and conversation data are not stored.",
   },
   {
     label: "Bring your own model",
