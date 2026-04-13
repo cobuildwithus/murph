@@ -11,6 +11,7 @@ import { getPrisma } from "../prisma";
 import { isHostedMemberActivationPending } from "./activation-progress";
 import { readHostedPhoneHint } from "./contact-privacy";
 import { hostedOnboardingError } from "./errors";
+import { projectHostedMemberRoutingState } from "./hosted-member-routing-store";
 import { deriveHostedOnboardingStage } from "./lifecycle";
 import {
   readHostedMemberIdentity,
@@ -31,6 +32,7 @@ import {
   type HostedOnboardingPrismaClient,
   withHostedOnboardingTransaction,
 } from "./shared";
+import { normalizePhoneNumber } from "./phone";
 
 const HOSTED_INVITE_SEND_CODE_COOLDOWN_MS = 60_000;
 
@@ -73,6 +75,16 @@ export async function getHostedInviteStatus(input: {
         prisma,
       })
     : false;
+  const inviteRouting = invite.member.routing
+    ? projectHostedMemberRoutingState(invite.member.routing)
+    : null;
+  const stage = deriveHostedOnboardingStage({
+    billingStatus: invite.member.billingStatus,
+    expiresAt: invite.expiresAt,
+    now,
+    sessionMatchesInvite,
+    suspendedAt: invite.member.suspendedAt,
+  });
 
   return {
     activationPending,
@@ -85,18 +97,19 @@ export async function getHostedInviteStatus(input: {
       expiresAt: invite.expiresAt.toISOString(),
       phoneHint: readHostedPhoneHint(inviteIdentity.maskedPhoneNumberHint),
     },
+    murphPhoneNumber: sessionMatchesInvite && stage === "active"
+      ? normalizePhoneNumber(
+          inviteRouting?.linqRecipientPhone
+          ?? inviteRouting?.pendingLinqRecipientPhone
+          ?? null,
+        )
+      : null,
     session: {
       authenticated: Boolean(input.authenticatedMember),
       expiresAt: null,
       matchesInvite: Boolean(sessionMatchesInvite),
     },
-    stage: deriveHostedOnboardingStage({
-      billingStatus: invite.member.billingStatus,
-      expiresAt: invite.expiresAt,
-      now,
-      sessionMatchesInvite,
-      suspendedAt: invite.member.suspendedAt,
-    }),
+    stage,
   };
 }
 
@@ -361,6 +374,7 @@ async function findHostedInviteByCode(
       member: {
         include: {
           identity: true,
+          routing: true,
         },
       },
     },
