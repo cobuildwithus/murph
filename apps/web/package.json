@@ -8,6 +8,7 @@
   },
   "scripts": {
     "dev": "vercel env run -- pnpm dev:local-env",
+    "dev:prod": "vercel env run --environment production -- pnpm dev:local-env",
     "dev:local-env": "pnpm --dir ../.. exec tsx apps/web/scripts/dev-local.ts",
     "build": "prisma generate && next build",
     "lint": "eslint .",
