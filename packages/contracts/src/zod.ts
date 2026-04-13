@@ -27,6 +27,8 @@ import {
   GOAL_HORIZONS,
   GOAL_STATUSES,
   ID_PREFIXES,
+  NUTRITION_CONFIDENCE_LEVELS,
+  NUTRITION_PROVENANCE_SOURCES,
   RAW_ASSET_OWNER_KINDS,
   RAW_IMPORT_KINDS,
   RECIPE_STATUSES,
@@ -74,6 +76,8 @@ export type AllergyStatus = (typeof ALLERGY_STATUSES)[number];
 export type AllergyCriticality = (typeof ALLERGY_CRITICALITIES)[number];
 export type FoodStatus = (typeof FOOD_STATUSES)[number];
 export type RecipeStatus = (typeof RECIPE_STATUSES)[number];
+export type NutritionProvenanceSource = (typeof NUTRITION_PROVENANCE_SOURCES)[number];
+export type NutritionConfidenceLevel = (typeof NUTRITION_CONFIDENCE_LEVELS)[number];
 export type ProtocolKind = (typeof PROTOCOL_KINDS)[number];
 export type ProtocolStatus = (typeof PROTOCOL_STATUSES)[number];
 export type SampleStream = (typeof SAMPLE_STREAMS)[number];
@@ -266,6 +270,38 @@ export const externalRefSchema = z
     resourceId: boundedString(1, 200),
     version: boundedString(1, 200).optional(),
     facet: patternedString(SLUG_PATTERN).optional(),
+  })
+  .strict();
+
+export const nutritionDataSchema = z
+  .object({
+    calories: numberSchema(0).optional(),
+    proteinGrams: numberSchema(0).optional(),
+    carbsGrams: numberSchema(0).optional(),
+    fatGrams: numberSchema(0).optional(),
+    fiberGrams: numberSchema(0).optional(),
+  })
+  .strict();
+
+export const nutritionProvenanceSchema = z
+  .object({
+    source: z.enum(NUTRITION_PROVENANCE_SOURCES),
+    confidence: z.enum(NUTRITION_CONFIDENCE_LEVELS).optional(),
+    sourceDetail: boundedString(1, 240).optional(),
+  })
+  .strict();
+
+export const foodNutritionSchema = z
+  .object({
+    perServing: nutritionDataSchema.optional(),
+    provenance: nutritionProvenanceSchema.optional(),
+  })
+  .strict();
+
+export const mealNutritionSchema = z
+  .object({
+    totals: nutritionDataSchema.optional(),
+    provenance: nutritionProvenanceSchema.optional(),
   })
   .strict();
 
@@ -621,6 +657,7 @@ export const eventRecordSchema = withContractMetadata(
     eventSchema("meal", {
       mealId: idSchema(ID_PREFIXES.meal),
       ingredients: uniqueArray(boundedString(1, 4000), { maxItems: 100 }).optional(),
+      nutrition: mealNutritionSchema.optional(),
     }),
     eventSchema("symptom", {
       symptom: boundedString(1, 120),
@@ -923,6 +960,7 @@ export const foodFrontmatterSchema = withContractMetadata(
       vendor: boundedString(1, 160).optional(),
       location: boundedString(1, 160).optional(),
       serving: boundedString(1, 160).optional(),
+      nutrition: foodNutritionSchema.optional(),
       aliases: uniqueArray(boundedString(1, 160), { uniqueItems: true }).optional(),
       ingredients: uniqueArray(boundedString(1, 4000), { maxItems: 100 }).optional(),
       tags: uniqueArray(patternedString(SLUG_PATTERN), { uniqueItems: true }).optional(),
@@ -1244,6 +1282,10 @@ export const geneticVariantFrontmatterSchema = withContractMetadata(
 );
 
 export type ExternalRef = z.infer<typeof externalRefSchema>;
+export type NutritionData = z.infer<typeof nutritionDataSchema>;
+export type NutritionProvenance = z.infer<typeof nutritionProvenanceSchema>;
+export type FoodNutrition = z.infer<typeof foodNutritionSchema>;
+export type MealNutrition = z.infer<typeof mealNutritionSchema>;
 export type ActivityStrengthExercise = z.infer<typeof activityStrengthExerciseSchema>;
 export type WorkoutSetType = z.infer<typeof workoutSetTypeSchema>;
 export type WorkoutExerciseMode = z.infer<typeof workoutExerciseModeSchema>;

@@ -1101,6 +1101,70 @@
             "minLength": 1,
             "maxLength": 4000
           }
+        },
+        "nutrition": {
+          "type": "object",
+          "properties": {
+            "totals": {
+              "type": "object",
+              "properties": {
+                "calories": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "proteinGrams": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "carbsGrams": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "fatGrams": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "fiberGrams": {
+                  "type": "number",
+                  "minimum": 0
+                }
+              },
+              "additionalProperties": false
+            },
+            "provenance": {
+              "type": "object",
+              "properties": {
+                "source": {
+                  "type": "string",
+                  "enum": [
+                    "user",
+                    "label",
+                    "database",
+                    "inherited",
+                    "estimated"
+                  ]
+                },
+                "confidence": {
+                  "type": "string",
+                  "enum": [
+                    "low",
+                    "medium",
+                    "high"
+                  ]
+                },
+                "sourceDetail": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 240
+                }
+              },
+              "required": [
+                "source"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
         }
       },
       "required": [

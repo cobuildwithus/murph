@@ -502,6 +502,10 @@ test.sequential(
         payload: {
           title?: string
           aliases?: string[]
+          nutrition?: {
+            perServing?: Record<string, unknown>
+            provenance?: Record<string, unknown>
+          }
         }
       }>(['food', 'scaffold', '--vault', vaultRoot])
 
@@ -512,6 +516,18 @@ test.sequential(
         'regular acai bowl',
         'usual acai bowl',
       ])
+      assert.deepEqual(requireData(foodScaffold).payload.nutrition?.perServing, {
+        calories: 540,
+        proteinGrams: 11,
+        carbsGrams: 68,
+        fatGrams: 24,
+        fiberGrams: 11,
+      })
+      assert.deepEqual(requireData(foodScaffold).payload.nutrition?.provenance, {
+        source: 'estimated',
+        confidence: 'medium',
+        sourceDetail: 'Neighborhood menu plus standard granola serving.',
+      })
 
       await writeFile(
         foodPayloadPath,
@@ -524,6 +540,20 @@ test.sequential(
           vendor: 'Neighborhood Acai Bar',
           location: 'Brooklyn, NY',
           serving: '1 bowl',
+          nutrition: {
+            perServing: {
+              calories: 540,
+              proteinGrams: 11,
+              carbsGrams: 68,
+              fatGrams: 24,
+              fiberGrams: 11,
+            },
+            provenance: {
+              source: 'estimated',
+              confidence: 'medium',
+              sourceDetail: 'Neighborhood menu plus standard granola serving.',
+            },
+          },
           aliases: ['regular acai bowl', 'usual acai bowl'],
           ingredients: ['acai base', 'banana', 'strawberries', 'granola'],
           tags: ['breakfast', 'favorite'],
@@ -560,6 +590,10 @@ test.sequential(
           data: {
             vendor?: string
             ingredients?: string[]
+            nutrition?: {
+              perServing?: Record<string, unknown>
+              provenance?: Record<string, unknown>
+            }
           }
         }
       }>([
@@ -612,6 +646,18 @@ test.sequential(
         'strawberries',
         'granola',
       ])
+      assert.deepEqual(requireData(foodShow).entity.data.nutrition?.perServing, {
+        calories: 540,
+        proteinGrams: 11,
+        carbsGrams: 68,
+        fatGrams: 24,
+        fiberGrams: 11,
+      })
+      assert.deepEqual(requireData(foodShow).entity.data.nutrition?.provenance, {
+        source: 'estimated',
+        confidence: 'medium',
+        sourceDetail: 'Neighborhood menu plus standard granola serving.',
+      })
       assert.equal(foodShowBySlug.ok, true)
       assert.equal(requireData(foodShowBySlug).entity.id, requireData(foodUpsert).foodId)
 
@@ -626,12 +672,27 @@ test.sequential(
       )
       assert.equal('markdown' in (requireData(foodList).items[0] ?? {}), false)
       assert.equal(requireData(foodList).items[0]?.data.kind, 'acai bowl')
+      assert.deepEqual(
+        (requireData(foodList).items[0]?.data.nutrition as {
+          perServing?: Record<string, unknown>
+        } | undefined)?.perServing,
+        {
+        calories: 540,
+        proteinGrams: 11,
+        carbsGrams: 68,
+        fatGrams: 24,
+        fiberGrams: 11,
+        },
+      )
 
       const foodMarkdown = await readFile(
         path.join(vaultRoot, requireData(foodUpsert).path),
         'utf8',
       )
       assert.match(foodMarkdown, /foodId:/u)
+      assert.match(foodMarkdown, /nutrition:/u)
+      assert.match(foodMarkdown, /perServing:/u)
+      assert.match(foodMarkdown, /provenance:/u)
       assert.match(foodMarkdown, /## Aliases/u)
       assert.match(foodMarkdown, /## Ingredients/u)
     } finally {

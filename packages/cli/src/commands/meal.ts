@@ -1,6 +1,7 @@
 import { Cli, z } from 'incur'
 import { eventSourceSchema } from '@murphai/contracts'
 import {
+  localDateSchema,
   isoTimestampSchema,
   listResultSchema,
   mealAddResultSchema,
@@ -24,7 +25,37 @@ import {
   createEventBackedEntityEditCommandConfig,
 } from './record-mutation-command-helpers.js'
 
-export function registerMealCommands(cli: Cli.Cli, _services: VaultServices) {
+const mealNutritionMetricSchema = z.object({
+  total: z.number().nonnegative().nullable(),
+  mealCount: z.number().int().nonnegative(),
+})
+
+const mealNutritionTotalsSchema = z.object({
+  calories: mealNutritionMetricSchema,
+  proteinGrams: mealNutritionMetricSchema,
+  carbsGrams: mealNutritionMetricSchema,
+  fatGrams: mealNutritionMetricSchema,
+  fiberGrams: mealNutritionMetricSchema,
+})
+
+const mealNutritionDaySchema = z.object({
+  date: localDateSchema,
+  mealCount: z.number().int().nonnegative(),
+  totals: mealNutritionTotalsSchema,
+})
+
+const mealNutritionTotalsResultSchema = z.object({
+  vault: pathSchema,
+  filters: z.object({
+    from: localDateSchema.nullable(),
+    to: localDateSchema.nullable(),
+  }),
+  mealCount: z.number().int().nonnegative(),
+  totals: mealNutritionTotalsSchema,
+  days: z.array(mealNutritionDaySchema),
+})
+
+export function registerMealCommands(cli: Cli.Cli, services: VaultServices) {
   registerArtifactBackedEntityGroup(cli, {
     commandName: 'meal',
     description: 'Meal capture commands routed through the core write API.',
@@ -41,6 +72,7 @@ export function registerMealCommands(cli: Cli.Cli, _services: VaultServices) {
           .describe('Optional audio note path.'),
         note: z
           .string()
+          .trim()
           .min(1)
           .optional()
           .describe('Optional freeform meal description when no media is available.'),
@@ -108,6 +140,31 @@ export function registerMealCommands(cli: Cli.Cli, _services: VaultServices) {
       },
     },
     additionalCommands: [
+      {
+        name: 'totals',
+        args: z.object({}),
+        description:
+          'Show calorie and macro totals from meal nutrition over an optional date range.',
+        hint:
+          'Use `meal totals --from YYYY-MM-DD --to YYYY-MM-DD` when you need practical calories/protein/carbs/fat/fiber totals without a broader reporting layer.',
+        options: {
+          from: localDateSchema
+            .optional()
+            .describe('Optional inclusive lower date bound in YYYY-MM-DD form.'),
+          to: localDateSchema
+            .optional()
+            .describe('Optional inclusive upper date bound in YYYY-MM-DD form.'),
+        },
+        output: mealNutritionTotalsResultSchema,
+        async run({ options, requestId }) {
+          return services.query.showMealNutritionTotals({
+            vault: String(options.vault ?? ''),
+            requestId: typeof requestId === 'string' ? requestId : null,
+            from: typeof options.from === 'string' ? options.from : undefined,
+            to: typeof options.to === 'string' ? options.to : undefined,
+          })
+        },
+      },
       createEventBackedEntityEditCommandConfig({
         arg: {
           name: 'id',

@@ -5,6 +5,11 @@ import {
   type EntityFilter as SharedEntityFilter,
   type ExportPack as SharedExportPack,
   type ExportPackFile as SharedExportPackFile,
+  type MealNutritionDayTotal as SharedMealNutritionDayTotal,
+  type MealNutritionMetricTotal as SharedMealNutritionMetricTotal,
+  type MealNutritionTotals as SharedMealNutritionTotals,
+  type MealNutritionTotalsOptions as SharedMealNutritionTotalsOptions,
+  type MealNutritionTotalsResult as SharedMealNutritionTotalsResult,
   type QueryProjectionStatus as SharedQueryProjectionStatus,
   type RebuildQueryProjectionResult as SharedQueryProjectionRebuildResult,
   type SearchCitation as SharedSearchCitation,
@@ -47,6 +52,11 @@ export type QueryTimelineEntry = SharedTimelineEntry
 export type QueryExportPackFile = SharedExportPackFile
 export type QueryExportPackOptions = SharedBuildExportPackOptions
 export type QueryExportPack = SharedExportPack
+export type QueryMealNutritionMetricTotal = SharedMealNutritionMetricTotal
+export type QueryMealNutritionTotals = SharedMealNutritionTotals
+export type QueryMealNutritionDayTotal = SharedMealNutritionDayTotal
+export type QueryMealNutritionTotalsOptions = SharedMealNutritionTotalsOptions
+export type QueryMealNutritionTotalsResult = SharedMealNutritionTotalsResult
 
 export type QueryWearableSummaryFilters = WearableSummaryFiltersShape
 export type QueryWearableSleepSummary = WearableSleepSummaryShape
@@ -58,7 +68,7 @@ export type QueryWearableSourceHealthSummary = WearableSourceHealthSummaryShape
 
 type SharedQueryRuntimeModule = typeof import('@murphai/query')
 
-export type QueryRuntimeModule = Pick<
+type SharedQueryRuntimeBaseModule = Pick<
   SharedQueryRuntimeModule,
   | 'buildExportPack'
   | 'buildTimeline'
@@ -82,6 +92,13 @@ export type QueryRuntimeModule = Pick<
   | 'summarizeWearableSleep'
   | 'summarizeWearableSourceHealth'
 >
+
+export interface QueryRuntimeModule extends SharedQueryRuntimeBaseModule {
+  readMealNutritionTotals(
+    vaultRoot: string,
+    options?: QueryMealNutritionTotalsOptions,
+  ): Promise<QueryMealNutritionTotalsResult>
+}
 
 export function inferQueryIdEntityKind(id: string): string {
   return inferSharedIdEntityKind(id)

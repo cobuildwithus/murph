@@ -162,6 +162,20 @@ export const exampleEventRecords: readonly Readonly<EventRecord>[] = Object.free
       },
     ],
     mealId: "meal_01JNV42NP0KH6JQXMZM1G0V6SE",
+    nutrition: {
+      totals: {
+        calories: 640,
+        proteinGrams: 38,
+        carbsGrams: 52,
+        fatGrams: 28,
+        fiberGrams: 9,
+      },
+      provenance: {
+        source: "estimated",
+        confidence: "medium",
+        sourceDetail: "Estimated from photo and note.",
+      },
+    },
   },
   {
     schemaVersion: "murph.event.v1",
@@ -630,6 +644,20 @@ export const exampleFrontmatterObjects: Readonly<FrontmatterExamples> = Object.f
     vendor: "Neighborhood Acai Bar",
     location: "Brooklyn, NY",
     serving: "1 bowl",
+    nutrition: {
+      perServing: {
+        calories: 540,
+        proteinGrams: 11,
+        carbsGrams: 68,
+        fatGrams: 24,
+        fiberGrams: 11,
+      },
+      provenance: {
+        source: "label",
+        confidence: "medium",
+        sourceDetail: "Menu board plus saved toppings.",
+      },
+    },
     aliases: ["regular acai bowl", "usual acai bowl"],
     ingredients: [
       "acai base",
@@ -900,6 +928,17 @@ kind: acai bowl
 vendor: Neighborhood Acai Bar
 location: Brooklyn, NY
 serving: 1 bowl
+nutrition:
+  perServing:
+    calories: 540
+    proteinGrams: 11
+    carbsGrams: 68
+    fatGrams: 24
+    fiberGrams: 11
+  provenance:
+    source: label
+    confidence: medium
+    sourceDetail: Menu board plus saved toppings.
 aliases:
   - regular acai bowl
   - usual acai bowl

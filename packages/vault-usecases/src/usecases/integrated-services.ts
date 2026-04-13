@@ -157,8 +157,9 @@ function createIntegratedCoreServices(
       audio?: string
       note?: string
       occurredAt?: string
+      nutrition?: import('@murphai/contracts').MealNutrition
     }) {
-      const { vault, photo, audio, note, occurredAt } = input
+      const { vault, photo, audio, note, occurredAt, nutrition } = input
       const { core } = await loadIntegratedRuntime()
       const result = await core.addMeal({
         vaultRoot: vault,
@@ -166,6 +167,7 @@ function createIntegratedCoreServices(
         audioPath: audio,
         note,
         occurredAt,
+        nutrition,
       })
 
       return {
@@ -497,6 +499,27 @@ function createIntegratedQueryServices(): QueryServices {
       limit: number
     }) {
       return listFoodRecords(input)
+    },
+    async showMealNutritionTotals(input: CommandContext & {
+      from?: string
+      to?: string
+    }) {
+      const { query } = await loadIntegratedRuntime()
+      const result = await query.readMealNutritionTotals(input.vault, {
+        from: input.from,
+        to: input.to,
+      })
+
+      return {
+        vault: input.vault,
+        filters: {
+          from: result.from,
+          to: result.to,
+        },
+        mealCount: result.mealCount,
+        totals: result.totals,
+        days: result.days,
+      }
     },
     async showEvent(input: CommandContext & {
       eventId: string

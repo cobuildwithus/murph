@@ -19,6 +19,7 @@ import {
   upsertMemoryRecord,
 } from "../src/memory.ts";
 import { foodUpsertPayloadSchema } from "../src/shares.ts";
+import { eventRecordSchema } from "../src/zod.ts";
 
 describe("automation contract seams", () => {
   it("applies scaffold defaults while preserving parsed schedule and route fields", () => {
@@ -347,6 +348,85 @@ describe("shares schema seam", () => {
     ).toMatchObject({
       status: "active",
       title: "Greek yogurt",
+    });
+  });
+
+  it("accepts optional nutrition on food payloads and meal events", () => {
+    expect(
+      foodUpsertPayloadSchema.parse({
+        title: "Greek yogurt",
+        nutrition: {
+          perServing: {
+            calories: 160,
+            proteinGrams: 15,
+            carbsGrams: 9,
+            fatGrams: 5,
+          },
+          provenance: {
+            source: "label",
+            confidence: "high",
+            sourceDetail: "Container label",
+          },
+        },
+      }),
+    ).toMatchObject({
+      nutrition: {
+        perServing: {
+          calories: 160,
+          proteinGrams: 15,
+          carbsGrams: 9,
+          fatGrams: 5,
+        },
+        provenance: {
+          source: "label",
+          confidence: "high",
+          sourceDetail: "Container label",
+        },
+      },
+    });
+
+    expect(
+      eventRecordSchema.parse({
+        schemaVersion: "murph.event.v1",
+        id: "evt_01JQ1A0M6R6ZXQX3C2D8K6YV0A",
+        kind: "meal",
+        occurredAt: "2026-04-13T12:00:00Z",
+        recordedAt: "2026-04-13T12:01:00Z",
+        dayKey: "2026-04-13",
+        source: "manual",
+        title: "Lunch",
+        mealId: "meal_01JQ1A0M6R6ZXQX3C2D8K6YV0B",
+        nutrition: {
+          totals: {
+            calories: 620,
+            proteinGrams: 40,
+            carbsGrams: 55,
+            fatGrams: 25,
+            fiberGrams: 8,
+          },
+          provenance: {
+            source: "estimated",
+            confidence: "medium",
+            sourceDetail: "Estimated from note",
+          },
+        },
+      }),
+    ).toMatchObject({
+      kind: "meal",
+      nutrition: {
+        totals: {
+          calories: 620,
+          proteinGrams: 40,
+          carbsGrams: 55,
+          fatGrams: 25,
+          fiberGrams: 8,
+        },
+        provenance: {
+          source: "estimated",
+          confidence: "medium",
+          sourceDetail: "Estimated from note",
+        },
+      },
     });
   });
 });

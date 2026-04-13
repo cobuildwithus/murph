@@ -569,6 +569,78 @@ describe('assistant cron runtime threshold coverage', () => {
     })
   })
 
+  it('carries saved-food nutrition into recurring food auto-log meal writes when available', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T08:00:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext('assistant-cron-food-nutrition-')
+    const nutrition = {
+      perServing: {
+        calories: 420,
+        proteinGrams: 28,
+      },
+      provenance: {
+        source: 'estimated',
+        confidence: 'medium',
+      },
+    }
+    const addMeal = vi.fn(async () => ({
+      mealId: 'meal-nutrition',
+    }))
+
+    cronMocks.loadRuntimeModule.mockResolvedValueOnce({
+      readFood: vi.fn(async () => ({
+        foodId: 'food-nutrition',
+        nutrition,
+        title: 'Protein Oats',
+      })),
+    })
+    cronMocks.loadImporterRuntime.mockResolvedValueOnce({
+      addMeal,
+    })
+    cronMocks.renderAutoLoggedFoodMealNote.mockReturnValueOnce(
+      'Meal note for Protein Oats',
+    )
+
+    const job = await addAssistantCronJob({
+      foodAutoLog: {
+        foodId: 'food-nutrition',
+      },
+      name: 'nutrition-carry-through',
+      now: new Date('2026-04-08T08:00:00.000Z'),
+      prompt: 'Auto-log oats.',
+      schedule: {
+        at: '2026-04-08T09:00:00.000Z',
+        kind: 'at',
+      },
+      vault: vaultRoot,
+    })
+
+    const result = await runAssistantCronJobNow({
+      job: job.jobId,
+      vault: vaultRoot,
+    })
+
+    expect(result.run.status).toBe('succeeded')
+    expect(addMeal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        note: 'Meal note for Protein Oats',
+        nutrition: {
+          totals: {
+            calories: 420,
+            proteinGrams: 28,
+          },
+          provenance: {
+            source: 'inherited',
+            confidence: 'medium',
+            sourceDetail: 'Copied from saved food "Protein Oats".',
+          },
+        },
+        source: 'derived',
+        vaultRoot,
+      }),
+    )
+  })
+
   it('records aborted manual runs before any cron work starts', async () => {
     const { vaultRoot } = await createRuntimeContext('assistant-cron-aborted-run-')
     const job = await addAssistantCronJob({

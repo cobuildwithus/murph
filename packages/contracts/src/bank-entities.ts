@@ -104,6 +104,82 @@ function projectFoodAutoLogDaily(
   return time ? { time } : null;
 }
 
+function projectNutritionData(
+  value: unknown,
+  helpers: BankEntityRegistryProjectionHelpers,
+): {
+  calories: number | null;
+  proteinGrams: number | null;
+  carbsGrams: number | null;
+  fatGrams: number | null;
+  fiberGrams: number | null;
+} | null {
+  if (!isPlainObject(value)) {
+    return null;
+  }
+
+  const projected = {
+    calories: helpers.firstNumber(value, ["calories"]),
+    proteinGrams: helpers.firstNumber(value, ["proteinGrams"]),
+    carbsGrams: helpers.firstNumber(value, ["carbsGrams"]),
+    fatGrams: helpers.firstNumber(value, ["fatGrams"]),
+    fiberGrams: helpers.firstNumber(value, ["fiberGrams"]),
+  };
+
+  return Object.values(projected).some((entry) => entry !== null) ? projected : null;
+}
+
+function projectNutritionProvenance(
+  value: unknown,
+  helpers: BankEntityRegistryProjectionHelpers,
+): {
+  source: string | null;
+  confidence: string | null;
+  sourceDetail: string | null;
+} | null {
+  if (!isPlainObject(value)) {
+    return null;
+  }
+
+  const source = helpers.firstString(value, ["source"]);
+  if (!source) {
+    return null;
+  }
+
+  return {
+    source,
+    confidence: helpers.firstString(value, ["confidence"]),
+    sourceDetail: helpers.firstString(value, ["sourceDetail"]),
+  };
+}
+
+function projectFoodNutrition(
+  value: unknown,
+  helpers: BankEntityRegistryProjectionHelpers,
+): {
+  perServing: {
+    calories: number | null;
+    proteinGrams: number | null;
+    carbsGrams: number | null;
+    fatGrams: number | null;
+    fiberGrams: number | null;
+  } | null;
+  provenance: {
+    source: string | null;
+    confidence: string | null;
+    sourceDetail: string | null;
+  } | null;
+} | null {
+  if (!isPlainObject(value)) {
+    return null;
+  }
+
+  const perServing = projectNutritionData(helpers.firstObject(value, ["perServing"]), helpers);
+  const provenance = projectNutritionProvenance(helpers.firstObject(value, ["provenance"]), helpers);
+
+  return perServing || provenance ? { perServing, provenance } : null;
+}
+
 function defineBankRegistryEntity(
   input: DefineBankRegistryEntityInput,
 ): BankEntityDefinition {
@@ -143,6 +219,7 @@ const checkedBankEntityDefinitions = [
             vendor: helpers.firstString(attributes, ["vendor"]),
             location: helpers.firstString(attributes, ["location"]),
             serving: helpers.firstString(attributes, ["serving"]),
+            nutrition: projectFoodNutrition(attributes.nutrition, helpers),
             aliases: helpers.firstStringArray(attributes, ["aliases"]),
             ingredients: helpers.firstStringArray(attributes, ["ingredients"]),
             tags: helpers.firstStringArray(attributes, ["tags"]),

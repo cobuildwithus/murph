@@ -632,6 +632,15 @@ describe('assistant CLI tool capability seam', () => {
     await executeTool(writeTools, 'vault.meal.add', {
       photo: 'raw/inbox/captures/cap_123/attachments/1/photo.jpg',
     })
+    await executeTool(writeTools, 'vault.meal.add', {
+      note: 'Black coffee after lunch',
+      occurredAt: '2026-04-08T14:30:00Z',
+    })
+    await expect(
+      executeTool(writeTools, 'vault.meal.add', {
+        note: '   ',
+      }),
+    ).rejects.toThrow('Provide at least one of photo, audio, or note.')
     await executeTool(writeTools, 'vault.journal.ensure', {
       date: '2026-04-08',
     })
@@ -693,6 +702,13 @@ describe('assistant CLI tool capability seam', () => {
       audio: path.join(vaultRoot, 'raw/inbox/captures/cap_123/attachments/1/audio.m4a'),
       photo: path.join(vaultRoot, 'raw/inbox/captures/cap_123/attachments/1/photo.jpg'),
     })
+    expect(findLastCall(coreCalls, 'addMeal')).toMatchObject({
+      note: 'Black coffee after lunch',
+      occurredAt: '2026-04-08T14:30:00Z',
+      requestId: 'req_123',
+      vault: vaultRoot,
+    })
+    expect(findLastCall(coreCalls, 'addMeal')).not.toHaveProperty('photo')
     expect(findCall(coreCalls, 'projectAssessment')).toMatchObject({
       assessmentId: 'asmt_example',
     })
@@ -718,6 +734,9 @@ describe('assistant CLI tool capability seam', () => {
     })
     await executeTool(nullRequestWriteTools, 'vault.meal.add', {
       photo: 'raw/inbox/captures/cap_123/attachments/1/photo.jpg',
+    })
+    await executeTool(nullRequestWriteTools, 'vault.meal.add', {
+      note: 'Late tea',
     })
     await executeTool(nullRequestWriteTools, 'vault.journal.ensure', {
       date: '2026-04-09',
@@ -772,6 +791,12 @@ describe('assistant CLI tool capability seam', () => {
     expect(findLastCall(importerCalls, 'importAssessmentResponse')).toMatchObject({
       requestId: null,
     })
+    expect(findLastCall(coreCalls, 'addMeal')).toMatchObject({
+      note: 'Late tea',
+      requestId: null,
+      vault: vaultRoot,
+    })
+    expect(findLastCall(coreCalls, 'addMeal')).not.toHaveProperty('photo')
 
     const outwardTools = createOutwardSideEffectToolDefinitions(context)
     expect(await executeTool(outwardTools, 'murph.device.connect', {

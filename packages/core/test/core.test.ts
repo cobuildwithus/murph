@@ -886,6 +886,57 @@ test("note-only meals stay first-class meal events without raw artifacts", async
   assert.deepEqual(manifest.artifacts, []);
 });
 
+test("meal events persist optional nutrition totals without affecting attachment flows", async () => {
+  const vaultRoot = await makeTempDirectory("murph-vault");
+  const sourceRoot = await makeTempDirectory("murph-source");
+  await initializeVault({ vaultRoot });
+
+  const photoPath = await writeExternalFile(sourceRoot, "meal photo.jpg", "photo");
+  const meal = await addMeal({
+    vaultRoot,
+    occurredAt: "2026-03-10T18:30:00.000Z",
+    photoPath,
+    note: "salmon rice bowl",
+    nutrition: {
+      totals: {
+        calories: 690,
+        proteinGrams: 42,
+        carbsGrams: 58,
+        fatGrams: 30,
+        fiberGrams: 7,
+      },
+      provenance: {
+        source: "estimated",
+        confidence: "medium",
+        sourceDetail: "Estimated from note and saved food.",
+      },
+    },
+  });
+
+  const mealEvents = await readJsonlRecords({
+    vaultRoot,
+    relativePath: meal.eventPath,
+  });
+  const mealEvent = expectRecord<MealEventRecord>(mealEvents[0]);
+
+  assert.equal(mealEvent.kind, "meal");
+  assert.equal(mealEvent.attachments?.length, 1);
+  assert.deepEqual(mealEvent.nutrition, {
+    totals: {
+      calories: 690,
+      proteinGrams: 42,
+      carbsGrams: 58,
+      fatGrams: 30,
+      fiberGrams: 7,
+    },
+    provenance: {
+      source: "estimated",
+      confidence: "medium",
+      sourceDetail: "Estimated from note and saved food.",
+    },
+  });
+});
+
 test("meal day keys follow the vault timezone instead of UTC date slicing", async () => {
   const vaultRoot = await makeTempDirectory("murph-vault");
   await initializeVault({
@@ -3526,6 +3577,16 @@ test("mutation helpers reject empty meal imports and invalid sample batches", as
     () =>
       addMeal({
         vaultRoot,
+      }),
+    (error: unknown) =>
+      error instanceof VaultError && error.code === "VAULT_MEAL_CONTENT_REQUIRED",
+  );
+
+  await assert.rejects(
+    () =>
+      addMeal({
+        vaultRoot,
+        note: "   ",
       }),
     (error: unknown) =>
       error instanceof VaultError && error.code === "VAULT_MEAL_CONTENT_REQUIRED",

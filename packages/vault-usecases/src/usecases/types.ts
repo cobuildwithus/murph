@@ -9,6 +9,7 @@ import type {
   DeviceDaemonStopResult,
   DeviceProviderListResult,
 } from "@murphai/operator-config/device-cli-contracts"
+import type { MealNutrition } from "@murphai/contracts"
 import type {
   DocumentImportResult,
   ExperimentCreateResult,
@@ -37,6 +38,9 @@ import type {
 } from "../health-cli-method-types.js"
 import type {
   QueryCanonicalEntity,
+  QueryMealNutritionDayTotal,
+  QueryMealNutritionMetricTotal,
+  QueryMealNutritionTotals,
   QueryRuntimeModule as SharedQueryRuntimeModule,
   QueryWearableActivitySummary,
   QueryWearableBodyStateSummary,
@@ -197,6 +201,21 @@ export interface EventListResult {
   items: ListEntity[]
   count: number
   nextCursor: string | null
+}
+
+export type MealNutritionMetricResult = QueryMealNutritionMetricTotal
+export type MealNutritionTotals = QueryMealNutritionTotals
+export type MealNutritionDayResult = QueryMealNutritionDayTotal
+
+export interface MealNutritionTotalsResult {
+  vault: string
+  filters: {
+    from: string | null
+    to: string | null
+  }
+  mealCount: number
+  totals: MealNutritionTotals
+  days: MealNutritionDayResult[]
 }
 
 export interface SamplesAddResult {
@@ -422,10 +441,11 @@ export interface CoreWriteServices extends HealthCoreServiceMethods {
   validate(input: CommandContext): Promise<VaultValidateResult>
   addMeal(
     input: CommandContext & {
-      photo: string
+      photo?: string
       audio?: string
       note?: string
       occurredAt?: string
+      nutrition?: MealNutrition
     },
   ): Promise<MealAddResult>
   createExperiment(
@@ -689,6 +709,12 @@ export interface QueryServices extends HealthQueryServiceMethods {
       limit: number
     },
   ): Promise<FoodListResult>
+  showMealNutritionTotals(
+    input: CommandContext & {
+      from?: string
+      to?: string
+    },
+  ): Promise<MealNutritionTotalsResult>
   showEvent(
     input: CommandContext & {
       eventId: string
@@ -902,6 +928,7 @@ export interface CoreRuntimeModule extends HealthCoreRuntimeMethods {
     audioPath?: string
     note?: string
     occurredAt?: string
+    nutrition?: MealNutrition
   }): Promise<{
     mealId: string
     event: {
@@ -1004,6 +1031,7 @@ export interface ImportersRuntime {
     vaultRoot: string
     occurredAt?: string
     note?: string
+    nutrition?: MealNutrition
     source?: string
   }): Promise<{
     mealId: string

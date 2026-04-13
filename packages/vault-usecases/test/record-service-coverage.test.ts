@@ -504,7 +504,22 @@ describe("record service seams", () => {
                 entityId: "meal_1",
                 primaryLookupId: "meal_1",
                 path: "raw/meals/meal_1/meal.md",
-                attributes: { documentPath: "raw/meals/meal_1/manifest.json" },
+                attributes: {
+                  documentPath: "raw/meals/meal_1/manifest.json",
+                  nutrition: {
+                    totals: {
+                      calories: 620,
+                      proteinGrams: 40,
+                      carbsGrams: 48,
+                      fatGrams: 26,
+                      fiberGrams: 8,
+                    },
+                    provenance: {
+                      source: "estimated",
+                      confidence: "medium",
+                    },
+                  },
+                },
               })
             : null,
       ),
@@ -519,7 +534,7 @@ describe("record service seams", () => {
         }),
       ]),
     };
-    const editEventRecord = vi.fn(async () => ({ lookupId: "doc_1" }));
+    const editEventRecord = vi.fn(async (input: { lookup: string }) => ({ lookupId: input.lookup }));
     const deleteEventRecord = vi.fn(async () => ({ lookupId: "meal_1", deleted: true }));
 
     const documentMeal = await importWithMocks<
@@ -579,12 +594,46 @@ describe("record service seams", () => {
     });
     assert.equal(editedDocument.vault, "./vault");
     assert.equal(editedDocument.entity.id, "doc_1");
+    const shownMeal = await documentMeal.showMealRecord("./vault", "meal_1");
+    assert.equal(shownMeal.entity.id, "meal_1");
+    assert.deepEqual(shownMeal.entity.data.nutrition, {
+      totals: {
+        calories: 620,
+        proteinGrams: 40,
+        carbsGrams: 48,
+        fatGrams: 26,
+        fiberGrams: 8,
+      },
+      provenance: {
+        source: "estimated",
+        confidence: "medium",
+      },
+    });
+    const editedMeal = await documentMeal.editMealRecord({
+      vault: "./vault",
+      lookup: "meal_1",
+      set: ["note=Updated meal note"],
+    });
+    assert.equal(editedMeal.entity.id, "meal_1");
+    assert.deepEqual(editedMeal.entity.data.nutrition, {
+      totals: {
+        calories: 620,
+        proteinGrams: 40,
+        carbsGrams: 48,
+        fatGrams: 26,
+        fiberGrams: 8,
+      },
+      provenance: {
+        source: "estimated",
+        confidence: "medium",
+      },
+    });
     assert.deepEqual(await documentMeal.deleteMealRecord({ vault: "./vault", lookup: "meal_1" }), {
       lookupId: "meal_1",
       deleted: true,
     });
 
-    assert.equal(editEventRecord.mock.calls.length, 1);
+    assert.equal(editEventRecord.mock.calls.length, 2);
     assert.equal(deleteEventRecord.mock.calls.length, 1);
   });
 
@@ -606,10 +655,47 @@ describe("record service seams", () => {
         slug: "regular-acai-bowl",
         title: "Regular Acai Bowl",
         status: "active",
+        nutrition: {
+          perServing: {
+            calories: 540,
+            proteinGrams: 11,
+            carbsGrams: 68,
+            fatGrams: 24,
+            fiberGrams: 11,
+          },
+          provenance: {
+            source: "estimated",
+            confidence: "medium",
+            sourceDetail: "Neighborhood menu plus standard granola serving.",
+          },
+        },
         relativePath: "foods/food_1.md",
         markdown: "# Food",
       })),
-      listFoods: vi.fn(async () => []),
+      listFoods: vi.fn(async () => [
+        {
+          foodId: "food_1",
+          slug: "regular-acai-bowl",
+          title: "Regular Acai Bowl",
+          status: "active",
+          nutrition: {
+            perServing: {
+              calories: 540,
+              proteinGrams: 11,
+              carbsGrams: 68,
+              fatGrams: 24,
+              fiberGrams: 11,
+            },
+            provenance: {
+              source: "estimated",
+              confidence: "medium",
+              sourceDetail: "Neighborhood menu plus standard granola serving.",
+            },
+          },
+          relativePath: "foods/food_1.md",
+          markdown: "# Food",
+        },
+      ]),
     };
     const recipeCore = {
       upsertRecipe: vi.fn(async () => ({
@@ -682,6 +768,39 @@ describe("record service seams", () => {
       created: true,
     });
     assert.equal(typeof food.scaffoldFoodPayload, "function");
+    const shownFood = await food.showFoodRecord("./vault", "food_1");
+    assert.deepEqual(shownFood.entity.data.nutrition, {
+      perServing: {
+        calories: 540,
+        proteinGrams: 11,
+        carbsGrams: 68,
+        fatGrams: 24,
+        fiberGrams: 11,
+      },
+      provenance: {
+        source: "estimated",
+        confidence: "medium",
+        sourceDetail: "Neighborhood menu plus standard granola serving.",
+      },
+    });
+    const listedFoods = await food.listFoodRecords({
+      vault: "./vault",
+      limit: 10,
+    });
+    assert.deepEqual(listedFoods.items[0]?.data.nutrition, {
+      perServing: {
+        calories: 540,
+        proteinGrams: 11,
+        carbsGrams: 68,
+        fatGrams: 24,
+        fiberGrams: 11,
+      },
+      provenance: {
+        source: "estimated",
+        confidence: "medium",
+        sourceDetail: "Neighborhood menu plus standard granola serving.",
+      },
+    });
 
     const recipe = await importWithMocks<typeof import("../src/usecases/recipe.ts")>(
       "../src/usecases/recipe.ts",
