@@ -152,4 +152,25 @@ describe("hosted dispatch payload store", () => {
     expect(store.readStoredDispatchRef(legacyPayload)).toBeNull();
     await expect(store.deleteStoredDispatchPayload(legacyPayload)).resolves.toBeUndefined();
   });
+
+  it("treats missing staged payload probes as absent instead of failing", async () => {
+    const bucket = new MemoryR2Bucket();
+    const store = createHostedExecutionDispatchPayloadStore({
+      bucket,
+      key: new Uint8Array(Array.from({ length: 32 }, (_, index) => index + 1)),
+      keyId: "test-key",
+    });
+    const dispatch = createTestDispatch({ eventId: "device-sync.wake:test-user:event-missing" });
+    const payload = await store.writeStoredDispatch(dispatch);
+
+    if (payload.storage !== "reference") {
+      throw new Error("Expected device-sync dispatches to use reference payload storage.");
+    }
+
+    bucket.objects.clear();
+
+    await expect(store.readDispatchPayload({
+      stagedPayloadId: payload.stagedPayloadId,
+    })).resolves.toBeNull();
+  });
 });

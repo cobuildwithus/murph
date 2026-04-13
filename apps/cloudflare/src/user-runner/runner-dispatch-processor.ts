@@ -472,6 +472,99 @@ export class RunnerDispatchProcessor {
       }),
     };
 
+    emitHostedExecutionStructuredLog({
+      component: "runner",
+      details: {
+        bundlePresent: job.request.bundle !== null,
+        forwardedEnvCategories: {
+          assistantConfigured: hasAnyRunnerConfigKey(forwardedEnv, [
+            "ANTHROPIC_API_KEY",
+            "CEREBRAS_API_KEY",
+            "DEEPSEEK_API_KEY",
+            "FIREWORKS_API_KEY",
+            "GOOGLE_API_KEY",
+            "GOOGLE_GENERATIVE_AI_API_KEY",
+            "GROQ_API_KEY",
+            "MISTRAL_API_KEY",
+            "OPENAI_API_KEY",
+            "OPENROUTER_API_KEY",
+            "PERPLEXITY_API_KEY",
+            "TOGETHER_API_KEY",
+            "VERCEL_AI_API_KEY",
+            "VENICE_API_KEY",
+            "XAI_API_KEY",
+          ]),
+          hostedEmailConfigured: hasAnyRunnerConfigKey(forwardedEnv, [
+            "HOSTED_EMAIL_DOMAIN",
+            "HOSTED_EMAIL_FROM_ADDRESS",
+            "HOSTED_EMAIL_LOCAL_PART",
+          ]),
+          linqConfigured: hasAnyRunnerConfigKey(forwardedEnv, [
+            "LINQ_API_BASE_URL",
+            "LINQ_API_TOKEN",
+            "LINQ_WEBHOOK_SECRET",
+          ]),
+          parserToolingConfigured: hasAnyRunnerConfigKey(forwardedEnv, [
+            "FFMPEG_COMMAND",
+            "PDFTOTEXT_COMMAND",
+            "WHISPER_COMMAND",
+            "WHISPER_MODEL_PATH",
+          ]),
+          telegramConfigured: hasAnyRunnerConfigKey(forwardedEnv, [
+            "TELEGRAM_API_BASE_URL",
+            "TELEGRAM_BOT_TOKEN",
+            "TELEGRAM_BOT_USERNAME",
+            "TELEGRAM_FILE_BASE_URL",
+          ]),
+          webSearchConfigured: hasAnyRunnerConfigKey(forwardedEnv, [
+            "BRAVE_API_KEY",
+            "MURPH_WEB_FETCH_ENABLED",
+            "MURPH_WEB_SEARCH_MAX_RESULTS",
+            "MURPH_WEB_SEARCH_PROVIDER",
+          ]),
+        },
+        forwardedEnvKeyCount: Object.keys(forwardedEnv).length,
+        resumeFromCommit: Boolean(resume),
+        sharePackAttached: Boolean(sharePack),
+        userEnvCategories: {
+          modelCredentialConfigured: hasAnyRunnerConfigKey(userEnv, [
+            "ANTHROPIC_API_KEY",
+            "BRAVE_API_KEY",
+            "CEREBRAS_API_KEY",
+            "DEEPSEEK_API_KEY",
+            "FIREWORKS_API_KEY",
+            "GOOGLE_API_KEY",
+            "GOOGLE_GENERATIVE_AI_API_KEY",
+            "GROQ_API_KEY",
+            "HF_TOKEN",
+            "HUGGINGFACEHUB_API_TOKEN",
+            "HUGGINGFACE_API_KEY",
+            "HUGGING_FACE_HUB_TOKEN",
+            "LITELLM_PROXY_API_KEY",
+            "MISTRAL_API_KEY",
+            "NVIDIA_API_KEY",
+            "NGC_API_KEY",
+            "OPENAI_API_KEY",
+            "OPENROUTER_API_KEY",
+            "PERPLEXITY_API_KEY",
+            "TOGETHER_API_KEY",
+            "VERCEL_AI_API_KEY",
+            "VENICE_API_KEY",
+            "XAI_API_KEY",
+          ]),
+          verifiedEmailPresent: typeof userEnv.HOSTED_USER_VERIFIED_EMAIL === "string"
+            && userEnv.HOSTED_USER_VERIFIED_EMAIL.length > 0,
+        },
+        userEnvKeyCount: Object.keys(userEnv).length,
+        verifiedEmailPresent: typeof userEnv.HOSTED_USER_VERIFIED_EMAIL === "string"
+          && userEnv.HOSTED_USER_VERIFIED_EMAIL.length > 0,
+      },
+      dispatch,
+      message: "Hosted runner prepared container invocation.",
+      phase: "dispatch.running",
+      run,
+    });
+
     return invokeHostedExecutionContainerRunner({
       job,
       runnerContainerNamespace: this.dependencies.runnerContainerNamespace,
@@ -747,4 +840,11 @@ function isMissingHostedSharePackError(error: unknown): error is Error & { code:
   return error instanceof Error
     && "code" in error
     && error.code === "HOSTED_SHARE_PACK_NOT_FOUND";
+}
+
+function hasAnyRunnerConfigKey(
+  source: Readonly<Record<string, string>>,
+  keys: readonly string[],
+): boolean {
+  return keys.some((key) => typeof source[key] === "string" && source[key].length > 0);
 }

@@ -343,6 +343,44 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
       expect.any(Function),
     );
     expect(mocks.materializeHostedExecutionArtifacts).toHaveBeenCalledTimes(1);
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "runtime",
+        details: expect.objectContaining({
+          channelCapabilities: {
+            emailSendReady: true,
+            telegramBotConfigured: true,
+          },
+          commitCallbackConfigured: true,
+          commitTimeoutMs: 45_000,
+          forwardedEnvCategories: expect.objectContaining({
+            assistantConfigured: true,
+            hostedEmailConfigured: false,
+            linqConfigured: false,
+            parserToolingConfigured: false,
+            telegramConfigured: false,
+            webSearchConfigured: false,
+          }),
+          forwardedEnvKeyCount: 1,
+          platformBindings: expect.objectContaining({
+            artifactStoreBound: true,
+            assistantDeliveryJournalBound: true,
+            effectsPortBound: true,
+            usageExportBound: false,
+          }),
+          resumeFromCommit: false,
+          sharePackAttached: false,
+          userEnvCategories: {
+            modelCredentialConfigured: false,
+            verifiedEmailPresent: true,
+          },
+          userEnvKeyCount: 1,
+          verifiedEmailPresent: true,
+        }),
+        message: "Hosted runtime starting.",
+        phase: "runtime.starting",
+      }),
+    );
     expect(
       mocks.materializeHostedExecutionArtifacts.mock.calls[0]?.[0].shouldRestoreArtifact({
         path: "vault/raw/a.bin",
@@ -367,6 +405,55 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
         root: "vault",
       }),
     ).toBe(false);
+  });
+
+  it("still emits a failure log when runtime normalization fails before startup telemetry can be recorded", async () => {
+    mocks.normalizeHostedAssistantRuntimeConfig.mockImplementationOnce(() => {
+      throw new Error("missing hosted runtime config");
+    });
+
+    await expect(
+      runHostedAssistantRuntimeJobInProcessDetailed(
+        {
+          request: {
+            bundle: "incoming-bundle",
+            dispatch: {
+              event: {
+                kind: "assistant.cron.tick",
+                reason: "manual",
+                userId: "member_123",
+              },
+              eventId: "evt_runtime_normalization_failure",
+              occurredAt: "2026-04-08T00:00:00.000Z",
+            },
+          },
+        },
+        {
+          platform: {
+            artifactStore: {
+              async get() {
+                return null;
+              },
+              async put() {},
+            },
+            effectsPort: createHostedRuntimeEffectsPortStub(),
+          },
+        },
+      ),
+    ).rejects.toThrow(/missing hosted runtime config/u);
+
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "runtime",
+        message: "Hosted runtime failed.",
+        phase: "failed",
+      }),
+    );
+    expect(mocks.emitHostedExecutionStructuredLog).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        phase: "runtime.starting",
+      }),
+    );
   });
 
   it("skips rematerialization when every requested artifact path is already materialized", async () => {

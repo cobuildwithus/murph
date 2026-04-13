@@ -8,6 +8,7 @@ import {
 } from "@murphai/runtime-state/node";
 import type {
   HostedExecutionRunnerResult,
+  HostedExecutionStructuredLogDetails,
 } from "@murphai/hosted-execution";
 import {
   emitHostedExecutionStructuredLog,
@@ -100,17 +101,20 @@ export async function runHostedAssistantRuntimeJobInProcessDetailed(
     platform: HostedRuntimePlatform;
   },
 ): Promise<HostedAssistantRuntimeJobResult> {
-  emitHostedExecutionStructuredLog({
-    component: "runtime",
-    dispatch: input.request.dispatch,
-    message: "Hosted runtime starting.",
-    phase: "runtime.starting",
-    run: input.request.run ?? null,
-  });
-  const runtime = normalizeHostedAssistantRuntimeConfig(input.runtime, options.platform);
-  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-"));
+  let workspaceRoot: string | null = null;
 
   try {
+    const runtime = normalizeHostedAssistantRuntimeConfig(input.runtime, options.platform);
+    emitHostedExecutionStructuredLog({
+      component: "runtime",
+      details: buildHostedRuntimeStartDetails(input, runtime),
+      dispatch: input.request.dispatch,
+      message: "Hosted runtime starting.",
+      phase: "runtime.starting",
+      run: input.request.run ?? null,
+    });
+    const nextWorkspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-"));
+    workspaceRoot = nextWorkspaceRoot;
     const incomingBundle = decodeHostedBundleBase64(input.request.bundle);
     const artifactResolver = createHostedArtifactResolver({
       artifactStore: runtime.platform.artifactStore,
@@ -120,7 +124,7 @@ export async function runHostedAssistantRuntimeJobInProcessDetailed(
       artifactResolver,
       bundle: incomingBundle,
       shouldRestoreArtifact: () => false,
-      workspaceRoot,
+      workspaceRoot: nextWorkspaceRoot,
     });
     const runtimeEnv = {
       ...runtime.forwardedEnv,
@@ -159,7 +163,7 @@ export async function runHostedAssistantRuntimeJobInProcessDetailed(
                       artifactResolver,
                       bundle: incomingBundle,
                       materializedArtifactPaths,
-                      workspaceRoot,
+                      workspaceRoot: nextWorkspaceRoot,
                     })
                   : null,
                 materializedArtifactPaths,
@@ -228,7 +232,9 @@ export async function runHostedAssistantRuntimeJobInProcessDetailed(
     });
     throw error;
   } finally {
-    await rm(workspaceRoot, { force: true, recursive: true });
+    if (workspaceRoot) {
+      await rm(workspaceRoot, { force: true, recursive: true });
+    }
   }
 }
 
@@ -250,4 +256,133 @@ function createHostedDeviceConnectLinkIssuer(input: {
       provider,
     });
   };
+}
+
+function buildHostedRuntimeStartDetails(
+  input: HostedAssistantRuntimeJobInput,
+  runtime: ReturnType<typeof normalizeHostedAssistantRuntimeConfig>,
+): HostedExecutionStructuredLogDetails {
+  return {
+    channelCapabilities: {
+      emailSendReady: runtime.resolvedConfig.channelCapabilities.emailSendReady,
+      telegramBotConfigured: runtime.resolvedConfig.channelCapabilities.telegramBotConfigured,
+    },
+    commitCallbackConfigured: Boolean(input.request.commit),
+    commitTimeoutMs: runtime.commitTimeoutMs,
+    deviceSync: {
+      configured: runtime.resolvedConfig.deviceSync !== null,
+      controlPortBound: Boolean(runtime.platform.deviceSyncPort),
+      providerNames: runtime.resolvedConfig.deviceSync
+        ? listConfiguredDeviceSyncProviderNames(runtime.resolvedConfig.deviceSync.providerConfigs)
+        : [],
+      publicBaseUrlConfigured: Boolean(runtime.resolvedConfig.deviceSync?.publicBaseUrl),
+      secretConfigured: Boolean(runtime.resolvedConfig.deviceSync?.secret),
+    },
+    forwardedEnvCategories: {
+      assistantConfigured: hasAnyHostedRuntimeConfigKey(runtime.forwardedEnv, [
+        "ANTHROPIC_API_KEY",
+        "CEREBRAS_API_KEY",
+        "DEEPSEEK_API_KEY",
+        "FIREWORKS_API_KEY",
+        "GOOGLE_API_KEY",
+        "GOOGLE_GENERATIVE_AI_API_KEY",
+        "GROQ_API_KEY",
+        "MISTRAL_API_KEY",
+        "OPENAI_API_KEY",
+        "OPENROUTER_API_KEY",
+        "PERPLEXITY_API_KEY",
+        "TOGETHER_API_KEY",
+        "VERCEL_AI_API_KEY",
+        "VENICE_API_KEY",
+        "XAI_API_KEY",
+      ]),
+      hostedEmailConfigured: hasAnyHostedRuntimeConfigKey(runtime.forwardedEnv, [
+        "HOSTED_EMAIL_DOMAIN",
+        "HOSTED_EMAIL_FROM_ADDRESS",
+        "HOSTED_EMAIL_LOCAL_PART",
+      ]),
+      linqConfigured: hasAnyHostedRuntimeConfigKey(runtime.forwardedEnv, [
+        "LINQ_API_BASE_URL",
+        "LINQ_API_TOKEN",
+        "LINQ_WEBHOOK_SECRET",
+      ]),
+      parserToolingConfigured: hasAnyHostedRuntimeConfigKey(runtime.forwardedEnv, [
+        "FFMPEG_COMMAND",
+        "PDFTOTEXT_COMMAND",
+        "WHISPER_COMMAND",
+        "WHISPER_MODEL_PATH",
+      ]),
+      telegramConfigured: hasAnyHostedRuntimeConfigKey(runtime.forwardedEnv, [
+        "TELEGRAM_API_BASE_URL",
+        "TELEGRAM_BOT_TOKEN",
+        "TELEGRAM_BOT_USERNAME",
+        "TELEGRAM_FILE_BASE_URL",
+      ]),
+      webSearchConfigured: hasAnyHostedRuntimeConfigKey(runtime.forwardedEnv, [
+        "BRAVE_API_KEY",
+        "MURPH_WEB_FETCH_ENABLED",
+        "MURPH_WEB_SEARCH_MAX_RESULTS",
+        "MURPH_WEB_SEARCH_PROVIDER",
+      ]),
+    },
+    forwardedEnvKeyCount: Object.keys(runtime.forwardedEnv).length,
+    platformBindings: {
+      artifactStoreBound: Boolean(runtime.platform.artifactStore),
+      assistantDeliveryJournalBound:
+        typeof runtime.platform.effectsPort.deletePreparedAssistantDelivery === "function"
+        && typeof runtime.platform.effectsPort.readAssistantDeliveryRecord === "function"
+        && typeof runtime.platform.effectsPort.writeAssistantDeliveryRecord === "function",
+      effectsPortBound: Boolean(runtime.platform.effectsPort),
+      usageExportBound: Boolean(runtime.platform.usageExportPort),
+    },
+    resumeFromCommit: Boolean(input.request.resume?.committedResult),
+    sharePackAttached: Boolean(input.request.sharePack),
+    userEnvCategories: {
+      modelCredentialConfigured: hasAnyHostedRuntimeConfigKey(runtime.userEnv, [
+        "ANTHROPIC_API_KEY",
+        "BRAVE_API_KEY",
+        "CEREBRAS_API_KEY",
+        "DEEPSEEK_API_KEY",
+        "FIREWORKS_API_KEY",
+        "GOOGLE_API_KEY",
+        "GOOGLE_GENERATIVE_AI_API_KEY",
+        "GROQ_API_KEY",
+        "HF_TOKEN",
+        "HUGGINGFACEHUB_API_TOKEN",
+        "HUGGINGFACE_API_KEY",
+        "HUGGING_FACE_HUB_TOKEN",
+        "LITELLM_PROXY_API_KEY",
+        "MISTRAL_API_KEY",
+        "NVIDIA_API_KEY",
+        "NGC_API_KEY",
+        "OPENAI_API_KEY",
+        "OPENROUTER_API_KEY",
+        "PERPLEXITY_API_KEY",
+        "TOGETHER_API_KEY",
+        "VERCEL_AI_API_KEY",
+        "VENICE_API_KEY",
+        "XAI_API_KEY",
+      ]),
+      verifiedEmailPresent: typeof runtime.userEnv.HOSTED_USER_VERIFIED_EMAIL === "string"
+        && runtime.userEnv.HOSTED_USER_VERIFIED_EMAIL.length > 0,
+    },
+    userEnvKeyCount: Object.keys(runtime.userEnv).length,
+    verifiedEmailPresent: typeof runtime.userEnv.HOSTED_USER_VERIFIED_EMAIL === "string"
+      && runtime.userEnv.HOSTED_USER_VERIFIED_EMAIL.length > 0,
+  };
+}
+
+function hasAnyHostedRuntimeConfigKey(
+  source: Readonly<Record<string, string>>,
+  keys: readonly string[],
+): boolean {
+  return keys.some((key) => typeof source[key] === "string" && source[key].length > 0);
+}
+
+function listConfiguredDeviceSyncProviderNames(
+  providerConfigs: NonNullable<ReturnType<typeof normalizeHostedAssistantRuntimeConfig>["resolvedConfig"]["deviceSync"]>["providerConfigs"],
+): string[] {
+  return ["garmin", "oura", "whoop"].filter((provider) => Boolean(
+    providerConfigs[provider as keyof typeof providerConfigs],
+  ));
 }
