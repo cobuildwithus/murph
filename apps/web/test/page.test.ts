@@ -71,6 +71,9 @@ test("HomePage keeps the hosted auth entrypoints visible when no hosted session 
 
   assert.match(markup, /Open source — Apache 2\.0/u);
   assert.match(markup, /https:\/\/github\.com\/cobuildwithus\/murph/u);
+  assert.match(markup, /Zero Data Retention/);
+  assert.match(markup, /Your data does not train AI models/u);
+  assert.match(markup, /restricted system access/u);
   assert.match(markup, /Sign up with your phone\./);
   assert.match(markup, /Hosted phone auth/);
   assert.match(markup, /data-existing-account-sign-in-dialog="true"/);
