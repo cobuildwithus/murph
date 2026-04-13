@@ -418,7 +418,7 @@ describe('openAiCompatibleProviderDefinition.executeTurn', () => {
       apiKey: 'test-openai-key',
       apiKeyEnv: 'OPENAI_API_KEY',
       baseUrl: 'https://api.openai.com/v1',
-      executionDriver: 'openai-responses',
+      executionDriver: 'responses',
       model: 'gpt-4.1-mini',
       providerName: 'OpenAI',
     })
@@ -789,7 +789,7 @@ describe('openAiCompatibleProviderDefinition.executeTurn', () => {
     expect(result.error).toEqual(new Error('gateway timeout'))
   })
 
-  it('routes Vercel AI Gateway zero-data-retention through gateway provider options', async () => {
+  it('routes Vercel AI Gateway zero-data-retention through the responses request policy', async () => {
     providerMocks.generateText.mockResolvedValue({
       text: 'Gateway answer',
       response: {
@@ -817,6 +817,21 @@ describe('openAiCompatibleProviderDefinition.executeTurn', () => {
       workingDirectory: WORKING_DIRECTORY,
     })
 
+    expect(providerMocks.resolveAssistantLanguageModel).toHaveBeenCalledWith(
+      expect.objectContaining({
+        apiKeyEnv: 'VERCEL_AI_API_KEY',
+        baseUrl: 'https://ai-gateway.vercel.sh/v1',
+        executionDriver: 'responses',
+        model: 'openai/gpt-5.4',
+        providerName: 'vercel-ai-gateway',
+        responsesProviderOptions: {
+          gateway: {
+            zeroDataRetention: true,
+          },
+        },
+      }),
+    )
+
     expect(providerMocks.generateText).toHaveBeenCalledWith({
       abortSignal: undefined,
       maxRetries: 0,
@@ -830,9 +845,6 @@ describe('openAiCompatibleProviderDefinition.executeTurn', () => {
         provider: 'mock-language-model',
       },
       providerOptions: {
-        gateway: {
-          zeroDataRetention: true,
-        },
         openai: {
           reasoningEffort: 'low',
           store: false,

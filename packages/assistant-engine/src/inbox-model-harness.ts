@@ -159,7 +159,7 @@ export async function routeInboxCaptureWithModel(
     fallbackError,
     model: {
       model: input.modelSpec.model,
-      providerMode: input.modelSpec.baseUrl ? 'openai-compatible' : 'gateway',
+      providerMode: 'openai-compatible',
       baseUrl: input.modelSpec.baseUrl ?? null,
       providerName: input.modelSpec.providerName ?? null,
     },
