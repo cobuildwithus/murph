@@ -19,7 +19,10 @@ import {
   writePendingAssistantUsageRecord,
 } from "@murphai/runtime-state/node";
 import { assistantOutboxIntentSchema } from "@murphai/operator-config/assistant-cli-contracts";
-import { HOSTED_ASSISTANT_CONFIG_ENV_NAMES } from "@murphai/operator-config/hosted-assistant-config";
+import {
+  HOSTED_ASSISTANT_ALLOWED_API_KEY_ENV_NAMES,
+  HOSTED_ASSISTANT_CONFIG_ENV_NAMES,
+} from "@murphai/operator-config/hosted-assistant-config";
 import type {
   HostedAssistantRuntimeConfig,
   HostedAssistantRuntimeJobInput,
@@ -2648,22 +2651,33 @@ describe("runHostedExecutionJob", () => {
   it("falls back to ambient runner env only when the runtime envelope omits forwarded env entirely", () => {
     const previousNodeEnv = process.env.NODE_ENV;
     const previousOpenAiApiKey = process.env.OPENAI_API_KEY;
-    const previousAmbientHostedAssistantEnv = captureEnvVars([
-      ...HOSTED_ASSISTANT_CONFIG_ENV_NAMES,
-      "BRAVE_API_KEY",
-      "MURPH_WEB_FETCH_ENABLED",
-      "MURPH_WEB_SEARCH_MAX_RESULTS",
-      "MURPH_WEB_SEARCH_PROVIDER",
-      "MURPH_WEB_SEARCH_TIMEOUT_MS",
-      "VENICE_API_KEY",
-    ]);
-    process.env.NODE_ENV = "production";
-    process.env.OPENAI_API_KEY = "ambient-openai-key";
+    const previousAmbientRunnerEnv = {
+      ...captureEnvVars([
+        "BRAVE_API_KEY",
+        "FFMPEG_COMMAND",
+        "HOSTED_EXECUTION_RUNNER_ENV_PROFILES",
+        "PDFTOTEXT_COMMAND",
+        "WHISPER_COMMAND",
+        "WHISPER_MODEL_PATH",
+        ...HOSTED_ASSISTANT_ALLOWED_API_KEY_ENV_NAMES,
+        ...HOSTED_ASSISTANT_CONFIG_ENV_NAMES,
+      ]),
+      ...captureEnvVarsWithPrefixes([
+        ...HOSTED_DEVICE_SYNC_ENV_PREFIXES,
+        "HOSTED_EMAIL_",
+        "LINQ_",
+        "MAPBOX_",
+        "MURPH_WEB_",
+        "TELEGRAM_",
+      ]),
+    };
     restoreEnvVars(
       Object.fromEntries(
-        Object.keys(previousAmbientHostedAssistantEnv).map((key) => [key, undefined]),
+        Object.keys(previousAmbientRunnerEnv).map((key) => [key, undefined]),
       ),
     );
+    process.env.NODE_ENV = "production";
+    process.env.OPENAI_API_KEY = "ambient-openai-key";
 
     try {
       const runtime = buildHostedExecutionJobRuntimeForTests({});
@@ -2677,7 +2691,7 @@ describe("runHostedExecutionJob", () => {
     } finally {
       restoreEnvVar("NODE_ENV", previousNodeEnv);
       restoreEnvVar("OPENAI_API_KEY", previousOpenAiApiKey);
-      restoreEnvVars(previousAmbientHostedAssistantEnv);
+      restoreEnvVars(previousAmbientRunnerEnv);
     }
   });
 
