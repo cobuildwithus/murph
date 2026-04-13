@@ -1,5 +1,3 @@
-import type { ChildProcess } from "node:child_process";
-
 export interface HostedLocalDevConfig {
   skipPrismaMigrate: boolean;
   skipVercelPull: boolean;
@@ -24,7 +22,17 @@ export interface HostedWebDevServerLockMetadata {
   startedAt: string;
 }
 
+export interface HostedLocalChildProcess {
+  exitCode: number | null;
+  kill(signal?: NodeJS.Signals | number): boolean;
+  once(
+    event: "exit",
+    listener: (code: number | null, signal: NodeJS.Signals | null) => void,
+  ): this;
+  pid?: number;
+}
+
 export interface NamedChildProcess {
-  child: ChildProcess;
+  child: HostedLocalChildProcess;
   name: "cloudflare" | "web";
 }

@@ -1,4 +1,5 @@
 import http from "node:http";
+import type { AddressInfo } from "node:net";
 
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -33,7 +34,7 @@ describe("waitForHealthyHttpEndpoint", () => {
       }, 6_000).unref();
     });
 
-    const address = await new Promise<http.AddressInfo>((resolve, reject) => {
+    const address = await new Promise<AddressInfo>((resolve, reject) => {
       server?.listen(0, "127.0.0.1", () => {
         const value = server?.address();
         if (!value || typeof value === "string") {

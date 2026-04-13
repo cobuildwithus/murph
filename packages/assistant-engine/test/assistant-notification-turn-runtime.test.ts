@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 
-import { afterEach, test, vi } from 'vitest'
+import { afterEach, describe, expect, test, vi } from 'vitest'
 
 import type {
   AssistantProviderSessionOptions,
@@ -8,6 +8,7 @@ import type {
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { createAssistantModelTarget } from '@murphai/operator-config/assistant-backend'
 import { serializeAssistantProviderSessionOptions } from '@murphai/operator-config/assistant/provider-config'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import type { ResolvedAssistantFailoverRoute } from '../src/assistant/failover.ts'
 import type { AssistantProviderUsage } from '../src/assistant/providers/types.ts'
 import type {
@@ -219,6 +220,279 @@ test('sendAssistantNotificationLocal persists the turn before outbound delivery 
     kind: 'send_message',
     privateSummary: 'summary',
     text: 'Sanitized notification text',
+  })
+})
+
+test('sendAssistantNotificationLocal returns skip decisions without persisting or delivering', async () => {
+  const providerSession = createAssistantSession({
+    binding: {
+      actorId: 'actor-skip',
+      channel: 'email',
+      conversationKey: null,
+      delivery: {
+        kind: 'thread',
+        target: 'thread-skip',
+      },
+      identityId: 'identity-skip',
+      threadId: 'thread-skip',
+      threadIsDirect: true,
+    },
+  })
+  const sharedPlan = createSharedPlan()
+  const providerResult = createProviderResult({
+    response: '```json\n{"kind":"skip","privateSummary":"No notification required."}\n```',
+    session: providerSession,
+  })
+  const deliverMessage = vi.fn()
+  const mocks = {
+    createAssistantRuntimeStateService: vi.fn(() => ({
+      outbox: {
+        deliverMessage,
+      },
+    })),
+    executeProviderTurnWithRecovery: vi.fn(async (input) => {
+      assert.equal(input.input.turnTrigger, 'automation-cron')
+      assert.equal(input.input.workingDirectory, '/vaults/skip')
+      return {
+        kind: 'succeeded',
+        providerTurn: providerResult,
+      }
+    }),
+    normalizeAssistantExecutionContext: vi.fn((value) => value),
+    persistAssistantTurnAndSession: vi.fn(async () => providerSession),
+    persistPendingAssistantUsageEvent: vi.fn(async () => undefined),
+    prioritizeAssistantRoutesForRichUserMessageContent: vi.fn((input) => input.routes),
+    resolveAssistantOperatorDefaults: vi.fn(async () => ({
+      timezone: 'Australia/Sydney',
+    })),
+    resolveAssistantSessionForMessage: vi.fn(async () => ({
+      session: providerSession,
+    })),
+    resolveAssistantTurnRoutes: vi.fn(() => [providerResult.route]),
+    resolveAssistantTurnSharedPlan: vi.fn(async () => sharedPlan),
+    sanitizeAssistantOutboundReply: vi.fn(() => 'unused'),
+    withAssistantTurnLock: vi.fn(async (input: { run(): Promise<unknown> }) => await input.run()),
+  }
+
+  vi.doMock('@murphai/operator-config/operator-config', () => ({
+    resolveAssistantOperatorDefaults: mocks.resolveAssistantOperatorDefaults,
+  }))
+  vi.doMock('@murphai/operator-config/assistant-backend', () => ({
+    createDefaultLocalAssistantModelTarget: () => ({
+      adapter: 'openai-compatible',
+      model: 'gpt-5.4',
+    }),
+  }))
+  vi.doMock('../src/assistant/runtime-state-service.js', () => ({
+    createAssistantRuntimeStateService: mocks.createAssistantRuntimeStateService,
+  }))
+  vi.doMock('../src/assistant/execution-context.js', () => ({
+    normalizeAssistantExecutionContext: mocks.normalizeAssistantExecutionContext,
+  }))
+  vi.doMock('../src/assistant/session-resolution.js', () => ({
+    resolveAssistantSessionForMessage: mocks.resolveAssistantSessionForMessage,
+  }))
+  vi.doMock('../src/assistant/turn-plan.js', () => ({
+    resolveAssistantTurnSharedPlan: mocks.resolveAssistantTurnSharedPlan,
+  }))
+  vi.doMock('../src/assistant/provider-turn-runner.js', () => ({
+    executeProviderTurnWithRecovery: mocks.executeProviderTurnWithRecovery,
+  }))
+  vi.doMock('../src/assistant/service-usage.js', () => ({
+    persistPendingAssistantUsageEvent: mocks.persistPendingAssistantUsageEvent,
+  }))
+  vi.doMock('../src/assistant/turn-finalizer.js', () => ({
+    persistAssistantTurnAndSession: mocks.persistAssistantTurnAndSession,
+  }))
+  vi.doMock('../src/assistant/service-turn-routes.js', () => ({
+    resolveAssistantTurnRoutes: mocks.resolveAssistantTurnRoutes,
+  }))
+  vi.doMock('../src/assistant/rich-content-routing.js', () => ({
+    prioritizeAssistantRoutesForRichUserMessageContent:
+      mocks.prioritizeAssistantRoutesForRichUserMessageContent,
+  }))
+  vi.doMock('../src/assistant/turns.js', () => ({
+    createAssistantTurnId: () => 'turn-notification-skip',
+  }))
+  vi.doMock('../src/assistant/reply-sanitizer.js', () => ({
+    sanitizeAssistantOutboundReply: mocks.sanitizeAssistantOutboundReply,
+  }))
+  vi.doMock('../src/assistant/turn-lock.js', () => ({
+    withAssistantTurnLock: mocks.withAssistantTurnLock,
+  }))
+
+  const { sendAssistantNotificationLocal } = await import(
+    '../src/assistant/notification-turn.ts'
+  )
+
+  const result = await sendAssistantNotificationLocal({
+    executionContext: {
+      hosted: null,
+    },
+    instructions: 'Decide if the operator should be interrupted.',
+    vault: '/vaults/skip',
+  })
+
+  expect(result).toEqual({
+    decision: {
+      kind: 'skip',
+      privateSummary: 'No notification required.',
+    },
+    response: null,
+    session: providerSession,
+  })
+  expect(mocks.persistPendingAssistantUsageEvent).toHaveBeenCalledTimes(1)
+  expect(mocks.persistAssistantTurnAndSession).not.toHaveBeenCalled()
+  expect(deliverMessage).not.toHaveBeenCalled()
+})
+
+test('sendAssistantNotificationLocal surfaces failed delivery results', async () => {
+  const providerSession = createAssistantSession()
+  const sharedPlan = createSharedPlan()
+  const providerResult = createProviderResult({
+    response: JSON.stringify({
+      kind: 'send_message',
+      text: 'Needs delivery',
+      privateSummary: 'deliver',
+    }),
+    session: providerSession,
+  })
+  const deliveryError = new Error('delivery exploded')
+  const mocks = {
+    createAssistantRuntimeStateService: vi.fn(() => ({
+      outbox: {
+        deliverMessage: vi.fn(async () => ({
+          deliveryError,
+          kind: 'failed',
+        })),
+      },
+    })),
+    executeProviderTurnWithRecovery: vi.fn(async () => ({
+      kind: 'succeeded',
+      providerTurn: providerResult,
+    })),
+    normalizeAssistantExecutionContext: vi.fn((value) => value),
+    persistAssistantTurnAndSession: vi.fn(async () => providerSession),
+    persistPendingAssistantUsageEvent: vi.fn(async () => undefined),
+    prioritizeAssistantRoutesForRichUserMessageContent: vi.fn((input) => input.routes),
+    resolveAssistantOperatorDefaults: vi.fn(async () => ({
+      timezone: 'Australia/Sydney',
+    })),
+    resolveAssistantSessionForMessage: vi.fn(async () => ({
+      session: providerSession,
+    })),
+    resolveAssistantTurnRoutes: vi.fn(() => [providerResult.route]),
+    resolveAssistantTurnSharedPlan: vi.fn(async () => sharedPlan),
+    sanitizeAssistantOutboundReply: vi.fn(() => 'sanitized'),
+    withAssistantTurnLock: vi.fn(async (input: { run(): Promise<unknown> }) => await input.run()),
+  }
+
+  vi.doMock('@murphai/operator-config/operator-config', () => ({
+    resolveAssistantOperatorDefaults: mocks.resolveAssistantOperatorDefaults,
+  }))
+  vi.doMock('@murphai/operator-config/assistant-backend', () => ({
+    createDefaultLocalAssistantModelTarget: () => ({
+      adapter: 'openai-compatible',
+      model: 'gpt-5.4',
+    }),
+  }))
+  vi.doMock('../src/assistant/runtime-state-service.js', () => ({
+    createAssistantRuntimeStateService: mocks.createAssistantRuntimeStateService,
+  }))
+  vi.doMock('../src/assistant/execution-context.js', () => ({
+    normalizeAssistantExecutionContext: mocks.normalizeAssistantExecutionContext,
+  }))
+  vi.doMock('../src/assistant/session-resolution.js', () => ({
+    resolveAssistantSessionForMessage: mocks.resolveAssistantSessionForMessage,
+  }))
+  vi.doMock('../src/assistant/turn-plan.js', () => ({
+    resolveAssistantTurnSharedPlan: mocks.resolveAssistantTurnSharedPlan,
+  }))
+  vi.doMock('../src/assistant/provider-turn-runner.js', () => ({
+    executeProviderTurnWithRecovery: mocks.executeProviderTurnWithRecovery,
+  }))
+  vi.doMock('../src/assistant/service-usage.js', () => ({
+    persistPendingAssistantUsageEvent: mocks.persistPendingAssistantUsageEvent,
+  }))
+  vi.doMock('../src/assistant/turn-finalizer.js', () => ({
+    persistAssistantTurnAndSession: mocks.persistAssistantTurnAndSession,
+  }))
+  vi.doMock('../src/assistant/service-turn-routes.js', () => ({
+    resolveAssistantTurnRoutes: mocks.resolveAssistantTurnRoutes,
+  }))
+  vi.doMock('../src/assistant/rich-content-routing.js', () => ({
+    prioritizeAssistantRoutesForRichUserMessageContent:
+      mocks.prioritizeAssistantRoutesForRichUserMessageContent,
+  }))
+  vi.doMock('../src/assistant/turns.js', () => ({
+    createAssistantTurnId: () => 'turn-notification-delivery-error',
+  }))
+  vi.doMock('../src/assistant/reply-sanitizer.js', () => ({
+    sanitizeAssistantOutboundReply: mocks.sanitizeAssistantOutboundReply,
+  }))
+  vi.doMock('../src/assistant/turn-lock.js', () => ({
+    withAssistantTurnLock: mocks.withAssistantTurnLock,
+  }))
+
+  const { sendAssistantNotificationLocal } = await import(
+    '../src/assistant/notification-turn.ts'
+  )
+
+  await expect(
+    sendAssistantNotificationLocal({
+      executionContext: {
+        hosted: null,
+      },
+      instructions: 'Deliver this',
+      vault: '/vaults/delivery-error',
+    }),
+  ).rejects.toThrow('delivery exploded')
+})
+
+describe('parseAssistantNotificationDecision', () => {
+  test('accepts fenced JSON and extracted objects', async () => {
+    const { parseAssistantNotificationDecision } = await import(
+      '../src/assistant/notification-turn.ts'
+    )
+
+    expect(
+      parseAssistantNotificationDecision(
+        '```json\n{"kind":"send_message","text":"Hello","privateSummary":"brief"}\n```',
+      ),
+    ).toEqual({
+      kind: 'send_message',
+      privateSummary: 'brief',
+      text: 'Hello',
+    })
+    expect(
+      parseAssistantNotificationDecision(
+        'Some preface\n{"kind":"skip","privateSummary":"No action"}\nSome trailing note',
+      ),
+    ).toEqual({
+      kind: 'skip',
+      privateSummary: 'No action',
+    })
+  })
+
+  test('rejects missing or invalid decision objects with stable errors', async () => {
+    const { parseAssistantNotificationDecision } = await import(
+      '../src/assistant/notification-turn.ts'
+    )
+
+    expect(() => parseAssistantNotificationDecision('not json at all')).toThrowError(
+      new VaultCliError(
+        'ASSISTANT_NOTIFICATION_INVALID_RESPONSE',
+        'Assistant notification turn must return a single valid JSON decision object.',
+      ),
+    )
+    expect(() =>
+      parseAssistantNotificationDecision('{"kind":"send_message","privateSummary":"brief"}'),
+    ).toThrowError(
+      new VaultCliError(
+        'ASSISTANT_NOTIFICATION_INVALID_RESPONSE',
+        'Assistant notification turn returned an invalid decision object.',
+      ),
+    )
   })
 })
 

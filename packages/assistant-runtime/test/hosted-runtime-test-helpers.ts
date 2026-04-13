@@ -109,7 +109,6 @@ export function createHostedRuntimeEffectsPortStub(
   overrides: Partial<HostedRuntimeEffectsPort> = {},
 ): HostedRuntimeEffectsPort {
   return {
-    async commit() {},
     async deletePreparedAssistantDelivery() {},
     async readRawEmailMessage() {
       return null;

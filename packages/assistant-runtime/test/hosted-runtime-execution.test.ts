@@ -209,7 +209,6 @@ describe("executeHostedDispatchForCommit", () => {
             async put() {},
           },
           effectsPort: {
-            async commit() {},
             async deletePreparedAssistantDelivery() {},
             async readRawEmailMessage() {
               return null;
@@ -300,14 +299,6 @@ describe("completeHostedExecutionAfterCommit", () => {
     ]);
 
     const result = await completeHostedExecutionAfterCommit({
-      commit: {
-        bundleRef: {
-          hash: "hash_123",
-          key: "bundles/member/vault.json",
-          size: 42,
-          updatedAt: "2026-04-08T00:00:00.000Z",
-        },
-      },
       committedExecution: {
         committedGatewayProjectionSnapshot: {
           schema: "murph.gateway-projection-snapshot.v1",
@@ -362,7 +353,6 @@ describe("completeHostedExecutionAfterCommit", () => {
             async put() {},
           },
           effectsPort: {
-            async commit() {},
             async deletePreparedAssistantDelivery() {},
             async readRawEmailMessage() {
               return null;

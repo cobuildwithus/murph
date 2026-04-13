@@ -64,7 +64,6 @@ describe("ingestHostedEmailMessage", () => {
         "/tmp/assistant-runtime-email",
         { ...dispatch, event: dispatch.event },
         {
-          async commit() {},
           async deletePreparedAssistantDelivery() {},
           async readRawEmailMessage() {
             return null;
@@ -121,7 +120,6 @@ describe("ingestHostedEmailMessage", () => {
       "/tmp/assistant-runtime-email",
       { ...dispatch, event: dispatch.event },
       {
-        async commit() {},
         async deletePreparedAssistantDelivery() {},
         async readRawEmailMessage() {
           return rawMessage;

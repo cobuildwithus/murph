@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { HostedLocalDevConfig, NamedChildProcess } from "./types.ts";
+import type {
+  HostedLocalChildProcess,
+  HostedLocalDevConfig,
+  NamedChildProcess,
+} from "./types.ts";
 
 const defaultConfig: HostedLocalDevConfig = {
   skipPrismaMigrate: false,
@@ -67,18 +71,23 @@ describe("hosted local dev main", () => {
   });
 
   it("starts Cloudflare through the prepared app-owned dev entrypoint", async () => {
+    const createChild = (input: {
+      exitCode: number | null;
+      pid: number;
+    }): HostedLocalChildProcess => ({
+      exitCode: input.exitCode,
+      kill: vi.fn(() => true),
+      once: vi.fn(function once(this: HostedLocalChildProcess) {
+        return this;
+      }),
+      pid: input.pid,
+    });
     const cloudflareChild = {
-      child: {
-        exitCode: null,
-        pid: 101,
-      },
+      child: createChild({ exitCode: null, pid: 101 }),
       name: "cloudflare" as const,
     } satisfies NamedChildProcess;
     const webChild = {
-      child: {
-        exitCode: 0,
-        pid: 102,
-      },
+      child: createChild({ exitCode: 0, pid: 102 }),
       name: "web" as const,
     } satisfies NamedChildProcess;
 

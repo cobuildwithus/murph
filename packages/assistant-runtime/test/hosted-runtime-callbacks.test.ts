@@ -24,7 +24,6 @@ vi.mock("@murphai/assistant-engine", () => ({
 
 import {
   collectHostedAssistantDeliverySideEffects,
-  commitHostedExecutionResult,
   drainHostedCommittedAssistantDeliveriesAfterCommit,
   resumeHostedCommittedExecution,
 } from "../src/hosted-runtime/callbacks.ts";
@@ -200,14 +199,6 @@ describe("hosted runtime callbacks", () => {
     });
 
     await drainHostedCommittedAssistantDeliveriesAfterCommit({
-      commit: {
-        bundleRef: {
-          hash: "hash_123",
-          key: "bundles/member/vault.json",
-          size: 42,
-          updatedAt: "2026-04-08T00:00:00.000Z",
-        },
-      },
       dispatch: {
         event: {
           kind: "assistant.cron.tick",
@@ -285,14 +276,6 @@ describe("hosted runtime callbacks", () => {
       });
 
       await drainHostedCommittedAssistantDeliveriesAfterCommit({
-        commit: {
-          bundleRef: {
-            hash: "hash_123",
-            key: "bundles/member/vault.json",
-            size: 42,
-            updatedAt: "2026-04-08T00:00:00.000Z",
-          },
-        },
         dispatch: {
           event: {
             kind: "assistant.cron.tick",
@@ -364,14 +347,6 @@ describe("hosted runtime callbacks", () => {
     });
 
     await drainHostedCommittedAssistantDeliveriesAfterCommit({
-      commit: {
-        bundleRef: {
-          hash: "hash_123",
-          key: "bundles/member/vault.json",
-          size: 42,
-          updatedAt: "2026-04-08T00:00:00.000Z",
-        },
-      },
       dispatch: {
         event: {
           kind: "assistant.cron.tick",
@@ -432,14 +407,6 @@ describe("hosted runtime callbacks", () => {
     });
 
     await drainHostedCommittedAssistantDeliveriesAfterCommit({
-      commit: {
-        bundleRef: {
-          hash: "hash_123",
-          key: "bundles/member/vault.json",
-          size: 42,
-          updatedAt: "2026-04-08T00:00:00.000Z",
-        },
-      },
       dispatch: {
         event: {
           kind: "assistant.cron.tick",
@@ -517,14 +484,6 @@ describe("hosted runtime callbacks", () => {
     });
 
     await drainHostedCommittedAssistantDeliveriesAfterCommit({
-      commit: {
-        bundleRef: {
-          hash: "hash_123",
-          key: "bundles/member/vault.json",
-          size: 42,
-          updatedAt: "2026-04-08T00:00:00.000Z",
-        },
-      },
       dispatch: {
         event: {
           kind: "assistant.cron.tick",
@@ -600,14 +559,6 @@ describe("hosted runtime callbacks", () => {
     });
 
     await drainHostedCommittedAssistantDeliveriesAfterCommit({
-      commit: {
-        bundleRef: {
-          hash: "hash_123",
-          key: "bundles/member/vault.json",
-          size: 42,
-          updatedAt: "2026-04-08T00:00:00.000Z",
-        },
-      },
       dispatch: {
         event: {
           kind: "assistant.cron.tick",
@@ -676,14 +627,6 @@ describe("hosted runtime callbacks", () => {
     });
 
     await drainHostedCommittedAssistantDeliveriesAfterCommit({
-      commit: {
-        bundleRef: {
-          hash: "hash_123",
-          key: "bundles/member/vault.json",
-          size: 42,
-          updatedAt: "2026-04-08T00:00:00.000Z",
-        },
-      },
       dispatch: {
         event: {
           kind: "assistant.cron.tick",
@@ -776,14 +719,6 @@ describe("hosted runtime callbacks", () => {
     });
 
     await drainHostedCommittedAssistantDeliveriesAfterCommit({
-      commit: {
-        bundleRef: {
-          hash: "hash_123",
-          key: "bundles/member/vault.json",
-          size: 42,
-          updatedAt: "2026-04-08T00:00:00.000Z",
-        },
-      },
       dispatch: {
         event: {
           kind: "assistant.cron.tick",
@@ -861,14 +796,6 @@ describe("hosted runtime callbacks", () => {
     });
 
     await drainHostedCommittedAssistantDeliveriesAfterCommit({
-      commit: {
-        bundleRef: {
-          hash: "hash_123",
-          key: "bundles/member/vault.json",
-          size: 42,
-          updatedAt: "2026-04-08T00:00:00.000Z",
-        },
-      },
       dispatch: {
         event: {
           kind: "assistant.cron.tick",
@@ -952,14 +879,6 @@ describe("hosted runtime callbacks", () => {
     });
 
     await drainHostedCommittedAssistantDeliveriesAfterCommit({
-      commit: {
-        bundleRef: {
-          hash: "hash_123",
-          key: "bundles/member/vault.json",
-          size: 42,
-          updatedAt: "2026-04-08T00:00:00.000Z",
-        },
-      },
       dispatch: {
         event: {
           kind: "assistant.cron.tick",
