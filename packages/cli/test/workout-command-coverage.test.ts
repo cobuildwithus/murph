@@ -719,23 +719,21 @@ test('workout add, show, list, edit, delete, and manifest cover the workout sess
   assert.equal(structuredCreated.kind, 'activity_session')
   assert.equal(structuredCreated.durationMinutes, 35)
 
-  const minimalCreated = requireData(
-    (
-      await runWorkoutCli<{
-        eventId: string
-        kind: string
-        lookupId: string
-      }>(cli, [
-        'workout',
-        'add',
-        'Went for a short walk.',
-        '--vault',
-        vaultRoot,
-      ])
-    ).envelope,
+  const minimalCreated = (
+    await runWorkoutCli(cli, [
+      'workout',
+      'add',
+      'Went for a short walk.',
+      '--vault',
+      vaultRoot,
+    ])
+  ).envelope
+  assert.equal(minimalCreated.ok, false)
+  assert.equal(minimalCreated.error.code, 'invalid_option')
+  assert.match(
+    minimalCreated.error.message ?? '',
+    /Workout duration is missing/u,
   )
-  assert.equal(minimalCreated.kind, 'activity_session')
-  assert.equal(minimalCreated.eventId, minimalCreated.lookupId)
 })
 
 test('workout format save, show, list, and log handle structured input and media overrides', async () => {

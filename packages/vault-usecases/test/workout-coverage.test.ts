@@ -428,6 +428,48 @@ describe("workout", () => {
 
     assert.throws(
       () => workoutModule.resolveWorkoutCapture({
+        text: "Easy run around the neighborhood",
+      }),
+      {
+        name: "VaultCliError",
+        code: "invalid_option",
+        message: "Workout duration is missing. Pass --duration <minutes> to record it explicitly.",
+      },
+    );
+
+    assert.throws(
+      () => workoutModule.resolveWorkoutCapture({
+        text: "Morning run to the beach, followed by a quick 10-minute swim, then back home. Approx 8.56 km total.",
+      }),
+      {
+        name: "VaultCliError",
+        code: "invalid_option",
+        message: "Workout note includes multiple activities or segments. Pass --duration <minutes> to record the total workout duration explicitly.",
+      },
+    );
+
+    assert.throws(
+      () => workoutModule.resolveWorkoutCapture({
+        text: "10-minute warmup jog then easy run home.",
+      }),
+      {
+        name: "VaultCliError",
+        code: "invalid_option",
+        message: "Workout note includes multiple activities or segments. Pass --duration <minutes> to record the total workout duration explicitly.",
+      },
+    );
+
+    const mixedCapture = workoutModule.resolveWorkoutCapture({
+      text: "Morning run to the beach, followed by a quick 10-minute swim, then back home. Approx 8.56 km total.",
+      durationMinutes: 70,
+    });
+    assert.equal(mixedCapture.activityType, "running");
+    assert.equal(mixedCapture.durationMinutes, 70);
+    assert.equal(mixedCapture.distanceKm, 8.56);
+    assert.equal(mixedCapture.title, "70-minute run");
+
+    assert.throws(
+      () => workoutModule.resolveWorkoutCapture({
         text: "This was ambiguous",
         durationMinutes: undefined,
         activityType: "!!!",
