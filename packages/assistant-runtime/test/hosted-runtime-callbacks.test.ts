@@ -32,6 +32,12 @@ import {
   createHostedRuntimeEffectsPortStub,
 } from "./hosted-runtime-test-helpers.ts";
 
+const HOSTED_RUN_CONTEXT = {
+  attempt: 1,
+  runId: "run_123",
+  startedAt: "2026-04-08T00:00:00.000Z",
+} as const;
+
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.normalizeAssistantDeliveryError.mockImplementation((error: Error) => ({
@@ -118,6 +124,7 @@ describe("hosted runtime callbacks", () => {
         },
       },
       assistantDeliveryEffects: [],
+      run: HOSTED_RUN_CONTEXT,
     });
 
     expect(commit).not.toHaveBeenCalled();
@@ -160,14 +167,15 @@ describe("hosted runtime callbacks", () => {
         },
         result: {
           bundle: "bundle_123",
-          result: {
-            eventsHandled: 1,
-            nextWakeAt: null,
-            summary: "completed",
-          },
+        result: {
+          eventsHandled: 1,
+          nextWakeAt: null,
+          summary: "completed",
         },
-        assistantDeliveryEffects: [],
-      }),
+      },
+      assistantDeliveryEffects: [],
+      run: HOSTED_RUN_CONTEXT,
+    }),
     ).rejects.toThrow(/durable commit failed for member_123\/evt_commit/u);
   });
 
@@ -216,6 +224,7 @@ describe("hosted runtime callbacks", () => {
         },
       },
       assistantDeliveryEffects: [],
+      run: HOSTED_RUN_CONTEXT,
     }).catch((error: unknown) => error);
 
     assert.ok(thrown instanceof Error);

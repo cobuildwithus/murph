@@ -10,6 +10,10 @@ export function ensureRunnerQueueSchema(sql: DurableObjectSqlStorageLike): void 
     CREATE TABLE IF NOT EXISTS runner_meta (
       singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
       user_id TEXT NOT NULL,
+      active_run_event_id TEXT,
+      active_run_id TEXT,
+      active_run_attempt INTEGER,
+      active_run_started_at TEXT,
       runtime_bootstrapped INTEGER NOT NULL DEFAULT 0,
       in_flight INTEGER NOT NULL DEFAULT 0,
       last_error_at TEXT,
@@ -62,6 +66,7 @@ export function ensureRunnerQueueSchema(sql: DurableObjectSqlStorageLike): void 
     CREATE INDEX IF NOT EXISTS poisoned_events_poisoned_at_idx
     ON poisoned_events (poisoned_at, event_id)
   `);
+  ensureRunnerMetaColumns(sql);
   assertRunnerQueueTableColumns(sql, "runner_meta", {
     forbiddenColumns: [
       "activated",
@@ -69,6 +74,10 @@ export function ensureRunnerQueueSchema(sql: DurableObjectSqlStorageLike): void 
     requiredColumns: [
       "singleton",
       "user_id",
+      "active_run_event_id",
+      "active_run_id",
+      "active_run_attempt",
+      "active_run_started_at",
       "runtime_bootstrapped",
       "in_flight",
       "last_error_at",
@@ -118,6 +127,36 @@ export function ensureRunnerQueueSchema(sql: DurableObjectSqlStorageLike): void 
       "last_error_code",
     ],
   });
+}
+
+function ensureRunnerMetaColumns(sql: DurableObjectSqlStorageLike): void {
+  const columns = new Set(readRunnerQueueTableColumns(sql, "runner_meta"));
+  const additions = [
+    {
+      columnName: "active_run_event_id",
+      ddl: "ALTER TABLE runner_meta ADD COLUMN active_run_event_id TEXT",
+    },
+    {
+      columnName: "active_run_id",
+      ddl: "ALTER TABLE runner_meta ADD COLUMN active_run_id TEXT",
+    },
+    {
+      columnName: "active_run_attempt",
+      ddl: "ALTER TABLE runner_meta ADD COLUMN active_run_attempt INTEGER",
+    },
+    {
+      columnName: "active_run_started_at",
+      ddl: "ALTER TABLE runner_meta ADD COLUMN active_run_started_at TEXT",
+    },
+  ] as const;
+
+  for (const addition of additions) {
+    if (columns.has(addition.columnName)) {
+      continue;
+    }
+
+    sql.exec(addition.ddl);
+  }
 }
 
 function ensurePendingEventsTable(sql: DurableObjectSqlStorageLike): void {

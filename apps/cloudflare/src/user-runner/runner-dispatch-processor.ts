@@ -196,9 +196,10 @@ export class RunnerDispatchProcessor {
 
       const claim = await this.dependencies.queueStore.claimNextDuePendingDispatch(Date.now());
       const nextPending = claim.pendingDispatch;
+      const run = claim.run;
       record = claim.record;
 
-      if (!nextPending) {
+      if (!nextPending || !run) {
         return toUserStatus(
           processedDispatch
             ? record
@@ -206,7 +207,6 @@ export class RunnerDispatchProcessor {
         );
       }
 
-      const run = this.createRunContext(record, nextPending);
       record = await this.advanceRunPhase({
         clearError: true,
         dispatch: nextPending.dispatch,
@@ -662,6 +662,10 @@ export class RunnerDispatchProcessor {
         eventId: recovered.committedEventId,
         startedAt: recovered.record.lastRunAt ?? recovered.committed.committedAt,
       }),
+      {
+        allowAnyRunForEvent: true,
+        run: null,
+      },
     );
   }
 
@@ -671,13 +675,17 @@ export class RunnerDispatchProcessor {
     dispatch: HostedExecutionDispatchProgressRecord,
     cleanupDispatch: HostedExecutionDispatchRequest | null = null,
     run: HostedExecutionRunContext | null = null,
+    leaseOwner: {
+      allowAnyRunForEvent?: boolean;
+      run: HostedExecutionRunContext | null;
+    } | null = run === null ? null : { run },
   ): Promise<RunnerStateRecord> {
     const { commitRecovery, gatewayStore } = await this.dependencies.ensureRunnerStores(userId);
     if (cleanupDispatch) {
       await this.applyHostedBusinessOutcomeIfNeeded(cleanupDispatch);
     }
     await gatewayStore.applySnapshot(committed.gatewayProjectionSnapshot ?? null);
-    let record = await commitRecovery.applyCommittedDispatch(userId, committed);
+    let record = await commitRecovery.applyCommittedDispatch(userId, committed, leaseOwner);
     record = await this.advanceRunPhase({
       clearError: true,
       dispatch,
@@ -703,21 +711,6 @@ export class RunnerDispatchProcessor {
       dispatch,
       env: this.dependencies.readWorkerStringEnvSource(),
     });
-  }
-
-  private createRunContext(
-    record: RunnerStateRecord,
-    pending: PendingDispatchRecord,
-  ): HostedExecutionRunContext {
-    const priorAttempt = record.run?.eventId === pending.eventId
-      ? record.run.attempt
-      : 0;
-
-    return {
-      attempt: Math.max(pending.attempts + 1, priorAttempt + 1),
-      runId: crypto.randomUUID(),
-      startedAt: new Date().toISOString(),
-    };
   }
 
   private resolveRunContext(
@@ -783,7 +776,11 @@ export class RunnerDispatchProcessor {
     eventId: string,
     dispatch: HostedExecutionDispatchRequest | null = null,
   ): Promise<RunnerStateRecord> {
-    const record = await this.dependencies.queueStore.rememberCommittedEvent(eventId);
+    const record = await this.dependencies.queueStore.rememberCommittedEvent(eventId, {
+      allowAnyRunForEvent: true,
+      eventId,
+      run: null,
+    });
     await this.deleteCommittedDispatchBestEffort(userId, eventId);
     if (dispatch) {
       await this.deleteTransientDispatchDataBestEffort(dispatch);

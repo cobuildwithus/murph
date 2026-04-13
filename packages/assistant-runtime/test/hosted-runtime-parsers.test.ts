@@ -138,4 +138,28 @@ describe("parseHostedAssistantRuntimeJobInput", () => {
       },
     })).toThrow(/committedResult\.sideEffects is no longer supported/i);
   });
+
+  it("rejects commit callbacks that omit request.run", () => {
+    expect(() => parseHostedAssistantRuntimeJobInput({
+      request: {
+        bundle: "vault-bundle",
+        commit: {
+          bundleRef: {
+            hash: "abc123",
+            key: "bundles/user/vault.json",
+            size: 42,
+            updatedAt: "2026-04-01T00:00:02.000Z",
+          },
+        },
+        dispatch: {
+          event: {
+            kind: "member.activated",
+            userId: "member_123",
+          },
+          eventId: "evt_missing_run",
+          occurredAt: "2026-04-01T00:00:00.000Z",
+        },
+      },
+    })).toThrow(/commit callback requires request\.run/i);
+  });
 });

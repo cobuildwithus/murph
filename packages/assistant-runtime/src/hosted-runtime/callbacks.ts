@@ -62,9 +62,16 @@ export async function commitHostedExecutionResult(input: {
   gatewayProjectionSnapshot?: GatewayProjectionSnapshot | null;
   result: HostedExecutionRunnerResult;
   assistantDeliveryEffects: HostedAssistantDeliveryEffect[];
+  run: HostedAssistantRuntimeJobRequest["run"] | null;
 }): Promise<void> {
   if (!input.commit) {
     return;
+  }
+
+  if (!input.run) {
+    throw new Error(
+      `Hosted runner durable commit requires run metadata for ${input.dispatch.event.userId}/${input.dispatch.eventId}.`,
+    );
   }
 
   try {
@@ -76,6 +83,7 @@ export async function commitHostedExecutionResult(input: {
         gatewayProjectionSnapshot: input.gatewayProjectionSnapshot ?? null,
         ...input.result,
       },
+      run: input.run,
     });
   } catch (error) {
     throw new Error(

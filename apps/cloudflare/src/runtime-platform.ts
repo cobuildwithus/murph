@@ -129,12 +129,15 @@ export function buildHostedExecutionRuntimePlatform(input: {
       },
     },
     effectsPort: {
-      async commit({ eventId, payload }) {
+      async commit({ eventId, payload, run }) {
         const response = await fetchHostedResponse({
           description: `Hosted commit ${eventId}`,
           fetchImpl,
           init: {
-            body: JSON.stringify(payload),
+            body: JSON.stringify({
+              ...payload,
+              run,
+            }),
             headers: {
               "content-type": "application/json; charset=utf-8",
             },

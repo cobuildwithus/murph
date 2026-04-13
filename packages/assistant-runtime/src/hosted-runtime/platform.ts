@@ -8,6 +8,9 @@ import type {
   HostedAssistantDeliveryRecord,
   HostedAssistantDeliverySideEffect,
 } from "@murphai/hosted-execution/side-effects";
+import type {
+  HostedExecutionRunContext,
+} from "@murphai/hosted-execution";
 
 import type {
   HostedEmailSendRequest,
@@ -25,6 +28,7 @@ type HostedRuntimeEffectsPortBase = {
   commit(input: {
     eventId: string;
     payload: Record<string, unknown>;
+    run: HostedExecutionRunContext;
   }): Promise<void>;
   readRawEmailMessage(rawMessageKey: string): Promise<Uint8Array | null>;
   sendEmail(request: HostedEmailSendRequest): Promise<{ target: string } | void>;

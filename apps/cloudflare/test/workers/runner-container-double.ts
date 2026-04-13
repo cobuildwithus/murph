@@ -36,6 +36,7 @@ export class RunnerContainerTestDouble extends DurableObject {
             currentBundleRef: payload.job.request.commit?.bundleRef ?? null,
             gatewayProjectionSnapshot: runnerResult.finalGatewayProjectionSnapshot,
             result: runnerResult.result.result,
+            run: payload.job.request.run,
           }),
           headers: {
             "content-type": "application/json; charset=utf-8",

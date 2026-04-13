@@ -8,6 +8,9 @@ import type {
   HostedExecutionUserStatus,
 } from "@murphai/hosted-execution/contracts";
 import type {
+  HostedExecutionRunContext,
+} from "@murphai/hosted-execution";
+import type {
   HostedExecutionOutboxPayload,
 } from "@murphai/hosted-execution/outbox-payload";
 import type {
@@ -612,11 +615,63 @@ export class HostedUserRunner {
     payload: HostedExecutionCommitPayload & {
       currentBundleRef: HostedExecutionBundleRef | null;
     };
+    run: HostedExecutionRunContext | null;
   }): Promise<HostedExecutionCommittedResult> {
     return this.applyHostedTransition({
       eventId: input.eventId,
       gatewayProjectionSnapshot: input.payload.gatewayProjectionSnapshot ?? null,
       run: async (userId, stores) => {
+        const authorization = await this.queueStore.authorizeCommitRun({
+          eventId: input.eventId,
+          run: input.run,
+        });
+        if (!authorization.accepted) {
+          emitHostedExecutionStructuredLog({
+            component: "runner",
+            details: {
+              activeRun: summarizeHostedExecutionRunContext(authorization.activeRun),
+              hasRunMetadata: input.run !== null,
+              pending: authorization.pending,
+              reason: authorization.reason,
+            },
+            dispatch: {
+              eventId: input.eventId,
+            },
+            level: "warn",
+            message: authorization.reason === "stale"
+              ? input.run
+                ? "Hosted execution commit rejected from a stale runner attempt."
+                : "Hosted execution commit rejected because the active run lease belongs to a different runner."
+              : "Hosted execution commit rejected because no active or pending run could own it.",
+            phase: "commit.recorded",
+            ...(input.run ?? authorization.activeRun ? { run: input.run ?? authorization.activeRun } : {}),
+          });
+          throw new Error(
+            authorization.reason === "stale"
+              ? input.run
+                ? `Hosted execution commit ${input.eventId} came from a stale runner attempt.`
+                : `Hosted execution commit ${input.eventId} does not match the active runner lease.`
+              : `Hosted execution commit ${input.eventId} does not match any active or pending runner attempt.`,
+          );
+        }
+        if (authorization.reason === "late" || authorization.reason === "legacy_active") {
+          emitHostedExecutionStructuredLog({
+            component: "runner",
+            details: {
+              activeRun: summarizeHostedExecutionRunContext(authorization.activeRun ?? input.run),
+              reason: authorization.reason,
+            },
+            dispatch: {
+              eventId: input.eventId,
+            },
+            level: "info",
+            message: authorization.reason === "late"
+              ? "Hosted execution commit arrived after the active run lease cleared; accepting it because the event is still pending."
+              : "Hosted execution commit arrived without run metadata; accepting it because the active lease for the same event is still present.",
+            phase: "commit.recorded",
+            ...(input.run ?? authorization.activeRun ? { run: input.run ?? authorization.activeRun } : {}),
+          });
+        }
         return persistHostedExecutionCommit({
           bucket: this.bucket,
           currentBundleRef: input.payload.currentBundleRef,
@@ -739,4 +794,18 @@ export class HostedUserRunner {
       }
     }
   }
+}
+
+function summarizeHostedExecutionRunContext(
+  run: HostedExecutionRunContext | null,
+): Record<string, number | string> | null {
+  if (!run) {
+    return null;
+  }
+
+  return {
+    attempt: run.attempt,
+    runId: run.runId,
+    startedAt: run.startedAt,
+  };
 }

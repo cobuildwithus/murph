@@ -236,27 +236,10 @@ describe("cloudflare worker runtime suite", () => {
     const userId = "member_journal";
     const eventId = "evt_finalize_runtime";
     await resolveHostedUserCryptoContext(userId);
-
-    const commitResponse = await callRunnerOutbound(
-      new Request(`http://results.worker/events/${eventId}/commit`, {
-        body: JSON.stringify({
-          assistantDeliveryEffects: [],
-          bundle: btoa("vault-commit"),
-          currentBundleRef: null,
-          result: {
-            eventsHandled: 1,
-            summary: "committed",
-          },
-        }),
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-        },
-        method: "POST",
-      }),
-      userId,
+    const dispatchResponse = await worker.fetch(
+      await createSignedDispatchRequest("/internal/dispatch", createDispatch(eventId, userId)),
     );
-
-    expect(commitResponse.status).toBe(200);
+    expect(dispatchResponse.status).toBe(200);
 
     const finalizeResponse = await callRunnerOutbound(
       new Request(`http://results.worker/events/${eventId}/finalize`, {
@@ -272,13 +255,7 @@ describe("cloudflare worker runtime suite", () => {
     );
 
     expect(finalizeResponse.status).toBe(404);
-    await expect((await createJournalStore(userId)).readCommittedResult(userId, eventId)).resolves.toMatchObject({
-      eventId,
-      finalizedAt: null,
-      result: {
-        summary: "committed",
-      },
-    });
+    await expect((await createJournalStore(userId)).readCommittedResult(userId, eventId)).resolves.toBeNull();
   });
 });
 
