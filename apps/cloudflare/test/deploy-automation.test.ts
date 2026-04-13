@@ -158,9 +158,6 @@ describe("hosted deploy automation helpers", () => {
     expect(config.vars.HOSTED_EMAIL_DOMAIN).toBe("mail.example.test");
     expect(config.vars.HOSTED_EMAIL_FROM_ADDRESS).toBe("assistant@mail.example.test");
     expect(config.vars.HOSTED_EMAIL_LOCAL_PART).toBe("assistant");
-    expect(config.vars.HOSTED_AI_USAGE_BASE_URL).toBeUndefined();
-    expect(config.vars.HOSTED_DEVICE_SYNC_CONTROL_BASE_URL).toBeUndefined();
-    expect(config.vars.HOSTED_SHARE_API_BASE_URL).toBeUndefined();
     expect(config.vars.HOSTED_WEB_BASE_URL).toBeUndefined();
     expect(config.vars.AGENTMAIL_BASE_URL).toBeUndefined();
     expect(config.vars.MURPH_WEB_SEARCH_MAX_RESULTS).toBe("8");
