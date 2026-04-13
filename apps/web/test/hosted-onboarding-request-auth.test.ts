@@ -218,7 +218,7 @@ describe("hosted Privy request auth", () => {
     });
   });
 
-  it("blocks unpaid members from active hosted mutations", async () => {
+  it("blocks unpaid members from active hosted mutations with a billing-specific message", async () => {
     mocks.lookupHostedMemberForPrivyIdentity.mockResolvedValue(
       createHostedMemberLookup({
         core: createHostedMember({
@@ -230,6 +230,23 @@ describe("hosted Privy request auth", () => {
     await expect(requireActivePrivyMemberAuth(createAuthenticatedRequest(), prisma)).rejects.toMatchObject({
       code: "HOSTED_ACCESS_REQUIRED",
       httpStatus: 403,
+      message: "Your subscription is unpaid. Update billing before continuing.",
+    });
+  });
+
+  it("blocks canceled members from active hosted mutations with a cancellation-specific message", async () => {
+    mocks.lookupHostedMemberForPrivyIdentity.mockResolvedValue(
+      createHostedMemberLookup({
+        core: createHostedMember({
+          billingStatus: HostedBillingStatus.canceled,
+        }),
+      }),
+    );
+
+    await expect(requireActivePrivyMemberAuth(createAuthenticatedRequest(), prisma)).rejects.toMatchObject({
+      code: "HOSTED_ACCESS_REQUIRED",
+      httpStatus: 403,
+      message: "Your subscription is canceled. Open billing to resume access.",
     });
   });
 });

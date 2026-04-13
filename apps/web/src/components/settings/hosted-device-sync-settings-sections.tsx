@@ -68,6 +68,32 @@ export function HostedDeviceSyncSettingsContent(props: {
   );
 }
 
+export function HostedDeviceSyncSettingsStatusCard(props: {
+  actionLabel?: string | null;
+  description: string;
+  disabled?: boolean;
+  title: string;
+  onAction?: (() => Promise<void>) | undefined;
+}) {
+  return (
+    <Card className="shadow-sm">
+      <CardHeader>
+        <CardTitle className="text-lg text-stone-900">{props.title}</CardTitle>
+        <CardDescription className="text-sm leading-relaxed text-stone-500">
+          {props.description}
+        </CardDescription>
+      </CardHeader>
+      {props.actionLabel && props.onAction ? (
+        <CardContent>
+          <Button type="button" onClick={() => void props.onAction?.()} disabled={props.disabled} variant="outline" size="md">
+            {props.disabled ? "Refreshing..." : props.actionLabel}
+          </Button>
+        </CardContent>
+      ) : null}
+    </Card>
+  );
+}
+
 function HostedDeviceSyncSourceCard(props: {
   disconnectPending: boolean;
   pendingActionKey: string | null;

@@ -8,14 +8,15 @@ const mocks = vi.hoisted(() => ({
   buildHostedDeviceSyncSettingsResponse: vi.fn(),
   HostedDeviceSyncSettingsClient: vi.fn((props: {
     authenticated: boolean;
-    initialLoadError: string | null;
+    initialLoadError: { code: string | null; message: string } | null;
     initialResponse: { sources: unknown[] } | null;
   }) =>
     React.createElement(
       "div",
       {
         "data-authenticated": String(props.authenticated),
-        "data-error": props.initialLoadError ?? "",
+        "data-error": props.initialLoadError?.message ?? "",
+        "data-error-code": props.initialLoadError?.code ?? "",
         "data-source-count": String(props.initialResponse?.sources.length ?? 0),
       },
       "Hosted device sync settings client",
@@ -71,14 +72,14 @@ test("HostedDeviceSyncSettings keeps blocked members on a user-safe error withou
   mocks.buildHostedDeviceSyncSettingsResponse.mockRejectedValue(hostedOnboardingError({
     code: "HOSTED_ACCESS_REQUIRED",
     httpStatus: 403,
-    message: "Finish hosted activation before continuing.",
+    message: "Your subscription is canceled. Open billing to resume access.",
   }));
 
   const { HostedDeviceSyncSettings } = await import("@/src/components/settings/hosted-device-sync-settings");
   const markup = renderToStaticMarkup(await HostedDeviceSyncSettings({
     authenticated: true,
     member: {
-      billingStatus: "incomplete",
+      billingStatus: "canceled",
       id: "member_123",
       suspendedAt: null,
     },
@@ -86,12 +87,13 @@ test("HostedDeviceSyncSettings keeps blocked members on a user-safe error withou
 
   expect(mocks.buildHostedDeviceSyncSettingsResponse).toHaveBeenCalledWith({
     member: {
-      billingStatus: "incomplete",
+      billingStatus: "canceled",
       id: "member_123",
       suspendedAt: null,
     },
   });
-  assert.match(markup, /Finish hosted activation before continuing\./);
+  assert.match(markup, /Your subscription is canceled\. Open billing to resume access\./);
+  assert.match(markup, /data-error-code="HOSTED_ACCESS_REQUIRED"/);
   assert.match(markup, /data-source-count="0"/);
 });
 

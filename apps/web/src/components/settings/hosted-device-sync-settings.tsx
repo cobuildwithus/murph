@@ -6,12 +6,17 @@ import { isHostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 
 import { HostedDeviceSyncSettingsClient } from "./hosted-device-sync-settings-client";
 
+export interface HostedDeviceSyncSettingsInitialLoadError {
+  code: string | null;
+  message: string;
+}
+
 export async function HostedDeviceSyncSettings(props: {
   authenticated: boolean;
   member: Pick<HostedMember, "billingStatus" | "id" | "suspendedAt"> | null;
 }) {
   let initialResponse: HostedDeviceSyncSettingsResponse | null = null;
-  let initialLoadError: string | null = null;
+  let initialLoadError: HostedDeviceSyncSettingsInitialLoadError | null = null;
 
   if (props.authenticated && props.member) {
     try {
@@ -20,8 +25,14 @@ export async function HostedDeviceSyncSettings(props: {
       });
     } catch (error) {
       initialLoadError = isHostedOnboardingError(error)
-        ? error.message
-        : "Could not load your wearables right now.";
+        ? {
+            code: error.code,
+            message: error.message,
+          }
+        : {
+            code: null,
+            message: "Could not load your wearables right now.",
+          };
     }
   }
 
