@@ -6,6 +6,7 @@ import {
   type CanonicalEntityFamily,
   type CanonicalRecordClass,
 } from "./canonical-entities.ts";
+import { ALL_QUERY_ENTITY_FAMILIES } from "./entity-families.ts";
 import { readVaultSourceTolerant, type QueryRecordData } from "./vault-source.ts";
 
 type VaultReadModelFamilyViews = {
@@ -102,27 +103,6 @@ interface RecordLikeFilterSource {
   occurredAt: string | null;
   tags: readonly string[];
 }
-
-export const ALL_QUERY_ENTITY_FAMILIES = [
-  "allergy",
-  "assessment",
-  "audit",
-  "condition",
-  "core",
-  "event",
-  "experiment",
-  "family",
-  "food",
-  "genetics",
-  "goal",
-  "journal",
-  "protocol",
-  "provider",
-  "recipe",
-  "sample",
-  "workout_format",
-] as const satisfies readonly CanonicalEntityFamily[];
-
 
 // Convenience views stay derived from the authoritative canonical entity array.
 const VAULT_FAMILY_VIEW_SPECS = {

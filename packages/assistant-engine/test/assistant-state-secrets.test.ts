@@ -14,9 +14,9 @@ import {
   assertAssistantOutboxIntentId,
   assertAssistantSessionId,
   assertAssistantTurnId,
-  isValidAssistantOpaqueId,
   resolveAssistantOpaqueStateFilePath,
 } from '../src/assistant/state-ids.ts'
+import { isValidAssistantOpaqueId } from '@murphai/runtime-state/assistant-ids'
 import {
   extractAssistantSessionSecretsForPersistence,
   mergeAssistantSessionSecrets,

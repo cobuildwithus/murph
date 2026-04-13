@@ -9,13 +9,13 @@ function recordTypeDescriptionFromModule(
 }
 
 afterEach(() => {
-  vi.doUnmock('@murphai/query')
+  vi.doUnmock('@murphai/query/entity-families')
   vi.resetModules()
 })
 
 test('listFilterSchema describes query record types from the query package when available', async () => {
   vi.resetModules()
-  vi.doMock('@murphai/query', () => ({
+  vi.doMock('@murphai/query/entity-families', () => ({
     ALL_QUERY_ENTITY_FAMILIES: ['custom_a', 'custom_b'],
   }))
 
@@ -27,7 +27,7 @@ test('listFilterSchema describes query record types from the query package when 
 
 test('listFilterSchema fails closed when query record types are not an array', async () => {
   vi.resetModules()
-  vi.doMock('@murphai/query', () => ({
+  vi.doMock('@murphai/query/entity-families', () => ({
     ALL_QUERY_ENTITY_FAMILIES: 'not-an-array',
   }))
 
@@ -38,7 +38,7 @@ test('listFilterSchema fails closed when query record types are not an array', a
 
 test('listFilterSchema surfaces query family loading failures', async () => {
   vi.resetModules()
-  vi.doMock('@murphai/query', () => {
+  vi.doMock('@murphai/query/entity-families', () => {
     const mockedModule: Record<string, unknown> = {}
     Object.defineProperty(mockedModule, 'ALL_QUERY_ENTITY_FAMILIES', {
       enumerable: true,

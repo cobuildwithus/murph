@@ -16,6 +16,11 @@
       "import": "./dist/index.js",
       "default": "./dist/index.js"
     },
+    "./entity-families": {
+      "types": "./dist/entity-families.d.ts",
+      "import": "./dist/entity-families.js",
+      "default": "./dist/entity-families.js"
+    },
     "./id-families": {
       "types": "./dist/id-families.d.ts",
       "import": "./dist/id-families.js",

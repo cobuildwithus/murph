@@ -51,7 +51,7 @@ import {
   normalizeCanonicalLinks,
   resolveCanonicalRecordClass,
 } from "../src/canonical-entities.ts";
-import { ALL_QUERY_ENTITY_FAMILIES } from "../src/model.ts";
+import { ALL_QUERY_ENTITY_FAMILIES } from "../src/entity-families.ts";
 import { parseFrontmatterDocument as parseHealthFrontmatterDocument } from "../src/health/shared.ts";
 import { parseMarkdownDocument } from "../src/markdown.ts";
 import {

@@ -22,6 +22,7 @@ const WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS = {
   "@murphai/device-syncd": "../device-syncd/src/index.ts",
   "@murphai/messaging-ingress": "../messaging-ingress/src/index.ts",
   "@murphai/operator-config": "./src/index.ts",
+  "@murphai/query": "../query/src/index.ts",
   "@murphai/runtime-state": "../runtime-state/src/index.ts",
 } as const;
 
