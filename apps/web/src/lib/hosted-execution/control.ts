@@ -17,6 +17,11 @@ import { createHostedExecutionVercelOidcBearerTokenProvider } from "./auth-adapt
 import { readHostedExecutionControlBaseUrl } from "./environment";
 import { formatHostedExecutionSafeLogError } from "./logging";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
+import {
+  deriveHostedOnboardingTimingErrorName,
+  finishHostedOnboardingTiming,
+  startHostedOnboardingTiming,
+} from "../hosted-onboarding/logging";
 
 export interface HostedVerifiedEmailSyncResult {
   emailAddress: string;
@@ -128,16 +133,26 @@ export async function preProvisionManagedUserCryptoInHostedExecutionBestEffort(i
   trigger: HostedManagedUserCryptoWarmupTrigger;
   userId: string;
 }): Promise<boolean> {
+  const timing = startHostedOnboardingTiming("hosted-onboarding.crypto-warmup", {
+    trigger: input.trigger,
+  });
   const client = readHostedExecutionControlClientIfConfigured();
 
   if (!client) {
+    finishHostedOnboardingTiming(timing, "skipped", {
+      reason: "control-unconfigured",
+    });
     return false;
   }
 
   try {
     await client.provisionManagedUserCrypto(input.userId);
+    finishHostedOnboardingTiming(timing, "completed");
     return true;
   } catch (error) {
+    finishHostedOnboardingTiming(timing, "failed", {
+      errorName: deriveHostedOnboardingTimingErrorName(error),
+    });
     console.error(
       `Hosted managed user crypto warmup failed during ${input.trigger}.`,
       formatHostedExecutionSafeLogError(error),

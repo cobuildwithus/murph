@@ -7,6 +7,11 @@ import { readHostedPhoneHint } from "./contact-privacy";
 import { isHostedMemberSuspended } from "./entitlement";
 import { hostedOnboardingError } from "./errors";
 import { deriveHostedPostVerificationStage } from "./lifecycle";
+import {
+  deriveHostedOnboardingTimingErrorName,
+  finishHostedOnboardingTiming,
+  startHostedOnboardingTiming,
+} from "./logging";
 import { type HostedPrivyIdentity } from "./privy";
 import {
   buildHostedInviteUrl,
@@ -32,49 +37,68 @@ export async function completeHostedPrivyVerification(input: {
 }> {
   const prisma = input.prisma ?? getPrisma();
   const now = input.now ?? new Date();
-  const invite = input.inviteCode
-    ? await requireHostedInviteForAuthentication(input.inviteCode, prisma, now)
-    : null;
-  const member = invite
-    ? await (async () => {
-        const inviteIdentity = requireHostedInviteMemberIdentity(invite.member);
-        return reconcileHostedPrivyIdentityOnMember({
-          expectedPhoneHint: readHostedPhoneHint(inviteIdentity.maskedPhoneNumberHint),
-          expectedPhoneLookupKey: inviteIdentity.phoneLookupKey,
+  const timing = startHostedOnboardingTiming("hosted-onboarding.privy.complete", {
+    inviteProvided: Boolean(input.inviteCode),
+  });
+  let usedInvite = false;
+
+  try {
+    const invite = input.inviteCode
+      ? await requireHostedInviteForAuthentication(input.inviteCode, prisma, now)
+      : null;
+    usedInvite = invite !== null;
+    const member = invite
+      ? await (async () => {
+          const inviteIdentity = requireHostedInviteMemberIdentity(invite.member);
+          return reconcileHostedPrivyIdentityOnMember({
+            expectedPhoneHint: readHostedPhoneHint(inviteIdentity.maskedPhoneNumberHint),
+            expectedPhoneLookupKey: inviteIdentity.phoneLookupKey,
+            identity: input.identity,
+            member: invite.member,
+            prisma,
+            now,
+          });
+        })()
+      : await ensureHostedMemberForPrivyIdentity({
           identity: input.identity,
-          member: invite.member,
           prisma,
           now,
         });
-      })()
-    : await ensureHostedMemberForPrivyIdentity({
-        identity: input.identity,
-        prisma,
-        now,
+
+    if (isHostedMemberSuspended(member.suspendedAt)) {
+      throw hostedOnboardingError({
+        code: "HOSTED_MEMBER_SUSPENDED",
+        message: "This hosted account is suspended. Contact support to restore access.",
+        httpStatus: 403,
       });
+    }
 
-  if (isHostedMemberSuspended(member.suspendedAt)) {
-    throw hostedOnboardingError({
-      code: "HOSTED_MEMBER_SUSPENDED",
-      message: "This hosted account is suspended. Contact support to restore access.",
-      httpStatus: 403,
+    const activeInvite = invite ?? await issueHostedInvite({
+      channel: "web",
+      memberId: member.id,
+      prisma,
     });
+    const stage = deriveHostedPostVerificationStage({
+      billingStatus: member.billingStatus,
+      suspendedAt: member.suspendedAt,
+    });
+
+    finishHostedOnboardingTiming(timing, "completed", {
+      stage,
+      usedInvite,
+    });
+
+    return {
+      inviteCode: activeInvite.inviteCode,
+      joinUrl: buildHostedInviteUrl(activeInvite.inviteCode),
+      memberId: member.id,
+      stage,
+    };
+  } catch (error) {
+    finishHostedOnboardingTiming(timing, "failed", {
+      errorName: deriveHostedOnboardingTimingErrorName(error),
+      usedInvite,
+    });
+    throw error;
   }
-
-  const activeInvite = invite ?? await issueHostedInvite({
-    channel: "web",
-    memberId: member.id,
-    prisma,
-  });
-  const stage = deriveHostedPostVerificationStage({
-    billingStatus: member.billingStatus,
-    suspendedAt: member.suspendedAt,
-  });
-
-  return {
-    inviteCode: activeInvite.inviteCode,
-    joinUrl: buildHostedInviteUrl(activeInvite.inviteCode),
-    memberId: member.id,
-    stage,
-  };
 }

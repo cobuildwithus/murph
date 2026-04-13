@@ -60,6 +60,7 @@ import {
 describe("hosted onboarding member activation", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.spyOn(console, "info").mockImplementation(() => {});
 
     mocks.lockHostedMemberRow.mockResolvedValue(undefined);
     mocks.provisionManagedUserCryptoInHostedExecution.mockResolvedValue(undefined);

@@ -158,6 +158,7 @@ function makeInvite(member: ReturnType<typeof makeMember>, overrides: Record<str
 describe("completeHostedPrivyVerification", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.spyOn(console, "info").mockImplementation(() => {});
     mocks.isHostedOnboardingRevnetEnabled.mockReturnValue(false);
   });
 

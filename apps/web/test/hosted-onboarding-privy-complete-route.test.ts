@@ -46,6 +46,7 @@ describe("hosted onboarding Privy completion route", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.spyOn(console, "info").mockImplementation(() => {});
     mocks.after.mockImplementation((callback: () => void | Promise<void>) => {
       const result = callback();
 

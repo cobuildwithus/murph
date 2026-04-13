@@ -27,6 +27,7 @@ describe("hosted verified email sync helper", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.spyOn(console, "info").mockImplementation(() => {});
     mocks.readHostedExecutionControlBaseUrl.mockReturnValue("https://dispatch.example.test");
     mocks.createHostedExecutionVercelOidcBearerTokenProvider.mockReturnValue(mocks.tokenProvider);
     mocks.createCloudflareHostedControlClient.mockReturnValue({
@@ -123,6 +124,7 @@ describe("managed user crypto warmup helper", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.spyOn(console, "info").mockImplementation(() => {});
     mocks.readHostedExecutionControlBaseUrl.mockReturnValue("https://dispatch.example.test");
     mocks.createHostedExecutionVercelOidcBearerTokenProvider.mockReturnValue(mocks.tokenProvider);
     mocks.createCloudflareHostedControlClient.mockReturnValue({
@@ -132,6 +134,7 @@ describe("managed user crypto warmup helper", () => {
   });
 
   it("best-effort pre-provisions the managed user crypto context when control is configured", async () => {
+    const consoleInfo = vi.spyOn(console, "info").mockImplementation(() => {});
     const { preProvisionManagedUserCryptoInHostedExecutionBestEffort } = await import(
       "@/src/lib/hosted-execution/control"
     );
@@ -144,6 +147,14 @@ describe("managed user crypto warmup helper", () => {
     ).resolves.toBe(true);
 
     expect(provisionManagedUserCrypto).toHaveBeenCalledWith("member_123");
+    expect(consoleInfo).toHaveBeenCalledWith(
+      "Hosted onboarding timing.",
+      expect.objectContaining({
+        outcome: "completed",
+        step: "hosted-onboarding.crypto-warmup",
+        trigger: "privy-complete-checkout",
+      }),
+    );
   });
 
   it("returns false without throwing when hosted execution control is not configured", async () => {

@@ -83,6 +83,7 @@ import {
 describe("hosted Stripe event reconciliation", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.spyOn(console, "info").mockImplementation(() => {});
     mocks.applyStripeCheckoutCompleted.mockResolvedValue({
       activatedMemberId: null,
       hostedExecutionEventId: null,
