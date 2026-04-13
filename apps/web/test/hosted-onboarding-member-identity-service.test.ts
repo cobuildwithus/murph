@@ -1,5 +1,5 @@
 import { HostedBillingStatus } from "@prisma/client";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { encryptHostedWebNullableString } from "@/src/lib/hosted-web/encryption";
 
 const mocks = vi.hoisted(() => ({
@@ -24,11 +24,28 @@ import {
 import type { HostedPrivyIdentity } from "@/src/lib/hosted-onboarding/privy";
 
 const NOW = new Date("2026-04-06T10:00:00.000Z");
+const TEST_CONTACT_PRIVACY_KEY = "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=";
 
 describe("hosted-onboarding member-identity-service", () => {
+  const previousHostedContactPrivacyKeys = process.env.HOSTED_CONTACT_PRIVACY_KEYS;
+  const previousHostedContactPrivacyCurrentKeyVersion =
+    process.env.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION;
+
   beforeEach(() => {
+    process.env.HOSTED_CONTACT_PRIVACY_KEYS = `v1:${TEST_CONTACT_PRIVACY_KEY}`;
+    process.env.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION = "v1";
+    clearHostedOnboardingEnvCache();
     vi.clearAllMocks();
     mocks.isHostedOnboardingRevnetEnabled.mockReturnValue(false);
+  });
+
+  afterEach(() => {
+    restoreEnvValue("HOSTED_CONTACT_PRIVACY_KEYS", previousHostedContactPrivacyKeys);
+    restoreEnvValue(
+      "HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION",
+      previousHostedContactPrivacyCurrentKeyVersion,
+    );
+    clearHostedOnboardingEnvCache();
   });
 
   it("locks and re-reads the current member before reconciling a Privy identity", async () => {
@@ -228,4 +245,21 @@ function makeMember(overrides: Partial<{
     updatedAt: NOW,
     ...overrides,
   };
+}
+
+function clearHostedOnboardingEnvCache(): void {
+  delete (
+    globalThis as typeof globalThis & {
+      __murphHostedOnboardingEnv?: unknown;
+    }
+  ).__murphHostedOnboardingEnv;
+}
+
+function restoreEnvValue(key: string, value: string | undefined): void {
+  if (value === undefined) {
+    delete process.env[key];
+    return;
+  }
+
+  process.env[key] = value;
 }

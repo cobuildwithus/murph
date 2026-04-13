@@ -3,7 +3,7 @@ import {
   type HostedMember,
   HostedBillingStatus,
 } from "@prisma/client";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { encryptHostedWebNullableString } from "@/src/lib/hosted-web/encryption";
 
 import {
@@ -35,9 +35,27 @@ import {
   upsertHostedMemberTelegramRoutingBinding,
 } from "@/src/lib/hosted-onboarding/hosted-member-routing-store";
 
+const TEST_CONTACT_PRIVACY_KEY = "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=";
+
 describe("hosted-member-store", () => {
+  const previousHostedContactPrivacyKeys = process.env.HOSTED_CONTACT_PRIVACY_KEYS;
+  const previousHostedContactPrivacyCurrentKeyVersion =
+    process.env.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION;
+
   beforeEach(() => {
+    process.env.HOSTED_CONTACT_PRIVACY_KEYS = `v1:${TEST_CONTACT_PRIVACY_KEY}`;
+    process.env.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION = "v1";
+    clearHostedOnboardingEnvCache();
     vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    restoreEnvValue("HOSTED_CONTACT_PRIVACY_KEYS", previousHostedContactPrivacyKeys);
+    restoreEnvValue(
+      "HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION",
+      previousHostedContactPrivacyCurrentKeyVersion,
+    );
+    clearHostedOnboardingEnvCache();
   });
 
   it("keeps identity, routing, and billing refs nested under their owning slices", () => {
@@ -1079,6 +1097,23 @@ describe("hosted-member-store", () => {
     });
   });
 });
+
+function clearHostedOnboardingEnvCache(): void {
+  delete (
+    globalThis as typeof globalThis & {
+      __murphHostedOnboardingEnv?: unknown;
+    }
+  ).__murphHostedOnboardingEnv;
+}
+
+function restoreEnvValue(key: string, value: string | undefined): void {
+  if (value === undefined) {
+    delete process.env[key];
+    return;
+  }
+
+  process.env[key] = value;
+}
 
 function createHostedMember(overrides: Partial<HostedMember> = {}): HostedMember {
   return {
