@@ -1,7 +1,7 @@
 const capabilities = [
   {
     title: "Any chat app",
-    body: "Talk to Murph on Telegram, iMessage, or email. No app to download.",
+    body: "Talk to Murph on iMessage, Telegram, or email. No app to download.",
   },
   {
     title: "Wearable sync",
@@ -38,9 +38,7 @@ export function CapabilitiesGrid() {
               <h3 className="text-lg font-semibold text-stone-900">
                 {item.title}
               </h3>
-              <p className="mt-2 leading-relaxed text-stone-400">
-                {item.body}
-              </p>
+              <p className="mt-2 leading-relaxed text-stone-400">{item.body}</p>
             </article>
           ))}
         </div>
