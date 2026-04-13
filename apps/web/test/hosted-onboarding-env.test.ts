@@ -56,10 +56,20 @@ describe("readHostedOnboardingEnvironment", () => {
     expect(environment.linqApiBaseUrl).toBe("https://api.linqapp.com/api/partner/v3");
   });
 
-  it("requires HOSTED_CONTACT_PRIVACY_KEYS", () => {
+  it("falls back to a local development contact privacy keyring when keys are absent", () => {
+    const environment = readHostedOnboardingEnvironment({
+      NODE_ENV: "development",
+    });
+
+    expect(environment.contactPrivacyKeyring.currentVersion).toBe("v1");
+    expect(environment.contactPrivacyKeyring.readVersions).toEqual(["v1"]);
+    expect(environment.contactPrivacyKeyring.keysByVersion.v1).toBeInstanceOf(Buffer);
+  });
+
+  it("still requires HOSTED_CONTACT_PRIVACY_KEYS in production", () => {
     expect(() =>
       readHostedOnboardingEnvironment({
-        NODE_ENV: "test",
+        NODE_ENV: "production",
       }),
     ).toThrow(/HOSTED_CONTACT_PRIVACY_KEYS/u);
   });

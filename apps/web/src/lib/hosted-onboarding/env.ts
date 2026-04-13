@@ -5,6 +5,14 @@ import { readLinqEnvironment } from "../linq/env";
 import { normalizePhoneNumber } from "./phone";
 
 const HOSTED_CONTACT_PRIVACY_VERSION_PATTERN = /^v[0-9]+$/u;
+const LOCAL_DEV_HOSTED_CONTACT_PRIVACY_VERSION = "v1";
+const LOCAL_DEV_HOSTED_CONTACT_PRIVACY_KEYRING = {
+  currentVersion: LOCAL_DEV_HOSTED_CONTACT_PRIVACY_VERSION,
+  keysByVersion: {
+    [LOCAL_DEV_HOSTED_CONTACT_PRIVACY_VERSION]: Buffer.alloc(32, 0x64),
+  },
+  readVersions: [LOCAL_DEV_HOSTED_CONTACT_PRIVACY_VERSION],
+} as const satisfies HostedContactPrivacyKeyring;
 
 export interface HostedContactPrivacyKeyring {
   currentVersion: string;
@@ -74,6 +82,10 @@ function readHostedContactPrivacyKeyring(
   const keyringValue = readEnv(source, "HOSTED_CONTACT_PRIVACY_KEYS");
 
   if (!keyringValue) {
+    if ((source.NODE_ENV ?? "development") !== "production") {
+      return LOCAL_DEV_HOSTED_CONTACT_PRIVACY_KEYRING;
+    }
+
     throw new TypeError(
       "HOSTED_CONTACT_PRIVACY_KEYS is required for hosted contact privacy.",
     );
