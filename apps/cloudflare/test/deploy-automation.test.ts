@@ -185,6 +185,7 @@ describe("hosted deploy automation helpers", () => {
     });
 
     expect(environment.workerVars).toEqual({
+      HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "device-sync,hosted-email,linq,mapbox,telegram",
       MURPH_WEB_FETCH_ENABLED: "true",
     });
   });
@@ -209,6 +210,18 @@ describe("hosted deploy automation helpers", () => {
     });
 
     expect(environment.workerVars.HOSTED_EXECUTION_RUNNER_ENV_PROFILES).toBe("telegram,mapbox");
+  });
+
+  it("defaults runner env profiles to the full hosted integration set", () => {
+    const environment = readHostedDeployAutomationEnvironment({
+      CF_BUNDLES_BUCKET: "hosted-bundles",
+      CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
+      CF_WORKER_NAME: "hosted-worker",
+    });
+
+    expect(environment.workerVars.HOSTED_EXECUTION_RUNNER_ENV_PROFILES).toBe(
+      "device-sync,hosted-email,linq,mapbox,telegram",
+    );
   });
 
   it("accepts a custom JSON container instance type for generated deploy config", () => {
