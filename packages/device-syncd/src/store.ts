@@ -42,6 +42,7 @@ import {
 
 import type {
   ClaimDeviceSyncWebhookTraceInput,
+  ConsumeOAuthStateResult,
   DeviceSyncWebhookTraceClaimResult,
   DeviceSyncAccountStatus,
   DeviceSyncJobInput,
@@ -308,8 +309,8 @@ export class SqliteDeviceSyncStore {
     return deleteExpiredOAuthStates(this.database, now);
   }
 
-  consumeOAuthState(state: string, now: string): OAuthStateRecord | null {
-    return consumeOAuthState(this.database, state, now);
+  consumeOAuthState(state: string, now: string, expectedProvider?: string): ConsumeOAuthStateResult {
+    return consumeOAuthState(this.database, state, now, expectedProvider);
   }
 
   listAccounts(provider?: string): StoredDeviceSyncAccount[] {

@@ -2,6 +2,7 @@ import { PrismaClient } from "@prisma/client";
 
 import type {
   ClaimDeviceSyncWebhookTraceInput,
+  ConsumeOAuthStateResult,
   DeviceSyncPublicIngressStore,
   DeviceSyncWebhookTraceClaimResult,
   OAuthStateRecord,
@@ -88,8 +89,12 @@ export class PrismaDeviceSyncControlPlaneStore
     return this.oauthSessions.createOAuthState(input);
   }
 
-  async consumeOAuthState(state: string, now: string): Promise<OAuthStateRecord | null> {
-    return this.oauthSessions.consumeOAuthState(state, now);
+  async consumeOAuthState(
+    state: string,
+    now: string,
+    expectedProvider?: string,
+  ): Promise<ConsumeOAuthStateResult> {
+    return this.oauthSessions.consumeOAuthState(state, now, expectedProvider);
   }
 
   async upsertConnection(input: UpsertPublicDeviceSyncConnectionInput): Promise<PublicDeviceSyncAccount> {

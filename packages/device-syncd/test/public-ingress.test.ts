@@ -8,6 +8,7 @@ import { scopeWebhookTraceId, sha256Text } from "../src/shared.ts";
 
 import type {
   ClaimDeviceSyncWebhookTraceInput,
+  ConsumeOAuthStateResult,
   DeviceSyncIngressWebhook,
   DeviceSyncWebhookTraceClaimResult,
   DeviceSyncProvider,
@@ -56,15 +57,32 @@ class InMemoryPublicIngressStore implements DeviceSyncPublicIngressStore {
     return input;
   }
 
-  consumeOAuthState(state: string, now: string): OAuthStateRecord | null {
+  consumeOAuthState(state: string, now: string, expectedProvider?: string): ConsumeOAuthStateResult {
     const record = this.oauthStates.get(state) ?? null;
-    this.oauthStates.delete(state);
 
     if (!record || Date.parse(record.expiresAt) <= Date.parse(now)) {
-      return null;
+      this.oauthStates.delete(state);
+      return {
+        status: "missing",
+      };
     }
 
-    return record;
+    if (expectedProvider && record.provider !== expectedProvider) {
+      return {
+        status: "provider_mismatch",
+        provider: record.provider,
+      };
+    }
+
+    this.oauthStates.delete(state);
+    return {
+      status: "consumed",
+      record,
+    };
+  }
+
+  hasOAuthState(state: string): boolean {
+    return this.oauthStates.has(state);
   }
 
   upsertConnection(input: UpsertPublicDeviceSyncConnectionInput): PublicDeviceSyncAccount {
@@ -1334,6 +1352,92 @@ test("public ingress preserves callback redirect context on OAuth callback failu
       error.details?.provider === "demo" &&
       error.details?.returnTo === "https://app.example.test/settings/devices",
   );
+});
+
+test("public ingress does not burn valid oauth state on provider mismatch", async () => {
+  const store = new InMemoryPublicIngressStore();
+  const whoopBase = createFakeProvider();
+  const ingress = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    allowedReturnOrigins: ["https://app.example.test"],
+    registry: createDeviceSyncRegistry([
+      createFakeProvider(),
+      createFakeProvider({
+        provider: "whoop",
+        descriptor: {
+          ...whoopBase.descriptor,
+          displayName: "Whoop",
+          oauth: {
+            ...whoopBase.descriptor.oauth,
+            callbackPath: "/oauth/whoop/callback",
+            defaultScopes: ["offline", "read:data"],
+          },
+          provider: "whoop",
+        },
+      }),
+    ]),
+    store,
+  });
+
+  const begin = await ingress.startConnection({
+    provider: "demo",
+    returnTo: "https://app.example.test/settings/devices",
+  });
+
+  await assert.rejects(
+    () =>
+      ingress.handleOAuthCallback({
+        provider: "whoop",
+        state: begin.state,
+        code: "wrong-provider",
+      }),
+    (error: unknown) =>
+      error instanceof DeviceSyncError &&
+      error.code === "OAUTH_PROVIDER_MISMATCH" &&
+      error.httpStatus === 400,
+  );
+  assert.equal(store.hasOAuthState(begin.state), true);
+
+  const connected = await ingress.handleOAuthCallback({
+    provider: "demo",
+    state: begin.state,
+    code: "abc",
+  });
+
+  assert.equal(connected.account.provider, "demo");
+  assert.equal(store.hasOAuthState(begin.state), false);
+});
+
+test("public ingress discards tampered persisted returnTo values before reuse", async () => {
+  const store = new InMemoryPublicIngressStore();
+  store.createOAuthState({
+    state: "tampered-state",
+    provider: "demo",
+    returnTo: "javascript:alert(1)",
+    metadata: {},
+    createdAt: "2026-05-24T00:00:00.000Z",
+    expiresAt: "2026-05-24T01:00:00.000Z",
+  });
+  const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+  const ingress = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    allowedReturnOrigins: ["https://app.example.test"],
+    registry: createDeviceSyncRegistry([createFakeProvider()]),
+    store,
+  });
+
+  try {
+    const connected = await ingress.handleOAuthCallback({
+      provider: "demo",
+      state: "tampered-state",
+      code: "abc",
+    });
+
+    assert.equal(connected.returnTo, null);
+    assert.equal(warnSpy.mock.calls.length, 1);
+  } finally {
+    warnSpy.mockRestore();
+  }
 });
 
 test("public ingress preserves non-device-sync callback errors without wrapping them", async () => {

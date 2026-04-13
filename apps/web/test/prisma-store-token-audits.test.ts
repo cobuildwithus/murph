@@ -18,7 +18,7 @@ describe("PrismaHostedTokenAuditStore logging", () => {
       id: 7,
       keyVersion: "v1",
       provider: "oura",
-      sessionId: null,
+      sessionId: data.sessionId,
       tokenVersion: 3,
       userId: "user-123",
     }));
@@ -28,7 +28,7 @@ describe("PrismaHostedTokenAuditStore logging", () => {
       },
     } as never);
 
-    await store.createTokenAudit({
+    const audit = await store.createTokenAudit({
       action: "token_exported",
       channel: "agent_export",
       connectionId: "dsc_123",
@@ -41,9 +41,10 @@ describe("PrismaHostedTokenAuditStore logging", () => {
 
     expect(createSpy).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
-        sessionId: null,
+        sessionId: "sess_123",
       }),
     }));
+    expect(audit.sessionId).toBe("sess_123");
     expect(warnSpy).toHaveBeenCalledTimes(1);
     const payload = JSON.parse(warnSpy.mock.calls[0]?.[0] ?? "{}") as Record<string, unknown>;
     expect(payload).toMatchObject({

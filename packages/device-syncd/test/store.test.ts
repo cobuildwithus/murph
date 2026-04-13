@@ -455,15 +455,22 @@ test("device sync store rejects legacy schemas and consumes missing or expired O
       expiresAt: "2026-04-07T00:02:00.000Z",
     });
 
-    assert.equal(store.consumeOAuthState("missing-state", "2026-04-07T00:01:00.000Z"), null);
-    assert.equal(store.consumeOAuthState("expired-state", "2026-04-07T00:01:00.000Z"), null);
+    assert.deepEqual(store.consumeOAuthState("missing-state", "2026-04-07T00:01:00.000Z"), {
+      status: "missing",
+    });
+    assert.deepEqual(store.consumeOAuthState("expired-state", "2026-04-07T00:01:00.000Z"), {
+      status: "missing",
+    });
     assert.deepEqual(store.consumeOAuthState("defaulted-state", "2026-04-07T00:01:00.000Z"), {
-      state: "defaulted-state",
-      provider: "demo",
-      returnTo: null,
-      metadata: {},
-      createdAt: "2026-04-07T00:00:00.000Z",
-      expiresAt: "2026-04-07T00:02:00.000Z",
+      status: "consumed",
+      record: {
+        state: "defaulted-state",
+        provider: "demo",
+        returnTo: null,
+        metadata: {},
+        createdAt: "2026-04-07T00:00:00.000Z",
+        expiresAt: "2026-04-07T00:02:00.000Z",
+      },
     });
   } finally {
     store.close();
@@ -541,16 +548,73 @@ test("device sync store filters listed accounts by provider and returns unexpire
       ["demo-account"],
     );
     assert.deepEqual(store.consumeOAuthState("active-state", "2026-04-07T00:05:00.000Z"), {
-      state: "active-state",
+      status: "consumed",
+      record: {
+        state: "active-state",
+        provider: "demo",
+        returnTo: "/devices",
+        metadata: {
+          intent: "connect",
+        },
+        createdAt: "2026-04-07T00:00:00.000Z",
+        expiresAt: "2026-04-07T00:10:00.000Z",
+      },
+    });
+    assert.deepEqual(store.consumeOAuthState("active-state", "2026-04-07T00:05:01.000Z"), {
+      status: "missing",
+    });
+  } finally {
+    store.close();
+    await rm(tempDir, {
+      force: true,
+      recursive: true,
+    });
+  }
+});
+
+test("device sync store preserves unexpired OAuth state on provider mismatch", async () => {
+  const tempDir = await makeTempDirectory("murph-device-syncd-store-provider-mismatch");
+  const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));
+
+  try {
+    store.createOAuthState({
+      state: "provider-mismatch-state",
       provider: "demo",
       returnTo: "/devices",
-      metadata: {
-        intent: "connect",
-      },
+      metadata: {},
       createdAt: "2026-04-07T00:00:00.000Z",
       expiresAt: "2026-04-07T00:10:00.000Z",
     });
-    assert.equal(store.consumeOAuthState("active-state", "2026-04-07T00:05:01.000Z"), null);
+
+    assert.deepEqual(
+      store.consumeOAuthState(
+        "provider-mismatch-state",
+        "2026-04-07T00:05:00.000Z",
+        "oura",
+      ),
+      {
+        status: "provider_mismatch",
+        provider: "demo",
+      },
+    );
+    assert.deepEqual(
+      store.consumeOAuthState(
+        "provider-mismatch-state",
+        "2026-04-07T00:05:01.000Z",
+        "demo",
+      ),
+      {
+        status: "consumed",
+        record: {
+          state: "provider-mismatch-state",
+          provider: "demo",
+          returnTo: "/devices",
+          metadata: {},
+          createdAt: "2026-04-07T00:00:00.000Z",
+          expiresAt: "2026-04-07T00:10:00.000Z",
+        },
+      },
+    );
   } finally {
     store.close();
     await rm(tempDir, {

@@ -104,7 +104,8 @@ export class DeviceSyncService {
       store: {
         deleteExpiredOAuthStates: (now) => this.store.deleteExpiredOAuthStates(now),
         createOAuthState: (record) => this.store.createOAuthState(record),
-        consumeOAuthState: (state, now) => this.store.consumeOAuthState(state, now),
+        consumeOAuthState: (state, now, expectedProvider) =>
+          this.store.consumeOAuthState(state, now, expectedProvider),
         upsertConnection: (record) =>
           this.toPublicAccount(
             this.store.upsertAccount({

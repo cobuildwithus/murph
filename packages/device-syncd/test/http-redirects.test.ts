@@ -34,6 +34,26 @@ test("callback error redirects return null without a returnTo destination", () =
   );
 });
 
+test("callback error redirects fail closed for malformed or non-http destinations", () => {
+  assert.equal(
+    buildCallbackErrorRedirectLocation({
+      returnTo: "javascript:alert(1)",
+      provider: "demo",
+      errorCode: "OAUTH_CALLBACK_REJECTED",
+    }),
+    null,
+  );
+
+  assert.equal(
+    buildCallbackErrorRedirectLocation({
+      returnTo: "https://app.example.test:bad/settings",
+      provider: "demo",
+      errorCode: "OAUTH_CALLBACK_REJECTED",
+    }),
+    null,
+  );
+});
+
 test("callback error redirects scrub stale callback params from returnTo", () => {
   const location = buildCallbackErrorRedirectLocation({
     returnTo:

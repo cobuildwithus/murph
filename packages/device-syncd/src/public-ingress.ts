@@ -151,9 +151,9 @@ export class DeviceSyncPublicIngress {
       });
     }
 
-    const stateRecord = await this.store.consumeOAuthState(state, now);
+    const stateResult = await this.store.consumeOAuthState(state, now, provider.provider);
 
-    if (!stateRecord) {
+    if (stateResult.status === "missing") {
       throw deviceSyncError({
         code: "OAUTH_STATE_INVALID",
         message: "OAuth state is invalid or expired.",
@@ -162,16 +162,19 @@ export class DeviceSyncPublicIngress {
       });
     }
 
-    try {
-      if (stateRecord.provider !== provider.provider) {
-        throw deviceSyncError({
-          code: "OAUTH_PROVIDER_MISMATCH",
-          message: `OAuth state belongs to provider ${stateRecord.provider}, not ${provider.provider}.`,
-          retryable: false,
-          httpStatus: 400,
-        });
-      }
+    if (stateResult.status === "provider_mismatch") {
+      throw deviceSyncError({
+        code: "OAUTH_PROVIDER_MISMATCH",
+        message: `OAuth state belongs to provider ${stateResult.provider}, not ${provider.provider}.`,
+        retryable: false,
+        httpStatus: 400,
+      });
+    }
 
+    const stateRecord = stateResult.record;
+    const returnTo = this.sanitizeStoredReturnTo(stateRecord.returnTo ?? null);
+
+    try {
       const callbackError = normalizeString(input.error);
 
       if (callbackError) {
@@ -244,12 +247,12 @@ export class DeviceSyncPublicIngress {
 
       return {
         account,
-        returnTo: stateRecord.returnTo ?? null,
+        returnTo,
       };
     } catch (error) {
       throw attachOAuthCallbackContext(error, {
         provider: provider.provider,
-        returnTo: stateRecord.returnTo ?? null,
+        returnTo,
       });
     }
   }
@@ -450,6 +453,17 @@ export class DeviceSyncPublicIngress {
 
     return resolved;
   }
+
+  private sanitizeStoredReturnTo(candidate: string | null): string | null {
+    const resolved = resolveRelativeOrAllowedOriginUrl(candidate, this.publicBaseUrl, this.allowedReturnOrigins);
+
+    if (candidate && !resolved) {
+      this.logger.warn?.("Discarding invalid persisted OAuth returnTo state.");
+      return null;
+    }
+
+    return resolved;
+  }
 }
 
 export function createDeviceSyncPublicIngress(input: CreateDeviceSyncPublicIngressInput): DeviceSyncPublicIngress {
@@ -505,6 +519,7 @@ export type {
   BeginConnectionResult,
   ClaimDeviceSyncWebhookTraceInput,
   CompleteConnectionResult,
+  ConsumeOAuthStateResult,
   DeviceSyncAccount,
   DeviceSyncAccountStatus,
   DeviceSyncIngressWebhook,
