@@ -72,16 +72,13 @@ export interface AssistantNotificationInput
       | 'turnTrigger'
       | 'workingDirectory'
     > {
+  deliveryDedupeToken?: string | null
   instructions: string
 }
 
 export interface AssistantNotificationResult {
   decision: AssistantNotificationDecision
   response: string | null
-  session: AssistantSession
-}
-
-interface AssistantNotificationDeliveryResult {
   session: AssistantSession
 }
 
@@ -156,12 +153,13 @@ export async function sendAssistantNotificationLocal(
         turnCreatedAt,
         turnId,
       })
-      const delivery = await deliverAssistantNotificationMessage({
+      await deliverAssistantNotificationMessage({
+        dedupeToken: input.deliveryDedupeToken ?? null,
         input: messageInput,
+        message: sanitizedResponse,
         session: savedSession,
         sharedPlan,
         turnId,
-        message: sanitizedResponse,
       })
 
       return {
@@ -170,7 +168,7 @@ export async function sendAssistantNotificationLocal(
           text: sanitizedResponse,
         },
         response: sanitizedResponse,
-        session: delivery.session,
+        session: savedSession,
       }
     },
   })
@@ -205,18 +203,20 @@ function buildAssistantNotificationMessageInput(
 }
 
 async function deliverAssistantNotificationMessage(input: {
+  dedupeToken: string | null
   input: AssistantMessageInput
   message: string
   session: AssistantSession
   sharedPlan: Awaited<ReturnType<typeof resolveAssistantTurnSharedPlan>>
   turnId: string
-}): Promise<AssistantNotificationDeliveryResult> {
+}): Promise<void> {
   const state = createAssistantRuntimeStateService(input.input.vault)
   const audience = input.sharedPlan.conversationPolicy.audience
   const outcome = await state.outbox.deliverMessage({
     turnId: input.turnId,
     sessionId: input.session.sessionId,
     message: input.message,
+    dedupeToken: input.dedupeToken,
     channel: audience.channel ?? input.session.binding.channel,
     identityId: audience.identityId ?? input.session.binding.identityId,
     actorId: audience.actorId ?? input.session.binding.actorId,
@@ -232,9 +232,7 @@ async function deliverAssistantNotificationMessage(input: {
   switch (outcome.kind) {
     case 'sent':
     case 'queued':
-      return {
-        session: outcome.session ?? input.session,
-      }
+      return
     case 'failed':
       throw outcome.deliveryError
     default:

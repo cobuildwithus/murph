@@ -34,13 +34,19 @@ const assistantCronStoreSchema = z
   })
   .strict()
 
+const assistantCronStoreReadSchema = z
+  .object({
+    version: z.literal(ASSISTANT_CRON_STORE_VERSION),
+    jobs: z.array(z.unknown()),
+  })
+  .strict()
+
 export type AssistantCronStore = z.infer<typeof assistantCronStoreSchema>
 
 export interface AssistantCronTargetInput {
   alias?: string | null
   channel?: string | null
   deliveryTarget?: string | null
-  deliverResponse?: boolean
   identityId?: string | null
   participantId?: string | null
   sessionId?: string | null
@@ -64,7 +70,7 @@ export async function readAssistantCronStore(
   try {
     const raw = await readFile(paths.cronJobsPath, 'utf8')
     return normalizeAssistantCronStore(
-      assistantCronStoreSchema.parse(JSON.parse(raw) as unknown),
+      sanitizePersistedAssistantCronStore(JSON.parse(raw) as unknown),
     )
   } catch (error) {
     if (isMissingFileError(error)) {
@@ -228,7 +234,6 @@ export function buildAssistantCronTarget(
     participantId: normalizeNullableString(input.participantId),
     sourceThreadId: normalizeNullableString(input.sourceThreadId),
     deliveryTarget: normalizeNullableString(input.deliveryTarget),
-    deliverResponse: input.deliverResponse ?? false,
   }
 }
 
@@ -262,10 +267,35 @@ function createEmptyAssistantCronStore(): AssistantCronStore {
   }
 }
 
+function sanitizePersistedAssistantCronStore(value: unknown): AssistantCronStore {
+  const parsed = assistantCronStoreReadSchema.parse(value)
+  return assistantCronStoreSchema.parse({
+    ...parsed,
+    jobs: parsed.jobs.map(stripLegacyAssistantCronTargetFields),
+  })
+}
+
 function normalizeAssistantCronStore(store: AssistantCronStore): AssistantCronStore {
   return {
     ...store,
     jobs: store.jobs.map((job) => normalizeAssistantCronJob(job)),
+  }
+}
+
+function stripLegacyAssistantCronTargetFields(value: unknown): unknown {
+  if (!isPlainRecord(value)) {
+    return value
+  }
+
+  const target = value.target
+  if (!isPlainRecord(target) || !('deliverResponse' in target)) {
+    return value
+  }
+
+  const { deliverResponse: _legacyDeliverResponse, ...normalizedTarget } = target
+  return {
+    ...value,
+    target: normalizedTarget,
   }
 }
 
@@ -319,6 +349,10 @@ function compareNullableIsoTimestamps(
   }
 
   return left.localeCompare(right)
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 function isForeignAssistantCronProcessRunning(pid: number): boolean {

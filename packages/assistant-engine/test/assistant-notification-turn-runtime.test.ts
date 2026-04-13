@@ -35,7 +35,7 @@ afterEach(() => {
   vi.doUnmock('../src/assistant/turn-lock.js')
 })
 
-test('sendAssistantNotificationLocal persists the turn before outbound delivery', async () => {
+test('sendAssistantNotificationLocal persists the turn before outbound delivery and forwards the dedupe token', async () => {
   const persistedBeforeDelivery: string[] = []
   const initialSession = createAssistantSession({
     binding: {
@@ -98,6 +98,7 @@ test('sendAssistantNotificationLocal persists the turn before outbound delivery'
       outbox: {
         deliverMessage: vi.fn(async (input) => {
           persistedBeforeDelivery.push('deliver')
+          assert.equal(input.dedupeToken, 'cron-slot-token')
           return {
             delivery: null,
             intent: {
@@ -184,6 +185,7 @@ test('sendAssistantNotificationLocal persists the turn before outbound delivery'
   )
 
   const result = await sendAssistantNotificationLocal({
+    deliveryDedupeToken: 'cron-slot-token',
     executionContext: {
       hosted: null,
     },
@@ -212,7 +214,7 @@ test('sendAssistantNotificationLocal persists the turn before outbound delivery'
     'identity-saved',
   )
   assert.equal(result.response, 'Sanitized notification text')
-  assert.equal(result.session, deliveredSession)
+  assert.equal(result.session, savedSession)
   assert.deepEqual(result.decision, {
     kind: 'send_message',
     privateSummary: 'summary',

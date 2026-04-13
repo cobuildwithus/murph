@@ -163,7 +163,6 @@ test('assistant cron preset installs materialize regular cron jobs with resolved
   assert.equal(installed.job.target.channel, 'telegram')
   assert.equal(installed.job.target.alias, 'routine:mindfulness')
   assert.equal(installed.job.target.sourceThreadId, '123456789')
-  assert.equal(installed.job.target.deliverResponse, true)
   assert.equal(
     installed.resolvedVariables.practice_window,
     'a 10 minute seated meditation before work',
@@ -222,7 +221,6 @@ test('assistant cron jobs reuse the sole saved self-delivery target when no rout
     assert.equal(installed.job.target.channel, 'telegram')
     assert.equal(installed.job.target.participantId, 'saved-chat')
     assert.equal(installed.job.target.sourceThreadId, 'saved-chat')
-    assert.equal(installed.job.target.deliverResponse, true)
   } finally {
     process.env.HOME = originalHome
   }
@@ -313,20 +311,6 @@ test('assistant cron jobs require explicit outbound delivery routing', async () 
       /Email cron jobs require a configured email sender identity/u,
     )
 
-    await assert.rejects(
-      () =>
-        addAssistantCronJob({
-          vault: vaultRoot,
-          name: 'explicitly-disabled-delivery',
-          prompt: 'Send my weekly update.',
-          schedule: buildAssistantCronSchedule({
-            every: '1d',
-          }),
-          ...testCronDeliveryTarget,
-          deliverResponse: false,
-        }),
-      /always use bound notification delivery/u,
-    )
   } finally {
     process.env.HOME = originalHome
   }
@@ -354,7 +338,6 @@ test('assistant cron jobs persist cleanly and can be enabled, disabled, and remo
   assert.equal(job.schedule.kind, 'every')
   assert.equal(job.keepAfterRun, true)
   assert.equal(job.enabled, true)
-  assert.equal(job.target.deliverResponse, true)
   assert.equal(job.state.nextRunAt !== null, true)
 
   const listed = await listAssistantCronJobs(vaultRoot)

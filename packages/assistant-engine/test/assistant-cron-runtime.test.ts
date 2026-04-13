@@ -97,6 +97,7 @@ import {
   getAssistantCronJob,
   getAssistantCronStatus,
   listAssistantCronJobs,
+  listAssistantCronRuns,
   processDueAssistantCronJobsLocal,
   runAssistantCronJobNow,
   setAssistantCronJobEnabled,
@@ -414,7 +415,6 @@ describe('assistant cron runtime orchestration', () => {
         alias: 'continuity-alias',
         channel: 'telegram',
         deliveryTarget: 'room-1',
-        deliverResponse: true,
         sessionId: 'session-1',
       },
     }))
@@ -510,10 +510,61 @@ describe('assistant cron runtime orchestration', () => {
 
     expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
       expect.objectContaining({
+        deliveryDedupeToken: null,
         instructions: 'Check in for raw-prompt-shape',
         turnTrigger: 'automation-cron',
       }),
     )
+  })
+
+  it('persists the private summary when a scheduled notification turn returns no response', async () => {
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-private-summary-',
+    )
+    const canonicalJob = await createCanonicalJob(vaultRoot, 'private-summary')
+
+    await updateCanonicalRuntimeState(vaultRoot, canonicalJob.jobId, (record) => ({
+      ...record,
+      state: {
+        ...record.state,
+        nextRunAt: '2026-04-08T08:00:00.000Z',
+      },
+    }))
+    cronMocks.sendAssistantMessageLocal.mockResolvedValueOnce({
+      decision: {
+        kind: 'skip',
+        privateSummary: 'Skipped because no delivery was required.',
+      },
+      response: null,
+      session: {
+        sessionId: 'session-private-summary',
+      },
+    })
+
+    const summary = await processDueAssistantCronJobsLocal({
+      limit: 1,
+      vault: vaultRoot,
+    })
+
+    expect(summary).toEqual({
+      failed: 0,
+      processed: 1,
+      succeeded: 1,
+    })
+    await expect(
+      listAssistantCronRuns({
+        job: canonicalJob.jobId,
+        vault: vaultRoot,
+      }),
+    ).resolves.toEqual({
+      jobId: canonicalJob.jobId,
+      runs: [
+        expect.objectContaining({
+          response: 'Skipped because no delivery was required.',
+          status: 'succeeded',
+        }),
+      ],
+    })
   })
 
   it('processes due jobs across local and canonical stores and reports mixed outcomes', async () => {
@@ -552,6 +603,14 @@ describe('assistant cron runtime orchestration', () => {
       processed: 2,
       succeeded: 1,
     })
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        deliveryDedupeToken: expect.stringContaining(
+          'assistant-cron|automation-1|2026-04-08T08:00:00.000Z',
+        ),
+        turnTrigger: 'automation-cron',
+      }),
+    )
 
     const updatedLocal = await getAssistantCronJob(vaultRoot, localJob.jobId)
     expect(updatedLocal.state.lastSucceededAt).not.toBeNull()
