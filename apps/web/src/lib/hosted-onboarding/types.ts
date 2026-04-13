@@ -11,6 +11,7 @@ export interface HostedInviteStatusPayload {
     expiresAt: string;
     phoneHint: string;
   } | null;
+  murphPhoneNumber?: string | null;
   session: {
     authenticated: boolean;
     expiresAt: string | null;

@@ -105,6 +105,7 @@ export function JoinInviteStageContent({
       {status.stage === "active" ? (
         <JoinInviteActivePanel
           activationPending={status.activationPending}
+          murphPhoneNumber={status.murphPhoneNumber ?? null}
           pendingAction={pendingAction}
           shareImportState={shareImportState}
           sharePreview={sharePreview}

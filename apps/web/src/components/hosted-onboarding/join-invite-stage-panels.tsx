@@ -23,7 +23,7 @@ import { JOIN_INVITE_ACTIVATION_PENDING_COPY } from "./join-invite-copy";
 import type { JoinInviteShareImportState } from "./join-invite-state";
 import { describeHostedSharePreview } from "../hosted-share/hosted-share-preview";
 
-const MESSAGES_APP_HREF = "sms:";
+const MURPH_CONTACT_DOWNLOAD_FILENAME = "Murph.vcf";
 
 interface JoinInviteVerificationPanelProps {
   awaitingInviteSessionResolution: boolean;
@@ -163,17 +163,26 @@ export function JoinInviteCheckoutButton({
 
 export function JoinInviteActivePanel({
   activationPending,
+  murphPhoneNumber,
   pendingAction,
   shareImportState,
   sharePreview,
   onAcceptShare,
 }: {
   activationPending: boolean;
+  murphPhoneNumber: string | null;
   pendingAction: "checkout" | "share" | null;
   shareImportState: JoinInviteShareImportState;
   sharePreview: HostedSharePreview | null;
   onAcceptShare: () => Promise<void>;
 }) {
+  const murphContactActions = murphPhoneNumber
+    ? {
+        smsHref: buildMurphSmsHref(murphPhoneNumber),
+        vcardHref: buildMurphVcardHref(murphPhoneNumber),
+      }
+    : null;
+
   return (
     <div className="space-y-6">
       {activationPending ? (
@@ -228,9 +237,21 @@ export function JoinInviteActivePanel({
       ) : null}
 
       <div className="flex flex-col items-start gap-3">
-        <Button render={<a href={MESSAGES_APP_HREF} />} nativeButton={false} size="lg">
-          Open Messages
-        </Button>
+        {murphContactActions ? (
+          <div className="flex flex-col items-start gap-3 sm:flex-row sm:flex-wrap">
+            <Button render={<a href={murphContactActions.smsHref} />} nativeButton={false} size="lg">
+              Text Murph
+            </Button>
+            <Button
+              render={<a download={MURPH_CONTACT_DOWNLOAD_FILENAME} href={murphContactActions.vcardHref} />}
+              nativeButton={false}
+              variant="outline"
+              size="lg"
+            >
+              Add Murph to Contacts
+            </Button>
+          </div>
+        ) : null}
         <Button
           render={<Link href="/settings" />}
           nativeButton={false}
@@ -243,4 +264,21 @@ export function JoinInviteActivePanel({
       </div>
     </div>
   );
+}
+
+function buildMurphSmsHref(phoneNumber: string): string {
+  return `sms:${phoneNumber}`;
+}
+
+function buildMurphVcardHref(phoneNumber: string): string {
+  const vcard = [
+    "BEGIN:VCARD",
+    "VERSION:3.0",
+    "FN:Murph",
+    `TEL;TYPE=CELL:${phoneNumber}`,
+    "END:VCARD",
+    "",
+  ].join("\r\n");
+
+  return `data:text/vcard;charset=utf-8,${encodeURIComponent(vcard)}`;
 }

@@ -1,6 +1,8 @@
 import { HostedBillingStatus } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { buildHostedMemberRoutingPrivateColumns } from "@/src/lib/hosted-onboarding/member-private-codecs";
+
 const mocks = vi.hoisted(() => ({
   readHostedExecutionControlClientIfConfigured: vi.fn(),
 }));
@@ -61,6 +63,7 @@ describe("getHostedInviteStatus", () => {
         member: {
           include: {
             identity: true,
+            routing: true,
           },
         },
       },
@@ -125,11 +128,79 @@ describe("getHostedInviteStatus", () => {
       }),
     ).resolves.toMatchObject({
       activationPending: true,
+      murphPhoneNumber: null,
       session: {
         authenticated: true,
         matchesInvite: true,
       },
       stage: "active",
+    });
+  });
+
+  it("returns the assigned Murph phone number only for matched active sessions", async () => {
+    const prisma = {
+      executionOutbox: {
+        findFirst: vi.fn().mockResolvedValue(null),
+      },
+      hostedInvite: {
+        findUnique: vi.fn().mockResolvedValue(createInvite({
+          member: createMember({
+            billingStatus: HostedBillingStatus.active,
+            identity: createIdentity(),
+            routing: createRouting({
+              linqChatId: "chat_123",
+              linqRecipientPhone: "+1 (555) 010-0001",
+            }),
+          }),
+        })),
+      },
+    } as never;
+
+    await expect(
+      getHostedInviteStatus({
+        authenticatedMember: createAuthenticatedMember(),
+        inviteCode: "invite-code",
+        now: NOW,
+        prisma,
+      }),
+    ).resolves.toMatchObject({
+      murphPhoneNumber: "+15550100001",
+      stage: "active",
+    });
+  });
+
+  it("redacts the assigned Murph phone number for unmatched sessions", async () => {
+    const prisma = {
+      hostedInvite: {
+        findUnique: vi.fn().mockResolvedValue(createInvite({
+          member: createMember({
+            billingStatus: HostedBillingStatus.active,
+            identity: createIdentity(),
+            routing: createRouting({
+              linqChatId: "chat_123",
+              linqRecipientPhone: "+15550100001",
+            }),
+          }),
+        })),
+      },
+    } as never;
+
+    await expect(
+      getHostedInviteStatus({
+        authenticatedMember: {
+          ...createAuthenticatedMember(),
+          id: "member_other",
+        },
+        inviteCode: "invite-code",
+        now: NOW,
+        prisma,
+      }),
+    ).resolves.toMatchObject({
+      murphPhoneNumber: null,
+      session: {
+        authenticated: true,
+        matchesInvite: false,
+      },
     });
   });
 
@@ -282,6 +353,29 @@ function createIdentity(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function createRouting(input?: {
+  linqChatId?: string | null;
+  linqRecipientPhone?: string | null;
+  pendingLinqChatId?: string | null;
+  pendingLinqRecipientPhone?: string | null;
+  telegramUserLookupKey?: string | null;
+}) {
+  return {
+    createdAt: NOW,
+    memberId: "member_123",
+    telegramUserLookupKey: input?.telegramUserLookupKey ?? null,
+    updatedAt: NOW,
+    ...buildHostedMemberRoutingPrivateColumns({
+      linqChatId: input?.linqChatId ?? null,
+      linqRecipientPhone: input?.linqRecipientPhone ?? null,
+      memberId: "member_123",
+      pendingLinqChatId: input?.pendingLinqChatId ?? null,
+      pendingLinqRecipientPhone: input?.pendingLinqRecipientPhone ?? null,
+      telegramUserId: null,
+    }),
+  };
+}
+
 function createMember(overrides: Record<string, unknown> = {}) {
   return {
     billingStatus: HostedBillingStatus.not_started,
@@ -293,6 +387,7 @@ function createMember(overrides: Record<string, unknown> = {}) {
     phoneLookupKey: "hbidx:phone:v1:legacy",
     phoneNumberVerifiedAt: null,
     privyUserId: null,
+    routing: null,
     suspendedAt: null,
     stripeCustomerId: null,
     stripeSubscriptionId: null,

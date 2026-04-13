@@ -443,6 +443,7 @@ test("active invite state renders message and settings actions with client navig
   const markup = renderToStaticMarkup(
     createElement(JoinInviteClient, {
       initialStatus: createStatus({
+        murphPhoneNumber: "+15550100001",
         session: {
           authenticated: true,
           expiresAt: null,
@@ -456,8 +457,10 @@ test("active invite state renders message and settings actions with client navig
     }),
   );
 
-  assert.ok(markup.includes('href="sms:"'));
-  assert.match(markup, /Open Messages/);
+  assert.ok(markup.includes('href="sms:+15550100001"'));
+  assert.match(markup, /Text Murph/);
+  assert.ok(markup.includes('download="Murph.vcf"'));
+  assert.match(markup, /Add Murph to Contacts/);
   assert.ok(markup.includes('href="/settings"'));
   assert.match(markup, /Manage settings/);
 });
