@@ -33,6 +33,11 @@ import {
   sanitizeHostedOnboardingPersistedErrorMessage,
 } from "./http";
 import {
+  deriveHostedOnboardingTimingErrorName,
+  finishHostedOnboardingTiming,
+  startHostedOnboardingTiming,
+} from "./logging";
+import {
   isHostedOnboardingRevnetEnabled,
   readHostedRevnetPaymentReceipt,
 } from "./revnet";
@@ -438,6 +443,11 @@ async function processClaimedHostedStripeEvent(
   claimed: NonNullable<Awaited<ReturnType<typeof claimHostedStripeEvent>>>,
   prisma: PrismaClient,
 ): Promise<HostedStripeEventReconcileResult> {
+  const timing = startHostedOnboardingTiming("hosted-onboarding.stripe.reconcile-event", {
+    attemptCount: claimed.attemptCount,
+    eventType: claimed.type,
+  });
+
   try {
     const stripeEvent = await fetchHostedStripeEventForReconciliation(claimed.eventId);
     const processingContext = await prepareHostedStripeEventProcessingContext(stripeEvent);
@@ -461,6 +471,12 @@ async function processClaimedHostedStripeEvent(
         processedAt: new Date(),
         status: HostedStripeEventStatus.completed,
       },
+    });
+    finishHostedOnboardingTiming(timing, "completed", {
+      activatedMember: Boolean(result.activatedMemberId),
+      createdOrUpdatedRevnetIssuance: result.createdOrUpdatedRevnetIssuance,
+      hostedExecutionEventScheduled: Boolean(result.hostedExecutionEventId),
+      postCommitProvisionScheduled: Boolean(result.postCommitProvisionUserId),
     });
 
     return {
@@ -489,6 +505,11 @@ async function processClaimedHostedStripeEvent(
             ? HostedStripeEventStatus.poisoned
             : HostedStripeEventStatus.failed,
       },
+    });
+    finishHostedOnboardingTiming(timing, "failed", {
+      errorName: deriveHostedOnboardingTimingErrorName(error),
+      poisoned:
+        claimed.attemptCount >= STRIPE_EVENT_MAX_ATTEMPTS,
     });
 
     return {

@@ -72,6 +72,7 @@ type BillingServiceInvite = {
 describe("createHostedBillingCheckout", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.spyOn(console, "info").mockImplementation(() => {});
     mocks.requireHostedOnboardingPublicBaseUrl.mockReturnValue("https://join.example.test");
     mocks.requireHostedStripeCheckoutConfig.mockReturnValue({
       priceId: "price_123",
@@ -113,6 +114,7 @@ describe("createHostedBillingCheckout", () => {
   });
 
   it("creates a fresh Stripe Checkout Session keyed only by member metadata", async () => {
+    const consoleInfo = vi.spyOn(console, "info").mockImplementation(() => {});
     mocks.requireHostedInviteForAuthentication.mockResolvedValue(makeInvite());
     const prisma = makePrisma();
 
@@ -157,6 +159,23 @@ describe("createHostedBillingCheckout", () => {
       }),
     );
     expect(mocks.stripe.checkout.sessions.create.mock.calls[0]?.[1]).toBeUndefined();
+    expect(consoleInfo).toHaveBeenCalledWith(
+      "Hosted onboarding timing.",
+      expect.objectContaining({
+        customerPath: "created",
+        outcome: "completed",
+        step: "hosted-onboarding.billing.ensure-stripe-customer",
+      }),
+    );
+    expect(consoleInfo).toHaveBeenCalledWith(
+      "Hosted onboarding timing.",
+      expect.objectContaining({
+        alreadyActive: false,
+        outcome: "completed",
+        shareCodeProvided: true,
+        step: "hosted-onboarding.billing.create-checkout",
+      }),
+    );
   });
 
   it("reuses the existing durable Stripe customer binding for metering and checkout", async () => {
