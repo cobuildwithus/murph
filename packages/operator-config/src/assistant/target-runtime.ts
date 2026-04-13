@@ -6,9 +6,8 @@ import { normalizeNullableString } from './shared.js'
 
 export const assistantExecutionDriverValues = [
   'codex-cli',
+  'responses',
   'openai-compatible',
-  'openai-responses',
-  'gateway',
 ] as const
 
 export const assistantResumeKindValues = [
@@ -64,6 +63,10 @@ export function normalizeAssistantExecutionDriver(
   value: string | null | undefined,
 ): AssistantExecutionDriver | null {
   const normalized = normalizeNullableString(value)
+  if (normalized === 'openai-responses' || normalized === 'gateway') {
+    return 'responses'
+  }
+
   return normalized !== null &&
     assistantExecutionDriverValues.includes(normalized as AssistantExecutionDriver)
     ? (normalized as AssistantExecutionDriver)
@@ -225,14 +228,14 @@ function resolveAssistantOpenAICompatibleRuntimeBehavior(input: {
   model?: string | null
   presetId: SetupAssistantProviderPreset | null
 }): AssistantOpenAICompatibleRuntimeBehavior {
-  const gatewayOpenAIModel =
+  const gatewayResponsesModel =
     input.presetId === 'vercel-ai-gateway' &&
     isAssistantGatewayOpenAIModel(input.model)
 
   switch (input.presetId) {
     case 'openai':
       return {
-        executionDriver: 'openai-responses',
+        executionDriver: 'responses',
         resumeKind: 'openai-response-id',
         supportsGatewayWebSearch: false,
         supportsProviderWebSearch: true,
@@ -241,11 +244,11 @@ function resolveAssistantOpenAICompatibleRuntimeBehavior(input: {
       }
     case 'vercel-ai-gateway':
       return {
-        executionDriver: 'gateway',
-        resumeKind: gatewayOpenAIModel ? 'openai-response-id' : null,
+        executionDriver: 'responses',
+        resumeKind: gatewayResponsesModel ? 'openai-response-id' : null,
         supportsGatewayWebSearch: true,
-        supportsProviderWebSearch: gatewayOpenAIModel,
-        supportsReasoningEffort: gatewayOpenAIModel,
+        supportsProviderWebSearch: gatewayResponsesModel,
+        supportsReasoningEffort: gatewayResponsesModel,
         supportsZeroDataRetention: true,
       }
     default:

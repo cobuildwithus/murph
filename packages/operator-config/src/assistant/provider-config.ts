@@ -360,10 +360,7 @@ export function resolveAssistantProviderContinuityFingerprint(
 export function shouldUseAssistantOpenAIResponsesApi(
   input: AssistantProviderConfigInput | null | undefined,
 ): boolean {
-  return (
-    resolveAssistantProviderRuntimeTarget(input).executionDriver ===
-    'openai-responses'
-  )
+  return resolveAssistantProviderRuntimeTarget(input).executionDriver === 'responses'
 }
 
 export function supportsAssistantNativeResume(
