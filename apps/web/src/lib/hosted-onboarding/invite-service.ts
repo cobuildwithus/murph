@@ -97,13 +97,11 @@ export async function getHostedInviteStatus(input: {
       expiresAt: invite.expiresAt.toISOString(),
       phoneHint: readHostedPhoneHint(inviteIdentity.maskedPhoneNumberHint),
     },
-    murphPhoneNumber: sessionMatchesInvite && stage === "active"
-      ? normalizePhoneNumber(
-          inviteRouting?.linqRecipientPhone
-          ?? inviteRouting?.pendingLinqRecipientPhone
-          ?? null,
-        )
-      : null,
+    murphPhoneNumber: resolveHostedInviteMurphPhoneNumber({
+      routing: inviteRouting,
+      sessionMatchesInvite,
+      stage,
+    }),
     session: {
       authenticated: Boolean(input.authenticatedMember),
       expiresAt: null,
@@ -360,6 +358,22 @@ export function requireHostedInviteMemberIdentity(
     message: "Hosted invite identity state is missing.",
     httpStatus: 500,
   });
+}
+
+function resolveHostedInviteMurphPhoneNumber(input: {
+  routing: ReturnType<typeof projectHostedMemberRoutingState> | null;
+  sessionMatchesInvite: boolean | undefined;
+  stage: HostedInviteStatusPayload["stage"];
+}): string | null {
+  if (!input.sessionMatchesInvite || input.stage !== "active") {
+    return null;
+  }
+
+  return normalizePhoneNumber(
+    input.routing?.linqRecipientPhone
+    ?? input.routing?.pendingLinqRecipientPhone
+    ?? null,
+  );
 }
 
 async function findHostedInviteByCode(

@@ -176,13 +176,6 @@ export function JoinInviteActivePanel({
   sharePreview: HostedSharePreview | null;
   onAcceptShare: () => Promise<void>;
 }) {
-  const murphContactActions = murphPhoneNumber
-    ? {
-        smsHref: buildMurphSmsHref(murphPhoneNumber),
-        vcardHref: buildMurphVcardHref(murphPhoneNumber),
-      }
-    : null;
-
   return (
     <div className="space-y-6">
       {activationPending ? (
@@ -237,21 +230,7 @@ export function JoinInviteActivePanel({
       ) : null}
 
       <div className="flex flex-col items-start gap-3">
-        {murphContactActions ? (
-          <div className="flex flex-col items-start gap-3 sm:flex-row sm:flex-wrap">
-            <Button render={<a href={murphContactActions.smsHref} />} nativeButton={false} size="lg">
-              Text Murph
-            </Button>
-            <Button
-              render={<a download={MURPH_CONTACT_DOWNLOAD_FILENAME} href={murphContactActions.vcardHref} />}
-              nativeButton={false}
-              variant="outline"
-              size="lg"
-            >
-              Add Murph to Contacts
-            </Button>
-          </div>
-        ) : null}
+        <JoinInviteMurphContactActions murphPhoneNumber={murphPhoneNumber} />
         <Button
           render={<Link href="/settings" />}
           nativeButton={false}
@@ -266,12 +245,42 @@ export function JoinInviteActivePanel({
   );
 }
 
+function JoinInviteMurphContactActions({
+  murphPhoneNumber,
+}: {
+  murphPhoneNumber: string | null;
+}) {
+  if (!murphPhoneNumber) {
+    return null;
+  }
+
+  return (
+    <div className="flex flex-col items-start gap-3 sm:flex-row sm:flex-wrap">
+      <Button render={<a href={buildMurphSmsHref(murphPhoneNumber)} />} nativeButton={false} size="lg">
+        Text Murph
+      </Button>
+      <Button
+        render={<a download={MURPH_CONTACT_DOWNLOAD_FILENAME} href={buildMurphVcardHref(murphPhoneNumber)} />}
+        nativeButton={false}
+        variant="outline"
+        size="lg"
+      >
+        Add Murph to Contacts
+      </Button>
+    </div>
+  );
+}
+
 function buildMurphSmsHref(phoneNumber: string): string {
   return `sms:${phoneNumber}`;
 }
 
 function buildMurphVcardHref(phoneNumber: string): string {
-  const vcard = [
+  return `data:text/vcard;charset=utf-8,${encodeURIComponent(buildMurphVcard(phoneNumber))}`;
+}
+
+function buildMurphVcard(phoneNumber: string): string {
+  return [
     "BEGIN:VCARD",
     "VERSION:3.0",
     "FN:Murph",
@@ -279,6 +288,4 @@ function buildMurphVcardHref(phoneNumber: string): string {
     "END:VCARD",
     "",
   ].join("\r\n");
-
-  return `data:text/vcard;charset=utf-8,${encodeURIComponent(vcard)}`;
 }
