@@ -26,6 +26,17 @@ afterEach(async () => {
   }));
 });
 
+interface ClassifiedRunnerPayload {
+  code?: string;
+  details?: {
+    errorCodeDetail?: string;
+    errorDetail?: string;
+    stackPreview?: string[];
+  };
+  error?: string;
+  errorName?: string;
+}
+
 function buildJobBody(input: {
   dispatch: {
     event: Record<string, unknown>;
@@ -188,7 +199,7 @@ describe("startHostedContainerEntrypoint", () => {
     });
   });
 
-  it("keeps downstream runtime TypeErrors as internal errors after request decoding succeeds", async () => {
+  it("surfaces safe downstream runtime TypeError diagnostics after request decoding succeeds", async () => {
     const spy = vi.spyOn(nodeRunner, "runHostedExecutionJob").mockRejectedValue(
       new TypeError("missing hosted runtime config"),
     );
@@ -214,6 +225,54 @@ describe("startHostedContainerEntrypoint", () => {
           },
         })),
         headers: {
+          Authorization: "Bearer runner-token",
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "POST",
+      });
+
+      expect(response.status).toBe(500);
+      const payload = await response.json() as ClassifiedRunnerPayload;
+      expect(payload).toMatchObject({
+        code: "type_error",
+        details: {
+          errorDetail: "missing hosted runtime config",
+        },
+        error: "Hosted execution runtime failed.",
+        errorName: "TypeError",
+      });
+      expect(payload.details?.stackPreview).toEqual(expect.any(Array));
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("redacts downstream runtime secrets while surfacing safe failure diagnostics", async () => {
+    const spy = vi.spyOn(nodeRunner, "runHostedExecutionJob").mockRejectedValue(
+      new Error("Authorization: Bearer secret-token for ops@example.com OPENAI_API_KEY=sk-live-secret"),
+    );
+
+    try {
+      const server = await startHostedContainerEntrypoint({
+        controlToken: "runner-token",
+        port: 0,
+      });
+      servers.push(server);
+      const address = server.address();
+
+      if (!address || typeof address === "string") {
+        throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
+      }
+
+      const response = await fetch(`http://127.0.0.1:${address.port}/__internal/run`, {
+        body: JSON.stringify(buildJobBody({
+          dispatch: {
+            event: { kind: "assistant.cron.tick", reason: "manual", userId: "u1" },
+            eventId: "evt_runtime_secret_error",
+            occurredAt: "2026-03-26T12:00:00.000Z",
+          },
+        })),
+        headers: {
           authorization: "Bearer runner-token",
           "content-type": "application/json; charset=utf-8",
         },
@@ -221,9 +280,66 @@ describe("startHostedContainerEntrypoint", () => {
       });
 
       expect(response.status).toBe(500);
-      await expect(response.json()).resolves.toEqual({
-        error: "Internal error.",
+      const payload = await response.json() as ClassifiedRunnerPayload;
+      expect(payload).toMatchObject({
+        code: "authorization_error",
+        details: {
+          errorDetail: "Authorization=Bearer [redacted] for [redacted-email] OPENAI_API_KEY=[redacted]",
+        },
+        error: "Hosted execution authorization failed.",
+        errorName: "Error",
       });
+      expect(payload.details?.stackPreview).toEqual(expect.any(Array));
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("returns safe configuration error details from the inner hosted runtime", async () => {
+    const spy = vi.spyOn(nodeRunner, "runHostedExecutionJob").mockRejectedValue(
+      new HostedAssistantConfigurationError(
+        "HOSTED_ASSISTANT_CONFIG_REQUIRED",
+        "Hosted assistant defaults are missing.",
+      ),
+    );
+
+    try {
+      const server = await startHostedContainerEntrypoint({
+        controlToken: "runner-token",
+        port: 0,
+      });
+      servers.push(server);
+      const address = server.address();
+
+      if (!address || typeof address === "string") {
+        throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
+      }
+
+      const response = await fetch(`http://127.0.0.1:${address.port}/__internal/run`, {
+        body: JSON.stringify(buildJobBody({
+          dispatch: {
+            event: { kind: "assistant.cron.tick", reason: "manual", userId: "u1" },
+            eventId: "evt_runtime_config_error",
+            occurredAt: "2026-03-26T12:00:00.000Z",
+          },
+        })),
+        headers: {
+          authorization: "Bearer runner-token",
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "POST",
+      });
+
+      expect(response.status).toBe(503);
+      const payload = await response.json() as ClassifiedRunnerPayload;
+      expect(payload).toMatchObject({
+        code: "HOSTED_ASSISTANT_CONFIG_REQUIRED",
+        details: {
+          errorCodeDetail: "HOSTED_ASSISTANT_CONFIG_REQUIRED",
+        },
+        error: "Hosted assistant defaults are missing.",
+      });
+      expect(payload.details?.stackPreview).toEqual(expect.any(Array));
     } finally {
       spy.mockRestore();
     }
@@ -454,21 +570,33 @@ describe("classifyRunnerJobError", () => {
       ),
     );
 
-    expect(classified).toEqual({
+    expect(classified).toMatchObject({
       payload: {
         code: "HOSTED_ASSISTANT_CONFIG_REQUIRED",
+        details: {
+          errorCodeDetail: "HOSTED_ASSISTANT_CONFIG_REQUIRED",
+        },
         error: "Hosted assistant defaults are missing.",
       },
       statusCode: 503,
     });
+    expect((classified.payload as ClassifiedRunnerPayload).details?.stackPreview).toEqual(expect.any(Array));
   });
 
-  it("keeps generic runner failures opaque", () => {
-    expect(classifyRunnerJobError(new Error("boom"))).toEqual({
+  it("surfaces safe generic runner failure metadata", () => {
+    const classified = classifyRunnerJobError(new Error("boom"));
+
+    expect(classified).toMatchObject({
       payload: {
-        error: "Internal error.",
+        code: "runtime_error",
+        details: {
+          errorDetail: "boom",
+        },
+        error: "Hosted execution runtime failed.",
+        errorName: "Error",
       },
       statusCode: 500,
     });
+    expect((classified.payload as ClassifiedRunnerPayload).details?.stackPreview).toEqual(expect.any(Array));
   });
 });

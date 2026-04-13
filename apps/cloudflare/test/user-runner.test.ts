@@ -2168,6 +2168,12 @@ describe("HostedUserRunner", () => {
       eventId: "evt_retry_1",
       phase: "retry.scheduled",
     });
+    expect(first.timeline?.map((entry) => entry.phase)).toEqual([
+      "claimed",
+      "dispatch.running",
+      "retry.scheduled",
+    ]);
+    expect(new Set((first.timeline ?? []).map((entry) => entry.runId)).size).toBe(1);
     expect(first.timeline?.at(-1)).toMatchObject({
       errorCode: "runner_http_error",
       phase: "retry.scheduled",
@@ -2190,6 +2196,12 @@ describe("HostedUserRunner", () => {
       eventId: "evt_retry_1",
       phase: "poisoned",
     });
+    expect(final.timeline?.slice(-3).map((entry) => entry.phase)).toEqual([
+      "claimed",
+      "dispatch.running",
+      "poisoned",
+    ]);
+    expect(new Set((final.timeline ?? []).slice(-3).map((entry) => entry.runId)).size).toBe(1);
   });
 
   it("redacts retryable runner failures before persisting hosted status", async () => {

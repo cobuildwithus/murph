@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   destroyHostedExecutionContainer,
+  HostedExecutionConfigurationError,
   type HostedExecutionContainerStubLike,
   invokeHostedExecutionContainerRunner,
   RunnerContainer,
@@ -238,6 +239,48 @@ describe("RunnerContainer", () => {
     expect(startOptions?.cancellationOptions.instanceGetTimeoutMS).toBeGreaterThan(0);
     expect(startOptions?.cancellationOptions.portReadyTimeoutMS).toBeLessThanOrEqual(1_000);
     expect(startOptions?.cancellationOptions.portReadyTimeoutMS).toBeGreaterThan(0);
+  });
+
+  it("propagates safe configuration failures from the runner shell with the inner error code", async () => {
+    const { container } = createContainerDouble({
+      containerFetch: vi.fn(async (url: string) => {
+        if (url.endsWith("/health")) {
+          return new Response(JSON.stringify({ ok: true }), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
+        }
+
+        return new Response(JSON.stringify({
+          code: "HOSTED_ASSISTANT_CONFIG_REQUIRED",
+          error: "Hosted assistant defaults are missing.",
+          stack: "secret stack should not escape the parser",
+        }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 503,
+        });
+      }),
+    });
+
+    const thrown = await container.invoke({
+      job: {
+        request: createRunnerRequest("evt_config_error"),
+      },
+      timeoutMs: 10_000,
+      userId: "member_123",
+    }).catch((error: unknown) => error);
+
+    expect(thrown).toBeInstanceOf(HostedExecutionConfigurationError);
+    expect(thrown).toMatchObject({
+      code: "HOSTED_ASSISTANT_CONFIG_REQUIRED",
+      message: "Hosted assistant defaults are missing.",
+      name: "HostedExecutionConfigurationError",
+    });
+    expect(String(thrown)).not.toContain("secret stack");
   });
 
   it("keeps legacy internal HTTP invoke routes disabled", async () => {

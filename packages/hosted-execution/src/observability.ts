@@ -47,6 +47,11 @@ const HOSTED_EXECUTION_SAFE_ERROR_NAMES = new Set([
 ]);
 
 const HOSTED_EXECUTION_MAX_OPERATOR_MESSAGE_LENGTH = 200;
+const HOSTED_EXECUTION_MAX_DIAGNOSTIC_MESSAGE_LENGTH = 320;
+const HOSTED_EXECUTION_MAX_STACK_PREVIEW_LINES = 3;
+const HOSTED_EXECUTION_MAX_DETAIL_ARRAY_LENGTH = 32;
+const HOSTED_EXECUTION_MAX_DETAIL_DEPTH = 4;
+const HOSTED_EXECUTION_MAX_DETAIL_KEYS = 32;
 const HOSTED_EXECUTION_SAFE_CONFIGURATION_MESSAGE_PATTERNS = [
   /^(?:[A-Z][A-Z0-9_]{1,127}|CF_[A-Z0-9_]{1,127}|HOSTED_[A-Z0-9_]{1,127}|DEVICE_SYNC_[A-Z0-9_]{1,127})\s+(?:must be|is)\s+configured(?:\s+for [A-Za-z0-9 ._/-]+)?\.?$/u,
   /^Native hosted execution requires a RunnerContainer binding\.$/u,
@@ -101,6 +106,7 @@ export interface HostedExecutionTimelineEntry {
 export interface HostedExecutionStructuredLogRecord {
   attempt: number | null;
   component: string;
+  details?: HostedExecutionStructuredLogDetails | null;
   errorCode?: string | null;
   errorMessage?: string | null;
   errorName?: string | null;
@@ -118,8 +124,23 @@ interface HostedExecutionDispatchLike {
   eventId?: string | null;
 }
 
+export type HostedExecutionStructuredLogDetailValue =
+  | boolean
+  | number
+  | string
+  | null
+  | HostedExecutionStructuredLogDetailValue[]
+  | {
+    [key: string]: HostedExecutionStructuredLogDetailValue;
+  };
+
+export type HostedExecutionStructuredLogDetails = {
+  [key: string]: HostedExecutionStructuredLogDetailValue;
+};
+
 export interface HostedExecutionStructuredLogInput {
   component: string;
+  details?: HostedExecutionStructuredLogDetails | null;
   dispatch?: HostedExecutionDispatchLike | null;
   error?: unknown;
   eventId?: string | null;
@@ -262,9 +283,14 @@ export function buildHostedExecutionStructuredLogRecord(
 ): HostedExecutionStructuredLogRecord {
   const error = input.error;
   const errorName = readHostedExecutionSafeErrorName(error);
+  const details = mergeHostedExecutionStructuredLogDetails(
+    sanitizeHostedExecutionStructuredLogDetails(input.details),
+    buildHostedExecutionSafeErrorDetails(error),
+  );
   return {
     attempt: input.run?.attempt ?? null,
     component: input.component,
+    ...(details ? { details } : {}),
     ...(error === undefined ? {} : {
       errorCode: deriveHostedExecutionErrorCode(error),
       errorMessage: summarizeHostedExecutionError(error),
@@ -347,7 +373,7 @@ function hasOwn<ObjectType extends object, Key extends PropertyKey>(
   return Object.hasOwn(object, key);
 }
 
-function readHostedExecutionSafeErrorName(error: unknown): string | null {
+export function readHostedExecutionSafeErrorName(error: unknown): string | null {
   if (!(error instanceof Error)) {
     return null;
   }
@@ -369,8 +395,77 @@ function readHostedExecutionSafeConfigurationMessage(message: string): string | 
     : null;
 }
 
+export function sanitizeHostedExecutionStructuredLogDetails(
+  value: HostedExecutionStructuredLogDetails | null | undefined,
+): HostedExecutionStructuredLogDetails | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+
+  const sanitized = sanitizeHostedExecutionDetailNode(value, 0);
+  return sanitized && typeof sanitized === "object" && !Array.isArray(sanitized)
+    ? sanitized
+    : null;
+}
+
+export function buildHostedExecutionSafeErrorDetails(
+  error: unknown,
+): HostedExecutionStructuredLogDetails | null {
+  if (!(error instanceof Error)) {
+    return null;
+  }
+
+  const nestedDetails = sanitizeHostedExecutionStructuredLogDetails(
+    readHostedExecutionObjectErrorProperty(error, ["details"]),
+  );
+  const details: HostedExecutionStructuredLogDetails = {
+    ...(nestedDetails ?? {}),
+  };
+  const errorDetail = normalizeHostedExecutionDiagnosticMessage(error.message);
+  const operatorSummary = summarizeHostedExecutionError(error);
+  const errorCause = readHostedExecutionSafeErrorCause(error);
+  const stackPreview = readHostedExecutionSafeStackPreview(error);
+  const errorStatus = readHostedExecutionNumericErrorProperty(
+    error,
+    ["status", "statusCode", "responseStatus"],
+    100,
+    599,
+  );
+  const errorCode = readHostedExecutionStringErrorProperty(
+    error,
+    ["code", "errorCode"],
+  );
+
+  if (errorDetail && errorDetail !== operatorSummary) {
+    details.errorDetail = errorDetail;
+  }
+
+  if (errorCause) {
+    details.errorCause = errorCause;
+  }
+
+  if (stackPreview) {
+    details.stackPreview = stackPreview;
+  }
+
+  if (errorStatus !== null) {
+    details.errorStatus = errorStatus;
+  }
+
+  if (errorCode) {
+    details.errorCodeDetail = errorCode;
+  }
+
+  return Object.keys(details).length > 0 ? details : null;
+}
+
 function redactHostedExecutionText(value: string): string {
   return value
+    .replace(/file:\/\/\/Users\/[^\s)"']+/gu, "file://<REDACTED_PATH>")
+    .replace(/\/Users\/[^\s)"']+/gu, "<REDACTED_PATH>")
+    .replace(/\/home\/[^\s)"']+/gu, "<REDACTED_PATH>")
+    .replace(/\/root\/[^\s)"']+/gu, "<REDACTED_PATH>")
+    .replace(/\b[A-Za-z]:\\Users\\[^\s)"']+/gu, "<REDACTED_PATH>")
     .replace(
       /\b(authorization)\b\s*:\s*Bearer\s+[A-Za-z0-9._~+/=-]+\b/giu,
       (_match, key: string) => `${key}=Bearer [redacted]`,
@@ -386,4 +481,175 @@ function redactHostedExecutionText(value: string): string {
       "$1=[redacted]",
     )
     .replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/gu, "[redacted-token]");
+}
+
+function mergeHostedExecutionStructuredLogDetails(
+  primary: HostedExecutionStructuredLogDetails | null,
+  secondary: HostedExecutionStructuredLogDetails | null,
+): HostedExecutionStructuredLogDetails | null {
+  if (!primary && !secondary) {
+    return null;
+  }
+
+  return {
+    ...(primary ?? {}),
+    ...(secondary ?? {}),
+  };
+}
+
+function sanitizeHostedExecutionDetailNode(
+  value: HostedExecutionStructuredLogDetailValue,
+  depth: number,
+): HostedExecutionStructuredLogDetailValue | null {
+  if (depth > HOSTED_EXECUTION_MAX_DETAIL_DEPTH) {
+    return null;
+  }
+
+  if (value === null || typeof value === "boolean") {
+    return value;
+  }
+
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : null;
+  }
+
+  if (typeof value === "string") {
+    return normalizeHostedExecutionDiagnosticMessage(value);
+  }
+
+  if (Array.isArray(value)) {
+    const sanitizedItems = value
+      .slice(0, HOSTED_EXECUTION_MAX_DETAIL_ARRAY_LENGTH)
+      .map((entry) => sanitizeHostedExecutionDetailNode(entry, depth + 1))
+      .filter((entry): entry is Exclude<typeof entry, null> => entry !== null);
+    return sanitizedItems.length > 0 ? sanitizedItems : null;
+  }
+
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const sanitizedEntries = Object.entries(value)
+    .slice(0, HOSTED_EXECUTION_MAX_DETAIL_KEYS)
+    .flatMap(([key, entry]) => {
+      if (!/^[A-Za-z0-9_.-]{1,64}$/u.test(key)) {
+        return [];
+      }
+
+      const sanitizedEntry = sanitizeHostedExecutionDetailNode(entry, depth + 1);
+      return sanitizedEntry === null ? [] : [[key, sanitizedEntry] as const];
+    });
+
+  return sanitizedEntries.length > 0 ? Object.fromEntries(sanitizedEntries) : null;
+}
+
+function normalizeHostedExecutionDiagnosticMessage(
+  value: unknown,
+  maxLength: number = HOSTED_EXECUTION_MAX_DIAGNOSTIC_MESSAGE_LENGTH,
+): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = redactHostedExecutionText(value)
+    .replace(/[\r\n\t]+/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim();
+
+  if (normalized.length === 0) {
+    return null;
+  }
+
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
+
+  return `${normalized.slice(0, maxLength - 1).trimEnd()}…`;
+}
+
+function readHostedExecutionSafeErrorCause(error: Error): string | null {
+  const cause = (error as Error & { cause?: unknown }).cause;
+
+  if (cause instanceof Error) {
+    return normalizeHostedExecutionDiagnosticMessage(cause.message);
+  }
+
+  return normalizeHostedExecutionDiagnosticMessage(
+    typeof cause === "string" ? cause : null,
+  );
+}
+
+function readHostedExecutionSafeStackPreview(error: Error): string[] | null {
+  if (typeof error.stack !== "string" || error.stack.length === 0) {
+    return null;
+  }
+
+  const lines = error.stack
+    .split(/\r?\n/gu)
+    .slice(1)
+    .map((line) => normalizeHostedExecutionDiagnosticMessage(line, 180))
+    .filter((line): line is string => Boolean(line))
+    .slice(0, HOSTED_EXECUTION_MAX_STACK_PREVIEW_LINES);
+
+  return lines.length > 0 ? lines : null;
+}
+
+function readHostedExecutionStringErrorProperty(
+  error: unknown,
+  keys: readonly string[],
+): string | null {
+  if (!error || typeof error !== "object") {
+    return null;
+  }
+
+  for (const key of keys) {
+    const value = (error as Record<string, unknown>)[key];
+    const normalized = normalizeHostedExecutionDiagnosticMessage(value);
+
+    if (normalized) {
+      return normalized;
+    }
+  }
+
+  return null;
+}
+
+function readHostedExecutionNumericErrorProperty(
+  error: unknown,
+  keys: readonly string[],
+  minimum: number,
+  maximum: number,
+): number | null {
+  if (!error || typeof error !== "object") {
+    return null;
+  }
+
+  for (const key of keys) {
+    const value = (error as Record<string, unknown>)[key];
+
+    if (typeof value === "number" && Number.isInteger(value) && value >= minimum && value <= maximum) {
+      return value;
+    }
+  }
+
+  return null;
+}
+
+function readHostedExecutionObjectErrorProperty(
+  error: unknown,
+  keys: readonly string[],
+): HostedExecutionStructuredLogDetails | null {
+  if (!error || typeof error !== "object") {
+    return null;
+  }
+
+  for (const key of keys) {
+    const value = (error as Record<string, unknown>)[key];
+
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      return value as HostedExecutionStructuredLogDetails;
+    }
+  }
+
+  return null;
 }

@@ -6,6 +6,8 @@ import {
 } from "@murphai/assistant-runtime";
 import {
   emitHostedExecutionStructuredLog,
+  sanitizeHostedExecutionStructuredLogDetails,
+  type HostedExecutionStructuredLogDetails,
 } from "@murphai/hosted-execution";
 
 import {
@@ -26,11 +28,22 @@ const MIN_RUNNER_IDLE_TTL_MS = 1_000;
 
 export class HostedExecutionConfigurationError extends Error {
   readonly code: string | null;
+  readonly details: HostedExecutionStructuredLogDetails | null;
+  readonly statusCode: number | null;
 
-  constructor(message: string, code: string | null = null) {
+  constructor(
+    message: string,
+    code: string | null = null,
+    options: {
+      details?: HostedExecutionStructuredLogDetails | null;
+      statusCode?: number | null;
+    } = {},
+  ) {
     super(message);
     this.code = code;
+    this.details = options.details ?? null;
     this.name = "HostedExecutionConfigurationError";
+    this.statusCode = options.statusCode ?? null;
   }
 }
 
@@ -201,12 +214,29 @@ export class RunnerContainer extends Container {
         emitHostedExecutionStructuredLog({
           component: "container",
           dispatch,
+          details: {
+            readinessLatencyMs: Date.now() - readinessStartedAt,
+            startMode: "warm",
+          },
           message: "Hosted execution container is ready.",
           phase: "container.ready",
           run,
         });
         return this.runnerControlToken;
-      } catch {
+      } catch (error) {
+        emitHostedExecutionStructuredLog({
+          component: "container",
+          dispatch,
+          details: {
+            readinessLatencyMs: Date.now() - readinessStartedAt,
+            startMode: "warm",
+          },
+          error,
+          level: "warn",
+          message: "Hosted execution container warm health check failed; restarting shell.",
+          phase: "container.starting",
+          run,
+        });
         await this.stopWarmContainer();
       }
     } else if (!isRunnerContainerStopped(status)) {
@@ -216,6 +246,9 @@ export class RunnerContainer extends Container {
     emitHostedExecutionStructuredLog({
       component: "container",
       dispatch,
+      details: {
+        startMode: "cold",
+      },
       message: "Hosted execution container starting.",
       phase: "container.starting",
       run,
@@ -245,6 +278,10 @@ export class RunnerContainer extends Container {
     emitHostedExecutionStructuredLog({
       component: "container",
       dispatch,
+      details: {
+        readinessLatencyMs: Date.now() - readinessStartedAt,
+        startMode: "cold",
+      },
       message: "Hosted execution container is ready.",
       phase: "container.ready",
       run,
@@ -338,7 +375,9 @@ async function classifyHostedRunnerContainerErrorResponse(
 ): Promise<Error> {
   let payload: {
     code?: unknown;
+    details?: unknown;
     error?: unknown;
+    errorName?: unknown;
   } | null = null;
 
   try {
@@ -356,12 +395,40 @@ async function classifyHostedRunnerContainerErrorResponse(
   const code = typeof payload?.code === "string" && payload.code.trim().length > 0
     ? payload.code
     : null;
+  const details = sanitizeHostedExecutionStructuredLogDetails(
+    payload?.details && typeof payload.details === "object" && !Array.isArray(payload.details)
+      ? payload.details as HostedExecutionStructuredLogDetails
+      : null,
+  );
+  const errorName = typeof payload?.errorName === "string" && payload.errorName.trim().length > 0
+    ? payload.errorName.trim()
+    : readHostedExecutionErrorNameForCode(code);
 
   if (response.status === 503) {
-    return new HostedExecutionConfigurationError(message, code);
+    return new HostedExecutionConfigurationError(message, code, {
+      details,
+      statusCode: response.status,
+    });
   }
 
-  return new Error(message);
+  const error = new Error(message) as Error & {
+    code?: string | null;
+    details?: HostedExecutionStructuredLogDetails | null;
+    status?: number;
+    statusCode?: number;
+  };
+  if (code) {
+    error.code = code;
+  }
+  if (details) {
+    error.details = details;
+  }
+  if (errorName) {
+    error.name = errorName;
+  }
+  error.status = response.status;
+  error.statusCode = response.status;
+  return error;
 }
 
 function createRunnerOutboundHandler() {
@@ -505,4 +572,23 @@ function formatRunnerSleepAfter(idleTtlMs: number): `${number}s` {
 
 function sleep(delayMs: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, delayMs));
+}
+
+function readHostedExecutionErrorNameForCode(code: string | null): string | null {
+  switch (code) {
+    case "configuration_error":
+      return "HostedExecutionConfigurationError";
+    case "range_error":
+      return "RangeError";
+    case "reference_error":
+      return "ReferenceError";
+    case "syntax_error":
+      return "SyntaxError";
+    case "type_error":
+      return "TypeError";
+    case "uri_error":
+      return "URIError";
+    default:
+      return null;
+  }
 }

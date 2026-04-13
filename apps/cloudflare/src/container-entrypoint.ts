@@ -11,7 +11,11 @@ import {
   HostedAssistantConfigurationError,
 } from "@murphai/assistant-runtime/hosted-assistant-env";
 import {
+  buildHostedExecutionSafeErrorDetails,
+  deriveHostedExecutionErrorCode,
   emitHostedExecutionStructuredLog,
+  readHostedExecutionSafeErrorName,
+  summarizeHostedExecutionError,
 } from "@murphai/hosted-execution";
 
 import { runHostedExecutionJob } from "./node-runner.js";
@@ -384,11 +388,14 @@ export function classifyRunnerJobError(error: unknown): {
   payload: Record<string, unknown>;
   statusCode: number;
 } {
+  const details = buildHostedExecutionSafeErrorDetails(error);
+
   if (error instanceof HostedAssistantConfigurationError) {
     return {
       payload: {
         code: error.code,
         error: error.message,
+        ...(details ? { details } : {}),
       },
       statusCode: 503,
     };
@@ -396,7 +403,12 @@ export function classifyRunnerJobError(error: unknown): {
 
   return {
     payload: {
-      error: "Internal error.",
+      code: deriveHostedExecutionErrorCode(error),
+      error: summarizeHostedExecutionError(error),
+      ...(details ? { details } : {}),
+      ...(readHostedExecutionSafeErrorName(error)
+        ? { errorName: readHostedExecutionSafeErrorName(error) }
+        : {}),
     },
     statusCode: 500,
   };

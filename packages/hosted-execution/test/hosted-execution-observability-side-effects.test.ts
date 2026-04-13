@@ -68,6 +68,16 @@ describe("hosted execution observability", () => {
     expect(normalized.endsWith("…")).toBe(true);
   });
 
+  it("redacts non-bearer authorization and other secret-bearing key-value pairs", () => {
+    expect(
+      normalizeHostedExecutionOperatorMessage(
+        "authorization=\"Basic abc123\" cookie=session-123 set-cookie=\"sid=abc\" apiKey: key_123 passcode=7890",
+      ),
+    ).toBe(
+      "authorization=[redacted] cookie=[redacted] set-cookie=[redacted] apiKey=[redacted] passcode=[redacted]",
+    );
+  });
+
   it("summarizes errors using safe operator-facing messages only", () => {
     expect(
       summarizeHostedExecutionError(new Error("CF_API_TOKEN must be configured for hosted execution.")),
@@ -87,6 +97,19 @@ describe("hosted execution observability", () => {
     expect(summarizeHostedExecutionErrorCode(null)).toBeNull();
   });
 
+  it("falls back to generic summaries when an error contains unsafe configuration detail", () => {
+    expect(
+      summarizeHostedExecutionError(
+        new Error("HOSTED_WEB_BASE_URL must be configured for alice@example.com."),
+      ),
+    ).toBe("Hosted execution configuration is invalid.");
+    expect(
+      summarizeHostedExecutionError(
+        new Error("Runner returned HTTP 401 for authorization: Bearer secret-token"),
+      ),
+    ).toBe("Hosted runner container returned HTTP 401.");
+  });
+
   it("builds structured logs with normalized messages, safe errors, and dispatch precedence", () => {
     const record = buildHostedExecutionStructuredLogRecord({
       component: "runner",
@@ -104,9 +127,12 @@ describe("hosted execution observability", () => {
       userId: "user_123",
     });
 
-    expect(record).toEqual({
+    expect(record).toMatchObject({
       attempt: 2,
       component: "runner",
+      details: {
+        errorDetail: "wrong type",
+      },
       errorCode: "type_error",
       errorMessage: "Hosted execution runtime failed.",
       errorName: "TypeError",
@@ -119,6 +145,7 @@ describe("hosted execution observability", () => {
       time: "2026-04-08T00:01:00.000Z",
       userId: "user_123",
     });
+    expect(record.details?.stackPreview).toEqual(expect.any(Array));
 
     const unsafeErrorRecord = buildHostedExecutionStructuredLogRecord({
       component: "runner",
@@ -129,6 +156,56 @@ describe("hosted execution observability", () => {
 
     expect(unsafeErrorRecord.errorName).toBeUndefined();
     expect(unsafeErrorRecord.level).toBe("error");
+  });
+
+  it("keeps structured configuration diagnostics redacted even when the error name is safe", () => {
+    const record = buildHostedExecutionStructuredLogRecord({
+      component: "container",
+      error: Object.assign(
+        new Error("HOSTED_WEB_BASE_URL must be configured for alice@example.com."),
+        { name: "HostedExecutionConfigurationError" },
+      ),
+      message: "authorization=\"Basic abc123\" cookie=session-123 alice@example.com",
+      phase: "failed",
+    });
+
+    expect(record).toMatchObject({
+      component: "container",
+      details: {
+        errorDetail: "HOSTED_WEB_BASE_URL must be configured for [redacted-email].",
+      },
+      errorCode: "configuration_error",
+      errorMessage: "Hosted execution configuration is invalid.",
+      errorName: "HostedExecutionConfigurationError",
+      level: "error",
+      message: "authorization=[redacted] cookie=[redacted] [redacted-email]",
+      phase: "failed",
+    });
+    expect(record.details?.stackPreview).toEqual(expect.any(Array));
+  });
+
+  it("redacts linux home paths from diagnostic details and stack previews", () => {
+    const error = new Error("failed from /home/operator/app/runtime.ts");
+    error.stack = [
+      "Error: failed from /home/operator/app/runtime.ts",
+      "    at runThing (/home/operator/app/runtime.ts:12:5)",
+      "    at main (/root/project/index.ts:4:1)",
+    ].join("\n");
+
+    const record = buildHostedExecutionStructuredLogRecord({
+      component: "runtime",
+      error,
+      message: "failed",
+      phase: "failed",
+    });
+
+    expect(record.details).toMatchObject({
+      errorDetail: "failed from <REDACTED_PATH>",
+      stackPreview: [
+        "at runThing (<REDACTED_PATH>)",
+        "at main (<REDACTED_PATH>)",
+      ],
+    });
   });
 
   it("emits structured logs only when stdio logging is enabled", () => {

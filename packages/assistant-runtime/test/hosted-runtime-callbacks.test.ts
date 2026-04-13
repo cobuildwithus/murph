@@ -171,6 +171,59 @@ describe("hosted runtime callbacks", () => {
     ).rejects.toThrow(/durable commit failed for member_123\/evt_commit/u);
   });
 
+  it("keeps durable commit wrapper messages free of raw cause details", async () => {
+    const rawCause = new Error("Authorization: Bearer secret-token user@example.com");
+
+    const thrown = await commitHostedExecutionResult({
+      commit: {
+        bundleRef: {
+          hash: "hash_123",
+          key: "bundles/member/vault.json",
+          size: 42,
+          updatedAt: "2026-04-08T00:00:00.000Z",
+        },
+      },
+      dispatch: {
+        event: {
+          kind: "member.activated",
+          userId: "member_123",
+        },
+        eventId: "evt_commit_redacted",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+      },
+      effectsPort: {
+        async commit() {
+          throw rawCause;
+        },
+        async deletePreparedAssistantDelivery() {},
+        async readRawEmailMessage() {
+          return null;
+        },
+        async readAssistantDeliveryRecord() {
+          return null;
+        },
+        async sendEmail() {},
+        async writeAssistantDeliveryRecord(record) {
+          return record;
+        },
+      },
+      result: {
+        bundle: "bundle_123",
+        result: {
+          eventsHandled: 1,
+          nextWakeAt: null,
+          summary: "completed",
+        },
+      },
+      assistantDeliveryEffects: [],
+    }).catch((error: unknown) => error);
+
+    assert.ok(thrown instanceof Error);
+    assert.match(thrown.message, /member_123\/evt_commit_redacted/u);
+    assert.doesNotMatch(thrown.message, /secret-token|user@example\.com/u);
+    assert.equal(thrown.cause, rawCause);
+  });
+
   it("collects only dispatchable side effects and caps the committed batch size", async () => {
     const intents = Array.from({ length: 25 }, (_, index) => ({
       dedupeKey: `dedupe_${index}`,
@@ -923,6 +976,94 @@ describe("hosted runtime callbacks", () => {
       deliveryMayHaveSucceeded: true,
       retryable: true,
     });
+  });
+
+  it("uses normalized delivery errors for pending-confirmation messages without surfacing raw cause details", async () => {
+    let observedDispatchHooks:
+      | {
+          resolveDeliveredIntent(args: { intent: Record<string, unknown>; vault: string }): Promise<unknown>;
+        }
+      | undefined;
+    const journalError = new Error("Authorization: Bearer secret-token user@example.com");
+    const preparedRecord = buildHostedAssistantDeliveryPreparedRecord({
+      dedupeKey: "dedupe_123",
+      effectId: "intent_123",
+      recordedAt: "2026-04-08T00:00:00.000Z",
+    });
+
+    mocks.normalizeAssistantDeliveryError.mockReturnValue({
+      message: "Hosted side-effect journal retry required. authorization=[redacted] [redacted-email]",
+    });
+    mocks.dispatchAssistantOutboxIntent.mockImplementation(async (input) => {
+      observedDispatchHooks = input.dispatchHooks;
+    });
+
+    await drainHostedCommittedAssistantDeliveriesAfterCommit({
+      commit: {
+        bundleRef: {
+          hash: "hash_123",
+          key: "bundles/member/vault.json",
+          size: 42,
+          updatedAt: "2026-04-08T00:00:00.000Z",
+        },
+      },
+      dispatch: {
+        event: {
+          kind: "assistant.cron.tick",
+          reason: "manual",
+          userId: "member_123",
+        },
+        eventId: "evt_reconcile_redacted",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+      },
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        async readAssistantDeliveryRecord() {
+          return preparedRecord;
+        },
+        async writeAssistantDeliveryRecord() {
+          throw journalError;
+        },
+      }),
+      assistantDeliveryEffects: [
+        buildHostedAssistantDeliverySideEffect({
+          dedupeKey: "dedupe_123",
+          effectId: "intent_123",
+        }),
+      ],
+      vaultRoot: "/tmp/vault",
+    });
+
+    assert.ok(observedDispatchHooks);
+    const thrown = await observedDispatchHooks.resolveDeliveredIntent({
+      intent: {
+        dedupeKey: "dedupe_123",
+        delivery: {
+          channel: "email",
+          idempotencyKey: "idem_123",
+          messageLength: 5,
+          providerMessageId: "provider_message_123",
+          providerThreadId: null,
+          sentAt: "2026-04-08T00:01:00.000Z",
+          target: "user@example.com",
+          targetKind: "explicit",
+        },
+        intentId: "intent_123",
+      },
+      vault: "/tmp/vault",
+    }).catch((error: unknown) => error);
+
+    assert.ok(thrown instanceof Error);
+    expect(mocks.normalizeAssistantDeliveryError).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cause: journalError,
+        code: "HOSTED_SIDE_EFFECT_JOURNAL_FAILED",
+      }),
+    );
+    assert.match(
+      thrown.message,
+      /Hosted side-effect journal retry required\. authorization=\[redacted\] \[redacted-email\]/u,
+    );
+    assert.doesNotMatch(thrown.message, /secret-token|user@example\.com/u);
   });
 
   it("fails closed when the hosted effects port is missing callback journal methods", async () => {
