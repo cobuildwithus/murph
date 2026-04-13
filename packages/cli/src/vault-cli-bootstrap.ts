@@ -27,8 +27,8 @@ export function createDefaultVaultServices(): VaultServices {
   })
 }
 
-export function createVaultCliShell(): Cli.Cli {
-  const cli = Cli.create('vault-cli', {
+export function createVaultCliShell(commandName = 'vault-cli'): Cli.Cli {
+  const cli = Cli.create(commandName, {
     description: CLI_DESCRIPTION,
     config: {
       flag: 'config',
