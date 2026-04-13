@@ -10,6 +10,7 @@ import type {
   EventSource,
   ExperimentEventRecord,
   JournalDayFrontmatter,
+  MealNutrition,
   SampleQuality,
   SampleRecord,
   SampleSource,
@@ -46,6 +47,9 @@ import { pathExists, readUtf8File, writeVaultTextFile } from "./fs.ts";
 import { parseFrontmatterDocument, stringifyFrontmatterDocument } from "./frontmatter.ts";
 import { generateRecordId } from "./ids.ts";
 import { readJsonlRecords, toMonthlyShardRelativePath } from "./jsonl.ts";
+import {
+  normalizeMealNutrition,
+} from "./nutrition.ts";
 import { stageRawImportManifest } from "./operations/raw-manifests.ts";
 import { runCanonicalWrite, type WriteBatch } from "./operations/write-batch.ts";
 import { resolveVaultPath } from "./path-safety.ts";
@@ -121,6 +125,7 @@ interface AddMealInput {
   note?: string;
   photoPath?: string;
   audioPath?: string;
+  nutrition?: MealNutrition;
   source?: string;
 }
 
@@ -1509,11 +1514,14 @@ export async function addMeal({
   note,
   photoPath,
   audioPath,
+  nutrition,
   source = "manual",
 }: AddMealInput): Promise<AddMealResult> {
   const vault = await loadVault({ vaultRoot });
+  const normalizedNote =
+    typeof note === "string" && note.trim().length > 0 ? note.trim() : undefined;
 
-  if (!photoPath && !audioPath && !note) {
+  if (!photoPath && !audioPath && !normalizedNote) {
     throw new VaultError(
       "VAULT_MEAL_CONTENT_REQUIRED",
       "Meal imports require at least one of photoPath, audioPath, or note.",
@@ -1564,11 +1572,12 @@ export async function addMeal({
     timeZone: vault.metadata.timezone,
     source,
     title: "Meal",
-    note,
+    note: normalizedNote,
     links: [{ type: "related_to", targetId: mealId }],
     rawRefs: pendingAttachmentState.rawRefs,
     fields: {
       mealId,
+      nutrition: normalizeMealNutrition(nutrition, "nutrition"),
     },
   });
   return runCanonicalWrite({

@@ -146,6 +146,7 @@ test("food auto-log projection metadata stays owned by contracts", () => {
       ingredients: ["acai", "banana"],
       tags: ["breakfast"],
       note: "Seasonal fruit works too.",
+      nutrition: null,
       attachedProtocolIds: ["protocol_123"],
       autoLogDaily: {
         time: "08:00",

@@ -87,6 +87,19 @@ const knowledgeMetadataTagSchema = z.string().min(1)
 const knowledgeSourcePathSchema = z.string().min(1)
 const knowledgeSlugSchema = z.string().min(1)
 
+function assertMealAddInputHasContent(input: {
+  photo?: string
+  audio?: string
+  note?: string
+}) {
+  const hasTrimmedNote = typeof input.note === 'string' && input.note.trim().length > 0
+  if (input.photo || input.audio || hasTrimmedNote) {
+    return
+  }
+
+  throw new Error('Provide at least one of photo, audio, or note.')
+}
+
 export function createAssistantCliExecutorToolDefinitions(
   input: AssistantToolContext,
 ) {
@@ -841,28 +854,39 @@ export function createCanonicalVaultWriteToolDefinitions(
     defineVaultServiceBackedTool({
       name: 'vault.meal.add',
       description:
-        'Create one canonical meal record from a photo plus an optional audio note and optional text note. Use this for meals, snacks, and drink logs, preserving snack/drink context in the note when helpful.',
+        'Create one canonical meal record from any combination of photo, audio note, and text note. Note-only meals are allowed. Use this for meals, snacks, and drink logs, preserving snack/drink context in the note when helpful.',
       inputSchema: z.object({
-        photo: vaultFilePathSchema,
+        photo: vaultFilePathSchema.optional(),
         audio: vaultFilePathSchema.optional(),
-        note: z.string().min(1).optional(),
+        note: z.string().trim().min(1).optional(),
         occurredAt: isoTimestampSchema.optional(),
+      }).refine((value) => Boolean(value.photo || value.audio || value.note), {
+        message: 'Provide at least one of photo, audio, or note.',
       }),
       inputExample: {
-        photo: 'raw/inbox/captures/cap_123/attachments/1/photo.jpg',
-        note: 'Post-workout meal',
+        note: 'Two eggs, sourdough toast, black coffee',
+        occurredAt: '2026-04-08T08:15:00Z',
       },
-      execute: async ({ photo, audio, note, occurredAt }) =>
-        input.vaultServices!.core.addMeal({
+      execute: async ({ photo, audio, note, occurredAt }) => {
+        assertMealAddInputHasContent({ photo, audio, note })
+
+        return input.vaultServices!.core.addMeal({
           vault: input.vault,
           requestId: input.requestId ?? null,
-          photo: await resolveAssistantVaultPath(input.vault, photo, 'file path'),
-          audio: audio
-            ? await resolveAssistantVaultPath(input.vault, audio, 'file path')
-            : undefined,
+          ...(photo
+            ? {
+                photo: await resolveAssistantVaultPath(input.vault, photo, 'file path'),
+              }
+            : {}),
+          ...(audio
+            ? {
+                audio: await resolveAssistantVaultPath(input.vault, audio, 'file path'),
+              }
+            : {}),
           note,
           occurredAt,
-        }),
+        })
+      },
     }),
     defineVaultServiceBackedTool({
       name: 'vault.journal.ensure',

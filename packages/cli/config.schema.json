@@ -2113,7 +2113,7 @@
                           "type": "boolean"
                         },
                         "country": {
-                          "description": "Optional ISO 3166-1 alpha-2 country hints for geocoding. Repeat --country to add more than one.",
+                          "description": "Optional ISO 3166-1 alpha-2 country hints for geocoding when plain-text places are ambiguous. Repeat --country to add more than one.",
                           "maxItems": 10,
                           "type": "array",
                           "items": {
@@ -2122,7 +2122,7 @@
                           }
                         },
                         "language": {
-                          "description": "Optional language hint for geocoding display names.",
+                          "description": "Optional language hint for provider geocoding display names.",
                           "type": "string",
                           "minLength": 1,
                           "maxLength": 10
@@ -2283,6 +2283,39 @@
                           "type": "string",
                           "minLength": 1,
                           "maxLength": 128
+                        }
+                      }
+                    }
+                  }
+                },
+                "totals": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "options": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "vault": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "Vault root to operate against."
+                        },
+                        "requestId": {
+                          "description": "Optional caller-supplied request id for audit correlation.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128
+                        },
+                        "from": {
+                          "description": "Optional inclusive lower date bound in YYYY-MM-DD form.",
+                          "type": "string",
+                          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                        },
+                        "to": {
+                          "description": "Optional inclusive upper date bound in YYYY-MM-DD form.",
+                          "type": "string",
+                          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
                         }
                       }
                     }

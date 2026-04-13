@@ -1,4 +1,8 @@
-import { resolveSystemTimeZone } from '@murphai/contracts'
+import {
+  resolveSystemTimeZone,
+  type FoodNutrition,
+  type MealNutrition,
+} from '@murphai/contracts'
 import { loadVault, upsertAutomation } from '@murphai/core'
 import {
   listAutomations as listCanonicalAutomations,
@@ -87,6 +91,7 @@ interface FoodAutoLogRecord {
   serving?: string
   ingredients?: string[]
   note?: string
+  nutrition?: FoodNutrition | null
 }
 
 interface FoodAutoLogCoreRuntime {
@@ -1681,12 +1686,38 @@ async function runFoodAutoLogCronJob(input: {
     foodId: input.foodId,
   })
   const note = renderAutoLoggedFoodMealNote(food)
-  const result = await importers.addMeal({
+  const mealInput: Parameters<typeof importers.addMeal>[0] = {
     vaultRoot: input.vault,
     occurredAt: new Date().toISOString(),
     note,
     source: 'derived',
-  })
+  }
+  const inheritedNutrition = buildInheritedMealNutrition(food.nutrition, food.title)
+  if (inheritedNutrition != null) {
+    mealInput.nutrition = inheritedNutrition
+  }
+  const result = await importers.addMeal(mealInput)
 
   return `Auto-logged recurring food "${food.title}" as meal ${result.mealId}.`
+}
+
+function buildInheritedMealNutrition(
+  foodNutrition: FoodNutrition | null | undefined,
+  title: string,
+): MealNutrition | undefined {
+  const totals = foodNutrition?.perServing
+  if (!totals) {
+    return undefined
+  }
+
+  return {
+    totals,
+    provenance: {
+      source: 'inherited',
+      ...(foodNutrition.provenance?.confidence
+        ? { confidence: foodNutrition.provenance.confidence }
+        : {}),
+      sourceDetail: `Copied from saved food "${title}".`,
+    },
+  }
 }

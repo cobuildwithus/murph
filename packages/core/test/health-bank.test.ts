@@ -974,6 +974,21 @@ test("foods use first-class markdown registry reads for regular meals and staple
     status: "active",
     kind: "acai bowl",
     vendor: "Neighborhood Acai Bar",
+    serving: "1 bowl",
+    nutrition: {
+      perServing: {
+        calories: 540,
+        proteinGrams: 11,
+        carbsGrams: 68,
+        fatGrams: 24,
+        fiberGrams: 11,
+      },
+      provenance: {
+        source: "label",
+        confidence: "medium",
+        sourceDetail: "Menu board plus saved toppings.",
+      },
+    },
     aliases: ["usual acai bowl", "regular acai bowl", "usual acai bowl"],
     ingredients: ["banana", "acai base", "banana", "granola"],
     tags: ["breakfast", "favorite"],
@@ -990,6 +1005,21 @@ test("foods use first-class markdown registry reads for regular meals and staple
     status: "active",
     kind: "acai bowl",
     vendor: "Neighborhood Acai Bar",
+    serving: "1 bowl",
+    nutrition: {
+      perServing: {
+        calories: 540,
+        proteinGrams: 11,
+        carbsGrams: 68,
+        fatGrams: 24,
+        fiberGrams: 11,
+      },
+      provenance: {
+        source: "label",
+        confidence: "medium",
+        sourceDetail: "Menu board plus saved toppings.",
+      },
+    },
     aliases: ["usual acai bowl", "regular acai bowl", "usual acai bowl"],
     ingredients: ["banana", "acai base", "banana", "granola"],
     tags: ["breakfast", "favorite"],
@@ -1030,11 +1060,26 @@ test("foods use first-class markdown registry reads for regular meals and staple
   assert.equal(readFoodById.slug, createdFood.record.slug);
   assert.deepEqual(readFoodById.aliases, ["usual acai bowl", "regular acai bowl"]);
   assert.deepEqual(readFoodById.ingredients, ["banana", "acai base", "granola"]);
+  assert.deepEqual(readFoodById.nutrition, {
+    perServing: {
+      calories: 540,
+      proteinGrams: 11,
+      carbsGrams: 68,
+      fatGrams: 24,
+      fiberGrams: 11,
+    },
+    provenance: {
+      source: "label",
+      confidence: "medium",
+      sourceDetail: "Menu board plus saved toppings.",
+    },
+  });
   assert.deepEqual(readFoodById.autoLogDaily, {
     time: "08:00",
   });
   assert.equal(readFoodBySlug.foodId, createdFood.record.foodId);
   assert.equal(readFoodBySlug.title, "Usual Acai Bowl");
+  assert.equal(readFoodBySlug.nutrition?.perServing?.calories, 540);
   assert.deepEqual(readFoodBySlug.autoLogDaily, {
     time: "08:00",
   });
@@ -1042,8 +1087,10 @@ test("foods use first-class markdown registry reads for regular meals and staple
   assert.equal(listedFoods[1]?.foodId, createdFood.record.foodId);
   assert.match(foodMarkdown, /foodId:/u);
   assert.match(foodMarkdown, /autoLogDaily:/u);
+  assert.match(foodMarkdown, /nutrition:/u);
   assert.match(foodMarkdown, /## Aliases/u);
   assert.match(foodMarkdown, /## Ingredients/u);
+  assert.match(foodMarkdown, /## Nutrition per serving/u);
   assert.match(foodMarkdown, /Auto-log daily/u);
   assert.doesNotMatch(foodMarkdown, /^attachedProtocolRefs:/mu);
 

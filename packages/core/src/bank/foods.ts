@@ -5,6 +5,9 @@ import {
 
 import { VaultError } from "../errors.ts";
 import { generateRecordId } from "../ids.ts";
+import {
+  normalizeFoodNutrition,
+} from "../nutrition.ts";
 import { createMarkdownRegistryApi } from "../registry/api.ts";
 
 import {
@@ -78,10 +81,35 @@ function normalizeFoodAutoLogDailyRule(
 
 function buildBody(record: FoodRecord): string {
   const relations = canonicalizeFoodRelations(record);
+  const nutritionLines = [
+    record.nutrition?.perServing?.calories !== undefined
+      ? `Calories: ${record.nutrition.perServing.calories}`
+      : null,
+    record.nutrition?.perServing?.proteinGrams !== undefined
+      ? `Protein: ${record.nutrition.perServing.proteinGrams} g`
+      : null,
+    record.nutrition?.perServing?.carbsGrams !== undefined
+      ? `Carbs: ${record.nutrition.perServing.carbsGrams} g`
+      : null,
+    record.nutrition?.perServing?.fatGrams !== undefined
+      ? `Fat: ${record.nutrition.perServing.fatGrams} g`
+      : null,
+    record.nutrition?.perServing?.fiberGrams !== undefined
+      ? `Fiber: ${record.nutrition.perServing.fiberGrams} g`
+      : null,
+    record.nutrition?.provenance?.source ? `Source: ${record.nutrition.provenance.source}` : null,
+    record.nutrition?.provenance?.confidence
+      ? `Confidence: ${record.nutrition.provenance.confidence}`
+      : null,
+    record.nutrition?.provenance?.sourceDetail
+      ? `Source detail: ${record.nutrition.provenance.sourceDetail}`
+      : null,
+  ].filter((line): line is string => Boolean(line));
   const sections = [
     record.summary ? section("Summary", record.summary) : null,
     record.aliases?.length ? listSection("Aliases", record.aliases) : null,
     record.ingredients?.length ? listSection("Ingredients", record.ingredients) : null,
+    nutritionLines.length ? listSection("Nutrition per serving", nutritionLines) : null,
     listSection("Tags", record.tags),
     listSection("Attached protocols", relations.attachedProtocolIds),
     record.note ? section("Notes", record.note) : null,
@@ -203,6 +231,7 @@ function parseFoodRecord(
     vendor: optionalString(attributes.vendor, "vendor", 160),
     location: optionalString(attributes.location, "location", 160),
     serving: optionalString(attributes.serving, "serving", 160),
+    nutrition: normalizeFoodNutrition(attributes.nutrition, "nutrition"),
     aliases: normalizeUniqueTextList(attributes.aliases, "aliases"),
     ingredients: normalizeUniqueTextList(attributes.ingredients, "ingredients"),
     tags: normalizeDomainList(attributes.tags, "tags"),
@@ -228,6 +257,7 @@ export function foodRecordToBasePayload(record: FoodRecord): Omit<FoodUpsertPayl
     vendor: record.vendor,
     location: record.location,
     serving: record.serving,
+    nutrition: record.nutrition,
     aliases: record.aliases,
     ingredients: record.ingredients,
     tags: record.tags,
@@ -334,6 +364,11 @@ export async function upsertFood(input: UpsertFoodInput): Promise<UpsertFoodResu
           ),
           serving: resolveOptionalUpsertValue(input.serving, existingRecord?.serving, (value) =>
             optionalString(value, "serving", 160),
+          ),
+          nutrition: resolveOptionalUpsertValue(
+            input.nutrition,
+            existingRecord?.nutrition,
+            (value) => normalizeFoodNutrition(value, "nutrition"),
           ),
           aliases: resolveOptionalUpsertValue(input.aliases, existingRecord?.aliases, (value) =>
             normalizeUniqueTextList(value, "aliases"),

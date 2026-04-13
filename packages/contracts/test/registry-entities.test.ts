@@ -396,6 +396,20 @@ describe("bank registry seam", () => {
           kind: "meal",
           brand: "Homemade",
           serving: "1 bowl",
+          nutrition: {
+            perServing: {
+              calories: 520,
+              proteinGrams: 12,
+              carbsGrams: 66,
+              fatGrams: 22,
+              fiberGrams: 10,
+            },
+            provenance: {
+              source: " estimated ",
+              confidence: " high ",
+              sourceDetail: " photo + menu ",
+            },
+          },
           aliases: [" acai bowl ", "", "breakfast bowl", "acai bowl"],
           ingredients: ["acai", " banana "],
           tags: [" breakfast ", "post-workout"],
@@ -414,6 +428,20 @@ describe("bank registry seam", () => {
       vendor: null,
       location: null,
       serving: "1 bowl",
+      nutrition: {
+        perServing: {
+          calories: 520,
+          proteinGrams: 12,
+          carbsGrams: 66,
+          fatGrams: 22,
+          fiberGrams: 10,
+        },
+        provenance: {
+          source: "estimated",
+          confidence: "high",
+          sourceDetail: "photo + menu",
+        },
+      },
       aliases: ["acai bowl", "breakfast bowl"],
       ingredients: ["acai", "banana"],
       tags: ["breakfast", "post-workout"],

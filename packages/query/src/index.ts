@@ -50,6 +50,17 @@ export type {
   OverviewWeeklyStat,
 } from "./overview.ts";
 export {
+  readMealNutritionTotals,
+  summarizeMealNutritionTotals,
+} from "./meal-nutrition.ts";
+export type {
+  MealNutritionDayTotal,
+  MealNutritionMetricTotal,
+  MealNutritionTotals,
+  MealNutritionTotalsOptions,
+  MealNutritionTotalsResult,
+} from "./meal-nutrition.ts";
+export {
   searchVault,
   searchVaultSafe,
 } from "./search.ts";

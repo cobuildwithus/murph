@@ -145,6 +145,7 @@ declare module 'incur' {
       'meal list': { args: {}; options: { vault: string; requestId?: string; from?: string; to?: string } }
       'meal manifest': { args: { id: string }; options: { vault: string; requestId?: string } }
       'meal show': { args: { id: string }; options: { vault: string; requestId?: string } }
+      'meal totals': { args: {}; options: { vault: string; requestId?: string; from?: string; to?: string } }
       'memory forget': { args: { memoryId: string }; options: { vault: string } }
       'memory show': { args: { memoryId?: string }; options: { vault: string } }
       'memory update': { args: { memoryId: string; text: string }; options: { vault: string; section?: "Identity" | "Preferences" | "Instructions" | "Context" } }

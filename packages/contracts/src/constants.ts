@@ -150,6 +150,10 @@ export const FOOD_STATUSES = Object.freeze(["active", "archived"] as const);
 export const WORKOUT_FORMAT_STATUSES = Object.freeze(["active", "archived"] as const);
 
 export const RECIPE_STATUSES = Object.freeze(["draft", "saved", "archived"] as const);
+export const NUTRITION_PROVENANCE_SOURCES = Object.freeze(
+  ["user", "label", "database", "inherited", "estimated"] as const,
+);
+export const NUTRITION_CONFIDENCE_LEVELS = Object.freeze(["low", "medium", "high"] as const);
 
 export const TEST_RESULT_STATUSES = Object.freeze(["pending", "normal", "abnormal", "mixed", "unknown"] as const);
 export const BLOOD_TEST_CATEGORY = "blood" as const;

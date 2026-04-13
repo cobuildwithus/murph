@@ -111,6 +111,62 @@ interface ManifestEnvelope {
   }
 }
 
+interface MealTotalsEnvelope {
+  filters: {
+    from: string | null
+    to: string | null
+  }
+  mealCount: number
+  totals: {
+    calories: {
+      total: number | null
+      mealCount: number
+    }
+    proteinGrams: {
+      total: number | null
+      mealCount: number
+    }
+    carbsGrams: {
+      total: number | null
+      mealCount: number
+    }
+    fatGrams: {
+      total: number | null
+      mealCount: number
+    }
+    fiberGrams: {
+      total: number | null
+      mealCount: number
+    }
+  }
+  days: Array<{
+    date: string
+    mealCount: number
+    totals: {
+      calories: {
+        total: number | null
+        mealCount: number
+      }
+      proteinGrams: {
+        total: number | null
+        mealCount: number
+      }
+      carbsGrams: {
+        total: number | null
+        mealCount: number
+      }
+      fatGrams: {
+        total: number | null
+        mealCount: number
+      }
+      fiberGrams: {
+        total: number | null
+        mealCount: number
+      }
+    }
+  }>
+}
+
 const runSourceCli = runCli
 const runRawSourceCli = runRawCli
 const DOCUMENT_MEAL_SCHEMA_TIMEOUT_MS = 45_000
@@ -150,6 +206,9 @@ test(
     const mealListSchema = JSON.parse(
       await runRawSourceCli(['meal', 'list', '--schema', '--format', 'json']),
     ) as SchemaEnvelope
+    const mealTotalsSchema = JSON.parse(
+      await runRawSourceCli(['meal', 'totals', '--schema', '--format', 'json']),
+    ) as SchemaEnvelope
 
     assert.equal('title' in documentImportSchema.options.properties, true)
     assert.equal('occurredAt' in documentImportSchema.options.properties, true)
@@ -183,6 +242,9 @@ test(
     assert.equal('to' in mealListSchema.options.properties, true)
     assert.equal('kind' in mealListSchema.options.properties, false)
     assert.deepEqual(mealListSchema.options.required, ['vault'])
+    assert.equal('from' in mealTotalsSchema.options.properties, true)
+    assert.equal('to' in mealTotalsSchema.options.properties, true)
+    assert.deepEqual(mealTotalsSchema.options.required, ['vault'])
   },
   DOCUMENT_MEAL_SCHEMA_TIMEOUT_MS,
 )
@@ -428,6 +490,8 @@ test.sequential(
         'note=Green smoothie after training.',
         '--set',
         'ingredients=[\"spinach\",\"banana\",\"greek yogurt\"]',
+        '--set',
+        'nutrition={\"totals\":{\"calories\":430,\"proteinGrams\":32,\"carbsGrams\":46,\"fatGrams\":14,\"fiberGrams\":9},\"provenance\":{\"source\":\"estimated\",\"confidence\":\"medium\",\"sourceDetail\":\"Recipe estimate\"}}',
         '--vault',
         vaultRoot,
       ])
@@ -438,6 +502,58 @@ test.sequential(
         'spinach',
         'banana',
         'greek yogurt',
+      ])
+      assert.deepEqual(requireData(editedMeal).entity.data.nutrition, {
+        totals: {
+          calories: 430,
+          proteinGrams: 32,
+          carbsGrams: 46,
+          fatGrams: 14,
+          fiberGrams: 9,
+        },
+        provenance: {
+          source: 'estimated',
+          confidence: 'medium',
+          sourceDetail: 'Recipe estimate',
+        },
+      })
+
+      const mealTotals = await runSourceCli<MealTotalsEnvelope>([
+        'meal',
+        'totals',
+        '--from',
+        '2026-03-12',
+        '--to',
+        '2026-03-12',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(mealTotals.ok, true)
+      assert.equal(mealTotals.meta?.command, 'meal totals')
+      assert.deepEqual(requireData(mealTotals).filters, {
+        from: '2026-03-12',
+        to: '2026-03-12',
+      })
+      assert.equal(requireData(mealTotals).mealCount, 1)
+      assert.deepEqual(requireData(mealTotals).totals, {
+        calories: { total: 430, mealCount: 1 },
+        proteinGrams: { total: 32, mealCount: 1 },
+        carbsGrams: { total: 46, mealCount: 1 },
+        fatGrams: { total: 14, mealCount: 1 },
+        fiberGrams: { total: 9, mealCount: 1 },
+      })
+      assert.deepEqual(requireData(mealTotals).days, [
+        {
+          date: '2026-03-12',
+          mealCount: 1,
+          totals: {
+            calories: { total: 430, mealCount: 1 },
+            proteinGrams: { total: 32, mealCount: 1 },
+            carbsGrams: { total: 46, mealCount: 1 },
+            fatGrams: { total: 14, mealCount: 1 },
+            fiberGrams: { total: 9, mealCount: 1 },
+          },
+        },
       ])
 
       const deletedDocument = await runSourceCli<DeleteEnvelope>([
@@ -501,6 +617,18 @@ test.sequential(
     const vaultRoot = await createVault()
 
     try {
+      const whitespaceOnlyMeal = await runSourceCli([
+        'meal',
+        'add',
+        '--note',
+        '   ',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(whitespaceOnlyMeal.ok, false)
+      assert.equal(whitespaceOnlyMeal.error?.code, 'VALIDATION_ERROR')
+      assert.match(whitespaceOnlyMeal.error?.message ?? '', /Too small/u)
+
       const currentMeal = requireData(
         await runSourceCli<MealAddEnvelope>([
           'meal',

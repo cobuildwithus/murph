@@ -404,6 +404,10 @@ export const vaultCliCommandDescriptors = [
         description: 'List meal events within an optional date range.',
       },
       {
+        path: ['meal', 'totals'],
+        description: 'Show calorie and macro totals from meal nutrition over an optional date range.',
+      },
+      {
         path: ['meal', 'manifest'],
         description: 'Show the immutable raw-import manifest for one recorded meal.',
       },
