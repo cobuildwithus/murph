@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   confirmHostedInvitePhoneCode: vi.fn(),
   createHostedBillingCheckout: vi.fn(),
   preProvisionManagedUserCryptoInHostedExecutionBestEffort: vi.fn(),
+  scheduleManagedUserCryptoWarmupBestEffort: vi.fn(),
   prepareHostedInvitePhoneCode: vi.fn(),
   requirePrivyCompletionSession: vi.fn(),
   requireHostedInviteCodeFromRequest: vi.fn(),
@@ -55,6 +56,8 @@ vi.mock("@/src/lib/hosted-onboarding/billing-service", () => ({
 vi.mock("@/src/lib/hosted-execution/control", () => ({
   preProvisionManagedUserCryptoInHostedExecutionBestEffort:
     mocks.preProvisionManagedUserCryptoInHostedExecutionBestEffort,
+  scheduleManagedUserCryptoWarmupBestEffort:
+    mocks.scheduleManagedUserCryptoWarmupBestEffort,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/invite-service", async () => {
@@ -126,6 +129,28 @@ describe("hosted onboarding routes", () => {
         void (result as Promise<void>).catch(() => {});
       }
     });
+    mocks.scheduleManagedUserCryptoWarmupBestEffort.mockImplementation(
+      (input: {
+        schedule: (callback: () => Promise<void> | void) => void;
+        trigger: string;
+        userId: string;
+      }) => {
+        const { schedule, ...warmupInput } = input;
+        try {
+          schedule(() =>
+            mocks.preProvisionManagedUserCryptoInHostedExecutionBestEffort(warmupInput),
+          );
+          return "after";
+        } catch (error) {
+          console.error(
+            `Hosted managed user crypto warmup scheduling failed during ${warmupInput.trigger}. Falling back to inline dispatch.`,
+            error instanceof Error ? error.message : String(error),
+          );
+          void mocks.preProvisionManagedUserCryptoInHostedExecutionBestEffort(warmupInput);
+          return "fallback-inline";
+        }
+      },
+    );
     mocks.requirePrivyCompletionSession.mockResolvedValue({
       identity: {
         phone: {

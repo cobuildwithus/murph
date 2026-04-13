@@ -194,4 +194,53 @@ describe("managed user crypto warmup helper", () => {
       "worker unavailable",
     );
   });
+
+  it("schedules the managed crypto warmup through the provided scheduler when available", async () => {
+    const { scheduleManagedUserCryptoWarmupBestEffort } = await import(
+      "@/src/lib/hosted-execution/control"
+    );
+    const schedule = vi.fn((callback: () => Promise<void> | void) => {
+      const result = callback();
+
+      if (result && typeof (result as Promise<void>).catch === "function") {
+        void (result as Promise<void>).catch(() => {});
+      }
+    });
+
+    expect(
+      scheduleManagedUserCryptoWarmupBestEffort({
+        schedule,
+        trigger: "privy-complete-checkout",
+        userId: "member_123",
+      }),
+    ).toBe("after");
+
+    expect(schedule).toHaveBeenCalledTimes(1);
+    expect(provisionManagedUserCrypto).toHaveBeenCalledWith("member_123");
+  });
+
+  it("falls back to inline warmup when the scheduler throws", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { scheduleManagedUserCryptoWarmupBestEffort } = await import(
+      "@/src/lib/hosted-execution/control"
+    );
+    const schedule = vi.fn(() => {
+      throw new TypeError("authorization: Bearer abc.def.ghi user@example.com");
+    });
+
+    expect(
+      scheduleManagedUserCryptoWarmupBestEffort({
+        schedule,
+        trigger: "billing-checkout-route",
+        userId: "member_123",
+      }),
+    ).toBe("fallback-inline");
+
+    expect(schedule).toHaveBeenCalledTimes(1);
+    expect(provisionManagedUserCrypto).toHaveBeenCalledWith("member_123");
+    expect(consoleError).toHaveBeenCalledWith(
+      "Hosted managed user crypto warmup scheduling failed during billing-checkout-route. Falling back to inline dispatch.",
+      "authorization=Bearer [redacted] [redacted-email]",
+    );
+  });
 });

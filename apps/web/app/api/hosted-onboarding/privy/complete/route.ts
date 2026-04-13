@@ -1,6 +1,6 @@
 import { after } from "next/server";
 
-import { preProvisionManagedUserCryptoInHostedExecutionBestEffort } from "@/src/lib/hosted-execution/control";
+import { scheduleManagedUserCryptoWarmupBestEffort } from "@/src/lib/hosted-execution/control";
 import { jsonOk, withJsonError, readOptionalJsonObject } from "@/src/lib/hosted-onboarding/http";
 import {
   deriveHostedOnboardingTimingErrorName,
@@ -25,11 +25,10 @@ export const POST = withJsonError(async (request: Request) => {
     const warmupScheduled = result.stage === "checkout";
 
     if (warmupScheduled) {
-      after(async () => {
-        await preProvisionManagedUserCryptoInHostedExecutionBestEffort({
-          trigger: "privy-complete-checkout",
-          userId: result.memberId,
-        });
+      scheduleManagedUserCryptoWarmupBestEffort({
+        schedule: after,
+        trigger: "privy-complete-checkout",
+        userId: result.memberId,
       });
     }
 
