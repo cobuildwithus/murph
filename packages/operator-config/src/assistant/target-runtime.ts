@@ -220,43 +220,59 @@ interface AssistantOpenAICompatibleRuntimeBehavior {
   supportsZeroDataRetention: boolean
 }
 
+const DEFAULT_OPENAI_COMPATIBLE_RUNTIME_BEHAVIOR: AssistantOpenAICompatibleRuntimeBehavior =
+  {
+    executionDriver: 'openai-compatible',
+    resumeKind: null,
+    supportsGatewayWebSearch: false,
+    supportsProviderWebSearch: false,
+    supportsReasoningEffort: false,
+    supportsZeroDataRetention: false,
+  }
+
+const OPENAI_COMPATIBLE_PRESET_RUNTIME_BEHAVIORS: Partial<
+  Record<SetupAssistantProviderPreset, AssistantOpenAICompatibleRuntimeBehavior>
+> = {
+  openai: {
+    executionDriver: 'responses',
+    resumeKind: 'openai-response-id',
+    supportsGatewayWebSearch: false,
+    supportsProviderWebSearch: true,
+    supportsReasoningEffort: true,
+    supportsZeroDataRetention: false,
+  },
+}
+
+const VERCEL_GATEWAY_RESPONSES_RUNTIME_BEHAVIOR = {
+  executionDriver: 'responses',
+  supportsGatewayWebSearch: true,
+  supportsZeroDataRetention: true,
+} as const satisfies Pick<
+  AssistantOpenAICompatibleRuntimeBehavior,
+  'executionDriver' | 'supportsGatewayWebSearch' | 'supportsZeroDataRetention'
+>
+
 function resolveAssistantOpenAICompatibleRuntimeBehavior(input: {
   model?: string | null
   presetId: SetupAssistantProviderPreset | null
 }): AssistantOpenAICompatibleRuntimeBehavior {
-  const gatewayResponsesModel =
+  const gatewayOpenAiResponsesModel =
     input.presetId === 'vercel-ai-gateway' &&
     isAssistantGatewayOpenAIModel(input.model)
 
-  switch (input.presetId) {
-    case 'openai':
-      return {
-        executionDriver: 'responses',
-        resumeKind: 'openai-response-id',
-        supportsGatewayWebSearch: false,
-        supportsProviderWebSearch: true,
-        supportsReasoningEffort: true,
-        supportsZeroDataRetention: false,
-      }
-    case 'vercel-ai-gateway':
-      return {
-        executionDriver: 'responses',
-        resumeKind: gatewayResponsesModel ? 'openai-response-id' : null,
-        supportsGatewayWebSearch: true,
-        supportsProviderWebSearch: gatewayResponsesModel,
-        supportsReasoningEffort: gatewayResponsesModel,
-        supportsZeroDataRetention: true,
-      }
-    default:
-      return {
-        executionDriver: 'openai-compatible',
-        resumeKind: null,
-        supportsGatewayWebSearch: false,
-        supportsProviderWebSearch: false,
-        supportsReasoningEffort: false,
-        supportsZeroDataRetention: false,
-      }
+  if (input.presetId === 'vercel-ai-gateway') {
+    return {
+      ...VERCEL_GATEWAY_RESPONSES_RUNTIME_BEHAVIOR,
+      resumeKind: gatewayOpenAiResponsesModel ? 'openai-response-id' : null,
+      supportsProviderWebSearch: gatewayOpenAiResponsesModel,
+      supportsReasoningEffort: gatewayOpenAiResponsesModel,
+    }
   }
+
+  return input.presetId
+    ? (OPENAI_COMPATIBLE_PRESET_RUNTIME_BEHAVIORS[input.presetId] ??
+        DEFAULT_OPENAI_COMPATIBLE_RUNTIME_BEHAVIOR)
+    : DEFAULT_OPENAI_COMPATIBLE_RUNTIME_BEHAVIOR
 }
 
 function isAssistantGatewayOpenAIModel(model: string | null | undefined): boolean {

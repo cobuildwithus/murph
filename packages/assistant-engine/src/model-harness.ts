@@ -448,10 +448,8 @@ export interface AssistantModelMessage {
   content: string | AssistantModelContentPart[]
 }
 
-export interface AssistantResponsesRequestProviderOptions {
-  gateway?: {
-    zeroDataRetention?: boolean
-  }
+export interface AssistantResponsesRequestPolicy {
+  gatewayZeroDataRetention?: boolean
 }
 
 export interface AssistantToolCatalog {
@@ -476,7 +474,7 @@ export interface AssistantModelSpec {
   headers?: Record<string, string>
   model: string
   providerName?: string
-  responsesProviderOptions?: AssistantResponsesRequestProviderOptions
+  responsesRequestPolicy?: AssistantResponsesRequestPolicy
 }
 
 export interface GenerateAssistantObjectInput<TSchema extends z.ZodTypeAny> {
@@ -492,7 +490,7 @@ export interface GenerateAssistantObjectInput<TSchema extends z.ZodTypeAny> {
 }
 
 const OPENAI_RESPONSES_AUTO_COMPACTION_THRESHOLD = 200_000
-const OPENAI_RESPONSES_AUTO_COMPACTION_CONTEXT = Object.freeze([
+const ASSISTANT_RESPONSES_AUTO_COMPACTION_CONTEXT = Object.freeze([
   {
     type: 'compaction',
     compact_threshold: OPENAI_RESPONSES_AUTO_COMPACTION_THRESHOLD,
@@ -669,7 +667,7 @@ export function resolveAssistantLanguageModel(
         apiKey: resolveAssistantApiKey(spec),
         ...(spec.baseUrl ? { baseURL: spec.baseUrl } : {}),
         ...(spec.headers ? { headers: spec.headers } : {}),
-        fetch: createAssistantOpenAIResponsesFetch(spec),
+        fetch: createAssistantResponsesFetch(spec.responsesRequestPolicy),
       })
 
       return provider.responses(spec.model)
@@ -867,26 +865,22 @@ function resolveAssistantPromptOrMessages(
   throw new Error('Assistant generation requires either a prompt string or at least one message.')
 }
 
-function createAssistantOpenAIResponsesFetch(
-  spec: AssistantModelSpec,
+function createAssistantResponsesFetch(
+  requestPolicy: AssistantResponsesRequestPolicy | undefined,
   baseFetch: typeof fetch = globalThis.fetch.bind(globalThis),
 ): typeof fetch {
   return async (input: AssistantFetchInput, init?: AssistantFetchInit) => {
-    const nextInit = await maybeMutateAssistantOpenAIResponsesRequest(
-      spec,
-      input,
-      init,
-    )
+    const nextInit = await maybeMutateAssistantResponsesRequest(requestPolicy, input, init)
     return await baseFetch(input, nextInit)
   }
 }
 
-async function maybeMutateAssistantOpenAIResponsesRequest(
-  spec: AssistantModelSpec,
+async function maybeMutateAssistantResponsesRequest(
+  requestPolicy: AssistantResponsesRequestPolicy | undefined,
   input: AssistantFetchInput,
   init?: AssistantFetchInit,
 ): Promise<AssistantFetchInit | undefined> {
-  if (!shouldMutateAssistantOpenAIResponsesRequest(input, init)) {
+  if (!shouldMutateAssistantResponsesRequest(input, init)) {
     return init
   }
 
@@ -903,7 +897,7 @@ async function maybeMutateAssistantOpenAIResponsesRequest(
     return init
   }
 
-  const nextPayload = applyAssistantOpenAIResponsesRequestMutations(payload, spec)
+  const nextPayload = applyAssistantResponsesRequestPolicy(payload, requestPolicy)
   if (!nextPayload) {
     return init
   }
@@ -914,62 +908,46 @@ async function maybeMutateAssistantOpenAIResponsesRequest(
   }
 }
 
-function applyAssistantOpenAIResponsesRequestMutations(
+function applyAssistantResponsesRequestPolicy(
   payload: Record<string, unknown>,
-  spec: AssistantModelSpec,
+  requestPolicy: AssistantResponsesRequestPolicy | undefined,
 ): Record<string, unknown> | null {
   let nextPayload: Record<string, unknown> | null = null
 
   if (!('context_management' in payload)) {
     nextPayload = {
       ...payload,
-      context_management: OPENAI_RESPONSES_AUTO_COMPACTION_CONTEXT,
+      context_management: ASSISTANT_RESPONSES_AUTO_COMPACTION_CONTEXT,
     }
   }
 
-  const mergedProviderOptions = mergeAssistantResponsesProviderOptions(
-    nextPayload?.providerOptions ?? payload.providerOptions,
-    spec.responsesProviderOptions,
-  )
-  if (mergedProviderOptions) {
-    nextPayload = {
-      ...(nextPayload ?? payload),
-      providerOptions: mergedProviderOptions,
+  if (requestPolicy?.gatewayZeroDataRetention === true) {
+    const currentProviderOptions = nextPayload?.providerOptions ?? payload.providerOptions
+    const nextProviderOptions = isAssistantPlainObject(currentProviderOptions)
+      ? {
+          ...currentProviderOptions,
+        }
+      : {}
+    const currentGatewayOptions = isAssistantPlainObject(nextProviderOptions.gateway)
+      ? {
+          ...nextProviderOptions.gateway,
+        }
+      : {}
+
+    if (currentGatewayOptions.zeroDataRetention !== true) {
+      currentGatewayOptions.zeroDataRetention = true
+      nextProviderOptions.gateway = currentGatewayOptions
+      nextPayload = {
+        ...(nextPayload ?? payload),
+        providerOptions: nextProviderOptions,
+      }
     }
   }
 
   return nextPayload
 }
 
-function mergeAssistantResponsesProviderOptions(
-  current: unknown,
-  injected: AssistantResponsesRequestProviderOptions | undefined,
-): Record<string, unknown> | null {
-  if (injected?.gateway?.zeroDataRetention !== true) {
-    return null
-  }
-
-  const nextProviderOptions = isAssistantPlainObject(current)
-    ? {
-        ...current,
-      }
-    : {}
-  const currentGatewayOptions = isAssistantPlainObject(nextProviderOptions.gateway)
-    ? {
-        ...nextProviderOptions.gateway,
-      }
-    : {}
-
-  if (currentGatewayOptions.zeroDataRetention === true) {
-    return null
-  }
-
-  currentGatewayOptions.zeroDataRetention = true
-  nextProviderOptions.gateway = currentGatewayOptions
-  return nextProviderOptions
-}
-
-function shouldMutateAssistantOpenAIResponsesRequest(
+function shouldMutateAssistantResponsesRequest(
   input: AssistantFetchInput,
   init?: AssistantFetchInit,
 ): boolean {

@@ -29,6 +29,7 @@ export function resolveAssistantModelSpecFromProviderConfig(
 
   const apiKeyEnv = normalizeNullableString(normalized.apiKeyEnv)
   const apiKeyValue = readAssistantEnvString(env, apiKeyEnv) ?? undefined
+  const responsesRequestPolicy = resolveAssistantResponsesRequestPolicy(normalized)
 
   return {
     ...(baseUrl ? { baseUrl } : {}),
@@ -38,15 +39,16 @@ export function resolveAssistantModelSpecFromProviderConfig(
     ...(apiKeyEnv ? { apiKeyEnv } : {}),
     ...(normalized.headers ? { headers: normalized.headers } : {}),
     ...(normalized.providerName ? { providerName: normalized.providerName } : {}),
-    ...(normalized.presetId === 'vercel-ai-gateway' &&
-    normalized.zeroDataRetention === true
-      ? {
-          responsesProviderOptions: {
-            gateway: {
-              zeroDataRetention: true,
-            },
-          },
-        }
-      : {}),
+    ...(responsesRequestPolicy ? { responsesRequestPolicy } : {}),
   }
+}
+
+function resolveAssistantResponsesRequestPolicy(
+  input: ReturnType<typeof normalizeAssistantProviderConfig>,
+): AssistantModelSpec['responsesRequestPolicy'] {
+  return input.presetId === 'vercel-ai-gateway' && input.zeroDataRetention === true
+    ? {
+        gatewayZeroDataRetention: true,
+      }
+    : undefined
 }
