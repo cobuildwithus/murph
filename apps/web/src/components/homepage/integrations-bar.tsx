@@ -1,6 +1,6 @@
 const integrations = [
   "Telegram",
-  "Linq",
+  "iMessage",
   "Email",
   "Garmin",
   "Oura",
