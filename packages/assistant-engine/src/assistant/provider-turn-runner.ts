@@ -99,6 +99,9 @@ interface AssistantPromptTimeContext {
   currentTimeZone: string
 }
 
+const ASSISTANT_BOOTSTRAP_TRANSCRIPT_REPLAY_MESSAGE_LIMIT = 100
+const ASSISTANT_NATIVE_RESUME_TRANSCRIPT_REPLAY_MESSAGE_LIMIT = 20
+
 export interface ExecutedAssistantProviderTurnResult
   extends AssistantProviderTurnExecutionResult {
   attemptCount: number
@@ -354,7 +357,10 @@ async function resolveAssistantRouteTurnPlan(input: {
   const providerCapabilities = routeProviderCapabilities
   const conversationMessages = removeTrailingCurrentUserPrompt(
     await loadAssistantConversationMessages({
-      limit: 20,
+      limit:
+        shouldInjectBootstrapContext
+          ? ASSISTANT_BOOTSTRAP_TRANSCRIPT_REPLAY_MESSAGE_LIMIT
+          : ASSISTANT_NATIVE_RESUME_TRANSCRIPT_REPLAY_MESSAGE_LIMIT,
       sessionId: input.session.sessionId,
       vault: input.input.vault,
     }),

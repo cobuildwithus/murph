@@ -412,6 +412,58 @@ describe('executeProviderTurnWithRecovery', () => {
     )
   })
 
+  it('replays the latest 100 transcript messages when bootstrap context is required', async () => {
+    const route = createRoute({
+      routeId: 'route-bootstrap-replay-limit',
+    })
+    const session = createAssistantSession()
+
+    runnerMocks.listAssistantTranscriptEntries.mockResolvedValue(
+      Array.from({ length: 105 }, (_, index) => ({
+        kind: index % 2 === 0 ? 'assistant' : 'user',
+        text: `Message ${index + 1}`,
+      })),
+    )
+    runnerMocks.executeAssistantProviderTurnAttempt.mockResolvedValue(
+      createSuccessfulAttemptResult({
+        providerSessionId: 'provider-session-bootstrap-limit',
+        response: 'Replay window applied',
+      }),
+    )
+
+    await executeProviderTurnWithRecovery({
+      input: createMessageInput({
+        prompt: 'Newest prompt',
+      }),
+      plan: createTurnPlan({
+        firstTurnCheckInEligible: true,
+      }),
+      resolvedSession: session,
+      routes: [route],
+      turnCreatedAt: '2026-04-08T00:00:00.000Z',
+      turnId: 'turn-bootstrap-replay-limit',
+    })
+
+    expect(runnerMocks.executeAssistantProviderTurnAttempt).toHaveBeenCalledWith(
+      expect.objectContaining({
+        conversationMessages: expect.arrayContaining([
+          {
+            content: 'Message 6',
+            role: 'user',
+          },
+          {
+            content: 'Message 105',
+            role: 'assistant',
+          },
+        ]),
+      }),
+    )
+    expect(
+      runnerMocks.executeAssistantProviderTurnAttempt.mock.calls[0]?.[0]
+        ?.conversationMessages,
+    ).toHaveLength(100)
+  })
+
   it('reuses the native provider session when the active route can resume without bootstrap context', async () => {
     const session = createAssistantSession({
       providerSessionId: 'provider-session-primary',
@@ -434,16 +486,12 @@ describe('executeProviderTurnWithRecovery', () => {
       'provider-session-primary',
     )
     toolCatalog.hasTool.mockReturnValue(false)
-    runnerMocks.listAssistantTranscriptEntries.mockResolvedValue([
-      {
-        kind: 'assistant',
-        text: 'Prior answer',
-      },
-      {
-        kind: 'user',
-        text: 'Different prompt',
-      },
-    ])
+    runnerMocks.listAssistantTranscriptEntries.mockResolvedValue(
+      Array.from({ length: 25 }, (_, index) => ({
+        kind: index % 2 === 0 ? 'assistant' : 'user',
+        text: `Resume message ${index + 1}`,
+      })),
+    )
     runnerMocks.executeAssistantProviderTurnAttempt.mockResolvedValue(
       createSuccessfulAttemptResult({
         providerSessionId: 'provider-session-primary',
@@ -491,21 +539,25 @@ describe('executeProviderTurnWithRecovery', () => {
     expect(toolCatalog.hasTool).not.toHaveBeenCalled()
     expect(runnerMocks.executeAssistantProviderTurnAttempt).toHaveBeenCalledWith(
       expect.objectContaining({
-        conversationMessages: [
+        conversationMessages: expect.arrayContaining([
           {
-            content: 'Prior answer',
-            role: 'assistant',
-          },
-          {
-            content: 'Different prompt',
+            content: 'Resume message 6',
             role: 'user',
           },
-        ],
+          {
+            content: 'Resume message 25',
+            role: 'assistant',
+          },
+        ]),
         resumeProviderSessionId: 'provider-session-primary',
         sessionContext: undefined,
         systemPrompt: 'prompt:none:later:no-bootstrap:no-overview',
       }),
     )
+    expect(
+      runnerMocks.executeAssistantProviderTurnAttempt.mock.calls[0]?.[0]
+        ?.conversationMessages,
+    ).toHaveLength(20)
   })
 
   it('passes automation-cron turn trigger into the system prompt builder', async () => {
