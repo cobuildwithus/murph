@@ -1,3 +1,5 @@
+import type { HostedInviteStatusPayload } from "@/src/lib/hosted-onboarding/types";
+
 interface ApiErrorPayload {
   error: {
     code?: string;
@@ -87,6 +89,19 @@ export async function requestHostedBillingCheckout(input: {
       ...(input.shareCode ? { shareCode: input.shareCode } : {}),
     },
     url: "/api/hosted-onboarding/billing/checkout",
+  });
+}
+
+export async function requestHostedBillingSuccess(input: {
+  inviteCode: string;
+  sessionId: string;
+}): Promise<HostedInviteStatusPayload> {
+  return requestHostedOnboardingJson<HostedInviteStatusPayload>({
+    payload: {
+      inviteCode: input.inviteCode,
+      sessionId: input.sessionId,
+    },
+    url: "/api/hosted-onboarding/billing/success",
   });
 }
 

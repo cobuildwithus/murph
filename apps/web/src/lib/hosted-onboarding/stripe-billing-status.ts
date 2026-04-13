@@ -15,7 +15,8 @@ export function resolveHostedSubscriptionBillingStatus(input: {
 
 export function requiresHostedCanonicalStripeBillingStatus(sourceType: string): boolean {
   return isHostedStripeSubscriptionSourceType(sourceType) ||
-    isHostedStripeInvoiceSourceType(sourceType);
+    isHostedStripeInvoiceSourceType(sourceType) ||
+    sourceType === "stripe.checkout.session.success_redirect";
 }
 
 export function resolveHostedStripeBillingStatusForWrite(input: {
@@ -36,7 +37,10 @@ export function resolveHostedStripeBillingStatusForWrite(input: {
       });
     }
 
-    if (input.sourceType === "stripe.invoice.paid") {
+    if (
+      input.sourceType === "stripe.invoice.paid" ||
+      input.sourceType === "stripe.checkout.session.success_redirect"
+    ) {
       return input.canonicalBillingStatus === HostedBillingStatus.active
         ? HostedBillingStatus.active
         : input.canonicalBillingStatus;
