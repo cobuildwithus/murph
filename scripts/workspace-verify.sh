@@ -737,6 +737,7 @@ run_test_diff() {
   local typecheck_dirs=("${diff_typecheck_dirs[@]-}")
   local test_dirs=("${diff_test_dirs[@]-}")
   local affected_app_dirs=("${diff_affected_app_dirs[@]-}")
+  local run_repo_tools_tests="${diff_run_repo_tools_tests:-0}"
 
   verify_log "diff scope: ${diff_summary}"
 
@@ -749,6 +750,9 @@ run_test_diff() {
   if [[ "$diff_repo_internal_fast_path" == "1" ]]; then
     verify_log "diff-aware verification selected the repo-internal fast path"
     run_diff_repo_internal_fast_path
+    if [[ "$run_repo_tools_tests" == "1" ]]; then
+      run_timed_step "Repo tools tests" pnpm test:repo-tools
+    fi
     run_timed_step "Dependency policy" run_dependency_policy_check
     return 0
   fi
@@ -767,6 +771,10 @@ run_test_diff() {
 
   if [[ "$diff_run_verify_cli" == "1" ]]; then
     run_timed_step "CLI targeted verification" run_verify_cli_with_workspace_artifact_lock
+  fi
+
+  if [[ "$run_repo_tools_tests" == "1" ]]; then
+    run_timed_step "Repo tools tests" pnpm test:repo-tools
   fi
 
   local package_dir

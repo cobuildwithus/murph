@@ -227,6 +227,7 @@ async function buildDiffScopeSummary(explicitChangedFiles) {
     .filter((metadata) => metadata !== undefined)
     .sort((left, right) => left.dir.localeCompare(right.dir));
   const runVerifyCli = changedFiles.some((filePath) => isCliArtifactSensitiveFile(filePath));
+  const runRepoToolsTests = changedFiles.some((filePath) => filePath.startsWith("scripts/"));
   const typecheckDirs = [];
   const testDirs = [];
   const verifyAppDirs = [];
@@ -267,6 +268,7 @@ async function buildDiffScopeSummary(explicitChangedFiles) {
     noChanges: changedFiles.length === 0,
     nonWorkspaceFiles: uniqueSorted(nonWorkspaceFiles),
     repoInternalFastPath,
+    runRepoToolsTests,
     runVerifyCli,
     testDirs: uniqueSorted(testDirs),
     touchedWorkspaceDirs: uniqueSorted([...touchedWorkspaceDirs]),
@@ -299,6 +301,7 @@ function printShellSummary(summary) {
   printShellScalar("diff_global_root_change", summary.globalRootChange ? "1" : "0");
   printShellScalar("diff_has_non_workspace_files", summary.hasNonWorkspaceFiles ? "1" : "0");
   printShellScalar("diff_run_verify_cli", summary.runVerifyCli ? "1" : "0");
+  printShellScalar("diff_run_repo_tools_tests", summary.runRepoToolsTests ? "1" : "0");
   printShellArray("diff_changed_files", summary.changedFiles);
   printShellArray("diff_non_workspace_files", summary.nonWorkspaceFiles);
   printShellArray("diff_touched_workspace_dirs", summary.touchedWorkspaceDirs);
