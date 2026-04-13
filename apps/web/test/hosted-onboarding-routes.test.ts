@@ -422,6 +422,43 @@ describe("hosted onboarding routes", () => {
     });
   });
 
+  it("logs a sanitized error message for warning-level hosted Privy completion failures in production", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    mocks.requirePrivyCompletionSession.mockRejectedValue(
+      new TypeError(
+        "HOSTED_CONTACT_PRIVACY_KEYS is required for hosted contact privacy while reading /Users/test/app and notifying user@example.com with Bearer abc.def.ghi",
+      ),
+    );
+
+    const response = await privyCompleteRoute.POST(
+      new Request("https://join.example.test/api/hosted-onboarding/privy/complete", {
+        body: JSON.stringify({
+          inviteCode: "invite-code",
+        }),
+        headers: {
+          cookie: "privy-id-token=cookie-token",
+          origin: SAME_ORIGIN_HEADERS.origin,
+          "user-agent": "test-agent",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "INVALID_REQUEST",
+        message: "Invalid request.",
+      },
+    });
+    expect(warnSpy).toHaveBeenCalledWith("Hosted onboarding route failed.", {
+      errorMessage:
+        "HOSTED_CONTACT_PRIVACY_KEYS is required for hosted contact privacy while reading <redacted-path> and notifying <redacted-email> with Bearer <redacted-secret>",
+      errorType: "TypeError",
+      internalMessage: "Hosted onboarding route failed unexpectedly.",
+    });
+  });
+
   it("serializes retryable server-side Privy lag errors during completion", async () => {
     mocks.requirePrivyCompletionSession.mockRejectedValue(
       hostedOnboardingError({

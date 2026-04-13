@@ -57,6 +57,16 @@ function describeHostedOnboardingErrorForLog(error: unknown): Record<string, unk
   return null;
 }
 
+function describeHostedOnboardingWarningErrorForLog(error: unknown): Record<string, unknown> | null {
+  if (!(error instanceof Error)) {
+    return null;
+  }
+
+  const errorMessage = sanitizeHostedOnboardingLogString(error.message);
+
+  return errorMessage ? { errorMessage } : null;
+}
+
 function describeHostedOnboardingPrismaErrorForLog(error: unknown): Record<string, unknown> | null {
   if (error instanceof Prisma.PrismaClientKnownRequestError) {
     const prismaMeta = sanitizeHostedOnboardingPrismaMeta(error.meta);
@@ -294,6 +304,7 @@ const hostedOnboardingJsonRouteHelpers = createJsonRouteHelpers({
   internalMessage: "Hosted onboarding route failed unexpectedly.",
   logMessage: "Hosted onboarding route failed.",
   logDetails: describeHostedOnboardingErrorForLog,
+  warnLogDetails: describeHostedOnboardingWarningErrorForLog,
   matchers: [mapHostedOnboardingError, mapHostedWebConfigurationError],
 });
 

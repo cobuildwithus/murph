@@ -27,6 +27,7 @@ interface JsonErrorResponseOptions {
   internalMessage: string;
   logMessage: string;
   logDetails?: JsonErrorLogDetailProvider;
+  warnLogDetails?: JsonErrorLogDetailProvider;
   matchers?: JsonErrorMatcher[];
 }
 
@@ -35,6 +36,7 @@ export interface JsonRouteHelpersOptions {
   internalMessage: string;
   logMessage: string;
   logDetails?: JsonErrorLogDetailProvider;
+  warnLogDetails?: JsonErrorLogDetailProvider;
   matchers?: JsonErrorMatcher[];
 }
 
@@ -224,6 +226,7 @@ export function createJsonRouteHelpers(
       internalMessage: options.internalMessage,
       logMessage: options.logMessage,
       logDetails: options.logDetails,
+      warnLogDetails: options.warnLogDetails,
       matchers: options.matchers,
     });
 
@@ -325,7 +328,9 @@ function logJsonError(
   log(options.logMessage, {
     errorType: describeLoggedErrorType(error),
     internalMessage: options.internalMessage,
-    ...(level === "error" ? (options.logDetails?.(error) ?? {}) : {}),
+    ...(level === "error"
+      ? (options.logDetails?.(error) ?? {})
+      : (options.warnLogDetails?.(error) ?? {})),
   });
 }
 
