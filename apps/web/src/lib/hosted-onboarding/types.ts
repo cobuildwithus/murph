@@ -1,6 +1,7 @@
 import type { HostedOnboardingStage } from "./lifecycle";
 
 export interface HostedInviteStatusPayload {
+  activationPending: boolean;
   capabilities: {
     billingReady: boolean;
     phoneAuthReady: boolean;
@@ -19,7 +20,8 @@ export interface HostedInviteStatusPayload {
 }
 
 export interface HostedPrivyCompletionPayload {
+  activationPending: boolean;
   inviteCode: string;
   joinUrl: string;
-  stage: "checkout" | "activating" | "blocked" | "active";
+  stage: "checkout" | "blocked" | "active";
 }

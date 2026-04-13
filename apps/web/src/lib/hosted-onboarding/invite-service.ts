@@ -49,6 +49,7 @@ export async function getHostedInviteStatus(input: {
 
   if (!invite) {
     return {
+      activationPending: false,
       capabilities: {
         billingReady,
         phoneAuthReady,
@@ -74,6 +75,7 @@ export async function getHostedInviteStatus(input: {
     : false;
 
   return {
+    activationPending,
     capabilities: {
       billingReady,
       phoneAuthReady,
@@ -89,7 +91,6 @@ export async function getHostedInviteStatus(input: {
       matchesInvite: Boolean(sessionMatchesInvite),
     },
     stage: deriveHostedOnboardingStage({
-      activationPending,
       billingStatus: invite.member.billingStatus,
       expiresAt: invite.expiresAt,
       now,

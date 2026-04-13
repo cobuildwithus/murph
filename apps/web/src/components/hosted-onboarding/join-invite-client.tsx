@@ -86,7 +86,7 @@ export function JoinInviteClient({
         setHasCompletedInitialRefresh(true);
       }
     },
-    shouldPoll: status.stage === "verify" || status.stage === "checkout" || status.stage === "activating",
+    shouldPoll: status.stage === "verify" || status.stage === "checkout" || status.activationPending,
   });
 
   async function refreshStatus(): Promise<HostedInviteStatusPayload> {

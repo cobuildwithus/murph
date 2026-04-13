@@ -98,8 +98,6 @@ export function resolveJoinInviteTitle(status: HostedInviteStatusPayload): strin
       return "Finish joining Murph";
     case "checkout":
       return "One last step";
-    case "activating":
-      return "We’re setting up your account";
     case "blocked":
       return "This account is blocked";
     case "active":
@@ -119,12 +117,12 @@ export function resolveJoinInviteSubtitle(status: HostedInviteStatusPayload): st
       return "Verify the number that messaged Murph to finish joining.";
     case "checkout":
       return "Your phone is confirmed. Finish checkout to start using Murph.";
-    case "activating":
-      return "Your payment went through. Murph is finishing hosted activation now.";
     case "blocked":
       return "This hosted account cannot continue from the invite right now. Contact support to restore access.";
     case "active":
-      return "Congrats, you’re all set. Here’s what to expect next.";
+      return status.activationPending
+        ? "Your account is ready. Murph is still booting your hosted runtime in Cloudflare and sending your first text."
+        : "Congrats, you’re all set. Here’s what to expect next.";
     default:
       return "Murph signup";
   }

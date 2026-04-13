@@ -172,6 +172,7 @@ describe("hosted onboarding routes", () => {
       },
     });
     mocks.completeHostedPrivyVerification.mockResolvedValue({
+      activationPending: false,
       inviteCode: "invite-code",
       joinUrl: "https://join.example.test/join/invite-code",
       memberId: "member_123",
@@ -247,6 +248,7 @@ describe("hosted onboarding routes", () => {
       inviteCode: "invite-code",
     });
     await expect(response.json()).resolves.toEqual({
+      activationPending: false,
       inviteCode: "invite-code",
       joinUrl: "https://join.example.test/join/invite-code",
       ok: true,

@@ -41,8 +41,27 @@ test("blocked success page does not pretend setup is still running", () => {
   assert.doesNotMatch(markup, /We&#x27;ll keep checking automatically/);
 });
 
-function createStatus(stage: HostedInviteStatusPayload["stage"]): HostedInviteStatusPayload {
+test("active success page explains when Cloudflare warmup is still running", () => {
+  const markup = renderToStaticMarkup(
+    createElement(JoinInviteSuccessShell, {
+      initialStatus: createStatus("active", true),
+      inviteCode: "invite-code",
+      shareCode: null,
+    }),
+  );
+
+  assert.match(markup, /Your account is ready/);
+  assert.match(markup, /Payment is confirmed\./);
+  assert.match(markup, /booting your hosted runtime in Cloudflare/);
+  assert.doesNotMatch(markup, /We&#x27;ll keep checking automatically/);
+});
+
+function createStatus(
+  stage: HostedInviteStatusPayload["stage"],
+  activationPending = false,
+): HostedInviteStatusPayload {
   return {
+    activationPending,
     capabilities: {
       billingReady: true,
       phoneAuthReady: true,

@@ -12,6 +12,7 @@ import {
   finishHostedOnboardingTiming,
   startHostedOnboardingTiming,
 } from "./logging";
+import { isHostedMemberActivationPending } from "./activation-progress";
 import { type HostedPrivyIdentity } from "./privy";
 import {
   buildHostedInviteUrl,
@@ -30,10 +31,11 @@ export async function completeHostedPrivyVerification(input: {
   now?: Date;
   prisma?: PrismaClient;
 }): Promise<{
+  activationPending: boolean;
   inviteCode: string;
   joinUrl: string;
   memberId: string;
-  stage: "active" | "activating" | "checkout" | "blocked";
+  stage: "active" | "checkout" | "blocked";
 }> {
   const prisma = input.prisma ?? getPrisma();
   const now = input.now ?? new Date();
@@ -78,6 +80,13 @@ export async function completeHostedPrivyVerification(input: {
       memberId: member.id,
       prisma,
     });
+    const activationPending = member.billingStatus === "active"
+      ? await isHostedMemberActivationPending({
+          billingStatus: member.billingStatus,
+          memberId: member.id,
+          prisma,
+        })
+      : false;
     const stage = deriveHostedPostVerificationStage({
       billingStatus: member.billingStatus,
       suspendedAt: member.suspendedAt,
@@ -89,6 +98,7 @@ export async function completeHostedPrivyVerification(input: {
     });
 
     return {
+      activationPending,
       inviteCode: activeInvite.inviteCode,
       joinUrl: buildHostedInviteUrl(activeInvite.inviteCode),
       memberId: member.id,

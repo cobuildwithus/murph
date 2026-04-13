@@ -574,6 +574,7 @@ describe("HostedPhoneAuth", () => {
       resolveHostedPrivyCompletionRedirectUrl({
         intent: "signin",
         payload: {
+          activationPending: false,
           inviteCode: "invite-code",
           joinUrl: "/join/invite-code",
           stage: "active",
@@ -585,6 +586,7 @@ describe("HostedPhoneAuth", () => {
       resolveHostedPrivyCompletionRedirectUrl({
         intent: "signup",
         payload: {
+          activationPending: false,
           inviteCode: "invite-code",
           joinUrl: "/join/invite-code",
           stage: "active",
@@ -596,6 +598,7 @@ describe("HostedPhoneAuth", () => {
       resolveHostedPrivyCompletionRedirectUrl({
         intent: "signup",
         payload: {
+          activationPending: false,
           inviteCode: "invite-code",
           joinUrl: "https://www.withmurph.ai/join/invite-code",
           stage: "checkout",
@@ -611,6 +614,7 @@ describe("HostedPhoneAuth", () => {
     const ensureHostedPrivyPhoneReady = vi.fn().mockResolvedValue(undefined);
     const requestHostedOnboardingJson = vi.fn()
       .mockResolvedValueOnce({
+        activationPending: false,
         inviteCode: "invite-code",
         joinUrl: "/join/invite-code",
         stage: "checkout",
@@ -684,6 +688,7 @@ describe("HostedPhoneAuth", () => {
     const requestHostedOnboardingJson = vi.fn()
       .mockRejectedValueOnce(new TestHostedOnboardingApiError("AUTH_REQUIRED", "Verify your phone to continue."))
       .mockResolvedValueOnce({
+        activationPending: false,
         inviteCode: "invite-code",
         joinUrl: "/join/invite-code",
         stage: "checkout",

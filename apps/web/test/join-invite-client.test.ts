@@ -462,16 +462,17 @@ test("active invite state renders message and settings actions with client navig
   assert.match(markup, /Manage settings/);
 });
 
-test("activating invite state explains that payment finished and setup is still running", () => {
+test("active invite state explains when Cloudflare warmup is still running", () => {
   const markup = renderToStaticMarkup(
     createElement(JoinInviteClient, {
       initialStatus: createStatus({
+        activationPending: true,
         session: {
           authenticated: true,
           expiresAt: null,
           matchesInvite: true,
         },
-        stage: "activating",
+        stage: "active",
       }),
       inviteCode: "invite-code",
       shareCode: "share-code",
@@ -488,9 +489,9 @@ test("activating invite state explains that payment finished and setup is still 
     }),
   );
 
-  assert.match(markup, /We’re setting up your account/);
-  assert.match(markup, /Payment received\. We&#x27;re setting up your account\./);
-  assert.match(markup, /We&#x27;ll add your shared bundle after setup finishes\./);
+  assert.match(markup, /Your account is ready\. Murph is still booting your hosted runtime in Cloudflare/);
+  assert.match(markup, /Your account is ready\. Murph is still warming up\./);
+  assert.match(markup, /We&#x27;ll add your shared bundle after the warmup finishes\./);
 });
 
 test("invite share preview renders the generic bundle copy from the tiny summary", () => {
@@ -693,6 +694,7 @@ function createStatus(
   },
 ): HostedInviteStatusPayload {
   return {
+    activationPending: false,
     capabilities: {
       billingReady: true,
       phoneAuthReady: false,
@@ -741,6 +743,7 @@ function createShareStatus(stage: HostedSharePageData["stage"]): HostedSharePage
 
 function createCompletionPayload(stage: HostedPrivyCompletionPayload["stage"]): HostedPrivyCompletionPayload {
   return {
+    activationPending: false,
     inviteCode: "invite-code",
     joinUrl: "https://join.example.test/join/invite-code",
     stage,
