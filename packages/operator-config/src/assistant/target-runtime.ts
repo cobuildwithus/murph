@@ -63,10 +63,6 @@ export function normalizeAssistantExecutionDriver(
   value: string | null | undefined,
 ): AssistantExecutionDriver | null {
   const normalized = normalizeNullableString(value)
-  if (normalized === 'openai-responses' || normalized === 'gateway') {
-    return 'responses'
-  }
-
   return normalized !== null &&
     assistantExecutionDriverValues.includes(normalized as AssistantExecutionDriver)
     ? (normalized as AssistantExecutionDriver)

@@ -5,15 +5,10 @@ import { afterEach, beforeEach, expectTypeOf, test as baseTest, vi } from 'vites
 const test = baseTest.sequential
 
 const harnessMocks = vi.hoisted(() => {
-  const gateway = vi.fn((model: string) => ({
-    provider: 'gateway',
-    model,
-  }))
   const createOpenAI = vi.fn()
   const createOpenAICompatible = vi.fn()
 
   return {
-    gateway,
     createOpenAI,
     createOpenAICompatible,
   }
@@ -21,10 +16,7 @@ const harnessMocks = vi.hoisted(() => {
 
 vi.mock('ai', async () => {
   const actual = await vi.importActual<typeof import('ai')>('ai')
-  return {
-    ...actual,
-    gateway: harnessMocks.gateway,
-  }
+  return actual
 })
 
 vi.mock('@ai-sdk/openai', async () => {
@@ -66,7 +58,6 @@ import {
 const TEST_API_KEY_ENV = 'ASSISTANT_TEST_KEY'
 
 beforeEach(() => {
-  harnessMocks.gateway.mockClear()
   harnessMocks.createOpenAI.mockClear()
   harnessMocks.createOpenAICompatible.mockClear()
   delete process.env[TEST_API_KEY_ENV]
@@ -348,17 +339,30 @@ test('assistant tool catalogs reject duplicate bound tool names from one host se
   )
 })
 
-test('resolveAssistantLanguageModel uses gateway when no baseUrl is provided', () => {
+test('resolveAssistantLanguageModel uses the responses provider when no baseUrl is provided', () => {
   const model = resolveAssistantLanguageModel({
-    executionDriver: 'gateway',
+    executionDriver: 'responses',
     model: 'anthropic/claude-sonnet-4-5',
   })
 
-  assert.deepEqual(model, {
-    provider: 'gateway',
-    model: 'anthropic/claude-sonnet-4-5',
-  })
-  assert.deepEqual(harnessMocks.gateway.mock.calls, [['anthropic/claude-sonnet-4-5']])
+  const responsesModel = model as {
+    constructor?: {
+      name?: string
+    }
+    modelId?: string
+    specificationVersion?: string
+    config?: {
+      fetch?: typeof fetch
+      provider?: string
+    }
+  }
+
+  assert.equal(responsesModel.constructor?.name, 'OpenAIResponsesLanguageModel')
+  assert.equal(responsesModel.modelId, 'anthropic/claude-sonnet-4-5')
+  assert.equal(responsesModel.specificationVersion, 'v2')
+  assert.equal(responsesModel.config?.provider, 'murph-assistant.responses')
+  assert.equal(typeof responsesModel.config?.fetch, 'function')
+  assert.equal(harnessMocks.createOpenAI.mock.calls.length, 1)
   assert.equal(harnessMocks.createOpenAICompatible.mock.calls.length, 0)
 })
 
@@ -366,7 +370,7 @@ test('resolveAssistantLanguageModel uses the OpenAI responses provider for the o
   process.env[TEST_API_KEY_ENV] = 'secret-key'
 
   const model = resolveAssistantLanguageModel({
-    executionDriver: 'openai-responses',
+    executionDriver: 'responses',
     model: 'gpt-5',
     baseUrl: 'https://api.openai.com/v1',
     apiKeyEnv: TEST_API_KEY_ENV,
@@ -420,7 +424,7 @@ test('resolveAssistantLanguageModel injects automatic OpenAI response compaction
 
   try {
     const model = resolveAssistantLanguageModel({
-      executionDriver: 'openai-responses',
+      executionDriver: 'responses',
       model: 'gpt-5',
       baseUrl: 'https://api.openai.com/v1',
       apiKeyEnv: TEST_API_KEY_ENV,
