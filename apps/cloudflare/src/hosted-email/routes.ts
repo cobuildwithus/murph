@@ -148,10 +148,7 @@ export async function reconcileHostedEmailVerifiedSenderRoute(input: {
   if (!routeState.record) {
     await store.writeVerifiedSenderRoute({
       identityId: verifiedSenderConfig.publicSenderAddress,
-      senderHash: await deriveHostedEmailVerifiedSenderHash(
-        verifiedSenderConfig.signingSecret,
-        nextVerifiedEmailAddress,
-      ),
+      senderHash: routeState.senderHash,
       senderKey: routeState.senderKey,
       userId: input.userId,
     });
@@ -326,20 +323,10 @@ async function deleteHostedEmailVerifiedSenderRoute(input: {
   await input.store.deleteVerifiedSenderRoute(routeState.senderKey);
 }
 
-async function matchesHostedEmailVerifiedSenderRoute(input: {
-  record: HostedEmailVerifiedSenderRouteRecord;
-  secret: string;
-  senderAddress: string;
-}): Promise<boolean> {
-  return input.record.senderHash === await deriveHostedEmailVerifiedSenderHash(
-    input.secret,
-    input.senderAddress,
-  );
-}
-
 interface HostedEmailVerifiedSenderRouteState {
   matchesSenderHash: boolean;
   record: HostedEmailVerifiedSenderRouteRecord | null;
+  senderHash: string;
   senderKey: string;
 }
 
@@ -348,18 +335,14 @@ async function readHostedEmailVerifiedSenderRouteState(input: {
   senderAddress: string;
   store: HostedEmailRouteStore;
 }): Promise<HostedEmailVerifiedSenderRouteState> {
+  const senderHash = await deriveHostedEmailVerifiedSenderHash(input.secret, input.senderAddress);
   const senderKey = await deriveHostedEmailVerifiedSenderKey(input.secret, input.senderAddress);
   const record = await input.store.readVerifiedSenderRoute(senderKey);
 
   return {
-    matchesSenderHash: record
-      ? await matchesHostedEmailVerifiedSenderRoute({
-          record,
-          secret: input.secret,
-          senderAddress: input.senderAddress,
-        })
-      : false,
+    matchesSenderHash: record ? record.senderHash === senderHash : false,
     record,
+    senderHash,
     senderKey,
   };
 }
