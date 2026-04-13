@@ -32,6 +32,8 @@ describe('buildAssistantSystemPrompt', () => {
     expect(prompt).toContain('call `vault.cli.run` with `route estimate ...`')
     expect(prompt).toContain('distance, duration, traffic time, or approximate elevation')
     expect(prompt).toContain('`walking`, `cycling`, `driving`, or `driving-traffic`')
+    expect(prompt).toContain('prefer more specific place text or coordinates')
+    expect(prompt).toContain('provider may still return a broader display label')
   })
 
   it('tells direct-cli sessions to use vault-cli route estimate directly', () => {
@@ -39,6 +41,17 @@ describe('buildAssistantSystemPrompt', () => {
 
     expect(prompt).toContain('use `vault-cli route estimate ...` and choose the matching profile')
     expect(prompt).toContain('`walking`, `cycling`, `driving`, or `driving-traffic`')
+    expect(prompt).toContain('prefer more specific place text or coordinates')
+    expect(prompt).toContain('provider may still return a broader display label')
+  })
+
+  it('keeps the fallback route-estimation guidance aligned with the explicit profiles', () => {
+    const prompt = buildPrompt('none')
+
+    expect(prompt).toContain('prefer `vault-cli route estimate ...`')
+    expect(prompt).toContain('`walking`, `cycling`, `driving`, or `driving-traffic`')
+    expect(prompt).toContain('prefer more specific place text or coordinates')
+    expect(prompt).toContain('provider may still return a broader display label')
   })
 
   it('tells the assistant to capture detailed food and supplement logging context', () => {
