@@ -107,7 +107,6 @@ describe('assistant CLI delivery contracts', () => {
         participantId: null,
         sourceThreadId: null,
         deliveryTarget: null,
-        deliverResponse: false,
       },
       createdAt: '2026-04-12T00:00:00.000Z',
       updatedAt: '2026-04-12T00:00:00.000Z',
@@ -143,6 +142,45 @@ describe('assistant CLI delivery contracts', () => {
     expect(run.runId).toBe('cronrun_123')
     expect(run.jobId).toBe('cronjob_123')
     expect(run.sessionId).toBe('session_123')
+  })
+
+  it('rejects the removed assistant cron deliverResponse field', () => {
+    expect(() =>
+      assistantCronJobSchema.parse({
+        schema: 'murph.assistant-cron-job.v1',
+        jobId: 'cronjob_456',
+        name: 'Daily check-in',
+        enabled: true,
+        keepAfterRun: false,
+        prompt: 'Ping me',
+        schedule: {
+          kind: 'every',
+          everyMs: 60_000,
+        },
+        target: {
+          sessionId: null,
+          alias: null,
+          channel: 'telegram',
+          identityId: null,
+          participantId: 'user_123',
+          sourceThreadId: 'thread_123',
+          deliveryTarget: null,
+          deliverResponse: true,
+        },
+        createdAt: '2026-04-12T00:00:00.000Z',
+        updatedAt: '2026-04-12T00:00:00.000Z',
+        state: {
+          nextRunAt: null,
+          lastRunAt: null,
+          lastSucceededAt: null,
+          lastFailedAt: null,
+          consecutiveFailures: 0,
+          lastError: null,
+          runningAt: null,
+          runningPid: null,
+        },
+      }),
+    ).toThrow()
   })
 
   it('rejects assistant ids with path separators or traversal segments', () => {

@@ -143,7 +143,6 @@ const TEST_CRON_JOB = {
     participantId: 'chat-123',
     sourceThreadId: 'chat-123',
     deliveryTarget: null,
-    deliverResponse: true,
   },
   createdAt: '2026-03-28T00:00:00.000Z',
   updatedAt: '2026-03-28T00:00:00.000Z',

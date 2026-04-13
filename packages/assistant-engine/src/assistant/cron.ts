@@ -57,6 +57,7 @@ import {
   type AssistantCronTargetInput,
   writeAssistantCronStore,
 } from './cron/store.ts'
+import { buildAssistantCronNotificationDedupeToken } from './cron/notification-delivery.ts'
 import {
   createAssistantCronAutomationRuntimeRecord,
   findAssistantCronAutomationRuntimeRecord,
@@ -234,7 +235,6 @@ export async function installAssistantCronPreset(
     identityId: input.identityId,
     participantId: input.participantId,
     sourceThreadId: input.sourceThreadId,
-    deliverResponse: input.deliverResponse,
     deliveryTarget: input.deliveryTarget,
   })
 
@@ -499,7 +499,6 @@ function projectCanonicalAssistantCronJob(input: {
     participantId: input.automation.route.participantId,
     sourceThreadId: input.automation.route.sourceThreadId,
     deliveryTarget: input.automation.route.deliveryTarget,
-    deliverResponse: true,
   })
 
   return assistantCronJobSchema.parse({
@@ -1180,13 +1179,6 @@ function validateAssistantCronDeliveryTarget(
     )
   }
 
-  if (input.deliverResponse === false) {
-    throw new VaultCliError(
-      'ASSISTANT_CRON_DELIVERY_REQUIRED',
-      'Assistant cron jobs always use bound notification delivery. Remove the deliverResponse override and bind an explicit outbound route.',
-    )
-  }
-
   const identityId = normalizeNullableString(input.identityId)
   if (channel === 'email' && !identityId) {
     throw new VaultCliError(
@@ -1218,7 +1210,6 @@ function validateAssistantCronDeliveryTarget(
     participantId,
     sourceThreadId,
     deliveryTarget,
-    deliverResponse: true,
   })
 }
 
@@ -1335,6 +1326,10 @@ async function executeClaimedAssistantCronJob(input: {
       const result = await sendAssistantNotificationLocal({
         vault: input.vault,
         instructions: buildAssistantCronExecutionInstructions(claimedJob),
+        deliveryDedupeToken: buildAssistantCronNotificationDedupeToken({
+          job: claimedJob,
+          trigger: input.trigger,
+        }),
         executionContext: input.executionContext,
         sessionId: claimedJob.target.sessionId,
         alias: claimedJob.target.alias,
@@ -1350,7 +1345,7 @@ async function executeClaimedAssistantCronJob(input: {
       })
 
       sessionId = result.session.sessionId
-      response = result.response
+      response = result.response ?? result.decision.privateSummary
     }
     if (status === 'failed') {
       status = 'succeeded'
@@ -1672,11 +1667,11 @@ function buildAssistantCronTargetSnapshot(
 function assistantCronTargetAudienceEquals(
   left: Pick<
     AssistantCronTarget,
-    'channel' | 'deliverResponse' | 'deliveryTarget' | 'identityId' | 'participantId' | 'sourceThreadId'
+    'channel' | 'deliveryTarget' | 'identityId' | 'participantId' | 'sourceThreadId'
   >,
   right: Pick<
     AssistantCronTarget,
-    'channel' | 'deliverResponse' | 'deliveryTarget' | 'identityId' | 'participantId' | 'sourceThreadId'
+    'channel' | 'deliveryTarget' | 'identityId' | 'participantId' | 'sourceThreadId'
   >,
 ): boolean {
   return (
@@ -1684,8 +1679,7 @@ function assistantCronTargetAudienceEquals(
     left.identityId === right.identityId &&
     left.participantId === right.participantId &&
     left.sourceThreadId === right.sourceThreadId &&
-    left.deliveryTarget === right.deliveryTarget &&
-    left.deliverResponse === right.deliverResponse
+    left.deliveryTarget === right.deliveryTarget
   )
 }
 

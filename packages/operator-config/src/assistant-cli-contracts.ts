@@ -889,7 +889,6 @@ export const assistantCronTargetSchema = z
     participantId: z.string().min(1).nullable(),
     sourceThreadId: z.string().min(1).nullable(),
     deliveryTarget: z.string().min(1).nullable(),
-    deliverResponse: z.boolean(),
   })
   .strict()
 
