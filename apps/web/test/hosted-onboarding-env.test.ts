@@ -20,12 +20,15 @@ describe("readHostedOnboardingEnvironment", () => {
     expect(environment.privyAppId).toBe("cm_app_123");
     expect(environment.privyVerificationKey).toBe("privy-verification-key");
     expect(environment.inviteTtlHours).toBe(24 * 7);
+    expect(environment.linqMaxActiveMembersPerConversationPhone).toBe(1000);
   });
 
   it("reads explicit Linq config", () => {
     const environment = readHostedOnboardingEnvironment(createProcessEnv({
       LINQ_API_TOKEN: "linq-token",
       LINQ_API_BASE_URL: "https://linq.example.test/api",
+      HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS: "+15550000001, +1 (555) 000-0002",
+      HOSTED_ONBOARDING_LINQ_MAX_ACTIVE_MEMBERS_PER_PHONE_NUMBER: "250",
       NEXT_PUBLIC_PRIVY_APP_ID: "cm_app_123",
       TELEGRAM_BOT_USERNAME: "murph_bot",
       TELEGRAM_WEBHOOK_SECRET: "telegram-secret",
@@ -33,6 +36,11 @@ describe("readHostedOnboardingEnvironment", () => {
 
     expect(environment.linqApiToken).toBe("linq-token");
     expect(environment.linqApiBaseUrl).toBe("https://linq.example.test/api");
+    expect(environment.linqConversationPhoneNumbers).toEqual([
+      "+15550000001",
+      "+15550000002",
+    ]);
+    expect(environment.linqMaxActiveMembersPerConversationPhone).toBe(250);
     expect(environment.privyAppId).toBe("cm_app_123");
     expect(environment.telegramBotUsername).toBe("murph_bot");
     expect(environment.telegramWebhookSecret).toBe("telegram-secret");

@@ -85,6 +85,8 @@ Hosted onboarding extras:
 - enable Privy identity tokens in the dashboard under `User management > Authentication > Advanced`
 - hosted browser auth expects Privy to issue its normal `privy-id-token` cookie so same-origin requests can authenticate through server-side cookie verification instead of client-managed auth headers
 - `HOSTED_ONBOARDING_INVITE_TTL_HOURS`
+- `HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS` as a comma-separated or newline-separated pool of Murph Linq numbers for hosted home-line assignment
+- `HOSTED_ONBOARDING_LINQ_MAX_ACTIVE_MEMBERS_PER_PHONE_NUMBER` to cap how many active hosted members can be assigned to one pooled Linq number; defaults to `1000` when unset
 - `HOSTED_ONBOARDING_STRIPE_PRICE_ID`
 - `STRIPE_SECRET_KEY`
 - `STRIPE_WEBHOOK_SECRET`
@@ -130,6 +132,7 @@ Set these under `Settings -> Environment Variables` in the Vercel project that d
 - Enable Vercel OIDC for the project so the app-local hosted-execution auth adapter in `apps/web` can present bearer workload identity to Cloudflare on hosted execution dispatch/control requests.
 - `CRON_SECRET`: configure the Vercel cron bearer secret for the hosted cron routes under `/api/internal/**/cron`.
 - Configure the hosted public-origin envs and `HOSTED_WEB_CALLBACK_SIGNING_*` values exactly as documented in the `Hosted public origin and Cloudflare callback auth` section above.
+- Set `HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS` and, if you need a non-default pool cap, `HOSTED_ONBOARDING_LINQ_MAX_ACTIVE_MEMBERS_PER_PHONE_NUMBER` on the Vercel project that deploys `apps/web`. These are hosted-web onboarding settings, not Cloudflare worker vars and not GitHub Actions secrets.
 - `DEVICE_SYNC_TRUSTED_USER_SIGNING_SECRET`: generate a distinct strong random secret and use the same value in Vercel plus whichever trusted auth proxy or middleware signs the hosted user assertion headers. `apps/web` verifies that signature before trusting the lower-level assertion-backed device-sync bridge routes.
 
 If you prefer the CLI, Vercel's current docs cover `vercel env add`, `vercel env update`, and `vercel env pull` for managing these project environment variables.
