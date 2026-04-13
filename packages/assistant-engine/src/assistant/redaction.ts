@@ -3,11 +3,12 @@ import type {
   AssistantSession,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import {
-  isSensitiveAssistantHeaderName as isSensitiveSharedAssistantHeaderName,
-  isSensitiveAssistantHeaderValue as isSensitiveSharedAssistantHeaderValue,
-  splitAssistantHeadersForPersistence as splitSharedAssistantHeadersForPersistence,
-  type AssistantHeaderPersistenceSplit as SharedAssistantHeaderPersistenceSplit,
+  isSensitiveAssistantHeaderName,
+  isSensitiveAssistantHeaderValue,
+  mergeAssistantHeaders,
+  splitAssistantHeadersForPersistence,
 } from '@murphai/operator-config/assistant/redaction'
+import type { AssistantHeaderPersistenceSplit } from '@murphai/operator-config/assistant/redaction'
 
 const REDACTED_SECRET_TEXT = '[REDACTED]' as const
 
@@ -15,7 +16,13 @@ const SENSITIVE_HEADER_VALUE_PATTERN = /\b(?:Bearer|Basic)\s+[A-Za-z0-9._~+/=-]{
 const SENSITIVE_INLINE_ASSIGNMENT_PATTERN =
   /((?:authorization|proxy-authorization|cookie|set-cookie|api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|password|secret|token)\s*[:=]\s*["']?)([^"'\s,;\]}]{4,})/giu
 
-export type AssistantHeaderPersistenceSplit = SharedAssistantHeaderPersistenceSplit
+export {
+  isSensitiveAssistantHeaderName,
+  isSensitiveAssistantHeaderValue,
+  mergeAssistantHeaders,
+  splitAssistantHeadersForPersistence,
+}
+export type { AssistantHeaderPersistenceSplit }
 
 export function redactAssistantStateString(value: string): string {
   return value
@@ -53,24 +60,6 @@ export function redactAssistantStateStructuredValue(value: unknown): unknown {
 
 export function containsInlineAssistantSecretMaterial(value: string): boolean {
   return redactAssistantStateString(value) !== value
-}
-
-export function splitAssistantHeadersForPersistence(
-  headers: Record<string, string> | null | undefined,
-): AssistantHeaderPersistenceSplit {
-  return splitSharedAssistantHeadersForPersistence(headers)
-}
-
-export function mergeAssistantHeaders(
-  publicHeaders: Record<string, string> | null | undefined,
-  secretHeaders: Record<string, string> | null | undefined,
-): Record<string, string> | null {
-  const merged = {
-    ...(publicHeaders ?? {}),
-    ...(secretHeaders ?? {}),
-  }
-
-  return Object.keys(merged).length > 0 ? merged : null
 }
 
 export function redactAssistantHeadersForDisplay(
@@ -128,14 +117,6 @@ export function redactAssistantSessionsForDisplay(
   sessions: readonly AssistantSession[],
 ): AssistantSession[] {
   return sessions.map((session) => redactAssistantSessionForDisplay(session))
-}
-
-export function isSensitiveAssistantHeaderName(name: string): boolean {
-  return isSensitiveSharedAssistantHeaderName(name)
-}
-
-export function isSensitiveAssistantHeaderValue(value: string): boolean {
-  return isSensitiveSharedAssistantHeaderValue(value)
 }
 
 function isSensitiveAssistantFieldName(name: string): boolean {

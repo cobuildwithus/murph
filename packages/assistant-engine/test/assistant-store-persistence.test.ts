@@ -108,7 +108,6 @@ describe('assistant store persistence seams', () => {
       schema: 'murph.assistant-session-secrets.v1',
       sessionId: session.sessionId,
       updatedAt: session.updatedAt,
-      providerBindingHeaders: null,
       providerHeaders: {
         Authorization: 'Bearer secret-token',
         Cookie: 'session-cookie',

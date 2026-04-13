@@ -1,4 +1,4 @@
-import { FOOD_STATUSES, RECIPE_STATUSES } from '@murphai/contracts'
+import { FOOD_STATUSES, RECIPE_STATUSES, eventSourceSchema } from '@murphai/contracts'
 import { buildSharePackFromVault } from '@murphai/core'
 import { z, type ZodTypeAny } from 'zod'
 import type { AssistantToolProvenance } from '../inbox-model-contracts.js'
@@ -821,7 +821,7 @@ export function createCanonicalVaultWriteToolDefinitions(
         title: z.string().min(1).optional(),
         occurredAt: isoTimestampSchema.optional(),
         note: z.string().min(1).optional(),
-        source: z.enum(['manual', 'import', 'device', 'derived']).optional(),
+        source: eventSourceSchema.optional(),
       }),
       inputExample: {
         file: 'raw/inbox/captures/cap_123/attachments/1/report.pdf',

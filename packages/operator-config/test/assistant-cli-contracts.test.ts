@@ -11,6 +11,7 @@ import {
   assistantBindingDeliveryKindValues,
   assistantChannelDeliveryTargetKindValues,
   assistantOutboxIntentSchema,
+  assistantSessionSecretsSchema,
   assistantSessionIdSchema,
   assistantTurnReceiptSchema,
 } from '../src/assistant-cli-contracts.ts'
@@ -148,5 +149,28 @@ describe('assistant CLI delivery contracts', () => {
     expect(() => assistantSessionIdSchema.parse('../session_123')).toThrow(
       /opaque runtime ids/i,
     )
+  })
+
+  it('drops the obsolete provider binding header bucket while still accepting it on read', () => {
+    expect(
+      assistantSessionSecretsSchema.parse({
+        schema: 'murph.assistant-session-secrets.v1',
+        sessionId: 'sess_headers_roundtrip',
+        updatedAt: '2026-04-13T00:00:00.000Z',
+        providerHeaders: {
+          'X-Upstream-Auth': 'Bearer firstsecret123',
+        },
+        providerBindingHeaders: {
+          'X-Old-Binding-Auth': 'Bearer oldsecret456',
+        },
+      }),
+    ).toEqual({
+      schema: 'murph.assistant-session-secrets.v1',
+      sessionId: 'sess_headers_roundtrip',
+      updatedAt: '2026-04-13T00:00:00.000Z',
+      providerHeaders: {
+        'X-Upstream-Auth': 'Bearer firstsecret123',
+      },
+    })
   })
 })

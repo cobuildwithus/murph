@@ -268,9 +268,12 @@ export const assistantSessionSecretsSchema = z
     sessionId: assistantSessionIdSchema,
     updatedAt: isoTimestampSchema,
     providerHeaders: assistantHeadersSchema.nullable().default(null),
-    providerBindingHeaders: assistantHeadersSchema.nullable().default(null),
+    providerBindingHeaders: assistantHeadersSchema.nullable().optional(),
   })
   .strict()
+  .transform(({ providerBindingHeaders: _deprecatedProviderBindingHeaders, ...value }) =>
+    value,
+  )
 
 export const assistantProviderFailoverRouteSchema = z
   .object({

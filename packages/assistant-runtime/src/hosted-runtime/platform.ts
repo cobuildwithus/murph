@@ -86,16 +86,28 @@ export function parseHostedRuntimeUsageRecordResponse(
   const recorded = (value as { recorded?: unknown }).recorded;
   const usageIds = (value as { usageIds?: unknown }).usageIds;
 
-  if (typeof recorded !== "number" || !Number.isFinite(recorded)) {
-    throw new TypeError("Hosted runtime usage response.recorded must be a finite number.");
+  if (typeof recorded !== "number" || !Number.isSafeInteger(recorded) || recorded < 0) {
+    throw new TypeError("Hosted runtime usage response.recorded must be a non-negative integer.");
   }
 
-  if (!Array.isArray(usageIds) || usageIds.some((entry) => typeof entry !== "string")) {
-    throw new TypeError("Hosted runtime usage response.usageIds must be a string array.");
+  if (!Array.isArray(usageIds)) {
+    throw new TypeError("Hosted runtime usage response.usageIds must be a string array of non-empty values.");
+  }
+
+  const normalizedUsageIds: string[] = []
+  for (const entry of usageIds) {
+    if (typeof entry !== "string") {
+      throw new TypeError("Hosted runtime usage response.usageIds must be a string array of non-empty values.");
+    }
+    const trimmedEntry = entry.trim()
+    if (trimmedEntry.length === 0) {
+      throw new TypeError("Hosted runtime usage response.usageIds must be a string array of non-empty values.");
+    }
+    normalizedUsageIds.push(trimmedEntry)
   }
 
   return {
     recorded,
-    usageIds,
+    usageIds: normalizedUsageIds,
   };
 }
