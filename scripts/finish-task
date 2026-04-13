@@ -138,6 +138,17 @@ if (planColumnIndex === -1) {
   process.exit(1);
 }
 
+function normalizePlanCell(value) {
+  const trimmed = value.trim();
+  const inlineCodeMatch = trimmed.match(/^`([^`]+)`$/);
+
+  if (inlineCodeMatch) {
+    return inlineCodeMatch[1].trim();
+  }
+
+  return trimmed;
+}
+
 const matches = [];
 
 for (let i = headerIndex + 2; i < lines.length; i += 1) {
@@ -147,7 +158,7 @@ for (let i = headerIndex + 2; i < lines.length; i += 1) {
     .split('|')
     .slice(1, -1)
     .map((part) => part.trim());
-  if (columns[planColumnIndex] === planPath) {
+  if (normalizePlanCell(columns[planColumnIndex] ?? '') === planPath) {
     matches.push(i);
   }
 }
