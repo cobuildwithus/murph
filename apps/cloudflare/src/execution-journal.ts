@@ -353,7 +353,16 @@ function assertEquivalentDuplicateCommit(
     input.payload.assistantDeliveryEffects,
     "Hosted execution commit payload.assistantDeliveryEffects",
   );
-  if (!sameStructuredJsonValue(existing.assistantDeliveryEffects, expectedAssistantDeliveryEffects)) {
+  if (
+    !sameStructuredJsonValue(
+      sortHostedAssistantDeliveryEffectsSummary(
+        summarizeHostedAssistantDeliveryEffects(existing.assistantDeliveryEffects),
+      ),
+      sortHostedAssistantDeliveryEffectsSummary(
+        summarizeHostedAssistantDeliveryEffects(expectedAssistantDeliveryEffects),
+      ),
+    )
+  ) {
     emitHostedDuplicateCommitMismatchLog({
       eventId: input.eventId,
       existing,
