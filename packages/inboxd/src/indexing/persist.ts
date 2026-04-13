@@ -48,7 +48,7 @@ import {
   buildInboxCaptureLedgerPath,
   buildInboxCaptureLedgerPathForOccurredAt,
   buildInboxCaptureRecord,
-} from "./persist/canonical-records.ts";
+} from "./persist/canonical-records.js";
 
 const STORED_CAPTURE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]*$/u;
 const QUARANTINED_INVALID_CAPTURE_ID_SUFFIX = "quarantined-invalid-capture-id";
