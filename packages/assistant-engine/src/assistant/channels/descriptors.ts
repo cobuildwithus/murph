@@ -11,7 +11,6 @@ import {
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   createAssistantChannelAdapter,
-  inferThreadFirstBindingDelivery,
   readDeliveredProviderMessageId,
   readDeliveredProviderThreadId,
   readDeliveredTarget,
@@ -34,11 +33,6 @@ const TELEGRAM_CHANNEL_ADAPTER = createAssistantChannelAdapter({
     return capture.threadIsDirect === true
       ? null
       : 'Telegram auto-reply only runs for direct chats'
-  },
-  inferBindingDelivery(input) {
-    return inferThreadFirstBindingDelivery(input, {
-      includeParticipant: true,
-    })
   },
   isReadyForSetup(env) {
     return resolveTelegramBotToken(env) !== null
@@ -75,11 +69,6 @@ const LINQ_CHANNEL_ADAPTER = createAssistantChannelAdapter({
       ? null
       : 'Linq auto-reply only runs for direct chats'
   },
-  inferBindingDelivery(input) {
-    return inferThreadFirstBindingDelivery(input, {
-      includeParticipant: false,
-    })
-  },
   isReadyForSetup(env) {
     return resolveLinqApiToken(env) !== null && resolveLinqWebhookSecret(env) !== null
   },
@@ -113,11 +102,6 @@ const EMAIL_CHANNEL_ADAPTER = createAssistantChannelAdapter({
     return capture.threadIsDirect === true
       ? null
       : 'Email auto-reply only runs for direct threads'
-  },
-  inferBindingDelivery(input) {
-    return inferThreadFirstBindingDelivery(input, {
-      includeParticipant: true,
-    })
   },
   isReadyForSetup(env) {
     return resolveAgentmailApiKey(env) !== null
