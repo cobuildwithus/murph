@@ -90,13 +90,13 @@ Optional tuning variables:
 - `CF_COMPATIBILITY_DATE` (default `2026-03-27`)
 - `CF_CONTAINER_INSTANCE_TYPE` (default `standard-1`; also accepts a custom JSON object with `vcpu`, `memory_mib`, and `disk_mb`)
 - `CF_CONTAINER_MAX_INSTANCES` (default `50`)
-- `CF_LOG_HEAD_SAMPLING_RATE` (default `0`)
+- `CF_LOG_HEAD_SAMPLING_RATE` (default `1`)
 - `CF_MAX_EVENT_ATTEMPTS` (default `3`)
 - `CF_RETRY_DELAY_MS` (default `30000`)
 - `CF_RUNNER_TIMEOUT_MS` (default `120000`)
 - `CF_RUNNER_COMMIT_TIMEOUT_MS` (default `30000`)
 - `HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS` (default `120000`)
-- `CF_TRACE_HEAD_SAMPLING_RATE` (default `0`)
+- `CF_TRACE_HEAD_SAMPLING_RATE` (default `1`)
 - `CF_ALLOWED_USER_ENV_KEYS`
 - `HOSTED_ASSISTANT_PROVIDER`, `HOSTED_ASSISTANT_MODEL`, and the rest of the `HOSTED_ASSISTANT_*` seed vars when you want hosted member activation to persist one explicit platform-managed assistant profile into `~/.murph/config.json` instead of relying on runtime fallback
 
@@ -242,8 +242,8 @@ export HOSTED_EMAIL_DOMAIN=mail.example.test
 export HOSTED_EMAIL_LOCAL_PART=assistant
 export HOSTED_EMAIL_SIGNING_SECRET=...
 export CF_RUNNER_TIMEOUT_MS=120000
-export CF_LOG_HEAD_SAMPLING_RATE=0
-export CF_TRACE_HEAD_SAMPLING_RATE=0
+export CF_LOG_HEAD_SAMPLING_RATE=1
+export CF_TRACE_HEAD_SAMPLING_RATE=1
 
 pnpm --dir apps/cloudflare r2:lifecycle:apply
 pnpm --dir apps/cloudflare deploy:config:render

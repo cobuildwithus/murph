@@ -44,10 +44,17 @@
   ],
   "observability": {
     "enabled": true,
-    "head_sampling_rate": 0,
+    "head_sampling_rate": 1,
+    "logs": {
+      "enabled": true,
+      "invocation_logs": true,
+      "persist": true,
+      "head_sampling_rate": 1
+    },
     "traces": {
       "enabled": true,
-      "head_sampling_rate": 0
+      "persist": true,
+      "head_sampling_rate": 1
     }
   },
   "secrets": {
