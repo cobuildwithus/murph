@@ -355,17 +355,23 @@ async function resolveAssistantRouteTurnPlan(input: {
     shouldInjectBootstrapContext &&
     input.session.turnCount === 0
   const providerCapabilities = routeProviderCapabilities
-  const conversationMessages = removeTrailingCurrentUserPrompt(
-    await loadAssistantConversationMessages({
-      limit:
-        shouldInjectBootstrapContext
-          ? ASSISTANT_BOOTSTRAP_TRANSCRIPT_REPLAY_MESSAGE_LIMIT
-          : ASSISTANT_NATIVE_RESUME_TRANSCRIPT_REPLAY_MESSAGE_LIMIT,
-      sessionId: input.session.sessionId,
-      vault: input.input.vault,
-    }),
-    input.input.prompt,
-  )
+  const transcriptReplayLimit = shouldInjectBootstrapContext
+    ? ASSISTANT_BOOTSTRAP_TRANSCRIPT_REPLAY_MESSAGE_LIMIT
+    : shouldReplayAssistantTranscriptOnNativeResume(
+          input.route.providerOptions.resumeKind,
+        )
+      ? ASSISTANT_NATIVE_RESUME_TRANSCRIPT_REPLAY_MESSAGE_LIMIT
+      : null
+  const conversationMessages = transcriptReplayLimit
+    ? removeTrailingCurrentUserPrompt(
+        await loadAssistantConversationMessages({
+          limit: transcriptReplayLimit,
+          sessionId: input.session.sessionId,
+          vault: input.input.vault,
+        }),
+        input.input.prompt,
+      )
+    : undefined
   const promptCapabilityAvailability = resolveAssistantPromptCapabilityAvailability({
     providerCapabilities,
     toolCatalog: input.toolCatalog,
@@ -1022,6 +1028,12 @@ function truncateAssistantContinuityText(text: string): string {
   }
 
   return `${normalized.slice(0, 397)}...`
+}
+
+function shouldReplayAssistantTranscriptOnNativeResume(
+  resumeKind: AssistantProviderSessionOptions['resumeKind'],
+): boolean {
+  return resumeKind === 'codex-session'
 }
 
 async function loadAssistantConversationMessages(input: {
