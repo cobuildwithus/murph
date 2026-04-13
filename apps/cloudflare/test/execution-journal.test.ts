@@ -151,6 +151,67 @@ describe("persistHostedExecutionCommit", () => {
     expect(consoleError).not.toHaveBeenCalled();
   });
 
+  it("accepts duplicate commits when assistant deliveries are only reordered", async () => {
+    process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS = "true";
+    const consoleInfo = vi.spyOn(console, "info").mockImplementation(() => {});
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const bucket = new InMemoryR2Bucket();
+    const baseCommit = createBaseCommit(bucket);
+
+    const first = await persistHostedExecutionCommit({
+      ...baseCommit,
+      payload: {
+        assistantDeliveryEffects: [
+          {
+            effectId: "outbox_b",
+            fingerprint: "fingerprint-b",
+            kind: "assistant.delivery",
+          },
+          {
+            effectId: "outbox_a",
+            fingerprint: "fingerprint-a",
+            kind: "assistant.delivery",
+          },
+        ],
+        bundle: null,
+        result: {
+          eventsHandled: 1,
+          nextWakeAt: null,
+          summary: "ok",
+        },
+      },
+    });
+
+    await expect(
+      persistHostedExecutionCommit({
+        ...baseCommit,
+        payload: {
+          assistantDeliveryEffects: [
+            {
+              effectId: "outbox_a",
+              fingerprint: "fingerprint-a",
+              kind: "assistant.delivery",
+            },
+            {
+              effectId: "outbox_b",
+              fingerprint: "fingerprint-b",
+              kind: "assistant.delivery",
+            },
+          ],
+          bundle: null,
+          result: {
+            eventsHandled: 1,
+            nextWakeAt: null,
+            summary: "ok",
+          },
+        },
+      }),
+    ).resolves.toEqual(first);
+
+    expect(consoleInfo).toHaveBeenCalledTimes(1);
+    expect(consoleError).not.toHaveBeenCalled();
+  });
+
   it("logs sanitized assistant-delivery diagnostics when duplicate commit effects diverge", async () => {
     process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS = "true";
     const consoleInfo = vi.spyOn(console, "info").mockImplementation(() => {});
