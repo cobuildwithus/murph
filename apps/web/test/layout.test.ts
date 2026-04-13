@@ -40,7 +40,7 @@ vi.mock("../app/providers", () => ({
 
 import RootLayout from "../app/layout";
 
-test("RootLayout renders the Apache footer with a GitHub link", () => {
+test("RootLayout renders the Apache footer with support and GitHub links", () => {
   const markup = renderToStaticMarkup(
     RootLayout({
       children: "hosted-shell",
@@ -52,6 +52,8 @@ test("RootLayout renders the Apache footer with a GitHub link", () => {
   assert.match(markup, /data-privy-app-id="cm_app_123"/);
   assert.match(markup, /data-privy-client-id="client_123"/);
   assert.match(markup, /Murph is open source and licensed under Apache 2\.0\./);
+  assert.match(markup, /Contact support/);
+  assert.match(markup, /mailto:support@withmurph\.ai/u);
   assert.match(markup, /View the code on GitHub/);
   assert.match(markup, /https:\/\/github\.com\/cobuildwithus\/murph/u);
 });
