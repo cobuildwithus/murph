@@ -55,12 +55,10 @@ import {
 } from './setup-services/steps.js'
 import { describeSelectedSetupWearables } from '@murphai/operator-config/setup-runtime-env'
 import {
-  ensureAssistantDefaultSelection,
-  ensureDefaultVaultSelection,
+  configureSetupOperatorDefaults,
 } from './setup-services/operator-defaults.js'
 import {
-  provisionLinuxToolchain,
-  provisionMacosToolchain,
+  provisionHostToolchain,
 } from './setup-services/tool-provisioning.js'
 
 interface SetupInput {
@@ -176,34 +174,20 @@ export function createSetupServices(
       title: 'Local toolchain root',
     })
 
-    const provisioning =
-      platform === 'darwin'
-        ? await provisionMacosToolchain({
-            arch,
-            downloadFile,
-            dryRun,
-            env: effectiveEnv,
-            fileExists,
-            log,
-            notes,
-            runCommand,
-            steps,
-            toolchainRoot,
-            whisperModel,
-          })
-        : await provisionLinuxToolchain({
-            arch,
-            downloadFile,
-            dryRun,
-            env: effectiveEnv,
-            fileExists,
-            log,
-            notes,
-            runCommand,
-            steps,
-            toolchainRoot,
-            whisperModel,
-          })
+    const provisioning = await provisionHostToolchain({
+      arch,
+      downloadFile,
+      dryRun,
+      env: effectiveEnv,
+      fileExists,
+      log,
+      notes,
+      platform,
+      runCommand,
+      steps,
+      toolchainRoot,
+      whisperModel,
+    })
     const toolchainEnv = provisioning.env
     const tools = provisioning.tools
 
@@ -283,22 +267,14 @@ export function createSetupServices(
       notes,
       steps,
     })
-    await ensureDefaultVaultSelection({
+    const assistant = await configureSetupOperatorDefaults({
+      assistant: input.assistant ?? null,
       dryRun,
       homeDirectory,
+      notes,
       steps,
       vault,
     })
-    const assistant =
-      input.assistant == null
-        ? null
-        : await ensureAssistantDefaultSelection({
-            assistant: input.assistant,
-            dryRun,
-            homeDirectory,
-            notes,
-            steps,
-          })
 
     const channels =
       input.channels == null

@@ -154,8 +154,8 @@ export async function updateAssistantOutboxAfterDispatchFailure(input: {
   deliveryMayHaveSucceeded: boolean
   deliveryTransportIdempotent: boolean
   error: unknown
+  failedAt: Date
   intentPath: string
-  now: Date
   sending: AssistantOutboxIntent
   vault: string
 }): Promise<AssistantOutboxIntent> {
@@ -169,11 +169,9 @@ export async function updateAssistantOutboxAfterDispatchFailure(input: {
     await ensureAssistantState(paths)
     const current = await readAssistantOutboxIntentAtPath(input.intentPath)
     const attemptCount = current?.attemptCount ?? input.sending.attemptCount
-    const updatedAt = new Date().toISOString()
+    const failedAt = input.failedAt.toISOString()
     const nextAttemptAt = retryable
-      ? new Date(
-          input.now.getTime() + resolveAssistantOutboxRetryDelayMs(attemptCount),
-        ).toISOString()
+      ? buildAssistantOutboxRetryTimestamp(input.failedAt, attemptCount)
       : null
     const failedIntent = assistantOutboxIntentSchema.parse({
       ...(current ?? input.sending),
@@ -181,7 +179,7 @@ export async function updateAssistantOutboxAfterDispatchFailure(input: {
       deliveryTransportIdempotent: input.deliveryMayHaveSucceeded
         ? input.deliveryTransportIdempotent
         : (current?.deliveryTransportIdempotent ?? input.sending.deliveryTransportIdempotent),
-      updatedAt,
+      updatedAt: failedAt,
       nextAttemptAt,
       status: retryable ? 'retryable' : 'failed',
       lastError: deliveryError,
@@ -229,6 +227,7 @@ export async function updateAssistantOutboxAfterDispatchFailure(input: {
         : {
             deliveriesFailed: 1,
           },
+      at: failedIntent.updatedAt,
     })
     return failedIntent
   })
@@ -237,7 +236,7 @@ export async function updateAssistantOutboxAfterDispatchFailure(input: {
 export async function rescheduleAssistantOutboxConfirmationRetry(input: {
   error: AssistantDeliveryError
   intentPath: string
-  now: Date
+  scheduledAt: Date
   sending: AssistantOutboxIntent
   vault: string
 }): Promise<AssistantOutboxIntent> {
@@ -245,20 +244,25 @@ export async function rescheduleAssistantOutboxConfirmationRetry(input: {
     await ensureAssistantState(paths)
     const current = await readAssistantOutboxIntentAtPath(input.intentPath)
     const baseIntent = current ?? input.sending
-    const updatedAt = new Date().toISOString()
+    const scheduledAt = input.scheduledAt.toISOString()
     const retryIntent = assistantOutboxIntentSchema.parse({
       ...baseIntent,
       deliveryConfirmationPending: true,
-      updatedAt,
-      nextAttemptAt: new Date(
-        input.now.getTime() + resolveAssistantOutboxRetryDelayMs(baseIntent.attemptCount),
-      ).toISOString(),
+      updatedAt: scheduledAt,
+      nextAttemptAt: buildAssistantOutboxRetryTimestamp(
+        input.scheduledAt,
+        baseIntent.attemptCount,
+      ),
       status: 'retryable',
       lastError: input.error,
     })
     await writeJsonFileAtomic(input.intentPath, retryIntent)
     return retryIntent
   })
+}
+
+function buildAssistantOutboxRetryTimestamp(at: Date, attemptCount: number): string {
+  return new Date(at.getTime() + resolveAssistantOutboxRetryDelayMs(attemptCount)).toISOString()
 }
 
 function sameAssistantChannelDelivery(

@@ -146,6 +146,7 @@ describe('assistant outbox runtime', () => {
 
   it('reconciles confirmation-pending deliveries or reschedules them for retry', async () => {
     const { vaultRoot } = await createAssistantVault('assistant-outbox-reconcile-')
+    vi.useFakeTimers()
 
     const reconciledSeed = await createIntent(vaultRoot, {
       createdAt: '2026-04-08T01:00:00.000Z',
@@ -210,6 +211,8 @@ describe('assistant outbox runtime', () => {
       status: 'sending',
       updatedAt: '2026-04-08T02:01:00.000Z',
     })
+
+    vi.setSystemTime(new Date('2026-04-08T02:20:00.000Z'))
 
     const retried = await dispatchAssistantOutboxIntent({
       dispatchHooks: {
@@ -361,6 +364,7 @@ describe('assistant outbox runtime', () => {
 
   it('drains only due intents and summarizes mixed outbox states', async () => {
     const { vaultRoot } = await createAssistantVault('assistant-outbox-drain-')
+    vi.useFakeTimers()
 
     await createIntent(vaultRoot, {
       createdAt: '2026-04-08T05:00:00.000Z',
@@ -416,6 +420,8 @@ describe('assistant outbox runtime', () => {
         code: 'REQUEST_FAILED',
       }),
     )
+
+    vi.setSystemTime(new Date('2026-04-08T05:20:00.000Z'))
 
     const drained = await drainAssistantOutboxLocal({
       limit: 10,
