@@ -1,6 +1,6 @@
 import { PrismaClient } from "@prisma/client";
 
-import type { OAuthStateRecord } from "@murphai/device-syncd/public-ingress";
+import type { ConsumeOAuthStateResult, OAuthStateRecord } from "@murphai/device-syncd/public-ingress";
 
 export class PrismaHostedOAuthSessionStore {
   readonly prisma: PrismaClient;
@@ -35,7 +35,11 @@ export class PrismaHostedOAuthSessionStore {
     return input;
   }
 
-  async consumeOAuthState(state: string, now: string): Promise<OAuthStateRecord | null> {
+  async consumeOAuthState(
+    state: string,
+    now: string,
+    expectedProvider?: string,
+  ): Promise<ConsumeOAuthStateResult> {
     return this.prisma.$transaction(async (tx) => {
       const record = await tx.deviceOauthSession.findUnique({
         where: {
@@ -44,7 +48,27 @@ export class PrismaHostedOAuthSessionStore {
       });
 
       if (!record) {
-        return null;
+        return {
+          status: "missing",
+        };
+      }
+
+      if (record.expiresAt.getTime() <= Date.parse(now)) {
+        await tx.deviceOauthSession.delete({
+          where: {
+            state,
+          },
+        });
+        return {
+          status: "missing",
+        };
+      }
+
+      if (expectedProvider && record.provider !== expectedProvider) {
+        return {
+          status: "provider_mismatch",
+          provider: record.provider,
+        };
       }
 
       await tx.deviceOauthSession.delete({
@@ -53,18 +77,17 @@ export class PrismaHostedOAuthSessionStore {
         },
       });
 
-      if (record.expiresAt.getTime() <= Date.parse(now)) {
-        return null;
-      }
-
       return {
-        state: record.state,
-        provider: record.provider,
-        returnTo: record.returnTo,
-        metadata: record.userId ? { ownerId: record.userId } : {},
-        createdAt: record.createdAt.toISOString(),
-        expiresAt: record.expiresAt.toISOString(),
-      } satisfies OAuthStateRecord;
+        status: "consumed",
+        record: {
+          state: record.state,
+          provider: record.provider,
+          returnTo: record.returnTo,
+          metadata: record.userId ? { ownerId: record.userId } : {},
+          createdAt: record.createdAt.toISOString(),
+          expiresAt: record.expiresAt.toISOString(),
+        } satisfies OAuthStateRecord,
+      };
     });
   }
 }

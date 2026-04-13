@@ -116,10 +116,27 @@ export type DeviceSyncWebhookTraceClaimResult =
   | "processed"
   | "processing";
 
+export type ConsumeOAuthStateResult =
+  | {
+      status: "consumed";
+      record: OAuthStateRecord;
+    }
+  | {
+      status: "missing";
+    }
+  | {
+      status: "provider_mismatch";
+      provider: string;
+    };
+
 export interface DeviceSyncPublicIngressStore {
   deleteExpiredOAuthStates(now: string): number | Promise<number>;
   createOAuthState(input: OAuthStateRecord): OAuthStateRecord | Promise<OAuthStateRecord>;
-  consumeOAuthState(state: string, now: string): OAuthStateRecord | null | Promise<OAuthStateRecord | null>;
+  consumeOAuthState(
+    state: string,
+    now: string,
+    expectedProvider?: string,
+  ): ConsumeOAuthStateResult | Promise<ConsumeOAuthStateResult>;
   upsertConnection(input: UpsertPublicDeviceSyncConnectionInput): PublicDeviceSyncAccount | Promise<PublicDeviceSyncAccount>;
   getConnectionByExternalAccount(
     provider: string,

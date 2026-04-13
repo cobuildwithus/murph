@@ -869,6 +869,27 @@ test("device sync http handler validates request bodies and payload limits", asy
   });
 });
 
+test("device sync http handler maps URI errors from callback handling to BAD_REQUEST", async () => {
+  const response = await invokeHandler({
+    service: createStubService({
+      async handleOAuthCallback() {
+        throw new URIError("Malformed callback URL encoding.");
+      },
+    }),
+    method: "GET",
+    url: "/device-sync/oauth/demo/callback?state=abc&code=xyz",
+    surface: "public",
+  });
+
+  assert.equal(response.statusCode, 400);
+  assert.deepEqual(response.readJson(), {
+    error: {
+      code: "BAD_REQUEST",
+      message: "Malformed callback URL encoding.",
+    },
+  });
+});
+
 test("device sync http handler redirects successful callbacks and renders callback failures without returnTo", async () => {
   const redirected = await invokeHandler({
     service: createStubService({
@@ -917,6 +938,30 @@ test("device sync http handler redirects successful callbacks and renders callba
   assert.equal(failed.statusCode, 400);
   assert.match(failed.readText(), /Demo connection failed/u);
   assert.match(failed.readText(), /The provider rejected the OAuth callback\./u);
+});
+
+test("device sync http handler renders callback html when a stored success returnTo is unsafe", async () => {
+  const response = await invokeHandler({
+    service: createStubService({
+      async handleOAuthCallback() {
+        return {
+          account: {
+            ...accountRecord,
+            id: "acct_redirect",
+            provider: "demo",
+          },
+          returnTo: "javascript:alert(1)",
+        };
+      },
+    }),
+    method: "GET",
+    url: "/device-sync/oauth/demo/callback?state=abc&code=xyz",
+    surface: "public",
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.headers.location, undefined);
+  assert.match(response.readText(), /Connected Demo successfully\./u);
 });
 
 test("device sync http handler returns not found for unknown accounts", async () => {
@@ -1331,6 +1376,33 @@ test("device sync http handler renders callback errors when no returnTo is avail
   const body = response.readText();
   assert.match(body, /Demo connection failed/u);
   assert.match(body, /The user canceled the OAuth flow\./u);
+});
+
+test("device sync http handler renders callback errors when returnTo is malformed", async () => {
+  const response = await invokeHandler({
+    service: createStubService({
+      async handleOAuthCallback() {
+        throw new DeviceSyncError({
+          code: "OAUTH_CALLBACK_REJECTED",
+          message: "The user canceled the OAuth flow.",
+          retryable: false,
+          httpStatus: 400,
+          details: {
+            provider: "demo",
+            returnTo: "javascript:alert(1)",
+          },
+        });
+      },
+    }),
+    method: "GET",
+    url: "/device-sync/oauth/demo/callback?state=state-1&error=access_denied",
+    surface: "public",
+  });
+
+  assert.equal(response.statusCode, 400);
+  assert.equal(response.headers.location, undefined);
+  assert.match(response.readText(), /Demo connection failed/u);
+  assert.match(response.readText(), /The user canceled the OAuth flow\./u);
 });
 
 test("device sync http handler serves the Oura webhook verification challenge on the public listener", async () => {

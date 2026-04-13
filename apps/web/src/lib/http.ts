@@ -46,6 +46,13 @@ export interface JsonRouteHelpers {
   ): (...args: TArgs) => Promise<Response>;
 }
 
+export class InvalidRouteParamEncodingError extends TypeError {
+  constructor(key: string) {
+    super(`Route parameter ${key} contained an invalid encoding.`);
+    this.name = "InvalidRouteParamEncodingError";
+  }
+}
+
 export async function readJsonObject(request: Request): Promise<Record<string, unknown>> {
   return requireJsonObject((await request.json()) as unknown);
 }
@@ -130,7 +137,12 @@ export async function resolveDecodedRouteParam<
   key: TKey,
 ): Promise<string> {
   const resolvedParams = await resolveRouteParams(params);
-  return decodeURIComponent(resolvedParams[key]);
+
+  try {
+    return decodeURIComponent(resolvedParams[key]);
+  } catch {
+    throw new InvalidRouteParamEncodingError(key);
+  }
 }
 
 export function mapDomainJsonError(error: {
@@ -177,7 +189,7 @@ export function createJsonErrorResponse(
     );
   }
 
-  if (error instanceof TypeError || error instanceof RangeError) {
+  if (error instanceof TypeError || error instanceof RangeError || error instanceof URIError) {
     logJsonError("warn", error, options);
     return NextResponse.json(
       {

@@ -269,12 +269,13 @@ const DEVICE_SYNC_HTTP_ROUTES = [
           errorDescription: url.searchParams.get("error_description"),
         });
 
-        if (result.returnTo) {
-          const destination = new URL(result.returnTo);
-          resetDeviceSyncCallbackParams(destination);
-          destination.searchParams.set("deviceSyncStatus", "connected");
-          destination.searchParams.set("deviceSyncProvider", result.account.provider);
-          redirect(response, destination.toString());
+        const redirectLocation = buildCallbackSuccessRedirectLocation({
+          returnTo: result.returnTo,
+          provider: result.account.provider,
+        });
+
+        if (redirectLocation) {
+          redirect(response, redirectLocation);
           return;
         }
 
@@ -742,16 +743,33 @@ function redirect(response: ServerResponse, location: string): void {
   response.end();
 }
 
+function buildCallbackSuccessRedirectLocation(input: {
+  returnTo: string | null;
+  provider: string;
+}): string | null {
+  const destination = parseCallbackRedirectDestination(input.returnTo);
+
+  if (!destination) {
+    return null;
+  }
+
+  resetDeviceSyncCallbackParams(destination);
+  destination.searchParams.set("deviceSyncStatus", "connected");
+  destination.searchParams.set("deviceSyncProvider", input.provider);
+  return destination.toString();
+}
+
 export function buildCallbackErrorRedirectLocation(input: {
   returnTo: string | null;
   provider: string;
   errorCode: string;
 }): string | null {
-  if (!input.returnTo) {
+  const destination = parseCallbackRedirectDestination(input.returnTo);
+
+  if (!destination) {
     return null;
   }
 
-  const destination = new URL(input.returnTo);
   resetDeviceSyncCallbackParams(destination);
   destination.searchParams.set("deviceSyncStatus", "error");
   destination.searchParams.set("deviceSyncProvider", input.provider);
@@ -765,6 +783,24 @@ function resetDeviceSyncCallbackParams(destination: URL): void {
   destination.searchParams.delete("deviceSyncAccountId");
   destination.searchParams.delete("deviceSyncError");
   destination.searchParams.delete("deviceSyncErrorMessage");
+}
+
+function parseCallbackRedirectDestination(returnTo: string | null): URL | null {
+  if (!returnTo) {
+    return null;
+  }
+
+  try {
+    const destination = new URL(returnTo);
+
+    if (destination.protocol !== "http:" && destination.protocol !== "https:") {
+      return null;
+    }
+
+    return destination;
+  } catch {
+    return null;
+  }
 }
 
 function sendCallbackErrorResponse(response: ServerResponse, fallbackProvider: string, error: DeviceSyncError): void {
@@ -812,7 +848,7 @@ function sendError(response: ServerResponse, error: unknown): void {
     return;
   }
 
-  if (error instanceof TypeError) {
+  if (error instanceof TypeError || error instanceof URIError) {
     sendJson(response, 400, {
       error: {
         code: "BAD_REQUEST",

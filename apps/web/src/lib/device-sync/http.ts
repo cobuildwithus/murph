@@ -15,6 +15,7 @@ const HOSTED_DEVICE_SYNC_DEFAULT_HEADERS = {
 } as const;
 
 export {
+  InvalidRouteParamEncodingError,
   readJsonObject,
   readOptionalJsonObject,
   readRawBodyBuffer,
@@ -61,11 +62,12 @@ function updateCallbackRedirect(
   returnTo: string | null,
   mutate: (destination: URL) => void,
 ): NextResponse | null {
-  if (!returnTo) {
+  const destination = parseCallbackRedirectDestination(returnTo);
+
+  if (!destination) {
     return null;
   }
 
-  const destination = new URL(returnTo);
   resetDeviceSyncCallbackParams(destination);
   mutate(destination);
   return redirectTo(destination.toString());
@@ -103,6 +105,24 @@ function escapeHtml(value: string): string {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;");
+}
+
+function parseCallbackRedirectDestination(returnTo: string | null): URL | null {
+  if (!returnTo) {
+    return null;
+  }
+
+  try {
+    const destination = new URL(returnTo);
+
+    if (destination.protocol !== "http:" && destination.protocol !== "https:") {
+      return null;
+    }
+
+    return destination;
+  } catch {
+    return null;
+  }
 }
 
 function matchDeviceSyncError(error: unknown) {

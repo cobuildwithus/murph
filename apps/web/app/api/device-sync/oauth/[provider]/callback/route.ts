@@ -2,6 +2,7 @@ import { isDeviceSyncError } from "@murphai/device-syncd/public-ingress";
 
 import { createHostedDeviceSyncControlPlane } from "../../../../../../src/lib/device-sync/control-plane";
 import {
+  InvalidRouteParamEncodingError,
   callbackHtml,
   errorToCallbackRedirect,
   providerCallbackRedirect,
@@ -41,6 +42,14 @@ export async function GET(
       });
 
       return redirect ?? callbackHtml("Device connection failed", error.message, error.httpStatus);
+    }
+
+    if (error instanceof InvalidRouteParamEncodingError) {
+      return callbackHtml(
+        "Device connection failed",
+        "The device connection callback URL was invalid.",
+        400,
+      );
     }
 
     console.error("Hosted device-sync OAuth callback failed unexpectedly.", {

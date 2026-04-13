@@ -4,7 +4,7 @@ import { withImmediateTransaction } from "@murphai/runtime-state/node";
 
 import { maybeParseJsonObject, stringifyJson } from "../shared.ts";
 
-import type { OAuthStateRecord } from "../types.ts";
+import type { ConsumeOAuthStateResult, OAuthStateRecord } from "../types.ts";
 
 interface OAuthStateRow {
   state: string;
@@ -51,7 +51,12 @@ export function deleteExpiredOAuthStates(database: DatabaseSync, now: string): n
   return result.changes ?? 0;
 }
 
-export function consumeOAuthState(database: DatabaseSync, state: string, now: string): OAuthStateRecord | null {
+export function consumeOAuthState(
+  database: DatabaseSync,
+  state: string,
+  now: string,
+  expectedProvider?: string,
+): ConsumeOAuthStateResult {
   return withImmediateTransaction(database, () => {
     const row = database.prepare(`
       select state, provider, return_to, metadata_json, created_at, expires_at
@@ -59,12 +64,30 @@ export function consumeOAuthState(database: DatabaseSync, state: string, now: st
       where state = ?
     `).get(state) as OAuthStateRow | undefined;
 
-    if (!row || Date.parse(row.expires_at) <= Date.parse(now)) {
+    if (!row) {
+      return {
+        status: "missing",
+      };
+    }
+
+    if (Date.parse(row.expires_at) <= Date.parse(now)) {
       database.prepare("delete from oauth_state where state = ?").run(state);
-      return null;
+      return {
+        status: "missing",
+      };
+    }
+
+    if (expectedProvider && row.provider !== expectedProvider) {
+      return {
+        status: "provider_mismatch",
+        provider: row.provider,
+      };
     }
 
     database.prepare("delete from oauth_state where state = ?").run(state);
-    return mapOAuthStateRow(row);
+    return {
+      status: "consumed",
+      record: mapOAuthStateRow(row)!,
+    };
   });
 }

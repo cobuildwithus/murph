@@ -255,6 +255,17 @@ describe("device sync callback redirect helpers", () => {
     ).resolves.toBe("oura/legacy");
   });
 
+  it("maps malformed route param encodings to a stable type error", async () => {
+    await expect(
+      httpModule.resolveDecodedRouteParam(
+        Promise.resolve({
+          provider: "%E0%A4%A",
+        }),
+        "provider",
+      ),
+    ).rejects.toThrow("Route parameter provider contained an invalid encoding.");
+  });
+
   it("wraps thrown handler errors with the hosted device-sync JSON mapper", async () => {
     const sensitiveBodySnippet =
       "account_id=acct_fake_sensitive_789 access_token=tok_fake_sensitive_987 scope=recovery";
@@ -390,5 +401,28 @@ describe("device sync callback redirect helpers", () => {
     expect(destination.searchParams.get("tab")).toBe("wearables");
     expect(destination.searchParams.get("deviceSyncError")).toBe("OAUTH_CALLBACK_REJECTED");
     expect(destination.searchParams.get("deviceSyncErrorMessage")).toBeNull();
+  });
+
+  it("rejects malformed or non-http callback redirect destinations", () => {
+    expect(
+      httpModule.providerCallbackRedirect({
+        returnTo: "javascript:alert(1)",
+        provider: "demo",
+        connectionId: "conn_123",
+      }),
+    ).toBeNull();
+
+    expect(
+      httpModule.errorToCallbackRedirect({
+        returnTo: "https://app.example.test:bad/settings",
+        provider: "demo",
+        error: mocks.deviceSyncError({
+          code: "OAUTH_CALLBACK_REJECTED",
+          message: "The user canceled the OAuth flow.",
+          retryable: false,
+          httpStatus: 400,
+        }),
+      }),
+    ).toBeNull();
   });
 });
