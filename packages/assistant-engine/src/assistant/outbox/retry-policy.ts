@@ -90,11 +90,7 @@ export function normalizeAssistantDeliveryError(
 ): AssistantDeliveryError {
   return assistantDeliveryErrorSchema.parse({
     code: readStringProperty(error, 'code'),
-    message: redactAssistantStateString(
-      error instanceof Error && error.message.trim().length > 0
-        ? error.message
-        : String(error),
-    ),
+    message: redactAssistantStateString(resolveAssistantDeliveryErrorMessage(error)),
   })
 }
 
@@ -125,6 +121,10 @@ function readAssistantOutboxRetryableFlag(error: unknown): boolean | null {
   }
 
   return readBooleanProperty(error, 'retryable')
+}
+
+function resolveAssistantDeliveryErrorMessage(error: unknown): string {
+  return readNonEmptyStringProperty(error, 'message') ?? String(error)
 }
 
 function assistantOutboxErrorCodeLooksPermanent(code: string): boolean {
@@ -160,5 +160,12 @@ function readStringProperty(value: unknown, property: string): string | null {
   const record = readRecord(value)
   return record && typeof record[property] === 'string'
     ? record[property] as string
+    : null
+}
+
+function readNonEmptyStringProperty(value: unknown, property: string): string | null {
+  const propertyValue = readStringProperty(value, property)
+  return propertyValue && propertyValue.trim().length > 0
+    ? propertyValue
     : null
 }

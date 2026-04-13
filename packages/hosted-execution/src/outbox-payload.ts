@@ -53,22 +53,26 @@ export function buildHostedExecutionOutboxPayload(
     storage?: HostedExecutionOutboxPayloadStorage | "auto";
   } = {},
 ): HostedExecutionOutboxPayload {
-  const storage = resolveHostedExecutionDispatchPayloadStorage(dispatch, options.storage ?? "auto");
+  const normalizedDispatch = parseHostedExecutionDispatchRequest(dispatch);
+  const storage = resolveHostedExecutionDispatchPayloadStorage(
+    normalizedDispatch,
+    options.storage ?? "auto",
+  );
 
   if (storage === "inline") {
     return {
-      dispatch: parseHostedExecutionDispatchRequest(dispatch),
+      dispatch: normalizedDispatch,
       storage,
     };
   }
 
   const stagedPayloadId = requireText(
     options.stagedPayloadId,
-    `Hosted execution ${dispatch.event.kind} reference payloads require a staged payload id.`,
+    `Hosted execution ${normalizedDispatch.event.kind} reference payloads require a staged payload id.`,
   );
 
   return {
-    dispatchRef: buildHostedExecutionDispatchRef(dispatch),
+    dispatchRef: buildHostedExecutionDispatchRef(normalizedDispatch),
     stagedPayloadId,
     storage,
   };
@@ -150,7 +154,10 @@ function readHostedExecutionInlineOutboxPayload(
     return null;
   }
 
-  const dispatch = parseHostedExecutionDispatchRequest(payloadObject.dispatch);
+  const dispatch = readHostedExecutionDispatchRequestIfValid(payloadObject.dispatch);
+  if (!dispatch) {
+    return null;
+  }
 
   return isHostedExecutionOutboxPayloadStorageAllowed(dispatch.event.kind, "inline")
     ? {
@@ -182,6 +189,16 @@ function readHostedExecutionReferenceOutboxPayload(
     stagedPayloadId,
     storage: "reference",
   };
+}
+
+function readHostedExecutionDispatchRequestIfValid(
+  value: unknown,
+): HostedExecutionDispatchRequest | null {
+  try {
+    return parseHostedExecutionDispatchRequest(value);
+  } catch {
+    return null;
+  }
 }
 
 function isHostedExecutionOutboxPayloadStorageAllowed(

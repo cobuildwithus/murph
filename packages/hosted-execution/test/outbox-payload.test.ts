@@ -20,6 +20,24 @@ import {
 } from "../src/outbox-payload.js";
 const occurredAt = "2026-04-04T00:00:00.000Z";
 
+function createInlineDispatch() {
+  return buildHostedExecutionMemberActivatedDispatch({
+    eventId: "member-activated-inline",
+    memberId: "user-inline",
+    occurredAt,
+  });
+}
+
+function createReferenceDispatch() {
+  return buildHostedExecutionGatewayMessageSendDispatch({
+    eventId: "gateway-reference",
+    occurredAt,
+    sessionKey: "session-reference",
+    text: "hello",
+    userId: "user-reference",
+  });
+}
+
 describe("resolveHostedExecutionDispatchPayloadStorage", () => {
   it("uses canonical storage for hosted events", () => {
     expect(
@@ -147,6 +165,26 @@ describe("resolveHostedExecutionDispatchPayloadStorage", () => {
     ).toBe("reference");
   });
 
+  it("validates reference payload dispatches before building refs", () => {
+    const invalidReferenceDispatch = {
+      event: {
+        kind: "gateway.message.send",
+        sessionKey: "session-invalid",
+        text: "hello",
+        userId: "user-invalid",
+      },
+      occurredAt,
+    };
+
+    expect(() => buildHostedExecutionOutboxPayload(
+      invalidReferenceDispatch as never,
+      {
+        stagedPayloadId: "staged-invalid-reference",
+        storage: "reference",
+      },
+    )).toThrow("Hosted execution dispatch request eventId");
+  });
+
   it("rejects forcing inline storage for reference-only gateway sends", () => {
     expect(() => buildHostedExecutionOutboxPayload(
       buildHostedExecutionGatewayMessageSendDispatch({
@@ -213,6 +251,36 @@ describe("resolveHostedExecutionDispatchPayloadStorage", () => {
         userId: "user_123",
       },
       storage: "reference",
+    })).toBeNull();
+  });
+
+  it("round-trips valid inline payloads", () => {
+    const payload = buildHostedExecutionOutboxPayload(createInlineDispatch(), {
+      storage: "inline",
+    });
+
+    expect(readHostedExecutionOutboxPayload(payload)).toEqual(payload);
+  });
+
+  it("round-trips valid reference payloads", () => {
+    const payload = buildHostedExecutionOutboxPayload(createReferenceDispatch(), {
+      stagedPayloadId: "staged-reference-roundtrip",
+      storage: "reference",
+    });
+
+    expect(readHostedExecutionOutboxPayload(payload)).toEqual(payload);
+  });
+
+  it("returns null instead of throwing for malformed inline payloads", () => {
+    expect(readHostedExecutionOutboxPayload({
+      dispatch: {
+        event: {
+          kind: "member.activated",
+          userId: "user-inline",
+        },
+        occurredAt,
+      },
+      storage: "inline",
     })).toBeNull();
   });
 

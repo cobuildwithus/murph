@@ -7,6 +7,7 @@ import {
 import {
   createAssistantDeliveryConfirmationPendingError,
   isAssistantOutboxRetryableError,
+  normalizeAssistantDeliveryError,
   resolveAssistantOutboxRetryDelayMs,
   shouldBeginAssistantOutboxDispatch,
   shouldDispatchAssistantOutboxIntent,
@@ -83,6 +84,18 @@ describe('assistant outbox retry policy', () => {
     ).toBe(false)
     expect(isAssistantOutboxRetryableError({ message: 'plain failure' })).toBe(false)
     expect(isAssistantOutboxRetryableError('temporary network timeout')).toBe(true)
+    expect(
+      isAssistantOutboxRetryableError({
+        code: null,
+        message: 'temporary network timeout',
+      }),
+    ).toBe(true)
+    expect(
+      isAssistantOutboxRetryableError({
+        code: 'TARGET_REQUIRED',
+        message: 'temporary network timeout',
+      }),
+    ).toBe(false)
   })
 
   it('clamps retry delays and preserves optional confirmation details', () => {
@@ -105,6 +118,16 @@ describe('assistant outbox retry policy', () => {
       code: 'ASSISTANT_DELIVERY_CONFIRMATION_PENDING',
       message:
         'Assistant outbound delivery may have succeeded already and must be reconciled before resend. provider may still deliver',
+    })
+  })
+
+  it('keeps message text from error-like objects', () => {
+    expect(normalizeAssistantDeliveryError({
+      code: 'WEB_SEARCH_REQUEST_FAILED',
+      message: 'temporary network timeout',
+    })).toEqual({
+      code: 'WEB_SEARCH_REQUEST_FAILED',
+      message: 'temporary network timeout',
     })
   })
 })
