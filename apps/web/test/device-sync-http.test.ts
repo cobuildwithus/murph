@@ -326,7 +326,6 @@ describe("device sync callback redirect helpers", () => {
       returnTo:
         "https://app.example.test/settings/devices?tab=wearables&deviceSyncStatus=error&deviceSyncProvider=legacy&deviceSyncError=stale&deviceSyncErrorMessage=leak",
       provider: "demo",
-      connectionId: "conn_123",
     });
 
     expect(response).not.toBeNull();
@@ -342,7 +341,7 @@ describe("device sync callback redirect helpers", () => {
     expect(destination.searchParams.get("tab")).toBe("wearables");
     expect(destination.searchParams.get("deviceSyncStatus")).toBe("connected");
     expect(destination.searchParams.get("deviceSyncProvider")).toBe("demo");
-    expect(destination.searchParams.get("deviceSyncConnectionId")).toBe("conn_123");
+    expect(destination.searchParams.get("deviceSyncConnectionId")).toBeNull();
     expect(destination.searchParams.get("deviceSyncError")).toBeNull();
     expect(destination.searchParams.get("deviceSyncErrorMessage")).toBeNull();
   });
@@ -408,7 +407,6 @@ describe("device sync callback redirect helpers", () => {
       httpModule.providerCallbackRedirect({
         returnTo: "javascript:alert(1)",
         provider: "demo",
-        connectionId: "conn_123",
       }),
     ).toBeNull();
 

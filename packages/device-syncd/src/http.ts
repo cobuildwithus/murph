@@ -8,6 +8,10 @@ import {
 } from "@murphai/runtime-state";
 import { hasMatchingLoopbackControlBearerToken } from "@murphai/runtime-state/node";
 
+import {
+  buildDeviceSyncCallbackErrorRedirectLocation,
+  buildDeviceSyncCallbackSuccessRedirectLocation,
+} from "./callback-redirect.ts";
 import { deviceSyncError, isDeviceSyncError } from "./errors.ts";
 import { DEFAULT_DEVICE_SYNC_HOST } from "./shared.ts";
 import { resolveDeviceSyncWebhookVerificationResponse } from "./webhook-verification.ts";
@@ -20,6 +24,12 @@ import type { DeviceSyncService } from "./service.ts";
 
 const DEFAULT_BODY_LIMIT_BYTES = DEFAULT_DEVICE_SYNC_HTTP_BODY_LIMIT_BYTES;
 const CONTROL_PLANE_WWW_AUTHENTICATE = 'Bearer realm="device-syncd-control-plane"';
+
+export {
+  buildDeviceSyncCallbackErrorRedirectLocation as buildCallbackErrorRedirectLocation,
+  buildDeviceSyncCallbackSuccessRedirectLocation as buildCallbackSuccessRedirectLocation,
+  DEVICE_SYNC_CALLBACK_QUERY_PARAM_KEYS,
+} from "./callback-redirect.ts";
 
 type DeviceSyncHttpRouteKind = "control" | "public";
 type DeviceSyncHttpListenerSurface = "combined" | "control" | "public";
@@ -269,7 +279,7 @@ const DEVICE_SYNC_HTTP_ROUTES = [
           errorDescription: url.searchParams.get("error_description"),
         });
 
-        const redirectLocation = buildCallbackSuccessRedirectLocation({
+        const redirectLocation = buildDeviceSyncCallbackSuccessRedirectLocation({
           returnTo: result.returnTo,
           provider: result.account.provider,
         });
@@ -743,71 +753,11 @@ function redirect(response: ServerResponse, location: string): void {
   response.end();
 }
 
-function buildCallbackSuccessRedirectLocation(input: {
-  returnTo: string | null;
-  provider: string;
-}): string | null {
-  const destination = parseCallbackRedirectDestination(input.returnTo);
-
-  if (!destination) {
-    return null;
-  }
-
-  resetDeviceSyncCallbackParams(destination);
-  destination.searchParams.set("deviceSyncStatus", "connected");
-  destination.searchParams.set("deviceSyncProvider", input.provider);
-  return destination.toString();
-}
-
-export function buildCallbackErrorRedirectLocation(input: {
-  returnTo: string | null;
-  provider: string;
-  errorCode: string;
-}): string | null {
-  const destination = parseCallbackRedirectDestination(input.returnTo);
-
-  if (!destination) {
-    return null;
-  }
-
-  resetDeviceSyncCallbackParams(destination);
-  destination.searchParams.set("deviceSyncStatus", "error");
-  destination.searchParams.set("deviceSyncProvider", input.provider);
-  destination.searchParams.set("deviceSyncError", input.errorCode);
-  return destination.toString();
-}
-
-function resetDeviceSyncCallbackParams(destination: URL): void {
-  destination.searchParams.delete("deviceSyncStatus");
-  destination.searchParams.delete("deviceSyncProvider");
-  destination.searchParams.delete("deviceSyncAccountId");
-  destination.searchParams.delete("deviceSyncError");
-  destination.searchParams.delete("deviceSyncErrorMessage");
-}
-
-function parseCallbackRedirectDestination(returnTo: string | null): URL | null {
-  if (!returnTo) {
-    return null;
-  }
-
-  try {
-    const destination = new URL(returnTo);
-
-    if (destination.protocol !== "http:" && destination.protocol !== "https:") {
-      return null;
-    }
-
-    return destination;
-  } catch {
-    return null;
-  }
-}
-
 function sendCallbackErrorResponse(response: ServerResponse, fallbackProvider: string, error: DeviceSyncError): void {
   const provider = error.details ? readStringField(error.details, "provider") ?? fallbackProvider : fallbackProvider;
   const returnTo = error.details ? readStringField(error.details, "returnTo") : null;
 
-  const redirectLocation = buildCallbackErrorRedirectLocation({
+  const redirectLocation = buildDeviceSyncCallbackErrorRedirectLocation({
     returnTo,
     provider,
     errorCode: error.code,

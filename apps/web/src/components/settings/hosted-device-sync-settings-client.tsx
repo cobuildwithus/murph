@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 
+import { DEVICE_SYNC_CALLBACK_QUERY_PARAM_KEYS } from "@murphai/device-syncd/callback-redirect";
+
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { requestHostedOnboardingJson } from "@/src/components/hosted-onboarding/client-api";
 import {
@@ -87,11 +89,9 @@ export function HostedDeviceSyncSettingsClient(props: {
       setSuccessMessage(null);
     }
 
-    url.searchParams.delete("deviceSyncStatus");
-    url.searchParams.delete("deviceSyncProvider");
-    url.searchParams.delete("deviceSyncConnectionId");
-    url.searchParams.delete("deviceSyncError");
-    url.searchParams.delete("deviceSyncErrorMessage");
+    for (const key of DEVICE_SYNC_CALLBACK_QUERY_PARAM_KEYS) {
+      url.searchParams.delete(key);
+    }
     window.history.replaceState({}, "", url.toString());
   }, [loadSources]);
 
