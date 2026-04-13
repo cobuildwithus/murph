@@ -307,6 +307,14 @@ export class RunnerQueueStore {
     } satisfies HostedExecutionRunContext;
     meta.in_flight = 1;
     this.assignActiveRunMetaSync(meta, nextPending.eventId, run);
+    this.volatileRun = {
+      attempt: run.attempt,
+      eventId: nextPending.eventId,
+      phase: "claimed",
+      runId: run.runId,
+      startedAt: run.startedAt,
+      updatedAt: run.startedAt,
+    };
     this.clearLastErrorMetaSync(meta);
     this.writeMetaRowSync(meta);
     return {
@@ -538,14 +546,18 @@ export class RunnerQueueStore {
     const meta = this.requireMetaRowSync();
     const activeRun = this.readActiveRunContextSync(meta);
     if (activeRun) {
+      const pending = this.readPendingDispatchRowByEventIdSync(input.eventId) !== null;
       const sameEvent = meta.active_run_event_id === input.eventId;
       const sameRun = input.run ? sameHostedExecutionRun(activeRun, input.run) : false;
-      const legacyActive = sameEvent && input.run === null;
+      const legacyActive = sameEvent
+        && pending
+        && input.run === null
+        && activeRun.attempt === 1;
 
       return {
         accepted: sameRun || legacyActive,
         activeRun,
-        pending: this.readPendingDispatchRowByEventIdSync(input.eventId) !== null,
+        pending,
         reason: sameRun
           ? "active"
           : legacyActive

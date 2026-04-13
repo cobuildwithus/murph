@@ -798,6 +798,42 @@ describe("RunnerQueueStore", () => {
     });
   });
 
+  it("rejects legacy ownerless commits once a newer retry attempt owns the same event", async () => {
+    const state = createState();
+    const { store } = createQueueHarness(state);
+    await store.bootstrapUser("member_123");
+
+    await store.enqueueDispatch({
+      event: {
+        kind: "assistant.cron.tick",
+        reason: "manual",
+        userId: "member_123",
+      },
+      eventId: "evt_legacy_stale",
+      occurredAt: "2026-03-29T10:00:00.000Z",
+    });
+    state.storage.sql!.exec(
+      "UPDATE pending_events SET attempts = ? WHERE event_id = ?",
+      1,
+      "evt_legacy_stale",
+    );
+
+    const claim = await store.claimNextDuePendingDispatch(Date.now() + 1_000);
+    if (!claim.run) {
+      throw new Error("Expected a claimed run lease.");
+    }
+
+    expect(await store.authorizeCommitRun({
+      eventId: "evt_legacy_stale",
+      run: null,
+    })).toEqual({
+      accepted: false,
+      activeRun: claim.run,
+      pending: true,
+      reason: "stale",
+    });
+  });
+
   it("clears a same-event active lease during committed recovery when the journal already owns the event", async () => {
     const state = createState();
     const { store } = createQueueHarness(state);

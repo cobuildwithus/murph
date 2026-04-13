@@ -783,6 +783,49 @@ describe("HostedUserRunner", () => {
     );
   });
 
+  it("rejects legacy runner commits without run metadata once a newer retry owns the same event", async () => {
+    const runner = new HostedUserRunner(storage.state, environment, bucket.api);
+    await runner.provisionManagedUserCrypto("member_123");
+    await seedRunnerQueueState({
+      activeRunLease: {
+        attempt: 2,
+        eventId: "evt_legacy_runner_stale",
+        runId: "run_new",
+        startedAt: "2026-03-26T12:01:00.000Z",
+      },
+      bucket,
+      environment,
+      inFlight: true,
+      pendingEvents: [{
+        attempts: 1,
+        availableAt: "2026-03-26T12:01:00.000Z",
+        dispatch: createDispatch("evt_legacy_runner_stale"),
+        enqueuedAt: "2026-03-26T12:00:00.000Z",
+        lastError: "timeout",
+      }],
+      storage,
+      userId: "member_123",
+    });
+
+    await expect(
+      runner.commit({
+        eventId: "evt_legacy_runner_stale",
+        payload: {
+          assistantDeliveryEffects: [],
+          bundle: Buffer.from("vault").toString("base64"),
+          currentBundleRef: null,
+          result: {
+            eventsHandled: 1,
+            summary: "ok",
+          },
+        },
+        run: null,
+      }),
+    ).rejects.toThrow(
+      "Hosted execution commit evt_legacy_runner_stale does not match the active runner lease.",
+    );
+  });
+
   it("rejects stale runner commits once a newer claimed run owns the pending event", async () => {
     const runner = new HostedUserRunner(storage.state, environment, bucket.api);
     await runner.provisionManagedUserCrypto("member_123");
@@ -2296,6 +2339,66 @@ describe("HostedUserRunner", () => {
     expect(status.retryingEventId).toBeNull();
     expect(status.inFlight).toBe(false);
     expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not launch a second resumed run while the first runner is still alive after commit", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-26T12:00:00.000Z"));
+    const dispatch = {
+      event: {
+        kind: "assistant.cron.tick" as const,
+        reason: "manual" as const,
+        userId: "member_123",
+      },
+      eventId: "evt_live_runner_guard",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+    };
+    const committedPayload = createRunnerSuccessPayload({
+      agentState: Buffer.from("agent-state-committed").toString("base64"),
+      summary: "committed",
+      vault: Buffer.from("vault-committed").toString("base64"),
+    });
+    const finalPayload = createRunnerSuccessPayload({
+      agentState: Buffer.from("agent-state-final").toString("base64"),
+      summary: "final",
+      vault: Buffer.from("vault-final").toString("base64"),
+    });
+    const firstCommitRecorded = createDeferred<void>();
+    const releaseFirstRunner = createDeferred<void>();
+    const fetchSpy = vi.fn(async (_url, init) => {
+      const requestBody = JSON.parse(String(init?.body));
+      await commitResultForRunnerRequest({
+        bucket,
+        environment,
+        payload: committedPayload,
+        requestBody,
+      });
+      firstCommitRecorded.resolve();
+      await releaseFirstRunner.promise;
+      await finalizeResultForRunnerRequest({
+        bucket,
+        environment,
+        payload: finalPayload,
+        requestBody,
+      });
+
+      return new Response(JSON.stringify(serializeRunnerSuccessPayload(finalPayload)), {
+        status: 200,
+      });
+    });
+    vi.stubGlobal("fetch", fetchSpy);
+    const runner = new HostedUserRunner(storage.state, environment, bucket.api);
+    await runner.provisionManagedUserCrypto("member_123");
+
+    const firstDispatch = runner.dispatch(dispatch);
+    await firstCommitRecorded.promise;
+
+    await runner.alarm();
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+
+    releaseFirstRunner.resolve();
+    await firstDispatch;
+    expect((await runner.status()).pendingEventCount).toBe(0);
   });
 
 
