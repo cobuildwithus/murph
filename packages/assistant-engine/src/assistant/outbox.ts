@@ -344,7 +344,7 @@ export async function dispatchAssistantOutboxIntent(input: {
       const retryIntent = await rescheduleAssistantOutboxConfirmationRetry({
         error: createAssistantDeliveryConfirmationPendingError(),
         intentPath: dispatchIntentPath,
-        now,
+        scheduledAt: new Date(),
         sending: dispatchIntent,
         vault: input.vault,
       })
@@ -468,8 +468,8 @@ export async function dispatchAssistantOutboxIntent(input: {
       deliveryMayHaveSucceeded: effectiveDeliveryMayHaveSucceeded,
       deliveryTransportIdempotent,
       error: failure,
+      failedAt: new Date(),
       intentPath: dispatchIntentPath,
-      now,
       sending: dispatchIntent,
       vault: input.vault,
     })

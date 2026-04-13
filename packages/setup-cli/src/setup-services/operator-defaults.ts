@@ -60,6 +60,34 @@ export async function ensureDefaultVaultSelection(input: {
   )
 }
 
+export async function configureSetupOperatorDefaults(input: {
+  assistant: SetupConfiguredAssistant | null
+  dryRun: boolean
+  homeDirectory: string
+  notes: string[]
+  steps: SetupStepResult[]
+  vault: string
+}): Promise<SetupConfiguredAssistant | null> {
+  await ensureDefaultVaultSelection({
+    dryRun: input.dryRun,
+    homeDirectory: input.homeDirectory,
+    steps: input.steps,
+    vault: input.vault,
+  })
+
+  if (input.assistant == null) {
+    return null
+  }
+
+  return await ensureAssistantDefaultSelection({
+    assistant: input.assistant,
+    dryRun: input.dryRun,
+    homeDirectory: input.homeDirectory,
+    notes: input.notes,
+    steps: input.steps,
+  })
+}
+
 export async function ensureAssistantDefaultSelection(input: {
   assistant: SetupConfiguredAssistant
   dryRun: boolean

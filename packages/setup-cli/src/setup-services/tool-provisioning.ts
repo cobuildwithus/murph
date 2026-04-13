@@ -64,7 +64,17 @@ interface LinuxResolvedCommandContext {
   runCommand: (input: CommandRunInput) => Promise<CommandRunResult>
 }
 
-export async function provisionMacosToolchain(
+export async function provisionHostToolchain(
+  input: SetupProvisioningInput & {
+    platform: 'darwin' | 'linux'
+  },
+): Promise<SetupProvisioningResult> {
+  return input.platform === 'darwin'
+    ? provisionMacosToolchain(input)
+    : provisionLinuxToolchain(input)
+}
+
+async function provisionMacosToolchain(
   input: SetupProvisioningInput,
 ): Promise<SetupProvisioningResult> {
   let state = await ensureHomebrew({
@@ -109,7 +119,7 @@ export async function provisionMacosToolchain(
   }
 }
 
-export async function provisionLinuxToolchain(
+async function provisionLinuxToolchain(
   input: SetupProvisioningInput,
 ): Promise<SetupProvisioningResult> {
   let apt = await resolveAptRunner(input.env)
