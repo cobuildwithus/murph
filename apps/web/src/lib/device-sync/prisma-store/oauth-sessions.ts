@@ -54,7 +54,7 @@ export class PrismaHostedOAuthSessionStore {
       }
 
       if (record.expiresAt.getTime() <= Date.parse(now)) {
-        await tx.deviceOauthSession.delete({
+        await tx.deviceOauthSession.deleteMany({
           where: {
             state,
           },
@@ -71,11 +71,20 @@ export class PrismaHostedOAuthSessionStore {
         };
       }
 
-      await tx.deviceOauthSession.delete({
+      // Delete with a count check so duplicate callbacks or retries fail closed as
+      // already-consumed/missing instead of surfacing as a transaction error.
+      const deleteResult = await tx.deviceOauthSession.deleteMany({
         where: {
           state,
+          provider: record.provider,
         },
       });
+
+      if (deleteResult.count !== 1) {
+        return {
+          status: "missing",
+        };
+      }
 
       return {
         status: "consumed",

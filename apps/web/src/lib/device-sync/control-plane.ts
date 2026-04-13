@@ -164,14 +164,6 @@ export class HostedDeviceSyncControlPlane {
   ) {
     return this.agentSessions.recordLocalHeartbeat(userId, connectionId, patch);
   }
-
-  toBrowserConnection(account: Parameters<HostedDeviceSyncPublicIngressService["toBrowserConnection"]>[0]) {
-    return this.connections.toBrowserConnection(account);
-  }
-
-  createBrowserConnectionId(connectionId: string): string {
-    return this.connections.createBrowserConnectionId(connectionId);
-  }
 }
 
 export function createHostedDeviceSyncControlPlane(request: Request): HostedDeviceSyncControlPlane {

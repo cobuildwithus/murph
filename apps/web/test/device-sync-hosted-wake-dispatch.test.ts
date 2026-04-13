@@ -222,6 +222,11 @@ import {
   HostedDeviceSyncControlPlane,
   dispatchHostedDeviceSyncWake,
 } from "@/src/lib/device-sync/control-plane";
+import { createHostedBrowserConnectionId } from "@/src/lib/device-sync/public-connection";
+
+function buildPublicConnectionId(connectionId: string): string {
+  return createHostedBrowserConnectionId("01234567890123456789012345678901", connectionId);
+}
 
 describe("dispatchHostedDeviceSyncWake", () => {
   beforeEach(() => {
@@ -622,7 +627,7 @@ describe("dispatchHostedDeviceSyncWake", () => {
     mocks.getConnectionForUser
       .mockResolvedValueOnce(activeConnection)
       .mockResolvedValueOnce(disconnectedConnection);
-    const publicConnectionId = controlPlane.createBrowserConnectionId("dsc_123");
+    const publicConnectionId = buildPublicConnectionId("dsc_123");
 
     await expect(controlPlane.disconnectConnection("user-123", publicConnectionId)).resolves.toMatchObject({
       connection: {
@@ -682,7 +687,7 @@ describe("dispatchHostedDeviceSyncWake", () => {
     mocks.getConnectionForUser
       .mockResolvedValueOnce(activeConnection)
       .mockResolvedValueOnce(disconnectedConnection);
-    const publicConnectionId = controlPlane.createBrowserConnectionId("dsc_123");
+    const publicConnectionId = buildPublicConnectionId("dsc_123");
 
     await expect(controlPlane.disconnectConnection("user-123", publicConnectionId)).resolves.toMatchObject({
       connection: {
@@ -756,7 +761,7 @@ describe("dispatchHostedDeviceSyncWake", () => {
       generatedAt: "2026-03-26T12:00:00.000Z",
       userId: "user-123",
     });
-    const publicConnectionId = controlPlane.createBrowserConnectionId("dsc_123");
+    const publicConnectionId = buildPublicConnectionId("dsc_123");
 
     await expect(controlPlane.disconnectConnection("user-123", publicConnectionId)).rejects.toThrow(
       "Hosted device-sync runtime is missing provider identity for connection dsc_123.",
@@ -779,7 +784,7 @@ describe("dispatchHostedDeviceSyncWake", () => {
       providers: [],
       connections: [
         {
-          id: controlPlane.createBrowserConnectionId("dsc_123"),
+          id: buildPublicConnectionId("dsc_123"),
           provider: "oura",
           displayName: "Oura",
           status: "active",
@@ -808,7 +813,7 @@ describe("dispatchHostedDeviceSyncWake", () => {
     mocks.listConnectionsForUser.mockResolvedValue([
       buildBrowserConnection(),
     ]);
-    const publicConnectionId = controlPlane.createBrowserConnectionId("dsc_123");
+    const publicConnectionId = buildPublicConnectionId("dsc_123");
 
     await expect(controlPlane.getConnectionStatus("user-123", publicConnectionId)).resolves.toEqual({
       connection: {

@@ -19,11 +19,9 @@ export async function GET(
     providerName = await resolveDecodedRouteParam(context.params, "provider");
     const controlPlane = createHostedDeviceSyncControlPlane(request);
     const result = await controlPlane.handleOAuthCallback(providerName);
-    const browserConnection = controlPlane.toBrowserConnection(result.account);
     const redirect = providerCallbackRedirect({
       returnTo: result.returnTo,
       provider: result.account.provider,
-      connectionId: browserConnection.id,
     });
 
     return (

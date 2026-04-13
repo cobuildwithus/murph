@@ -5,7 +5,6 @@ import { createRouteContext } from "./route-test-helpers";
 const mocks = vi.hoisted(() => ({
   createHostedDeviceSyncControlPlane: vi.fn(),
   handleOAuthCallback: vi.fn(),
-  toBrowserConnection: vi.fn(),
 }));
 
 vi.mock("@/src/lib/device-sync/control-plane", () => ({
@@ -25,7 +24,6 @@ describe("hosted device-sync callback route", () => {
     vi.clearAllMocks();
     mocks.createHostedDeviceSyncControlPlane.mockReturnValue({
       handleOAuthCallback: mocks.handleOAuthCallback,
-      toBrowserConnection: mocks.toBrowserConnection,
     });
     mocks.handleOAuthCallback.mockResolvedValue({
       account: {
@@ -34,13 +32,9 @@ describe("hosted device-sync callback route", () => {
       },
       returnTo: null,
     });
-    mocks.toBrowserConnection.mockReturnValue({
-      id: "dspc_public_123",
-      provider: "oura",
-    });
   });
 
-  it("uses the opaque browser connection id in callback redirects", async () => {
+  it("uses provider-only callback params in redirects", async () => {
     mocks.handleOAuthCallback.mockResolvedValue({
       account: {
         id: "dsc_123",
@@ -56,7 +50,9 @@ describe("hosted device-sync callback route", () => {
 
     expect(response.status).toBe(302);
     const location = response.headers.get("location");
-    expect(location).toContain("deviceSyncConnectionId=dspc_public_123");
+    expect(location).toContain("deviceSyncStatus=connected");
+    expect(location).toContain("deviceSyncProvider=oura");
+    expect(location).not.toContain("deviceSyncConnectionId");
     expect(location).not.toContain("dsc_123");
   });
 
