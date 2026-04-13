@@ -1,21 +1,55 @@
 import assert from "node:assert/strict";
+import { createRequire } from "node:module";
+import path from "node:path";
 
-import { createElement } from "react";
+import { act } from "react";
+import { createElement, type ReactNode } from "react";
+import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
-import { test, vi } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
+
+const mocks = vi.hoisted(() => ({
+  useHostedInviteStatusRefresh: vi.fn(),
+}));
 
 vi.mock("@/src/components/hosted-onboarding/invite-status-client", () => ({
-  useHostedInviteStatusRefresh: () => {},
+  useHostedInviteStatusRefresh: mocks.useHostedInviteStatusRefresh,
+}));
+
+vi.mock("next/link", () => ({
+  default(props: { children?: ReactNode; href: string }) {
+    return createElement("a", {
+      href: props.href,
+    }, props.children);
+  },
 }));
 
 import { JoinInviteSuccessShell } from "@/src/components/hosted-onboarding/join-invite-success-shell";
 import type { HostedInviteStatusPayload } from "@/src/lib/hosted-onboarding/types";
+
+const activeJoinInviteSuccessClientCleanups = new Set<() => Promise<void> | void>();
+const requireFromJoinInviteSuccessClientTest = createRequire(import.meta.url);
+const { parseHTML } = loadJoinInviteSuccessClientLinkedom();
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  vi.unstubAllGlobals();
+  mocks.useHostedInviteStatusRefresh.mockImplementation(() => {});
+});
+
+afterEach(async () => {
+  for (const cleanup of [...activeJoinInviteSuccessClientCleanups].reverse()) {
+    await cleanup();
+  }
+  activeJoinInviteSuccessClientCleanups.clear();
+});
 
 test("verify-stage success page keeps the copy neutral while sign-in settles", () => {
   const markup = renderToStaticMarkup(
     createElement(JoinInviteSuccessShell, {
       initialStatus: createStatus("verify"),
       inviteCode: "invite-code",
+      sessionId: null,
       shareCode: null,
     }),
   );
@@ -31,6 +65,7 @@ test("blocked success page does not pretend setup is still running", () => {
     createElement(JoinInviteSuccessShell, {
       initialStatus: createStatus("blocked"),
       inviteCode: "invite-code",
+      sessionId: null,
       shareCode: null,
     }),
   );
@@ -46,6 +81,7 @@ test("active success page explains when Cloudflare warmup is still running", () 
     createElement(JoinInviteSuccessShell, {
       initialStatus: createStatus("active", true),
       inviteCode: "invite-code",
+      sessionId: null,
       shareCode: null,
     }),
   );
@@ -54,6 +90,29 @@ test("active success page explains when Cloudflare warmup is still running", () 
   assert.match(markup, /Payment is confirmed\./);
   assert.match(markup, /booting your hosted runtime in Cloudflare/);
   assert.doesNotMatch(markup, /We&#x27;ll keep checking automatically/);
+});
+
+test("checkout-stage success page reconciles the returned session once and updates the ready copy", async () => {
+  const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+    new Response(JSON.stringify(createStatus("active", true)), {
+      status: 200,
+    }),
+  );
+  vi.stubGlobal("fetch", fetchMock);
+
+  const view = await renderJoinInviteSuccessClientForEffects();
+  await act(async () => {});
+
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  expect(fetchMock).toHaveBeenCalledWith("/api/hosted-onboarding/billing/success", expect.objectContaining({
+    body: JSON.stringify({
+      inviteCode: "invite-code",
+      sessionId: "cs_123",
+    }),
+    method: "POST",
+  }));
+
+  await view.cleanup();
 });
 
 function createStatus(
@@ -78,4 +137,122 @@ function createStatus(
     },
     stage,
   };
+}
+
+async function renderJoinInviteSuccessClientForEffects(input?: {
+  initialStatus?: HostedInviteStatusPayload;
+  sessionId?: string | null;
+}) {
+  const { document, window } = parseHTML("<html><body><div id='root'></div></body></html>");
+  const cleanupGlobals = installJoinInviteSuccessClientGlobals(window, document);
+  activeJoinInviteSuccessClientCleanups.add(cleanupGlobals);
+  const container = document.getElementById("root");
+  assert.ok(container);
+
+  let root: Root | null = createRoot(container);
+
+  await act(async () => {
+    root?.render(
+      createElement(JoinInviteSuccessShell, {
+        initialStatus: input?.initialStatus ?? createStatus("checkout"),
+        inviteCode: "invite-code",
+        sessionId: input?.sessionId ?? "cs_123",
+        shareCode: null,
+      }),
+    );
+  });
+
+  return {
+    cleanup: async () => {
+      await act(async () => {
+        root?.unmount();
+        root = null;
+      });
+      cleanupGlobals();
+      activeJoinInviteSuccessClientCleanups.delete(cleanupGlobals);
+    },
+    container,
+  };
+}
+
+function installJoinInviteSuccessClientGlobals(
+  window: Window & typeof globalThis,
+  document: Document,
+) {
+  const restoreEntries = [
+    setJoinInviteSuccessClientGlobal("window", window),
+    setJoinInviteSuccessClientGlobal("self", window),
+    setJoinInviteSuccessClientGlobal("document", document),
+    setJoinInviteSuccessClientGlobal("location", window.location),
+    setJoinInviteSuccessClientGlobal("navigator", window.navigator),
+    setJoinInviteSuccessClientGlobal("HTMLElement", window.HTMLElement),
+    setJoinInviteSuccessClientGlobal("Node", window.Node),
+    setJoinInviteSuccessClientGlobal("Event", window.Event),
+    setJoinInviteSuccessClientGlobal("MutationObserver", window.MutationObserver),
+    setJoinInviteSuccessClientGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      callback(0);
+      return 0;
+    }),
+    setJoinInviteSuccessClientGlobal("cancelAnimationFrame", () => {}),
+    setJoinInviteSuccessClientGlobal("requestIdleCallback", (callback: IdleRequestCallback) => {
+      callback({
+        didTimeout: false,
+        timeRemaining: () => 0,
+      });
+      return 0;
+    }),
+    setJoinInviteSuccessClientGlobal("cancelIdleCallback", () => {}),
+    setJoinInviteSuccessClientGlobal("IS_REACT_ACT_ENVIRONMENT", true),
+  ];
+
+  return () => {
+    for (const restore of restoreEntries.reverse()) {
+      restore();
+    }
+  };
+}
+
+function setJoinInviteSuccessClientGlobal(key: string, value: unknown) {
+  const hadOwnProperty = Object.prototype.hasOwnProperty.call(globalThis, key);
+  const previousDescriptor = Object.getOwnPropertyDescriptor(globalThis, key);
+
+  Object.defineProperty(globalThis, key, {
+    configurable: true,
+    value,
+    writable: true,
+  });
+
+  return () => {
+    if (hadOwnProperty) {
+      assert.ok(previousDescriptor);
+      Object.defineProperty(globalThis, key, previousDescriptor);
+      return;
+    }
+
+    Reflect.deleteProperty(globalThis, key);
+  };
+}
+
+function loadJoinInviteSuccessClientLinkedom(): {
+  parseHTML: (html: string) => { document: Document; window: Window & typeof globalThis };
+} {
+  const resolvePaths = [
+    path.resolve(process.cwd(), "node_modules"),
+    path.resolve(process.cwd(), "node_modules/.pnpm/node_modules"),
+  ];
+
+  for (const resolvePath of resolvePaths) {
+    try {
+      const resolvedEntry = requireFromJoinInviteSuccessClientTest.resolve("linkedom", {
+        paths: [resolvePath],
+      });
+      return requireFromJoinInviteSuccessClientTest(resolvedEntry) as {
+        parseHTML: (html: string) => { document: Document; window: Window & typeof globalThis };
+      };
+    } catch {
+      // Try the next resolution root.
+    }
+  }
+
+  throw new Error("Unable to resolve linkedom for join invite success client effect tests.");
 }

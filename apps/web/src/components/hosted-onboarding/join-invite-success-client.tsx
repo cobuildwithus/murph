@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { AlertCircleIcon, CheckCircleIcon, LoaderCircleIcon } from "lucide-react";
 
@@ -10,11 +10,13 @@ import { Button } from "@/components/ui/button";
 import { CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import type { HostedInviteStatusPayload } from "@/src/lib/hosted-onboarding/types";
 
+import { requestHostedBillingSuccess } from "./client-api";
 import { useHostedInviteStatusRefresh } from "./invite-status-client";
 
 interface JoinInviteSuccessClientProps {
   initialStatus: HostedInviteStatusPayload;
   inviteCode: string;
+  sessionId: string | null;
   shareCode: string | null;
 }
 
@@ -29,10 +31,12 @@ interface HostedInviteSuccessState {
 export function JoinInviteSuccessClient({
   initialStatus,
   inviteCode,
+  sessionId,
   shareCode,
 }: JoinInviteSuccessClientProps) {
   const [status, setStatus] = useState(initialStatus);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const successSyncStartedRef = useRef(false);
   const shouldPoll = status.stage === "verify" || status.stage === "checkout" || status.activationPending;
 
   useHostedInviteStatusRefresh({
@@ -46,6 +50,44 @@ export function JoinInviteSuccessClient({
     },
     shouldPoll,
   });
+
+  useEffect(() => {
+    if (
+      successSyncStartedRef.current ||
+      !sessionId ||
+      !status.session.matchesInvite ||
+      status.stage !== "checkout"
+    ) {
+      return;
+    }
+
+    let cancelled = false;
+    successSyncStartedRef.current = true;
+
+    void requestHostedBillingSuccess({
+      inviteCode,
+      sessionId,
+    })
+      .then((payload) => {
+        if (cancelled) {
+          return;
+        }
+
+        setErrorMessage(null);
+        setStatus(payload);
+      })
+      .catch((error: unknown) => {
+        if (cancelled) {
+          return;
+        }
+
+        setErrorMessage(error instanceof Error ? error.message : "Unable to refresh activation status.");
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [inviteCode, sessionId, status.session.matchesInvite, status.stage]);
 
   const href = `/join/${encodeURIComponent(inviteCode)}${shareCode ? `?share=${encodeURIComponent(shareCode)}` : ""}`;
   const successState = resolveHostedInviteSuccessState(status);
