@@ -4,7 +4,14 @@ import {
   usePrivy,
   useUser,
 } from "@privy-io/react-auth";
-import { useEffect, useEffectEvent, useMemo, useRef, useState, type FormEvent } from "react";
+import {
+  useEffect,
+  useEffectEvent,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react";
 
 import {
   canContinueHostedPrivyClientSession,
@@ -45,8 +52,18 @@ interface HostedPhoneAuthControllerInput {
 }
 
 const HOSTED_PHONE_COUNTRY_OPTIONS: HostedPhoneCountryOption[] = [
-  { code: "US", dialCode: "+1", label: "United States", placeholder: "(415) 555-2671" },
-  { code: "CA", dialCode: "+1", label: "Canada", placeholder: "(416) 555-0123" },
+  {
+    code: "US",
+    dialCode: "+1",
+    label: "United States",
+    placeholder: "(415) 555-2671",
+  },
+  {
+    code: "CA",
+    dialCode: "+1",
+    label: "Canada",
+    placeholder: "(416) 555-0123",
+  },
 ];
 
 const DEFAULT_HOSTED_PHONE_COUNTRY_CODE = "US";
@@ -63,36 +80,56 @@ export function useHostedPhoneAuthController({
   const { user } = useUser();
   const [code, setCode] = useState("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [finalizationState, setFinalizationState] = useState<HostedPrivyFinalizationState>("idle");
-  const [pendingAction, setPendingAction] = useState<HostedPrivyClientPendingAction>(null);
-  const [phoneCountryCode, setPhoneCountryCode] = useState<string>(DEFAULT_HOSTED_PHONE_COUNTRY_CODE);
+  const [finalizationState, setFinalizationState] =
+    useState<HostedPrivyFinalizationState>("idle");
+  const [pendingAction, setPendingAction] =
+    useState<HostedPrivyClientPendingAction>(null);
+  const [phoneCountryCode, setPhoneCountryCode] = useState<string>(
+    DEFAULT_HOSTED_PHONE_COUNTRY_CODE
+  );
   const [phoneNumber, setPhoneNumber] = useState("");
-  const [phoneVerificationAttempt, setPhoneVerificationAttempt] = useState<HostedPhoneVerificationAttempt | null>(null);
+  const [phoneVerificationAttempt, setPhoneVerificationAttempt] =
+    useState<HostedPhoneVerificationAttempt | null>(null);
   const lastAutoSubmittedCodeRef = useRef<string | null>(null);
   const finalizationStateRef = useRef<HostedPrivyFinalizationState>("idle");
 
   const selectedPhoneCountry = useMemo(
-    () => HOSTED_PHONE_COUNTRY_OPTIONS.find((option) => option.code === phoneCountryCode) ?? HOSTED_PHONE_COUNTRY_OPTIONS[0],
-    [phoneCountryCode],
+    () =>
+      HOSTED_PHONE_COUNTRY_OPTIONS.find(
+        (option) => option.code === phoneCountryCode
+      ) ?? HOSTED_PHONE_COUNTRY_OPTIONS[0],
+    [phoneCountryCode]
   );
   const normalizedPhoneNumber = useMemo(
-    () => normalizePhoneNumberForCountry(phoneNumber, selectedPhoneCountry.dialCode),
-    [phoneNumber, selectedPhoneCountry.dialCode],
+    () =>
+      normalizePhoneNumberForCountry(
+        phoneNumber,
+        selectedPhoneCountry.dialCode
+      ),
+    [phoneNumber, selectedPhoneCountry.dialCode]
   );
-  const normalizedVerificationCode = useMemo(() => normalizeHostedPhoneVerificationCode(code), [code]);
+  const normalizedVerificationCode = useMemo(
+    () => normalizeHostedPhoneVerificationCode(code),
+    [code]
+  );
   const authenticatedSessionIssue = useMemo(
-    () => resolveHostedPrivyClientSessionIssue(readHostedPrivyClientSessionState({ user })),
-    [user],
+    () =>
+      resolveHostedPrivyClientSessionIssue(
+        readHostedPrivyClientSessionState({ user })
+      ),
+    [user]
   );
 
   const flowDisabled = !ready || pendingAction !== null;
   const phoneEntrySendCodeDisabled = flowDisabled || !normalizedPhoneNumber;
-  const showAuthenticatedLoadingState = authenticated && finalizationState !== "idle";
-  const showAuthenticatedManualResumeState = shouldShowHostedPrivyManualResumeState({
-    authenticated,
-    issue: authenticatedSessionIssue,
-    showAuthenticatedLoadingState,
-  });
+  const showAuthenticatedLoadingState =
+    authenticated && finalizationState !== "idle";
+  const showAuthenticatedManualResumeState =
+    shouldShowHostedPrivyManualResumeState({
+      authenticated,
+      issue: authenticatedSessionIssue,
+      showAuthenticatedLoadingState,
+    });
   const showAuthenticatedRestartState = shouldShowHostedPrivyRestartState({
     authenticated,
     issue: authenticatedSessionIssue,
@@ -103,11 +140,12 @@ export function useHostedPhoneAuthController({
     showAuthenticatedManualResumeState,
     showAuthenticatedRestartState,
   });
-  const authenticatedLoadingTitle = intent === "signin" ? "Signing you in..." : "Finishing setup...";
+  const authenticatedLoadingTitle =
+    intent === "signin" ? "Signing you in..." : "Finishing setup...";
   const authenticatedLoadingBody =
     intent === "signin"
       ? "Keep this tab open. We are verifying your number and signing you into your account."
-      : "Keep this tab open. We are verifying your number, preparing your account, and moving you to the next step.";
+      : "Keep this tab open. We are verifying your number, preparing your account.";
 
   const sharedFlowProps = {
     activeAttempt: phoneVerificationAttempt,
@@ -144,9 +182,11 @@ export function useHostedPhoneAuthController({
     setPhoneVerificationAttempt(null);
   }
 
-  const submitVerificationCodeEffect = useEffectEvent((submittedCode: string) => {
-    void handleVerifyCode(submittedCode);
-  });
+  const submitVerificationCodeEffect = useEffectEvent(
+    (submittedCode: string) => {
+      void handleVerifyCode(submittedCode);
+    }
+  );
 
   useEffect(() => {
     if (!authenticated) {
@@ -161,9 +201,9 @@ export function useHostedPhoneAuthController({
     }
 
     if (
-      !phoneVerificationAttempt
-      || pendingAction !== null
-      || lastAutoSubmittedCodeRef.current === normalizedVerificationCode
+      !phoneVerificationAttempt ||
+      pendingAction !== null ||
+      lastAutoSubmittedCodeRef.current === normalizedVerificationCode
     ) {
       return;
     }
@@ -187,7 +227,9 @@ export function useHostedPhoneAuthController({
     }
 
     if (!submission.normalizedPhoneNumber) {
-      setErrorMessage(`Enter a valid phone number for ${selectedPhoneCountry.label}.`);
+      setErrorMessage(
+        `Enter a valid phone number for ${selectedPhoneCountry.label}.`
+      );
       return;
     }
 
@@ -196,7 +238,9 @@ export function useHostedPhoneAuthController({
     try {
       await sendVerificationCode(submission.normalizedPhoneNumber);
     } catch (error) {
-      setErrorMessage(toErrorMessage(error, "We could not send a verification code."));
+      setErrorMessage(
+        toErrorMessage(error, "We could not send a verification code.")
+      );
     } finally {
       setPendingAction(null);
     }
@@ -205,7 +249,9 @@ export function useHostedPhoneAuthController({
   async function sendVerificationCode(nextPhoneNumber: string) {
     await sendCode({ phoneNumber: nextPhoneNumber });
     setCode("");
-    setPhoneVerificationAttempt(createHostedPhoneVerificationAttempt(nextPhoneNumber));
+    setPhoneVerificationAttempt(
+      createHostedPhoneVerificationAttempt(nextPhoneNumber)
+    );
   }
 
   async function handleResendCode() {
@@ -220,7 +266,9 @@ export function useHostedPhoneAuthController({
       try {
         await sendVerificationCode(resendTarget.phoneNumber);
       } catch (error) {
-        setErrorMessage(toErrorMessage(error, "We could not send a verification code."));
+        setErrorMessage(
+          toErrorMessage(error, "We could not send a verification code.")
+        );
       } finally {
         setPendingAction(null);
       }
@@ -234,7 +282,9 @@ export function useHostedPhoneAuthController({
     setErrorMessage(null);
 
     if (!phoneVerificationAttempt) {
-      setErrorMessage("Request a fresh verification code before entering one here.");
+      setErrorMessage(
+        "Request a fresh verification code before entering one here."
+      );
       return;
     }
 
@@ -263,12 +313,16 @@ export function useHostedPhoneAuthController({
     try {
       await runHostedPrivyFinalization("continue");
     } catch (error) {
-      const latestSessionIssue = resolveHostedPrivyClientSessionIssue(readHostedPrivyClientSessionState({ user }));
+      const latestSessionIssue = resolveHostedPrivyClientSessionIssue(
+        readHostedPrivyClientSessionState({ user })
+      );
       if (!canContinueHostedPrivyClientSession(latestSessionIssue)) {
         return;
       }
 
-      setErrorMessage(toErrorMessage(error, "We could not continue with your Privy session."));
+      setErrorMessage(
+        toErrorMessage(error, "We could not continue with your Privy session.")
+      );
     }
   }
 
@@ -284,13 +338,17 @@ export function useHostedPhoneAuthController({
       setPhoneCountryCode(DEFAULT_HOSTED_PHONE_COUNTRY_CODE);
       setPhoneNumber("");
     } catch (error) {
-      setErrorMessage(toErrorMessage(error, "We could not sign you out cleanly."));
+      setErrorMessage(
+        toErrorMessage(error, "We could not sign you out cleanly.")
+      );
     } finally {
       setPendingAction(null);
     }
   }
 
-  async function runHostedPrivyFinalization(action: "continue" | "verify-code") {
+  async function runHostedPrivyFinalization(
+    action: "continue" | "verify-code"
+  ) {
     await runHostedPrivyFinalizationAttempt({
       action,
       finalize: async () =>
@@ -315,8 +373,8 @@ export function useHostedPhoneAuthController({
     authenticatedLoadingBody,
     authenticatedLoadingTitle,
     authenticatedSessionDescription:
-      describeHostedPrivyClientSessionIssue(authenticatedSessionIssue)
-      ?? "Sign out and request a fresh code to continue.",
+      describeHostedPrivyClientSessionIssue(authenticatedSessionIssue) ??
+      "Sign out and request a fresh code to continue.",
     authenticatedView,
     errorMessage,
     flowDisabled,
