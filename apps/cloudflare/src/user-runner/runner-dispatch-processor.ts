@@ -729,7 +729,7 @@ export class RunnerDispatchProcessor {
         startedAt: recovered.record.lastRunAt ?? recovered.committed.committedAt,
       }),
       {
-        allowAnyRunForEvent: true,
+        policy: "same-event",
         run: null,
       },
     );
@@ -742,7 +742,7 @@ export class RunnerDispatchProcessor {
     cleanupDispatch: HostedExecutionDispatchRequest | null = null,
     run: HostedExecutionRunContext | null = null,
     leaseOwner: {
-      allowAnyRunForEvent?: boolean;
+      policy?: "matching-run" | "same-event";
       run: HostedExecutionRunContext | null;
     } | null = run === null ? null : { run },
   ): Promise<RunnerStateRecord> {
@@ -843,8 +843,8 @@ export class RunnerDispatchProcessor {
     dispatch: HostedExecutionDispatchRequest | null = null,
   ): Promise<RunnerStateRecord> {
     const record = await this.dependencies.queueStore.rememberCommittedEvent(eventId, {
-      allowAnyRunForEvent: true,
       eventId,
+      policy: "same-event",
       run: null,
     });
     await this.deleteCommittedDispatchBestEffort(userId, eventId);

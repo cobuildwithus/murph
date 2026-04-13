@@ -734,8 +734,8 @@ describe("RunnerQueueStore", () => {
       },
       userId: "member_123",
     }, {
-      allowAnyRunForEvent: true,
       eventId: "evt_recovered_commit",
+      policy: "same-event",
       run: null,
     });
 
