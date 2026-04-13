@@ -465,6 +465,28 @@ test("active invite state renders message and settings actions with client navig
   assert.match(markup, /Manage settings/);
 });
 
+test("active invite state omits Murph contact actions when no assigned number is available", () => {
+  const markup = renderToStaticMarkup(
+    createElement(JoinInviteClient, {
+      initialStatus: createStatus({
+        session: {
+          authenticated: true,
+          expiresAt: null,
+          matchesInvite: true,
+        },
+        stage: "active",
+      }),
+      inviteCode: "invite-code",
+      shareCode: null,
+      sharePreview: null,
+    }),
+  );
+
+  assert.doesNotMatch(markup, /Text Murph/);
+  assert.doesNotMatch(markup, /Add Murph to Contacts/);
+  assert.ok(markup.includes('href="/settings"'));
+});
+
 test("active invite state explains when vault and assistant setup is still running", () => {
   const markup = renderToStaticMarkup(
     createElement(JoinInviteClient, {
