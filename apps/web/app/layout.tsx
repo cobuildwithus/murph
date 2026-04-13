@@ -5,8 +5,10 @@ import { SpeedInsights } from "@vercel/speed-insights/next";
 
 import { Providers } from "./providers";
 import { resolveHostedPublicBaseUrl } from "@/src/lib/hosted-web/public-url";
-import { resolveHostedPrivyClientId } from "@/src/lib/hosted-onboarding/landing";
-import { requireHostedPrivyPhoneAuthConfig } from "@/src/lib/hosted-onboarding/privy";
+import {
+  requireHostedPrivyClientAppId,
+  resolveHostedPrivyClientId,
+} from "@/src/lib/hosted-onboarding/landing";
 
 import "./globals.css";
 import { cn } from "@/lib/utils";
@@ -29,7 +31,7 @@ export const metadata: Metadata = metadataBase
   : {};
 
 export default function RootLayout(input: { children: React.ReactNode }) {
-  const { appId: privyAppId } = requireHostedPrivyPhoneAuthConfig();
+  const privyAppId = requireHostedPrivyClientAppId();
   const privyClientId = resolveHostedPrivyClientId();
 
   return (

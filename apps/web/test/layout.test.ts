@@ -20,14 +20,8 @@ vi.mock("next/font/google", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/landing", () => ({
+  requireHostedPrivyClientAppId: () => "cm_app_123",
   resolveHostedPrivyClientId: () => "client_123",
-}));
-
-vi.mock("@/src/lib/hosted-onboarding/privy", () => ({
-  requireHostedPrivyPhoneAuthConfig: () => ({
-    appId: "cm_app_123",
-    verificationKey: "privy-verification-key",
-  }),
 }));
 
 vi.mock("../app/providers", () => ({
