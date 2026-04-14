@@ -5,7 +5,7 @@ import type { ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
-export function HomepageInlineAuthButton({
+export function HostedInlineAuthButton({
   active = false,
   children,
   className,

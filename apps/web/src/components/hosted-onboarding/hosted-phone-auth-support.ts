@@ -4,15 +4,11 @@ import {
   maskPhoneNumber,
   normalizePhoneNumberForCountry,
 } from "@/src/lib/hosted-onboarding/phone";
-import {
-  ensureHostedPrivyPhoneReady,
-} from "@/src/lib/hosted-onboarding/privy-client";
 import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
 
-import {
-  requestHostedBillingCheckout,
-  requestHostedOnboardingJson,
-} from "./client-api";
+import { completeHostedPrivyAuth } from "./hosted-auth-completion";
+import { toErrorMessage } from "./hosted-auth-shared";
+import { requestHostedOnboardingJson } from "./client-api";
 import type {
   HostedPhoneAuthIntent,
   HostedPhoneVerificationAttempt,
@@ -27,6 +23,7 @@ import { waitForRetryDelay } from "./hosted-retry-support";
 export {
   requestHostedPrivyCompletionWithRetry,
   runHostedPrivyFinalizationAttempt,
+  toErrorMessage,
 };
 
 interface PendingInvitePhoneCodeMutation {
@@ -100,33 +97,20 @@ export async function finalizeHostedPrivyVerification(input: {
   onCompleted?: (payload: HostedPrivyCompletionPayload) => Promise<void> | void;
   user: { linkedAccounts?: unknown } | null;
 }) {
-  await ensureHostedPrivyPhoneReady(input);
-  const payload = await requestHostedPrivyCompletionWithRetry(input.inviteCode);
-
-  if (!input.onCompleted && input.intent === "signup" && payload.stage === "checkout") {
-    const checkout = await requestHostedBillingCheckout({
-      inviteCode: payload.inviteCode,
-    });
-
-    if (!checkout.alreadyActive) {
-      if (!checkout.url) {
-        throw new Error("Checkout did not return a redirect URL.");
-      }
-
-      window.location.assign(checkout.url);
-      return;
-    }
-  }
+  const result = await completeHostedPrivyAuth({
+    createWallet: input.createWallet,
+    intent: input.intent,
+    inviteCode: input.inviteCode,
+    requirePhone: true,
+    user: input.user,
+  });
 
   if (input.onCompleted) {
-    await input.onCompleted(payload);
+    await input.onCompleted(result.payload);
     return;
   }
 
-  window.location.assign(resolveHostedPrivyCompletionRedirectUrl({
-    intent: input.intent,
-    payload,
-  }));
+  window.location.assign(result.redirectUrl);
 }
 
 export function resolveHostedPrivyCompletionRedirectUrl(input: {
@@ -138,10 +122,6 @@ export function resolveHostedPrivyCompletionRedirectUrl(input: {
   }
 
   return `/join/${encodeURIComponent(input.payload.inviteCode)}`;
-}
-
-export function toErrorMessage(error: unknown, fallback: string): string {
-  return error instanceof Error && error.message ? error.message : fallback;
 }
 
 export async function finalizeInvitePhoneCodeSendConfirmation(input: {

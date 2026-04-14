@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { beforeEach, test, vi } from "vitest";
+import { test, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   getHostedPageAuthSnapshot: vi.fn(),
@@ -21,25 +21,75 @@ vi.mock("@/src/lib/hosted-onboarding/landing", () => {
   };
 });
 
-vi.mock("@/src/components/hosted-onboarding/hosted-phone-auth", () => {
+vi.mock("@/src/components/hosted-onboarding/hosted-auth-panel", () => {
   return {
-    HostedPhoneAuth(input: { intent?: string; showPassiveConsentNotice?: boolean }) {
+    HostedAuthPanel(input: {
+      intent?: string;
+      methods: string[];
+      showLegalNotice?: boolean;
+    }) {
       return createElement(
         "div",
         {
-          "data-hosted-phone-auth-intent": input.intent ?? "signup",
-          "data-hosted-phone-auth": "public",
-          "data-hosted-phone-auth-passive-consent":
-            input.showPassiveConsentNotice === false ? "hidden" : "shown",
+          "data-hosted-auth-panel-intent": input.intent ?? "signup",
+          "data-hosted-auth-panel-methods": input.methods.join(","),
+          "data-hosted-auth-panel-legal":
+            input.showLegalNotice === true ? "shown" : "hidden",
         },
-        "Hosted phone auth",
-        input.showPassiveConsentNotice === false
-          ? null
-          : createElement(
+        "Hosted auth panel",
+        input.methods.includes("phone")
+          ? createElement(
+              "span",
+              {
+                "data-hosted-phone-auth-passive-consent": "hidden",
+              },
+              "Hosted phone auth",
+            )
+          : null,
+        input.methods.includes("telegram")
+          ? createElement("span", null, "OR")
+          : null,
+        input.methods.includes("telegram")
+          ? createElement(
+              "span",
+              {
+                "data-hosted-telegram-auth-button": "true",
+              },
+              "Hosted Telegram auth",
+            )
+          : null,
+        input.methods.includes("email")
+          ? createElement(
+              "span",
+              {
+                "data-hosted-email-auth-button": "true",
+              },
+              "Hosted Email auth",
+            )
+          : null,
+        input.showLegalNotice === true
+          ? createElement(
               "span",
               null,
-              "By signing up, you agree to our Terms and Privacy Policy.",
-            ),
+              "By signing up, you agree to our ",
+              createElement(
+                "a",
+                {
+                  href: "/legal/terms.pdf",
+                },
+                "Terms",
+              ),
+              " and ",
+              createElement(
+                "a",
+                {
+                  href: "/legal/privacy.pdf",
+                },
+                "Privacy Policy",
+              ),
+              ".",
+            )
+          : null,
       );
     },
   };
@@ -59,35 +109,7 @@ vi.mock("@/src/components/hosted-onboarding/hosted-existing-account-sign-in-dial
   };
 });
 
-vi.mock("@/src/components/homepage/homepage-telegram-auth-button", () => {
-  return {
-    HomepageTelegramAuthButton() {
-      return createElement(
-        "div",
-        {
-          "data-homepage-telegram-auth-button": "true",
-        },
-        "Homepage Telegram auth",
-      );
-    },
-  };
-});
-
-vi.mock("@/src/components/homepage/homepage-email-auth-button", () => {
-  return {
-    HomepageEmailAuthButton() {
-      return createElement(
-        "div",
-        {
-          "data-homepage-email-auth-button": "true",
-        },
-        "Homepage Email auth",
-      );
-    },
-  };
-});
-
-beforeEach(() => {
+test("HomePage keeps the hosted auth entrypoints visible when no hosted session exists", async () => {
   vi.clearAllMocks();
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
     authenticated: false,
@@ -96,9 +118,6 @@ beforeEach(() => {
     memberLookup: null,
     session: null,
   });
-});
-
-test("HomePage keeps the hosted auth entrypoints visible when no hosted session exists", async () => {
   const { default: HomePage } = await import("../app/page");
   const { resolveHostedInstallScriptUrl } = await import(
     "@/src/lib/hosted-onboarding/landing"
@@ -114,10 +133,12 @@ test("HomePage keeps the hosted auth entrypoints visible when no hosted session 
   assert.match(markup, /Your data does not train AI models/u);
   assert.match(markup, /restricted system access/u);
   assert.match(markup, /Signup/);
-  assert.match(markup, /Homepage Telegram auth/);
-  assert.match(markup, /Homepage Email auth/);
-  assert.match(markup, /data-homepage-telegram-auth-button="true"/);
-  assert.match(markup, /data-homepage-email-auth-button="true"/);
+  assert.match(markup, /Hosted auth panel/);
+  assert.match(markup, /Hosted Telegram auth/);
+  assert.match(markup, /Hosted Email auth/);
+  assert.match(markup, /data-hosted-auth-panel-methods="phone,telegram,email"/);
+  assert.match(markup, /data-hosted-telegram-auth-button="true"/);
+  assert.match(markup, /data-hosted-email-auth-button="true"/);
   assert.match(markup, /Hosted phone auth/);
   assert.match(markup, /data-hosted-phone-auth-passive-consent="hidden"/);
   assert.match(markup, /OR/u);
@@ -130,7 +151,7 @@ test("HomePage keeps the hosted auth entrypoints visible when no hosted session 
     1,
   );
   assert.ok(
-    markup.indexOf('data-homepage-telegram-auth-button="true"') <
+    markup.indexOf('data-hosted-telegram-auth-button="true"') <
       markup.indexOf("By signing up, you agree to our"),
   );
   assert.match(markup, /Get started free/);
@@ -138,6 +159,14 @@ test("HomePage keeps the hosted auth entrypoints visible when no hosted session 
 });
 
 test("HomePage renders the hosted phone auth UI in the shared app shell", async () => {
+  vi.clearAllMocks();
+  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+    authenticated: false,
+    authenticatedMember: null,
+    linkedAccounts: [],
+    memberLookup: null,
+    session: null,
+  });
   const { default: HomePage } = await import("../app/page");
   const { resolveHostedInstallScriptUrl } = await import(
     "@/src/lib/hosted-onboarding/landing"
@@ -152,10 +181,12 @@ test("HomePage renders the hosted phone auth UI in the shared app shell", async 
   assert.match(markup, /Open source — Apache 2\.0/u);
   assert.match(markup, /https:\/\/github\.com\/cobuildwithus\/murph/u);
   assert.match(markup, /Signup/);
-  assert.match(markup, /Homepage Telegram auth/);
-  assert.match(markup, /Homepage Email auth/);
+  assert.match(markup, /Hosted auth panel/);
+  assert.match(markup, /Hosted Telegram auth/);
+  assert.match(markup, /Hosted Email auth/);
   assert.match(markup, /Hosted phone auth/);
   assert.match(markup, /data-hosted-phone-auth-passive-consent="hidden"/);
+  assert.match(markup, /data-hosted-auth-panel-methods="phone,telegram,email"/);
   assert.match(markup, /OR/u);
   assert.match(markup, /data-existing-account-sign-in-dialog="true"/);
   assert.match(markup, /Existing account sign in/);
@@ -175,6 +206,7 @@ test("HomePage renders the hosted phone auth UI in the shared app shell", async 
 });
 
 test("HomePage hides homepage auth entrypoints once the hosted session is authenticated", async () => {
+  vi.clearAllMocks();
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
     authenticated: true,
     authenticatedMember: {

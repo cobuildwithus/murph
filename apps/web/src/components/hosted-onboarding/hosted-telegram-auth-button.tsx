@@ -9,18 +9,21 @@ import {
 import { useState } from "react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { toErrorMessage } from "@/src/components/settings/hosted-settings-utils";
+import { TelegramIcon } from "@/src/components/homepage/telegram-icon";
 
-import { HomepageInlineAuthButton } from "./homepage-inline-auth-button";
-import { completeHomepagePrivyAuth } from "./homepage-privy-auth";
-import { TelegramIcon } from "./telegram-icon";
+import { completeHostedPrivyAuth } from "./hosted-auth-completion";
+import type { HostedAuthIntent } from "./hosted-auth-shared";
+import { toErrorMessage } from "./hosted-auth-shared";
+import { HostedInlineAuthButton } from "./hosted-inline-auth-button";
 
-export function HomepageTelegramAuthButton({
-  isActive = false,
+export function HostedTelegramAuthButton({
+  active = false,
+  intent,
   onActivate,
 }: {
-  isActive?: boolean;
-  onActivate?: () => void;
+  active?: boolean;
+  intent: HostedAuthIntent;
+  onActivate: () => void;
 }) {
   const { createWallet } = useCreateWallet();
   const { login, state } = useLoginWithTelegram();
@@ -32,21 +35,27 @@ export function HomepageTelegramAuthButton({
   const loading = state.status === "loading" || redirectPending;
 
   async function handleClick() {
-    onActivate?.();
+    onActivate();
     setErrorMessage(null);
     setRedirectPending(true);
 
     try {
       await login();
-      const redirectUrl = await completeHomepagePrivyAuth({
+      const result = await completeHostedPrivyAuth({
         createWallet,
+        intent,
         refreshUser,
         user,
       });
-      window.location.assign(redirectUrl);
+      window.location.assign(result.redirectUrl);
     } catch (error) {
       setErrorMessage(
-        toErrorMessage(error, "Could not continue with Telegram right now."),
+        toErrorMessage(
+          error,
+          intent === "signin"
+            ? "Could not sign in with Telegram right now."
+            : "Could not continue with Telegram right now.",
+        ),
       );
       setRedirectPending(false);
     }
@@ -54,17 +63,17 @@ export function HomepageTelegramAuthButton({
 
   return (
     <>
-      <HomepageInlineAuthButton
-        active={isActive}
+      <HostedInlineAuthButton
+        active={active}
         disabled={!ready || loading}
-        className="order-1"
+        className="order-1 border-[#5b9fc6] bg-[#5b9fc6] text-white hover:bg-[#4e92b8] hover:text-white"
         icon={<TelegramIcon className="h-5 w-5" />}
         onClick={handleClick}
       >
         {loading ? "Connecting..." : "Telegram"}
-      </HomepageInlineAuthButton>
+      </HostedInlineAuthButton>
 
-      {isActive && errorMessage ? (
+      {active && errorMessage ? (
         <Alert variant="destructive" className="order-3 sm:col-span-2">
           <AlertTitle>Unable to continue</AlertTitle>
           <AlertDescription>{errorMessage}</AlertDescription>

@@ -13,17 +13,14 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 
+import { HostedAuthLegalNotice } from "./hosted-auth-shared";
 import { HostedUseDifferentNumberButton } from "./hosted-phone-auth-use-different-number-button";
+import { HostedVerificationCodeStep } from "./hosted-verification-code-step";
 import type {
   HostedPhoneAuthIntent,
   HostedPhoneAuthPendingAction,
   HostedPhoneCountryOption,
 } from "./hosted-phone-auth-types";
-
-export { HostedCodeEntryStep } from "./hosted-phone-auth-code-entry-step";
-
-const HOSTED_TERMS_URL = "/legal/terms.pdf";
-const HOSTED_PRIVACY_URL = "/legal/privacy.pdf";
 
 export function HostedInviteShortcutStep({
   disabled,
@@ -58,7 +55,7 @@ export function HostedInviteShortcutStep({
           onClick={onUseDifferentNumber}
         />
       </div>
-      <HostedPassiveConsentNotice />
+      <HostedAuthLegalNotice />
     </div>
   );
 }
@@ -157,24 +154,62 @@ export function HostedPhoneEntryStep({
         </Button>
       </div>
       {intent === "signup" && showPassiveConsentNotice ? (
-        <HostedPassiveConsentNotice />
+        <HostedAuthLegalNotice />
       ) : null}
     </form>
   );
 }
 
-function HostedPassiveConsentNotice() {
+export function HostedCodeEntryStep({
+  verificationPhoneNumberHint,
+  code,
+  disabled,
+  intent,
+  pendingAction,
+  secondaryActionSize,
+  onCodeChange,
+  onResendCode,
+  onUseDifferentNumber,
+  onVerifyCode,
+}: {
+  verificationPhoneNumberHint: string;
+  code: string;
+  disabled: boolean;
+  intent: HostedPhoneAuthIntent;
+  pendingAction: HostedPhoneAuthPendingAction;
+  secondaryActionSize: "sm" | "lg";
+  onCodeChange: (value: string) => void;
+  onResendCode: () => void;
+  onUseDifferentNumber: () => void;
+  onVerifyCode: () => void;
+}) {
   return (
-    <p className="text-xs leading-relaxed text-stone-500">
-      By signing up, you agree to our{" "}
-      <a href={HOSTED_TERMS_URL} target="_blank" rel="noreferrer" className="hover:underline hover:underline-offset-4">
-        Terms
-      </a>{" "}
-      and{" "}
-      <a href={HOSTED_PRIVACY_URL} target="_blank" rel="noreferrer" className="hover:underline hover:underline-offset-4">
-        Privacy Policy
-      </a>
-      .
-    </p>
+    <HostedVerificationCodeStep
+      code={code}
+      description={`We texted the latest ${
+        intent === "signin" ? "sign-in code" : "code"
+      } to ${verificationPhoneNumberHint}.`}
+      disabled={disabled}
+      pendingAction={
+        pendingAction === "send-code" || pendingAction === "verify-code"
+          ? pendingAction
+          : null
+      }
+      primaryActionLabel={intent === "signin" ? "Sign in" : "Verify phone"}
+      primaryActionPendingLabel={
+        intent === "signin" ? "Signing in..." : "Finishing setup..."
+      }
+      secondaryAction={
+        <HostedUseDifferentNumberButton
+          disabled={disabled}
+          pendingAction={pendingAction}
+          size={secondaryActionSize}
+          onClick={onUseDifferentNumber}
+        />
+      }
+      onCodeChange={onCodeChange}
+      onResendCode={onResendCode}
+      onSubmit={onVerifyCode}
+    />
   );
 }

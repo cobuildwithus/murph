@@ -1,7 +1,5 @@
+import { HostedAuthPanel } from "@/src/components/hosted-onboarding/hosted-auth-panel";
 import { HostedExistingAccountSignInDialog } from "@/src/components/hosted-onboarding/hosted-existing-account-sign-in-dialog";
-import { HostedPhoneAuth } from "@/src/components/hosted-onboarding/hosted-phone-auth";
-
-import { HomepageAlternateAuthOptions } from "./homepage-alternate-auth-options";
 
 const SETTINGS_HREF = "/settings";
 
@@ -45,10 +43,11 @@ export function HomepageAuthPanel({
       </h2>
 
       <div className="mt-5 rounded bg-white p-4 text-stone-900">
-        <div className="space-y-4">
-          <HostedPhoneAuth showPassiveConsentNotice={false} />
-          <HomepageAlternateAuthOptions />
-        </div>
+        <HostedAuthPanel
+          intent="signup"
+          methods={["phone", "telegram", "email"]}
+          showLegalNotice
+        />
       </div>
       <div className="mt-4">
         <HostedExistingAccountSignInDialog />

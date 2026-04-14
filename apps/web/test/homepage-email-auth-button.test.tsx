@@ -4,7 +4,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { renderClientComponent } from "./render-client-component";
 
 const mocks = vi.hoisted(() => ({
-  completeHomepagePrivyAuth: vi.fn(),
+  completeHostedPrivyAuth: vi.fn(),
   createWallet: vi.fn(),
   loginWithCode: vi.fn(),
   sendCode: vi.fn(),
@@ -29,11 +29,11 @@ vi.mock("@privy-io/react-auth", () => ({
   useUser: mocks.useUser,
 }));
 
-vi.mock("@/src/components/homepage/homepage-privy-auth", () => ({
-  completeHomepagePrivyAuth: mocks.completeHomepagePrivyAuth,
+vi.mock("@/src/components/hosted-onboarding/hosted-auth-completion", () => ({
+  completeHostedPrivyAuth: mocks.completeHostedPrivyAuth,
 }));
 
-import { HomepageEmailAuthButton } from "@/src/components/homepage/homepage-email-auth-button";
+import { HostedEmailAuthButton } from "@/src/components/hosted-onboarding/hosted-email-auth-button";
 
 let cleanupRender: (() => Promise<void>) | null = null;
 
@@ -48,7 +48,15 @@ beforeEach(() => {
   });
   mocks.sendCode.mockResolvedValue(undefined);
   mocks.loginWithCode.mockResolvedValue(undefined);
-  mocks.completeHomepagePrivyAuth.mockResolvedValue("/settings");
+  mocks.completeHostedPrivyAuth.mockResolvedValue({
+    payload: {
+      activationPending: false,
+      inviteCode: "invite-code",
+      joinUrl: "/join/invite-code",
+      stage: "active",
+    },
+    redirectUrl: "/settings",
+  });
 });
 
 afterEach(async () => {
@@ -62,8 +70,9 @@ function HomepageEmailAuthButtonHarness() {
   const [active, setActive] = useState(false);
 
   return (
-    <HomepageEmailAuthButton
-      isActive={active}
+    <HostedEmailAuthButton
+      active={active}
+      intent="signup"
       onActivate={() => setActive(true)}
     />
   );
@@ -122,8 +131,9 @@ test("HomepageEmailAuthButton expands, sends a code, verifies it, and redirects 
   expect(mocks.loginWithCode).toHaveBeenCalledWith({
     code: "654321",
   });
-  expect(mocks.completeHomepagePrivyAuth).toHaveBeenCalledWith({
+  expect(mocks.completeHostedPrivyAuth).toHaveBeenCalledWith({
     createWallet: mocks.createWallet,
+    intent: "signup",
     refreshUser: expect.any(Function),
     user: null,
   });

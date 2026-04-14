@@ -11,23 +11,26 @@ import { useRef, useState, type FormEvent } from "react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { HostedVerificationCodeStep } from "@/src/components/hosted-onboarding/hosted-verification-code-step";
+import { EmailIcon } from "@/src/components/homepage/email-icon";
+
+import { completeHostedPrivyAuth } from "./hosted-auth-completion";
 import {
   isValidEmailAddress,
   normalizeEmailAddress,
-} from "@/src/components/settings/hosted-email-settings-helpers";
-import { toErrorMessage } from "@/src/components/settings/hosted-settings-utils";
+  type HostedAuthIntent,
+  toErrorMessage,
+} from "./hosted-auth-shared";
+import { HostedInlineAuthButton } from "./hosted-inline-auth-button";
+import { HostedVerificationCodeStep } from "./hosted-verification-code-step";
 
-import { EmailIcon } from "./email-icon";
-import { HomepageInlineAuthButton } from "./homepage-inline-auth-button";
-import { completeHomepagePrivyAuth } from "./homepage-privy-auth";
-
-export function HomepageEmailAuthButton({
-  isActive = false,
+export function HostedEmailAuthButton({
+  active = false,
+  intent,
   onActivate,
 }: {
-  isActive?: boolean;
-  onActivate?: () => void;
+  active?: boolean;
+  intent: HostedAuthIntent;
+  onActivate: () => void;
 }) {
   const { createWallet } = useCreateWallet();
   const { loginWithCode, sendCode, state } = useLoginWithEmail();
@@ -47,12 +50,11 @@ export function HomepageEmailAuthButton({
     state.status === "sending-code" ||
     state.status === "submitting-code" ||
     redirectPending;
-
-  const formDisabled = !ready || loading;
+  const disabled = !ready || loading;
   const showCodeEntry = pendingEmailAddress !== null;
 
   function handleOpen() {
-    onActivate?.();
+    onActivate();
     setErrorMessage(null);
   }
 
@@ -129,14 +131,22 @@ export function HomepageEmailAuthButton({
 
     try {
       await loginWithCode({ code: submittedCode });
-      const redirectUrl = await completeHomepagePrivyAuth({
+      const result = await completeHostedPrivyAuth({
         createWallet,
+        intent,
         refreshUser,
         user,
       });
-      window.location.assign(redirectUrl);
+      window.location.assign(result.redirectUrl);
     } catch (error) {
-      setErrorMessage(toErrorMessage(error, "We could not verify that code."));
+      setErrorMessage(
+        toErrorMessage(
+          error,
+          intent === "signin"
+            ? "We could not sign you in with that code."
+            : "We could not verify that code.",
+        ),
+      );
       setRedirectPending(false);
     }
   }
@@ -149,33 +159,35 @@ export function HomepageEmailAuthButton({
 
   return (
     <>
-      <HomepageInlineAuthButton
-        active={isActive}
-        disabled={!ready || loading}
+      <HostedInlineAuthButton
+        active={active}
+        disabled={disabled}
         className="order-2"
         icon={<EmailIcon className="h-5 w-5" />}
         onClick={handleOpen}
       >
         Email
-      </HomepageInlineAuthButton>
+      </HostedInlineAuthButton>
 
-      {isActive ? (
+      {active ? (
         <div className="order-4 space-y-3 sm:col-span-2">
           {showCodeEntry ? (
             <HostedVerificationCodeStep
               code={code}
               description={`We emailed the latest code to ${pendingEmailAddress}.`}
-              disabled={formDisabled}
+              disabled={disabled}
               inputRef={codeInputRef}
               pendingAction={loading ? "verify-code" : null}
-              primaryActionLabel="Verify email"
-              primaryActionPendingLabel="Verifying..."
+              primaryActionLabel={intent === "signin" ? "Sign in" : "Verify email"}
+              primaryActionPendingLabel={
+                intent === "signin" ? "Signing in..." : "Verifying..."
+              }
               secondaryAction={
                 <Button
                   type="button"
                   variant="outline"
                   size="lg"
-                  disabled={formDisabled}
+                  disabled={disabled}
                   onClick={handleUseAnotherEmail}
                 >
                   Use another email
@@ -197,15 +209,19 @@ export function HomepageEmailAuthButton({
                 ref={emailInputRef}
                 value={emailAddress}
                 onChange={(event) => setEmailAddress(event.currentTarget.value)}
-                className="border-stone-200 bg-white px-4 text-base md:text-sm"
+                className="w-full border-stone-200 bg-white px-4 text-base md:text-sm"
               />
               <Button
                 type="submit"
                 size="lg"
-                disabled={formDisabled}
+                disabled={disabled}
                 className="w-full"
               >
-                {state.status === "sending-code" ? "Sending..." : "Email me a code"}
+                {state.status === "sending-code"
+                  ? "Sending..."
+                  : intent === "signin"
+                    ? "Email me a sign-in code"
+                    : "Email me a code"}
               </Button>
             </form>
           )}
