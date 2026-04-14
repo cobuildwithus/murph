@@ -4,7 +4,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { renderClientComponent } from "./render-client-component";
 
 const mocks = vi.hoisted(() => ({
-  completeHomepagePrivyAuth: vi.fn(),
+  completeHostedPrivyAuth: vi.fn(),
   createWallet: vi.fn(),
   login: vi.fn(),
   usePrivy: vi.fn(),
@@ -27,11 +27,11 @@ vi.mock("@privy-io/react-auth", () => ({
   useUser: mocks.useUser,
 }));
 
-vi.mock("@/src/components/homepage/homepage-privy-auth", () => ({
-  completeHomepagePrivyAuth: mocks.completeHomepagePrivyAuth,
+vi.mock("@/src/components/hosted-onboarding/hosted-auth-completion", () => ({
+  completeHostedPrivyAuth: mocks.completeHostedPrivyAuth,
 }));
 
-import { HomepageTelegramAuthButton } from "@/src/components/homepage/homepage-telegram-auth-button";
+import { HostedTelegramAuthButton } from "@/src/components/hosted-onboarding/hosted-telegram-auth-button";
 
 let cleanupRender: (() => Promise<void>) | null = null;
 
@@ -45,7 +45,15 @@ beforeEach(() => {
     user: null,
   });
   mocks.login.mockResolvedValue(undefined);
-  mocks.completeHomepagePrivyAuth.mockResolvedValue("/settings");
+  mocks.completeHostedPrivyAuth.mockResolvedValue({
+    payload: {
+      activationPending: false,
+      inviteCode: "invite-code",
+      joinUrl: "/join/invite-code",
+      stage: "active",
+    },
+    redirectUrl: "/settings",
+  });
 });
 
 afterEach(async () => {
@@ -59,8 +67,9 @@ function HomepageTelegramAuthButtonHarness() {
   const [active, setActive] = useState(false);
 
   return (
-    <HomepageTelegramAuthButton
-      isActive={active}
+    <HostedTelegramAuthButton
+      active={active}
+      intent="signup"
       onActivate={() => setActive(true)}
     />
   );
@@ -77,8 +86,9 @@ test("HomepageTelegramAuthButton logs in with Telegram and redirects through the
   });
 
   expect(mocks.login).toHaveBeenCalledTimes(1);
-  expect(mocks.completeHomepagePrivyAuth).toHaveBeenCalledWith({
+  expect(mocks.completeHostedPrivyAuth).toHaveBeenCalledWith({
     createWallet: mocks.createWallet,
+    intent: "signup",
     refreshUser: expect.any(Function),
     user: null,
   });
@@ -116,7 +126,7 @@ test("HomepageTelegramAuthButton surfaces Telegram login failures and clears the
 });
 
 test("HomepageTelegramAuthButton surfaces shared completion failures instead of redirecting", async () => {
-  mocks.completeHomepagePrivyAuth.mockRejectedValueOnce(
+  mocks.completeHostedPrivyAuth.mockRejectedValueOnce(
     new Error("Checkout did not return a redirect URL."),
   );
 

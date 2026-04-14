@@ -1,12 +1,12 @@
 import { act, createElement } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
-import { HomepageAlternateAuthOptions } from "@/src/components/homepage/homepage-alternate-auth-options";
+import { HostedAuthPanel } from "@/src/components/hosted-onboarding/hosted-auth-panel";
 
 import { renderClientComponent } from "./render-client-component";
 
 const mocks = vi.hoisted(() => ({
-  completeHomepagePrivyAuth: vi.fn(),
+  completeHostedPrivyAuth: vi.fn(),
   createWallet: vi.fn(),
   loginWithCode: vi.fn(),
   loginWithTelegram: vi.fn(),
@@ -38,8 +38,22 @@ vi.mock("@privy-io/react-auth", () => ({
   useUser: mocks.useUser,
 }));
 
-vi.mock("@/src/components/homepage/homepage-privy-auth", () => ({
-  completeHomepagePrivyAuth: mocks.completeHomepagePrivyAuth,
+vi.mock("@/src/components/hosted-onboarding/hosted-auth-completion", () => ({
+  completeHostedPrivyAuth: mocks.completeHostedPrivyAuth,
+}));
+
+vi.mock("@/src/components/hosted-onboarding/hosted-phone-auth", () => ({
+  HostedPhoneAuth(input: { intent?: string; showPassiveConsentNotice?: boolean }) {
+    return createElement(
+      "div",
+      {
+        "data-hosted-phone-auth": input.intent ?? "signup",
+        "data-hosted-phone-auth-passive-consent":
+          input.showPassiveConsentNotice === false ? "hidden" : "shown",
+      },
+      "Hosted phone auth",
+    );
+  },
 }));
 
 let cleanupRender: (() => Promise<void>) | null = null;
@@ -55,7 +69,15 @@ beforeEach(() => {
   });
   mocks.sendCode.mockResolvedValue(undefined);
   mocks.loginWithCode.mockResolvedValue(undefined);
-  mocks.completeHomepagePrivyAuth.mockResolvedValue("/settings");
+  mocks.completeHostedPrivyAuth.mockResolvedValue({
+    payload: {
+      activationPending: false,
+      inviteCode: "invite-code",
+      joinUrl: "/join/invite-code",
+      stage: "active",
+    },
+    redirectUrl: "/settings",
+  });
 });
 
 afterEach(async () => {
@@ -65,11 +87,15 @@ afterEach(async () => {
   }
 });
 
-test("HomepageAlternateAuthOptions keeps only one auth method active at a time", async () => {
+test("HostedAuthPanel keeps only one alternate auth method active at a time", async () => {
   mocks.loginWithTelegram.mockRejectedValue(new Error("Telegram popup closed"));
 
   const { cleanup, container } = await renderClientComponent(
-    createElement(HomepageAlternateAuthOptions),
+    createElement(HostedAuthPanel, {
+      intent: "signup",
+      methods: ["phone", "telegram", "email"],
+      showLegalNotice: true,
+    }),
   );
   cleanupRender = cleanup;
 
@@ -77,8 +103,11 @@ test("HomepageAlternateAuthOptions keeps only one auth method active at a time",
     container.querySelectorAll("button"),
   ) as HTMLButtonElement[];
 
+  expect(container.querySelector('[data-hosted-phone-auth="signup"]')).toBeTruthy();
+  expect(container.querySelector('[data-hosted-phone-auth-passive-consent="hidden"]')).toBeTruthy();
   expect(telegramButton?.textContent).toContain("Telegram");
   expect(emailButton?.textContent).toContain("Email");
+  expect(container.textContent).toContain("By signing up, you agree to our");
 
   await act(async () => {
     telegramButton?.dispatchEvent(new Event("click", { bubbles: true }));

@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   ensureHostedPrivyWalletReady: vi.fn(),
   requestHostedBillingCheckout: vi.fn(),
   requestHostedPrivyCompletionWithRetry: vi.fn(),
+  ensureHostedPrivyPhoneReady: vi.fn(),
 }));
 
 vi.mock("@/src/components/hosted-onboarding/client-api", () => ({
@@ -22,12 +23,14 @@ vi.mock("@/src/lib/hosted-onboarding/privy-client", async () => {
 
   return {
     ...actual,
+    ensureHostedPrivyPhoneReady: mocks.ensureHostedPrivyPhoneReady,
     ensureHostedPrivyWalletReady: mocks.ensureHostedPrivyWalletReady,
   };
 });
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.ensureHostedPrivyPhoneReady.mockResolvedValue(undefined);
   mocks.ensureHostedPrivyWalletReady.mockResolvedValue(undefined);
   mocks.requestHostedPrivyCompletionWithRetry.mockResolvedValue({
     activationPending: false,
@@ -41,20 +44,23 @@ beforeEach(() => {
   });
 });
 
-test("completeHomepagePrivyAuth sends active members to settings", async () => {
-  const { completeHomepagePrivyAuth } = await import(
-    "@/src/components/homepage/homepage-privy-auth"
+test("completeHostedPrivyAuth sends active members to settings", async () => {
+  const { completeHostedPrivyAuth } = await import(
+    "@/src/components/hosted-onboarding/hosted-auth-completion"
   );
 
   await expect(
-    completeHomepagePrivyAuth({
+    completeHostedPrivyAuth({
       createWallet: vi.fn(),
+      intent: "signup",
       refreshUser: vi.fn().mockResolvedValue({
         linkedAccounts: [],
       }),
       user: null,
     }),
-  ).resolves.toBe("/settings");
+  ).resolves.toMatchObject({
+    redirectUrl: "/settings",
+  });
 
   expect(mocks.ensureHostedPrivyWalletReady).toHaveBeenCalledWith({
     createWallet: expect.any(Function),
@@ -64,7 +70,7 @@ test("completeHomepagePrivyAuth sends active members to settings", async () => {
   });
 });
 
-test("completeHomepagePrivyAuth sends checkout users into billing", async () => {
+test("completeHostedPrivyAuth sends checkout users into billing", async () => {
   mocks.requestHostedPrivyCompletionWithRetry.mockResolvedValue({
     activationPending: false,
     inviteCode: "invite-code",
@@ -76,28 +82,32 @@ test("completeHomepagePrivyAuth sends checkout users into billing", async () => 
     url: "https://checkout.example.test/session_123",
   });
 
-  const { completeHomepagePrivyAuth } = await import(
-    "@/src/components/homepage/homepage-privy-auth"
+  const { completeHostedPrivyAuth } = await import(
+    "@/src/components/hosted-onboarding/hosted-auth-completion"
   );
 
   await expect(
-    completeHomepagePrivyAuth({
+    completeHostedPrivyAuth({
       createWallet: vi.fn(),
+      intent: "signup",
       refreshUser: vi.fn().mockResolvedValue(null),
       user: {
         linkedAccounts: [{ type: "email" }],
       },
     }),
-  ).resolves.toBe("https://checkout.example.test/session_123");
+  ).resolves.toMatchObject({
+    redirectUrl: "https://checkout.example.test/session_123",
+  });
 });
 
-test("completeHomepagePrivyAuth falls back to the current user when refreshUser fails", async () => {
-  const { completeHomepagePrivyAuth } = await import(
-    "@/src/components/homepage/homepage-privy-auth"
+test("completeHostedPrivyAuth falls back to the current user when refreshUser fails", async () => {
+  const { completeHostedPrivyAuth } = await import(
+    "@/src/components/hosted-onboarding/hosted-auth-completion"
   );
 
-  await completeHomepagePrivyAuth({
+  await completeHostedPrivyAuth({
     createWallet: vi.fn(),
+    intent: "signup",
     refreshUser: vi.fn().mockRejectedValue(new Error("stale user")),
     user: {
       linkedAccounts: [{ type: "telegram" }],
@@ -112,7 +122,7 @@ test("completeHomepagePrivyAuth falls back to the current user when refreshUser 
   });
 });
 
-test("completeHomepagePrivyAuth surfaces missing checkout URLs", async () => {
+test("completeHostedPrivyAuth surfaces missing checkout URLs", async () => {
   mocks.requestHostedPrivyCompletionWithRetry.mockResolvedValue({
     activationPending: false,
     inviteCode: "invite-code",
@@ -124,15 +134,43 @@ test("completeHomepagePrivyAuth surfaces missing checkout URLs", async () => {
     url: null,
   });
 
-  const { completeHomepagePrivyAuth } = await import(
-    "@/src/components/homepage/homepage-privy-auth"
+  const { completeHostedPrivyAuth } = await import(
+    "@/src/components/hosted-onboarding/hosted-auth-completion"
   );
 
   await expect(
-    completeHomepagePrivyAuth({
+    completeHostedPrivyAuth({
       createWallet: vi.fn(),
+      intent: "signup",
       refreshUser: vi.fn().mockResolvedValue(null),
       user: null,
     }),
   ).rejects.toThrow("Checkout did not return a redirect URL.");
+});
+
+test("completeHostedPrivyAuth uses the phone readiness path when requested", async () => {
+  const { completeHostedPrivyAuth } = await import(
+    "@/src/components/hosted-onboarding/hosted-auth-completion"
+  );
+
+  await expect(
+    completeHostedPrivyAuth({
+      createWallet: vi.fn(),
+      intent: "signin",
+      requirePhone: true,
+      user: {
+        linkedAccounts: [{ type: "phone" }],
+      },
+    }),
+  ).resolves.toMatchObject({
+    redirectUrl: "/settings",
+  });
+
+  expect(mocks.ensureHostedPrivyPhoneReady).toHaveBeenCalledWith({
+    createWallet: expect.any(Function),
+    user: {
+      linkedAccounts: [{ type: "phone" }],
+    },
+  });
+  expect(mocks.ensureHostedPrivyWalletReady).not.toHaveBeenCalled();
 });

@@ -11,7 +11,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 
-import { HostedPhoneAuth } from "./hosted-phone-auth";
+import { HostedAuthPanel } from "./hosted-auth-panel";
 
 export function HostedExistingAccountSignInDialog() {
   const [open, setOpen] = useState(false);
@@ -36,9 +36,7 @@ export function HostedExistingAccountSignInDialog() {
             <DialogDescription>We&apos;ll text you a sign-in code.</DialogDescription>
           </DialogHeader>
           {open ? (
-            <HostedPhoneAuth
-              intent="signin"
-            />
+            <HostedAuthPanel intent="signin" methods={["phone"]} />
           ) : null}
         </DialogContent>
       </Dialog>
