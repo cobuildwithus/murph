@@ -123,6 +123,8 @@ test('document and meal commands exercise import, read, edit, list, manifest, an
     'init',
     '--vault',
     vaultRoot,
+    '--timezone',
+    'America/Los_Angeles',
   ])
   assert.equal(initResult.exitCode, null)
   assert.equal(requireData(initResult.envelope).created, true)
@@ -141,7 +143,7 @@ test('document and meal commands exercise import, read, edit, list, manifest, an
         '--title',
         'Lab Report',
         '--occurred-at',
-        '2026-03-12T09:30:00Z',
+        '2026-03-12',
         '--note',
         'Fasted lipid panel.',
         '--source',
@@ -165,7 +167,7 @@ test('document and meal commands exercise import, read, edit, list, manifest, an
         '--title',
         'Older Report',
         '--occurred-at',
-        '2026-03-10T07:15:00Z',
+        '2026-03-10',
         '--vault',
         vaultRoot,
       ])
@@ -191,6 +193,10 @@ test('document and meal commands exercise import, read, edit, list, manifest, an
   assert.equal(shownDocument.exitCode, null)
   assert.equal(shownDocument.envelope.ok, true)
   assert.equal(requireData(shownDocument.envelope).entity.title, 'Lab Report')
+  assert.equal(
+    requireData(shownDocument.envelope).entity.occurredAt,
+    '2026-03-12T19:00:00.000Z',
+  )
   assert.equal(requireData(shownDocument.envelope).entity.data.source, 'device')
 
   const listedDocuments = await runInProcessJsonCli<{
@@ -314,7 +320,7 @@ test('document and meal commands exercise import, read, edit, list, manifest, an
         '--note',
         'Post-workout recovery meal.',
         '--occurred-at',
-        '2026-03-12T12:15:00Z',
+        '2026-03-12',
         '--source',
         'device',
         '--vault',
@@ -336,7 +342,7 @@ test('document and meal commands exercise import, read, edit, list, manifest, an
         '--note',
         'Simple recovery breakfast.',
         '--occurred-at',
-        '2026-03-10T18:00:00Z',
+        '2026-03-10',
         '--vault',
         vaultRoot,
       ])
@@ -361,6 +367,10 @@ test('document and meal commands exercise import, read, edit, list, manifest, an
   ])
   assert.equal(shownMeal.exitCode, null)
   assert.equal(requireData(shownMeal.envelope).entity.kind, 'meal')
+  assert.equal(
+    requireData(shownMeal.envelope).entity.occurredAt,
+    '2026-03-12T19:00:00.000Z',
+  )
   assert.equal(requireData(shownMeal.envelope).entity.data.note, 'Post-workout recovery meal.')
 
   const listedMeals = await runInProcessJsonCli<{
@@ -455,6 +465,8 @@ test('intervention commands exercise add, edit, and delete paths in-process', as
     'init',
     '--vault',
     vaultRoot,
+    '--timezone',
+    'America/Los_Angeles',
   ])
   assert.equal(initResult.exitCode, null)
   assert.equal(requireData(initResult.envelope).created, true)
@@ -466,6 +478,7 @@ test('intervention commands exercise add, edit, and delete paths in-process', as
         lookupId: string
         kind: string
         title: string
+        occurredAt: string
         interventionType: string
         durationMinutes: number | null
         protocolId: string | null
@@ -480,7 +493,7 @@ test('intervention commands exercise add, edit, and delete paths in-process', as
         '--protocol-id',
         'prot_01JNV422Y2M5ZBV64ZP4N1DRB1',
         '--occurred-at',
-        '2026-03-12T18:15:00Z',
+        '2026-03-12',
         '--source',
         'manual',
         '--vault',
@@ -552,6 +565,7 @@ test('intervention commands exercise add, edit, and delete paths in-process', as
   assert.equal(edited.exitCode, null)
   assert.equal(requireData(edited.envelope).entity.title, '25-minute sauna')
   assert.equal(requireData(edited.envelope).entity.data.durationMinutes, 25)
+  assert.equal(created.occurredAt, '2026-03-12T19:00:00.000Z')
 
   const deleted = await runInProcessJsonCli<{
     entityId: string

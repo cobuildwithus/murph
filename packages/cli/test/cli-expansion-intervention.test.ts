@@ -305,7 +305,6 @@ test.sequential(
 
       assert.equal(invalidTimestamp.ok, false)
       assert.equal(invalidTimestamp.error.code, 'VALIDATION_ERROR')
-      assert.match(invalidTimestamp.error.message ?? '', /Invalid ISO datetime/u)
     } finally {
       await rm(vaultRoot, { recursive: true, force: true })
     }

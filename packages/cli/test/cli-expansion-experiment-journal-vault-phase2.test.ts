@@ -69,7 +69,7 @@ test.sequential(
         '--vault',
         vaultRoot,
         '--timezone',
-        'Australia/Sydney',
+        'America/Los_Angeles',
       ])
       const created = await runSliceCli<{
         experimentId: string
@@ -144,7 +144,7 @@ test.sequential(
         'stop',
         'focus-sprint',
         '--occurred-at',
-        '2026-03-13T18:45:00Z',
+        '2026-03-14',
         '--note',
         'The sprint is complete and the updated routine is stable enough to keep.',
         '--vault',
@@ -166,6 +166,7 @@ test.sequential(
       const eventShown = await runSliceCli<{
         entity: {
           kind: string
+          occurredAt: string | null
           data: Record<string, unknown>
         }
       }>([
@@ -217,6 +218,7 @@ test.sequential(
 
       assert.equal(eventShown.ok, true)
       assert.equal(requireData(eventShown).entity.kind, 'experiment_event')
+      assert.equal(requireData(eventShown).entity.occurredAt, '2026-03-14T19:00:00.000Z')
       assert.equal(requireData(eventShown).entity.data.phase, 'stop')
       assert.equal(
         requireData(eventShown).entity.data.experimentId,

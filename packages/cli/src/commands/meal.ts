@@ -2,7 +2,7 @@ import { Cli, z } from 'incur'
 import { eventSourceSchema } from '@murphai/contracts'
 import {
   localDateSchema,
-  isoTimestampSchema,
+  occurredAtOptionSchema,
   listResultSchema,
   mealAddResultSchema,
   pathSchema,
@@ -24,6 +24,7 @@ import {
   createEntityDeleteCommandConfig,
   createEventBackedEntityEditCommandConfig,
 } from './record-mutation-command-helpers.js'
+import { normalizeOccurredAtOption } from './occurred-at-option.js'
 
 const mealNutritionMetricSchema = z.object({
   total: z.number().nonnegative().nullable(),
@@ -76,9 +77,9 @@ export function registerMealCommands(cli: Cli.Cli, services: VaultServices) {
           .min(1)
           .optional()
           .describe('Optional freeform meal description when no media is available.'),
-        occurredAt: isoTimestampSchema
+        occurredAt: occurredAtOptionSchema
           .optional()
-          .describe('Optional occurrence timestamp in ISO 8601 form.'),
+          .describe('Optional occurrence timestamp in ISO 8601 form or YYYY-MM-DD form.'),
         source: eventSourceSchema
           .optional()
           .describe('Optional event source (`manual`, `import`, `device`, or `derived`).'),
@@ -91,7 +92,11 @@ export function registerMealCommands(cli: Cli.Cli, services: VaultServices) {
           audioPath: typeof options.audio === 'string' ? options.audio : undefined,
           vaultRoot: String(options.vault ?? ''),
           note: typeof options.note === 'string' ? options.note : undefined,
-          occurredAt: typeof options.occurredAt === 'string' ? options.occurredAt : undefined,
+          occurredAt: await normalizeOccurredAtOption({
+            vault: String(options.vault ?? ''),
+            occurredAt:
+              typeof options.occurredAt === 'string' ? options.occurredAt : undefined,
+          }),
           source: typeof options.source === 'string' ? options.source : undefined,
         })
 

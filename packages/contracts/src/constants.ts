@@ -186,6 +186,8 @@ export const AUDIT_ACTIONS = Object.freeze([
   "document_import",
   "device_import",
   "experiment_create",
+  "event_delete",
+  "event_upsert",
   "journal_ensure",
   "list",
   "meal_add",

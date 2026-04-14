@@ -3,7 +3,7 @@ import { eventSourceSchema } from '@murphai/contracts'
 import { withBaseOptions } from '@murphai/operator-config/command-helpers'
 import {
   interventionAddResultSchema,
-  isoTimestampSchema,
+  occurredAtOptionSchema,
 } from '@murphai/operator-config/vault-cli-contracts'
 import type { VaultServices } from '@murphai/vault-usecases'
 import {
@@ -15,6 +15,7 @@ import {
   createDirectEntityDeleteCommandDefinition,
   createDirectEventBackedEntityEditCommandDefinition,
 } from './record-mutation-command-helpers.js'
+import { normalizeOccurredAtOption } from './occurred-at-option.js'
 const protocolIdSchema = z
   .string()
   .regex(/^prot_[0-9A-Za-z]+$/u, 'Expected a canonical protocol id in prot_* form.')
@@ -90,9 +91,9 @@ export function registerInterventionCommands(
         .describe(
           'Optional protocol id to relate this intervention session back to one active therapy or habit.',
         ),
-      occurredAt: isoTimestampSchema
+      occurredAt: occurredAtOptionSchema
         .optional()
-        .describe('Optional occurrence timestamp in ISO 8601 form.'),
+        .describe('Optional occurrence timestamp in ISO 8601 form or YYYY-MM-DD form.'),
       source: eventSourceSchema
         .optional()
         .describe(
@@ -111,10 +112,13 @@ export function registerInterventionCommands(
           typeof options.protocolId === 'string'
             ? options.protocolId
             : undefined,
-        occurredAt:
-          typeof options.occurredAt === 'string'
-            ? options.occurredAt
-            : undefined,
+        occurredAt: await normalizeOccurredAtOption({
+          vault: options.vault,
+          occurredAt:
+            typeof options.occurredAt === 'string'
+              ? options.occurredAt
+              : undefined,
+        }),
         source: typeof options.source === 'string' ? options.source : undefined,
       })
     },

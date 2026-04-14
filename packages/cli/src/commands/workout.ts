@@ -7,6 +7,7 @@ import {
 } from '@murphai/vault-usecases'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
+  occurredAtOptionSchema,
   isoTimestampSchema,
   listResultSchema,
   pathSchema,
@@ -58,6 +59,7 @@ import {
   commonDateRangeOptionDescriptions,
   commonListLimitOptionSchema,
 } from './command-factory-primitives.js'
+import { normalizeOccurredAtOption } from './occurred-at-option.js'
 
 export function registerWorkoutCommands(
   cli: Cli.Cli,
@@ -129,9 +131,9 @@ export function registerWorkoutCommands(
         .max(1_000)
         .optional()
         .describe('Optional workout distance override in kilometers.'),
-      occurredAt: isoTimestampSchema
+      occurredAt: occurredAtOptionSchema
         .optional()
-        .describe('Optional occurrence timestamp in ISO 8601 form.'),
+        .describe('Optional occurrence timestamp in ISO 8601 form or YYYY-MM-DD form.'),
       source: eventSourceSchema
         .optional()
         .describe(
@@ -158,10 +160,13 @@ export function registerWorkoutCommands(
           typeof options.distanceKm === 'number'
             ? options.distanceKm
             : undefined,
-        occurredAt:
-          typeof options.occurredAt === 'string'
-            ? options.occurredAt
-            : undefined,
+        occurredAt: await normalizeOccurredAtOption({
+          vault: options.vault,
+          occurredAt:
+            typeof options.occurredAt === 'string'
+              ? options.occurredAt
+              : undefined,
+        }),
         source: typeof options.source === 'string' ? options.source : undefined,
         mediaPaths: Array.isArray(options.media)
           ? options.media.filter((entry): entry is string => typeof entry === 'string')
@@ -305,9 +310,9 @@ export function registerWorkoutCommands(
         .max(160)
         .optional()
         .describe('Optional measurement title override.'),
-      occurredAt: isoTimestampSchema
+      occurredAt: occurredAtOptionSchema
         .optional()
-        .describe('Optional occurrence timestamp in ISO 8601 form.'),
+        .describe('Optional occurrence timestamp in ISO 8601 form or YYYY-MM-DD form.'),
       source: eventSourceSchema
         .optional()
         .describe('Optional event source (`manual`, `import`, `device`, or `derived`).'),
@@ -329,10 +334,13 @@ export function registerWorkoutCommands(
         unit: typeof options.unit === 'string' ? options.unit : undefined,
         note: typeof options.note === 'string' ? options.note : undefined,
         title: typeof options.title === 'string' ? options.title : undefined,
-        occurredAt:
-          typeof options.occurredAt === 'string'
-            ? options.occurredAt
-            : undefined,
+        occurredAt: await normalizeOccurredAtOption({
+          vault: options.vault,
+          occurredAt:
+            typeof options.occurredAt === 'string'
+              ? options.occurredAt
+              : undefined,
+        }),
         source: typeof options.source === 'string' ? options.source : undefined,
         mediaPaths: Array.isArray(options.media)
           ? options.media.filter((entry): entry is string => typeof entry === 'string')
@@ -688,9 +696,9 @@ export function registerWorkoutCommands(
         .max(1_000)
         .optional()
         .describe('Optional workout distance override in kilometers.'),
-      occurredAt: isoTimestampSchema
+      occurredAt: occurredAtOptionSchema
         .optional()
-        .describe('Optional occurrence timestamp in ISO 8601 form.'),
+        .describe('Optional occurrence timestamp in ISO 8601 form or YYYY-MM-DD form.'),
       source: eventSourceSchema
         .optional()
         .describe(
@@ -713,10 +721,13 @@ export function registerWorkoutCommands(
           typeof options.distanceKm === 'number'
             ? options.distanceKm
             : undefined,
-        occurredAt:
-          typeof options.occurredAt === 'string'
-            ? options.occurredAt
-            : undefined,
+        occurredAt: await normalizeOccurredAtOption({
+          vault: options.vault,
+          occurredAt:
+            typeof options.occurredAt === 'string'
+              ? options.occurredAt
+              : undefined,
+        }),
         source: typeof options.source === 'string' ? options.source : undefined,
         mediaPaths: Array.isArray(options.media)
           ? options.media.filter((entry): entry is string => typeof entry === 'string')

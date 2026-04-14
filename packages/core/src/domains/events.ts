@@ -4,6 +4,7 @@ import {
   eventRecordSchema,
 } from "@murphai/contracts";
 
+import { emitAuditRecord } from "../audit.ts";
 import { ID_PREFIXES, VAULT_LAYOUT } from "../constants.ts";
 import {
   buildAttachmentCompatibilityProjections,
@@ -612,6 +613,16 @@ export async function addActivitySession(
       const ledgerFile = toEventLedgerFile(eventRecord.occurredAt);
 
       await batch.stageJsonlAppend(ledgerFile, `${JSON.stringify(eventRecord)}\n`);
+      await emitAuditRecord({
+        vaultRoot: input.vaultRoot,
+        batch,
+        action: "event_upsert",
+        commandName: "core.addActivitySession",
+        summary: `Wrote activity_session ${eventId}.`,
+        occurredAt: eventRecord.occurredAt,
+        files: [ledgerFile],
+        targetIds: [eventId],
+      });
 
       return {
         eventId,
@@ -686,6 +697,16 @@ export async function addBodyMeasurement(
       const ledgerFile = toEventLedgerFile(eventRecord.occurredAt);
 
       await batch.stageJsonlAppend(ledgerFile, `${JSON.stringify(eventRecord)}\n`);
+      await emitAuditRecord({
+        vaultRoot: input.vaultRoot,
+        batch,
+        action: "event_upsert",
+        commandName: "core.addBodyMeasurement",
+        summary: `Wrote body_measurement ${eventId}.`,
+        occurredAt: eventRecord.occurredAt,
+        files: [ledgerFile],
+        targetIds: [eventId],
+      });
 
       return {
         eventId,
@@ -906,6 +927,16 @@ export async function upsertEvent(
     occurredAt: eventRecord.occurredAt,
     mutate: async ({ batch }) => {
       await batch.stageJsonlAppend(ledgerFile, `${JSON.stringify(eventRecord)}\n`);
+      await emitAuditRecord({
+        vaultRoot: input.vaultRoot,
+        batch,
+        action: "event_upsert",
+        commandName: "core.upsertEvent",
+        summary: `Upserted ${eventRecord.kind} ${eventRecord.id}.`,
+        occurredAt: eventRecord.occurredAt,
+        files: [ledgerFile],
+        targetIds: [eventRecord.id],
+      });
 
       return {
         eventId: eventRecord.id,
@@ -948,6 +979,16 @@ export async function deleteEvent(
     occurredAt: new Date(),
     mutate: async ({ batch }) => {
       await batch.stageJsonlAppend(tombstoneLedgerFile, `${JSON.stringify(tombstoneRecord)}\n`);
+      await emitAuditRecord({
+        vaultRoot: input.vaultRoot,
+        batch,
+        action: "event_delete",
+        commandName: "core.deleteEvent",
+        summary: `Deleted ${latestMatchedEvent.record.kind} ${input.eventId}.`,
+        occurredAt: new Date(),
+        files: [tombstoneLedgerFile],
+        targetIds: [input.eventId],
+      });
 
       return {
         eventId: input.eventId,
