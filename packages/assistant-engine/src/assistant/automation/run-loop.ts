@@ -288,13 +288,6 @@ export async function runAssistantAutomationPass(
         queued: 0,
         sent: 0,
       }
-  const cronResult = await processDueAssistantCronJobs({
-    deliveryDispatchMode: input.deliveryDispatchMode,
-    executionContext: input.executionContext,
-    vault: input.vault,
-    signal: input.signal,
-    limit: input.maxPerScan,
-  })
   let state = await readAssistantAutomationState(input.vault)
   const stateBeforeScan = snapshotAssistantAutomationLoopState(state)
 
@@ -334,6 +327,13 @@ export async function runAssistantAutomationPass(
         updatedAt: new Date().toISOString(),
       })
     },
+  })
+  const cronResult = await processDueAssistantCronJobs({
+    deliveryDispatchMode: input.deliveryDispatchMode,
+    executionContext: input.executionContext,
+    vault: input.vault,
+    signal: input.signal,
+    limit: input.maxPerScan,
   })
 
   await refreshAssistantStatusSnapshot(input.vault).catch((error) => {

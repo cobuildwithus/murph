@@ -3635,6 +3635,32 @@ describe('assistant automation run loop', () => {
     expect(release).toHaveBeenCalledOnce()
   })
 
+  it('runs inbox recovery and scanning before due cron jobs in a pass', async () => {
+    const inboxServices = createInboxServices({
+      run: vi.fn().mockResolvedValue(undefined),
+    })
+    const runLoop = await vi.importActual<typeof import('../src/assistant/automation/run-loop.ts')>(
+      '../src/assistant/automation/run-loop.ts',
+    )
+
+    await runLoop.runAssistantAutomation({
+      drainOutbox: true,
+      inboxServices,
+      once: true,
+      startDaemon: false,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(runLoopMocks.recoverAssistantAutoReplies).toHaveBeenCalledOnce()
+    expect(runLoopMocks.scanAssistantAutomationOnce).toHaveBeenCalledOnce()
+    expect(runLoopMocks.processDueAssistantCronJobs).toHaveBeenCalledOnce()
+    expect(
+      runLoopMocks.scanAssistantAutomationOnce.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      runLoopMocks.processDueAssistantCronJobs.mock.invocationCallOrder[0] ?? 0,
+    )
+  })
+
   it('wakes immediately on non-self imported captures instead of waiting for the scan interval', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-09T00:00:00.000Z'))
