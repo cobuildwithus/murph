@@ -3,6 +3,12 @@
 import { useState } from "react";
 import { MetricCard } from "@/src/components/ui/metric-card";
 import { TimelineEntry } from "@/src/components/ui/timeline-entry";
+import { ConclusionCard } from "@/src/components/conclusion-card";
+import { NextStepCard } from "@/src/components/next-step-card";
+import { ExpectedSignalCard } from "@/src/components/experiments/experiment-detail/expected-signal-card";
+import { HealthDomainCard } from "@/src/components/overview/health-domain-card";
+import { ActiveExperimentBanner } from "@/src/components/overview/active-experiment-banner";
+import { ProfileStats } from "@/src/components/overview/profile-stats";
 import { Button } from "@/src/components/ui/button";
 import { Badge } from "@/src/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/src/components/ui/tabs";
@@ -500,6 +506,77 @@ export default function DesignSystemPage() {
               <TimelineEntry date="Mar 25" label="Checkpoint" title="Week 1 complete" description="Baseline captured. Active phase started." variant="outline" />
               <TimelineEntry date="Mar 18" label="Start" title="Experiment started" description="Finnish Sauna Protocol · 21 days" variant="primary" last />
             </div>
+          </div>
+        </Section>
+
+        <Separator />
+
+        {/* Next Step Card */}
+        <Section title="Next Step Card">
+          <NextStepCard
+            title="Sauna session · 15–20 min @ 80–100°C"
+            when="Today evening"
+            instructions="Stay hydrated, replace electrolytes after"
+            context="Session 2 of 3 this week"
+            nextSession="Friday"
+          />
+        </Section>
+
+        <Separator />
+
+        {/* Expected Signal Card */}
+        <Section title="Expected Signal Card">
+          <div className="flex gap-4">
+            <ExpectedSignalCard label="HRV" expected="+10–25%" direction="up" description="Heat stress trains the autonomic nervous system, increasing parasympathetic dominance at rest." />
+            <ExpectedSignalCard label="Resting HR" expected="-3–8 bpm" direction="down" description="Repeated heat exposure improves cardiac output efficiency, lowering resting heart rate." />
+            <ExpectedSignalCard label="Deep Sleep" expected="+15–30%" direction="up" description="Core temp drop after sauna triggers deeper slow-wave sleep via thermoregulatory pathways." />
+          </div>
+        </Section>
+
+        <Separator />
+
+        {/* Conclusion Card */}
+        <Section title="Conclusion Card">
+          <div className="flex flex-col gap-4">
+            <ConclusionCard title="What worked" variant="positive" items={[
+              { icon: "↑", text: "HRV +15.7% — well above ±4% normal variation." },
+              { icon: "↑", text: "Deep sleep +18.2% — evening timing was key." },
+            ]} />
+            <ConclusionCard title="What didn't change" variant="neutral" items={[
+              { icon: "→", text: "Respiratory rate -2.6% — within normal variation." },
+            ]} />
+            <ConclusionCard title="Key insights" variant="insight" items={[
+              { icon: "•", text: "Evening sessions drove sleep gains. Morning sessions showed no benefit." },
+              { icon: "•", text: "2–3x/week appears sufficient. Skipping one session had no negative impact." },
+            ]} />
+            <ConclusionCard title="Recommendations" variant="recommendation" items={[
+              { icon: "→", text: "Continue sauna 2x/week as maintenance." },
+              { icon: "→", text: "Add cold exposure post-sauna for contrast protocol." },
+            ]} />
+          </div>
+        </Section>
+
+        <Separator />
+
+        {/* Health Domain Card */}
+        <Section title="Health Domain Card">
+          <div className="grid grid-cols-2 gap-4">
+            <HealthDomainCard title="Sleep & Recovery" description="Deep sleep and HRV below your potential." score={42} status="biggest-opportunity" statusLabel="Biggest opportunity" secondaryInfo="3 experiments available" />
+            <HealthDomainCard title="Cardiovascular & Fitness" description="RHR decent but flat. Zone 2 experiment running." score={64} status="experiment-active" statusLabel="Experiment active" secondaryInfo="Zone 2 RHR Reset · Day 14" />
+            <HealthDomainCard title="Supplements" description="No experiments run yet." score={null} status="not-started" statusLabel="Not started" secondaryInfo="5 experiments available" />
+            <HealthDomainCard title="Stress & Calm" description="HRV patterns suggest elevated baseline stress." score={35} status="worth-attention" statusLabel="Worth attention" secondaryInfo="4 experiments available" />
+          </div>
+        </Section>
+
+        <Separator />
+
+        {/* Active Experiment Banner + Profile Stats */}
+        <Section title="Active Experiment Banner & Profile Stats">
+          <div className="flex items-stretch gap-4">
+            <div className="flex-1">
+              <ActiveExperimentBanner id="demo" title="Zone 2 RHR Reset" day={14} totalDays={28} />
+            </div>
+            <ProfileStats completed={2} daysTracked={47} />
           </div>
         </Section>
 
