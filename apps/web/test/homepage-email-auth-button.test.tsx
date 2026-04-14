@@ -64,9 +64,13 @@ test("HomepageEmailAuthButton expands, sends a code, verifies it, and redirects 
   );
   cleanupRender = cleanup;
 
+  expect(button.className).toContain("order-2");
+
   await act(async () => {
     button.dispatchEvent(new Event("click", { bubbles: true }));
   });
+
+  expect(container.querySelector('label[for="homepage-email-address"]')).toBeNull();
 
   const emailInput = container.querySelector(
     'input[id="homepage-email-address"]',
@@ -74,6 +78,7 @@ test("HomepageEmailAuthButton expands, sends a code, verifies it, and redirects 
   const emailForm = container.querySelector("form");
   expect(emailInput).toBeTruthy();
   expect(emailForm).toBeTruthy();
+  expect(emailInput?.className).toContain("w-full");
 
   await act(async () => {
     if (emailInput) {

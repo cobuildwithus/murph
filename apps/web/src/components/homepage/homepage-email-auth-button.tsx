@@ -11,7 +11,6 @@ import { useRef, useState, type FormEvent } from "react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { HostedVerificationCodeStep } from "@/src/components/hosted-onboarding/hosted-verification-code-step";
 import {
   isValidEmailAddress,
@@ -148,6 +147,7 @@ export function HomepageEmailAuthButton() {
       <HomepageInlineAuthButton
         active={expanded}
         disabled={!ready || loading}
+        className="order-2"
         icon={<EmailIcon className="h-5 w-5" />}
         onClick={handleOpen}
       >
@@ -155,7 +155,7 @@ export function HomepageEmailAuthButton() {
       </HomepageInlineAuthButton>
 
       {expanded ? (
-        <div className="space-y-3 rounded-md border border-stone-200 bg-stone-50/80 p-3 sm:col-span-2 sm:p-4">
+        <div className="order-4 space-y-3 sm:col-span-2">
           {showCodeEntry ? (
             <HostedVerificationCodeStep
               code={code}
@@ -182,19 +182,22 @@ export function HomepageEmailAuthButton() {
             />
           ) : (
             <form className="space-y-3" onSubmit={handleSendCode}>
-              <div className="space-y-2">
-                <Label htmlFor="homepage-email-address">Email address</Label>
-                <Input
-                  id="homepage-email-address"
-                  autoComplete="email"
-                  inputMode="email"
-                  placeholder="you@example.com"
-                  ref={emailInputRef}
-                  value={emailAddress}
-                  onChange={(event) => setEmailAddress(event.currentTarget.value)}
-                />
-              </div>
-              <Button type="submit" size="lg" disabled={formDisabled}>
+              <Input
+                id="homepage-email-address"
+                autoComplete="email"
+                inputMode="email"
+                placeholder="you@example.com"
+                ref={emailInputRef}
+                value={emailAddress}
+                onChange={(event) => setEmailAddress(event.currentTarget.value)}
+                className="h-14 w-full rounded-2xl border-stone-200 bg-white px-5 text-base shadow-[0_1px_0_rgba(38,38,38,0.04)] placeholder:text-stone-400 md:text-base"
+              />
+              <Button
+                type="submit"
+                size="lg"
+                disabled={formDisabled}
+                className="w-full"
+              >
                 {state.status === "sending-code" ? "Sending..." : "Email me a code"}
               </Button>
             </form>
