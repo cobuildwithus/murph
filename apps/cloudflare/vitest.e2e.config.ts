@@ -24,7 +24,7 @@ export default defineConfig({
     environment: "node",
     fileParallelism: false,
     hookTimeout: 600_000,
-    include: [path.join(cloudflareDir, "test", "hosted-local-e2e.test.ts")],
+    include: [path.join(cloudflareDir, "test", "*e2e.test.ts")],
     maxWorkers: 1,
     name: "cloudflare-hosted-local-e2e",
     testTimeout: 600_000,
