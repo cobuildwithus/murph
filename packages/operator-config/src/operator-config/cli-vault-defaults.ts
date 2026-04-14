@@ -139,20 +139,7 @@ export function applyDefaultVaultToArgs(
   args: readonly string[],
   vault: string | null,
 ): string[] {
-  if (!vault || hasExplicitVaultOption(args) || hasNonExecutingBuiltinFlag(args)) {
-    return [...args]
-  }
-
-  const topLevelToken = resolveEffectiveTopLevelToken(args)
-  if (!topLevelToken || !TOP_LEVEL_COMMANDS_REQUIRING_VAULT.has(topLevelToken)) {
-    return [...args]
-  }
-
-  if (hasVaultExemptCommandPath(args)) {
-    return [...args]
-  }
-
-  if (hasIncompleteCommandGroupPath(args)) {
+  if (!vault || hasExplicitVaultOption(args) || !commandNeedsVaultForExecution(args)) {
     return [...args]
   }
 
@@ -167,6 +154,27 @@ export function applyDefaultVaultToArgs(
     vault,
     ...args.slice(separatorIndex),
   ]
+}
+
+export function commandNeedsVaultForExecution(args: readonly string[]): boolean {
+  if (hasNonExecutingBuiltinFlag(args)) {
+    return false
+  }
+
+  const topLevelToken = resolveEffectiveTopLevelToken(args)
+  if (!topLevelToken || !TOP_LEVEL_COMMANDS_REQUIRING_VAULT.has(topLevelToken)) {
+    return false
+  }
+
+  if (hasVaultExemptCommandPath(args)) {
+    return false
+  }
+
+  if (hasIncompleteCommandGroupPath(args)) {
+    return false
+  }
+
+  return true
 }
 
 function hasNonExecutingBuiltinFlag(args: readonly string[]): boolean {

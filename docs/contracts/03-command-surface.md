@@ -5,6 +5,7 @@ Status: frozen baseline plus health extension fence for `vault-cli`
 ## Namespace
 
 - The only public baseline namespace is `vault-cli`.
+- The installed `murph` binary is the product-facing single-active-vault wrapper over this raw surface: normal `murph` commands use the selected active vault, `murph onboard --vault <path>` creates/selects one during setup, and `murph use <path>` selects an existing vault for future `murph` commands.
 - `packages/cli` owns command registration, schema validation, and delegation into `core`, `importers`, and `query`.
 - `device` commands delegate to the local `@murphai/device-syncd` control plane for provider OAuth/account actions while leaving canonical health writes behind the existing importer/core boundary, and the CLI may start or reuse that local daemon for the selected vault when no explicit control-plane target is provided.
 - Native `incur` owns the transport envelope and human-oriented formatting behavior.

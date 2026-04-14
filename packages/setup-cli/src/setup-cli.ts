@@ -1,8 +1,16 @@
-import { readFile } from 'node:fs/promises'
+import { readFile, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { Cli, z } from 'incur'
 import { assistantAutomationStateSchema } from '@murphai/operator-config/assistant-cli-contracts'
 import { inboxRuntimeConfigSchema } from '@murphai/operator-config/inbox-cli-contracts'
+import {
+  normalizeVaultForConfig,
+  readOperatorConfig,
+  resolveOperatorConfigPath,
+  resolveOperatorHomeDirectory,
+  saveDefaultVaultConfig,
+} from '@murphai/operator-config/operator-config'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { resolveAssistantStatePaths } from '@murphai/assistant-engine/assistant-state'
 import { showWearablePreferences } from '@murphai/vault-usecases'
 import {
@@ -13,9 +21,11 @@ import {
   type SetupCommandOptions,
   type SetupConfiguredWearable,
   type SetupResult,
+  type SetupVaultSelectionResult,
   type SetupWearable,
   setupChannelValues,
   setupCommandOptionsSchema,
+  setupVaultSelectionResultSchema,
   setupWearableValues,
   setupResultSchema,
 } from '@murphai/operator-config/setup-cli-contracts'
@@ -59,6 +69,7 @@ import {
 } from './setup-wizard.js'
 import { configureSetupChannels } from './setup-services/channels.js'
 import { configureSetupScheduledUpdates } from './setup-services/scheduled-updates.js'
+import { redactHomePath } from './setup-services/shell.js'
 import { incurErrorBridge } from './incur-error-bridge.js'
 
 const INITIAL_SETUP_WIZARD_INBOX_CONFIG_SCHEMA = 'murph.inbox-runtime-config.v1'
@@ -306,6 +317,32 @@ export function createSetupCli(options: SetupCliOptions = {}): Cli.Cli {
     description:
       'Provision the local parser/runtime toolchain for macOS or Linux, initialize the vault, and open the interactive onboarding flow when the terminal supports it.',
     run: runSetupCommand,
+  })
+
+  cli.command('use', {
+    args: z.object({
+      vault: z
+        .string()
+        .min(1)
+        .describe('Existing Murph vault path to make active for future `murph` commands.'),
+    }),
+    description:
+      'Set the active Murph vault for future `murph` commands without rerunning onboarding.',
+    examples: [
+      {
+        description: 'Select an existing local vault as the active Murph vault.',
+        args: {
+          vault: './vault',
+        },
+      },
+    ],
+    hint:
+      'Use `murph onboard --vault <path>` when the vault does not exist yet. `murph use` only selects an existing vault.',
+    options: z.object({}),
+    output: setupVaultSelectionResultSchema,
+    async run(context): Promise<SetupVaultSelectionResult> {
+      return await selectActiveMurphVault(context.args.vault)
+    },
   })
 
   return cli
@@ -691,6 +728,57 @@ function registerSetupCommand(
       return await input.run(context)
     },
   })
+}
+
+async function selectActiveMurphVault(
+  candidateVault: string,
+  input?: {
+    cwd?: string
+    homeDirectory?: string
+  },
+): Promise<SetupVaultSelectionResult> {
+  const cwd = input?.cwd ?? process.cwd()
+  const homeDirectory = input?.homeDirectory ?? resolveOperatorHomeDirectory()
+  const absoluteVault = path.resolve(cwd, candidateVault)
+  const vaultMetadataPath = path.join(absoluteVault, 'vault.json')
+
+  try {
+    const metadataStats = await stat(vaultMetadataPath)
+    if (!metadataStats.isFile()) {
+      throw new VaultCliError(
+        'invalid_option',
+        'Murph can only switch to an existing vault. Run `murph onboard --vault <path>` to create one first.',
+      )
+    }
+  } catch (error) {
+    if (isNodeErrorWithCode(error, 'ENOENT')) {
+      throw new VaultCliError(
+        'invalid_option',
+        'Murph can only switch to an existing vault. Run `murph onboard --vault <path>` to create one first.',
+      )
+    }
+
+    throw error
+  }
+
+  const existingConfig = await readOperatorConfig(homeDirectory)
+  const normalizedVault = normalizeVaultForConfig(absoluteVault, homeDirectory)
+  const status =
+    existingConfig?.defaultVault === normalizedVault ? 'reused' : 'completed'
+
+  if (status === 'completed') {
+    await saveDefaultVaultConfig(absoluteVault, homeDirectory)
+  }
+
+  return {
+    configPath: redactHomePath(resolveOperatorConfigPath(homeDirectory), homeDirectory),
+    status,
+    vault: redactHomePath(absoluteVault, homeDirectory),
+  }
+}
+
+function isNodeErrorWithCode(error: unknown, code: string): boolean {
+  return typeof error === 'object' && error !== null && 'code' in error && error.code === code
 }
 
 export { detectSetupProgramName, isSetupInvocation }

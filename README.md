@@ -39,6 +39,8 @@ murph onboard
 
 `@murphai/murph` is the full local Murph package. The repo keeps many internal workspace packages, but the public npm surface is intentionally narrow: `@murphai/murph`, `@murphai/openclaw-plugin`, `@murphai/contracts`, `@murphai/hosted-execution`, and `@murphai/gateway-core`. The remaining owner packages stay workspace-private and are bundled into those public tarballs only when a public package still needs them at runtime.
 
+`murph` is the simple product entrypoint: it operates on one active vault at a time, selected during onboarding or later with `murph use <path>`. The lower-level `vault-cli` binary remains the raw explicit-vault surface for development, automation, and other contract-level consumers.
+
 ## OpenClaw integration
 
 If you already use OpenClaw, install the first-party Murph OpenClaw bundle after onboarding:
@@ -79,6 +81,7 @@ Installed package:
 
 ```bash
 murph onboard
+murph use ./vault
 murph model
 murph chat
 murph run
@@ -172,6 +175,8 @@ The root CLI is no longer just a vault editor. The built command surface include
 
 The `knowledge` surface is intentionally narrow: use it to persist pages, inspect saved pages, lint the wiki, rebuild the index, and tail the append-only wiki log. The assistant's wiki-maintainer workflow itself lives in the runtime prompt plus the dedicated `assistant.knowledge.*` tools, not in repo `AGENTS.md`.
 
+For operator UX, prefer `murph`. It resolves one active vault and no longer expects ad hoc `--vault` switching on normal commands. Use `murph use <path>` to select a different existing vault, or `murph onboard --vault <path>` to create/select one during setup. Use `vault-cli` when you intentionally need the raw explicit-vault contract.
+
 ### Choosing a read command
 
 - Use `vault-cli show <id>` when you already know one exact query-layer record id to inspect.
@@ -194,9 +199,10 @@ pnpm exec tsx packages/cli/src/bin.ts --help
 
 ```bash
 pnpm onboard --vault ./vault
+murph use ./vault
 pnpm chat
 murph run
-murph device daemon start --vault ./vault
+murph device daemon start
 ```
 
 ### Developer flows

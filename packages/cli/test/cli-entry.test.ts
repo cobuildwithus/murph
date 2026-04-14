@@ -31,7 +31,15 @@ function mockCliActionModules(input: {
   vi.doMock("../src/vault-cli.js", () => ({
     createVaultCliWithOptions: vi.fn(() => input.cli),
   }));
-  vi.doMock("@murphai/operator-config/operator-config", () => input.operatorConfigModule);
+  vi.doMock("@murphai/operator-config/operator-config", () => ({
+    commandNeedsVaultForExecution: vi.fn(() => true),
+    hasExplicitVaultOption: vi.fn(() => false),
+    resolveConfiguredDefaultVault: vi.fn(async () => null),
+    resolveEffectiveTopLevelToken: vi.fn(
+      (argv: readonly string[]) => argv.find((token) => !token.startsWith("-")) ?? null,
+    ),
+    ...input.operatorConfigModule,
+  }));
   vi.doMock("@murphai/setup-cli/setup-cli", () => input.setupCliModule);
   vi.doMock("@murphai/operator-config/setup-runtime-env", () => ({
     SETUP_RUNTIME_ENV_NOTICE: "Set the missing wearable environment variables.",
@@ -144,12 +152,19 @@ test("runMurphCliAction injects the resolved default vault for non-setup invocat
       defaultVault === null ? [...argv] : [...argv, "--vault", defaultVault],
   );
   const resolveDefaultVault = vi.fn(async () => "/vaults/default");
+  const resolveConfiguredDefaultVault = vi.fn(async () => null);
 
   mockCliActionModules({
     cli: { serve },
     operatorConfigModule: {
       applyDefaultVaultToArgs,
+      commandNeedsVaultForExecution: vi.fn(() => true),
       expandConfiguredVaultPath: vi.fn(),
+      hasExplicitVaultOption: vi.fn(() => false),
+      resolveConfiguredDefaultVault,
+      resolveEffectiveTopLevelToken: vi.fn(
+        (argv: readonly string[]) => argv.find((token) => !token.startsWith("-")) ?? null,
+      ),
       resolveDefaultVault,
       resolveOperatorHomeDirectory: vi.fn(() => "/operator-home"),
     },
@@ -170,9 +185,128 @@ test("runMurphCliAction injects the resolved default vault for non-setup invocat
     [["assistant", "chat"], "/vaults/default"],
   ]);
   assert.deepEqual(resolveDefaultVault.mock.calls, [["/operator-home"]]);
+  assert.deepEqual(resolveConfiguredDefaultVault.mock.calls, []);
   assert.deepEqual(serve.mock.calls, [
     [
       ["assistant", "chat", "--vault", "/vaults/default"],
+      {
+        env: process.env,
+      },
+    ],
+  ]);
+});
+
+test("runMurphCliAction rejects explicit --vault overrides for murph product commands", async () => {
+  const serve = vi.fn(async () => undefined);
+  const resolveConfiguredDefaultVault = vi.fn(async () => "/vaults/default");
+
+  mockCliActionModules({
+    cli: { serve },
+    operatorConfigModule: {
+      applyDefaultVaultToArgs: vi.fn((argv: readonly string[]) => [...argv]),
+      commandNeedsVaultForExecution: vi.fn(() => true),
+      expandConfiguredVaultPath: vi.fn(),
+      hasExplicitVaultOption: vi.fn(() => true),
+      resolveConfiguredDefaultVault,
+      resolveDefaultVault: vi.fn(async () => "/vaults/default"),
+      resolveEffectiveTopLevelToken: vi.fn(() => "assistant"),
+      resolveOperatorHomeDirectory: vi.fn(() => "/operator-home"),
+    },
+    setupCliModule: {
+      createSetupCli: vi.fn(),
+      detectSetupProgramName: vi.fn(() => "murph"),
+      formatSetupWearableLabel: vi.fn((value: string) => value),
+      isSetupInvocation: vi.fn(() => false),
+      listSetupPendingWearables: vi.fn(() => []),
+      listSetupReadyWearables: vi.fn(() => []),
+      resolveSetupPostLaunchAction: vi.fn(() => null),
+    },
+  });
+
+  await assert.rejects(
+    () => runMurphCliAction(["assistant", "chat", "--vault", "/vaults/other"]),
+    /`murph` uses one active vault/u,
+  );
+  assert.deepEqual(resolveConfiguredDefaultVault.mock.calls, [["/operator-home"]]);
+  assert.equal(serve.mock.calls.length, 0);
+});
+
+test("runMurphCliAction fails with an active-vault message when murph has no configured vault", async () => {
+  const serve = vi.fn(async () => undefined);
+  const resolveConfiguredDefaultVault = vi.fn(async () => null);
+  const resolveDefaultVault = vi.fn(async () => "/vaults/from-env");
+
+  mockCliActionModules({
+    cli: { serve },
+    operatorConfigModule: {
+      applyDefaultVaultToArgs: vi.fn((argv: readonly string[]) => [...argv]),
+      commandNeedsVaultForExecution: vi.fn(() => true),
+      expandConfiguredVaultPath: vi.fn(),
+      hasExplicitVaultOption: vi.fn(() => false),
+      resolveConfiguredDefaultVault,
+      resolveDefaultVault,
+      resolveEffectiveTopLevelToken: vi.fn(() => "workout"),
+      resolveOperatorHomeDirectory: vi.fn(() => "/operator-home"),
+    },
+    setupCliModule: {
+      createSetupCli: vi.fn(),
+      detectSetupProgramName: vi.fn(() => "murph"),
+      formatSetupWearableLabel: vi.fn((value: string) => value),
+      isSetupInvocation: vi.fn(() => false),
+      listSetupPendingWearables: vi.fn(() => []),
+      listSetupReadyWearables: vi.fn(() => []),
+      resolveSetupPostLaunchAction: vi.fn(() => null),
+    },
+  });
+
+  await assert.rejects(
+    () => runMurphCliAction(["workout", "list"]),
+    /No active Murph vault is configured/u,
+  );
+  assert.deepEqual(resolveConfiguredDefaultVault.mock.calls, [["/operator-home"]]);
+  assert.deepEqual(resolveDefaultVault.mock.calls, []);
+  assert.equal(serve.mock.calls.length, 0);
+});
+
+test("runMurphCliAction still allows murph init to target an explicit vault", async () => {
+  const serve = vi.fn(async () => undefined);
+  const applyDefaultVaultToArgs = vi.fn((argv: readonly string[]) => [...argv]);
+  const resolveConfiguredDefaultVault = vi.fn(async () => null);
+  const resolveDefaultVault = vi.fn(async () => "/vaults/from-env");
+
+  mockCliActionModules({
+    cli: { serve },
+    operatorConfigModule: {
+      applyDefaultVaultToArgs,
+      commandNeedsVaultForExecution: vi.fn(() => true),
+      expandConfiguredVaultPath: vi.fn(),
+      hasExplicitVaultOption: vi.fn(() => true),
+      resolveConfiguredDefaultVault,
+      resolveDefaultVault,
+      resolveEffectiveTopLevelToken: vi.fn(() => "init"),
+      resolveOperatorHomeDirectory: vi.fn(() => "/operator-home"),
+    },
+    setupCliModule: {
+      createSetupCli: vi.fn(),
+      detectSetupProgramName: vi.fn(() => "murph"),
+      formatSetupWearableLabel: vi.fn((value: string) => value),
+      isSetupInvocation: vi.fn(() => false),
+      listSetupPendingWearables: vi.fn(() => []),
+      listSetupReadyWearables: vi.fn(() => []),
+      resolveSetupPostLaunchAction: vi.fn(() => null),
+    },
+  });
+
+  await runMurphCliAction(["init", "--vault", "/vaults/new"]);
+
+  assert.deepEqual(resolveConfiguredDefaultVault.mock.calls, []);
+  assert.deepEqual(resolveDefaultVault.mock.calls, [["/operator-home"]]);
+  assert.deepEqual(applyDefaultVaultToArgs.mock.calls, [
+    [["init", "--vault", "/vaults/new"], "/vaults/from-env"],
+  ]);
+  assert.deepEqual(serve.mock.calls, [
+    [
+      ["init", "--vault", "/vaults/new"],
       {
         env: process.env,
       },
@@ -208,6 +342,7 @@ test("runMurphCliEntrypoint installs env loading and sqlite warning filtering be
         "/vaults/default",
       ]),
       expandConfiguredVaultPath: vi.fn(),
+      resolveConfiguredDefaultVault: vi.fn(async () => null),
       resolveDefaultVault: vi.fn(async () => "/vaults/default"),
       resolveOperatorHomeDirectory: vi.fn(() => "/operator-home"),
     },

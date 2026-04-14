@@ -3510,11 +3510,12 @@ test.sequential('setup service redacts nested bootstrap toolchain paths under th
   }
 })
 
-test('setup routing helpers only recognize onboard as the root onboarding command', () => {
+test('setup routing helpers recognize murph onboarding and active-vault selection commands', () => {
   assert.equal(isSetupInvocation(['setup', '--dryRun']), false)
   assert.equal(isSetupInvocation(['inbox', 'doctor']), false)
   assert.equal(isSetupInvocation([], 'murph'), true)
   assert.equal(isSetupInvocation(['--help'], 'murph'), true)
+  assert.equal(isSetupInvocation(['use', './vault'], 'murph'), true)
   assert.equal(isSetupInvocation(['--verbose', '--format', 'json'], 'murph'), true)
   assert.equal(
     isSetupInvocation(['--format', 'json', 'setup', '--dry-run'], 'murph'),
@@ -3559,9 +3560,10 @@ test('setup routing helpers only recognize onboard as the root onboarding comman
 })
 
 test.sequential('murph alias routes empty and help invocations to onboarding help', async () => {
-  const [help, onboardHelp, emptyInvocation, inboxHelp] = await Promise.all([
+  const [help, onboardHelp, useHelp, emptyInvocation, inboxHelp] = await Promise.all([
     runSetupAliasRaw('murph', ['--help']),
     runSetupAliasRaw('murph', ['onboard', '--help']),
+    runSetupAliasRaw('murph', ['use', '--help']),
     runSetupAliasRaw('murph', []),
     runSetupAliasRaw('murph', ['inbox', 'doctor', '--help']),
   ])
@@ -3576,13 +3578,63 @@ test.sequential('murph alias routes empty and help invocations to onboarding hel
     onboardHelp,
     /onboard\s+[-—]\s+Provision the local parser\/runtime toolchain for macOS or Linux/u,
   )
+  assert.match(
+    help,
+    /use\s+Set the active Murph vault for future `murph` commands/u,
+  )
+  assert.match(
+    useHelp,
+    /murph use\s+[-—]\s+Set the active Murph vault for future `murph` commands/u,
+  )
   assert.doesNotMatch(help, /search\s+Search commands for the local read model/u)
   assert.match(emptyInvocation, /Murph local machine onboarding helpers\./u)
   assert.doesNotMatch(inboxHelp, /Murph local machine onboarding helpers\./u)
   assert.match(inboxHelp, /murph inbox doctor/u)
 }, SETUP_ALIAS_TIMEOUT_MS)
 
-test.sequential('murph loads VAULT from a local .env file', async () => {
+test.sequential('murph use saves an existing vault as the active default vault', async () => {
+  const homeRoot = await mkdtemp(path.join(tmpdir(), 'murph-use-home-'))
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-use-vault-'))
+
+  try {
+    await writeFile(path.join(vaultRoot, 'vault.json'), '{}\n', 'utf8')
+
+    const output = await runSetupAliasRaw('murph', ['use', vaultRoot, '--format', 'json'], {
+      env: {
+        HOME: homeRoot,
+      },
+    })
+
+    const result = JSON.parse(output) as {
+      configPath: string
+      status: string
+      vault: string
+    }
+    assert.equal(result.status, 'completed')
+
+    const savedConfig = await readOperatorConfig(homeRoot)
+    assert.equal(savedConfig?.defaultVault, vaultRoot)
+
+    const secondOutput = await runSetupAliasRaw(
+      'murph',
+      ['use', vaultRoot, '--format', 'json'],
+      {
+        env: {
+          HOME: homeRoot,
+        },
+      },
+    )
+    const secondResult = JSON.parse(secondOutput) as {
+      status: string
+    }
+    assert.equal(secondResult.status, 'reused')
+  } finally {
+    await rm(homeRoot, { recursive: true, force: true })
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+}, SETUP_ALIAS_TIMEOUT_MS)
+
+test.sequential('murph init loads VAULT from a local .env file during setup bootstrap', async () => {
   const originalVault = process.env.VAULT
   const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-dotenv-vault-'))
   const homeRoot = await mkdtemp(path.join(tmpdir(), 'murph-dotenv-home-'))
@@ -3613,7 +3665,7 @@ test.sequential('murph loads VAULT from a local .env file', async () => {
   }
 })
 
-test.sequential('murph keeps exported VAULT values ahead of local .env files', async () => {
+test.sequential('murph init keeps exported VAULT values ahead of local .env files during setup bootstrap', async () => {
   const originalVault = process.env.VAULT
   const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-dotenv-precedence-'))
   const homeRoot = await mkdtemp(path.join(tmpdir(), 'murph-dotenv-precedence-home-'))
