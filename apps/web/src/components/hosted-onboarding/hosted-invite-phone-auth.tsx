@@ -144,6 +144,7 @@ export function HostedInvitePhoneAuth({
           phoneFieldDescription="Enter the number that messaged Murph."
           phoneFieldLabel="Phone number"
           secondaryActionSize="sm"
+          showPassiveConsentNotice={false}
           onResendCode={handleResendCode}
           onUseDifferentNumber={handleUseDifferentNumber}
         />

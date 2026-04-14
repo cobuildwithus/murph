@@ -9,40 +9,11 @@ import {
 import { useState } from "react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Button } from "@/components/ui/button";
-import { requestHostedBillingCheckout } from "@/src/components/hosted-onboarding/client-api";
-import { requestHostedPrivyCompletionWithRetry } from "@/src/components/hosted-onboarding/hosted-phone-auth-support";
-import { ensureHostedPrivyWalletReady } from "@/src/lib/hosted-onboarding/privy-client";
+import { toErrorMessage } from "@/src/components/settings/hosted-settings-utils";
 
+import { HomepageInlineAuthButton } from "./homepage-inline-auth-button";
+import { completeHomepagePrivyAuth } from "./homepage-privy-auth";
 import { TelegramIcon } from "./telegram-icon";
-
-function toErrorMessage(error: unknown): string {
-  return error instanceof Error && error.message
-    ? error.message
-    : "Could not continue with Telegram right now.";
-}
-
-async function resolveHomepageTelegramRedirectUrl(input: {
-  payload: Awaited<ReturnType<typeof requestHostedPrivyCompletionWithRetry>>;
-}): Promise<string> {
-  if (input.payload.stage === "checkout") {
-    const checkout = await requestHostedBillingCheckout({
-      inviteCode: input.payload.inviteCode,
-    });
-
-    if (checkout.alreadyActive) {
-      return "/settings";
-    }
-
-    if (!checkout.url) {
-      throw new Error("Checkout did not return a redirect URL.");
-    }
-
-    return checkout.url;
-  }
-
-  return input.payload.stage === "active" ? "/settings" : input.payload.joinUrl;
-}
 
 export function HomepageTelegramAuthButton() {
   const { createWallet } = useCreateWallet();
@@ -60,41 +31,37 @@ export function HomepageTelegramAuthButton() {
 
     try {
       await login();
-
-      const refreshedUser = await refreshUser().catch(() => null);
-      await ensureHostedPrivyWalletReady({
+      const redirectUrl = await completeHomepagePrivyAuth({
         createWallet,
-        user: refreshedUser ?? user,
+        refreshUser,
+        user,
       });
-
-      const payload = await requestHostedPrivyCompletionWithRetry();
-      const redirectUrl = await resolveHomepageTelegramRedirectUrl({ payload });
       window.location.assign(redirectUrl);
     } catch (error) {
-      setErrorMessage(toErrorMessage(error));
+      setErrorMessage(
+        toErrorMessage(error, "Could not continue with Telegram right now."),
+      );
       setRedirectPending(false);
     }
   }
 
   return (
-    <div className="space-y-3">
-      <Button
-        type="button"
-        size="lg"
+    <>
+      <HomepageInlineAuthButton
         disabled={!ready || loading}
-        className="w-full justify-center gap-3 bg-[#229ED9] font-semibold text-white hover:bg-[#1d8dc4]"
+        className="order-1 border-[#229ED9] bg-[#229ED9] text-white hover:bg-[#1d8dc4] hover:text-white"
+        icon={<TelegramIcon className="h-5 w-5" />}
         onClick={handleClick}
       >
-        <TelegramIcon className="h-5 w-5" />
-        {loading ? "Connecting Telegram..." : "Continue with Telegram"}
-      </Button>
+        {loading ? "Connecting..." : "Telegram"}
+      </HomepageInlineAuthButton>
 
       {errorMessage ? (
-        <Alert variant="destructive">
+        <Alert variant="destructive" className="order-3 sm:col-span-2">
           <AlertTitle>Unable to continue</AlertTitle>
           <AlertDescription>{errorMessage}</AlertDescription>
         </Alert>
       ) : null}
-    </div>
+    </>
   );
 }

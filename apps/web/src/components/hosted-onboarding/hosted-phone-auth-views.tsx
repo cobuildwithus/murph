@@ -31,6 +31,7 @@ interface SharedFlowProps {
   sendCodeDisabled: boolean;
   secondaryActionSize: "sm" | "lg";
   selectedPhoneCountry: HostedPhoneCountryOption;
+  showPassiveConsentNotice?: boolean;
   onCodeChange: (value: string) => void;
   onPhoneCountryChange: (code: string) => void;
   onPhoneNumberChange: (value: string) => void;
@@ -129,6 +130,7 @@ export function HostedPhoneAuthFlow(props: SharedFlowProps) {
       phoneNumber={props.phoneNumber}
       sendCodeDisabled={props.sendCodeDisabled}
       selectedPhoneCountry={props.selectedPhoneCountry}
+      showPassiveConsentNotice={props.showPassiveConsentNotice}
       onPhoneCountryChange={props.onPhoneCountryChange}
       onPhoneNumberChange={props.onPhoneNumberChange}
       onSubmitPhoneEntry={props.onSubmitPhoneEntry}
