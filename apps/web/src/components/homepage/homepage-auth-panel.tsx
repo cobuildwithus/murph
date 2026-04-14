@@ -4,6 +4,8 @@ import { HostedPhoneAuth } from "@/src/components/hosted-onboarding/hosted-phone
 import { HomepageTelegramAuthButton } from "./homepage-telegram-auth-button";
 
 const SETTINGS_HREF = "/settings";
+const TERMS_HREF = "/legal/terms.pdf";
+const PRIVACY_HREF = "/legal/privacy.pdf";
 
 export function HomepageAuthPanel({
   authenticated,
@@ -41,7 +43,7 @@ export function HomepageAuthPanel({
         id="signup-title"
         className="text-2xl font-bold tracking-tight md:text-3xl"
       >
-        Sign up with your phone or Telegram.
+        Signup
       </h2>
 
       <div className="mt-5 rounded bg-white p-4 text-stone-900">
@@ -58,6 +60,27 @@ export function HomepageAuthPanel({
       <div className="mt-4">
         <HostedExistingAccountSignInDialog />
       </div>
+      <p className="mt-4 text-xs leading-relaxed text-white/70">
+        By signing up, you agree to our{" "}
+        <a
+          href={TERMS_HREF}
+          target="_blank"
+          rel="noreferrer"
+          className="font-medium text-white underline decoration-white/40 underline-offset-2 transition-colors hover:text-cream"
+        >
+          Terms
+        </a>{" "}
+        and{" "}
+        <a
+          href={PRIVACY_HREF}
+          target="_blank"
+          rel="noreferrer"
+          className="font-medium text-white underline decoration-white/40 underline-offset-2 transition-colors hover:text-cream"
+        >
+          Privacy Policy
+        </a>
+        .
+      </p>
     </section>
   );
 }
