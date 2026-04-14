@@ -501,10 +501,17 @@ test("upsertEvent appends revisions across shards and deleteEvent appends a tomb
   assert.equal(updatedEvent.lifecycle?.revision, 2);
   assert.equal(updatedEvent.note, "Updated note.");
 
-  const deleted = await deleteEvent({
-    vaultRoot,
-    eventId,
-  });
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-04-02T08:00:00.000Z"));
+  let deleted;
+  try {
+    deleted = await deleteEvent({
+      vaultRoot,
+      eventId,
+    });
+  } finally {
+    vi.useRealTimers();
+  }
   assert.equal(deleted.eventId, eventId);
   assert.equal(deleted.kind, "note");
   assert.deepEqual(deleted.retainedPaths, []);
@@ -523,6 +530,49 @@ test("upsertEvent appends revisions across shards and deleteEvent appends a tomb
   assert.ok(tombstoneEvent);
   assert.equal(tombstoneEvent.lifecycle?.revision, 3);
   assert.equal(tombstoneEvent.note, "Updated note.");
+
+  const marchAuditRecords = await readJsonlRecords({
+    vaultRoot,
+    relativePath: toMonthlyShardRelativePath("audit", "2026-03-12T08:15:00.000Z", "occurredAt"),
+  });
+  const aprilAuditRecords = await readJsonlRecords({
+    vaultRoot,
+    relativePath: toMonthlyShardRelativePath("audit", "2026-04-02T07:00:00.000Z", "occurredAt"),
+  });
+  const marchUpsertAudit = marchAuditRecords.find(
+    (record) =>
+      (record as { action?: string }).action === "event_upsert" &&
+      Array.isArray((record as { targetIds?: unknown }).targetIds) &&
+      (record as { targetIds: string[] }).targetIds.includes(eventId),
+  ) as AuditRecord | undefined;
+  const aprilUpsertAudit = aprilAuditRecords.find(
+    (record) =>
+      (record as { action?: string }).action === "event_upsert" &&
+      Array.isArray((record as { targetIds?: unknown }).targetIds) &&
+      (record as { targetIds: string[] }).targetIds.includes(eventId),
+  ) as AuditRecord | undefined;
+  const aprilDeleteAudit = aprilAuditRecords.find(
+    (record) =>
+      (record as { action?: string }).action === "event_delete" &&
+      Array.isArray((record as { targetIds?: unknown }).targetIds) &&
+      (record as { targetIds: string[] }).targetIds.includes(eventId),
+  ) as AuditRecord | undefined;
+
+  assert.equal(marchUpsertAudit?.commandName, "core.upsertEvent");
+  assert.equal(aprilUpsertAudit?.commandName, "core.upsertEvent");
+  assert.equal(aprilDeleteAudit?.commandName, "core.deleteEvent");
+  assert.deepEqual(
+    marchUpsertAudit?.changes.map((change) => change.path),
+    [marchResult.ledgerFile],
+  );
+  assert.deepEqual(
+    aprilUpsertAudit?.changes.map((change) => change.path),
+    [aprilResult.ledgerFile],
+  );
+  assert.deepEqual(
+    aprilDeleteAudit?.changes.map((change) => change.path),
+    [aprilResult.ledgerFile],
+  );
 });
 
 test("deleteEvent leaves historical rows in place and the same event id can be revived later", async () => {

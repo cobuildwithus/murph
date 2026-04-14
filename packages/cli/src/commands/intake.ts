@@ -2,6 +2,7 @@ import { rawImportManifestSchema } from '@murphai/contracts'
 import { Cli, z } from 'incur'
 import { requestIdFromOptions, withBaseOptions } from '@murphai/operator-config/command-helpers'
 import {
+  occurredAtOptionSchema,
   isoTimestampSchema,
   listResultSchema,
   localDateSchema,
@@ -14,6 +15,7 @@ import {
   showAssessmentManifest,
   showAssessmentRaw,
 } from './export-intake-read-helpers.js'
+import { normalizeOccurredAtOption } from './occurred-at-option.js'
 
 const payloadSchema = z.record(z.string(), z.unknown())
 const intakeSourceSchema = z.enum(['import', 'manual', 'derived'])
@@ -82,9 +84,9 @@ export function registerIntakeCommands(cli: Cli.Cli, services: VaultServices) {
           .min(1)
           .optional()
           .describe('Optional assessment title stored on the imported record.'),
-        occurredAt: isoTimestampSchema
+        occurredAt: occurredAtOptionSchema
           .optional()
-          .describe('Optional occurrence timestamp in ISO 8601 form.'),
+          .describe('Optional occurrence timestamp in ISO 8601 form or YYYY-MM-DD form.'),
         importedAt: isoTimestampSchema
           .optional()
           .describe('Optional import timestamp in ISO 8601 form.'),
@@ -99,7 +101,10 @@ export function registerIntakeCommands(cli: Cli.Cli, services: VaultServices) {
           filePath: args.file,
           vaultRoot: options.vault,
           title: options.title,
-          occurredAt: options.occurredAt,
+          occurredAt: await normalizeOccurredAtOption({
+            vault: options.vault,
+            occurredAt: options.occurredAt,
+          }),
           importedAt: options.importedAt,
           source: options.source,
           requestId: requestIdFromOptions(options),

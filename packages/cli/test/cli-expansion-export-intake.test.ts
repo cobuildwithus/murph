@@ -122,7 +122,7 @@ test.sequential(
     const assessmentPath = path.join(vaultRoot, 'assessment.json')
 
     try {
-      await initializeVault({ vaultRoot })
+      await initializeVault({ vaultRoot, timezone: 'America/Los_Angeles' })
       await writeFile(
         assessmentPath,
         JSON.stringify({
@@ -139,6 +139,7 @@ test.sequential(
 
       const imported = await runSliceCli<{
         assessmentId: string
+        ledgerFile?: string
         manifestFile: string
         rawFile: string
       }>([
@@ -150,7 +151,7 @@ test.sequential(
         '--title',
         'Baseline Intake',
         '--occurred-at',
-        '2026-03-11T08:15:00Z',
+        '2026-03-11',
         '--imported-at',
         '2026-03-12T09:45:00Z',
         '--source',

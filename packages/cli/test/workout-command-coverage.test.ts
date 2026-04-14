@@ -68,6 +68,8 @@ test('workout measurement capture and unit preferences round-trip through the re
     'init',
     '--vault',
     vaultRoot,
+    '--timezone',
+    'America/Los_Angeles',
   ])
   assert.equal(requireData(initResult.envelope).created, true)
 
@@ -141,6 +143,7 @@ test('workout measurement capture and unit preferences round-trip through the re
         eventId: string
         kind: string
         manifestFile: string | null
+        occurredAt: string
         measurements: Array<{
           type: string
           unit: string
@@ -168,11 +171,12 @@ test('workout measurement capture and unit preferences round-trip through the re
         '--media',
         sampleDocumentPath,
         '--occurred-at',
-        '2026-03-12T07:30:00.000Z',
+        '2026-03-12',
       ])
     ).envelope,
   )
   assert.equal(measurement.kind, 'body_measurement')
+  assert.equal(measurement.occurredAt, '2026-03-12T19:00:00.000Z')
   assert.match(
     measurement.manifestFile ?? '',
     /^raw\/measurements\/2026\/03\/evt[_A-Z0-9]+\/manifest\.json$/u,
@@ -364,6 +368,8 @@ test('workout import inspect and raw-only csv import expose the raw batch surfac
     'init',
     '--vault',
     vaultRoot,
+    '--timezone',
+    'America/Los_Angeles',
   ])
   assert.equal(requireData(initResult.envelope).created, true)
 
@@ -440,6 +446,8 @@ test('workout format save rejects missing name or text when --input is absent', 
     'init',
     '--vault',
     vaultRoot,
+    '--timezone',
+    'America/Los_Angeles',
   ])
   assert.equal(requireData(initResult.envelope).created, true)
 
@@ -489,6 +497,8 @@ test('workout add, show, list, edit, delete, and manifest cover the workout sess
     'init',
     '--vault',
     vaultRoot,
+    '--timezone',
+    'America/Los_Angeles',
   ])
   assert.equal(requireData(initResult.envelope).created, true)
 
@@ -500,6 +510,7 @@ test('workout add, show, list, edit, delete, and manifest cover the workout sess
         kind: string
         lookupId: string
         note: string
+        occurredAt: string
       }>(cli, [
         'workout',
         'add',
@@ -513,7 +524,7 @@ test('workout add, show, list, edit, delete, and manifest cover the workout sess
         '--media',
         sampleDocumentPath,
         '--occurred-at',
-        '2026-03-12T17:30:00Z',
+        '2026-03-12',
         '--source',
         'manual',
         '--vault',
@@ -523,6 +534,7 @@ test('workout add, show, list, edit, delete, and manifest cover the workout sess
   )
   assert.equal(created.kind, 'activity_session')
   assert.equal(created.durationMinutes, 45)
+  assert.equal(created.occurredAt, '2026-03-12T19:00:00.000Z')
   const workoutId = created.eventId ?? created.lookupId
   if (typeof workoutId !== 'string') {
     throw new Error('Expected workout add to return a canonical workout id.')
@@ -745,6 +757,8 @@ test('workout format save, show, list, and log handle structured input and media
     'init',
     '--vault',
     vaultRoot,
+    '--timezone',
+    'America/Los_Angeles',
   ])
   assert.equal(requireData(initResult.envelope).created, true)
 
@@ -903,6 +917,7 @@ test('workout format save, show, list, and log handle structured input and media
         durationMinutes: number
         kind: string
         note: string | null
+        occurredAt: string
         workout: Record<string, unknown> | null
       }>(cli, [
         'workout',
@@ -920,7 +935,7 @@ test('workout format save, show, list, and log handle structured input and media
         '--media',
         sampleDocumentPath,
         '--occurred-at',
-        '2026-03-12T17:30:00Z',
+        '2026-03-12',
         '--vault',
         vaultRoot,
       ])
@@ -929,6 +944,7 @@ test('workout format save, show, list, and log handle structured input and media
   assert.equal(logged.kind, 'activity_session')
   assert.equal(logged.activityType, 'strength-training')
   assert.equal(logged.durationMinutes, 25)
+  assert.equal(logged.occurredAt, '2026-03-12T19:00:00.000Z')
   assert.equal(logged.note, 'Strength training block.')
   assert.equal(logged.workout === null, false)
 
