@@ -17,8 +17,21 @@ const serverReadyPollIntervalMs = 250;
 const childShutdownTimeoutMs = 5_000;
 const staleLockWaitTimeoutMs = 15_000;
 const staleLockWaitPollIntervalMs = 250;
+const hostedWebSmokeLocalEnvEnvVarName = "MURPH_HOSTED_WEB_SMOKE_USE_LOCAL_ENV";
 
 type HostedWebSmokeChildProcess = ChildProcessByStdio<null, Readable, Readable>;
+type HostedWebSmokeDevCommand = "dev" | "dev:local-env";
+
+export function resolveHostedWebSmokeDevCommand(
+  environment: NodeJS.ProcessEnv = process.env,
+): HostedWebSmokeDevCommand {
+  if (environment[hostedWebSmokeLocalEnvEnvVarName] === "1") {
+    return "dev:local-env";
+  }
+
+  const ci = environment.CI?.trim().toLowerCase();
+  return ci === "1" || ci === "true" ? "dev:local-env" : "dev";
+}
 
 async function main(): Promise<void> {
   const scriptDir = path.dirname(fileURLToPath(import.meta.url));
@@ -27,6 +40,7 @@ async function main(): Promise<void> {
   const distDir = path.join(packageDir, HOSTED_WEB_SMOKE_DIST_DIR);
   const nextLockPath = resolveHostedWebSmokeLockPath(distDir);
   const port = await reserveTcpPort();
+  const smokeDevCommand = resolveHostedWebSmokeDevCommand(process.env);
   await clearStaleHostedWebSmokeLocks(nextLockPath);
   await pruneTurbopackCache(distDir);
   const child = spawn(
@@ -34,7 +48,7 @@ async function main(): Promise<void> {
     [
       "--dir",
       packageDir,
-      "dev",
+      smokeDevCommand,
       "--hostname",
       "127.0.0.1",
       "--port",
