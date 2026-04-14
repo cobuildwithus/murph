@@ -110,6 +110,26 @@ function expectRecord<T>(value: unknown): T {
   return value as T;
 }
 
+function asAuditLikeRecord(value: unknown): {
+  action?: string;
+  commandName?: string;
+  targetIds?: string[];
+  changes?: Array<{
+    path?: string;
+    op?: string;
+  }>;
+} {
+  return (typeof value === "object" && value !== null ? value : {}) as {
+    action?: string;
+    commandName?: string;
+    targetIds?: string[];
+    changes?: Array<{
+      path?: string;
+      op?: string;
+    }>;
+  };
+}
+
 function readFileMode(stats: { mode: number }): number {
   return stats.mode & 0o777;
 }
@@ -858,6 +878,10 @@ test("public raw, jsonl, and batchless audit writes persist canonical operation 
       readStoredWriteOperation(vaultRoot, relativePath),
     ),
   );
+  const genericAuditRecords = await readJsonlRecords({
+    vaultRoot,
+    relativePath: "audit/2026/2026-04.jsonl",
+  });
 
   assert.ok(operations.some((operation) => operation.operationType === "raw_copy"));
   assert.ok(
@@ -867,6 +891,25 @@ test("public raw, jsonl, and batchless audit writes persist canonical operation 
         && operation.actions.some(
           (action) => action.kind === "jsonl_append" && action.targetRelativePath === "audit/2026/2026-03.jsonl",
         ),
+    ),
+  );
+  assert.ok(
+    genericAuditRecords.some(
+      (record) =>
+        record.action === "raw_copy" &&
+        record.commandName === "core.copyRawArtifact",
+    ),
+  );
+  assert.ok(
+    genericAuditRecords.some(
+      (record) => {
+        const audit = asAuditLikeRecord(record);
+        return (
+          audit.action === "jsonl_append" &&
+          audit.commandName === "core.appendJsonlRecord" &&
+          audit.changes?.[0]?.path === "audit/2026/2026-03.jsonl"
+        );
+      },
     ),
   );
   assert.ok(
@@ -2465,6 +2508,11 @@ test("committed raw-copy actions omit payload blobs while replayable text and js
     vaultRoot,
     operationType: "test_payload_metadata_shapes",
     summary: "verify committed payload metadata by action kind",
+    audit: {
+      action: "show",
+      commandName: "test.payloadMetadataShapes",
+      summary: "Verified committed payload metadata by action kind.",
+    },
     rawCopies: [
       {
         sourcePath,
@@ -2500,7 +2548,7 @@ test("committed raw-copy actions omit payload blobs while replayable text and js
 
   assert.ok(operation);
   assert.equal(operation.status, "committed");
-  assert.equal(operation.actions.length, 3);
+  assert.equal(operation.actions.length, 4);
   assert.equal(operation.actions[0]?.kind, "raw_copy");
   assert.equal("committedPayloadReceipt" in (operation.actions[0] ?? {}), false);
   assert.equal(operation.actions[1]?.kind, "text_write");
@@ -2512,6 +2560,9 @@ test("committed raw-copy actions omit payload blobs while replayable text and js
   assert.ok(operation.actions[2]?.committedPayloadReceipt);
   assert.equal(typeof operation.actions[2]?.committedPayloadReceipt?.sha256, "string");
   assert.equal(typeof operation.actions[2]?.committedPayloadReceipt?.byteLength, "number");
+  assert.equal(operation.actions[3]?.kind, "jsonl_append");
+  assert.match(operation.actions[3]?.targetRelativePath ?? "", /^audit\/\d{4}\/\d{4}-\d{2}\.jsonl$/u);
+  assert.ok(operation.actions[3]?.committedPayloadReceipt);
 });
 
 test("applyCanonicalWriteBatch rejects empty staged actions with CANONICAL_WRITE_EMPTY", async () => {
@@ -2524,6 +2575,11 @@ test("applyCanonicalWriteBatch rejects empty staged actions with CANONICAL_WRITE
         vaultRoot,
         operationType: "test_empty_batch",
         summary: "reject empty staged actions",
+        audit: {
+          action: "show",
+          commandName: "test.rejectEmptyBatch",
+          summary: "Rejected empty staged actions.",
+        },
       }),
     (error: unknown) =>
       error instanceof VaultError && error.code === "CANONICAL_WRITE_EMPTY",
@@ -3113,6 +3169,11 @@ test("applyCanonicalWriteBatch rolls back vault summary writes when a later text
           operationType: "vault_summary_update",
           summary: "Rollback summary update",
           occurredAt: updatedAt,
+          audit: {
+            action: "vault_summary_update",
+            commandName: "test.rollbackVaultSummaryUpdate",
+            summary: "Rolled back vault summary update.",
+          },
           textWrites: [
             {
               relativePath: "vault.json",
@@ -3190,6 +3251,11 @@ test("applyCanonicalWriteBatch rolls back experiment markdown when the lifecycle
           operationType: "experiment_lifecycle_event",
           summary: "Rollback lifecycle append",
           occurredAt,
+          audit: {
+            action: "experiment_lifecycle",
+            commandName: "test.rollbackExperimentLifecycle",
+            summary: "Rolled back experiment lifecycle append.",
+          },
           textWrites: [
             {
               relativePath: experimentRelativePath,
@@ -3271,6 +3337,11 @@ test("applyCanonicalWriteBatch rolls back provider slug renames when deleting th
           operationType: "provider_upsert",
           summary: "Rollback provider rename",
           occurredAt: "2026-03-16T16:00:00.000Z",
+          audit: {
+            action: "provider_upsert",
+            commandName: "test.rollbackProviderRename",
+            summary: "Rolled back provider rename.",
+          },
           textWrites: [
             {
               relativePath: betaRelativePath,
@@ -4024,6 +4095,92 @@ test("high-level canonical mutation ports own experiment and journal mutation se
     journalDocument.body,
     /Evening note from the canonical journal append port\./u,
   );
+  const marchAuditRecords = await readJsonlRecords({
+    vaultRoot,
+    relativePath: "audit/2026/2026-03.jsonl",
+  });
+  const currentAuditRecords = await readJsonlRecords({
+    vaultRoot,
+    relativePath: toMonthlyShardRelativePath("audit", new Date()),
+  });
+  assert.ok(
+    currentAuditRecords.some(
+      (record) =>
+        record.action === "experiment_update" &&
+        record.commandName === "core.updateExperiment",
+    ),
+  );
+  assert.ok(
+    marchAuditRecords.some(
+      (record) => {
+        const audit = asAuditLikeRecord(record);
+        return (
+          audit.action === "experiment_lifecycle" &&
+          audit.commandName === "core.checkpointExperiment" &&
+          Array.isArray(audit.targetIds) &&
+          audit.targetIds.includes(checkpoint.eventId)
+        );
+      },
+    ),
+  );
+  assert.ok(
+    marchAuditRecords.some(
+      (record) => {
+        const audit = asAuditLikeRecord(record);
+        return (
+          audit.action === "experiment_lifecycle" &&
+          audit.commandName === "core.stopExperiment" &&
+          Array.isArray(audit.targetIds) &&
+          audit.targetIds.includes(stopped.eventId)
+        );
+      },
+    ),
+  );
+  assert.ok(
+    marchAuditRecords.some(
+      (record) => {
+        const audit = asAuditLikeRecord(record);
+        return (
+          audit.action === "journal_append" &&
+          audit.commandName === "core.appendJournal" &&
+          audit.changes?.[0]?.path === appended.relativePath
+        );
+      },
+    ),
+  );
+  assert.ok(
+    marchAuditRecords.some(
+      (record) => {
+        const audit = asAuditLikeRecord(record);
+        return (
+          audit.action === "journal_link" &&
+          audit.commandName === "core.linkJournalEventIds" &&
+          audit.changes?.[0]?.path === appended.relativePath
+        );
+      },
+    ),
+  );
+  assert.ok(
+    marchAuditRecords.some(
+      (record) =>
+        record.action === "journal_link" &&
+        record.commandName === "core.linkJournalStreams",
+    ),
+  );
+  assert.ok(
+    marchAuditRecords.some(
+      (record) =>
+        record.action === "journal_unlink" &&
+        record.commandName === "core.unlinkJournalEventIds",
+    ),
+  );
+  assert.ok(
+    marchAuditRecords.some(
+      (record) =>
+        record.action === "journal_unlink" &&
+        record.commandName === "core.unlinkJournalStreams",
+    ),
+  );
 });
 
 test("high-level canonical mutation ports own provider, event, and vault summary semantics", async () => {
@@ -4052,6 +4209,23 @@ test("high-level canonical mutation ports own provider, event, and vault summary
   assert.equal(coreDocument.attributes.title, "Health Ops Vault");
   assert.equal(coreDocument.attributes.timezone, "America/Los_Angeles");
   assert.match(coreDocument.body, /^# Health Ops Vault/mu);
+  const summaryAuditRecords = await readJsonlRecords({
+    vaultRoot,
+    relativePath: "audit/2026/2026-04.jsonl",
+  });
+  assert.ok(
+    summaryAuditRecords.some(
+      (record) => {
+        const audit = asAuditLikeRecord(record);
+        return (
+          audit.action === "vault_summary_update" &&
+          audit.commandName === "core.updateVaultSummary" &&
+          audit.changes?.some((change) => change.path === "vault.json") === true &&
+          audit.changes?.some((change) => change.path === "CORE.md") === true
+        );
+      },
+    ),
+  );
 
   const createdProvider = await upsertProvider({
     vaultRoot,
@@ -4170,6 +4344,36 @@ test("high-level canonical mutation ports own inbox journal and experiment-note 
   assert.equal(secondJournalPromotion.linked, false);
   assert.equal(firstExperimentPromotion.appended, true);
   assert.equal(secondExperimentPromotion.appended, false);
+  const auditRecords = await readJsonlRecords({
+    vaultRoot,
+    relativePath: toMonthlyShardRelativePath("audit", new Date()),
+  });
+  assert.ok(
+    auditRecords.some(
+      (record) => {
+        const audit = asAuditLikeRecord(record);
+        return (
+          audit.action === "inbox_promote_journal" &&
+          audit.commandName === "core.promoteInboxJournal" &&
+          Array.isArray(audit.targetIds) &&
+          audit.targetIds.includes(capture.captureId)
+        );
+      },
+    ),
+  );
+  assert.ok(
+    auditRecords.some(
+      (record) => {
+        const audit = asAuditLikeRecord(record);
+        return (
+          audit.action === "inbox_promote_experiment_note" &&
+          audit.commandName === "core.promoteInboxExperimentNote" &&
+          Array.isArray(audit.targetIds) &&
+          audit.targetIds.includes(capture.captureId)
+        );
+      },
+    ),
+  );
 
   const journalMarkdown = await fs.readFile(
     path.join(vaultRoot, firstJournalPromotion.journalPath),

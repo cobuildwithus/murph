@@ -25,10 +25,10 @@ import {
 } from "./markdown-documents.ts";
 import {
   canonicalPathResource,
-  runCanonicalWrite,
   withCanonicalResourceLocks,
 } from "./operations/index.ts";
 import { resolveVaultPath } from "./path-safety.ts";
+import { commitAuditedCanonicalWrite } from "./audited-write.ts";
 
 export type {
   ForgetMemoryRecordInput,
@@ -110,11 +110,17 @@ export async function updateMemory(
   record: MemoryRecord;
 }> {
   return await withLockedMemoryDocument(vaultRoot, async () => {
-    const result = await runCanonicalWrite({
+    const result = await commitAuditedCanonicalWrite({
       vaultRoot,
       operationType: "memory_update",
       summary: `Update memory record ${input.recordId}`,
       occurredAt: input.now,
+      audit: {
+        action: "memory_upsert",
+        commandName: "core.updateMemory",
+        summary: `Updated memory record ${input.recordId}.`,
+        targetIds: [input.recordId],
+      },
       mutate: async ({ batch, vaultRoot: lockedVaultRoot }) => {
         const snapshot = await readMemoryDocument(lockedVaultRoot);
         const existing = snapshot.records.find((record) => record.id === input.recordId) ?? null;
@@ -138,11 +144,21 @@ export async function updateMemory(
         );
 
         return {
-          recordId: next.record.id,
+          result: {
+            recordId: next.record.id,
+          },
+          files: [memoryDocumentRelativePath],
+          changes: [
+            {
+              path: memoryDocumentRelativePath,
+              op: snapshot.exists ? "update" : "create",
+            },
+          ],
+          targetIds: [next.record.id],
         };
       },
     });
-    const persisted = await readPersistedMemoryRecord(vaultRoot, result.recordId, "update");
+    const persisted = await readPersistedMemoryRecord(vaultRoot, result.result.recordId, "update");
 
     return {
       document: persisted.document,
@@ -180,6 +196,12 @@ export async function forgetMemory(
         created: !snapshot.exists,
       }),
       markdown,
+      audit: {
+        action: "memory_forget",
+        commandName: "core.forgetMemory",
+        summary: `Forgot memory record ${next.record.id}.`,
+        targetIds: [next.record.id],
+      },
     });
     const nextSnapshot = await readMemoryDocument(vaultRoot);
 
@@ -245,6 +267,12 @@ async function persistUpsertMemory(
       created: !snapshot.exists,
     }),
     markdown: renderMemoryDocument({ document: next.document }),
+    audit: {
+      action: "memory_upsert",
+      commandName: "core.upsertMemory",
+      summary: `Upserted memory record ${next.record.id}.`,
+      targetIds: [next.record.id],
+    },
   });
   const persisted = await readPersistedMemoryRecord(vaultRoot, next.record.id, "upsert");
 

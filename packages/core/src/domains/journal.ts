@@ -11,11 +11,11 @@ import {
 } from "../markdown-documents.ts";
 import { defaultTimeZone, toLocalDayKey } from "../time.ts";
 import { loadVault } from "../vault.ts";
+import { commitAuditedCanonicalWrite } from "../audited-write.ts";
 
 import {
   appendMarkdownParagraph,
   readValidatedFrontmatterDocument,
-  runLoadedCanonicalWrite,
   sortStrings,
   uniqueTrimmedStringList,
   validateContract,
@@ -146,7 +146,7 @@ export async function ensureJournalDay({
     return {
       created: true,
       relativePath: target.relativePath,
-      auditPath: result.auditPath ?? undefined,
+      auditPath: result.auditPath,
     };
   } catch (error) {
     if (error instanceof VaultError && error.code === "VAULT_FILE_EXISTS") {
@@ -174,13 +174,18 @@ export async function appendJournal(input: AppendJournalInput): Promise<AppendJo
     body: appendMarkdownParagraph(document.body, input.text),
   });
 
-  return runLoadedCanonicalWrite<AppendJournalResult>({
+  const result = await commitAuditedCanonicalWrite<AppendJournalResult>({
     vaultRoot: input.vaultRoot,
     operationType: "journal_append_text",
     summary: `Append journal text for ${input.date}`,
     occurredAt: `${input.date}T00:00:00.000Z`,
+    audit: {
+      action: "journal_append",
+      commandName: "core.appendJournal",
+      summary: `Appended journal text for ${input.date}.`,
+    },
     mutate: async ({ batch }) => {
-      await stageMarkdownDocumentWrite(
+      const write = await stageMarkdownDocumentWrite(
         batch,
         resolveDatedMarkdownDocumentTarget({
           directory: VAULT_LAYOUT.journalDirectory,
@@ -194,12 +199,18 @@ export async function appendJournal(input: AppendJournalInput): Promise<AppendJo
       );
 
       return {
-        relativePath: ensured.relativePath,
-        created: ensured.created,
-        updated: true,
+        result: {
+          relativePath: ensured.relativePath,
+          created: ensured.created,
+          updated: true,
+        },
+        files: write.files,
+        changes: write.changes,
       };
     },
   });
+
+  return result.result;
 }
 
 async function mutateJournalLinks(
@@ -263,13 +274,28 @@ async function mutateJournalLinks(
     body: document.body,
   });
 
-  return runLoadedCanonicalWrite<MutateJournalLinksResult>({
+  const result = await commitAuditedCanonicalWrite<MutateJournalLinksResult>({
     vaultRoot: input.vaultRoot,
     operationType: input.operation === "link" ? "journal_link" : "journal_unlink",
     summary: `${input.operation === "link" ? "Link" : "Unlink"} journal ${input.key} for ${input.date}`,
     occurredAt: `${input.date}T00:00:00.000Z`,
+    audit: {
+      action: input.operation === "link" ? "journal_link" : "journal_unlink",
+      commandName:
+        input.key === "eventIds"
+          ? input.operation === "link"
+            ? "core.linkJournalEventIds"
+            : "core.unlinkJournalEventIds"
+          : input.operation === "link"
+            ? "core.linkJournalStreams"
+            : "core.unlinkJournalStreams",
+      summary:
+        input.operation === "link"
+          ? `Linked journal ${input.key} for ${input.date}.`
+          : `Unlinked journal ${input.key} for ${input.date}.`,
+    },
     mutate: async ({ batch }) => {
-      await stageMarkdownDocumentWrite(
+      const write = await stageMarkdownDocumentWrite(
         batch,
         resolveDatedMarkdownDocumentTarget({
           directory: VAULT_LAYOUT.journalDirectory,
@@ -283,14 +309,20 @@ async function mutateJournalLinks(
       );
 
       return {
-        relativePath,
-        created: ensured?.created ?? false,
-        changed,
-        eventIds: nextAttributes.eventIds,
-        sampleStreams: nextAttributes.sampleStreams,
+        result: {
+          relativePath,
+          created: ensured?.created ?? false,
+          changed,
+          eventIds: nextAttributes.eventIds,
+          sampleStreams: nextAttributes.sampleStreams,
+        },
+        files: write.files,
+        changes: write.changes,
       };
     },
   });
+
+  return result.result;
 }
 
 export async function linkJournalEventIds(

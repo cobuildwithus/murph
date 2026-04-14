@@ -272,6 +272,11 @@ describe('assistant knowledge threshold coverage', () => {
     })
     expect(loadIntegratedRuntime).toHaveBeenCalledTimes(1)
     expect(applyCanonicalWriteBatch).toHaveBeenCalledWith({
+      audit: {
+        action: 'knowledge_write',
+        commandName: 'assistantEngine.saveKnowledgeText',
+        summary: 'Rebuilt the derived knowledge index.',
+      },
       operationType: 'knowledge_index.rebuild',
       summary: 'Rebuilt the derived knowledge index.',
       textWrites: [

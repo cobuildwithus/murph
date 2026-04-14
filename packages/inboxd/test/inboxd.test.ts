@@ -228,12 +228,58 @@ test("processCapture stores redacted raw evidence, one canonical intake record, 
     await readJsonlRecordsIfPresent(vaultRoot, "ledger/events/2026/2026-03.jsonl"),
     [],
   );
+  const auditRecords = await readJsonlRecordsIfPresent(
+    vaultRoot,
+    `audit/${first.createdAt.slice(0, 4)}/${first.createdAt.slice(0, 7)}.jsonl`,
+  );
   assert.deepEqual(
-    await readJsonlRecordsIfPresent(
-      vaultRoot,
-      `audit/${first.createdAt.slice(0, 4)}/${first.createdAt.slice(0, 7)}.jsonl`,
-    ),
-    [],
+    auditRecords.filter(
+      (record) =>
+        typeof record === "object" &&
+        record !== null &&
+        "action" in record &&
+        record.action === "inbox_capture_persist",
+    ).map((record) => ({
+      action: typeof record === "object" && record !== null && "action" in record ? record.action : undefined,
+      actor: typeof record === "object" && record !== null && "actor" in record ? record.actor : undefined,
+      changes: typeof record === "object" && record !== null && "changes" in record ? record.changes : undefined,
+      commandName:
+        typeof record === "object" && record !== null && "commandName" in record ? record.commandName : undefined,
+      occurredAt:
+        typeof record === "object" && record !== null && "occurredAt" in record ? record.occurredAt : undefined,
+      schemaVersion:
+        typeof record === "object" && record !== null && "schemaVersion" in record ? record.schemaVersion : undefined,
+      status: typeof record === "object" && record !== null && "status" in record ? record.status : undefined,
+      summary: typeof record === "object" && record !== null && "summary" in record ? record.summary : undefined,
+      targetIds:
+        typeof record === "object" && record !== null && "targetIds" in record ? record.targetIds : undefined,
+    })),
+    [
+      {
+        action: "inbox_capture_persist",
+        actor: "core",
+        changes: [
+          {
+            op: "copy",
+            path: capture.attachments[0]?.storedPath,
+          },
+          {
+            op: "create",
+            path: capture.envelopePath,
+          },
+          {
+            op: "append",
+            path: "ledger/inbox-captures/2026/2026-03.jsonl",
+          },
+        ],
+        commandName: "inboxd.persistCanonicalInboxCapture",
+        occurredAt: first.createdAt,
+        schemaVersion: "murph.audit.v1",
+        status: "success",
+        summary: `Persisted inbox capture ${first.captureId}.`,
+        targetIds: [first.captureId, first.eventId],
+      },
+    ],
   );
 
   pipeline.close();

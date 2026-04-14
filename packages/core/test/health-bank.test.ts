@@ -789,6 +789,7 @@ test("markdown registry helpers keep provider and recipe rename writes on the sh
 
 test("food, provider, and recipe deletes remove the markdown registry record cleanly", async () => {
   const vaultRoot = await makeTempDirectory("murph-bank-deletes");
+  const auditRelativePath = resolveAuditShardPath(new Date());
   await initializeVault({ vaultRoot });
 
   const provider = await upsertProvider({
@@ -824,6 +825,10 @@ test("food, provider, and recipe deletes remove the markdown registry record cle
   const deletedRecipe = await deleteRecipe({
     vaultRoot,
     recipeId: recipe.record.recipeId,
+  });
+  const auditRecords = await readJsonlRecords({
+    vaultRoot,
+    relativePath: auditRelativePath,
   });
   const operations = await Promise.all(
     (await listWriteOperationMetadataPaths(vaultRoot)).map((relativePath) =>
@@ -869,6 +874,15 @@ test("food, provider, and recipe deletes remove the markdown registry record cle
       }),
     (error: unknown) => error instanceof VaultError && error.code === "VAULT_RECIPE_MISSING",
   );
+  assert.deepEqual(selectAuditMetadata(auditRecords, "provider_delete"), [
+    { action: "provider_delete", commandName: "core.deleteProvider", op: "delete" },
+  ]);
+  assert.deepEqual(selectAuditMetadata(auditRecords, "food_delete"), [
+    { action: "food_delete", commandName: "core.deleteFood", op: "delete" },
+  ]);
+  assert.deepEqual(selectAuditMetadata(auditRecords, "recipe_delete"), [
+    { action: "recipe_delete", commandName: "core.deleteRecipe", op: "delete" },
+  ]);
   assert.deepEqual(
     operations
       .filter((operation) => operation.operationType === "provider_delete")
@@ -890,6 +904,44 @@ test("food, provider, and recipe deletes remove the markdown registry record cle
             state: "applied",
             effect: "delete",
             targetRelativePath: deletedProvider.relativePath,
+          },
+          {
+            kind: "jsonl_append",
+            state: "applied",
+            effect: "append",
+            targetRelativePath: auditRelativePath,
+          },
+        ],
+      },
+    ],
+  );
+  assert.deepEqual(
+    operations
+      .filter((operation) => operation.operationType === "food_delete")
+      .map((operation) => ({
+        status: operation.status,
+        actions: operation.actions.map((action) => ({
+          kind: action.kind,
+          state: action.state,
+          effect: action.effect,
+          targetRelativePath: action.targetRelativePath,
+        })),
+      })),
+    [
+      {
+        status: "committed",
+        actions: [
+          {
+            kind: "delete",
+            state: "applied",
+            effect: "delete",
+            targetRelativePath: deletedFood.relativePath,
+          },
+          {
+            kind: "jsonl_append",
+            state: "applied",
+            effect: "append",
+            targetRelativePath: auditRelativePath,
           },
         ],
       },
@@ -916,6 +968,12 @@ test("food, provider, and recipe deletes remove the markdown registry record cle
             state: "applied",
             effect: "delete",
             targetRelativePath: deletedRecipe.relativePath,
+          },
+          {
+            kind: "jsonl_append",
+            state: "applied",
+            effect: "append",
+            targetRelativePath: auditRelativePath,
           },
         ],
       },

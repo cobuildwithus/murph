@@ -15,10 +15,10 @@ import {
 } from "./fs.ts";
 import {
   canonicalPathResource,
-  runCanonicalWrite,
   withCanonicalResourceLocks,
 } from "./operations/index.ts";
 import { resolveVaultPath } from "./path-safety.ts";
+import { commitAuditedCanonicalWrite } from "./audited-write.ts";
 import { isPlainRecord } from "./types.ts";
 
 export type {
@@ -116,11 +116,16 @@ export async function updateWorkoutUnitPreferences(input: {
       wearablePreferences: current.wearablePreferences,
     };
 
-    await runCanonicalWrite({
+    await commitAuditedCanonicalWrite({
       vaultRoot: input.vaultRoot,
       operationType: "preferences_update",
       summary: "Update canonical workout unit preferences",
       occurredAt: document.updatedAt,
+      audit: {
+        action: "preferences_update",
+        commandName: "core.updateWorkoutUnitPreferences",
+        summary: "Updated canonical workout unit preferences.",
+      },
       mutate: async ({ batch }) => {
         await batch.stageTextWrite(
           preferencesDocumentRelativePath,
@@ -128,7 +133,16 @@ export async function updateWorkoutUnitPreferences(input: {
           { overwrite: true },
         );
 
-        return null;
+        return {
+          result: null,
+          files: [preferencesDocumentRelativePath],
+          changes: [
+            {
+              path: preferencesDocumentRelativePath,
+              op: current.exists ? "update" : "create",
+            },
+          ],
+        };
       },
     });
 
@@ -169,11 +183,16 @@ export async function updateWearablePreferences(input: {
       wearablePreferences: nextPreferences,
     };
 
-    await runCanonicalWrite({
+    await commitAuditedCanonicalWrite({
       vaultRoot: input.vaultRoot,
       operationType: "preferences_update",
       summary: "Update canonical wearable preferences",
       occurredAt: document.updatedAt,
+      audit: {
+        action: "preferences_update",
+        commandName: "core.updateWearablePreferences",
+        summary: "Updated canonical wearable preferences.",
+      },
       mutate: async ({ batch }) => {
         await batch.stageTextWrite(
           preferencesDocumentRelativePath,
@@ -181,7 +200,16 @@ export async function updateWearablePreferences(input: {
           { overwrite: true },
         );
 
-        return null;
+        return {
+          result: null,
+          files: [preferencesDocumentRelativePath],
+          changes: [
+            {
+              path: preferencesDocumentRelativePath,
+              op: current.exists ? "update" : "create",
+            },
+          ],
+        };
       },
     });
 

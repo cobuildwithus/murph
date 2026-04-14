@@ -258,6 +258,11 @@ export async function saveVaultTextNote(input: {
     vaultRoot: input.vault,
     operationType: input.operationType,
     summary: input.summary,
+    audit: {
+      action: 'research_note_write',
+      commandName: 'cli.saveVaultTextNote',
+      summary: input.summary,
+    },
     textWrites: [
       {
         relativePath: input.relativePath,

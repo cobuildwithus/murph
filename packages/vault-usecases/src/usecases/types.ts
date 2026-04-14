@@ -884,6 +884,12 @@ export interface CoreRuntimeModule extends HealthCoreRuntimeMethods {
     operationType: string
     summary: string
     occurredAt?: string
+    audit: {
+      action: string
+      commandName: string
+      summary: string
+      targetIds?: string[]
+    }
     textWrites?: Array<{
       relativePath: string
       content: string

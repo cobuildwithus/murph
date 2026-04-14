@@ -11,9 +11,9 @@ import {
   ensureJournalDay as ensureJournalDayInternal,
   readJournalDayFrontmatterDocument,
 } from "./domains/journal.ts";
+import { commitAuditedCanonicalWrite } from "./audited-write.ts";
 import { stringifyFrontmatterDocument } from "./frontmatter.ts";
 import { stageMarkdownDocumentWrite } from "./markdown-documents.ts";
-import { runCanonicalWrite } from "./operations/write-batch.ts";
 
 interface InboxPromotionCaptureAttachment {
   attachmentId?: string | null;
@@ -276,13 +276,19 @@ export async function promoteInboxJournal(
   });
 
   if (nextDocument !== rawDocument) {
-    await runCanonicalWrite({
+    await commitAuditedCanonicalWrite({
       vaultRoot: input.vaultRoot,
       operationType: "inbox_promote_journal",
       summary: `Promote inbox capture ${input.capture.captureId} into journal ${input.date}`,
       occurredAt: new Date(),
+      audit: {
+        action: "inbox_promote_journal",
+        commandName: "core.promoteInboxJournal",
+        summary: `Promoted inbox capture ${input.capture.captureId} into journal ${input.date}.`,
+        targetIds: [input.capture.captureId, input.capture.eventId],
+      },
       mutate: async ({ batch }) => {
-        await stageMarkdownDocumentWrite(
+        const write = await stageMarkdownDocumentWrite(
           batch,
           {
             relativePath: ensured.relativePath,
@@ -293,7 +299,12 @@ export async function promoteInboxJournal(
             overwrite: true,
           },
         );
-        return undefined;
+        return {
+          result: undefined,
+          files: write.files,
+          changes: write.changes,
+          targetIds: [input.capture.captureId, input.capture.eventId],
+        };
       },
     });
   }
@@ -329,13 +340,19 @@ export async function promoteInboxExperimentNote(
   });
 
   if (nextDocument !== rawDocument) {
-    await runCanonicalWrite({
+    await commitAuditedCanonicalWrite({
       vaultRoot: input.vaultRoot,
       operationType: "inbox_promote_experiment_note",
       summary: `Promote inbox capture ${input.capture.captureId} into experiment ${document.attributes.experimentId}`,
       occurredAt: new Date(),
+      audit: {
+        action: "inbox_promote_experiment_note",
+        commandName: "core.promoteInboxExperimentNote",
+        summary: `Promoted inbox capture ${input.capture.captureId} into experiment ${document.attributes.experimentId}.`,
+        targetIds: [input.capture.captureId, input.capture.eventId, document.attributes.experimentId],
+      },
       mutate: async ({ batch }) => {
-        await stageMarkdownDocumentWrite(
+        const write = await stageMarkdownDocumentWrite(
           batch,
           {
             relativePath: input.relativePath,
@@ -346,7 +363,12 @@ export async function promoteInboxExperimentNote(
             overwrite: true,
           },
         );
-        return undefined;
+        return {
+          result: undefined,
+          files: write.files,
+          changes: write.changes,
+          targetIds: [input.capture.captureId, input.capture.eventId, document.attributes.experimentId],
+        };
       },
     });
   }

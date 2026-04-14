@@ -13,7 +13,6 @@ import {
   inspectCanonicalWriteLock,
   withCanonicalWriteLockScope,
 } from "./operations/canonical-write-lock.ts";
-import { runCanonicalWrite } from "./operations/write-batch.ts";
 import {
   type CopyRawArtifactInput as RawCopyRawArtifactInput,
   prepareRawArtifact,
@@ -61,6 +60,7 @@ import {
   updateWearablePreferences as updateWearablePreferencesInternal,
   updateWorkoutUnitPreferences as updateWorkoutUnitPreferencesInternal,
 } from "./preferences.ts";
+import { commitAuditedCanonicalWrite, type CanonicalMutationAuditInput } from "./audited-write.ts";
 import { VaultError } from "./errors.ts";
 import {
   initializeVault as initializeVaultInternal,
@@ -108,6 +108,7 @@ export interface ApplyCanonicalWriteBatchInput {
   operationType: string;
   summary: string;
   occurredAt?: DateInput;
+  audit: CanonicalMutationAuditInput;
   rawCopies?: CanonicalRawCopyInput[];
   rawContents?: CanonicalRawContentInput[];
   textWrites?: CanonicalTextWriteInput[];
@@ -206,6 +207,11 @@ export async function appendJsonlRecord<TRecord extends Record<string, unknown>>
     vaultRoot: input.vaultRoot,
     operationType: "jsonl_append",
     summary: `Append JSONL record to ${input.relativePath}`,
+    audit: {
+      action: "jsonl_append",
+      commandName: "core.appendJsonlRecord",
+      summary: `Appended JSONL record to ${input.relativePath}.`,
+    },
     jsonlAppends: [
       {
         relativePath: input.relativePath,
@@ -241,11 +247,12 @@ export async function applyCanonicalWriteBatch(
 
   await loadVaultInternal({ vaultRoot: input.vaultRoot });
 
-  return runCanonicalWrite({
+  const result = await commitAuditedCanonicalWrite({
     vaultRoot: input.vaultRoot,
     operationType: input.operationType,
     summary: input.summary,
     occurredAt: input.occurredAt,
+    audit: input.audit,
     mutate: async ({ batch }) => {
       for (const rawCopy of rawCopies) {
         await batch.stageRawCopy({
@@ -297,14 +304,48 @@ export async function applyCanonicalWriteBatch(
       }
 
       return {
-        rawCopies: rawCopies.map((entry) => entry.targetRelativePath),
-        rawContents: rawContents.map((entry) => entry.targetRelativePath),
-        textWrites: textWrites.map((entry) => entry.relativePath),
-        jsonlAppends: jsonlAppends.map((entry) => entry.relativePath),
-        deletes: deletes.map((entry) => entry.relativePath),
+        result: {
+          rawCopies: rawCopies.map((entry) => entry.targetRelativePath),
+          rawContents: rawContents.map((entry) => entry.targetRelativePath),
+          textWrites: textWrites.map((entry) => entry.relativePath),
+          jsonlAppends: jsonlAppends.map((entry) => entry.relativePath),
+          deletes: deletes.map((entry) => entry.relativePath),
+        },
+        files: [
+          ...rawCopies.map((entry) => entry.targetRelativePath),
+          ...rawContents.map((entry) => entry.targetRelativePath),
+          ...textWrites.map((entry) => entry.relativePath),
+          ...jsonlAppends.map((entry) => entry.relativePath),
+          ...deletes.map((entry) => entry.relativePath),
+        ],
+        changes: [
+          ...rawCopies.map((entry) => ({
+            path: entry.targetRelativePath,
+            op: "copy" as const,
+          })),
+          ...rawContents.map((entry) => ({
+            path: entry.targetRelativePath,
+            op: "create" as const,
+          })),
+          ...textWrites.map((entry) => ({
+            path: entry.relativePath,
+            op: entry.overwrite ? "update" as const : "create" as const,
+          })),
+          ...jsonlAppends.map((entry) => ({
+            path: entry.relativePath,
+            op: "append" as const,
+          })),
+          ...deletes.map((entry) => ({
+            path: entry.relativePath,
+            op: "delete" as const,
+          })),
+        ],
+        targetIds: input.audit.targetIds ?? [],
       };
     },
   });
+
+  return result.result;
 }
 
 export async function copyRawArtifact(
@@ -322,6 +363,11 @@ export async function copyRawArtifact(
     operationType: "raw_copy",
     summary: `Copy raw artifact ${artifact.relativePath}`,
     occurredAt: input.occurredAt,
+    audit: {
+      action: "raw_copy",
+      commandName: "core.copyRawArtifact",
+      summary: `Copied raw artifact ${artifact.relativePath}.`,
+    },
     rawCopies: [
       {
         sourcePath: input.sourcePath,

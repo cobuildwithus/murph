@@ -111,6 +111,11 @@ test("applyCanonicalWriteBatch records raw contents without receipts and protect
         vaultRoot,
         operationType: "test_raw_content_and_delete_receipt_shapes",
         summary: "stage raw content and a protected delete",
+        audit: {
+          action: "show",
+          commandName: "test.rawContentAndDeleteReceiptShapes",
+          summary: "Staged raw content and a protected delete.",
+        },
         rawContents: [
           {
             targetRelativePath: rawTextPath,
@@ -159,11 +164,13 @@ test("applyCanonicalWriteBatch records raw contents without receipts and protect
   ) as {
     actions?: Array<{ kind: string; targetRelativePath: string }>;
   };
-  assert.equal(receipt.actions?.length, 1);
+  assert.equal(receipt.actions?.length, 2);
   assert.deepEqual(receipt.actions?.[0], {
     kind: "delete",
     targetRelativePath: deletePath,
   });
+  assert.equal(receipt.actions?.[1]?.kind, "jsonl_append");
+  assert.match(receipt.actions?.[1]?.targetRelativePath ?? "", /^audit\/\d{4}\/\d{4}-\d{2}\.jsonl$/u);
 });
 
 test("validateVault reports stale canonical-write locks", async () => {
