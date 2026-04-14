@@ -56,13 +56,27 @@ const SECONDARY_PHONE_NUMBER = "+15557654321";
 const SECONDARY_PHONE_LOOKUP_KEY = createHostedPhoneLookupKey(SECONDARY_PHONE_NUMBER)!;
 type CompleteHostedPrivyVerificationInput = Parameters<typeof completeHostedPrivyVerification>[0];
 type CompleteHostedPrivyVerificationPrisma = CompleteHostedPrivyVerificationInput["prisma"];
+type BaseHostedPrivyIdentity = HostedPrivyIdentity & {
+  phone: NonNullable<HostedPrivyIdentity["phone"]>;
+  wallet: NonNullable<HostedPrivyIdentity["wallet"]>;
+};
+type PhoneOverrides = Partial<NonNullable<HostedPrivyIdentity["phone"]>> | null;
 type WalletOverrides = Partial<NonNullable<HostedPrivyIdentity["wallet"]>> | null;
-type IdentityOverrides = Omit<Partial<HostedPrivyIdentity>, "wallet"> & {
+type IdentityOverrides = Omit<Partial<HostedPrivyIdentity>, "phone" | "wallet"> & {
+  phone?: PhoneOverrides;
   wallet?: WalletOverrides;
 };
 
 function makeIdentity(overrides: IdentityOverrides = {}): HostedPrivyIdentity {
   const identity = baseIdentity();
+  const basePhone: NonNullable<HostedPrivyIdentity["phone"]> = identity.phone;
+  const phone: HostedPrivyIdentity["phone"] =
+    overrides.phone === null
+      ? null
+      : {
+          ...basePhone,
+          ...(overrides.phone ?? {}),
+        };
   const wallet: HostedPrivyIdentity["wallet"] =
     overrides.wallet === null
       ? null
@@ -76,17 +90,12 @@ function makeIdentity(overrides: IdentityOverrides = {}): HostedPrivyIdentity {
   return {
     ...identity,
     ...overrides,
-    phone: overrides.phone === null
-      ? null
-      : {
-          ...identity.phone,
-          ...(overrides.phone ?? {}),
-        },
+    phone,
     wallet,
   };
 }
 
-function baseIdentity(): HostedPrivyIdentity {
+function baseIdentity(): BaseHostedPrivyIdentity {
   return {
     phone: {
       number: DEFAULT_PHONE_NUMBER,
