@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   canContinueHostedPrivyClientSession,
   describeHostedPrivyClientSessionIssue,
+  ensureHostedPrivyWalletReady,
   ensureHostedPrivyPhoneReady,
   resolveHostedPrivyClientSessionIssue,
   shouldShowHostedPrivyManualResumeState,
@@ -48,6 +49,79 @@ describe("hosted Privy client wallet readiness", () => {
 
     expect(createWallet).not.toHaveBeenCalled();
     expect(resolveHostedPrivyClientSessionIssue(null)).toBeNull();
+  });
+
+  it("does not create a wallet when the local session is missing or already has one", async () => {
+    const createWallet = vi.fn();
+
+    await expect(
+      ensureHostedPrivyWalletReady({
+        createWallet,
+        user: null,
+      }),
+    ).resolves.toBeUndefined();
+
+    await expect(
+      ensureHostedPrivyWalletReady({
+        createWallet,
+        user: {
+          linkedAccounts: [
+            {
+              address: "0xD8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
+              chain_type: "ethereum",
+              connector_type: "embedded",
+              id: "wallet_123",
+              type: "wallet",
+              wallet_client: "privy",
+            },
+          ],
+        },
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(createWallet).not.toHaveBeenCalled();
+  });
+
+  it("creates a wallet when the local session is authenticated without one", async () => {
+    const createWallet = vi.fn().mockResolvedValue({});
+
+    await expect(
+      ensureHostedPrivyWalletReady({
+        createWallet,
+        user: {
+          linkedAccounts: [
+            {
+              latest_verified_at: 1741194420,
+              phone_number: "+1 415 555 2671",
+              type: "phone",
+            },
+          ],
+        },
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(createWallet).toHaveBeenCalledTimes(1);
+  });
+
+  it("treats wallet creation as best effort for authenticated sessions without a linked wallet", async () => {
+    const createWallet = vi.fn().mockRejectedValue(new Error("wallet create failed"));
+
+    await expect(
+      ensureHostedPrivyWalletReady({
+        createWallet,
+        user: {
+          linkedAccounts: [
+            {
+              latest_verified_at: 1741194420,
+              phone_number: "+1 415 555 2671",
+              type: "phone",
+            },
+          ],
+        },
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(createWallet).toHaveBeenCalledTimes(1);
   });
 
   it("switches from manual resume to restart mode when the authenticated session is missing a phone", () => {

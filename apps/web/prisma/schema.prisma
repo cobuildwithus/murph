@@ -221,8 +221,8 @@ model HostedMember {
 
 model HostedMemberIdentity {
   memberId                       String       @unique @map("member_id")
-  maskedPhoneNumberHint          String       @map("masked_phone_number_hint")
-  phoneLookupKey                 String       @unique @map("phone_lookup_key")
+  maskedPhoneNumberHint          String?      @map("masked_phone_number_hint")
+  phoneLookupKey                 String?      @unique @map("phone_lookup_key")
   phoneNumberEncrypted           String?      @map("phone_number_encrypted")
   phoneNumberVerifiedAt          DateTime?    @map("phone_number_verified_at")
   privyUserLookupKey             String?      @unique @map("privy_user_lookup_key")

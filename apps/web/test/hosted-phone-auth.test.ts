@@ -737,6 +737,76 @@ describe("HostedPhoneAuth", () => {
     assert.equal(assign.mock.calls[0]?.[0], "https://stripe.example.test/retry-checkout");
   });
 
+  it("retries hosted completion once when the verified Telegram account has not reached the server-side session yet", async () => {
+    vi.resetModules();
+
+    const ensureHostedPrivyPhoneReady = vi.fn().mockResolvedValue(undefined);
+    class TestHostedOnboardingApiError extends Error {
+      code: string | null;
+      retryable: boolean;
+
+      constructor(code: string | null, message: string, retryable = false) {
+        super(message);
+        this.code = code;
+        this.retryable = retryable;
+      }
+    }
+    const requestHostedOnboardingJson = vi.fn()
+      .mockRejectedValueOnce(new TestHostedOnboardingApiError(
+        "PRIVY_ACCOUNT_NOT_READY",
+        "Your verified Privy account has not reached the server-side session yet.",
+        true,
+      ))
+      .mockResolvedValueOnce({
+        activationPending: false,
+        inviteCode: "invite-code",
+        joinUrl: "/join/invite-code",
+        stage: "checkout",
+      })
+      .mockResolvedValueOnce({
+        alreadyActive: false,
+        url: "https://stripe.example.test/telegram-retry-checkout",
+      });
+    const assign = vi.fn();
+
+    vi.doMock("@/src/lib/hosted-onboarding/privy-client", () => ({
+      HOSTED_PRIVY_COMPLETION_RETRY_DELAYS_MS: [0, 0],
+      ensureHostedPrivyPhoneReady,
+    }));
+    vi.doMock("@/src/components/hosted-onboarding/client-api", () => ({
+      HostedOnboardingApiError: TestHostedOnboardingApiError,
+      requestHostedBillingCheckout(input: { inviteCode: string }) {
+        return requestHostedOnboardingJson({
+          payload: input,
+          url: "/api/hosted-onboarding/billing/checkout",
+        });
+      },
+      requestHostedOnboardingJson,
+    }));
+    vi.stubGlobal("window", {
+      location: {
+        assign,
+      },
+    });
+
+    try {
+      const { finalizeHostedPrivyVerification } = await import("@/src/components/hosted-onboarding/hosted-phone-auth-support");
+
+      await finalizeHostedPrivyVerification({
+        createWallet: vi.fn(),
+        intent: "signup",
+        user: null,
+      });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+
+    assert.equal(ensureHostedPrivyPhoneReady.mock.calls.length, 1);
+    assert.equal(requestHostedOnboardingJson.mock.calls.length, 3);
+    assert.equal(assign.mock.calls.length, 1);
+    assert.equal(assign.mock.calls[0]?.[0], "https://stripe.example.test/telegram-retry-checkout");
+  });
+
   it("uses the invite shortcut route for the first invite send-code request", async () => {
     const harness = await loadHostedInvitePhoneAuthHarness();
 

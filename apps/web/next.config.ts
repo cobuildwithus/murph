@@ -38,6 +38,9 @@ const PRIVY_REQUIRED_CONNECT_SOURCES = [
   "https://*.rpc.privy.systems",
   "https://explorer-api.walletconnect.com",
 ] as const;
+const PRIVY_REQUIRED_SCRIPT_SOURCES = [
+  "https://auth.privy.io",
+] as const;
 const TURNSTILE_SOURCES = ["https://challenges.cloudflare.com"] as const;
 
 const appDir = path.dirname(fileURLToPath(import.meta.url));
@@ -118,6 +121,7 @@ export function buildHostedWebContentSecurityPolicy(
   const scriptSources = uniqueSources([
     "'self'",
     "'unsafe-inline'",
+    ...PRIVY_REQUIRED_SCRIPT_SOURCES,
     ...TURNSTILE_SOURCES,
     ...(isDevelopment ? ["'unsafe-eval'"] : []),
   ]);

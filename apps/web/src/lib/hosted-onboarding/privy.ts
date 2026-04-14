@@ -6,8 +6,10 @@ import {
   HOSTED_PRIVY_EMBEDDED_WALLET_CHAIN_TYPE,
   type HostedPrivyLinkedAccountContainer,
   type HostedPrivyPhoneAccount,
+  type HostedPrivyTelegramAccount,
   type HostedPrivyWalletAccount,
   resolveHostedPrivyLinkedAccountState,
+  resolveHostedPrivyTelegramAccountSelection,
 } from "./privy-shared";
 import { isHostedOnboardingRevnetEnabled } from "./revnet";
 import { getHostedOnboardingEnvironment } from "./runtime";
@@ -23,7 +25,8 @@ export interface HostedPrivyCookieStore {
 export const HOSTED_PRIVY_IDENTITY_TOKEN_COOKIE_NAME = "privy-id-token";
 
 export interface HostedPrivyIdentity {
-  phone: HostedPrivyPhoneAccount;
+  phone: HostedPrivyPhoneAccount | null;
+  telegram: HostedPrivyTelegramAccount | null;
   userId: string;
   wallet: HostedPrivyWalletAccount | null;
 }
@@ -117,11 +120,20 @@ export async function verifyHostedPrivyIdentityToken(identityToken: string): Pro
 
 export function resolveHostedPrivyIdentityFromVerifiedUser(user: HostedPrivyUser): HostedPrivyIdentity {
   const { phone, wallet } = resolveHostedPrivyLinkedAccountState(user, HOSTED_PRIVY_EMBEDDED_WALLET_CHAIN_TYPE);
+  const telegramSelection = resolveHostedPrivyTelegramAccountSelection(user);
 
-  if (!phone) {
+  if (telegramSelection.ambiguous) {
     throw hostedOnboardingError({
-      code: "PRIVY_PHONE_REQUIRED",
-      message: "Finish phone verification before continuing.",
+      code: "PRIVY_TELEGRAM_AMBIGUOUS",
+      message: "Reconnect Telegram in Privy before continuing.",
+      httpStatus: 409,
+    });
+  }
+
+  if (!phone && !telegramSelection.account) {
+    throw hostedOnboardingError({
+      code: "PRIVY_ACCOUNT_REQUIRED",
+      message: "Finish phone or Telegram verification before continuing.",
       httpStatus: 400,
     });
   }
@@ -136,6 +148,7 @@ export function resolveHostedPrivyIdentityFromVerifiedUser(user: HostedPrivyUser
 
   return {
     phone,
+    telegram: telegramSelection.account,
     userId: user.id,
     wallet: wallet ?? null,
   };
@@ -213,6 +226,16 @@ function normalizeEnvValue(value: string | null | undefined): string | null {
 export function remapHostedPrivyCompletionLagError(error: unknown): unknown {
   if (!isHostedOnboardingError(error)) {
     return error;
+  }
+
+  if (error.code === "PRIVY_ACCOUNT_REQUIRED") {
+    return hostedOnboardingError({
+      code: "PRIVY_ACCOUNT_NOT_READY",
+      message:
+        "Your verified Privy account has not reached the server-side session yet. Wait a moment and try again.",
+      httpStatus: 409,
+      retryable: true,
+    });
   }
 
   if (error.code === "PRIVY_PHONE_REQUIRED") {

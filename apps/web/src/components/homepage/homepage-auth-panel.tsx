@@ -1,6 +1,8 @@
 import { HostedExistingAccountSignInDialog } from "@/src/components/hosted-onboarding/hosted-existing-account-sign-in-dialog";
 import { HostedPhoneAuth } from "@/src/components/hosted-onboarding/hosted-phone-auth";
 
+import { HomepageTelegramAuthButton } from "./homepage-telegram-auth-button";
+
 const SETTINGS_HREF = "/settings";
 
 export function HomepageAuthPanel({
@@ -39,11 +41,19 @@ export function HomepageAuthPanel({
         id="signup-title"
         className="text-2xl font-bold tracking-tight md:text-3xl"
       >
-        Sign up with your phone.
+        Sign up with your phone or Telegram.
       </h2>
 
       <div className="mt-5 rounded bg-white p-4 text-stone-900">
-        <HostedPhoneAuth />
+        <div className="space-y-4">
+          <HostedPhoneAuth />
+          <div className="flex items-center gap-3 text-[11px] font-semibold uppercase tracking-[0.24em] text-stone-400">
+            <span className="h-px flex-1 bg-stone-200" />
+            More options
+            <span className="h-px flex-1 bg-stone-200" />
+          </div>
+          <HomepageTelegramAuthButton />
+        </div>
       </div>
       <div className="mt-4">
         <HostedExistingAccountSignInDialog />

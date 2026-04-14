@@ -160,6 +160,49 @@ function buildHostedMemberPhoneIdentityFields(phoneNumber: string) {
   };
 }
 
+function buildHostedOptionalMemberPhoneIdentityFields(phone: HostedPrivyIdentity["phone"]) {
+  if (!phone) {
+    return {
+      maskedPhoneNumberHint: null,
+      phoneLookupKey: null,
+      phoneNumber: null,
+    };
+  }
+
+  const fields = buildHostedMemberPhoneIdentityFields(phone.number);
+
+  return {
+    maskedPhoneNumberHint: fields.maskedPhoneNumberHint,
+    phoneLookupKey: fields.phoneLookupKey,
+    phoneNumber: fields.phoneNumber,
+  };
+}
+
+function buildHostedPersistedPhoneIdentityFields(input: {
+  currentIdentity?: {
+    maskedPhoneNumberHint: string | null;
+    phoneLookupKey: string | null;
+    phoneNumber: string | null;
+    phoneNumberVerifiedAt: Date | null;
+  } | null;
+  now: Date;
+  phone: HostedPrivyIdentity["phone"];
+}) {
+  if (input.phone) {
+    return {
+      ...buildHostedOptionalMemberPhoneIdentityFields(input.phone),
+      phoneNumberVerifiedAt: input.now,
+    };
+  }
+
+  return {
+    maskedPhoneNumberHint: input.currentIdentity?.maskedPhoneNumberHint ?? null,
+    phoneLookupKey: input.currentIdentity?.phoneLookupKey ?? null,
+    phoneNumber: input.currentIdentity?.phoneNumber ?? null,
+    phoneNumberVerifiedAt: input.currentIdentity?.phoneNumberVerifiedAt ?? null,
+  };
+}
+
 function buildHostedMemberWalletIdentityFields(input: {
   existingWalletAddress?: string | null;
   existingWalletChainType?: string | null;
@@ -195,6 +238,32 @@ function assertHostedPrivyWalletAvailableWhenRequired(identity: HostedPrivyIdent
   }
 }
 
+function assertHostedPrivyIdentityMatchesExpectedPhone(input: {
+  expectedPhoneHint?: string;
+  expectedPhoneLookupKey?: string;
+  identity: HostedPrivyIdentity;
+}): void {
+  if (!input.expectedPhoneLookupKey) {
+    return;
+  }
+
+  if (!input.identity.phone) {
+    throw hostedOnboardingError({
+      code: "PRIVY_PHONE_REQUIRED",
+      message: "Finish phone verification before continuing.",
+      httpStatus: 400,
+    });
+  }
+
+  if (!hostedPhoneLookupKeyMatchesValue(input.identity.phone.number, input.expectedPhoneLookupKey)) {
+    throw hostedOnboardingError({
+      code: "PRIVY_PHONE_MISMATCH",
+      message: `Enter the same phone number that received this invite (${input.expectedPhoneHint ?? "your invited number"}).`,
+      httpStatus: 403,
+    });
+  }
+}
+
 export function hasHostedMemberPrivyIdentity(member: {
   privyUserId?: string | null | undefined;
   privyUserLookupKey?: string | null | undefined;
@@ -223,10 +292,13 @@ export async function ensureHostedMemberForPrivyIdentity(input: {
         memberId,
         prisma: tx,
       });
+      const phoneIdentity = buildHostedPersistedPhoneIdentityFields({
+        now: input.now,
+        phone: input.identity.phone,
+      });
       await upsertHostedMemberIdentity({
-        ...buildHostedMemberPhoneIdentityFields(input.identity.phone.number),
+        ...phoneIdentity,
         memberId,
-        phoneNumberVerifiedAt: input.now,
         prisma: tx,
         privyUserId: input.identity.userId,
         signupPhoneCodeSendAttemptId: null,
@@ -263,7 +335,6 @@ export async function reconcileHostedPrivyIdentityOnMember(input: {
   assertHostedPrivyWalletAvailableWhenRequired(input.identity);
 
   const member = await withHostedOnboardingTransaction(input.prisma, async (tx) => {
-    const phoneLookupKey = createHostedPhoneLookupKey(input.identity.phone.number);
     await lockHostedMemberRow(tx, input.member.id);
 
     const currentMember = await readHostedMemberCoreState({
@@ -275,14 +346,6 @@ export async function reconcileHostedPrivyIdentityOnMember(input: {
       prisma: tx,
     });
 
-    if (!phoneLookupKey) {
-      throw hostedOnboardingError({
-        code: "PHONE_NUMBER_INVALID",
-        message: "A valid phone number is required to continue.",
-        httpStatus: 400,
-      });
-    }
-
     if (!currentMember) {
       throw hostedOnboardingError({
         code: "HOSTED_MEMBER_NOT_FOUND",
@@ -291,16 +354,11 @@ export async function reconcileHostedPrivyIdentityOnMember(input: {
       });
     }
 
-    if (
-      input.expectedPhoneLookupKey
-      && !hostedPhoneLookupKeyMatchesValue(input.identity.phone.number, input.expectedPhoneLookupKey)
-    ) {
-      throw hostedOnboardingError({
-        code: "PRIVY_PHONE_MISMATCH",
-        message: `Enter the same phone number that received this invite (${input.expectedPhoneHint ?? "your invited number"}).`,
-        httpStatus: 403,
-      });
-    }
+    assertHostedPrivyIdentityMatchesExpectedPhone({
+      expectedPhoneHint: input.expectedPhoneHint,
+      expectedPhoneLookupKey: input.expectedPhoneLookupKey,
+      identity: input.identity,
+    });
 
     if (currentIdentity?.privyUserId && currentIdentity.privyUserId !== input.identity.userId) {
       throw hostedOnboardingError({
@@ -326,11 +384,16 @@ export async function reconcileHostedPrivyIdentityOnMember(input: {
       });
     }
 
+    const nextPhoneIdentity = buildHostedPersistedPhoneIdentityFields({
+      currentIdentity,
+      now: input.now,
+      phone: input.identity.phone,
+    });
+
     try {
       await upsertHostedMemberIdentity({
-        ...buildHostedMemberPhoneIdentityFields(input.identity.phone.number),
+        ...nextPhoneIdentity,
         memberId: currentMember.id,
-        phoneNumberVerifiedAt: input.now,
         prisma: tx,
         privyUserId: input.identity.userId,
         signupPhoneCodeSendAttemptId: null,
@@ -372,7 +435,9 @@ export async function lookupHostedMemberForPrivyIdentity(input: {
   const normalizedWalletAddress = input.identity.wallet
     ? normalizeHostedWalletAddress(input.identity.wallet.address)
     : null;
-  const phoneLookupKey = createHostedPhoneLookupKey(input.identity.phone.number);
+  const phoneLookupKey = input.identity.phone
+    ? createHostedPhoneLookupKey(input.identity.phone.number)
+    : null;
   const lookupByPrivyUserId = input.identity.userId
     ? () => lookupHostedMemberIdentityByPrivyUserId({
         privyUserId: input.identity.userId,
@@ -381,7 +446,7 @@ export async function lookupHostedMemberForPrivyIdentity(input: {
     : null;
   const lookupByPhoneNumber = phoneLookupKey
     ? () => lookupHostedMemberIdentityByPhoneNumber({
-        phoneNumber: input.identity.phone.number,
+        phoneNumber: input.identity.phone!.number,
         prisma: input.prisma,
       })
     : null;
