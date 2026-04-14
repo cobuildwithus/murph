@@ -2,6 +2,25 @@
 
 All notable changes to `@murphai/murph` will be documented in this file.
 
+## [0.2.9] - 2026-04-14
+
+### Added
+- Added meal and food nutrition tracking.
+- Routed automation notifications through notification turns and hardened notification targets.
+- Added clearer homepage and invite CTAs, including the support footer action and messages call-to-action.
+- Added a repo-root hosted local development lane with end-to-end runner verification coverage.
+
+### Fixed
+- Fixed Cloudflare hosted execution stability issues across outbound handler registration, duplicate commit delivery handling, durable run ownership, stale recovery, teardown, and telemetry.
+- Fixed hosted onboarding and checkout edge cases across setup copy, bootstrap replay, billing-state messaging, checkout success redirects, warmup logging, and Privy CSP fallback behavior.
+- Fixed release and CI verification lanes so `pnpm release:check` and the push workflows pass cleanly again.
+- Fixed segmented workout duration notes to fail closed instead of accepting malformed input.
+
+### Changed
+- Simplified the hosted local development harness and verification flow.
+- Simplified the assistant hosted runtime seams and resumed execution around the responses-first path.
+- Removed remaining greenfield legacy hosted driver branches and related compatibility cleanup.
+
 ## [0.2.8] - 2026-04-13
 
 ### Added
