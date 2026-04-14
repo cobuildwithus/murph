@@ -398,9 +398,7 @@ export async function updateExperiment(
           status: nextAttributes.status,
           updated: true,
         },
-        files: write.files,
         changes: write.changes,
-        targetIds: [nextAttributes.experimentId],
       };
     },
   });
@@ -488,7 +486,6 @@ async function appendExperimentLifecycleEvent(
           ledgerFile,
           updated: true,
         },
-        files: [...write.files, ledgerFile],
         changes: [
           ...write.changes,
           {
@@ -496,7 +493,6 @@ async function appendExperimentLifecycleEvent(
             op: "append",
           },
         ],
-        targetIds: [document.attributes.experimentId, eventRecord.id],
       };
     },
   });

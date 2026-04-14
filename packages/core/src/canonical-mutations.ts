@@ -301,9 +301,7 @@ export async function promoteInboxJournal(
         );
         return {
           result: undefined,
-          files: write.files,
           changes: write.changes,
-          targetIds: [input.capture.captureId, input.capture.eventId],
         };
       },
     });
@@ -365,9 +363,7 @@ export async function promoteInboxExperimentNote(
         );
         return {
           result: undefined,
-          files: write.files,
           changes: write.changes,
-          targetIds: [input.capture.captureId, input.capture.eventId, document.attributes.experimentId],
         };
       },
     });

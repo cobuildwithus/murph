@@ -745,16 +745,33 @@ test("markdown registry helpers keep provider and recipe rename writes on the sh
           (record as AuditLikeRecord).action === "provider_upsert",
       )
       .map((record) => ({
-        path: record.changes?.[0]?.path,
+        changes: record.changes?.map((change) => ({
+          path: change.path,
+          op: change.op,
+        })),
         targetId: record.targetIds?.[0],
       })),
     [
       {
-        path: "bank/providers/northwest-labs.md",
+        changes: [
+          {
+            path: "bank/providers/northwest-labs.md",
+            op: "create",
+          },
+        ],
         targetId: provider.providerId,
       },
       {
-        path: "bank/providers/northwest-labs-west.md",
+        changes: [
+          {
+            path: "bank/providers/northwest-labs-west.md",
+            op: "update",
+          },
+          {
+            path: "bank/providers/northwest-labs.md",
+            op: "delete",
+          },
+        ],
         targetId: provider.providerId,
       },
     ],

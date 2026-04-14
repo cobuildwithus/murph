@@ -303,6 +303,29 @@ export async function applyCanonicalWriteBatch(
         await batch.stageDelete(deletion.relativePath);
       }
 
+      const changes = [
+        ...rawCopies.map((entry) => ({
+          path: entry.targetRelativePath,
+          op: "copy" as const,
+        })),
+        ...rawContents.map((entry) => ({
+          path: entry.targetRelativePath,
+          op: "create" as const,
+        })),
+        ...textWrites.map((entry) => ({
+          path: entry.relativePath,
+          op: entry.overwrite ? "update" as const : "create" as const,
+        })),
+        ...jsonlAppends.map((entry) => ({
+          path: entry.relativePath,
+          op: "append" as const,
+        })),
+        ...deletes.map((entry) => ({
+          path: entry.relativePath,
+          op: "delete" as const,
+        })),
+      ];
+
       return {
         result: {
           rawCopies: rawCopies.map((entry) => entry.targetRelativePath),
@@ -311,36 +334,7 @@ export async function applyCanonicalWriteBatch(
           jsonlAppends: jsonlAppends.map((entry) => entry.relativePath),
           deletes: deletes.map((entry) => entry.relativePath),
         },
-        files: [
-          ...rawCopies.map((entry) => entry.targetRelativePath),
-          ...rawContents.map((entry) => entry.targetRelativePath),
-          ...textWrites.map((entry) => entry.relativePath),
-          ...jsonlAppends.map((entry) => entry.relativePath),
-          ...deletes.map((entry) => entry.relativePath),
-        ],
-        changes: [
-          ...rawCopies.map((entry) => ({
-            path: entry.targetRelativePath,
-            op: "copy" as const,
-          })),
-          ...rawContents.map((entry) => ({
-            path: entry.targetRelativePath,
-            op: "create" as const,
-          })),
-          ...textWrites.map((entry) => ({
-            path: entry.relativePath,
-            op: entry.overwrite ? "update" as const : "create" as const,
-          })),
-          ...jsonlAppends.map((entry) => ({
-            path: entry.relativePath,
-            op: "append" as const,
-          })),
-          ...deletes.map((entry) => ({
-            path: entry.relativePath,
-            op: "delete" as const,
-          })),
-        ],
-        targetIds: input.audit.targetIds ?? [],
+        changes,
       };
     },
   });

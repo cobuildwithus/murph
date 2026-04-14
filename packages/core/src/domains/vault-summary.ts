@@ -140,7 +140,6 @@ export async function updateVaultSummary(
               updatedAt,
               updated: true,
             },
-            files: [VAULT_LAYOUT.metadata, ...coreWrite.files],
             changes: [
               {
                 path: VAULT_LAYOUT.metadata,

@@ -15,7 +15,7 @@ export interface CanonicalMutationAuditInput {
 
 export interface AuditedCanonicalMutationResult<TResult> {
   result: TResult;
-  files: string[];
+  files?: string[];
   changes?: Array<FileChange | null | undefined>;
   targetIds?: string[];
 }

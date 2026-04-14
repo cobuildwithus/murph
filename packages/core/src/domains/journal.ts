@@ -204,7 +204,6 @@ export async function appendJournal(input: AppendJournalInput): Promise<AppendJo
           created: ensured.created,
           updated: true,
         },
-        files: write.files,
         changes: write.changes,
       };
     },
@@ -316,7 +315,6 @@ async function mutateJournalLinks(
           eventIds: nextAttributes.eventIds,
           sampleStreams: nextAttributes.sampleStreams,
         },
-        files: write.files,
         changes: write.changes,
       };
     },

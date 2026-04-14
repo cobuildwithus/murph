@@ -1,6 +1,7 @@
-import type { AuditAction } from "@murphai/contracts";
-
-import { commitAuditedCanonicalWrite } from "./audited-write.ts";
+import {
+  commitAuditedCanonicalWrite,
+  type CanonicalMutationAuditInput,
+} from "./audited-write.ts";
 import { VaultError } from "./errors.ts";
 import { parseFrontmatterDocument, stringifyFrontmatterDocument } from "./frontmatter.ts";
 import { readUtf8File, walkVaultFiles } from "./fs.ts";
@@ -54,13 +55,7 @@ export interface SlugMarkdownDocumentTarget extends CanonicalMarkdownDocumentTar
   slug: string;
 }
 
-export interface CanonicalMarkdownDocumentAuditInput {
-  action: AuditAction;
-  commandName: string;
-  summary: string;
-  targetIds?: string[];
-  occurredAt?: DateInput;
-}
+export type CanonicalMarkdownDocumentAuditInput = CanonicalMutationAuditInput;
 
 export interface StageMarkdownDocumentWriteOptions {
   overwrite?: boolean;
@@ -90,21 +85,7 @@ export interface StagedMarkdownDocumentWrite {
   relativePath: string;
   previousRelativePath?: string;
   created: boolean;
-  files: string[];
   changes: FileChange[];
-}
-
-function buildMarkdownDocumentFiles(target: CanonicalMarkdownDocumentTarget): string[] {
-  const files = [target.relativePath];
-
-  if (
-    target.previousRelativePath &&
-    target.previousRelativePath !== target.relativePath
-  ) {
-    files.push(target.previousRelativePath);
-  }
-
-  return files;
 }
 
 function assertMarkdownDocumentPath(relativePath: string, fieldName: string): void {
@@ -117,12 +98,24 @@ function assertMarkdownDocumentPath(relativePath: string, fieldName: string): vo
 }
 
 function buildMarkdownDocumentChanges(target: CanonicalMarkdownDocumentTarget): FileChange[] {
-  return [
+  const changes: FileChange[] = [
     {
       path: target.relativePath,
       op: target.created ? "create" : "update",
     },
   ];
+
+  if (
+    target.previousRelativePath &&
+    target.previousRelativePath !== target.relativePath
+  ) {
+    changes.push({
+      path: target.previousRelativePath,
+      op: "delete",
+    });
+  }
+
+  return changes;
 }
 
 export async function loadMarkdownDocuments<TRecord>({
@@ -240,7 +233,6 @@ export async function stageMarkdownDocumentWrite(
         ? target.previousRelativePath
         : undefined,
     created: target.created,
-    files: buildMarkdownDocumentFiles(target),
     changes: buildMarkdownDocumentChanges(target),
   };
 }
@@ -273,9 +265,7 @@ export async function writeCanonicalMarkdownDocument({
           markdown,
           write,
         },
-        files: write.files,
         changes: write.changes,
-        targetIds: audit.targetIds ?? [],
       };
     },
   });
@@ -340,7 +330,6 @@ export async function deleteCanonicalMarkdownDocument({
         result: {
           relativePath,
         },
-        files: [relativePath],
         changes: [
           {
             path: relativePath,

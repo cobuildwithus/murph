@@ -135,7 +135,6 @@ export async function updateWorkoutUnitPreferences(input: {
 
         return {
           result: null,
-          files: [preferencesDocumentRelativePath],
           changes: [
             {
               path: preferencesDocumentRelativePath,
@@ -202,7 +201,6 @@ export async function updateWearablePreferences(input: {
 
         return {
           result: null,
-          files: [preferencesDocumentRelativePath],
           changes: [
             {
               path: preferencesDocumentRelativePath,
