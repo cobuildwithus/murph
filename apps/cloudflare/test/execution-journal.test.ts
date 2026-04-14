@@ -212,6 +212,57 @@ describe("persistHostedExecutionCommit", () => {
     expect(consoleError).not.toHaveBeenCalled();
   });
 
+  it("accepts duplicate commits when assistant delivery fingerprints match but effect ids rotate", async () => {
+    process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS = "true";
+    const consoleInfo = vi.spyOn(console, "info").mockImplementation(() => {});
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const bucket = new InMemoryR2Bucket();
+    const baseCommit = createBaseCommit(bucket);
+
+    const first = await persistHostedExecutionCommit({
+      ...baseCommit,
+      payload: {
+        assistantDeliveryEffects: [
+          {
+            effectId: "outbox_original",
+            fingerprint: "fingerprint-stable",
+            kind: "assistant.delivery",
+          },
+        ],
+        bundle: null,
+        result: {
+          eventsHandled: 1,
+          nextWakeAt: null,
+          summary: "ok",
+        },
+      },
+    });
+
+    await expect(
+      persistHostedExecutionCommit({
+        ...baseCommit,
+        payload: {
+          assistantDeliveryEffects: [
+            {
+              effectId: "outbox_regenerated",
+              fingerprint: "fingerprint-stable",
+              kind: "assistant.delivery",
+            },
+          ],
+          bundle: null,
+          result: {
+            eventsHandled: 1,
+            nextWakeAt: null,
+            summary: "ok",
+          },
+        },
+      }),
+    ).resolves.toEqual(first);
+
+    expect(consoleInfo).toHaveBeenCalledTimes(1);
+    expect(consoleError).not.toHaveBeenCalled();
+  });
+
   it("logs sanitized assistant-delivery diagnostics when duplicate commit effects diverge", async () => {
     process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS = "true";
     const consoleInfo = vi.spyOn(console, "info").mockImplementation(() => {});

@@ -355,11 +355,11 @@ function assertEquivalentDuplicateCommit(
   );
   if (
     !sameStructuredJsonValue(
-      sortHostedAssistantDeliveryEffectsSummary(
-        summarizeHostedAssistantDeliveryEffects(existing.assistantDeliveryEffects),
+      sortHostedAssistantDeliveryReplayIdentitySummary(
+        summarizeHostedAssistantDeliveryReplayIdentities(existing.assistantDeliveryEffects),
       ),
-      sortHostedAssistantDeliveryEffectsSummary(
-        summarizeHostedAssistantDeliveryEffects(expectedAssistantDeliveryEffects),
+      sortHostedAssistantDeliveryReplayIdentitySummary(
+        summarizeHostedAssistantDeliveryReplayIdentities(expectedAssistantDeliveryEffects),
       ),
     )
   ) {
@@ -421,19 +421,38 @@ function emitHostedDuplicateCommitMismatchLog(input: {
   const incomingAssistantDeliveriesSorted = sortHostedAssistantDeliveryEffectsSummary(
     incomingAssistantDeliveriesInOrder,
   );
+  const existingAssistantDeliveryReplayIdentitiesSorted =
+    sortHostedAssistantDeliveryReplayIdentitySummary(
+      summarizeHostedAssistantDeliveryReplayIdentities(input.existing.assistantDeliveryEffects),
+    );
+  const incomingAssistantDeliveryReplayIdentitiesSorted =
+    sortHostedAssistantDeliveryReplayIdentitySummary(
+      summarizeHostedAssistantDeliveryReplayIdentities(
+        requireAssistantDeliveryEffects(
+          input.payload.assistantDeliveryEffects,
+          "Hosted execution duplicate commit payload.assistantDeliveryEffects",
+        ),
+      ),
+    );
 
   emitHostedExecutionStructuredLog({
     component: "runner",
     details: {
       existingAssistantDeliveryCount: existingAssistantDeliveriesInOrder.length,
       existingAssistantDeliveriesInOrder,
+      existingAssistantDeliveryReplayIdentitiesSorted,
       existingAssistantDeliveriesSorted,
       existingCommittedAt: input.existing.committedAt,
       existingFinalizedAt: input.existing.finalizedAt,
       incomingAssistantDeliveryCount: incomingAssistantDeliveriesInOrder.length,
       incomingAssistantDeliveriesInOrder,
+      incomingAssistantDeliveryReplayIdentitiesSorted,
       incomingAssistantDeliveriesSorted,
       mismatch: input.mismatch,
+      sortedAssistantDeliveryReplayIdentitiesMatch: sameStructuredJsonValue(
+        existingAssistantDeliveryReplayIdentitiesSorted,
+        incomingAssistantDeliveryReplayIdentitiesSorted,
+      ),
       sortedAssistantDeliveriesMatch: sameStructuredJsonValue(
         existingAssistantDeliveriesSorted,
         incomingAssistantDeliveriesSorted,
@@ -458,6 +477,18 @@ function summarizeHostedAssistantDeliveryEffects(
   }));
 }
 
+function summarizeHostedAssistantDeliveryReplayIdentities(
+  effects: readonly HostedAssistantDeliveryEffect[],
+): {
+  fingerprint: string;
+  kind: HostedAssistantDeliveryEffect["kind"];
+}[] {
+  return effects.map((effect) => ({
+    fingerprint: effect.fingerprint,
+    kind: effect.kind,
+  }));
+}
+
 function sortHostedAssistantDeliveryEffectsSummary(input: readonly {
   effectId: string;
   fingerprint: string;
@@ -472,6 +503,23 @@ function sortHostedAssistantDeliveryEffectsSummary(input: readonly {
     }
 
     return left.fingerprint.localeCompare(right.fingerprint);
+  });
+}
+
+function sortHostedAssistantDeliveryReplayIdentitySummary(input: readonly {
+  fingerprint: string;
+  kind: HostedAssistantDeliveryEffect["kind"];
+}[]): {
+  fingerprint: string;
+  kind: HostedAssistantDeliveryEffect["kind"];
+}[] {
+  return [...input].sort((left, right) => {
+    const fingerprintOrder = left.fingerprint.localeCompare(right.fingerprint);
+    if (fingerprintOrder !== 0) {
+      return fingerprintOrder;
+    }
+
+    return left.kind.localeCompare(right.kind);
   });
 }
 
