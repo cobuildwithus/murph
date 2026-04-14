@@ -1,10 +1,11 @@
 # Completion Workflow
 
-Last verified: 2026-04-09
+Last verified: 2026-04-14
 
 This workflow applies to repo code/docs/test/config changes after implementation is materially complete.
 Use `agent-docs/operations/agent-workflow-routing.md` to classify the task, choose the commit path, and decide whether ledger or plan mechanics apply.
 Use `agent-docs/operations/verification-and-runtime.md` to choose the truthful verification command set.
+When the routed task class requires audit passes such as `coverage-write` or `task-finish-review`, treat them as mandatory completion steps before handoff, not optional close-out checks after code, tests, or commit.
 
 ## Sequence
 
@@ -12,7 +13,7 @@ Use `agent-docs/operations/verification-and-runtime.md` to choose the truthful v
    During local iteration, prefer the narrowest truthful verification loop for the task. In practice that is usually `pnpm test:diff <path ...>` for package or app work, the low-risk `pnpm typecheck` fast path for tiny repo-internal workflow/tooling changes, or `pnpm verify:acceptance` when the task already clearly needs the full lane.
 2. Run a scope and shape check before polish: confirm the diff is still proportional to the task, new abstractions are immediately justified, any new persisted state is explicitly classified and versioned, and any architecture/API/trust-boundary change is documented or split into an explicit plan.
 3. If the change sprawled, duplicated existing patterns, or introduced speculative structure, cut it back before continuing.
-4. Decide the audit path:
+4. Decide the audit path required by the routed task class:
    - docs/process-only work normally skips audit subagents unless the user explicitly asks for them
    - the tiny repo-internal fast path below replaces the final-review audit subagent with an explicit local final review
    - repo code/test/config changes whose verification lane includes owner-level coverage or truthful `pnpm test:diff <path ...>` coverage require the dedicated `coverage-write` pass
@@ -27,7 +28,7 @@ Use `agent-docs/operations/verification-and-runtime.md` to choose the truthful v
 11. Treat that final review as the last audit of remaining coverage and proof gaps too. If it finds meaningful missing tests or boundary-level verification, add the smallest high-impact proof before handoff instead of creating another default coverage pass.
 12. Resolve high-severity findings before final handoff and re-run affected required checks after any post-review fixes.
 13. Do not automatically spawn another workflow audit subagent after the first final review. One extra final-review rerun is allowed only when the first review forced a large or high-risk follow-up diff; otherwise finish locally after the post-fix checks.
-14. Close any active execution plan and use the commit path chosen by the routing doc and `AGENTS.md` before handoff.
+14. Close any active execution plan and use the commit path chosen by the routing doc and `AGENTS.md` before handoff. Do not treat the commit as a substitute for any still-required audit pass.
 15. Final handoff must report required-check results plus any direct scenario evidence. Green required checks remain the default completion bar; if a required check failed for a credibly unrelated pre-existing reason, handoff must name the failing command, failing target, and why the current diff did not cause it.
 
 ## When To Add Simplify
