@@ -22,7 +22,13 @@ import { EmailIcon } from "./email-icon";
 import { HomepageInlineAuthButton } from "./homepage-inline-auth-button";
 import { completeHomepagePrivyAuth } from "./homepage-privy-auth";
 
-export function HomepageEmailAuthButton() {
+export function HomepageEmailAuthButton({
+  isActive = false,
+  onActivate,
+}: {
+  isActive?: boolean;
+  onActivate?: () => void;
+}) {
   const { createWallet } = useCreateWallet();
   const { loginWithCode, sendCode, state } = useLoginWithEmail();
   const { ready } = usePrivy();
@@ -30,7 +36,6 @@ export function HomepageEmailAuthButton() {
   const [code, setCode] = useState("");
   const [emailAddress, setEmailAddress] = useState("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [expanded, setExpanded] = useState(false);
   const [pendingEmailAddress, setPendingEmailAddress] = useState<string | null>(
     null,
   );
@@ -47,7 +52,7 @@ export function HomepageEmailAuthButton() {
   const showCodeEntry = pendingEmailAddress !== null;
 
   function handleOpen() {
-    setExpanded(true);
+    onActivate?.();
     setErrorMessage(null);
   }
 
@@ -145,7 +150,7 @@ export function HomepageEmailAuthButton() {
   return (
     <>
       <HomepageInlineAuthButton
-        active={expanded}
+        active={isActive}
         disabled={!ready || loading}
         className="order-2"
         icon={<EmailIcon className="h-5 w-5" />}
@@ -154,7 +159,7 @@ export function HomepageEmailAuthButton() {
         Email
       </HomepageInlineAuthButton>
 
-      {expanded ? (
+      {isActive ? (
         <div className="order-4 space-y-3 sm:col-span-2">
           {showCodeEntry ? (
             <HostedVerificationCodeStep
@@ -184,13 +189,15 @@ export function HomepageEmailAuthButton() {
             <form className="space-y-3" onSubmit={handleSendCode}>
               <Input
                 id="homepage-email-address"
-                autoComplete="email"
+                autoComplete="off"
+                autoFocus
+                data-bwignore="true"
                 inputMode="email"
                 placeholder="you@example.com"
                 ref={emailInputRef}
                 value={emailAddress}
                 onChange={(event) => setEmailAddress(event.currentTarget.value)}
-                className="h-14 w-full rounded-2xl border-stone-200 bg-white px-5 text-base shadow-[0_1px_0_rgba(38,38,38,0.04)] placeholder:text-stone-400 md:text-base"
+                className="border-stone-200 bg-white px-4 text-base md:text-sm"
               />
               <Button
                 type="submit"

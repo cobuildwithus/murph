@@ -15,7 +15,13 @@ import { HomepageInlineAuthButton } from "./homepage-inline-auth-button";
 import { completeHomepagePrivyAuth } from "./homepage-privy-auth";
 import { TelegramIcon } from "./telegram-icon";
 
-export function HomepageTelegramAuthButton() {
+export function HomepageTelegramAuthButton({
+  isActive = false,
+  onActivate,
+}: {
+  isActive?: boolean;
+  onActivate?: () => void;
+}) {
   const { createWallet } = useCreateWallet();
   const { login, state } = useLoginWithTelegram();
   const { ready } = usePrivy();
@@ -26,6 +32,7 @@ export function HomepageTelegramAuthButton() {
   const loading = state.status === "loading" || redirectPending;
 
   async function handleClick() {
+    onActivate?.();
     setErrorMessage(null);
     setRedirectPending(true);
 
@@ -48,15 +55,16 @@ export function HomepageTelegramAuthButton() {
   return (
     <>
       <HomepageInlineAuthButton
+        active={isActive}
         disabled={!ready || loading}
-        className="order-1 border-[#229ED9] bg-[#229ED9] text-white hover:bg-[#1d8dc4] hover:text-white"
+        className="order-1"
         icon={<TelegramIcon className="h-5 w-5" />}
         onClick={handleClick}
       >
         {loading ? "Connecting..." : "Telegram"}
       </HomepageInlineAuthButton>
 
-      {errorMessage ? (
+      {isActive && errorMessage ? (
         <Alert variant="destructive" className="order-3 sm:col-span-2">
           <AlertTitle>Unable to continue</AlertTitle>
           <AlertDescription>{errorMessage}</AlertDescription>

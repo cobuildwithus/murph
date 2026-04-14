@@ -1,4 +1,4 @@
-import { act, createElement } from "react";
+import { act, createElement, useState } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import { renderClientComponent } from "./render-client-component";
@@ -55,9 +55,20 @@ afterEach(async () => {
   }
 });
 
+function HomepageTelegramAuthButtonHarness() {
+  const [active, setActive] = useState(false);
+
+  return (
+    <HomepageTelegramAuthButton
+      isActive={active}
+      onActivate={() => setActive(true)}
+    />
+  );
+}
+
 test("HomepageTelegramAuthButton logs in with Telegram and redirects through the shared homepage completion flow", async () => {
   const { assign, button, cleanup } = await renderClientComponent(
-    createElement(HomepageTelegramAuthButton),
+    createElement(HomepageTelegramAuthButtonHarness),
   );
   cleanupRender = cleanup;
 
@@ -80,7 +91,7 @@ test("HomepageTelegramAuthButton keeps the CTA disabled until Privy is ready", a
   });
 
   const { button, cleanup } = await renderClientComponent(
-    createElement(HomepageTelegramAuthButton),
+    createElement(HomepageTelegramAuthButtonHarness),
   );
   cleanupRender = cleanup;
 
@@ -91,7 +102,7 @@ test("HomepageTelegramAuthButton surfaces Telegram login failures and clears the
   mocks.login.mockRejectedValueOnce(new Error("Telegram popup closed"));
 
   const { button, cleanup, container } = await renderClientComponent(
-    createElement(HomepageTelegramAuthButton),
+    createElement(HomepageTelegramAuthButtonHarness),
   );
   cleanupRender = cleanup;
 
@@ -110,7 +121,7 @@ test("HomepageTelegramAuthButton surfaces shared completion failures instead of 
   );
 
   const { assign, button, cleanup, container } = await renderClientComponent(
-    createElement(HomepageTelegramAuthButton),
+    createElement(HomepageTelegramAuthButtonHarness),
   );
   cleanupRender = cleanup;
 
