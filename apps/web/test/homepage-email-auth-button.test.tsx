@@ -1,4 +1,4 @@
-import { act, createElement } from "react";
+import { act, createElement, useState } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import { renderClientComponent } from "./render-client-component";
@@ -58,9 +58,20 @@ afterEach(async () => {
   }
 });
 
+function HomepageEmailAuthButtonHarness() {
+  const [active, setActive] = useState(false);
+
+  return (
+    <HomepageEmailAuthButton
+      isActive={active}
+      onActivate={() => setActive(true)}
+    />
+  );
+}
+
 test("HomepageEmailAuthButton expands, sends a code, verifies it, and redirects through the shared homepage completion flow", async () => {
   const { assign, button, cleanup, container, window } = await renderClientComponent(
-    createElement(HomepageEmailAuthButton),
+    createElement(HomepageEmailAuthButtonHarness),
   );
   cleanupRender = cleanup;
 
@@ -121,7 +132,7 @@ test("HomepageEmailAuthButton expands, sends a code, verifies it, and redirects 
 
 test("HomepageEmailAuthButton validates the email address before sending a code", async () => {
   const { button, cleanup, container, window } = await renderClientComponent(
-    createElement(HomepageEmailAuthButton),
+    createElement(HomepageEmailAuthButtonHarness),
   );
   cleanupRender = cleanup;
 
@@ -151,7 +162,7 @@ test("HomepageEmailAuthButton surfaces email verification failures and clears th
   mocks.loginWithCode.mockRejectedValueOnce(new Error("Invalid code"));
 
   const { button, cleanup, container, window } = await renderClientComponent(
-    createElement(HomepageEmailAuthButton),
+    createElement(HomepageEmailAuthButtonHarness),
   );
   cleanupRender = cleanup;
 

@@ -120,7 +120,7 @@ test("HomePage keeps the hosted auth entrypoints visible when no hosted session 
   assert.match(markup, /data-homepage-email-auth-button="true"/);
   assert.match(markup, /Hosted phone auth/);
   assert.match(markup, /data-hosted-phone-auth-passive-consent="hidden"/);
-  assert.match(markup, /Other/u);
+  assert.match(markup, /OR/u);
   assert.match(markup, /data-existing-account-sign-in-dialog="true"/);
   assert.match(markup, /By signing up, you agree to our/);
   assert.match(markup, /\/legal\/terms\.pdf/);
@@ -156,7 +156,7 @@ test("HomePage renders the hosted phone auth UI in the shared app shell", async 
   assert.match(markup, /Homepage Email auth/);
   assert.match(markup, /Hosted phone auth/);
   assert.match(markup, /data-hosted-phone-auth-passive-consent="hidden"/);
-  assert.match(markup, /Other/u);
+  assert.match(markup, /OR/u);
   assert.match(markup, /data-existing-account-sign-in-dialog="true"/);
   assert.match(markup, /Existing account sign in/);
   assert.match(markup, /By signing up, you agree to our/);
