@@ -1,8 +1,4 @@
-import { useId } from "react";
-
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { HostedVerificationCodeStep } from "./hosted-verification-code-step";
 
 import type {
   HostedPhoneAuthIntent,
@@ -33,55 +29,31 @@ export function HostedCodeEntryStep({
   onUseDifferentNumber: () => void;
   onVerifyCode: () => void;
 }) {
-  const codeInputId = useId();
-
   return (
-    <>
-      <div className="space-y-3">
-        <div className="flex items-baseline justify-between">
-          <Label htmlFor={codeInputId}>Verification code</Label>
-          <Button
-            type="button"
-            onClick={onResendCode}
-            disabled={disabled}
-            variant="link"
-            size="xs"
-            className="h-auto p-0 text-xs text-stone-500"
-          >
-            {pendingAction === "send-code" ? "Sending..." : "Resend code"}
-          </Button>
-        </div>
-        <Input
-          id={codeInputId}
-          autoFocus
-          autoComplete="one-time-code"
-          inputMode="numeric"
-          placeholder="123456"
-          value={code}
-          onChange={(event) => onCodeChange(event.currentTarget.value)}
-          className="h-14 px-4 text-lg md:text-base"
-        />
-        <p className="text-sm text-stone-500">
-          We texted the latest {intent === "signin" ? "sign-in code" : "code"} to {verificationPhoneNumberHint}.
-        </p>
-      </div>
-      <div className="flex flex-wrap gap-3">
-        <Button type="button" onClick={onVerifyCode} disabled={disabled} size="lg" className="w-full">
-          {pendingAction === "verify-code"
-            ? intent === "signin"
-              ? "Signing in..."
-              : "Finishing setup..."
-            : intent === "signin"
-              ? "Sign in"
-              : "Verify phone"}
-        </Button>
+    <HostedVerificationCodeStep
+      code={code}
+      description={`We texted the latest ${
+        intent === "signin" ? "sign-in code" : "code"
+      } to ${verificationPhoneNumberHint}.`}
+      disabled={disabled}
+      pendingAction={pendingAction === "send-code" || pendingAction === "verify-code"
+        ? pendingAction
+        : null}
+      primaryActionLabel={intent === "signin" ? "Sign in" : "Verify phone"}
+      primaryActionPendingLabel={
+        intent === "signin" ? "Signing in..." : "Finishing setup..."
+      }
+      secondaryAction={
         <HostedUseDifferentNumberButton
           disabled={disabled}
           pendingAction={pendingAction}
           size={secondaryActionSize}
           onClick={onUseDifferentNumber}
         />
-      </div>
-    </>
+      }
+      onCodeChange={onCodeChange}
+      onResendCode={onResendCode}
+      onSubmit={onVerifyCode}
+    />
   );
 }

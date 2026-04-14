@@ -72,6 +72,7 @@ export function HostedPhoneEntryStep({
   phoneNumber,
   sendCodeDisabled,
   selectedPhoneCountry,
+  showPassiveConsentNotice = true,
   onPhoneCountryChange,
   onPhoneNumberChange,
   onSubmitPhoneEntry,
@@ -84,6 +85,7 @@ export function HostedPhoneEntryStep({
   phoneNumber: string;
   sendCodeDisabled: boolean;
   selectedPhoneCountry: HostedPhoneCountryOption;
+  showPassiveConsentNotice?: boolean;
   onPhoneCountryChange: (code: string) => void;
   onPhoneNumberChange: (value: string) => void;
   onSubmitPhoneEntry: (event: FormEvent<HTMLFormElement>) => void;
@@ -154,7 +156,9 @@ export function HostedPhoneEntryStep({
             : "Text me a code"}
         </Button>
       </div>
-      {intent === "signup" ? <HostedPassiveConsentNotice /> : null}
+      {intent === "signup" && showPassiveConsentNotice ? (
+        <HostedPassiveConsentNotice />
+      ) : null}
     </form>
   );
 }

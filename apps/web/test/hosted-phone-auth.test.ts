@@ -58,6 +58,19 @@ describe("HostedPhoneAuth", () => {
     assert.doesNotMatch(markup, /Defaulting to United States/);
   });
 
+  it("can hide the passive consent notice for homepage layouts that render their own copy", async () => {
+    const { HostedPhoneAuth } = await import("@/src/components/hosted-onboarding/hosted-phone-auth");
+
+    const markup = renderToStaticMarkup(
+      React.createElement(HostedPhoneAuth, {
+        showPassiveConsentNotice: false,
+      }),
+    );
+
+    assert.match(markup, /Text me a code/);
+    assert.doesNotMatch(markup, /By signing up, you agree to our/);
+  });
+
   it("uses unique phone input ids for separate public auth instances", async () => {
     const { HostedPhoneAuth } = await import("@/src/components/hosted-onboarding/hosted-phone-auth");
 

@@ -12,6 +12,7 @@ interface HostedPhoneAuthProps {
   intent?: HostedPhoneAuthIntent;
   onCompleted?: (payload: HostedPrivyCompletionPayload) => Promise<void> | void;
   onSignOut?: () => Promise<void> | void;
+  showPassiveConsentNotice?: boolean;
 }
 type HostedPhoneAuthIntent = "signup" | "signin";
 
@@ -19,6 +20,7 @@ export function HostedPhoneAuth({
   intent = "signup",
   onCompleted,
   onSignOut,
+  showPassiveConsentNotice = true,
 }: HostedPhoneAuthProps) {
   const controller = useHostedPhoneAuthController({
     intent,
@@ -40,7 +42,10 @@ export function HostedPhoneAuth({
       onContinue={controller.handleContinueAuthenticated}
       onUseDifferentNumber={controller.handleLogout}
     >
-      <HostedPhoneAuthFlow {...controller.sharedFlowProps} />
+      <HostedPhoneAuthFlow
+        {...controller.sharedFlowProps}
+        showPassiveConsentNotice={showPassiveConsentNotice}
+      />
     </HostedPhoneAuthScaffold>
   );
 }
