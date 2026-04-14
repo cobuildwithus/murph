@@ -405,7 +405,7 @@ test.sequential(
 )
 
 test.sequential(
-  'assistant commands use the saved default vault when --vault is omitted and still allow explicit overrides',
+  'raw vault-cli assistant commands use the saved default vault when --vault is omitted and still allow explicit overrides',
   async () => {
     const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-default-vault-'))
     const homeRoot = path.join(parent, 'home')

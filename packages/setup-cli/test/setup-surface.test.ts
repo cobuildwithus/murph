@@ -133,10 +133,11 @@ test('detectSetupProgramName prefers the shim program name when set to murph', (
   assert.equal(detectSetupProgramName('/tmp/anything-else', undefined), 'vault-cli')
 })
 
-test('isSetupInvocation treats onboard and murph root help as setup entrypoints', () => {
+test('isSetupInvocation treats murph onboarding and active-vault selection as setup entrypoints', () => {
   assert.equal(isSetupInvocation(['onboard']), true)
   assert.equal(isSetupInvocation([], 'murph'), true)
   assert.equal(isSetupInvocation(['help'], 'murph'), true)
+  assert.equal(isSetupInvocation(['use', './vault'], 'murph'), true)
   assert.equal(isSetupInvocation(['status'], 'murph'), false)
   assert.equal(isSetupInvocation([], 'vault-cli'), false)
 })

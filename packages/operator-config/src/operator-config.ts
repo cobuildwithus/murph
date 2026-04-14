@@ -49,6 +49,7 @@ export {
 export {
   TOP_LEVEL_COMMANDS_REQUIRING_VAULT,
   applyDefaultVaultToArgs,
+  commandNeedsVaultForExecution,
   hasExplicitVaultOption,
 } from './operator-config/cli-vault-defaults.js'
 export {
@@ -325,6 +326,25 @@ export async function resolveDefaultVault(
   }
 
   return null
+}
+
+export async function resolveConfiguredDefaultVault(
+  homeDirectory = resolveOperatorHomeDirectory(),
+): Promise<string | null> {
+  const config = await readOperatorConfig(homeDirectory)
+  if (!config?.defaultVault) {
+    return null
+  }
+
+  const configuredDefaultVault = expandConfiguredVaultPath(
+    config.defaultVault,
+    homeDirectory,
+  )
+  if (!(await pathExists(configuredDefaultVault))) {
+    return null
+  }
+
+  return configuredDefaultVault
 }
 export async function resolveAssistantOperatorDefaults(
   homeDirectory = resolveOperatorHomeDirectory(),

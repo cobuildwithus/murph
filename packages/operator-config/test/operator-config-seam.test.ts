@@ -18,6 +18,7 @@ import {
   resolveAssistantOperatorDefaults,
   resolveAssistantProviderDefaults,
   resolveAssistantSelfDeliveryTarget,
+  resolveConfiguredDefaultVault,
   resolveDefaultVault,
   resolveHostedAssistantConfig,
   resolveOperatorConfigPath,
@@ -221,15 +222,18 @@ test('operator config resolves default vaults and injects them only for eligible
 
   await saveDefaultVaultConfig(configuredVault, homeDirectory)
   assert.equal(await resolveDefaultVault(homeDirectory, {}), configuredVault)
+  assert.equal(await resolveConfiguredDefaultVault(homeDirectory), configuredVault)
 
   await rm(configuredVault, { force: true, recursive: true })
   assert.equal(
     await realpath((await resolveDefaultVault(homeDirectory, {})) ?? ''),
     await realpath(cwdVault),
   )
+  assert.equal(await resolveConfiguredDefaultVault(homeDirectory), null)
 
   await rm(cwdVault, { force: true, recursive: true })
   assert.equal(await resolveDefaultVault(homeDirectory, {}), null)
+  assert.equal(await resolveConfiguredDefaultVault(homeDirectory), null)
 
   assert.equal(hasExplicitVaultOption(['assistant', '--vault', '/tmp/vault']), true)
   assert.equal(hasExplicitVaultOption(['assistant', '--vault=/tmp/vault']), true)

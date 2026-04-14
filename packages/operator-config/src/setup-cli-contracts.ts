@@ -161,6 +161,12 @@ export const setupScheduledUpdateSchema = z.object({
   status: setupStepStatusSchema,
 })
 
+export const setupVaultSelectionResultSchema = z.object({
+  configPath: pathSchema,
+  status: z.enum(['completed', 'reused']),
+  vault: pathSchema,
+})
+
 export const setupCommandOptionsSchema = z.object({
   vault: pathSchema
     .default('./vault')
@@ -276,6 +282,9 @@ export type SetupConfiguredAssistant = z.infer<
   typeof setupConfiguredAssistantSchema
 >
 export type SetupScheduledUpdate = z.infer<typeof setupScheduledUpdateSchema>
+export type SetupVaultSelectionResult = z.infer<
+  typeof setupVaultSelectionResultSchema
+>
 export type SetupCommandOptions = z.infer<typeof setupCommandOptionsSchema>
 export type SetupStepKind = z.infer<typeof setupStepKindSchema>
 export type SetupStepStatus = z.infer<typeof setupStepStatusSchema>

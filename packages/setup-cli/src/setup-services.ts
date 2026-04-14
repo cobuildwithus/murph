@@ -414,7 +414,7 @@ export function isSetupInvocation(
     return false
   }
 
-  return commandToken === null || commandToken === 'help'
+  return commandToken === null || commandToken === 'help' || commandToken === 'use'
 }
 
 async function ensureDirectoryStep(input: {

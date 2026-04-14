@@ -2,6 +2,7 @@ import path from 'node:path'
 import type { Cli } from 'incur'
 
 import { formatStructuredErrorMessage } from '@murphai/operator-config/text/shared'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
 export interface MurphCliRunOptions {
   argv0?: string
@@ -41,7 +42,11 @@ export async function runMurphCliAction(
 
   const {
     applyDefaultVaultToArgs,
+    commandNeedsVaultForExecution,
     expandConfiguredVaultPath,
+    hasExplicitVaultOption,
+    resolveConfiguredDefaultVault,
+    resolveEffectiveTopLevelToken,
     resolveDefaultVault,
     resolveOperatorHomeDirectory,
   } = operatorConfigModule
@@ -57,6 +62,7 @@ export async function runMurphCliAction(
   const { SETUP_RUNTIME_ENV_NOTICE } = setupRuntimeEnvModule
 
   const programName = detectSetupProgramName(options.argv0 ?? process.argv[1])
+  const topLevelToken = resolveEffectiveTopLevelToken(argv)
   const cli = vaultCliModule.createVaultCliWithOptions({
     commandName: programName,
   })
@@ -81,7 +87,9 @@ export async function runMurphCliAction(
     }
 
     const launchVault =
-      (await resolveDefaultVault(homeDirectory)) ??
+      (programName === 'murph' && topLevelToken !== 'init'
+        ? await resolveConfiguredDefaultVault(homeDirectory)
+        : await resolveDefaultVault(homeDirectory)) ??
       expandConfiguredVaultPath(setupContext.result.vault, homeDirectory)
 
     const readyWearables = listSetupReadyWearables(setupContext.result)
@@ -134,8 +142,22 @@ export async function runMurphCliAction(
     return
   }
 
-  const defaultVault = await resolveDefaultVault(homeDirectory)
-  await cli.serve(applyDefaultVaultToArgs(argv, defaultVault), serveOptions)
+  const defaultVault =
+    programName === 'murph' && topLevelToken !== 'init'
+      ? await resolveConfiguredDefaultVault(homeDirectory)
+      : await resolveDefaultVault(homeDirectory)
+  await cli.serve(
+    prepareProgramArgsForExecution({
+      applyDefaultVaultToArgs,
+      argv,
+      commandNeedsVaultForExecution,
+      defaultVault,
+      hasExplicitVaultOption,
+      programName,
+      resolveEffectiveTopLevelToken: () => topLevelToken,
+    }),
+    serveOptions,
+  )
 }
 
 export function formatMurphCliError(error: unknown): string {
@@ -149,6 +171,49 @@ export function createCliServeOptions(
     env: process.env,
     ...(exit ? { exit: (code: number) => exit(code) } : {}),
   }
+}
+
+function prepareProgramArgsForExecution(input: {
+  applyDefaultVaultToArgs: (args: readonly string[], vault: string | null) => string[]
+  argv: string[]
+  commandNeedsVaultForExecution: (args: readonly string[]) => boolean
+  defaultVault: string | null
+  hasExplicitVaultOption: (args: readonly string[]) => boolean
+  programName: string
+  resolveEffectiveTopLevelToken: (args: readonly string[]) => string | null
+}): string[] {
+  if (input.programName !== 'murph') {
+    return input.applyDefaultVaultToArgs(input.argv, input.defaultVault)
+  }
+
+  const explicitVaultRequested = input.hasExplicitVaultOption(input.argv)
+  const commandNeedsVault = input.commandNeedsVaultForExecution(input.argv)
+  const commandAllowsExplicitVaultOverride =
+    input.resolveEffectiveTopLevelToken(input.argv) === 'init'
+
+  if (
+    explicitVaultRequested &&
+    commandNeedsVault &&
+    !commandAllowsExplicitVaultOverride
+  ) {
+    throw new VaultCliError(
+      'invalid_option',
+      '`murph` uses one active vault. Omit `--vault` and use `murph use <path>` or `murph onboard --vault <path>` to change it.',
+    )
+  }
+
+  if (
+    input.defaultVault === null &&
+    commandNeedsVault &&
+    !commandAllowsExplicitVaultOverride
+  ) {
+    throw new VaultCliError(
+      'invalid_option',
+      'No active Murph vault is configured. Run `murph onboard --vault ./vault` to create one, or `murph use <path>` to select an existing vault.',
+    )
+  }
+
+  return input.applyDefaultVaultToArgs(input.argv, input.defaultVault)
 }
 
 function formatErrorMessage(error: unknown): string {
