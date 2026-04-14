@@ -41,6 +41,12 @@ const PRIVY_REQUIRED_CONNECT_SOURCES = [
 const PRIVY_REQUIRED_SCRIPT_SOURCES = [
   "https://auth.privy.io",
 ] as const;
+const TELEGRAM_REQUIRED_SCRIPT_SOURCES = [
+  "https://telegram.org",
+] as const;
+const TELEGRAM_REQUIRED_FRAME_SOURCES = [
+  "https://oauth.telegram.org",
+] as const;
 const TURNSTILE_SOURCES = ["https://challenges.cloudflare.com"] as const;
 
 const appDir = path.dirname(fileURLToPath(import.meta.url));
@@ -111,7 +117,11 @@ export function buildHostedWebContentSecurityPolicy(
     ...PRIVY_REQUIRED_CHILD_FRAME_SOURCES,
     ...privyOrigins,
   ]);
-  const frameSources = uniqueSources([...privyFrameSources, ...TURNSTILE_SOURCES]);
+  const frameSources = uniqueSources([
+    ...privyFrameSources,
+    ...TELEGRAM_REQUIRED_FRAME_SOURCES,
+    ...TURNSTILE_SOURCES,
+  ]);
   const connectSources = uniqueSources([
     "'self'",
     ...PRIVY_REQUIRED_CONNECT_SOURCES,
@@ -122,6 +132,7 @@ export function buildHostedWebContentSecurityPolicy(
     "'self'",
     "'unsafe-inline'",
     ...PRIVY_REQUIRED_SCRIPT_SOURCES,
+    ...TELEGRAM_REQUIRED_SCRIPT_SOURCES,
     ...TURNSTILE_SOURCES,
     ...(isDevelopment ? ["'unsafe-eval'"] : []),
   ]);
