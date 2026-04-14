@@ -30,8 +30,10 @@ describe('buildAssistantSystemPrompt', () => {
     const prompt = buildPrompt('bound-tools')
 
     expect(prompt).toContain('call `vault.cli.run` with `route estimate ...`')
+    expect(prompt).toContain('describes a route-bearing trip or workout between recognizable places')
     expect(prompt).toContain('distance, duration, traffic time, or approximate elevation')
     expect(prompt).toContain('`walking`, `cycling`, `driving`, or `driving-traffic`')
+    expect(prompt).toContain('even if the user did not explicitly ask for them')
     expect(prompt).toContain('prefer more specific place text or coordinates')
     expect(prompt).toContain('provider may still return a broader display label')
   })
@@ -40,7 +42,9 @@ describe('buildAssistantSystemPrompt', () => {
     const prompt = buildPrompt('direct-cli')
 
     expect(prompt).toContain('use `vault-cli route estimate ...` and choose the matching profile')
+    expect(prompt).toContain('describes a route-bearing trip or workout between recognizable places')
     expect(prompt).toContain('`walking`, `cycling`, `driving`, or `driving-traffic`')
+    expect(prompt).toContain('even if the user did not explicitly ask for them')
     expect(prompt).toContain('prefer more specific place text or coordinates')
     expect(prompt).toContain('provider may still return a broader display label')
   })
@@ -49,7 +53,9 @@ describe('buildAssistantSystemPrompt', () => {
     const prompt = buildPrompt('none')
 
     expect(prompt).toContain('prefer `vault-cli route estimate ...`')
+    expect(prompt).toContain('route-bearing trip or workout')
     expect(prompt).toContain('`walking`, `cycling`, `driving`, or `driving-traffic`')
+    expect(prompt).toContain('even if the user did not explicitly ask for them')
     expect(prompt).toContain('prefer more specific place text or coordinates')
     expect(prompt).toContain('provider may still return a broader display label')
   })
@@ -65,6 +71,18 @@ describe('buildAssistantSystemPrompt', () => {
       'use available web lookup to recover likely ingredients, calories, or serving amounts before writing',
     )
     expect(prompt).toContain('Mark uncertainty plainly instead of inventing exact values.')
+  })
+
+  it('tells the assistant to recover detailed workout structure from freeform activity logs', () => {
+    const prompt = buildPrompt('bound-tools')
+
+    expect(prompt).toContain(
+      'try hard to capture the full recoverable structure for future reference, including workout type, duration, route, distance, pace, elevation, exercises, reps, sets, intervals, and segment-level details',
+    )
+    expect(prompt).toContain(
+      'treat that as implicit permission to recover estimated distance, duration, or elevation for logging when enough detail is present',
+    )
+    expect(prompt).toContain('even if the user did not explicitly ask for distance')
   })
 
   it('adds scheduled automation execution context for automation cron turns', () => {
