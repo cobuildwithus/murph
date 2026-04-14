@@ -49,7 +49,7 @@ export default function RootLayout(input: { children: React.ReactNode }) {
                 <div className="flex flex-wrap items-center gap-3">
                   <a
                     href={`mailto:${SUPPORT_EMAIL}`}
-                    className="inline-flex items-center rounded-full border border-olive/15 bg-white/80 px-4 py-2 font-medium text-stone-700 transition-colors hover:border-olive/35 hover:text-stone-900"
+                    className="inline-flex items-center text-[11px] font-medium uppercase tracking-[0.16em] text-stone-600 transition-colors hover:text-stone-800"
                   >
                     Contact support
                   </a>

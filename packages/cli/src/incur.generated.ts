@@ -47,7 +47,7 @@ declare module 'incur' {
       'doctor': { args: {}; options: { vault: string; requestId?: string; repair: boolean } }
       'document delete': { args: { id: string }; options: { vault: string; requestId?: string } }
       'document edit': { args: { id: string }; options: { vault: string; requestId?: string; input?: string; set?: string[]; clear?: string[]; dayKeyPolicy?: "keep" | "recompute" } }
-      'document import': { args: { file: string }; options: { vault: string; requestId?: string; title?: string; occurredAt?: string; note?: string; source?: "manual" | "import" | "device" | "derived" } }
+      'document import': { args: { file: string }; options: { vault: string; requestId?: string; title?: string; occurredAt?: string | string; note?: string; source?: "manual" | "import" | "device" | "derived" } }
       'document list': { args: {}; options: { vault: string; requestId?: string; from?: string; to?: string } }
       'document manifest': { args: { id: string }; options: { vault: string; requestId?: string } }
       'document show': { args: { id: string }; options: { vault: string; requestId?: string } }
@@ -61,7 +61,7 @@ declare module 'incur' {
       'experiment create': { args: { slug: string }; options: { vault: string; requestId?: string; title?: string; hypothesis?: string; startedOn?: string; status?: "planned" | "active" | "paused" | "completed" | "abandoned" } }
       'experiment list': { args: {}; options: { vault: string; requestId?: string; status?: "planned" | "active" | "paused" | "completed" | "abandoned"; limit: number } }
       'experiment show': { args: { id: string }; options: { vault: string; requestId?: string } }
-      'experiment stop': { args: { id: string }; options: { vault: string; requestId?: string; occurredAt?: string; note?: string } }
+      'experiment stop': { args: { id: string }; options: { vault: string; requestId?: string; occurredAt?: string | string; note?: string } }
       'experiment update': { args: {}; options: { vault: string; requestId?: string; input: string } }
       'export pack create': { args: {}; options: { vault: string; requestId?: string; from: string; to: string; experiment?: string; out?: string } }
       'export pack list': { args: {}; options: { vault: string; requestId?: string; from?: string; to?: string; experiment?: string; limit: number } }
@@ -116,13 +116,13 @@ declare module 'incur' {
       'inbox status': { args: {}; options: { vault: string; requestId?: string } }
       'inbox stop': { args: {}; options: { vault: string; requestId?: string } }
       'init': { args: {}; options: { vault: string; requestId?: string; timezone?: string } }
-      'intake import': { args: { file: string }; options: { vault: string; requestId?: string; title?: string; occurredAt?: string; importedAt?: string; source?: "import" | "manual" | "derived" } }
+      'intake import': { args: { file: string }; options: { vault: string; requestId?: string; title?: string; occurredAt?: string | string; importedAt?: string; source?: "import" | "manual" | "derived" } }
       'intake list': { args: {}; options: { vault: string; requestId?: string; from?: string; to?: string; limit: number } }
       'intake manifest': { args: { id: string }; options: { vault: string; requestId?: string } }
       'intake project': { args: { id: string }; options: { vault: string; requestId?: string } }
       'intake raw': { args: { id: string }; options: { vault: string; requestId?: string } }
       'intake show': { args: { id: string }; options: { vault: string; requestId?: string } }
-      'intervention add': { args: { text: string }; options: { vault: string; requestId?: string; duration?: number; type?: string; protocolId?: string; occurredAt?: string; source?: "manual" | "import" | "device" | "derived" } }
+      'intervention add': { args: { text: string }; options: { vault: string; requestId?: string; duration?: number; type?: string; protocolId?: string; occurredAt?: string | string; source?: "manual" | "import" | "device" | "derived" } }
       'intervention delete': { args: { id: string }; options: { vault: string; requestId?: string } }
       'intervention edit': { args: { id: string }; options: { vault: string; requestId?: string; input?: string; set?: string[]; clear?: string[]; dayKeyPolicy?: "keep" | "recompute" } }
       'journal append': { args: { date: string }; options: { vault: string; requestId?: string; text: string } }
@@ -139,7 +139,7 @@ declare module 'incur' {
       'knowledge show': { args: { slug: string }; options: { vault: string; requestId?: string } }
       'knowledge upsert': { args: {}; options: { vault: string; requestId?: string; body: string; title?: string; slug?: string; pageType?: string; status?: string; clearLibraryLinks?: boolean; relatedSlug?: string[]; librarySlug?: string[]; sourcePath?: string[] } }
       'list': { args: {}; options: { vault: string; requestId?: string; recordType?: string[]; kind?: string; status?: string; stream?: string[]; experiment?: string; from?: string; to?: string; tag?: string[]; limit: number } }
-      'meal add': { args: {}; options: { vault: string; requestId?: string; photo?: string; audio?: string; note?: string; occurredAt?: string; source?: "manual" | "import" | "device" | "derived" } }
+      'meal add': { args: {}; options: { vault: string; requestId?: string; photo?: string; audio?: string; note?: string; occurredAt?: string | string; source?: "manual" | "import" | "device" | "derived" } }
       'meal delete': { args: { id: string }; options: { vault: string; requestId?: string } }
       'meal edit': { args: { id: string }; options: { vault: string; requestId?: string; input?: string; set?: string[]; clear?: string[]; dayKeyPolicy?: "keep" | "recompute" } }
       'meal list': { args: {}; options: { vault: string; requestId?: string; from?: string; to?: string } }
@@ -203,18 +203,18 @@ declare module 'incur' {
       'wearables recovery list': { args: {}; options: { vault: string; requestId?: string; date?: string; from?: string; to?: string; provider?: string[]; limit: number } }
       'wearables sleep list': { args: {}; options: { vault: string; requestId?: string; date?: string; from?: string; to?: string; provider?: string[]; limit: number } }
       'wearables sources list': { args: {}; options: { vault: string; requestId?: string; date?: string; from?: string; to?: string; provider?: string[]; limit: number } }
-      'workout add': { args: { text?: string }; options: { vault: string; requestId?: string; input?: string; duration?: number; type?: string; distanceKm?: number; occurredAt?: string; source?: "manual" | "import" | "device" | "derived"; media?: string[] } }
+      'workout add': { args: { text?: string }; options: { vault: string; requestId?: string; input?: string; duration?: number; type?: string; distanceKm?: number; occurredAt?: string | string; source?: "manual" | "import" | "device" | "derived"; media?: string[] } }
       'workout delete': { args: { id: string }; options: { vault: string; requestId?: string } }
       'workout edit': { args: { id: string }; options: { vault: string; requestId?: string; input?: string; set?: string[]; clear?: string[]; dayKeyPolicy?: "keep" | "recompute" } }
       'workout format list': { args: {}; options: { vault: string; requestId?: string; limit: number } }
-      'workout format log': { args: { name: string }; options: { vault: string; requestId?: string; duration?: number; type?: string; distanceKm?: number; occurredAt?: string; source?: "manual" | "import" | "device" | "derived"; media?: string[] } }
+      'workout format log': { args: { name: string }; options: { vault: string; requestId?: string; duration?: number; type?: string; distanceKm?: number; occurredAt?: string | string; source?: "manual" | "import" | "device" | "derived"; media?: string[] } }
       'workout format save': { args: { name?: string; text?: string }; options: { vault: string; requestId?: string; input?: string; duration?: number; type?: string; distanceKm?: number } }
       'workout format show': { args: { name: string }; options: { vault: string; requestId?: string } }
       'workout import csv': { args: { file: string }; options: { vault: string; requestId?: string; source?: string; delimiter?: string; storeRawOnly?: boolean } }
       'workout import inspect': { args: { file: string }; options: { vault: string; requestId?: string; source?: string; delimiter?: string } }
       'workout list': { args: {}; options: { vault: string; requestId?: string; from?: string; to?: string; limit: number } }
       'workout manifest': { args: { id: string }; options: { vault: string; requestId?: string } }
-      'workout measurement add': { args: {}; options: { vault: string; requestId?: string; input?: string; type?: "weight" | "body_fat_pct" | "waist" | "neck" | "shoulders" | "chest" | "biceps" | "forearms" | "abdomen" | "hips" | "thighs" | "calves"; value?: number; unit?: "lb" | "kg" | "percent" | "cm" | "in"; note?: string; title?: string; occurredAt?: string; source?: "manual" | "import" | "device" | "derived"; media?: string[] } }
+      'workout measurement add': { args: {}; options: { vault: string; requestId?: string; input?: string; type?: "weight" | "body_fat_pct" | "waist" | "neck" | "shoulders" | "chest" | "biceps" | "forearms" | "abdomen" | "hips" | "thighs" | "calves"; value?: number; unit?: "lb" | "kg" | "percent" | "cm" | "in"; note?: string; title?: string; occurredAt?: string | string; source?: "manual" | "import" | "device" | "derived"; media?: string[] } }
       'workout measurement list': { args: {}; options: { vault: string; requestId?: string; from?: string; to?: string; limit: number } }
       'workout measurement manifest': { args: { id: string }; options: { vault: string; requestId?: string } }
       'workout measurement show': { args: { id: string }; options: { vault: string; requestId?: string } }
