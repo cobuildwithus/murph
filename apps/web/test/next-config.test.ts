@@ -210,6 +210,7 @@ test("buildHostedWebContentSecurityPolicy includes Privy, WalletConnect, and hos
 
   assert.match(csp, /default-src 'self'/);
   assert.match(csp, /script-src [^;]*https:\/\/auth\.privy\.io/);
+  assert.match(csp, /script-src [^;]*https:\/\/telegram\.org/);
   assert.match(csp, /script-src [^;]*https:\/\/challenges\.cloudflare\.com/);
   assert.match(csp, /style-src 'self' 'unsafe-inline'/);
   assert.match(csp, /object-src 'none'/);
@@ -217,6 +218,7 @@ test("buildHostedWebContentSecurityPolicy includes Privy, WalletConnect, and hos
   assert.match(csp, /child-src [^;]*https:\/\/auth\.privy\.io/);
   assert.match(csp, /child-src [^;]*https:\/\/privy\.custom\.example\.com/);
   assert.match(csp, /frame-src [^;]*https:\/\/privy\.custom\.example\.com/);
+  assert.match(csp, /frame-src [^;]*https:\/\/oauth\.telegram\.org/);
   assert.match(csp, /frame-src [^;]*https:\/\/verify\.walletconnect\.com/);
   assert.match(csp, /connect-src [^;]*https:\/\/privy\.custom\.example\.com/);
   assert.match(csp, /connect-src [^;]*https:\/\/\*\.rpc\.privy\.systems/);

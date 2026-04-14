@@ -80,6 +80,7 @@ Hosted onboarding extras:
 - `PRIVY_CUSTOM_AUTH_DOMAIN` when Privy uses a custom auth host such as `https://privy.example.com`; `apps/web` uses this to extend the CSP `connect-src` and `frame-src` allowlists for Privy's browser SDK
 - `PRIVY_BASE_DOMAIN` as an optional fallback when the Privy custom host follows the `privy.<base-domain>` pattern
 - When neither `PRIVY_*` value is set, `apps/web` still derives the Privy CSP origin from the canonical hosted public origin (`HOSTED_ONBOARDING_PUBLIC_BASE_URL`, then `HOSTED_WEB_BASE_URL`, then Vercel's production URL), and it also admits the common hosted-web subdomain fallback (`app.<domain>`, `www.<domain>`, or `web.<domain>` -> `privy.<domain>`)
+- Telegram login/linking through Privy also requires the hosted CSP to allow `https://telegram.org` in `script-src` and `https://oauth.telegram.org` in `frame-src`; `apps/web` now bakes those origins into its default CSP
 - `PRIVY_VERIFICATION_KEY`
 - enable Privy email login/linking in the dashboard so `/settings` can verify account email addresses
 - enable Privy identity tokens in the dashboard under `User management > Authentication > Advanced`
