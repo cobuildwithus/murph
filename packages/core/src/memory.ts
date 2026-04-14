@@ -147,14 +147,12 @@ export async function updateMemory(
           result: {
             recordId: next.record.id,
           },
-          files: [memoryDocumentRelativePath],
           changes: [
             {
               path: memoryDocumentRelativePath,
               op: snapshot.exists ? "update" : "create",
             },
           ],
-          targetIds: [next.record.id],
         };
       },
     });

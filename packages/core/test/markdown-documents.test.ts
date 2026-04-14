@@ -151,6 +151,10 @@ describe("markdown document primitives", () => {
         path: "bank/test/renamed.md",
         op: "update",
       },
+      {
+        path: "bank/test/original.md",
+        op: "delete",
+      },
     ]);
     expect(renamed.auditPath).toMatch(/^audit\//u);
   });

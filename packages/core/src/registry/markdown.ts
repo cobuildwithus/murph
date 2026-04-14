@@ -37,8 +37,6 @@ interface ExistingRegistrySelectionOptions<TRecord>
   conflictMessage: string;
 }
 
-type MarkdownRegistryUpsertAuditInput = CanonicalMarkdownDocumentAuditInput;
-
 interface UpsertMarkdownRegistryDocumentInput {
   vaultRoot: string;
   operationType: string;
@@ -47,7 +45,7 @@ interface UpsertMarkdownRegistryDocumentInput {
   previousRelativePath?: string;
   markdown: string;
   created: boolean;
-  audit: MarkdownRegistryUpsertAuditInput;
+  audit: CanonicalMarkdownDocumentAuditInput;
 }
 
 interface DeleteMarkdownRegistryDocumentInput {
@@ -55,7 +53,7 @@ interface DeleteMarkdownRegistryDocumentInput {
   operationType: string;
   summary: string;
   relativePath: string;
-  audit: MarkdownRegistryUpsertAuditInput;
+  audit: CanonicalMarkdownDocumentAuditInput;
 }
 
 interface ResolveMarkdownRegistryUpsertTargetOptions<TRecord> {
@@ -81,7 +79,7 @@ interface WriteMarkdownRegistryRecordOptions<TRecord> {
   recordFromParts: (attributes: FrontmatterObject, relativePath: string, markdown: string) => TRecord;
   operationType: string;
   summary: string;
-  audit: MarkdownRegistryUpsertAuditInput;
+  audit: CanonicalMarkdownDocumentAuditInput;
 }
 
 export async function loadMarkdownRegistryDocuments<TRecord>({
@@ -256,10 +254,6 @@ export async function writeMarkdownRegistryRecord<TRecord>({
     summary,
     audit,
   });
-
-  if (!result.auditPath) {
-    throw new Error("Markdown registry write audit path was not produced.");
-  }
 
   return {
     auditPath: result.auditPath,
