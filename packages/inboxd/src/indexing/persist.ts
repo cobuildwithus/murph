@@ -350,6 +350,12 @@ export async function persistCanonicalInboxCapture({
     operationType: "inbox_capture_persist",
     summary: `Persist inbox capture ${captureId}`,
     occurredAt: prepared.stored.storedAt,
+    audit: {
+      action: "inbox_capture_persist",
+      commandName: "inboxd.persistCanonicalInboxCapture",
+      summary: `Persisted inbox capture ${captureId}.`,
+      targetIds: [captureId, eventId],
+    },
     rawCopies: prepared.rawCopies,
     rawContents: prepared.rawContents,
     jsonlAppends: [
@@ -425,6 +431,12 @@ export async function ensureStoredCaptureCanonicalEvidence(input: {
         operationType: "inbox_capture_canonical_evidence",
         summary: `Ensure canonical evidence for inbox capture ${input.envelope.captureId}`,
         occurredAt: input.envelope.stored.storedAt,
+        audit: {
+          action: "inbox_capture_canonical_evidence",
+          commandName: "inboxd.ensureStoredCaptureCanonicalEvidence",
+          summary: `Ensured canonical inbox evidence for capture ${input.envelope.captureId}.`,
+          targetIds: [input.envelope.captureId, input.envelope.eventId],
+        },
         jsonlAppends: [
           {
             relativePath,

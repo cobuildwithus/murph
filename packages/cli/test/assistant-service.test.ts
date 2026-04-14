@@ -3972,6 +3972,11 @@ test('sendAssistantMessage preserves audited protected deletes', async () => {
     vaultRoot,
     operationType: 'assistant_guard_delete_seed',
     summary: 'Seed protected delete target',
+    audit: {
+      action: 'show',
+      commandName: 'test.assistantGuardDeleteSeed',
+      summary: 'Seeded protected delete target.',
+    },
     textWrites: [
       {
         relativePath: targetRelativePath,
@@ -3985,6 +3990,11 @@ test('sendAssistantMessage preserves audited protected deletes', async () => {
       vaultRoot,
       operationType: 'assistant_guard_delete_test',
       summary: 'Delete protected bank file',
+      audit: {
+        action: 'show',
+        commandName: 'test.assistantGuardDelete',
+        summary: 'Deleted protected bank file in assistant-service test.',
+      },
       deletes: [
         {
           relativePath: targetRelativePath,

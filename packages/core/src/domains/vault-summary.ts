@@ -7,6 +7,7 @@ import {
 import { VAULT_LAYOUT } from "../constants.ts";
 import { stringifyFrontmatterDocument } from "../frontmatter.ts";
 import { stageMarkdownDocumentWrite } from "../markdown-documents.ts";
+import { commitAuditedCanonicalWrite } from "../audited-write.ts";
 import {
   canonicalPathResource,
   dedupeCanonicalResources,
@@ -19,7 +20,6 @@ import {
   normalizeOptionalText,
   readValidatedFrontmatterDocument,
   replaceMarkdownTitle,
-  runLoadedCanonicalWrite,
   validateContract,
 } from "./shared.ts";
 
@@ -101,11 +101,16 @@ export async function updateVaultSummary(
         body: replaceMarkdownTitle(coreDocument.body, nextTitle),
       });
 
-      return runLoadedCanonicalWrite<UpdateVaultSummaryResult>({
+      const result = await commitAuditedCanonicalWrite<UpdateVaultSummaryResult>({
         vaultRoot: input.vaultRoot,
         operationType: "vault_summary_update",
         summary: "Update vault summary",
         occurredAt: updatedAt,
+        audit: {
+          action: "vault_summary_update",
+          commandName: "core.updateVaultSummary",
+          summary: "Updated vault summary.",
+        },
         mutate: async ({ batch }) => {
           await batch.stageTextWrite(
             VAULT_LAYOUT.metadata,
@@ -114,7 +119,7 @@ export async function updateVaultSummary(
               overwrite: true,
             },
           );
-          await stageMarkdownDocumentWrite(
+          const coreWrite = await stageMarkdownDocumentWrite(
             batch,
             {
               relativePath: VAULT_LAYOUT.coreDocument,
@@ -127,15 +132,27 @@ export async function updateVaultSummary(
           );
 
           return {
-            metadataFile: VAULT_LAYOUT.metadata,
-            corePath: VAULT_LAYOUT.coreDocument,
-            title: nextTitle,
-            timezone: nextTimezone,
-            updatedAt,
-            updated: true,
+            result: {
+              metadataFile: VAULT_LAYOUT.metadata,
+              corePath: VAULT_LAYOUT.coreDocument,
+              title: nextTitle,
+              timezone: nextTimezone,
+              updatedAt,
+              updated: true,
+            },
+            files: [VAULT_LAYOUT.metadata, ...coreWrite.files],
+            changes: [
+              {
+                path: VAULT_LAYOUT.metadata,
+                op: "update",
+              },
+              ...coreWrite.changes,
+            ],
           };
         },
       });
+
+      return result.result;
     },
   });
 }

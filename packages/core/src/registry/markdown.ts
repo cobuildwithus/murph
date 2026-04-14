@@ -55,6 +55,7 @@ interface DeleteMarkdownRegistryDocumentInput {
   operationType: string;
   summary: string;
   relativePath: string;
+  audit: MarkdownRegistryUpsertAuditInput;
 }
 
 interface ResolveMarkdownRegistryUpsertTargetOptions<TRecord> {
@@ -205,10 +206,6 @@ export async function upsertMarkdownRegistryDocument({
     audit,
   });
 
-  if (!result.auditPath) {
-    throw new Error("Markdown registry upsert audit path was not produced.");
-  }
-
   return result.auditPath;
 }
 
@@ -217,6 +214,7 @@ export async function deleteMarkdownRegistryDocument({
   operationType,
   summary,
   relativePath,
+  audit,
 }: DeleteMarkdownRegistryDocumentInput): Promise<{
   relativePath: string;
 }> {
@@ -225,6 +223,7 @@ export async function deleteMarkdownRegistryDocument({
     operationType,
     summary,
     relativePath,
+    audit,
   });
 }
 

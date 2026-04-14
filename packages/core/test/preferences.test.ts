@@ -7,14 +7,32 @@ import { afterEach, test } from "vitest";
 
 import {
   initializeVault,
+  readJsonlRecords,
   readPreferencesDocument,
   resolvePreferencesDocumentPath,
   updateWearablePreferences,
   updateWorkoutUnitPreferences,
   validateVault,
 } from "../src/index.ts";
+import { resolveAuditShardPath } from "../src/audit.ts";
 
 const createdVaultRoots: string[] = [];
+
+function asAuditLikeRecord(value: unknown): {
+  action?: string;
+  commandName?: string;
+  changes?: Array<{
+    path?: string;
+  }>;
+} {
+  return (typeof value === "object" && value !== null ? value : {}) as {
+    action?: string;
+    commandName?: string;
+    changes?: Array<{
+      path?: string;
+    }>;
+  };
+}
 
 async function createTempVault(): Promise<string> {
   const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-core-preferences-"));
@@ -80,6 +98,20 @@ test("reads and writes canonical workout unit preferences from the singleton pre
   const serialized = await readFile(path.join(vaultRoot, "bank/preferences.json"), "utf8");
   assert.match(serialized, /"schemaVersion": 1/u);
   assert.match(serialized, /"weight": "lb"/u);
+  const auditRecords = await readJsonlRecords({
+    vaultRoot,
+    relativePath: resolveAuditShardPath("2026-04-08T10:00:00.000Z"),
+  });
+  assert.ok(
+    auditRecords.some((record) => {
+      const audit = asAuditLikeRecord(record);
+      return (
+        audit.action === "preferences_update" &&
+        audit.commandName === "core.updateWorkoutUnitPreferences" &&
+        audit.changes?.[0]?.path === "bank/preferences.json"
+      );
+    }),
+  );
 
   const noChange = await updateWorkoutUnitPreferences({
     vaultRoot,
@@ -215,6 +247,20 @@ test("reads and writes canonical wearable preferences from the singleton prefere
   assert.match(serialized, /"desiredProviders": \[/u);
   assert.match(serialized, /"oura"/u);
   assert.match(serialized, /"whoop"/u);
+  const auditRecords = await readJsonlRecords({
+    vaultRoot,
+    relativePath: resolveAuditShardPath("2026-04-08T10:00:00.000Z"),
+  });
+  assert.ok(
+    auditRecords.some((record) => {
+      const audit = asAuditLikeRecord(record);
+      return (
+        audit.action === "preferences_update" &&
+        audit.commandName === "core.updateWearablePreferences" &&
+        audit.changes?.[0]?.path === "bank/preferences.json"
+      );
+    }),
+  );
 
   const noChange = await updateWearablePreferences({
     vaultRoot,

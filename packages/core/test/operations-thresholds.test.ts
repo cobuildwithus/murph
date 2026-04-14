@@ -606,6 +606,11 @@ test("applyCanonicalWriteBatch rejects empty batches and rolls back applied writ
         vaultRoot,
         operationType: "empty_batch",
         summary: "nothing to stage",
+        audit: {
+          action: "show",
+          commandName: "test.emptyBatch",
+          summary: "Attempted empty batch.",
+        },
       }),
     (error: unknown) => error instanceof VaultError && error.code === "CANONICAL_WRITE_EMPTY",
   );
@@ -624,6 +629,11 @@ test("applyCanonicalWriteBatch rejects empty batches and rolls back applied writ
         vaultRoot,
         operationType: "rollback_test",
         summary: "stage a write and then fail",
+        audit: {
+          action: "show",
+          commandName: "test.rollbackBatch",
+          summary: "Staged a write and then failed.",
+        },
         textWrites: [
           {
             relativePath: createdPath,
@@ -686,6 +696,11 @@ test("applyCanonicalWriteBatch records rollback failures and validateVault repor
         vaultRoot,
         operationType: "rollback_failure",
         summary: "stage a write and then fail",
+        audit: {
+          action: "show",
+          commandName: "test.rollbackFailureBatch",
+          summary: "Staged a write and then failed rollback.",
+        },
         textWrites: [
           {
             relativePath: createdPath,

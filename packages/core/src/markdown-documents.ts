@@ -1,8 +1,10 @@
-import { emitAuditRecord } from "./audit.ts";
+import type { AuditAction } from "@murphai/contracts";
+
+import { commitAuditedCanonicalWrite } from "./audited-write.ts";
 import { VaultError } from "./errors.ts";
 import { parseFrontmatterDocument, stringifyFrontmatterDocument } from "./frontmatter.ts";
 import { readUtf8File, walkVaultFiles } from "./fs.ts";
-import { runCanonicalWrite, type WriteBatch } from "./operations/write-batch.ts";
+import { type WriteBatch } from "./operations/write-batch.ts";
 
 import type { DateInput, FileChange, FrontmatterObject } from "./types.ts";
 
@@ -53,7 +55,7 @@ export interface SlugMarkdownDocumentTarget extends CanonicalMarkdownDocumentTar
 }
 
 export interface CanonicalMarkdownDocumentAuditInput {
-  action: Parameters<typeof emitAuditRecord>[0]["action"];
+  action: AuditAction;
   commandName: string;
   summary: string;
   targetIds?: string[];
@@ -74,7 +76,7 @@ interface WriteCanonicalMarkdownDocumentOptions extends StageMarkdownDocumentWri
   occurredAt?: DateInput;
   target: CanonicalMarkdownDocumentTarget;
   markdown: string;
-  audit?: CanonicalMarkdownDocumentAuditInput;
+  audit: CanonicalMarkdownDocumentAuditInput;
 }
 
 interface WriteCanonicalFrontmatterDocumentOptions<TRecord>
@@ -253,40 +255,35 @@ export async function writeCanonicalMarkdownDocument({
   audit,
   ...options
 }: WriteCanonicalMarkdownDocumentOptions): Promise<{
-  auditPath: string | null;
+  auditPath: string;
   markdown: string;
   write: StagedMarkdownDocumentWrite;
 }> {
-  const operationOccurredAt = occurredAt ?? audit?.occurredAt;
-
-  return runCanonicalWrite({
+  const result = await commitAuditedCanonicalWrite({
     vaultRoot,
     operationType,
     summary,
-    occurredAt: operationOccurredAt,
+    occurredAt,
+    audit,
     mutate: async ({ batch }) => {
       const write = await stageMarkdownDocumentWrite(batch, target, markdown, options);
-      const emittedAudit = audit
-        ? await emitAuditRecord({
-            vaultRoot,
-            batch,
-            action: audit.action,
-            commandName: audit.commandName,
-            summary: audit.summary,
-            occurredAt: audit.occurredAt ?? operationOccurredAt,
-            files: write.files,
-            targetIds: audit.targetIds ?? [],
-            changes: write.changes,
-          })
-        : null;
 
       return {
-        auditPath: emittedAudit?.relativePath ?? null,
-        markdown,
-        write,
+        result: {
+          markdown,
+          write,
+        },
+        files: write.files,
+        changes: write.changes,
+        targetIds: audit.targetIds ?? [],
       };
     },
   });
+
+  return {
+    ...result.result,
+    auditPath: result.auditPath,
+  };
 }
 
 export async function writeCanonicalFrontmatterDocument<TRecord>({
@@ -295,7 +292,7 @@ export async function writeCanonicalFrontmatterDocument<TRecord>({
   recordFromParts,
   ...input
 }: WriteCanonicalFrontmatterDocumentOptions<TRecord>): Promise<{
-  auditPath: string | null;
+  auditPath: string;
   markdown: string;
   record: TRecord;
   write: StagedMarkdownDocumentWrite;
@@ -318,27 +315,41 @@ export async function deleteCanonicalMarkdownDocument({
   summary,
   relativePath,
   occurredAt,
+  audit,
 }: {
   vaultRoot: string;
   operationType: string;
   summary: string;
   relativePath: string;
   occurredAt?: DateInput;
+  audit: CanonicalMarkdownDocumentAuditInput;
 }): Promise<{
   relativePath: string;
 }> {
   assertMarkdownDocumentPath(relativePath, "relativePath");
 
-  return runCanonicalWrite({
+  const result = await commitAuditedCanonicalWrite({
     vaultRoot,
     operationType,
     summary,
     occurredAt,
+    audit,
     mutate: async ({ batch }) => {
       await batch.stageDelete(relativePath);
       return {
-        relativePath,
+        result: {
+          relativePath,
+        },
+        files: [relativePath],
+        changes: [
+          {
+            path: relativePath,
+            op: "delete",
+          },
+        ],
       };
     },
   });
+
+  return result.result;
 }

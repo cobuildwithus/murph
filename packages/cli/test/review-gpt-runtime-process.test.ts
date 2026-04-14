@@ -56,6 +56,11 @@ test('saveVaultTextNote delegates to the integrated runtime batch writer', async
   assert.deepEqual(applyCanonicalWriteBatch.mock.calls, [
     [
       {
+        audit: {
+          action: 'research_note_write',
+          commandName: 'cli.saveVaultTextNote',
+          summary: 'Saved research note.',
+        },
         operationType: 'research_note.write',
         summary: 'Saved research note.',
         textWrites: [
@@ -179,6 +184,7 @@ test('runResearchPrompt uses the default save-note flow when no custom saver is 
   if (
     !batchInput ||
     typeof batchInput !== 'object' ||
+    !('audit' in batchInput) ||
     !('vaultRoot' in batchInput) ||
     !('textWrites' in batchInput)
   ) {
@@ -186,6 +192,11 @@ test('runResearchPrompt uses the default save-note flow when no custom saver is 
   }
 
   assert.equal(batchInput.vaultRoot, '/vaults/primary')
+  assert.deepEqual(batchInput.audit, {
+    action: 'research_note_write',
+    commandName: 'cli.saveVaultTextNote',
+    summary: 'Saved Deep Research note "Sleep consistency".',
+  })
   assert.match(
     String(
       (Array.isArray(batchInput.textWrites) ? batchInput.textWrites[0] : null)?.content ?? '',

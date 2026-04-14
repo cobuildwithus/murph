@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { promises as fs } from "node:fs";
 
-import { afterEach, test, vi } from "vitest";
+import { afterEach, test } from "vitest";
 
 import { canonicalizeEventRelations } from "../src/event-links.ts";
 import { VaultError, isVaultError } from "../src/errors.ts";
@@ -47,7 +47,6 @@ import {
   writeMarkdownRegistryRecord,
 } from "../src/registry/markdown.ts";
 import { WriteBatch } from "../src/operations/write-batch.ts";
-import type { FileChange } from "../src/types.ts";
 import {
   coerceDate,
   defaultTimeZone,
@@ -487,6 +486,11 @@ test("registry and profile helpers materialize, read, update, and delete markdow
     ...baseOptions,
     deleteOperationType: "mock_registry_delete",
     deleteSummary: (recordId: string) => `Delete mock registry record ${recordId}`,
+    deleteAudit: {
+      action: "vault_init" as const,
+      commandName: "core.mockRegistryDelete",
+      summary: (recordId: string) => `Deleted mock registry record ${recordId}`,
+    },
   });
 
   const records = await api.listRecords(vaultRoot);
@@ -608,119 +612,6 @@ test("markdown registry wrappers and profile reads cover the remaining branch se
   assert.equal(writtenRecord.record.slug, "omega");
   assert.equal(writtenRecord.record.relativePath, "library/records/omega-frontmatter.md");
   await assert.doesNotReject(() => fs.access(path.join(vaultRoot, writtenRecord.auditPath)));
-
-  const markdownWriteResult = {
-    auditPath: null,
-    markdown: "# Broken\n",
-    write: {
-      relativePath: "library/records/broken.md",
-      created: true,
-      files: ["library/records/broken.md"],
-      changes: [
-        {
-          path: "library/records/broken.md",
-          op: "create",
-        },
-      ],
-    },
-  } satisfies Awaited<ReturnType<typeof markdownDocuments.writeCanonicalMarkdownDocument>>;
-
-  const frontmatterWriteResult = {
-    auditPath: null,
-    markdown: "---\nid: reg_01ARZ3NDEKTSV4RRFFQ69G5FAV\nslug: broken\n---\nBroken body\n",
-    record: {
-      id: "reg_01ARZ3NDEKTSV4RRFFQ69G5FAV",
-      slug: "broken",
-    },
-    write: {
-      relativePath: "library/records/broken-frontmatter.md",
-      created: true,
-      files: ["library/records/broken-frontmatter.md"],
-      changes: [
-        {
-          path: "library/records/broken-frontmatter.md",
-          op: "create",
-        },
-      ],
-    },
-  } satisfies {
-    auditPath: string | null;
-    markdown: string;
-    record: {
-      id: string;
-      slug: string;
-    };
-    write: {
-      relativePath: string;
-      created: boolean;
-      files: string[];
-      changes: FileChange[];
-    };
-  };
-
-  const markdownWriteSpy = vi.spyOn(markdownDocuments, "writeCanonicalMarkdownDocument");
-  const frontmatterWriteSpy = vi.spyOn(markdownDocuments, "writeCanonicalFrontmatterDocument");
-
-  try {
-    markdownWriteSpy.mockResolvedValueOnce(markdownWriteResult);
-    await assert.rejects(
-      () =>
-        upsertMarkdownRegistryDocument({
-          vaultRoot,
-          operationType: "mock_registry_write",
-          summary: "Write markdown registry document",
-          relativePath: "library/records/broken.md",
-          markdown: "# Broken\n",
-          created: true,
-          audit: {
-            action: "vault_init",
-            commandName: "core.mockRegistryWrite",
-            summary: "Created mock registry document.",
-          },
-        }),
-      (error: unknown) =>
-        error instanceof Error &&
-        error.message === "Markdown registry upsert audit path was not produced.",
-    );
-
-    frontmatterWriteSpy.mockResolvedValueOnce(frontmatterWriteResult);
-    await assert.rejects(
-      () =>
-        writeMarkdownRegistryRecord({
-          vaultRoot,
-          target: {
-            recordId: "reg_01ARZ3NDEKTSV4RRFFQ69G5FAV",
-            slug: "broken",
-            relativePath: "library/records/broken-frontmatter.md",
-            created: true,
-          },
-          attributes: {
-            id: "reg_01ARZ3NDEKTSV4RRFFQ69G5FAV",
-            slug: "broken",
-          },
-          body: "Broken body\n",
-          recordFromParts: (attributes: Record<string, unknown>, relativePath: string, markdown: string) => ({
-            id: String(attributes.id),
-            slug: String(attributes.slug),
-            relativePath,
-            markdown,
-          }),
-          operationType: "mock_registry_write",
-          summary: "Write markdown registry record",
-          audit: {
-            action: "vault_init",
-            commandName: "core.mockRegistryWrite",
-            summary: "Created mock registry record.",
-          },
-        }),
-      (error: unknown) =>
-        error instanceof Error &&
-        error.message === "Markdown registry write audit path was not produced.",
-    );
-  } finally {
-    markdownWriteSpy.mockRestore();
-    frontmatterWriteSpy.mockRestore();
-  }
 });
 
 test("event link canonicalization dedupes links, falls back from related ids, and reports invalid shapes", () => {

@@ -720,6 +720,11 @@ async function saveKnowledgeText(input: {
     vaultRoot: input.vault,
     operationType: input.operationType,
     summary: input.summary,
+    audit: {
+      action: 'knowledge_write',
+      commandName: 'assistantEngine.saveKnowledgeText',
+      summary: input.summary,
+    },
     textWrites: [
       {
         relativePath: input.relativePath,

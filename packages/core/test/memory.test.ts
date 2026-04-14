@@ -4,6 +4,8 @@ import { mkdtemp, rm } from "node:fs/promises";
 
 import { afterEach, describe, expect, test, vi } from "vitest";
 
+import { resolveAuditShardPath } from "../src/audit.ts";
+import { readJsonlRecords } from "../src/index.ts";
 import {
   buildMemoryCorePromptBlock,
   forgetMemory,
@@ -150,6 +152,20 @@ describe("core memory package wrapper", () => {
     expect(updated.document.records).toHaveLength(1);
     expect(updated.document.records[0]).toEqual(updated.record);
     expect(await getMemoryRecord(vaultRoot, expectedRecordId)).toEqual(updated.record);
+    const auditRecords = await readJsonlRecords({
+      vaultRoot,
+      relativePath: resolveAuditShardPath(updatedAt),
+    });
+    expect(
+      auditRecords
+        .filter(
+          (record) =>
+            record.action === "memory_upsert" &&
+            Array.isArray(record.targetIds) &&
+            record.targetIds.includes(expectedRecordId),
+        )
+        .map((record) => record.commandName),
+    ).toContain("core.updateMemory");
   });
 
   test("serializes parallel upserts to the singleton memory document without losing records", async () => {
@@ -316,6 +332,19 @@ describe("core memory package wrapper", () => {
       expect(await buildMemoryCorePromptBlock(vaultRoot)).toBeNull();
       const snapshot = await readMemoryDocument(vaultRoot);
       expect(snapshot.markdown).not.toContain("Prefers direct answers");
+      const auditRecords = await readJsonlRecords({
+        vaultRoot,
+        relativePath: resolveAuditShardPath(deletedAt),
+      });
+      expect(
+        auditRecords.some(
+          (record) =>
+            record.action === "memory_forget" &&
+            record.commandName === "core.forgetMemory" &&
+            Array.isArray(record.targetIds) &&
+            record.targetIds.includes(inserted.record.id),
+        ),
+      ).toBe(true);
     } finally {
       vi.useRealTimers();
     }
