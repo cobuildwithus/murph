@@ -25,7 +25,7 @@ export function HostedExistingAccountSignInDialog() {
         className="h-auto p-0 text-sm font-medium text-white underline-offset-4 hover:text-white hover:underline"
         onClick={() => setOpen(true)}
       >
-        Already have an account? Sign in
+        Already murph&apos;n?
       </Button>
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-w-md p-6 md:p-7">
