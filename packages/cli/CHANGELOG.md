@@ -2,6 +2,14 @@
 
 All notable changes to `@murphai/murph` will be documented in this file.
 
+## [0.2.10] - 2026-04-14
+
+### Fixed
+- Fixed hosted-web release verification so CI smoke uses the repo-local `dev:local-env` path instead of depending on a globally installed `vercel` CLI.
+
+### Changed
+- Added regression coverage for hosted-web smoke command selection across CI and linked-local development modes.
+
 ## [0.2.9] - 2026-04-14
 
 ### Added
