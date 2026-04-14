@@ -76,10 +76,12 @@ function makeIdentity(overrides: IdentityOverrides = {}): HostedPrivyIdentity {
   return {
     ...identity,
     ...overrides,
-    phone: {
-      ...identity.phone,
-      ...(overrides.phone ?? {}),
-    },
+    phone: overrides.phone === null
+      ? null
+      : {
+          ...identity.phone,
+          ...(overrides.phone ?? {}),
+        },
     wallet,
   };
 }
@@ -90,6 +92,7 @@ function baseIdentity(): HostedPrivyIdentity {
       number: DEFAULT_PHONE_NUMBER,
       verifiedAt: 1742990400,
     },
+    telegram: null,
     userId: "did:privy:user_123",
     wallet: {
       address: "0xD8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
@@ -372,6 +375,155 @@ describe("completeHostedPrivyVerification", () => {
     });
 
     expect(prisma.hostedMember.create).toHaveBeenCalledTimes(1);
+  });
+
+  it("creates a hosted member and a web invite for a new Telegram-only signup without synthetic phone identity data", async () => {
+    const identityUpsert = vi.fn(async ({
+      create,
+      update,
+    }: {
+      create: Record<string, unknown>;
+      update: Record<string, unknown>;
+    }) => ({
+      ...create,
+      ...update,
+    }));
+    const createdMember = makeMember({
+      id: "member_telegram_only",
+      maskedPhoneNumberHint: null,
+      phoneLookupKey: null,
+      phoneNumberVerifiedAt: null,
+      privyUserId: "did:privy:user_123",
+      walletAddress: null,
+      walletChainType: null,
+      walletCreatedAt: null,
+      walletProvider: null,
+    });
+    const createdInvite = makeInvite(createdMember, {
+      channel: "web",
+      id: "invite_telegram_only",
+      inviteCode: "public-telegram-invite",
+      memberId: "member_telegram_only",
+    });
+    const prisma = asCompleteHostedPrivyVerificationPrisma({
+      hostedInvite: {
+        create: vi.fn().mockResolvedValue(createdInvite),
+        findFirst: vi.fn().mockResolvedValue(null),
+        update: vi.fn().mockResolvedValue({}),
+      },
+      hostedMember: {
+        create: vi.fn().mockResolvedValue(createdMember),
+        findUnique: vi.fn().mockResolvedValue(null),
+      },
+      hostedMemberIdentity: {
+        findFirst: vi.fn().mockResolvedValue(null),
+        upsert: identityUpsert,
+      },
+    });
+
+    await expect(
+      completeHostedPrivyVerification({
+        identity: makeIdentity({
+          phone: null,
+          telegram: {
+            firstName: "Alice",
+            lastName: null,
+            photoUrl: null,
+            telegramUserId: "456",
+            username: "alice",
+          },
+          wallet: null,
+        }),
+        now: NOW,
+        prisma,
+      }),
+    ).resolves.toEqual({
+      activationPending: false,
+      inviteCode: "public-telegram-invite",
+      joinUrl: "https://join.example.test/join/public-telegram-invite",
+      memberId: "member_telegram_only",
+      stage: "checkout",
+    });
+
+    expect(identityUpsert).toHaveBeenCalledWith(expect.objectContaining({
+      create: expect.objectContaining({
+        maskedPhoneNumberHint: null,
+        phoneLookupKey: null,
+        phoneNumberVerifiedAt: null,
+      }),
+      update: expect.objectContaining({
+        maskedPhoneNumberHint: null,
+        phoneLookupKey: null,
+        phoneNumberVerifiedAt: null,
+      }),
+    }));
+  });
+
+  it("allows an invite-bound Telegram-only verification when the invite does not require a phone identity", async () => {
+    const inviteMember = makeMember({
+      maskedPhoneNumberHint: null,
+      phoneLookupKey: null,
+      phoneNumberVerifiedAt: null,
+    });
+    const invite = {
+      ...makeInvite(inviteMember),
+      member: {
+        ...inviteMember,
+        identity: {
+          createdAt: NOW,
+          maskedPhoneNumberHint: null,
+          memberId: inviteMember.id,
+          phoneLookupKey: null,
+          phoneNumberVerifiedAt: null,
+          privyUserId: null,
+          updatedAt: NOW,
+          walletAddress: null,
+          walletChainType: null,
+          walletCreatedAt: null,
+          walletProvider: null,
+        },
+      },
+    };
+    const prisma = asCompleteHostedPrivyVerificationPrisma({
+      hostedInvite: {
+        findUnique: vi.fn().mockResolvedValue(invite),
+        update: vi.fn().mockResolvedValue({}),
+      },
+      hostedMember: {
+        update: vi.fn().mockImplementation(async ({ data }: { data: Record<string, unknown> }) => ({
+          ...inviteMember,
+          ...data,
+        })),
+      },
+    });
+
+    await expect(
+      completeHostedPrivyVerification({
+        identity: makeIdentity({
+          phone: null,
+          telegram: {
+            firstName: "Alice",
+            lastName: null,
+            photoUrl: null,
+            telegramUserId: "456",
+            username: "alice",
+          },
+          wallet: null,
+        }),
+        inviteCode: "invite-code",
+        now: NOW,
+        prisma,
+      }),
+    ).resolves.toEqual({
+      activationPending: false,
+      inviteCode: "invite-code",
+      joinUrl: "https://join.example.test/join/invite-code",
+      memberId: inviteMember.id,
+      stage: "checkout",
+    });
+
+    expect(prisma.hostedMember.update).not.toHaveBeenCalled();
+    expect(prisma.hostedInvite.update).not.toHaveBeenCalled();
   });
 
   it("rejects a wallet-less verified identity when RevNet is enabled", async () => {

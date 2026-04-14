@@ -12,8 +12,8 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
   ],
   HostedMemberIdentity: [
     'memberId String @unique @map("member_id")',
-    'maskedPhoneNumberHint String @map("masked_phone_number_hint")',
-    'phoneLookupKey String @unique @map("phone_lookup_key")',
+    'maskedPhoneNumberHint String? @map("masked_phone_number_hint")',
+    'phoneLookupKey String? @unique @map("phone_lookup_key")',
     'phoneNumberEncrypted String? @map("phone_number_encrypted")',
     'phoneNumberVerifiedAt DateTime? @map("phone_number_verified_at")',
     'privyUserLookupKey String? @unique @map("privy_user_lookup_key")',
@@ -76,14 +76,28 @@ describe("hosted Prisma baseline migration", () => {
       new URL("../prisma/migrations/2026040600_init/migration.sql", import.meta.url),
       "utf8",
     );
+    const optionalPhoneMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/202604141730_hosted_member_identity_optional_phone/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
 
-    expect(migrationEntries).toEqual(["2026040600_init", "migration_lock.toml"]);
+    expect(migrationEntries).toEqual([
+      "2026040600_init",
+      "202604141730_hosted_member_identity_optional_phone",
+      "migration_lock.toml",
+    ]);
     expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_member_identity"');
     expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_member_routing"');
     expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_member_billing_ref"');
     expect(baselineMigrationSql).toContain('CREATE UNIQUE INDEX "hosted_member_routing_linq_chat_lookup_key_key"');
     expect(baselineMigrationSql).toContain('"masked_phone_number_hint" TEXT NOT NULL');
     expect(baselineMigrationSql).toContain('"phone_lookup_key" TEXT NOT NULL');
+    expect(optionalPhoneMigrationSql).toContain('ALTER TABLE "hosted_member_identity"');
+    expect(optionalPhoneMigrationSql).toContain('ALTER COLUMN "masked_phone_number_hint" DROP NOT NULL');
+    expect(optionalPhoneMigrationSql).toContain('ALTER COLUMN "phone_lookup_key" DROP NOT NULL');
     expect(baselineMigrationSql).toContain('"telegram_user_lookup_key" TEXT');
     expect(baselineMigrationSql).toContain('"payload_json" JSONB NOT NULL');
     expect(baselineMigrationSql).toContain('"result_json" JSONB');

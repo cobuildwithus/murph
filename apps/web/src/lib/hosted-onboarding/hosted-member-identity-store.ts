@@ -24,10 +24,10 @@ import {
 } from "./shared";
 
 export interface HostedMemberIdentityState {
-  maskedPhoneNumberHint: string;
+  maskedPhoneNumberHint: string | null;
   memberId: string;
   phoneNumber: string | null;
-  phoneLookupKey: string;
+  phoneLookupKey: string | null;
   signupPhoneCodeSendAttemptId: string | null;
   signupPhoneCodeSendAttemptStartedAt: Date | null;
   signupPhoneCodeSentAt: Date | null;
@@ -58,9 +58,9 @@ export interface HostedMemberIdentityLookup {
 // and onboarding flows do not need to round-trip through readHostedMemberIdentity.
 
 export interface HostedMemberIdentityWriteInput {
-  maskedPhoneNumberHint: string;
+  maskedPhoneNumberHint: string | null;
   memberId: string;
-  phoneLookupKey: string;
+  phoneLookupKey: string | null;
   phoneNumberVerifiedAt: Date | null;
   prisma: HostedOnboardingPrismaClient;
   phoneNumber: string | null;

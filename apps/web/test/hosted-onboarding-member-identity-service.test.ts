@@ -154,6 +154,68 @@ describe("hosted-onboarding member-identity-service", () => {
     expect(prisma.hostedMemberIdentity.upsert).not.toHaveBeenCalled();
   });
 
+  it("preserves the existing phone identity fields when reconciling a Telegram-only Privy session", async () => {
+    const verifiedAt = new Date("2026-04-01T10:00:00.000Z");
+    const identityUpsert = vi.fn(async ({
+      create,
+      update: updateData,
+    }: {
+      create: Record<string, unknown>;
+      update: Record<string, unknown>;
+    }) => ({
+      ...create,
+      ...updateData,
+    }));
+    const prisma = {
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue(makeMember()),
+        update: vi.fn(),
+      },
+      hostedMemberIdentity: {
+        findUnique: vi.fn().mockResolvedValue({
+          maskedPhoneNumberHint: "*** 4567",
+          memberId: "member_123",
+          phoneLookupKey: "hbidx:phone:v1:existing",
+          phoneNumber: "+15551234567",
+          phoneNumberVerifiedAt: verifiedAt,
+          privyUserId: null,
+          walletAddress: null,
+          walletChainType: null,
+          walletCreatedAt: null,
+          walletProvider: null,
+        }),
+        upsert: identityUpsert,
+      },
+    };
+
+    await expect(reconcileHostedPrivyIdentityOnMember({
+      identity: makeIdentity({
+        phone: null,
+        telegram: {
+          firstName: "Alice",
+          lastName: null,
+          photoUrl: null,
+          telegramUserId: "456",
+          username: "alice",
+        },
+      }),
+      member: makeMember(),
+      now: NOW,
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      id: "member_123",
+    });
+
+    expect(identityUpsert).toHaveBeenCalledWith(expect.objectContaining({
+      update: expect.objectContaining({
+        maskedPhoneNumberHint: "*** 4567",
+        phoneLookupKey: "hbidx:phone:v1:existing",
+        phoneNumberVerifiedAt: verifiedAt,
+      }),
+    }));
+  });
+
   it("preserves every matching identity binding when Privy identity lookup hits the same member twice", async () => {
     const member = makeMember();
     const identityRecord = {
@@ -226,6 +288,7 @@ function makeIdentity(
       number: "+15551234567",
       verifiedAt: 1743933600,
     },
+    telegram: null,
     userId: "did:privy:user_123",
     wallet: null,
     ...overrides,

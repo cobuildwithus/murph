@@ -50,6 +50,20 @@ vi.mock("@/src/components/hosted-onboarding/hosted-existing-account-sign-in-dial
   };
 });
 
+vi.mock("@/src/components/homepage/homepage-telegram-auth-button", () => {
+  return {
+    HomepageTelegramAuthButton() {
+      return createElement(
+        "div",
+        {
+          "data-homepage-telegram-auth-button": "true",
+        },
+        "Homepage Telegram auth",
+      );
+    },
+  };
+});
+
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
@@ -74,8 +88,11 @@ test("HomePage keeps the hosted auth entrypoints visible when no hosted session 
   assert.match(markup, /Zero Data Retention/);
   assert.match(markup, /Your data does not train AI models/u);
   assert.match(markup, /restricted system access/u);
-  assert.match(markup, /Sign up with your phone\./);
+  assert.match(markup, /Sign up with your phone or Telegram\./);
+  assert.match(markup, /Homepage Telegram auth/);
+  assert.match(markup, /data-homepage-telegram-auth-button="true"/);
   assert.match(markup, /Hosted phone auth/);
+  assert.ok(markup.includes("More options"));
   assert.match(markup, /data-existing-account-sign-in-dialog="true"/);
   assert.match(markup, /Get started free/);
   assert.match(markup, /href="#signup-title"/);
@@ -91,8 +108,10 @@ test("HomePage renders the hosted phone auth UI in the shared app shell", async 
 
   assert.match(markup, /Open source — Apache 2\.0/u);
   assert.match(markup, /https:\/\/github\.com\/cobuildwithus\/murph/u);
-  assert.match(markup, /Sign up with your phone\./);
+  assert.match(markup, /Sign up with your phone or Telegram\./);
+  assert.match(markup, /Homepage Telegram auth/);
   assert.match(markup, /Hosted phone auth/);
+  assert.ok(markup.includes("More options"));
   assert.match(markup, /data-existing-account-sign-in-dialog="true"/);
   assert.match(markup, /Existing account sign in/);
   assert.match(markup, /curl -fsSL https:\/\/murph\.example\.test\/install\.sh \| bash/u);

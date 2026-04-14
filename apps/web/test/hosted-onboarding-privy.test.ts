@@ -120,6 +120,7 @@ describe("hosted Privy verification", () => {
         number: "+14155552671",
         verifiedAt: 1741194420,
       },
+      telegram: null,
       userId: "did:privy:user_123",
       wallet: {
         address: "0xD8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
@@ -188,6 +189,7 @@ describe("hosted Privy verification", () => {
       phone: {
         number: "+14155552671",
       },
+      telegram: null,
       wallet: {
         address: "0xD8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
       },
@@ -226,7 +228,7 @@ describe("hosted Privy verification", () => {
     });
   });
 
-  it("maps missing server-side phone state to a retryable not-ready error for completion", async () => {
+  it("maps missing server-side account state to a retryable not-ready error for completion", async () => {
     mocks.cookies.mockResolvedValue({
       get: vi.fn().mockImplementation((name: string) =>
         name === "privy-id-token" ? { value: "cookie-token" } : undefined),
@@ -250,9 +252,38 @@ describe("hosted Privy verification", () => {
     });
 
     await expect(requireHostedPrivyCompletionIdentityFromCookies()).rejects.toMatchObject({
-      code: "PRIVY_PHONE_NOT_READY",
+      code: "PRIVY_ACCOUNT_NOT_READY",
       httpStatus: 409,
       retryable: true,
+    });
+  });
+
+  it("allows Telegram-only server-side completion state", async () => {
+    mocks.cookies.mockResolvedValue({
+      get: vi.fn().mockImplementation((name: string) =>
+        name === "privy-id-token" ? { value: "cookie-token" } : undefined),
+    });
+    mocks.verifyIdentityToken.mockResolvedValue({
+      id: "did:privy:user_123",
+      linked_accounts: [
+        {
+          first_name: "Alice",
+          id: 456,
+          type: "telegram",
+          username: "alice",
+        },
+      ],
+    });
+
+    await expect(requireHostedPrivyCompletionIdentityFromCookies()).resolves.toMatchObject({
+      phone: null,
+      telegram: {
+        firstName: "Alice",
+        telegramUserId: "456",
+        username: "alice",
+      },
+      userId: "did:privy:user_123",
+      wallet: null,
     });
   });
 
@@ -276,6 +307,7 @@ describe("hosted Privy verification", () => {
       phone: {
         number: "+14155552671",
       },
+      telegram: null,
       userId: "did:privy:user_123",
       wallet: null,
     });
@@ -338,7 +370,7 @@ describe("hosted Privy verification", () => {
     });
 
     await expect(requireHostedPrivyIdentity("signed-identity-token")).rejects.toMatchObject({
-      code: "PRIVY_PHONE_REQUIRED",
+      code: "PRIVY_ACCOUNT_REQUIRED",
       httpStatus: 400,
     });
   });
@@ -365,6 +397,7 @@ describe("hosted Privy verification", () => {
       phone: {
         number: "+14155552671",
       },
+      telegram: null,
       userId: "did:privy:user_123",
       wallet: null,
     });
@@ -398,6 +431,7 @@ describe("hosted Privy verification", () => {
       phone: {
         number: "+14155552671",
       },
+      telegram: null,
       userId: "did:privy:user_123",
       wallet: null,
     });

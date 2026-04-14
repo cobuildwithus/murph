@@ -685,4 +685,3 @@ ALTER TABLE "hosted_linq_daily_state" ADD CONSTRAINT "hosted_linq_daily_state_me
 
 -- AddForeignKey
 ALTER TABLE "linq_webhook_event" ADD CONSTRAINT "linq_webhook_event_binding_id_fkey" FOREIGN KEY ("binding_id") REFERENCES "linq_recipient_binding"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-

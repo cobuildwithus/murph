@@ -263,7 +263,11 @@ function isRetryableHostedPrivyCompletionError(error: unknown): boolean {
 
   return (
     error.retryable &&
-    (error.code === "PRIVY_PHONE_NOT_READY" || error.code === "PRIVY_WALLET_NOT_READY")
+    (
+      error.code === "PRIVY_ACCOUNT_NOT_READY"
+      || error.code === "PRIVY_PHONE_NOT_READY"
+      || error.code === "PRIVY_WALLET_NOT_READY"
+    )
   );
 }
 
@@ -293,6 +297,8 @@ async function requestHostedPrivyCompletionWithRetry(
 
   throw lastError instanceof Error ? lastError : new Error("We could not verify your Privy session.");
 }
+
+export { requestHostedPrivyCompletionWithRetry };
 
 async function confirmInvitePhoneCodeSend(input: {
   inviteCode: string;

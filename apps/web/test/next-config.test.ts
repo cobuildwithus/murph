@@ -209,7 +209,8 @@ test("buildHostedWebContentSecurityPolicy includes Privy, WalletConnect, and hos
   } as NodeJS.ProcessEnv);
 
   assert.match(csp, /default-src 'self'/);
-  assert.match(csp, /script-src 'self' 'unsafe-inline' https:\/\/challenges\.cloudflare\.com/);
+  assert.match(csp, /script-src [^;]*https:\/\/auth\.privy\.io/);
+  assert.match(csp, /script-src [^;]*https:\/\/challenges\.cloudflare\.com/);
   assert.match(csp, /style-src 'self' 'unsafe-inline'/);
   assert.match(csp, /object-src 'none'/);
   assert.match(csp, /frame-ancestors 'none'/);
