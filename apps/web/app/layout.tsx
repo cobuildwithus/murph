@@ -48,7 +48,7 @@ export default function RootLayout(input: { children: React.ReactNode }) {
         <Providers privyAppId={privyAppId} privyClientId={privyClientId}>
           <div className="flex min-h-screen flex-col">
             <div className="flex-1">{input.children}</div>
-            <footer className="border-t border-stone-200 bg-cream-dark/60">
+            <footer id="global-footer" className="border-t border-stone-200 bg-cream-dark/60">
               <div className="mx-auto flex max-w-7xl flex-col gap-3 px-6 py-5 text-sm text-stone-500 md:px-12 lg:flex-row lg:items-center lg:justify-between lg:px-16">
                 <p className="max-w-2xl leading-relaxed">
                   Murph is open source and licensed under Apache 2.0.
