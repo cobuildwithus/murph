@@ -7,7 +7,6 @@ import {
 import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
 
 import { completeHostedPrivyAuth } from "./hosted-auth-completion";
-import { toErrorMessage } from "./hosted-auth-shared";
 import { requestHostedOnboardingJson } from "./client-api";
 import type {
   HostedPhoneAuthIntent,
@@ -23,8 +22,8 @@ import { waitForRetryDelay } from "./hosted-retry-support";
 export {
   requestHostedPrivyCompletionWithRetry,
   runHostedPrivyFinalizationAttempt,
-  toErrorMessage,
 };
+export { toErrorMessage } from "./hosted-auth-shared";
 
 interface PendingInvitePhoneCodeMutation {
   inviteCode: string;
