@@ -1,13 +1,19 @@
 import type {
   HostedAssistantRuntimeJobInput,
+  HostedAssistantRuntimeJobRequest,
   HostedAssistantRuntimeJobResult,
 } from "@murphai/assistant-runtime";
-import type { HostedExecutionRunnerRequest } from "@murphai/hosted-execution";
-import { DurableObject } from "cloudflare:workers";
+import { DurableObject, env } from "cloudflare:workers";
+
+import {
+  buildSyntheticCommittedRunnerResult,
+  buildSyntheticCompletedRunnerResult,
+  pauseRunnerCommitIfArmed,
+} from "./runner-e2e-control.ts";
 
 interface RunnerContainerInvokePayload {
   internalWorkerProxyToken?: string | null;
-  job: HostedAssistantRuntimeJobInput & { request: HostedExecutionRunnerRequest };
+  job: HostedAssistantRuntimeJobInput & { request: HostedAssistantRuntimeJobRequest };
   userId: string;
 }
 
@@ -17,65 +23,15 @@ export class RunnerContainerTestDouble extends DurableObject {
       throw new Error("Expected a non-empty internal worker proxy token.");
     }
 
+    await pauseRunnerCommitIfArmed({
+      bucket: (env as { BUNDLES: import("../../src/bundle-store.js").R2BucketLike }).BUNDLES,
+      request: payload.job.request,
+    });
+
     return payload.job.request.resume?.committedResult
-      ? buildCompletedRunnerResult(payload.job.request)
-      : buildCommittedRunnerResult(payload.job.request);
+      ? buildSyntheticCompletedRunnerResult(payload.job.request)
+      : buildSyntheticCommittedRunnerResult(payload.job.request);
   }
 
   async destroyInstance(): Promise<void> {}
-}
-
-function buildCommittedRunnerResult(
-  request: HostedExecutionRunnerRequest,
-): HostedAssistantRuntimeJobResult {
-  return {
-    committedAssistantDeliveryEffects: [],
-    committedGatewayProjectionSnapshot: {
-      conversations: [],
-      generatedAt: new Date().toISOString(),
-      messages: [],
-      permissions: [],
-      schema: "murph.gateway-projection-snapshot.v1",
-    },
-    phase: "committed",
-    result: {
-      bundle: request.bundle ?? btoa(`vault:${request.dispatch.eventId}`),
-      result: {
-        eventsHandled: 1,
-        ...(request.dispatch.event.kind === "member.activated"
-          ? {
-              nextWakeAt: new Date(Date.now() + 60_000).toISOString(),
-            }
-          : {}),
-        summary: `runtime:${request.dispatch.eventId}`,
-      },
-    },
-  };
-}
-
-function buildCompletedRunnerResult(
-  request: HostedExecutionRunnerRequest,
-): HostedAssistantRuntimeJobResult {
-  return {
-    finalGatewayProjectionSnapshot: {
-      conversations: [],
-      generatedAt: new Date().toISOString(),
-      messages: [],
-      permissions: [],
-      schema: "murph.gateway-projection-snapshot.v1",
-    },
-    result: {
-      bundle: request.bundle ?? btoa(`vault:${request.dispatch.eventId}`),
-      result: {
-        eventsHandled: 1,
-        ...(request.dispatch.event.kind === "member.activated"
-          ? {
-              nextWakeAt: new Date(Date.now() + 60_000).toISOString(),
-            }
-          : {}),
-        summary: `runtime:${request.dispatch.eventId}`,
-      },
-    },
-    phase: "completed",
-  };
 }
