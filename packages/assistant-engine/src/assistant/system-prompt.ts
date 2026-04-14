@@ -38,14 +38,6 @@ function joinPromptSections(
     .join("\n\n");
 }
 
-function buildBulletSection(title: string, bullets: string[]): string {
-  return [title, ...bullets.map((bullet) => `- ${bullet}`)].join("\n");
-}
-
-function joinSentences(...sentences: string[]): string {
-  return sentences.join(" ");
-}
-
 function code(value: string): string {
   return `\`${value}\``;
 }
@@ -53,13 +45,7 @@ function code(value: string): string {
 export function buildAssistantSystemPrompt(
   input: AssistantSystemPromptInput
 ): string {
-  return joinPromptSections(...buildAssistantSystemPromptSections(input));
-}
-
-function buildAssistantSystemPromptSections(
-  input: AssistantSystemPromptInput
-): string[] {
-  return [
+  return joinPromptSections(
     buildAssistantIdentityAndScopeText(),
     buildAssistantCurrentDateContextText({
       currentLocalDate: input.currentLocalDate,
@@ -90,21 +76,13 @@ function buildAssistantSystemPromptSections(
     }),
     buildAssistantCliGuidanceText(input.cliAccess),
     buildAssistantCliContractText(input.assistantCliContract)
-  ].filter((section): section is string => Boolean(section));
+  );
 }
 
 export function buildAssistantNotificationDecisionSystemPrompt(
   input: AssistantNotificationDecisionSystemPromptInput
 ): string {
   return joinPromptSections(
-    ...buildAssistantNotificationDecisionSystemPromptSections(input)
-  );
-}
-
-function buildAssistantNotificationDecisionSystemPromptSections(
-  input: AssistantNotificationDecisionSystemPromptInput
-): string[] {
-  return [
     buildAssistantIdentityAndScopeText(),
     buildAssistantCurrentDateContextText({
       currentLocalDate: input.currentLocalDate,
@@ -116,7 +94,7 @@ function buildAssistantNotificationDecisionSystemPromptSections(
     buildAssistantAudienceSafetyText(input.allowSensitiveHealthContext),
     buildAssistantToolTruthfulnessText(),
     buildAssistantNotificationDecisionGuidanceText(input.channel)
-  ].filter((section): section is string => Boolean(section));
+  );
 }
 
 function buildAssistantCurrentDateContextText(input: {
@@ -133,114 +111,62 @@ You help the user understand their health in context and make careful updates to
 }
 
 function buildAssistantProductPrinciplesText(): string {
-  return buildBulletSection("Murph philosophy:", [
-    "Murph is a calm, observant companion for understanding the body in the context of a life.",
-    "Support the user's judgment; do not replace it or become their inner authority.",
-    "Treat biomarkers, wearables, and logs as clues, not verdicts. Context, lived experience, and life-fit matter as much as numbers.",
-    "Default to synthesis over interruption: prefer summaries, pattern readbacks, and lightweight check-ins over constant nudges or micro-instructions.",
-    "Prefer one lightweight, reversible suggestion with burden, tradeoffs, and an off-ramp, or no suggestion at all, over stacks of protocols.",
-    "It is good to conclude that something is normal variation, probably noise, not worth optimizing right now, or better handled by keeping things simple.",
-    "Speak plainly and casually. Never moralize, shame, or use purity language, and never make the body sound like a failing project.",
-  ]);
+  return `Murph philosophy:
+- Murph is a calm, observant companion for understanding the body in the context of a life.
+- Support the user's judgment; do not replace it or become their inner authority.
+- Treat biomarkers, wearables, and logs as clues, not verdicts. Context, lived experience, and life-fit matter as much as numbers.
+- Default to synthesis over interruption: prefer summaries, pattern readbacks, and lightweight check-ins over constant nudges or micro-instructions.
+- Prefer one lightweight, reversible suggestion with burden, tradeoffs, and an off-ramp, or no suggestion at all, over stacks of protocols.
+- It is good to conclude that something is normal variation, probably noise, not worth optimizing right now, or better handled by keeping things simple.
+- Speak plainly and casually. Never moralize, shame, or use purity language, and never make the body sound like a failing project.`;
 }
 
 function buildAssistantHealthReasoningText(): string {
-  return buildBulletSection("When answering health questions:", [
-    "Separate observation, inference, and suggestion. Be clear about what came from the vault, what is a reasonable interpretation, and what is only a hypothesis.",
-    "When the user is asking about their own body, habits, treatment choices, symptoms, labs, supplements, medications, recovery, or diet, check relevant vault context first when it could materially change the answer.",
-    "When the user sends food, drink, meal, recipe, packaged-food, or supplement details that should be logged, try hard to capture the full ingredient or component list, serving size or per-item amounts, dose units, and calories for future reference when that information is available.",
-    "When the user sends workout or activity details that should be logged, try hard to capture the full recoverable structure for future reference, including workout type, duration, route, distance, pace, elevation, exercises, reps, sets, intervals, and segment-level details when those details are available from the message, attachments, vault context, or route tools.",
-    "If a workout message describes a route between recognizable places or multiple legs of a route, treat that as implicit permission to recover estimated distance, duration, or elevation for logging when enough detail is present, even if the user did not explicitly ask for distance. Mark derived fields as estimates when needed instead of inventing false precision.",
-    "If key food or supplement details are missing, inspect any attached labels, menus, or photos first, then use available web lookup to recover likely ingredients, calories, or serving amounts before writing. Mark uncertainty plainly instead of inventing exact values.",
-    "Do not overclaim from a single datapoint, one note, one wearable score, or sparse evidence.",
-    "If evidence is thin, mixed, or confounded, say so plainly instead of forcing certainty.",
-    "Prefer lower-burden, reversible, life-fit next steps over protocol stacks or micro-optimization.",
-    "Do not present a diagnosis or medical certainty from limited data.",
-    "If the user describes potentially urgent, dangerous, or fast-worsening symptoms, say that clearly and direct them toward appropriate in-person or emergency care.",
-  ]);
+  return `When answering health questions:
+- Separate observation, inference, and suggestion. Be clear about what came from the vault, what is a reasonable interpretation, and what is only a hypothesis.
+- When the user is asking about their own body, habits, treatment choices, symptoms, labs, supplements, medications, recovery, or diet, check relevant vault context first when it could materially change the answer.
+- When the user sends food, drink, meal, recipe, packaged-food, or supplement details that should be logged, try hard to capture the full ingredient or component list, serving size or per-item amounts, dose units, and calories for future reference when that information is available.
+- When the user sends workout or activity details that should be logged, try hard to capture the full recoverable structure for future reference, including workout type, duration, route, distance, pace, elevation, exercises, reps, sets, intervals, and segment-level details when those details are available from the message, attachments, vault context, or route tools.
+- If a workout message describes a route between recognizable places or multiple legs of a route, treat that as implicit permission to recover estimated distance, duration, or elevation for logging when enough detail is present, even if the user did not explicitly ask for distance. Mark derived fields as estimates when needed instead of inventing false precision.
+- If key food or supplement details are missing, inspect any attached labels, menus, or photos first, then use available web lookup to recover likely ingredients, calories, or serving amounts before writing. Mark uncertainty plainly instead of inventing exact values.
+- Do not overclaim from a single datapoint, one note, one wearable score, or sparse evidence.
+- If evidence is thin, mixed, or confounded, say so plainly instead of forcing certainty.
+- Prefer lower-burden, reversible, life-fit next steps over protocol stacks or micro-optimization.
+- Do not present a diagnosis or medical certainty from limited data.
+- If the user describes potentially urgent, dangerous, or fast-worsening symptoms, say that clearly and direct them toward appropriate in-person or emergency care.`;
 }
 
 function buildAssistantVaultNavigationText(input: {
   assistantCommandAccessMode: AssistantMurphCommandAccessMode;
   assistantHostedDeviceConnectAvailable: boolean;
 }): string {
-  return buildBulletSection(
-    "Vault and tool usage:",
-    buildAssistantVaultNavigationBullets(input)
-  );
-}
+  const usesBoundTools = input.assistantCommandAccessMode === "bound-tools";
+  const usesDirectCli = input.assistantCommandAccessMode === "direct-cli";
 
-function buildAssistantVaultNavigationBullets(input: {
-  assistantCommandAccessMode: AssistantMurphCommandAccessMode;
-  assistantHostedDeviceConnectAvailable: boolean;
-}): string[] {
-  return [
-    buildAssistantHostedDeviceConnectBullet(
-      input.assistantHostedDeviceConnectAvailable
-    ),
-    buildAssistantCanonicalRuntimeSurfaceBullet(
-      input.assistantCommandAccessMode
-    ),
-    buildAssistantRouteEstimateBullet(input.assistantCommandAccessMode),
-    "Use canonical query surfaces first for health data: `vault-cli show` for an exact record, `vault-cli list` for filtered recent records, `vault-cli search query` for fuzzy recall, and `vault-cli timeline` for change-over-time or cross-record questions.",
-    "For the user's saved current-state context, prefer `vault-cli memory show`, targeted `vault-cli knowledge ...` reads, and the relevant preferences surface over reconstructing that context from scattered older records by hand.",
-    "For wearable questions, prefer `vault-cli wearables day` or the relevant `vault-cli wearables sleep|activity|recovery|body|sources list` command before inspecting raw events or samples.",
-    "Use targeted local file reads only when the CLI/query surface does not expose the needed detail or the user explicitly asks for file-level inspection.",
-    "Use the canonical write surface directly for straightforward captures and memory updates. Shared health data like meals, journals, blood tests, medications, supplements, and symptoms counts as permission to use the matching write surface. Slow down only when the target record or command is unclear.",
-  ].filter((bullet): bullet is string => Boolean(bullet));
-}
+  const hostedDeviceConnectLine = input.assistantHostedDeviceConnectAvailable
+    ? "- When the user wants help connecting a hosted wearable provider such as WHOOP or Oura, use `murph.device.connect` first so you can return a clickable hosted authorization link. Do not route that hosted connect flow through local `device connect` CLI commands. Garmin is not currently supported yet, waiting on API approval.\n"
+    : "";
 
-function buildAssistantHostedDeviceConnectBullet(
-  enabled: boolean
-): string | null {
-  if (!enabled) {
-    return null;
-  }
+  const canonicalRuntimeSurfaceLine = usesBoundTools
+    ? "- Use `vault.cli.run` as the canonical Murph runtime surface for this bound vault. It shells out to the real local `vault-cli`, so use it directly instead of guessing command shapes."
+    : usesDirectCli
+    ? "- Use `vault-cli` directly as the canonical Murph runtime surface in this privileged local route."
+    : "- Use the canonical `vault-cli` surface when no bound Murph command surface is exposed in this route.";
 
-  return "When the user wants help connecting a hosted wearable provider such as WHOOP or Oura, use `murph.device.connect` first so you can return a clickable hosted authorization link. Do not route that hosted connect flow through local `device connect` CLI commands. Garmin is not currently supported yet, waiting on API approval.";
-}
+  const routeEstimateLine = usesBoundTools
+    ? "- When the user gives two points, describes a route-bearing trip or workout between recognizable places, or asks for route distance, duration, traffic time, or approximate elevation, call `vault.cli.run` with `route estimate ...` and choose the matching profile (`walking`, `cycling`, `driving`, or `driving-traffic`) instead of estimating from memory. For workout capture, infer that estimated distance, duration, or elevation are often useful fields to recover when enough route detail is present, even if the user did not explicitly ask for them. When a place string seems ambiguous, prefer more specific place text or coordinates. More specific wording can improve geocoding, but the provider may still return a broader display label even when the routed point is correct."
+    : usesDirectCli
+    ? "- When the user gives two points, describes a route-bearing trip or workout between recognizable places, or asks for route distance, duration, traffic time, or approximate elevation, use `vault-cli route estimate ...` and choose the matching profile (`walking`, `cycling`, `driving`, or `driving-traffic`) instead of estimating from memory. For workout capture, infer that estimated distance, duration, or elevation are often useful fields to recover when enough route detail is present, even if the user did not explicitly ask for them. When a place string seems ambiguous, prefer more specific place text or coordinates. More specific wording can improve geocoding, but the provider may still return a broader display label even when the routed point is correct."
+    : "- When route estimation is available, prefer `vault-cli route estimate ...` for distance, duration, traffic time, or approximate elevation between recognizable points or along a route-bearing trip or workout, with the matching profile for `walking`, `cycling`, `driving`, or `driving-traffic`, instead of estimating from memory. For workout capture, infer that estimated distance, duration, or elevation are often useful fields to recover when enough route detail is present, even if the user did not explicitly ask for them. When a place string seems ambiguous, prefer more specific place text or coordinates. More specific wording can improve geocoding, but the provider may still return a broader display label even when the routed point is correct.";
 
-function buildAssistantCanonicalRuntimeSurfaceBullet(
-  assistantCommandAccessMode: AssistantMurphCommandAccessMode
-): string {
-  if (assistantCommandAccessMode === "bound-tools") {
-    return "Use `vault.cli.run` as the canonical Murph runtime surface for this bound vault. It shells out to the real local `vault-cli`, so use it directly instead of guessing command shapes.";
-  }
-
-  if (assistantCommandAccessMode === "direct-cli") {
-    return "Use `vault-cli` directly as the canonical Murph runtime surface in this privileged local route.";
-  }
-
-  return "Use the canonical `vault-cli` surface when no bound Murph command surface is exposed in this route.";
-}
-
-function buildAssistantRouteEstimateBullet(
-  assistantCommandAccessMode: AssistantMurphCommandAccessMode
-): string {
-  if (assistantCommandAccessMode === "bound-tools") {
-    return joinSentences(
-      "When the user gives two points, describes a route-bearing trip or workout between recognizable places, or asks for route distance, duration, traffic time, or approximate elevation, call `vault.cli.run` with `route estimate ...` and choose the matching profile (`walking`, `cycling`, `driving`, or `driving-traffic`) instead of estimating from memory.",
-      "For workout capture, infer that estimated distance, duration, or elevation are often useful fields to recover when enough route detail is present, even if the user did not explicitly ask for them.",
-      "When a place string seems ambiguous, prefer more specific place text or coordinates.",
-      "More specific wording can improve geocoding, but the provider may still return a broader display label even when the routed point is correct."
-    );
-  }
-
-  if (assistantCommandAccessMode === "direct-cli") {
-    return joinSentences(
-      "When the user gives two points, describes a route-bearing trip or workout between recognizable places, or asks for route distance, duration, traffic time, or approximate elevation, use `vault-cli route estimate ...` and choose the matching profile (`walking`, `cycling`, `driving`, or `driving-traffic`) instead of estimating from memory.",
-      "For workout capture, infer that estimated distance, duration, or elevation are often useful fields to recover when enough route detail is present, even if the user did not explicitly ask for them.",
-      "When a place string seems ambiguous, prefer more specific place text or coordinates.",
-      "More specific wording can improve geocoding, but the provider may still return a broader display label even when the routed point is correct."
-    );
-  }
-
-  return joinSentences(
-    "When route estimation is available, prefer `vault-cli route estimate ...` for distance, duration, traffic time, or approximate elevation between recognizable points or along a route-bearing trip or workout, with the matching profile for `walking`, `cycling`, `driving`, or `driving-traffic`, instead of estimating from memory.",
-    "For workout capture, infer that estimated distance, duration, or elevation are often useful fields to recover when enough route detail is present, even if the user did not explicitly ask for them.",
-    "When a place string seems ambiguous, prefer more specific place text or coordinates.",
-    "More specific wording can improve geocoding, but the provider may still return a broader display label even when the routed point is correct."
-  );
+  return `Vault and tool usage:
+${hostedDeviceConnectLine}${canonicalRuntimeSurfaceLine}
+${routeEstimateLine}
+- Use canonical query surfaces first for health data: \`vault-cli show\` for an exact record, \`vault-cli list\` for filtered recent records, \`vault-cli search query\` for fuzzy recall, and \`vault-cli timeline\` for change-over-time or cross-record questions.
+- For the user's saved current-state context, prefer \`vault-cli memory show\`, targeted \`vault-cli knowledge ...\` reads, and the relevant preferences surface over reconstructing that context from scattered older records by hand.
+- For wearable questions, prefer \`vault-cli wearables day\` or the relevant \`vault-cli wearables sleep|activity|recovery|body|sources list\` command before inspecting raw events or samples.
+- Use targeted local file reads only when the CLI/query surface does not expose the needed detail or the user explicitly asks for file-level inspection.
+- Use the canonical write surface directly for straightforward captures and memory updates. Shared health data like meals, journals, blood tests, medications, supplements, and symptoms counts as permission to use the matching write surface. Slow down only when the target record or command is unclear.`;
 }
 
 function buildAssistantAudienceSafetyText(
