@@ -2,6 +2,37 @@
 
 All notable changes to `@murphai/murph` will be documented in this file.
 
+## [0.2.11] - 2026-04-14
+
+### Added
+- add homepage email auth
+- tighten homepage auth copy
+- add homepage telegram auth
+- accept date-only occurred-at and audit event writes
+- make murph use a single active vault
+
+### Fixed
+- restore release green state
+- restore hosted phone auth error export
+- shorten homepage phone label
+- tweak sign-in cta copy
+- refine homepage auth options
+- allow Telegram auth origins in CSP
+- prioritize inbox before cron
+- quiet sqlite and duplicate prisma log noise
+
+### Changed
+- upgrade next.js to 16.2.3
+- simplify hosted auth flows
+- fix worker runtime wake expectation
+- simplify audited write seam
+- clarify required audit passes
+- simplify homepage email auth form
+- audit public canonical writes
+- use multiline prompt blocks
+- make system prompt composition readable
+- cover duplicate activation commit replay
+
 ## [0.2.10] - 2026-04-14
 
 ### Fixed
