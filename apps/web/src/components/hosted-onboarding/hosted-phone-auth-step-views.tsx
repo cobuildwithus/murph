@@ -96,7 +96,7 @@ export function HostedPhoneEntryStep({
     <form className="space-y-3" onSubmit={onSubmitPhoneEntry}>
       <div className="space-y-3">
         <Label htmlFor={phoneInputId}>
-          {phoneFieldLabel ?? (intent === "signin" ? "Phone number" : "Your phone number")}
+          {phoneFieldLabel ?? (intent === "signin" ? "Phone number" : "Your phone")}
         </Label>
         <div className="flex flex-col gap-3 sm:flex-row">
           <Combobox
