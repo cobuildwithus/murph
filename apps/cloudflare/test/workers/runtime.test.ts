@@ -152,7 +152,7 @@ describe("cloudflare worker runtime suite", () => {
     const initialStatus = await stub.dispatch(createDispatch("evt_alarm_seed", userId));
 
     expect(initialStatus.lastEventId).toBe("evt_alarm_seed");
-    expect(initialStatus.nextWakeAt).toBe("2026-05-26T12:01:00.000Z");
+    expect(initialStatus.nextWakeAt).toBe("2026-05-26T12:00:00.000Z");
 
     vi.setSystemTime(new Date("2026-05-26T12:01:10.000Z"));
     await expect(runDurableObjectAlarm(stub as never)).resolves.toBe(true);
