@@ -1,9 +1,12 @@
+import { z } from "zod";
+
 import { extractIsoDatePrefix } from "@murphai/contracts";
 
 import { stripEmptyObject, stripUndefined } from "../shared.ts";
 import {
   asArray,
   asPlainObject,
+  buildSyntheticDeletionResourceId,
   createRawArtifact,
   emitObservationMetrics,
   emitSampleMetrics,
@@ -49,6 +52,29 @@ export interface OuraSnapshotInput {
   heartrate?: unknown[];
   heartRate?: unknown[];
   deletions?: unknown[];
+}
+
+const ouraCollectionSchema = z.array(z.unknown());
+
+const ouraSnapshotSchema = z.object({
+  accountId: z.union([z.string(), z.number()]).optional(),
+  importedAt: z.union([z.string(), z.number(), z.date()]).optional(),
+  personalInfo: z.unknown().optional(),
+  dailyActivity: ouraCollectionSchema.optional(),
+  dailySleep: ouraCollectionSchema.optional(),
+  dailyReadiness: ouraCollectionSchema.optional(),
+  dailySpO2: ouraCollectionSchema.optional(),
+  dailySpo2: ouraCollectionSchema.optional(),
+  sleeps: ouraCollectionSchema.optional(),
+  sessions: ouraCollectionSchema.optional(),
+  workouts: ouraCollectionSchema.optional(),
+  heartrate: ouraCollectionSchema.optional(),
+  heartRate: ouraCollectionSchema.optional(),
+  deletions: ouraCollectionSchema.optional(),
+}).catchall(z.unknown());
+
+function parseOuraSnapshot(snapshot: unknown): OuraSnapshotInput {
+  return ouraSnapshotSchema.parse(snapshot);
 }
 
 function secondsToMinutes(value: unknown): number | undefined {
@@ -363,9 +389,6 @@ function pushDeletionObservation(
     deletion.resource_type ?? deletion.resourceType ?? deletion.data_type ?? deletion.dataType,
     "resource",
   );
-  const resourceId =
-    stringId(deletion.resource_id ?? deletion.resourceId ?? deletion.object_id ?? deletion.objectId) ??
-    `deleted-${events.length + 1}`;
   const occurredAt =
     firstIso(deletion.occurred_at, deletion.occurredAt, deletion.event_time, deletion.eventTime) ??
     importedAt;
@@ -375,14 +398,22 @@ function pushDeletionObservation(
       : typeof deletion.sourceEventType === "string" && deletion.sourceEventType.trim()
         ? deletion.sourceEventType.trim()
         : typeof deletion.event_type === "string" && deletion.event_type.trim()
-          ? deletion.event_type.trim()
-          : typeof deletion.eventType === "string" && deletion.eventType.trim()
-            ? deletion.eventType.trim()
-            : undefined;
+        ? deletion.event_type.trim()
+        : typeof deletion.eventType === "string" && deletion.eventType.trim()
+          ? deletion.eventType.trim()
+          : undefined;
+  const resourceId =
+    stringId(deletion.resource_id ?? deletion.resourceId ?? deletion.object_id ?? deletion.objectId) ??
+    buildSyntheticDeletionResourceId({
+      provider: "oura",
+      resourceType,
+      occurredAt,
+      sourceEventType,
+      deletion,
+    });
   pushSharedDeletionObservation(events, rawArtifacts, {
     provider: "oura",
     providerDisplayName: "Oura",
-    deletion,
     resourceType,
     resourceId,
     occurredAt,
@@ -551,18 +582,17 @@ export function normalizeOuraSnapshot(snapshot: OuraSnapshotInput): NormalizedDe
     const role = `sleep:${sleepId}`;
     const version = firstIso(sleep.timestamp, sleep.updated_at, sleep.updatedAt);
 
-    pushRawArtifact(rawArtifacts, createRawArtifact(role, `sleep-${sleepId}.json`, sleep));
-
     if (sleepType === "deleted") {
       pushDeletionObservation(events, rawArtifacts, importedAt, {
         resource_type: "sleep",
         resource_id: sleepId,
         occurred_at: recordedAt,
         source_event_type: "sleep.deleted",
-        payload: sleep,
       });
       continue;
     }
+
+    pushRawArtifact(rawArtifacts, createRawArtifact(role, `sleep-${sleepId}.json`, sleep));
 
     if (sleepType !== "rest" && occurredAt && startAt && endAt && durationMinutes) {
       events.push(
@@ -787,5 +817,6 @@ export function normalizeOuraSnapshot(snapshot: OuraSnapshotInput): NormalizedDe
 
 export const ouraProviderAdapter: DeviceProviderAdapter<OuraSnapshotInput> = {
   ...OURA_DEVICE_PROVIDER_DESCRIPTOR,
+  parseSnapshot: parseOuraSnapshot,
   normalizeSnapshot: normalizeOuraSnapshot,
 };

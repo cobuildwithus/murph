@@ -19,6 +19,13 @@ import type {
 } from '../../model-harness.js'
 
 export type AssistantProviderProgressEvent = SharedAssistantProviderProgressEvent
+export type AssistantUserMessageContentType = AssistantUserMessageContentPart['type']
+
+export function supportsAnyAssistantRichUserMessageContent(
+  supportedTypes: readonly AssistantUserMessageContentType[],
+): boolean {
+  return supportedTypes.some((type) => type !== 'text')
+}
 
 export interface AssistantModelCapabilities {
   images: boolean
@@ -43,14 +50,21 @@ export interface AssistantModelDiscoveryResult {
 }
 
 export interface AssistantProviderCapabilities {
+  supportedUserMessageContentTypes: readonly AssistantUserMessageContentType[]
   supportsModelDiscovery: boolean
   supportsNativeResume: boolean
   supportsReasoningEffort: boolean
   supportsRichUserMessageContent: boolean
+  supportsZeroDataRetention: boolean
 }
+
+export type AssistantMurphCommandSurface = 'bound-tools' | 'direct-cli'
+
+export type AssistantMurphCommandAccessMode = AssistantMurphCommandSurface | 'none'
 
 export interface AssistantProviderExecutionCapabilities
   extends AssistantProviderCapabilities {
+  murphCommandSurface: AssistantMurphCommandSurface
   requestFormat: 'flat-prompt' | 'messages'
   supportsToolRuntime: boolean
 }
@@ -85,7 +99,10 @@ export interface AssistantProviderTurnInput {
   prompt?: string | null
   provider?: AssistantChatProvider | null
   providerName?: string | null
+  presetId?: string | null
   reasoningEffort?: string | null
+  webSearch?: string | null
+  zeroDataRetention?: boolean | null
   resumeProviderSessionId?: string | null
   sandbox?: AssistantSandbox | null
   sessionContext?: {

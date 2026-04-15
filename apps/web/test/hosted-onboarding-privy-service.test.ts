@@ -56,13 +56,27 @@ const SECONDARY_PHONE_NUMBER = "+15557654321";
 const SECONDARY_PHONE_LOOKUP_KEY = createHostedPhoneLookupKey(SECONDARY_PHONE_NUMBER)!;
 type CompleteHostedPrivyVerificationInput = Parameters<typeof completeHostedPrivyVerification>[0];
 type CompleteHostedPrivyVerificationPrisma = CompleteHostedPrivyVerificationInput["prisma"];
+type BaseHostedPrivyIdentity = HostedPrivyIdentity & {
+  phone: NonNullable<HostedPrivyIdentity["phone"]>;
+  wallet: NonNullable<HostedPrivyIdentity["wallet"]>;
+};
+type PhoneOverrides = Partial<NonNullable<HostedPrivyIdentity["phone"]>> | null;
 type WalletOverrides = Partial<NonNullable<HostedPrivyIdentity["wallet"]>> | null;
-type IdentityOverrides = Omit<Partial<HostedPrivyIdentity>, "wallet"> & {
+type IdentityOverrides = Omit<Partial<HostedPrivyIdentity>, "phone" | "wallet"> & {
+  phone?: PhoneOverrides;
   wallet?: WalletOverrides;
 };
 
 function makeIdentity(overrides: IdentityOverrides = {}): HostedPrivyIdentity {
   const identity = baseIdentity();
+  const basePhone: NonNullable<HostedPrivyIdentity["phone"]> = identity.phone;
+  const phone: HostedPrivyIdentity["phone"] =
+    overrides.phone === null
+      ? null
+      : {
+          ...basePhone,
+          ...(overrides.phone ?? {}),
+        };
   const wallet: HostedPrivyIdentity["wallet"] =
     overrides.wallet === null
       ? null
@@ -76,20 +90,18 @@ function makeIdentity(overrides: IdentityOverrides = {}): HostedPrivyIdentity {
   return {
     ...identity,
     ...overrides,
-    phone: {
-      ...identity.phone,
-      ...(overrides.phone ?? {}),
-    },
+    phone,
     wallet,
   };
 }
 
-function baseIdentity(): HostedPrivyIdentity {
+function baseIdentity(): BaseHostedPrivyIdentity {
   return {
     phone: {
       number: DEFAULT_PHONE_NUMBER,
       verifiedAt: 1742990400,
     },
+    telegram: null,
     userId: "did:privy:user_123",
     wallet: {
       address: "0xD8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
@@ -158,6 +170,7 @@ function makeInvite(member: ReturnType<typeof makeMember>, overrides: Record<str
 describe("completeHostedPrivyVerification", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.spyOn(console, "info").mockImplementation(() => {});
     mocks.isHostedOnboardingRevnetEnabled.mockReturnValue(false);
   });
 
@@ -208,8 +221,11 @@ describe("completeHostedPrivyVerification", () => {
     expect(prisma.hostedMember.update).not.toHaveBeenCalled();
     expect(prisma.hostedInvite.update).not.toHaveBeenCalled();
     expect(result).toEqual({
+      activationPending: false,
       inviteCode: "invite-code",
       joinUrl: "https://join.example.test/join/invite-code",
+      memberId: inviteMember.id,
+      messagingSetupRequired: false,
       stage: "checkout",
     });
   });
@@ -288,7 +304,9 @@ describe("completeHostedPrivyVerification", () => {
       },
       hostedMember: {
         create: vi.fn().mockResolvedValue(createdMember),
-        findUnique: vi.fn().mockResolvedValue(null),
+        findUnique: vi.fn().mockImplementation(async ({ where }: { where: Record<string, unknown> }) => (
+          where.id === createdMember.id ? createdMember : null
+        )),
       },
     });
 
@@ -298,7 +316,7 @@ describe("completeHostedPrivyVerification", () => {
       prisma,
     });
 
-    expect(prisma.hostedMember.findUnique).toHaveBeenCalledTimes(3);
+    expect(prisma.hostedMember.findUnique).toHaveBeenCalledTimes(4);
     expect(prisma.hostedMember.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         billingStatus: HostedBillingStatus.not_started,
@@ -320,6 +338,7 @@ describe("completeHostedPrivyVerification", () => {
     expect(prisma.hostedInvite.update).not.toHaveBeenCalled();
     expect(result.joinUrl).toBe("https://join.example.test/join/public-invite-code");
     expect(result.inviteCode).toBe("public-invite-code");
+    expect(result.messagingSetupRequired).toBe(false);
     expect(result.stage).toBe("checkout");
   });
 
@@ -348,7 +367,9 @@ describe("completeHostedPrivyVerification", () => {
       },
       hostedMember: {
         create: vi.fn().mockResolvedValue(createdMember),
-        findUnique: vi.fn().mockResolvedValue(null),
+        findUnique: vi.fn().mockImplementation(async ({ where }: { where: Record<string, unknown> }) => (
+          where.id === createdMember.id ? createdMember : null
+        )),
       },
     });
 
@@ -361,12 +382,168 @@ describe("completeHostedPrivyVerification", () => {
         prisma,
       }),
     ).resolves.toEqual({
+      activationPending: false,
       inviteCode: "public-phone-only-invite",
       joinUrl: "https://join.example.test/join/public-phone-only-invite",
+      memberId: "member_phone_only",
+      messagingSetupRequired: false,
       stage: "checkout",
     });
 
     expect(prisma.hostedMember.create).toHaveBeenCalledTimes(1);
+  });
+
+  it("creates a hosted member and a web invite for a new Telegram-only signup without synthetic phone identity data", async () => {
+    const identityUpsert = vi.fn(async ({
+      create,
+      update,
+    }: {
+      create: Record<string, unknown>;
+      update: Record<string, unknown>;
+    }) => ({
+      ...create,
+      ...update,
+    }));
+    const createdMember = makeMember({
+      id: "member_telegram_only",
+      maskedPhoneNumberHint: null,
+      phoneLookupKey: null,
+      phoneNumberVerifiedAt: null,
+      privyUserId: "did:privy:user_123",
+      walletAddress: null,
+      walletChainType: null,
+      walletCreatedAt: null,
+      walletProvider: null,
+    });
+    const createdInvite = makeInvite(createdMember, {
+      channel: "web",
+      id: "invite_telegram_only",
+      inviteCode: "public-telegram-invite",
+      memberId: "member_telegram_only",
+    });
+    const prisma = asCompleteHostedPrivyVerificationPrisma({
+      hostedInvite: {
+        create: vi.fn().mockResolvedValue(createdInvite),
+        findFirst: vi.fn().mockResolvedValue(null),
+        update: vi.fn().mockResolvedValue({}),
+      },
+      hostedMember: {
+        create: vi.fn().mockResolvedValue(createdMember),
+        findUnique: vi.fn().mockImplementation(async ({ where }: { where: Record<string, unknown> }) => (
+          where.id === createdMember.id ? createdMember : null
+        )),
+      },
+      hostedMemberIdentity: {
+        findFirst: vi.fn().mockResolvedValue(null),
+        upsert: identityUpsert,
+      },
+    });
+
+    await expect(
+      completeHostedPrivyVerification({
+        identity: makeIdentity({
+          phone: null,
+          telegram: {
+            firstName: "Alice",
+            lastName: null,
+            photoUrl: null,
+            telegramUserId: "456",
+            username: "alice",
+          },
+          wallet: null,
+        }),
+        now: NOW,
+        prisma,
+      }),
+    ).resolves.toEqual({
+      activationPending: false,
+      inviteCode: "public-telegram-invite",
+      joinUrl: "https://join.example.test/join/public-telegram-invite",
+      memberId: "member_telegram_only",
+      messagingSetupRequired: false,
+      stage: "checkout",
+    });
+
+    expect(identityUpsert).toHaveBeenCalledWith(expect.objectContaining({
+      create: expect.objectContaining({
+        maskedPhoneNumberHint: null,
+        phoneLookupKey: null,
+        phoneNumberVerifiedAt: null,
+      }),
+      update: expect.objectContaining({
+        maskedPhoneNumberHint: null,
+        phoneLookupKey: null,
+        phoneNumberVerifiedAt: null,
+      }),
+    }));
+  });
+
+  it("allows an invite-bound Telegram-only verification when the invite does not require a phone identity", async () => {
+    const inviteMember = makeMember({
+      maskedPhoneNumberHint: null,
+      phoneLookupKey: null,
+      phoneNumberVerifiedAt: null,
+    });
+    const invite = {
+      ...makeInvite(inviteMember),
+      member: {
+        ...inviteMember,
+        identity: {
+          createdAt: NOW,
+          maskedPhoneNumberHint: null,
+          memberId: inviteMember.id,
+          phoneLookupKey: null,
+          phoneNumberVerifiedAt: null,
+          privyUserId: null,
+          updatedAt: NOW,
+          walletAddress: null,
+          walletChainType: null,
+          walletCreatedAt: null,
+          walletProvider: null,
+        },
+      },
+    };
+    const prisma = asCompleteHostedPrivyVerificationPrisma({
+      hostedInvite: {
+        findUnique: vi.fn().mockResolvedValue(invite),
+        update: vi.fn().mockResolvedValue({}),
+      },
+      hostedMember: {
+        update: vi.fn().mockImplementation(async ({ data }: { data: Record<string, unknown> }) => ({
+          ...inviteMember,
+          ...data,
+        })),
+      },
+    });
+
+    await expect(
+      completeHostedPrivyVerification({
+        identity: makeIdentity({
+          phone: null,
+          telegram: {
+            firstName: "Alice",
+            lastName: null,
+            photoUrl: null,
+            telegramUserId: "456",
+            username: "alice",
+          },
+          wallet: null,
+        }),
+        inviteCode: "invite-code",
+        now: NOW,
+        prisma,
+      }),
+    ).resolves.toEqual({
+      activationPending: false,
+      inviteCode: "invite-code",
+      joinUrl: "https://join.example.test/join/invite-code",
+      memberId: inviteMember.id,
+      messagingSetupRequired: false,
+      stage: "checkout",
+    });
+
+    expect(prisma.hostedMember.update).not.toHaveBeenCalled();
+    expect(prisma.hostedInvite.update).not.toHaveBeenCalled();
   });
 
   it("rejects a wallet-less verified identity when RevNet is enabled", async () => {
@@ -710,8 +887,11 @@ describe("completeHostedPrivyVerification", () => {
         prisma,
       }),
     ).resolves.toEqual({
+      activationPending: false,
       inviteCode: "invite-code",
       joinUrl: "https://join.example.test/join/invite-code",
+      memberId: inviteMember.id,
+      messagingSetupRequired: false,
       stage: "checkout",
     });
 
@@ -730,6 +910,7 @@ function asCompleteHostedPrivyVerificationPrisma<T extends Record<string, unknow
   prisma: T,
 ): T & CompleteHostedPrivyVerificationPrisma {
   const prismaWithQueryRaw = prisma as T & CompleteHostedPrivyVerificationPrisma;
+  const routingRecordsByMemberId = new Map<string, Record<string, unknown>>();
   const hostedInvite = prismaWithQueryRaw.hostedInvite as unknown as
     | {
         findUnique?: ((input: { where?: Record<string, unknown> }) => Promise<unknown>) | undefined;
@@ -742,13 +923,30 @@ function asCompleteHostedPrivyVerificationPrisma<T extends Record<string, unknow
         update?: ((input: { data?: Record<string, unknown>; where?: Record<string, unknown> }) => Promise<unknown>) | undefined;
       }
     | undefined;
+  const hostedMemberRouting = prismaWithQueryRaw.hostedMemberRouting as unknown as
+    | {
+        findUnique?: ((input: { where?: Record<string, unknown> }) => Promise<unknown>) | undefined;
+        upsert?: ((input: { create: Record<string, unknown>; update: Record<string, unknown>; where?: Record<string, unknown> }) => Promise<unknown>) | undefined;
+      }
+    | undefined;
+  const executionOutbox = prismaWithQueryRaw.executionOutbox as unknown as
+    | {
+        findFirst?: ((input: { where?: Record<string, unknown> }) => Promise<unknown>) | undefined;
+      }
+    | undefined;
 
   if (!("hostedMember" in prismaWithQueryRaw) || !prismaWithQueryRaw.hostedMember || typeof hostedMember?.findUnique !== "function") {
     Object.defineProperty(prismaWithQueryRaw, "hostedMember", {
       configurable: true,
       value: {
         ...(hostedMember ?? {}),
-        findUnique: vi.fn(async ({ where }: { where?: Record<string, unknown> }) => {
+        findUnique: vi.fn(async ({
+          include,
+          where,
+        }: {
+          include?: { billingRef?: boolean; identity?: boolean; routing?: boolean };
+          where?: Record<string, unknown>;
+        }) => {
           const invite = await hostedInvite?.findUnique?.({ where: {} });
           const inviteMember = (invite as { member?: unknown } | null)?.member ?? null;
 
@@ -757,10 +955,119 @@ function asCompleteHostedPrivyVerificationPrisma<T extends Record<string, unknow
             && typeof where?.id === "string"
             && (inviteMember as { id?: unknown }).id === where.id
           ) {
-            return inviteMember;
+            if (!include || typeof inviteMember !== "object") {
+              return inviteMember;
+            }
+
+            const memberRecord = inviteMember as Record<string, unknown>;
+            const memberId = typeof memberRecord.id === "string" ? memberRecord.id : null;
+            return {
+              ...memberRecord,
+              ...(include.billingRef ? { billingRef: (memberRecord.billingRef as unknown) ?? null } : {}),
+              ...(include.identity ? { identity: (memberRecord.identity as unknown) ?? readMemberIdentity(memberRecord) } : {}),
+              ...(include.routing
+                ? {
+                    routing:
+                      (memberRecord.routing as unknown)
+                      ?? (memberId ? routingRecordsByMemberId.get(memberId) ?? null : null),
+                  }
+                : {}),
+            };
           }
 
           return null;
+        }),
+      },
+    });
+  } else {
+    const hostedMemberRecord = prismaWithQueryRaw.hostedMember;
+    const originalFindUnique =
+      typeof hostedMemberRecord.findUnique === "function"
+        ? hostedMemberRecord.findUnique.bind(hostedMemberRecord)
+        : undefined;
+
+    if (originalFindUnique) {
+      Object.defineProperty(hostedMemberRecord, "findUnique", {
+        configurable: true,
+        value: vi.fn(async ({
+          include,
+          where,
+        }: {
+          include?: { billingRef?: boolean; identity?: boolean; routing?: boolean };
+          where: Record<string, unknown>;
+        }) => {
+          const result = await Reflect.apply(originalFindUnique, hostedMemberRecord, [
+            {
+              include,
+              where,
+            },
+          ]);
+
+          if (!include || !result || typeof result !== "object") {
+            return result;
+          }
+
+          const memberRecord = result as Record<string, unknown>;
+          const memberId = typeof memberRecord.id === "string" ? memberRecord.id : null;
+
+          return {
+            ...memberRecord,
+            ...(include.billingRef ? { billingRef: (memberRecord.billingRef as unknown) ?? null } : {}),
+            ...(include.identity ? { identity: (memberRecord.identity as unknown) ?? readMemberIdentity(memberRecord) } : {}),
+            ...(include.routing
+              ? {
+                  routing:
+                    (memberRecord.routing as unknown)
+                    ?? (memberId ? routingRecordsByMemberId.get(memberId) ?? null : null),
+                }
+              : {}),
+          };
+        }),
+      });
+    }
+  }
+
+  if (!("executionOutbox" in prismaWithQueryRaw) || !prismaWithQueryRaw.executionOutbox || typeof executionOutbox?.findFirst !== "function") {
+    Object.defineProperty(prismaWithQueryRaw, "executionOutbox", {
+      configurable: true,
+      value: {
+        ...(executionOutbox ?? {}),
+        findFirst: vi.fn().mockResolvedValue(null),
+      },
+    });
+  }
+
+  if (!("hostedMemberRouting" in prismaWithQueryRaw) || !prismaWithQueryRaw.hostedMemberRouting) {
+    Object.defineProperty(prismaWithQueryRaw, "hostedMemberRouting", {
+      configurable: true,
+      value: {
+        ...(hostedMemberRouting ?? {}),
+        findUnique: vi.fn(async ({ where }: { where?: Record<string, unknown> }) => {
+          const memberId = typeof where?.memberId === "string" ? where.memberId : null;
+          return memberId ? routingRecordsByMemberId.get(memberId) ?? null : null;
+        }),
+        upsert: vi.fn(async ({
+          create,
+          update,
+        }: {
+          create: Record<string, unknown>;
+          update: Record<string, unknown>;
+        }) => {
+          const memberId = typeof create.memberId === "string"
+            ? create.memberId
+            : typeof update.memberId === "string"
+              ? update.memberId
+              : null;
+          const nextRecord = {
+            ...create,
+            ...update,
+          };
+
+          if (memberId) {
+            routingRecordsByMemberId.set(memberId, nextRecord);
+          }
+
+          return nextRecord;
         }),
       },
     });
@@ -966,6 +1273,13 @@ function asCompleteHostedPrivyVerificationPrisma<T extends Record<string, unknow
     Object.defineProperty(prismaWithQueryRaw, "$queryRaw", {
       configurable: true,
       value: vi.fn(async () => []),
+    });
+  }
+  if (!("$transaction" in prismaWithQueryRaw)) {
+    Object.defineProperty(prismaWithQueryRaw, "$transaction", {
+      configurable: true,
+      value: vi.fn(async (callback: (transaction: CompleteHostedPrivyVerificationPrisma) => Promise<unknown>) =>
+        callback(prismaWithQueryRaw)),
     });
   }
   return prismaWithQueryRaw;

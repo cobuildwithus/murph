@@ -35,7 +35,6 @@ export async function acquireAssistantAutomationRunLock(input: {
     pid: process.pid,
     startedAt: new Date().toISOString(),
   } satisfies AssistantAutomationRunLockMetadata
-
   if (activeAutomationRoots.has(input.paths.assistantStateRoot)) {
     throw createAssistantAlreadyRunningError({
       metadata: activeAutomationRoots.get(input.paths.assistantStateRoot) ?? metadata,
@@ -100,18 +99,9 @@ export async function inspectAssistantAutomationRunLock(
     }
   }
 
-  const inspection = await inspectDirectoryLock({
+  const inspection = await inspectAssistantAutomationRunLockDirectory({
     lockPath: resolveAssistantAutomationRunLockPath(paths),
     metadataPath: resolveAssistantAutomationRunLockMetadataPath(paths),
-    parseMetadata(value) {
-      return isAssistantAutomationRunLockMetadata(value) ? value : null
-    },
-    invalidMetadataReason: 'Assistant automation run lock metadata is malformed.',
-    inspectStale(metadata) {
-      return isProcessRunning(metadata.pid)
-        ? null
-        : `Process ${metadata.pid} is no longer running.`
-    },
   })
 
   if (inspection.state === 'unlocked') {
@@ -177,7 +167,26 @@ function resolveAssistantAutomationRunLockPath(paths: AssistantStatePaths): stri
 }
 
 function resolveAssistantAutomationRunLockMetadataPath(paths: AssistantStatePaths): string {
-  return path.join(paths.assistantStateRoot, '.automation-run-lock.json')
+  return path.join(paths.assistantStateRoot, '.automation-run.lock', 'owner.json')
+}
+
+async function inspectAssistantAutomationRunLockDirectory(input: {
+  lockPath: string
+  metadataPath: string
+}) {
+  return await inspectDirectoryLock({
+    lockPath: input.lockPath,
+    metadataPath: input.metadataPath,
+    parseMetadata(value) {
+      return isAssistantAutomationRunLockMetadata(value) ? value : null
+    },
+    invalidMetadataReason: 'Assistant automation run lock metadata is malformed.',
+    inspectStale(metadata) {
+      return isProcessRunning(metadata.pid)
+        ? null
+        : `Process ${metadata.pid} is no longer running.`
+    },
+  })
 }
 
 function isAssistantAutomationRunLockMetadata(

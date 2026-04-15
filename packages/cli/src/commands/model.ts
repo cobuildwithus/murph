@@ -41,55 +41,98 @@ import {
 
 const modelCommandPresetSchema = z.enum(['codex', 'openai-compatible'])
 
+function optionalNonEmptyStringOption(description: string) {
+  return z
+    .string()
+    .min(1)
+    .optional()
+    .describe(description)
+}
+
+function describePresetScopedOption(
+  description: string,
+  preset: z.infer<typeof modelCommandPresetSchema>,
+) {
+  return `${description} Only applies with \`--preset ${preset}\`.`
+}
+
 const modelCommandOptionsSchema = z.object({
   show: z
     .boolean()
     .optional()
-    .describe('Show the saved default assistant backend without changing it.'),
+    .describe(
+      'Show the saved default assistant backend configuration without changing it. This inspects persisted defaults, not live session state. When set, no update options are allowed.',
+    ),
   preset: modelCommandPresetSchema
     .optional()
-    .describe('Assistant backend preset to save: Codex or an OpenAI-compatible endpoint.'),
+    .describe(
+      'Assistant backend preset to save. Required for non-interactive updates when Murph cannot infer or reuse the backend, and required when switching between Codex and an OpenAI-compatible endpoint.',
+    ),
   providerPreset: setupAssistantProviderPresetSchema
     .optional()
-    .describe('Optional named OpenAI-compatible provider preset to seed the endpoint prompts.'),
-  model: z
-    .string()
-    .min(1)
+    .describe(
+      `${describePresetScopedOption(
+        'Optional named OpenAI-compatible provider preset.',
+        'openai-compatible',
+      )} Named presets carry provider-specific runtime behavior in addition to endpoint defaults.`,
+    ),
+  model: optionalNonEmptyStringOption(
+    'Default model to save for the selected backend. In non-interactive mode, pair this with `--preset` unless Murph can reuse the currently saved backend.',
+  ),
+  baseUrl: optionalNonEmptyStringOption(
+    describePresetScopedOption(
+      'OpenAI-compatible base URL to save, such as http://127.0.0.1:11434/v1.',
+      'openai-compatible',
+    ),
+  ),
+  apiKeyEnv: optionalNonEmptyStringOption(
+    describePresetScopedOption(
+      'Environment variable name that should hold the OpenAI-compatible API key.',
+      'openai-compatible',
+    ),
+  ),
+  providerName: optionalNonEmptyStringOption(
+    describePresetScopedOption(
+      'Stable label for the saved OpenAI-compatible provider.',
+      'openai-compatible',
+    ),
+  ),
+  zeroDataRetention: z
+    .boolean()
     .optional()
-    .describe('Default model to save for the selected backend.'),
-  baseUrl: z
-    .string()
-    .min(1)
-    .optional()
-    .describe('OpenAI-compatible base URL to save, such as http://127.0.0.1:11434/v1.'),
-  apiKeyEnv: z
-    .string()
-    .min(1)
-    .optional()
-    .describe('Environment variable name that should hold the OpenAI-compatible API key.'),
-  providerName: z
-    .string()
-    .min(1)
-    .optional()
-    .describe('Stable label for the saved OpenAI-compatible provider.'),
-  codexCommand: z
-    .string()
-    .min(1)
-    .optional()
-    .describe('Optional Codex CLI executable path. Defaults to codex.'),
-  profile: z
-    .string()
-    .min(1)
-    .optional()
-    .describe('Optional Codex profile name to save.'),
+    .describe(
+      describePresetScopedOption(
+        'Request zero data retention on Vercel AI Gateway assistant turns.',
+        'openai-compatible',
+      ),
+    ),
+  codexCommand: optionalNonEmptyStringOption(
+    `${describePresetScopedOption(
+      'Optional Codex CLI executable path.',
+      'codex',
+    )} Defaults to \`codex\`.`,
+  ),
+  profile: optionalNonEmptyStringOption(
+    describePresetScopedOption(
+      'Optional Codex profile name to save.',
+      'codex',
+    ),
+  ),
   reasoningEffort: z
     .enum(assistantReasoningEffortValues)
     .optional()
-    .describe('Optional assistant reasoning effort default to save.'),
+    .describe(
+      'Optional assistant reasoning effort default to save for the selected backend. Use the matching `--preset` when Murph cannot infer the backend non-interactively.',
+    ),
   oss: z
     .boolean()
     .optional()
-    .describe('Save a local Codex OSS model target instead of the signed-in Codex cloud path.'),
+    .describe(
+      describePresetScopedOption(
+        'Save a local Codex OSS model target instead of the signed-in Codex cloud path.',
+        'codex',
+      ),
+    ),
 })
 
 const modelCommandResultSchema = z
@@ -157,7 +200,7 @@ export function registerModelCommands(
   cli.command('model', {
     args: z.object({}),
     description:
-      'Show or update the saved default assistant backend that Murph reuses for future chats and auto-reply.',
+      'Show or update the saved default assistant backend configuration that Murph reuses for future chats and auto-reply. This inspects saved defaults, not the provider or model used by recent turns.',
     examples: [
       {
         description: 'Show the currently saved default assistant backend.',
@@ -186,7 +229,7 @@ export function registerModelCommands(
       },
     ],
     hint:
-      'Run `murph model` in a TTY to reopen the provider/model picker, or use `--show` for the current saved backend.',
+      'Run `murph model` in a TTY to reopen the provider/model picker. In non-interactive contexts, use `murph model --show` to inspect saved defaults, or pass `--preset` plus backend-specific options to update them.',
     options: modelCommandOptionsSchema,
     output: modelCommandResultSchema,
     async run({ options }) {
@@ -286,18 +329,39 @@ function assertShowOnly(options: ModelCommandOptions): void {
   )
 }
 
+function hasOpenAiCompatibleModelOptions(
+  options: ModelCommandOptions,
+): boolean {
+  return (
+    options.providerPreset !== undefined ||
+    options.baseUrl !== undefined ||
+    options.apiKeyEnv !== undefined ||
+    options.providerName !== undefined ||
+    options.zeroDataRetention !== undefined
+  )
+}
+
+function hasCodexModelOptions(options: ModelCommandOptions): boolean {
+  return (
+    options.codexCommand !== undefined ||
+    options.profile !== undefined ||
+    options.oss !== undefined
+  )
+}
+
+function hasModelSelectionOptions(options: ModelCommandOptions): boolean {
+  return (
+    options.model !== undefined ||
+    options.reasoningEffort !== undefined
+  )
+}
+
 function hasModelUpdateOptions(options: ModelCommandOptions): boolean {
-  return Boolean(
-    options.preset ??
-      options.providerPreset ??
-      options.model ??
-      options.baseUrl ??
-      options.apiKeyEnv ??
-      options.providerName ??
-      options.codexCommand ??
-      options.profile ??
-      options.reasoningEffort ??
-      options.oss,
+  return (
+    options.preset !== undefined ||
+    hasOpenAiCompatibleModelOptions(options) ||
+    hasModelSelectionOptions(options) ||
+    hasCodexModelOptions(options)
   )
 }
 
@@ -351,20 +415,15 @@ async function resolveModelCommandPreset(input: {
     return input.options.preset
   }
 
-  if (
-    input.options.providerPreset ??
-    input.options.baseUrl ??
-    input.options.apiKeyEnv ??
-    input.options.providerName
-  ) {
+  if (hasOpenAiCompatibleModelOptions(input.options)) {
     return 'openai-compatible'
   }
 
-  if (input.options.codexCommand ?? input.options.profile ?? input.options.oss) {
+  if (hasCodexModelOptions(input.options)) {
     return 'codex'
   }
 
-  if (input.options.model ?? input.options.reasoningEffort) {
+  if (hasModelSelectionOptions(input.options)) {
     if (
       input.currentPreset === 'codex' ||
       input.currentPreset === 'openai-compatible'
@@ -383,7 +442,7 @@ async function resolveModelCommandPreset(input: {
   if (!input.allowPrompt) {
     throw new VaultCliError(
       'invalid_option',
-      'Run `murph model --show` to inspect the saved backend, or pass `--preset` / provider options to update it non-interactively.',
+      'Run `murph model --show` to inspect saved defaults, or pass `--preset` / provider options to update them non-interactively.',
     )
   }
 
@@ -403,10 +462,7 @@ function assertCompatibleModelCommandOptions(
 ): void {
   if (
     preset === 'codex' &&
-    (options.providerPreset ??
-      options.baseUrl ??
-      options.apiKeyEnv ??
-      options.providerName)
+    hasOpenAiCompatibleModelOptions(options)
   ) {
     throw new VaultCliError(
       'invalid_option',
@@ -416,7 +472,7 @@ function assertCompatibleModelCommandOptions(
 
   if (
     preset === 'openai-compatible' &&
-    (options.codexCommand ?? options.profile ?? options.oss)
+    hasCodexModelOptions(options)
   ) {
     throw new VaultCliError(
       'invalid_option',
@@ -475,6 +531,11 @@ function createModelSetupOptions(input: {
     ...(input.options.providerName !== undefined
       ? {
           assistantProviderName: input.options.providerName,
+        }
+      : {}),
+    ...(input.options.zeroDataRetention !== undefined
+      ? {
+          assistantZeroDataRetention: input.options.zeroDataRetention,
         }
       : {}),
     ...(input.options.codexCommand !== undefined

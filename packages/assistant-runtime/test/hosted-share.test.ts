@@ -63,6 +63,7 @@ describe("handleHostedShareAcceptedDispatch", () => {
       });
 
       assert.equal(result.shareImportTitle, "Breakfast staples");
+      assert.ok(result.shareImportResult);
       assert.equal(result.shareImportResult.pack.title, "Breakfast staples");
       assert.equal(result.shareImportResult.foods.length, 1);
       assert.equal(result.shareImportResult.protocols.length, 0);

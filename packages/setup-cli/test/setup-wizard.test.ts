@@ -1,5 +1,21 @@
 import assert from 'node:assert/strict'
-import { test } from 'vitest'
+import { afterAll, test, vi } from 'vitest'
+
+const originalCi = vi.hoisted(() => {
+  const previousCi = process.env.CI
+  process.env.CI = 'false'
+  return previousCi
+})
+
+afterAll(() => {
+  if (originalCi === undefined) {
+    delete process.env.CI
+    return
+  }
+
+  process.env.CI = originalCi
+})
+
 import {
   buildSetupWizardPublicUrlReview,
   createSetupWizardCompletionController as createSetupWizardController,
@@ -17,24 +33,25 @@ import {
   createSetupWizardCompletionController,
   wrapSetupWizardIndex,
 } from '../src/setup-wizard-core.js'
-import { stripAnsi, withMockProcessTty } from './helpers.ts'
+import {
+  formatSetupChannel,
+  formatSetupScheduledUpdate,
+  formatSetupWearable,
+} from '../src/setup-wizard-options.ts'
+import {
+  formatSetupPublicUrlStrategy,
+  normalizeSetupWizardText,
+} from '../src/setup-wizard-public-url.ts'
+import {
+  buildSetupWizardRuntimeBadges,
+  describeSetupWizardRuntimeStatus,
+  normalizeSetupWizardRuntimeStatus,
+  resolveSetupWizardChannelStatus,
+  resolveSetupWizardWearableStatus,
+} from '../src/setup-wizard-runtime-status.ts'
+import { waitForRenderedText, withMockProcessTty } from './helpers.ts'
 
-async function waitForWizardText(
-  flush: () => Promise<void>,
-  readOutput: () => string,
-  pattern: RegExp,
-): Promise<string> {
-  for (let attempt = 0; attempt < 30; attempt += 1) {
-    const output = stripAnsi(readOutput())
-    if (pattern.test(output)) {
-      return output
-    }
-
-    await flush()
-  }
-
-  return stripAnsi(readOutput())
-}
+const WIZARD_TEST_TIMEOUT_MS = 90_000
 
 test('setup wizard core wraps indices and waits for exit before resolving', async () => {
   const controller =
@@ -106,12 +123,12 @@ test('setup wizard scheduled updates keep the starter bundle unless explicitly o
 })
 
 test('setup wizard selection toggles keep channels and wearables in canonical order', () => {
-  assert.deepEqual(toggleSetupWizardChannel(['telegram'], 'imessage'), [
-    'imessage',
+  assert.deepEqual(toggleSetupWizardChannel(['email'], 'telegram'), [
     'telegram',
+    'email',
   ])
-  assert.deepEqual(toggleSetupWizardChannel(['imessage', 'telegram'], 'imessage'), [
-    'telegram',
+  assert.deepEqual(toggleSetupWizardChannel(['telegram', 'email'], 'telegram'), [
+    'email',
   ])
   assert.deepEqual(toggleSetupWizardWearable(['whoop'], 'garmin'), [
     'garmin',
@@ -121,7 +138,7 @@ test('setup wizard selection toggles keep channels and wearables in canonical or
 })
 
 test('setup wizard exported defaults and wrapper controller keep platform-specific decisions stable', async () => {
-  assert.deepEqual(getDefaultSetupWizardChannels('darwin'), ['imessage'])
+  assert.deepEqual(getDefaultSetupWizardChannels('darwin'), [])
   assert.deepEqual(getDefaultSetupWizardChannels('linux'), [])
   assert.deepEqual(getDefaultSetupWizardWearables(), [])
   assert.deepEqual(
@@ -147,6 +164,180 @@ test('setup wizard exported defaults and wrapper controller keep platform-specif
   )
 })
 
+test.sequential('setup wizard preserves an explicit empty channel selection on darwin', async () => {
+  await withMockProcessTty(async ({ flush, readOutput, writeInput }) => {
+    const wizardResultPromise = runSetupWizard({
+      initialAssistantPreset: 'skip',
+      initialChannels: [],
+      platform: 'darwin',
+      vault: './wizard-explicit-empty-channels',
+    })
+
+    await flush()
+    await writeInput('\r')
+    await waitForRenderedText(flush, readOutput, /How should Murph answer\?/u)
+    await writeInput('\r')
+    await waitForRenderedText(flush, readOutput, /Auto updates/u)
+    await writeInput('\r')
+    await waitForRenderedText(flush, readOutput, /Chat channels/u)
+    await writeInput('\r')
+    await waitForRenderedText(flush, readOutput, /Health data/u)
+    await writeInput('\r')
+    await waitForRenderedText(flush, readOutput, /Review your setup/u)
+    await writeInput('\r')
+
+    assert.deepEqual(await wizardResultPromise, {
+      assistantApiKeyEnv: null,
+      assistantBaseUrl: null,
+      assistantOss: null,
+      assistantPreset: 'skip',
+      assistantProviderName: null,
+      channels: [],
+      scheduledUpdates: [
+        'environment-health-watch',
+        'weekly-health-snapshot',
+      ],
+      wearables: [],
+    })
+  })
+}, WIZARD_TEST_TIMEOUT_MS)
+
+test.sequential('setup wizard wrapper rejects when Ink render throws before initialization completes', async () => {
+  const renderError = new Error('render failed')
+
+  vi.resetModules()
+  vi.doMock('ink', async () => {
+    const actual = await vi.importActual<typeof import('ink')>('ink')
+    return {
+      ...actual,
+      render() {
+        throw renderError
+      },
+    }
+  })
+
+  try {
+    const { runSetupWizard: runMockedSetupWizard } = await import(
+      '../src/setup-wizard.ts'
+    )
+
+    await assert.rejects(
+      runMockedSetupWizard({
+        vault: './wizard-render-failure',
+      }),
+      /render failed/u,
+    )
+  } finally {
+    vi.doUnmock('ink')
+    vi.resetModules()
+  }
+}, WIZARD_TEST_TIMEOUT_MS)
+
+test.sequential('setup wizard wrapper rejects when Ink exits with an error after rendering', async () => {
+  const exitError = new Error('terminal crashed')
+
+  vi.resetModules()
+  vi.doMock('ink', async () => {
+    const actual = await vi.importActual<typeof import('ink')>('ink')
+    return {
+      ...actual,
+      render() {
+        return {
+          unmount() {},
+          waitUntilExit() {
+            return Promise.reject(exitError)
+          },
+        }
+      },
+    }
+  })
+
+  try {
+    const { runSetupWizard: runMockedSetupWizard } = await import(
+      '../src/setup-wizard.ts'
+    )
+
+    await assert.rejects(
+      runMockedSetupWizard({
+        vault: './wizard-exit-failure',
+      }),
+      /terminal crashed/u,
+    )
+  } finally {
+    vi.doUnmock('ink')
+    vi.resetModules()
+  }
+}, WIZARD_TEST_TIMEOUT_MS)
+
+test('setup wizard extracted option and public-url helpers keep labels and trimming stable', () => {
+  assert.equal(formatSetupChannel('telegram'), 'Telegram')
+  assert.equal(formatSetupChannel('email'), 'Email')
+  assert.equal(formatSetupWearable('garmin'), 'Garmin')
+  assert.equal(formatSetupWearable('oura'), 'Oura')
+  assert.equal(formatSetupScheduledUpdate('environment-health-watch'), 'Environment health watch')
+  assert.equal(formatSetupScheduledUpdate('custom-update'), 'custom-update')
+  assert.equal(formatSetupPublicUrlStrategy('hosted'), 'Hosted web app')
+  assert.equal(formatSetupPublicUrlStrategy('tunnel'), 'Local tunnel')
+  assert.equal(normalizeSetupWizardText('  https://murph.example  '), 'https://murph.example')
+  assert.equal(normalizeSetupWizardText('   '), null)
+  assert.equal(normalizeSetupWizardText(undefined), null)
+})
+
+test('setup wizard runtime-status helpers preserve defaulting, detail copy, and badge tones', () => {
+  const defaultStatus = normalizeSetupWizardRuntimeStatus(undefined)
+  assert.deepEqual(defaultStatus, {
+    badge: 'optional',
+    detail: '',
+    missingEnv: [],
+    ready: true,
+  })
+  assert.equal(
+    describeSetupWizardRuntimeStatus(defaultStatus),
+    'Ready to connect now.',
+  )
+  assert.deepEqual(buildSetupWizardRuntimeBadges(defaultStatus), [
+    { label: 'optional', tone: 'success' },
+  ])
+
+  const needsEnvStatus = resolveSetupWizardChannelStatus(
+    {
+      linq: {
+        badge: 'needs env',
+        detail: 'Missing webhook credentials.',
+        missingEnv: ['LINQ_API_TOKEN', 'LINQ_WEBHOOK_SECRET'],
+        ready: false,
+      },
+    },
+    'linq',
+  )
+  assert.equal(
+    describeSetupWizardRuntimeStatus(needsEnvStatus),
+    'Needs LINQ_API_TOKEN, LINQ_WEBHOOK_SECRET before this can connect.',
+  )
+  assert.deepEqual(buildSetupWizardRuntimeBadges(needsEnvStatus), [
+    { label: 'needs env', tone: 'warn' },
+  ])
+
+  const macosStatus = resolveSetupWizardWearableStatus(
+    {
+      whoop: {
+        badge: 'macOS only',
+        detail: 'Unavailable on Linux.',
+        missingEnv: [],
+        ready: false,
+      },
+    },
+    'whoop',
+  )
+  assert.equal(
+    describeSetupWizardRuntimeStatus(macosStatus),
+    'Only available on macOS.',
+  )
+  assert.deepEqual(buildSetupWizardRuntimeBadges(macosStatus), [
+    { label: 'macOS only', tone: 'accent' },
+  ])
+})
+
 test.sequential('setup wizard uses endpoint-specific method copy and confirm review for named endpoints', async () => {
   await withMockProcessTty(async ({ flush, readOutput, writeInput }) => {
     const wizardResultPromise = runSetupWizard({
@@ -156,12 +347,13 @@ test.sequential('setup wizard uses endpoint-specific method copy and confirm rev
       vault: './wizard-endpoint-provider',
     })
 
-    await flush()
+    const introOutput = await waitForRenderedText(flush, readOutput, /Before you start/u)
+    assert.match(introOutput, /Before you start/u)
     await writeInput('\r')
-    await waitForWizardText(flush, readOutput, /How should Murph answer\?/u)
+    await waitForRenderedText(flush, readOutput, /How should Murph answer\?/u)
     await writeInput('\r')
 
-    const methodOutput = await waitForWizardText(
+    const methodOutput = await waitForRenderedText(
       flush,
       readOutput,
       /How should Murph connect to your endpoint\?/u,
@@ -172,14 +364,14 @@ test.sequential('setup wizard uses endpoint-specific method copy and confirm rev
     )
 
     await writeInput('\r')
-    await waitForWizardText(flush, readOutput, /Auto updates/u)
+    await waitForRenderedText(flush, readOutput, /Auto updates/u)
     await writeInput('\r')
-    await waitForWizardText(flush, readOutput, /Chat channels/u)
+    await waitForRenderedText(flush, readOutput, /Chat channels/u)
     await writeInput('\r')
-    await waitForWizardText(flush, readOutput, /Health data/u)
+    await waitForRenderedText(flush, readOutput, /Health data/u)
     await writeInput('\r')
 
-    const confirmOutput = await waitForWizardText(flush, readOutput, /Review/u)
+    const confirmOutput = await waitForRenderedText(flush, readOutput, /Review/u)
     assert.match(confirmOutput, /Review your setup/u)
     assert.match(confirmOutput, /Assistant: Custom endpoint · Compatible endpoint/u)
 
@@ -199,7 +391,7 @@ test.sequential('setup wizard uses endpoint-specific method copy and confirm rev
       wearables: [],
     })
   })
-})
+}, WIZARD_TEST_TIMEOUT_MS)
 
 test('setup wizard public URL guidance stays disabled when a public base URL is already set', () => {
   const review = buildSetupWizardPublicUrlReview({
@@ -362,21 +554,21 @@ test.sequential('setup wizard runs the public-link flow, preserves explicit opt-
 
     await flush()
     await writeInput('\r')
-    await waitForWizardText(flush, readOutput, /How should Murph answer\?/u)
+    await waitForRenderedText(flush, readOutput, /How should Murph answer\?/u)
     await writeInput('\r')
-    await waitForWizardText(flush, readOutput, /Auto updates/u)
+    await waitForRenderedText(flush, readOutput, /Auto updates/u)
     await writeInput('\r')
-    await waitForWizardText(flush, readOutput, /Chat channels/u)
+    await waitForRenderedText(flush, readOutput, /Chat channels/u)
+    await writeInput('\u001B[A')
+    await writeInput('\u001B[A')
+    await writeInput(' ')
+    await writeInput('\r')
+    await waitForRenderedText(flush, readOutput, /Health data/u)
     await writeInput('\u001B[B')
     await writeInput('\u001B[B')
     await writeInput(' ')
     await writeInput('\r')
-    await waitForWizardText(flush, readOutput, /Health data/u)
-    await writeInput('\u001B[B')
-    await writeInput('\u001B[B')
-    await writeInput(' ')
-    await writeInput('\r')
-    const publicLinkOutput = await waitForWizardText(
+    const publicLinkOutput = await waitForRenderedText(
       flush,
       readOutput,
       /Public links/u,
@@ -390,11 +582,11 @@ test.sequential('setup wizard runs the public-link flow, preserves explicit opt-
     )
 
     await writeInput('\u001B')
-    await waitForWizardText(flush, readOutput, /Health data/u)
+    await waitForRenderedText(flush, readOutput, /Health data/u)
     await writeInput('\r')
-    await waitForWizardText(flush, readOutput, /Public links/u)
+    await waitForRenderedText(flush, readOutput, /Public links/u)
     await writeInput('\r')
-    await waitForWizardText(flush, readOutput, /Review your setup/u)
+    await waitForRenderedText(flush, readOutput, /Review your setup/u)
     await writeInput('\r')
 
     await assert.doesNotReject(wizardResultPromise)
@@ -409,7 +601,7 @@ test.sequential('setup wizard runs the public-link flow, preserves explicit opt-
       wearables: ['whoop'],
     })
   })
-})
+}, WIZARD_TEST_TIMEOUT_MS)
 
 test.sequential('setup wizard keeps assistant API-key defaults and review guidance when no public-link step is needed', async () => {
   const previousOpenAiApiKey = process.env.OPENAI_API_KEY
@@ -428,17 +620,17 @@ test.sequential('setup wizard keeps assistant API-key defaults and review guidan
 
       await flush()
       await writeInput('\r')
-      await waitForWizardText(flush, readOutput, /How should Murph answer\?/u)
+      await waitForRenderedText(flush, readOutput, /How should Murph answer\?/u)
       await writeInput('\r')
-      await waitForWizardText(flush, readOutput, /How should Murph connect to OpenAI\?/u)
+      await waitForRenderedText(flush, readOutput, /How should Murph connect to OpenAI\?/u)
       await writeInput('\r')
-      await waitForWizardText(flush, readOutput, /Auto updates/u)
+      await waitForRenderedText(flush, readOutput, /Auto updates/u)
       await writeInput('\r')
-      await waitForWizardText(flush, readOutput, /Chat channels/u)
+      await waitForRenderedText(flush, readOutput, /Chat channels/u)
       await writeInput('\r')
-      await waitForWizardText(flush, readOutput, /Health data/u)
+      await waitForRenderedText(flush, readOutput, /Health data/u)
       await writeInput('\r')
-      const confirmOutput = await waitForWizardText(
+      const confirmOutput = await waitForRenderedText(
         flush,
         readOutput,
         /Needs keys first/u,
@@ -456,9 +648,9 @@ test.sequential('setup wizard keeps assistant API-key defaults and review guidan
       )
 
       await writeInput('\u001B[D')
-      await waitForWizardText(flush, readOutput, /Health data/u)
+      await waitForRenderedText(flush, readOutput, /Health data/u)
       await writeInput('\r')
-      await waitForWizardText(flush, readOutput, /Review your setup/u)
+      await waitForRenderedText(flush, readOutput, /Review your setup/u)
       await writeInput('\r')
 
       assert.deepEqual(await wizardResultPromise, {
@@ -482,7 +674,7 @@ test.sequential('setup wizard keeps assistant API-key defaults and review guidan
       process.env.OPENAI_API_KEY = previousOpenAiApiKey
     }
   }
-})
+}, WIZARD_TEST_TIMEOUT_MS)
 
 test.sequential('setup wizard surfaces cancellation when the operator quits from the intro screen', async () => {
   await withMockProcessTty(async ({ flush, writeInput }) => {
@@ -499,4 +691,88 @@ test.sequential('setup wizard surfaces cancellation when the operator quits from
 
     await rejection
   })
-})
+}, WIZARD_TEST_TIMEOUT_MS)
+
+test.sequential('setup wizard surfaces cancellation when the operator presses escape on the intro screen', async () => {
+  await withMockProcessTty(async ({ flush, writeInput }) => {
+    const wizardResultPromise = runSetupWizard({
+      vault: './wizard-cancelled-escape',
+    })
+    const rejection = assert.rejects(
+      wizardResultPromise,
+      /Murph setup was cancelled\./u,
+    )
+
+    await flush()
+    await writeInput('\u001B')
+
+    await rejection
+  })
+}, WIZARD_TEST_TIMEOUT_MS)
+
+test.sequential('setup wizard accepts wrapped selection navigation plus space-based public-link and confirm actions', async () => {
+  await withMockProcessTty(async ({ flush, readOutput, writeInput }) => {
+    const wizardResultPromise = runSetupWizard({
+      channelStatuses: {
+        linq: {
+          badge: 'needs env',
+          detail: 'Missing webhook credentials.',
+          missingEnv: ['LINQ_API_TOKEN'],
+          ready: false,
+        },
+      },
+      initialAssistantPreset: 'skip',
+      initialChannels: [],
+      initialScheduledUpdates: [],
+      initialWearables: [],
+      platform: 'linux',
+      vault: './wizard-public-links-space',
+      wearableStatuses: {
+        whoop: {
+          badge: 'needs env',
+          detail: 'Missing WHOOP client credentials.',
+          missingEnv: ['WHOOP_CLIENT_ID'],
+          ready: false,
+        },
+      },
+    })
+
+    await flush()
+    await writeInput('\r')
+    await waitForRenderedText(flush, readOutput, /How should Murph answer\?/u)
+    await writeInput('\r')
+    await waitForRenderedText(flush, readOutput, /Auto updates/u)
+    await writeInput('\r')
+    await waitForRenderedText(flush, readOutput, /Chat channels/u)
+    await writeInput('\u001B[A')
+    await writeInput('\u001B[B')
+    await writeInput('\u001B[B')
+    await writeInput('\u001B[B')
+    await writeInput(' ')
+    await writeInput('\r')
+    await waitForRenderedText(flush, readOutput, /Health data/u)
+    await writeInput('\u001B[B')
+    await writeInput('\u001B[B')
+    await writeInput(' ')
+    await writeInput('\r')
+    await waitForRenderedText(flush, readOutput, /Public links/u)
+    await writeInput(' ')
+    await waitForRenderedText(flush, readOutput, /Review your setup/u)
+    await writeInput('\u001B')
+    await waitForRenderedText(flush, readOutput, /Public links/u)
+    await writeInput(' ')
+    await waitForRenderedText(flush, readOutput, /Review your setup/u)
+    await writeInput(' ')
+
+    assert.deepEqual(await wizardResultPromise, {
+      assistantApiKeyEnv: null,
+      assistantBaseUrl: null,
+      assistantOss: null,
+      assistantPreset: 'skip',
+      assistantProviderName: null,
+      channels: ['email'],
+      scheduledUpdates: [],
+      wearables: ['whoop'],
+    })
+  })
+}, WIZARD_TEST_TIMEOUT_MS)

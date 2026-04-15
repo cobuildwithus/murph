@@ -1,12 +1,10 @@
-import { readHealthContextTolerant } from "./export-pack-health.ts";
+import { buildHealthContextFromVault } from "./export-pack-health.ts";
 import type {
   ExportPackAssessmentRecord,
   ExportPackBankPage,
-  ExportPackCurrentProfile,
   ExportPackFilters,
+  ExportPackHealthEventRecord,
   ExportPackHealthContext,
-  ExportPackHistoryRecord,
-  ExportPackProfileSnapshotRecord,
 } from "./export-pack-health-types.ts";
 import type { CanonicalEntity } from "./canonical-entities.ts";
 import { getExperiment, listEntities, listJournalEntries } from "./model.ts";
@@ -17,11 +15,9 @@ import type { DailySampleSummary } from "./summaries.ts";
 export type {
   ExportPackAssessmentRecord,
   ExportPackBankPage,
-  ExportPackCurrentProfile,
   ExportPackFilters,
+  ExportPackHealthEventRecord,
   ExportPackHealthContext,
-  ExportPackHistoryRecord,
-  ExportPackProfileSnapshotRecord,
 } from "./export-pack-health-types.ts";
 
 export interface ExportPackFile {
@@ -36,8 +32,7 @@ export interface ExportPackManifest {
   journalCount: number;
   sampleSummaryCount: number;
   assessmentCount: number;
-  profileSnapshotCount: number;
-  historyEventCount: number;
+  healthEventCount: number;
   bankPageCount: number;
   questionCount: number;
   fileCount: number;
@@ -168,7 +163,7 @@ export function buildExportPack(
   };
 
   const entities = listEntities(vault, {
-    families: ["audit", "core", "event", "experiment", "history", "journal", "sample"],
+    families: ["audit", "core", "event", "experiment", "journal", "sample"],
     from: filters.from ?? undefined,
     to: filters.to ?? undefined,
     experimentSlug: filters.experimentSlug ?? undefined,
@@ -194,8 +189,7 @@ export function buildExportPack(
     journalCount: journalEntries.length,
     sampleSummaryCount: dailySampleSummaries.length,
     assessmentCount: health.assessments.length,
-    profileSnapshotCount: health.profileSnapshots.length,
-    historyEventCount: health.historyEvents.length,
+    healthEventCount: health.healthEvents.length,
     bankPageCount: countHealthBankPages(health),
     questionCount: 0,
     fileCount: 0,
@@ -379,22 +373,9 @@ function renderAssistantContext(input: QuestionPack): string {
     lines.push("");
   }
 
-  if (context.health.currentProfile) {
-    lines.push("## Current Profile", "");
-    lines.push(`- Snapshot: ${context.health.currentProfile.snapshotId ?? "none"}`);
-    lines.push(`- Updated At: ${context.health.currentProfile.updatedAt ?? "unknown"}`);
-    if (context.health.currentProfile.topGoalIds.length > 0) {
-      lines.push(`- Top Goals: ${context.health.currentProfile.topGoalIds.join(", ")}`);
-    }
-    if (context.health.currentProfile.body) {
-      lines.push("", context.health.currentProfile.body);
-    }
-    lines.push("");
-  }
-
-  if (context.health.historyEvents.length > 0) {
-    lines.push("## Health History", "");
-    for (const event of context.health.historyEvents.slice(0, 25)) {
+  if (context.health.healthEvents.length > 0) {
+    lines.push("## Health Events", "");
+    for (const event of context.health.healthEvents.slice(0, 25)) {
       lines.push(`- ${event.occurredAt} | ${event.kind} | ${event.title}`);
     }
     lines.push("");
@@ -498,15 +479,15 @@ function buildPromptQuestions(input: {
     );
   }
 
-  if (health.currentProfile || countHealthBankPages(health) > 0) {
+  if (countHealthBankPages(health) > 0) {
     questions.push(
-      "How does the derived current profile compare with the durable health registries in this pack?",
+      "Which durable goals, conditions, protocols, family history, or genetics context should shape interpretation of the other records?",
     );
   }
 
-  if (health.historyEvents.length > 0) {
+  if (health.healthEvents.length > 0) {
     questions.push(
-      "Which medical history events or exposures most change the interpretation of the other records?",
+      "Which time-stamped health events most change the interpretation of the other records?",
     );
   }
 
@@ -575,10 +556,8 @@ function toStringArray(value: unknown): string[] {
 function summarizeHealthManifest(health: ExportPackHealthContext) {
   return {
     assessmentCount: health.assessments.length,
-    profileSnapshotCount: health.profileSnapshots.length,
-    historyEventCount: health.historyEvents.length,
+    healthEventCount: health.healthEvents.length,
     bankPageCount: countHealthBankPages(health),
-    currentProfileIncluded: health.currentProfile !== null,
   };
 }
 
@@ -613,5 +592,5 @@ function buildHealthContext(
   vault: VaultReadModel,
   filters: ExportPackFilters,
 ): ExportPackHealthContext {
-  return readHealthContextTolerant(vault.vaultRoot, filters);
+  return buildHealthContextFromVault(vault, filters);
 }

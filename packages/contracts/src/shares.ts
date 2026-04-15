@@ -19,6 +19,7 @@ import {
   ID_PREFIXES,
 } from "./constants.ts";
 import {
+  foodNutritionSchema,
   workoutTemplateSchema,
   FAMILY_MEMBER_LIMITS,
   GENETIC_VARIANT_LIMITS,
@@ -196,6 +197,7 @@ export const foodUpsertPayloadSchema = withContractMetadata(
       vendor: boundedString(1, 160).optional(),
       location: boundedString(1, 160).optional(),
       serving: boundedString(1, 160).optional(),
+      nutrition: foodNutritionSchema.optional(),
       aliases: uniqueArray(boundedString(1, 160), { uniqueItems: true }).optional(),
       ingredients: uniqueArray(boundedString(1, 4000), { maxItems: 100 }).optional(),
       tags: uniqueArray(slugSchema, { uniqueItems: true }).optional(),

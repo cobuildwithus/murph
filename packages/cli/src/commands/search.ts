@@ -1,9 +1,7 @@
 import { Cli, z } from 'incur'
 import { emptyArgsSchema, withBaseOptions } from '@murphai/operator-config/command-helpers'
-import {
-  ALL_QUERY_ENTITY_FAMILIES,
-  loadQueryRuntime,
-} from '@murphai/vault-usecases/runtime'
+import { ALL_QUERY_ENTITY_FAMILIES } from '@murphai/query/entity-families'
+import { loadQueryRuntime } from '@murphai/vault-usecases/runtime'
 import {
   isoTimestampSchema,
   localDateSchema,
@@ -18,12 +16,12 @@ import {
 import type { VaultServices } from '@murphai/vault-usecases'
 
 const recordTypeValues = ALL_QUERY_ENTITY_FAMILIES
+const recordTypeDescription =
+  `Optional query record families. Repeat --record-type for multiple values: ${recordTypeValues.join(', ')}.`
 
 const timelineEntryTypeValues = [
   'assessment',
-  'history',
   'journal',
-  'profile_snapshot',
   'event',
   'sample_summary',
 ] as const
@@ -112,6 +110,45 @@ const queryProjectionRebuildSchema = queryProjectionStatusSchema.extend({
   rebuilt: z.literal(true),
 })
 
+function normalizeSearchQueryInput(input: {
+  positionalQuery?: string
+  namedQuery?: string
+}): string {
+  const positionalQuery = input.positionalQuery?.trim()
+  const namedQuery = input.namedQuery?.trim()
+
+  if (input.positionalQuery !== undefined && !positionalQuery) {
+    throw new VaultCliError(
+      'invalid_query',
+      'Positional search text must not be blank.',
+    )
+  }
+
+  if (input.namedQuery !== undefined && !namedQuery) {
+    throw new VaultCliError(
+      'invalid_query',
+      'Search text passed to `--text` must not be blank.',
+    )
+  }
+
+  if (positionalQuery && namedQuery && positionalQuery !== namedQuery) {
+    throw new VaultCliError(
+      'invalid_query',
+      'Positional search text and `--text` must match when both are provided.',
+    )
+  }
+
+  const text = positionalQuery ?? namedQuery
+  if (!text) {
+    throw new VaultCliError(
+      'invalid_query',
+      'Search text is required for `search query`. Use `search query <query>` or `search query --text "<query>"`.',
+    )
+  }
+
+  return text
+}
+
 export function registerSearchCommands(
   cli: Cli.Cli,
   _services: VaultServices,
@@ -123,18 +160,28 @@ export function registerSearchCommands(
 
   search.command('query', {
     description:
-      'Search the shared local query projection when the target is fuzzy or remembered by phrase rather than exact id.',
-    args: emptyArgsSchema,
+      'Search the shared local query projection when the target is fuzzy or remembered by phrase rather than exact id. Provide the query either positionally or with `--text`.',
+    args: z.object({
+      query: z
+        .string()
+        .min(1)
+        .optional()
+        .describe(
+          'Positional search text. Required when `--text` is omitted; prefer this direct CLI form when searching by one remembered phrase.',
+        ),
+    }),
     options: withBaseOptions({
       text: z
         .string()
         .min(1)
         .optional()
-        .describe('Search text to run across titles, notes, tags, ids, and record payloads.'),
+        .describe(
+          'Named search text alias. Required when the positional query is omitted; use this for explicit machine-oriented calls.',
+        ),
       recordType: z
         .array(z.string().min(1))
         .optional()
-        .describe('Optional record families. Repeat --record-type for multiple values: core, experiment, journal, event, sample, audit, assessment, profile_snapshot, current_profile, goal, condition, allergy, protocol, history, family, genetics.'),
+        .describe(recordTypeDescription),
       kind: z
         .array(z.string().min(1))
         .optional()
@@ -167,33 +214,40 @@ export function registerSearchCommands(
     examples: [
       {
         description: 'Find prior mentions of magnesium across records and notes.',
+        args: {
+          query: 'magnesium',
+        },
         options: {
-          text: 'magnesium',
           vault: './vault',
         },
       },
       {
-        description: 'Search only profile and protocol records for insulin sensitivity mentions.',
+        description: 'Search only assessment, event, and protocol records for insulin sensitivity mentions.',
+        args: {
+          query: 'insulin sensitivity',
+        },
         options: {
-          text: 'insulin sensitivity',
-          recordType: ['profile_snapshot', 'current_profile', 'protocol'],
+          recordType: ['assessment', 'event', 'protocol'],
+          vault: './vault',
+        },
+      },
+      {
+        description: 'Use the explicit named text form when a caller prefers fully named options.',
+        options: {
+          text: 'sauna recovery',
           vault: './vault',
         },
       },
     ],
     hint:
-      'Use `search query` for fuzzy recall or remembered phrases. Use `show` for one exact id, `list` for structured filters, and `timeline` for chronology.',
+      'Use `search query <query>` for direct fuzzy recall, or `search query --text "<query>"` for explicit machine-oriented calls. Use `show` for one exact id, `list` for structured filters, and `timeline` for chronology.',
     output: searchResultSchema,
-    async run({ options }) {
+    async run({ args, options }) {
       const query = await loadQueryRuntime()
-      const text = options.text?.trim()
-
-      if (!text) {
-        throw new VaultCliError(
-          'invalid_query',
-          'Search text is required for `search query`.',
-        )
-      }
+      const text = normalizeSearchQueryInput({
+        positionalQuery: args.query,
+        namedQuery: options.text,
+      })
 
       const recordTypes =
         normalizeRepeatableEnumFlagOption(
@@ -312,7 +366,7 @@ export function registerSearchCommands(
         entryType: z
           .array(z.string().min(1))
           .optional()
-          .describe('Optional entry types: journal, event, assessment, history, profile_snapshot, sample_summary. Repeat --entry-type for multiple values.'),
+          .describe('Optional entry types: journal, event, assessment, sample_summary. Repeat --entry-type for multiple values.'),
         limit: z
           .number()
           .int()
@@ -341,7 +395,7 @@ export function registerSearchCommands(
         },
       ],
       hint:
-        'Use `timeline` when you need chronology across journals, events, assessments, profile snapshots, and sample summaries. Drill into `show` or family-specific reads after you find the relevant entries.',
+        'Use `timeline` when you need chronology across journals, events, assessments, and sample summaries. Drill into `show` or family-specific reads after you find the relevant entries.',
       output: timelineResultSchema,
       async run({ options }) {
         const kinds = normalizeRepeatableFlagOption(options.kind, 'kind') ?? []
@@ -364,10 +418,6 @@ export function registerSearchCommands(
           includeJournal: entryTypeSet ? entryTypeSet.has('journal') : true,
           includeEvents: entryTypeSet ? entryTypeSet.has('event') : true,
           includeAssessments: entryTypeSet ? entryTypeSet.has('assessment') : true,
-          includeHistory: entryTypeSet ? entryTypeSet.has('history') : true,
-          includeProfileSnapshots: entryTypeSet
-            ? entryTypeSet.has('profile_snapshot')
-            : true,
           includeDailySampleSummaries: entryTypeSet
             ? entryTypeSet.has('sample_summary')
             : true,

@@ -32,7 +32,6 @@ import {
   addMeal,
   applyCanonicalWriteBatch,
   appendJournal,
-  appendProfileSnapshot,
   appendJsonlRecord,
   buildActivitySessionEventDraft,
   buildPublicEventRecord,
@@ -48,11 +47,13 @@ import {
   linkJournalEventIds,
   linkJournalStreams,
   loadVault,
+  listAssessmentResponses,
   promoteInboxExperimentNote,
   promoteInboxJournal,
   parseFrontmatterDocument,
   projectAssessmentResponse,
   readJsonlRecords,
+  readAssessmentResponse,
   repairVault,
   stopExperiment,
   stringifyFrontmatterDocument,
@@ -99,7 +100,6 @@ import {
   FILE_CHANGE_OPERATIONS as CORE_FILE_CHANGE_OPERATIONS,
   FRONTMATTER_SCHEMA_VERSIONS as CORE_FRONTMATTER_SCHEMA_VERSIONS,
   ID_PREFIXES as CORE_ID_PREFIXES,
-  PROFILE_SNAPSHOT_SCHEMA_VERSION as CORE_PROFILE_SNAPSHOT_SCHEMA_VERSION,
   SAMPLE_QUALITIES as CORE_SAMPLE_QUALITIES,
   SAMPLE_SCHEMA_VERSION as CORE_SAMPLE_SCHEMA_VERSION,
   SAMPLE_SOURCES as CORE_SAMPLE_SOURCES,
@@ -108,6 +108,26 @@ import {
 
 function expectRecord<T>(value: unknown): T {
   return value as T;
+}
+
+function asAuditLikeRecord(value: unknown): {
+  action?: string;
+  commandName?: string;
+  targetIds?: string[];
+  changes?: Array<{
+    path?: string;
+    op?: string;
+  }>;
+} {
+  return (typeof value === "object" && value !== null ? value : {}) as {
+    action?: string;
+    commandName?: string;
+    targetIds?: string[];
+    changes?: Array<{
+      path?: string;
+      op?: string;
+    }>;
+  };
 }
 
 function readFileMode(stats: { mode: number }): number {
@@ -136,7 +156,6 @@ test("core constants stay aligned with canonical contracts constants", () => {
     geneticVariant: CONTRACT_SCHEMA_VERSION.geneticVariantFrontmatter,
     goal: CONTRACT_SCHEMA_VERSION.goalFrontmatter,
     journalDay: CONTRACT_SCHEMA_VERSION.journalDayFrontmatter,
-    profileCurrent: CONTRACT_SCHEMA_VERSION.profileCurrentFrontmatter,
     recipe: CONTRACT_SCHEMA_VERSION.recipeFrontmatter,
     protocol: CONTRACT_SCHEMA_VERSION.protocolFrontmatter,
     workoutFormat: CONTRACT_SCHEMA_VERSION.workoutFormatFrontmatter,
@@ -144,7 +163,6 @@ test("core constants stay aligned with canonical contracts constants", () => {
   assert.equal(Object.isFrozen(CORE_FRONTMATTER_SCHEMA_VERSIONS), true);
   assert.equal(CORE_ASSESSMENT_RESPONSE_SCHEMA_VERSION, CONTRACT_SCHEMA_VERSION.assessmentResponse);
   assert.equal(CORE_EVENT_SCHEMA_VERSION, CONTRACT_SCHEMA_VERSION.event);
-  assert.equal(CORE_PROFILE_SNAPSHOT_SCHEMA_VERSION, CONTRACT_SCHEMA_VERSION.profileSnapshot);
   assert.equal(CORE_SAMPLE_SCHEMA_VERSION, CONTRACT_SCHEMA_VERSION.sample);
   assert.equal(CORE_AUDIT_SCHEMA_VERSION, CONTRACT_SCHEMA_VERSION.audit);
   assert.equal(CORE_ID_PREFIXES, CONTRACT_ID_PREFIXES);
@@ -319,8 +337,6 @@ test("upsertEvent rejects specialized event kinds on the generic public boundary
           title: "Lunch bowl",
           note: "Chicken, rice, and avocado.",
           mealId: "meal_01JNV42NP0KH6JQXMZM1G0V6SE",
-          photoPaths: ["raw/meals/2026/03/meal_01JNV42NP0KH6JQXMZM1G0V6SE/photo-01.jpg"],
-          audioPaths: [],
         },
       }),
     (error: unknown) =>
@@ -505,10 +521,17 @@ test("upsertEvent appends revisions across shards and deleteEvent appends a tomb
   assert.equal(updatedEvent.lifecycle?.revision, 2);
   assert.equal(updatedEvent.note, "Updated note.");
 
-  const deleted = await deleteEvent({
-    vaultRoot,
-    eventId,
-  });
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-04-02T08:00:00.000Z"));
+  let deleted;
+  try {
+    deleted = await deleteEvent({
+      vaultRoot,
+      eventId,
+    });
+  } finally {
+    vi.useRealTimers();
+  }
   assert.equal(deleted.eventId, eventId);
   assert.equal(deleted.kind, "note");
   assert.deepEqual(deleted.retainedPaths, []);
@@ -527,6 +550,49 @@ test("upsertEvent appends revisions across shards and deleteEvent appends a tomb
   assert.ok(tombstoneEvent);
   assert.equal(tombstoneEvent.lifecycle?.revision, 3);
   assert.equal(tombstoneEvent.note, "Updated note.");
+
+  const marchAuditRecords = await readJsonlRecords({
+    vaultRoot,
+    relativePath: toMonthlyShardRelativePath("audit", "2026-03-12T08:15:00.000Z", "occurredAt"),
+  });
+  const aprilAuditRecords = await readJsonlRecords({
+    vaultRoot,
+    relativePath: toMonthlyShardRelativePath("audit", "2026-04-02T07:00:00.000Z", "occurredAt"),
+  });
+  const marchUpsertAudit = marchAuditRecords.find(
+    (record) =>
+      (record as { action?: string }).action === "event_upsert" &&
+      Array.isArray((record as { targetIds?: unknown }).targetIds) &&
+      (record as { targetIds: string[] }).targetIds.includes(eventId),
+  ) as AuditRecord | undefined;
+  const aprilUpsertAudit = aprilAuditRecords.find(
+    (record) =>
+      (record as { action?: string }).action === "event_upsert" &&
+      Array.isArray((record as { targetIds?: unknown }).targetIds) &&
+      (record as { targetIds: string[] }).targetIds.includes(eventId),
+  ) as AuditRecord | undefined;
+  const aprilDeleteAudit = aprilAuditRecords.find(
+    (record) =>
+      (record as { action?: string }).action === "event_delete" &&
+      Array.isArray((record as { targetIds?: unknown }).targetIds) &&
+      (record as { targetIds: string[] }).targetIds.includes(eventId),
+  ) as AuditRecord | undefined;
+
+  assert.equal(marchUpsertAudit?.commandName, "core.upsertEvent");
+  assert.equal(aprilUpsertAudit?.commandName, "core.upsertEvent");
+  assert.equal(aprilDeleteAudit?.commandName, "core.deleteEvent");
+  assert.deepEqual(
+    marchUpsertAudit?.changes.map((change) => change.path),
+    [marchResult.ledgerFile],
+  );
+  assert.deepEqual(
+    aprilUpsertAudit?.changes.map((change) => change.path),
+    [aprilResult.ledgerFile],
+  );
+  assert.deepEqual(
+    aprilDeleteAudit?.changes.map((change) => change.path),
+    [aprilResult.ledgerFile],
+  );
 });
 
 test("deleteEvent leaves historical rows in place and the same event id can be revived later", async () => {
@@ -639,34 +705,20 @@ test("repairVault returns a no-op result when metadata and directories are alrea
   assert.deepEqual(operationPathsAfterRepair, operationPathsBeforeRepair);
 });
 
-test("repairVault rebuilds the generated current profile when it is missing", async () => {
+test("repairVault recreates missing required directories", async () => {
   const vaultRoot = await makeTempDirectory("murph-vault");
   await initializeVault({ vaultRoot });
 
-  const appended = await appendProfileSnapshot({
-    vaultRoot,
-    recordedAt: "2026-03-12T11:00:00.000Z",
-    source: "manual",
-    profile: {
-      goals: {
-        topGoalIds: [],
-      },
-      custom: {
-        domains: ["sleep"],
-      },
-    },
-  });
-  const currentProfilePath = path.join(vaultRoot, "bank/profile/current.md");
-  await fs.rm(currentProfilePath, { force: true });
+  const missingDirectory = path.join(vaultRoot, "bank/providers");
+  await fs.rm(missingDirectory, { recursive: true, force: true });
 
   const repaired = await repairVault({ vaultRoot });
-  const repairedCurrent = await fs.readFile(currentProfilePath, "utf8");
+  const repairedDirectory = await fs.stat(missingDirectory);
 
   assert.equal(repaired.updated, true);
-  assert.deepEqual(repaired.createdDirectories, []);
+  assert.deepEqual(repaired.createdDirectories, ["bank/providers"]);
   assert.equal(typeof repaired.auditPath, "string");
-  assert.match(repairedCurrent, /^---\n/u);
-  assert.match(repairedCurrent, new RegExp(`Snapshot ID: \`${appended.snapshot.id}\``,"u"));
+  assert.equal(repairedDirectory.isDirectory(), true);
 
   const validation = await validateVault({ vaultRoot });
   assert.equal(validation.valid, true);
@@ -748,7 +800,10 @@ test("copyRawArtifact enforces raw immutability and importDocument appends contr
   assert.equal(eventRecords.length, 1);
   assert.equal(documentEvent.kind, "document");
   assert.equal(documentEvent.documentId, imported.documentId);
-  assert.equal(documentEvent.documentPath, imported.raw.relativePath);
+  assert.deepEqual(documentEvent.links, [
+    { type: "related_to", targetId: imported.documentId },
+  ]);
+  assert.deepEqual(documentEvent.rawRefs, [imported.raw.relativePath]);
   assert.equal(documentEvent.attachments?.length, 1);
   assert.equal(documentEvent.attachments?.[0]?.relativePath, imported.raw.relativePath);
   assert.equal(documentEvent.attachments?.[0]?.kind, "document");
@@ -765,7 +820,110 @@ test("copyRawArtifact enforces raw immutability and importDocument appends contr
   assert.equal(latestAuditRecord.action, "document_import");
 });
 
-test("photo-only meals preserve an empty audioPaths array in the stored event", async () => {
+test("public raw, jsonl, and batchless audit writes persist canonical operation metadata", async () => {
+  const vaultRoot = await makeTempDirectory("murph-vault");
+  const sourceRoot = await makeTempDirectory("murph-source");
+  await initializeVault({ vaultRoot });
+
+  const documentPath = await writeExternalFile(sourceRoot, "projection-source.json", "{}");
+  await copyRawArtifact({
+    vaultRoot,
+    sourcePath: documentPath,
+    owner: {
+      kind: "document",
+      id: "doc_01JQ9R7WF97M1WAB2B4QF2Q1AB",
+    },
+    targetName: "projection-source.json",
+  });
+  await appendJsonlRecord({
+    vaultRoot,
+    relativePath: "audit/2026/2026-03.jsonl",
+    record: {
+      schemaVersion: "murph.audit.v1",
+      id: "aud_01JQ9R7WF97M1WAB2B4QF2Q1AC",
+      action: "history_add",
+      status: "success",
+      occurredAt: "2026-03-12T09:15:00.000Z",
+      actor: "core",
+      commandName: "core.appendJsonlRecord",
+      summary: "append test",
+      changes: [],
+    } satisfies AuditRecord,
+  });
+
+  const assessmentPath = await writeExternalFile(
+    sourceRoot,
+    "intake.json",
+    JSON.stringify({
+      profile: {
+        goals: {
+          topGoalIds: ["goal_01JNW7YJ7MNE7M9Q2QWQK4Z3F8"],
+        },
+      },
+    }),
+  );
+  const imported = await importAssessmentResponse({
+    vaultRoot,
+    sourcePath: assessmentPath,
+    assessmentType: "intake",
+    questionnaireSlug: "baseline-intake",
+  });
+  const projected = await projectAssessmentResponse({
+    vaultRoot,
+    assessmentId: imported.assessment.id,
+  });
+
+  const operations = await Promise.all(
+    (await listWriteOperationMetadataPaths(vaultRoot)).map((relativePath) =>
+      readStoredWriteOperation(vaultRoot, relativePath),
+    ),
+  );
+  const genericAuditRecords = await readJsonlRecords({
+    vaultRoot,
+    relativePath: "audit/2026/2026-04.jsonl",
+  });
+
+  assert.ok(operations.some((operation) => operation.operationType === "raw_copy"));
+  assert.ok(
+    operations.some(
+      (operation) =>
+        operation.operationType === "jsonl_append"
+        && operation.actions.some(
+          (action) => action.kind === "jsonl_append" && action.targetRelativePath === "audit/2026/2026-03.jsonl",
+        ),
+    ),
+  );
+  assert.ok(
+    genericAuditRecords.some(
+      (record) =>
+        record.action === "raw_copy" &&
+        record.commandName === "core.copyRawArtifact",
+    ),
+  );
+  assert.ok(
+    genericAuditRecords.some(
+      (record) => {
+        const audit = asAuditLikeRecord(record);
+        return (
+          audit.action === "jsonl_append" &&
+          audit.commandName === "core.appendJsonlRecord" &&
+          audit.changes?.[0]?.path === "audit/2026/2026-03.jsonl"
+        );
+      },
+    ),
+  );
+  assert.ok(
+    operations.some(
+      (operation) =>
+        operation.operationType === "audit_append"
+        && operation.actions.some(
+          (action) => action.kind === "jsonl_append" && action.targetRelativePath === projected.auditPath,
+        ),
+    ),
+  );
+});
+
+test("photo-only meals keep canonical attachments without legacy audio path projections", async () => {
   const vaultRoot = await makeTempDirectory("murph-vault");
   const sourceRoot = await makeTempDirectory("murph-source");
   await initializeVault({ vaultRoot });
@@ -788,7 +946,7 @@ test("photo-only meals preserve an empty audioPaths array in the stored event", 
   assert.equal(mealEvent.kind, "meal");
   assert.equal(mealEvent.attachments?.length, 1);
   assert.equal(mealEvent.attachments?.[0]?.kind, "photo");
-  assert.deepEqual(mealEvent.audioPaths, []);
+  assert.equal("audioPaths" in mealEvent, false);
   assert.equal(meal.audio, null);
 });
 
@@ -815,12 +973,149 @@ test("note-only meals stay first-class meal events without raw artifacts", async
 
   assert.equal(mealEvent.kind, "meal");
   assert.deepEqual(mealEvent.attachments ?? [], []);
-  assert.deepEqual(mealEvent.photoPaths, []);
-  assert.deepEqual(mealEvent.audioPaths, []);
   assert.deepEqual(mealEvent.rawRefs, [meal.manifestPath]);
   assert.equal(meal.photo, null);
   assert.equal(meal.audio, null);
   assert.deepEqual(manifest.artifacts, []);
+});
+
+test("structured-only meals persist source, ingredients, and nutrition without raw artifacts", async () => {
+  const vaultRoot = await makeTempDirectory("murph-vault");
+  await initializeVault({ vaultRoot });
+
+  const meal = await addMeal({
+    vaultRoot,
+    occurredAt: "2026-03-10T18:30:00.000Z",
+    source: "derived",
+    ingredients: [" salmon  ", "rice", "salmon"],
+    nutrition: {
+      totals: {
+        calories: 690,
+        proteinGrams: 42,
+      },
+      provenance: {
+        source: "estimated",
+        confidence: "medium",
+      },
+    },
+  });
+
+  const mealEvents = await readJsonlRecords({
+    vaultRoot,
+    relativePath: meal.eventPath,
+  });
+  const mealEvent = expectRecord<MealEventRecord>(mealEvents[0]);
+  const manifest = JSON.parse(
+    await fs.readFile(path.join(vaultRoot, meal.manifestPath), "utf8"),
+  ) as {
+    artifacts?: unknown[];
+  };
+
+  assert.equal(mealEvent.kind, "meal");
+  assert.equal(mealEvent.source, "derived");
+  assert.deepEqual(mealEvent.ingredients, ["salmon", "rice"]);
+  assert.deepEqual(mealEvent.nutrition, {
+    totals: {
+      calories: 690,
+      proteinGrams: 42,
+    },
+    provenance: {
+      source: "estimated",
+      confidence: "medium",
+    },
+  });
+  assert.deepEqual(mealEvent.attachments ?? [], []);
+  assert.deepEqual(mealEvent.rawRefs, [meal.manifestPath]);
+  assert.equal(meal.photo, null);
+  assert.equal(meal.audio, null);
+  assert.deepEqual(manifest.artifacts, []);
+});
+
+test("nutrition-only structured meals remain valid meal events", async () => {
+  const vaultRoot = await makeTempDirectory("murph-vault");
+  await initializeVault({ vaultRoot });
+
+  const meal = await addMeal({
+    vaultRoot,
+    occurredAt: "2026-03-10T18:30:00.000Z",
+    nutrition: {
+      totals: {
+        calories: 420,
+      },
+      provenance: {
+        source: "estimated",
+      },
+    },
+  });
+
+  const mealEvents = await readJsonlRecords({
+    vaultRoot,
+    relativePath: meal.eventPath,
+  });
+  const mealEvent = expectRecord<MealEventRecord>(mealEvents[0]);
+
+  assert.equal(mealEvent.kind, "meal");
+  assert.equal(mealEvent.note, undefined);
+  assert.deepEqual(mealEvent.ingredients, undefined);
+  assert.deepEqual(mealEvent.nutrition, {
+    totals: {
+      calories: 420,
+    },
+    provenance: {
+      source: "estimated",
+    },
+  });
+});
+
+test("meal events persist optional nutrition totals without affecting attachment flows", async () => {
+  const vaultRoot = await makeTempDirectory("murph-vault");
+  const sourceRoot = await makeTempDirectory("murph-source");
+  await initializeVault({ vaultRoot });
+
+  const photoPath = await writeExternalFile(sourceRoot, "meal photo.jpg", "photo");
+  const meal = await addMeal({
+    vaultRoot,
+    occurredAt: "2026-03-10T18:30:00.000Z",
+    photoPath,
+    note: "salmon rice bowl",
+    nutrition: {
+      totals: {
+        calories: 690,
+        proteinGrams: 42,
+        carbsGrams: 58,
+        fatGrams: 30,
+        fiberGrams: 7,
+      },
+      provenance: {
+        source: "estimated",
+        confidence: "medium",
+        sourceDetail: "Estimated from note and saved food.",
+      },
+    },
+  });
+
+  const mealEvents = await readJsonlRecords({
+    vaultRoot,
+    relativePath: meal.eventPath,
+  });
+  const mealEvent = expectRecord<MealEventRecord>(mealEvents[0]);
+
+  assert.equal(mealEvent.kind, "meal");
+  assert.equal(mealEvent.attachments?.length, 1);
+  assert.deepEqual(mealEvent.nutrition, {
+    totals: {
+      calories: 690,
+      proteinGrams: 42,
+      carbsGrams: 58,
+      fatGrams: 30,
+      fiberGrams: 7,
+    },
+    provenance: {
+      source: "estimated",
+      confidence: "medium",
+      sourceDetail: "Estimated from note and saved food.",
+    },
+  });
 });
 
 test("meal day keys follow the vault timezone instead of UTC date slicing", async () => {
@@ -872,8 +1167,10 @@ test("meal, journal, experiment, and samples mutations write expected contract d
   assert.equal(meal.mealId, mealEvent.mealId);
   assert.equal(mealEvent.kind, "meal");
   assert.equal(mealEvent.attachments?.length, 2);
-  assert.equal(mealEvent.photoPaths.length, 1);
-  assert.equal(mealEvent.audioPaths.length, 1);
+  assert.deepEqual(mealEvent.rawRefs?.sort(), [
+    meal.photo?.relativePath,
+    meal.audio?.relativePath,
+  ].filter((value): value is string => Boolean(value)).sort());
 
   const firstJournal = await ensureJournalDay({
     vaultRoot,
@@ -1042,7 +1339,6 @@ test("createExperiment returns the existing experiment for idempotent retries", 
   assert.deepEqual(createdExperimentEvents[0]?.links, [
     { type: "related_to", targetId: first.experiment.id },
   ]);
-  assert.deepEqual(createdExperimentEvents[0]?.relatedIds, [first.experiment.id]);
   const operationPaths = await listWriteOperationMetadataPaths(vaultRoot);
   const operations = await Promise.all(
     operationPaths.map((relativePath) => readStoredWriteOperation(vaultRoot, relativePath)),
@@ -1131,10 +1427,211 @@ test("assessment imports append contract-shaped records and emit intake audits",
     1,
   );
   assert.equal(projected.assessmentId, imported.assessment.id);
-  assert.equal(projected.profileSnapshots.length, 1);
 
   const validation = await validateVault({ vaultRoot });
   assert.equal(validation.valid, true);
+});
+
+test("assessment imports and projections normalize rich nested proposals across every supported category", async () => {
+  const vaultRoot = await makeTempDirectory("murph-vault");
+  const sourceRoot = await makeTempDirectory("murph-source");
+  await initializeVault({ vaultRoot });
+
+  const goalId = "goal_01JNW7YJ7MNE7M9Q2QWQK4Z3F8";
+  const secondaryGoalId = "goal_01JNW7YJ7MNE7M9Q2QWQK4Z3F9";
+  const assessmentPath = await writeExternalFile(
+    sourceRoot,
+    "rich-intake.json",
+    JSON.stringify({
+      response: {
+        profile: {
+          goals: {
+            topGoalIds: [goalId],
+          },
+          custom: {
+            domains: ["sleep", "nutrition"],
+          },
+        },
+        goals: [
+          {
+            label: "Sleep 8 hours",
+            status: "active",
+            horizon: "quarter",
+            priority: "high",
+            details: "Recover faster.",
+            tags: ["sleep", "recovery"],
+          },
+        ],
+        conditions: [
+          {
+            diagnosis: "Asthma",
+            status: "active",
+            recordedAt: "2021-02-03T07:30:00.000Z",
+            details: "Exercise induced.",
+          },
+        ],
+        allergies: [
+          {
+            allergen: "Shellfish",
+            reactions: "hives",
+            severity: "severe",
+            description: "Avoid entirely.",
+          },
+        ],
+        protocols: [
+          {
+            medicationName: "Magnesium glycinate",
+            dose: "200",
+            unit: "mg",
+            frequency: "nightly",
+            instructions: "Take before bed.",
+          },
+        ],
+        historyEvents: [
+          {
+            event: "ACL surgery",
+            type: "procedure",
+            date: "2022-07-04T12:00:00.000Z",
+            note: "Recovered fully.",
+          },
+        ],
+        familyMembers: [
+          {
+            relationship: "mother",
+            note: "Migraines.",
+          },
+        ],
+        genetics: [
+          {
+            variant: "BRCA1 c.68_69delAG",
+            gene: "BRCA1",
+            classification: "pathogenic",
+            zygosity: "heterozygous",
+          },
+        ],
+        proposal: {
+          structured: {
+            data: {
+              goal: {
+                name: "Build base",
+                note: "Nested goal.",
+                tags: ["baseline"],
+              },
+              condition: {
+                name: "Hypertension",
+                onsetAt: "2021-03-01T08:15:00.000Z",
+                note: "Managed.",
+              },
+              allergy: {
+                substance: "Penicillin",
+                reaction: "rash",
+                severity: "moderate",
+              },
+              supplements: {
+                name: "Vitamin D",
+                dose: "2000",
+                unit: "IU",
+                schedule: "daily",
+                note: "Morning.",
+              },
+              historyEvent: {
+                title: "Appendectomy",
+                occurredAt: "2020-06-12T09:00:00.000Z",
+                description: "No complications.",
+              },
+              familyMember: {
+                name: "Father",
+                relation: "father",
+                description: "Heart disease.",
+              },
+              geneticVariant: {
+                name: "APOE E4",
+                significance: "risk",
+                zygosity: "heterozygous",
+              },
+            },
+          },
+        },
+      },
+    }),
+  );
+
+  const imported = await importAssessmentResponse({
+    vaultRoot,
+    sourcePath: assessmentPath,
+    assessmentType: " intake ",
+    questionnaireSlug: " rich-intake ",
+    recordedAt: "2026-03-12T09:15:00.000Z",
+    relatedIds: [goalId, ` ${goalId} `, secondaryGoalId],
+  });
+  const projected = await projectAssessmentResponse({
+    vaultRoot,
+    assessmentId: imported.assessment.id,
+  });
+
+  assert.equal(imported.assessment.assessmentType, "intake");
+  assert.equal(imported.assessment.title, "rich-intake.json");
+  assert.equal(imported.assessment.questionnaireSlug, "rich-intake");
+  assert.deepEqual(imported.assessment.relatedIds, [goalId, secondaryGoalId]);
+  assert.equal(projected.assessmentId, imported.assessment.id);
+  assert.equal(projected.sourcePath, imported.assessment.rawPath);
+  assert.equal(projected.goals.length, 2);
+  assert.equal(projected.conditions.length, 2);
+  assert.equal(projected.allergies.length, 2);
+  assert.equal(projected.protocols.length, 2);
+  assert.equal(projected.historyEvents.length, 2);
+  assert.equal(projected.familyMembers.length, 2);
+  assert.equal(projected.geneticVariants.length, 2);
+
+  const nestedGoal = projected.goals.find((goal) => goal.title === "Build base");
+  const nestedCondition = projected.conditions.find((condition) => condition.name === "Hypertension");
+  const nestedAllergy = projected.allergies.find((allergy) => allergy.substance === "Penicillin");
+  const nestedProtocol = projected.protocols.find((protocol) => protocol.name === "Vitamin D");
+  const nestedHistory = projected.historyEvents.find((event) => event.title === "Appendectomy");
+  const nestedFamily = projected.familyMembers.find((member) => member.name === "Father");
+  const nestedVariant = projected.geneticVariants.find((variant) => variant.variant === "APOE E4");
+
+  assert.ok(nestedGoal);
+  assert.equal(nestedGoal.source.assessmentPointer, "/response/proposal/structured/data/goal");
+  assert.deepEqual(nestedGoal.tags, ["baseline"]);
+  assert.ok(nestedCondition);
+  assert.equal(nestedCondition.source.assessmentPointer, "/response/proposal/structured/data/condition");
+  assert.equal(nestedCondition.onsetAt, "2021-03-01T08:15:00.000Z");
+  assert.ok(nestedAllergy);
+  assert.equal(nestedAllergy.source.assessmentPointer, "/response/proposal/structured/data/allergy");
+  assert.equal(nestedAllergy.reaction, "rash");
+  assert.ok(nestedProtocol);
+  assert.equal(nestedProtocol.source.assessmentPointer, "/response/proposal/structured/data/supplements");
+  assert.equal(nestedProtocol.dose, "2000 IU");
+  assert.ok(nestedHistory);
+  assert.equal(nestedHistory.source.assessmentPointer, "/response/proposal/structured/data/historyEvent");
+  assert.equal(nestedHistory.occurredAt, "2020-06-12T09:00:00.000Z");
+  assert.ok(nestedFamily);
+  assert.equal(nestedFamily.source.assessmentPointer, "/response/proposal/structured/data/familyMember");
+  assert.ok(nestedVariant);
+  assert.equal(nestedVariant.source.assessmentPointer, "/response/proposal/structured/data/geneticVariant");
+  assert.equal(nestedVariant.significance, "risk");
+  assert.equal(typeof projected.auditPath, "string");
+
+  const validation = await validateVault({ vaultRoot });
+  assert.equal(validation.valid, true);
+});
+
+test("projectAssessmentResponse rejects missing payloads and assessmentIds without a vault root", async () => {
+  await assert.rejects(
+    () => projectAssessmentResponse({}),
+    (error: unknown) =>
+      error instanceof VaultError && error.code === "ASSESSMENT_RESPONSE_PROJECT_INVALID",
+  );
+
+  await assert.rejects(
+    () =>
+      projectAssessmentResponse({
+        assessmentId: "asmt_01JQ9R7WF97M1WAB2B4QF2Q1A1",
+      }),
+    (error: unknown) =>
+      error instanceof VaultError && error.code === "ASSESSMENT_RESPONSE_PROJECT_INVALID",
+  );
 });
 
 test("assessment projection drops legacy flat profile blobs after the hard cutover", async () => {
@@ -1164,7 +1661,107 @@ test("assessment projection drops legacy flat profile blobs after the hard cutov
     assessmentId: imported.assessment.id,
   });
 
-  assert.equal(projected.profileSnapshots.length, 0);
+  assert.equal(projected.goals.length, 0);
+});
+
+test("importAssessmentResponse rejects non-object assessment payloads", async () => {
+  const vaultRoot = await makeTempDirectory("murph-vault");
+  const sourceRoot = await makeTempDirectory("murph-source");
+  await initializeVault({ vaultRoot });
+
+  const assessmentPath = await writeExternalFile(sourceRoot, "invalid-intake.json", "[]");
+
+  await assert.rejects(
+    () =>
+      importAssessmentResponse({
+        vaultRoot,
+        sourcePath: assessmentPath,
+        assessmentType: "intake",
+      }),
+    (error: unknown) => error instanceof VaultError && error.code === "ASSESSMENT_INVALID_JSON",
+  );
+});
+
+test("listAssessmentResponses sorts by recordedAt and id", async () => {
+  const vaultRoot = await makeTempDirectory("murph-vault");
+  const sourceRoot = await makeTempDirectory("murph-source");
+  await initializeVault({ vaultRoot });
+
+  const earlierPath = await writeExternalFile(
+    sourceRoot,
+    "earlier-intake.json",
+    JSON.stringify({
+      profile: {
+        goals: {
+          topGoalIds: ["goal_01JNW7YJ7MNE7M9Q2QWQK4Z3F8"],
+        },
+      },
+    }),
+  );
+  const laterPath = await writeExternalFile(
+    sourceRoot,
+    "later-intake.json",
+    JSON.stringify({
+      profile: {
+        goals: {
+          topGoalIds: ["goal_01JNW7YJ7MNE7M9Q2QWQK4Z3F9"],
+        },
+      },
+    }),
+  );
+
+  const later = await importAssessmentResponse({
+    vaultRoot,
+    sourcePath: laterPath,
+    recordedAt: "2026-03-14T10:00:00.000Z",
+  });
+  const earlier = await importAssessmentResponse({
+    vaultRoot,
+    sourcePath: earlierPath,
+    recordedAt: "2026-03-12T10:00:00.000Z",
+  });
+
+  const records = await listAssessmentResponses({ vaultRoot });
+  const actualOrder = records.map((record) => record.id);
+
+  assert.deepEqual(actualOrder, [earlier.assessment.id, later.assessment.id]);
+});
+
+test("listAssessmentResponses rejects malformed stored assessment rows", async () => {
+  const vaultRoot = await makeTempDirectory("murph-vault");
+  await initializeVault({ vaultRoot });
+
+  const shardPath = path.join(vaultRoot, "ledger/assessments/2026/2026-03.jsonl");
+  await fs.mkdir(path.dirname(shardPath), { recursive: true });
+  await fs.writeFile(
+    shardPath,
+    `${JSON.stringify({
+      schemaVersion: "murph.assessment-response.v1",
+      id: "asmt_01JQ9R7WF97M1WAB2B4QF2Q1A2",
+    })}\n`,
+    "utf8",
+  );
+
+  await assert.rejects(
+    () => listAssessmentResponses({ vaultRoot }),
+    (error: unknown) =>
+      error instanceof VaultError && error.code === "ASSESSMENT_RESPONSE_INVALID",
+  );
+});
+
+test("readAssessmentResponse throws when the assessment id is missing", async () => {
+  const vaultRoot = await makeTempDirectory("murph-vault");
+  await initializeVault({ vaultRoot });
+
+  await assert.rejects(
+    () =>
+      readAssessmentResponse({
+        vaultRoot,
+        assessmentId: "asmt_01JQ9R7WF97M1WAB2B4QF2Q1A9",
+      }),
+    (error: unknown) =>
+      error instanceof VaultError && error.code === "ASSESSMENT_RESPONSE_NOT_FOUND",
+  );
 });
 
 test("ensureJournalDay rethrows non-file-exists write failures", async () => {
@@ -1388,6 +1985,40 @@ test("jsonl helpers reject non-object writes and surface invalid JSON line numbe
   );
 });
 
+test("jsonl helpers use the default date field and stringify non-Error parse failures", async () => {
+  assert.equal(
+    toMonthlyShardRelativePath("audit", "2026-03-10T12:00:00.000Z"),
+    "audit/2026/2026-03.jsonl",
+  );
+
+  const vaultRoot = await makeTempDirectory("murph-vault");
+  await initializeVault({ vaultRoot });
+
+  const invalidJsonlPath = path.join(vaultRoot, "audit/2026/non-error.jsonl");
+  await fs.writeFile(invalidJsonlPath, '{"ok":true}', "utf8");
+
+  const parseSpy = vi.spyOn(JSON, "parse").mockImplementationOnce(() => {
+    throw "broken-jsonl";
+  });
+
+  try {
+    await assert.rejects(
+      () =>
+        readJsonlRecords({
+          vaultRoot,
+          relativePath: "audit/2026/non-error.jsonl",
+        }),
+      (error: unknown) =>
+        error instanceof VaultError &&
+        error.code === "VAULT_INVALID_JSONL" &&
+        error.details.lineNumber === 1 &&
+        error.details.cause === "broken-jsonl",
+    );
+  } finally {
+    parseSpy.mockRestore();
+  }
+});
+
 test("validateVault reports invalid metadata before deeper validation", async () => {
   const vaultRoot = await makeTempDirectory("murph-vault");
   await initializeVault({ vaultRoot });
@@ -1473,21 +2104,15 @@ test("validateVault accumulates missing directory and malformed event issues", a
   );
 });
 
-test("validateVault covers health ledgers, registries, and the derived current profile page", async () => {
+test("validateVault covers health ledgers and registries", async () => {
   const vaultRoot = await makeTempDirectory("murph-vault");
   await initializeVault({ vaultRoot });
 
   await fs.mkdir(path.join(vaultRoot, "ledger/assessments/2026"), { recursive: true });
-  await fs.mkdir(path.join(vaultRoot, "ledger/profile-snapshots/2026"), { recursive: true });
 
   await fs.writeFile(
     path.join(vaultRoot, "ledger/assessments/2026/2026-03.jsonl"),
     `${JSON.stringify({ schemaVersion: "murph.assessment-response.v1", id: "asmt_invalid" })}\n`,
-    "utf8",
-  );
-  await fs.writeFile(
-    path.join(vaultRoot, "ledger/profile-snapshots/2026/2026-03.jsonl"),
-    `${JSON.stringify({ schemaVersion: "murph.profile-snapshot.v1", id: "psnap_invalid" })}\n`,
     "utf8",
   );
   await fs.writeFile(
@@ -1508,33 +2133,16 @@ test("validateVault covers health ledgers, registries, and the derived current p
     ].join("\n"),
     "utf8",
   );
-  await fs.writeFile(
-    path.join(vaultRoot, "bank/profile/current.md"),
-    [
-      "---",
-      "schemaVersion: murph.frontmatter.profile-current.v1",
-      "docType: profile_current",
-      "snapshotId: psnap_invalid",
-      "updatedAt: not-a-timestamp",
-      "---",
-      "",
-      "# Current Profile",
-      "",
-    ].join("\n"),
-    "utf8",
-  );
 
   const validation = await validateVault({ vaultRoot });
   const issuePaths = new Set(validation.issues.map((issue) => issue.path));
 
   assert.equal(validation.valid, false);
   assert.ok(issuePaths.has("ledger/assessments/2026/2026-03.jsonl"));
-  assert.ok(issuePaths.has("ledger/profile-snapshots/2026/2026-03.jsonl"));
   assert.ok(issuePaths.has("bank/family/father.md"));
-  assert.ok(issuePaths.has("bank/profile/current.md"));
 });
 
-test("validateVault checks raw manifests, referenced artifacts, and current-profile consistency", async () => {
+test("validateVault checks raw manifests and referenced artifacts", async () => {
   const vaultRoot = await makeTempDirectory("murph-vault");
   const sourceRoot = await makeTempDirectory("murph-source");
   await initializeVault({ vaultRoot });
@@ -1546,23 +2154,9 @@ test("validateVault checks raw manifests, referenced artifacts, and current-prof
     occurredAt: "2026-03-12T10:00:00.000Z",
     title: "Visit summary",
   });
-  await appendProfileSnapshot({
-    vaultRoot,
-    recordedAt: "2026-03-12T11:00:00.000Z",
-    source: "manual",
-    profile: {
-      goals: {
-        topGoalIds: [],
-      },
-      custom: {
-        domains: ["sleep"],
-      },
-    },
-  });
 
   await fs.rm(path.join(vaultRoot, documentImport.raw.relativePath), { force: true });
   await fs.rm(path.join(vaultRoot, documentImport.manifestPath), { force: true });
-  await fs.appendFile(path.join(vaultRoot, "bank/profile/current.md"), "\nStale view\n", "utf8");
 
   const validation = await validateVault({ vaultRoot });
 
@@ -1579,13 +2173,6 @@ test("validateVault checks raw manifests, referenced artifacts, and current-prof
       (issue) =>
         issue.code === "RAW_MANIFEST_INVALID" &&
         issue.path === documentImport.manifestPath,
-    ),
-  );
-  assert.ok(
-    validation.issues.some(
-      (issue) =>
-        issue.code === "PROFILE_CURRENT_STALE" &&
-        issue.path === "bank/profile/current.md",
     ),
   );
 });
@@ -2009,6 +2596,11 @@ test("committed raw-copy actions omit payload blobs while replayable text and js
     vaultRoot,
     operationType: "test_payload_metadata_shapes",
     summary: "verify committed payload metadata by action kind",
+    audit: {
+      action: "show",
+      commandName: "test.payloadMetadataShapes",
+      summary: "Verified committed payload metadata by action kind.",
+    },
     rawCopies: [
       {
         sourcePath,
@@ -2044,7 +2636,7 @@ test("committed raw-copy actions omit payload blobs while replayable text and js
 
   assert.ok(operation);
   assert.equal(operation.status, "committed");
-  assert.equal(operation.actions.length, 3);
+  assert.equal(operation.actions.length, 4);
   assert.equal(operation.actions[0]?.kind, "raw_copy");
   assert.equal("committedPayloadReceipt" in (operation.actions[0] ?? {}), false);
   assert.equal(operation.actions[1]?.kind, "text_write");
@@ -2056,6 +2648,9 @@ test("committed raw-copy actions omit payload blobs while replayable text and js
   assert.ok(operation.actions[2]?.committedPayloadReceipt);
   assert.equal(typeof operation.actions[2]?.committedPayloadReceipt?.sha256, "string");
   assert.equal(typeof operation.actions[2]?.committedPayloadReceipt?.byteLength, "number");
+  assert.equal(operation.actions[3]?.kind, "jsonl_append");
+  assert.match(operation.actions[3]?.targetRelativePath ?? "", /^audit\/\d{4}\/\d{4}-\d{2}\.jsonl$/u);
+  assert.ok(operation.actions[3]?.committedPayloadReceipt);
 });
 
 test("applyCanonicalWriteBatch rejects empty staged actions with CANONICAL_WRITE_EMPTY", async () => {
@@ -2068,6 +2663,11 @@ test("applyCanonicalWriteBatch rejects empty staged actions with CANONICAL_WRITE
         vaultRoot,
         operationType: "test_empty_batch",
         summary: "reject empty staged actions",
+        audit: {
+          action: "show",
+          commandName: "test.rejectEmptyBatch",
+          summary: "Rejected empty staged actions.",
+        },
       }),
     (error: unknown) =>
       error instanceof VaultError && error.code === "CANONICAL_WRITE_EMPTY",
@@ -2657,6 +3257,11 @@ test("applyCanonicalWriteBatch rolls back vault summary writes when a later text
           operationType: "vault_summary_update",
           summary: "Rollback summary update",
           occurredAt: updatedAt,
+          audit: {
+            action: "vault_summary_update",
+            commandName: "test.rollbackVaultSummaryUpdate",
+            summary: "Rolled back vault summary update.",
+          },
           textWrites: [
             {
               relativePath: "vault.json",
@@ -2734,6 +3339,11 @@ test("applyCanonicalWriteBatch rolls back experiment markdown when the lifecycle
           operationType: "experiment_lifecycle_event",
           summary: "Rollback lifecycle append",
           occurredAt,
+          audit: {
+            action: "experiment_lifecycle",
+            commandName: "test.rollbackExperimentLifecycle",
+            summary: "Rolled back experiment lifecycle append.",
+          },
           textWrites: [
             {
               relativePath: experimentRelativePath,
@@ -2815,6 +3425,11 @@ test("applyCanonicalWriteBatch rolls back provider slug renames when deleting th
           operationType: "provider_upsert",
           summary: "Rollback provider rename",
           occurredAt: "2026-03-16T16:00:00.000Z",
+          audit: {
+            action: "provider_upsert",
+            commandName: "test.rollbackProviderRename",
+            summary: "Rolled back provider rename.",
+          },
           textWrites: [
             {
               relativePath: betaRelativePath,
@@ -3163,57 +3778,6 @@ test("validateVault preserves unresolved write-operation error messages and vaul
   );
 });
 
-test("validateVault covers current profile success, missing-file, and unreadable-file branches", async () => {
-  const vaultRoot = await makeTempDirectory("murph-vault");
-  await initializeVault({ vaultRoot });
-
-  await appendProfileSnapshot({
-    vaultRoot,
-    recordedAt: "2026-03-12T11:00:00.000Z",
-    source: "manual",
-    profile: {
-      goals: {
-        topGoalIds: [],
-      },
-      custom: {
-        domains: ["sleep"],
-      },
-    },
-  });
-
-  const validState = await validateVault({ vaultRoot });
-  assert.equal(validState.valid, true);
-  assert.ok(
-    validState.issues.every((issue) => issue.code !== "PROFILE_CURRENT_STALE"),
-  );
-
-  const currentProfilePath = path.join(vaultRoot, "bank/profile/current.md");
-  await fs.rm(currentProfilePath, { force: true });
-
-  const missingCurrent = await validateVault({ vaultRoot });
-  assert.equal(missingCurrent.valid, false);
-  assert.ok(
-    missingCurrent.issues.some(
-      (issue) =>
-        issue.code === "PROFILE_CURRENT_STALE" &&
-        issue.message.includes("Current profile is missing") &&
-        issue.path === "bank/profile/current.md",
-    ),
-  );
-
-  await fs.mkdir(currentProfilePath, { recursive: true });
-
-  const unreadableCurrent = await validateVault({ vaultRoot });
-  assert.equal(unreadableCurrent.valid, false);
-  assert.ok(
-    unreadableCurrent.issues.some(
-      (issue) =>
-        issue.code === "PROFILE_CURRENT_STALE" &&
-        issue.path === "bank/profile/current.md",
-    ),
-  );
-});
-
 test("mutation helpers reject empty meal imports and invalid sample batches", async () => {
   const vaultRoot = await makeTempDirectory("murph-vault");
   await initializeVault({ vaultRoot });
@@ -3222,6 +3786,26 @@ test("mutation helpers reject empty meal imports and invalid sample batches", as
     () =>
       addMeal({
         vaultRoot,
+      }),
+    (error: unknown) =>
+      error instanceof VaultError && error.code === "VAULT_MEAL_CONTENT_REQUIRED",
+  );
+
+  await assert.rejects(
+    () =>
+      addMeal({
+        vaultRoot,
+        note: "   ",
+      }),
+    (error: unknown) =>
+      error instanceof VaultError && error.code === "VAULT_MEAL_CONTENT_REQUIRED",
+  );
+
+  await assert.rejects(
+    () =>
+      addMeal({
+        vaultRoot,
+        nutrition: {},
       }),
     (error: unknown) =>
       error instanceof VaultError && error.code === "VAULT_MEAL_CONTENT_REQUIRED",
@@ -3609,6 +4193,92 @@ test("high-level canonical mutation ports own experiment and journal mutation se
     journalDocument.body,
     /Evening note from the canonical journal append port\./u,
   );
+  const marchAuditRecords = await readJsonlRecords({
+    vaultRoot,
+    relativePath: "audit/2026/2026-03.jsonl",
+  });
+  const currentAuditRecords = await readJsonlRecords({
+    vaultRoot,
+    relativePath: toMonthlyShardRelativePath("audit", new Date()),
+  });
+  assert.ok(
+    currentAuditRecords.some(
+      (record) =>
+        record.action === "experiment_update" &&
+        record.commandName === "core.updateExperiment",
+    ),
+  );
+  assert.ok(
+    marchAuditRecords.some(
+      (record) => {
+        const audit = asAuditLikeRecord(record);
+        return (
+          audit.action === "experiment_lifecycle" &&
+          audit.commandName === "core.checkpointExperiment" &&
+          Array.isArray(audit.targetIds) &&
+          audit.targetIds.includes(checkpoint.eventId)
+        );
+      },
+    ),
+  );
+  assert.ok(
+    marchAuditRecords.some(
+      (record) => {
+        const audit = asAuditLikeRecord(record);
+        return (
+          audit.action === "experiment_lifecycle" &&
+          audit.commandName === "core.stopExperiment" &&
+          Array.isArray(audit.targetIds) &&
+          audit.targetIds.includes(stopped.eventId)
+        );
+      },
+    ),
+  );
+  assert.ok(
+    marchAuditRecords.some(
+      (record) => {
+        const audit = asAuditLikeRecord(record);
+        return (
+          audit.action === "journal_append" &&
+          audit.commandName === "core.appendJournal" &&
+          audit.changes?.[0]?.path === appended.relativePath
+        );
+      },
+    ),
+  );
+  assert.ok(
+    marchAuditRecords.some(
+      (record) => {
+        const audit = asAuditLikeRecord(record);
+        return (
+          audit.action === "journal_link" &&
+          audit.commandName === "core.linkJournalEventIds" &&
+          audit.changes?.[0]?.path === appended.relativePath
+        );
+      },
+    ),
+  );
+  assert.ok(
+    marchAuditRecords.some(
+      (record) =>
+        record.action === "journal_link" &&
+        record.commandName === "core.linkJournalStreams",
+    ),
+  );
+  assert.ok(
+    marchAuditRecords.some(
+      (record) =>
+        record.action === "journal_unlink" &&
+        record.commandName === "core.unlinkJournalEventIds",
+    ),
+  );
+  assert.ok(
+    marchAuditRecords.some(
+      (record) =>
+        record.action === "journal_unlink" &&
+        record.commandName === "core.unlinkJournalStreams",
+    ),
+  );
 });
 
 test("high-level canonical mutation ports own provider, event, and vault summary semantics", async () => {
@@ -3637,6 +4307,23 @@ test("high-level canonical mutation ports own provider, event, and vault summary
   assert.equal(coreDocument.attributes.title, "Health Ops Vault");
   assert.equal(coreDocument.attributes.timezone, "America/Los_Angeles");
   assert.match(coreDocument.body, /^# Health Ops Vault/mu);
+  const summaryAuditRecords = await readJsonlRecords({
+    vaultRoot,
+    relativePath: "audit/2026/2026-04.jsonl",
+  });
+  assert.ok(
+    summaryAuditRecords.some(
+      (record) => {
+        const audit = asAuditLikeRecord(record);
+        return (
+          audit.action === "vault_summary_update" &&
+          audit.commandName === "core.updateVaultSummary" &&
+          audit.changes?.some((change) => change.path === "vault.json") === true &&
+          audit.changes?.some((change) => change.path === "CORE.md") === true
+        );
+      },
+    ),
+  );
 
   const createdProvider = await upsertProvider({
     vaultRoot,
@@ -3696,7 +4383,6 @@ test("high-level canonical mutation ports own provider, event, and vault summary
   ) as EventRecord | undefined;
   assert.ok(eventRecord);
   assert.deepEqual(eventRecord.links, [{ type: "related_to", targetId: createdProvider.providerId }]);
-  assert.deepEqual(eventRecord.relatedIds, [createdProvider.providerId]);
   assert.equal(eventRecord.kind, "note");
 });
 
@@ -3713,7 +4399,7 @@ test("high-level canonical mutation ports own inbox journal and experiment-note 
   const capture = {
     captureId: "cap_01JNV422Y2M5ZBV64ZP4N1DRB1",
     eventId: "evt_01JNV422Y2M5ZBV64ZP4N1DRB2",
-    source: "imessage",
+    source: "telegram",
     occurredAt: "2026-03-13T08:00:00.000Z",
     text: "Breakfast note from inbox",
     thread: {
@@ -3756,6 +4442,36 @@ test("high-level canonical mutation ports own inbox journal and experiment-note 
   assert.equal(secondJournalPromotion.linked, false);
   assert.equal(firstExperimentPromotion.appended, true);
   assert.equal(secondExperimentPromotion.appended, false);
+  const auditRecords = await readJsonlRecords({
+    vaultRoot,
+    relativePath: toMonthlyShardRelativePath("audit", new Date()),
+  });
+  assert.ok(
+    auditRecords.some(
+      (record) => {
+        const audit = asAuditLikeRecord(record);
+        return (
+          audit.action === "inbox_promote_journal" &&
+          audit.commandName === "core.promoteInboxJournal" &&
+          Array.isArray(audit.targetIds) &&
+          audit.targetIds.includes(capture.captureId)
+        );
+      },
+    ),
+  );
+  assert.ok(
+    auditRecords.some(
+      (record) => {
+        const audit = asAuditLikeRecord(record);
+        return (
+          audit.action === "inbox_promote_experiment_note" &&
+          audit.commandName === "core.promoteInboxExperimentNote" &&
+          Array.isArray(audit.targetIds) &&
+          audit.targetIds.includes(capture.captureId)
+        );
+      },
+    ),
+  );
 
   const journalMarkdown = await fs.readFile(
     path.join(vaultRoot, firstJournalPromotion.journalPath),
@@ -3815,4 +4531,35 @@ test("updateVaultSummary rejects invalid metadata and malformed CORE frontmatter
     (error: unknown) =>
       error instanceof VaultError && error.code === "CORE_FRONTMATTER_INVALID",
   );
+});
+
+test("updateVaultSummary serializes concurrent metadata and CORE rewrites through the shared resource bundle", async () => {
+  const vaultRoot = await makeTempDirectory("murph-vault-summary-parallel");
+  await initializeVault({ vaultRoot });
+
+  await Promise.all([
+    updateVaultSummary({
+      vaultRoot,
+      title: "Parallel Health Vault",
+    }),
+    updateVaultSummary({
+      vaultRoot,
+      timezone: "America/Los_Angeles",
+    }),
+  ]);
+
+  const vaultMetadata = JSON.parse(
+    await fs.readFile(path.join(vaultRoot, "vault.json"), "utf8"),
+  ) as {
+    title: string;
+    timezone: string;
+  };
+  const coreDocument = parseFrontmatterDocument(
+    await fs.readFile(path.join(vaultRoot, "CORE.md"), "utf8"),
+  );
+
+  assert.equal(vaultMetadata.title, "Parallel Health Vault");
+  assert.equal(vaultMetadata.timezone, "America/Los_Angeles");
+  assert.equal(coreDocument.attributes.title, "Parallel Health Vault");
+  assert.equal(coreDocument.attributes.timezone, "America/Los_Angeles");
 });

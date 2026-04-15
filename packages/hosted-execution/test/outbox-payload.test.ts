@@ -1,3 +1,7 @@
+import { readFile } from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
 import { describe, expect, it } from "vitest";
 
 import {
@@ -6,13 +10,39 @@ import {
   buildHostedExecutionGatewayMessageSendDispatch,
   buildHostedExecutionMemberActivatedDispatch,
   buildHostedExecutionVaultShareAcceptedDispatch,
-} from "../src/builders";
+} from "../src/builders.js";
 import {
   buildHostedExecutionOutboxPayload,
   readHostedExecutionOutboxPayload,
   resolveHostedExecutionDispatchPayloadStorage,
-} from "../src/outbox-payload";
+  resolveHostedExecutionOutboxPayloadEventId,
+  resolveHostedExecutionOutboxPayloadUserId,
+} from "../src/outbox-payload.js";
 const occurredAt = "2026-04-04T00:00:00.000Z";
+const defaultMemberChannels = {
+  email: false,
+  linq: false,
+  telegram: false,
+} as const;
+
+function createInlineDispatch() {
+  return buildHostedExecutionMemberActivatedDispatch({
+    eventId: "member-activated-inline",
+    memberId: "user-inline",
+    memberChannels: defaultMemberChannels,
+    occurredAt,
+  });
+}
+
+function createReferenceDispatch() {
+  return buildHostedExecutionGatewayMessageSendDispatch({
+    eventId: "gateway-reference",
+    occurredAt,
+    sessionKey: "session-reference",
+    text: "hello",
+    userId: "user-reference",
+  });
+}
 
 describe("resolveHostedExecutionDispatchPayloadStorage", () => {
   it("uses canonical storage for hosted events", () => {
@@ -21,6 +51,7 @@ describe("resolveHostedExecutionDispatchPayloadStorage", () => {
         buildHostedExecutionMemberActivatedDispatch({
           eventId: "member-activated-1",
           memberId: "user_123",
+          memberChannels: defaultMemberChannels,
           occurredAt,
         }),
         "auto",
@@ -90,6 +121,7 @@ describe("resolveHostedExecutionDispatchPayloadStorage", () => {
         buildHostedExecutionMemberActivatedDispatch({
           eventId: "member-activated-2",
           memberId: "user_123",
+          memberChannels: defaultMemberChannels,
           occurredAt,
         }),
       ).storage,
@@ -139,6 +171,26 @@ describe("resolveHostedExecutionDispatchPayloadStorage", () => {
         },
       ).storage,
     ).toBe("reference");
+  });
+
+  it("validates reference payload dispatches before building refs", () => {
+    const invalidReferenceDispatch = {
+      event: {
+        kind: "gateway.message.send",
+        sessionKey: "session-invalid",
+        text: "hello",
+        userId: "user-invalid",
+      },
+      occurredAt,
+    };
+
+    expect(() => buildHostedExecutionOutboxPayload(
+      invalidReferenceDispatch as never,
+      {
+        stagedPayloadId: "staged-invalid-reference",
+        storage: "reference",
+      },
+    )).toThrow("Hosted execution dispatch request eventId");
   });
 
   it("rejects forcing inline storage for reference-only gateway sends", () => {
@@ -208,5 +260,83 @@ describe("resolveHostedExecutionDispatchPayloadStorage", () => {
       },
       storage: "reference",
     })).toBeNull();
+  });
+
+  it("round-trips valid inline payloads", () => {
+    const payload = buildHostedExecutionOutboxPayload(createInlineDispatch(), {
+      storage: "inline",
+    });
+
+    expect(readHostedExecutionOutboxPayload(payload)).toEqual(payload);
+  });
+
+  it("round-trips valid reference payloads", () => {
+    const payload = buildHostedExecutionOutboxPayload(createReferenceDispatch(), {
+      stagedPayloadId: "staged-reference-roundtrip",
+      storage: "reference",
+    });
+
+    expect(readHostedExecutionOutboxPayload(payload)).toEqual(payload);
+  });
+
+  it("returns null instead of throwing for malformed inline payloads", () => {
+    expect(readHostedExecutionOutboxPayload({
+      dispatch: {
+        event: {
+          kind: "member.activated",
+          memberChannels: defaultMemberChannels,
+          userId: "user-inline",
+        },
+        occurredAt,
+      },
+      storage: "inline",
+    })).toBeNull();
+  });
+
+  it("resolves event and user identity for inline and reference payloads", () => {
+    const inlinePayload = buildHostedExecutionOutboxPayload(
+      buildHostedExecutionMemberActivatedDispatch({
+        eventId: "member-activated-3",
+        memberId: "user-inline",
+        memberChannels: defaultMemberChannels,
+        occurredAt,
+      }),
+    );
+    const referencePayload = buildHostedExecutionOutboxPayload(
+      buildHostedExecutionGatewayMessageSendDispatch({
+        eventId: "gateway-6",
+        occurredAt,
+        sessionKey: "session-identity",
+        text: "hello",
+        userId: "user-reference",
+      }),
+      {
+        stagedPayloadId: "staged-gateway-identity",
+        storage: "reference",
+      },
+    );
+
+    expect(resolveHostedExecutionOutboxPayloadUserId(inlinePayload)).toBe("user-inline");
+    expect(resolveHostedExecutionOutboxPayloadEventId(inlinePayload)).toBe("member-activated-3");
+    expect(resolveHostedExecutionOutboxPayloadUserId(referencePayload)).toBe("user-reference");
+    expect(resolveHostedExecutionOutboxPayloadEventId(referencePayload)).toBe("gateway-6");
+  });
+
+  it("publishes focused subpath exports for boundary-owned helpers", async () => {
+    const packageJsonPath = path.resolve(
+      path.dirname(fileURLToPath(import.meta.url)),
+      "..",
+      "package.json",
+    );
+    const packageJson = JSON.parse(await readFile(packageJsonPath, "utf8")) as {
+      exports?: Record<string, unknown>;
+    };
+
+    expect(packageJson.exports).toMatchObject({
+      "./bundles": expect.any(Object),
+      "./dispatch-ref": expect.any(Object),
+      "./outbox-payload": expect.any(Object),
+      "./side-effects": expect.any(Object),
+    });
   });
 });

@@ -1,20 +1,36 @@
-import { Buffer } from "node:buffer";
-import { timingSafeEqual } from "node:crypto";
 import { createServer } from "node:http";
 
-import { isLoopbackHostname } from "@murphai/runtime-state";
+import {
+  assertListenerPort,
+  assertLoopbackListenerHost,
+  assertUnbracketedListenerHost,
+  getLoopbackControlRequestRejectionReason,
+} from "@murphai/runtime-state";
+import { hasMatchingLoopbackControlBearerToken } from "@murphai/runtime-state/node/loopback-control-plane-auth";
 
+import {
+  buildDeviceSyncCallbackErrorRedirectLocation,
+  buildDeviceSyncCallbackSuccessRedirectLocation,
+} from "./callback-redirect.ts";
 import { deviceSyncError, isDeviceSyncError } from "./errors.ts";
+import { sanitizeHostedRuntimeErrorText } from "./hosted-runtime.ts";
 import { DEFAULT_DEVICE_SYNC_HOST } from "./shared.ts";
 import { resolveDeviceSyncWebhookVerificationResponse } from "./webhook-verification.ts";
+import { DEFAULT_DEVICE_SYNC_HTTP_BODY_LIMIT_BYTES } from "./types.ts";
 
 import type { IncomingHttpHeaders, IncomingMessage, Server, ServerResponse } from "node:http";
 import type { DeviceSyncError } from "./errors.ts";
 import type { DeviceSyncHttpConfig, NodeServerHandle } from "./types.ts";
 import type { DeviceSyncService } from "./service.ts";
 
-const DEFAULT_BODY_LIMIT_BYTES = 1_048_576;
+const DEFAULT_BODY_LIMIT_BYTES = DEFAULT_DEVICE_SYNC_HTTP_BODY_LIMIT_BYTES;
 const CONTROL_PLANE_WWW_AUTHENTICATE = 'Bearer realm="device-syncd-control-plane"';
+
+export {
+  buildDeviceSyncCallbackErrorRedirectLocation as buildCallbackErrorRedirectLocation,
+  buildDeviceSyncCallbackSuccessRedirectLocation as buildCallbackSuccessRedirectLocation,
+  DEVICE_SYNC_CALLBACK_QUERY_PARAM_KEYS,
+} from "./callback-redirect.ts";
 
 type DeviceSyncHttpRouteKind = "control" | "public";
 type DeviceSyncHttpListenerSurface = "combined" | "control" | "public";
@@ -49,7 +65,7 @@ interface DeviceSyncHttpRouteMatch {
   params: DeviceSyncHttpRouteParams;
 }
 
-export type DeviceSyncHttpRequestHandler = (
+type DeviceSyncHttpRequestHandler = (
   request: IncomingMessage,
   response: ServerResponse,
 ) => Promise<void>;
@@ -60,13 +76,9 @@ export interface CreateDeviceSyncHttpServerInput {
   bodyLimitBytes?: number;
 }
 
-export function isLoopbackRemoteAddress(value: string | null | undefined): boolean {
-  if (typeof value !== "string") {
-    return false;
-  }
-
-  const normalized = value.trim().toLowerCase();
-  return normalized === "::1" || normalized.startsWith("127.") || normalized.startsWith("::ffff:127.");
+interface StartedDeviceSyncHttpListener {
+  server: Server;
+  address: NodeServerHandle["control"];
 }
 
 export function assertDeviceSyncControlRequest(input: {
@@ -74,7 +86,12 @@ export function assertDeviceSyncControlRequest(input: {
   remoteAddress: string | null | undefined;
   controlToken: string;
 }): void {
-  if (!isLoopbackRemoteAddress(input.remoteAddress)) {
+  const rejectionReason = getLoopbackControlRequestRejectionReason({
+    headers: input.headers,
+    remoteAddress: input.remoteAddress,
+  });
+
+  if (rejectionReason === "loopback-remote-address-required") {
     throw deviceSyncError({
       code: "CONTROL_PLANE_LOOPBACK_REQUIRED",
       message: "Device sync control routes only accept loopback requests.",
@@ -83,7 +100,27 @@ export function assertDeviceSyncControlRequest(input: {
     });
   }
 
-  if (!hasMatchingControlToken(input.headers, input.controlToken)) {
+  if (rejectionReason === "forwarded-headers-rejected") {
+    throw deviceSyncError({
+      code: "CONTROL_PLANE_PROXY_HEADERS_REJECTED",
+      message: "Device sync control routes reject forwarded proxy headers.",
+      retryable: false,
+      httpStatus: 403,
+    });
+  }
+
+  if (rejectionReason === "loopback-host-required") {
+    throw deviceSyncError({
+      code: "CONTROL_PLANE_LOOPBACK_HOST_REQUIRED",
+      message: "Device sync control routes require a loopback Host header.",
+      retryable: false,
+      httpStatus: 403,
+    });
+  }
+
+  if (
+    !hasMatchingLoopbackControlBearerToken(input.headers.authorization, input.controlToken)
+  ) {
     throw deviceSyncError({
       code: "CONTROL_PLANE_AUTH_REQUIRED",
       message: "Device sync control routes require a valid bearer token.",
@@ -98,8 +135,16 @@ export async function startDeviceSyncHttpServer(input: CreateDeviceSyncHttpServe
   const bodyLimitBytes = Math.max(1024, input.bodyLimitBytes ?? DEFAULT_BODY_LIMIT_BYTES);
   const configuredHost = input.config?.host?.trim();
   const host = configuredHost && configuredHost.length > 0 ? configuredHost : DEFAULT_DEVICE_SYNC_HOST;
-  assertLoopbackControlListenerHost(host);
+  assertLoopbackListenerHost(
+    host,
+    "Device sync control listener host must be a loopback hostname or address. Use publicHost/publicPort for externally reachable callback and webhook routes.",
+  );
   const port = input.config?.port ?? 8788;
+  assertListenerPort(
+    port,
+    "Device sync control listener port must be an integer between 0 and 65535.",
+    { allowZero: true },
+  );
   const controlToken = requireControlToken(input.config?.controlToken);
   const publicListener = resolvePublicListener(input.config);
   const controlHandler = createDeviceSyncHttpRequestHandler({
@@ -124,23 +169,34 @@ export async function startDeviceSyncHttpServer(input: CreateDeviceSyncHttpServe
     port,
     handler: controlHandler,
   });
-  const publicServer = publicListener
-    ? await startListener({
-        host: publicListener.host,
-        port: publicListener.port,
-        handler: publicHandler!,
-      })
-    : null;
+
+  let publicServer: StartedDeviceSyncHttpListener | null = null;
+  try {
+    publicServer = publicListener
+      ? await startListener({
+          host: publicListener.host,
+          port: publicListener.port,
+          handler: publicHandler!,
+        })
+      : null;
+  } catch (error) {
+    try {
+      await closeStartedListeners([controlServer]);
+    } catch (closeError) {
+      throw new AggregateError(
+        [error, closeError],
+        "Device sync HTTP startup failed and could not fully roll back the control listener.",
+      );
+    }
+
+    throw error;
+  }
 
   return {
     control: controlServer.address,
     public: publicServer?.address ?? null,
     async close() {
-      if (publicServer) {
-        await closeServer(publicServer.server);
-      }
-
-      await closeServer(controlServer.server);
+      await closeStartedListeners([publicServer, controlServer]);
     },
   };
 }
@@ -224,12 +280,13 @@ const DEVICE_SYNC_HTTP_ROUTES = [
           errorDescription: url.searchParams.get("error_description"),
         });
 
-        if (result.returnTo) {
-          const destination = new URL(result.returnTo);
-          destination.searchParams.set("deviceSyncStatus", "connected");
-          destination.searchParams.set("deviceSyncProvider", result.account.provider);
-          destination.searchParams.set("deviceSyncAccountId", result.account.id);
-          redirect(response, destination.toString());
+        const redirectLocation = buildDeviceSyncCallbackSuccessRedirectLocation({
+          returnTo: result.returnTo,
+          provider: result.account.provider,
+        });
+
+        if (redirectLocation) {
+          redirect(response, redirectLocation);
           return;
         }
 
@@ -238,7 +295,7 @@ const DEVICE_SYNC_HTTP_ROUTES = [
           200,
           renderCallbackHtml({
             title: `${formatProviderLabel(result.account.provider)} connected`,
-            body: `Connected ${formatProviderLabel(result.account.provider)} account ${result.account.id} successfully.`,
+            body: `Connected ${formatProviderLabel(result.account.provider)} successfully.`,
           }),
         );
       } catch (error) {
@@ -379,7 +436,7 @@ async function routeRequest(input: {
   });
 }
 
-export function createDeviceSyncHttpRequestHandler(input: {
+function createDeviceSyncHttpRequestHandler(input: {
   service: DeviceSyncService;
   bodyLimitBytes?: number;
   controlToken: string;
@@ -409,10 +466,7 @@ async function startListener(input: {
   host: string;
   port: number;
   handler: DeviceSyncHttpRequestHandler;
-}): Promise<{
-  server: Server;
-  address: NodeServerHandle["control"];
-}> {
+}): Promise<StartedDeviceSyncHttpListener> {
   const server = createServer(input.handler);
   const address = await listenServer(server, input.host, input.port);
   return {
@@ -455,14 +509,26 @@ async function closeServer(server: Server): Promise<void> {
   });
 }
 
-function assertLoopbackControlListenerHost(host: string): void {
-  if (isLoopbackHostname(host)) {
-    return;
+async function closeStartedListeners(
+  listeners: readonly (StartedDeviceSyncHttpListener | null | undefined)[],
+): Promise<void> {
+  let firstError: unknown = null;
+
+  for (const listener of listeners) {
+    if (!listener) {
+      continue;
+    }
+
+    try {
+      await closeServer(listener.server);
+    } catch (error) {
+      firstError ??= error;
+    }
   }
 
-  throw new TypeError(
-    "Device sync control listener host must be a loopback hostname or address. Use publicHost/publicPort for externally reachable callback and webhook routes.",
-  );
+  if (firstError) {
+    throw firstError;
+  }
 }
 
 function requireControlToken(controlToken: string | undefined): string {
@@ -490,6 +556,16 @@ function resolvePublicListener(
       "Set both publicHost and publicPort to expose a separate public callback/webhook listener.",
     );
   }
+
+  assertUnbracketedListenerHost(
+    publicHost,
+    "Device sync public listener host must be a hostname or address without URL bracket syntax. Use ::1, not [::1].",
+  );
+  assertListenerPort(
+    publicPort,
+    "Device sync public listener port must be an integer between 0 and 65535.",
+    { allowZero: true },
+  );
 
   return {
     host: publicHost,
@@ -678,28 +754,11 @@ function redirect(response: ServerResponse, location: string): void {
   response.end();
 }
 
-export function buildCallbackErrorRedirectLocation(input: {
-  returnTo: string | null;
-  provider: string;
-  errorCode: string;
-}): string | null {
-  if (!input.returnTo) {
-    return null;
-  }
-
-  const destination = new URL(input.returnTo);
-  destination.searchParams.delete("deviceSyncErrorMessage");
-  destination.searchParams.set("deviceSyncStatus", "error");
-  destination.searchParams.set("deviceSyncProvider", input.provider);
-  destination.searchParams.set("deviceSyncError", input.errorCode);
-  return destination.toString();
-}
-
 function sendCallbackErrorResponse(response: ServerResponse, fallbackProvider: string, error: DeviceSyncError): void {
   const provider = error.details ? readStringField(error.details, "provider") ?? fallbackProvider : fallbackProvider;
   const returnTo = error.details ? readStringField(error.details, "returnTo") : null;
 
-  const redirectLocation = buildCallbackErrorRedirectLocation({
+  const redirectLocation = buildDeviceSyncCallbackErrorRedirectLocation({
     returnTo,
     provider,
     errorCode: error.code,
@@ -715,7 +774,7 @@ function sendCallbackErrorResponse(response: ServerResponse, fallbackProvider: s
     error.httpStatus,
     renderCallbackHtml({
       title: `${formatProviderLabel(provider)} connection failed`,
-      body: error.message,
+      body: sanitizeHostedRuntimeErrorText(error.message) ?? "Request failed.",
     }),
   );
 }
@@ -734,17 +793,17 @@ function sendError(response: ServerResponse, error: unknown): void {
     sendJson(response, 413, {
       error: {
         code: "PAYLOAD_TOO_LARGE",
-        message: error.message,
+        message: sanitizeHostedRuntimeErrorText(error.message) ?? "Request failed.",
       },
     });
     return;
   }
 
-  if (error instanceof TypeError) {
+  if (error instanceof TypeError || error instanceof URIError) {
     sendJson(response, 400, {
       error: {
         code: "BAD_REQUEST",
-        message: error.message,
+        message: sanitizeHostedRuntimeErrorText(error.message) ?? "Request failed.",
       },
     });
     return;
@@ -769,7 +828,7 @@ export function buildPublicDeviceSyncErrorPayload(error: DeviceSyncError): {
   return {
     error: {
       code: error.code,
-      message: error.message,
+      message: sanitizeHostedRuntimeErrorText(error.message) ?? "Request failed.",
       retryable: error.retryable,
       details: buildPublicDeviceSyncErrorDetails(error.details),
     },
@@ -803,38 +862,6 @@ function readDeviceSyncErrorStatusDetail(
 
 function readStringField(record: Record<string, unknown>, key: string): string | null {
   const value = record[key];
-  return typeof value === "string" && value.trim() ? value.trim() : null;
-}
-
-function hasMatchingControlToken(headers: IncomingHttpHeaders, expectedToken: string): boolean {
-  const providedToken = readBearerToken(headers.authorization);
-
-  if (!providedToken) {
-    return false;
-  }
-
-  const expected = Buffer.from(expectedToken, "utf8");
-  const provided = Buffer.from(providedToken, "utf8");
-
-  return expected.length === provided.length && timingSafeEqual(expected, provided);
-}
-
-function readBearerToken(value: string | string[] | undefined): string | null {
-  const header = readHeaderValue(value);
-
-  if (!header) {
-    return null;
-  }
-
-  const match = header.match(/^bearer\s+(.+)$/iu);
-  return match?.[1]?.trim() || null;
-}
-
-function readHeaderValue(value: string | string[] | undefined): string | null {
-  if (Array.isArray(value)) {
-    return value.length === 1 ? readHeaderValue(value[0]) : null;
-  }
-
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 

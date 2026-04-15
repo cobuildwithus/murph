@@ -101,19 +101,28 @@ function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === 'AbortError'
 }
 
+function createDeferredPromise<TResult>() {
+  let resolve!: (value: TResult | PromiseLike<TResult>) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<TResult>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve
+    reject = promiseReject
+  })
+  return {
+    promise,
+    reject,
+    resolve,
+  }
+}
+
 async function waitForProcessTurnQueue(
   assistantStateRoot: string,
   abortSignal?: AbortSignal,
 ): Promise<() => void> {
   const prior = processTurnQueues.get(assistantStateRoot) ?? Promise.resolve()
-  let releaseQueue!: () => void
-  const queued = new Promise<void>((resolve) => {
-    releaseQueue = resolve
-  })
-  const tail = prior.then(
-    () => queued,
-    () => queued,
-  )
+  const { promise: queued, resolve: releaseQueue } = createDeferredPromise<void>()
+  const continueQueue = () => queued
+  const tail = prior.then(continueQueue, continueQueue)
   processTurnQueues.set(assistantStateRoot, tail)
 
   try {
@@ -137,8 +146,9 @@ async function waitForPriorTurn(
   prior: Promise<void>,
   abortSignal?: AbortSignal,
 ): Promise<void> {
+  const ignorePriorFailure = () => undefined
   if (!abortSignal) {
-    await prior.catch(() => undefined)
+    await prior.catch(ignorePriorFailure)
     return
   }
 
@@ -149,17 +159,16 @@ async function waitForPriorTurn(
   let onAbort: (() => void) | null = null
 
   try {
+    const abortDeferred = createDeferredPromise<never>()
+    onAbort = () => {
+      abortDeferred.reject(createAssistantTurnAbortedError())
+    }
+    abortSignal.addEventListener('abort', onAbort, {
+      once: true,
+    })
     await Promise.race([
-      prior.catch(() => undefined),
-      new Promise<never>((_, reject) => {
-        onAbort = () => {
-          reject(createAssistantTurnAbortedError())
-        }
-
-        abortSignal.addEventListener('abort', onAbort, {
-          once: true,
-        })
-      }),
+      prior.catch(ignorePriorFailure),
+      abortDeferred.promise,
     ])
   } finally {
     if (onAbort) {

@@ -1,5 +1,7 @@
-import { generateText, stepCountIs } from 'ai'
+import { createGateway, gateway, generateText, stepCountIs, type ToolSet } from 'ai'
+import { openai } from '@ai-sdk/openai'
 import {
+  type AssistantModelSpec,
   resolveAssistantLanguageModel,
   type AssistantAiSdkToolEvent,
 } from '../../model-harness.js'
@@ -26,11 +28,18 @@ import {
   createAssistantProviderToolProgressEvent,
 } from '../provider-progress.js'
 import {
+  type AssistantProviderConfig,
+  resolveAssistantProviderRuntimeTarget,
+  shouldAssistantProviderUseGatewayWebSearch,
+  shouldAssistantProviderUseMurphWebSearch,
+  shouldAssistantProviderUseProviderWebSearch,
   supportsAssistantReasoningEffort,
-  shouldUseAssistantOpenAIResponsesApi,
 } from '@murphai/operator-config/assistant/provider-config'
 import { resolveAssistantModelSpecFromProviderConfig } from '../provider-config.js'
-import type { AssistantProviderDefinition } from './types.js'
+import {
+  supportsAnyAssistantRichUserMessageContent,
+  type AssistantProviderDefinition,
+} from './types.js'
 
 const OPENAI_COMPATIBLE_PROVIDER_TIMEOUT_MS = 10 * 60 * 1000
 const OPENAI_COMPATIBLE_PROVIDER_MAX_RETRIES = 2
@@ -39,11 +48,18 @@ const MODEL_DISCOVERY_TIMEOUT_MS = 2_500
 
 export const openAiCompatibleProviderDefinition: AssistantProviderDefinition = {
   capabilities: {
+    murphCommandSurface: 'bound-tools',
     requestFormat: 'messages',
+    supportedUserMessageContentTypes: ['text', 'image', 'file'],
     supportsModelDiscovery: true,
-    supportsNativeResume: true,
+    supportsNativeResume: false,
     supportsReasoningEffort: false,
-    supportsRichUserMessageContent: true,
+    supportsRichUserMessageContent: supportsAnyAssistantRichUserMessageContent([
+      'text',
+      'image',
+      'file',
+    ]),
+    supportsZeroDataRetention: false,
     supportsToolRuntime: true,
   },
   async discoverModels(input) {
@@ -156,11 +172,12 @@ export const openAiCompatibleProviderDefinition: AssistantProviderDefinition = {
       )
     }
 
-    const usesOpenAIResponsesApi =
-      shouldUseAssistantOpenAIResponsesApi(providerConfig)
+    const resolvedRuntimeTarget = resolveAssistantProviderRuntimeTarget(providerConfig)
     const toolEvents: unknown[] = []
     let executedToolCount = 0
-    const tools = input.toolRuntime?.toolCatalog?.createAiSdkTools('apply', {
+    const tools = resolveOpenAiCompatibleAiSdkTools({
+      input,
+      languageModelSpec,
       onToolEvent: (event) => {
         if (event.kind === 'started' && event.mode === 'apply') {
           executedToolCount += 1
@@ -190,29 +207,18 @@ export const openAiCompatibleProviderDefinition: AssistantProviderDefinition = {
           })
         }
       },
-    }) ?? null
+      providerConfig,
+    })
 
     try {
       const messages = buildAssistantProviderMessages(input)
-      const reasoningEffort = normalizeNullableString(providerConfig.reasoningEffort)
-      const providerOptionKey = usesOpenAIResponsesApi
-        ? 'openai'
-        : normalizeAssistantProviderOptionKey(providerConfig.providerName)
-      const providerOptionValues: Record<string, boolean | string> = {}
-
-      if (supportsAssistantReasoningEffort(providerConfig) && reasoningEffort) {
-        providerOptionValues.reasoningEffort = reasoningEffort
-      }
-
-      if (usesOpenAIResponsesApi) {
-        providerOptionValues.store = false
-
-        if (normalizeNullableString(input.resumeProviderSessionId)) {
-          providerOptionValues.previousResponseId = normalizeNullableString(
-            input.resumeProviderSessionId,
-          )!
-        }
-      }
+      const usesResponsesApi =
+        (languageModelSpec.executionDriver ?? 'openai-compatible') === 'responses'
+      const providerOptions = resolveOpenAiCompatibleProviderOptions({
+        providerConfig,
+        resumeProviderSessionId: input.resumeProviderSessionId,
+        usesResponsesApi,
+      })
 
       const result = await generateText({
         abortSignal: input.abortSignal,
@@ -225,11 +231,9 @@ export const openAiCompatibleProviderDefinition: AssistantProviderDefinition = {
               tools,
             }
           : {}),
-        ...(Object.keys(providerOptionValues).length > 0
+        ...(providerOptions
           ? {
-              providerOptions: {
-                [providerOptionKey]: providerOptionValues,
-              },
+              providerOptions,
             }
           : {}),
         system: normalizeNullableString(input.systemPrompt) ?? undefined,
@@ -246,7 +250,7 @@ export const openAiCompatibleProviderDefinition: AssistantProviderDefinition = {
         result: {
           provider: providerConfig.provider,
           providerSessionId:
-            usesOpenAIResponsesApi
+            resolvedRuntimeTarget.supportsNativeResume
               ? (
                   extractOpenAICompatibleProviderSessionId(result) ??
                   normalizeNullableString(input.resumeProviderSessionId)
@@ -280,6 +284,119 @@ export const openAiCompatibleProviderDefinition: AssistantProviderDefinition = {
   resolveStaticModels() {
     return []
   },
+}
+
+function resolveOpenAiCompatibleAiSdkTools(input: {
+  input: Parameters<AssistantProviderDefinition['executeTurn']>[0]
+  languageModelSpec: AssistantModelSpec
+  onToolEvent: (event: AssistantAiSdkToolEvent) => void
+  providerConfig: AssistantProviderConfig
+}): ToolSet | undefined {
+  const murphTools = filterOpenAiCompatibleMurphAiSdkTools({
+    tools:
+      input.input.toolRuntime?.toolCatalog?.createAiSdkTools('apply', {
+        onToolEvent: input.onToolEvent,
+      }) ?? null,
+    useMurphWebSearch: shouldAssistantProviderUseMurphWebSearch(
+      input.providerConfig,
+    ),
+  })
+  const nativeSearchTools = resolveOpenAiCompatibleNativeSearchTools({
+    languageModelSpec: input.languageModelSpec,
+    providerConfig: input.providerConfig,
+  })
+  const tools: ToolSet = {
+    ...(murphTools ?? {}),
+    ...(nativeSearchTools ?? {}),
+  }
+
+  return Object.keys(tools).length > 0 ? tools : undefined
+}
+
+function filterOpenAiCompatibleMurphAiSdkTools(input: {
+  tools: ToolSet | null
+  useMurphWebSearch: boolean
+}): ToolSet | null {
+  if (!input.tools) {
+    return null
+  }
+
+  const filteredEntries = Object.entries(input.tools).filter(([name]) =>
+    input.useMurphWebSearch ? true : name !== 'web.search',
+  )
+
+  return filteredEntries.length > 0 ? Object.fromEntries(filteredEntries) : null
+}
+
+function resolveOpenAiCompatibleNativeSearchTools(input: {
+  languageModelSpec: AssistantModelSpec
+  providerConfig: AssistantProviderConfig
+}): ToolSet | null {
+  if (shouldAssistantProviderUseProviderWebSearch(input.providerConfig)) {
+    return {
+      web_search: openai.tools.webSearch({}),
+    } as ToolSet
+  }
+
+  if (shouldAssistantProviderUseGatewayWebSearch(input.providerConfig)) {
+    return {
+      perplexity_search: resolveOpenAiCompatibleGatewayProvider(
+        input.languageModelSpec,
+      ).tools.perplexitySearch(),
+    } as ToolSet
+  }
+
+  return null
+}
+
+function resolveOpenAiCompatibleGatewayProvider(spec: AssistantModelSpec) {
+  return spec.baseUrl || spec.headers || spec.apiKey
+    ? createGateway({
+        ...(spec.baseUrl ? { baseURL: spec.baseUrl } : {}),
+        ...(spec.headers ? { headers: spec.headers } : {}),
+        ...(spec.apiKey ? { apiKey: spec.apiKey } : {}),
+      })
+    : gateway
+}
+
+function resolveOpenAiCompatibleProviderOptions(input: {
+  providerConfig: AssistantProviderConfig
+  resumeProviderSessionId: string | null | undefined
+  usesResponsesApi: boolean
+}): Record<string, Record<string, boolean | string>> | undefined {
+  const reasoningEffort = supportsAssistantReasoningEffort(input.providerConfig)
+    ? normalizeNullableString(input.providerConfig.reasoningEffort)
+    : null
+  const normalizedResumeProviderSessionId = normalizeNullableString(
+    input.resumeProviderSessionId,
+  )
+  if (input.usesResponsesApi) {
+    const openAiOptions: Record<string, boolean | string> = {
+      store: false,
+    }
+
+    if (reasoningEffort) {
+      openAiOptions.reasoningEffort = reasoningEffort
+    }
+
+    if (normalizedResumeProviderSessionId) {
+      openAiOptions.previousResponseId = normalizedResumeProviderSessionId
+    }
+
+    return {
+      openai: openAiOptions,
+    }
+  }
+
+  if (!reasoningEffort) {
+    return undefined
+  }
+
+  return {
+    [normalizeAssistantProviderOptionKey(input.providerConfig.providerName)]: {
+      reasoningEffort,
+    },
+  }
 }
 
 function createOpenAiCompatibleToolRawEvent(input: {

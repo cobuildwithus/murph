@@ -4,6 +4,7 @@ import {
   DEFAULT_DEVICE_SYNC_BASE_URL,
   DEVICE_SYNC_BASE_URL_ENV,
   DEVICE_SYNC_CONTROL_TOKEN_ENV,
+  type DeviceSyncJobRecord,
   isDeviceSyncLocalControlPlaneError,
   normalizeDeviceSyncBaseUrl,
   resolveDeviceSyncControlPlane as resolveSharedDeviceSyncControlPlane,
@@ -13,28 +14,6 @@ import {
 } from '@murphai/device-syncd/client'
 
 import { VaultCliError } from './vault-cli-errors.js'
-
-interface DeviceSyncJobRecord {
-  id: string
-  provider: string
-  accountId: string
-  kind: string
-  payload: Record<string, unknown>
-  priority: number
-  availableAt: string
-  attempts: number
-  maxAttempts: number
-  dedupeKey: string | null
-  status: 'queued' | 'running' | 'succeeded' | 'dead'
-  leaseOwner: string | null
-  leaseExpiresAt: string | null
-  lastErrorCode: string | null
-  lastErrorMessage: string | null
-  createdAt: string
-  updatedAt: string
-  startedAt: string | null
-  finishedAt: string | null
-}
 
 export interface DeviceSyncClientOptions {
   baseUrl?: string | null

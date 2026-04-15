@@ -15,7 +15,7 @@ This app is intentionally separate from `apps/web`:
 - perform durable hosted bootstrap explicitly on `member.activated`
 - restore a temporary execution context for one-shot runs
 - start the Durable Object's native Cloudflare container on demand for the runner process
-- run the existing Murph inbox, parser, assistant, device-sync, and hosted share-import seams for member activation, direct Linq messages, hosted share acceptance, hosted device-sync wake events, and periodic assistant ticks through the headless `@murphai/assistant-runtime` package
+- run the existing Murph inbox, parser, assistant, device-sync, and hosted share-import seams for member activation, direct Linq messages, hosted share acceptance, hosted device-sync wake events, and explicit assistant cron/deadline wakes through the headless `@murphai/assistant-runtime` package
 - hydrate opaque hosted share packs from Cloudflare storage only when a `vault.share.accepted` runner job is about to import them
 
 ## Non-goals
@@ -54,21 +54,22 @@ Current worker env/config names read directly by `src/env.ts`:
 - optional secret: `HOSTED_EMAIL_CLOUDFLARE_API_TOKEN` enables hosted email delivery through Cloudflare Email Routing
 - optional secret: `HOSTED_EMAIL_SIGNING_SECRET` enables trusted hosted email ingress token generation and verification
 - optional non-secret: `HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS` extends the exact per-user encrypted env key allowlist in both the worker and container
+- optional non-secret: `HOSTED_EXECUTION_RUNNER_ENV_PROFILES` adds explicit hosted runner env profiles beyond the runtime's default minimal `assistant,parsers,web` set. Supported opt-in profiles are `device-sync`, `hosted-email`, `linq`, `mapbox`, and `telegram`, and the repo deploy automation now defaults hosted deploys to `device-sync,hosted-email,linq,mapbox,telegram` when this variable is unset
 - optional non-secret: `HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID` selects the Cloudflare account used for hosted email sends
 - optional non-secret: `HOSTED_EMAIL_CLOUDFLARE_API_BASE_URL` overrides the Cloudflare API base URL for hosted email delivery
 - optional non-secret: `HOSTED_EMAIL_DEFAULT_SUBJECT` overrides the default hosted email subject
 - optional non-secret: `HOSTED_EMAIL_DOMAIN`, `HOSTED_EMAIL_FROM_ADDRESS`, and `HOSTED_EMAIL_LOCAL_PART` configure the fixed hosted email sender identity plus stable per-user reply aliases
 - optional non-secret: `HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY_ID` defaults to `v1`
 - optional secret: `HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEYRING_JSON` may provide a JSON object of `{ keyId: base64Key }` entries so already-addressed hosted ciphertext can still decrypt during key rotation
-- optional non-secret: `HOSTED_EXECUTION_DEFAULT_ALARM_DELAY_MS` defaults to `21600000` in the checked-in Wrangler scaffold
 - optional non-secret: `HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS` defaults to `3`
 - optional non-secret: `HOSTED_EXECUTION_RETRY_DELAY_MS` defaults to `30000`
 - optional non-secret: `HOSTED_EXECUTION_RUNNER_TIMEOUT_MS` defaults to `120000`
 - optional non-secret: `HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS` defaults to `30000` and is forwarded into the container runtime
 - optional non-secret: `HOSTED_ASSISTANT_*` vars choose the explicit platform-managed hosted assistant profile that hosted bootstrap persists into `~/.murph/config.json`. `HOSTED_ASSISTANT_API_KEY_ENV` names the env var to read at runtime; it is never the raw API key itself
+- optional secret: `MAPBOX_ACCESS_TOKEN` enables hosted `vault-cli route estimate` calls through the same CLI-backed runtime surface used locally
 - optional provider/toolchain vars and secrets configured on the Worker are forwarded into the container only when `src/runner-env.ts` explicitly names the exact keys; broad prefix forwarding is intentionally not part of the hosted runner contract
 
-Hosted email on this worker keeps the public `From` identity fixed while new outbound sends reuse one stable per-user reply alias. Registered members can also start a thread by emailing that fixed public sender address once their verified email has been synced into hosted execution; the worker resolves that direct inbox only through an encrypted verified-owner index and still re-authorizes the sender before raw-message persistence or hosted dispatch. Learning another member's alias is not enough to reach that member's vault, and neither is addressing the public mailbox from an unregistered or mismatched sender. Legacy per-thread reply aliases are no longer accepted.
+Hosted email on this worker keeps the public `From` identity fixed while new outbound sends reuse one stable per-user reply alias. Registered members can also start a thread by emailing that fixed public sender address once their verified email has been synced into hosted execution; the worker resolves that direct inbox only through an encrypted verified-owner index and still re-authorizes the sender before raw-message persistence or hosted dispatch. That verified-owner index is current-schema only: unsupported older records now fail closed instead of being rewritten during sync. Learning another member's alias is not enough to reach that member's vault, and neither is addressing the public mailbox from an unregistered or mismatched sender. Legacy per-thread reply aliases are no longer accepted.
 
 Current worker routes:
 
@@ -101,37 +102,38 @@ That means:
 - those worker-owned outbound proxy hosts now require an in-memory per-run proxy token from the trusted Worker/container bridge in addition to the bound `userId`, so random code inside one warm runner shell cannot call them directly with `curl` or borrowed env once the worker rotates that token away after the run
 - the worker-owned hosted-AI-usage proxy host injects the Durable Object's bound `userId` into the worker-side usage buffer path, and any later web import still happens from the Durable Object with the broader web control token kept out of the runner environment
 - worker-owned callback and web-control base URLs now normalize to HTTPS by default and only permit explicit loopback or internal worker-host HTTP exceptions
-- the runner process posts the durable commit callback plus hosted email and assistant-delivery journal requests through one internal `http://results.worker` seam; the fuller final result now returns directly to the Durable Object, so bundle finalization no longer needs a second worker callback hop
+- the Durable Object now owns the durable hosted commit directly from the runner's first committed-phase result; the remaining internal `http://results.worker` seam is only for true outward effects such as hosted email and assistant-delivery journal access
 - the container-local bridge is intentionally thin; the execution core lives in `packages/assistant-runtime`
 - the queue Durable Object invokes the per-user container on demand, may keep that outer shell warm for a short idle TTL, and still runs each hosted execution inside a fresh isolated child process with the outbound proxy token rotated away after completion; if any unexpected processes remain, the shell exits instead of being reused
 
-The native container image is declared in `apps/cloudflare/wrangler.jsonc` under the `containers` section, points at `../../Dockerfile.cloudflare-hosted-runner`, uses `instance_type: "standard-1"` in the checked-in scaffold, and now keeps the default `max_instances` at `50` until deploy automation raises it explicitly. Generated deploy config accepts `CF_CONTAINER_INSTANCE_TYPE` as either a named Wrangler preset such as `standard-1` or a JSON object with `vcpu`, `memory_mib`, and `disk_mb`.
+The native container image is declared in `apps/cloudflare/wrangler.jsonc` under the `containers` section, points at `../../Dockerfile.cloudflare-hosted-runner`, and now pins the Docker build context to `apps/cloudflare` through Wrangler's `image_build_context` so deploys only upload the app-local container contract instead of the whole repo. The checked-in scaffold still uses `instance_type: "standard-1"` and keeps the default `max_instances` at `50` until deploy automation raises it explicitly. Generated deploy config accepts `CF_CONTAINER_INSTANCE_TYPE` as either a named Wrangler preset such as `standard-1` or a JSON object with `vcpu`, `memory_mib`, and `disk_mb`.
 
 ## Container image
 
-`Dockerfile.cloudflare-hosted-runner` builds the container image used by Wrangler. The deploy-only helpers under `apps/cloudflare/scripts/**` prepare the app-owned runtime leaf artifact under `apps/cloudflare/.deploy/runner-bundle`, install the real published-shape `@murphai/murph` package there so `vault-cli` resolves from `/app/node_modules/.bin`, and then let the Docker build copy only that prepared runtime artifact plus the pinned Whisper assets into the final image. The sibling generated deploy files under `.deploy/`, including `wrangler.generated.jsonc` and `worker-secrets.json`, are deploy inputs, not container image contents. Inside that image, the private container entrypoint still serves:
+`Dockerfile.cloudflare-hosted-runner` builds the container image used by Wrangler. The deploy-only helpers under `apps/cloudflare/scripts/**` prepare the app-owned runtime leaf artifact under `apps/cloudflare/.deploy/runner-bundle`, install the real published-shape `@murphai/murph` package there so `vault-cli` resolves from `/app/node_modules/.bin`, and then let the Docker build copy only that prepared runtime artifact plus the pinned Whisper assets into the final image. Because the build context is now `apps/cloudflare`, the app-local `apps/cloudflare/.dockerignore` keeps that upload limited to `.deploy/runner-bundle/**` instead of shipping unrelated repo files through Docker. The sibling generated deploy files under `.deploy/`, including `wrangler.generated.jsonc` and `worker-secrets.json`, remain deploy inputs, not container image contents. Inside that image, the private container entrypoint still serves:
 
 - `GET /health`
 - `POST /__internal/run`
 
 That HTTP bridge is an internal container implementation detail, not a separately supported hosted service or repo-supported local command surface. The repo no longer supports an external `HOSTED_EXECUTION_RUNNER_BASE_URL` path.
 
-The default image now bakes the local parser toolchain directly into the container: `ffmpeg`, `pdftotext`, a pinned `whisper.cpp` `whisper-cli` build, and the default `base.en` Whisper model under `~/.murph/models/whisper/ggml-base.en.bin`. `FFMPEG_COMMAND`, `PDFTOTEXT_COMMAND`, `WHISPER_COMMAND`, and `WHISPER_MODEL_PATH` are set in the image by default, and operators only need to override the Whisper vars when they intentionally want a different binary or model. Those parser binary/model selector vars are operator-only deploy knobs: separately encrypted per-user env overrides must not set them, and `HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS` cannot re-enable them.
+The default image now bakes the local parser toolchain directly into the container: `ffmpeg`, a pinned `whisper.cpp` `whisper-cli` build, and the default `base.en` Whisper model under `~/.murph/models/whisper/ggml-base.en.bin`. `FFMPEG_COMMAND`, `WHISPER_COMMAND`, and `WHISPER_MODEL_PATH` are set in the image by default, and `WHISPER_MODEL_PATH` now follows the selected `WHISPER_MODEL_FILE` build arg instead of assuming the base model path. Operators only need to override the Whisper vars when they intentionally want a different binary or model. Those parser binary/model selector vars are operator-only deploy knobs: separately encrypted per-user env overrides must not set them, and `HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS` cannot re-enable them.
 
 Current expectations for the container image:
 
-- Node `>=22.16.0`
+- Node `>=24.14.1`
 - the runner app assembled by `apps/cloudflare` into `apps/cloudflare/.deploy/runner-bundle` before `wrangler deploy` starts the Docker build
 - the prepared `/app` tree remains a runtime leaf artifact: bundle assembly strips deploy-only docs plus build metadata such as lockfiles, declaration files, sourcemaps, and `.tsbuildinfo`
 - the hosted `vault-cli` surface resolves from the real installed `@murphai/murph` package inside the bundle, while hosted execution behavior still runs through `@murphai/assistant-runtime`
-- a copy-only Docker contract: the final image copies `/app` from `apps/cloudflare/.deploy/runner-bundle`, then starts `dist/container-entrypoint.js`
+- a copy-only Docker contract: the final image copies `/app` from `.deploy/runner-bundle` inside the app-local build context, then starts `dist/container-entrypoint.js`
 - `wrangler.generated.jsonc` and `worker-secrets.json` stay alongside the bundle as deploy inputs, not container image contents
 - bundle assembly is the app-owned artifact step and no longer depends on `pnpm deploy --legacy` or any Docker-stage workspace repair
 - writable temp storage for ephemeral hosted bundle restore/snapshot work
 - the baked `/app` tree is a runtime artifact bundle and the runtime executes as a dedicated non-root user, so any job that needs scratch space must use temp/vault paths rather than mutating shipped assets
 - `PORT` for the internal bridge listen port, defaulting to `8080`
 - provider/runtime env such as WHOOP, Oura, Linq, Telegram, hosted email bridge config, and model-provider keys when the one-shot runner should execute those surfaces instead of skipping them
-- optional allowlist extension var `HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS` when separately encrypted per-user env overrides need to cover additional exact key names, excluding operator-only binary/model selectors and process-control env such as `FFMPEG_COMMAND`, `PDFTOTEXT_COMMAND`, `WHISPER_COMMAND`, `WHISPER_MODEL_PATH`, `NODE_OPTIONS`, and dynamic-loader variables
+- optional allowlist extension var `HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS` when separately encrypted per-user env overrides need to cover additional exact key names, excluding operator-only binary/model selectors and process-control env such as `FFMPEG_COMMAND`, `WHISPER_COMMAND`, `WHISPER_MODEL_PATH`, `NODE_OPTIONS`, and dynamic-loader variables
+- optional runner env profile var `HOSTED_EXECUTION_RUNNER_ENV_PROFILES` when operators want the container to opt into additional platform-managed integration env beyond the runtime default `assistant,parsers,web` set; supported profile names are `device-sync`, `hosted-email`, `linq`, `mapbox`, and `telegram`. The repo deploy automation now defaults to `device-sync,hosted-email,linq,mapbox,telegram` when this variable is unset
 - optional `HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS` when operators want to override the default 120-second warm-shell idle retention
 - encrypted per-user overrides are read from a dedicated per-user hosted object, injected into the one-shot runtime request, and the default hosted execution path runs each job in an isolated child process launched from a temp cwd rather than `/app`, so per-user env overrides no longer force container-wide request serialization, the job does not inherit the shipped app bundle as its ambient working directory, the child does not inherit supervisor-only container env or proxy credentials, writable cache/temp roots stay per-run, and the launch-time `HOME` no longer reuses the container supervisor account
 
@@ -143,7 +145,7 @@ Current scaffold files:
 - `apps/cloudflare/.dev.vars.example`
 - `apps/cloudflare/DEPLOY.md`
 - `Dockerfile.cloudflare-hosted-runner`
-- `.dockerignore`
+- `apps/cloudflare/.dockerignore`
 
 Still intentionally placeholder:
 
@@ -176,10 +178,10 @@ The Cloudflare app now keeps two focused Vitest lanes:
 - Broad hosted idempotency no longer depends on the web outbox lifecycle: `apps/web` now uses the shared Postgres `execution_outbox` only for delivery handoff into Cloudflare, while the Durable Object queue owns retries, poison/backpressure, committed-result recovery, and any hosted-web business-outcome callback before it consumes the event. Hosted webhook receipts still keep their own durable side-effect state for Linq replies, and RevNet issuance stays on its invoice-owned idempotency path.
 - Missing hosted share packs are treated as an async runner-side failure instead of a web claim-time validation step. If hydration fails, Cloudflare releases the Postgres share claim through the signed hosted-web release callback and then poisons the queue event instead of retrying a permanently missing pack forever.
 - Follow-up hosted events now require an already bootstrapped member context; they no longer create the vault or force-enable Linq auto-reply as a hidden side effect.
-- The checked-in Wrangler scaffold now explicitly enables Workers Logs and Workers Traces so request logs, container logs, and trace spans are available before production deploys. The generated deploy config exposes log and trace sampling through `CF_LOG_HEAD_SAMPLING_RATE` and `CF_TRACE_HEAD_SAMPLING_RATE`.
+- The checked-in Wrangler scaffold now defaults to temporary incident-debug observability, with persisted invocation logs and trace sampling both set to `1` so every hosted runner invocation can be inspected in Cloudflare while the issue is being diagnosed. Scale those values back down after the incident window to control observability volume.
 - The operational deploy path now uses a direct cut through `wrangler deploy` semantics on every GitHub Actions run and local `deploy:worker` invocation. The helper prepares `wrangler.generated.jsonc`, `worker-secrets.json`, and the prebuilt `apps/cloudflare/.deploy/runner-bundle` once before the deploy call, so deploy flow and image contents stay aligned around the prepared runtime artifact. The lower-level version/deploy split stays in the helper code as a manual escape hatch, but the default workflow no longer treats gradual traffic rollout as the normal path.
 - Frequent deploys can accumulate old managed-registry tags. Use `pnpm --dir apps/cloudflare images:cleanup -- --filter '<repo-regex>' --keep 10` first, then add `--apply` once the dry-run plan looks correct.
-- The checked-in deploy surface now documents and forwards only the canonical runtime vars that the container actually consumes, such as `HOSTED_EMAIL_*`, `FFMPEG_COMMAND`, `PDFTOTEXT_COMMAND`, `WHISPER_COMMAND`, `WHISPER_MODEL_PATH`, and the explicit runner web-control host allowlist override. The default image already bakes the standard parser-toolchain values, so the parser vars are operator-only override knobs rather than baseline deployment requirements or per-user env settings. AgentMail stays a local-only integration and is not part of the hosted deploy surface.
+- The checked-in deploy surface now documents and forwards only the canonical runtime vars that the container actually consumes, such as `HOSTED_EMAIL_*`, `FFMPEG_COMMAND`, `WHISPER_COMMAND`, `WHISPER_MODEL_PATH`, and the explicit runner web-control host allowlist override. The default image already bakes the standard parser-toolchain values, so the parser vars are operator-only override knobs rather than baseline deployment requirements or per-user env settings. AgentMail stays a local-only integration and is not part of the hosted deploy surface.
 - The deploy automation now also forwards the hosted email bridge config (`HOSTED_EMAIL_*`) into the generated Worker vars/secrets payload and the manual GitHub Actions deploy workflow, so the documented hosted email contract matches the deploy surface.
 - Manual deploy smoke no longer stops at `POST /run` acceptance. It now polls the operator status route until the queue drains, `lastRunAt` advances, and durable bundle refs exist, so a broken containerized run does not look healthy just because the enqueue succeeded.
 - The checked-in Wrangler scaffold and rendered deploy config now declare the four required hosted runtime secrets through Wrangler's experimental `secrets.required` support, so local `wrangler` validation and deploy/version uploads fail early when those names are unset. Keep that list tight and treat optional provider secrets as separately managed Worker configuration.
@@ -194,4 +196,4 @@ The Cloudflare app now keeps two focused Vitest lanes:
 
 - Only assistant delivery is implemented as a hosted side-effect kind today. Future provider mutations, callbacks, or outbound deliveries should extend the same committed side-effect journal rather than bypassing it.
 - Cloudflare container lifecycle now keeps only the outer per-user shell warm for a short idle TTL. The actual Murph execution remains a fresh isolated child process each time, and ambiguous warm state still fails closed by destroying the shell.
-- The remaining `results.worker` seam is now only for the durable commit callback plus true outward effects such as hosted email and side-effect journal access. Future outward mutations should extend that same committed side-effect journal instead of adding separate reliability lanes.
+- The remaining `results.worker` seam is now only for true outward effects such as hosted email and side-effect journal access. Future outward mutations should extend that same committed side-effect journal instead of adding separate reliability lanes.

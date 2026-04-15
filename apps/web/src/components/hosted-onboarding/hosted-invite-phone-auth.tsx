@@ -64,7 +64,6 @@ export function HostedInvitePhoneAuth({
     try {
       await flushPendingInvitePhoneCodeMutation(inviteCode);
       const payload = await requestHostedOnboardingJson<InvitePhoneCodePayload>({
-        auth: "none",
         method: "POST",
         url: `/api/hosted-onboarding/invites/${encodeURIComponent(inviteCode)}/send-code`,
       });
@@ -145,6 +144,7 @@ export function HostedInvitePhoneAuth({
           phoneFieldDescription="Enter the number that messaged Murph."
           phoneFieldLabel="Phone number"
           secondaryActionSize="sm"
+          showPassiveConsentNotice={false}
           onResendCode={handleResendCode}
           onUseDifferentNumber={handleUseDifferentNumber}
         />

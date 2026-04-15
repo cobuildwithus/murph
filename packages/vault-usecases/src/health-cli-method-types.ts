@@ -1,6 +1,9 @@
 import type { JsonObject } from "@murphai/contracts"
 
-import type { ReadEntity } from "@murphai/operator-config/vault-cli-contracts"
+import type {
+  ListEntity,
+  ReadEntity,
+} from "@murphai/operator-config/vault-cli-contracts"
 
 export type { JsonObject }
 
@@ -31,21 +34,7 @@ export interface AssessmentListRuntimeOptions {
   limit?: number
 }
 
-export interface ProfileSnapshotListRuntimeOptions {
-  from?: string
-  to?: string
-  limit?: number
-}
-
 export interface RegistryEntityListRuntimeOptions {
-  limit?: number
-  status?: string
-}
-
-export interface HistoryListRuntimeOptions {
-  kind?: string
-  from?: string
-  to?: string
   limit?: number
   status?: string
 }
@@ -79,19 +68,9 @@ export interface HealthListFilters {
 export interface HealthListEnvelope {
   vault: string
   filters: HealthListFilters
-  items: ReadEntity[]
+  items: ListEntity[]
   count: number
   nextCursor: string | null
-}
-
-export interface ProfileSnapshotUpsertResult {
-  vault: string
-  snapshotId: string
-  lookupId: string
-  ledgerFile?: string
-  currentProfilePath?: string
-  created: boolean
-  profile?: JsonObject
 }
 
 export interface UpsertRecordResult {
@@ -101,32 +80,12 @@ export interface UpsertRecordResult {
   created: boolean
 }
 
-export interface UpsertHistoryEventResult {
+export interface UpsertEventLedgerResult {
   vault: string
   eventId: string
   lookupId: string
   ledgerFile: string
   created: true
-}
-
-export interface ProfileSnapshotRuntimeInput {
-  vaultRoot: string
-  recordedAt?: string | number | Date
-  source?: string
-  sourceAssessmentIds?: string[]
-  sourceEventIds?: string[]
-  profile: JsonObject
-}
-
-export interface ProfileSnapshotRuntimeResult {
-  snapshot: {
-    id: string
-    profile: JsonObject
-  }
-  ledgerPath?: string
-  currentProfile: {
-    relativePath: string
-  }
 }
 
 export interface StoredHealthRecordRuntime<TIdField extends string> extends JsonObject {
@@ -139,7 +98,7 @@ export interface HealthRecordRuntimeResult<TIdField extends string> {
   created: boolean
 }
 
-export interface HistoryEventRuntimeResult {
+export interface EventLedgerRuntimeResult {
   record: {
     id: string
   }
@@ -147,9 +106,6 @@ export interface HistoryEventRuntimeResult {
 }
 
 export interface HealthCoreRuntimeMethods {
-  appendProfileSnapshot(
-    input: ProfileSnapshotRuntimeInput,
-  ): Promise<ProfileSnapshotRuntimeResult>
   upsertGoal(
     input: { vaultRoot: string } & JsonObject,
   ): Promise<HealthRecordRuntimeResult<'goalId'>>
@@ -165,12 +121,9 @@ export interface HealthCoreRuntimeMethods {
   readProtocolItem(
     input: { vaultRoot: string } & JsonObject,
   ): Promise<StoredHealthRecordRuntime<'protocolId'>>
-  appendHistoryEvent(
-    input: { vaultRoot: string } & JsonObject,
-  ): Promise<HistoryEventRuntimeResult>
   appendBloodTest(
     input: { vaultRoot: string } & JsonObject,
-  ): Promise<HistoryEventRuntimeResult>
+  ): Promise<EventLedgerRuntimeResult>
   upsertFamilyMember(
     input: { vaultRoot: string } & JsonObject,
   ): Promise<HealthRecordRuntimeResult<'familyMemberId'>>
@@ -180,18 +133,12 @@ export interface HealthCoreRuntimeMethods {
 }
 
 export interface HealthCoreScaffoldServiceMethods {
-  scaffoldProfileSnapshot(
-    input: CommandContext,
-  ): Promise<HealthScaffoldResult<'profile'>>
   scaffoldGoal(input: CommandContext): Promise<HealthScaffoldResult<'goal'>>
   scaffoldCondition(
     input: CommandContext,
   ): Promise<HealthScaffoldResult<'condition'>>
   scaffoldAllergy(input: CommandContext): Promise<HealthScaffoldResult<'allergy'>>
   scaffoldProtocol(input: CommandContext): Promise<HealthScaffoldResult<'protocol'>>
-  scaffoldHistoryEvent(
-    input: CommandContext,
-  ): Promise<HealthScaffoldResult<'history'>>
   scaffoldBloodTest(
     input: CommandContext,
   ): Promise<HealthScaffoldResult<'blood-test'>>
@@ -204,9 +151,6 @@ export interface HealthCoreScaffoldServiceMethods {
 }
 
 export interface HealthCoreUpsertServiceMethods {
-  upsertProfileSnapshot(
-    input: JsonFileInput,
-  ): Promise<ProfileSnapshotUpsertResult>
   upsertGoal(
     input: JsonFileInput,
   ): Promise<UpsertRecordResult & { goalId: string }>
@@ -219,12 +163,9 @@ export interface HealthCoreUpsertServiceMethods {
   upsertProtocol(
     input: JsonFileInput,
   ): Promise<UpsertRecordResult & { protocolId: string }>
-  upsertHistoryEvent(
-    input: JsonFileInput,
-  ): Promise<UpsertHistoryEventResult>
   upsertBloodTest(
     input: JsonFileInput,
-  ): Promise<UpsertHistoryEventResult>
+  ): Promise<UpsertEventLedgerResult>
   upsertFamilyMember(
     input: JsonFileInput,
   ): Promise<UpsertRecordResult & { familyMemberId: string }>
@@ -239,12 +180,10 @@ export interface HealthCoreServiceMethods
 
 export interface HealthQueryRuntimeShowMethods {
   showAssessment(vaultRoot: string, lookup: string): Promise<JsonObject | null>
-  showProfile(vaultRoot: string, lookup: string): Promise<JsonObject | null>
   showGoal(vaultRoot: string, lookup: string): Promise<JsonObject | null>
   showCondition(vaultRoot: string, lookup: string): Promise<JsonObject | null>
   showAllergy(vaultRoot: string, lookup: string): Promise<JsonObject | null>
   showProtocol(vaultRoot: string, lookup: string): Promise<JsonObject | null>
-  showHistoryEvent(vaultRoot: string, lookup: string): Promise<JsonObject | null>
   showBloodTest(vaultRoot: string, lookup: string): Promise<JsonObject | null>
   showFamilyMember(vaultRoot: string, lookup: string): Promise<JsonObject | null>
   showGeneticVariant(vaultRoot: string, lookup: string): Promise<JsonObject | null>
@@ -255,11 +194,10 @@ export interface HealthQueryRuntimeListMethods {
     vaultRoot: string,
     options?: AssessmentListRuntimeOptions,
   ): Promise<JsonObject[]>
-  listProfileSnapshots(
+  listGoals(
     vaultRoot: string,
-    options?: ProfileSnapshotListRuntimeOptions,
+    options?: RegistryEntityListRuntimeOptions,
   ): Promise<JsonObject[]>
-  listGoals(vaultRoot: string, options?: RegistryEntityListRuntimeOptions): Promise<JsonObject[]>
   listConditions(
     vaultRoot: string,
     options?: RegistryEntityListRuntimeOptions,
@@ -271,10 +209,6 @@ export interface HealthQueryRuntimeListMethods {
   listProtocols(
     vaultRoot: string,
     options?: RegistryEntityListRuntimeOptions,
-  ): Promise<JsonObject[]>
-  listHistoryEvents(
-    vaultRoot: string,
-    options?: HistoryListRuntimeOptions,
   ): Promise<JsonObject[]>
   listBloodTests(
     vaultRoot: string,
@@ -296,12 +230,10 @@ export interface HealthQueryRuntimeMethods
 
 export interface HealthQueryShowServiceMethods {
   showAssessment(input: EntityLookupInput): Promise<HealthEntityEnvelope>
-  showProfile(input: EntityLookupInput): Promise<HealthEntityEnvelope>
   showGoal(input: EntityLookupInput): Promise<HealthEntityEnvelope>
   showCondition(input: EntityLookupInput): Promise<HealthEntityEnvelope>
   showAllergy(input: EntityLookupInput): Promise<HealthEntityEnvelope>
   showProtocol(input: EntityLookupInput): Promise<HealthEntityEnvelope>
-  showHistoryEvent(input: EntityLookupInput): Promise<HealthEntityEnvelope>
   showBloodTest(input: EntityLookupInput): Promise<HealthEntityEnvelope>
   showFamilyMember(input: EntityLookupInput): Promise<HealthEntityEnvelope>
   showGeneticVariant(input: EntityLookupInput): Promise<HealthEntityEnvelope>
@@ -309,12 +241,10 @@ export interface HealthQueryShowServiceMethods {
 
 export interface HealthQueryListServiceMethods {
   listAssessments(input: HealthListInput): Promise<HealthListEnvelope>
-  listProfileSnapshots(input: HealthListInput): Promise<HealthListEnvelope>
   listGoals(input: HealthListInput): Promise<HealthListEnvelope>
   listConditions(input: HealthListInput): Promise<HealthListEnvelope>
   listAllergies(input: HealthListInput): Promise<HealthListEnvelope>
   listProtocols(input: HealthListInput): Promise<HealthListEnvelope>
-  listHistoryEvents(input: HealthListInput): Promise<HealthListEnvelope>
   listBloodTests(input: HealthListInput): Promise<HealthListEnvelope>
   listFamilyMembers(input: HealthListInput): Promise<HealthListEnvelope>
   listGeneticVariants(input: HealthListInput): Promise<HealthListEnvelope>

@@ -12,7 +12,6 @@ import {
   type FrontmatterObject,
 } from './health/shared.ts'
 import {
-  DERIVED_KNOWLEDGE_SEARCH_RESULT_FORMAT,
   extractKnowledgeFirstHeading,
   humanizeKnowledgeTag,
   orderedUniqueStrings,
@@ -22,8 +21,6 @@ import {
   stripGeneratedKnowledgeSections,
   stripKnowledgeLeadingHeading,
 } from './knowledge-format.ts'
-import { searchDerivedKnowledgeGraph } from './knowledge-search.ts'
-export { searchDerivedKnowledgeGraph } from './knowledge-search.ts'
 
 export const DERIVED_KNOWLEDGE_ROOT = 'derived/knowledge'
 export const DERIVED_KNOWLEDGE_PAGES_ROOT = `${DERIVED_KNOWLEDGE_ROOT}/pages`
@@ -62,35 +59,6 @@ export interface DerivedKnowledgeGraphIssue {
 export interface DerivedKnowledgeGraphReadResult {
   graph: DerivedKnowledgeGraph
   issues: DerivedKnowledgeGraphIssue[]
-}
-
-export interface DerivedKnowledgeSearchFilters {
-  limit?: number
-  pageType?: string | null
-  status?: string | null
-}
-
-export interface DerivedKnowledgeSearchHit {
-  compiledAt: string | null
-  librarySlugs: string[]
-  matchedTerms: string[]
-  pagePath: string
-  pageType: string | null
-  relatedSlugs: string[]
-  score: number
-  slug: string
-  snippet: string
-  sourcePaths: string[]
-  status: string | null
-  summary: string | null
-  title: string
-}
-
-export interface DerivedKnowledgeSearchResult {
-  format: typeof DERIVED_KNOWLEDGE_SEARCH_RESULT_FORMAT
-  hits: DerivedKnowledgeSearchHit[]
-  query: string
-  total: number
 }
 
 interface DerivedKnowledgeNodeParseResult {
@@ -154,15 +122,6 @@ export async function readDerivedKnowledgeGraphWithIssues(
     },
     issues,
   }
-}
-
-export async function searchDerivedKnowledgeVault(
-  vaultRoot: string,
-  query: string,
-  filters: DerivedKnowledgeSearchFilters = {},
-): Promise<DerivedKnowledgeSearchResult> {
-  const graph = await readDerivedKnowledgeGraph(vaultRoot)
-  return searchDerivedKnowledgeGraph(graph, query, filters)
 }
 
 export function renderDerivedKnowledgeIndex(

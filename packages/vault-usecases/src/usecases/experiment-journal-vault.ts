@@ -15,6 +15,7 @@ import {
 import {
   asListEnvelope,
   readJsonPayload,
+  toListEntity,
 } from './shared.js'
 import {
   compactObject,
@@ -349,7 +350,7 @@ export async function listExperimentRecords(input: {
       statuses: input.status ? [input.status] : undefined,
     })
     .slice(0, input.limit)
-    .map(toShowEntity)
+    .map(toListItem)
 
   return asListEnvelope(input.vault, {
     status: input.status ?? null,
@@ -484,7 +485,7 @@ export async function listJournalRecords(input: {
       to: input.to,
     })
     .slice(0, input.limit)
-    .map(toShowEntity)
+    .map(toListItem)
 
   return asListEnvelope(input.vault, {
     kind: 'journal_day',
@@ -561,12 +562,10 @@ export async function showVaultStats(vault: string) {
       samples: readModel.samples.length,
       audits: readModel.audits.length,
       assessments: readModel.assessments.length,
-      profileSnapshots: readModel.profileSnapshots.length,
       goals: readModel.goals.length,
       conditions: readModel.conditions.length,
       allergies: readModel.allergies.length,
       protocols: readModel.protocols.length,
-      history: readModel.history.length,
       familyMembers: readModel.familyMembers.length,
       geneticVariants: readModel.geneticVariants.length,
     },
@@ -693,6 +692,19 @@ function toShowEntity(entity: QueryCanonicalEntity) {
     data: buildEntityData(entity),
     links: buildEntityLinks(entity),
   }
+}
+
+function toListItem(entity: QueryCanonicalEntity) {
+  return toListEntity({
+    id: entity.entityId,
+    kind: entity.kind,
+    title: entity.title ?? null,
+    occurredAt: normalizeIsoTimestamp(entity.occurredAt),
+    path: entity.path ?? null,
+    markdown: entity.body ?? null,
+    data: buildEntityData(entity),
+    links: buildEntityLinks(entity),
+  })
 }
 
 function buildEntityData(entity: QueryCanonicalEntity) {

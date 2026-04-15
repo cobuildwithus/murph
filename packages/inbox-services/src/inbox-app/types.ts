@@ -1,8 +1,24 @@
-import type { ConnectorRestartPolicy } from '@murphai/inboxd'
+import type {
+  AttachmentParseJobRecord as SharedAttachmentParseJobRecord,
+  InboxCaptureRecord as SharedInboxCaptureRecord,
+  InboxPipeline as SharedInboxPipeline,
+  InboxRuntimeStore as SharedInboxRuntimeStore,
+  InboxSearchHit as SharedInboxSearchHit,
+  IndexedAttachment as SharedIndexedAttachment,
+  InboundCapture as SharedInboundCapture,
+  PersistedCapture as SharedPersistedCapture,
+  PollConnector as SharedPollConnector,
+} from '@murphai/inboxd'
+import type { ConnectorRestartPolicy } from '@murphai/inboxd/runtime'
+import type { EventSource, MealNutrition } from '@murphai/contracts'
 import type { RuntimePaths } from '@murphai/runtime-state/node'
 import { z } from 'zod'
 import type { AgentmailApiClient } from '@murphai/operator-config/agentmail-runtime'
 import { inboxPromotionStoreSchema } from '@murphai/operator-config/inbox-cli-contracts'
+import type {
+  QueryEntityFamily,
+  QueryVaultReadModel,
+} from '@murphai/vault-usecases/runtime'
 import type {
   InboxAttachmentListResult,
   InboxAttachmentParseResult,
@@ -36,82 +52,17 @@ import type {
   InboxSourceListResult,
   InboxSourceRemoveResult,
 } from '@murphai/operator-config/inbox-cli-contracts'
-import type {
-  ImportersFactoryRuntimeModule,
-  QueryRuntimeModule,
-} from '@murphai/vault-usecases/runtime'
 
-export interface RuntimeAttachmentRecord {
-  attachmentId?: string | null
-  ordinal: number
-  externalId?: string | null
-  kind: 'image' | 'audio' | 'video' | 'document' | 'other'
-  mime?: string | null
-  originalPath?: string | null
-  storedPath?: string | null
-  fileName?: string | null
-  byteSize?: number | null
-  sha256?: string | null
-  extractedText?: string | null
-  transcriptText?: string | null
-  derivedPath?: string | null
-  parserProviderId?: string | null
-  parseState?: 'pending' | 'running' | 'succeeded' | 'failed' | null
-}
+export type { AgentmailApiClient } from '@murphai/operator-config/agentmail-runtime'
+export type {
+  InboxConnectorConfig,
+  InboxRuntimeConfig,
+} from '@murphai/operator-config/inbox-cli-contracts'
 
-export interface RuntimeCaptureRecord {
-  captureId: string
-  eventId: string
-  source: string
-  externalId: string
-  accountId?: string | null
-  thread: {
-    id: string
-    title?: string | null
-    isDirect?: boolean
-  }
-  actor: {
-    id?: string | null
-    displayName?: string | null
-    isSelf: boolean
-  }
-  occurredAt: string
-  receivedAt?: string | null
-  text: string | null
-  attachments: RuntimeAttachmentRecord[]
-  raw: Record<string, unknown>
-  envelopePath: string
-  createdAt: string
-}
-
-export interface RuntimeSearchHit {
-  captureId: string
-  source: string
-  accountId?: string | null
-  threadId: string
-  threadTitle?: string | null
-  occurredAt: string
-  text: string | null
-  snippet: string
-  score: number
-  envelopePath: string
-}
-
-export interface RuntimeAttachmentParseJobRecord {
-  jobId: string
-  captureId: string
-  attachmentId: string
-  pipeline: 'attachment_text'
-  state: 'pending' | 'running' | 'succeeded' | 'failed'
-  attempts: number
-  providerId?: string | null
-  resultPath?: string | null
-  errorCode?: string | null
-  errorMessage?: string | null
-  createdAt: string
-  startedAt?: string | null
-  finishedAt?: string | null
-}
+export type RuntimeAttachmentRecord = SharedIndexedAttachment
+export type RuntimeCaptureRecord = SharedInboxCaptureRecord
+export type RuntimeSearchHit = SharedInboxSearchHit
+export type RuntimeAttachmentParseJobRecord = SharedAttachmentParseJobRecord
 
 export type PromotionStore = z.infer<typeof inboxPromotionStoreSchema>
 export type PromotionTarget = InboxPromotionEntry['target']
@@ -151,100 +102,24 @@ export type CanonicalAttachmentPromotionResult<
   { target: TTarget }
 >
 
-export interface RuntimeStore {
-  close(): void
-  getCursor(source: string, accountId?: string | null): Record<string, unknown> | null
-  setCursor(
-    source: string,
-    accountId: string | null | undefined,
-    cursor: Record<string, unknown> | null,
-  ): void
-  listCaptures(filters?: {
-    afterCaptureId?: string | null
-    afterOccurredAt?: string | null
-    source?: string
-    accountId?: string | null
-    limit?: number
-    oldestFirst?: boolean
-  }): RuntimeCaptureRecord[]
-  searchCaptures(filters: {
-    text: string
-    source?: string
-    accountId?: string | null
-    limit?: number
-  }): RuntimeSearchHit[]
-  listAttachmentParseJobs?(filters?: {
-    captureId?: string
-    attachmentId?: string
-    state?: 'pending' | 'running' | 'succeeded' | 'failed'
-    limit?: number
-  }): RuntimeAttachmentParseJobRecord[]
-  requeueAttachmentParseJobs?(filters?: {
-    captureId?: string
-    attachmentId?: string
-    state?: 'pending' | 'running' | 'succeeded' | 'failed'
-  }): number
-  getCapture(captureId: string): RuntimeCaptureRecord | null
-}
+export type RuntimeStore = Pick<
+  SharedInboxRuntimeStore,
+  | 'close'
+  | 'getCursor'
+  | 'setCursor'
+  | 'claimNextAttachmentParseJob'
+  | 'requeueAttachmentParseJobs'
+  | 'completeAttachmentParseJob'
+  | 'failAttachmentParseJob'
+  | 'listCaptures'
+  | 'searchCaptures'
+  | 'listAttachmentParseJobs'
+  | 'getCapture'
+>
 
-export interface PersistedCapture {
-  captureId?: string
-  deduped: boolean
-}
-
-export interface PollConnector {
-  id: string
-  source: string
-  accountId?: string | null
-  kind: 'poll'
-  capabilities: {
-    backfill: boolean
-    watch: boolean
-    webhooks: boolean
-    attachments: boolean
-    ownMessages?: boolean
-  }
-  backfill?(
-    cursor: Record<string, unknown> | null,
-    emit: (
-      capture: RuntimeCaptureRecordInput,
-      checkpoint?: Record<string, unknown> | null,
-    ) => Promise<PersistedCapture>,
-  ): Promise<Record<string, unknown> | null>
-  watch?(
-    cursor: Record<string, unknown> | null,
-    emit: (
-      capture: RuntimeCaptureRecordInput,
-      checkpoint?: Record<string, unknown> | null,
-    ) => Promise<PersistedCapture>,
-    signal: AbortSignal,
-  ): Promise<void>
-  close?(): Promise<void> | void
-}
-
-export interface RuntimeCaptureRecordInput {
-  source: string
-  externalId: string
-  accountId?: string | null
-  occurredAt: string
-  receivedAt?: string | null
-  thread?: {
-    id: string
-    title?: string | null
-    isDirect?: boolean
-  }
-  actor?: {
-    id?: string | null
-    displayName?: string | null
-    isSelf?: boolean
-  }
-  text?: string | null
-  attachments?: Array<{
-    kind: 'image' | 'audio' | 'video' | 'document' | 'other'
-    fileName?: string | null
-  }>
-  raw?: Record<string, unknown>
-}
+export type PersistedCapture = SharedPersistedCapture
+export type PollConnector = SharedPollConnector
+export type RuntimeCaptureRecordInput = SharedInboundCapture
 
 export interface InboxRunEvent {
   capture?: RuntimeCaptureRecordInput
@@ -254,6 +129,12 @@ export interface InboxRunEvent {
     imported: number
   }
   details?: string
+  parser?: {
+    captureIds: string[]
+    failed: number
+    processed: number
+    succeeded: number
+  }
   persisted?: PersistedCapture
   phase?: 'backfill' | 'startup' | 'watch'
   source: string
@@ -262,35 +143,12 @@ export interface InboxRunEvent {
     | 'connector.backfill.finished'
     | 'connector.backfill.started'
     | 'connector.failed'
+    | 'parser.jobs.drained'
     | 'connector.skipped'
     | 'connector.watch.started'
 }
 
-export interface InboxPipeline {
-  runtime: RuntimeStore
-  processCapture(input: RuntimeCaptureRecordInput): Promise<PersistedCapture>
-  close(): void
-}
-
-export interface ImessageDriver {
-  getMessages(input: {
-    cursor?: Record<string, unknown> | null
-    limit?: number
-    includeOwnMessages?: boolean
-  }): Promise<unknown[]>
-  listChats?(): Promise<unknown[]>
-}
-
-export interface InboxImessageRuntimeModule {
-  createImessageConnector(input: {
-    driver: ImessageDriver
-    id?: string
-    accountId?: string | null
-    includeOwnMessages?: boolean
-    backfillLimit?: number
-  }): PollConnector
-  loadImessageKitDriver(): Promise<ImessageDriver>
-}
+export type InboxPipeline = SharedInboxPipeline
 
 export interface TelegramDriver {
   getMe(signal?: AbortSignal): Promise<unknown>
@@ -409,6 +267,7 @@ export interface InboxRuntimeModule {
     signal: AbortSignal
     continueOnConnectorFailure?: boolean
     connectorRestartPolicy?: ConnectorRestartPolicy
+    onParserDrain?: (results: ParserRuntimeDrainResult[]) => Promise<void> | void
   }): Promise<void>
 }
 
@@ -425,7 +284,6 @@ export interface ParserDoctorRuntimeReport {
   discoveredAt: string
   tools: {
     ffmpeg: ParserToolRuntimeStatus
-    pdftotext: ParserToolRuntimeStatus
     whisper: ParserToolRuntimeStatus & {
       modelPath: string | null
     }
@@ -501,7 +359,9 @@ export interface CoreRuntimeModule {
     note?: string
     photoPath?: string
     audioPath?: string
-    source?: string
+    source?: EventSource
+    ingredients?: string[]
+    nutrition?: MealNutrition
   }): Promise<{
     mealId: string
     event: {
@@ -534,6 +394,47 @@ export interface CoreRuntimeModule {
   }>
 }
 
+export interface ImportersRuntimeModule {
+  importDocument(input: {
+    filePath: string
+    vaultRoot: string
+    title?: string
+    occurredAt?: string
+    note?: string
+    source?: string
+  }): Promise<{
+    documentId: string
+    event: {
+      id: string
+    }
+  }>
+}
+
+export interface ImportersFactoryRuntimeModule {
+  createImporters(input?: {
+    corePort?: CoreRuntimeModule
+  }): ImportersRuntimeModule
+}
+
+export interface QueryRuntimeModule {
+  readVault(vaultRoot: string): Promise<QueryVaultReadModel>
+  listEntities(
+    readModel: QueryVaultReadModel,
+    filters?: {
+      families?: QueryEntityFamily[]
+    },
+  ): Array<{
+    path: string
+    entityId: string
+    attributes: {
+      slug?: string
+      status?: string | null
+    }
+    experimentSlug?: string | null
+    status?: string | null
+  }>
+}
+
 export interface PromotionScope<TPrepared, TDerived> {
   input: PromoteInput
   paths: InboxPaths
@@ -562,11 +463,8 @@ export interface InboxServicesDependencies {
   loadCoreModule?: () => Promise<CoreRuntimeModule>
   loadImportersModule?: () => Promise<ImportersFactoryRuntimeModule>
   loadInboxModule?: () => Promise<InboxRuntimeModule>
-  inboxImessageModule?: InboxImessageRuntimeModule
-  loadInboxImessageModule?: () => Promise<InboxImessageRuntimeModule>
   loadParsersModule?: () => Promise<ParsersRuntimeModule>
   loadQueryModule?: () => Promise<QueryRuntimeModule>
-  loadImessageDriver?: (config: InboxConnectorConfig) => Promise<ImessageDriver>
   loadTelegramDriver?: (config: InboxConnectorConfig) => Promise<TelegramDriver>
   loadEmailDriver?: (config: InboxConnectorConfig) => Promise<EmailDriver>
   createAgentmailClient?: (input: {
@@ -578,7 +476,6 @@ export interface InboxServicesDependencies {
     vault: string,
     channel: InboxConnectorConfig['source'],
   ) => Promise<boolean>
-  probeImessageMessagesDb?: (targetPath: string) => Promise<void>
   getEnvironment?: () => NodeJS.ProcessEnv
 }
 
@@ -648,7 +545,6 @@ export interface InitInput extends CommandContext {
 
 export interface SetupInput extends CommandContext {
   ffmpegCommand?: string
-  pdftotextCommand?: string
   whisperCommand?: string
   whisperModelPath?: string
 }
@@ -689,6 +585,11 @@ export interface SearchInput extends ListInput {
 
 export interface PromoteInput extends CommandContext {
   captureId: string
+  note?: string
+  occurredAt?: string
+  source?: EventSource
+  ingredients?: string[]
+  nutrition?: MealNutrition
 }
 
 export interface InboxServices {
@@ -730,7 +631,7 @@ export interface InboxServices {
   ): Promise<InboxAttachmentReparseResult>
   show(input: CommandContext & { captureId: string }): Promise<InboxShowResult>
   search(input: SearchInput): Promise<InboxSearchResult>
-  preserveDocumentAttachments?(
+  preserveDocumentAttachments(
     input: PromoteInput,
   ): Promise<InboxPreserveDocumentAttachmentsResult>
   promoteMeal(input: PromoteInput): Promise<InboxPromoteMealResult>
@@ -767,11 +668,9 @@ export interface InboxAppEnvironment {
   loadCore: () => Promise<CoreRuntimeModule>
   loadImporters: () => Promise<ImportersFactoryRuntimeModule>
   loadInbox: () => Promise<InboxRuntimeModule>
-  loadInboxImessage: () => Promise<InboxImessageRuntimeModule>
   loadParsers: () => Promise<ParsersRuntimeModule>
   loadQuery: () => Promise<QueryRuntimeModule>
   requireParsers: (operation: string) => Promise<ParsersRuntimeModule>
-  loadConfiguredImessageDriver: (config: InboxConnectorConfig) => Promise<ImessageDriver>
   loadConfiguredTelegramDriver: (config: InboxConnectorConfig) => Promise<TelegramDriver>
   loadConfiguredEmailDriver: (config: InboxConnectorConfig) => Promise<EmailDriver>
   createConfiguredAgentmailClient: (apiKey?: string | null) => AgentmailApiClient
@@ -791,6 +690,5 @@ export interface InboxAppEnvironment {
     accountId: string
     emailAddress: string | null
   }) => Promise<string | null>
-  ensureConfiguredImessageReady: () => Promise<void>
   journalPromotionEnabled: boolean
 }

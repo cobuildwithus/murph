@@ -1,15 +1,30 @@
 import assert from 'node:assert/strict'
-import type { IncomingMessage, ServerResponse } from 'node:http'
+import type { IncomingHttpHeaders, IncomingMessage, ServerResponse } from 'node:http'
 import { Readable } from 'node:stream'
 import { afterEach, test, vi } from 'vitest'
+import { AssistantHttpRequestError } from '../src/http-protocol.js'
 import {
+  assertAssistantControlRequest,
   createAssistantHttpRequestHandler,
+  startAssistantHttpServer,
   type AssistantHttpRequestHandler,
 } from '../src/http.js'
 import type { AssistantLocalService } from '../src/service.js'
 
+const TEST_PROVIDER_OPTIONS = {
+  continuityFingerprint: 'fingerprint-http-test',
+  executionDriver: 'codex-cli',
+  approvalPolicy: null,
+  model: null,
+  oss: false,
+  profile: null,
+  reasoningEffort: null,
+  resumeKind: 'codex-session',
+  sandbox: null,
+} as const
+
 const TEST_SESSION = {
-  schema: 'murph.assistant-session.v4',
+  schema: 'murph.assistant-session.v1',
   sessionId: 'session_http_test',
   target: {
     adapter: 'codex-cli',
@@ -23,14 +38,7 @@ const TEST_SESSION = {
   },
   resumeState: null,
   provider: 'codex-cli',
-  providerOptions: {
-    model: null,
-    reasoningEffort: null,
-    sandbox: null,
-    approvalPolicy: null,
-    profile: null,
-    oss: false,
-  },
+  providerOptions: { ...TEST_PROVIDER_OPTIONS },
   providerBinding: null,
   alias: 'chat:test',
   binding: {
@@ -241,21 +249,29 @@ function createAssistantdTestFetch(
     let statusCode = 200
     const responseHeaders = new Headers()
     const responseChunks: Uint8Array[] = []
-    const responseLike: Pick<ServerResponse, 'end' | 'setHeader'> & {
+    let responseLike!: Pick<ServerResponse, 'end' | 'setHeader'> & {
       statusCode: number
-    } = {
-      end(chunk?: string | Uint8Array) {
-        if (typeof chunk === 'string') {
-          responseChunks.push(Buffer.from(chunk, 'utf8'))
-        } else if (chunk) {
-          responseChunks.push(Buffer.from(chunk))
+    }
+    responseLike = {
+      end(
+        chunk?: string | Uint8Array | (() => void),
+        encodingOrCb?: BufferEncoding | (() => void),
+        cb?: () => void,
+      ) {
+        const resolvedChunk = typeof chunk === 'function' ? undefined : chunk
+        if (typeof resolvedChunk === 'string') {
+          responseChunks.push(Buffer.from(resolvedChunk, 'utf8'))
+        } else if (resolvedChunk) {
+          responseChunks.push(Buffer.from(resolvedChunk))
         }
+        return responseLike as ServerResponse
       },
       setHeader(name: string, value: number | string | readonly string[]) {
         responseHeaders.set(
           name,
           Array.isArray(value) ? value.join(', ') : String(value),
         )
+        return responseLike as ServerResponse
       },
       get statusCode() {
         return statusCode
@@ -284,14 +300,160 @@ function readAssistantdTestRequestBody(body: RequestInit['body']): string | unde
   if (body instanceof URLSearchParams) {
     return body.toString()
   }
-  if (body instanceof Uint8Array || body instanceof ArrayBuffer) {
+  if (body instanceof Uint8Array) {
     return Buffer.from(body).toString('utf8')
+  }
+  if (body instanceof ArrayBuffer) {
+    return Buffer.from(new Uint8Array(body)).toString('utf8')
+  }
+  if (ArrayBuffer.isView(body)) {
+    return Buffer.from(body.buffer, body.byteOffset, body.byteLength).toString(
+      'utf8',
+    )
   }
   throw new Error('Unsupported assistantd test request body.')
 }
 
+function requireFirstCallArg<T>(
+  mock: {
+    mock: {
+      calls: ReadonlyArray<readonly unknown[]>
+    }
+  },
+  label: string,
+): T {
+  const firstArg = mock.mock.calls[0]?.[0]
+  assert.notEqual(firstArg, undefined, `${label} should be called with an argument`)
+  return firstArg as T
+}
+
+function withIncomingHeader(name: string, value: string | string[]): IncomingHttpHeaders {
+  const headers: IncomingHttpHeaders = {}
+  Reflect.set(headers, name, value)
+  return headers
+}
+
 afterEach(() => {
   vi.restoreAllMocks()
+})
+
+test('assertAssistantControlRequest rejects forwarded proxy headers on control routes', () => {
+  assert.throws(
+    () =>
+      assertAssistantControlRequest({
+        headers: {
+          authorization: 'Bearer control-secret',
+          host: 'localhost:50241',
+          forwarded: 'for=203.0.113.7;proto=https;host=murph.example',
+        },
+        remoteAddress: '127.0.0.1',
+        controlToken: 'control-secret',
+      }),
+    (error: unknown) =>
+      error instanceof AssistantHttpRequestError &&
+      error.code === 'ASSISTANT_CONTROL_PROXY_HEADERS_REJECTED' &&
+      error.statusCode === 403,
+  )
+})
+
+test('assertAssistantControlRequest rejects repeated forwarded proxy headers on control routes', () => {
+  assert.throws(
+    () =>
+      assertAssistantControlRequest({
+        headers: {
+          authorization: 'Bearer control-secret',
+          host: 'localhost:50241',
+          'x-forwarded-for': ['203.0.113.7', '203.0.113.8'],
+        },
+        remoteAddress: '127.0.0.1',
+        controlToken: 'control-secret',
+      }),
+    (error: unknown) =>
+      error instanceof AssistantHttpRequestError &&
+      error.code === 'ASSISTANT_CONTROL_PROXY_HEADERS_REJECTED' &&
+      error.statusCode === 403,
+  )
+})
+
+test('assertAssistantControlRequest rejects non-loopback host headers on control routes', () => {
+  assert.throws(
+    () =>
+      assertAssistantControlRequest({
+        headers: {
+          authorization: 'Bearer control-secret',
+          host: 'murph.example',
+        },
+        remoteAddress: '127.0.0.1',
+        controlToken: 'control-secret',
+      }),
+    (error: unknown) =>
+      error instanceof AssistantHttpRequestError &&
+      error.code === 'ASSISTANT_CONTROL_LOOPBACK_HOST_REQUIRED' &&
+      error.statusCode === 403,
+  )
+})
+
+test('assertAssistantControlRequest rejects malformed loopback-like host headers', () => {
+  assert.throws(
+    () =>
+      assertAssistantControlRequest({
+        headers: {
+          authorization: 'Bearer control-secret',
+          host: 'foo@localhost:50241',
+        },
+        remoteAddress: '127.0.0.1',
+        controlToken: 'control-secret',
+      }),
+    (error: unknown) =>
+      error instanceof AssistantHttpRequestError &&
+      error.code === 'ASSISTANT_CONTROL_LOOPBACK_HOST_REQUIRED' &&
+      error.statusCode === 403,
+  )
+})
+
+test('assertAssistantControlRequest rejects duplicate authorization headers instead of guessing', () => {
+  assert.throws(
+    () =>
+      assertAssistantControlRequest({
+        headers: {
+          host: 'localhost:50241',
+          ...withIncomingHeader('authorization', [
+            'Bearer control-secret',
+            'Bearer shadow-secret',
+          ]),
+        },
+        remoteAddress: '127.0.0.1',
+        controlToken: 'control-secret',
+      }),
+    (error: unknown) =>
+      error instanceof AssistantHttpRequestError && error.statusCode === 401,
+  )
+})
+
+test('assertAssistantControlRequest accepts loopback requests with a loopback host header', () => {
+  assert.doesNotThrow(() =>
+    assertAssistantControlRequest({
+      headers: {
+        authorization: 'Bearer control-secret',
+        host: '[::1]:50241',
+      },
+      remoteAddress: '::ffff:127.0.0.1',
+      controlToken: 'control-secret',
+    }),
+  )
+})
+
+test('assistantd http server rejects non-loopback listener hosts', async () => {
+  await assert.rejects(
+    () =>
+      startAssistantHttpServer({
+        controlToken: 'control-secret',
+        host: '0.0.0.0',
+        port: 0,
+        service: {} as AssistantLocalService,
+      }),
+    /Assistant daemon listener host must be a loopback hostname or address\./u,
+  )
 })
 
 test('assistantd http server enforces bearer auth, validates requests, and routes calls to the local assistant service', async () => {
@@ -397,10 +559,7 @@ test('assistantd http server enforces bearer auth, validates requests, and route
     },
     automation: {
       inboxScanCursor: null,
-      autoReplyScanCursor: null,
-      autoReplyChannels: [],
-      autoReplyBacklogChannels: [],
-      autoReplyPrimed: false,
+      autoReply: [],
       updatedAt: '2026-03-28T00:00:00.000Z',
     },
     outbox: {
@@ -641,7 +800,13 @@ test('assistantd http server enforces bearer auth, validates requests, and route
       }),
     })
     assert.equal(sessionOptions.status, 200)
-    assert.equal(updateSessionOptions.mock.calls[0]?.[0]?.sessionId, TEST_SESSION.sessionId)
+    assert.equal(
+      requireFirstCallArg<{ sessionId: string }>(
+        updateSessionOptions,
+        'updateSessionOptions',
+      ).sessionId,
+      TEST_SESSION.sessionId,
+    )
 
     const openConversation = await fetch(`${handle.address.baseUrl}/open-conversation`, {
       method: 'POST',
@@ -673,8 +838,12 @@ test('assistantd http server enforces bearer auth, validates requests, and route
       },
     )
     assert.equal(status.status, 200)
-    assert.equal(getStatus.mock.calls[0]?.[0]?.limit, 7)
-    assert.equal(getStatus.mock.calls[0]?.[0]?.sessionId, TEST_SESSION.sessionId)
+    const getStatusInput = requireFirstCallArg<{
+      limit?: number
+      sessionId?: string | null
+    }>(getStatus, 'getStatus')
+    assert.equal(getStatusInput.limit, 7)
+    assert.equal(getStatusInput.sessionId, TEST_SESSION.sessionId)
 
     const sessions = await fetch(
       `${handle.address.baseUrl}/sessions?vault=${encodeURIComponent('/tmp/vault')}`,
@@ -737,7 +906,10 @@ test('assistantd http server enforces bearer auth, validates requests, and route
       }),
     })
     assert.equal(outboxDrain.status, 200)
-    assert.equal(drainOutbox.mock.calls[0]?.[0]?.limit, 3)
+    assert.equal(
+      requireFirstCallArg<{ limit?: number }>(drainOutbox, 'drainOutbox').limit,
+      3,
+    )
 
     const gatewayList = await fetch(`${handle.address.baseUrl}/gateway/conversations/list`, {
       method: 'POST',
@@ -760,8 +932,12 @@ test('assistantd http server enforces bearer auth, validates requests, and route
       gatewayListPayload.conversations[0]?.sessionKey,
       TEST_GATEWAY_CONVERSATION.sessionKey,
     )
-    assert.equal(listGatewayConversations.mock.calls[0]?.[0]?.limit, 5)
-    assert.equal(listGatewayConversations.mock.calls[0]?.[0]?.search, 'lab')
+    const listGatewayConversationsInput = requireFirstCallArg<{
+      limit?: number
+      search?: string | null
+    }>(listGatewayConversations, 'listGatewayConversations')
+    assert.equal(listGatewayConversationsInput.limit, 5)
+    assert.equal(listGatewayConversationsInput.search, 'lab')
 
     const gatewayConversation = await fetch(`${handle.address.baseUrl}/gateway/conversations/get`, {
       method: 'POST',
@@ -783,7 +959,10 @@ test('assistantd http server enforces bearer auth, validates requests, and route
       TEST_GATEWAY_CONVERSATION.sessionKey,
     )
     assert.equal(
-      getGatewayConversation.mock.calls[0]?.[0]?.sessionKey,
+      requireFirstCallArg<{ sessionKey: string }>(
+        getGatewayConversation,
+        'getGatewayConversation',
+      ).sessionKey,
       TEST_GATEWAY_CONVERSATION.sessionKey,
     )
 
@@ -807,7 +986,13 @@ test('assistantd http server enforces bearer auth, validates requests, and route
       gatewayMessagesPayload.messages[0]?.messageId,
       TEST_GATEWAY_MESSAGE.messageId,
     )
-    assert.equal(readGatewayMessages.mock.calls[0]?.[0]?.oldestFirst, true)
+    assert.equal(
+      requireFirstCallArg<{ oldestFirst?: boolean }>(
+        readGatewayMessages,
+        'readGatewayMessages',
+      ).oldestFirst,
+      true,
+    )
 
     const gatewayAttachments = await fetch(`${handle.address.baseUrl}/gateway/attachments/fetch`, {
       method: 'POST',
@@ -829,7 +1014,10 @@ test('assistantd http server enforces bearer auth, validates requests, and route
       TEST_GATEWAY_ATTACHMENT.attachmentId,
     )
     assert.equal(
-      fetchGatewayAttachments.mock.calls[0]?.[0]?.messageId,
+      requireFirstCallArg<{ messageId: string }>(
+        fetchGatewayAttachments,
+        'fetchGatewayAttachments',
+      ).messageId,
       TEST_GATEWAY_MESSAGE.messageId,
     )
 
@@ -866,7 +1054,13 @@ test('assistantd http server enforces bearer auth, validates requests, and route
       }),
     })
     assert.equal(gatewayPoll.status, 200)
-    assert.equal(gatewayPollEvents.mock.calls[0]?.[0]?.cursor, 7)
+    assert.equal(
+      requireFirstCallArg<{ cursor?: number }>(
+        gatewayPollEvents,
+        'gatewayPollEvents',
+      ).cursor,
+      7,
+    )
 
     const gatewayWait = await fetch(`${handle.address.baseUrl}/gateway/events/wait`, {
       method: 'POST',
@@ -881,7 +1075,13 @@ test('assistantd http server enforces bearer auth, validates requests, and route
       }),
     })
     assert.equal(gatewayWait.status, 200)
-    assert.equal(gatewayWaitForEvents.mock.calls[0]?.[0]?.timeoutMs, 100)
+    assert.equal(
+      requireFirstCallArg<{ timeoutMs?: number }>(
+        gatewayWaitForEvents,
+        'gatewayWaitForEvents',
+      ).timeoutMs,
+      100,
+    )
 
     const gatewayPermissions = await fetch(
       `${handle.address.baseUrl}/gateway/permissions/list-open`,
@@ -899,7 +1099,10 @@ test('assistantd http server enforces bearer auth, validates requests, and route
     )
     assert.equal(gatewayPermissions.status, 200)
     assert.equal(
-      gatewayListOpenPermissions.mock.calls[0]?.[0]?.sessionKey,
+      requireFirstCallArg<{ sessionKey: string }>(
+        gatewayListOpenPermissions,
+        'gatewayListOpenPermissions',
+      ).sessionKey,
       TEST_GATEWAY_CONVERSATION.sessionKey,
     )
 
@@ -919,7 +1122,13 @@ test('assistantd http server enforces bearer auth, validates requests, and route
       },
     )
     assert.equal(gatewayPermissionResponse.status, 200)
-    assert.equal(gatewayRespondToPermission.mock.calls[0]?.[0]?.requestId, 'perm_http_test')
+    assert.equal(
+      requireFirstCallArg<{ requestId: string }>(
+        gatewayRespondToPermission,
+        'gatewayRespondToPermission',
+      ).requestId,
+      'perm_http_test',
+    )
 
     const invalidGatewayList = await fetch(`${handle.address.baseUrl}/gateway/conversations/list`, {
       method: 'POST',
@@ -1189,8 +1398,12 @@ test('assistantd http server enforces bearer auth, validates requests, and route
       }),
     })
     assert.equal(processCron.status, 200)
-    assert.equal(processDueCron.mock.calls[0]?.[0]?.deliveryDispatchMode, 'queue-only')
-    assert.equal(processDueCron.mock.calls[0]?.[0]?.limit, 9)
+    const processDueCronInput = requireFirstCallArg<{
+      deliveryDispatchMode?: string
+      limit?: number
+    }>(processDueCron, 'processDueCron')
+    assert.equal(processDueCronInput.deliveryDispatchMode, 'queue-only')
+    assert.equal(processDueCronInput.limit, 9)
 
     const invalidAutomationDispatchMode = await fetch(`${handle.address.baseUrl}/automation/run-once`, {
       method: 'POST',
@@ -1404,6 +1617,151 @@ test('assistantd http server enforces bearer auth, validates requests, and route
   }
 })
 
+test('assistant http handler rejects continuous automation without the inbox daemon', async () => {
+  const service = {
+    drainOutbox: async () => ({ attempted: 0, sent: 0, failed: 0, queued: 0 }),
+    getSession: async () => TEST_SESSION as any,
+    health: async () => ({
+      generatedAt: '2026-03-28T00:00:00.000Z',
+      ok: true,
+      pid: 1234,
+      vaultBound: true,
+    }),
+    getStatus: async () => ({
+      vault: '/tmp/vault',
+      stateRoot: '/tmp/vault/.runtime/operations/assistant',
+      statusPath: '/tmp/vault/.runtime/operations/assistant/status.json',
+      outboxRoot: '/tmp/vault/.runtime/operations/assistant/outbox',
+      diagnosticsPath: '/tmp/vault/.runtime/operations/assistant/diagnostics.snapshot.json',
+      failoverStatePath: '/tmp/vault/.runtime/operations/assistant/failover.json',
+      turnsRoot: '/tmp/vault/.runtime/operations/assistant/turns',
+      generatedAt: '2026-03-28T00:00:00.000Z',
+      runLock: {
+        state: 'unlocked',
+        pid: null,
+        startedAt: null,
+        mode: null,
+        command: null,
+        reason: null,
+      },
+      automation: {
+        inboxScanCursor: null,
+        autoReply: [],
+        updatedAt: '2026-03-28T00:00:00.000Z',
+      },
+      sessions: [],
+      diagnostics: {
+        automationScans: 0,
+        automationFailures: 0,
+      },
+      outbox: {
+        queued: 0,
+        sent: 0,
+        failed: 0,
+      },
+    } as any),
+    listSessions: async () => [],
+    listCronJobs: async () => [],
+    listCronRuns: async () => ({
+      jobId: TEST_CRON_JOB.jobId,
+      runs: [],
+    }),
+    listOutbox: async () => [],
+    getOutboxIntent: async () => null,
+    getCronJob: async () => TEST_CRON_JOB as any,
+    getCronTarget: async () => ({
+      jobId: TEST_CRON_JOB.jobId,
+      jobName: TEST_CRON_JOB.name,
+      target: TEST_CRON_JOB.target,
+      bindingDelivery: null,
+    }),
+    getCronStatus: async () => ({
+      totalJobs: 0,
+      enabledJobs: 0,
+      dueJobs: 0,
+      runningJobs: 0,
+      nextRunAt: null,
+    }),
+    openConversation: async () => ({ created: true, session: TEST_SESSION as any }),
+    processDueCron: async () => ({ failed: 0, processed: 0, succeeded: 0 } as any),
+    setCronTarget: async () => ({
+      job: TEST_CRON_JOB as any,
+      beforeTarget: {
+        jobId: TEST_CRON_JOB.jobId,
+        jobName: TEST_CRON_JOB.name,
+        target: TEST_CRON_JOB.target,
+        bindingDelivery: null,
+      },
+      afterTarget: {
+        jobId: TEST_CRON_JOB.jobId,
+        jobName: TEST_CRON_JOB.name,
+        target: TEST_CRON_JOB.target,
+        bindingDelivery: null,
+      },
+      changed: false,
+      continuityReset: false,
+      dryRun: false,
+    }),
+    runAutomationOnce: async () => {
+      throw new Error(
+        'Continuous assistant automation now requires the inbox daemon. Rerun in continuous mode with the daemon enabled, or use once=true for a one-shot pass.',
+      )
+    },
+    sendMessage: async () => ({
+      vault: '/tmp/vault',
+      status: 'completed',
+      prompt: 'hello',
+      response: 'daemon response',
+      session: TEST_SESSION,
+      delivery: null,
+      deliveryDeferred: false,
+      deliveryIntentId: null,
+      deliveryError: null,
+      blocked: null,
+    }),
+    gateway: createGatewayServiceMock(),
+    updateSessionOptions: async () => TEST_SESSION as any,
+    vault: '/tmp/vault',
+  } as AssistantLocalService
+
+  const baseUrl = 'http://127.0.0.1:50241'
+  const fetch = createAssistantdTestFetch(
+    createAssistantHttpRequestHandler({
+      controlToken: 'secret-token',
+      host: '127.0.0.1',
+      port: 0,
+      service,
+    }),
+    baseUrl,
+  )
+  const handle = {
+    address: {
+      baseUrl,
+    },
+    close: async () => undefined,
+  }
+
+  try {
+    const response = await fetch(`${handle.address.baseUrl}/automation/run-once`, {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer secret-token',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        once: false,
+        startDaemon: false,
+        vault: '/tmp/vault',
+      }),
+    })
+    assert.equal(response.status, 500)
+    const payload = await response.json() as { error: string }
+    assert.equal(payload.error, 'Assistant daemon request failed.')
+  } finally {
+    await handle.close()
+  }
+})
+
 test('assistantd http server preserves typed assistant error codes for invalid ids and missing cron jobs', async () => {
   const getOutboxIntent = vi.fn(async () => TEST_OUTBOX_INTENT as any)
   const service = {
@@ -1456,10 +1814,7 @@ test('assistantd http server preserves typed assistant error codes for invalid i
       },
       automation: {
         inboxScanCursor: null,
-        autoReplyScanCursor: null,
-        autoReplyChannels: [],
-        autoReplyBacklogChannels: [],
-        autoReplyPrimed: false,
+        autoReply: [],
         updatedAt: '2026-03-28T00:00:00.000Z',
       },
       outbox: {

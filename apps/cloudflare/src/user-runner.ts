@@ -1,11 +1,13 @@
-import type { CloudflareHostedUserEnvStatus } from "@murphai/cloudflare-hosted-control";
+import type { CloudflareHostedUserEnvStatus } from "@murphai/cloudflare-hosted-control/contracts";
+import type { HostedRuntimeUsageRecordResponse } from "@murphai/assistant-runtime";
 import type {
   HostedExecutionBundleRef,
   HostedExecutionDispatchResult,
   HostedExecutionDispatchRequest,
-  HostedExecutionOutboxPayload,
+  HostedExecutionEventDispatchStatus,
   HostedExecutionUserStatus,
 } from "@murphai/hosted-execution";
+import type { HostedExecutionOutboxPayload } from "@murphai/hosted-execution/outbox-payload";
 import type {
   HostedExecutionDeviceSyncRuntimeApplyRequest,
   HostedExecutionDeviceSyncRuntimeApplyResponse,
@@ -27,7 +29,7 @@ import type {
 } from "@murphai/gateway-core";
 import {
   emitHostedExecutionStructuredLog,
-  resolveHostedExecutionDispatchOutcomeState,
+  resolveHostedExecutionDispatchOutcome,
 } from "@murphai/hosted-execution";
 
 import type { R2BucketLike } from "./bundle-store.js";
@@ -39,10 +41,9 @@ import { createHostedDeviceSyncRuntimeStore } from "./device-sync-runtime-store.
 import { createHostedPendingUsageStore } from "./usage-store.ts";
 import { HostedGatewayProjectionStore } from "./gateway-store.js";
 import type { HostedExecutionEnvironment } from "./env.js";
+import { toStringEnvSource } from "./string-env.js";
 import {
-  persistHostedExecutionCommit,
   type HostedExecutionCommitPayload,
-  type HostedExecutionCommittedResult,
 } from "./execution-journal.js";
 import { readHostedEmailConfig } from "./hosted-email.js";
 import {
@@ -187,7 +188,7 @@ export class HostedUserRunner {
       state,
       dispatchPayloadStore,
     );
-    this.scheduler = new RunnerScheduler(this.queueStore, state, env.defaultAlarmDelayMs);
+    this.scheduler = new RunnerScheduler(this.queueStore, state);
     this.dispatchProcessor = new RunnerDispatchProcessor({
       applyHostedTransition: <T>(input: {
         eventId: string;
@@ -197,11 +198,6 @@ export class HostedUserRunner {
       bucket: this.bucket,
       ensureRunnerStores: (userId?: string) => this.ensureRunnerStores(userId),
       env: this.env,
-      provisionManagedUserCrypto: async (userId: string) => {
-        await this.userKeyStore.bootstrapManagedUserCryptoContext(userId, {
-          reason: "member-activation-dispatch",
-        });
-      },
       queueStore: this.queueStore,
       readRunnerRuntimeConfigSource: () => this.readRunnerRuntimeConfigSource(),
       readWorkerStringEnvSource: () => this.readWorkerStringEnvSource(),
@@ -340,15 +336,23 @@ export class HostedUserRunner {
     return { userId };
   }
 
-  async provisionManagedUserCrypto(userId: string): Promise<{ recipientKinds: string[]; rootKeyId: string; userId: string }> {
+  async provisionManagedUserCrypto(userId: string): Promise<{
+    recipientKinds: string[];
+    rootKeyId: string;
+    userId: string;
+  }> {
     await this.queueStore.bootstrapUser(userId);
-    const crypto = await this.userKeyStore.bootstrapManagedUserCryptoContext(userId, {
+    const status = await this.userKeyStore.ensureManagedUserCryptoEnvelope(userId, {
       reason: "managed-user-provisioning",
     });
-    this.runnerStores = null;
+
+    if (status.needsRunnerStoreRefresh && this.runnerStores?.userId === userId) {
+      this.runnerStores = null;
+    }
+
     return {
-      recipientKinds: crypto.envelope.recipients.map((recipient) => recipient.kind),
-      rootKeyId: crypto.rootKeyId,
+      recipientKinds: status.envelope.recipients.map((recipient) => recipient.kind),
+      rootKeyId: status.envelope.rootKeyId,
       userId,
     };
   }
@@ -393,7 +397,7 @@ export class HostedUserRunner {
 
   async putPendingUsage(input: {
     usage: readonly Record<string, unknown>[];
-  }): Promise<{ recorded: number; usageIds: string[] }> {
+  }): Promise<HostedRuntimeUsageRecordResponse> {
     return this.withUserKeyEnvelopeLock(async () => {
       const userId = await this.requireBoundUserId();
       const { crypto } = await this.ensureRunnerStoresWhileHoldingKeyLock(userId);
@@ -401,7 +405,6 @@ export class HostedUserRunner {
         bucket: this.bucket,
         dirtyKey: this.env.platformEnvelopeKey,
         dirtyKeyId: this.env.platformEnvelopeKeyId,
-        dirtyKeysById: this.env.platformEnvelopeKeysById,
         key: crypto.rootKey,
         keyId: crypto.rootKeyId,
         keysById: crypto.keysById,
@@ -419,7 +422,6 @@ export class HostedUserRunner {
       bucket: this.bucket,
       dirtyKey: this.env.platformEnvelopeKey,
       dirtyKeyId: this.env.platformEnvelopeKeyId,
-      dirtyKeysById: this.env.platformEnvelopeKeysById,
       key: crypto.rootKey,
       keyId: crypto.rootKeyId,
       keysById: crypto.keysById,
@@ -437,7 +439,6 @@ export class HostedUserRunner {
         bucket: this.bucket,
         dirtyKey: this.env.platformEnvelopeKey,
         dirtyKeyId: this.env.platformEnvelopeKeyId,
-        dirtyKeysById: this.env.platformEnvelopeKeysById,
         key: crypto.rootKey,
         keyId: crypto.rootKeyId,
         keysById: crypto.keysById,
@@ -488,7 +489,7 @@ export class HostedUserRunner {
 
   async dispatch(input: HostedExecutionDispatchRequest): Promise<HostedExecutionUserStatus> {
     await this.queueStore.bootstrapUser(input.event.userId);
-    await this.provisionManagedUserCryptoForActivationIfNeeded(input);
+    await this.ensureManagedUserCryptoForActivationIfNeeded(input);
     await this.ensureRunnerStores(input.event.userId);
     return this.dispatchProcessor.dispatchBootstrapped(input);
   }
@@ -498,37 +499,37 @@ export class HostedUserRunner {
     stagedPayloadId: string | null = null,
   ): Promise<HostedExecutionDispatchResult> {
     await this.queueStore.bootstrapUser(input.event.userId);
-    await this.provisionManagedUserCryptoForActivationIfNeeded(input);
+    await this.ensureManagedUserCryptoForActivationIfNeeded(input);
     await this.ensureRunnerStores(input.event.userId);
-    const initialState = await this.queueStore.readEventState(input.eventId);
+    const initialStatus = await this.queueStore.readEventDispatchStatus(input.eventId);
     const status = await this.dispatchProcessor.dispatchBootstrapped(input, stagedPayloadId);
-    const nextState = await this.queueStore.readEventState(input.eventId);
+    const nextStatus = await this.queueStore.readEventDispatchStatus(input.eventId);
 
     return {
-      event: {
+      event: resolveHostedExecutionDispatchOutcome({
         eventId: input.eventId,
-        lastError: nextState.lastError ?? status.lastError,
-        state: resolveHostedExecutionDispatchOutcomeState({
-          initialState,
-          nextState,
-        }),
+        initialStatus,
+        nextStatus,
         userId: input.event.userId,
-      },
+      }),
       status,
     };
   }
 
-  private async provisionManagedUserCryptoForActivationIfNeeded(
+  private async ensureManagedUserCryptoForActivationIfNeeded(
     input: HostedExecutionDispatchRequest,
   ): Promise<void> {
     if (input.event.kind !== "member.activated") {
       return;
     }
 
-    await this.userKeyStore.bootstrapManagedUserCryptoContext(input.event.userId, {
+    const status = await this.userKeyStore.ensureManagedUserCryptoEnvelope(input.event.userId, {
       reason: "member-activation-dispatch",
     });
-    this.runnerStores = null;
+
+    if (status.needsRunnerStoreRefresh && this.runnerStores?.userId === input.event.userId) {
+      this.runnerStores = null;
+    }
   }
 
   async alarm(): Promise<void> {
@@ -573,6 +574,12 @@ export class HostedUserRunner {
     return toUserStatus(await this.queueStore.readState());
   }
 
+  async getEventStatus(input: {
+    eventId: string;
+  }): Promise<HostedExecutionEventDispatchStatus | null> {
+    return this.queueStore.readEventDispatchStatus(input.eventId);
+  }
+
   async getUserEnvStatus(): Promise<CloudflareHostedUserEnvStatus> {
     const userId = await this.requireBoundUserId();
     const { userEnv } = await this.ensureRunnerStores(userId);
@@ -596,30 +603,6 @@ export class HostedUserRunner {
     return this.updateUserEnv({
       env: {},
       mode: "replace",
-    });
-  }
-
-  async commit(input: {
-    eventId: string;
-    payload: HostedExecutionCommitPayload & {
-      currentBundleRef: HostedExecutionBundleRef | null;
-    };
-  }): Promise<HostedExecutionCommittedResult> {
-    return this.applyHostedTransition({
-      eventId: input.eventId,
-      gatewayProjectionSnapshot: input.payload.gatewayProjectionSnapshot ?? null,
-      run: async (userId, stores) => {
-        return persistHostedExecutionCommit({
-          bucket: this.bucket,
-          currentBundleRef: input.payload.currentBundleRef,
-          eventId: input.eventId,
-          key: stores.crypto.rootKey,
-          keyId: stores.crypto.rootKeyId,
-          keysById: stores.crypto.keysById,
-          payload: input.payload,
-          userId,
-        });
-      },
     });
   }
 
@@ -653,13 +636,7 @@ export class HostedUserRunner {
   }
 
   private readWorkerStringEnvSource(): Readonly<Record<string, string | undefined>> {
-    const values: Record<string, string | undefined> = {};
-
-    for (const [key, value] of Object.entries(this.runnerRuntimeEnvSource)) {
-      values[key] = typeof value === "string" ? value : undefined;
-    }
-
-    return values;
+    return toStringEnvSource(this.runnerRuntimeEnvSource);
   }
 
   private async requireBoundUserId(): Promise<string> {

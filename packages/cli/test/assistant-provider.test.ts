@@ -58,8 +58,8 @@ import {
   executeAssistantProviderTurnAttempt,
   executeAssistantProviderTurn,
   resolveAssistantProviderCapabilities,
-  prepareAssistantDirectCliEnv,
 } from '@murphai/assistant-engine/assistant-provider'
+import { prepareAssistantDirectCliEnv } from '@murphai/assistant-engine/assistant-cli-access'
 import {
   defaultDiscoverOpenAICompatibleModels,
   type AssistantModelDiscoveryResult,
@@ -105,64 +105,82 @@ beforeEach(() => {
 })
 
 test('serializeAssistantProviderSessionOptions sanitizes settings for the selected provider', () => {
-  assert.deepEqual(
-    serializeAssistantProviderSessionOptions({
-      provider: 'openai-compatible',
-      model: ' gpt-oss:20b ',
-      codexHome: ' /tmp/codex-1 ',
-      sandbox: 'read-only',
-      approvalPolicy: 'never',
-      profile: ' primary ',
-      baseUrl: ' http://127.0.0.1:11434/v1 ',
-      apiKeyEnv: ' OLLAMA_API_KEY ',
-      providerName: ' ollama ',
-      headers: {
-        'X-Foo ': ' bar ',
-        ' X-Bar': 'baz',
-      },
-      oss: true,
-    }),
-    {
-      model: 'gpt-oss:20b',
-      reasoningEffort: null,
-      sandbox: null,
-      approvalPolicy: null,
-      profile: null,
-      oss: false,
-      baseUrl: 'http://127.0.0.1:11434/v1',
-      apiKeyEnv: 'OLLAMA_API_KEY',
-      providerName: 'ollama',
-      headers: {
-        'X-Bar': 'baz',
-        'X-Foo': 'bar',
-      },
+  const actual = serializeAssistantProviderSessionOptions({
+    provider: 'openai-compatible',
+    model: ' gpt-oss:20b ',
+    codexHome: ' /tmp/codex-1 ',
+    sandbox: 'read-only',
+    approvalPolicy: 'never',
+    profile: ' primary ',
+    baseUrl: ' http://127.0.0.1:11434/v1 ',
+    apiKeyEnv: ' OLLAMA_API_KEY ',
+    providerName: ' ollama ',
+    headers: {
+      'X-Foo ': ' bar ',
+      ' X-Bar': 'baz',
     },
-  )
+    oss: true,
+  })
+
+  const { continuityFingerprint, ...rest } = actual
+  assert.equal(actual.executionDriver, 'openai-compatible')
+  assert.equal(actual.resumeKind, null)
+  assert.equal(typeof continuityFingerprint, 'string')
+  if (typeof continuityFingerprint !== 'string') {
+    throw new Error('Expected continuity fingerprint for OpenAI-compatible provider options.')
+  }
+  assert.match(continuityFingerprint, /"presetId":null/u)
+  assert.deepEqual(rest, {
+    model: 'gpt-oss:20b',
+    reasoningEffort: null,
+    sandbox: null,
+    approvalPolicy: null,
+    profile: null,
+    oss: false,
+    baseUrl: 'http://127.0.0.1:11434/v1',
+    apiKeyEnv: 'OLLAMA_API_KEY',
+    providerName: 'ollama',
+    headers: {
+      'X-Bar': 'baz',
+      'X-Foo': 'bar',
+    },
+    executionDriver: 'openai-compatible',
+    resumeKind: null,
+  })
 })
 
 test('serializeAssistantProviderSessionOptions preserves an explicit Codex home for Codex targets', () => {
-  assert.deepEqual(
-    serializeAssistantProviderSessionOptions({
-      provider: 'codex-cli',
-      model: ' gpt-5.4 ',
-      codexCommand: ' codex ',
-      codexHome: ' /tmp/codex-1 ',
-      profile: ' primary ',
-      reasoningEffort: ' high ',
-      sandbox: 'workspace-write',
-      approvalPolicy: 'on-request',
-      oss: false,
-    }),
-    {
-      model: 'gpt-5.4',
-      reasoningEffort: 'high',
-      sandbox: 'workspace-write',
-      approvalPolicy: 'on-request',
-      profile: 'primary',
-      oss: false,
-      codexHome: '/tmp/codex-1',
-    },
-  )
+  const actual = serializeAssistantProviderSessionOptions({
+    provider: 'codex-cli',
+    model: ' gpt-5.4 ',
+    codexCommand: ' codex ',
+    codexHome: ' /tmp/codex-1 ',
+    profile: ' primary ',
+    reasoningEffort: ' high ',
+    sandbox: 'workspace-write',
+    approvalPolicy: 'on-request',
+    oss: false,
+  })
+
+  const { continuityFingerprint, ...rest } = actual
+  assert.equal(actual.executionDriver, 'codex-cli')
+  assert.equal(actual.resumeKind, 'codex-session')
+  assert.equal(typeof continuityFingerprint, 'string')
+  if (typeof continuityFingerprint !== 'string') {
+    throw new Error('Expected continuity fingerprint for Codex provider options.')
+  }
+  assert.match(continuityFingerprint, /"provider":"codex-cli"/u)
+  assert.deepEqual(rest, {
+    model: 'gpt-5.4',
+    reasoningEffort: 'high',
+    sandbox: 'workspace-write',
+    approvalPolicy: 'on-request',
+    profile: 'primary',
+    oss: false,
+    codexHome: '/tmp/codex-1',
+    executionDriver: 'codex-cli',
+    resumeKind: 'codex-session',
+  })
 })
 
 test('buildAssistantProviderDefaultsPatch keeps OpenAI-compatible public headers when only the model changes', () => {
@@ -179,7 +197,9 @@ test('buildAssistantProviderDefaultsPatch keeps OpenAI-compatible public headers
             Authorization: 'Bearer override-token',
             'X-Foo': 'bar',
           },
+          presetId: null,
           reasoningEffort: null,
+          webSearch: null,
         },
         identityId: null,
         failoverRoutes: null,
@@ -213,7 +233,9 @@ test('buildAssistantProviderDefaultsPatch keeps OpenAI-compatible public headers
         headers: {
           'X-Foo': 'bar',
         },
+        presetId: null,
         reasoningEffort: null,
+        webSearch: null,
       },
     },
   )
@@ -245,16 +267,20 @@ test('resolveAssistantProviderDefaults only returns the active saved backend tar
 
 test('resolveAssistantProviderCapabilities reports shared backend-facing capabilities', () => {
   assert.deepEqual(resolveAssistantProviderCapabilities('codex-cli'), {
+    supportedUserMessageContentTypes: ['text', 'image'],
     supportsModelDiscovery: false,
     supportsNativeResume: true,
     supportsReasoningEffort: true,
-    supportsRichUserMessageContent: false,
+    supportsRichUserMessageContent: true,
+    supportsZeroDataRetention: false,
   })
   assert.deepEqual(resolveAssistantProviderCapabilities('openai-compatible'), {
+    supportedUserMessageContentTypes: ['text', 'image', 'file'],
     supportsModelDiscovery: true,
-    supportsNativeResume: true,
+    supportsNativeResume: false,
     supportsReasoningEffort: false,
     supportsRichUserMessageContent: true,
+    supportsZeroDataRetention: false,
   })
 })
 
@@ -264,13 +290,16 @@ test('resolveAssistantTargetCapabilities enables reasoning effort for OpenAI-com
       provider: 'openai-compatible',
       baseUrl: 'https://api.openai.com/v1',
       model: 'gpt-5.4',
+      presetId: 'openai',
       providerName: 'openai',
     }),
     {
+      supportedUserMessageContentTypes: ['text', 'image', 'file'],
       supportsModelDiscovery: true,
       supportsNativeResume: true,
       supportsReasoningEffort: true,
       supportsRichUserMessageContent: true,
+      supportsZeroDataRetention: false,
     },
   )
   assert.deepEqual(
@@ -281,10 +310,12 @@ test('resolveAssistantTargetCapabilities enables reasoning effort for OpenAI-com
       providerName: 'ollama',
     }),
     {
+      supportedUserMessageContentTypes: ['text', 'image', 'file'],
       supportsModelDiscovery: true,
-      supportsNativeResume: true,
-      supportsReasoningEffort: true,
+      supportsNativeResume: false,
+      supportsReasoningEffort: false,
       supportsRichUserMessageContent: true,
+      supportsZeroDataRetention: false,
     },
   )
 })
@@ -320,13 +351,14 @@ test('resolveAssistantModelCatalog uses discovered OpenAI-compatible models and 
     ['gpt-oss:20b', 'llama3.3:70b'],
   )
   assert.equal(catalog.providerLabel, 'Ollama')
-  assert.equal(catalog.reasoningOptions.length, 4)
+  assert.equal(catalog.reasoningOptions.length, 0)
 })
 
 test('resolveAssistantModelCatalog exposes reasoning options for official OpenAI-compatible targets', () => {
   const catalog = resolveAssistantModelCatalog({
     provider: 'openai-compatible',
     baseUrl: 'https://api.openai.com/v1',
+    presetId: 'openai',
     providerName: 'openai',
     currentModel: 'gpt-5.4',
     currentReasoningEffort: 'medium',
@@ -344,6 +376,7 @@ test('resolveAssistantModelCatalog normalizes discovery objects for official Ope
   const catalog = resolveAssistantModelCatalog({
     provider: 'openai-compatible',
     baseUrl: 'https://api.openai.com/v1',
+    presetId: 'openai',
     providerName: 'openai',
     currentModel: 'gpt-5.4',
     discovery: {
@@ -356,8 +389,8 @@ test('resolveAssistantModelCatalog normalizes discovery objects for official Ope
           description: 'Discovered from OpenAI.',
           source: 'discovered',
           capabilities: {
-            images: false,
-            pdf: false,
+            images: true,
+            pdf: true,
             reasoning: false,
             streaming: true,
             tools: true,
@@ -393,7 +426,7 @@ test('resolveAssistantModelCatalog keeps the current OpenAI-compatible model sel
   })
 
   assert.equal(catalog.modelOptions[0]?.value, 'llama3.3:70b')
-  assert.equal(catalog.reasoningOptions.length, 4)
+  assert.equal(catalog.reasoningOptions.length, 0)
 })
 
 test('defaultDiscoverOpenAICompatibleModels normalizes and dedupes model ids from the models endpoint', async () => {
@@ -567,8 +600,8 @@ test('executeAssistantProviderTurn dispatches to the Codex adapter and preserves
     userPrompt: 'hello',
     sessionContext: {
       binding: {
-        conversationKey: 'channel:imessage|thread:chat-123',
-        channel: 'imessage',
+        conversationKey: 'channel:telegram|thread:chat-123',
+        channel: 'telegram',
         identityId: null,
         actorId: 'contact:bob',
         threadId: 'chat-123',
@@ -608,7 +641,7 @@ test('executeAssistantProviderTurn dispatches to the Codex adapter and preserves
   assert.equal(call?.profile, 'primary')
   assert.equal(call?.oss, true)
   assert.match(call?.prompt ?? '', /system prompt/u)
-  assert.match(call?.prompt ?? '', /channel: imessage/u)
+  assert.match(call?.prompt ?? '', /channel: telegram/u)
   assert.match(call?.prompt ?? '', /thread: chat-123/u)
   assert.match(call?.prompt ?? '', /Recent local conversation transcript/u)
   assert.match(call?.prompt ?? '', /User message:\nhello/u)
@@ -638,6 +671,50 @@ test('executeAssistantProviderTurn dispatches to the Codex adapter and preserves
   })
 })
 
+test('executeAssistantProviderTurn forwards image attachments to the Codex adapter but omits unsupported files', async () => {
+  const imageBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47])
+  providerMocks.executeCodexPrompt.mockResolvedValue({
+    finalMessage: 'assistant reply',
+    jsonEvents: [],
+    sessionId: 'thread-456',
+    stderr: '',
+    stdout: '',
+  })
+
+  await executeAssistantProviderTurn({
+    provider: 'codex-cli',
+    workingDirectory: '/tmp/vault',
+    userPrompt: 'Use the attached evidence.',
+    userMessageContent: [
+      {
+        type: 'text',
+        text: 'Photo from Telegram.',
+      },
+      {
+        type: 'image',
+        image: imageBytes,
+        mediaType: 'image/png',
+        mimeType: 'image/png',
+      },
+      {
+        type: 'file',
+        data: new Uint8Array([1, 2, 3]),
+        filename: 'report.pdf',
+        mediaType: 'application/pdf',
+      },
+    ],
+  })
+
+  const call = providerMocks.executeCodexPrompt.mock.calls[0]?.[0]
+  assert.deepEqual(call?.images, [
+    {
+      bytes: imageBytes,
+      mimeType: 'image/png',
+    },
+  ])
+  assert.match(call?.prompt ?? '', /Use the attached evidence\./u)
+})
+
 test('executeAssistantProviderTurnAttempt collects provider-agnostic activity labels from Codex progress events', async () => {
   const onEvent = vi.fn()
   providerMocks.executeCodexPrompt.mockImplementation(async (input: { onProgress?: Function }) => {
@@ -654,22 +731,22 @@ test('executeAssistantProviderTurnAttempt collects provider-agnostic activity la
     input.onProgress?.({
       id: 'tool-1',
       kind: 'tool',
-      label: 'murph.cli.run',
+      label: 'vault.cli.run',
       rawEvent: { type: 'tool.call' },
-      safeLabel: 'murph.cli.run',
-      safeText: 'finished murph.cli.run',
+      safeLabel: 'vault.cli.run',
+      safeText: 'finished vault.cli.run',
       state: 'completed',
-      text: 'Tool murph.cli.run',
+      text: 'Tool vault.cli.run',
     })
     input.onProgress?.({
       id: 'tool-2',
       kind: 'tool',
-      label: 'murph.cli.run',
+      label: 'vault.cli.run',
       rawEvent: { type: 'tool.call' },
-      safeLabel: 'murph.cli.run',
-      safeText: 'using murph.cli.run',
+      safeLabel: 'vault.cli.run',
+      safeText: 'using vault.cli.run',
       state: 'running',
-      text: 'Tool murph.cli.run',
+      text: 'Tool vault.cli.run',
     })
 
     return {
@@ -694,7 +771,7 @@ test('executeAssistantProviderTurnAttempt collects provider-agnostic activity la
   }
   assert.deepEqual(result.metadata.activityLabels, [
     'memory show',
-    'murph.cli.run',
+    'vault.cli.run',
   ])
   assert.equal(onEvent.mock.calls.length, 3)
 })
@@ -755,6 +832,7 @@ test('executeAssistantProviderTurn dispatches to the OpenAI-compatible adapter w
       apiKey: 'secret-token',
       apiKeyEnv: 'OLLAMA_API_KEY',
       baseUrl: 'http://127.0.0.1:11434/v1',
+      executionDriver: 'openai-compatible',
       headers: {
         'X-Foo': 'bar',
       },
@@ -885,6 +963,7 @@ test('executeAssistantProviderTurn chains official OpenAI responses and stores t
     workingDirectory: '/tmp/vault',
     baseUrl: 'https://api.openai.com/v1',
     apiKeyEnv: 'OPENAI_API_KEY',
+    presetId: 'openai',
     providerName: 'openai',
     model: 'gpt-5',
     systemPrompt: 'system prompt',
@@ -916,6 +995,7 @@ test('executeAssistantProviderTurn forwards reasoning effort to official OpenAI 
     workingDirectory: '/tmp/vault',
     baseUrl: 'https://api.openai.com/v1',
     apiKeyEnv: 'OPENAI_API_KEY',
+    presetId: 'openai',
     providerName: 'openai',
     model: 'gpt-5.4',
     reasoningEffort: 'medium',
@@ -950,11 +1030,7 @@ test('executeAssistantProviderTurn forwards reasoning effort to Venice chat comp
   })
 
   const generateCall = providerMocks.generateText.mock.calls[0]?.[0]
-  assert.deepEqual(generateCall?.providerOptions, {
-    venice: {
-      reasoningEffort: 'medium',
-    },
-  })
+  assert.equal(generateCall?.providerOptions, undefined)
 })
 
 test('executeAssistantProviderTurn uses the prebuilt canonical assistant tool catalog for OpenAI-compatible tool-runtime turns', async () => {
@@ -1402,6 +1478,7 @@ test('executeAssistantProviderTurn infers the OpenAI-compatible provider when en
     {
       apiKeyEnv: 'OLLAMA_API_KEY',
       baseUrl: 'http://127.0.0.1:11434/v1',
+      executionDriver: 'openai-compatible',
       headers: {
         'X-Foo': 'bar',
       },
@@ -1626,7 +1703,7 @@ test('createSetupAssistantResolver accepts reasoning effort for OpenAI-compatibl
   assert.equal(resolved.reasoningEffort, 'medium')
 })
 
-test('createSetupAssistantResolver accepts reasoning effort for Venice', async () => {
+test('createSetupAssistantResolver rejects reasoning effort for Venice', async () => {
   const resolver = createSetupAssistantResolver({
     assistantAccount: {
       resolve: async () => null,
@@ -1635,20 +1712,20 @@ test('createSetupAssistantResolver accepts reasoning effort for Venice', async (
     output: new PassThrough(),
   })
 
-  const resolved = await resolver.resolve({
-    allowPrompt: false,
-    commandName: 'setup',
-    preset: 'openai-compatible',
-    options: {
-      assistantProviderPreset: 'venice',
-      assistantModel: 'openai-gpt-54',
-      assistantReasoningEffort: 'medium',
-    } as any,
-  })
-
-  assert.equal(resolved.baseUrl, 'https://api.venice.ai/api/v1')
-  assert.equal(resolved.providerName, 'venice')
-  assert.equal(resolved.reasoningEffort, 'medium')
+  await assert.rejects(
+    () =>
+      resolver.resolve({
+        allowPrompt: false,
+        commandName: 'setup',
+        preset: 'openai-compatible',
+        options: {
+          assistantProviderPreset: 'venice',
+          assistantModel: 'openai-gpt-54',
+          assistantReasoningEffort: 'medium',
+        } as any,
+      }),
+    /does not support assistantReasoningEffort/u,
+  )
 })
 
 test('executeAssistantProviderTurn enables reasoning summary traces when requested', async () => {
@@ -1690,8 +1767,8 @@ function createDiscoveryResult(
       description: `Discovered ${id}.`,
       source: 'discovered',
       capabilities: {
-        images: false,
-        pdf: false,
+        images: true,
+        pdf: true,
         reasoning: false,
         streaming: true,
         tools: true,

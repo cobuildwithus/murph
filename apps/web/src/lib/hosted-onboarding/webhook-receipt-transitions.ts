@@ -274,7 +274,7 @@ function readHostedWebhookDispatchSideEffectResult(
 function readHostedWebhookLinqMessageSideEffectResult(
   value: HostedWebhookSideEffectResult,
 ): NonNullable<HostedWebhookLinqMessageSideEffect["result"]> {
-  if ("chatId" in value && "messageId" in value) {
+  if ("delivered" in value && value.delivered === true) {
     return value;
   }
 

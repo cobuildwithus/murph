@@ -195,7 +195,6 @@ export function buildEventSpineEnvelope(
     note: input.note,
     tags: input.tags,
     links: canonicalRelations.links,
-    relatedIds: canonicalRelations.relatedIds,
     rawRefs: input.rawRefs ?? attachmentProjections?.rawRefs ?? undefined,
     attachments,
     lifecycle: input.lifecycle,

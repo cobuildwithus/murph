@@ -34,11 +34,10 @@
     "@murphai/gateway-core": "workspace:*",
     "@murphai/gateway-local": "workspace:*",
     "@murphai/inbox-services": "workspace:*",
-    "@murphai/operator-config": "workspace:*",
     "@murphai/runtime-state": "workspace:*",
     "@murphai/vault-usecases": "workspace:*"
   },
   "engines": {
-    "node": ">=22.16.0"
+    "node": ">=24.14.1"
   }
 }

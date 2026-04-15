@@ -2,11 +2,12 @@ import { createPublicKey, generateKeyPairSync, sign } from "node:crypto";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { HostedExecutionDispatchRequest } from "@murphai/runtime-state";
+import type { HostedExecutionDispatchRequest } from "@murphai/hosted-execution";
+import { HOSTED_EXECUTION_USER_ID_HEADER } from "@murphai/hosted-execution/contracts";
 import worker, { UserRunnerDurableObject } from "../src/index.ts";
 
 import { MAX_PENDING_EVENTS } from "../src/user-runner/types.js";
-import { createHostedExecutionTestEnv } from "./hosted-execution-fixtures";
+import { createHostedExecutionTestEnv } from "./hosted-execution-fixtures.js";
 import { createTestSqlStorage } from "./sql-storage.ts";
 
 const TEST_VERCEL_OIDC_TEAM_SLUG = "murph-team";
@@ -80,10 +81,9 @@ function createUserRunnerDurableObject(
   const bucket = createBucketStore();
   const storage = createStorage();
   const baseEnv = {
-    ...createHostedExecutionTestEnv({
-      BUNDLES: bucket.api,
-      RUNNER_CONTAINER: storage.runnerContainerNamespace,
-    }),
+    ...createHostedExecutionTestEnv(),
+    BUNDLES: bucket.api,
+    RUNNER_CONTAINER: storage.runnerContainerNamespace,
     ...overrides,
   };
   const durableObject = new UserRunnerDurableObject(storage.state, baseEnv as never);
@@ -150,7 +150,11 @@ function createBucketStore() {
 
         return {
           async arrayBuffer() {
-            return Buffer.from(value, "utf8");
+            const bytes = Buffer.from(value, "utf8");
+            return bytes.buffer.slice(
+              bytes.byteOffset,
+              bytes.byteOffset + bytes.byteLength,
+            );
           },
         };
       },
@@ -212,18 +216,25 @@ async function createSignedDispatchRequest(
   dispatch: HostedExecutionDispatchRequest,
   input: {
     aud?: string;
+    boundUserId?: string | null;
     iss?: string;
     sub?: string;
   } = {},
 ): Promise<Request> {
   installOidcJwksFetch();
 
+  const headers = new Headers({
+    authorization: `Bearer ${createTestVercelOidcToken(input)}`,
+    "content-type": "application/json; charset=utf-8",
+  });
+
+  if (input.boundUserId !== null) {
+    headers.set(HOSTED_EXECUTION_USER_ID_HEADER, input.boundUserId ?? dispatch.event.userId);
+  }
+
   return new Request(`https://runner.example.test${path}`, {
     body: JSON.stringify(dispatch),
-    headers: {
-      authorization: `Bearer ${createTestVercelOidcToken(input)}`,
-      "content-type": "application/json; charset=utf-8",
-    },
+    headers,
     method: "POST",
   });
 }
@@ -232,6 +243,7 @@ async function signControlRequest(
   request: Request,
   input: {
     aud?: string;
+    boundUserId?: string | null;
     iss?: string;
     sub?: string;
   } = {},
@@ -239,6 +251,11 @@ async function signControlRequest(
   installOidcJwksFetch();
   const headers = new Headers(request.headers);
   headers.set("authorization", `Bearer ${createTestVercelOidcToken(input)}`);
+  const derivedUserId = /^\/internal\/users\/(?<userId>[^/]+)/u.exec(new URL(request.url).pathname)?.groups?.userId;
+
+  if (input.boundUserId !== null && (input.boundUserId || derivedUserId)) {
+    headers.set(HOSTED_EXECUTION_USER_ID_HEADER, input.boundUserId ?? derivedUserId ?? "");
+  }
 
   return new Request(request, { headers });
 }

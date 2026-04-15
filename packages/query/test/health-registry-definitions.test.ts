@@ -44,8 +44,9 @@ import {
   workoutFormatRecordFromEntity,
   workoutFormatRegistryDefinition,
 } from "../src/health/registries.ts";
-import { getBankRegistryQueryMetadata } from "../src/health/bank-registry-query-metadata.ts";
-import { getHealthRegistryQueryMetadata } from "../src/health/health-registry-query-metadata.ts";
+import {
+  getBankRegistryQueryMetadata,
+} from "../src/health/bank-registry-query-metadata.ts";
 import { projectRegistryEntity } from "../src/health/projectors/registry.ts";
 import type { MarkdownDocumentRecord } from "../src/health/shared.ts";
 import {
@@ -87,7 +88,7 @@ test("query registry definitions combine canonical registry metadata with query-
       continue;
     }
 
-    const queryMetadata = getHealthRegistryQueryMetadata(kind);
+    const queryMetadata = getBankRegistryQueryMetadata(kind);
 
     assert.equal(registryDefinition.registry.directory, definition.registry.directory);
     assert.deepEqual(registryDefinition.registry.idKeys, definition.registry.idKeys);
@@ -145,6 +146,7 @@ test("food auto-log projection metadata stays owned by contracts", () => {
       ingredients: ["acai", "banana"],
       tags: ["breakfast"],
       note: "Seasonal fruit works too.",
+      nutrition: null,
       attachedProtocolIds: ["protocol_123"],
       autoLogDaily: {
         time: "08:00",
@@ -508,7 +510,7 @@ test("family and genetics split canonical payload metadata from query sort metad
   assert.ok(familyRegistryEntityDefinition.registry.frontmatterSchema);
   assert.ok(familyRegistryEntityDefinition.registry.upsertPayloadSchema);
   assert.ok(familyRegistryEntityDefinition.registry.patchPayloadSchema);
-  assert.equal(getHealthRegistryQueryMetadata("family").sortBehavior, "title");
+  assert.equal(getBankRegistryQueryMetadata("family").sortBehavior, "title");
 
   const parsedFamilyPayload = familyRegistryEntityDefinition.registry.upsertPayloadSchema?.safeParse({
     title: "Mother",
@@ -534,7 +536,7 @@ test("family and genetics split canonical payload metadata from query sort metad
   assert.ok(geneticsRegistryEntityDefinition.registry.frontmatterSchema);
   assert.ok(geneticsRegistryEntityDefinition.registry.upsertPayloadSchema);
   assert.ok(geneticsRegistryEntityDefinition.registry.patchPayloadSchema);
-  assert.equal(getHealthRegistryQueryMetadata("genetics").sortBehavior, "gene-title");
+  assert.equal(getBankRegistryQueryMetadata("genetics").sortBehavior, "gene-title");
 
   const parsedGeneticsPayload = geneticsRegistryEntityDefinition.registry.upsertPayloadSchema?.safeParse({
     gene: "APOE",

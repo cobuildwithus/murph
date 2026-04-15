@@ -101,7 +101,7 @@ test('root help exposes the Incur built-ins', async () => {
 
   assert.match(help, new RegExp(`vault-cli@${packageJson.version ?? '0.0.0'}`, 'u'))
   assert.match(help, /Integrations:/u)
-  assert.match(help, /chat\s+Open the same assistant chat UI as/u)
+  assert.match(help, /chat\s+Open the same interactive assistant chat UI as/u)
   assert.match(help, /search\s+Search commands for the shared local query projection/u)
   assert.match(help, /timeline\s+Build a descending cross-record timeline/u)
   assert.match(help, /completions\s+Generate shell completion script/u)
@@ -202,10 +202,12 @@ test('root config autodiscovery resolves ~/.config/murph/config.json', async () 
   }
 })
 
-test('published config schema artifact covers nested config defaults', async () => {
-  const schema = JSON.parse(
-    await readFile(new URL('../config.schema.json', import.meta.url), 'utf8'),
-  ) as {
+test('published config schema artifact stays on the native incur shape', async () => {
+  const schemaText = await readFile(
+    new URL('../config.schema.json', import.meta.url),
+    'utf8',
+  )
+  const schema = JSON.parse(schemaText) as {
     type?: string
     properties?: {
       commands?: {
@@ -256,6 +258,7 @@ test('published config schema artifact covers nested config defaults', async () 
   assert.ok(
     schema.properties?.commands?.properties?.assistant?.properties?.commands?.properties?.chat?.properties?.options?.properties?.model,
   )
+  assert.equal(schemaText.includes('"x-incur-'), false)
 })
 
 test('VaultCliError remains a typed incur envelope through the CLI bridge', async () => {
@@ -291,7 +294,6 @@ test('root help lists the simple health CRUD command groups', async () => {
   const help = await runRawCli(['--help'])
 
   const commands = [
-    'profile',
     'goal',
     'condition',
     'allergy',
@@ -299,7 +301,6 @@ test('root help lists the simple health CRUD command groups', async () => {
     'recipe',
     'supplement',
     'protocol',
-    'history',
     'blood-test',
     'family',
     'genetics',
@@ -380,12 +381,22 @@ test('search query schema exposes retrieval-specific filters', async () => {
   const schema = JSON.parse(
     await runRawCli(['search', 'query', '--schema', '--format', 'json']),
   ) as {
+    args: {
+      properties: Record<string, {
+        description?: string
+      }>
+      required?: string[]
+    }
     options: {
-      properties: Record<string, unknown>
+      properties: Record<string, {
+        description?: string
+      }>
       required?: string[]
     }
   }
 
+  assert.equal('query' in schema.args.properties, true)
+  assert.deepEqual(schema.args.required ?? [], [])
   assert.equal('text' in schema.options.properties, true)
   assert.equal('backend' in schema.options.properties, false)
   assert.equal('recordType' in schema.options.properties, true)
@@ -394,7 +405,128 @@ test('search query schema exposes retrieval-specific filters', async () => {
   assert.equal('dateFrom' in schema.options.properties, false)
   assert.equal('dateTo' in schema.options.properties, false)
   assert.equal('entryType' in schema.options.properties, false)
+  assert.match(
+    String(schema.options.properties.text?.description ?? ''),
+    /Named search text alias/u,
+  )
+  assert.match(
+    String(schema.options.properties.recordType?.description ?? ''),
+    /workout_format/u,
+  )
+  assert.doesNotMatch(
+    String(schema.options.properties.recordType?.description ?? ''),
+    /history/u,
+  )
   assert.deepEqual(schema.options.required, ['vault', 'limit'])
+})
+
+test('audit list schema describes its filters and sort controls', async () => {
+  const schema = JSON.parse(
+    await runRawCli(['audit', 'list', '--schema', '--format', 'json']),
+  ) as {
+    options: {
+      properties: Record<string, {
+        description?: string
+      }>
+      required?: string[]
+    }
+  }
+
+  assert.match(
+    String(schema.options.properties.action?.description ?? ''),
+    /audit action filter/u,
+  )
+  assert.match(
+    String(schema.options.properties.sort?.description ?? ''),
+    /ascending or descending/u,
+  )
+  assert.match(
+    String(schema.options.properties.limit?.description ?? ''),
+    /Maximum number of audit records/u,
+  )
+  assert.deepEqual(schema.options.required, ['vault', 'sort', 'limit'])
+})
+
+test('route estimate schema exposes the Mapbox-backed routing inputs', async () => {
+  const schema = JSON.parse(
+    await runRawCli(['route', 'estimate', '--schema', '--format', 'json']),
+  ) as {
+    args: {
+      properties: Record<string, { description?: string }>
+      required?: string[]
+    }
+    options: {
+      properties: Record<string, { description?: string }>
+    }
+  }
+
+  assert.deepEqual(schema.args.required, ['origin', 'destination'])
+  assert.match(
+    String(schema.args.properties.origin?.description ?? ''),
+    /plain text or a lon,lat literal/u,
+  )
+  assert.match(
+    String(schema.args.properties.origin?.description ?? ''),
+    /include suburb\/state\/postcode, or use coordinates when you need the routed point pinned exactly/u,
+  )
+  assert.match(
+    String(schema.args.properties.destination?.description ?? ''),
+    /plain text or a lon,lat literal/u,
+  )
+  assert.match(
+    String(schema.args.properties.destination?.description ?? ''),
+    /include suburb\/state\/postcode, or use coordinates when you need the routed point pinned exactly/u,
+  )
+  assert.match(
+    String(schema.options.properties.profile?.description ?? ''),
+    /walking for hikes, runs, and on-foot trail estimates/u,
+  )
+  assert.match(
+    String(schema.options.properties.elevation?.description ?? ''),
+    /approximate elevation summary/u,
+  )
+  assert.match(
+    String(schema.options.properties.geometry?.description ?? ''),
+    /GeoJSON LineString/u,
+  )
+  assert.equal('waypoint' in schema.options.properties, true)
+  assert.equal('country' in schema.options.properties, true)
+  assert.equal('language' in schema.options.properties, true)
+  assert.equal('elevationSampleSpacingMeters' in schema.options.properties, true)
+  assert.equal('maxElevationSamples' in schema.options.properties, true)
+
+  const help = await runRawCli(['route', 'estimate', '--help'])
+
+  assert.match(help, /More specific text can improve geocoding, but provider display labels may still stay broad/u)
+  assert.match(
+    help,
+    /More specific text or coordinates can improve point matching, but provider labels may still be broader than the routed point/u,
+  )
+})
+
+test('model schema explains preset-gated non-interactive updates', async () => {
+  const schema = JSON.parse(
+    await runRawCli(['model', '--schema', '--format', 'json']),
+  ) as {
+    options: {
+      properties: Record<string, {
+        description?: string
+      }>
+    }
+  }
+
+  assert.match(
+    String(schema.options.properties.preset?.description ?? ''),
+    /Required for non-interactive updates/u,
+  )
+  assert.match(
+    String(schema.options.properties.providerPreset?.description ?? ''),
+    /Only applies with `--preset openai-compatible`/u,
+  )
+  assert.match(
+    String(schema.options.properties.profile?.description ?? ''),
+    /Only applies with `--preset codex`/u,
+  )
 })
 
 test('blood-test list schema stays scoped to shared date-range and status filters', async () => {
@@ -890,12 +1022,14 @@ test('automation show schema accepts an id-or-slug lookup', async () => {
   assert.deepEqual(schema.options.required, ['vault'])
 }, INCUR_SCHEMA_TIMEOUT_MS)
 
-test('memory upsert schema exposes canonical memory write fields', async () => {
+test('memory upsert schema exposes create-only canonical memory fields', async () => {
   const schema = JSON.parse(
     await runRawCli(['memory', 'upsert', '--schema', '--format', 'json']),
   ) as {
     args: {
-      properties: Record<string, unknown>
+      properties: Record<string, {
+        description?: string
+      }>
       required?: string[]
     }
     options: {
@@ -905,18 +1039,23 @@ test('memory upsert schema exposes canonical memory write fields', async () => {
   }
 
   assert.equal('text' in schema.args.properties, true)
+  assert.match(
+    String(schema.args.properties.text?.description ?? ''),
+    /Memory text to store/u,
+  )
   assert.deepEqual(schema.args.required, ['text'])
   assert.equal('section' in schema.options.properties, true)
-  assert.equal('memoryId' in schema.options.properties, true)
   assert.deepEqual(schema.options.required, ['vault', 'section'])
 }, INCUR_SCHEMA_TIMEOUT_MS)
 
-test('memory show schema accepts an optional memory id', async () => {
+test('memory update schema requires a memory id and text, with an optional replacement section', async () => {
   const schema = JSON.parse(
-    await runRawCli(['memory', 'show', '--schema', '--format', 'json']),
+    await runRawCli(['memory', 'update', '--schema', '--format', 'json']),
   ) as {
     args: {
-      properties: Record<string, unknown>
+      properties: Record<string, {
+        description?: string
+      }>
       required?: string[]
     }
     options: {
@@ -926,6 +1065,37 @@ test('memory show schema accepts an optional memory id', async () => {
   }
 
   assert.equal('memoryId' in schema.args.properties, true)
+  assert.equal('text' in schema.args.properties, true)
+  assert.match(
+    String(schema.args.properties.memoryId?.description ?? ''),
+    /Canonical memory record id/u,
+  )
+  assert.deepEqual(schema.args.required, ['memoryId', 'text'])
+  assert.equal('section' in schema.options.properties, true)
+  assert.deepEqual(schema.options.required, ['vault'])
+}, INCUR_SCHEMA_TIMEOUT_MS)
+
+test('memory show schema accepts an optional memory id', async () => {
+  const schema = JSON.parse(
+    await runRawCli(['memory', 'show', '--schema', '--format', 'json']),
+  ) as {
+    args: {
+      properties: Record<string, {
+        description?: string
+      }>
+      required?: string[]
+    }
+    options: {
+      properties: Record<string, unknown>
+      required?: string[]
+    }
+  }
+
+  assert.equal('memoryId' in schema.args.properties, true)
+  assert.match(
+    String(schema.args.properties.memoryId?.description ?? ''),
+    /omit to return the whole memory document/u,
+  )
   assert.deepEqual(schema.args.required ?? [], [])
   assert.deepEqual(schema.options.required, ['vault'])
 }, INCUR_SCHEMA_TIMEOUT_MS)
@@ -1028,30 +1198,43 @@ test('food help exposes schedule and no longer exposes add-daily', async () => {
   assert.doesNotMatch(help, /add-daily/u)
 })
 
-test('profile show help exposes only the global format flag', async () => {
-  const help = await runRawCli(['profile', 'show', '--help'])
+test('goal show help exposes only the global format flag', async () => {
+  const help = await runRawCli(['goal', 'show', '--help'])
 
-  assert.match(help, /Usage: vault-cli profile show <id> \[options\]/u)
+  assert.match(help, /Usage: vault-cli goal show <id> \[options\]/u)
   assert.doesNotMatch(help, /Options:[\s\S]*--format <json\|md>/u)
   assert.match(help, /Global Options:[\s\S]*--format <toon\|json\|yaml\|md\|jsonl>/u)
 })
 
 test('health command help surfaces examples and hints through Incur metadata', async () => {
-  const profileUpsertHelp = await runRawCli(['profile', 'upsert', '--help'])
+  const goalUpsertHelp = await runRawCli(['goal', 'upsert', '--help'])
+  const journalLinkHelp = await runRawCli(['journal', 'link', '--help'])
   const foodRenameHelp = await runRawCli(['food', 'rename', '--help'])
   const supplementUpsertHelp = await runRawCli(['supplement', 'upsert', '--help'])
+  const supplementStopHelp = await runRawCli(['supplement', 'stop', '--help'])
   const supplementRenameHelp = await runRawCli(['supplement', 'rename', '--help'])
   const supplementCompoundListHelp = await runRawCli(['supplement', 'compound', 'list', '--help'])
-  const profileRebuildHelp = await runRawCli(['profile', 'current', 'rebuild', '--help'])
   const protocolStopHelp = await runRawCli(['protocol', 'stop', '--help'])
 
   assert.match(
-    profileUpsertHelp,
-    /vault-cli profile upsert --input @profile-snapshot\.json --vault \.\/vault/u,
+    goalUpsertHelp,
+    /vault-cli goal upsert --input @goal\.json --vault \.\/vault/u,
   )
   assert.match(
-    profileUpsertHelp,
-    /--input accepts @file\.json or - so the CLI can load the structured profile payload from disk or stdin\./u,
+    goalUpsertHelp,
+    /--input accepts @file\.json or - so the CLI can load the structured goal payload from disk or stdin\./u,
+  )
+  assert.match(
+    goalUpsertHelp,
+    /Run goal scaffold first if you need the current canonical field shape\./u,
+  )
+  assert.match(
+    journalLinkHelp,
+    /Link either event ids or sample streams into the journal day frontmatter\./u,
+  )
+  assert.match(
+    journalLinkHelp,
+    /Choose exactly one target type per command: repeat --event-id for events or repeat --stream for sample streams\./u,
   )
   assert.match(
     foodRenameHelp,
@@ -1062,16 +1245,21 @@ test('health command help surfaces examples and hints through Incur metadata', a
     /--input accepts @file\.json or - so the CLI can load a supplement payload with product metadata and ingredients\./u,
   )
   assert.match(
+    supplementStopHelp,
+    /Usage: vault-cli supplement stop <id> \[options\]/u,
+  )
+  assert.doesNotMatch(supplementStopHelp, /<protocolId>/u)
+  assert.match(
+    supplementStopHelp,
+    /--stopped-on <string>\s+Optional calendar day when the supplement stopped\. Defaults to today\./u,
+  )
+  assert.match(
     supplementRenameHelp,
     /Use the canonical supplement id or current slug; the CLI reuses the existing supplement record instead of creating a new one\./u,
   )
   assert.match(
     supplementCompoundListHelp,
     /The compound ledger defaults to active supplements so overlapping ingredients sum into a single canonical row\./u,
-  )
-  assert.match(
-    profileRebuildHelp,
-    /Run this after accepting a snapshot if you need to refresh the generated current profile document immediately\./u,
   )
   assert.match(
     protocolStopHelp,
@@ -1093,11 +1281,44 @@ test('health list help preserves command-family option shapes', async () => {
   assert.match(eventHelp, /^\s+--to\b/mu)
   assert.match(eventHelp, /^\s+--tag\b/mu)
   assert.match(eventHelp, /^\s+--experiment\b/mu)
+  assert.match(
+    eventHelp,
+    /--kind <string>\s+Optional canonical event kind filter such as encounter, procedure, test, adverse_effect, or exposure\./u,
+  )
+  assert.match(
+    eventHelp,
+    /--tag <array>\s+Optional tag filter\. Repeat --tag to match any listed tag\./u,
+  )
+  assert.match(
+    eventHelp,
+    /--experiment <string>\s+Optional experiment slug filter for events linked to one experiment\./u,
+  )
 
   assert.match(documentHelp, /^\s+--from\b/mu)
   assert.match(documentHelp, /^\s+--to\b/mu)
   assert.doesNotMatch(documentHelp, /^\s+--status\b/mu)
   assert.doesNotMatch(documentHelp, /^\s+--limit\b/mu)
+}, INCUR_HELP_TIMEOUT_MS)
+
+test('owned date-range list help reuses consistent date and limit descriptions', async () => {
+  const journalListHelp = await runRawCli(['journal', 'list', '--help'])
+  const workoutListHelp = await runRawCli(['workout', 'list', '--help'])
+  const eventListHelp = await runRawCli(['event', 'list', '--help'])
+
+  for (const help of [journalListHelp, workoutListHelp, eventListHelp]) {
+    assert.match(
+      help,
+      /--from <string>\s+Optional inclusive lower date bound in YYYY-MM-DD form\./u,
+    )
+    assert.match(
+      help,
+      /--to <string>\s+Optional inclusive upper date bound in YYYY-MM-DD form\./u,
+    )
+    assert.match(
+      help,
+      /--limit <number>\s+Maximum number of results to return\./u,
+    )
+  }
 }, INCUR_HELP_TIMEOUT_MS)
 
 test('command schema reflects only domain-specific options', async () => {
@@ -1116,7 +1337,7 @@ test('command schema reflects only domain-specific options', async () => {
 
 test('health command schema remains JSON-Schema-safe', async () => {
   const schema = JSON.parse(
-    await runRawCli(['profile', 'upsert', '--schema', '--format', 'json']),
+    await runRawCli(['goal', 'upsert', '--schema', '--format', 'json']),
   ) as {
     options: {
       properties: Record<string, unknown>
@@ -1146,13 +1367,13 @@ test('health command metadata exposes Incur-native CTA suggestions', async () =>
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-incur-'))
 
   try {
-    const result = await runCli<{ noun: string }>(['profile', 'scaffold', '--vault', vaultRoot])
+    const result = await runCli<{ noun: string }>(['goal', 'scaffold', '--vault', vaultRoot])
 
     assert.equal(result.ok, true)
-    assert.equal(requireData(result).noun, 'profile')
+    assert.equal(requireData(result).noun, 'goal')
     assert.equal(
       result.meta.cta?.commands.some((command) =>
-        command.command.includes('vault-cli profile upsert'),
+        command.command.includes('vault-cli goal upsert'),
       ),
       true,
     )
@@ -1173,7 +1394,7 @@ test('compact llms json manifest remains available', async () => {
   assert.equal(manifest.commands.some((command) => command.name === 'init'), true)
   assert.equal(manifest.commands.some((command) => command.name === 'chat'), true)
   assert.equal(
-    manifest.commands.some((command) => command.name === 'profile show'),
+    manifest.commands.some((command) => command.name === 'goal show'),
     true,
   )
   assert.equal(
@@ -1195,13 +1416,14 @@ test('full llms json manifest remains available for schema-rich commands', async
     await runRawCli(['--llms-full', '--format', 'json']),
   ) as {
     commands: Array<{
+      description?: string
       name: string
       options?: Record<string, unknown>
     }>
   }
 
   assert.equal(
-    manifest.commands.some((command) => command.name === 'profile upsert'),
+    manifest.commands.some((command) => command.name === 'goal upsert'),
     true,
   )
   assert.equal(
@@ -1215,6 +1437,13 @@ test('full llms json manifest remains available for schema-rich commands', async
   assert.equal(
     manifest.commands.some((command) => command.name === 'query projection status'),
     true,
+  )
+  const searchQueryCommand = manifest.commands.find(
+    (command) => command.name === 'search query',
+  )
+  assert.match(
+    String(searchQueryCommand?.description ?? ''),
+    /either positionally or with `--text`/u,
   )
 })
 
@@ -1239,9 +1468,13 @@ test('goal scaffold help surfaces factory-provided example and hint text', async
     help,
     /Edit the emitted payload, save it as goal\.json, then pass it back with --input @goal\.json or pipe it to --input -\./u,
   )
+  assert.match(
+    help,
+    /The scaffold output is the current canonical field shape for this command\./u,
+  )
 })
 
-test('profile scaffold exposes a success CTA in the verbose json envelope', async () => {
+test('goal scaffold exposes a success CTA in the verbose json envelope', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-incur-cta-'))
 
   try {
@@ -1252,15 +1485,15 @@ test('profile scaffold exposes a success CTA in the verbose json envelope', asyn
     const scaffoldResult = await runCli<{
       noun: string
       payload: Record<string, unknown>
-    }>(['profile', 'scaffold', '--vault', vaultRoot])
+    }>(['goal', 'scaffold', '--vault', vaultRoot])
 
     assert.equal(scaffoldResult.ok, true)
-    assert.equal(scaffoldResult.meta.command, 'profile scaffold')
-    assert.equal(requireData(scaffoldResult).noun, 'profile')
+    assert.equal(scaffoldResult.meta.command, 'goal scaffold')
+    assert.equal(requireData(scaffoldResult).noun, 'goal')
     assert.deepEqual(scaffoldResult.meta.cta?.commands, [
       {
-        command: 'vault-cli profile upsert --input @profile-snapshot.json --vault <vault>',
-        description: 'Apply the edited profile payload.',
+        command: 'vault-cli goal upsert --input @goal.json --vault <vault>',
+        description: 'Apply the edited goal payload.',
       },
     ])
   } finally {

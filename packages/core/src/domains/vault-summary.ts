@@ -7,6 +7,12 @@ import {
 import { VAULT_LAYOUT } from "../constants.ts";
 import { stringifyFrontmatterDocument } from "../frontmatter.ts";
 import { stageMarkdownDocumentWrite } from "../markdown-documents.ts";
+import { commitAuditedCanonicalWrite } from "../audited-write.ts";
+import {
+  canonicalPathResource,
+  dedupeCanonicalResources,
+  withCanonicalResourceLocks,
+} from "../operations/index.ts";
 import { loadVault } from "../vault.ts";
 
 import {
@@ -14,7 +20,6 @@ import {
   normalizeOptionalText,
   readValidatedFrontmatterDocument,
   replaceMarkdownTitle,
-  runLoadedCanonicalWrite,
   validateContract,
 } from "./shared.ts";
 
@@ -60,68 +65,93 @@ function validateCoreFrontmatter(
 export async function updateVaultSummary(
   input: UpdateVaultSummaryInput,
 ): Promise<UpdateVaultSummaryResult> {
-  const { metadata } = await loadVault({ vaultRoot: input.vaultRoot });
-  const { document: coreDocument } = await readValidatedFrontmatterDocument(
-    input.vaultRoot,
-    VAULT_LAYOUT.coreDocument,
-    coreFrontmatterSchema,
-    "CORE_FRONTMATTER_INVALID",
-    `CORE frontmatter for "${VAULT_LAYOUT.coreDocument}" is invalid.`,
-  );
-  const nextTitle = normalizeOptionalText(input.title) ?? metadata.title;
-  const nextTimezone = normalizeOptionalText(input.timezone) ?? metadata.timezone;
-  const updatedAt = new Date().toISOString();
-  const nextMetadata = validateVaultMetadata({
-    ...metadata,
-    title: nextTitle,
-    timezone: nextTimezone,
-  });
-  const nextCoreAttributes = validateCoreFrontmatter(
-    compactObject({
-      ...coreDocument.attributes,
-      title: nextTitle,
-      timezone: nextTimezone,
-      updatedAt,
-    }),
-  );
-  const nextCoreMarkdown = stringifyFrontmatterDocument({
-    attributes: nextCoreAttributes,
-    body: replaceMarkdownTitle(coreDocument.body, nextTitle),
-  });
-
-  return runLoadedCanonicalWrite<UpdateVaultSummaryResult>({
+  return withCanonicalResourceLocks({
     vaultRoot: input.vaultRoot,
-    operationType: "vault_summary_update",
-    summary: "Update vault summary",
-    occurredAt: updatedAt,
-    mutate: async ({ batch }) => {
-      await batch.stageTextWrite(
-        VAULT_LAYOUT.metadata,
-        `${JSON.stringify(nextMetadata, null, 2)}\n`,
-        {
-          overwrite: true,
-        },
+    resources: dedupeCanonicalResources([
+      canonicalPathResource(VAULT_LAYOUT.metadata),
+      canonicalPathResource(VAULT_LAYOUT.coreDocument),
+    ]),
+    run: async () => {
+      const { metadata } = await loadVault({ vaultRoot: input.vaultRoot });
+      const { document: coreDocument } = await readValidatedFrontmatterDocument(
+        input.vaultRoot,
+        VAULT_LAYOUT.coreDocument,
+        coreFrontmatterSchema,
+        "CORE_FRONTMATTER_INVALID",
+        `CORE frontmatter for "${VAULT_LAYOUT.coreDocument}" is invalid.`,
       );
-      await stageMarkdownDocumentWrite(
-        batch,
-        {
-          relativePath: VAULT_LAYOUT.coreDocument,
-          created: false,
-        },
-        nextCoreMarkdown,
-        {
-          overwrite: true,
-        },
-      );
-
-      return {
-        metadataFile: VAULT_LAYOUT.metadata,
-        corePath: VAULT_LAYOUT.coreDocument,
+      const nextTitle = normalizeOptionalText(input.title) ?? metadata.title;
+      const nextTimezone = normalizeOptionalText(input.timezone) ?? metadata.timezone;
+      const updatedAt = new Date().toISOString();
+      const nextMetadata = validateVaultMetadata({
+        ...metadata,
         title: nextTitle,
         timezone: nextTimezone,
-        updatedAt,
-        updated: true,
-      };
+      });
+      const nextCoreAttributes = validateCoreFrontmatter(
+        compactObject({
+          ...coreDocument.attributes,
+          title: nextTitle,
+          timezone: nextTimezone,
+          updatedAt,
+        }),
+      );
+      const nextCoreMarkdown = stringifyFrontmatterDocument({
+        attributes: nextCoreAttributes,
+        body: replaceMarkdownTitle(coreDocument.body, nextTitle),
+      });
+
+      const result = await commitAuditedCanonicalWrite<UpdateVaultSummaryResult>({
+        vaultRoot: input.vaultRoot,
+        operationType: "vault_summary_update",
+        summary: "Update vault summary",
+        occurredAt: updatedAt,
+        audit: {
+          action: "vault_summary_update",
+          commandName: "core.updateVaultSummary",
+          summary: "Updated vault summary.",
+        },
+        mutate: async ({ batch }) => {
+          await batch.stageTextWrite(
+            VAULT_LAYOUT.metadata,
+            `${JSON.stringify(nextMetadata, null, 2)}\n`,
+            {
+              overwrite: true,
+            },
+          );
+          const coreWrite = await stageMarkdownDocumentWrite(
+            batch,
+            {
+              relativePath: VAULT_LAYOUT.coreDocument,
+              created: false,
+            },
+            nextCoreMarkdown,
+            {
+              overwrite: true,
+            },
+          );
+
+          return {
+            result: {
+              metadataFile: VAULT_LAYOUT.metadata,
+              corePath: VAULT_LAYOUT.coreDocument,
+              title: nextTitle,
+              timezone: nextTimezone,
+              updatedAt,
+              updated: true,
+            },
+            changes: [
+              {
+                path: VAULT_LAYOUT.metadata,
+                op: "update",
+              },
+              ...coreWrite.changes,
+            ],
+          };
+        },
+      });
+
+      return result.result;
     },
   });
 }

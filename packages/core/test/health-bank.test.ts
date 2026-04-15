@@ -309,6 +309,120 @@ test("goal id-or-slug resolution preserves conflict, missing, and read-preferenc
   );
 });
 
+test("goals normalize repeated links and reject self-referential windows", async () => {
+  const vaultRoot = await makeTempDirectory("murph-goal-link-normalization");
+  await initializeVault({ vaultRoot });
+
+  const parent = await upsertGoal({
+    vaultRoot,
+    goalId: "goal_01JNYB6M9A6W4K2N8P3Q7R5S4A",
+    title: "Parent goal",
+    window: {
+      startAt: "2026-03-01",
+    },
+  });
+  const peer = await upsertGoal({
+    vaultRoot,
+    goalId: "goal_01JNYB6M9A6W4K2N8P3Q7R5S4B",
+    title: "Peer goal",
+    window: {
+      startAt: "2026-03-02",
+    },
+  });
+  const goal = await upsertGoal({
+    vaultRoot,
+    goalId: "goal_01JNYB6M9A6W4K2N8P3Q7R5S4C",
+    title: "Recovery goal",
+    window: {
+      startAt: "2026-03-03",
+      targetAt: "2026-03-10",
+    },
+    parentGoalId: parent.record.entity.goalId,
+    relatedGoalIds: [peer.record.entity.goalId, peer.record.entity.goalId],
+    relatedExperimentIds: ["exp_01JNYB6M9A6W4K2N8P3Q7R5S4B", "exp_01JNYB6M9A6W4K2N8P3Q7R5S4A"],
+  });
+  const read = await readGoal({
+    vaultRoot,
+    goalId: goal.record.entity.goalId,
+  });
+
+  assert.deepEqual(read.entity.parentGoalId, parent.record.entity.goalId);
+  assert.deepEqual(read.entity.relatedGoalIds, [peer.record.entity.goalId]);
+  assert.deepEqual(read.entity.relatedExperimentIds, [
+    "exp_01JNYB6M9A6W4K2N8P3Q7R5S4A",
+    "exp_01JNYB6M9A6W4K2N8P3Q7R5S4B",
+  ]);
+  assert.deepEqual(read.entity.links, [
+    {
+      type: "parent_goal",
+      targetId: parent.record.entity.goalId,
+    },
+    {
+      type: "related_goal",
+      targetId: peer.record.entity.goalId,
+    },
+    {
+      type: "related_experiment",
+      targetId: "exp_01JNYB6M9A6W4K2N8P3Q7R5S4A",
+    },
+    {
+      type: "related_experiment",
+      targetId: "exp_01JNYB6M9A6W4K2N8P3Q7R5S4B",
+    },
+  ]);
+  assert.match(read.document.markdown, /## Related Experiments/);
+
+  await assert.rejects(
+    () =>
+      upsertGoal({
+        vaultRoot,
+        goalId: "goal_01JNYB6M9A6W4K2N8P3Q7R5S4D",
+        title: "Invalid parent",
+        window: {
+          startAt: "2026-03-04",
+        },
+        parentGoalId: "goal_01JNYB6M9A6W4K2N8P3Q7R5S4D",
+      }),
+    (error: unknown) =>
+      error instanceof VaultError &&
+      error.code === "VAULT_INVALID_INPUT" &&
+      error.message === "parentGoalId may not equal goalId.",
+  );
+
+  await assert.rejects(
+    () =>
+      upsertGoal({
+        vaultRoot,
+        goalId: "goal_01JNYB6M9A6W4K2N8P3Q7R5S4E",
+        title: "Invalid related goal",
+        window: {
+          startAt: "2026-03-04",
+        },
+        relatedGoalIds: ["goal_01JNYB6M9A6W4K2N8P3Q7R5S4E"],
+      }),
+    (error: unknown) =>
+      error instanceof VaultError &&
+      error.code === "VAULT_INVALID_INPUT" &&
+      error.message === "relatedGoalIds may not include goalId.",
+  );
+
+  await assert.rejects(
+    () =>
+      upsertGoal({
+        vaultRoot,
+        title: "Backwards window",
+        window: {
+          startAt: "2026-03-10",
+          targetAt: "2026-03-09",
+        },
+      }),
+    (error: unknown) =>
+      error instanceof VaultError &&
+      error.code === "VAULT_INVALID_INPUT" &&
+      error.message === "window.targetAt must be on or after startAt.",
+  );
+});
+
 test("providers and recipes use first-class markdown registry reads without changing selector behavior", async () => {
   const vaultRoot = await makeTempDirectory("murph-provider-recipe-registry");
   await initializeVault({ vaultRoot });
@@ -411,6 +525,153 @@ test("providers and recipes use first-class markdown registry reads without chan
   );
 });
 
+test("recipes normalize repeated related links and clear them on update", async () => {
+  const vaultRoot = await makeTempDirectory("murph-recipe-link-normalization");
+  await initializeVault({ vaultRoot });
+
+  const goalA = await upsertGoal({
+    vaultRoot,
+    goalId: "goal_01JNYB6M9A6W4K2N8P3Q7R5S5A",
+    title: "Goal A",
+    window: {
+      startAt: "2026-03-01",
+    },
+  });
+  const goalB = await upsertGoal({
+    vaultRoot,
+    goalId: "goal_01JNYB6M9A6W4K2N8P3Q7R5S5B",
+    title: "Goal B",
+    window: {
+      startAt: "2026-03-02",
+    },
+  });
+  const conditionA = await upsertCondition({
+    vaultRoot,
+    conditionId: "cond_01JNYB6M9A6W4K2N8P3Q7R5S5A",
+    title: "Condition A",
+    clinicalStatus: "active",
+  });
+  const conditionB = await upsertCondition({
+    vaultRoot,
+    conditionId: "cond_01JNYB6M9A6W4K2N8P3Q7R5S5B",
+    title: "Condition B",
+    clinicalStatus: "active",
+  });
+
+  const created = await upsertRecipe({
+    vaultRoot,
+    recipeId: "rcp_01JNYB6M9A6W4K2N8P3Q7R5S5A",
+    title: "Recovery bowl",
+    slug: "recovery-bowl",
+    status: "saved",
+    summary: "A simple post-workout bowl.",
+    ingredients: ["rice", "salmon"],
+    steps: ["Cook the rice.", "Add the salmon."],
+    relatedGoalIds: [goalB.record.entity.goalId, goalA.record.entity.goalId, goalA.record.entity.goalId],
+    relatedConditionIds: [
+      conditionB.record.entity.conditionId,
+      conditionA.record.entity.conditionId,
+      conditionA.record.entity.conditionId,
+    ],
+  });
+  const read = await readRecipe({
+    vaultRoot,
+    recipeId: created.record.recipeId,
+  });
+  const cleared = await upsertRecipe({
+    vaultRoot,
+    recipeId: created.record.recipeId,
+    relatedGoalIds: [],
+    relatedConditionIds: [],
+  });
+  const clearedRead = await readRecipe({
+    vaultRoot,
+    recipeId: created.record.recipeId,
+  });
+
+  assert.deepEqual(created.record.relatedGoalIds, [
+    goalA.record.entity.goalId,
+    goalB.record.entity.goalId,
+  ]);
+  assert.deepEqual(created.record.relatedConditionIds, [
+    conditionA.record.entity.conditionId,
+    conditionB.record.entity.conditionId,
+  ]);
+  assert.deepEqual(read.links, [
+    {
+      type: "supports_goal",
+      targetId: goalA.record.entity.goalId,
+    },
+    {
+      type: "supports_goal",
+      targetId: goalB.record.entity.goalId,
+    },
+    {
+      type: "addresses_condition",
+      targetId: conditionA.record.entity.conditionId,
+    },
+    {
+      type: "addresses_condition",
+      targetId: conditionB.record.entity.conditionId,
+    },
+  ]);
+  assert.match(read.markdown, /## Related Goals/);
+  assert.match(read.markdown, /## Related Conditions/);
+  assert.equal(cleared.created, false);
+  assert.equal(clearedRead.relatedGoalIds, undefined);
+  assert.equal(clearedRead.relatedConditionIds, undefined);
+  assert.deepEqual(clearedRead.links, []);
+  assert.match(clearedRead.markdown, /## Related Goals[\s\S]*- none/);
+  assert.match(clearedRead.markdown, /## Related Conditions[\s\S]*- none/);
+
+  const linkedRecipe = await upsertRecipe({
+    vaultRoot,
+    recipeId: "rcp_01JNYB6M9A6W4K2N8P3Q7R5S5B",
+    title: "Linked bowl",
+    slug: "linked-bowl",
+    status: "saved",
+    ingredients: ["rice"],
+    steps: ["Cook the rice."],
+    links: [
+      {
+        type: "addresses_condition",
+        targetId: conditionB.record.entity.conditionId,
+      },
+      {
+        type: "supports_goal",
+        targetId: goalB.record.entity.goalId,
+      },
+      {
+        type: "supports_goal",
+        targetId: goalA.record.entity.goalId,
+      },
+      {
+        type: "supports_goal",
+        targetId: goalA.record.entity.goalId,
+      },
+    ],
+  });
+  const linkedRecipeRead = await readRecipe({
+    vaultRoot,
+    recipeId: linkedRecipe.record.recipeId,
+  });
+
+  assert.deepEqual(linkedRecipeRead.links, [
+    {
+      type: "supports_goal",
+      targetId: goalA.record.entity.goalId,
+    },
+    {
+      type: "supports_goal",
+      targetId: goalB.record.entity.goalId,
+    },
+    {
+      type: "addresses_condition",
+      targetId: conditionB.record.entity.conditionId,
+    },
+  ]);
+});
+
 test("markdown registry helpers keep provider and recipe rename writes on the shared canonical path", async () => {
   const vaultRoot = await makeTempDirectory("murph-markdown-registry-write-seam");
   await initializeVault({ vaultRoot });
@@ -484,16 +745,33 @@ test("markdown registry helpers keep provider and recipe rename writes on the sh
           (record as AuditLikeRecord).action === "provider_upsert",
       )
       .map((record) => ({
-        path: record.changes?.[0]?.path,
+        changes: record.changes?.map((change) => ({
+          path: change.path,
+          op: change.op,
+        })),
         targetId: record.targetIds?.[0],
       })),
     [
       {
-        path: "bank/providers/northwest-labs.md",
+        changes: [
+          {
+            path: "bank/providers/northwest-labs.md",
+            op: "create",
+          },
+        ],
         targetId: provider.providerId,
       },
       {
-        path: "bank/providers/northwest-labs-west.md",
+        changes: [
+          {
+            path: "bank/providers/northwest-labs-west.md",
+            op: "update",
+          },
+          {
+            path: "bank/providers/northwest-labs.md",
+            op: "delete",
+          },
+        ],
         targetId: provider.providerId,
       },
     ],
@@ -528,6 +806,7 @@ test("markdown registry helpers keep provider and recipe rename writes on the sh
 
 test("food, provider, and recipe deletes remove the markdown registry record cleanly", async () => {
   const vaultRoot = await makeTempDirectory("murph-bank-deletes");
+  const auditRelativePath = resolveAuditShardPath(new Date());
   await initializeVault({ vaultRoot });
 
   const provider = await upsertProvider({
@@ -563,6 +842,10 @@ test("food, provider, and recipe deletes remove the markdown registry record cle
   const deletedRecipe = await deleteRecipe({
     vaultRoot,
     recipeId: recipe.record.recipeId,
+  });
+  const auditRecords = await readJsonlRecords({
+    vaultRoot,
+    relativePath: auditRelativePath,
   });
   const operations = await Promise.all(
     (await listWriteOperationMetadataPaths(vaultRoot)).map((relativePath) =>
@@ -608,6 +891,15 @@ test("food, provider, and recipe deletes remove the markdown registry record cle
       }),
     (error: unknown) => error instanceof VaultError && error.code === "VAULT_RECIPE_MISSING",
   );
+  assert.deepEqual(selectAuditMetadata(auditRecords, "provider_delete"), [
+    { action: "provider_delete", commandName: "core.deleteProvider", op: "delete" },
+  ]);
+  assert.deepEqual(selectAuditMetadata(auditRecords, "food_delete"), [
+    { action: "food_delete", commandName: "core.deleteFood", op: "delete" },
+  ]);
+  assert.deepEqual(selectAuditMetadata(auditRecords, "recipe_delete"), [
+    { action: "recipe_delete", commandName: "core.deleteRecipe", op: "delete" },
+  ]);
   assert.deepEqual(
     operations
       .filter((operation) => operation.operationType === "provider_delete")
@@ -629,6 +921,44 @@ test("food, provider, and recipe deletes remove the markdown registry record cle
             state: "applied",
             effect: "delete",
             targetRelativePath: deletedProvider.relativePath,
+          },
+          {
+            kind: "jsonl_append",
+            state: "applied",
+            effect: "append",
+            targetRelativePath: auditRelativePath,
+          },
+        ],
+      },
+    ],
+  );
+  assert.deepEqual(
+    operations
+      .filter((operation) => operation.operationType === "food_delete")
+      .map((operation) => ({
+        status: operation.status,
+        actions: operation.actions.map((action) => ({
+          kind: action.kind,
+          state: action.state,
+          effect: action.effect,
+          targetRelativePath: action.targetRelativePath,
+        })),
+      })),
+    [
+      {
+        status: "committed",
+        actions: [
+          {
+            kind: "delete",
+            state: "applied",
+            effect: "delete",
+            targetRelativePath: deletedFood.relativePath,
+          },
+          {
+            kind: "jsonl_append",
+            state: "applied",
+            effect: "append",
+            targetRelativePath: auditRelativePath,
           },
         ],
       },
@@ -655,6 +985,12 @@ test("food, provider, and recipe deletes remove the markdown registry record cle
             state: "applied",
             effect: "delete",
             targetRelativePath: deletedRecipe.relativePath,
+          },
+          {
+            kind: "jsonl_append",
+            state: "applied",
+            effect: "append",
+            targetRelativePath: auditRelativePath,
           },
         ],
       },
@@ -713,6 +1049,21 @@ test("foods use first-class markdown registry reads for regular meals and staple
     status: "active",
     kind: "acai bowl",
     vendor: "Neighborhood Acai Bar",
+    serving: "1 bowl",
+    nutrition: {
+      perServing: {
+        calories: 540,
+        proteinGrams: 11,
+        carbsGrams: 68,
+        fatGrams: 24,
+        fiberGrams: 11,
+      },
+      provenance: {
+        source: "label",
+        confidence: "medium",
+        sourceDetail: "Menu board plus saved toppings.",
+      },
+    },
     aliases: ["usual acai bowl", "regular acai bowl", "usual acai bowl"],
     ingredients: ["banana", "acai base", "banana", "granola"],
     tags: ["breakfast", "favorite"],
@@ -729,6 +1080,21 @@ test("foods use first-class markdown registry reads for regular meals and staple
     status: "active",
     kind: "acai bowl",
     vendor: "Neighborhood Acai Bar",
+    serving: "1 bowl",
+    nutrition: {
+      perServing: {
+        calories: 540,
+        proteinGrams: 11,
+        carbsGrams: 68,
+        fatGrams: 24,
+        fiberGrams: 11,
+      },
+      provenance: {
+        source: "label",
+        confidence: "medium",
+        sourceDetail: "Menu board plus saved toppings.",
+      },
+    },
     aliases: ["usual acai bowl", "regular acai bowl", "usual acai bowl"],
     ingredients: ["banana", "acai base", "banana", "granola"],
     tags: ["breakfast", "favorite"],
@@ -769,11 +1135,26 @@ test("foods use first-class markdown registry reads for regular meals and staple
   assert.equal(readFoodById.slug, createdFood.record.slug);
   assert.deepEqual(readFoodById.aliases, ["usual acai bowl", "regular acai bowl"]);
   assert.deepEqual(readFoodById.ingredients, ["banana", "acai base", "granola"]);
+  assert.deepEqual(readFoodById.nutrition, {
+    perServing: {
+      calories: 540,
+      proteinGrams: 11,
+      carbsGrams: 68,
+      fatGrams: 24,
+      fiberGrams: 11,
+    },
+    provenance: {
+      source: "label",
+      confidence: "medium",
+      sourceDetail: "Menu board plus saved toppings.",
+    },
+  });
   assert.deepEqual(readFoodById.autoLogDaily, {
     time: "08:00",
   });
   assert.equal(readFoodBySlug.foodId, createdFood.record.foodId);
   assert.equal(readFoodBySlug.title, "Usual Acai Bowl");
+  assert.equal(readFoodBySlug.nutrition?.perServing?.calories, 540);
   assert.deepEqual(readFoodBySlug.autoLogDaily, {
     time: "08:00",
   });
@@ -781,8 +1162,10 @@ test("foods use first-class markdown registry reads for regular meals and staple
   assert.equal(listedFoods[1]?.foodId, createdFood.record.foodId);
   assert.match(foodMarkdown, /foodId:/u);
   assert.match(foodMarkdown, /autoLogDaily:/u);
+  assert.match(foodMarkdown, /nutrition:/u);
   assert.match(foodMarkdown, /## Aliases/u);
   assert.match(foodMarkdown, /## Ingredients/u);
+  assert.match(foodMarkdown, /## Nutrition per serving/u);
   assert.match(foodMarkdown, /Auto-log daily/u);
   assert.doesNotMatch(foodMarkdown, /^attachedProtocolRefs:/mu);
 
@@ -1131,6 +1514,91 @@ templateText: Garage day template.
       error instanceof VaultError &&
       error.code === "VAULT_INVALID_INPUT" &&
       error.message === "workoutFormatId is required.",
+  );
+});
+
+test("workout formats normalize blank status and rich template formatting", async () => {
+  const vaultRoot = await makeTempDirectory("murph-workout-format-rich-template");
+  await initializeVault({ vaultRoot });
+  const blankStatus = " ".repeat(3);
+
+  const created = await upsertWorkoutFormat({
+    vaultRoot,
+    workoutFormatId: "wfmt_01JNYB6M9A6W4K2N8P3Q7R5S5A",
+    title: "Accessory day",
+    slug: "accessory-day",
+    // @ts-expect-error Intentional runtime fallback case for blank status normalization.
+    status: blankStatus,
+    activityType: "strength training",
+    durationMinutes: 35,
+    template: {
+      routineNote: "Use comfortable loads.",
+      exercises: [
+        {
+          name: "carry",
+          order: 2,
+          groupId: "upper-body",
+          plannedSets: [
+            {
+              order: 1,
+              type: "warmup",
+              targetDurationSeconds: 60,
+            },
+            {
+              order: 2,
+              targetDistanceMeters: 100,
+              targetRpe: 8,
+            },
+          ],
+        },
+        {
+          name: "row",
+          order: 1,
+          mode: "weight_reps",
+          plannedSets: [
+            {
+              order: 1,
+              targetReps: 12,
+              targetWeight: 40,
+              targetWeightUnit: "lb",
+            },
+            {
+              order: 2,
+            },
+          ],
+        },
+      ],
+    },
+    templateText: "Original session text.",
+    note: "Keep the weight controlled.",
+  });
+  const read = await readWorkoutFormat({
+    vaultRoot,
+    workoutFormatId: created.record.workoutFormatId,
+  });
+
+  assert.equal(created.record.status, "active");
+  assert.equal(read.status, "active");
+  assert.match(read.markdown, /## Template Exercises/);
+  assert.match(read.markdown, /carry \[upper-body\]: warmup · 60s; 100m · RPE 8/);
+  assert.match(read.markdown, /row \(weight_reps\): 12 reps · 40 lb; set 2/);
+  assert.match(read.markdown, /## Saved workout text/);
+  assert.match(read.markdown, /Default duration: 35 min/);
+
+  await assert.rejects(
+    () =>
+      upsertWorkoutFormat({
+        vaultRoot,
+        title: "Broken activity type",
+        activityType: "!!!",
+        template: {
+          exercises: [],
+        },
+      }),
+    (error: unknown) =>
+      error instanceof VaultError &&
+      error.code === "VAULT_INVALID_INPUT" &&
+      error.message === "slug could not be normalized to a slug.",
   );
 });
 
@@ -1505,6 +1973,196 @@ test("condition and allergy reads reject non-canonical frontmatter after the har
   );
 });
 
+test("conditions and allergies normalize repeated relations and enforce timeline rules", async () => {
+  const vaultRoot = await makeTempDirectory("murph-condition-allergy-normalization");
+  await initializeVault({ vaultRoot });
+
+  const goalA = await upsertGoal({
+    vaultRoot,
+    goalId: "goal_01JNYB6M9A6W4K2N8P3Q7R5S6A",
+    title: "Goal A",
+    window: {
+      startAt: "2026-03-01",
+    },
+  });
+  const goalB = await upsertGoal({
+    vaultRoot,
+    goalId: "goal_01JNYB6M9A6W4K2N8P3Q7R5S6B",
+    title: "Goal B",
+    window: {
+      startAt: "2026-03-02",
+    },
+  });
+  const protocolA = await upsertProtocolItem({
+    vaultRoot,
+    protocolId: "prot_01JNYB6M9A6W4K2N8P3Q7R5S6A",
+    title: "Protocol A",
+    kind: "supplement",
+    status: "active",
+    startedOn: "2026-03-03",
+  });
+  const protocolB = await upsertProtocolItem({
+    vaultRoot,
+    protocolId: "prot_01JNYB6M9A6W4K2N8P3Q7R5S6B",
+    title: "Protocol B",
+    kind: "supplement",
+    status: "active",
+    startedOn: "2026-03-04",
+  });
+
+  const condition = await upsertCondition({
+    vaultRoot,
+    conditionId: "cond_01JNYB6M9A6W4K2N8P3Q7R5S6A",
+    title: "Migraine",
+    clinicalStatus: "resolved",
+    verificationStatus: "confirmed",
+    assertedOn: "2026-03-01",
+    resolvedOn: "2026-03-10",
+    relatedGoalIds: [goalB.record.entity.goalId, goalA.record.entity.goalId, goalA.record.entity.goalId],
+    relatedProtocolIds: [
+      protocolB.record.entity.protocolId,
+      protocolA.record.entity.protocolId,
+      protocolA.record.entity.protocolId,
+    ],
+    note: "Likely worsened by sleep disruption.",
+  });
+  const allergy = await upsertAllergy({
+    vaultRoot,
+    allergyId: "alg_01JNYB6M9A6W4K2N8P3Q7R5S6A",
+    title: "Penicillin allergy",
+    substance: "penicillin",
+    status: "active",
+    criticality: "high",
+    reaction: "rash",
+    recordedOn: "2018-04-10",
+    relatedConditionIds: [
+      condition.record.entity.conditionId,
+      condition.record.entity.conditionId,
+    ],
+    note: "Avoid beta-lactam exposure until formally reviewed.",
+  });
+  const conditionRead = await readCondition({
+    vaultRoot,
+    conditionId: condition.record.entity.conditionId,
+  });
+  const allergyRead = await readAllergy({
+    vaultRoot,
+    allergyId: allergy.record.entity.allergyId,
+  });
+
+  assert.deepEqual(conditionRead.entity.relatedGoalIds, [
+    goalA.record.entity.goalId,
+    goalB.record.entity.goalId,
+  ]);
+  assert.deepEqual(conditionRead.entity.relatedProtocolIds, [
+    protocolA.record.entity.protocolId,
+    protocolB.record.entity.protocolId,
+  ]);
+  assert.deepEqual(conditionRead.entity.links, [
+    {
+      type: "related_goal",
+      targetId: goalA.record.entity.goalId,
+    },
+    {
+      type: "related_goal",
+      targetId: goalB.record.entity.goalId,
+    },
+    {
+      type: "related_protocol",
+      targetId: protocolA.record.entity.protocolId,
+    },
+    {
+      type: "related_protocol",
+      targetId: protocolB.record.entity.protocolId,
+    },
+  ]);
+  assert.deepEqual(allergyRead.entity.relatedConditionIds, [condition.record.entity.conditionId]);
+  assert.deepEqual(allergyRead.entity.links, [
+    {
+      type: "related_condition",
+      targetId: condition.record.entity.conditionId,
+    },
+  ]);
+  assert.match(conditionRead.document.markdown, /## Related Goals/);
+  assert.match(conditionRead.document.markdown, /## Related Protocols/);
+  assert.match(allergyRead.document.markdown, /## Related Conditions/);
+
+  const extraCondition = await upsertCondition({
+    vaultRoot,
+    conditionId: "cond_01JNYB6M9A6W4K2N8P3Q7R5S6C",
+    title: "Asthma",
+    clinicalStatus: "active",
+  });
+  const linkedAllergy = await upsertAllergy({
+    vaultRoot,
+    allergyId: "alg_01JNYB6M9A6W4K2N8P3Q7R5S6B",
+    title: "Shellfish allergy",
+    substance: "shellfish",
+    links: [
+      {
+        type: "related_condition",
+        targetId: extraCondition.record.entity.conditionId,
+      },
+      {
+        type: "related_condition",
+        targetId: condition.record.entity.conditionId,
+      },
+      {
+        type: "related_condition",
+        targetId: condition.record.entity.conditionId,
+      },
+    ],
+  });
+  const linkedAllergyRead = await readAllergy({
+    vaultRoot,
+    allergyId: linkedAllergy.record.entity.allergyId,
+  });
+
+  assert.deepEqual(linkedAllergyRead.entity.relatedConditionIds, [
+    condition.record.entity.conditionId,
+    extraCondition.record.entity.conditionId,
+  ]);
+  assert.deepEqual(linkedAllergyRead.entity.links, [
+    {
+      type: "related_condition",
+      targetId: condition.record.entity.conditionId,
+    },
+    {
+      type: "related_condition",
+      targetId: extraCondition.record.entity.conditionId,
+    },
+  ]);
+
+  await assert.rejects(
+    () =>
+      upsertCondition({
+        vaultRoot,
+        title: "Active resolved date",
+        clinicalStatus: "active",
+        resolvedOn: "2026-03-02",
+      }),
+    (error: unknown) =>
+      error instanceof VaultError &&
+      error.code === "VAULT_INVALID_INPUT" &&
+      error.message === "resolvedOn requires clinicalStatus=resolved.",
+  );
+
+  await assert.rejects(
+    () =>
+      upsertCondition({
+        vaultRoot,
+        title: "Backwards recovery",
+        clinicalStatus: "resolved",
+        assertedOn: "2026-03-10",
+        resolvedOn: "2026-03-09",
+      }),
+    (error: unknown) =>
+      error instanceof VaultError &&
+      error.code === "VAULT_INVALID_INPUT" &&
+      error.message === "resolvedOn must be on or after assertedOn.",
+  );
+});
+
 test("protocols support medication and supplement groups plus stop handling", async () => {
   const vaultRoot = await makeTempDirectory("murph-protocols");
   await initializeVault({ vaultRoot });
@@ -1667,7 +2325,7 @@ test("protocols support medication and supplement groups plus stop handling", as
   assert.ok(protocolOperations.every((operation) => operation.status === "committed"));
 });
 
-test("protocol reads with conflicting protocolId and slug currently return the first sorted selector match", async () => {
+test("protocol reads reject conflicting protocolId and slug selectors", async () => {
   const vaultRoot = await makeTempDirectory("murph-protocol-read-conflict");
   await initializeVault({ vaultRoot });
 
@@ -1688,14 +2346,18 @@ test("protocol reads with conflicting protocolId and slug currently return the f
     startedOn: "2026-02-02",
   });
 
-  const readByConflictingSelectors = await readProtocolItem({
-    vaultRoot,
-    protocolId: supplement.record.entity.protocolId,
-    slug: medication.record.entity.slug,
-  });
-
-  assert.equal(readByConflictingSelectors.entity.protocolId, medication.record.entity.protocolId);
-  assert.equal(readByConflictingSelectors.entity.group, "medication");
+  await assert.rejects(
+    () =>
+      readProtocolItem({
+        vaultRoot,
+        protocolId: supplement.record.entity.protocolId,
+        slug: medication.record.entity.slug,
+      }),
+    (error: unknown) =>
+      error instanceof VaultError &&
+      error.code === "VAULT_PROTOCOL_CONFLICT" &&
+      error.message === "protocolId and slug resolve to different protocol records.",
+  );
 });
 
 test("protocol reads reject ambiguous slugs across groups unless group is supplied", async () => {
@@ -1776,5 +2438,246 @@ test("protocol upserts reject ambiguous slugs across groups unless protocolId or
       error instanceof VaultError &&
       error.code === "VAULT_PROTOCOL_CONFLICT" &&
       error.message === "slug resolves to multiple protocol records; include group or protocolId.",
+  );
+});
+
+test("protocols normalize repeated relations, support ingredient edge cases, and reject bad timing", async () => {
+  const vaultRoot = await makeTempDirectory("murph-protocol-normalization");
+  await initializeVault({ vaultRoot });
+
+  const goalA = await upsertGoal({
+    vaultRoot,
+    goalId: "goal_01JNYB6M9A6W4K2N8P3Q7R5S7A",
+    title: "Goal A",
+    window: {
+      startAt: "2026-03-01",
+    },
+  });
+  const goalB = await upsertGoal({
+    vaultRoot,
+    goalId: "goal_01JNYB6M9A6W4K2N8P3Q7R5S7B",
+    title: "Goal B",
+    window: {
+      startAt: "2026-03-02",
+    },
+  });
+  const conditionA = await upsertCondition({
+    vaultRoot,
+    conditionId: "cond_01JNYB6M9A6W4K2N8P3Q7R5S7A",
+    title: "Condition A",
+    clinicalStatus: "active",
+  });
+  const conditionB = await upsertCondition({
+    vaultRoot,
+    conditionId: "cond_01JNYB6M9A6W4K2N8P3Q7R5S7B",
+    title: "Condition B",
+    clinicalStatus: "active",
+  });
+  const peerProtocol = await upsertProtocolItem({
+    vaultRoot,
+    protocolId: "prot_01JNYB6M9A6W4K2N8P3Q7R5S7A",
+    title: "Peer protocol",
+    kind: "supplement",
+    status: "active",
+    startedOn: "2026-03-03",
+  });
+
+  const created = await upsertProtocolItem({
+    vaultRoot,
+    protocolId: "prot_01JNYB6M9A6W4K2N8P3Q7R5S7B",
+    title: "Recovery stack",
+    slug: "recovery-stack",
+    kind: "supplement",
+    group: "supplement",
+    status: "active",
+    startedOn: "2026-03-04",
+    substance: "omega-3",
+    dose: 1000,
+    unit: "mg",
+    schedule: "daily",
+    brand: "Example",
+    manufacturer: "Example",
+    servingSize: "2 softgels",
+    ingredients: [
+      {
+        compound: "EPA",
+        note: "Primary omega-3 source.",
+      },
+      {
+        compound: "DHA",
+        amount: 400,
+        unit: "mg",
+        active: false,
+      },
+      {
+        compound: "Creatine",
+        amount: 5,
+        unit: "g",
+        active: true,
+      },
+    ],
+    relatedGoalIds: [goalB.record.entity.goalId, goalA.record.entity.goalId, goalA.record.entity.goalId],
+    relatedConditionIds: [
+      conditionB.record.entity.conditionId,
+      conditionA.record.entity.conditionId,
+      conditionA.record.entity.conditionId,
+    ],
+    relatedProtocolIds: [
+      peerProtocol.record.entity.protocolId,
+      peerProtocol.record.entity.protocolId,
+    ],
+  });
+  const read = await readProtocolItem({
+    vaultRoot,
+    protocolId: created.record.entity.protocolId,
+  });
+  const cleared = await upsertProtocolItem({
+    vaultRoot,
+    protocolId: created.record.entity.protocolId,
+    relatedGoalIds: [],
+    relatedConditionIds: [],
+    relatedProtocolIds: [],
+  });
+  const clearedRead = await readProtocolItem({
+    vaultRoot,
+    protocolId: created.record.entity.protocolId,
+  });
+
+  assert.deepEqual(created.record.entity.relatedGoalIds, [
+    goalA.record.entity.goalId,
+    goalB.record.entity.goalId,
+  ]);
+  assert.deepEqual(created.record.entity.relatedConditionIds, [
+    conditionA.record.entity.conditionId,
+    conditionB.record.entity.conditionId,
+  ]);
+  assert.deepEqual(created.record.entity.relatedProtocolIds, [peerProtocol.record.entity.protocolId]);
+  assert.deepEqual(read.entity.links, [
+    {
+      type: "supports_goal",
+      targetId: goalA.record.entity.goalId,
+    },
+    {
+      type: "supports_goal",
+      targetId: goalB.record.entity.goalId,
+    },
+    {
+      type: "addresses_condition",
+      targetId: conditionA.record.entity.conditionId,
+    },
+    {
+      type: "addresses_condition",
+      targetId: conditionB.record.entity.conditionId,
+    },
+    {
+      type: "related_protocol",
+      targetId: peerProtocol.record.entity.protocolId,
+    },
+  ]);
+  assert.match(read.document.markdown, /EPA — amount not specified/);
+  assert.match(read.document.markdown, /DHA — 400 mg; inactive/);
+  assert.match(read.document.markdown, /Creatine — 5 g/);
+  assert.match(read.document.markdown, /## Related Goals/);
+  assert.match(read.document.markdown, /## Related Conditions/);
+  assert.match(read.document.markdown, /## Related Protocols/);
+  assert.equal(cleared.created, false);
+  assert.deepEqual(clearedRead.entity.relatedGoalIds, undefined);
+  assert.deepEqual(clearedRead.entity.relatedConditionIds, undefined);
+  assert.deepEqual(clearedRead.entity.relatedProtocolIds, undefined);
+  assert.deepEqual(clearedRead.entity.links, []);
+  assert.match(clearedRead.document.markdown, /## Related Goals[\s\S]*- none/);
+  assert.match(clearedRead.document.markdown, /## Related Conditions[\s\S]*- none/);
+  assert.match(clearedRead.document.markdown, /## Related Protocols[\s\S]*- none/);
+
+  await assert.rejects(
+    () =>
+      upsertProtocolItem({
+        vaultRoot,
+        title: "Missing startedOn",
+        kind: "supplement",
+        startedOn: "",
+      }),
+    (error: unknown) =>
+      error instanceof VaultError &&
+      error.code === "VAULT_INVALID_INPUT" &&
+      error.message === "startedOn is required.",
+  );
+
+  await assert.rejects(
+    () =>
+      upsertProtocolItem({
+        vaultRoot,
+        title: "Backwards stop",
+        kind: "supplement",
+        startedOn: "2026-03-04",
+        stoppedOn: "2026-03-03",
+      }),
+    (error: unknown) =>
+      error instanceof VaultError &&
+      error.code === "VAULT_INVALID_INPUT" &&
+      error.message === "stoppedOn must be on or after startedOn.",
+  );
+
+  await assert.rejects(
+    () =>
+      upsertProtocolItem({
+        vaultRoot,
+        title: "Stopped while active",
+        kind: "supplement",
+        status: "active",
+        startedOn: "2026-03-04",
+        stoppedOn: "2026-03-05",
+      }),
+    (error: unknown) =>
+      error instanceof VaultError &&
+      error.code === "VAULT_INVALID_INPUT" &&
+      error.message === "stoppedOn requires status=stopped or completed.",
+  );
+
+  await assert.rejects(
+    () =>
+      upsertProtocolItem({
+        vaultRoot,
+        title: "Stopped without date",
+        kind: "supplement",
+        status: "stopped",
+        startedOn: "2026-03-04",
+      }),
+    (error: unknown) =>
+      error instanceof VaultError &&
+      error.code === "VAULT_INVALID_INPUT" &&
+      error.message === "status=stopped requires stoppedOn.",
+  );
+
+  await fs.writeFile(
+    path.join(vaultRoot, "bank/protocols/legacy-protocol.md"),
+    [
+      "---",
+      "schemaVersion: murph.frontmatter.protocol.v1",
+      "docType: protocol",
+      "protocolId: prot_01JNYB6M9A6W4K2N8P3Q7R5S7C",
+      "slug: legacy-protocol",
+      "title: Legacy protocol",
+      "kind: supplement",
+      "status: active",
+      "startedOn: 2026-03-05",
+      "---",
+      "",
+      "# Legacy protocol",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+
+  await assert.rejects(
+    () =>
+      readProtocolItem({
+        vaultRoot,
+        slug: "legacy-protocol",
+      }),
+    (error: unknown) =>
+      error instanceof VaultError &&
+      error.code === "VAULT_INVALID_PROTOCOL" &&
+      error.message === "Protocol path is missing a group directory.",
   );
 });

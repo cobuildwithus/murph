@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { createHostedPendingUsageDirtyUserStore } from "../src/usage-store/dirty-users.ts";
 import {
-  createHostedPendingUsageDirtyUserStore,
   createHostedPendingUsageStore,
 } from "../src/usage-store.ts";
 

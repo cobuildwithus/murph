@@ -7,9 +7,7 @@ import {
 import {
   getAssistantChannelAdapter,
   resolveDeliveryCandidates,
-  resolveImessageDeliveryCandidates,
   sendEmailMessage,
-  sendImessageMessage,
   sendLinqMessage,
   sendTelegramMessage,
   type AssistantChannelDependencies,
@@ -40,8 +38,6 @@ import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
 export {
   sendEmailMessage,
-  resolveImessageDeliveryCandidates,
-  sendImessageMessage,
   sendLinqMessage,
   sendTelegramMessage,
 }

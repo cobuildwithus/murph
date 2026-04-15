@@ -31,6 +31,8 @@ Constraints:
 Final response contract:
 
 - Return one downloadable `.patch` attachment containing a single unified diff for every change you chose to make in this pass.
+- Any returned patch must include at least one non-Markdown repo file change under code, tests, scripts, or config. Do not satisfy this task with a docs-only patch to `agent-docs/**`, `docs/**`, `README.md`, or other `*.md` files.
+- If a doc update would help explain a code refactor, include it only alongside those non-Markdown changes, not as the only patch content.
 - Also return a short plain-text summary that says what you changed, what those changes fix or improve, and any important residual concerns you left untouched.
 - Keep the summary concise and factual; do not return a long prose review or any alternate structured findings template.
-- If you find no safe actionable changes, return a short plain-text summary saying so and attach no patch.
+- If you find no safe actionable non-Markdown repo change, return a short plain-text summary saying so and attach no patch.

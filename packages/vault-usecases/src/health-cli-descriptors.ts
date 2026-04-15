@@ -1,17 +1,10 @@
 import {
-  allergyRegistryEntityDefinition,
   commandNounCapabilityByNoun,
-  conditionRegistryEntityDefinition,
-  familyRegistryEntityDefinition,
-  geneticsRegistryEntityDefinition,
-  goalRegistryEntityDefinition,
   healthEntityDefinitions,
-  protocolRegistryEntityDefinition,
   type JsonObject,
   type CommandCapability,
   type CommandCapabilityBundleId,
   type HealthEntityDefinition,
-  type HealthEntityDefinitionWithRegistry,
   type HealthEntityKind,
 } from "@murphai/contracts";
 import { z } from "zod";
@@ -32,20 +25,17 @@ import {
   showResultSchema,
 } from "@murphai/operator-config/vault-cli-contracts";
 import {
-  getHealthRegistryCommandMetadata,
-  type HealthRegistryCommandKind,
-} from "./health-registry-command-metadata.js";
+  getHealthRegistryFamily,
+  healthRegistryFamilies,
+  type HealthRegistryFamilyKind,
+} from "./health-registry-families.js";
 
 export type { JsonObject } from "./health-cli-method-types.js";
 export { getHealthRegistryCommandMetadata } from "./health-registry-command-metadata.js";
 
 export type HealthListFilterCapability = "date-range" | "kind" | "status";
-export type HealthUpsertInputCapability = "profile-snapshot-envelope";
-export type HealthUpsertResultCapability =
-  | "path"
-  | "ledger-file"
-  | "current-profile-path"
-  | "profile-payload";
+export type HealthUpsertInputCapability = never;
+export type HealthUpsertResultCapability = "path" | "ledger-file";
 
 export interface HealthCoreDescriptor {
   inputCapabilities: readonly HealthUpsertInputCapability[];
@@ -145,7 +135,7 @@ export const healthListResultSchema = z.object({
   nextCursor: z.string().min(1).nullable(),
 });
 
-type StatusFilteredRegistryDescriptorCommandName = HealthRegistryCommandKind;
+type StatusFilteredRegistryDescriptorCommandName = HealthRegistryFamilyKind;
 
 interface StatusFilteredRegistryDescriptorInput {
   commandDescription: string;
@@ -202,27 +192,20 @@ function buildStatusFilteredRegistryDescriptorExtension(
 }
 
 function buildSharedStatusFilteredRegistryDescriptorExtension(
-  definition: HealthEntityDefinitionWithRegistry & {
-    kind: StatusFilteredRegistryDescriptorCommandName;
-  },
+  kind: StatusFilteredRegistryDescriptorCommandName,
 ): HealthEntityDescriptorExtension {
-  const command = getHealthRegistryCommandMetadata(definition.kind);
-  const resultIdField = definition.registry.idField;
-  const supportsStatusFilter = definition.registry.statusKeys.length > 0;
-
-  if (!resultIdField) {
-    throw new Error(`Registry entity "${definition.kind}" is missing a canonical id field.`);
-  }
+  const family = getHealthRegistryFamily(kind);
+  const { command, definition } = family;
 
   const extension = buildStatusFilteredRegistryDescriptorExtension({
     commandDescription: command.commandDescription,
     commandName: command.commandName,
     listServiceMethod: command.listServiceMethod,
-    listStatusDescription: supportsStatusFilter ? command.listStatusDescription : undefined,
+    listStatusDescription: family.supportsStatusFilter ? command.listStatusDescription : undefined,
     noun: definition.noun,
     payloadFile: command.payloadFile,
     pluralNoun: definition.plural,
-    resultIdField,
+    resultIdField: family.idField,
     runtimeListMethod: command.runtimeListMethod,
     runtimeMethod: command.runtimeMethod,
     runtimeShowMethod: command.runtimeShowMethod,
@@ -232,7 +215,7 @@ function buildSharedStatusFilteredRegistryDescriptorExtension(
     upsertServiceMethod: command.upsertServiceMethod,
   });
 
-  if (supportsStatusFilter) {
+  if (family.supportsStatusFilter) {
     return extension;
   }
 
@@ -247,15 +230,16 @@ function buildSharedStatusFilteredRegistryDescriptorExtension(
   };
 }
 
-function narrowStatusFilteredRegistryDefinition<TKind extends StatusFilteredRegistryDescriptorCommandName>(
-  definition: HealthEntityDefinitionWithRegistry,
-  kind: TKind,
-): HealthEntityDefinitionWithRegistry & { kind: TKind } {
-  if (definition.kind !== kind) {
-    throw new Error(`Expected registry entity "${kind}" but received "${definition.kind}".`);
-  }
-
-  return definition as HealthEntityDefinitionWithRegistry & { kind: TKind };
+function buildSharedStatusFilteredRegistryDescriptorExtensions(): Record<
+  StatusFilteredRegistryDescriptorCommandName,
+  HealthEntityDescriptorExtension
+> {
+  return Object.fromEntries(
+    healthRegistryFamilies.map((family) => [
+      family.definition.kind,
+      buildSharedStatusFilteredRegistryDescriptorExtension(family.definition.kind),
+    ]),
+  ) as Record<StatusFilteredRegistryDescriptorCommandName, HealthEntityDescriptorExtension>;
 }
 
 const checkedHealthEntityDescriptorExtensions = {
@@ -269,120 +253,7 @@ const checkedHealthEntityDescriptorExtensions = {
       showServiceMethod: "showAssessment",
     },
   },
-  profile: {
-    command: {
-      commandName: "profile",
-      description: "Profile snapshot commands for the health extension surface.",
-      descriptions: {
-        list: "List profile snapshots through the health read model.",
-        scaffold: "Emit a payload template for a profile snapshot upsert.",
-        show: "Show one profile snapshot or the derived current profile.",
-        upsert: "Upsert one profile snapshot from a JSON payload file or stdin.",
-      },
-      examples: {
-        show: [
-          {
-            args: {
-              id: "current",
-            },
-            description: "Show the derived current profile.",
-            options: {
-              vault: "./vault",
-            },
-          },
-          {
-            args: {
-              id: "<snapshot-id>",
-            },
-            description: "Show one saved profile snapshot.",
-            options: {
-              vault: "./vault",
-            },
-          },
-        ],
-        upsert: [
-          {
-            description: "Upsert one profile snapshot from a JSON payload file.",
-            options: {
-              input: "@profile-snapshot.json",
-              vault: "./vault",
-            },
-          },
-        ],
-      },
-      hints: {
-        show: "Use `current` to read the derived profile or pass a snapshot id to inspect one saved payload.",
-      },
-      payloadFile: "profile-snapshot.json",
-      showId: {
-        description: "Snapshot id or `current`.",
-        example: "current",
-      },
-    },
-    core: {
-      inputCapabilities: ["profile-snapshot-envelope"],
-      resultIdField: "snapshotId",
-      resultCapabilities: ["ledger-file", "current-profile-path", "profile-payload"],
-      runtimeMethod: "appendProfileSnapshot",
-      scaffoldNoun: "profile",
-      scaffoldServiceMethod: "scaffoldProfileSnapshot",
-      upsertServiceMethod: "upsertProfileSnapshot",
-    },
-    query: {
-      genericListFilterCapabilities: ["date-range", "status"],
-      listServiceMethod: "listProfileSnapshots",
-      notFoundLabel: "profile",
-      runtimeListMethod: "listProfileSnapshots",
-      runtimeShowMethod: "showProfile",
-      showServiceMethod: "showProfile",
-    },
-  },
-  goal: buildSharedStatusFilteredRegistryDescriptorExtension(
-    narrowStatusFilteredRegistryDefinition(goalRegistryEntityDefinition, "goal"),
-  ),
-  condition: buildSharedStatusFilteredRegistryDescriptorExtension(
-    narrowStatusFilteredRegistryDefinition(conditionRegistryEntityDefinition, "condition"),
-  ),
-  allergy: buildSharedStatusFilteredRegistryDescriptorExtension(
-    narrowStatusFilteredRegistryDefinition(allergyRegistryEntityDefinition, "allergy"),
-  ),
-  protocol: buildSharedStatusFilteredRegistryDescriptorExtension(
-    narrowStatusFilteredRegistryDefinition(protocolRegistryEntityDefinition, "protocol"),
-  ),
-  history: {
-    command: {
-      commandName: "history",
-      description: "Timed health history commands for the extension surface.",
-      descriptions: {
-        list: "List timed history events through the health read model.",
-        scaffold: "Emit a payload template for timed history events.",
-        show: "Show one timed history event.",
-        upsert: "Append one timed history event from a JSON payload file or stdin.",
-      },
-      listStatusDescription: "Optional health-event status to filter by.",
-      payloadFile: "history.json",
-      showId: {
-        description: "Timed history event id to show.",
-        example: "<history-event-id>",
-      },
-    },
-    core: {
-      resultIdField: "eventId",
-      resultCapabilities: ["ledger-file"],
-      runtimeMethod: "appendHistoryEvent",
-      scaffoldNoun: "history",
-      scaffoldServiceMethod: "scaffoldHistoryEvent",
-      upsertServiceMethod: "upsertHistoryEvent",
-    },
-    query: {
-      genericListFilterCapabilities: ["kind", "date-range", "status"],
-      listServiceMethod: "listHistoryEvents",
-      notFoundLabel: "history event",
-      runtimeListMethod: "listHistoryEvents",
-      runtimeShowMethod: "showHistoryEvent",
-      showServiceMethod: "showHistoryEvent",
-    },
-  },
+  ...buildSharedStatusFilteredRegistryDescriptorExtensions(),
   blood_test: {
     command: {
       commandName: "blood-test",
@@ -417,12 +288,6 @@ const checkedHealthEntityDescriptorExtensions = {
       showServiceMethod: "showBloodTest",
     },
   },
-  family: buildSharedStatusFilteredRegistryDescriptorExtension(
-    narrowStatusFilteredRegistryDefinition(familyRegistryEntityDefinition, "family"),
-  ),
-  genetics: buildSharedStatusFilteredRegistryDescriptorExtension(
-    narrowStatusFilteredRegistryDefinition(geneticsRegistryEntityDefinition, "genetics"),
-  ),
 } as const satisfies Record<HealthEntityKind, HealthEntityDescriptorExtension>;
 
 function requireScaffoldTemplate(definition: HealthEntityDefinition): JsonObject {

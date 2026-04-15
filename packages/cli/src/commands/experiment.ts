@@ -3,10 +3,10 @@ import { Cli, z } from 'incur'
 import {
   inputFileOptionSchema,
   normalizeInputFileOption,
-} from './health-command-factory.js'
+} from '@murphai/vault-usecases'
 import {
   experimentCreateResultSchema,
-  isoTimestampSchema,
+  occurredAtOptionSchema,
   listItemSchema,
   localDateSchema,
   pathSchema,
@@ -14,7 +14,8 @@ import {
   slugSchema,
 } from '@murphai/operator-config/vault-cli-contracts'
 import type { VaultServices } from '@murphai/vault-usecases'
-import { registerLifecycleEntityGroup } from './health-command-factory.js'
+import { registerLifecycleEntityGroup } from './entity-command-groups.js'
+import { normalizeOccurredAtOption } from './occurred-at-option.js'
 
 const experimentStatusSchema = z.enum(EXPERIMENT_STATUSES)
 
@@ -139,9 +140,9 @@ export function registerExperimentCommands(
       argName: 'id',
       argSchema: z.string().min(1).describe('Experiment id or slug to stop.'),
       options: {
-        occurredAt: isoTimestampSchema
+        occurredAt: occurredAtOptionSchema
           .optional()
-          .describe('Optional stop timestamp in ISO 8601 form.'),
+          .describe('Optional stop timestamp in ISO 8601 form or YYYY-MM-DD form.'),
         note: z.string().min(1).optional().describe('Optional stop note.'),
       },
       output: experimentLifecycleResultSchema,
@@ -150,8 +151,11 @@ export function registerExperimentCommands(
           vault: input.vault,
           requestId: input.requestId,
           lookup: input.id,
-          occurredAt:
-            typeof input.occurredAt === 'string' ? input.occurredAt : undefined,
+          occurredAt: await normalizeOccurredAtOption({
+            vault: input.vault,
+            occurredAt:
+              typeof input.occurredAt === 'string' ? input.occurredAt : undefined,
+          }),
           note: typeof input.note === 'string' ? input.note : undefined,
         })
       },

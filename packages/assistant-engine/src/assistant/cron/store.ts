@@ -40,7 +40,6 @@ export interface AssistantCronTargetInput {
   alias?: string | null
   channel?: string | null
   deliveryTarget?: string | null
-  deliverResponse?: boolean
   identityId?: string | null
   participantId?: string | null
   sessionId?: string | null
@@ -228,7 +227,6 @@ export function buildAssistantCronTarget(
     participantId: normalizeNullableString(input.participantId),
     sourceThreadId: normalizeNullableString(input.sourceThreadId),
     deliveryTarget: normalizeNullableString(input.deliveryTarget),
-    deliverResponse: input.deliverResponse ?? false,
   }
 }
 

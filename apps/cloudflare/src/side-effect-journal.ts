@@ -1,9 +1,9 @@
 import {
-  parseHostedExecutionSideEffectRecord,
-  sameHostedExecutionAssistantDelivery,
-  sameHostedExecutionSideEffectIdentity,
-  type HostedExecutionSideEffectRecord,
-} from "@murphai/hosted-execution";
+  parseHostedAssistantDeliveryRecord,
+  sameHostedAssistantDeliveryReceipt,
+  sameHostedAssistantDeliverySideEffectIdentity,
+  type HostedAssistantDeliveryRecord,
+} from "@murphai/hosted-execution/side-effects";
 
 import type { R2BucketLike } from "./bundle-store.ts";
 import {
@@ -17,42 +17,40 @@ import {
   writeEncryptedR2Json,
 } from "./crypto.js";
 
-export class HostedExecutionSideEffectConflictError extends Error {
+export class HostedAssistantDeliveryConflictError extends Error {
   constructor(message: string) {
     super(message);
-    this.name = "HostedExecutionSideEffectConflictError";
+    this.name = "HostedAssistantDeliveryConflictError";
   }
 }
 
-interface HostedExecutionSideEffectJournalContext {
+interface HostedAssistantDeliveryJournalContext {
   bucket: R2BucketLike;
   key: Uint8Array;
   keyId: string;
   keysById?: Readonly<Record<string, Uint8Array>>;
 }
 
-export interface HostedExecutionSideEffectJournalStore {
+export interface HostedAssistantDeliveryJournalStore {
   deletePrepared(input: {
     effectId: string;
     fingerprint: string;
-    kind: HostedExecutionSideEffectRecord["kind"];
     userId: string;
   }): Promise<boolean>;
   read(input: {
     effectId: string;
     fingerprint: string;
-    kind: HostedExecutionSideEffectRecord["kind"];
     userId: string;
-  }): Promise<HostedExecutionSideEffectRecord | null>;
+  }): Promise<HostedAssistantDeliveryRecord | null>;
   write(input: {
-    record: HostedExecutionSideEffectRecord;
+    record: HostedAssistantDeliveryRecord;
     userId: string;
-  }): Promise<HostedExecutionSideEffectRecord>;
+  }): Promise<HostedAssistantDeliveryRecord>;
 }
 
-export function createHostedExecutionSideEffectJournalStore(
-  input: HostedExecutionSideEffectJournalContext,
-): HostedExecutionSideEffectJournalStore {
+export function createHostedAssistantDeliveryJournalStore(
+  input: HostedAssistantDeliveryJournalContext,
+): HostedAssistantDeliveryJournalStore {
   return {
     async deletePrepared(query) {
       const objectKey = await hostedSideEffectRecordKey(input.key, query.userId, query.effectId);
@@ -62,13 +60,13 @@ export function createHostedExecutionSideEffectJournalStore(
         return false;
       }
 
-      assertSideEffectQueryMatchesRecord(query, existing);
+      assertAssistantDeliveryQueryMatchesRecord(query, existing);
       if (existing.state !== "prepared") {
         return false;
       }
 
       if (!input.bucket.delete) {
-        throw new Error("Hosted side-effect journal cleanup requires R2 delete support.");
+        throw new Error("Hosted assistant-delivery journal cleanup requires R2 delete support.");
       }
 
       await input.bucket.delete(objectKey);
@@ -83,13 +81,12 @@ export function createHostedExecutionSideEffectJournalStore(
         return null;
       }
 
-      assertSideEffectQueryMatchesRecord(query, existing);
+      assertAssistantDeliveryQueryMatchesRecord(query, existing);
       return existing;
     },
 
     async write(writeInput) {
-      const record = parseHostedExecutionSideEffectRecord(writeInput.record);
-      assertSideEffectRecordIsSelfConsistent(record);
+      const record = writeInput.record;
       const objectKey = await hostedSideEffectRecordKey(
         input.key,
         writeInput.userId,
@@ -101,7 +98,7 @@ export function createHostedExecutionSideEffectJournalStore(
         writeInput.userId,
         record.effectId,
       );
-      const durableRecord = mergeHostedExecutionSideEffectRecord(existing, record);
+      const durableRecord = mergeHostedAssistantDeliveryRecord(existing, record);
 
       if (durableRecord === existing) {
         return durableRecord;
@@ -120,11 +117,11 @@ export function createHostedExecutionSideEffectJournalStore(
 }
 
 async function readRecordAtKey(
-  input: HostedExecutionSideEffectJournalContext,
+  input: HostedAssistantDeliveryJournalContext,
   objectKey: string,
   userId: string,
   effectId: string,
-): Promise<HostedExecutionSideEffectRecord | null> {
+): Promise<HostedAssistantDeliveryRecord | null> {
   const value = await readEncryptedR2Json({
     aad: buildHostedStorageAad({
       effectId,
@@ -147,15 +144,15 @@ async function readRecordAtKey(
     return null;
   }
 
-  return parseHostedExecutionSideEffectRecord(value);
+  return parseHostedAssistantDeliveryRecord(value);
 }
 
 async function writeRecordAtKey(
-  input: HostedExecutionSideEffectJournalContext,
+  input: HostedAssistantDeliveryJournalContext,
   objectKey: string,
   userId: string,
   effectId: string,
-  value: HostedExecutionSideEffectRecord,
+  value: HostedAssistantDeliveryRecord,
 ): Promise<void> {
   await writeEncryptedR2Json({
     aad: buildHostedStorageAad({
@@ -173,49 +170,36 @@ async function writeRecordAtKey(
   });
 }
 
-function assertSideEffectRecordIsSelfConsistent(
-  record: HostedExecutionSideEffectRecord,
-): void {
-  if (record.effectId !== record.intentId) {
-    throw new HostedExecutionSideEffectConflictError(
-      `Hosted side effect ${record.effectId} must reuse the same intentId as effectId.`,
-    );
-  }
-}
-
-function assertSideEffectQueryMatchesRecord(
+function assertAssistantDeliveryQueryMatchesRecord(
   query: {
     effectId: string;
     fingerprint: string;
-    kind: HostedExecutionSideEffectRecord["kind"];
   },
-  record: HostedExecutionSideEffectRecord,
+  record: HostedAssistantDeliveryRecord,
 ): void {
   if (
     record.effectId === query.effectId
-    && record.intentId === query.effectId
     && record.fingerprint === query.fingerprint
-    && record.kind === query.kind
   ) {
     return;
   }
 
-  throw new HostedExecutionSideEffectConflictError(
-    `Hosted side effect ${query.effectId} does not match the stored side-effect identity.`,
+  throw new HostedAssistantDeliveryConflictError(
+    `Hosted assistant delivery ${query.effectId} does not match the stored identity.`,
   );
 }
 
-function mergeHostedExecutionSideEffectRecord(
-  existing: HostedExecutionSideEffectRecord | null,
-  next: HostedExecutionSideEffectRecord,
-): HostedExecutionSideEffectRecord {
+function mergeHostedAssistantDeliveryRecord(
+  existing: HostedAssistantDeliveryRecord | null,
+  next: HostedAssistantDeliveryRecord,
+): HostedAssistantDeliveryRecord {
   if (!existing) {
     return next;
   }
 
-  if (!sameHostedExecutionSideEffectIdentity(existing, next)) {
-    throw new HostedExecutionSideEffectConflictError(
-      `Hosted side effect ${next.effectId} cannot change identity after it has been recorded.`,
+  if (!sameHostedAssistantDeliverySideEffectIdentity(existing, next)) {
+    throw new HostedAssistantDeliveryConflictError(
+      `Hosted assistant delivery ${next.effectId} cannot change identity after it has been recorded.`,
     );
   }
 
@@ -224,9 +208,9 @@ function mergeHostedExecutionSideEffectRecord(
       return existing;
     }
 
-    if (!sameHostedExecutionAssistantDelivery(existing.delivery, next.delivery)) {
-      throw new HostedExecutionSideEffectConflictError(
-        `Hosted side effect ${next.effectId} cannot change delivery details after it has been sent.`,
+    if (!sameHostedAssistantDeliveryReceipt(existing.delivery, next.delivery)) {
+      throw new HostedAssistantDeliveryConflictError(
+        `Hosted assistant delivery ${next.effectId} cannot change delivery details after it has been sent.`,
       );
     }
 

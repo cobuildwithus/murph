@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import {
   getKnowledgePage,
   lintKnowledgePages,
+  listKnowledgePages,
   searchKnowledgePages,
   tailKnowledgeLog,
   upsertKnowledgePage,
@@ -125,6 +126,17 @@ describe('upsertKnowledgePage', () => {
     expect(shown.page.markdown).toContain('# Sleep quality')
     expect(shown.page.librarySlugs).toEqual(['sleep-architecture'])
     expect(shown.page.relatedSlugs).toEqual(['magnesium'])
+
+    const listed = await listKnowledgePages({
+      vault: vaultRoot,
+    })
+    expect(listed.pages).toHaveLength(1)
+    expect(listed.pages[0]).toMatchObject({
+      slug: 'sleep-quality',
+      title: 'Sleep quality',
+    })
+    expect(listed.pages[0]?.summary).toBeTruthy()
+    expect(listed.pages[0]).not.toHaveProperty('markdown')
 
     const tailed = await tailKnowledgeLog({
       vault: vaultRoot,

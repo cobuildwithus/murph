@@ -6,13 +6,12 @@ on:
       environment:
         description: GitHub environment to deploy from
         required: true
-        default: staging
+        default: production
         type: choice
         options:
-          - staging
           - production
       sync_worker_secrets:
-        description: Include the rendered Worker secrets file during upload or deploy
+        description: Include the rendered Worker secrets file during deploy
         required: true
         default: true
         type: boolean
@@ -66,6 +65,7 @@ jobs:
       HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: ${{ secrets.HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY }}
       HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEYRING_JSON: ${{ secrets.HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEYRING_JSON }}
       HOSTED_EXECUTION_RECOVERY_RECIPIENT_PUBLIC_JWK: ${{ secrets.HOSTED_EXECUTION_RECOVERY_RECIPIENT_PUBLIC_JWK }}
+      HOSTED_EXECUTION_RUNNER_ENV_PROFILES: ${{ vars.HOSTED_EXECUTION_RUNNER_ENV_PROFILES || 'device-sync,hosted-email,linq,mapbox,telegram' }}
       HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: ${{ vars.HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT || 'production' }}
       HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME: ${{ vars.HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME }}
       HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG: ${{ vars.HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG }}
@@ -88,9 +88,6 @@ jobs:
       HOSTED_ASSISTANT_PROVIDER_NAME: ${{ vars.HOSTED_ASSISTANT_PROVIDER_NAME }}
       HOSTED_ASSISTANT_REASONING_EFFORT: ${{ vars.HOSTED_ASSISTANT_REASONING_EFFORT }}
       HOSTED_ASSISTANT_SANDBOX: ${{ vars.HOSTED_ASSISTANT_SANDBOX }}
-      HOSTED_AI_USAGE_BASE_URL: ${{ vars.HOSTED_AI_USAGE_BASE_URL }}
-      HOSTED_DEVICE_SYNC_CONTROL_BASE_URL: ${{ vars.HOSTED_DEVICE_SYNC_CONTROL_BASE_URL }}
-      HOSTED_SHARE_API_BASE_URL: ${{ vars.HOSTED_SHARE_API_BASE_URL }}
       HOSTED_WEB_BASE_URL: ${{ vars.HOSTED_WEB_BASE_URL }}
       HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: ${{ secrets.HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK }}
       DEVICE_SYNC_PUBLIC_BASE_URL: ${{ vars.DEVICE_SYNC_PUBLIC_BASE_URL }}
@@ -102,11 +99,11 @@ jobs:
       LINQ_API_BASE_URL: ${{ vars.LINQ_API_BASE_URL }}
       LINQ_API_TOKEN: ${{ secrets.LINQ_API_TOKEN }}
       LINQ_WEBHOOK_SECRET: ${{ secrets.LINQ_WEBHOOK_SECRET }}
+      MAPBOX_ACCESS_TOKEN: ${{ secrets.MAPBOX_ACCESS_TOKEN }}
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_BOT_USERNAME: ${{ vars.TELEGRAM_BOT_USERNAME }}
       TELEGRAM_API_BASE_URL: ${{ vars.TELEGRAM_API_BASE_URL }}
       TELEGRAM_FILE_BASE_URL: ${{ vars.TELEGRAM_FILE_BASE_URL }}
-      TELEGRAM_WEBHOOK_SECRET: ${{ secrets.TELEGRAM_WEBHOOK_SECRET }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       BRAVE_API_KEY: ${{ secrets.BRAVE_API_KEY }}
@@ -137,7 +134,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v6
         with:
-          node-version: 22
+          node-version-file: .nvmrc
           cache: pnpm
 
       - name: Install workspace dependencies
@@ -184,6 +181,6 @@ jobs:
             echo "- Worker URL: \`${CF_PUBLIC_BASE_URL:-not-set}\`"
             echo "- Container instance type: \`${CF_CONTAINER_INSTANCE_TYPE}\`"
             echo "- Native container image: Wrangler-built from \`Dockerfile.cloudflare-hosted-runner\` during deploy"
-            echo "- Final version traffic: \`${{ steps.deploy.outputs.final_version_traffic || 'not-deployed' }}\`"
+            echo "- Deployed versions: \`${{ steps.deploy.outputs.final_version_traffic || 'not-deployed' }}\`"
             echo "- Smoke user id: \`${{ inputs.smoke_user_id || 'not-set' }}\`"
           } >> "$GITHUB_STEP_SUMMARY"

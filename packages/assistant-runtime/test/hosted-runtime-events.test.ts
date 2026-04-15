@@ -7,9 +7,14 @@ import {
   buildHostedExecutionGatewayMessageSendDispatch,
   buildHostedExecutionLinqMessageReceivedDispatch,
   buildHostedExecutionMemberActivatedDispatch,
+  buildHostedExecutionMemberChannelsUpdatedDispatch,
   buildHostedExecutionTelegramMessageReceivedDispatch,
   buildHostedExecutionVaultShareAcceptedDispatch,
 } from "@murphai/hosted-execution";
+import {
+  createHostedRuntimeEffectsPortStub,
+  createHostedRuntimeResolvedConfig,
+} from "./hosted-runtime-test-helpers.ts";
 
 const mocks = vi.hoisted(() => ({
   assistantGatewayLocalMessageSender: Symbol("assistantGatewayLocalMessageSender"),
@@ -71,22 +76,10 @@ function createRuntime(userEnv: Readonly<Record<string, string>> = {}) {
         async put() {},
       },
       deviceSyncPort: null,
-      effectsPort: {
-        async commit() {},
-        async deletePreparedSideEffect() {},
-        async readRawEmailMessage() {
-          return null;
-        },
-        async readSideEffect() {
-          return null;
-        },
-        async sendEmail() {},
-        async writeSideEffect(record) {
-          return record;
-        },
-      },
+      effectsPort: createHostedRuntimeEffectsPortStub(),
       usageExportPort: null,
     },
+    resolvedConfig: createHostedRuntimeResolvedConfig(),
     userEnv: { ...userEnv },
   } as const;
 }
@@ -108,6 +101,7 @@ describe("executeHostedDispatchEvent", () => {
       assistantProvider: "openai-compatible" as const,
       assistantSeeded: false,
       emailAutoReplyEnabled: true,
+      linqAutoReplyEnabled: true,
       telegramAutoReplyEnabled: true,
       vaultCreated: false,
     };
@@ -122,6 +116,11 @@ describe("executeHostedDispatchEvent", () => {
         threadIsDirect: true,
       },
       memberId: "member_123",
+      memberChannels: {
+        email: true,
+        linq: true,
+        telegram: true,
+      },
       occurredAt: "2026-04-08T00:00:00.000Z",
     });
 
@@ -141,8 +140,10 @@ describe("executeHostedDispatchEvent", () => {
       {
         OPENAI_API_KEY: "secret",
       },
+      runtime.resolvedConfig,
     );
     expect(mocks.queueAssistantFirstContactWelcome).toHaveBeenCalledWith({
+      actorId: null,
       channel: "linq",
       identityId: "hbidx:phone:v1:test",
       threadId: "thread_123",
@@ -153,6 +154,42 @@ describe("executeHostedDispatchEvent", () => {
       bootstrapResult,
       shareImportResult: null,
       shareImportTitle: null,
+    });
+  });
+
+  it("passes Linq home-thread materialization first-contact data through unchanged", async () => {
+    const dispatch = buildHostedExecutionMemberActivatedDispatch({
+      eventId: "evt_member_activated_materialize_linq_home",
+      firstContact: {
+        channel: "linq",
+        fromPhoneNumber: "+15550001111",
+        identityId: "hbidx:phone:v1:test",
+        kind: "linq-materialize-home-thread",
+        toPhoneNumber: "+15550002222",
+      },
+      memberId: "member_123",
+      memberChannels: {
+        email: true,
+        linq: true,
+        telegram: true,
+      },
+      occurredAt: "2026-04-08T00:00:00.000Z",
+    });
+
+    await executeHostedDispatchEvent({
+      dispatch,
+      runtime: createRuntime(),
+      runtimeEnv: {},
+      vaultRoot: "/tmp/assistant-runtime-events",
+    });
+
+    expect(mocks.queueAssistantFirstContactWelcome).toHaveBeenCalledWith({
+      channel: "linq",
+      fromPhoneNumber: "+15550001111",
+      identityId: "hbidx:phone:v1:test",
+      kind: "linq-materialize-home-thread",
+      toPhoneNumber: "+15550002222",
+      vault: "/tmp/assistant-runtime-events",
     });
   });
 
@@ -221,6 +258,33 @@ describe("executeHostedDispatchEvent", () => {
       runtime.platform.effectsPort,
       runtime.userEnv,
     );
+  });
+
+  it("treats explicit member channel sync events as no-op dispatch handlers", async () => {
+    const dispatch = buildHostedExecutionMemberChannelsUpdatedDispatch({
+      eventId: "evt_member_channels_updated",
+      memberChannels: {
+        email: true,
+        linq: false,
+        telegram: true,
+      },
+      memberId: "member_123",
+      occurredAt: "2026-04-08T00:03:00.000Z",
+    });
+
+    const result = await executeHostedDispatchEvent({
+      dispatch,
+      runtime: createRuntime(),
+      runtimeEnv: {},
+      vaultRoot: "/tmp/assistant-runtime-events",
+    });
+
+    expect(mocks.queueAssistantFirstContactWelcome).not.toHaveBeenCalled();
+    assert.deepEqual(result, {
+      bootstrapResult: null,
+      shareImportResult: null,
+      shareImportTitle: null,
+    });
   });
 
   it("requires a hydrated share pack for hosted share acceptance", async () => {

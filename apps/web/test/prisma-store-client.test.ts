@@ -92,7 +92,25 @@ describe("prisma module", () => {
     });
     expect(PrismaClient).toHaveBeenCalledWith({
       adapter: expect.any(Object),
-      log: ["error"],
+      transactionOptions: {
+        maxWait: 10_000,
+        timeout: 15_000,
+      },
+    });
+  });
+
+  it("enables Prisma warn and error logs in development only", async () => {
+    process.env = {
+      ...process.env,
+      NODE_ENV: "development",
+      DATABASE_URL: "postgresql://user:pass@example.com/db?sslmode=require",
+    };
+
+    await import("@/src/lib/prisma");
+
+    expect(PrismaClient).toHaveBeenCalledWith({
+      adapter: expect.any(Object),
+      log: ["warn", "error"],
       transactionOptions: {
         maxWait: 10_000,
         timeout: 15_000,

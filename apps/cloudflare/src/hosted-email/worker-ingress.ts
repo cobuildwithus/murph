@@ -1,6 +1,6 @@
 import {
   readHostedEmailCapabilities,
-} from "@murphai/hosted-execution";
+} from "@murphai/hosted-execution/hosted-email";
 import {
   isHostedEmailInboundSenderAuthorized,
   readHostedVerifiedEmailFromEnv,
@@ -31,36 +31,56 @@ import {
   resolveUserRunnerStub,
   type WorkerEnvironmentSource,
 } from "../worker-routes/shared.ts";
+import { asWorkerStringEnvironment } from "../worker-contracts.ts";
 import { buildHostedExecutionEmailMessageReceivedDispatch } from "@murphai/hosted-execution";
 
 export async function handleHostedEmailIngress(
   message: HostedEmailWorkerRequest,
   env: WorkerEnvironmentSource,
 ): Promise<void> {
-  const environment = readHostedExecutionEnvironment(
-    env as unknown as Readonly<Record<string, string | undefined>>,
-  );
-  const capabilities = readHostedEmailCapabilities(
-    env as unknown as Readonly<Record<string, string | undefined>>,
-  );
+  const stringEnv = asWorkerStringEnvironment(env);
+  const environment = readHostedExecutionEnvironment(stringEnv);
+  const capabilities = readHostedEmailCapabilities(stringEnv);
   if (!capabilities.ingressReady) {
     message.setReject?.("Hosted email ingress is not configured.");
     return;
   }
 
-  const config = readHostedEmailConfig(
-    env as unknown as Readonly<Record<string, string | undefined>>,
-  );
-  const rawBytes = await readHostedEmailMessageBytes(message.raw);
+  const config = readHostedEmailConfig(stringEnv);
+  let rawBytes: Uint8Array;
+
+  try {
+    rawBytes = await readHostedEmailMessageBytes(message.raw, {
+      rawSize: typeof message.rawSize === "number" ? message.rawSize : null,
+    });
+  } catch (error) {
+    if (error instanceof RangeError) {
+      message.setReject?.("Hosted email message exceeded the maximum accepted size.");
+      return;
+    }
+
+    throw error;
+  }
+
   const parsedMessage = parseRawEmailMessage(rawBytes);
   const headerFrom = readRawEmailHeaderValue(rawBytes, "from");
+  const resolvedHeaderFrom = headerFrom.value ?? parsedMessage.from;
   const rejectReason = "Hosted email message was not accepted.";
+  const shouldRejectOnIngressFailure = shouldRejectHostedEmailIngressFailure({
+    config,
+    to: message.to,
+  });
+  const rejectIngressFailure = () => {
+    if (shouldRejectOnIngressFailure) {
+      message.setReject?.(rejectReason);
+    }
+  };
   const route = await resolveHostedEmailIngressRoute({
     bucket: env.BUNDLES,
     config,
     envelopeFrom: message.from,
     hasRepeatedHeaderFrom: headerFrom.repeated,
-    headerFrom: headerFrom.value ?? parsedMessage.from,
+    headerFrom: resolvedHeaderFrom,
     key: environment.platformEnvelopeKey,
     keyId: environment.platformEnvelopeKeyId,
     keysById: environment.platformEnvelopeKeysById,
@@ -68,9 +88,7 @@ export async function handleHostedEmailIngress(
   });
 
   if (!route) {
-    if (shouldRejectHostedEmailIngressFailure({ config, to: message.to })) {
-      message.setReject?.(rejectReason);
-    }
+    rejectIngressFailure();
     return;
   }
 
@@ -85,13 +103,11 @@ export async function handleHostedEmailIngress(
     env,
     envelopeFrom: message.from,
     hasRepeatedHeaderFrom: headerFrom.repeated,
-    headerFrom: headerFrom.value ?? parsedMessage.from,
+    headerFrom: resolvedHeaderFrom,
     route,
     userCrypto,
   })) {
-    if (shouldRejectHostedEmailIngressFailure({ config, to: message.to })) {
-      message.setReject?.(rejectReason);
-    }
+    rejectIngressFailure();
     return;
   }
 
@@ -129,7 +145,7 @@ async function authorizeHostedEmailIngress(input: {
   }).readUserEnv(input.route.userId);
   const userEnv = decodeHostedUserEnvPayload(
     userEnvPayload,
-    input.env as unknown as Readonly<Record<string, string | undefined>>,
+    asWorkerStringEnvironment(input.env),
   );
   const verifiedEmailAddress = readHostedVerifiedEmailFromEnv(userEnv)?.address ?? null;
 

@@ -5,40 +5,34 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  refreshUser: vi.fn(),
   sendCode: vi.fn(),
-  usePrivy: vi.fn(),
   useUpdateEmail: vi.fn(),
-  useUser: vi.fn(),
   verifyCode: vi.fn(),
 }));
 
 vi.mock("@privy-io/react-auth", () => ({
-  usePrivy: mocks.usePrivy,
   useUpdateEmail: mocks.useUpdateEmail,
-  useUser: mocks.useUser,
 }));
 
-vi.mock("@radix-ui/react-dialog", () => ({
-  Close(input: { asChild?: boolean; children: React.ReactNode }) {
-    return input.asChild ? input.children : React.createElement("div", null, input.children);
+vi.mock("@/components/ui/dialog", () => ({
+  Dialog(input: { children: React.ReactNode; open?: boolean; onOpenChange?: (open: boolean) => void }) {
+    return React.createElement("div", {
+      "data-dialog-open": String(input.open ?? false),
+    }, input.children);
   },
-  Content(input: Record<string, unknown> & { children?: React.ReactNode }) {
-    return React.createElement("div", input, input.children);
+  DialogContent(input: Record<string, unknown> & { children?: React.ReactNode }) {
+    return React.createElement("div", {
+      ...input,
+      "data-show-close-button": String(input.showCloseButton ?? true),
+    }, input.children);
   },
-  Description(input: Record<string, unknown> & { children?: React.ReactNode }) {
+  DialogDescription(input: Record<string, unknown> & { children?: React.ReactNode }) {
     return React.createElement("p", input, input.children);
   },
-  Overlay(input: Record<string, unknown>) {
-    return React.createElement("div", input);
+  DialogHeader(input: Record<string, unknown> & { children?: React.ReactNode }) {
+    return React.createElement("div", input, input.children);
   },
-  Portal(input: { children: React.ReactNode }) {
-    return React.createElement(React.Fragment, null, input.children);
-  },
-  Root(input: { children: React.ReactNode }) {
-    return React.createElement(React.Fragment, null, input.children);
-  },
-  Title(input: Record<string, unknown> & { children?: React.ReactNode }) {
+  DialogTitle(input: Record<string, unknown> & { children?: React.ReactNode }) {
     return React.createElement("h2", input, input.children);
   },
 }));
@@ -46,28 +40,6 @@ vi.mock("@radix-ui/react-dialog", () => ({
 describe("HostedEmailSettings", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.usePrivy.mockReturnValue({
-      authenticated: true,
-      logout: vi.fn(),
-      ready: true,
-    });
-    mocks.useUser.mockReturnValue({
-      refreshUser: mocks.refreshUser,
-      user: {
-        id: "did:privy:user_123",
-        linkedAccounts: [
-          {
-            address: "stale@example.com",
-            type: "email",
-          },
-          {
-            address: "verified@example.com",
-            latest_verified_at: 1741194420,
-            type: "email",
-          },
-        ],
-      },
-    });
     mocks.useUpdateEmail.mockReturnValue({
       sendCode: mocks.sendCode,
       state: {
@@ -82,14 +54,26 @@ describe("HostedEmailSettings", () => {
 
     const markup = renderToStaticMarkup(
       React.createElement(HostedEmailSettings, {
-        expectedPrivyUserId: "did:privy:user_123",
+        authenticated: true,
+        initialLinkedAccounts: [
+          {
+            address: "stale@example.com",
+            type: "email",
+          },
+          {
+            address: "verified@example.com",
+            latest_verified_at: 1741194420,
+            type: "email",
+          },
+        ],
       }),
     );
 
-    assert.match(markup, /Current verified email/);
+    assert.match(markup, /Connected as verified@example\.com\./);
     assert.match(markup, /verified@example\.com/);
-    assert.doesNotMatch(markup, /Current email<\/strong><p class="mt-1">stale@example\.com/);
-    assert.match(markup, /Sync current verified email/);
+    assert.match(markup, /id="settings-email-address"[^>]*value="verified@example\.com"/);
+    assert.doesNotMatch(markup, /Connected as stale@example\.com\./);
+    assert.match(markup, /Save verified email/);
   });
 });
 

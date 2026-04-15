@@ -4,11 +4,15 @@ import {
   HOSTED_EXECUTION_SIGNING_KEY_ID_HEADER,
   HOSTED_EXECUTION_SIGNATURE_HEADER,
   HOSTED_EXECUTION_TIMESTAMP_HEADER,
-} from "@murphai/hosted-execution";
+} from "@murphai/hosted-execution/contracts";
 
 import { readHostedExecutionEnvironment } from "../src/env.ts";
-import { handleRunnerOutboundRequest } from "../src/runner-outbound.ts";
+import {
+  handleRunnerOutboundRequest,
+  type RunnerOutboundEnvironmentSource,
+} from "../src/runner-outbound.ts";
 import { createHostedUserKeyStore } from "../src/user-key-store.ts";
+import type { WorkerUserRunnerNamespaceLike, WorkerUserRunnerStubLike } from "../src/worker-contracts.ts";
 
 const describe = baseDescribe.sequential;
 
@@ -326,7 +330,14 @@ describe("handleRunnerOutboundRequest", () => {
         method: "POST",
       }),
     );
-    const requestHeaders = fetchMock.mock.calls[0]?.[1]?.headers;
+    const firstCall = fetchMock.mock.calls[0];
+    if (!firstCall) {
+      throw new Error("Expected hosted-web connect-link fetch to be called.");
+    }
+    const [, requestInit] = firstCall as unknown as [RequestInfo | URL, RequestInit?];
+    expect(requestInit).toBeTruthy();
+    const requestHeaders = requestInit?.headers;
+    expect(requestHeaders).toBeInstanceOf(Headers);
     expect((requestHeaders as Headers).get("authorization")).toBeNull();
     expect((requestHeaders as Headers).get("x-hosted-execution-user-id")).toBe("member_123");
     expect((requestHeaders as Headers).get(HOSTED_EXECUTION_SIGNING_KEY_ID_HEADER)).toBe("v1");
@@ -448,7 +459,6 @@ describe("handleRunnerOutboundRequest", () => {
         body: JSON.stringify({
           effectId: "outbox_999",
           fingerprint: "dedupe_123",
-          intentId: "outbox_123",
           kind: "assistant.delivery",
           recordedAt: "2026-03-26T12:00:05.000Z",
           state: "prepared",
@@ -468,6 +478,7 @@ describe("handleRunnerOutboundRequest", () => {
       error: "effectId mismatch: expected outbox_123, received outbox_999.",
     });
   });
+
 });
 
 function createRunnerProxyHeaders(headers: Record<string, string> = {}) {
@@ -477,16 +488,15 @@ function createRunnerProxyHeaders(headers: Record<string, string> = {}) {
   };
 }
 
-function createRunnerOutboundEnv(overrides: Partial<Record<string, unknown>> = {}) {
+function createRunnerOutboundEnv(
+  overrides: Partial<RunnerOutboundEnvironmentSource> = {},
+): RunnerOutboundEnvironmentSource {
   const values = new Map<string, string>();
-  const defaultUserRunnerNamespace = {
+  const defaultUserRunnerNamespace: WorkerUserRunnerNamespaceLike = {
     getByName() {
       return {
         async bootstrapUser() {
           return { userId: "member_123" };
-        },
-        async commit() {
-          throw new Error("not used");
         },
         async applyDeviceSyncRuntimeUpdates(input: { request: { userId: string } }) {
           return {
@@ -511,9 +521,7 @@ function createRunnerOutboundEnv(overrides: Partial<Record<string, unknown>> = {
       };
     },
   };
-  const userRunnerNamespace = "USER_RUNNER" in overrides
-    ? overrides.USER_RUNNER
-    : defaultUserRunnerNamespace;
+  const userRunnerNamespace = overrides.USER_RUNNER ?? defaultUserRunnerNamespace;
   const env = {
     BUNDLES: {
       async delete(key: string) {
@@ -528,7 +536,11 @@ function createRunnerOutboundEnv(overrides: Partial<Record<string, unknown>> = {
 
         return {
           async arrayBuffer() {
-            return Buffer.from(value, "utf8");
+            const bytes = Buffer.from(value, "utf8");
+            return bytes.buffer.slice(
+              bytes.byteOffset,
+              bytes.byteOffset + bytes.byteLength,
+            );
           },
         };
       },
@@ -544,30 +556,29 @@ function createRunnerOutboundEnv(overrides: Partial<Record<string, unknown>> = {
     HOSTED_EXECUTION_RECOVERY_RECIPIENT_KEY_ID: "recovery:v1",
     HOSTED_EXECUTION_RECOVERY_RECIPIENT_PUBLIC_JWK:
       "{\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"xSelVJv6r6LPUS8GCNgj1T_7z5GXOrhgY1cCdzGb5ao\",\"y\":\"8HhciS1cAPKs_fPfgZnb1USdRtBX-4Nvp8XiBHuMcmY\",\"ext\":true,\"key_ops\":[]}",
+    HOSTED_EXECUTION_TEE_AUTOMATION_RECIPIENT_KEY_ID: "tee-automation:v1",
+    HOSTED_EXECUTION_TEE_AUTOMATION_RECIPIENT_PUBLIC_JWK:
+      "{\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"xSelVJv6r6LPUS8GCNgj1T_7z5GXOrhgY1cCdzGb5ao\",\"y\":\"8HhciS1cAPKs_fPfgZnb1USdRtBX-4Nvp8XiBHuMcmY\",\"ext\":true,\"key_ops\":[]}",
     HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY: Buffer.alloc(32, 9).toString("base64"),
     HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME: "murph-web",
     HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG: "murph-team",
     HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK:
       "{\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"xSelVJv6r6LPUS8GCNgj1T_7z5GXOrhgY1cCdzGb5ao\",\"y\":\"8HhciS1cAPKs_fPfgZnb1USdRtBX-4Nvp8XiBHuMcmY\",\"d\":\"HAPljluiFVW3g-UEmrJ9NVYTlclAhaC8N5LT0h7vitQ\",\"ext\":true,\"key_ops\":[\"sign\"]}",
     ...overrides,
-  };
+  } satisfies Omit<RunnerOutboundEnvironmentSource, "USER_RUNNER">;
   const bootstrappedByUserId = new Map<string, Promise<void>>();
 
   return {
     ...env,
     USER_RUNNER: {
       getByName(userId: string) {
-        const stub = userRunnerNamespace.getByName(userId) as {
-          bootstrapUser?: (boundUserId: string) => Promise<{ userId: string }>;
-          commit?: () => Promise<unknown>;
-          finalizeCommit?: () => Promise<unknown>;
-        };
+        const stub: WorkerUserRunnerStubLike = userRunnerNamespace.getByName(userId);
         return {
           ...stub,
           async bootstrapUser(boundUserId: string) {
             let seeded = bootstrappedByUserId.get(boundUserId);
             if (!seeded) {
-              seeded = ensureRunnerOutboundUserEnvelope(env as Record<string, unknown>, boundUserId);
+              seeded = ensureRunnerOutboundUserEnvelope(env, boundUserId);
               bootstrappedByUserId.set(boundUserId, seeded);
             }
             await seeded;
@@ -587,7 +598,7 @@ async function ensureRunnerOutboundUserEnvelope(
     env as Readonly<Record<string, string | undefined>>,
   );
 
-  await createHostedUserKeyStore({
+  const store = createHostedUserKeyStore({
     automationRecipientKeyId: environment.automationRecipientKeyId,
     automationRecipientPrivateKey: environment.automationRecipientPrivateKey,
     automationRecipientPrivateKeysById: environment.automationRecipientPrivateKeysById,
@@ -600,5 +611,6 @@ async function ensureRunnerOutboundUserEnvelope(
     recoveryRecipientPublicKey: environment.recoveryRecipientPublicKey,
     teeAutomationRecipientKeyId: environment.teeAutomationRecipientKeyId,
     teeAutomationRecipientPublicKey: environment.teeAutomationRecipientPublicKey,
-  }).bootstrapManagedUserCryptoContext(userId);
+  });
+  await store.ensureManagedUserCryptoEnvelope(userId);
 }

@@ -5,10 +5,16 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { prepareAssistantDirectCliEnv } from '../assistant-cli-access.js'
 import { normalizeNullableString } from '../assistant/shared.js'
-import { resolveAssistantVaultPath } from '../assistant-vault-paths.js'
+import { resolveAssistantVaultPath } from '@murphai/vault-usecases/assistant-vault-paths'
 import { sanitizeChildProcessEnv } from '../child-process-env.js'
 import { resolveRuntimePaths } from '@murphai/runtime-state/node'
+import {
+  HOSTED_ASSISTANT_ALLOWED_API_KEY_ENV_NAMES,
+  HOSTED_ASSISTANT_CONFIG_ENV_NAMES,
+} from '@murphai/operator-config/hosted-assistant-config'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import { assistantMemoryTurnEnvKeys } from '../assistant/memory/turn-context.js'
+import type { AssistantExecutionContext } from '../assistant/execution-context.js'
 import type { AssistantToolContext, AssistantCliLlmsManifest } from './shared.js'
 import {
   assistantCliDefaultTimeoutMs,
@@ -26,9 +32,70 @@ interface AssistantCliLauncher {
   command: string
 }
 
+const assistantCliAllowedEnvKeys = new Set<string>([
+  ...HOSTED_ASSISTANT_ALLOWED_API_KEY_ENV_NAMES,
+  'APPDATA',
+  'BRAVE_API_KEY',
+  'ComSpec',
+  'DEVICE_SYNC_PUBLIC_BASE_URL',
+  'DEVICE_SYNC_SECRET',
+  'FFMPEG_COMMAND',
+  'HOME',
+  'HOMEDRIVE',
+  'HOMEPATH',
+  'LANG',
+  'LANGUAGE',
+  'LC_ALL',
+  'LC_CTYPE',
+  'LINQ_API_BASE_URL',
+  'LINQ_API_TOKEN',
+  'LINQ_WEBHOOK_SECRET',
+  'LOCALAPPDATA',
+  'MAPBOX_ACCESS_TOKEN',
+  'MURPH_WEB_FETCH_ENABLED',
+  'MURPH_WEB_FETCH_MAX_CHARS',
+  'MURPH_WEB_FETCH_MAX_REDIRECTS',
+  'MURPH_WEB_FETCH_MAX_RESPONSE_BYTES',
+  'MURPH_WEB_FETCH_TIMEOUT_MS',
+  'MURPH_WEB_SEARCH_MAX_RESULTS',
+  'MURPH_WEB_SEARCH_PROVIDER',
+  'MURPH_WEB_SEARCH_TIMEOUT_MS',
+  'NODE_ENV',
+  'NODE_EXTRA_CA_CERTS',
+  'OURA_CLIENT_ID',
+  'OURA_CLIENT_SECRET',
+  'PATH',
+  'PATHEXT',
+  'PROGRAMDATA',
+  'SSL_CERT_DIR',
+  'SSL_CERT_FILE',
+  'SystemRoot',
+  'SystemDrive',
+  'TEMP',
+  'TELEGRAM_API_BASE_URL',
+  'TELEGRAM_BOT_TOKEN',
+  'TELEGRAM_BOT_USERNAME',
+  'TELEGRAM_FILE_BASE_URL',
+  'TMP',
+  'TMPDIR',
+  'TZ',
+  'USERPROFILE',
+  'VAULT',
+  'WHISPER_COMMAND',
+  'WHISPER_MODEL_PATH',
+  'WHOOP_CLIENT_ID',
+  'WHOOP_CLIENT_SECRET',
+  'XDG_CACHE_HOME',
+  'XDG_CONFIG_HOME',
+  'XDG_DATA_HOME',
+  ...assistantMemoryTurnEnvKeys,
+  ...HOSTED_ASSISTANT_CONFIG_ENV_NAMES,
+])
+
 export async function readAssistantCliLlmsManifest(input: {
   cliEnv?: NodeJS.ProcessEnv
   detail?: 'compact' | 'full'
+  executionContext?: AssistantExecutionContext | null
   vault: string
   workingDirectory?: string | null
 }): Promise<AssistantCliLlmsManifest> {
@@ -37,6 +104,7 @@ export async function readAssistantCliLlmsManifest(input: {
     args: [detail === 'full' ? '--llms-full' : '--llms', '--format', 'json'],
     input: {
       cliEnv: input.cliEnv,
+      executionContext: input.executionContext,
       vault: input.vault,
       workingDirectory: input.workingDirectory ?? undefined,
     },
@@ -73,19 +141,19 @@ export async function executeAssistantCliCommand(input: {
     stdin: input.stdin,
     vault: input.input.vault,
   })
-  const env = sanitizeChildProcessEnv(
-    prepareAssistantDirectCliEnv({
-      NO_COLOR: '1',
-      ...process.env,
-      ...input.input.cliEnv,
-    }),
-  )
+  const disableConfigAutodiscovery = shouldDisableAssistantCliConfigAutodiscovery(input.input)
+  const argv = disableConfigAutodiscovery
+    ? ['--no-config', ...preparedRequest.args]
+    : [...preparedRequest.args]
+  const env = buildAssistantCliProcessEnv({
+    cliEnv: input.input.cliEnv,
+  })
   const timeoutMs = input.timeoutMs ?? assistantCliDefaultTimeoutMs
 
   try {
     const launcher = await resolveAssistantCliLauncher(env)
     return await new Promise((resolve, reject) => {
-      const child = spawn(launcher.command, [...launcher.argvPrefix, ...preparedRequest.args], {
+      const child = spawn(launcher.command, [...launcher.argvPrefix, ...argv], {
         cwd: normalizeNullableString(input.input.workingDirectory) ?? process.cwd(),
         env,
         stdio: 'pipe',
@@ -186,7 +254,9 @@ export async function executeAssistantCliCommand(input: {
           }
 
           resolve({
-            argv: ['vault-cli', ...preparedRequest.redactedArgv],
+            argv: ['vault-cli', ...(disableConfigAutodiscovery
+              ? ['--no-config', ...preparedRequest.redactedArgv]
+              : preparedRequest.redactedArgv)],
             exitCode,
             json: tryParseAssistantCliJsonOutput(redactedStdout),
             stderr: redactedStderr,
@@ -199,6 +269,46 @@ export async function executeAssistantCliCommand(input: {
     if (preparedRequest.cleanupPath !== null) {
       await rm(preparedRequest.cleanupPath, { force: true, recursive: true })
     }
+  }
+}
+
+function shouldDisableAssistantCliConfigAutodiscovery(
+  input: Pick<AssistantToolContext, 'executionContext'>,
+): boolean {
+  return Boolean(input.executionContext?.hosted?.memberId)
+}
+
+export function buildAssistantCliProcessEnv(input: {
+  ambientEnv?: NodeJS.ProcessEnv
+  cliEnv?: NodeJS.ProcessEnv
+}): NodeJS.ProcessEnv {
+  const ambientEnv = input.ambientEnv ?? process.env
+  const env: NodeJS.ProcessEnv = {}
+
+  copyAllowedAssistantCliEnvEntries(env, ambientEnv)
+  copyAllowedAssistantCliEnvEntries(env, input.cliEnv)
+
+  env.NO_COLOR = '1'
+
+  return sanitizeChildProcessEnv(prepareAssistantDirectCliEnv(env))
+}
+
+function copyAllowedAssistantCliEnvEntries(
+  target: NodeJS.ProcessEnv,
+  source: NodeJS.ProcessEnv | undefined,
+): void {
+  for (const [key, value] of Object.entries(source ?? {})) {
+    const normalizedKey = key.toUpperCase() === 'PATH' ? 'PATH' : key
+
+    if (
+      typeof value !== 'string' ||
+      value.length === 0 ||
+      !assistantCliAllowedEnvKeys.has(normalizedKey)
+    ) {
+      continue
+    }
+
+    target[normalizedKey] = value
   }
 }
 
@@ -321,13 +431,12 @@ async function createAssistantPayloadFile(
 }
 
 async function resolveAssistantCliLauncher(
-  env: NodeJS.ProcessEnv,
+  cliProcessEnv: NodeJS.ProcessEnv,
 ): Promise<AssistantCliLauncher> {
-  const preparedEnv = prepareAssistantDirectCliEnv(env)
   const localBuiltCliBinPath = resolveLocalBuiltWorkspaceCliBinPath()
   const vaultCliBinary = await resolveExecutableOnPath(
     'vault-cli',
-    preparedEnv,
+    cliProcessEnv,
   )
   if (vaultCliBinary) {
     return {
@@ -350,21 +459,11 @@ async function resolveAssistantCliLauncher(
 }
 
 function resolveLocalBuiltWorkspaceCliBinPath(): string | null {
-  const moduleDir = resolveExecutionAdaptersModuleDir()
-  if (!moduleDir) {
-    return null
-  }
-
-  return path.resolve(moduleDir, '../../../cli/dist/bin.js')
-}
-
-function resolveExecutionAdaptersModuleDir(): string | null {
-  if (typeof import.meta.url !== 'string' || import.meta.url.length === 0) {
-    return null
-  }
-
   try {
-    return path.dirname(fileURLToPath(import.meta.url))
+    return path.resolve(
+      path.dirname(fileURLToPath(import.meta.url)),
+      '../../../cli/dist/bin.js',
+    )
   } catch {
     return null
   }
@@ -378,7 +477,7 @@ async function resolveExecutableOnPath(
     return (await isExecutable(command)) ? command : null
   }
 
-  const pathValue = env.PATH ?? process.env.PATH ?? ''
+  const pathValue = env.PATH ?? env.Path ?? ''
   const entries = pathValue
     .split(path.delimiter)
     .map((entry) => entry.trim())

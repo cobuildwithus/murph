@@ -12,8 +12,29 @@ import {
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
 type InboxDoctorInput = Parameters<InboxServices['doctor']>[0]
+type InboxListInput = Parameters<InboxServices['list']>[0]
 type InboxSourceAddInput = Parameters<InboxServices['sourceAdd']>[0]
 type InboxSourceSetEnabledInput = Parameters<InboxServices['sourceSetEnabled']>[0]
+
+function listAutoReplyChannels(
+  state: Awaited<ReturnType<typeof readAssistantAutomationState>>,
+): string[] {
+  return state.autoReply.map((entry) => entry.channel)
+}
+
+function createEmptyInboxListResult(input: InboxListInput) {
+  return {
+    vault: input.vault,
+    filters: {
+      afterCaptureId: input.afterCaptureId ?? null,
+      afterOccurredAt: input.afterOccurredAt ?? null,
+      limit: input.limit ?? 20,
+      oldestFirst: input.oldestFirst ?? false,
+      sourceId: input.sourceId ?? null,
+    },
+    items: [],
+  }
+}
 
 test('configureSetupChannels enables Telegram auto-reply only after the doctor probe passes', async () => {
   const vault = await mkdtemp(path.join(tmpdir(), 'murph-setup-channels-'))
@@ -83,7 +104,7 @@ test('configureSetupChannels enables Telegram auto-reply only after the doctor p
     assert.deepEqual(doctorCalls, ['telegram:bot'])
 
     const automationState = await readAssistantAutomationState(vault)
-    assert.deepEqual(automationState.autoReplyChannels, [])
+    assert.deepEqual(listAutoReplyChannels(automationState), [])
   } finally {
     await rm(vault, { recursive: true, force: true })
   }
@@ -121,6 +142,9 @@ test('configureSetupChannels persists Telegram auto-reply when the doctor probe 
             target: 'telegram:bot',
           }
         },
+        async list(input: InboxListInput) {
+          return createEmptyInboxListResult(input)
+        },
         async sourceAdd() {
           return {
             vault,
@@ -154,7 +178,7 @@ test('configureSetupChannels persists Telegram auto-reply when the doctor probe 
     assert.deepEqual(configured[0]?.missingEnv, [])
 
     const automationState = await readAssistantAutomationState(vault)
-    assert.deepEqual(automationState.autoReplyChannels, ['telegram'])
+    assert.deepEqual(listAutoReplyChannels(automationState), ['telegram'])
   } finally {
     await rm(vault, { recursive: true, force: true })
   }
@@ -197,6 +221,9 @@ test('configureSetupChannels reuses a disabled Telegram connector and re-enables
             parserToolchain: null,
             target: input.sourceId ?? null,
           }
+        },
+        async list(input: InboxListInput) {
+          return createEmptyInboxListResult(input)
         },
         async sourceAdd() {
           throw new Error('sourceAdd should not be called when a Telegram connector exists')
@@ -253,7 +280,7 @@ test('configureSetupChannels reuses a disabled Telegram connector and re-enables
     ])
 
     const automationState = await readAssistantAutomationState(vault)
-    assert.deepEqual(automationState.autoReplyChannels, ['telegram'])
+    assert.deepEqual(listAutoReplyChannels(automationState), ['telegram'])
   } finally {
     await rm(vault, { recursive: true, force: true })
   }
@@ -294,6 +321,9 @@ test('configureSetupChannels adds a Linq connector and persists auto-reply when 
             parserToolchain: null,
             target: input.sourceId ?? null,
           }
+        },
+        async list(input: InboxListInput) {
+          return createEmptyInboxListResult(input)
         },
         async sourceAdd(input: InboxSourceAddInput) {
           sourceAddCalls.push(input as unknown as Record<string, unknown>)
@@ -345,7 +375,7 @@ test('configureSetupChannels adds a Linq connector and persists auto-reply when 
     ])
 
     const automationState = await readAssistantAutomationState(vault)
-    assert.deepEqual(automationState.autoReplyChannels, ['linq'])
+    assert.deepEqual(listAutoReplyChannels(automationState), ['linq'])
   } finally {
     await rm(vault, { recursive: true, force: true })
   }
@@ -391,7 +421,7 @@ test('configureSetupChannels leaves Linq unconfigured until both the API token a
     assert.equal(sourceAdd.mock.calls.length, 0)
 
     const automationState = await readAssistantAutomationState(vault)
-    assert.deepEqual(automationState.autoReplyChannels, [])
+    assert.deepEqual(listAutoReplyChannels(automationState), [])
   } finally {
     await rm(vault, { recursive: true, force: true })
   }
@@ -433,6 +463,9 @@ test('configureSetupChannels provisions email and persists auto-reply when Agent
             parserToolchain: null,
             target: 'email:agentmail',
           }
+        },
+        async list(input: InboxListInput) {
+          return createEmptyInboxListResult(input)
         },
         async sourceAdd() {
           return {
@@ -478,8 +511,7 @@ test('configureSetupChannels provisions email and persists auto-reply when Agent
     assert.match(configured[0]?.detail ?? '', /murph@example\.test/u)
 
     const automationState = await readAssistantAutomationState(vault)
-    assert.deepEqual(automationState.autoReplyChannels, ['email'])
-    assert.deepEqual(automationState.autoReplyBacklogChannels, ['email'])
+    assert.deepEqual(listAutoReplyChannels(automationState), ['email'])
   } finally {
     await rm(vault, { recursive: true, force: true })
   }
@@ -521,6 +553,9 @@ test('configureSetupChannels keeps email selected in onboarding preferences even
             parserToolchain: null,
             target: 'email:agentmail',
           }
+        },
+        async list(input: InboxListInput) {
+          return createEmptyInboxListResult(input)
         },
         async sourceAdd() {
           return {
@@ -566,8 +601,7 @@ test('configureSetupChannels keeps email selected in onboarding preferences even
     assert.match(configured[0]?.detail ?? '', /401 unauthorized/u)
 
     const automationState = await readAssistantAutomationState(vault)
-    assert.deepEqual(automationState.autoReplyChannels, [])
-    assert.deepEqual(automationState.autoReplyBacklogChannels, [])
+    assert.deepEqual(listAutoReplyChannels(automationState), [])
   } finally {
     await rm(vault, { recursive: true, force: true })
   }
@@ -651,8 +685,7 @@ test('configureSetupChannels treats an empty but reachable AgentMail inbox as co
     assert.equal(configured[0]?.autoReply, true)
 
     const automationState = await readAssistantAutomationState(vault)
-    assert.deepEqual(automationState.autoReplyChannels, ['email'])
-    assert.deepEqual(automationState.autoReplyBacklogChannels, ['email'])
+    assert.deepEqual(listAutoReplyChannels(automationState), ['email'])
   } finally {
     await rm(vault, { recursive: true, force: true })
   }
@@ -700,6 +733,9 @@ test('configureSetupChannels disables stale setup connectors that were not selec
             target: 'email:agentmail',
           }
         },
+        async list(input: InboxListInput) {
+          return createEmptyInboxListResult(input)
+        },
         async sourceList() {
           return {
             vault,
@@ -715,13 +751,13 @@ test('configureSetupChannels disables stale setup connectors that were not selec
                 source: 'email' as const,
               },
               {
-                accountId: 'self',
+                accountId: 'bot',
                 enabled: true,
-                id: 'imessage:self',
+                id: 'telegram:bot',
                 options: {
-                  includeOwnMessages: true,
+                  transportMode: 'take-over-webhook',
                 },
-                source: 'imessage' as const,
+                source: 'telegram' as const,
               },
             ],
           }
@@ -738,7 +774,7 @@ test('configureSetupChannels disables stale setup connectors that were not selec
             vault,
             configPath: '.runtime/inboxd/config.json',
             connector: {
-              accountId: input.connectorId === 'email:agentmail' ? 'murph@agentmail.to' : 'self',
+              accountId: input.connectorId === 'email:agentmail' ? 'murph@agentmail.to' : 'bot',
               enabled: input.enabled,
               id: input.connectorId,
               options:
@@ -747,9 +783,9 @@ test('configureSetupChannels disables stale setup connectors that were not selec
                       emailAddress: 'murph@agentmail.to',
                     }
                   : {
-                      includeOwnMessages: true,
+                      transportMode: 'take-over-webhook',
                     },
-              source: input.connectorId === 'email:agentmail' ? 'email' : 'imessage',
+              source: input.connectorId === 'email:agentmail' ? 'email' : 'telegram',
             },
             connectorCount: 2,
           }
@@ -765,14 +801,13 @@ test('configureSetupChannels disables stale setup connectors that were not selec
     assert.equal(configured[0]?.configured, true)
     assert.deepEqual(sourceSetEnabledCalls, [
       {
-        connectorId: 'imessage:self',
+        connectorId: 'telegram:bot',
         enabled: false,
       },
     ])
 
     const automationState = await readAssistantAutomationState(vault)
-    assert.deepEqual(automationState.autoReplyChannels, ['email'])
-    assert.deepEqual(automationState.autoReplyBacklogChannels, ['email'])
+    assert.deepEqual(listAutoReplyChannels(automationState), ['email'])
   } finally {
     await rm(vault, { recursive: true, force: true })
   }
@@ -816,6 +851,9 @@ test('configureSetupChannels reuses a discovered AgentMail inbox during onboardi
             parserToolchain: null,
             target: 'email:agentmail',
           }
+        },
+        async list(input: InboxListInput) {
+          return createEmptyInboxListResult(input)
         },
         async sourceAdd(input: InboxSourceAddInput) {
           sourceAddCalls.push(input as unknown as Record<string, unknown>)

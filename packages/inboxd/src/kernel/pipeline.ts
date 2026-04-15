@@ -1,8 +1,8 @@
 import type { InboundCapture, PersistedCapture } from "../contracts/capture.ts";
 import type { InboxRuntimeStore } from "./sqlite.ts";
 import {
-  ensureStoredCaptureCanonicalEvidence,
   ensureInboxVault,
+  ensureStoredCaptureCanonicalEvidence,
   findStoredCaptureEnvelope,
   persistCanonicalInboxCapture,
 } from "../indexing/persist.ts";

@@ -1,7 +1,9 @@
 import path from 'node:path'
 import type { Cli } from 'incur'
 
+import { installSqliteExperimentalWarningFilterWithOptions } from '@murphai/runtime-state/node'
 import { formatStructuredErrorMessage } from '@murphai/operator-config/text/shared'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
 export interface MurphCliRunOptions {
   argv0?: string
@@ -10,8 +12,6 @@ export interface MurphCliRunOptions {
 
 type SuccessfulSetupContext = import('@murphai/setup-cli/setup-cli').SuccessfulSetupContext
 type CliServeOptions = Parameters<Cli.Cli['serve']>[1]
-
-let sqliteExperimentalWarningFilterInstalled = false
 
 export async function runMurphCliEntrypoint(
   argv: string[] = process.argv.slice(2),
@@ -26,15 +26,18 @@ export async function runMurphCliAction(
   argv: string[],
   options: MurphCliRunOptions = {},
 ): Promise<void> {
-  const cliModule = await import('./index.js')
+  const vaultCliModule = await import('./vault-cli.js')
   const operatorConfigModule = await import('@murphai/operator-config/operator-config')
   const setupCliModule = await import('@murphai/setup-cli/setup-cli')
   const setupRuntimeEnvModule = await import('@murphai/operator-config/setup-runtime-env')
 
-  const cli = cliModule.default
   const {
     applyDefaultVaultToArgs,
+    commandNeedsVaultForExecution,
     expandConfiguredVaultPath,
+    hasExplicitVaultOption,
+    resolveConfiguredDefaultVault,
+    resolveEffectiveTopLevelToken,
     resolveDefaultVault,
     resolveOperatorHomeDirectory,
   } = operatorConfigModule
@@ -49,16 +52,20 @@ export async function runMurphCliAction(
   } = setupCliModule
   const { SETUP_RUNTIME_ENV_NOTICE } = setupRuntimeEnvModule
 
-  const setupProgramName = detectSetupProgramName(options.argv0 ?? process.argv[1])
+  const programName = detectSetupProgramName(options.argv0 ?? process.argv[1])
+  const topLevelToken = resolveEffectiveTopLevelToken(argv)
+  const cli = vaultCliModule.createVaultCliWithOptions({
+    commandName: programName,
+  })
   const homeDirectory = resolveOperatorHomeDirectory()
   const serveOptions = createCliServeOptions(options.exit)
 
-  if (isSetupInvocation(argv, setupProgramName)) {
+  if (isSetupInvocation(argv, programName)) {
     const successfulSetup = {
       current: null as SuccessfulSetupContext | null,
     }
     const setupCli = createSetupCli({
-      commandName: setupProgramName,
+      commandName: programName,
       onSetupSuccess(context) {
         successfulSetup.current = context
       },
@@ -66,74 +73,138 @@ export async function runMurphCliAction(
     await setupCli.serve(argv, serveOptions)
 
     const setupContext = successfulSetup.current
-    if (setupContext !== null) {
-      const launchVault =
-        (await resolveDefaultVault(homeDirectory)) ??
-        expandConfiguredVaultPath(setupContext.result.vault, homeDirectory)
+    if (setupContext === null) {
+      return
+    }
 
-      const readyWearables = listSetupReadyWearables(setupContext.result)
-      const pendingWearables = listSetupPendingWearables(setupContext.result)
+    const launchVault =
+      (programName === 'murph' && topLevelToken !== 'init'
+        ? await resolveConfiguredDefaultVault(homeDirectory)
+        : await resolveDefaultVault(homeDirectory)) ??
+      expandConfiguredVaultPath(setupContext.result.vault, homeDirectory)
 
-      if (pendingWearables.length > 0) {
-        const pendingSummary = pendingWearables
-          .map(
-            (wearable) =>
-              `${formatSetupWearableLabel(wearable.wearable)} (${wearable.missingEnv.join(', ')})`,
-          )
-          .join(', ')
-        process.stderr.write(
-          `\nSelected wearable setup is waiting on credentials: ${pendingSummary}. ${SETUP_RUNTIME_ENV_NOTICE}\n`,
+    const readyWearables = listSetupReadyWearables(setupContext.result)
+    const pendingWearables = listSetupPendingWearables(setupContext.result)
+
+    if (pendingWearables.length > 0) {
+      const pendingSummary = pendingWearables
+        .map(
+          (wearable) =>
+            `${formatSetupWearableLabel(wearable.wearable)} (${wearable.missingEnv.join(', ')})`,
         )
-      }
+        .join(', ')
+      process.stderr.write(
+        `\nSelected wearable setup is waiting on credentials: ${pendingSummary}. ${SETUP_RUNTIME_ENV_NOTICE}\n`,
+      )
+    }
 
-      for (const wearable of readyWearables) {
-        process.stderr.write(
-          `\nOpening ${formatSetupWearableLabel(wearable)} connect flow in your browser.\n\n`,
+    for (const wearable of readyWearables) {
+      const wearableLabel = formatSetupWearableLabel(wearable)
+      process.stderr.write(
+        `\nOpening ${wearableLabel} connect flow in your browser.\n\n`,
+      )
+      try {
+        await cli.serve(
+          ['device', 'connect', wearable, '--vault', launchVault, '--open'],
+          serveOptions,
         )
-        try {
-          await cli.serve(
-            ['device', 'connect', wearable, '--vault', launchVault, '--open'],
-            serveOptions,
-          )
-        } catch (error) {
-          process.stderr.write(
-            `Could not start the ${formatSetupWearableLabel(wearable)} connect flow: ${formatErrorMessage(error)}\n`,
-          )
-        }
-      }
-
-      const launchAction = resolveSetupPostLaunchAction(setupContext)
-      if (launchAction !== null) {
-        if (launchAction === 'assistant-run') {
-          process.stderr.write(
-            '\nStarting Murph assistant automation. Leave this terminal open while channel auto-reply is active for iMessage, Telegram, and/or email. Press Ctrl+C to stop.\n\n',
-          )
-          await cli.serve(['assistant', 'run', '--vault', launchVault], serveOptions)
-          return
-        }
-
-        process.stderr.write('\nOpening Murph assistant chat. Type /exit to quit.\n\n')
-        await cli.serve(['assistant', 'chat', '--vault', launchVault], serveOptions)
+      } catch (error) {
+        process.stderr.write(
+          `Could not start the ${wearableLabel} connect flow: ${formatErrorMessage(error)}\n`,
+        )
       }
     }
+
+    const launchAction = resolveSetupPostLaunchAction(setupContext)
+    if (launchAction === null) {
+      return
+    }
+
+    if (launchAction === 'assistant-run') {
+      process.stderr.write(
+        '\nStarting Murph assistant automation. Leave this terminal open while channel auto-reply is active for Telegram, Linq, and/or email. Press Ctrl+C to stop.\n\n',
+      )
+      await cli.serve(['assistant', 'run', '--vault', launchVault], serveOptions)
+      return
+    }
+
+    process.stderr.write('\nOpening Murph assistant chat. Type /exit to quit.\n\n')
+    await cli.serve(['assistant', 'chat', '--vault', launchVault], serveOptions)
     return
   }
 
-  const defaultVault = await resolveDefaultVault(homeDirectory)
-  await cli.serve(applyDefaultVaultToArgs(argv, defaultVault), serveOptions)
+  const defaultVault =
+    programName === 'murph' && topLevelToken !== 'init'
+      ? await resolveConfiguredDefaultVault(homeDirectory)
+      : await resolveDefaultVault(homeDirectory)
+  await cli.serve(
+    prepareProgramArgsForExecution({
+      applyDefaultVaultToArgs,
+      argv,
+      commandNeedsVaultForExecution,
+      defaultVault,
+      hasExplicitVaultOption,
+      programName,
+      resolveEffectiveTopLevelToken: () => topLevelToken,
+    }),
+    serveOptions,
+  )
 }
 
 export function formatMurphCliError(error: unknown): string {
   return formatStructuredErrorMessage(error)
 }
 
-function createCliServeOptions(
+export function createCliServeOptions(
   exit: ((code?: number) => void) | undefined,
 ): CliServeOptions {
   return {
     env: process.env,
     ...(exit ? { exit: (code: number) => exit(code) } : {}),
   }
+}
+
+function prepareProgramArgsForExecution(input: {
+  applyDefaultVaultToArgs: (args: readonly string[], vault: string | null) => string[]
+  argv: string[]
+  commandNeedsVaultForExecution: (args: readonly string[]) => boolean
+  defaultVault: string | null
+  hasExplicitVaultOption: (args: readonly string[]) => boolean
+  programName: string
+  resolveEffectiveTopLevelToken: (args: readonly string[]) => string | null
+}): string[] {
+  if (input.programName !== 'murph') {
+    return input.applyDefaultVaultToArgs(input.argv, input.defaultVault)
+  }
+
+  const explicitVaultRequested = input.hasExplicitVaultOption(input.argv)
+  const commandNeedsVault = input.commandNeedsVaultForExecution(input.argv)
+  const commandAllowsExplicitVaultOverride =
+    input.resolveEffectiveTopLevelToken(input.argv) === 'init'
+
+  if (
+    explicitVaultRequested &&
+    commandNeedsVault &&
+    !commandAllowsExplicitVaultOverride
+  ) {
+    throw new VaultCliError(
+      'invalid_option',
+      '`murph` uses one active vault. Omit `--vault` and use `murph use <path>` or `murph onboard --vault <path>` to change it.',
+    )
+  }
+
+  if (
+    input.defaultVault === null &&
+    commandNeedsVault &&
+    !commandAllowsExplicitVaultOverride
+  ) {
+    throw new VaultCliError(
+      'invalid_option',
+      'No active Murph vault is configured. Run `murph onboard --vault ./vault` to create one, or `murph use <path>` to select an existing vault.',
+    )
+  }
+
+  return input.applyDefaultVaultToArgs(input.argv, input.defaultVault)
 }
 
 function formatErrorMessage(error: unknown): string {
@@ -152,12 +223,7 @@ export function loadCliEnvFiles(cwd = process.cwd()): void {
     try {
       process.loadEnvFile(filePath)
     } catch (error) {
-      if (
-        typeof error === 'object' &&
-        error !== null &&
-        'code' in error &&
-        error.code === 'ENOENT'
-      ) {
+      if (isNodeErrorWithCode(error, 'ENOENT')) {
         continue
       }
 
@@ -167,42 +233,11 @@ export function loadCliEnvFiles(cwd = process.cwd()): void {
 }
 
 export function installSqliteExperimentalWarningFilter(): void {
-  if (sqliteExperimentalWarningFilterInstalled) {
-    return
-  }
+  installSqliteExperimentalWarningFilterWithOptions({
+    matchMode: 'includes',
+  })
+}
 
-  sqliteExperimentalWarningFilterInstalled = true
-  const originalEmitWarning = process.emitWarning.bind(process)
-
-  process.emitWarning = ((warning: string | Error, ...args: unknown[]) => {
-    const message =
-      typeof warning === 'string'
-        ? warning
-        : warning instanceof Error
-          ? warning.message
-          : ''
-    const warningType =
-      typeof args[0] === 'string'
-        ? args[0]
-        : warning instanceof Error
-          ? warning.name
-          : ''
-
-    if (
-      warningType === 'ExperimentalWarning' &&
-      message.includes('SQLite is an experimental feature')
-    ) {
-      return
-    }
-
-    return originalEmitWarning(
-      warning as Parameters<typeof process.emitWarning>[0],
-      ...(args as Parameters<typeof process.emitWarning> extends [
-        unknown,
-        ...infer Rest,
-      ]
-        ? Rest
-        : never),
-    )
-  }) as typeof process.emitWarning
+function isNodeErrorWithCode(error: unknown, code: string): boolean {
+  return typeof error === 'object' && error !== null && 'code' in error && error.code === code
 }

@@ -19,15 +19,15 @@ import {
   readHostedMemberIdentityPrivateState,
 } from "./member-private-codecs";
 import {
+  type HostedOnboardingReadClient,
   normalizeNullableString,
-  type HostedOnboardingPrismaClient,
 } from "./shared";
 
 export interface HostedMemberIdentityState {
-  maskedPhoneNumberHint: string;
+  maskedPhoneNumberHint: string | null;
   memberId: string;
   phoneNumber: string | null;
-  phoneLookupKey: string;
+  phoneLookupKey: string | null;
   signupPhoneCodeSendAttemptId: string | null;
   signupPhoneCodeSendAttemptStartedAt: Date | null;
   signupPhoneCodeSentAt: Date | null;
@@ -40,12 +40,29 @@ export interface HostedMemberIdentityState {
   walletProvider: string | null;
 }
 
+export type HostedMemberIdentityLookupState = Omit<HostedMemberIdentityState, "phoneLookupKey">;
+
+export type HostedMemberIdentityLookupMatch =
+  | "phoneLookupKey"
+  | "phoneNumber"
+  | "privyUserId"
+  | "walletAddress";
+
+export interface HostedMemberIdentityLookup {
+  core: HostedMember;
+  identity: HostedMemberIdentityLookupState;
+  matchedBy: HostedMemberIdentityLookupMatch;
+}
+
+// Lookup helpers return the matched identity slice with the core row so auth
+// and onboarding flows do not need to round-trip through readHostedMemberIdentity.
+
 export interface HostedMemberIdentityWriteInput {
-  maskedPhoneNumberHint: string;
+  maskedPhoneNumberHint: string | null;
   memberId: string;
-  phoneLookupKey: string;
+  phoneLookupKey: string | null;
   phoneNumberVerifiedAt: Date | null;
-  prisma: HostedOnboardingPrismaClient;
+  prisma: Prisma.TransactionClient;
   phoneNumber: string | null;
   privyUserId: string | null;
   signupPhoneCodeSendAttemptId: string | null;
@@ -60,17 +77,17 @@ export interface HostedMemberIdentityWriteInput {
 
 export interface HostedMemberSignupPhoneStateWriteInput {
   memberId: string;
-  prisma: HostedOnboardingPrismaClient;
+  prisma: Prisma.TransactionClient;
   signupPhoneCodeSendAttemptId?: string | null;
   signupPhoneCodeSendAttemptStartedAt?: Date | null;
   signupPhoneCodeSentAt?: Date | null;
   signupPhoneNumber?: string | null;
 }
 
-export async function findHostedMemberByPrivyUserId(input: {
-  prisma: HostedOnboardingPrismaClient;
+export async function lookupHostedMemberIdentityByPrivyUserId(input: {
+  prisma: HostedOnboardingReadClient;
   privyUserId: string;
-}): Promise<HostedMember | null> {
+}): Promise<HostedMemberIdentityLookup | null> {
   const privyUserLookupKeys = createHostedPrivyUserLookupKeyReadCandidates(input.privyUserId);
 
   if (privyUserLookupKeys.length === 0) {
@@ -88,13 +105,15 @@ export async function findHostedMemberByPrivyUserId(input: {
     },
   });
 
-  return identityRecord?.member ?? null;
+  return identityRecord
+    ? projectHostedMemberIdentityLookup(identityRecord, "privyUserId")
+    : null;
 }
 
-export async function findHostedMemberByPhoneLookupKey(input: {
+export async function lookupHostedMemberIdentityByPhoneLookupKey(input: {
   phoneLookupKey: string;
-  prisma: HostedOnboardingPrismaClient;
-}): Promise<HostedMember | null> {
+  prisma: HostedOnboardingReadClient;
+}): Promise<HostedMemberIdentityLookup | null> {
   const identityRecord = await input.prisma.hostedMemberIdentity.findUnique({
     where: {
       phoneLookupKey: input.phoneLookupKey,
@@ -104,13 +123,15 @@ export async function findHostedMemberByPhoneLookupKey(input: {
     },
   });
 
-  return identityRecord?.member ?? null;
+  return identityRecord
+    ? projectHostedMemberIdentityLookup(identityRecord, "phoneLookupKey")
+    : null;
 }
 
-export async function findHostedMemberByPhoneNumber(input: {
+export async function lookupHostedMemberIdentityByPhoneNumber(input: {
   phoneNumber: string;
-  prisma: HostedOnboardingPrismaClient;
-}): Promise<HostedMember | null> {
+  prisma: HostedOnboardingReadClient;
+}): Promise<HostedMemberIdentityLookup | null> {
   const phoneLookupKeys = createHostedPhoneLookupKeyReadCandidates(input.phoneNumber);
 
   if (phoneLookupKeys.length === 0) {
@@ -128,13 +149,15 @@ export async function findHostedMemberByPhoneNumber(input: {
     },
   });
 
-  return identityRecord?.member ?? null;
+  return identityRecord
+    ? projectHostedMemberIdentityLookup(identityRecord, "phoneNumber")
+    : null;
 }
 
-export async function findHostedMemberByWalletAddress(input: {
-  prisma: HostedOnboardingPrismaClient;
+export async function lookupHostedMemberIdentityByWalletAddress(input: {
+  prisma: HostedOnboardingReadClient;
   walletAddress: string;
-}): Promise<HostedMember | null> {
+}): Promise<HostedMemberIdentityLookup | null> {
   const walletAddressLookupKeys = createHostedWalletAddressLookupKeyReadCandidates(
     input.walletAddress,
   );
@@ -154,12 +177,14 @@ export async function findHostedMemberByWalletAddress(input: {
     },
   });
 
-  return identityRecord?.member ?? null;
+  return identityRecord
+    ? projectHostedMemberIdentityLookup(identityRecord, "walletAddress")
+    : null;
 }
 
 export async function readHostedMemberIdentity(input: {
   memberId: string;
-  prisma: HostedOnboardingPrismaClient;
+  prisma: HostedOnboardingReadClient;
 }): Promise<HostedMemberIdentityState | null> {
   const identityRecord = await input.prisma.hostedMemberIdentity.findUnique({
     where: {
@@ -246,50 +271,68 @@ export function projectHostedMemberIdentityState(
   };
 }
 
+function projectHostedMemberIdentityLookup(
+  identity: HostedMemberIdentity & {
+    member: HostedMember;
+  },
+  matchedBy: HostedMemberIdentityLookupMatch,
+): HostedMemberIdentityLookup {
+  const identityState = projectHostedMemberIdentityState(identity);
+
+  return {
+    core: identity.member,
+    identity: {
+      maskedPhoneNumberHint: identityState.maskedPhoneNumberHint,
+      memberId: identityState.memberId,
+      phoneNumber: identityState.phoneNumber,
+      phoneNumberVerifiedAt: identityState.phoneNumberVerifiedAt,
+      privyUserId: identityState.privyUserId,
+      signupPhoneCodeSendAttemptId: identityState.signupPhoneCodeSendAttemptId,
+      signupPhoneCodeSendAttemptStartedAt: identityState.signupPhoneCodeSendAttemptStartedAt,
+      signupPhoneCodeSentAt: identityState.signupPhoneCodeSentAt,
+      signupPhoneNumber: identityState.signupPhoneNumber,
+      walletAddress: identityState.walletAddress,
+      walletChainType: identityState.walletChainType,
+      walletCreatedAt: identityState.walletCreatedAt,
+      walletProvider: identityState.walletProvider,
+    },
+    matchedBy,
+  };
+}
+
 function buildHostedMemberIdentityCreateData(
   input: HostedMemberIdentityWriteInput,
 ): Prisma.HostedMemberIdentityUncheckedCreateInput {
   return {
-    maskedPhoneNumberHint: input.maskedPhoneNumberHint,
     memberId: input.memberId,
-    phoneLookupKey: input.phoneLookupKey,
-    phoneNumberVerifiedAt: input.phoneNumberVerifiedAt,
-    privyUserLookupKey: createHostedPrivyUserLookupKey(input.privyUserId),
-    ...buildHostedMemberIdentityPrivateColumns({
-      memberId: input.memberId,
-      phoneNumber: input.phoneNumber,
-      privyUserId: input.privyUserId,
-      signupPhoneCodeSendAttemptId: input.signupPhoneCodeSendAttemptId,
-      signupPhoneCodeSendAttemptStartedAt: input.signupPhoneCodeSendAttemptStartedAt,
-      signupPhoneCodeSentAt: input.signupPhoneCodeSentAt,
-      signupPhoneNumber: input.signupPhoneNumber,
-      walletAddress: input.walletAddress,
-    }),
-    walletAddressLookupKey: createHostedWalletAddressLookupKey(input.walletAddress),
-    walletChainType: input.walletChainType,
-    walletCreatedAt: input.walletCreatedAt,
-    walletProvider: input.walletProvider,
+    ...buildHostedMemberIdentityMutationData(input),
   };
 }
 
 function buildHostedMemberIdentityUpdateData(
   input: HostedMemberIdentityWriteInput,
 ): Prisma.HostedMemberIdentityUncheckedUpdateInput {
+  return buildHostedMemberIdentityMutationData(input);
+}
+
+function buildHostedMemberIdentityMutationData(input: HostedMemberIdentityWriteInput) {
+  const privateColumns = buildHostedMemberIdentityPrivateColumns({
+    memberId: input.memberId,
+    phoneNumber: input.phoneNumber,
+    privyUserId: input.privyUserId,
+    signupPhoneCodeSendAttemptId: input.signupPhoneCodeSendAttemptId,
+    signupPhoneCodeSendAttemptStartedAt: input.signupPhoneCodeSendAttemptStartedAt,
+    signupPhoneCodeSentAt: input.signupPhoneCodeSentAt,
+    signupPhoneNumber: input.signupPhoneNumber,
+    walletAddress: input.walletAddress,
+  });
+
   return {
     maskedPhoneNumberHint: input.maskedPhoneNumberHint,
     phoneLookupKey: input.phoneLookupKey,
     phoneNumberVerifiedAt: input.phoneNumberVerifiedAt,
     privyUserLookupKey: createHostedPrivyUserLookupKey(input.privyUserId),
-    ...buildHostedMemberIdentityPrivateColumns({
-      memberId: input.memberId,
-      phoneNumber: input.phoneNumber,
-      privyUserId: input.privyUserId,
-      signupPhoneCodeSendAttemptId: input.signupPhoneCodeSendAttemptId,
-      signupPhoneCodeSendAttemptStartedAt: input.signupPhoneCodeSendAttemptStartedAt,
-      signupPhoneCodeSentAt: input.signupPhoneCodeSentAt,
-      signupPhoneNumber: input.signupPhoneNumber,
-      walletAddress: input.walletAddress,
-    }),
+    ...privateColumns,
     walletAddressLookupKey: createHostedWalletAddressLookupKey(input.walletAddress),
     walletChainType: input.walletChainType,
     walletCreatedAt: input.walletCreatedAt,

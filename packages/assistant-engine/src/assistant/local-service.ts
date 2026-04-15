@@ -3,7 +3,11 @@ import {
   type AssistantAskResult,
   type AssistantSession,
 } from '@murphai/operator-config/assistant-cli-contracts'
-import { createDefaultLocalAssistantModelTarget } from '@murphai/operator-config/assistant-backend'
+import {
+  assistantBackendTargetToProviderConfigInput,
+  createAssistantModelTarget,
+  createDefaultLocalAssistantModelTarget,
+} from '@murphai/operator-config/assistant-backend'
 import {
   type ResolvedAssistantSession,
   appendAssistantTranscriptEntries,
@@ -37,6 +41,10 @@ import {
   finalizeAssistantTurnReceipt,
 } from './turns.js'
 import {
+  AUTO_REPLY_RECEIPT_RETRY_AT_KEY,
+  computeAssistantAutoReplyRetryAt,
+} from './automation/auto-reply-retry.js'
+import {
   mergeAssistantProviderConfigsForProvider,
   serializeAssistantProviderSessionOptions,
 } from '@murphai/operator-config/assistant/provider-config'
@@ -51,6 +59,9 @@ import {
   normalizeAssistantAskResultForReturn,
   serializeAssistantSessionForResult,
 } from './service-result.js'
+import {
+  prioritizeAssistantRoutesForRichUserMessageContent,
+} from './rich-content-routing.js'
 import { persistFailedAssistantPromptAttempt } from './prompt-attempts.js'
 import { resolveAssistantTurnRoutes } from './service-turn-routes.js'
 import { persistPendingAssistantUsageEvent } from './service-usage.js'
@@ -139,7 +150,10 @@ export async function sendAssistantMessageLocal(
         message: input,
       })
       const sharedPlan = await buildAssistantTurnSharedPlan(input, resolved)
-      const routes = resolveAssistantTurnRoutes(input, defaults, resolved)
+      const routes = prioritizeAssistantRoutesForRichUserMessageContent({
+        routes: resolveAssistantTurnRoutes(input, defaults, resolved),
+        userMessageContent: input.userMessageContent,
+      })
       const primaryRoute = routes[0] ?? null
       const receipt = await createAssistantTurnReceipt({
         vault: input.vault,
@@ -240,6 +254,13 @@ export async function sendAssistantMessageLocal(
       } catch (error) {
         const normalizedError = normalizeAssistantDeliveryError(error)
         const failedAt = new Date().toISOString()
+        const retryAt =
+          input.turnTrigger === 'automation-auto-reply'
+            ? computeAssistantAutoReplyRetryAt(
+                error,
+                Date.parse(failedAt),
+              )
+            : null
         const failedSession =
           extractRecoveredAssistantSession(error) ?? resolved.session
 
@@ -264,6 +285,12 @@ export async function sendAssistantMessageLocal(
             error: normalizedError,
             response: responseText,
             completedAt: failedAt,
+            metadata:
+              retryAt === null
+                ? null
+                : {
+                    [AUTO_REPLY_RECEIPT_RETRY_AT_KEY]: retryAt,
+                  },
           }),
         )
 
@@ -310,19 +337,29 @@ export async function updateAssistantSessionOptionsLocal(input: {
 
   const providerConfig = mergeAssistantProviderConfigsForProvider(
     session.session.provider,
-    {
-      provider: session.session.provider,
-      ...session.session.providerOptions,
-    },
+    // Persisted targets carry the full durable provider config. Session
+    // providerOptions are a derived runtime projection and omit target-only
+    // fields such as the Codex executable path.
+    assistantBackendTargetToProviderConfigInput(session.session.target),
     {
       provider: session.session.provider,
       ...input.providerOptions,
     },
   )
+  const nextTarget =
+    createAssistantModelTarget(providerConfig) ?? session.session.target
+  const nextProviderOptions = serializeAssistantProviderSessionOptions(providerConfig)
+  const continuityChanged =
+    session.session.providerOptions.continuityFingerprint !==
+    nextProviderOptions.continuityFingerprint
 
   return saveAssistantSession(input.vault, {
     ...session.session,
-    providerOptions: serializeAssistantProviderSessionOptions(providerConfig),
+    provider: nextTarget.adapter,
+    providerBinding: continuityChanged ? null : session.session.providerBinding,
+    providerOptions: nextProviderOptions,
+    resumeState: continuityChanged ? null : session.session.resumeState,
+    target: nextTarget,
     updatedAt: new Date().toISOString(),
   })
 }

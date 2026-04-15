@@ -1,98 +1,309 @@
 import assert from "node:assert/strict";
-import { access, readFile } from "node:fs/promises";
+import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-import { test } from "vitest";
+import { beforeEach, test, vi } from "vitest";
 
 import { resolveAssistantStatePaths } from "@murphai/runtime-state/node";
 
+const mocks = vi.hoisted(() => ({
+  inboxInit: vi.fn(),
+  inboxList: vi.fn(),
+}));
+
+vi.mock("@murphai/inbox-services", () => ({
+  createIntegratedInboxServices() {
+    return {
+      init: mocks.inboxInit,
+      list: mocks.inboxList,
+    };
+  },
+}));
+
+vi.mock("@murphai/vault-usecases/vault-services", () => ({
+  createIntegratedVaultServices() {
+    return {
+      core: {
+        async init(input: { vault: string }) {
+          await mkdir(input.vault, { recursive: true });
+          await writeFile(path.join(input.vault, "vault.json"), "{}", "utf8");
+        },
+      },
+    };
+  },
+}));
+
 import {
   prepareHostedDispatchContext,
-  reconcileHostedAssistantChannelCapabilities,
+  reconcileHostedAssistantChannelState,
 } from "../src/hosted-runtime/context.ts";
 import {
   createHostedRuntimeWorkspace,
+  HOSTED_RUNTIME_RESOLVED_CONFIG,
   HOSTED_RUNTIME_EMAIL_CAPABILITY_ENV,
 } from "./hosted-runtime-test-helpers.ts";
 
-test("hosted channel capability reconciliation enables email and telegram auto-reply exactly once", async () => {
+const DEFAULT_MEMBER_CHANNELS = {
+  email: true,
+  linq: true,
+  telegram: true,
+} as const;
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  mocks.inboxList.mockResolvedValue({
+    items: [],
+  });
+});
+
+async function readAutomationState(vaultRoot: string) {
+  return JSON.parse(
+    await readFile(resolveAssistantStatePaths(vaultRoot).automationStatePath, "utf8"),
+  ) as {
+    autoReply: Array<{
+      channel: string;
+      cursor: { captureId: string; occurredAt: string } | null;
+    }>;
+  };
+}
+
+async function writeAutomationState(
+  vaultRoot: string,
+  state: {
+    autoReply: Array<{
+      channel: string;
+      cursor: { captureId: string; occurredAt: string } | null;
+    }>;
+    inboxScanCursor: { captureId: string; occurredAt: string } | null;
+    updatedAt: string;
+    version: number;
+  },
+) {
+  const automationStatePath = resolveAssistantStatePaths(vaultRoot).automationStatePath;
+  await mkdir(path.dirname(automationStatePath), { recursive: true });
+  await writeFile(automationStatePath, `${JSON.stringify(state, null, 2)}\n`, "utf8");
+}
+
+function setHostedAssistantSeedEnv(): Record<string, string | undefined> {
+  const previousEnv = {
+    HOSTED_ASSISTANT_MODEL: process.env.HOSTED_ASSISTANT_MODEL,
+    HOSTED_ASSISTANT_PROVIDER: process.env.HOSTED_ASSISTANT_PROVIDER,
+  };
+  process.env.HOSTED_ASSISTANT_MODEL = "gpt-4.1-mini";
+  process.env.HOSTED_ASSISTANT_PROVIDER = "openai";
+  return previousEnv;
+}
+
+function buildHostedAssistantSeedRuntimeEnv(): Record<string, string> {
+  return {
+    HOSTED_ASSISTANT_MODEL: "gpt-4.1-mini",
+    HOSTED_ASSISTANT_PROVIDER: "openai",
+  };
+}
+
+function restoreEnvVar(key: "HOSTED_ASSISTANT_MODEL" | "HOSTED_ASSISTANT_PROVIDER", value: string | undefined): void {
+  if (value === undefined) {
+    delete process.env[key];
+    return;
+  }
+
+  process.env[key] = value;
+}
+
+async function withOperatorHomeRoot<T>(
+  operatorHomeRoot: string,
+  run: () => Promise<T>,
+): Promise<T> {
+  const previousHome = process.env.HOME;
+
+  process.env.HOME = operatorHomeRoot;
+
+  try {
+    return await run();
+  } finally {
+    if (previousHome === undefined) {
+      delete process.env.HOME;
+    } else {
+      process.env.HOME = previousHome;
+    }
+  }
+}
+
+test("hosted channel state reconciliation enables linked hosted auto-reply channels exactly once", async () => {
   const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace("hosted-runtime-context-");
 
   try {
-    const firstResult = await reconcileHostedAssistantChannelCapabilities(
+    const firstResult = await reconcileHostedAssistantChannelState(
       vaultRoot,
-      HOSTED_RUNTIME_EMAIL_CAPABILITY_ENV,
+      DEFAULT_MEMBER_CHANNELS,
+      HOSTED_RUNTIME_RESOLVED_CONFIG.channelCapabilities,
       true,
     );
 
     assert.deepEqual(firstResult, {
       emailAutoReplyEnabled: true,
+      linqAutoReplyEnabled: true,
       telegramAutoReplyEnabled: true,
     });
-    assert.deepEqual(
-      JSON.parse(
-        await readFile(resolveAssistantStatePaths(vaultRoot).automationStatePath, "utf8"),
-      ).autoReplyChannels,
-      ["email", "telegram"],
-    );
+    assert.deepEqual((await readAutomationState(vaultRoot)).autoReply, [
+      {
+        channel: "email",
+        cursor: null,
+      },
+      {
+        channel: "linq",
+        cursor: null,
+      },
+      {
+        channel: "telegram",
+        cursor: null,
+      },
+    ]);
 
-    const secondResult = await reconcileHostedAssistantChannelCapabilities(
+    const secondResult = await reconcileHostedAssistantChannelState(
       vaultRoot,
-      HOSTED_RUNTIME_EMAIL_CAPABILITY_ENV,
+      DEFAULT_MEMBER_CHANNELS,
+      HOSTED_RUNTIME_RESOLVED_CONFIG.channelCapabilities,
       true,
     );
 
     assert.deepEqual(secondResult, {
       emailAutoReplyEnabled: true,
+      linqAutoReplyEnabled: true,
       telegramAutoReplyEnabled: true,
     });
+    assert.equal(mocks.inboxList.mock.calls.length, 1);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("hosted channel state reconciliation preserves unmanaged entries while pruning unlinked or unavailable hosted channels", async () => {
+  const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace("hosted-runtime-context-");
+
+  try {
+    await writeAutomationState(vaultRoot, {
+      version: 1,
+      inboxScanCursor: null,
+      autoReply: [
+        {
+          channel: "email",
+          cursor: {
+            captureId: "cap_email",
+            occurredAt: "2026-03-28T09:00:00.000Z",
+          },
+        },
+        {
+          channel: "linq",
+          cursor: {
+            captureId: "cap_linq",
+            occurredAt: "2026-03-28T09:01:00.000Z",
+          },
+        },
+        {
+          channel: "telegram",
+          cursor: {
+            captureId: "cap_telegram",
+            occurredAt: "2026-03-28T09:02:00.000Z",
+          },
+        },
+      ],
+      updatedAt: "2026-03-28T09:03:00.000Z",
+    });
+
+    const result = await reconcileHostedAssistantChannelState(
+      vaultRoot,
+      {
+        email: false,
+        linq: true,
+        telegram: true,
+      },
+      {
+        emailSendReady: false,
+        telegramBotConfigured: true,
+      },
+      true,
+    );
+
+    assert.deepEqual(result, {
+      emailAutoReplyEnabled: false,
+      linqAutoReplyEnabled: true,
+      telegramAutoReplyEnabled: true,
+    });
+    assert.deepEqual((await readAutomationState(vaultRoot)).autoReply, [
+      {
+        channel: "linq",
+        cursor: {
+          captureId: "cap_linq",
+          occurredAt: "2026-03-28T09:01:00.000Z",
+        },
+      },
+      {
+        channel: "telegram",
+        cursor: {
+          captureId: "cap_telegram",
+          occurredAt: "2026-03-28T09:02:00.000Z",
+        },
+      },
+    ]);
+    assert.equal(mocks.inboxList.mock.calls.length, 0);
   } finally {
     await cleanup();
   }
 });
 
 test("hosted dispatch context still requires member activation bootstrap before follow-up events", async () => {
-  const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace("hosted-runtime-context-");
+  const { cleanup, operatorHomeRoot, vaultRoot } = await createHostedRuntimeWorkspace("hosted-runtime-context-");
 
   try {
-    await assert.rejects(
-      prepareHostedDispatchContext(
+    await withOperatorHomeRoot(operatorHomeRoot, async () => {
+      await assert.rejects(
+        prepareHostedDispatchContext(
+          vaultRoot,
+          {
+            event: {
+              kind: "assistant.cron.tick",
+              reason: "manual",
+              userId: "member_123",
+            },
+            eventId: "evt_tick_without_bootstrap",
+            occurredAt: "2026-03-28T09:00:00.000Z",
+          },
+          {},
+          HOSTED_RUNTIME_RESOLVED_CONFIG,
+        ),
+        /requires member\.activated bootstrap first/u,
+      );
+
+      const bootstrapResult = await prepareHostedDispatchContext(
         vaultRoot,
         {
           event: {
-            kind: "assistant.cron.tick",
-            reason: "manual",
+            kind: "member.activated",
+            memberChannels: {
+              email: false,
+              linq: false,
+              telegram: false,
+            },
             userId: "member_123",
           },
-          eventId: "evt_tick_without_bootstrap",
-          occurredAt: "2026-03-28T09:00:00.000Z",
+          eventId: "evt_activation",
+          occurredAt: "2026-03-28T09:05:00.000Z",
         },
         {},
-      ),
-      /requires member\.activated bootstrap first/u,
-    );
+        HOSTED_RUNTIME_RESOLVED_CONFIG,
+      );
 
-    const bootstrapResult = await prepareHostedDispatchContext(
-      vaultRoot,
-      {
-        event: {
-          kind: "member.activated",
-          userId: "member_123",
-        },
-        eventId: "evt_activation",
-        occurredAt: "2026-03-28T09:05:00.000Z",
-      },
-      {},
-    );
-
-    assert.deepEqual(bootstrapResult, {
-      assistantConfigStatus: "missing",
-      assistantConfigured: false,
-      assistantProvider: null,
-      assistantSeeded: false,
-      emailAutoReplyEnabled: false,
-      telegramAutoReplyEnabled: false,
-      vaultCreated: true,
+      assert.deepEqual(bootstrapResult, {
+        assistantConfigStatus: "missing",
+        assistantConfigured: false,
+        assistantProvider: null,
+        assistantSeeded: false,
+        emailAutoReplyEnabled: false,
+        linqAutoReplyEnabled: false,
+        telegramAutoReplyEnabled: false,
+        vaultCreated: true,
+      });
     });
     await access(path.join(vaultRoot, "vault.json"));
   } finally {
@@ -100,42 +311,171 @@ test("hosted dispatch context still requires member activation bootstrap before 
   }
 });
 
-test("hosted dispatch context does not enable new auto-reply channels on non-activation follow-up events", async () => {
-  const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace("hosted-runtime-context-");
+test("hosted member activation enables managed Linq auto-reply when first contact is Linq and the hosted assistant is configured", async () => {
+  const { cleanup, operatorHomeRoot, vaultRoot } = await createHostedRuntimeWorkspace("hosted-runtime-context-");
+  const previousHostedAssistantEnv = setHostedAssistantSeedEnv();
 
   try {
-    await prepareHostedDispatchContext(
-      vaultRoot,
-      {
-        event: {
-          kind: "member.activated",
-          userId: "member_123",
+    await withOperatorHomeRoot(operatorHomeRoot, async () => {
+      const bootstrapResult = await prepareHostedDispatchContext(
+        vaultRoot,
+        {
+          event: {
+            kind: "member.activated",
+            firstContact: {
+              channel: "linq",
+              identityId: "hbidx:phone:v1:test",
+              threadId: "chat_123",
+              threadIsDirect: true,
+            },
+            memberChannels: DEFAULT_MEMBER_CHANNELS,
+            userId: "member_123",
+          },
+          eventId: "evt_activation_linq",
+          occurredAt: "2026-03-28T09:05:00.000Z",
         },
-        eventId: "evt_activation",
-        occurredAt: "2026-03-28T09:05:00.000Z",
-      },
-      {},
-    );
+        buildHostedAssistantSeedRuntimeEnv(),
+        HOSTED_RUNTIME_RESOLVED_CONFIG,
+      );
 
-    await prepareHostedDispatchContext(
-      vaultRoot,
+      assert.deepEqual(bootstrapResult, {
+        assistantConfigStatus: "hosted-env",
+        assistantConfigured: true,
+        assistantProvider: "openai-compatible",
+        assistantSeeded: true,
+        emailAutoReplyEnabled: true,
+        linqAutoReplyEnabled: true,
+        telegramAutoReplyEnabled: true,
+        vaultCreated: true,
+      });
+    });
+    assert.deepEqual((await readAutomationState(vaultRoot)).autoReply, [
       {
-        event: {
-          kind: "assistant.cron.tick",
-          reason: "manual",
-          userId: "member_123",
-        },
-        eventId: "evt_tick_after_bootstrap",
-        occurredAt: "2026-03-28T09:10:00.000Z",
+        channel: "email",
+        cursor: null,
       },
-      HOSTED_RUNTIME_EMAIL_CAPABILITY_ENV,
-    );
+      {
+        channel: "linq",
+        cursor: null,
+      },
+      {
+        channel: "telegram",
+        cursor: null,
+      },
+    ]);
+  } finally {
+    restoreEnvVar("HOSTED_ASSISTANT_MODEL", previousHostedAssistantEnv.HOSTED_ASSISTANT_MODEL);
+    restoreEnvVar("HOSTED_ASSISTANT_PROVIDER", previousHostedAssistantEnv.HOSTED_ASSISTANT_PROVIDER);
+    await cleanup();
+  }
+});
 
-    const automationState = JSON.parse(
-      await readFile(resolveAssistantStatePaths(vaultRoot).automationStatePath, "utf8"),
-    ) as { autoReplyChannels: string[] };
+test("hosted activation replay preserves managed Linq auto-reply after Linq bootstrap", async () => {
+  const { cleanup, operatorHomeRoot, vaultRoot } = await createHostedRuntimeWorkspace("hosted-runtime-context-");
+  const previousHostedAssistantEnv = setHostedAssistantSeedEnv();
 
-    assert.deepEqual(automationState.autoReplyChannels, []);
+  try {
+    await withOperatorHomeRoot(operatorHomeRoot, async () => {
+      await prepareHostedDispatchContext(
+        vaultRoot,
+        {
+          event: {
+            kind: "member.activated",
+            firstContact: {
+              channel: "linq",
+              identityId: "hbidx:phone:v1:test",
+              threadId: "chat_123",
+              threadIsDirect: true,
+            },
+            memberChannels: DEFAULT_MEMBER_CHANNELS,
+            userId: "member_123",
+          },
+          eventId: "evt_activation_linq_initial",
+          occurredAt: "2026-03-28T09:05:00.000Z",
+        },
+        buildHostedAssistantSeedRuntimeEnv(),
+        HOSTED_RUNTIME_RESOLVED_CONFIG,
+      );
+
+      await prepareHostedDispatchContext(
+        vaultRoot,
+        {
+          event: {
+            kind: "member.activated",
+            memberChannels: DEFAULT_MEMBER_CHANNELS,
+            userId: "member_123",
+          },
+          eventId: "evt_activation_linq_replay",
+          occurredAt: "2026-03-28T09:10:00.000Z",
+        },
+        buildHostedAssistantSeedRuntimeEnv(),
+        HOSTED_RUNTIME_RESOLVED_CONFIG,
+      );
+    });
+
+    assert.deepEqual((await readAutomationState(vaultRoot)).autoReply, [
+      {
+        channel: "email",
+        cursor: null,
+      },
+      {
+        channel: "linq",
+        cursor: null,
+      },
+      {
+        channel: "telegram",
+        cursor: null,
+      },
+    ]);
+  } finally {
+    restoreEnvVar("HOSTED_ASSISTANT_MODEL", previousHostedAssistantEnv.HOSTED_ASSISTANT_MODEL);
+    restoreEnvVar("HOSTED_ASSISTANT_PROVIDER", previousHostedAssistantEnv.HOSTED_ASSISTANT_PROVIDER);
+    await cleanup();
+  }
+});
+
+test("hosted dispatch context does not change auto-reply state on non-channel follow-up events", async () => {
+  const { cleanup, operatorHomeRoot, vaultRoot } = await createHostedRuntimeWorkspace("hosted-runtime-context-");
+
+  try {
+    await withOperatorHomeRoot(operatorHomeRoot, async () => {
+      await prepareHostedDispatchContext(
+        vaultRoot,
+        {
+          event: {
+            kind: "member.activated",
+            memberChannels: {
+              email: false,
+              linq: false,
+              telegram: false,
+            },
+            userId: "member_123",
+          },
+          eventId: "evt_activation",
+          occurredAt: "2026-03-28T09:05:00.000Z",
+        },
+        {},
+        HOSTED_RUNTIME_RESOLVED_CONFIG,
+      );
+      const autoReplyAfterActivation = (await readAutomationState(vaultRoot)).autoReply;
+
+      await prepareHostedDispatchContext(
+        vaultRoot,
+        {
+          event: {
+            kind: "assistant.cron.tick",
+            reason: "manual",
+            userId: "member_123",
+          },
+          eventId: "evt_tick_after_bootstrap",
+          occurredAt: "2026-03-28T09:10:00.000Z",
+        },
+        HOSTED_RUNTIME_EMAIL_CAPABILITY_ENV,
+        HOSTED_RUNTIME_RESOLVED_CONFIG,
+      );
+
+      assert.deepEqual((await readAutomationState(vaultRoot)).autoReply, autoReplyAfterActivation);
+    });
   } finally {
     await cleanup();
   }

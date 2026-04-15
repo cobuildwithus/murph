@@ -5,8 +5,10 @@ import { SpeedInsights } from "@vercel/speed-insights/next";
 
 import { Providers } from "./providers";
 import { resolveHostedPublicBaseUrl } from "@/src/lib/hosted-web/public-url";
-import { resolveHostedPrivyClientId } from "@/src/lib/hosted-onboarding/landing";
-import { requireHostedPrivyPhoneAuthConfig } from "@/src/lib/hosted-onboarding/privy";
+import {
+  requireHostedPrivyClientAppId,
+  resolveHostedPrivyClientId,
+} from "@/src/lib/hosted-onboarding/landing";
 
 import "./globals.css";
 import { cn } from "@/src/lib/utils";
@@ -29,6 +31,7 @@ const dmMono = DM_Mono({
 });
 
 const GITHUB_REPO_URL = "https://github.com/cobuildwithus/murph";
+const SUPPORT_EMAIL = "support@withmurph.ai";
 
 const metadataBase = resolveMetadataBase();
 
@@ -39,7 +42,7 @@ export const metadata: Metadata = metadataBase
   : {};
 
 export default function RootLayout(input: { children: React.ReactNode }) {
-  const { appId: privyAppId } = requireHostedPrivyPhoneAuthConfig();
+  const privyAppId = requireHostedPrivyClientAppId();
   const privyClientId = resolveHostedPrivyClientId();
 
   return (
@@ -53,14 +56,22 @@ export default function RootLayout(input: { children: React.ReactNode }) {
                 <p className="max-w-2xl leading-relaxed">
                   Murph is open source and licensed under Apache 2.0.
                 </p>
-                <a
-                  href={GITHUB_REPO_URL}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="font-semibold text-olive transition-colors hover:text-stone-900"
-                >
-                  View the code on GitHub
-                </a>
+                <div className="flex flex-wrap items-center gap-3">
+                  <a
+                    href={`mailto:${SUPPORT_EMAIL}`}
+                    className="inline-flex items-center text-[11px] font-medium uppercase tracking-[0.16em] text-stone-600 transition-colors hover:text-stone-800"
+                  >
+                    Contact support
+                  </a>
+                  <a
+                    href={GITHUB_REPO_URL}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="font-semibold text-olive transition-colors hover:text-stone-900"
+                  >
+                    View the code on GitHub
+                  </a>
+                </div>
               </div>
             </footer>
           </div>

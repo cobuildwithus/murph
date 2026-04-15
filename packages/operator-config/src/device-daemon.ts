@@ -93,10 +93,7 @@ export async function ensureManagedDeviceSyncControlPlane(input: {
 
   return {
     baseUrl: startResult.baseUrl,
-    controlToken: readManagedControlToken(
-      requireManagedVault(input.vault),
-      input.dependencies,
-    ),
+    controlToken: readManagedControlToken(requireManagedVault(input.vault)),
     managed: true,
     started: startResult.started,
   }
@@ -113,7 +110,7 @@ export async function getManagedDeviceSyncDaemonStatus(input: {
   const paths = resolveDeviceDaemonPaths(vault)
   const baseUrl = resolveDeviceSyncBaseUrl(input.baseUrl, input.env ?? process.env)
   const state = await readDeviceDaemonState(paths, dependencies)
-  const managedToken = readManagedControlToken(vault, input.dependencies)
+  const managedToken = readManagedControlToken(vault)
   const healthy = await isDeviceDaemonHealthy(baseUrl, dependencies.fetchImpl, managedToken)
   const managed = state !== null && state.baseUrl === baseUrl
   const running =
@@ -159,7 +156,7 @@ export async function startManagedDeviceSyncDaemon(input: {
 
   const paths = resolveDeviceDaemonPaths(vault)
   const state = await readDeviceDaemonState(paths, dependencies)
-  const existingToken = readManagedControlToken(vault, input.dependencies)
+  const existingToken = readManagedControlToken(vault)
   const existingHealthy = await isDeviceDaemonHealthy(baseUrl, dependencies.fetchImpl, existingToken)
 
   if (state !== null && state.baseUrl === baseUrl) {
@@ -438,10 +435,7 @@ function generateDeviceSyncControlToken(): string {
   return randomBytes(24).toString('hex')
 }
 
-function readManagedControlToken(
-  vaultRoot: string,
-  _overrides?: DeviceDaemonDependencyOverrides,
-): string | null {
+function readManagedControlToken(vaultRoot: string): string | null {
   const paths = resolveDeviceDaemonPaths(vaultRoot)
   return resolveManagedControlToken(paths)
 }

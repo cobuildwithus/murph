@@ -3,16 +3,35 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
 
 const mocks = vi.hoisted(() => ({
-  requireHostedPrivyActiveRequestAuthContext: vi.fn(),
+  drainHostedExecutionOutboxBestEffort: vi.fn(),
+  enqueueHostedMemberChannelsUpdatedTx: vi.fn(),
+  getPrisma: vi.fn(),
+  prismaClient: {
+    label: "test-prisma",
+    $transaction: vi.fn(),
+  },
+  requireActivePrivyMemberAuth: vi.fn(),
   syncHostedVerifiedEmailToHostedExecution: vi.fn(),
+}));
+
+vi.mock("@/src/lib/prisma", () => ({
+  getPrisma: mocks.getPrisma,
 }));
 
 vi.mock("@/src/lib/hosted-execution/control", () => ({
   syncHostedVerifiedEmailToHostedExecution: mocks.syncHostedVerifiedEmailToHostedExecution,
 }));
 
+vi.mock("@/src/lib/hosted-execution/outbox", () => ({
+  drainHostedExecutionOutboxBestEffort: mocks.drainHostedExecutionOutboxBestEffort,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/member-channel-sync", () => ({
+  enqueueHostedMemberChannelsUpdatedTx: mocks.enqueueHostedMemberChannelsUpdatedTx,
+}));
+
 vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({
-  requireHostedPrivyActiveRequestAuthContext: mocks.requireHostedPrivyActiveRequestAuthContext,
+  requireActivePrivyMemberAuth: mocks.requireActivePrivyMemberAuth,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
@@ -35,7 +54,11 @@ describe("settings email sync route", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.requireHostedPrivyActiveRequestAuthContext.mockResolvedValue({
+    mocks.getPrisma.mockReturnValue(mocks.prismaClient);
+    mocks.prismaClient.$transaction.mockImplementation(async (callback: (tx: unknown) => Promise<unknown>) =>
+      callback(mocks.prismaClient)
+    );
+    mocks.requireActivePrivyMemberAuth.mockResolvedValue({
       linkedAccounts: [
         {
           address: "user@example.com",
@@ -44,8 +67,10 @@ describe("settings email sync route", () => {
         },
       ],
       member: {
+        billingStatus: "active",
         id: "member_123",
         privyUserId: "did:privy:user_123",
+        suspendedAt: null,
       },
       verifiedPrivyUser: {
         id: "did:privy:user_123",
@@ -53,12 +78,15 @@ describe("settings email sync route", () => {
     });
     mocks.syncHostedVerifiedEmailToHostedExecution.mockResolvedValue({
       emailAddress: "user@example.com",
-      runTriggered: true,
       verifiedAt: "2025-03-27T09:10:00.000Z",
     });
+    mocks.enqueueHostedMemberChannelsUpdatedTx.mockResolvedValue({
+      eventId: "member.channels.updated:settings.email.sync:member_123:evt_123",
+    });
+    mocks.drainHostedExecutionOutboxBestEffort.mockResolvedValue(undefined);
   });
 
-  it("verifies the server-side Privy tokens and syncs the verified email into hosted user env", async () => {
+  it("verifies the server-side Privy cookie-backed session and syncs the verified email into hosted user env", async () => {
     const response = await settingsEmailSyncRoute.POST(
       new Request("https://join.example.test/api/settings/email/sync", {
         body: JSON.stringify({
@@ -71,11 +99,21 @@ describe("settings email sync route", () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get("Cache-Control")).toBe("no-store");
-    expect(mocks.requireHostedPrivyActiveRequestAuthContext).toHaveBeenCalledWith(expect.any(Request));
+    expect(mocks.requireActivePrivyMemberAuth).toHaveBeenCalledWith(expect.any(Request));
     expect(mocks.syncHostedVerifiedEmailToHostedExecution).toHaveBeenCalledWith({
       emailAddress: "user@example.com",
       userId: "member_123",
       verifiedAt: "2025-03-27T08:30:00.000Z",
+    });
+    expect(mocks.enqueueHostedMemberChannelsUpdatedTx).toHaveBeenCalledWith({
+      emailLinked: true,
+      memberId: "member_123",
+      occurredAt: expect.any(String),
+      prisma: mocks.prismaClient,
+      sourceType: "settings.email.sync",
+    });
+    expect(mocks.drainHostedExecutionOutboxBestEffort).toHaveBeenCalledWith({
+      eventIds: ["member.channels.updated:settings.email.sync:member_123:evt_123"],
     });
     await expect(response.json()).resolves.toEqual({
       emailAddress: "user@example.com",
@@ -85,7 +123,7 @@ describe("settings email sync route", () => {
     });
   });
 
-  it("accepts an empty POST body when the server-side Privy session already has the verified email", async () => {
+  it("accepts an empty POST body when the server-side Privy cookie session already has the verified email", async () => {
     const response = await settingsEmailSyncRoute.POST(
       new Request("https://join.example.test/api/settings/email/sync", {
         headers: SAME_ORIGIN_HEADERS,
@@ -101,11 +139,11 @@ describe("settings email sync route", () => {
     });
   });
 
-  it("rejects sync attempts whose Privy session does not match the hosted session", async () => {
-    mocks.requireHostedPrivyActiveRequestAuthContext.mockRejectedValue(hostedOnboardingError({
-      code: "PRIVY_SESSION_MISMATCH",
+  it("rejects sync attempts when the cookie-backed Privy session no longer maps to a hosted member", async () => {
+    mocks.requireActivePrivyMemberAuth.mockRejectedValue(hostedOnboardingError({
+      code: "HOSTED_MEMBER_NOT_FOUND",
       httpStatus: 403,
-      message: "This Privy session does not match the current hosted account. Reopen the latest invite and try again.",
+      message: "Finish signup from your latest Murph link before continuing.",
     }));
 
     const response = await settingsEmailSyncRoute.POST(
@@ -119,15 +157,15 @@ describe("settings email sync route", () => {
     expect(mocks.syncHostedVerifiedEmailToHostedExecution).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       error: {
-        code: "PRIVY_SESSION_MISMATCH",
-        message: "This Privy session does not match the current hosted account. Reopen the latest invite and try again.",
+        code: "HOSTED_MEMBER_NOT_FOUND",
+        message: "Finish signup from your latest Murph link before continuing.",
         retryable: false,
       },
     });
   });
 
   it("returns a retryable conflict while the updated verified email has not reached the server-side identity token yet", async () => {
-    mocks.requireHostedPrivyActiveRequestAuthContext.mockResolvedValue({
+    mocks.requireActivePrivyMemberAuth.mockResolvedValue({
       linkedAccounts: [
         {
           address: "user@example.com",
@@ -161,7 +199,7 @@ describe("settings email sync route", () => {
   });
 
   it("requires Privy-authenticated hosted member context before syncing the verified email", async () => {
-    mocks.requireHostedPrivyActiveRequestAuthContext.mockRejectedValue(hostedOnboardingError({
+    mocks.requireActivePrivyMemberAuth.mockRejectedValue(hostedOnboardingError({
       code: "AUTH_REQUIRED",
       httpStatus: 401,
       message: "Verify your phone to continue.",
@@ -185,7 +223,7 @@ describe("settings email sync route", () => {
   });
 
   it("blocks sync when hosted access is suspended", async () => {
-    mocks.requireHostedPrivyActiveRequestAuthContext.mockRejectedValue(hostedOnboardingError({
+    mocks.requireActivePrivyMemberAuth.mockRejectedValue(hostedOnboardingError({
       code: "HOSTED_MEMBER_SUSPENDED",
       httpStatus: 403,
       message: "This hosted account is suspended. Contact support to restore access.",
@@ -210,7 +248,7 @@ describe("settings email sync route", () => {
   });
 
   it("blocks sync when hosted billing access is no longer active", async () => {
-    mocks.requireHostedPrivyActiveRequestAuthContext.mockRejectedValue(hostedOnboardingError({
+    mocks.requireActivePrivyMemberAuth.mockRejectedValue(hostedOnboardingError({
       code: "HOSTED_ACCESS_REQUIRED",
       httpStatus: 403,
       message: "Finish hosted activation before continuing.",

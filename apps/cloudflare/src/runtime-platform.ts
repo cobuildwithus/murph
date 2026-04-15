@@ -1,15 +1,19 @@
 import {
+  parseHostedRuntimeUsageRecordResponse,
   readHostedRunnerCommitTimeoutMs,
   type HostedRuntimePlatform,
-} from "@murphai/assistant-runtime";
+} from "@murphai/assistant-runtime/hosted-runtime-contracts";
+import {
+  parseHostedAssistantDeliveryRecord,
+} from "@murphai/hosted-execution/side-effects";
 import {
   HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER,
+} from "@murphai/hosted-execution/contracts";
+import {
   HOSTED_EXECUTION_RUNNER_EMAIL_SEND_PATH,
-  buildHostedExecutionRunnerCommitPath,
   buildHostedExecutionRunnerEmailMessagePath,
   buildHostedExecutionRunnerSideEffectPath,
-  parseHostedExecutionSideEffectRecord,
-} from "@murphai/hosted-execution";
+} from "@murphai/hosted-execution/routes";
 import {
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_PATH,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH,
@@ -24,11 +28,6 @@ import {
   CLOUDFLARE_HOSTED_RUNTIME_INTERNAL_HOSTNAMES,
 } from "./internal-hosts.ts";
 import { CLOUDFLARE_HOSTED_USAGE_RECORD_PATH } from "./outbound-routes.ts";
-
-interface HostedExecutionAiUsageRecordResponse {
-  recorded: number;
-  usageIds: string[];
-}
 
 export function buildHostedExecutionRuntimePlatform(input: {
   boundUserId: string;
@@ -129,28 +128,8 @@ export function buildHostedExecutionRuntimePlatform(input: {
       },
     },
     effectsPort: {
-      async commit({ eventId, payload }) {
-        const response = await fetchHostedResponse({
-          description: `Hosted commit ${eventId}`,
-          fetchImpl,
-          init: {
-            body: JSON.stringify(payload),
-            headers: {
-              "content-type": "application/json; charset=utf-8",
-            },
-            method: "POST",
-          },
-          timeoutMs,
-          url: new URL(
-            buildHostedExecutionRunnerCommitPath(eventId),
-            `${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.effectsPort}/`,
-          ),
-        });
-
-        assertHostedOk(response, `Hosted commit ${eventId}`);
-      },
-      async deletePreparedSideEffect(sideEffect) {
-        const url = createHostedSideEffectUrl(sideEffect);
+      async deletePreparedAssistantDelivery(sideEffect) {
+        const url = createHostedAssistantDeliveryUrl(sideEffect);
         const response = await fetchHostedResponse({
           description: `Hosted side-effect delete ${sideEffect.effectId}`,
           fetchImpl,
@@ -181,18 +160,18 @@ export function buildHostedExecutionRuntimePlatform(input: {
         assertHostedOk(response, `Hosted raw email read ${rawMessageKey}`);
         return new Uint8Array(await response.arrayBuffer());
       },
-      async readSideEffect(sideEffect) {
+      async readAssistantDeliveryRecord(sideEffect) {
         const payload = await fetchHostedJson({
           allowNotFound: false,
           description: `Hosted side-effect read ${sideEffect.effectId}`,
           fetchImpl,
           method: "GET",
           timeoutMs,
-          url: createHostedSideEffectUrl(sideEffect),
+          url: createHostedAssistantDeliveryUrl(sideEffect),
         });
 
         const record = readHostedRecordField(payload, "record");
-        return record === null ? null : parseHostedExecutionSideEffectRecord(record);
+        return record === null ? null : parseHostedAssistantDeliveryRecord(record);
       },
       async sendEmail(request) {
         const payload = await fetchHostedJson({
@@ -210,17 +189,17 @@ export function buildHostedExecutionRuntimePlatform(input: {
 
         return target ? { target } : undefined;
       },
-      async writeSideEffect(record) {
+      async writeAssistantDeliveryRecord(record) {
         const payload = await fetchHostedJson({
           body: record,
           description: `Hosted side-effect write ${record.effectId}`,
           fetchImpl,
           method: "PUT",
           timeoutMs,
-          url: createHostedSideEffectUrl(record),
+          url: createHostedAssistantDeliveryUrl(record),
         });
 
-        return parseHostedExecutionSideEffectRecord(
+        return parseHostedAssistantDeliveryRecord(
           requireRecordField(payload, "record"),
         );
       },
@@ -241,7 +220,7 @@ export function buildHostedExecutionRuntimePlatform(input: {
           ),
         });
 
-        return parseHostedExecutionAiUsageRecordResponse(payload);
+        return parseHostedRuntimeUsageRecordResponse(payload);
       },
     },
   };
@@ -269,17 +248,15 @@ function createCloudflareHostedRuntimeFetch(
   }) as typeof fetch;
 }
 
-function createHostedSideEffectUrl(input: {
+function createHostedAssistantDeliveryUrl(input: {
   effectId: string;
   fingerprint: string;
-  kind: string;
 }): URL {
   const url = new URL(
     buildHostedExecutionRunnerSideEffectPath(input.effectId),
     `${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.effectsPort}/`,
   );
   url.searchParams.set("fingerprint", input.fingerprint);
-  url.searchParams.set("kind", input.kind);
   return url;
 }
 
@@ -351,30 +328,6 @@ function assertHostedOk(response: Response, description: string): void {
   }
 
   throw new Error(`${description} failed with HTTP ${response.status}.`);
-}
-
-function parseHostedExecutionAiUsageRecordResponse(
-  value: unknown,
-): HostedExecutionAiUsageRecordResponse {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError("Hosted AI usage export response must be an object.");
-  }
-
-  const recorded = (value as { recorded?: unknown }).recorded;
-  const usageIds = (value as { usageIds?: unknown }).usageIds;
-
-  if (typeof recorded !== "number" || !Number.isFinite(recorded)) {
-    throw new TypeError("Hosted AI usage export response.recorded must be a finite number.");
-  }
-
-  if (!Array.isArray(usageIds) || usageIds.some((entry) => typeof entry !== "string")) {
-    throw new TypeError("Hosted AI usage export response.usageIds must be a string array.");
-  }
-
-  return {
-    recorded,
-    usageIds,
-  };
 }
 
 function readHostedRecordField(

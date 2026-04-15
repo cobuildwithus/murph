@@ -101,6 +101,15 @@ test("prepareDocumentImport parses and normalizes object input with zod", async 
     note: "annual lab packet",
     source: "manual",
   });
+
+  await assert.rejects(
+    () =>
+      prepareDocumentImport({
+        filePath,
+        source: "wearable",
+      }),
+    /Invalid option: expected one of "manual"|"import"|"device"|"derived"/,
+  );
 });
 
 test("importAssessmentResponse normalizes the payload and ignores the removed vault alias", async () => {
@@ -147,6 +156,24 @@ test("prepareMealImport and assessment import reject invalid typed fields with s
         note: 42,
       }),
     /note must be a string when provided/,
+  );
+
+  await assert.rejects(
+    () =>
+      prepareMealImport({
+        photoPath,
+        ingredients: ["rice", 42],
+      }),
+    /ingredients must be an array of strings when provided/,
+  );
+
+  await assert.rejects(
+    () =>
+      prepareMealImport({
+        photoPath,
+        source: "wearable",
+      }),
+    /Invalid option: expected one of "manual"|"import"|"derived"|"device"/,
   );
 
   await assert.rejects(

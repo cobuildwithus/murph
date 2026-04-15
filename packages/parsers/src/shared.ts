@@ -19,9 +19,60 @@ const USER_PATH_PATTERNS = [
   /^[A-Za-z]:\\Users\\[^\\]+/u,
 ];
 
-function sanitizeChildProcessEnv(): NodeJS.ProcessEnv {
-  const nextEnv = { ...process.env };
-  delete nextEnv.NODE_V8_COVERAGE;
+const SAFE_CHILD_PROCESS_ENV_KEYS = new Set([
+  "APPDATA",
+  "COMSPEC",
+  "HOME",
+  "HOMEDRIVE",
+  "HOMEPATH",
+  "LANG",
+  "LOCALAPPDATA",
+  "PATH",
+  "PATHEXT",
+  "SYSTEMROOT",
+  "TEMP",
+  "TMP",
+  "TMPDIR",
+  "TZ",
+  "USERPROFILE",
+  "WINDIR",
+  "XDG_CACHE_HOME",
+  "XDG_CONFIG_HOME",
+  "XDG_DATA_HOME",
+  "XDG_RUNTIME_DIR",
+]);
+const SAFE_CHILD_PROCESS_ENV_PREFIXES = ["LC_"];
+
+function resolvePreservedChildProcessEnvKey(key: string): string | null {
+  const normalizedKey = key.toUpperCase();
+  return (
+    SAFE_CHILD_PROCESS_ENV_KEYS.has(normalizedKey) ||
+    SAFE_CHILD_PROCESS_ENV_PREFIXES.some((prefix) => normalizedKey.startsWith(prefix))
+  )
+    ? normalizedKey
+    : null;
+}
+
+export function sanitizeChildProcessEnv(
+  source: NodeJS.ProcessEnv = process.env,
+): NodeJS.ProcessEnv {
+  const nextEnv: NodeJS.ProcessEnv = {};
+
+  for (const [key, value] of Object.entries(source)) {
+    if (typeof value !== "string") {
+      continue;
+    }
+
+    const preservedKey = resolvePreservedChildProcessEnvKey(key);
+    if (!preservedKey) {
+      continue;
+    }
+
+    if (!(preservedKey in nextEnv) || key === preservedKey) {
+      nextEnv[preservedKey] = value;
+    }
+  }
+
   return nextEnv;
 }
 

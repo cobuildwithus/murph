@@ -2,85 +2,85 @@ import { type HostedMember, type PrismaClient } from "@prisma/client";
 
 import { getPrisma } from "../prisma";
 import {
-  hasHostedMemberActiveAccess,
-  isHostedMemberSuspended,
+  assertHostedMemberActiveAccessAllowed,
 } from "./entitlement";
 import { hostedOnboardingError } from "./errors";
-import { findHostedMemberForPrivyIdentity } from "./member-identity-service";
 import {
-  readHostedPrivyAccessTokenFromRequest,
+  lookupHostedMemberForPrivyIdentity,
+  type HostedMemberPrivyIdentityLookup,
+} from "./member-identity-service";
+import {
   type HostedPrivyIdentity,
   type HostedPrivyUser,
   remapHostedPrivyCompletionLagError,
-  verifyHostedPrivyAccessToken,
-  readHostedPrivyIdentityTokenFromRequest,
-  resolveHostedPrivyIdentityFromVerifiedUser,
-  verifyHostedPrivyIdentityToken,
 } from "./privy";
-import { type PrivyLinkedAccountLike, resolveHostedPrivyLinkedAccounts } from "./privy-shared";
+import { type PrivyLinkedAccountLike } from "./privy-shared";
+import { resolveHostedPrivySessionFromRequest } from "./hosted-session";
 
-export interface HostedPrivyRequestAuthContext {
+export interface PrivyMemberAuthContext {
   identity: HostedPrivyIdentity;
   linkedAccounts: PrivyLinkedAccountLike[];
+  memberLookup: HostedMemberPrivyIdentityLookup | null;
   member: HostedMember | null;
   verifiedPrivyUser: HostedPrivyUser;
 }
 
-export interface HostedPrivyAuthenticatedRequestContext extends Omit<HostedPrivyRequestAuthContext, "member"> {
+export interface PrivySessionContext {
+  identity: HostedPrivyIdentity;
+  linkedAccounts: PrivyLinkedAccountLike[];
+  verifiedPrivyUser: HostedPrivyUser;
+}
+
+export interface AuthenticatedPrivyMemberAuthContext extends Omit<PrivyMemberAuthContext, "member"> {
   member: HostedMember;
 }
 
-export async function resolveHostedPrivyRequestAuthContext(
+export async function getPrivySession(
   request: Request,
-  prisma: PrismaClient = getPrisma(),
-): Promise<HostedPrivyRequestAuthContext | null> {
-  const accessToken = readHostedPrivyAccessTokenFromRequest(request);
-  const identityToken = readHostedPrivyIdentityTokenFromRequest(request);
+): Promise<PrivySessionContext | null> {
+  const session = await resolveHostedPrivySessionFromRequest(request);
 
-  if (!accessToken && !identityToken) {
+  if (!session) {
     return null;
   }
 
-  if (!accessToken || !identityToken) {
-    throw hostedOnboardingError({
-      code: "AUTH_REQUIRED",
-      message: "Verify your phone to continue.",
-      httpStatus: 401,
-    });
+  return {
+    identity: session.identity,
+    linkedAccounts: session.linkedAccounts,
+    verifiedPrivyUser: session.verifiedPrivyUser,
+  };
+}
+
+export async function getPrivyMemberAuth(
+  request: Request,
+  prisma: PrismaClient = getPrisma(),
+): Promise<PrivyMemberAuthContext | null> {
+  const session = await getPrivySession(request);
+
+  if (!session) {
+    return null;
   }
 
-  const [verifiedAccessToken, verifiedPrivyUser] = await Promise.all([
-    verifyHostedPrivyAccessToken(accessToken),
-    verifyHostedPrivyIdentityToken(identityToken),
-  ]);
-
-  if (verifiedAccessToken.userId !== verifiedPrivyUser.id) {
-    throw hostedOnboardingError({
-      code: "PRIVY_SESSION_MISMATCH",
-      message: "This Privy session does not match the current hosted account. Reopen the latest invite and try again.",
-      httpStatus: 403,
-    });
-  }
-
-  const identity = resolveHostedPrivyIdentityFromVerifiedUser(verifiedPrivyUser);
-  const member = await findHostedMemberForPrivyIdentity({
-    identity,
+  const memberLookup = await lookupHostedMemberForPrivyIdentity({
+    identity: session.identity,
+    parallelizeReads: true,
     prisma,
   });
 
   return {
-    identity,
-    linkedAccounts: resolveHostedPrivyLinkedAccounts(verifiedPrivyUser),
-    member,
-    verifiedPrivyUser,
+    identity: session.identity,
+    linkedAccounts: session.linkedAccounts,
+    member: memberLookup?.core ?? null,
+    memberLookup,
+    verifiedPrivyUser: session.verifiedPrivyUser,
   };
 }
 
-export async function requireHostedPrivyRequestAuthContext(
+export async function requirePrivyMemberAuth(
   request: Request,
   prisma: PrismaClient = getPrisma(),
-): Promise<HostedPrivyAuthenticatedRequestContext> {
-  const context = await requireHostedPrivyVerifiedRequestAuthContext(request, prisma);
+): Promise<AuthenticatedPrivyMemberAuthContext> {
+  const context = await requireVerifiedPrivyMemberAuth(request, prisma);
   if (!context.member) {
     throw hostedOnboardingError({
       code: "HOSTED_MEMBER_NOT_FOUND",
@@ -95,16 +95,16 @@ export async function requireHostedPrivyRequestAuthContext(
   };
 }
 
-export async function requireHostedPrivyVerifiedRequestAuthContext(
+export async function requireVerifiedPrivyMemberAuth(
   request: Request,
   prisma: PrismaClient = getPrisma(),
-): Promise<HostedPrivyRequestAuthContext> {
-  const context = await resolveHostedPrivyRequestAuthContext(request, prisma);
+): Promise<PrivyMemberAuthContext> {
+  const context = await getPrivyMemberAuth(request, prisma);
 
   if (!context) {
     throw hostedOnboardingError({
       code: "AUTH_REQUIRED",
-      message: "Verify your phone to continue.",
+      message: "Sign in to continue.",
       httpStatus: 401,
     });
   }
@@ -112,43 +112,37 @@ export async function requireHostedPrivyVerifiedRequestAuthContext(
   return context;
 }
 
-export async function requireHostedPrivyCompletionRequestAuthContext(
+export async function requirePrivySession(
   request: Request,
-  prisma: PrismaClient = getPrisma(),
-): Promise<HostedPrivyRequestAuthContext> {
+): Promise<PrivySessionContext> {
+  const context = await getPrivySession(request);
+
+  if (!context) {
+    throw hostedOnboardingError({
+      code: "AUTH_REQUIRED",
+      message: "Sign in to continue.",
+      httpStatus: 401,
+    });
+  }
+
+  return context;
+}
+
+export async function requirePrivyCompletionSession(
+  request: Request,
+): Promise<PrivySessionContext> {
   try {
-    return await requireHostedPrivyVerifiedRequestAuthContext(request, prisma);
+    return await requirePrivySession(request);
   } catch (error) {
     throw remapHostedPrivyCompletionLagError(error);
   }
 }
 
-export async function requireHostedPrivyActiveRequestAuthContext(
+export async function requireActivePrivyMemberAuth(
   request: Request,
   prisma: PrismaClient = getPrisma(),
-): Promise<HostedPrivyAuthenticatedRequestContext> {
-  const context = await requireHostedPrivyRequestAuthContext(request, prisma);
+): Promise<AuthenticatedPrivyMemberAuthContext> {
+  const context = await requirePrivyMemberAuth(request, prisma);
   assertHostedMemberActiveAccessAllowed(context.member);
   return context;
-}
-
-function assertHostedMemberActiveAccessAllowed(member: HostedMember): void {
-  if (isHostedMemberSuspended(member.suspendedAt)) {
-    throw hostedOnboardingError({
-      code: "HOSTED_MEMBER_SUSPENDED",
-      message: "This hosted account is suspended. Contact support to restore access.",
-      httpStatus: 403,
-    });
-  }
-
-  if (!hasHostedMemberActiveAccess({
-    billingStatus: member.billingStatus,
-    suspendedAt: member.suspendedAt,
-  })) {
-    throw hostedOnboardingError({
-      code: "HOSTED_ACCESS_REQUIRED",
-      message: "Finish hosted activation before continuing.",
-      httpStatus: 403,
-    });
-  }
 }

@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process'
 import { constants as fsConstants } from 'node:fs'
-import { access, mkdtemp, readFile, rm, stat } from 'node:fs/promises'
+import { access, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
 import path from 'node:path'
 
@@ -48,10 +48,17 @@ export interface CodexExecInput {
   oss?: boolean
   profile?: string | null
   prompt: string
+  images?: readonly CodexExecImageInput[] | null
   reasoningEffort?: string | null
   resumeSessionId?: string | null
   sandbox?: AssistantSandbox
   workingDirectory: string
+}
+
+export interface CodexExecImageInput {
+  bytes?: Uint8Array | Buffer
+  mimeType?: string | null
+  path?: string
 }
 
 export interface CodexExecResult {
@@ -78,8 +85,13 @@ export async function executeCodexPrompt(
   })
   const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-codex-'))
   const outputFile = path.join(tempRoot, 'last-message.txt')
+  const imagePaths = await materializeCodexImagePaths({
+    images: input.images,
+    tempRoot,
+  })
   const args = buildCodexArgs({
     ...input,
+    imagePaths,
     outputFile,
     workingDirectory,
   })
@@ -155,6 +167,7 @@ export async function executeCodexPrompt(
 
       let settled = false
       let abortRequested = false
+      let deferredStdinError: NodeJS.ErrnoException | null = null
 
       const cleanupAbortListener = attachCodexAbortListener({
         abortSignal: input.abortSignal,
@@ -232,6 +245,14 @@ export async function executeCodexPrompt(
       })
 
       child.stdin.on('error', (error) => {
+        if (
+          input.resumeSessionId &&
+          (error as NodeJS.ErrnoException).code === 'EPIPE'
+        ) {
+          deferredStdinError = error as NodeJS.ErrnoException
+          return
+        }
+
         rejectOnce(error)
       })
       child.stdin.end(input.prompt)
@@ -264,10 +285,19 @@ export async function executeCodexPrompt(
                   code,
                   signal,
                   stderr,
-                  fallback: lastEventError,
+                  fallback:
+                    lastEventError ??
+                    (stderr.trim().length === 0
+                      ? deferredStdinError?.message ?? null
+                      : null),
                   providerSessionId: discoveredSessionId,
                 }),
           )
+          return
+        }
+
+        if (deferredStdinError) {
+          rejectOnce(deferredStdinError)
           return
         }
 
@@ -364,6 +394,7 @@ function attachCodexAbortListener(input: {
 
 export function buildCodexArgs(
   input: CodexExecInput & {
+    imagePaths?: readonly string[]
     outputFile: string
     workingDirectory: string
   },
@@ -412,9 +443,112 @@ export function buildCodexArgs(
     )
   }
 
+  for (const imagePath of input.imagePaths ?? []) {
+    args.push('--image', imagePath)
+  }
+
   args.push('-')
 
   return [...rootArgs, ...args]
+}
+
+async function materializeCodexImagePaths(input: {
+  images?: readonly CodexExecImageInput[] | null
+  tempRoot: string
+}): Promise<string[]> {
+  const imageInputs = input.images ?? []
+  const imagePaths: string[] = []
+
+  for (const [index, image] of imageInputs.entries()) {
+    imagePaths.push(
+      await materializeCodexImagePath({
+        image,
+        index,
+        tempRoot: input.tempRoot,
+      }),
+    )
+  }
+
+  return imagePaths
+}
+
+async function materializeCodexImagePath(input: {
+  image: CodexExecImageInput
+  index: number
+  tempRoot: string
+}): Promise<string> {
+  const inferredMimeType = normalizeNullableString(input.image.mimeType)
+  const normalizedPath = normalizeNullableString(input.image.path)
+  if (normalizedPath) {
+    return resolveReadableCodexImagePath(normalizedPath)
+  }
+
+  const bytes = input.image.bytes
+  if (!bytes) {
+    throw new VaultCliError(
+      'ASSISTANT_CODEX_IMAGE_INVALID',
+      'Codex CLI image input requires either bytes or a readable path.',
+    )
+  }
+
+  return writeCodexImageBytes({
+    bytes: Buffer.from(bytes),
+    index: input.index,
+    mimeType: inferredMimeType,
+    tempRoot: input.tempRoot,
+  })
+}
+
+async function writeCodexImageBytes(input: {
+  bytes: Buffer
+  index: number
+  mimeType: string | null
+  tempRoot: string
+}): Promise<string> {
+  const filePath = path.join(
+    input.tempRoot,
+    `image-${input.index + 1}${resolveCodexImageExtension(input.mimeType)}`,
+  )
+  await writeFile(filePath, input.bytes)
+  return filePath
+}
+
+async function resolveReadableCodexImagePath(candidatePath: string): Promise<string> {
+  const resolvedPath = path.resolve(candidatePath)
+
+  try {
+    await access(resolvedPath, fsConstants.R_OK)
+  } catch {
+    throw new VaultCliError(
+      'ASSISTANT_CODEX_IMAGE_INVALID',
+      `Codex CLI image input path is not readable: ${resolvedPath}`,
+    )
+  }
+
+  return resolvedPath
+}
+
+function resolveCodexImageExtension(mimeType: string | null): string {
+  switch (mimeType) {
+    case 'image/jpeg':
+      return '.jpg'
+    case 'image/png':
+      return '.png'
+    case 'image/webp':
+      return '.webp'
+    case 'image/gif':
+      return '.gif'
+    case 'image/heic':
+      return '.heic'
+    case 'image/heif':
+      return '.heif'
+    case 'image/bmp':
+      return '.bmp'
+    case 'image/tiff':
+      return '.tiff'
+    default:
+      return '.img'
+  }
 }
 
 async function readCodexDisplayConfig(
@@ -607,15 +741,25 @@ function buildCodexFailure(input: {
     normalizeStatusText(input.fallback ?? tailText(input.stderr)) ??
     input.fallback ??
     tailText(input.stderr)
+  const resumeStale = isCodexResumeStaleText(
+    [detail, input.stderr].filter((value): value is string => Boolean(value)).join('\n'),
+  )
   const connectionLost = isCodexConnectionLossText(
     [detail, input.stderr].filter((value): value is string => Boolean(value)).join('\n'),
   )
 
   return new VaultCliError(
-    connectionLost
-      ? 'ASSISTANT_CODEX_CONNECTION_LOST'
-      : 'ASSISTANT_CODEX_FAILED',
-    connectionLost
+    resumeStale
+      ? 'ASSISTANT_CODEX_RESUME_STALE'
+      : connectionLost
+        ? 'ASSISTANT_CODEX_CONNECTION_LOST'
+        : 'ASSISTANT_CODEX_FAILED',
+    resumeStale
+      ? buildCodexResumeStaleMessage({
+          ...input,
+          fallback: detail,
+        })
+      : connectionLost
       ? buildCodexConnectionFailureMessage({
           ...input,
           fallback: detail,
@@ -627,9 +771,11 @@ function buildCodexFailure(input: {
         }),
     {
       connectionLost,
-      providerSessionId: connectionLost ? input.providerSessionId : null,
+      providerSessionId:
+        connectionLost || resumeStale ? input.providerSessionId : null,
       recoverableConnectionLoss: connectionLost,
-      retryable: connectionLost,
+      retryable: connectionLost || resumeStale,
+      staleResume: resumeStale,
     },
   )
 }
@@ -748,6 +894,32 @@ function buildCodexFailureMessage(input: {
   return parts.join(' ')
 }
 
+function buildCodexResumeStaleMessage(input: {
+  code: number | null
+  fallback: string | null
+  providerSessionId: string | null
+  signal: NodeJS.Signals | null
+  stderr: string
+}): string {
+  const parts = ['Codex CLI could not resume the saved provider session.']
+
+  if (typeof input.code === 'number') {
+    parts.push(`exit code ${input.code}.`)
+  }
+
+  if (input.signal) {
+    parts.push(`signal ${input.signal}.`)
+  }
+
+  if (input.fallback) {
+    parts.push(input.fallback)
+  }
+
+  parts.push('Murph should start a fresh provider session for this turn.')
+
+  return parts.join(' ')
+}
+
 
 interface CodexDisplayConfig {
   defaultProfile: string | null
@@ -773,6 +945,18 @@ function tailText(value: string): string | null {
   }
 
   return lines.slice(-3).join(' ')
+}
+
+function isCodexResumeStaleText(value: string): boolean {
+  if (!value) {
+    return false
+  }
+
+  const normalized = value.toLowerCase()
+  return (
+    normalized.includes('thread/resume failed') ||
+    normalized.includes('no rollout found for thread id')
+  )
 }
 
 async function readOptionalNonBlankTextFile(

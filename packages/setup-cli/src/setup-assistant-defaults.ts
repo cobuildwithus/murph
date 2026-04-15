@@ -43,7 +43,11 @@ export function assistantSelectionToOperatorDefaults(
         oss: assistant.oss === true,
         baseUrl: assistant.baseUrl,
         apiKeyEnv: assistant.apiKeyEnv,
+        presetId: assistant.presetId ?? null,
         providerName: assistant.providerName,
+        ...(assistant.zeroDataRetention === true
+          ? { zeroDataRetention: true }
+          : {}),
       },
     }),
     account: assistant.account ?? null,
@@ -131,11 +135,17 @@ export function buildSetupAssistantOptionsFromDefaults(
 
       return {
         assistantPreset: 'openai-compatible',
+        assistantProviderPreset: savedDefaults?.presetId ?? undefined,
         assistantModel: savedDefaults?.model ?? undefined,
         assistantBaseUrl: savedDefaults?.baseUrl ?? undefined,
         assistantApiKeyEnv: savedDefaults?.apiKeyEnv ?? undefined,
         assistantProviderName: savedDefaults?.providerName ?? undefined,
         assistantReasoningEffort: savedDefaults?.reasoningEffort ?? undefined,
+        ...(savedDefaults?.zeroDataRetention === true
+          ? {
+              assistantZeroDataRetention: true,
+            }
+          : {}),
       }
     }
 

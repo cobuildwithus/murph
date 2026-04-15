@@ -1,21 +1,42 @@
 import { jsonOk, withJsonError, readOptionalJsonObject } from "@/src/lib/hosted-onboarding/http";
+import {
+  deriveHostedOnboardingTimingErrorName,
+  finishHostedOnboardingTiming,
+  startHostedOnboardingTiming,
+} from "@/src/lib/hosted-onboarding/logging";
 import { completeHostedPrivyVerification } from "@/src/lib/hosted-onboarding/member-service";
 import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
-import { requireHostedPrivyCompletionRequestAuthContext } from "@/src/lib/hosted-onboarding/request-auth";
+import { requirePrivyCompletionSession } from "@/src/lib/hosted-onboarding/request-auth";
 
 export const POST = withJsonError(async (request: Request) => {
-  assertHostedOnboardingMutationOrigin(request);
-  const auth = await requireHostedPrivyCompletionRequestAuthContext(request);
-  const body = await readOptionalJsonObject(request);
-  const result = await completeHostedPrivyVerification({
-    identity: auth.identity,
-    inviteCode: typeof body.inviteCode === "string" ? body.inviteCode : null,
-  });
+  const timing = startHostedOnboardingTiming("hosted-onboarding.route.privy-complete");
 
-  return jsonOk({
-    inviteCode: result.inviteCode,
-    joinUrl: result.joinUrl,
-    ok: true,
-    stage: result.stage,
-  });
+  try {
+    assertHostedOnboardingMutationOrigin(request);
+    const auth = await requirePrivyCompletionSession(request);
+    const body = await readOptionalJsonObject(request);
+    const result = await completeHostedPrivyVerification({
+      identity: auth.identity,
+      inviteCode: typeof body.inviteCode === "string" ? body.inviteCode : null,
+    });
+
+    finishHostedOnboardingTiming(timing, "completed", {
+      stage: result.stage,
+      messagingSetupRequired: result.messagingSetupRequired,
+    });
+
+    return jsonOk({
+      activationPending: result.activationPending,
+      inviteCode: result.inviteCode,
+      joinUrl: result.joinUrl,
+      messagingSetupRequired: result.messagingSetupRequired,
+      ok: true,
+      stage: result.stage,
+    });
+  } catch (error) {
+    finishHostedOnboardingTiming(timing, "failed", {
+      errorName: deriveHostedOnboardingTimingErrorName(error),
+    });
+    throw error;
+  }
 });

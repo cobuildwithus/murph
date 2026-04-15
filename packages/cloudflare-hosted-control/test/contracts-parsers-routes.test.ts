@@ -6,9 +6,13 @@ import {
   parseCloudflareHostedUserEnvUpdate,
 } from "../src/parsers.ts";
 import {
+  buildCloudflareHostedControlPendingUsageUsersPath,
+  buildCloudflareHostedControlSharePackPath,
   buildCloudflareHostedControlUserCryptoContextPath,
   buildCloudflareHostedControlUserDispatchPayloadPath,
+  buildCloudflareHostedControlUserEventStatusPath,
   buildCloudflareHostedControlUserEnvPath,
+  buildCloudflareHostedControlUserPendingUsagePath,
   buildCloudflareHostedControlUserRunPath,
   buildCloudflareHostedControlUserStatusPath,
   buildCloudflareHostedControlUserStoredDispatchPath,
@@ -56,6 +60,14 @@ describe("@murphai/cloudflare-hosted-control contracts, parsers, and routes", ()
 
     expect(() =>
       parseCloudflareHostedManagedUserCryptoStatus({
+        recipientKinds: "automation",
+        rootKeyId: "root-key-123",
+        userId: "user_123",
+      }),
+    ).toThrow("Managed user crypto status response recipientKinds must be an array.");
+
+    expect(() =>
+      parseCloudflareHostedManagedUserCryptoStatus({
         recipientKinds: ["automation"],
         rootKeyId: "",
         userId: "user_123",
@@ -68,6 +80,10 @@ describe("@murphai/cloudflare-hosted-control contracts, parsers, and routes", ()
         userId: " ",
       }),
     ).toThrow("Hosted execution user env status userId must be a non-empty string.");
+
+    expect(() =>
+      parseCloudflareHostedUserEnvUpdate(null),
+    ).toThrow("Hosted execution user env update must be an object.");
 
     expect(() =>
       parseCloudflareHostedUserEnvUpdate({
@@ -98,11 +114,23 @@ describe("@murphai/cloudflare-hosted-control contracts, parsers, and routes", ()
     expect(buildCloudflareHostedControlUserDispatchPayloadPath(userId)).toBe(
       `/internal/users/${encodedUserId}/dispatch-payload`,
     );
+    expect(buildCloudflareHostedControlUserEventStatusPath(userId, "evt/with spaces?#%")).toBe(
+      `/internal/users/${encodedUserId}/events/${encodeURIComponent("evt/with spaces?#%")}/status`,
+    );
     expect(buildCloudflareHostedControlUserEnvPath(userId)).toBe(
       `/internal/users/${encodedUserId}/env`,
     );
+    expect(buildCloudflareHostedControlUserPendingUsagePath(userId)).toBe(
+      `/internal/users/${encodedUserId}/usage/pending`,
+    );
     expect(buildCloudflareHostedControlUserRunPath(userId)).toBe(
       `/internal/users/${encodedUserId}/run`,
+    );
+    expect(buildCloudflareHostedControlPendingUsageUsersPath()).toBe(
+      "/internal/usage/pending-users",
+    );
+    expect(buildCloudflareHostedControlSharePackPath(userId, "share/with spaces?#%")).toBe(
+      `/internal/users/${encodedUserId}/shares/${encodeURIComponent("share/with spaces?#%")}/pack`,
     );
     expect(buildCloudflareHostedControlUserStatusPath(userId)).toBe(
       `/internal/users/${encodedUserId}/status`,

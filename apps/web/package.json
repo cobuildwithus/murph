@@ -4,34 +4,32 @@
   "private": true,
   "license": "Apache-2.0",
   "engines": {
-    "node": ">=22.16.0"
+    "node": ">=24.14.1"
   },
   "scripts": {
-    "dev": "pnpm --dir ../.. exec tsx apps/web/scripts/dev-local.ts",
-    "dev:turbopack": "pnpm --dir ../.. exec tsx apps/web/scripts/dev-local.ts --turbopack",
+    "dev": "vercel env run -- pnpm dev:local-env",
+    "dev:local-env": "pnpm --dir ../.. exec tsx apps/web/scripts/dev-local.ts",
     "build": "prisma generate && next build",
     "lint": "eslint .",
     "start": "next start",
     "dev:smoke": "pnpm --dir ../.. exec tsx apps/web/scripts/dev-smoke.ts",
+    "legal:pdf": "pnpm --dir ../.. exec tsx apps/web/scripts/generate-legal-pdfs.ts",
     "typecheck": "pnpm --dir ../.. exec tsx scripts/ensure-next-route-type-stubs.ts apps/web && prisma generate && tsc -p tsconfig.json --pretty false",
     "typecheck:prepared": "pnpm --dir ../.. exec tsx scripts/ensure-next-route-type-stubs.ts apps/web && tsc -p tsconfig.json --pretty false",
     "test": "pnpm --dir ../.. exec vitest run --config apps/web/vitest.workspace.ts --no-coverage",
-    "contact-privacy:backfill": "pnpm --dir ../.. exec tsx apps/web/scripts/backfill-hosted-contact-privacy.ts",
     "prisma:generate": "prisma generate",
     "prisma:migrate:deploy": "prisma migrate deploy",
     "prisma:migrate:dev": "prisma migrate dev",
-    "verify": "bash scripts/verify-fast.sh"
+    "verify": "bash scripts/verify-fast.sh",
+    "verify:parallel": "MURPH_VERIFY_STEP_PARALLEL=1 bash scripts/verify-fast.sh"
   },
   "dependencies": {
     "@base-ui/react": "1.3.0",
     "@cobuild/wire": "^0.3.6",
     "@murphai/cloudflare-hosted-control": "workspace:*",
     "@murphai/contracts": "workspace:*",
-    "@murphai/core": "workspace:*",
     "@murphai/device-syncd": "workspace:*",
     "@murphai/hosted-execution": "workspace:*",
-    "@murphai/importers": "workspace:*",
-    "@murphai/inboxd": "workspace:*",
     "@murphai/messaging-ingress": "workspace:*",
     "@murphai/runtime-state": "workspace:*",
     "@prisma/adapter-pg": "^7.5.0",
@@ -45,10 +43,10 @@
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",
     "lucide-react": "1.7.0",
-    "next": "^16.2.1",
+    "next": "^16.2.3",
     "pg": "^8.16.3",
-    "react": "^19.2.4",
-    "react-dom": "^19.2.4",
+    "react": "^19.2.5",
+    "react-dom": "^19.2.5",
     "recharts": "3.8.0",
     "shadcn": "4.1.1",
     "stripe": "^20.4.1",
@@ -61,7 +59,7 @@
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "eslint": "^9.39.4",
-    "eslint-config-next": "^16.2.1",
+    "eslint-config-next": "^16.2.3",
     "prisma": "^7.5.0",
     "tailwindcss": "^4.2.1"
   }

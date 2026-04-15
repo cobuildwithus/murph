@@ -5,10 +5,15 @@ import path from "node:path";
 import type {
   HostedWorkspaceArtifactPersistInput,
 } from "@murphai/runtime-state/node";
+import type {
+  HostedAssistantDeliveryRecord,
+} from "@murphai/hosted-execution/side-effects";
 
 import type {
+  HostedRuntimeEffectsPort,
   HostedRuntimeArtifactStore,
 } from "../src/hosted-runtime/platform.ts";
+import type { HostedAssistantRuntimeResolvedConfig } from "../src/hosted-runtime/models.ts";
 
 export const HOSTED_RUNTIME_EMAIL_CAPABILITY_ENV = {
   HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID: "acct_123",
@@ -18,6 +23,29 @@ export const HOSTED_RUNTIME_EMAIL_CAPABILITY_ENV = {
   HOSTED_EMAIL_SIGNING_SECRET: "email-secret",
   TELEGRAM_BOT_TOKEN: "telegram-token",
 } as const;
+
+export const HOSTED_RUNTIME_RESOLVED_CONFIG: HostedAssistantRuntimeResolvedConfig = {
+  channelCapabilities: {
+    emailSendReady: true,
+    telegramBotConfigured: true,
+  },
+  deviceSync: null,
+};
+
+export function createHostedRuntimeResolvedConfig(
+  overrides: Partial<HostedAssistantRuntimeResolvedConfig> = {},
+): HostedAssistantRuntimeResolvedConfig {
+  return {
+    channelCapabilities: {
+      ...HOSTED_RUNTIME_RESOLVED_CONFIG.channelCapabilities,
+      ...(overrides.channelCapabilities ?? {}),
+    },
+    deviceSync:
+      overrides.deviceSync === undefined
+        ? HOSTED_RUNTIME_RESOLVED_CONFIG.deviceSync
+        : overrides.deviceSync,
+  };
+}
 
 export async function createHostedRuntimeWorkspace(prefix: string) {
   const workspaceRoot = await mkdtemp(path.join(tmpdir(), prefix));
@@ -77,15 +105,38 @@ export function createHostedRuntimeArtifactStoreStub(initialEntries?: Record<str
   };
 }
 
+export function createHostedRuntimeEffectsPortStub(
+  overrides: Partial<HostedRuntimeEffectsPort> = {},
+): HostedRuntimeEffectsPort {
+  return {
+    async deletePreparedAssistantDelivery() {},
+    async readRawEmailMessage() {
+      return null;
+    },
+    async readAssistantDeliveryRecord(): Promise<HostedAssistantDeliveryRecord | null> {
+      return null;
+    },
+    async sendEmail() {},
+    async writeAssistantDeliveryRecord(
+      record: HostedAssistantDeliveryRecord,
+    ): Promise<HostedAssistantDeliveryRecord> {
+      return record;
+    },
+    ...overrides,
+  };
+}
+
 export function createHostedWorkspaceArtifactPersistInput(input: {
   bytes: Uint8Array;
   path?: string;
   root?: string;
   sha256: string;
 }): HostedWorkspaceArtifactPersistInput {
+  const relativePath = input.path ?? "vault/raw/example.bin";
   return {
+    absolutePath: path.join("/", relativePath),
     bytes: input.bytes,
-    path: input.path ?? "vault/raw/example.bin",
+    path: relativePath,
     ref: {
       byteSize: input.bytes.byteLength,
       sha256: input.sha256,

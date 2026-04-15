@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { rawImportManifestSchema, type RawImportManifest } from '@murphai/contracts'
-import { parseRawImportManifestWithLegacySupport } from '@murphai/core'
+import { parseRawImportManifest } from '@murphai/core'
 import { z } from 'zod'
 import {
   firstString,
@@ -16,7 +16,7 @@ import {
   deleteEventRecord,
   editEventRecord,
 } from './event-record-mutations.js'
-import { asListEnvelope } from './shared.js'
+import { asListEnvelope, toListEntity } from './shared.js'
 import { relativePathEntries } from './vault-usecase-helpers.js'
 
 type DocumentMealKind = 'document' | 'meal'
@@ -163,7 +163,7 @@ async function readImportManifest(
   }
 
   try {
-    return parseRawImportManifestWithLegacySupport(manifest)
+    return parseRawImportManifest(manifest)
   } catch (error) {
     throw new VaultCliError(
       'manifest_invalid',
@@ -204,7 +204,10 @@ async function listOwnedRecords(input: {
       to: input.to,
     })
     .slice(0, DEFAULT_LIST_LIMIT)
-    .map((record: QueryRecord) => toOwnedEventCommandShowEntity(record, OWNED_EVENT_LINK_KEYS))
+    .map((record: QueryRecord) => {
+      const entity = toOwnedEventCommandShowEntity(record, OWNED_EVENT_LINK_KEYS)
+      return toListEntity(entity)
+    })
 
   return asListEnvelope(input.vault, {
     kind: input.expectedKind,

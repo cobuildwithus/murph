@@ -1,8 +1,7 @@
-"use client";
-
-import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import type { HostedSharePreview } from "@/src/lib/hosted-share/service";
 import type { HostedInviteStatusPayload, HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
+import type { PrivyLinkedAccountLike } from "@/src/lib/hosted-onboarding/privy-shared";
 
 import {
   formatHostedSharePreviewSummary,
@@ -10,9 +9,9 @@ import {
 import type { JoinInviteShareImportState } from "./join-invite-state";
 import {
   JoinInviteActivePanel,
-  JoinInviteActivatingPanel,
   JoinInviteBlockedAlert,
   JoinInviteCheckoutButton,
+  JoinInviteMessagingSetupPanel,
   JoinInviteSignedInMismatchAlert,
   JoinInviteVerificationPanel,
 } from "./join-invite-stage-panels";
@@ -23,9 +22,12 @@ interface JoinInviteSharePreviewAlertProps {
 }
 
 interface JoinInviteStageContentProps {
+  authenticated: boolean;
   awaitingInviteSessionResolution: boolean;
+  checkoutPending: boolean;
+  initialLinkedAccounts: readonly PrivyLinkedAccountLike[];
   inviteCode: string;
-  pendingAction: "checkout" | "logout" | "share" | null;
+  pendingAction: "checkout" | "share" | null;
   shareImportState: JoinInviteShareImportState;
   sharePreview: HostedSharePreview | null;
   status: HostedInviteStatusPayload;
@@ -60,7 +62,10 @@ export function JoinInviteSharePreviewAlert({ sharePreview }: JoinInviteSharePre
 }
 
 export function JoinInviteStageContent({
+  authenticated,
   awaitingInviteSessionResolution,
+  checkoutPending,
+  initialLinkedAccounts,
   inviteCode,
   pendingAction,
   shareImportState,
@@ -78,7 +83,7 @@ export function JoinInviteStageContent({
   return (
     <>
       {status.session.authenticated && !status.session.matchesInvite ? (
-        <JoinInviteSignedInMismatchAlert pendingAction={pendingAction} onSignOut={onSignOut} />
+        <JoinInviteSignedInMismatchAlert onSignOut={onSignOut} />
       ) : null}
 
       {status.stage === "verify" ? (
@@ -95,18 +100,26 @@ export function JoinInviteStageContent({
 
       {status.stage === "blocked" ? <JoinInviteBlockedAlert /> : null}
 
-      {status.stage === "checkout" ? (
+      {status.stage === "checkout" && status.messagingSetupRequired ? (
+        <JoinInviteMessagingSetupPanel
+          authenticated={authenticated}
+          initialLinkedAccounts={initialLinkedAccounts}
+          onRefreshStatus={onRefreshStatus}
+        />
+      ) : null}
+
+      {status.stage === "checkout" && !status.messagingSetupRequired ? (
         <JoinInviteCheckoutButton
           billingReady={status.capabilities.billingReady}
-          pendingAction={pendingAction}
+          checkoutPending={checkoutPending}
           onCheckout={onCheckout}
         />
       ) : null}
 
-      {status.stage === "activating" ? <JoinInviteActivatingPanel sharePreview={sharePreview} /> : null}
-
       {status.stage === "active" ? (
         <JoinInviteActivePanel
+          activationPending={status.activationPending}
+          murphPhoneNumber={status.murphPhoneNumber ?? null}
           pendingAction={pendingAction}
           shareImportState={shareImportState}
           sharePreview={sharePreview}

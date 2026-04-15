@@ -1,5 +1,5 @@
 import { Prisma } from "@prisma/client";
-import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
 import { hostedWebConfigurationError } from "../src/lib/hosted-web/encryption";
@@ -11,9 +11,9 @@ const mocks = vi.hoisted(() => ({
   confirmHostedInvitePhoneCode: vi.fn(),
   createHostedBillingCheckout: vi.fn(),
   prepareHostedInvitePhoneCode: vi.fn(),
-  requireHostedPrivyCompletionRequestAuthContext: vi.fn(),
+  requirePrivyCompletionSession: vi.fn(),
   requireHostedInviteCodeFromRequest: vi.fn(),
-  requireHostedPrivyRequestAuthContext: vi.fn(),
+  requirePrivyMemberAuth: vi.fn(),
   runtimeEnv: {
     hostedOnboardingPublicBaseUrl: "https://join.example.test" as string | null,
   },
@@ -59,8 +59,8 @@ vi.mock("@/src/lib/hosted-onboarding/csrf", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({
-  requireHostedPrivyCompletionRequestAuthContext: mocks.requireHostedPrivyCompletionRequestAuthContext,
-  requireHostedPrivyRequestAuthContext: mocks.requireHostedPrivyRequestAuthContext,
+  requirePrivyCompletionSession: mocks.requirePrivyCompletionSession,
+  requirePrivyMemberAuth: mocks.requirePrivyMemberAuth,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/route-helpers", () => ({
@@ -84,6 +84,11 @@ let sendCodeRoute: SendCodeRouteModule;
 const SAME_ORIGIN_HEADERS = {
   origin: "https://join.example.test",
 };
+const ORIGINAL_NODE_ENV = process.env.NODE_ENV;
+
+function setHostedOnboardingTestNodeEnv(value: string | undefined): void {
+  Reflect.set(process.env, "NODE_ENV", value);
+}
 
 describe("hosted onboarding routes", () => {
   beforeAll(async () => {
@@ -96,8 +101,9 @@ describe("hosted onboarding routes", () => {
   });
 
   beforeEach(() => {
+    setHostedOnboardingTestNodeEnv(ORIGINAL_NODE_ENV);
     vi.clearAllMocks();
-    mocks.requireHostedPrivyCompletionRequestAuthContext.mockResolvedValue({
+    mocks.requirePrivyCompletionSession.mockResolvedValue({
       identity: {
         phone: {
           number: "+15551234567",
@@ -118,8 +124,10 @@ describe("hosted onboarding routes", () => {
       },
     });
     mocks.completeHostedPrivyVerification.mockResolvedValue({
+      activationPending: false,
       inviteCode: "invite-code",
       joinUrl: "https://join.example.test/join/invite-code",
+      memberId: "member_123",
       stage: "checkout",
     });
     mocks.createHostedBillingCheckout.mockResolvedValue({
@@ -136,7 +144,7 @@ describe("hosted onboarding routes", () => {
       phoneNumber: "+15551234567",
       sendAttemptId: "send_attempt_123",
     });
-    mocks.requireHostedPrivyRequestAuthContext.mockResolvedValue({
+    mocks.requirePrivyMemberAuth.mockResolvedValue({
       linkedAccounts: [
         {
           address: "user@example.com",
@@ -153,14 +161,18 @@ describe("hosted onboarding routes", () => {
     });
   });
 
-  it("marks Privy verification responses as no-store", async () => {
+  afterEach(() => {
+    setHostedOnboardingTestNodeEnv(ORIGINAL_NODE_ENV);
+  });
+
+  it("marks cookie-backed Privy verification responses as no-store", async () => {
     const response = await privyCompleteRoute.POST(
       new Request("https://join.example.test/api/hosted-onboarding/privy/complete", {
         body: JSON.stringify({
           inviteCode: "invite-code",
         }),
         headers: {
-          "x-privy-identity-token": "header-token",
+          cookie: "privy-id-token=cookie-token",
           origin: SAME_ORIGIN_HEADERS.origin,
           "user-agent": "test-agent",
         },
@@ -187,6 +199,7 @@ describe("hosted onboarding routes", () => {
       inviteCode: "invite-code",
     });
     await expect(response.json()).resolves.toEqual({
+      activationPending: false,
       inviteCode: "invite-code",
       joinUrl: "https://join.example.test/join/invite-code",
       ok: true,
@@ -194,11 +207,11 @@ describe("hosted onboarding routes", () => {
     });
   });
 
-  it("accepts a valid Privy auth header set even when the request body is empty", async () => {
+  it("accepts a valid Privy cookie-backed session even when the request body is empty", async () => {
     const response = await privyCompleteRoute.POST(
       new Request("https://join.example.test/api/hosted-onboarding/privy/complete", {
         headers: {
-          "x-privy-identity-token": "header-token",
+          cookie: "privy-id-token=cookie-token",
           origin: SAME_ORIGIN_HEADERS.origin,
           "user-agent": "test-agent",
         },
@@ -226,7 +239,7 @@ describe("hosted onboarding routes", () => {
     });
   });
 
-  it("ignores any body identity token and keeps the request headers authoritative", async () => {
+  it("ignores any body identity token and keeps the Privy cookie authoritative", async () => {
     const response = await privyCompleteRoute.POST(
       new Request("https://join.example.test/api/hosted-onboarding/privy/complete", {
         body: JSON.stringify({
@@ -234,7 +247,7 @@ describe("hosted onboarding routes", () => {
           inviteCode: "invite-code",
         }),
         headers: {
-          "x-privy-identity-token": "header-token",
+          cookie: "privy-id-token=cookie-token",
           origin: SAME_ORIGIN_HEADERS.origin,
           "user-agent": "test-agent",
         },
@@ -261,8 +274,8 @@ describe("hosted onboarding routes", () => {
     });
   });
 
-  it("rejects hosted Privy completion requests that are missing the strict Privy auth header set", async () => {
-    mocks.requireHostedPrivyCompletionRequestAuthContext.mockRejectedValue(
+  it("rejects hosted Privy completion requests that are missing the Privy identity cookie", async () => {
+    mocks.requirePrivyCompletionSession.mockRejectedValue(
       hostedOnboardingError({
         code: "AUTH_REQUIRED",
         httpStatus: 401,
@@ -295,8 +308,8 @@ describe("hosted onboarding routes", () => {
     });
   });
 
-  it("checks the hosted Privy auth headers before parsing malformed request JSON", async () => {
-    mocks.requireHostedPrivyCompletionRequestAuthContext.mockRejectedValue(
+  it("checks the hosted Privy cookie-backed session before parsing malformed request JSON", async () => {
+    mocks.requirePrivyCompletionSession.mockRejectedValue(
       hostedOnboardingError({
         code: "AUTH_REQUIRED",
         httpStatus: 401,
@@ -317,7 +330,7 @@ describe("hosted onboarding routes", () => {
 
     expect(response.status).toBe(401);
     expect(response.headers.get("Cache-Control")).toBe("no-store");
-    expect(mocks.requireHostedPrivyCompletionRequestAuthContext).toHaveBeenCalledTimes(1);
+    expect(mocks.requirePrivyCompletionSession).toHaveBeenCalledTimes(1);
     expect(mocks.completeHostedPrivyVerification).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       error: {
@@ -328,8 +341,8 @@ describe("hosted onboarding routes", () => {
     });
   });
 
-  it("does not accept a body identity token when the strict hosted Privy auth headers are missing", async () => {
-    mocks.requireHostedPrivyCompletionRequestAuthContext.mockRejectedValue(
+  it("does not accept a body identity token when the hosted Privy identity cookie is missing", async () => {
+    mocks.requirePrivyCompletionSession.mockRejectedValue(
       hostedOnboardingError({
         code: "AUTH_REQUIRED",
         httpStatus: 401,
@@ -362,8 +375,45 @@ describe("hosted onboarding routes", () => {
     });
   });
 
+  it("logs a sanitized error message for warning-level hosted Privy completion failures in production", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    mocks.requirePrivyCompletionSession.mockRejectedValue(
+      new TypeError(
+        "HOSTED_CONTACT_PRIVACY_KEYS is required for hosted contact privacy while reading /Users/test/app and notifying user@example.com with Bearer abc.def.ghi",
+      ),
+    );
+
+    const response = await privyCompleteRoute.POST(
+      new Request("https://join.example.test/api/hosted-onboarding/privy/complete", {
+        body: JSON.stringify({
+          inviteCode: "invite-code",
+        }),
+        headers: {
+          cookie: "privy-id-token=cookie-token",
+          origin: SAME_ORIGIN_HEADERS.origin,
+          "user-agent": "test-agent",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "INVALID_REQUEST",
+        message: "Invalid request.",
+      },
+    });
+    expect(warnSpy).toHaveBeenCalledWith("Hosted onboarding route failed.", {
+      errorMessage:
+        "HOSTED_CONTACT_PRIVACY_KEYS is required for hosted contact privacy while reading <redacted-path> and notifying <redacted-email> with Bearer <redacted-secret>",
+      errorType: "TypeError",
+      internalMessage: "Hosted onboarding route failed unexpectedly.",
+    });
+  });
+
   it("serializes retryable server-side Privy lag errors during completion", async () => {
-    mocks.requireHostedPrivyCompletionRequestAuthContext.mockRejectedValue(
+    mocks.requirePrivyCompletionSession.mockRejectedValue(
       hostedOnboardingError({
         code: "PRIVY_WALLET_NOT_READY",
         httpStatus: 409,
@@ -409,7 +459,7 @@ describe("hosted onboarding routes", () => {
       new Request("https://join.example.test/api/hosted-onboarding/privy/complete", {
         body: JSON.stringify({}),
         headers: {
-          "x-privy-identity-token": "header-token",
+          cookie: "privy-id-token=cookie-token",
           origin: SAME_ORIGIN_HEADERS.origin,
           "user-agent": "test-agent",
         },
@@ -554,6 +604,8 @@ describe("hosted onboarding routes", () => {
       },
     });
     expect(errorSpy).toHaveBeenCalledWith("Hosted onboarding route failed.", {
+      errorCode: "P2022",
+      errorMessage: "column missing",
       errorType: "PrismaClientKnownRequestError",
       internalMessage: "Hosted onboarding route failed unexpectedly.",
       prismaClientVersion: "test",
@@ -596,6 +648,9 @@ describe("hosted onboarding routes", () => {
       },
     });
     expect(errorSpy).toHaveBeenCalledWith("Hosted onboarding route failed.", {
+      errorCode: "P1001",
+      errorMessage:
+        "connect failed for <redacted-url> from <redacted-path> while notifying <redacted-email> at <redacted-phone>",
       errorType: "PrismaClientInitializationError",
       internalMessage: "Hosted onboarding route failed unexpectedly.",
       prismaClientVersion: "7.5.0",
@@ -678,7 +733,7 @@ describe("hosted onboarding routes", () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get("Cache-Control")).toBe("no-store");
-    expect(mocks.requireHostedPrivyRequestAuthContext).toHaveBeenCalledWith(request);
+    expect(mocks.requirePrivyMemberAuth).toHaveBeenCalledWith(request);
     expect(mocks.createHostedBillingCheckout).toHaveBeenCalledWith({
       inviteCode: "invite-code",
       member: { id: "member_123" },
@@ -703,7 +758,7 @@ describe("hosted onboarding routes", () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get("Cache-Control")).toBe("no-store");
-    expect(mocks.requireHostedPrivyRequestAuthContext).toHaveBeenCalledWith(request);
+    expect(mocks.requirePrivyMemberAuth).toHaveBeenCalledWith(request);
     expect(mocks.createHostedBillingCheckout).toHaveBeenCalledWith({
       inviteCode: "invite-code",
       member: { id: "member_123" },
@@ -735,7 +790,7 @@ describe("hosted onboarding routes", () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get("Cache-Control")).toBe("no-store");
-    expect(mocks.requireHostedPrivyRequestAuthContext).toHaveBeenCalledWith(request);
+    expect(mocks.requirePrivyMemberAuth).toHaveBeenCalledWith(request);
     expect(mocks.createHostedBillingCheckout).toHaveBeenCalledWith({
       inviteCode: "invite-code",
       member: { id: "member_123" },
@@ -745,6 +800,119 @@ describe("hosted onboarding routes", () => {
       alreadyActive: false,
       url: "https://billing.example.test/session_123",
     });
+  });
+
+  it("logs sanitized development diagnostics for unexpected hosted billing checkout failures", async () => {
+    setHostedOnboardingTestNodeEnv("development");
+
+    class StripeAuthenticationError extends Error {
+      constructor(message: string) {
+        super(message);
+        this.name = "StripeAuthenticationError";
+      }
+    }
+
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const billingError = new StripeAuthenticationError(
+      "Stripe auth failed for sk_test_123 from https://api.stripe.com while reading /Users/test/app",
+    ) as StripeAuthenticationError & {
+      detail: string;
+      headers: Record<string, string>;
+      requestId: string;
+      statusCode: number;
+      type: string;
+    };
+    billingError.type = "StripeAuthenticationError";
+    billingError.statusCode = 401;
+    billingError.requestId = "req_123";
+    billingError.detail = "See https://dashboard.stripe.com/test/logs/req_123";
+    billingError.headers = {
+      authorization: "Bearer sk_test_123",
+      requestId: "req_123",
+    };
+    mocks.createHostedBillingCheckout.mockRejectedValue(billingError);
+
+    const response = await billingCheckoutRoute.POST(
+      new Request("https://join.example.test/api/hosted-onboarding/billing/checkout", {
+        body: JSON.stringify({
+          inviteCode: "invite-code",
+        }),
+        headers: SAME_ORIGIN_HEADERS,
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "INTERNAL_ERROR",
+        message: "Internal error.",
+      },
+    });
+    const loggedPayload = errorSpy.mock.calls[0]?.[1];
+    expect(loggedPayload).toBeDefined();
+    expect(errorSpy).toHaveBeenCalledWith(
+      "Hosted onboarding route failed.",
+      expect.objectContaining({
+        errorType: "StripeAuthenticationError",
+        internalMessage: "Hosted onboarding route failed unexpectedly.",
+        errorMessage:
+          "Stripe auth failed for <redacted-secret> from <redacted-url> while reading <redacted-path>",
+        errorStack: expect.stringContaining(
+          "StripeAuthenticationError: Stripe auth failed for <redacted-secret> from <redacted-url> while reading <redacted-path>",
+        ),
+        errorDetails: expect.objectContaining({
+          detail: "See <redacted-url>",
+          headers: {
+            authorization: "[redacted]",
+            requestId: "req_123",
+          },
+          name: "StripeAuthenticationError",
+          requestId: "req_123",
+          statusCode: 401,
+          type: "StripeAuthenticationError",
+        }),
+      }),
+    );
+    expect(loggedPayload).toMatchObject({
+      errorStack: expect.not.stringContaining("file:///"),
+    });
+  });
+
+  it("keeps unexpected hosted billing checkout failures sanitized outside development", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    mocks.createHostedBillingCheckout.mockRejectedValue(
+      new Error(
+        "Stripe auth failed for sk_test_123 from https://api.stripe.com while reading /Users/test/app",
+      ),
+    );
+
+    const response = await billingCheckoutRoute.POST(
+      new Request("https://join.example.test/api/hosted-onboarding/billing/checkout", {
+        body: JSON.stringify({
+          inviteCode: "invite-code",
+        }),
+        headers: SAME_ORIGIN_HEADERS,
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "INTERNAL_ERROR",
+        message: "Internal error.",
+      },
+    });
+    expect(errorSpy).toHaveBeenCalledWith("Hosted onboarding route failed.", {
+      errorMessage:
+        "Stripe auth failed for <redacted-secret> from <redacted-url> while reading <redacted-path>",
+      errorType: "Error",
+      internalMessage: "Hosted onboarding route failed unexpectedly.",
+    });
+    const loggedPayload = errorSpy.mock.calls[0]?.[1];
+    expect(loggedPayload).not.toHaveProperty("errorDetails");
+    expect(loggedPayload).not.toHaveProperty("errorStack");
   });
 
 });

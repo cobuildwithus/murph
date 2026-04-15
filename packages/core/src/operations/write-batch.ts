@@ -1029,7 +1029,7 @@ export class WriteBatch {
 
       throw error;
     } finally {
-      await lock.release();
+      await lock?.release();
     }
   }
 
@@ -1045,7 +1045,7 @@ export class WriteBatch {
       await this.persist();
       await this.cleanupStageArtifacts();
     } finally {
-      await lock.release();
+      await lock?.release();
     }
   }
 

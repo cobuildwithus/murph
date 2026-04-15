@@ -17,6 +17,7 @@ plan_path="$1"
 shift
 commit_message="$1"
 shift
+ledger_path="agent-docs/exec-plans/active/COORDINATION_LEDGER.md"
 
 case "$plan_path" in
   agent-docs/exec-plans/active/*.md) ;;
@@ -104,6 +105,83 @@ expand_commit_target() {
   exit 1
 }
 
+remove_matching_ledger_row() {
+  local plan="$1"
+
+  if [[ ! -f "$ledger_path" ]]; then
+    echo "Coordination ledger not found: $ledger_path" >&2
+    exit 1
+  fi
+
+  LEDGER_PATH="$ledger_path" PLAN_PATH="$plan" node - <<'NODE'
+const fs = require('fs');
+
+const ledgerPath = process.env.LEDGER_PATH;
+const planPath = process.env.PLAN_PATH;
+const text = fs.readFileSync(ledgerPath, 'utf8');
+const lines = text.split('\n');
+const headerIndex = lines.findIndex((line) => line.startsWith('| Agent |'));
+
+if (headerIndex === -1) {
+  console.error(`Ledger header not found: ${ledgerPath}`);
+  process.exit(1);
+}
+
+const headerColumns = lines[headerIndex]
+  .split('|')
+  .slice(1, -1)
+  .map((part) => part.trim());
+const planColumnIndex = headerColumns.indexOf('Plan');
+
+if (planColumnIndex === -1) {
+  console.error(`Ledger Plan column not found: ${ledgerPath}`);
+  process.exit(1);
+}
+
+function normalizePlanCell(value) {
+  const trimmed = value.trim();
+  const inlineCodeMatch = trimmed.match(/^`([^`]+)`$/);
+
+  if (inlineCodeMatch) {
+    return inlineCodeMatch[1].trim();
+  }
+
+  return trimmed;
+}
+
+const matches = [];
+
+for (let i = headerIndex + 2; i < lines.length; i += 1) {
+  const line = lines[i];
+  if (!line.startsWith('|') || line.startsWith('| ---')) continue;
+  const columns = line
+    .split('|')
+    .slice(1, -1)
+    .map((part) => part.trim());
+  if (normalizePlanCell(columns[planColumnIndex] ?? '') === planPath) {
+    matches.push(i);
+  }
+}
+
+if (matches.length === 0) {
+  console.error(
+    `Expected exactly one coordination-ledger row with Plan '${planPath}', found none.`,
+  );
+  process.exit(1);
+}
+
+if (matches.length > 1) {
+  console.error(
+    `Expected exactly one coordination-ledger row with Plan '${planPath}', found ${matches.length}.`,
+  );
+  process.exit(1);
+}
+
+lines.splice(matches[0], 1);
+fs.writeFileSync(ledgerPath, lines.join('\n'));
+NODE
+}
+
 for target in "$@"; do
   expand_commit_target "$target"
 done
@@ -112,6 +190,8 @@ if [[ "${#resolved_commit_paths[@]}" -eq 0 ]]; then
   echo "No commit paths were resolved." >&2
   exit 1
 fi
+
+remove_matching_ledger_row "$plan_path"
 
 bash scripts/close-exec-plan.sh "$plan_path"
 

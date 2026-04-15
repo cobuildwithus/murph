@@ -29,6 +29,9 @@ test('cli and split owner packages publish the expected owner dependencies', asy
   const vaultUsecasesManifest = JSON.parse(
     await readFile(new URL('../../vault-usecases/package.json', import.meta.url), 'utf8'),
   ) as PackageManifest
+  const inboxServicesManifest = JSON.parse(
+    await readFile(new URL('../../inbox-services/package.json', import.meta.url), 'utf8'),
+  ) as PackageManifest
   const operatorConfigManifest = JSON.parse(
     await readFile(new URL('../../operator-config/package.json', import.meta.url), 'utf8'),
   ) as PackageManifest
@@ -50,8 +53,12 @@ test('cli and split owner packages publish the expected owner dependencies', asy
   assert.equal(cliManifest.dependencies?.['@murphai/operator-config'], 'workspace:*')
   assert.equal(cliManifest.dependencies?.['@murphai/assistant-engine'], 'workspace:*')
   assert.equal(cliManifest.dependencies?.['@murphai/vault-usecases'], 'workspace:*')
-  assert.equal(cliManifest.dependencies?.['@murphai/inboxd-imessage'], 'workspace:*')
-  assert.equal(cliManifest.bundleDependencies?.includes('@murphai/inboxd-imessage'), true)
+  assert.equal(cliManifest.dependencies?.['@murphai/inboxd-imessage'], undefined)
+  assert.equal(cliManifest.dependencies?.['@photon-ai/imessage-kit'], undefined)
+  assert.equal(
+    cliManifest.bundleDependencies?.includes('@murphai/inboxd-imessage'),
+    false,
+  )
 
   assert.equal(assistantCliManifest.dependencies?.['@murphai/assistant-engine'], 'workspace:*')
   assert.equal(assistantCliManifest.dependencies?.['@murphai/operator-config'], 'workspace:*')
@@ -72,8 +79,8 @@ test('cli and split owner packages publish the expected owner dependencies', asy
   assert.equal(setupCliManifest.dependencies?.['@murphai/vault-inbox'], undefined)
   assert.equal(assistantEngineManifest.exports?.['./assistant-backend'], undefined)
   assert.equal(assistantEngineManifest.exports?.['./assistant-cli-contracts'], undefined)
-  assert.equal(assistantEngineManifest.exports?.['./assistant-cli-access'] !== undefined, true)
-  assert.equal(assistantEngineManifest.exports?.['./assistant-cli-tools'] !== undefined, true)
+  assert.equal(assistantEngineManifest.exports?.['./assistant-cli-access'], undefined)
+  assert.equal(assistantEngineManifest.exports?.['./assistant-cli-tools'], undefined)
   assert.equal(assistantEngineManifest.exports?.['./assistant/*'], undefined)
   assert.equal(assistantEngineManifest.exports?.['./commands/*'], undefined)
   assert.equal(assistantEngineManifest.exports?.['./commands/query-record-command-helpers'], undefined)
@@ -100,8 +107,10 @@ test('cli and split owner packages publish the expected owner dependencies', asy
   assert.equal(vaultUsecasesManifest.exports?.['./helpers'] !== undefined, true)
   assert.equal(vaultUsecasesManifest.exports?.['./records'] !== undefined, true)
   assert.equal(vaultUsecasesManifest.exports?.['./runtime'] !== undefined, true)
-  assert.equal(vaultUsecasesManifest.exports?.['./testing'] !== undefined, true)
+  assert.equal(vaultUsecasesManifest.exports?.['./testing'], undefined)
   assert.equal(vaultUsecasesManifest.exports?.['./workouts'] !== undefined, true)
+  assert.equal(inboxServicesManifest.exports?.['./testing'], undefined)
+  assert.equal(operatorConfigManifest.exports?.['./imessage-readiness'], undefined)
   assert.equal(operatorConfigManifest.exports?.['./text/*'], undefined)
   assert.equal(operatorConfigManifest.exports?.['./text/shared'] !== undefined, true)
 
@@ -131,6 +140,7 @@ test('cli and split owner packages publish the expected owner dependencies', asy
   assert.deepEqual(repoTsconfigBase.compilerOptions?.paths?.['@murphai/operator-config/*'], [
     'packages/operator-config/src/*',
   ])
+  assert.equal(repoTsconfigBase.compilerOptions?.paths?.['@murphai/inboxd-imessage'], undefined)
   assert.equal(repoTsconfigBase.compilerOptions?.paths?.['@murphai/vault-inbox/*'], undefined)
   assert.equal(repoTsconfigBase.compilerOptions?.paths?.['@murphai/assistant-core/*'], undefined)
 })

@@ -1,7 +1,8 @@
 import { Cli, z } from 'incur'
+import { eventSourceSchema } from '@murphai/contracts'
 import {
   documentImportResultSchema,
-  isoTimestampSchema,
+  occurredAtOptionSchema,
   listResultSchema,
   pathSchema,
   showResultSchema,
@@ -13,13 +14,12 @@ import {
   editDocumentRecord,
   rawImportManifestResultSchema,
 } from '@murphai/vault-usecases/records'
-import { registerArtifactBackedEntityGroup } from './health-command-factory.js'
+import { registerArtifactBackedEntityGroup } from './entity-command-groups.js'
 import {
   createEntityDeleteCommandConfig,
   createEventBackedEntityEditCommandConfig,
 } from './record-mutation-command-helpers.js'
-
-const eventSourceSchema = z.enum(['manual', 'import', 'device', 'derived'])
+import { normalizeOccurredAtOption } from './occurred-at-option.js'
 
 export function registerDocumentCommands(
   cli: Cli.Cli,
@@ -40,9 +40,9 @@ export function registerDocumentCommands(
           .min(1)
           .optional()
           .describe('Optional document title to record on the emitted event.'),
-        occurredAt: isoTimestampSchema
+        occurredAt: occurredAtOptionSchema
           .optional()
-          .describe('Optional occurrence timestamp in ISO 8601 form.'),
+          .describe('Optional occurrence timestamp in ISO 8601 form or YYYY-MM-DD form.'),
         note: z.string().min(1).optional().describe('Optional freeform note.'),
         source: eventSourceSchema
           .optional()
@@ -56,7 +56,11 @@ export function registerDocumentCommands(
           vault: String(options.vault ?? ''),
           requestId,
           title: typeof options.title === 'string' ? options.title : undefined,
-          occurredAt: typeof options.occurredAt === 'string' ? options.occurredAt : undefined,
+          occurredAt: await normalizeOccurredAtOption({
+            vault: String(options.vault ?? ''),
+            occurredAt:
+              typeof options.occurredAt === 'string' ? options.occurredAt : undefined,
+          }),
           note: typeof options.note === 'string' ? options.note : undefined,
           source: sourceResult.success ? sourceResult.data : undefined,
         })

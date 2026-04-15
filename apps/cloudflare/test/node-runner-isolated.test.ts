@@ -68,18 +68,22 @@ describe("runHostedExecutionJobIsolatedDetailed", () => {
       },
     });
 
-    expect(result.result.summary).toBe("ok");
+    expect(result.result.result.summary).toBe("ok");
     expect(processKillSpy).toHaveBeenCalledWith(-4242, "SIGKILL");
   });
 });
 
 function createRunnerResult() {
   return {
-    bundle: null,
+    phase: "completed" as const,
     result: {
-      eventsHandled: 1,
-      nextWakeAt: null,
-      summary: "ok",
+      bundle: null,
+      result: {
+        eventsHandled: 1,
+        nextWakeAt: null,
+        summary: "ok",
+      },
     },
+    finalGatewayProjectionSnapshot: null,
   };
 }

@@ -9,6 +9,7 @@ import {
   FRONTMATTER_DOC_TYPES,
   GOAL_HORIZONS as CONTRACT_GOAL_HORIZONS,
   GOAL_STATUSES as CONTRACT_GOAL_STATUSES,
+  type FoodNutrition,
   PROTOCOL_KINDS as CONTRACT_PROTOCOL_KINDS,
   PROTOCOL_STATUSES as CONTRACT_PROTOCOL_STATUSES,
   RECIPE_STATUSES as CONTRACT_RECIPE_STATUSES,
@@ -154,6 +155,7 @@ export interface FoodRecord {
   vendor?: string;
   location?: string;
   serving?: string;
+  nutrition?: FoodNutrition;
   aliases?: string[];
   ingredients?: string[];
   tags?: string[];
@@ -178,6 +180,7 @@ export interface UpsertFoodInput {
   vendor?: string;
   location?: string;
   serving?: string;
+  nutrition?: FoodNutrition;
   aliases?: string[];
   ingredients?: string[];
   tags?: string[];

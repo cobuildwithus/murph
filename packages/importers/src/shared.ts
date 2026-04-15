@@ -1,6 +1,6 @@
 import { readFile, stat } from "node:fs/promises";
 import { basename, extname, resolve } from "node:path";
-import { normalizeStrictIsoTimestamp } from "@murphai/contracts";
+import { eventSourceSchema, normalizeStrictIsoTimestamp, type EventSource } from "@murphai/contracts";
 import { z } from "zod";
 
 const MEDIA_TYPES: ReadonlyMap<string, string> = new Map([
@@ -92,6 +92,12 @@ export function optionalStringListSchema(label: string): z.ZodType<string[]> {
         ? []
         : value.map((entry) => entry.trim()),
     );
+}
+
+export function optionalEventSourceSchema(
+  label: string,
+): z.ZodType<EventSource | undefined> {
+  return optionalTrimmedStringSchema(label).pipe(eventSourceSchema.optional());
 }
 
 export function optionalTimestampSchema(

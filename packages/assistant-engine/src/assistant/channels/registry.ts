@@ -4,7 +4,7 @@ import type {
 } from '@murphai/operator-config/assistant-cli-contracts'
 import type { ConversationRef } from '../conversation-ref.js'
 import {
-  inferFallbackBindingDelivery,
+  inferBindingDeliveryForChannel,
   resolveDeliveryCandidates,
 } from './helpers.js'
 import { ASSISTANT_CHANNEL_ADAPTERS } from './descriptors.js'
@@ -42,7 +42,8 @@ export function inferAssistantBindingDelivery(input: {
 }): AssistantBindingDelivery | null {
   const adapter = getAssistantChannelAdapter(input.channel ?? input.conversation?.channel)
   if (!adapter) {
-    return inferFallbackBindingDelivery({
+    return inferBindingDeliveryForChannel({
+      channel: input.channel ?? input.conversation?.channel ?? null,
       conversation: input.conversation ?? {},
       deliveryKind: input.deliveryKind ?? null,
       deliveryTarget: input.deliveryTarget ?? null,
@@ -54,11 +55,4 @@ export function inferAssistantBindingDelivery(input: {
     deliveryKind: input.deliveryKind ?? null,
     deliveryTarget: input.deliveryTarget ?? null,
   })
-}
-
-export function resolveImessageDeliveryCandidates(input: {
-  bindingDelivery?: AssistantBindingDelivery | null
-  explicitTarget?: string | null
-}): AssistantDeliveryCandidate[] {
-  return resolveDeliveryCandidates(input)
 }

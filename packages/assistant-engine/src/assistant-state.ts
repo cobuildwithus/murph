@@ -1,3 +1,5 @@
+export * from './assistant/auto-reply-channels.js'
+export * from './assistant/automation-state.js'
 export * from './assistant/runtime-state-service.js'
 export * from './assistant/runtime-write-lock.js'
 export * from './assistant/state-ids.js'

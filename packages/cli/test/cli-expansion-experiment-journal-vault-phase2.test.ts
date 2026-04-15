@@ -64,7 +64,13 @@ test.sequential(
     const checkpointPayloadPath = path.join(vaultRoot, 'experiment-checkpoint.json')
 
     try {
-      await runSliceCli(['init', '--vault', vaultRoot])
+      await runSliceCli([
+        'init',
+        '--vault',
+        vaultRoot,
+        '--timezone',
+        'America/Los_Angeles',
+      ])
       const created = await runSliceCli<{
         experimentId: string
         slug: string
@@ -138,7 +144,7 @@ test.sequential(
         'stop',
         'focus-sprint',
         '--occurred-at',
-        '2026-03-13T18:45:00Z',
+        '2026-03-14',
         '--note',
         'The sprint is complete and the updated routine is stable enough to keep.',
         '--vault',
@@ -160,11 +166,27 @@ test.sequential(
       const eventShown = await runSliceCli<{
         entity: {
           kind: string
+          occurredAt: string | null
           data: Record<string, unknown>
         }
       }>([
         'show',
         requireData(stopped).eventId,
+        '--vault',
+        vaultRoot,
+      ])
+      const listed = await runSliceCli<{
+        count: number
+        items: Array<{
+          id: string
+          excerpt?: string | null
+          markdown?: string | null
+        }>
+      }>([
+        'experiment',
+        'list',
+        '--status',
+        'completed',
         '--vault',
         vaultRoot,
       ])
@@ -196,11 +218,19 @@ test.sequential(
 
       assert.equal(eventShown.ok, true)
       assert.equal(requireData(eventShown).entity.kind, 'experiment_event')
+      assert.equal(requireData(eventShown).entity.occurredAt, '2026-03-14T19:00:00.000Z')
       assert.equal(requireData(eventShown).entity.data.phase, 'stop')
       assert.equal(
         requireData(eventShown).entity.data.experimentId,
         requireData(created).experimentId,
       )
+      assert.equal(listed.ok, true)
+      assert.equal(requireData(listed).count, 1)
+      assert.match(
+        requireData(listed).items[0]?.excerpt ?? '',
+        /Focus Sprint Updated Plan Keep the walks short and consistent\./u,
+      )
+      assert.equal('markdown' in (requireData(listed).items[0] ?? {}), false)
     } finally {
       await rm(vaultRoot, { recursive: true, force: true })
     }
@@ -353,6 +383,23 @@ test.sequential(
         '--vault',
         vaultRoot,
       ])
+      const listed = await runSliceCli<{
+        count: number
+        items: Array<{
+          id: string
+          excerpt?: string | null
+          markdown?: string | null
+        }>
+      }>([
+        'journal',
+        'list',
+        '--from',
+        '2026-03-12',
+        '--to',
+        '2026-03-12',
+        '--vault',
+        vaultRoot,
+      ])
 
       assert.equal(appended.ok, true)
       assert.equal(appended.meta?.command, 'journal append')
@@ -404,6 +451,13 @@ test.sequential(
       assert.match(requireData(shown).entity.markdown ?? '', /Evening note from the CLI append helper\./u)
       assert.deepEqual(requireData(shown).entity.data.eventIds, [firstEventId])
       assert.deepEqual(requireData(shown).entity.data.sampleStreams, ['glucose'])
+      assert.equal(listed.ok, true)
+      assert.equal(requireData(listed).count, 1)
+      assert.match(
+        requireData(listed).items[0]?.excerpt ?? '',
+        /Evening note from the CLI append helper\./u,
+      )
+      assert.equal('markdown' in (requireData(listed).items[0] ?? {}), false)
 
       const journalPath = path.join(vaultRoot, 'journal/2026/2026-03-12.md')
       const journalMarkdown = await readFile(journalPath, 'utf8')
@@ -535,73 +589,6 @@ test.sequential(
       assert.equal(validated.ok, true)
       assert.equal(requireData(validated).valid, true)
       assert.deepEqual(requireData(validated).issues, [])
-    } finally {
-      await rm(vaultRoot, { recursive: true, force: true })
-    }
-  },
-)
-
-test.sequential(
-  'vault upgrade rejects explicit older format versions when no migration is registered',
-  async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-vault-upgrade-'))
-
-    try {
-      await runSliceCli(['init', '--vault', vaultRoot])
-      await rewriteVaultMetadataWithFormatVersion(vaultRoot, 0)
-      await rm(path.join(vaultRoot, 'CORE.md'), { force: true })
-
-      const shownBeforeUpgrade = await runSliceCli([
-        'vault',
-        'show',
-        '--vault',
-        vaultRoot,
-      ])
-      const dryRunUpgrade = await runSliceCli([
-        'vault',
-        'upgrade',
-        '--vault',
-        vaultRoot,
-        '--dry-run',
-      ])
-      const appliedUpgrade = await runSliceCli([
-        'vault',
-        'upgrade',
-        '--vault',
-        vaultRoot,
-      ])
-      const shownAfterUpgrade = await runSliceCli([
-        'vault',
-        'show',
-        '--vault',
-        vaultRoot,
-      ])
-
-      assert.equal(shownBeforeUpgrade.ok, false)
-      assert.equal(shownBeforeUpgrade.error?.code, 'upgrade_required')
-
-      assert.equal(dryRunUpgrade.ok, false)
-      assert.equal(dryRunUpgrade.error?.code, 'upgrade_unsupported')
-      assert.equal(
-        dryRunUpgrade.error?.message,
-        'No vault upgrade migration is registered for formatVersion 0.',
-      )
-      assert.equal(appliedUpgrade.ok, false)
-      assert.equal(appliedUpgrade.error?.code, 'upgrade_unsupported')
-      assert.equal(
-        appliedUpgrade.error?.message,
-        'No vault upgrade migration is registered for formatVersion 0.',
-      )
-
-      assert.equal(shownAfterUpgrade.ok, false)
-      assert.equal(shownAfterUpgrade.error?.code, 'upgrade_required')
-
-      const upgradedMetadata = JSON.parse(
-        await readFile(path.join(vaultRoot, 'vault.json'), 'utf8'),
-      ) as {
-        formatVersion: number
-      }
-      assert.equal(upgradedMetadata.formatVersion, 0)
     } finally {
       await rm(vaultRoot, { recursive: true, force: true })
     }

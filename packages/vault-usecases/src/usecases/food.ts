@@ -1,4 +1,10 @@
-import { foodUpsertPayloadSchema, ID_PREFIXES, isContractId, type JsonObject } from '@murphai/contracts'
+import {
+  foodUpsertPayloadSchema,
+  ID_PREFIXES,
+  isContractId,
+  type FoodNutrition,
+  type JsonObject,
+} from '@murphai/contracts'
 import { z } from 'zod'
 
 import { loadRuntimeModule } from '../runtime-import.js'
@@ -12,6 +18,7 @@ import {
   buildEntityLinks,
   loadJsonInputFile,
   preparePatchedUpsertPayload,
+  toListEntity,
 } from './shared.js'
 import {
   compactObject,
@@ -35,6 +42,7 @@ interface FoodReadModel {
   vendor?: string
   location?: string
   serving?: string
+  nutrition?: FoodNutrition | null
   aliases?: string[]
   ingredients?: string[]
   tags?: string[]
@@ -88,6 +96,7 @@ interface FoodCoreRuntime {
     vendor?: string
     location?: string
     serving?: string
+    nutrition?: FoodNutrition | null
     aliases?: string[]
     ingredients?: string[]
     tags?: string[]
@@ -121,7 +130,7 @@ interface FoodCoreRuntime {
 export type FoodPayload = z.infer<typeof foodUpsertPayloadSchema>
 
 export function scaffoldFoodPayload() {
-  return {
+  return parseFoodPayload({
     title: 'Regular Acai Bowl',
     slug: 'regular-acai-bowl',
     status: 'active',
@@ -130,12 +139,26 @@ export function scaffoldFoodPayload() {
     vendor: 'Neighborhood Acai Bar',
     location: 'Brooklyn, NY',
     serving: '1 bowl',
+    nutrition: {
+      perServing: {
+        calories: 540,
+        proteinGrams: 11,
+        carbsGrams: 68,
+        fatGrams: 24,
+        fiberGrams: 11,
+      },
+      provenance: {
+        source: 'estimated',
+        confidence: 'medium',
+        sourceDetail: 'Neighborhood menu plus standard granola serving.',
+      },
+    },
     aliases: ['regular acai bowl', 'usual acai bowl'],
     ingredients: ['acai base', 'banana', 'strawberries', 'granola', 'almond butter'],
     tags: ['breakfast', 'favorite'],
     note: 'Typical order includes extra granola and no honey.',
-    attachedProtocolIds: ['prot_01JEXAMPLEATTACHED1', 'prot_01JEXAMPLEATTACHED2'],
-  } satisfies FoodPayload
+    attachedProtocolIds: ['prot_01234567890123456789012345', 'prot_01234567890123456789012346'],
+  })
 }
 
 export function parseFoodPayload(value: unknown) {
@@ -343,6 +366,7 @@ export async function renameFoodRecord(input: {
         vendor: existing.vendor,
         location: existing.location,
         serving: existing.serving,
+        nutrition: existing.nutrition,
         aliases: mergeFoodAliases(existing.aliases, existing.title, title),
         ingredients: existing.ingredients,
         tags: existing.tags,
@@ -536,7 +560,7 @@ export async function listFoodRecords(input: {
     .map((entry) => {
       const data = buildFoodData(entry)
 
-      return {
+      return toListEntity({
         id: entry.foodId,
         kind: 'food',
         title: entry.title,
@@ -547,7 +571,7 @@ export async function listFoodRecords(input: {
         links: buildEntityLinks({
           data,
         }),
-      }
+      })
     })
 
   return asListEnvelope(input.vault, {
@@ -592,6 +616,7 @@ interface FoodCoreUpsertInput {
   vendor?: string
   location?: string
   serving?: string
+  nutrition?: FoodNutrition | null
   aliases?: string[]
   ingredients?: string[]
   tags?: string[]
@@ -621,6 +646,7 @@ function buildFoodCoreInput(input: {
     vendor: clearedFields.has('vendor') ? '' : input.payload.vendor,
     location: clearedFields.has('location') ? '' : input.payload.location,
     serving: clearedFields.has('serving') ? '' : input.payload.serving,
+    nutrition: clearedFields.has('nutrition') ? null : input.payload.nutrition,
     aliases: clearedFields.has('aliases') ? [] : input.payload.aliases,
     ingredients: clearedFields.has('ingredients') ? [] : input.payload.ingredients,
     tags: clearedFields.has('tags') ? [] : input.payload.tags,

@@ -1,12 +1,10 @@
 import {
-  HostedRevnetIssuanceStatus,
   HostedStripeEventStatus,
   Prisma,
   type PrismaClient,
 } from "@prisma/client";
 import type Stripe from "stripe";
 
-import { provisionManagedUserCryptoInHostedExecution } from "../hosted-execution/control";
 import {
   applyStripeCheckoutCompleted,
   applyStripeCheckoutExpired,
@@ -16,20 +14,25 @@ import {
   applyStripeRefundCreated,
   applyStripeSubscriptionUpdated,
 } from "./stripe-billing-events";
+import { resolveStripeCustomerContext } from "./stripe-billing-lookup";
 import {
-  activateHostedMemberFromConfirmedRevnetIssuance,
-  resolveStripeCustomerContext,
+  buildHostedStripeDispatchContext,
   type HostedStripeDispatchContext,
-} from "./stripe-billing-policy";
+} from "./stripe-dispatch";
 import {
   coerceStripeObjectId,
 } from "./billing";
-import { readHostedMemberSnapshot } from "./hosted-member-store";
 import {
-  isHostedOnboardingRevnetEnabled,
-  readHostedRevnetPaymentReceipt,
-} from "./revnet";
+  sanitizeHostedOnboardingPersistedErrorCode,
+  sanitizeHostedOnboardingPersistedErrorMessage,
+} from "./http";
+import {
+  deriveHostedOnboardingTimingErrorName,
+  finishHostedOnboardingTiming,
+  startHostedOnboardingTiming,
+} from "./logging";
 import { requireHostedStripeApi } from "./runtime";
+import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "./shared";
 import { drainHostedRevnetIssuanceSubmissionQueue } from "./stripe-revnet-issuance";
 
 const STRIPE_EVENT_LEASE_MS = 10 * 60_000;
@@ -165,91 +168,6 @@ export async function reconcileHostedStripeEventById(input: {
   return processClaimedHostedStripeEvent(claimed, input.prisma);
 }
 
-export async function reconcileSubmittedHostedRevnetIssuances(input: {
-  limit?: number;
-  prisma: PrismaClient;
-}): Promise<string[]> {
-  if (!isHostedOnboardingRevnetEnabled()) {
-    return [];
-  }
-
-  const confirmedIssuanceIds: string[] = [];
-  const issuances = await input.prisma.hostedRevnetIssuance.findMany({
-    where: {
-      payTxHash: {
-        not: null,
-      },
-      status: HostedRevnetIssuanceStatus.submitted,
-    },
-    orderBy: [
-      {
-        createdAt: "asc",
-      },
-    ],
-    take: input.limit ?? 25,
-  });
-
-  for (const issuance of issuances) {
-    const receipt = await readHostedRevnetPaymentReceipt({
-      chainId: issuance.chainId,
-      payTxHash: issuance.payTxHash as `0x${string}`,
-    });
-
-    if (!receipt) {
-      continue;
-    }
-
-    if (receipt.status === "reverted") {
-      await input.prisma.hostedRevnetIssuance.update({
-        where: {
-          id: issuance.id,
-        },
-        data: {
-          failureCode: "REVNET_PAYMENT_REVERTED",
-          failureMessage: "The submitted Hosted RevNet payment reverted onchain.",
-          status: HostedRevnetIssuanceStatus.failed,
-        },
-      });
-      continue;
-    }
-
-    await input.prisma.$transaction(async (transaction) => {
-      await transaction.hostedRevnetIssuance.update({
-        where: {
-          id: issuance.id,
-        },
-        data: {
-          confirmedAt: new Date(),
-          failureCode: null,
-          failureMessage: null,
-          status: HostedRevnetIssuanceStatus.confirmed,
-        },
-      });
-
-      const member = await readHostedMemberSnapshot({
-        memberId: issuance.memberId,
-        prisma: transaction,
-      });
-
-      if (!member) {
-        return;
-      }
-
-      await activateHostedMemberFromConfirmedRevnetIssuance({
-        member,
-        occurredAt: new Date().toISOString(),
-        prisma: transaction as Prisma.TransactionClient,
-        sourceEventId: issuance.id,
-        sourceType: "hosted.revnet.issuance.confirmed",
-      });
-    });
-
-    confirmedIssuanceIds.push(issuance.id);
-  }
-
-  return confirmedIssuanceIds;
-}
-
 async function claimHostedStripeEvent(input: {
   eventId: string;
   now: Date;
@@ -289,17 +207,9 @@ async function processHostedStripeEventRecord(
   activatedMemberId: string | null;
   createdOrUpdatedRevnetIssuance: boolean;
   hostedExecutionEventId: string | null;
-  postCommitProvisionUserId: string | null;
 }> {
   const payload = event.data.object;
-  const dispatchContext: HostedStripeDispatchContext = {
-    eventCreatedAt: Number.isFinite(event.created) ? new Date(event.created * 1000) : new Date(),
-    occurredAt: Number.isFinite(event.created)
-      ? new Date(event.created * 1000).toISOString()
-      : new Date().toISOString(),
-    sourceEventId: event.id,
-    sourceType: normalizeHostedStripeDispatchSourceType(event.type),
-  };
+  const dispatchContext: HostedStripeDispatchContext = buildHostedStripeDispatchContext(event);
 
   switch (event.type) {
     case "checkout.session.completed":
@@ -377,10 +287,6 @@ async function prepareHostedStripeEventProcessingContext(
   };
 }
 
-function normalizeHostedStripeDispatchSourceType(eventType: string): string {
-  return `stripe.${eventType}`;
-}
-
 function readHostedStripeEventChargeId(type: string, object: Record<string, unknown>): string | null {
   if (type === "refund.created") {
     return coerceStripeObjectId(object.charge as never);
@@ -442,6 +348,11 @@ async function processClaimedHostedStripeEvent(
   claimed: NonNullable<Awaited<ReturnType<typeof claimHostedStripeEvent>>>,
   prisma: PrismaClient,
 ): Promise<HostedStripeEventReconcileResult> {
+  const timing = startHostedOnboardingTiming("hosted-onboarding.stripe.reconcile-event", {
+    attemptCount: claimed.attemptCount,
+    eventType: claimed.type,
+  });
+
   try {
     const stripeEvent = await fetchHostedStripeEventForReconciliation(claimed.eventId);
     const processingContext = await prepareHostedStripeEventProcessingContext(stripeEvent);
@@ -450,10 +361,9 @@ async function processClaimedHostedStripeEvent(
       result = await processHostedStripeEventRecord(
         stripeEvent,
         processingContext,
-        transaction as Prisma.TransactionClient,
+        transaction,
       );
-    });
-    await runHostedStripeEventPostCommitEffects(result);
+    }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
     await prisma.hostedStripeEvent.update({
       where: {
         eventId: claimed.eventId,
@@ -465,6 +375,11 @@ async function processClaimedHostedStripeEvent(
         processedAt: new Date(),
         status: HostedStripeEventStatus.completed,
       },
+    });
+    finishHostedOnboardingTiming(timing, "completed", {
+      activatedMember: Boolean(result.activatedMemberId),
+      createdOrUpdatedRevnetIssuance: result.createdOrUpdatedRevnetIssuance,
+      hostedExecutionEventScheduled: Boolean(result.hostedExecutionEventId),
     });
 
     return {
@@ -481,14 +396,23 @@ async function processClaimedHostedStripeEvent(
       },
       data: {
         claimExpiresAt: null,
-        lastErrorCode: deriveHostedStripeEventErrorCode(error),
-        lastErrorMessage: error instanceof Error ? error.message : String(error),
+        lastErrorCode: sanitizeHostedOnboardingPersistedErrorCode(
+          deriveHostedStripeEventErrorCode(error),
+        ),
+        lastErrorMessage: sanitizeHostedOnboardingPersistedErrorMessage(
+          error instanceof Error ? error.message : String(error),
+        ),
         nextAttemptAt: computeHostedStripeEventNextAttemptAt(claimed.attemptCount),
         status:
           claimed.attemptCount >= STRIPE_EVENT_MAX_ATTEMPTS
             ? HostedStripeEventStatus.poisoned
             : HostedStripeEventStatus.failed,
       },
+    });
+    finishHostedOnboardingTiming(timing, "failed", {
+      errorName: deriveHostedOnboardingTimingErrorName(error),
+      poisoned:
+        claimed.attemptCount >= STRIPE_EVENT_MAX_ATTEMPTS,
     });
 
     return {
@@ -503,16 +427,6 @@ async function processClaimedHostedStripeEvent(
 
 async function fetchHostedStripeEventForReconciliation(eventId: string): Promise<Stripe.Event> {
   return requireHostedStripeApi().events.retrieve(eventId);
-}
-
-async function runHostedStripeEventPostCommitEffects(input: {
-  postCommitProvisionUserId: string | null;
-}): Promise<void> {
-  if (!input.postCommitProvisionUserId) {
-    return;
-  }
-
-  await provisionManagedUserCryptoInHostedExecution(input.postCommitProvisionUserId);
 }
 
 function buildDueHostedStripeEventWhere(now: Date): Prisma.HostedStripeEventWhereInput {
@@ -545,19 +459,16 @@ function mapHostedStripeActivationOutcome(
     activatedMemberId: string | null;
     createdOrUpdatedRevnetIssuance?: boolean;
     hostedExecutionEventId: string | null;
-    postCommitProvisionUserId?: string | null;
   },
 ): {
   activatedMemberId: string | null;
   createdOrUpdatedRevnetIssuance: boolean;
   hostedExecutionEventId: string | null;
-  postCommitProvisionUserId: string | null;
 } {
   return {
     activatedMemberId: outcome.activatedMemberId,
     createdOrUpdatedRevnetIssuance: outcome.createdOrUpdatedRevnetIssuance ?? false,
     hostedExecutionEventId: outcome.hostedExecutionEventId,
-    postCommitProvisionUserId: outcome.postCommitProvisionUserId ?? null,
   };
 }
 
@@ -565,13 +476,11 @@ function buildEmptyHostedStripeEventProcessingResult(): {
   activatedMemberId: string | null;
   createdOrUpdatedRevnetIssuance: boolean;
   hostedExecutionEventId: string | null;
-  postCommitProvisionUserId: string | null;
 } {
   return {
     activatedMemberId: null,
     createdOrUpdatedRevnetIssuance: false,
     hostedExecutionEventId: null,
-    postCommitProvisionUserId: null,
   };
 }
 

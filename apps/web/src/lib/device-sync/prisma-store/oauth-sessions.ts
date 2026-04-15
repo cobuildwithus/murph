@@ -1,6 +1,6 @@
 import { PrismaClient } from "@prisma/client";
 
-import type { OAuthStateRecord } from "@murphai/device-syncd/public-ingress";
+import type { ConsumeOAuthStateResult, OAuthStateRecord } from "@murphai/device-syncd/public-ingress";
 
 export class PrismaHostedOAuthSessionStore {
   readonly prisma: PrismaClient;
@@ -35,7 +35,11 @@ export class PrismaHostedOAuthSessionStore {
     return input;
   }
 
-  async consumeOAuthState(state: string, now: string): Promise<OAuthStateRecord | null> {
+  async consumeOAuthState(
+    state: string,
+    now: string,
+    expectedProvider?: string,
+  ): Promise<ConsumeOAuthStateResult> {
     return this.prisma.$transaction(async (tx) => {
       const record = await tx.deviceOauthSession.findUnique({
         where: {
@@ -44,27 +48,55 @@ export class PrismaHostedOAuthSessionStore {
       });
 
       if (!record) {
-        return null;
+        return {
+          status: "missing",
+        };
       }
 
-      await tx.deviceOauthSession.delete({
+      if (record.expiresAt.getTime() <= Date.parse(now)) {
+        await tx.deviceOauthSession.deleteMany({
+          where: {
+            state,
+          },
+        });
+        return {
+          status: "missing",
+        };
+      }
+
+      if (expectedProvider && record.provider !== expectedProvider) {
+        return {
+          status: "provider_mismatch",
+          provider: record.provider,
+        };
+      }
+
+      // Delete with a count check so duplicate callbacks or retries fail closed as
+      // already-consumed/missing instead of surfacing as a transaction error.
+      const deleteResult = await tx.deviceOauthSession.deleteMany({
         where: {
           state,
+          provider: record.provider,
         },
       });
 
-      if (record.expiresAt.getTime() <= Date.parse(now)) {
-        return null;
+      if (deleteResult.count !== 1) {
+        return {
+          status: "missing",
+        };
       }
 
       return {
-        state: record.state,
-        provider: record.provider,
-        returnTo: record.returnTo,
-        metadata: record.userId ? { ownerId: record.userId } : {},
-        createdAt: record.createdAt.toISOString(),
-        expiresAt: record.expiresAt.toISOString(),
-      } satisfies OAuthStateRecord;
+        status: "consumed",
+        record: {
+          state: record.state,
+          provider: record.provider,
+          returnTo: record.returnTo,
+          metadata: record.userId ? { ownerId: record.userId } : {},
+          createdAt: record.createdAt.toISOString(),
+          expiresAt: record.expiresAt.toISOString(),
+        } satisfies OAuthStateRecord,
+      };
     });
   }
 }

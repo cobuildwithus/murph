@@ -4,32 +4,27 @@ import {
   maskPhoneNumber,
   normalizePhoneNumberForCountry,
 } from "@/src/lib/hosted-onboarding/phone";
-import {
-  ensureHostedPrivyPhoneReady,
-  HOSTED_PRIVY_COMPLETION_RETRY_DELAYS_MS,
-  type HostedPrivyFinalizationState,
-  type HostedPrivyClientPendingAction,
-} from "@/src/lib/hosted-onboarding/privy-client";
 import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
 
-import {
-  HostedOnboardingApiError,
-  requestHostedOnboardingJson,
-} from "./client-api";
+import { completeHostedPrivyAuth } from "./hosted-auth-completion";
+import { HostedOnboardingApiError, requestHostedOnboardingJson } from "./client-api";
 import type {
   HostedPhoneAuthIntent,
+  HostedPhoneLinkPayload,
   HostedPhoneVerificationAttempt,
   HostedResolvedPhoneSubmission,
 } from "./hosted-phone-auth-types";
-import { logHostedPrivySessionDebug, sanitizeHostedPrivyDebugPath } from "./privy-session-debug";
+import {
+  requestHostedPrivyCompletionWithRetry,
+  runHostedPrivyFinalizationAttempt,
+} from "./hosted-privy-auth-support";
+import { waitForRetryDelay } from "./hosted-retry-support";
 
-interface HostedPrivyFinalizationAttemptInput {
-  action: "continue" | "verify-code";
-  finalize: () => Promise<void>;
-  getFinalizationState: () => HostedPrivyFinalizationState;
-  setPendingAction: (action: HostedPrivyClientPendingAction) => void;
-  updateFinalizationState: (nextState: HostedPrivyFinalizationState) => void;
-}
+export {
+  requestHostedPrivyCompletionWithRetry,
+  runHostedPrivyFinalizationAttempt,
+};
+export { toErrorMessage } from "./hosted-auth-shared";
 
 interface PendingInvitePhoneCodeMutation {
   inviteCode: string;
@@ -95,33 +90,6 @@ export function readSubmittedPhoneNumber(event: FormEvent<HTMLFormElement> | und
   return typeof value === "string" ? value : null;
 }
 
-export async function runHostedPrivyFinalizationAttempt({
-  action,
-  finalize,
-  getFinalizationState,
-  setPendingAction,
-  updateFinalizationState,
-}: HostedPrivyFinalizationAttemptInput): Promise<void> {
-  if (getFinalizationState() !== "idle") {
-    return;
-  }
-
-  setPendingAction(action);
-  updateFinalizationState("running");
-
-  try {
-    await finalize();
-    updateFinalizationState("completed");
-  } catch (error) {
-    updateFinalizationState("idle");
-    throw error;
-  } finally {
-    if (getFinalizationState() !== "running") {
-      setPendingAction(null);
-    }
-  }
-}
-
 export async function finalizeHostedPrivyVerification(input: {
   createWallet: () => Promise<unknown>;
   inviteCode?: string | null;
@@ -129,24 +97,54 @@ export async function finalizeHostedPrivyVerification(input: {
   onCompleted?: (payload: HostedPrivyCompletionPayload) => Promise<void> | void;
   user: { linkedAccounts?: unknown } | null;
 }) {
-  await ensureHostedPrivyPhoneReady(input);
-  const payload = await requestHostedPrivyCompletionWithRetry(input.inviteCode);
+  const result = await completeHostedPrivyAuth({
+    createWallet: input.createWallet,
+    intent: input.intent,
+    inviteCode: input.inviteCode,
+    requirePhone: true,
+    user: input.user,
+  });
 
   if (input.onCompleted) {
-    await input.onCompleted(payload);
+    await input.onCompleted(result.payload);
     return;
   }
 
-  const redirectUrl = resolveHostedPrivyCompletionRedirectUrl({
-    intent: input.intent,
-    payload,
-  });
-  logHostedPrivySessionDebug("finalize:redirect", {
-    completionStage: payload.stage,
-    intent: input.intent,
-    redirectUrl: sanitizeHostedPrivyDebugPath(redirectUrl),
-  });
-  window.location.assign(redirectUrl);
+  window.location.assign(result.redirectUrl);
+}
+
+export async function finalizeHostedPhoneLink(input: {
+  onLinked?: (payload: HostedPhoneLinkPayload) => Promise<void> | void;
+}): Promise<void> {
+  const payload = await requestHostedPhoneLinkSyncWithRetry();
+  await input.onLinked?.(payload);
+}
+
+export async function requestHostedPhoneLinkSyncWithRetry(): Promise<HostedPhoneLinkPayload> {
+  let lastError: unknown = null;
+
+  for (const delayMs of [0, 500] as const) {
+    if (delayMs > 0) {
+      await waitForRetryDelay(delayMs);
+    }
+
+    try {
+      return await requestHostedOnboardingJson<HostedPhoneLinkPayload>({
+        method: "POST",
+        url: "/api/settings/phone/sync",
+      });
+    } catch (error) {
+      lastError = error;
+
+      if (!isRetryableHostedPhoneLinkError(error)) {
+        throw error;
+      }
+    }
+  }
+
+  throw lastError instanceof Error
+    ? lastError
+    : new Error("We could not save your verified phone number.");
 }
 
 export function resolveHostedPrivyCompletionRedirectUrl(input: {
@@ -160,8 +158,21 @@ export function resolveHostedPrivyCompletionRedirectUrl(input: {
   return `/join/${encodeURIComponent(input.payload.inviteCode)}`;
 }
 
-export function toErrorMessage(error: unknown, fallback: string): string {
-  return error instanceof Error && error.message ? error.message : fallback;
+function isRetryableHostedPhoneLinkError(error: unknown): boolean {
+  if (!(error instanceof HostedOnboardingApiError)) {
+    return false;
+  }
+
+  if (error.code === "AUTH_REQUIRED") {
+    return true;
+  }
+
+  return (
+    error.retryable
+    && (error.code === "PRIVY_ACCOUNT_NOT_READY"
+      || error.code === "PRIVY_PHONE_NOT_READY"
+      || error.code === "PRIVY_WALLET_NOT_READY")
+  );
 }
 
 export async function finalizeInvitePhoneCodeSendConfirmation(input: {
@@ -206,7 +217,6 @@ export async function abortInvitePhoneCodeSend(input: {
 }): Promise<boolean> {
   try {
     await requestHostedOnboardingJson<{ ok: true }>({
-      auth: "none",
       method: "POST",
       payload: {
         sendAttemptId: input.sendAttemptId,
@@ -244,53 +254,17 @@ export async function flushPendingInvitePhoneCodeMutation(inviteCode: string): P
   }
 }
 
-function isRetryableHostedPrivyCompletionError(error: unknown): boolean {
-  return (
-    error instanceof HostedOnboardingApiError &&
-    error.retryable &&
-    (error.code === "PRIVY_PHONE_NOT_READY" || error.code === "PRIVY_WALLET_NOT_READY")
-  );
-}
-
-async function requestHostedPrivyCompletionWithRetry(
-  inviteCode?: string | null,
-): Promise<HostedPrivyCompletionPayload> {
-  let lastError: unknown = null;
-
-  for (const delayMs of HOSTED_PRIVY_COMPLETION_RETRY_DELAYS_MS) {
-    if (delayMs > 0) {
-      await sleep(delayMs);
-    }
-
-    try {
-      return await requestHostedOnboardingJson<HostedPrivyCompletionPayload>({
-        payload: inviteCode ? { inviteCode } : {},
-        url: "/api/hosted-onboarding/privy/complete",
-      });
-    } catch (error) {
-      lastError = error;
-
-      if (!isRetryableHostedPrivyCompletionError(error)) {
-        throw error;
-      }
-    }
-  }
-
-  throw lastError instanceof Error ? lastError : new Error("We could not verify your Privy session.");
-}
-
 async function confirmInvitePhoneCodeSend(input: {
   inviteCode: string;
   sendAttemptId: string;
 }): Promise<boolean> {
   for (const delayMs of HOSTED_INVITE_SEND_CONFIRM_RETRY_DELAYS_MS) {
     if (delayMs > 0) {
-      await sleep(delayMs);
+      await waitForRetryDelay(delayMs);
     }
 
     try {
       await requestHostedOnboardingJson<{ ok: true }>({
-        auth: "none",
         method: "POST",
         payload: {
           sendAttemptId: input.sendAttemptId,
@@ -306,12 +280,6 @@ async function confirmInvitePhoneCodeSend(input: {
   }
 
   return false;
-}
-
-function sleep(delayMs: number): Promise<void> {
-  return new Promise((resolve) => {
-    globalThis.setTimeout(resolve, delayMs);
-  });
 }
 
 function readPendingInvitePhoneCodeMutation(): PendingInvitePhoneCodeMutation | null {

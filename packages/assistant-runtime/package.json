@@ -20,6 +20,16 @@
       "types": "./dist/hosted-assistant-env.d.ts",
       "import": "./dist/hosted-assistant-env.js",
       "default": "./dist/hosted-assistant-env.js"
+    },
+    "./hosted-runtime-contracts": {
+      "types": "./dist/hosted-runtime-contracts.d.ts",
+      "import": "./dist/hosted-runtime-contracts.js",
+      "default": "./dist/hosted-runtime-contracts.js"
+    },
+    "./hosted-email": {
+      "types": "./dist/hosted-email.d.ts",
+      "import": "./dist/hosted-email.js",
+      "default": "./dist/hosted-email.js"
     }
   },
   "files": [
@@ -34,6 +44,7 @@
   },
   "dependencies": {
     "@murphai/assistant-engine": "workspace:*",
+    "@murphai/contracts": "workspace:*",
     "@murphai/operator-config": "workspace:*",
     "@murphai/core": "workspace:*",
     "@murphai/device-syncd": "workspace:*",
@@ -48,6 +59,6 @@
     "@murphai/vault-usecases": "workspace:*"
   },
   "engines": {
-    "node": ">=22.16.0"
+    "node": ">=24.14.1"
   }
 }

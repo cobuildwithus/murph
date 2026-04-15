@@ -4,7 +4,7 @@ const mocks = vi.hoisted(() => ({
   assertHostedOnboardingMutationOrigin: vi.fn(),
   getPrisma: vi.fn(),
   readHostedMemberStripeBillingRef: vi.fn(),
-  requireHostedPrivyActiveRequestAuthContext: vi.fn(),
+  requirePrivyMemberAuth: vi.fn(),
   requireHostedStripeApi: vi.fn(),
 }));
 
@@ -21,7 +21,7 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-billing-store", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({
-  requireHostedPrivyActiveRequestAuthContext: mocks.requireHostedPrivyActiveRequestAuthContext,
+  requirePrivyMemberAuth: mocks.requirePrivyMemberAuth,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
@@ -36,9 +36,10 @@ beforeEach(async () => {
   vi.clearAllMocks();
   mocks.assertHostedOnboardingMutationOrigin.mockImplementation(() => {});
   mocks.getPrisma.mockReturnValue({} as never);
-  mocks.requireHostedPrivyActiveRequestAuthContext.mockResolvedValue({
+  mocks.requirePrivyMemberAuth.mockResolvedValue({
     member: {
       id: "member_123",
+      suspendedAt: null,
     },
   });
   mocks.readHostedMemberStripeBillingRef.mockResolvedValue({
@@ -60,7 +61,7 @@ beforeEach(async () => {
   billingPortalRoute = await import("../app/api/settings/billing/portal/route");
 });
 
-test("creates a Stripe billing portal session for the active hosted member", async () => {
+test("creates a Stripe billing portal session for an authenticated hosted member", async () => {
   const response = await billingPortalRoute.POST(
     new Request("https://join.example.test/api/settings/billing/portal", {
       headers: {
@@ -74,7 +75,7 @@ test("creates a Stripe billing portal session for the active hosted member", asy
   await expect(response.json()).resolves.toEqual({
     url: "https://stripe.example.test/portal/session_123",
   });
-  expect(mocks.requireHostedPrivyActiveRequestAuthContext).toHaveBeenCalledWith(
+  expect(mocks.requirePrivyMemberAuth).toHaveBeenCalledWith(
     expect.any(Request),
     expect.any(Object),
   );
@@ -82,6 +83,30 @@ test("creates a Stripe billing portal session for the active hosted member", asy
   expect(mocks.readHostedMemberStripeBillingRef).toHaveBeenCalledWith({
     memberId: "member_123",
     prisma: expect.any(Object),
+  });
+});
+
+test("keeps billing self-serve available for canceled members with a stored Stripe customer", async () => {
+  mocks.requirePrivyMemberAuth.mockResolvedValueOnce({
+    member: {
+      billingStatus: "canceled",
+      id: "member_123",
+      suspendedAt: null,
+    },
+  });
+
+  const response = await billingPortalRoute.POST(
+    new Request("https://join.example.test/api/settings/billing/portal", {
+      headers: {
+        origin: "https://join.example.test",
+      },
+      method: "POST",
+    }),
+  );
+
+  expect(response.status).toBe(200);
+  await expect(response.json()).resolves.toEqual({
+    url: "https://stripe.example.test/portal/session_123",
   });
 });
 

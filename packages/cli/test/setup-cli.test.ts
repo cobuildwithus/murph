@@ -77,9 +77,30 @@ const SETUP_ALIAS_TIMEOUT_MS = 45_000
 
 type InboxBootstrapInput = Parameters<InboxServices['bootstrap']>[0]
 type InboxDoctorInput = Parameters<InboxServices['doctor']>[0]
+type InboxListInput = Parameters<InboxServices['list']>[0]
 type InboxSourceAddInput = Parameters<InboxServices['sourceAdd']>[0]
 type InboxSourceListInput = Parameters<InboxServices['sourceList']>[0]
 type InboxSourceSetEnabledInput = Parameters<InboxServices['sourceSetEnabled']>[0]
+
+function listAutoReplyChannels(
+  state: Awaited<ReturnType<typeof readAssistantAutomationState>>,
+): string[] {
+  return state.autoReply.map((entry) => entry.channel)
+}
+
+function createEmptyInboxListResult(input: InboxListInput) {
+  return {
+    vault: input.vault,
+    filters: {
+      afterCaptureId: input.afterCaptureId ?? null,
+      afterOccurredAt: input.afterOccurredAt ?? null,
+      limit: input.limit ?? 20,
+      oldestFirst: input.oldestFirst ?? false,
+      sourceId: input.sourceId ?? null,
+    },
+    items: [],
+  }
+}
 
 function buildFakeJwt(payload: Record<string, unknown>): string {
   const header = Buffer.from(JSON.stringify({ alg: 'none' }), 'utf8')
@@ -727,12 +748,6 @@ function makeBootstrapResult(vault: string, options?: {
           reason: 'ffmpeg CLI available.',
           source: 'config' as const,
         },
-        pdftotext: {
-          available: true,
-          command: '/usr/local/bin/pdftotext',
-          reason: 'pdftotext CLI available.',
-          source: 'config' as const,
-        },
         whisper: {
           available: true,
           command: options?.whisperCommand ?? '/usr/local/bin/whisper-cli',
@@ -758,12 +773,6 @@ function makeBootstrapResult(vault: string, options?: {
                 available: true,
                 command: '/usr/local/bin/ffmpeg',
                 reason: 'ffmpeg CLI available.',
-                source: 'config' as const,
-              },
-              pdftotext: {
-                available: true,
-                command: '/usr/local/bin/pdftotext',
-                reason: 'pdftotext CLI available.',
                 source: 'config' as const,
               },
               whisper: {
@@ -813,7 +822,6 @@ function makeSetupResult(
     toolchainRoot: '~/.murph/toolchain',
     tools: {
       ffmpegCommand: '/usr/local/bin/ffmpeg',
-      pdftotextCommand: '/usr/local/bin/pdftotext',
       whisperCommand: '/usr/local/bin/whisper-cli',
       whisperModelPath: '~/.murph/toolchain/models/whisper/ggml-base.en.bin',
     },
@@ -1160,7 +1168,7 @@ test.sequential('onboard CLI keeps post-setup CTAs usable when invoked as murph'
   )
   assert.equal(
     result.meta.cta?.commands[2]?.command,
-    'murph inbox source add imessage --id imessage:self --account self --includeOwn',
+    'murph inbox source add telegram --id telegram:bot --account bot',
   )
 })
 
@@ -1281,6 +1289,14 @@ test('onboard invokes the wizard for interactive runs and skips it for explicit 
   const cli = createSetupCli({
     commandName: 'murph',
     platform: () => 'darwin',
+    runtimeEnv: {
+      getCurrentEnv() {
+        return {}
+      },
+      async promptForMissing() {
+        return {}
+      },
+    },
     terminal: {
       stdinIsTTY: true,
       stderrIsTTY: true,
@@ -1307,7 +1323,7 @@ test('onboard invokes the wizard for interactive runs and skips it for explicit 
         wizardInitialChannels.push([...input.initialChannels])
         wizardInitialScheduledUpdates.push([...input.initialScheduledUpdates])
         return {
-          channels: ['imessage'],
+          channels: ['telegram'],
           scheduledUpdates: ['environment-health-watch'],
           wearables: [],
         }
@@ -1334,12 +1350,12 @@ test('onboard invokes the wizard for interactive runs and skips it for explicit 
     })
 
     assert.equal(wizardCalls, 1)
-    assert.deepEqual(wizardInitialChannels, [['imessage']])
+    assert.deepEqual(wizardInitialChannels, [[]])
     assert.deepEqual(wizardInitialScheduledUpdates, [[
       'environment-health-watch',
       'weekly-health-snapshot',
     ]])
-    assert.deepEqual(receivedChannels[1], ['imessage'])
+    assert.deepEqual(receivedChannels[1], ['telegram'])
     assert.deepEqual(receivedScheduledUpdates[1], ['environment-health-watch'])
     assert.deepEqual(receivedWearables[1], [])
   } finally {
@@ -1347,7 +1363,7 @@ test('onboard invokes the wizard for interactive runs and skips it for explicit 
   }
 })
 
-test('interactive onboarding on Linux starts without the macOS-only iMessage default', async () => {
+test('interactive onboarding on Linux starts with no default chat channels', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-setup-wizard-linux-'))
   const wizardInitialChannels: Array<string[]> = []
   const wizardInitialScheduledUpdates: Array<string[]> = []
@@ -1408,7 +1424,7 @@ test('interactive onboarding on Linux starts without the macOS-only iMessage def
 
 test('resolveInitialSetupWizardChannels falls back to channel defaults when no auto-reply channels are persisted', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-setup-wizard-'))
-  const expectedChannels = process.platform === 'darwin' ? ['imessage'] : []
+  const expectedChannels: string[] = []
 
   try {
     assert.deepEqual(
@@ -2070,10 +2086,10 @@ test('setup handoff launches assistant automation instead of chat when auto-repl
       channels: [
         {
           autoReply: true,
-          channel: 'imessage' as const,
+          channel: 'telegram' as const,
           configured: true,
-          connectorId: 'imessage:self',
-          detail: 'Configured iMessage.',
+          connectorId: 'telegram:bot',
+          detail: 'Configured Telegram.',
           enabled: true,
           missingEnv: [],
         },
@@ -2128,15 +2144,13 @@ test.sequential('setup service configures Telegram and enables assistant auto-re
   const homebrewBin = path.join(tempRoot, 'brew', 'bin')
   const formulaPrefixes = {
     ffmpeg: path.join(tempRoot, 'Cellar', 'ffmpeg'),
-    poppler: path.join(tempRoot, 'Cellar', 'poppler'),
     'whisper-cpp': path.join(tempRoot, 'Cellar', 'whisper-cpp'),
   }
   const brewCommand = path.join(homebrewBin, 'brew')
   const ffmpegCommand = path.join(formulaPrefixes.ffmpeg, 'bin', 'ffmpeg')
-  const pdftotextCommand = path.join(formulaPrefixes.poppler, 'bin', 'pdftotext')
   const whisperCommand = path.join(formulaPrefixes['whisper-cpp'], 'bin', 'whisper-cli')
   const cliBinPath = path.join(tempRoot, 'packages', 'cli', 'dist', 'bin.js')
-  const installedFormulas = new Set(['ffmpeg', 'poppler', 'whisper-cpp'])
+  const installedFormulas = new Set(['ffmpeg', 'whisper-cpp'])
   const sourceAddCalls: Array<Record<string, unknown>> = []
   const doctorCalls: Array<Record<string, unknown>> = []
 
@@ -2144,7 +2158,6 @@ test.sequential('setup service configures Telegram and enables assistant auto-re
   await writeFile(path.join(vaultRoot, 'vault.json'), '{}\n', 'utf8')
   await writeExecutable(brewCommand)
   await writeExecutable(ffmpegCommand)
-  await writeExecutable(pdftotextCommand)
   await writeExecutable(whisperCommand)
 
   const services = createSetupServices({
@@ -2185,6 +2198,9 @@ test.sequential('setup service configures Telegram and enables assistant auto-re
           connectors: [],
           parserToolchain: null,
         }
+      },
+      async list(input: InboxListInput) {
+        return createEmptyInboxListResult(input)
       },
       async sourceAdd(input: InboxSourceAddInput) {
         sourceAddCalls.push(input as unknown as Record<string, unknown>)
@@ -2285,7 +2301,7 @@ test.sequential('setup service configures Telegram and enables assistant auto-re
     )
 
     const automationState = await readAssistantAutomationState(vaultRoot)
-    assert.deepEqual(automationState.autoReplyChannels, ['telegram'])
+    assert.deepEqual(listAutoReplyChannels(automationState), ['telegram'])
   } finally {
     await rm(tempRoot, { recursive: true, force: true })
   }
@@ -2298,21 +2314,18 @@ test.sequential('setup service keeps Telegram configured but disables auto-reply
   const homebrewBin = path.join(tempRoot, 'brew', 'bin')
   const formulaPrefixes = {
     ffmpeg: path.join(tempRoot, 'Cellar', 'ffmpeg'),
-    poppler: path.join(tempRoot, 'Cellar', 'poppler'),
     'whisper-cpp': path.join(tempRoot, 'Cellar', 'whisper-cpp'),
   }
   const brewCommand = path.join(homebrewBin, 'brew')
   const ffmpegCommand = path.join(formulaPrefixes.ffmpeg, 'bin', 'ffmpeg')
-  const pdftotextCommand = path.join(formulaPrefixes.poppler, 'bin', 'pdftotext')
   const whisperCommand = path.join(formulaPrefixes['whisper-cpp'], 'bin', 'whisper-cli')
   const cliBinPath = path.join(tempRoot, 'packages', 'cli', 'dist', 'bin.js')
-  const installedFormulas = new Set(['ffmpeg', 'poppler', 'whisper-cpp'])
+  const installedFormulas = new Set(['ffmpeg', 'whisper-cpp'])
 
   await mkdir(vaultRoot, { recursive: true })
   await writeFile(path.join(vaultRoot, 'vault.json'), '{}\n', 'utf8')
   await writeExecutable(brewCommand)
   await writeExecutable(ffmpegCommand)
-  await writeExecutable(pdftotextCommand)
   await writeExecutable(whisperCommand)
 
   const services = createSetupServices({
@@ -2433,7 +2446,7 @@ test.sequential('setup service keeps Telegram configured but disables auto-reply
     )
 
     const automationState = await readAssistantAutomationState(vaultRoot)
-    assert.deepEqual(automationState.autoReplyChannels, [])
+    assert.deepEqual(listAutoReplyChannels(automationState), [])
   } finally {
     await rm(tempRoot, { recursive: true, force: true })
   }
@@ -2521,12 +2534,10 @@ test.sequential('setup service provisions formulas, downloads the model, and boo
   const homebrewBin = path.join(tempRoot, 'brew', 'bin')
   const formulaPrefixes = {
     ffmpeg: path.join(tempRoot, 'Cellar', 'ffmpeg'),
-    poppler: path.join(tempRoot, 'Cellar', 'poppler'),
     'whisper-cpp': path.join(tempRoot, 'Cellar', 'whisper-cpp'),
   }
   const brewCommand = path.join(homebrewBin, 'brew')
   const ffmpegCommand = path.join(formulaPrefixes.ffmpeg, 'bin', 'ffmpeg')
-  const pdftotextCommand = path.join(formulaPrefixes.poppler, 'bin', 'pdftotext')
   const whisperCommand = path.join(formulaPrefixes['whisper-cpp'], 'bin', 'whisper-cli')
   const cliBinPath = path.join(tempRoot, 'packages', 'cli', 'dist', 'bin.js')
   const murphShimPath = path.join(homeRoot, '.local', 'bin', 'murph')
@@ -2539,7 +2550,6 @@ test.sequential('setup service provisions formulas, downloads the model, and boo
 
   await writeExecutable(brewCommand)
   await writeExecutable(ffmpegCommand)
-  await writeExecutable(pdftotextCommand)
   await writeExecutable(whisperCommand)
 
   const services = createSetupServices({
@@ -2658,7 +2668,6 @@ test.sequential('setup service provisions formulas, downloads the model, and boo
     assert.equal(bootstrapCalls.length, 1)
     assert.equal(bootstrapCalls[0]?.vault, vaultRoot)
     assert.equal(bootstrapCalls[0]?.ffmpegCommand, ffmpegCommand)
-    assert.equal(bootstrapCalls[0]?.pdftotextCommand, pdftotextCommand)
     assert.equal(bootstrapCalls[0]?.whisperCommand, whisperCommand)
     assert.equal(
       bootstrapCalls[0]?.whisperModelPath,
@@ -2670,7 +2679,6 @@ test.sequential('setup service provisions formulas, downloads the model, and boo
     )
     assert.equal(result.toolchainRoot, '~/.murph/toolchain')
     assert.equal(installedFormulas.has('ffmpeg'), true)
-    assert.equal(installedFormulas.has('poppler'), true)
     assert.equal(installedFormulas.has('whisper-cpp'), true)
     assert.equal(
       result.steps.some((step) => step.id === 'cli-shims' && step.status === 'completed'),
@@ -2769,12 +2777,10 @@ test.sequential('setup preserves saved public OpenAI-compatible headers when re-
   const homebrewBin = path.join(tempRoot, 'brew', 'bin')
   const formulaPrefixes = {
     ffmpeg: path.join(tempRoot, 'Cellar', 'ffmpeg'),
-    poppler: path.join(tempRoot, 'Cellar', 'poppler'),
     'whisper-cpp': path.join(tempRoot, 'Cellar', 'whisper-cpp'),
   }
   const brewCommand = path.join(homebrewBin, 'brew')
   const ffmpegCommand = path.join(formulaPrefixes.ffmpeg, 'bin', 'ffmpeg')
-  const pdftotextCommand = path.join(formulaPrefixes.poppler, 'bin', 'pdftotext')
   const whisperCommand = path.join(formulaPrefixes['whisper-cpp'], 'bin', 'whisper-cli')
 
   await saveAssistantOperatorDefaultsPatch(
@@ -2797,7 +2803,6 @@ test.sequential('setup preserves saved public OpenAI-compatible headers when re-
 
   await writeExecutable(brewCommand)
   await writeExecutable(ffmpegCommand)
-  await writeExecutable(pdftotextCommand)
   await writeExecutable(whisperCommand)
   await mkdir(path.dirname(expectedWhisperModelPath), { recursive: true })
   await writeFile(expectedWhisperModelPath, 'model', 'utf8')
@@ -2898,12 +2903,10 @@ test.sequential('setup updates codexCommand when provided and preserves a saved 
   const homebrewBin = path.join(tempRoot, 'brew', 'bin')
   const formulaPrefixes = {
     ffmpeg: path.join(tempRoot, 'Cellar', 'ffmpeg'),
-    poppler: path.join(tempRoot, 'Cellar', 'poppler'),
     'whisper-cpp': path.join(tempRoot, 'Cellar', 'whisper-cpp'),
   }
   const brewCommand = path.join(homebrewBin, 'brew')
   const ffmpegCommand = path.join(formulaPrefixes.ffmpeg, 'bin', 'ffmpeg')
-  const pdftotextCommand = path.join(formulaPrefixes.poppler, 'bin', 'pdftotext')
   const whisperCommand = path.join(formulaPrefixes['whisper-cpp'], 'bin', 'whisper-cli')
 
   await saveAssistantOperatorDefaultsPatch(
@@ -2923,7 +2926,6 @@ test.sequential('setup updates codexCommand when provided and preserves a saved 
 
   await writeExecutable(brewCommand)
   await writeExecutable(ffmpegCommand)
-  await writeExecutable(pdftotextCommand)
   await writeExecutable(whisperCommand)
   await mkdir(path.dirname(expectedWhisperModelPath), { recursive: true })
   await writeFile(expectedWhisperModelPath, 'model', 'utf8')
@@ -3240,14 +3242,12 @@ test.sequential('setup service reuses an existing vault and still bootstraps inb
   const homebrewBin = path.join(tempRoot, 'brew', 'bin')
   const formulaPrefixes = {
     ffmpeg: path.join(tempRoot, 'Cellar', 'ffmpeg'),
-    poppler: path.join(tempRoot, 'Cellar', 'poppler'),
     'whisper-cpp': path.join(tempRoot, 'Cellar', 'whisper-cpp'),
   }
   const brewCommand = path.join(homebrewBin, 'brew')
   const ffmpegCommand = path.join(formulaPrefixes.ffmpeg, 'bin', 'ffmpeg')
-  const pdftotextCommand = path.join(formulaPrefixes.poppler, 'bin', 'pdftotext')
   const whisperCommand = path.join(formulaPrefixes['whisper-cpp'], 'bin', 'whisper-cli')
-  const installedFormulas = new Set(['ffmpeg', 'poppler', 'whisper-cpp'])
+  const installedFormulas = new Set(['ffmpeg', 'whisper-cpp'])
   const initCalls: Array<{ requestId: string | null; vault: string }> = []
   const bootstrapCalls: Array<Record<string, unknown>> = []
 
@@ -3255,7 +3255,6 @@ test.sequential('setup service reuses an existing vault and still bootstraps inb
   await writeFile(path.join(vaultRoot, 'vault.json'), '{}\n', 'utf8')
   await writeExecutable(brewCommand)
   await writeExecutable(ffmpegCommand)
-  await writeExecutable(pdftotextCommand)
   await writeExecutable(whisperCommand)
 
   const services = createSetupServices({
@@ -3329,7 +3328,6 @@ test.sequential('setup service reuses an existing vault and still bootstraps inb
     assert.equal(bootstrapCalls.length, 1)
     assert.equal(bootstrapCalls[0]?.vault, vaultRoot)
     assert.equal(bootstrapCalls[0]?.ffmpegCommand, ffmpegCommand)
-    assert.equal(bootstrapCalls[0]?.pdftotextCommand, pdftotextCommand)
     assert.equal(bootstrapCalls[0]?.whisperCommand, whisperCommand)
     assert.equal(result.bootstrap?.vault, vaultRoot)
     assert.equal(
@@ -3353,12 +3351,10 @@ test.sequential('setup service redacts nested bootstrap toolchain paths under th
   const homebrewBin = path.join(tempRoot, 'brew', 'bin')
   const formulaPrefixes = {
     ffmpeg: path.join(tempRoot, 'Cellar', 'ffmpeg'),
-    poppler: path.join(tempRoot, 'Cellar', 'poppler'),
     'whisper-cpp': path.join(tempRoot, 'Cellar', 'whisper-cpp'),
   }
   const brewCommand = path.join(homebrewBin, 'brew')
   const ffmpegCommand = path.join(formulaPrefixes.ffmpeg, 'bin', 'ffmpeg')
-  const pdftotextCommand = path.join(formulaPrefixes.poppler, 'bin', 'pdftotext')
   const whisperFormulaCommand = path.join(formulaPrefixes['whisper-cpp'], 'bin', 'whisper-cli')
   const homeWhisperCommand = path.join(homeRoot, '.murph', 'toolchain', 'bin', 'whisper-cli')
   const homeWhisperModel = path.join(
@@ -3370,14 +3366,13 @@ test.sequential('setup service redacts nested bootstrap toolchain paths under th
     'ggml-base.en.bin',
   )
   const siblingPrefixPath = path.join(tempRoot, 'homebrew', 'bin', 'ffmpeg')
-  const installedFormulas = new Set(['ffmpeg', 'poppler', 'whisper-cpp'])
+  const installedFormulas = new Set(['ffmpeg', 'whisper-cpp'])
   let bootstrapCalls = 0
 
   await mkdir(vaultRoot, { recursive: true })
   await writeFile(path.join(vaultRoot, 'vault.json'), '{}\n', 'utf8')
   await writeExecutable(brewCommand)
   await writeExecutable(ffmpegCommand)
-  await writeExecutable(pdftotextCommand)
   await writeExecutable(whisperFormulaCommand)
 
   const services = createSetupServices({
@@ -3478,11 +3473,12 @@ test.sequential('setup service redacts nested bootstrap toolchain paths under th
   }
 })
 
-test('setup routing helpers only recognize onboard as the root onboarding command', () => {
+test('setup routing helpers recognize murph onboarding and active-vault selection commands', () => {
   assert.equal(isSetupInvocation(['setup', '--dryRun']), false)
   assert.equal(isSetupInvocation(['inbox', 'doctor']), false)
   assert.equal(isSetupInvocation([], 'murph'), true)
   assert.equal(isSetupInvocation(['--help'], 'murph'), true)
+  assert.equal(isSetupInvocation(['use', './vault'], 'murph'), true)
   assert.equal(isSetupInvocation(['--verbose', '--format', 'json'], 'murph'), true)
   assert.equal(
     isSetupInvocation(['--format', 'json', 'setup', '--dry-run'], 'murph'),
@@ -3527,10 +3523,13 @@ test('setup routing helpers only recognize onboard as the root onboarding comman
 })
 
 test.sequential('murph alias routes empty and help invocations to onboarding help', async () => {
-  const help = await runSetupAliasRaw('murph', ['--help'])
-  const onboardHelp = await runSetupAliasRaw('murph', ['onboard', '--help'])
-  const emptyInvocation = await runSetupAliasRaw('murph', [])
-  const inboxHelp = await runSetupAliasRaw('murph', ['inbox', 'doctor', '--help'])
+  const [help, onboardHelp, useHelp, emptyInvocation, inboxHelp] = await Promise.all([
+    runSetupAliasRaw('murph', ['--help']),
+    runSetupAliasRaw('murph', ['onboard', '--help']),
+    runSetupAliasRaw('murph', ['use', '--help']),
+    runSetupAliasRaw('murph', []),
+    runSetupAliasRaw('murph', ['inbox', 'doctor', '--help']),
+  ])
 
   assert.match(help, /Murph local machine onboarding helpers\./u)
   assert.match(
@@ -3542,13 +3541,63 @@ test.sequential('murph alias routes empty and help invocations to onboarding hel
     onboardHelp,
     /onboard\s+[-—]\s+Provision the local parser\/runtime toolchain for macOS or Linux/u,
   )
+  assert.match(
+    help,
+    /use\s+Set the active Murph vault for future `murph` commands/u,
+  )
+  assert.match(
+    useHelp,
+    /murph use\s+[-—]\s+Set the active Murph vault for future `murph` commands/u,
+  )
   assert.doesNotMatch(help, /search\s+Search commands for the local read model/u)
   assert.match(emptyInvocation, /Murph local machine onboarding helpers\./u)
   assert.doesNotMatch(inboxHelp, /Murph local machine onboarding helpers\./u)
-  assert.match(inboxHelp, /vault-cli inbox doctor/u)
+  assert.match(inboxHelp, /murph inbox doctor/u)
 }, SETUP_ALIAS_TIMEOUT_MS)
 
-test.sequential('murph loads VAULT from a local .env file', async () => {
+test.sequential('murph use saves an existing vault as the active default vault', async () => {
+  const homeRoot = await mkdtemp(path.join(tmpdir(), 'murph-use-home-'))
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-use-vault-'))
+
+  try {
+    await writeFile(path.join(vaultRoot, 'vault.json'), '{}\n', 'utf8')
+
+    const output = await runSetupAliasRaw('murph', ['use', vaultRoot, '--format', 'json'], {
+      env: {
+        HOME: homeRoot,
+      },
+    })
+
+    const result = JSON.parse(output) as {
+      configPath: string
+      status: string
+      vault: string
+    }
+    assert.equal(result.status, 'completed')
+
+    const savedConfig = await readOperatorConfig(homeRoot)
+    assert.equal(savedConfig?.defaultVault, vaultRoot)
+
+    const secondOutput = await runSetupAliasRaw(
+      'murph',
+      ['use', vaultRoot, '--format', 'json'],
+      {
+        env: {
+          HOME: homeRoot,
+        },
+      },
+    )
+    const secondResult = JSON.parse(secondOutput) as {
+      status: string
+    }
+    assert.equal(secondResult.status, 'reused')
+  } finally {
+    await rm(homeRoot, { recursive: true, force: true })
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+}, SETUP_ALIAS_TIMEOUT_MS)
+
+test.sequential('murph init loads VAULT from a local .env file during setup bootstrap', async () => {
   const originalVault = process.env.VAULT
   const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-dotenv-vault-'))
   const homeRoot = await mkdtemp(path.join(tmpdir(), 'murph-dotenv-home-'))
@@ -3579,7 +3628,7 @@ test.sequential('murph loads VAULT from a local .env file', async () => {
   }
 })
 
-test.sequential('murph keeps exported VAULT values ahead of local .env files', async () => {
+test.sequential('murph init keeps exported VAULT values ahead of local .env files during setup bootstrap', async () => {
   const originalVault = process.env.VAULT
   const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-dotenv-precedence-'))
   const homeRoot = await mkdtemp(path.join(tmpdir(), 'murph-dotenv-precedence-home-'))
@@ -3764,21 +3813,21 @@ test.sequential('setup-macos wrapper dry-run prints a plan without mutating the 
     assert.match(result.stdout, /Detected: macos/u)
     assert.match(result.stdout, /Install plan/u)
     assert.match(result.stdout, /Dry run requested/u)
-    assert.match(result.stdout, /Node requirement: >= 22\.16\.0/u)
+    assert.match(result.stdout, /Node requirement: >= 24\.14\.1/u)
     assert.match(
       result.stdout,
       new RegExp(`pnpm: ${pnpmVersion.replaceAll('.', '\\.')} via corepack`, 'u'),
     )
     assert.match(
       result.stdout,
-      /ffmpeg, poppler\/pdftotext, whisper\.cpp, and a local Whisper model/u,
+      /ffmpeg, whisper\.cpp, and a local Whisper model/u,
     )
     assert.match(
       result.stdout,
       /vault bootstrap, default config, user-level murph\/vault-cli shims, onboarding channel selection, wearables, and assistant automation\/chat handoff/u,
     )
     assert.match(result.stdout, /Ensure Homebrew is available/u)
-    assert.match(result.stdout, /Ensure Node >= 22\.16\.0/u)
+    assert.match(result.stdout, /Ensure Node >= 24\.14\.1/u)
     assert.match(result.stdout, /corepack pnpm install/u)
     assert.match(
       result.stdout,
@@ -3791,7 +3840,7 @@ test.sequential('setup-macos wrapper dry-run prints a plan without mutating the 
   }
 })
 
-test.sequential('setup service dry-run on Linux keeps cross-platform channels and skips iMessage cleanly', async () => {
+test.sequential('setup service dry-run on Linux reports supported channels cleanly', async () => {
   const homeRoot = await mkdtemp(path.join(tmpdir(), 'murph-setup-linux-home-'))
   const services = createSetupServices({
     arch: () => 'x64',
@@ -3804,18 +3853,17 @@ test.sequential('setup service dry-run on Linux keeps cross-platform channels an
   try {
     const result = await services.setupHost({
       vault: './vault',
-      channels: ['imessage', 'email'],
+      channels: ['email'],
       dryRun: true,
     })
 
     assert.equal(result.platform, 'linux')
     assert.equal(result.dryRun, true)
-    assert.equal(result.channels[0]?.channel, 'imessage')
+    assert.equal(result.channels[0]?.channel, 'email')
     assert.equal(result.channels[0]?.configured, false)
-    assert.match(result.channels[0]?.detail ?? '', /requires macOS/u)
-    assert.equal(result.channels[1]?.channel, 'email')
-    assert.equal(result.channels[1]?.autoReply, true)
-    assert.ok(result.steps.some((step) => step.id === 'channel-imessage' && step.status === 'skipped'))
+    assert.match(result.channels[0]?.detail ?? '', /enable assistant auto-reply for direct email threads/u)
+    assert.equal(result.channels[0]?.autoReply, true)
+    assert.ok(result.steps.some((step) => step.id === 'channel-email' && step.status === 'planned'))
   } finally {
     await rm(homeRoot, { recursive: true, force: true })
   }
@@ -3829,7 +3877,6 @@ test.sequential('Linux setup reuses one apt update across declarative tool insta
   const aptGetCommand = path.join(binRoot, 'apt-get')
   const sudoCommand = path.join(binRoot, 'sudo')
   const ffmpegCommand = path.join(binRoot, 'ffmpeg')
-  const pdftotextCommand = path.join(binRoot, 'pdftotext')
   const whisperCommand = path.join(binRoot, 'whisper-cli')
   const expectedWhisperModelPath = path.join(
     homeRoot,
@@ -3892,8 +3939,6 @@ test.sequential('Linux setup reuses one apt update across declarative tool insta
         for (const packageName of aptArgs.slice(2)) {
           if (packageName === 'ffmpeg') {
             await writeExecutable(ffmpegCommand)
-          } else if (packageName === 'poppler-utils') {
-            await writeExecutable(pdftotextCommand)
           } else if (packageName === 'whisper-cpp') {
             await writeExecutable(whisperCommand)
           } else {
@@ -3940,17 +3985,14 @@ test.sequential('Linux setup reuses one apt update across declarative tool insta
       [
         'update',
         'install -y ffmpeg',
-        'install -y poppler-utils',
         'install -y whisper-cpp',
       ],
     )
     assert.equal(bootstrapCalls.length, 1)
     assert.equal(bootstrapCalls[0]?.ffmpegCommand, ffmpegCommand)
-    assert.equal(bootstrapCalls[0]?.pdftotextCommand, pdftotextCommand)
     assert.equal(bootstrapCalls[0]?.whisperCommand, whisperCommand)
     assert.equal(bootstrapCalls[0]?.whisperModelPath, expectedWhisperModelPath)
     assert.equal(result.tools.ffmpegCommand, ffmpegCommand)
-    assert.equal(result.tools.pdftotextCommand, pdftotextCommand)
     assert.equal(result.tools.whisperCommand, whisperCommand)
     assert.equal(
       result.tools.whisperModelPath,
@@ -3959,12 +4001,6 @@ test.sequential('Linux setup reuses one apt update across declarative tool insta
     assert.equal(
       result.steps.some(
         (step) => step.id === 'ffmpeg' && step.status === 'completed',
-      ),
-      true,
-    )
-    assert.equal(
-      result.steps.some(
-        (step) => step.id === 'pdftotext' && step.status === 'completed',
       ),
       true,
     )
@@ -3979,24 +4015,23 @@ test.sequential('Linux setup reuses one apt update across declarative tool insta
   }
 })
 
-test.sequential('Linux setup preserves existing iMessage state while adding Telegram on the same vault', async () => {
-  const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-setup-linux-preserve-imessage-'))
+test.sequential('Linux setup reuses existing email state while adding Telegram on the same vault', async () => {
+  const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-setup-linux-preserve-email-'))
   const homeRoot = path.join(tempRoot, 'home')
   const vaultRoot = path.join(tempRoot, 'vault')
   const binRoot = path.join(tempRoot, 'bin')
   const ffmpegCommand = path.join(binRoot, 'ffmpeg')
-  const pdftotextCommand = path.join(binRoot, 'pdftotext')
   const whisperCommand = path.join(binRoot, 'whisper-cli')
   const cliBinPath = path.join(tempRoot, 'packages', 'cli', 'dist', 'bin.js')
   const connectors: InboxConnectorConfig[] = [
     {
-      accountId: 'self',
+      accountId: 'default',
       enabled: true,
-      id: 'imessage:self',
+      id: 'email:agentmail',
       options: {
-        includeOwnMessages: true,
+        emailAddress: 'team@example.com',
       },
-      source: 'imessage' as const,
+      source: 'email' as const,
     },
   ]
   const sourceAddCalls: Array<{
@@ -4016,15 +4051,16 @@ test.sequential('Linux setup preserves existing iMessage state while adding Tele
   await mkdir(vaultRoot, { recursive: true })
   await writeFile(path.join(vaultRoot, 'vault.json'), '{}\n', 'utf8')
   await writeExecutable(ffmpegCommand)
-  await writeExecutable(pdftotextCommand)
   await writeExecutable(whisperCommand)
   await saveAssistantAutomationState(vaultRoot, {
-    version: 2,
+    version: 1,
     inboxScanCursor: null,
-    autoReplyScanCursor: null,
-    autoReplyChannels: ['imessage'],
-    autoReplyBacklogChannels: [],
-    autoReplyPrimed: false,
+    autoReply: [
+      {
+        channel: 'email',
+        cursor: null,
+      },
+    ],
     updatedAt: '2026-03-24T23:00:00.000Z',
   })
 
@@ -4035,6 +4071,7 @@ test.sequential('Linux setup preserves existing iMessage state while adding Tele
       await writeFile(destinationPath, 'model', 'utf8')
     },
     env: () => ({
+      AGENTMAIL_API_KEY: 'agentmail-key',
       PATH: binRoot,
       TELEGRAM_BOT_TOKEN: 'token-123',
     }),
@@ -4046,6 +4083,25 @@ test.sequential('Linux setup preserves existing iMessage state while adding Tele
         })
       },
       async doctor(input: InboxDoctorInput) {
+        if (input.sourceId === 'email:agentmail') {
+          return {
+            vault: input.vault,
+            configPath: '.runtime/inboxd/config.json',
+            databasePath: '.runtime/inboxd.sqlite',
+            target: input.sourceId ?? null,
+            ok: true,
+            checks: [
+              {
+                name: 'probe',
+                status: 'warn' as const,
+                message: 'Email inbox reachable',
+              },
+            ],
+            connectors: [],
+            parserToolchain: null,
+          }
+        }
+
         return {
           vault: input.vault,
           configPath: '.runtime/inboxd/config.json',
@@ -4067,6 +4123,9 @@ test.sequential('Linux setup preserves existing iMessage state while adding Tele
           connectors: [],
           parserToolchain: null,
         }
+      },
+      async list(input: InboxListInput) {
+        return createEmptyInboxListResult(input)
       },
       async sourceAdd(input: InboxSourceAddInput) {
         sourceAddCalls.push({
@@ -4142,16 +4201,19 @@ test.sequential('Linux setup preserves existing iMessage state while adding Tele
 
   try {
     const result = await services.setupHost({
-      channels: ['telegram'],
+      channels: ['telegram', 'email'],
       vault: vaultRoot,
       whisperModel: 'base.en',
     })
 
     assert.equal(result.platform, 'linux')
-    assert.equal(result.channels.length, 1)
+    assert.equal(result.channels.length, 2)
     assert.equal(result.channels[0]?.channel, 'telegram')
     assert.equal(result.channels[0]?.configured, true)
     assert.equal(result.channels[0]?.autoReply, true)
+    assert.equal(result.channels[1]?.channel, 'email')
+    assert.equal(result.channels[1]?.configured, true)
+    assert.equal(result.channels[1]?.autoReply, true)
     assert.deepEqual(sourceAddCalls, [
       {
         account: 'bot',
@@ -4162,10 +4224,10 @@ test.sequential('Linux setup preserves existing iMessage state while adding Tele
       },
     ])
     assert.deepEqual(sourceSetEnabledCalls, [])
-    assert.equal(connectors.find((connector) => connector.id === 'imessage:self')?.enabled, true)
+    assert.equal(connectors.find((connector) => connector.id === 'email:agentmail')?.enabled, true)
 
     const automationState = await readAssistantAutomationState(vaultRoot)
-    assert.deepEqual(automationState.autoReplyChannels, ['telegram', 'imessage'])
+    assert.deepEqual(listAutoReplyChannels(automationState), ['email', 'telegram'])
   } finally {
     await rm(tempRoot, { recursive: true, force: true })
   }
@@ -4227,10 +4289,9 @@ exit 99
     assert.match(result.stdout, /Detected: linux/u)
     assert.match(result.stdout, /Install plan/u)
     assert.match(result.stdout, /Dry run requested/u)
-    assert.match(result.stdout, /download Node 22\.16\.0 under ~\/\.murph\/bootstrap/u)
+    assert.match(result.stdout, /download Node 24\.14\.1 under ~\/\.murph\/bootstrap/u)
     assert.match(result.stdout, /corepack pnpm install/u)
     assert.match(result.stdout, /node packages\/cli\/dist\/bin\.js onboard --dry-run --vault \.\/vault/u)
-    assert.match(result.stdout, /iMessage stays macOS-only/u)
     assert.equal(result.stderr, '')
     assert.equal(await readOptionalText(callLog), '')
   } finally {

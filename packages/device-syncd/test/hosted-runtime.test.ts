@@ -5,11 +5,13 @@ import {
   buildHostedExecutionUserDeviceSyncRuntimePath,
   normalizeHostedDeviceSyncJobHints,
   parseHostedExecutionDeviceSyncConnectLinkResponse,
+  parseHostedExecutionDeviceSyncWakeHint,
   parseHostedExecutionDeviceSyncRuntimeApplyRequest,
   parseHostedExecutionDeviceSyncRuntimeApplyResponse,
   parseHostedExecutionDeviceSyncRuntimeSnapshotRequest,
   parseHostedExecutionDeviceSyncRuntimeSnapshotResponse,
   resolveHostedDeviceSyncWakeContext,
+  sanitizeHostedRuntimeErrorText,
 } from "../src/hosted-runtime.ts";
 
 describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
@@ -150,6 +152,172 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
             lastErrorCode: "TOKEN_REFRESH_FAILED",
             lastErrorMessage: "Refresh token expired",
             lastSyncErrorAt: "2026-04-07T00:00:00.000Z",
+          },
+        },
+      ],
+      userId: "user_123",
+    });
+  });
+
+  it("normalizes timestamps and sanitizes secret-bearing local-state fields", () => {
+    expect(
+      parseHostedExecutionDeviceSyncRuntimeApplyRequest({
+        occurredAt: "2026-04-12T10:15:00+10:00",
+        updates: [
+          {
+            connectionId: "conn_01",
+            localState: {
+              lastErrorCode: "Authorization: Bearer secret-token",
+              lastErrorMessage: "refresh_token=super-secret",
+              lastSyncErrorAt: "2026-04-12T10:20:00+10:00",
+            },
+            observedTokenVersion: 1,
+            seed: {
+              connection: {
+                accessTokenExpiresAt: null,
+                connectedAt: "2026-04-12T09:00:00+10:00",
+                createdAt: "2026-04-12T08:00:00+10:00",
+                displayName: "Morning sync",
+                externalAccountId: "acct_01",
+                id: "conn_01",
+                metadata: {
+                  nickname: "watch",
+                },
+                provider: "oura",
+                scopes: ["daily"],
+                status: "active",
+                updatedAt: "2026-04-12T10:10:00+10:00",
+              },
+              localState: {
+                lastErrorCode: null,
+                lastErrorMessage: null,
+                lastSyncCompletedAt: null,
+                lastSyncErrorAt: null,
+                lastSyncStartedAt: null,
+                lastWebhookAt: null,
+                nextReconcileAt: null,
+              },
+              tokenBundle: null,
+            },
+            tokenBundle: null,
+          },
+        ],
+        userId: "user_01",
+      }),
+    ).toEqual({
+      occurredAt: "2026-04-12T00:15:00.000Z",
+      updates: [
+        {
+          connectionId: "conn_01",
+          localState: {
+            lastErrorCode: "Authorization: [redacted]",
+            lastErrorMessage: "refresh_token=[redacted]",
+            lastSyncErrorAt: "2026-04-12T00:20:00.000Z",
+          },
+          observedTokenVersion: 1,
+          seed: {
+            connection: {
+              accessTokenExpiresAt: null,
+              connectedAt: "2026-04-11T23:00:00.000Z",
+              createdAt: "2026-04-11T22:00:00.000Z",
+              displayName: "Morning sync",
+              externalAccountId: "acct_01",
+              id: "conn_01",
+              metadata: {
+                nickname: "watch",
+              },
+              provider: "oura",
+              scopes: ["daily"],
+              status: "active",
+              updatedAt: "2026-04-12T00:10:00.000Z",
+            },
+            localState: {
+              lastErrorCode: null,
+              lastErrorMessage: null,
+              lastSyncCompletedAt: null,
+              lastSyncErrorAt: null,
+              lastSyncStartedAt: null,
+              lastWebhookAt: null,
+              nextReconcileAt: null,
+            },
+            tokenBundle: null,
+          },
+          tokenBundle: null,
+        },
+      ],
+      userId: "user_01",
+    });
+  });
+
+  it("keeps plain bearer-token phrasing while still redacting token-like values", () => {
+    expect(
+      sanitizeHostedRuntimeErrorText(
+        "Hosted device-sync agent bearer token expired. Pair again or keep using the latest bearer returned by export-token-bundle or refresh-token-bundle.",
+      ),
+    ).toBe(
+      "Hosted device-sync agent bearer token expired. Pair again or keep using the latest bearer returned by export-token-bundle or refresh-token-bundle.",
+    );
+
+    expect(
+      sanitizeHostedRuntimeErrorText(
+        "authorization=Bearer expired-session-token",
+      ),
+    ).toBe("authorization=[redacted]");
+  });
+
+  it("redacts secret-bearing error fields in runtime apply payloads and seeds", () => {
+    const parsed = parseHostedExecutionDeviceSyncRuntimeApplyRequest({
+      updates: [
+        {
+          connectionId: "conn_123",
+          localState: {
+            lastErrorCode: "access_token=apply-secret",
+            lastErrorMessage:
+              "authorization=Bearer secret-token refresh_token=refresh-secret eyJhbGciOiJIUzI1NiJ9.payload.signature",
+          },
+          seed: {
+            connection: {
+              accessTokenExpiresAt: null,
+              connectedAt: "2026-04-06T23:00:00+00:00",
+              createdAt: "2026-04-06T22:00:00+00:00",
+              displayName: "Seed User",
+              externalAccountId: "oura-user-1",
+              id: "conn_123",
+              metadata: {},
+              provider: "oura",
+              scopes: ["daily"],
+              status: "active",
+            },
+            localState: {
+              lastErrorCode: "refresh_token=seed-secret",
+              lastErrorMessage:
+                "authorization=Bearer seed-token refresh_token=seed-refresh eyJhbGciOiJIUzI1NiJ9.seed.payload",
+              lastSyncCompletedAt: null,
+              lastSyncErrorAt: null,
+              lastSyncStartedAt: null,
+              lastWebhookAt: null,
+              nextReconcileAt: null,
+            },
+            tokenBundle: null,
+          },
+        },
+      ],
+      userId: "user_123",
+    });
+
+    expect(parsed).toMatchObject({
+      updates: [
+        {
+          connectionId: "conn_123",
+          localState: {
+            lastErrorCode: "access_token=[redacted]",
+            lastErrorMessage: "authorization=[redacted] refresh_token=[redacted] [redacted.jwt]",
+          },
+          seed: {
+            localState: {
+              lastErrorCode: "refresh_token=[redacted]",
+              lastErrorMessage: "authorization=[redacted] refresh_token=[redacted] [redacted.jwt]",
+            },
           },
         },
       ],
@@ -326,6 +494,7 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
             connectionId: "conn_123",
             status: "missing",
             tokenUpdate: "skipped_version_mismatch",
+            writeUpdate: "missing",
           },
         ],
         userId: "user_123",
@@ -338,6 +507,7 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
           connectionId: "conn_123",
           status: "missing",
           tokenUpdate: "skipped_version_mismatch",
+          writeUpdate: "missing",
         },
       ],
       userId: "user_123",
@@ -384,11 +554,28 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
             connectionId: "conn_123",
             status: "broken",
             tokenUpdate: "missing",
+            writeUpdate: "missing",
           },
         ],
         userId: "user_123",
       }),
     ).toThrowError(/status is invalid/u);
+
+    expect(() =>
+      parseHostedExecutionDeviceSyncRuntimeApplyResponse({
+        appliedAt: "2026-04-07T02:00:00.000Z",
+        updates: [
+          {
+            connection: null,
+            connectionId: "conn_123",
+            status: "missing",
+            tokenUpdate: "missing",
+            writeUpdate: "legacy_inferred",
+          },
+        ],
+        userId: "user_123",
+      }),
+    ).toThrowError(/writeUpdate is invalid/u);
 
     expect(() =>
       parseHostedExecutionDeviceSyncRuntimeApplyRequest({
@@ -443,6 +630,100 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
         userId: "user_123",
       }),
     ).toThrowError(/lastSyncErrorAt must be an ISO timestamp/u);
+  });
+
+  it("requires explicit writeUpdate values in runtime apply responses", () => {
+    expect(parseHostedExecutionDeviceSyncRuntimeApplyResponse({
+      appliedAt: "2026-04-07T02:00:00.000Z",
+      updates: [
+        {
+          connection: {
+            accessTokenExpiresAt: null,
+            connectedAt: "2026-04-07T00:00:00.000Z",
+            createdAt: "2026-04-07T00:00:00.000Z",
+            displayName: "Applied",
+            externalAccountId: "ext_applied",
+            id: "conn_applied",
+            metadata: {},
+            provider: "oura",
+            scopes: ["daily"],
+            status: "active",
+            updatedAt: "2026-04-07T02:00:00.000Z",
+          },
+          connectionId: "conn_applied",
+          status: "updated",
+          tokenUpdate: "unchanged",
+          writeUpdate: "applied",
+        },
+        {
+          connection: {
+            accessTokenExpiresAt: null,
+            connectedAt: "2026-04-07T00:00:00.000Z",
+            createdAt: "2026-04-07T00:00:00.000Z",
+            displayName: "Unchanged",
+            externalAccountId: "ext_unchanged",
+            id: "conn_unchanged",
+            metadata: {},
+            provider: "oura",
+            scopes: ["daily"],
+            status: "active",
+            updatedAt: "2026-04-07T01:59:00.000Z",
+          },
+          connectionId: "conn_unchanged",
+          status: "updated",
+          tokenUpdate: "unchanged",
+          writeUpdate: "unchanged",
+        },
+        {
+          connection: null,
+          connectionId: "conn_missing",
+          status: "missing",
+          tokenUpdate: "missing",
+          writeUpdate: "missing",
+        },
+      ],
+      userId: "user_123",
+    }).updates).toEqual([
+      expect.objectContaining({
+        connectionId: "conn_applied",
+        writeUpdate: "applied",
+      }),
+      expect.objectContaining({
+        connectionId: "conn_unchanged",
+        writeUpdate: "unchanged",
+      }),
+      expect.objectContaining({
+        connectionId: "conn_missing",
+        writeUpdate: "missing",
+      }),
+    ]);
+
+    expect(() =>
+      parseHostedExecutionDeviceSyncRuntimeApplyResponse({
+        appliedAt: "2026-04-07T02:00:00.000Z",
+        updates: [
+          {
+            connection: {
+              accessTokenExpiresAt: null,
+              connectedAt: "2026-04-07T00:00:00.000Z",
+              createdAt: "2026-04-07T00:00:00.000Z",
+              displayName: "Legacy",
+              externalAccountId: "ext_legacy",
+              id: "conn_legacy",
+              metadata: {},
+              provider: "oura",
+              scopes: ["daily"],
+              status: "active",
+              updatedAt: "2026-04-07T02:00:00.000Z",
+            },
+            connectionId: "conn_legacy",
+            status: "updated",
+            tokenUpdate: "unchanged",
+          },
+        ],
+        userId: "user_123",
+      }),
+    ).toThrowError(/writeUpdate must be a non-empty string/u);
   });
 
   it("normalizes hosted wake helpers without mutating the original hint payload", () => {
@@ -503,5 +784,96 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
       objectId: "sleep_123",
     });
     expect(normalizeHostedDeviceSyncJobHints(null)).toEqual([]);
+  });
+
+  it("parses the hosted wake hint owner shape once", () => {
+    const parsed = parseHostedExecutionDeviceSyncWakeHint({
+      eventType: "sleep.updated",
+      jobs: [
+        {
+          availableAt: "2026-04-09T00:00:00Z",
+          dedupeKey: null,
+          kind: "resource",
+          maxAttempts: 3,
+          payload: {
+            dataType: "sleep",
+          },
+          priority: 10,
+        },
+      ],
+      nextReconcileAt: null,
+      occurredAt: "2026-04-09T00:01:00Z",
+      reason: "webhook_hint",
+      resourceCategory: "sleep",
+      revokeWarning: {
+        code: "TOKEN_REVOKED",
+        message: "Token was revoked.",
+      },
+      scopes: ["sleep"],
+      traceId: "trace-123",
+    });
+
+    expect(parsed).toEqual({
+      eventType: "sleep.updated",
+      jobs: [
+        {
+          availableAt: "2026-04-09T00:00:00Z",
+          dedupeKey: null,
+          kind: "resource",
+          maxAttempts: 3,
+          payload: {
+            dataType: "sleep",
+          },
+          priority: 10,
+        },
+      ],
+      nextReconcileAt: null,
+      occurredAt: "2026-04-09T00:01:00Z",
+      reason: "webhook_hint",
+      resourceCategory: "sleep",
+      revokeWarning: {
+        code: "TOKEN_REVOKED",
+        message: "Token was revoked.",
+      },
+      scopes: ["sleep"],
+      traceId: "trace-123",
+    });
+  });
+
+  it("feeds the parsed owner shape into job-hint normalization", () => {
+    const hint = parseHostedExecutionDeviceSyncWakeHint({
+      jobs: [
+        {
+          availableAt: "2026-04-09T00:00:00Z",
+          kind: "resource",
+          payload: {
+            resourceId: "abc",
+          },
+        },
+      ],
+    });
+
+    expect(normalizeHostedDeviceSyncJobHints(hint)).toEqual([
+      {
+        availableAt: "2026-04-09T00:00:00Z",
+        kind: "resource",
+        payload: {
+          resourceId: "abc",
+        },
+      },
+    ]);
+  });
+
+  it("rejects invalid hosted wake job payloads", () => {
+    expect(() =>
+      parseHostedExecutionDeviceSyncWakeHint({
+        jobs: [
+          {
+            kind: "resource",
+            payload: ["not", "an", "object"],
+          },
+        ],
+      })
+    ).toThrow(/payload/i);
   });
 });

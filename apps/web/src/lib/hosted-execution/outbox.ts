@@ -1,5 +1,4 @@
 import { randomBytes } from "node:crypto";
-import { isDeepStrictEqual } from "node:util";
 
 import {
   ExecutionOutboxStatus,
@@ -9,11 +8,15 @@ import {
 } from "@prisma/client";
 import {
   HOSTED_EXECUTION_DISPATCH_NOT_CONFIGURED_ERROR,
+  HOSTED_EXECUTION_EVENT_DISPATCH_STATES,
   type HostedExecutionDispatchRequest,
   type HostedExecutionDispatchResult,
-  type HostedExecutionOutboxPayloadStorage,
+  type HostedExecutionEventDispatchState,
+} from "@murphai/hosted-execution/contracts";
+import {
   resolveHostedExecutionOutboxPayloadStorage,
-} from "@murphai/hosted-execution";
+  type HostedExecutionOutboxPayloadStorage,
+} from "@murphai/hosted-execution/outbox-payload";
 
 import {
   deleteHostedStoredDispatchPayloadBestEffort,
@@ -23,11 +26,14 @@ import {
   dispatchHostedExecutionStatus,
   dispatchStoredHostedExecutionStatus,
 } from "./dispatch";
+import { formatHostedExecutionSafeLogError } from "./logging";
 import {
+  areHostedExecutionOutboxPayloadsEquivalent,
   buildHostedExecutionDispatchRef,
   type HostedExecutionOutboxPayload,
   readHostedExecutionOutboxPayload,
   serializeHostedExecutionOutboxPayload,
+  summarizeHostedExecutionOutboxPayload,
 } from "./outbox-payload";
 import { getPrisma } from "../prisma";
 
@@ -35,6 +41,11 @@ const CLAIM_LEASE_MS = 30_000;
 const RETRY_BASE_DELAY_MS = 5_000;
 const RETRY_MAX_DELAY_MS = 5 * 60_000;
 const DEFAULT_DRAIN_LIMIT = 8;
+const TERMINAL_OUTBOX_RETENTION_DAYS = 30;
+const DEFAULT_HOSTED_EXECUTION_EVENT_DISPATCH_STATE: HostedExecutionEventDispatchState = "queued";
+const HOSTED_EXECUTION_EVENT_DISPATCH_STATE_SET = new Set<HostedExecutionEventDispatchState>(
+  HOSTED_EXECUTION_EVENT_DISPATCH_STATES,
+);
 
 type HostedExecutionOutboxClient = PrismaClient | Prisma.TransactionClient;
 
@@ -160,9 +171,25 @@ export async function drainHostedExecutionOutboxBestEffort(input: {
   } catch (error) {
     console.error(
       "Hosted execution outbox best-effort drain failed.",
-      error instanceof Error ? error.message : String(error),
+      formatHostedExecutionSafeLogError(error),
     );
   }
+}
+
+export async function pruneHostedExecutionOutbox(input: {
+  now?: string;
+  prisma?: PrismaClient;
+} = {}): Promise<number> {
+  const prisma = input.prisma ?? getPrisma();
+  const now = new Date(input.now ?? new Date().toISOString());
+  const cutoff = new Date(
+    now.getTime() - (TERMINAL_OUTBOX_RETENTION_DAYS * 24 * 60 * 60_000),
+  );
+  const deleted = await prisma.executionOutbox.deleteMany({
+    where: buildPrunableOutboxWhere(cutoff),
+  });
+
+  return deleted.count;
 }
 
 function buildDueOutboxWhere(
@@ -203,6 +230,28 @@ function buildDueOutboxWhere(
         claimExpiresAt: {
           lt: now,
         },
+      },
+    ],
+  };
+}
+
+function buildPrunableOutboxWhere(
+  cutoff: Date,
+): Prisma.ExecutionOutboxWhereInput {
+  return {
+    updatedAt: {
+      lt: cutoff,
+    },
+    OR: [
+      {
+        status: ExecutionOutboxStatus.dispatched,
+        dispatchState: {
+          in: ["duplicate_consumed", "completed", "poisoned"],
+        },
+      },
+      {
+        status: ExecutionOutboxStatus.delivery_failed,
+        nextAttemptAt: null,
       },
     ],
   };
@@ -292,12 +341,19 @@ async function processHostedExecutionOutboxRecord(
       ? await dispatchStoredHostedExecutionStatus(preparedDispatch.payload)
       : await dispatchHostedExecutionStatus(preparedDispatch.dispatch);
     const delivery = resolveHostedExecutionDeliveryOutcome(dispatchResult);
+    const nextAttemptAt = delivery.retryable
+      ? new Date(Date.parse(nowIso) + computeRetryDelayMs(record.attemptCount))
+      : null;
     const nextRecord = await finalizeHostedExecutionOutboxAttempt(prisma, record, {
+      dispatchState: delivery.dispatchState,
       lastError: delivery.lastError,
-      nextAttemptAt: delivery.retryable
-        ? new Date(Date.parse(nowIso) + computeRetryDelayMs(record.attemptCount))
-        : null,
-      payloadJson: persistedPayloadJson,
+      nextAttemptAt,
+      payloadJson: resolveHostedExecutionPersistedPayloadJson({
+        nextAttemptAt,
+        payload: cleanupPayload,
+        payloadJson: persistedPayloadJson,
+        status: delivery.status,
+      }),
       status: delivery.status,
     });
     await cleanupHostedExecutionOutboxPayloadIfSettled(
@@ -308,12 +364,19 @@ async function processHostedExecutionOutboxRecord(
     return nextRecord;
   } catch (error) {
     const permanentPayloadFailure = isPermanentHostedExecutionOutboxError(error);
+    const nextAttemptAt = permanentPayloadFailure
+      ? null
+      : new Date(Date.parse(nowIso) + computeRetryDelayMs(record.attemptCount));
     const nextRecord = await finalizeHostedExecutionOutboxAttempt(prisma, record, {
-      lastError: error instanceof Error ? error.message : String(error),
-      nextAttemptAt: permanentPayloadFailure
-        ? null
-        : new Date(Date.parse(nowIso) + computeRetryDelayMs(record.attemptCount)),
-      payloadJson: persistedPayloadJson,
+      dispatchState: readHostedExecutionEventDispatchState(record.dispatchState),
+      lastError: formatHostedExecutionSafeLogError(error),
+      nextAttemptAt,
+      payloadJson: resolveHostedExecutionPersistedPayloadJson({
+        nextAttemptAt,
+        payload: cleanupPayload,
+        payloadJson: persistedPayloadJson,
+        status: ExecutionOutboxStatus.delivery_failed,
+      }),
       status: ExecutionOutboxStatus.delivery_failed,
     });
     await cleanupHostedExecutionOutboxPayloadIfSettled(
@@ -399,6 +462,7 @@ async function finalizeHostedExecutionOutboxAttempt(
   prisma: PrismaClient,
   record: ExecutionOutbox & { claimToken: string },
   input: {
+    dispatchState: HostedExecutionEventDispatchState;
     lastError: string | null;
     nextAttemptAt: Date | null;
     payloadJson: Prisma.InputJsonValue;
@@ -411,6 +475,7 @@ async function finalizeHostedExecutionOutboxAttempt(
       claimToken: record.claimToken,
     },
     data: {
+      dispatchState: input.dispatchState,
       status: input.status,
       lastError: input.lastError,
       nextAttemptAt: input.nextAttemptAt,
@@ -472,6 +537,7 @@ async function upsertHostedExecutionOutboxRecord(input: {
       eventId: input.dispatchRef.eventId,
       eventKind: input.dispatchRef.eventKind,
       payloadJson: input.payloadJson,
+      dispatchState: DEFAULT_HOSTED_EXECUTION_EVENT_DISPATCH_STATE,
       status: ExecutionOutboxStatus.queued,
       nextAttemptAt: input.now,
     },
@@ -510,6 +576,27 @@ async function prepareHostedExecutionOutboxPayloadJson(
   throw createHostedExecutionOutboxPayloadRefError(dispatch.eventId);
 }
 
+function resolveHostedExecutionPersistedPayloadJson(input: {
+  nextAttemptAt: Date | null;
+  payload: HostedExecutionOutboxPayload | null;
+  payloadJson: Prisma.InputJsonValue;
+  status: ExecutionOutboxStatus;
+}): Prisma.InputJsonValue {
+  if (!input.payload || !shouldPruneHostedExecutionOutboxPayload(input)) {
+    return input.payloadJson;
+  }
+
+  return summarizeHostedExecutionOutboxPayload(input.payload) ?? input.payloadJson;
+}
+
+function shouldPruneHostedExecutionOutboxPayload(input: {
+  nextAttemptAt: Date | null;
+  status: ExecutionOutboxStatus;
+}): boolean {
+  return input.status === ExecutionOutboxStatus.dispatched
+    || (input.status === ExecutionOutboxStatus.delivery_failed && input.nextAttemptAt === null);
+}
+
 function assertHostedExecutionOutboxRecordMatches(
   record: Pick<
     ExecutionOutbox,
@@ -531,8 +618,8 @@ function assertHostedExecutionOutboxRecordMatches(
     || record.sourceType !== expected.sourceType
     || record.userId !== expected.userId
     || !areHostedExecutionOutboxPayloadsEquivalent(
-      readHostedExecutionOutboxPayload(record.payloadJson),
-      readHostedExecutionOutboxPayload(expected.payloadJson),
+      record.payloadJson,
+      expected.payloadJson,
     )
   ) {
     throw new Error(
@@ -541,39 +628,14 @@ function assertHostedExecutionOutboxRecordMatches(
   }
 }
 
-function areHostedExecutionOutboxPayloadsEquivalent(
-  left: HostedExecutionOutboxPayload | null,
-  right: HostedExecutionOutboxPayload | null,
-): boolean {
-  if (!left || !right || left.storage !== right.storage) {
-    return false;
-  }
-
-  if (left.storage === "inline" && right.storage === "inline") {
-    return isDeepStrictEqual(left.dispatch, right.dispatch);
-  }
-
-  if (left.storage === "reference" && right.storage === "reference") {
-    if (!isDeepStrictEqual(left.dispatchRef, right.dispatchRef)) {
-      return false;
-    }
-
-    return areHostedExecutionDispatchPayloadRefsEquivalent(left.stagedPayloadId, right.stagedPayloadId);
-  }
-
-  return false;
-}
-
-function areHostedExecutionDispatchPayloadRefsEquivalent(
-  left: string | null,
-  right: string | null,
-): boolean {
-  return left === right;
+function normalizeHostedExecutionOutboxLastError(lastError: string | null): string | null {
+  return lastError === null ? null : formatHostedExecutionSafeLogError(lastError);
 }
 
 function resolveHostedExecutionDeliveryOutcome(
   dispatchResult: HostedExecutionDispatchResult,
 ): {
+  dispatchState: HostedExecutionEventDispatchState;
   deleteStoredPayload: boolean;
   lastError: string | null;
   retryable: boolean;
@@ -581,8 +643,9 @@ function resolveHostedExecutionDeliveryOutcome(
 } {
   if (dispatchResult.status.lastError === HOSTED_EXECUTION_DISPATCH_NOT_CONFIGURED_ERROR) {
     return {
+      dispatchState: DEFAULT_HOSTED_EXECUTION_EVENT_DISPATCH_STATE,
       deleteStoredPayload: false,
-      lastError: dispatchResult.status.lastError,
+      lastError: normalizeHostedExecutionOutboxLastError(dispatchResult.status.lastError),
       retryable: true,
       status: ExecutionOutboxStatus.delivery_failed,
     };
@@ -591,17 +654,20 @@ function resolveHostedExecutionDeliveryOutcome(
   switch (dispatchResult.event.state) {
     case "backpressured":
       return {
+        dispatchState: dispatchResult.event.state,
         deleteStoredPayload: false,
-        lastError:
+        lastError: normalizeHostedExecutionOutboxLastError(
           dispatchResult.event.lastError
           ?? dispatchResult.status.lastError
           ?? "Hosted execution user queue is backpressured.",
+        ),
         retryable: true,
         status: ExecutionOutboxStatus.delivery_failed,
       };
     case "queued":
     case "duplicate_pending":
       return {
+        dispatchState: dispatchResult.event.state,
         deleteStoredPayload: false,
         lastError: null,
         retryable: false,
@@ -611,6 +677,7 @@ function resolveHostedExecutionDeliveryOutcome(
     case "completed":
     case "poisoned":
       return {
+        dispatchState: dispatchResult.event.state,
         deleteStoredPayload: true,
         lastError: null,
         retryable: false,
@@ -625,9 +692,34 @@ function computeRetryDelayMs(attemptCount: number): number {
   return Math.min(RETRY_MAX_DELAY_MS, RETRY_BASE_DELAY_MS * (2 ** Math.max(0, attemptCount - 1)));
 }
 
-function isHostedExecutionOutboxPayloadSettled(record: Pick<ExecutionOutbox, "nextAttemptAt" | "status">): boolean {
-  return record.status === ExecutionOutboxStatus.dispatched
+function isHostedExecutionOutboxPayloadSettled(
+  record: Pick<ExecutionOutbox, "dispatchState" | "nextAttemptAt" | "status">,
+): boolean {
+  return isHostedExecutionEventDispatchTerminal(
+    readHostedExecutionEventDispatchState(record.dispatchState),
+  )
     || (record.status === ExecutionOutboxStatus.delivery_failed && record.nextAttemptAt === null);
+}
+
+function readHostedExecutionEventDispatchState(
+  value: string | null | undefined,
+): HostedExecutionEventDispatchState {
+  if (
+    value
+    && HOSTED_EXECUTION_EVENT_DISPATCH_STATE_SET.has(value as HostedExecutionEventDispatchState)
+  ) {
+    return value as HostedExecutionEventDispatchState;
+  }
+
+  return DEFAULT_HOSTED_EXECUTION_EVENT_DISPATCH_STATE;
+}
+
+function isHostedExecutionEventDispatchTerminal(
+  state: HostedExecutionEventDispatchState,
+): boolean {
+  return state === "duplicate_consumed"
+    || state === "completed"
+    || state === "poisoned";
 }
 
 function createHostedExecutionOutboxPayloadError(eventId: string): Error & {

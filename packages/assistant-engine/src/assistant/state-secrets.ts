@@ -4,15 +4,16 @@ import path from 'node:path'
 import {
   assistantPersistedSessionSchema,
   assistantSessionSecretsSchema,
+  parseAssistantSessionRecord,
   type AssistantSession,
   type AssistantSessionSecrets,
 } from '@murphai/operator-config/assistant-cli-contracts'
-import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
-import { quarantineAssistantStateFile } from './quarantine.js'
 import {
   mergeAssistantHeaders,
   splitAssistantHeadersForPersistence,
-} from './redaction.js'
+} from '@murphai/operator-config/assistant/redaction'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import { quarantineAssistantStateFile } from './quarantine.js'
 import { serializeAssistantSessionForPersistence } from './provider-state.js'
 import {
   ensureAssistantStateDirectory,
@@ -71,27 +72,17 @@ export function mergeAssistantSessionSecrets(
   session: AssistantSession,
   secrets: AssistantSessionSecrets | null,
 ): AssistantSession {
-  if (!secrets) {
+  if (!secrets || session.target.adapter !== 'openai-compatible') {
     return session
   }
 
-  return {
-    ...session,
-    target:
-      session.target.adapter === 'openai-compatible'
-        ? {
-            ...session.target,
-            headers: mergeAssistantHeaders(
-              session.target.headers,
-              secrets.providerHeaders,
-            ),
-          }
-        : session.target,
-    providerOptions: {
-      ...session.providerOptions,
-      headers: mergeAssistantHeaders(session.providerOptions.headers, secrets.providerHeaders),
+  return parseAssistantSessionRecord({
+    ...serializeAssistantSessionForPersistence(session),
+    target: {
+      ...session.target,
+      headers: mergeAssistantHeaders(session.target.headers, secrets.providerHeaders),
     },
-  }
+  })
 }
 
 export async function readAssistantSessionSecrets(input: {

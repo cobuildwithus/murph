@@ -50,7 +50,6 @@ const TEST_CRON_JOB = {
     participantId: 'participant_123',
     sourceThreadId: 'thread_123',
     deliveryTarget: '@murph',
-    deliverResponse: true,
   },
   createdAt: '2026-04-01T00:00:00.000Z',
   updatedAt: '2026-04-01T00:00:00.000Z',
@@ -91,7 +90,7 @@ const TEST_CRON_RUN = {
 } satisfies AssistantCronRunRecord
 
 const TEST_SESSION = {
-  schema: 'murph.assistant-session.v4',
+  schema: 'murph.assistant-session.v1',
   sessionId: 'session-daemon-more',
   target: {
     adapter: 'codex-cli',
@@ -106,12 +105,15 @@ const TEST_SESSION = {
   resumeState: null,
   provider: 'codex-cli',
   providerOptions: {
+    continuityFingerprint: 'fingerprint-daemon-more',
     model: null,
     reasoningEffort: null,
     sandbox: null,
     approvalPolicy: null,
     profile: null,
     oss: false,
+    executionDriver: 'codex-cli',
+    resumeKind: 'codex-session',
   },
   providerBinding: null,
   alias: 'chat:daemon',

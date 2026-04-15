@@ -104,7 +104,7 @@ import {
 } from '../src/commands/assistant.js'
 
 const TEST_SESSION: AssistantSession = {
-  schema: 'murph.assistant-session.v4',
+  schema: 'murph.assistant-session.v1',
   sessionId: 'session-command-coverage',
   target: {
     adapter: 'codex-cli',
@@ -119,12 +119,15 @@ const TEST_SESSION: AssistantSession = {
   resumeState: null,
   provider: 'codex-cli',
   providerOptions: {
+    continuityFingerprint: 'fingerprint-command-coverage',
     model: null,
     reasoningEffort: null,
     sandbox: null,
     approvalPolicy: null,
     profile: null,
     oss: false,
+    executionDriver: 'codex-cli',
+    resumeKind: 'codex-session',
   },
   providerBinding: null,
   alias: 'chat:test',
@@ -188,6 +191,9 @@ function readCommand(
 ): {
   description?: string
   hint?: string
+  options?: {
+    shape: Record<string, { description?: string } | undefined>
+  }
   outputPolicy?: string
   run: (context: Record<string, unknown>) => Promise<unknown>
 } {
@@ -195,6 +201,9 @@ function readCommand(
     | {
         description?: string
         hint?: string
+        options?: {
+          shape: Record<string, { description?: string } | undefined>
+        }
         outputPolicy?: string
         run: (context: Record<string, unknown>) => Promise<unknown>
       }
@@ -203,6 +212,17 @@ function readCommand(
     throw new Error(`Expected command ${name} to be registered.`)
   }
   return command
+}
+
+function readOptionDescription(
+  command: {
+    options?: {
+      shape: Record<string, { description?: string } | undefined>
+    }
+  },
+  optionName: string,
+): string | undefined {
+  return command.options?.shape[optionName]?.description
 }
 
 beforeEach(() => {
@@ -229,6 +249,7 @@ test('assistant command registration exposes the owned subcommands and root alia
   const assistant = readCommandGroup(commands, 'assistant')
   const selfTarget = readCommandGroup(assistant.commands, 'self-target')
   const session = readCommandGroup(assistant.commands, 'session')
+  const run = readCommand(commands, 'run')
 
   assert.deepEqual([...assistant.commands.keys()], [
     'ask',
@@ -243,6 +264,7 @@ test('assistant command registration exposes the owned subcommands and root alia
   ])
   assert.deepEqual([...selfTarget.commands.keys()], ['list', 'show', 'set', 'clear'])
   assert.deepEqual([...session.commands.keys()], ['list', 'show'])
+  assert.equal(Object.hasOwn(run.options?.shape ?? {}, 'skipDaemon'), false)
   assert.equal(readCommand(assistant.commands, 'chat').outputPolicy, 'agent-only')
   assert.equal(readCommand(commands, 'chat').description?.includes('assistant chat'), true)
   assert.equal(readCommand(commands, 'run').description?.includes('assistant run'), true)
@@ -515,9 +537,7 @@ test('assistant run forwards automation options and emits formatted foreground l
       once: true,
       providerName: 'ollama',
       requestId: 'req_assistant_run',
-      scanIntervalMs: 2500,
       sessionRolloverHours: 2,
-      skipDaemon: true,
       vault: '/tmp/vault',
     },
   })
@@ -543,7 +563,6 @@ test('assistant run forwards automation options and emits formatted foreground l
     },
     once: true,
     requestId: 'req_assistant_run',
-    scanIntervalMs: 2500,
     sessionMaxAgeMs: 7_200_000,
     startDaemon: false,
     vault: '/tmp/vault',
@@ -733,6 +752,71 @@ test('self-target commands normalize channels, enforce email identity, and surfa
     participantId: null,
     sourceThreadId: null,
   })
+})
+
+test('assistant command help describes routing shapes and flat header JSON inputs', () => {
+  const commands = createAssistantCli()
+  const assistant = readCommandGroup(commands, 'assistant')
+  const ask = readCommand(assistant.commands, 'ask')
+  const deliver = readCommand(assistant.commands, 'deliver')
+  const run = readCommand(assistant.commands, 'run')
+  const selfTargetSet = readCommand(
+    readCommandGroup(assistant.commands, 'self-target').commands,
+    'set',
+  )
+
+  assert.equal(
+    readOptionDescription(ask, 'participant')?.includes(
+      'transport-native participant value',
+    ),
+    true,
+  )
+  assert.equal(
+    readOptionDescription(ask, 'sourceThread')?.includes(
+      '<chatId>:topic:<messageThreadId>',
+    ),
+    true,
+  )
+  assert.equal(
+    readOptionDescription(deliver, 'deliveryTarget')?.includes(
+      'transport-native send format',
+    ),
+    true,
+  )
+  assert.equal(
+    readOptionDescription(ask, 'headersJson')?.includes(
+      'flat JSON object of extra HTTP headers with string values',
+    ),
+    true,
+  )
+  assert.equal(
+    readOptionDescription(run, 'headersJson')?.includes(
+      'flat JSON object of extra HTTP headers with string values',
+    ),
+    true,
+  )
+  assert.equal(
+    run.description?.includes('Telegram, Linq, or email'),
+    true,
+  )
+  assert.equal(
+    selfTargetSet.description?.includes(
+      'Provide at least one of --participant, --sourceThread, or --deliveryTarget',
+    ),
+    true,
+  )
+  assert.equal(
+    selfTargetSet.hint?.includes(
+      'Saved email targets also require --identity with the configured AgentMail inbox id.',
+    ),
+    true,
+  )
+  assert.equal(
+    readOptionDescription(selfTargetSet, 'identity')?.includes(
+      'Email targets require the configured AgentMail inbox id here.',
+    ),
+    true,
+  )
 })
 
 test('session commands return redacted state paths and session payloads', async () => {

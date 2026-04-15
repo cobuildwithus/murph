@@ -12,6 +12,11 @@ export { VaultError, isVaultError } from "./errors.ts";
 export * from "./automation.ts";
 export * from "./memory.ts";
 export {
+  readPreferencesDocument,
+  resolvePreferencesDocumentPath,
+} from "./preferences.ts";
+export type { PreferencesDocumentSnapshot } from "./preferences.ts";
+export {
   assertPathWithinVault,
   assertPathWithinVaultOnDisk,
   normalizeOpaquePathSegment,
@@ -45,7 +50,6 @@ export {
   appendJournal,
   appendHistoryEvent,
   appendJsonlRecord,
-  appendProfileSnapshot,
   checkpointExperiment,
   copyRawArtifact,
   createExperiment,
@@ -64,12 +68,12 @@ export {
   promoteInboxExperimentNote,
   promoteInboxJournal,
   repairVault,
-  upgradeVault,
-  rebuildCurrentProfile,
   stopExperiment,
   stopProtocolItem,
   unlinkJournalEventIds,
   unlinkJournalStreams,
+  updateWorkoutUnitPreferences,
+  updateWearablePreferences,
   updateExperiment,
   updateVaultSummary,
   upsertEvent,
@@ -102,10 +106,18 @@ export type {
   CanonicalTextWriteInput,
 } from "./public-mutations.ts";
 export {
+  acquireCanonicalResourceLock,
+  CANONICAL_RESOURCE_LOCK_DIRECTORY,
+  CANONICAL_RESOURCE_LOCK_METADATA_BASENAME,
+  canonicalLogicalResource,
+  canonicalPathResource,
+  dedupeCanonicalResources,
+  withCanonicalResourceLocks,
   acquireCanonicalWriteLock,
   CANONICAL_WRITE_LOCK_DIRECTORY,
   CANONICAL_WRITE_LOCK_METADATA_PATH,
   inspectCanonicalWriteLock,
+  withCanonicalWriteLockScope,
   isProtectedCanonicalPath,
   listProtectedCanonicalPaths,
   listWriteOperationMetadataPaths,
@@ -113,6 +125,9 @@ export {
   readStoredWriteOperation,
 } from "./operations/index.ts";
 export type {
+  CanonicalMutationResource,
+  CanonicalResourceLockHandle,
+  CanonicalResourceLockMetadata,
   CanonicalWriteLockHandle,
   CanonicalWriteLockInspection,
   CanonicalWriteLockMetadata,
@@ -120,7 +135,7 @@ export type {
 } from "./operations/index.ts";
 export {
   buildRawImportManifest,
-  parseRawImportManifestWithLegacySupport,
+  parseRawImportManifest,
   resolveRawManifestPath,
 } from "./operations/raw-manifests.ts";
 export {
@@ -138,10 +153,6 @@ export {
   ASSESSMENT_LEDGER_DIRECTORY,
   ASSESSMENT_RESPONSE_SCHEMA_VERSION,
 } from "./assessment/index.ts";
-export {
-  listProfileSnapshots,
-  readCurrentProfile,
-} from "./profile/storage.ts";
 export type {
   AllergyProposal,
   AssessmentProposalSource,
@@ -153,11 +164,9 @@ export type {
   GoalProposal,
   HistoryEventProposal,
   ImportAssessmentResponseInput,
-  ProfileSnapshotProposal,
   ProtocolProposal,
 } from "./assessment/index.ts";
 export * from "./bank/index.ts";
-export * from "./profile/index.ts";
 export * from "./history/index.ts";
 export * from "./family/index.ts";
 export * from "./genetics/index.ts";

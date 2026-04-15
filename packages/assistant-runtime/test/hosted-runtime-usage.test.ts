@@ -31,11 +31,7 @@ async function writePendingRecord(vaultRoot: string, turnId: string) {
       occurredAt: "2026-04-07T00:00:00.000Z",
       outputTokens: 5,
       provider: "openai-compatible",
-      providerMetadataJson: null,
       providerName: "example",
-      providerRequestId: `req_${turnId}`,
-      providerSessionId: null,
-      rawUsageJson: null,
       reasoningTokens: null,
       requestedModel: "gpt-5.4-mini",
       routeId: "primary",
@@ -50,6 +46,15 @@ async function writePendingRecord(vaultRoot: string, turnId: string) {
   });
 
   return usageId;
+}
+
+function readUsageId(record: object | undefined): string | null {
+  if (!record) {
+    return null;
+  }
+
+  const usageId = Reflect.get(record, "usageId");
+  return typeof usageId === "string" ? usageId : null;
 }
 
 test("hosted usage export retries failed batches one record at a time and warns", async () => {
@@ -72,7 +77,10 @@ test("hosted usage export retries failed batches one record at a time and warns"
 
           return {
             recorded: 1,
-            usageIds: [usage[0]?.usageId as string],
+            usageIds: (() => {
+              const usageId = readUsageId(usage[0]);
+              return usageId ? [usageId] : [];
+            })(),
           };
         },
       },

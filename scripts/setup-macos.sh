@@ -108,7 +108,7 @@ print_install_plan() {
   printf '%s\n' 'Bootstrap scope:'
   printf '  - Homebrew, Node >= %s, and pnpm@%s via corepack\n' "$required_node" "$pnpm_version"
   printf '%s\n' '  - workspace dependencies and build output'
-  printf '%s\n' '  - ffmpeg, poppler/pdftotext, whisper.cpp, and a local Whisper model'
+  printf '%s\n' '  - ffmpeg, whisper.cpp, and a local Whisper model'
   printf '%s\n' '  - vault bootstrap, default config, user-level murph/vault-cli shims, onboarding channel selection, wearables, and assistant automation/chat handoff'
 }
 

@@ -1,0 +1,581 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import {
+  HOSTED_ASSISTANT_DELIVERY_KIND,
+  buildHostedAssistantDeliveryPreparedRecord,
+  buildHostedAssistantDeliverySentRecord,
+  buildHostedAssistantDeliverySideEffect,
+  buildHostedExecutionSafeErrorDetails,
+  buildHostedExecutionStructuredLogRecord,
+  deriveHostedExecutionErrorCode,
+  emitHostedExecutionStructuredLog,
+  formatHostedExecutionLogMessage,
+  isHostedAssistantDeliveryKind,
+  isHostedExecutionRunLevel,
+  isHostedExecutionRunPhase,
+  normalizeHostedExecutionErrorMessage,
+  normalizeHostedExecutionOperatorMessage,
+  parseHostedAssistantDeliveryRecord,
+  parseHostedAssistantDeliverySideEffect,
+  parseHostedAssistantDeliverySideEffects,
+  parseHostedExecutionSideEffect,
+  parseHostedExecutionSideEffectRecord,
+  parseHostedExecutionSideEffects,
+  readHostedExecutionSafeErrorName,
+  sanitizeHostedExecutionStructuredLogDetails,
+  sameHostedAssistantDeliverySideEffectIdentity,
+  sameHostedExecutionAssistantDelivery,
+  sameHostedExecutionSideEffectIdentity,
+  summarizeHostedExecutionError,
+  summarizeHostedExecutionErrorCode,
+} from "../src/index.ts";
+
+const ORIGINAL_ENV = { ...process.env };
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  process.env = { ...ORIGINAL_ENV };
+});
+
+describe("hosted execution observability", () => {
+  it("derives hosted execution error codes across the supported seams", () => {
+    const cases: Array<[unknown, string]> = [
+      [Object.assign(new Error("bad"), { name: "HostedExecutionConfigurationError" }), "configuration_error"],
+      [new Error("HOSTED_EXECUTION_TOKEN must be configured."), "configuration_error"],
+      [new Error("durable commit failed"), "durable_commit_error"],
+      [new Error("durable finalize failed"), "durable_finalize_error"],
+      [new Error("Runner returned HTTP 502"), "runner_http_error"],
+      [new Error("forbidden by authorization policy"), "authorization_error"],
+      [new Error("request body must be a json object"), "invalid_request"],
+      [Object.assign(new Error("aborted"), { name: "AbortError" }), "timeout"],
+      [new TypeError("wrong type"), "type_error"],
+      ["plain failure", "runtime_error"],
+    ];
+
+    for (const [error, expected] of cases) {
+      expect(deriveHostedExecutionErrorCode(error)).toBe(expected);
+    }
+  });
+
+  it("validates run phases, levels, and raw error-message normalization", () => {
+    expect(isHostedExecutionRunPhase("claimed")).toBe(true);
+    expect(isHostedExecutionRunPhase("not-a-phase")).toBe(false);
+    expect(isHostedExecutionRunLevel("warn")).toBe(true);
+    expect(isHostedExecutionRunLevel("verbose")).toBe(false);
+
+    expect(normalizeHostedExecutionErrorMessage(new Error("  boom  "))).toBe("boom");
+    expect(
+      normalizeHostedExecutionErrorMessage(Object.assign(new Error("   "), { name: "RangeError" })),
+    ).toBe("RangeError");
+    expect(normalizeHostedExecutionErrorMessage("  plain failure  ")).toBe("plain failure");
+    expect(normalizeHostedExecutionErrorMessage("   ")).toBe("Unknown hosted execution error.");
+  });
+
+  it("normalizes operator messages with redaction, whitespace cleanup, defaults, and truncation", () => {
+    expect(normalizeHostedExecutionOperatorMessage(" \n\t ")).toBe("Hosted execution event.");
+
+    expect(
+      normalizeHostedExecutionOperatorMessage(
+        "Authorization: Bearer secret-token hello user@example.com token=my-token "
+        + "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.signature",
+      ),
+    ).toBe(
+      "Authorization=Bearer [redacted] hello [redacted-email] token=[redacted] [redacted-token]",
+    );
+
+    const repeated = "x".repeat(260);
+    const normalized = normalizeHostedExecutionOperatorMessage(repeated);
+    expect(normalized).toHaveLength(260);
+
+    const truncated = normalizeHostedExecutionOperatorMessage("x".repeat(460));
+    expect(truncated).toHaveLength(400);
+    expect(truncated.endsWith("…")).toBe(true);
+  });
+
+  it("redacts non-bearer authorization and other secret-bearing key-value pairs", () => {
+    expect(
+      normalizeHostedExecutionOperatorMessage(
+        "authorization=\"Basic abc123\" cookie=session-123 set-cookie=\"sid=abc\" apiKey: key_123 passcode=7890",
+      ),
+    ).toBe(
+      "authorization=[redacted] cookie=[redacted] set-cookie=[redacted] apiKey=[redacted] passcode=[redacted]",
+    );
+  });
+
+  it("summarizes errors using safe operator-facing messages only", () => {
+    expect(
+      summarizeHostedExecutionError(new Error("CF_API_TOKEN must be configured for hosted execution.")),
+    ).toBe("CF_API_TOKEN must be configured for hosted execution.");
+    expect(
+      summarizeHostedExecutionError(new Error("missing token for alice@example.com")),
+    ).toBe("Hosted execution configuration is invalid.");
+    expect(summarizeHostedExecutionError(new Error("Runner returned HTTP 504 from upstream"))).toBe(
+      "Hosted runner container returned HTTP 504.",
+    );
+    expect(summarizeHostedExecutionErrorCode("authorization_error")).toBe(
+      "Hosted execution authorization failed.",
+    );
+    expect(summarizeHostedExecutionErrorCode("not-real")).toBe(
+      "Hosted execution runtime failed.",
+    );
+    expect(summarizeHostedExecutionErrorCode(null)).toBeNull();
+  });
+
+  it("falls back to generic summaries when an error contains unsafe configuration detail", () => {
+    expect(
+      summarizeHostedExecutionError(
+        new Error("HOSTED_WEB_BASE_URL must be configured for alice@example.com."),
+      ),
+    ).toBe("Hosted execution configuration is invalid.");
+    expect(
+      summarizeHostedExecutionError(
+        new Error("Runner returned HTTP 401 for authorization: Bearer secret-token"),
+      ),
+    ).toBe("Hosted runner container returned HTTP 401.");
+  });
+
+  it("builds structured logs with normalized messages, safe errors, and dispatch precedence", () => {
+    const record = buildHostedExecutionStructuredLogRecord({
+      component: "runner",
+      dispatch: { eventId: "evt_dispatch" },
+      error: Object.assign(new TypeError("wrong type"), { name: "TypeError" }),
+      eventId: "evt_fallback",
+      message: "  Bearer top-secret user@example.com  ",
+      phase: "runtime.starting",
+      run: {
+        attempt: 2,
+        runId: "run_123",
+        startedAt: "2026-04-08T00:00:00.000Z",
+      },
+      time: "2026-04-08T00:01:00.000Z",
+      userId: "user_123",
+    });
+
+    expect(record).toMatchObject({
+      attempt: 2,
+      component: "runner",
+      details: {
+        errorDetail: "wrong type",
+      },
+      errorCode: "type_error",
+      errorMessage: "Hosted execution runtime failed.",
+      errorName: "TypeError",
+      eventId: "evt_dispatch",
+      level: "error",
+      message:
+        "Bearer [redacted] [redacted-email] Hosted execution runtime failed. Detail: wrong type",
+      phase: "runtime.starting",
+      runId: "run_123",
+      schema: "murph.hosted-execution.log.v1",
+      time: "2026-04-08T00:01:00.000Z",
+      userId: "user_123",
+    });
+    expect(record.details?.stackPreview).toEqual(expect.any(Array));
+
+    const unsafeErrorRecord = buildHostedExecutionStructuredLogRecord({
+      component: "runner",
+      error: Object.assign(new Error("plain failure"), { name: "TotallyCustomError" }),
+      message: "started",
+      phase: "claimed",
+    });
+
+    expect(unsafeErrorRecord.errorName).toBeUndefined();
+    expect(unsafeErrorRecord.level).toBe("error");
+  });
+
+  it("keeps structured configuration diagnostics redacted even when the error name is safe", () => {
+    const record = buildHostedExecutionStructuredLogRecord({
+      component: "container",
+      error: Object.assign(
+        new Error("HOSTED_WEB_BASE_URL must be configured for alice@example.com."),
+        { name: "HostedExecutionConfigurationError" },
+      ),
+      message: "authorization=\"Basic abc123\" cookie=session-123 alice@example.com",
+      phase: "failed",
+    });
+
+    expect(record).toMatchObject({
+      component: "container",
+      details: {
+        errorDetail: "HOSTED_WEB_BASE_URL must be configured for [redacted-email].",
+      },
+      errorCode: "configuration_error",
+      errorMessage: "Hosted execution configuration is invalid.",
+      errorName: "HostedExecutionConfigurationError",
+      level: "error",
+      message:
+        "authorization=[redacted] cookie=[redacted] [redacted-email] Hosted execution configuration is invalid. Detail: HOSTED_WEB_BASE_URL must be configured for [redacted-email].",
+      phase: "failed",
+    });
+    expect(record.details?.stackPreview).toEqual(expect.any(Array));
+  });
+
+  it("formats operator-facing log messages with redacted detail appended only once", () => {
+    expect(
+      formatHostedExecutionLogMessage(
+        "Hosted worker route failed.",
+        new Error("Runner returned HTTP 502 from upstream"),
+      ),
+    ).toBe(
+      "Hosted worker route failed. Hosted runner container returned HTTP 502. Detail: Runner returned HTTP 502 from upstream",
+    );
+
+    expect(
+      formatHostedExecutionLogMessage(
+        "Hosted worker route failed. Hosted runner container returned HTTP 502.",
+        new Error("Runner returned HTTP 502 from upstream"),
+      ),
+    ).toBe(
+      "Hosted worker route failed. Hosted runner container returned HTTP 502. Detail: Runner returned HTTP 502 from upstream",
+    );
+  });
+
+  it("redacts linux home paths from diagnostic details and stack previews", () => {
+    const error = new Error("failed from /home/operator/app/runtime.ts");
+    error.stack = [
+      "Error: failed from /home/operator/app/runtime.ts",
+      "    at runThing (/home/operator/app/runtime.ts:12:5)",
+      "    at main (/root/project/index.ts:4:1)",
+    ].join("\n");
+
+    const record = buildHostedExecutionStructuredLogRecord({
+      component: "runtime",
+      error,
+      message: "failed",
+      phase: "failed",
+    });
+
+    expect(record.details).toMatchObject({
+      errorDetail: "failed from <REDACTED_PATH>",
+      stackPreview: [
+        "at runThing (<REDACTED_PATH>)",
+        "at main (<REDACTED_PATH>)",
+      ],
+    });
+  });
+
+  it("emits structured logs only when stdio logging is enabled", () => {
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    process.env.VITEST = "true";
+    emitHostedExecutionStructuredLog({
+      component: "runner",
+      level: "info",
+      message: "quiet",
+      phase: "claimed",
+    });
+    expect(infoSpy).not.toHaveBeenCalled();
+
+    process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS = "on";
+    emitHostedExecutionStructuredLog({
+      component: "runner",
+      level: "warn",
+      message: "warn",
+      phase: "retry.scheduled",
+    });
+    emitHostedExecutionStructuredLog({
+      component: "runner",
+      message: "boom",
+      phase: "failed",
+      error: new Error("failure"),
+    });
+
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(errorSpy).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(warnSpy.mock.calls[0]?.[0] as string)).toMatchObject({
+      level: "warn",
+      message: "warn",
+      phase: "retry.scheduled",
+    });
+
+    process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS = "off";
+    emitHostedExecutionStructuredLog({
+      component: "runner",
+      level: "info",
+      message: "quiet again",
+      phase: "completed",
+    });
+    expect(infoSpy).not.toHaveBeenCalled();
+  });
+
+  it("sanitizes nested structured log details and safe error metadata", () => {
+    const nested = Array.from({ length: 40 }, (_, index) => `value-${index}`);
+    const sanitized = sanitizeHostedExecutionStructuredLogDetails({
+      "ok-key": {
+        nested,
+        infinite: Number.POSITIVE_INFINITY,
+        deep: {
+          one: {
+            two: {
+              three: {
+                four: {
+                  dropped: "too deep",
+                },
+              },
+            },
+          },
+        },
+      },
+      "bad key!": "dropped",
+    });
+
+    expect(sanitized).toEqual({
+      "ok-key": {
+        nested: nested.slice(0, 32),
+      },
+    });
+    expect(sanitizeHostedExecutionStructuredLogDetails(["not-an-object"] as never)).toBeNull();
+
+    const error = Object.assign(new Error("Top level detail"), {
+      cause: "authorization: Bearer abc123",
+      code: "E_RUNTIME_SECRET",
+      context: {
+        operation: "send_message",
+        provider: "linq",
+        retryable: true,
+      },
+      details: {
+        token: "secret-token",
+        nested: {
+          email: "operator@example.com",
+        },
+      },
+      status: 502,
+    });
+    error.stack = [
+      "Error: Top level detail",
+      "    at first (/Users/example/project/index.ts:10:5)",
+      "    at second (/home/example/app/runtime.ts:4:1)",
+    ].join("\n");
+
+    expect(buildHostedExecutionSafeErrorDetails(error)).toEqual({
+      errorCause: "authorization=Bearer [redacted]",
+      errorCodeDetail: "E_RUNTIME_SECRET",
+      errorDetail: "Top level detail",
+      errorStatus: 502,
+      nested: {
+        email: "[redacted-email]",
+      },
+      operation: "send_message",
+      provider: "linq",
+      retryable: true,
+      stackPreview: [
+        "at first (<REDACTED_PATH>)",
+        "at second (<REDACTED_PATH>)",
+      ],
+      token: "secret-token",
+    });
+    expect(buildHostedExecutionSafeErrorDetails("not-an-error")).toBeNull();
+    expect(readHostedExecutionSafeErrorName(Object.assign(new Error("x"), { name: "Error" }))).toBe("Error");
+    expect(
+      readHostedExecutionSafeErrorName(Object.assign(new Error("x"), { name: "CustomSecretError" })),
+    ).toBeNull();
+  });
+});
+
+describe("hosted execution side-effects", () => {
+  const delivery = {
+    channel: "email",
+    idempotencyKey: "idem_123",
+    messageLength: 42,
+    providerMessageId: "provider_msg_123",
+    providerThreadId: null,
+    sentAt: "2026-04-08T00:00:00.000Z",
+    target: "assistant@example.com",
+    targetKind: "explicit" as const,
+  };
+
+  it("builds and parses assistant delivery side effects and records", () => {
+    expect(buildHostedAssistantDeliverySideEffect({
+      dedupeKey: "dedupe_123",
+      effectId: "intent_123",
+    })).toEqual({
+      effectId: "intent_123",
+      fingerprint: "dedupe_123",
+      kind: "assistant.delivery",
+    });
+
+    expect(buildHostedAssistantDeliveryPreparedRecord({
+      dedupeKey: "dedupe_123",
+      effectId: "intent_123",
+      recordedAt: "2026-04-08T00:00:00.000Z",
+    })).toEqual({
+      effectId: "intent_123",
+      fingerprint: "dedupe_123",
+      kind: "assistant.delivery",
+      recordedAt: "2026-04-08T00:00:00.000Z",
+      state: "prepared",
+    });
+
+    expect(buildHostedAssistantDeliverySentRecord({
+      dedupeKey: "dedupe_123",
+      delivery,
+      effectId: "intent_123",
+    })).toEqual({
+      delivery,
+      effectId: "intent_123",
+      fingerprint: "dedupe_123",
+      kind: "assistant.delivery",
+      recordedAt: "2026-04-08T00:00:00.000Z",
+      state: "sent",
+    });
+
+    expect(parseHostedExecutionSideEffect({
+      effectId: "intent_123",
+      fingerprint: "fingerprint_123",
+      kind: "assistant.delivery",
+    })).toEqual({
+      effectId: "intent_123",
+      fingerprint: "fingerprint_123",
+      kind: "assistant.delivery",
+    });
+
+    expect(parseHostedExecutionSideEffectRecord({
+      delivery,
+      effectId: "intent_123",
+      fingerprint: "fingerprint_123",
+      kind: "assistant.delivery",
+      recordedAt: "2026-04-08T00:00:00.000Z",
+      state: "sent",
+    })).toEqual({
+      delivery,
+      effectId: "intent_123",
+      fingerprint: "fingerprint_123",
+      kind: "assistant.delivery",
+      recordedAt: "2026-04-08T00:00:00.000Z",
+      state: "sent",
+    });
+
+    expect(parseHostedExecutionSideEffects("not-an-array")).toEqual([]);
+  });
+
+  it("compares side-effect identities and delivery payloads structurally", () => {
+    expect(sameHostedExecutionSideEffectIdentity(
+      {
+        effectId: "effect_123",
+        fingerprint: "fingerprint_123",
+        kind: "assistant.delivery",
+      },
+      {
+        effectId: "effect_123",
+        fingerprint: "fingerprint_123",
+        kind: "assistant.delivery",
+      },
+    )).toBe(true);
+    expect(sameHostedExecutionSideEffectIdentity(
+      {
+        effectId: "effect_123",
+        fingerprint: "fingerprint_123",
+        kind: "assistant.delivery",
+      },
+      {
+        effectId: "effect_123",
+        fingerprint: "other",
+        kind: "assistant.delivery",
+      },
+    )).toBe(false);
+
+    expect(sameHostedExecutionAssistantDelivery(delivery, { ...delivery })).toBe(true);
+    expect(sameHostedExecutionAssistantDelivery(delivery, {
+      ...delivery,
+      providerThreadId: "thread_123",
+    })).toBe(false);
+
+    expect(sameHostedAssistantDeliverySideEffectIdentity(
+      {
+        effectId: "effect_123",
+        fingerprint: "fingerprint_123",
+        kind: "assistant.delivery",
+      },
+      {
+        effectId: "effect_123",
+        fingerprint: "fingerprint_123",
+        kind: "assistant.delivery",
+      },
+    )).toBe(true);
+  });
+
+  it("fails closed on invalid side-effect shapes", () => {
+    expect(() => parseHostedExecutionSideEffect(null)).toThrow(
+      /Hosted execution side effect must be an object/i,
+    );
+    expect(() => parseHostedExecutionSideEffect({
+      effectId: "effect_123",
+      fingerprint: "fingerprint_123",
+      kind: "other",
+    })).toThrow(/Unsupported hosted execution side effect kind: other/i);
+
+    expect(() => parseHostedExecutionSideEffectRecord({
+      effectId: "intent_123",
+      fingerprint: "fingerprint_123",
+      kind: "assistant.delivery",
+      recordedAt: "2026-04-08T00:00:00.000Z",
+      state: "unknown",
+    })).toThrow(/Unsupported hosted execution side effect record state: unknown/i);
+
+    expect(() => buildHostedAssistantDeliveryPreparedRecord({
+      dedupeKey: "dedupe_123",
+      effectId: "intent_123",
+      recordedAt: "",
+    })).toThrow(/recordedAt must be a non-empty string/i);
+
+    expect(() => buildHostedAssistantDeliverySentRecord({
+      dedupeKey: "dedupe_123",
+      delivery: {
+        ...delivery,
+        messageLength: -1,
+      },
+      effectId: "intent_123",
+    })).toThrow(/messageLength must be a non-negative integer/i);
+
+    expect(() => parseHostedExecutionSideEffectRecord({
+      delivery: {
+        ...delivery,
+        targetKind: "group",
+      },
+      effectId: "intent_123",
+      fingerprint: "fingerprint_123",
+      kind: "assistant.delivery",
+      recordedAt: "2026-04-08T00:00:00.000Z",
+      state: "sent",
+    })).toThrow(/Unsupported hosted execution assistant delivery target kind: group/i);
+    expect(() => parseHostedExecutionSideEffectRecord({
+      effectId: "effect_123",
+      fingerprint: "fingerprint_123",
+      kind: "other",
+      recordedAt: "2026-04-08T00:00:00.000Z",
+      state: "prepared",
+    })).toThrow(/Unsupported hosted execution side effect kind: other/i);
+  });
+
+  it("exposes assistant-delivery-specific aliases and guards", () => {
+    const preparedRecord = buildHostedAssistantDeliveryPreparedRecord({
+      dedupeKey: "dedupe_123",
+      effectId: "intent_123",
+      recordedAt: "2026-04-08T00:00:00.000Z",
+    });
+
+    expect(parseHostedAssistantDeliverySideEffect({
+      effectId: "intent_123",
+      fingerprint: "dedupe_123",
+      kind: "assistant.delivery",
+    })).toEqual(buildHostedAssistantDeliverySideEffect({
+      dedupeKey: "dedupe_123",
+      effectId: "intent_123",
+    }));
+    expect(parseHostedAssistantDeliverySideEffects([preparedRecord])).toEqual([{
+      effectId: "intent_123",
+      fingerprint: "dedupe_123",
+      kind: "assistant.delivery",
+    }]);
+    expect(parseHostedAssistantDeliveryRecord(preparedRecord)).toEqual(preparedRecord);
+    expect(isHostedAssistantDeliveryKind(HOSTED_ASSISTANT_DELIVERY_KIND)).toBe(true);
+    expect(isHostedAssistantDeliveryKind("other")).toBe(false);
+    expect(() => parseHostedAssistantDeliveryRecord({
+      ...preparedRecord,
+      intentId: "different_intent",
+    })).toThrow(/intentId is no longer supported/i);
+  });
+});

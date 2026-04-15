@@ -50,6 +50,10 @@
       "types": "./dist/http.d.ts",
       "default": "./dist/http.js"
     },
+    "./callback-redirect": {
+      "types": "./dist/callback-redirect.d.ts",
+      "default": "./dist/callback-redirect.js"
+    },
     "./providers/garmin": {
       "types": "./dist/providers/garmin.d.ts",
       "default": "./dist/providers/garmin.js"
@@ -86,6 +90,6 @@
     "@murphai/runtime-state": "workspace:*"
   },
   "engines": {
-    "node": ">=22.16.0"
+    "node": ">=24.14.1"
   }
 }

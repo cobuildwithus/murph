@@ -2,12 +2,15 @@ import {
   gatewayProjectionSnapshotSchema,
   type GatewayProjectionSnapshot,
 } from "@murphai/gateway-core";
+import { emitHostedExecutionStructuredLog } from "@murphai/hosted-execution";
+import type {
+  HostedExecutionBundleRef,
+  HostedExecutionRunnerResult,
+} from "@murphai/hosted-execution/contracts";
 import {
-  type HostedExecutionBundleRef,
-  parseHostedExecutionSideEffects,
-  type HostedExecutionSideEffect,
-  type HostedExecutionRunnerResult,
-} from "@murphai/hosted-execution";
+  parseHostedAssistantDeliveryEffects,
+  type HostedAssistantDeliveryEffect,
+} from "@murphai/hosted-execution/side-effects";
 import {
   parseHostedExecutionBundleRef,
   sameHostedBundlePayloadRef,
@@ -27,27 +30,28 @@ import {
   hostedExecutionJournalObjectKey,
 } from "./storage-paths.js";
 import { readEncryptedR2Json, writeEncryptedR2Json } from "./crypto.js";
+import { sameStructuredJsonValue } from "./structured-json.js";
 
 export interface HostedExecutionRunnerCommitRequest {
   bundleRef: HostedExecutionBundleRef | null;
 }
 
 export interface HostedExecutionCommittedResult {
+  assistantDeliveryEffects: HostedAssistantDeliveryEffect[];
   bundleRef: HostedExecutionBundleRef | null;
   committedAt: string;
   eventId: string;
   finalizedAt: string | null;
   gatewayProjectionSnapshot: GatewayProjectionSnapshot | null;
   result: HostedExecutionRunnerResult["result"];
-  sideEffects: HostedExecutionSideEffect[];
   userId: string;
 }
 
 export interface HostedExecutionCommitPayload {
+  assistantDeliveryEffects: HostedAssistantDeliveryEffect[];
   bundle: HostedExecutionRunnerResult["bundle"];
   gatewayProjectionSnapshot?: GatewayProjectionSnapshot | null;
   result: HostedExecutionRunnerResult["result"];
-  sideEffects?: HostedExecutionSideEffect[];
 }
 
 export interface HostedExecutionFinalizePayload {
@@ -138,6 +142,21 @@ export async function persistHostedExecutionCommit(input: {
   const existing = await journalStore.readCommittedResult(input.userId, input.eventId);
 
   if (existing) {
+    emitHostedExecutionStructuredLog({
+      component: "runner",
+      details: {
+        existingAssistantDeliveryCount: existing.assistantDeliveryEffects.length,
+        existingCommittedAt: existing.committedAt,
+        existingFinalizedAt: existing.finalizedAt,
+        incomingAssistantDeliveryCount: requireAssistantDeliveryEffects(
+          input.payload.assistantDeliveryEffects,
+          "Hosted execution duplicate commit payload.assistantDeliveryEffects",
+        ).length,
+      },
+      eventId: input.eventId,
+      message: "Hosted duplicate durable commit attempt encountered an existing commit.",
+      phase: "commit.recorded",
+    });
     assertEquivalentDuplicateCommit(existing, input);
     return existing;
   }
@@ -149,7 +168,12 @@ export async function persistHostedExecutionCommit(input: {
     keysById: input.keysById,
   });
   const committedAt = new Date().toISOString();
+  const assistantDeliveryEffects = requireAssistantDeliveryEffects(
+    input.payload.assistantDeliveryEffects,
+    "Hosted execution commit payload.assistantDeliveryEffects",
+  );
   const committedResult: HostedExecutionCommittedResult = {
+    assistantDeliveryEffects,
     bundleRef: await writeHostedBase64BundleIfChanged({
       bundleStore,
       currentRef: input.currentBundleRef,
@@ -161,7 +185,6 @@ export async function persistHostedExecutionCommit(input: {
     finalizedAt: null,
     gatewayProjectionSnapshot: input.payload.gatewayProjectionSnapshot ?? null,
     result: input.payload.result,
-    sideEffects: parseHostedExecutionSideEffects(input.payload.sideEffects),
     userId: input.userId,
   };
 
@@ -193,32 +216,41 @@ export async function persistHostedExecutionFinalBundles(input: {
     );
   }
 
-  const bundleStore = createHostedBundleStore({
-    bucket: input.bucket,
-    key: input.key,
-    keyId: input.keyId,
-    keysById: input.keysById,
-  });
-  const nextBundleRef = await writeHostedBase64BundleIfChanged({
-    bundleStore,
-    currentRef: existing.bundleRef,
-    kind: "vault",
-    value: input.payload.bundle,
-  });
+  const expectedBundleRef = resolveExpectedCommittedBundleRef(
+    existing.bundleRef,
+    input.payload.bundle,
+  );
+  const expectedGatewayProjectionSnapshot =
+    input.payload.gatewayProjectionSnapshot ?? existing.gatewayProjectionSnapshot ?? null;
 
-  if (
-    sameHostedBundlePayloadRef(nextBundleRef, existing.bundleRef)
-    && existing.finalizedAt !== null
-  ) {
+  if (existing.finalizedAt !== null) {
+    assertEquivalentDuplicateFinalize(existing, {
+      eventId: input.eventId,
+      expectedBundleRef,
+      expectedGatewayProjectionSnapshot,
+    });
     return existing;
   }
+
+  const nextBundleRef = sameHostedBundlePayloadRef(expectedBundleRef, existing.bundleRef)
+    ? existing.bundleRef
+    : await writeHostedBase64BundleIfChanged({
+        bundleStore: createHostedBundleStore({
+          bucket: input.bucket,
+          key: input.key,
+          keyId: input.keyId,
+          keysById: input.keysById,
+        }),
+        currentRef: existing.bundleRef,
+        kind: "vault",
+        value: input.payload.bundle,
+      });
 
   const finalizedResult: HostedExecutionCommittedResult = {
     ...existing,
     bundleRef: nextBundleRef,
-    finalizedAt: existing.finalizedAt ?? new Date().toISOString(),
-    gatewayProjectionSnapshot:
-      input.payload.gatewayProjectionSnapshot ?? existing.gatewayProjectionSnapshot,
+    finalizedAt: new Date().toISOString(),
+    gatewayProjectionSnapshot: expectedGatewayProjectionSnapshot,
   };
   await journalStore.writeCommittedResult(input.userId, input.eventId, finalizedResult);
   return finalizedResult;
@@ -227,8 +259,22 @@ export async function persistHostedExecutionFinalBundles(input: {
 function normalizeHostedExecutionCommittedResult(
   value: HostedExecutionCommittedResult,
 ): HostedExecutionCommittedResult {
+  const record = value as {
+    assistantDeliveryEffects?: unknown;
+    sideEffects?: unknown;
+  };
+  rejectRemovedHostedExecutionField(
+    record,
+    "sideEffects",
+    "Hosted execution committed result",
+  );
+  const assistantDeliveryEffects = requireAssistantDeliveryEffects(
+    record.assistantDeliveryEffects,
+    "Hosted execution committed result.assistantDeliveryEffects",
+  );
   return {
     ...value,
+    assistantDeliveryEffects,
     bundleRef: parseHostedExecutionBundleRef(
       (value as { bundleRef?: unknown }).bundleRef,
       "Hosted execution committed result bundleRef",
@@ -241,7 +287,6 @@ function normalizeHostedExecutionCommittedResult(
         : gatewayProjectionSnapshotSchema.parse(
             (value as { gatewayProjectionSnapshot: unknown }).gatewayProjectionSnapshot,
           ),
-    sideEffects: parseHostedExecutionSideEffects((value as { sideEffects?: unknown }).sideEffects),
     userId: requireCommittedResultString(
       (value as { userId?: unknown }).userId,
       "Hosted execution committed result userId",
@@ -255,6 +300,32 @@ function requireCommittedResultString(value: unknown, label: string): string {
   }
 
   return value;
+}
+
+function assertEquivalentDuplicateFinalize(
+  existing: HostedExecutionCommittedResult,
+  input: {
+    eventId: string;
+    expectedBundleRef: HostedExecutionBundleRefIdentity | null;
+    expectedGatewayProjectionSnapshot: GatewayProjectionSnapshot | null;
+  },
+): void {
+  if (!sameHostedBundlePayloadRef(existing.bundleRef, input.expectedBundleRef)) {
+    throw new Error(
+      `Hosted execution finalize ${input.eventId} vault bundle ref does not match the existing durable finalize.`,
+    );
+  }
+
+  if (
+    !sameStructuredJsonValue(
+      existing.gatewayProjectionSnapshot ?? null,
+      input.expectedGatewayProjectionSnapshot,
+    )
+  ) {
+    throw new Error(
+      `Hosted execution finalize ${input.eventId} gateway projection snapshot does not match the existing durable finalize.`,
+    );
+  }
 }
 
 function assertEquivalentDuplicateCommit(
@@ -272,22 +343,40 @@ function assertEquivalentDuplicateCommit(
     );
   }
 
-  if (!sameStructuredValue(existing.result, input.payload.result)) {
+  if (!sameStructuredJsonValue(existing.result, input.payload.result)) {
     throw new Error(
       `Hosted execution commit ${input.eventId} result does not match the existing durable commit.`,
     );
   }
 
-  const expectedSideEffects = parseHostedExecutionSideEffects(input.payload.sideEffects);
-  if (!sameStructuredValue(existing.sideEffects, expectedSideEffects)) {
+  const expectedAssistantDeliveryEffects = requireAssistantDeliveryEffects(
+    input.payload.assistantDeliveryEffects,
+    "Hosted execution commit payload.assistantDeliveryEffects",
+  );
+  if (
+    !sameStructuredJsonValue(
+      sortHostedAssistantDeliveryReplayIdentitySummary(
+        summarizeHostedAssistantDeliveryReplayIdentities(existing.assistantDeliveryEffects),
+      ),
+      sortHostedAssistantDeliveryReplayIdentitySummary(
+        summarizeHostedAssistantDeliveryReplayIdentities(expectedAssistantDeliveryEffects),
+      ),
+    )
+  ) {
+    emitHostedDuplicateCommitMismatchLog({
+      eventId: input.eventId,
+      existing,
+      mismatch: "assistant_delivery_effects",
+      payload: input.payload,
+    });
     throw new Error(
-      `Hosted execution commit ${input.eventId} side effects do not match the existing durable commit.`,
+      `Hosted execution commit ${input.eventId} assistant deliveries do not match the existing durable commit.`,
     );
   }
 
   const expectedGatewayProjectionSnapshot = input.payload.gatewayProjectionSnapshot ?? null;
   if (
-    !sameStructuredValue(
+    !sameStructuredJsonValue(
       existing.gatewayProjectionSnapshot ?? null,
       expectedGatewayProjectionSnapshot,
     )
@@ -308,6 +397,132 @@ function assertEquivalentDuplicateCommit(
   }
 }
 
+type HostedDuplicateCommitMismatchKind =
+  | "assistant_delivery_effects";
+
+function emitHostedDuplicateCommitMismatchLog(input: {
+  eventId: string;
+  existing: HostedExecutionCommittedResult;
+  mismatch: HostedDuplicateCommitMismatchKind;
+  payload: HostedExecutionCommitPayload;
+}): void {
+  const existingAssistantDeliveriesInOrder = summarizeHostedAssistantDeliveryEffects(
+    input.existing.assistantDeliveryEffects,
+  );
+  const incomingAssistantDeliveriesInOrder = summarizeHostedAssistantDeliveryEffects(
+    requireAssistantDeliveryEffects(
+      input.payload.assistantDeliveryEffects,
+      "Hosted execution duplicate commit payload.assistantDeliveryEffects",
+    ),
+  );
+  const existingAssistantDeliveriesSorted = sortHostedAssistantDeliveryEffectsSummary(
+    existingAssistantDeliveriesInOrder,
+  );
+  const incomingAssistantDeliveriesSorted = sortHostedAssistantDeliveryEffectsSummary(
+    incomingAssistantDeliveriesInOrder,
+  );
+  const existingAssistantDeliveryReplayIdentitiesSorted =
+    sortHostedAssistantDeliveryReplayIdentitySummary(
+      summarizeHostedAssistantDeliveryReplayIdentities(input.existing.assistantDeliveryEffects),
+    );
+  const incomingAssistantDeliveryReplayIdentitiesSorted =
+    sortHostedAssistantDeliveryReplayIdentitySummary(
+      summarizeHostedAssistantDeliveryReplayIdentities(
+        requireAssistantDeliveryEffects(
+          input.payload.assistantDeliveryEffects,
+          "Hosted execution duplicate commit payload.assistantDeliveryEffects",
+        ),
+      ),
+    );
+
+  emitHostedExecutionStructuredLog({
+    component: "runner",
+    details: {
+      existingAssistantDeliveryCount: existingAssistantDeliveriesInOrder.length,
+      existingAssistantDeliveriesInOrder,
+      existingAssistantDeliveryReplayIdentitiesSorted,
+      existingAssistantDeliveriesSorted,
+      existingCommittedAt: input.existing.committedAt,
+      existingFinalizedAt: input.existing.finalizedAt,
+      incomingAssistantDeliveryCount: incomingAssistantDeliveriesInOrder.length,
+      incomingAssistantDeliveriesInOrder,
+      incomingAssistantDeliveryReplayIdentitiesSorted,
+      incomingAssistantDeliveriesSorted,
+      mismatch: input.mismatch,
+      sortedAssistantDeliveryReplayIdentitiesMatch: sameStructuredJsonValue(
+        existingAssistantDeliveryReplayIdentitiesSorted,
+        incomingAssistantDeliveryReplayIdentitiesSorted,
+      ),
+      sortedAssistantDeliveriesMatch: sameStructuredJsonValue(
+        existingAssistantDeliveriesSorted,
+        incomingAssistantDeliveriesSorted,
+      ),
+    },
+    eventId: input.eventId,
+    level: "error",
+    message: "Hosted duplicate durable commit payload diverged from the existing commit.",
+    phase: "failed",
+  });
+}
+
+function summarizeHostedAssistantDeliveryEffects(
+  effects: readonly HostedAssistantDeliveryEffect[],
+): {
+  effectId: string;
+  fingerprint: string;
+}[] {
+  return effects.map((effect) => ({
+    effectId: effect.effectId,
+    fingerprint: effect.fingerprint,
+  }));
+}
+
+function summarizeHostedAssistantDeliveryReplayIdentities(
+  effects: readonly HostedAssistantDeliveryEffect[],
+): {
+  fingerprint: string;
+  kind: HostedAssistantDeliveryEffect["kind"];
+}[] {
+  return effects.map((effect) => ({
+    fingerprint: effect.fingerprint,
+    kind: effect.kind,
+  }));
+}
+
+function sortHostedAssistantDeliveryEffectsSummary(input: readonly {
+  effectId: string;
+  fingerprint: string;
+}[]): {
+  effectId: string;
+  fingerprint: string;
+}[] {
+  return [...input].sort((left, right) => {
+    const effectIdOrder = left.effectId.localeCompare(right.effectId);
+    if (effectIdOrder !== 0) {
+      return effectIdOrder;
+    }
+
+    return left.fingerprint.localeCompare(right.fingerprint);
+  });
+}
+
+function sortHostedAssistantDeliveryReplayIdentitySummary(input: readonly {
+  fingerprint: string;
+  kind: HostedAssistantDeliveryEffect["kind"];
+}[]): {
+  fingerprint: string;
+  kind: HostedAssistantDeliveryEffect["kind"];
+}[] {
+  return [...input].sort((left, right) => {
+    const fingerprintOrder = left.fingerprint.localeCompare(right.fingerprint);
+    if (fingerprintOrder !== 0) {
+      return fingerprintOrder;
+    }
+
+    return left.kind.localeCompare(right.kind);
+  });
+}
+
 function resolveExpectedCommittedBundleRef(
   currentRef: HostedExecutionBundleRef | null,
   value: string | null,
@@ -326,6 +541,23 @@ function resolveExpectedCommittedBundleRef(
     : decoded.ref;
 }
 
-function sameStructuredValue(left: unknown, right: unknown): boolean {
-  return JSON.stringify(left) === JSON.stringify(right);
+function rejectRemovedHostedExecutionField(
+  record: Record<string, unknown>,
+  field: string,
+  label: string,
+): void {
+  if (record[field] !== undefined) {
+    throw new TypeError(`${label}.${field} is no longer supported.`);
+  }
+}
+
+function requireAssistantDeliveryEffects(
+  value: unknown,
+  label: string,
+): HostedAssistantDeliveryEffect[] {
+  if (!Array.isArray(value)) {
+    throw new TypeError(`${label} must be an array.`);
+  }
+
+  return parseHostedAssistantDeliveryEffects(value);
 }

@@ -26,6 +26,15 @@ const ROOT_GLOBAL_FILES = new Set([
   "pnpm-lock.yaml",
   "pnpm-workspace.yaml",
 ]);
+const CLI_ARTIFACT_SENSITIVE_FILES = new Set([
+  "packages/cli/config.schema.json",
+  "packages/cli/package.json",
+  "packages/cli/scripts/verify-package-shape.ts",
+  "packages/cli/tsconfig.build.json",
+  "packages/cli/vitest.config.ts",
+  "packages/cli/vitest.workspace.ts",
+  "scripts/build-test-runtime-prepared.mjs",
+]);
 
 function isRepoInternalFastPathFile(filePath) {
   if (ROOT_FAST_PATH_FILES.has(filePath)) {
@@ -46,6 +55,10 @@ function isRepoInternalFastPathFile(filePath) {
     || filePath.startsWith("docs/")
     || filePath.startsWith("scripts/")
   );
+}
+
+function isCliArtifactSensitiveFile(filePath) {
+  return ROOT_GLOBAL_FILES.has(filePath) || CLI_ARTIFACT_SENSITIVE_FILES.has(filePath);
 }
 
 function workspaceDirFromFile(filePath) {
@@ -213,7 +226,8 @@ async function buildDiffScopeSummary(explicitChangedFiles) {
     .map((workspaceDir) => metadataByDir.get(workspaceDir))
     .filter((metadata) => metadata !== undefined)
     .sort((left, right) => left.dir.localeCompare(right.dir));
-  const runVerifyCli = affectedWorkspaceDirs.has("packages/cli");
+  const runVerifyCli = changedFiles.some((filePath) => isCliArtifactSensitiveFile(filePath));
+  const runRepoToolsTests = changedFiles.some((filePath) => filePath.startsWith("scripts/"));
   const typecheckDirs = [];
   const testDirs = [];
   const verifyAppDirs = [];
@@ -226,7 +240,7 @@ async function buildDiffScopeSummary(explicitChangedFiles) {
       continue;
     }
 
-    if (metadata.dir === "packages/cli") {
+    if (metadata.dir === "packages/cli" && runVerifyCli) {
       continue;
     }
 
@@ -254,6 +268,7 @@ async function buildDiffScopeSummary(explicitChangedFiles) {
     noChanges: changedFiles.length === 0,
     nonWorkspaceFiles: uniqueSorted(nonWorkspaceFiles),
     repoInternalFastPath,
+    runRepoToolsTests,
     runVerifyCli,
     testDirs: uniqueSorted(testDirs),
     touchedWorkspaceDirs: uniqueSorted([...touchedWorkspaceDirs]),
@@ -286,6 +301,7 @@ function printShellSummary(summary) {
   printShellScalar("diff_global_root_change", summary.globalRootChange ? "1" : "0");
   printShellScalar("diff_has_non_workspace_files", summary.hasNonWorkspaceFiles ? "1" : "0");
   printShellScalar("diff_run_verify_cli", summary.runVerifyCli ? "1" : "0");
+  printShellScalar("diff_run_repo_tools_tests", summary.runRepoToolsTests ? "1" : "0");
   printShellArray("diff_changed_files", summary.changedFiles);
   printShellArray("diff_non_workspace_files", summary.nonWorkspaceFiles);
   printShellArray("diff_touched_workspace_dirs", summary.touchedWorkspaceDirs);

@@ -53,27 +53,10 @@ async function makeCanonicalHealthFixture(): Promise<string> {
 
   await writeVaultFile(
     vaultRoot,
-    'ledger/profile-snapshots/2026/2026-03.jsonl',
-    `${JSON.stringify({
-      schemaVersion: 'murph.profile-snapshot.v1',
-      id: 'psnap_health_01',
-      recordedAt: '2026-03-12T14:00:00Z',
-      source: 'assessment_projection',
-      sourceAssessmentIds: ['asmt_health_01'],
-      sourceEventIds: ['evt_history_01'],
-      profile: {
-        topGoalIds: ['goal_sleep_01'],
-      },
-      summary: 'Sleep remains the primary concern.',
-    })}\n`,
-  )
-
-  await writeVaultFile(
-    vaultRoot,
     'ledger/events/2026/2026-03.jsonl',
     `${JSON.stringify({
       schemaVersion: 'murph.event.v1',
-      id: 'evt_history_01',
+      id: 'evt_health_event_01',
       kind: 'encounter',
       occurredAt: '2026-03-12T12:45:00Z',
       recordedAt: '2026-03-12T12:50:00Z',
@@ -301,7 +284,6 @@ test('search returns lexical hits and excludes raw sample rows by default', asyn
     }>([
       'search',
       'query',
-      '--text',
       'afternoon crash pasta',
       '--limit',
       '10',
@@ -322,6 +304,57 @@ test('search returns lexical hits and excludes raw sample rows by default', asyn
       requireData(result).hits.some((hit) => hit.recordType === 'sample'),
       false,
     )
+  } finally {
+    await rm(fixture.vaultRoot, { recursive: true, force: true })
+  }
+})
+
+test('search query accepts matching positional and named text on the built CLI', async () => {
+  const fixture = await makeRetrievalFixture()
+
+  try {
+    const result = await runCli<{
+      query: string
+      total: number
+    }>([
+      'search',
+      'query',
+      'afternoon crash pasta',
+      '--text',
+      'afternoon crash pasta',
+      '--limit',
+      '10',
+      '--vault',
+      fixture.vaultRoot,
+    ])
+
+    assert.equal(result.ok, true)
+    assert.equal(result.meta?.command, 'search query')
+    assert.equal(requireData(result).query, 'afternoon crash pasta')
+    assert.equal(requireData(result).total, 2)
+  } finally {
+    await rm(fixture.vaultRoot, { recursive: true, force: true })
+  }
+})
+
+test('search query rejects blank mixed input on the built CLI', async () => {
+  const fixture = await makeRetrievalFixture()
+
+  try {
+    const result = await runCli([
+      'search',
+      'query',
+      'afternoon crash pasta',
+      '--text',
+      '   ',
+      '--limit',
+      '10',
+      '--vault',
+      fixture.vaultRoot,
+    ])
+
+    assert.equal(result.ok, false)
+    assert.equal(result.error?.code, 'invalid_query')
   } finally {
     await rm(fixture.vaultRoot, { recursive: true, force: true })
   }
@@ -730,9 +763,9 @@ test('search accepts projected health record families', async () => {
       '--text',
       'sleep',
       '--record-type',
-      'history',
-      '--record-type',
       'assessment',
+      '--record-type',
+      'event',
       '--record-type',
       'goal',
       '--vault',
@@ -741,13 +774,13 @@ test('search accepts projected health record families', async () => {
 
     assert.equal(result.ok, true)
     assert.deepEqual(requireData(result).filters.recordTypes, [
-      'history',
       'assessment',
+      'event',
       'goal',
     ])
     assert.deepEqual(
       new Set(requireData(result).hits.map((hit) => hit.recordType)),
-      new Set(['history', 'assessment', 'goal']),
+      new Set(['assessment', 'event', 'goal']),
     )
     assert.equal(requireData(result).total, 3)
   } finally {
@@ -771,9 +804,7 @@ test('timeline exposes projected health entry types', async () => {
       '--entry-type',
       'assessment',
       '--entry-type',
-      'history',
-      '--entry-type',
-      'profile_snapshot',
+      'event',
       '--from',
       '2026-03-12',
       '--to',
@@ -785,12 +816,11 @@ test('timeline exposes projected health entry types', async () => {
     assert.equal(result.ok, true)
     assert.deepEqual(requireData(result).filters.entryTypes, [
       'assessment',
-      'history',
-      'profile_snapshot',
+      'event',
     ])
     assert.deepEqual(
       requireData(result).items.map((item) => item.entryType),
-      ['profile_snapshot', 'assessment', 'history'],
+      ['assessment', 'event'],
     )
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })
@@ -832,7 +862,7 @@ test('search rejects comma-delimited record-type tokens', async () => {
       '--text',
       'sleep',
       '--record-type',
-      'history,assessment',
+      'event,assessment',
       '--vault',
       vaultRoot,
     ])
@@ -880,7 +910,7 @@ test('timeline rejects comma-delimited entry-type tokens', async () => {
     const result = await runCli([
       'timeline',
       '--entry-type',
-      'assessment,history',
+      'assessment,event',
       '--from',
       '2026-03-12',
       '--to',

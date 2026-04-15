@@ -1,10 +1,12 @@
-# Murph 🫀
+<img src="docs/assets/readme-hero.jpg" alt="Murph hero" width="1200" height="685">
+
+# Murph 🌙
 
 Murph is your personal health assistant.
 
 Think OpenClaw, but built specifically to help you live longer and healthier.
 
-Underneath that assistant, Murph keeps durable human-reviewed truth in Markdown, append-only machine history in JSONL, and layers a typed CLI, local daemons, and hosted control/execution surfaces on top of that vault.
+Underneath that assistant, Murph keeps durable human-reviewed truth in Markdown, append-only machine event ledgers in JSONL, and layers a typed CLI, local daemons, and hosted control/execution surfaces on top of that vault.
 
 The main installable product entrypoint is `@murphai/murph`, which gives you the `murph` command.
 
@@ -23,7 +25,7 @@ The main installable product entrypoint is `@murphai/murph`, which gives you the
 
 ## Install
 
-Runtime: Node `>= 22.16.0`.
+Runtime: Node `>= 24.14.1`.
 
 Preferred install for most users:
 
@@ -36,6 +38,8 @@ murph onboard
 ```
 
 `@murphai/murph` is the full local Murph package. The repo keeps many internal workspace packages, but the public npm surface is intentionally narrow: `@murphai/murph`, `@murphai/openclaw-plugin`, `@murphai/contracts`, `@murphai/hosted-execution`, and `@murphai/gateway-core`. The remaining owner packages stay workspace-private and are bundled into those public tarballs only when a public package still needs them at runtime.
+
+`murph` is the simple product entrypoint: it operates on one active vault at a time, selected during onboarding or later with `murph use <path>`. The lower-level `vault-cli` binary remains the raw explicit-vault surface for development, automation, and other contract-level consumers.
 
 ## OpenClaw integration
 
@@ -50,7 +54,7 @@ That bundle intentionally stays vault-first. It ships a Murph skill that teaches
 
 ## From this repo
 
-Supported host setup path: macOS and Linux. iMessage remains macOS-only.
+Supported host setup path: macOS and Linux.
 
 Preferred setup from a checkout:
 
@@ -77,6 +81,7 @@ Installed package:
 
 ```bash
 murph onboard
+murph use ./vault
 murph model
 murph chat
 murph run
@@ -96,8 +101,9 @@ vault-cli vault stats
 
 Murph is opinionated about storage boundaries:
 
-- Markdown is the human-facing source of truth for durable documents such as `CORE.md`, journals, profile state, goals, conditions, protocols, and registries.
+- Markdown is the human-facing source of truth for durable documents such as `CORE.md`, journals, memory, goals, conditions, protocols, registries, and the derived personal wiki.
 - JSONL ledgers are the machine-facing source of truth for append-only records such as events, samples, assessments, and audit entries.
+- Blood tests remain user-facing reads over canonical `kind: "test"` event-ledger records; they do not introduce a second storage family.
 - Imported source artifacts are copied into `raw/**` and treated as immutable.
 - Derived parser output and compiled knowledge pages live under `derived/**` and stay rebuildable. For the knowledge wiki specifically, `derived/knowledge/index.md` is the content catalog, `derived/knowledge/log.md` is the append-only write log, and `derived/knowledge/pages/*.md` are the assistant-authored personal synthesis pages.
 - Local machine state lives under `.runtime/**`, with durable non-canonical operational state in `.runtime/operations/**`, rebuildable projections in `.runtime/projections/**`, and ephemeral scratch state in `.runtime/cache/**` plus `.runtime/tmp/**`.
@@ -110,30 +116,30 @@ The result is a system you can inspect with normal filesystem tools while still 
 
 Only five packages are published to npm: `@murphai/murph`, `@murphai/openclaw-plugin`, `@murphai/contracts`, `@murphai/hosted-execution`, and `@murphai/gateway-core`. The remaining `packages/*` entries are workspace-private owner packages that stay installable from a checkout and can be bundled into public tarballs, but they are not intended to be consumed as standalone npm products.
 
-| Path | Responsibility |
-| --- | --- |
-| `packages/contracts` | Canonical Zod contracts, types, examples, and generated JSON Schema artifacts. |
-| `packages/hosted-execution` | Shared hosted dispatch contracts, env readers, signing helpers, and typed clients. |
-| `packages/runtime-state` | Workspace-private shared local-state taxonomy, `.runtime` path resolution, JSON-state versioning, and SQLite schema-version helpers. |
-| `packages/core` | Workspace-private canonical mutation owner. No other package may write canonical vault data directly. |
-| `packages/importers` | Workspace-private external adapters that normalize inputs and delegate writes to `core`. |
-| `packages/inboxd` | Workspace-private inbox capture, canonical evidence persistence, runtime indexing, and attachment parse-job orchestration. |
-| `packages/parsers` | Workspace-private local-first attachment parsing and derived artifact publication. |
-| `packages/query` | Workspace-private read helpers, summaries, list/search helpers, export-pack generation, and derived-knowledge parser/search/index helpers. |
-| `packages/device-syncd` | Workspace-private local wearable/device OAuth, webhook, and reconcile daemon. |
-| `packages/assistant-engine` | Workspace-private headless assistant execution/runtime owner. |
-| `packages/operator-config` | Workspace-private operator config, setup/runtime-env, and hosted assistant config owner. |
-| `packages/assistant-cli` | Workspace-private CLI-only assistant wrappers, commands, terminal logging, and Ink chat UI. |
-| `packages/setup-cli` | Workspace-private CLI-only onboarding, host setup, and setup-wizard package. |
-| `packages/gateway-core` | Headless transport-neutral gateway boundary. |
-| `packages/gateway-local` | Workspace-private local vault-backed gateway runtime and projection store. |
-| `packages/assistant-runtime` | Workspace-private headless hosted execution surface used by Cloudflare runner paths. |
-| `packages/assistantd` | Workspace-private local assistant daemon with a loopback-only bearer-authenticated control plane. |
-| `packages/cli` | The published `@murphai/murph` package, exposing the `murph` / `vault-cli` binaries and the main operator surface. |
-| `packages/openclaw-plugin` | The published OpenClaw-compatible bundle that teaches OpenClaw to use `vault-cli` directly against the configured Murph vault. |
-| `apps/web` | Hosted Next.js control plane for onboarding, billing, OAuth, webhooks, and execution dispatch/outbox. |
-| `apps/cloudflare` | Hosted execution plane for signed internal dispatch, per-user coordination, encrypted hosted bundles, and container-backed runs. |
-| `fixtures` and `e2e` | Deterministic fixtures and smoke coverage. |
+| Path                         | Responsibility                                                                                                                             |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `packages/contracts`         | Canonical Zod contracts, types, examples, and generated JSON Schema artifacts.                                                             |
+| `packages/hosted-execution`  | Shared hosted dispatch contracts, env readers, signing helpers, and typed clients.                                                         |
+| `packages/runtime-state`     | Workspace-private shared local-state taxonomy, `.runtime` path resolution, JSON-state versioning, and SQLite schema-version helpers.       |
+| `packages/core`              | Workspace-private canonical mutation owner. No other package may write canonical vault data directly.                                      |
+| `packages/importers`         | Workspace-private external adapters that normalize inputs and delegate writes to `core`.                                                   |
+| `packages/inboxd`            | Workspace-private inbox capture, canonical evidence persistence, runtime indexing, and attachment parse-job orchestration.                 |
+| `packages/parsers`           | Workspace-private local-first attachment parsing and derived artifact publication.                                                         |
+| `packages/query`             | Workspace-private read helpers, summaries, list/search helpers, export-pack generation, and derived-knowledge parser/search/index helpers. |
+| `packages/device-syncd`      | Workspace-private local wearable/device OAuth, webhook, and reconcile daemon.                                                              |
+| `packages/assistant-engine`  | Workspace-private headless assistant execution/runtime owner.                                                                              |
+| `packages/operator-config`   | Workspace-private operator config, setup/runtime-env, and hosted assistant config owner.                                                   |
+| `packages/assistant-cli`     | Workspace-private CLI-only assistant wrappers, commands, terminal logging, and Ink chat UI.                                                |
+| `packages/setup-cli`         | Workspace-private CLI-only onboarding, host setup, and setup-wizard package.                                                               |
+| `packages/gateway-core`      | Headless transport-neutral gateway boundary.                                                                                               |
+| `packages/gateway-local`     | Workspace-private local vault-backed gateway runtime and projection store.                                                                 |
+| `packages/assistant-runtime` | Workspace-private headless hosted execution surface used by Cloudflare runner paths.                                                       |
+| `packages/assistantd`        | Workspace-private local assistant daemon with a loopback-only bearer-authenticated control plane.                                          |
+| `packages/cli`               | The published `@murphai/murph` package, exposing the `murph` / `vault-cli` binaries and the main operator surface.                         |
+| `packages/openclaw-plugin`   | The published OpenClaw-compatible bundle that teaches OpenClaw to use `vault-cli` directly against the configured Murph vault.             |
+| `apps/web`                   | Hosted Next.js control plane for onboarding, billing, OAuth, webhooks, and execution dispatch/outbox.                                      |
+| `apps/cloudflare`            | Hosted execution plane for signed internal dispatch, per-user coordination, encrypted hosted bundles, and container-backed runs.           |
+| `fixtures` and `e2e`         | Deterministic fixtures and smoke coverage.                                                                                                 |
 
 ## Local and hosted surfaces
 
@@ -163,10 +169,13 @@ The root CLI is no longer just a vault editor. The built command surface include
 - `assistant` for local chat, status, outbox, cron, automation, and provider-backed runtime control
 - `inbox` for inbox runtime setup, review, and daemon operations
 - `device` for local wearable/device auth, status, and daemon control
+- env-gated route estimation through `vault-cli route estimate`, which uses temporary Mapbox geocoding and Search Box lookups for distance, duration, hiking POIs, and optional approximate elevation between two points without persisting the route payload in Murph state
 - root shortcuts such as `chat`, `run`, `status`, `doctor`, and `stop`
 - AI-assisted synthesis helpers such as `research`, `deepthink`, and `knowledge`
 
 The `knowledge` surface is intentionally narrow: use it to persist pages, inspect saved pages, lint the wiki, rebuild the index, and tail the append-only wiki log. The assistant's wiki-maintainer workflow itself lives in the runtime prompt plus the dedicated `assistant.knowledge.*` tools, not in repo `AGENTS.md`.
+
+For operator UX, prefer `murph`. It resolves one active vault and no longer expects ad hoc `--vault` switching on normal commands. Use `murph use <path>` to select a different existing vault, or `murph onboard --vault <path>` to create/select one during setup. Use `vault-cli` when you intentionally need the raw explicit-vault contract.
 
 ### Choosing a read command
 
@@ -174,7 +183,7 @@ The `knowledge` surface is intentionally narrow: use it to persist pages, inspec
 - Use `vault-cli list` when you need structured filtering by family, kind, status, stream, tag, or date range.
 - Use `vault-cli search query --text "..."` when the target is fuzzy, remembered by phrase, or buried across notes and record bodies.
 - Use `vault-cli timeline` when the question is chronological: what changed, what happened over a window, or what stood out over time.
-- Use `vault-cli profile show current` for the current synthesized profile instead of reconstructing it manually from older snapshots.
+- Use `vault-cli memory show`, targeted `vault-cli knowledge ...` reads, and the relevant preferences surface when you need the user's saved current-state context.
 - Use `vault-cli wearables day` or the `wearables ... list` commands for semantic wearable summaries before drilling into raw events or samples.
 - Use family `manifest` commands such as `meal manifest`, `document manifest`, `intake manifest`, and `workout manifest` when you need immutable import provenance or raw-source context.
 
@@ -190,27 +199,44 @@ pnpm exec tsx packages/cli/src/bin.ts --help
 
 ```bash
 pnpm onboard --vault ./vault
+murph use ./vault
 pnpm chat
 murph run
-murph device daemon start --vault ./vault
+murph device daemon start
 ```
 
 ### Developer flows
 
 ```bash
+pnpm dev
 pnpm typecheck
 pnpm test
-pnpm test:coverage
-pnpm --dir apps/web dev
+pnpm verify:acceptance
 pnpm --dir apps/cloudflare verify
 ```
+
+`pnpm dev` is the repo-root local hosted lane. It pulls the linked Vercel development env for `apps/web`, runs hosted-web Prisma generate plus migrate, and starts both `apps/web` and the local Cloudflare worker together. One-time local prerequisites:
+
+- either `cd apps/web && vercel link` or run `vercel link --repo` from the repo root
+- log into Vercel CLI and enable project OIDC for the linked web project
+- optional: copy `apps/cloudflare/.dev.vars.example` to `apps/cloudflare/.dev.vars` when you want to pin local Worker secrets or add provider-specific Worker vars; otherwise `pnpm dev` uses Wrangler's documented local process-env path for required Worker secrets and CLI `--var` overrides for local non-secret vars
+- either keep `DATABASE_URL` in the linked Vercel development env or run local Postgres on `127.0.0.1:5432` so the default local database URL works
+- keep the linked Vercel development env populated with the real hosted signup secrets you need locally, such as Privy and Stripe test credentials
+
+Repeatable launcher sanity check:
+
+```bash
+NEXT_DIST_DIR_MODE=smoke MURPH_DEV_WEB_PORT=3013 MURPH_DEV_WORKER_PORT=8793 pnpm dev
+```
+
+That variant keeps the check off the default `apps/web/.next-dev` lock and default localhost ports while still exercising the same root launcher, Vercel env pull, Prisma setup, and Wrangler/Containers startup path.
 
 The repo verification baseline for docs/process-only and ordinary repo work remains:
 
 ```bash
 pnpm typecheck
 pnpm test
-pnpm test:coverage
+pnpm verify:acceptance
 ```
 
 ## Maintainer helpers

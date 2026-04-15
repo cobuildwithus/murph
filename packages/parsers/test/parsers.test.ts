@@ -7,9 +7,12 @@ import { test } from "vitest";
 import { initializeVault } from "@murphai/core";
 import { createVersionedJsonStateEnvelope } from "@murphai/runtime-state/node";
 import {
+  type Cursor,
   createParsedInboxPipeline,
   createInboxPipeline,
+  type EmitCapture,
   openInboxRuntime,
+  type PollConnector,
   rebuildRuntimeFromVault,
   runInboxDaemonWithParsers,
   type InboxRuntimeStore,
@@ -19,7 +22,6 @@ import {
   createConfiguredParserRegistry,
   createInboxParserService,
   createParserRegistry,
-  createPdfToTextProvider,
   createTextFileProvider,
   createWhisperCppProvider,
   discoverParserToolchain,
@@ -31,7 +33,9 @@ import {
   runAttachmentParseWorker,
   writeParserArtifacts,
   writeParserToolchainConfig,
+  type AttachmentParseJobClaimFilters,
   type ParserProvider,
+  type RequeueAttachmentParseJobsInput,
 } from "../src/index.js";
 import {
   describeExecutableAvailability,
@@ -425,78 +429,6 @@ test("parser toolchain config rejects relative whisper model paths that escape t
   await fs.rm(outsideRoot, { recursive: true, force: true });
 });
 
-test("pdftotext provider discovers explicit executables and parses PDF text output", async () => {
-  const directory = await makeTempDirectory("murph-parser-pdftotext");
-  const executablePath = await writeExecutableFile(
-    directory,
-    "fake-pdftotext",
-    "#!/usr/bin/env node\nprocess.stdout.write('Page one\\fPage two\\n');\n",
-  );
-  const inputPath = await writeExternalFile(directory, "scan.pdf", "pdf-placeholder");
-  const provider = createPdfToTextProvider({
-    commandCandidates: [executablePath],
-  });
-
-  assert.deepEqual(await provider.discover(), {
-    available: true,
-    reason: "pdftotext CLI available.",
-    executablePath,
-  });
-  assert.equal(
-    provider.supports({
-      intent: "attachment_text",
-      artifact: {
-        captureId: "cap_pdf_support",
-        attachmentId: "att_pdf_support",
-        kind: "document",
-        fileName: "scan.pdf",
-        mime: "application/pdf",
-        storedPath: "raw/inbox/example/scan.pdf",
-        absolutePath: inputPath,
-      },
-      inputPath,
-      scratchDirectory: directory,
-    }),
-    true,
-  );
-  assert.equal(
-    provider.supports({
-      intent: "attachment_text",
-      artifact: {
-        captureId: "cap_text_support",
-        attachmentId: "att_text_support",
-        kind: "document",
-        fileName: "note.txt",
-        mime: "text/plain",
-        storedPath: "raw/inbox/example/note.txt",
-        absolutePath: inputPath,
-      },
-      inputPath,
-      scratchDirectory: directory,
-    }),
-    false,
-  );
-
-  const result = await provider.run({
-    intent: "attachment_text",
-    artifact: {
-      captureId: "cap_pdf_run",
-      attachmentId: "att_pdf_run",
-      kind: "document",
-      fileName: "scan.pdf",
-      mime: "application/pdf",
-      storedPath: "raw/inbox/example/scan.pdf",
-      absolutePath: inputPath,
-    },
-    inputPath,
-    scratchDirectory: directory,
-  });
-
-  assert.equal(result.text, "Page one\fPage two");
-  assert.equal(result.metadata?.pageCount, 2);
-  assert.match(result.markdown ?? "", /Page one/u);
-});
-
 test("whisper.cpp provider reports missing model paths and parses transcript artifacts", async () => {
   const directory = await makeTempDirectory("murph-parser-whisper");
   const executablePath = await writeExecutableFile(
@@ -825,7 +757,7 @@ test("parseAttachment rejects unsafe or malformed attachment IDs before using sc
       id: "fake-image",
       locality: "local",
       openness: "open_source",
-      runtime: "embedded",
+      runtime: "node",
       priority: 100,
       async discover() {
         return {
@@ -1241,7 +1173,7 @@ test("attachment parse worker fails closed on malformed attachment IDs", async (
     completeAttachmentParseJob() {
       throw new Error("worker should not complete malformed attachment IDs");
     },
-    failAttachmentParseJob(input) {
+    failAttachmentParseJob(input: Parameters<InboxRuntimeStore["failAttachmentParseJob"]>[0]) {
       job = {
         ...job,
         state: "failed",
@@ -1262,7 +1194,7 @@ test("attachment parse worker fails closed on malformed attachment IDs", async (
     searchCaptures() {
       return [];
     },
-    getCapture(captureId) {
+    getCapture(captureId: string) {
       return captureId === capture.captureId ? (capture as unknown) : null;
     },
   } as unknown as InboxRuntimeStore;
@@ -1275,7 +1207,7 @@ test("attachment parse worker fails closed on malformed attachment IDs", async (
         id: "unexpected-success-provider",
         locality: "local",
         openness: "open_source",
-        runtime: "embedded",
+        runtime: "node",
         priority: 100,
         async discover() {
           return {
@@ -1321,7 +1253,7 @@ test("attachment parse worker consumes inbox jobs, writes derived artifacts, and
   const pipeline = await createInboxPipeline({ vaultRoot, runtime });
 
   const capture = await pipeline.processCapture({
-    source: "imessage",
+    source: "telegram",
     externalId: "img-1",
     accountId: "self",
     thread: {
@@ -1437,7 +1369,7 @@ test("stale running parser attempts do not overwrite a requeued rerun", async ()
   const pipeline = await createInboxPipeline({ vaultRoot, runtime });
 
   const capture = await pipeline.processCapture({
-    source: "imessage",
+    source: "telegram",
     externalId: "race-1",
     accountId: "self",
     thread: {
@@ -1460,9 +1392,9 @@ test("stale running parser attempts do not overwrite a requeued rerun", async ()
   });
 
   let runCount = 0;
-  let releaseFirstRun: (() => void) | null = null;
+  let releaseFirstRun: (() => void) | undefined;
   const firstRunStarted = new Promise<void>((resolve) => {
-    releaseFirstRun = resolve;
+    releaseFirstRun = () => resolve();
   });
 
   const registry = createParserRegistry([
@@ -1557,14 +1489,14 @@ test("stale running parser attempts do not overwrite a requeued rerun", async ()
 });
 
 test("parser service forwards scoped drain and requeue filters to the runtime", async () => {
-  const claimFilters: Array<Record<string, unknown> | undefined> = [];
-  const requeueFilters: Array<Record<string, unknown> | undefined> = [];
+  const claimFilters: Array<AttachmentParseJobClaimFilters | undefined> = [];
+  const requeueFilters: Array<RequeueAttachmentParseJobsInput | undefined> = [];
   const runtime = {
-    claimNextAttachmentParseJob(filters) {
+    claimNextAttachmentParseJob(filters?: AttachmentParseJobClaimFilters) {
       claimFilters.push(filters);
       return null;
     },
-    requeueAttachmentParseJobs(filters) {
+    requeueAttachmentParseJobs(filters?: RequeueAttachmentParseJobsInput) {
       requeueFilters.push(filters);
       return 2;
     },
@@ -1627,7 +1559,7 @@ test("attachment parse worker marks jobs failed when no provider is available", 
   const pipeline = await createInboxPipeline({ vaultRoot, runtime });
 
   const capture = await pipeline.processCapture({
-    source: "imessage",
+    source: "telegram",
     externalId: "img-fail-1",
     accountId: "self",
     thread: {
@@ -1683,7 +1615,7 @@ test("attachment parse worker can drain jobs scoped to a single capture", async 
   const pipeline = await createInboxPipeline({ vaultRoot, runtime });
 
   const first = await pipeline.processCapture({
-    source: "imessage",
+    source: "telegram",
     externalId: "scoped-first",
     thread: {
       id: "chat-scoped",
@@ -1704,7 +1636,7 @@ test("attachment parse worker can drain jobs scoped to a single capture", async 
     raw: {},
   });
   const second = await pipeline.processCapture({
-    source: "imessage",
+    source: "telegram",
     externalId: "scoped-second",
     thread: {
       id: "chat-scoped",
@@ -1804,7 +1736,7 @@ test("parsed inbox pipeline auto-drains parser jobs for each processed capture",
   });
 
   const capture = await pipeline.processCapture({
-    source: "imessage",
+    source: "telegram",
     externalId: "auto-drain-1",
     thread: {
       id: "chat-auto-drain",
@@ -1850,7 +1782,7 @@ test("daemon with parsers drains pending jobs before connector watch work begins
   const pipeline = await createInboxPipeline({ vaultRoot, runtime });
 
   const capture = await pipeline.processCapture({
-    source: "imessage",
+    source: "telegram",
     externalId: "startup-drain-1",
     thread: {
       id: "chat-startup-drain",
@@ -1874,9 +1806,9 @@ test("daemon with parsers drains pending jobs before connector watch work begins
 
   const daemonRuntime = await openInboxRuntime({ vaultRoot });
   const controller = new AbortController();
-  const connector = {
-    id: "noop-imessage",
-    source: "imessage",
+  const connector: PollConnector = {
+    id: "noop-telegram",
+    source: "telegram",
     accountId: "self",
     kind: "poll" as const,
     capabilities: {
@@ -1886,7 +1818,10 @@ test("daemon with parsers drains pending jobs before connector watch work begins
       watch: true,
       webhooks: false,
     },
-    async watch(_cursor, _emit, signal) {
+    async backfill(cursor: Cursor | null) {
+      return cursor;
+    },
+    async watch(_cursor: Cursor | null, _emit: EmitCapture, signal: AbortSignal) {
       if (signal.aborted) {
         return;
       }
@@ -1953,7 +1888,7 @@ test("daemon with parsers skips startup drain when the signal is already aborted
   const pipeline = await createInboxPipeline({ vaultRoot, runtime });
 
   const capture = await pipeline.processCapture({
-    source: "imessage",
+    source: "telegram",
     externalId: "aborted-drain-1",
     thread: {
       id: "chat-aborted-drain",
@@ -1986,8 +1921,8 @@ test("daemon with parsers skips startup drain when the signal is already aborted
     registry: createParserRegistry([]),
     connectors: [
       {
-        id: "aborted-imessage",
-        source: "imessage",
+        id: "aborted-telegram",
+        source: "telegram",
         accountId: "self",
         kind: "poll" as const,
         capabilities: {
@@ -1997,6 +1932,10 @@ test("daemon with parsers skips startup drain when the signal is already aborted
           watch: false,
           webhooks: false,
         },
+        async backfill(cursor: Cursor | null) {
+          return cursor;
+        },
+        async watch(_cursor: Cursor | null, _emit: EmitCapture, _signal: AbortSignal) {},
         async close() {
           closeCount += 1;
         },
@@ -2027,7 +1966,7 @@ test("daemon with parsers stops startup drain after abort between jobs", async (
   const pipeline = await createInboxPipeline({ vaultRoot, runtime });
 
   const first = await pipeline.processCapture({
-    source: "imessage",
+    source: "telegram",
     externalId: "abort-drain-first",
     thread: {
       id: "chat-abort-drain",
@@ -2048,7 +1987,7 @@ test("daemon with parsers stops startup drain after abort between jobs", async (
     raw: {},
   });
   const second = await pipeline.processCapture({
-    source: "imessage",
+    source: "telegram",
     externalId: "abort-drain-second",
     thread: {
       id: "chat-abort-drain",
@@ -2131,8 +2070,8 @@ test("daemon with parsers still rejects connector failures after cleanup", async
       registry: createParserRegistry([]),
       connectors: [
         {
-          id: "failing-imessage",
-          source: "imessage",
+          id: "failing-telegram",
+          source: "telegram",
           accountId: "self",
           kind: "poll" as const,
           capabilities: {
@@ -2145,12 +2084,13 @@ test("daemon with parsers still rejects connector failures after cleanup", async
           async backfill() {
             throw new Error("daemon blew up");
           },
+          async watch(_cursor: Cursor | null, _emit: EmitCapture, _signal: AbortSignal) {},
           async close() {},
         },
       ],
       signal: new AbortController().signal,
     }),
-    /Connector "failing-imessage" \(imessage\) failed: daemon blew up/u,
+    /Connector "failing-telegram" \(telegram\) failed: daemon blew up/u,
   );
 });
 
@@ -2173,22 +2113,25 @@ test("daemon with parsers can keep healthy connectors running after one connecto
     runtime,
     registry: createParserRegistry([]),
     connectors: [
-      {
-        id: "healthy-email",
-        source: "email",
+        {
+          id: "healthy-email",
+          source: "email",
         accountId: "agentmail",
         kind: "poll" as const,
-        capabilities: {
-          attachments: true,
-          backfill: false,
-          ownMessages: false,
-          watch: true,
-          webhooks: false,
-        },
-        async watch(_cursor, _emit, signal) {
-          if (signal.aborted) {
-            healthyConnectorAborted = true;
-            return;
+          capabilities: {
+            attachments: true,
+            backfill: false,
+            ownMessages: false,
+            watch: true,
+            webhooks: false,
+          },
+          async backfill(cursor: Cursor | null) {
+            return cursor;
+          },
+          async watch(_cursor: Cursor | null, _emit: EmitCapture, signal: AbortSignal) {
+            if (signal.aborted) {
+              healthyConnectorAborted = true;
+              return;
           }
 
           await new Promise<void>((resolve) => {
@@ -2206,21 +2149,24 @@ test("daemon with parsers can keep healthy connectors running after one connecto
           healthyConnectorClosed += 1;
         },
       },
-      {
-        id: "failing-imessage",
-        source: "imessage",
+        {
+          id: "failing-telegram",
+          source: "telegram",
         accountId: "self",
         kind: "poll" as const,
-        capabilities: {
-          attachments: true,
-          backfill: false,
-          ownMessages: false,
-          watch: true,
-          webhooks: false,
-        },
-        async watch() {
-          throw new Error("daemon blew up");
-        },
+          capabilities: {
+            attachments: true,
+            backfill: false,
+            ownMessages: false,
+            watch: true,
+            webhooks: false,
+          },
+          async backfill(cursor: Cursor | null) {
+            return cursor;
+          },
+          async watch(_cursor: Cursor | null, _emit: EmitCapture, _signal: AbortSignal) {
+            throw new Error("daemon blew up");
+          },
         async close() {
           sawFailingConnectorClose = true;
           resolveFailingConnectorClose?.();
@@ -2256,7 +2202,7 @@ test("parsed inbox pipeline stores captures even when auto-drain parsing fails",
   });
 
   const capture = await pipeline.processCapture({
-    source: "imessage",
+    source: "telegram",
     externalId: "auto-drain-fail-1",
     thread: {
       id: "chat-auto-fail",
@@ -2310,7 +2256,7 @@ test("attachment parse worker marks jobs failed when no provider can handle the 
   const pipeline = await createInboxPipeline({ vaultRoot, runtime });
 
   const capture = await pipeline.processCapture({
-    source: "imessage",
+    source: "telegram",
     externalId: "img-fail-1",
     accountId: "self",
     thread: {
@@ -2368,7 +2314,7 @@ test("attachment parse worker stores audio output as transcript text", async () 
   const pipeline = await createInboxPipeline({ vaultRoot, runtime });
 
   const capture = await pipeline.processCapture({
-    source: "imessage",
+    source: "telegram",
     externalId: "audio-1",
     accountId: "self",
     thread: {
@@ -2450,7 +2396,7 @@ test("successful parser results stay derived-only and rebuild re-enqueues work f
   const pipeline = await createInboxPipeline({ vaultRoot, runtime });
 
   const capture = await pipeline.processCapture({
-    source: "imessage",
+    source: "telegram",
     externalId: "img-rebuild-1",
     accountId: "self",
     thread: {
@@ -2560,7 +2506,7 @@ test("attachment parse worker redacts local paths from stored failure messages",
   const pipeline = await createInboxPipeline({ vaultRoot, runtime });
 
   const capture = await pipeline.processCapture({
-    source: "imessage",
+    source: "telegram",
     externalId: "img-failure-1",
     accountId: "self",
     thread: {

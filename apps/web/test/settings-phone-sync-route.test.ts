@@ -1,0 +1,303 @@
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+
+import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
+
+const mocks = vi.hoisted(() => ({
+  drainHostedExecutionOutboxBestEffort: vi.fn(),
+  enqueueHostedMemberChannelsUpdatedTx: vi.fn(),
+  getPrisma: vi.fn(),
+  prismaClient: {
+    label: "test-prisma",
+    $transaction: vi.fn(),
+  },
+  readHostedPhoneHint: vi.fn(),
+  reconcileHostedPrivyIdentityOnMemberTx: vi.fn(),
+  resolveHostedMemberEmailLinked: vi.fn(),
+  requirePrivyMemberAuth: vi.fn(),
+}));
+
+vi.mock("@/src/lib/prisma", () => ({
+  getPrisma: mocks.getPrisma,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/contact-privacy", () => ({
+  readHostedPhoneHint: mocks.readHostedPhoneHint,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/member-identity-service", () => ({
+  reconcileHostedPrivyIdentityOnMemberTx: mocks.reconcileHostedPrivyIdentityOnMemberTx,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({
+  requirePrivyMemberAuth: mocks.requirePrivyMemberAuth,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/member-channel-sync", () => ({
+  enqueueHostedMemberChannelsUpdatedTx: mocks.enqueueHostedMemberChannelsUpdatedTx,
+  resolveHostedMemberEmailLinked: mocks.resolveHostedMemberEmailLinked,
+}));
+
+vi.mock("@/src/lib/hosted-execution/outbox", () => ({
+  drainHostedExecutionOutboxBestEffort: mocks.drainHostedExecutionOutboxBestEffort,
+}));
+
+type SettingsPhoneSyncRouteModule = typeof import("../app/api/settings/phone/sync/route");
+
+let settingsPhoneSyncRoute: SettingsPhoneSyncRouteModule;
+const SAME_ORIGIN_HEADERS = {
+  origin: "https://join.example.test",
+};
+
+describe("settings phone sync route", () => {
+  beforeAll(async () => {
+    settingsPhoneSyncRoute = await import("../app/api/settings/phone/sync/route");
+  });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.getPrisma.mockReturnValue(mocks.prismaClient);
+    mocks.readHostedPhoneHint.mockReturnValue("+1 415 555 2671");
+    mocks.prismaClient.$transaction.mockImplementation(async (callback: (tx: unknown) => Promise<unknown>) =>
+      callback(mocks.prismaClient)
+    );
+    mocks.reconcileHostedPrivyIdentityOnMemberTx.mockResolvedValue(undefined);
+    mocks.resolveHostedMemberEmailLinked.mockResolvedValue(false);
+    mocks.enqueueHostedMemberChannelsUpdatedTx.mockResolvedValue({
+      eventId: "member.channels.updated:settings.phone.sync:member_123:evt_123",
+    });
+    mocks.drainHostedExecutionOutboxBestEffort.mockResolvedValue(undefined);
+    mocks.requirePrivyMemberAuth.mockResolvedValue({
+      identity: {
+        phone: {
+          number: "+14155552671",
+        },
+      },
+      linkedAccounts: [],
+      member: {
+        billingStatus: "active",
+        id: "member_123",
+        suspendedAt: null,
+      },
+    });
+  });
+
+  it("verifies the server-side Privy cookie-backed session and syncs the phone identity onto the hosted member", async () => {
+    const response = await settingsPhoneSyncRoute.POST(
+      new Request("https://join.example.test/api/settings/phone/sync", {
+        headers: SAME_ORIGIN_HEADERS,
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    expect(mocks.requirePrivyMemberAuth).toHaveBeenCalledWith(expect.any(Request));
+    expect(mocks.reconcileHostedPrivyIdentityOnMemberTx).toHaveBeenCalledWith({
+      identity: {
+        phone: {
+          number: "+14155552671",
+        },
+      },
+      member: {
+        billingStatus: "active",
+        id: "member_123",
+        suspendedAt: null,
+      },
+      now: expect.any(Date),
+      prisma: mocks.prismaClient,
+    });
+    expect(mocks.resolveHostedMemberEmailLinked).toHaveBeenCalledWith({
+      linkedAccounts: [],
+      memberId: "member_123",
+      onUnconfirmed: "retry",
+    });
+    expect(mocks.enqueueHostedMemberChannelsUpdatedTx).toHaveBeenCalledWith({
+      emailLinked: false,
+      memberId: "member_123",
+      occurredAt: expect.any(String),
+      prisma: mocks.prismaClient,
+      sourceType: "settings.phone.sync",
+    });
+    expect(mocks.drainHostedExecutionOutboxBestEffort).toHaveBeenCalledWith({
+      eventIds: ["member.channels.updated:settings.phone.sync:member_123:evt_123"],
+    });
+    expect(mocks.readHostedPhoneHint).toHaveBeenCalledWith("+14155552671");
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      phoneNumber: "+14155552671",
+      phoneNumberHint: "+1 415 555 2671",
+      runTriggered: true,
+    });
+  });
+
+  it("updates the hosted member identity without dispatching channel sync before activation", async () => {
+    mocks.requirePrivyMemberAuth.mockResolvedValue({
+      identity: {
+        phone: {
+          number: "+14155552671",
+        },
+      },
+      linkedAccounts: [],
+      member: {
+        billingStatus: "not_started",
+        id: "member_123",
+        suspendedAt: null,
+      },
+    });
+
+    const response = await settingsPhoneSyncRoute.POST(
+      new Request("https://join.example.test/api/settings/phone/sync", {
+        headers: SAME_ORIGIN_HEADERS,
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.reconcileHostedPrivyIdentityOnMemberTx).toHaveBeenCalledTimes(1);
+    expect(mocks.enqueueHostedMemberChannelsUpdatedTx).not.toHaveBeenCalled();
+    expect(mocks.drainHostedExecutionOutboxBestEffort).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      phoneNumber: "+14155552671",
+      phoneNumberHint: "+1 415 555 2671",
+      runTriggered: false,
+    });
+  });
+
+  it("skips the hosted channel dispatch when hosted access is not active yet", async () => {
+    mocks.requirePrivyMemberAuth.mockResolvedValue({
+      identity: {
+        phone: {
+          number: "+14155552671",
+        },
+      },
+      linkedAccounts: [],
+      member: {
+        billingStatus: "incomplete",
+        id: "member_123",
+        suspendedAt: null,
+      },
+    });
+
+    const response = await settingsPhoneSyncRoute.POST(
+      new Request("https://join.example.test/api/settings/phone/sync", {
+        headers: SAME_ORIGIN_HEADERS,
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.resolveHostedMemberEmailLinked).not.toHaveBeenCalled();
+    expect(mocks.enqueueHostedMemberChannelsUpdatedTx).not.toHaveBeenCalled();
+    expect(mocks.drainHostedExecutionOutboxBestEffort).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      phoneNumber: "+14155552671",
+      phoneNumberHint: "+1 415 555 2671",
+      runTriggered: false,
+    });
+  });
+
+  it("requires Privy-authenticated hosted member context before syncing the phone number", async () => {
+    mocks.requirePrivyMemberAuth.mockRejectedValue(hostedOnboardingError({
+      code: "AUTH_REQUIRED",
+      httpStatus: 401,
+      message: "Verify your phone to continue.",
+    }));
+
+    const response = await settingsPhoneSyncRoute.POST(
+      new Request("https://join.example.test/api/settings/phone/sync", {
+        headers: SAME_ORIGIN_HEADERS,
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(401);
+    expect(mocks.reconcileHostedPrivyIdentityOnMemberTx).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "AUTH_REQUIRED",
+        message: "Verify your phone to continue.",
+        retryable: false,
+      },
+    });
+  });
+
+  it("returns a retryable conflict while the phone number has not reached the server-side Privy session yet", async () => {
+    mocks.requirePrivyMemberAuth.mockResolvedValue({
+      identity: {
+        phone: null,
+      },
+      member: {
+        id: "member_123",
+      },
+    });
+
+    const response = await settingsPhoneSyncRoute.POST(
+      new Request("https://join.example.test/api/settings/phone/sync", {
+        headers: SAME_ORIGIN_HEADERS,
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(409);
+    expect(mocks.reconcileHostedPrivyIdentityOnMemberTx).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "PRIVY_PHONE_NOT_READY",
+        message: "Your verified phone number has not reached the server-side Privy session yet. Wait a moment and try again.",
+        retryable: true,
+      },
+    });
+  });
+
+  it("rejects sync attempts when the cookie-backed Privy session no longer maps to a hosted member", async () => {
+    mocks.requirePrivyMemberAuth.mockRejectedValue(hostedOnboardingError({
+      code: "HOSTED_MEMBER_NOT_FOUND",
+      httpStatus: 403,
+      message: "Finish signup from your latest Murph link before continuing.",
+    }));
+
+    const response = await settingsPhoneSyncRoute.POST(
+      new Request("https://join.example.test/api/settings/phone/sync", {
+        headers: SAME_ORIGIN_HEADERS,
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(403);
+    expect(mocks.reconcileHostedPrivyIdentityOnMemberTx).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "HOSTED_MEMBER_NOT_FOUND",
+        message: "Finish signup from your latest Murph link before continuing.",
+        retryable: false,
+      },
+    });
+  });
+
+  it("surfaces identity conflicts when the verified phone belongs to a different hosted member", async () => {
+    mocks.reconcileHostedPrivyIdentityOnMemberTx.mockRejectedValue(hostedOnboardingError({
+      code: "PRIVY_IDENTITY_CONFLICT",
+      httpStatus: 409,
+      message: "That phone number is already linked to a different Murph account.",
+    }));
+
+    const response = await settingsPhoneSyncRoute.POST(
+      new Request("https://join.example.test/api/settings/phone/sync", {
+        headers: SAME_ORIGIN_HEADERS,
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(409);
+    expect(mocks.reconcileHostedPrivyIdentityOnMemberTx).toHaveBeenCalledTimes(1);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "PRIVY_IDENTITY_CONFLICT",
+        message: "That phone number is already linked to a different Murph account.",
+        retryable: false,
+      },
+    });
+  });
+});

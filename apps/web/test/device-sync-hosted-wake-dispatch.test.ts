@@ -1,3 +1,4 @@
+import { DEFAULT_DEVICE_SYNC_HTTP_BODY_LIMIT_BYTES } from "@murphai/device-syncd/public-ingress";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -34,8 +35,8 @@ vi.mock("@murphai/device-syncd/public-ingress", async () => {
   return {
     ...actual,
     createDeviceSyncPublicIngress: mocks.createDeviceSyncPublicIngress,
-    deviceSyncError: vi.fn((input: { message: string }) => new Error(input.message)),
-    isDeviceSyncError: vi.fn(() => false),
+    deviceSyncError: actual.deviceSyncError,
+    isDeviceSyncError: actual.isDeviceSyncError,
   };
 });
 
@@ -202,6 +203,16 @@ vi.mock("@/src/lib/device-sync/shared", () => ({
   normalizeNullableString: vi.fn((value: unknown) =>
     typeof value === "string" && value.trim().length > 0 ? value.trim() : null),
   parseInteger: vi.fn(),
+  sanitizeHostedRuntimeErrorCode: vi.fn((value: unknown) =>
+    typeof value === "string" && value.trim().length > 0
+      ? value.trim().replace(/([?&]?(?:access_token|refresh_token|id_token)=)[^\s]+/giu, "$1[redacted]")
+      : null),
+  sanitizeHostedRuntimeErrorText: vi.fn((value: unknown) =>
+    typeof value === "string" && value.trim().length > 0
+      ? value
+          .replace(/\bBearer\s+\S+/giu, "Bearer [redacted]")
+          .replace(/([?&]?(?:access_token|refresh_token|id_token)=)[^\s]+/giu, "$1[redacted]")
+      : null),
   sha256Hex: vi.fn(),
   toIsoTimestamp: vi.fn(() => "2026-03-26T12:00:00.000Z"),
   toJsonRecord: vi.fn((value: unknown) => value),
@@ -211,6 +222,11 @@ import {
   HostedDeviceSyncControlPlane,
   dispatchHostedDeviceSyncWake,
 } from "@/src/lib/device-sync/control-plane";
+import { createHostedBrowserConnectionId } from "@/src/lib/device-sync/public-connection";
+
+function buildPublicConnectionId(connectionId: string): string {
+  return createHostedBrowserConnectionId("01234567890123456789012345678901", connectionId);
+}
 
 describe("dispatchHostedDeviceSyncWake", () => {
   beforeEach(() => {
@@ -269,13 +285,14 @@ describe("dispatchHostedDeviceSyncWake", () => {
             scopes: ["heartrate"],
             status: "disconnected",
             updatedAt: "2026-03-26T12:00:00.000Z",
-          },
-          connectionId: "dsc_123",
-          status: "updated",
-          tokenUpdate: "cleared",
         },
-      ],
-      userId: "user-123",
+        connectionId: "dsc_123",
+        status: "updated",
+        tokenUpdate: "cleared",
+        writeUpdate: "applied",
+      },
+    ],
+    userId: "user-123",
     });
     mocks.ensureWebhookSubscriptions.mockResolvedValue(undefined);
     mocks.prisma.$transaction.mockImplementation(async (callback: (tx: typeof mocks.prismaTx) => Promise<unknown>) =>
@@ -342,6 +359,7 @@ describe("dispatchHostedDeviceSyncWake", () => {
           },
           now: "2026-03-26T12:00:00.000Z",
           provider: {},
+          traceId: "trace_123",
           webhook: {
             eventType: "sleep.updated",
             jobs: [
@@ -354,15 +372,7 @@ describe("dispatchHostedDeviceSyncWake", () => {
               },
             ],
             occurredAt: "2026-03-26T11:59:00.000Z",
-            payload: {
-              dataType: "daily_sleep",
-              access_token: "provider-secret-token",
-              nested: {
-                ssn: "123-45-6789",
-              },
-              objectId: "daily-sleep-1",
-            },
-            traceId: "trace_123",
+            resourceCategory: "daily_sleep",
           },
         });
         return {
@@ -472,7 +482,7 @@ describe("dispatchHostedDeviceSyncWake", () => {
         sourceId: "device-sync:connection-established:user-123:oura:dsc_123:2026-03-26T12:00:00.000Z",
         sourceType: "device_sync_signal",
         storage: "reference",
-        tx: mocks.prisma,
+        tx: mocks.prismaTx,
       }),
     );
     expect(mocks.drainHostedExecutionOutboxBestEffort).toHaveBeenCalledWith({
@@ -529,6 +539,7 @@ describe("dispatchHostedDeviceSyncWake", () => {
         sourceId: "device-sync:webhook-accepted:user-123:oura:dsc_123:trace_123",
         sourceType: "device_sync_signal",
         storage: "reference",
+        tx: mocks.prismaTx,
       }),
     );
   });
@@ -592,6 +603,7 @@ describe("dispatchHostedDeviceSyncWake", () => {
         sourceId: "device-sync:disconnect:user-123:oura:dsc_123:2026-03-26T12:00:00.000Z",
         sourceType: "device_sync_signal",
         storage: "reference",
+        tx: mocks.prismaTx,
       }),
     );
     expect(mocks.drainHostedExecutionOutboxBestEffort).toHaveBeenCalledWith({
@@ -615,7 +627,7 @@ describe("dispatchHostedDeviceSyncWake", () => {
     mocks.getConnectionForUser
       .mockResolvedValueOnce(activeConnection)
       .mockResolvedValueOnce(disconnectedConnection);
-    const publicConnectionId = controlPlane.createBrowserConnectionId("dsc_123");
+    const publicConnectionId = buildPublicConnectionId("dsc_123");
 
     await expect(controlPlane.disconnectConnection("user-123", publicConnectionId)).resolves.toMatchObject({
       connection: {
@@ -650,7 +662,84 @@ describe("dispatchHostedDeviceSyncWake", () => {
         }),
         sourceId: "device-sync:disconnect:user-123:oura:dsc_123:2026-03-26T12:00:00.000Z",
         sourceType: "device_sync_signal",
-        tx: mocks.prisma,
+        tx: mocks.prismaTx,
+      }),
+    );
+  });
+
+  it("sanitizes revoke failures before they fan out to runtime state, signals, dispatches, and the browser response", async () => {
+    const controlPlane = new HostedDeviceSyncControlPlane(
+      new Request("https://control.example.test/api/settings/device-sync/connections/dsc_123/disconnect"),
+    );
+    const activeConnection = buildHostedConnection();
+    const disconnectedConnection = buildHostedConnection({
+      lastErrorCode: "PROVIDER_REVOKE_FAILED",
+      lastErrorMessage: "authorization=[redacted] refresh_token=[redacted]",
+      status: "disconnected",
+    });
+    const revokeAccess = vi.fn(async () => {
+      throw new Error("authorization=Bearer secret-token refresh_token=refresh-secret");
+    });
+    mocks.registryGet.mockReturnValue({
+      revokeAccess,
+    });
+    mocks.listConnectionsForUser.mockResolvedValue([activeConnection]);
+    mocks.getConnectionForUser
+      .mockResolvedValueOnce(activeConnection)
+      .mockResolvedValueOnce(disconnectedConnection);
+    const publicConnectionId = buildPublicConnectionId("dsc_123");
+
+    await expect(controlPlane.disconnectConnection("user-123", publicConnectionId)).resolves.toMatchObject({
+      connection: {
+        id: publicConnectionId,
+        status: "disconnected",
+      },
+      warning: {
+        code: "PROVIDER_REVOKE_FAILED",
+        message: "authorization=[redacted] refresh_token=[redacted]",
+      },
+    });
+
+    expect(revokeAccess).toHaveBeenCalledTimes(1);
+    expect(mocks.applyDeviceSyncRuntimeUpdates).toHaveBeenCalledWith(
+      "user-123",
+      expect.objectContaining({
+        updates: [
+          expect.objectContaining({
+            localState: expect.objectContaining({
+              lastErrorCode: "PROVIDER_REVOKE_FAILED",
+              lastErrorMessage: "authorization=[redacted] refresh_token=[redacted]",
+            }),
+            seed: expect.objectContaining({
+              localState: expect.objectContaining({
+                lastErrorCode: "PROVIDER_REVOKE_FAILED",
+                lastErrorMessage: "authorization=[redacted] refresh_token=[redacted]",
+              }),
+            }),
+          }),
+        ],
+      }),
+    );
+    expect(mocks.createSignal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        revokeWarning: {
+          code: "PROVIDER_REVOKE_FAILED",
+          message: "authorization=[redacted] refresh_token=[redacted]",
+        },
+      }),
+    );
+    expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
+      expect.objectContaining({
+        dispatch: expect.objectContaining({
+          event: expect.objectContaining({
+            hint: expect.objectContaining({
+              revokeWarning: {
+                code: "PROVIDER_REVOKE_FAILED",
+                message: "authorization=[redacted] refresh_token=[redacted]",
+              },
+            }),
+          }),
+        }),
       }),
     );
   });
@@ -672,7 +761,7 @@ describe("dispatchHostedDeviceSyncWake", () => {
       generatedAt: "2026-03-26T12:00:00.000Z",
       userId: "user-123",
     });
-    const publicConnectionId = controlPlane.createBrowserConnectionId("dsc_123");
+    const publicConnectionId = buildPublicConnectionId("dsc_123");
 
     await expect(controlPlane.disconnectConnection("user-123", publicConnectionId)).rejects.toThrow(
       "Hosted device-sync runtime is missing provider identity for connection dsc_123.",
@@ -695,7 +784,7 @@ describe("dispatchHostedDeviceSyncWake", () => {
       providers: [],
       connections: [
         {
-          id: controlPlane.createBrowserConnectionId("dsc_123"),
+          id: buildPublicConnectionId("dsc_123"),
           provider: "oura",
           displayName: "Oura",
           status: "active",
@@ -724,7 +813,7 @@ describe("dispatchHostedDeviceSyncWake", () => {
     mocks.listConnectionsForUser.mockResolvedValue([
       buildBrowserConnection(),
     ]);
-    const publicConnectionId = controlPlane.createBrowserConnectionId("dsc_123");
+    const publicConnectionId = buildPublicConnectionId("dsc_123");
 
     await expect(controlPlane.getConnectionStatus("user-123", publicConnectionId)).resolves.toEqual({
       connection: {
@@ -827,7 +916,7 @@ describe("dispatchHostedDeviceSyncWake", () => {
         sourceId: "device-sync:connection-established:user-123:oura:dsc_123:2026-03-26T12:00:00.000Z",
         sourceType: "device_sync_signal",
         storage: "reference",
-        tx: mocks.prisma,
+        tx: mocks.prismaTx,
       }),
     );
     expect(mocks.ensureWebhookSubscriptions).toHaveBeenCalledWith({
@@ -913,10 +1002,10 @@ describe("dispatchHostedDeviceSyncWake", () => {
       traceId: "trace_123",
     });
     expect(mocks.completeWebhookTrace).toHaveBeenCalledWith("oura", "trace_123", mocks.prismaTx);
-    expect(mocks.enqueueHostedExecutionOutbox.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.createSignal.mock.invocationCallOrder[0],
-    );
     expect(mocks.createSignal.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.enqueueHostedExecutionOutbox.mock.invocationCallOrder[0],
+    );
+    expect(mocks.enqueueHostedExecutionOutbox.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.completeWebhookTrace.mock.invocationCallOrder[0],
     );
     expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
@@ -950,9 +1039,57 @@ describe("dispatchHostedDeviceSyncWake", () => {
         sourceId: "device-sync:webhook-accepted:user-123:oura:dsc_123:trace_123",
         sourceType: "device_sync_signal",
         storage: "reference",
-        tx: mocks.prisma,
+        tx: mocks.prismaTx,
       }),
     );
+  });
+
+  it("rejects hosted webhook bodies above the shared device-sync limit before ingress parsing", async () => {
+    const controlPlane = new HostedDeviceSyncControlPlane(
+      new Request("https://control.example.test/api/device-sync/webhooks/oura", {
+        body: "x".repeat(DEFAULT_DEVICE_SYNC_HTTP_BODY_LIMIT_BYTES + 1),
+        headers: {
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+    );
+
+    await expect(controlPlane.handleWebhook("oura")).rejects.toMatchObject({
+      code: "PAYLOAD_TOO_LARGE",
+      httpStatus: 413,
+      message: `Request body exceeded ${DEFAULT_DEVICE_SYNC_HTTP_BODY_LIMIT_BYTES} bytes.`,
+      retryable: false,
+    });
+
+    const ingress = mocks.createDeviceSyncPublicIngress.mock.results[0]?.value as {
+      handleWebhook: ReturnType<typeof vi.fn>;
+    };
+    expect(ingress.handleWebhook).not.toHaveBeenCalled();
+    expect(mocks.createSignal).not.toHaveBeenCalled();
+    expect(mocks.completeWebhookTrace).not.toHaveBeenCalled();
+    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+  });
+
+  it("does not complete or drain a hosted webhook trace when the outbox enqueue fails", async () => {
+    mocks.enqueueHostedExecutionOutbox.mockRejectedValueOnce(new Error("outbox failed"));
+    const controlPlane = new HostedDeviceSyncControlPlane(
+      new Request("https://control.example.test/api/device-sync/webhooks/oura", {
+        body: JSON.stringify({
+          event: "sleep.updated",
+        }),
+        headers: {
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+    );
+
+    await expect(controlPlane.handleWebhook("oura")).rejects.toThrow("outbox failed");
+
+    expect(mocks.createSignal).toHaveBeenCalledTimes(1);
+    expect(mocks.completeWebhookTrace).not.toHaveBeenCalled();
+    expect(mocks.drainHostedExecutionOutboxBestEffort).not.toHaveBeenCalled();
   });
 
   it("shapes hosted webhook hints by provider and job allowlists instead of key redaction", async () => {
@@ -973,6 +1110,7 @@ describe("dispatchHostedDeviceSyncWake", () => {
           },
           now: "2026-03-26T12:00:00.000Z",
           provider: {},
+          traceId: "trace_case_123",
           webhook: {
             eventType: "sleep.updated",
             jobs: [
@@ -1001,7 +1139,6 @@ describe("dispatchHostedDeviceSyncWake", () => {
               "X-Api-Key": "provider-api-key",
               verification_token: "provider-verification-token",
             },
-            traceId: "trace_case_123",
           },
         });
         return {
@@ -1077,6 +1214,7 @@ describe("dispatchHostedDeviceSyncWake", () => {
           },
           now: "2026-03-26T12:00:00.000Z",
           provider: {},
+          traceId: "trace_whoop_123",
           webhook: {
             eventType: "workout.updated",
             jobs: [
@@ -1105,10 +1243,7 @@ describe("dispatchHostedDeviceSyncWake", () => {
               },
             ],
             occurredAt: "2026-03-26T11:59:00.000Z",
-            payload: {
-              resourceType: "workout",
-            },
-            traceId: "trace_whoop_123",
+            resourceCategory: "workout",
           },
         });
         return {
@@ -1174,7 +1309,7 @@ describe("dispatchHostedDeviceSyncWake", () => {
     });
   });
 
-  it("skips signal creation and wake dispatch when ingress hooks cannot resolve an owner", async () => {
+  it("keeps hosted webhook traces retryable when ingress hooks cannot resolve an owner", async () => {
     const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
     mocks.getConnectionOwnerId.mockResolvedValue(null);
     const controlPlane = new HostedDeviceSyncControlPlane(
@@ -1189,18 +1324,22 @@ describe("dispatchHostedDeviceSyncWake", () => {
       }),
     );
 
-    await controlPlane.handleWebhook("oura");
+    await expect(controlPlane.handleWebhook("oura")).rejects.toMatchObject({
+      code: "CONNECTION_OWNER_NOT_FOUND",
+      httpStatus: 503,
+      message: "Hosted device-sync connection owner mapping is missing. Retry later.",
+      retryable: true,
+    });
 
     expect(consoleWarn).toHaveBeenCalledWith(
-      "Closing hosted device-sync webhook trace without an owner mapping.",
+      "Rejecting hosted device-sync webhook without an owner mapping.",
       expect.objectContaining({
         connectionId: "dsc_123",
         provider: "oura",
         traceId: "trace_123",
       }),
     );
-    expect(mocks.completeWebhookTrace).toHaveBeenCalledTimes(1);
-    expect(mocks.completeWebhookTrace).toHaveBeenCalledWith("oura", "trace_123", mocks.prismaTx);
+    expect(mocks.completeWebhookTrace).not.toHaveBeenCalled();
     expect(mocks.createSignal).not.toHaveBeenCalled();
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
     expect(mocks.drainHostedExecutionOutboxBestEffort).not.toHaveBeenCalled();
@@ -1229,11 +1368,7 @@ describe("dispatchHostedDeviceSyncWake", () => {
         },
       ],
       occurredAt: "2026-03-26T11:59:00.000Z",
-      payload: {
-        dataType: "session",
-        operation: "delete",
-      },
-      traceId: "trace_delete_123",
+      resourceCategory: "session",
     };
     mocks.createDeviceSyncPublicIngress.mockImplementationOnce((input: {
       hooks?: {
@@ -1253,6 +1388,7 @@ describe("dispatchHostedDeviceSyncWake", () => {
           provider: {
             provider: "oura",
           },
+          traceId: "trace_delete_123",
           webhook: deleteWebhook,
         });
         return {
@@ -1292,13 +1428,6 @@ describe("dispatchHostedDeviceSyncWake", () => {
       objectId: "session-42",
       occurredAt: "2026-03-26T11:59:00.000Z",
       sourceEventType: "session.deleted",
-      webhookPayload: {
-        data_type: "session",
-        event_time: "2026-03-26T11:59:00.000Z",
-        event_type: "delete",
-        object_id: "session-42",
-        user_id: "oura-user-1",
-      },
     });
     expect(hintPayload).not.toHaveProperty("windowStart");
     expect(hintPayload).not.toHaveProperty("windowEnd");

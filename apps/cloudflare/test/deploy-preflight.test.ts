@@ -88,6 +88,15 @@ describe("deploy preflight helpers", () => {
     }, { deployWorker: true })).not.toThrow();
   });
 
+  it("does not require BRAVE_API_KEY for config-only runs even when hosted search is pinned to brave", () => {
+    expect(listMissingHostedDeployEnvironment({
+      CF_BUNDLES_BUCKET: "bundles",
+      CF_BUNDLES_PREVIEW_BUCKET: "bundles-preview",
+      CF_WORKER_NAME: "hosted-runner",
+      MURPH_WEB_SEARCH_PROVIDER: "brave",
+    }, { deployWorker: false })).toEqual([]);
+  });
+
   it("treats whitespace-only values as missing", () => {
     expect(() => assertHostedDeployEnvironment({
       CF_BUNDLES_BUCKET: "bundles",

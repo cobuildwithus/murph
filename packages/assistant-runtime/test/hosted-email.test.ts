@@ -42,6 +42,22 @@ test("hosted email send parsing trims blank optional identity ids to null", () =
   );
 });
 
+test("hosted email send parsing treats an omitted identity id as null", () => {
+  assert.deepEqual(
+    parseHostedEmailSendRequest({
+      message: "hello",
+      target: "user@example.com",
+      targetKind: "explicit",
+    }),
+    {
+      identityId: null,
+      message: "hello",
+      target: "user@example.com",
+      targetKind: "explicit",
+    },
+  );
+});
+
 test("hosted email send parsing rejects non-object payloads", () => {
   assert.throws(
     () => parseHostedEmailSendRequest(null),

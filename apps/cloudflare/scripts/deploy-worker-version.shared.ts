@@ -5,7 +5,10 @@ import {
   resolveHostedWorkerGradualDeploymentSupport,
   resolveHostedWorkerDeploymentTraffic,
 } from "./deploy-automation/deployment-traffic.ts";
-import { normalizeOptionalString } from "./deploy-automation/shared.ts";
+import {
+  normalizeOptionalString,
+  parseOptionalStrictInteger,
+} from "./deploy-automation/shared.ts";
 
 type EnvSource = Readonly<Record<string, string | undefined>>;
 
@@ -108,32 +111,28 @@ export async function runHostedWorkerDeployment(input: {
 
   await input.dependencies.mkdir(path.dirname(input.resultPath), { recursive: true });
 
-  let result: HostedWorkerDeploymentResult;
-
-  if (deploymentSettings.mode === "direct") {
-    result = await runDirectDeployment({
-      configPath: input.configPath,
-      dependencies: input.dependencies,
-      deploymentMessage: deploymentSettings.deploymentMessage,
-      includeSecrets: deploymentSettings.includeSecrets,
-      secretsFilePath: input.secretsFilePath,
-      versionTag: deploymentSettings.versionTag,
-      workerName: input.workerName,
-    });
-  } else {
-    result = await runGradualDeployment({
-      configPath: input.configPath,
-      dependencies: input.dependencies,
-      deploymentMessage: deploymentSettings.deploymentMessage,
-      existingVersionId: deploymentSettings.existingVersionId,
-      includeSecrets: deploymentSettings.includeSecrets,
-      rolloutPercentage: deploymentSettings.rolloutPercentage,
-      secretsFilePath: input.secretsFilePath,
-      versionMessage: deploymentSettings.versionMessage,
-      versionTag: deploymentSettings.versionTag,
-      workerName: input.workerName,
-    });
-  }
+  const result = deploymentSettings.mode === "direct"
+    ? await runDirectDeployment({
+        configPath: input.configPath,
+        dependencies: input.dependencies,
+        deploymentMessage: deploymentSettings.deploymentMessage,
+        includeSecrets: deploymentSettings.includeSecrets,
+        secretsFilePath: input.secretsFilePath,
+        versionTag: deploymentSettings.versionTag,
+        workerName: input.workerName,
+      })
+    : await runGradualDeployment({
+        configPath: input.configPath,
+        dependencies: input.dependencies,
+        deploymentMessage: deploymentSettings.deploymentMessage,
+        existingVersionId: deploymentSettings.existingVersionId,
+        includeSecrets: deploymentSettings.includeSecrets,
+        rolloutPercentage: deploymentSettings.rolloutPercentage,
+        secretsFilePath: input.secretsFilePath,
+        versionMessage: deploymentSettings.versionMessage,
+        versionTag: deploymentSettings.versionTag,
+        workerName: input.workerName,
+      });
 
   await input.dependencies.writeFile(
     input.resultPath,
@@ -272,6 +271,8 @@ function resolveHostedWorkerDeploymentSettings(
   env: EnvSource,
   now: () => Date,
 ): HostedWorkerDeploymentSettings {
+  // Direct deploy is the default operator path. Gradual version/deployment splits
+  // remain available only through the lower-level helper env contract.
   const mode = readDeploymentMode(env.HOSTED_EXECUTION_DEPLOYMENT_MODE);
   const includeSecrets = readBooleanEnv(env.HOSTED_EXECUTION_INCLUDE_SECRETS, true);
   const deployContext = normalizeOptionalString(env.HOSTED_EXECUTION_DEPLOY_CONTEXT)
@@ -343,10 +344,12 @@ function readDeploymentMode(value: string | undefined): DeploymentMode {
 }
 
 function readRolloutPercentage(value: string | undefined): number {
-  const normalized = normalizeOptionalString(value) ?? "10";
-  const parsed = Number.parseInt(normalized, 10);
+  const parsed = parseOptionalStrictInteger(
+    value,
+    "HOSTED_EXECUTION_GRADUAL_ROLLOUT_PERCENTAGE must be an integer between 0 and 100.",
+  ) ?? 10;
 
-  if (!Number.isInteger(parsed) || parsed < 0 || parsed > 100) {
+  if (parsed < 0 || parsed > 100) {
     throw new Error("HOSTED_EXECUTION_GRADUAL_ROLLOUT_PERCENTAGE must be an integer between 0 and 100.");
   }
 

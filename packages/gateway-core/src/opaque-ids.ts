@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto'
 interface GatewayOpaqueEnvelope {
   kind: string
   routeToken?: string
-  version: 2
+  version: 1
 }
 
 interface GatewayConversationEnvelope extends GatewayOpaqueEnvelope {
@@ -32,7 +32,7 @@ export function createGatewayConversationSessionKey(routeKeyOrToken: string): st
   const envelope: GatewayConversationEnvelope = {
     kind: 'conversation',
     routeToken: normalizeGatewayRouteToken(routeKeyOrToken),
-    version: 2,
+    version: 1,
   }
   return encodeGatewayOpaqueId(GATEWAY_CONVERSATION_PREFIX, envelope)
 }
@@ -68,7 +68,7 @@ export function createGatewayCaptureMessageId(
     kind: 'capture-message',
     routeToken: normalizeGatewayRouteToken(routeKeyOrToken),
     sourceToken: createGatewaySourceToken('capture', captureId),
-    version: 2,
+    version: 1,
   }
   return encodeGatewayOpaqueId(GATEWAY_MESSAGE_PREFIX, envelope)
 }
@@ -81,7 +81,7 @@ export function createGatewayOutboxMessageId(
     kind: 'outbox-message',
     routeToken: normalizeGatewayRouteToken(routeKeyOrToken),
     sourceToken: createGatewaySourceToken('outbox', intentId),
-    version: 2,
+    version: 1,
   }
   return encodeGatewayOpaqueId(GATEWAY_MESSAGE_PREFIX, envelope)
 }
@@ -110,7 +110,7 @@ export function createGatewayAttachmentId(
     kind: 'attachment',
     routeToken: normalizeGatewayRouteToken(routeKeyOrToken),
     sourceToken: createGatewaySourceToken('attachment', `${captureId}:${attachmentId}`),
-    version: 2,
+    version: 1,
   }
   return encodeGatewayOpaqueId(GATEWAY_ATTACHMENT_PREFIX, envelope)
 }
@@ -188,7 +188,7 @@ function decodeGatewayOpaqueId(
   }
 
   const envelope = parsed as Record<string, unknown> & GatewayOpaqueEnvelope
-  if (envelope.version !== 2) {
+  if (envelope.version !== 1) {
     throw new Error('Gateway opaque id version is unsupported.')
   }
   if (typeof envelope.kind !== 'string' || envelope.kind.length === 0) {

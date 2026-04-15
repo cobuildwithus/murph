@@ -1,9 +1,17 @@
 import { ExecutionOutboxStatus } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { ExecutionOutbox, PrismaClient } from "@prisma/client";
-import type { HostedExecutionDispatchRequest, HostedExecutionDispatchResult } from "@murphai/hosted-execution";
-import { serializeHostedExecutionOutboxPayload } from "@/src/lib/hosted-execution/outbox-payload";
+import type { ExecutionOutbox, Prisma, PrismaClient } from "@prisma/client";
+import type {
+  HostedExecutionDispatchRequest,
+  HostedExecutionDispatchResult,
+  HostedExecutionEventDispatchState,
+} from "@murphai/hosted-execution";
+import {
+  readHostedExecutionOutboxPayload,
+  serializeHostedExecutionOutboxPayload,
+  summarizeHostedExecutionOutboxPayload,
+} from "@/src/lib/hosted-execution/outbox-payload";
 
 const mocks = vi.hoisted(() => ({
   deleteHostedStoredDispatchPayloadBestEffort: vi.fn(),
@@ -60,6 +68,7 @@ describe("drainHostedExecutionOutbox", () => {
     });
 
     expect(record?.status).toBe(ExecutionOutboxStatus.dispatched);
+    expect(record?.dispatchState).toBe("completed");
     expect(record?.nextAttemptAt).toBeNull();
     expect(mocks.deleteHostedStoredDispatchPayloadBestEffort).not.toHaveBeenCalled();
   });
@@ -80,15 +89,16 @@ describe("drainHostedExecutionOutbox", () => {
     });
 
     expect(record?.status).toBe(ExecutionOutboxStatus.dispatched);
+    expect(record?.dispatchState).toBe("duplicate_consumed");
   });
 
   it.each([
-    ["queued", ExecutionOutboxStatus.dispatched, null],
-    ["duplicate_pending", ExecutionOutboxStatus.dispatched, null],
-    ["backpressured", ExecutionOutboxStatus.delivery_failed, "runner full"],
+    ["queued", ExecutionOutboxStatus.dispatched, "queued", null],
+    ["duplicate_pending", ExecutionOutboxStatus.dispatched, "duplicate_pending", null],
+    ["backpressured", ExecutionOutboxStatus.delivery_failed, "backpressured", "runner full"],
   ] as const)(
     "maps %s outcomes onto the right retry status",
-    async (eventState, expectedStatus, lastError) => {
+    async (eventState, expectedStatus, expectedDispatchState, lastError) => {
       const dispatch = createTickDispatch();
       const prisma = createOutboxPrisma(createOutboxRecord({
         eventId: dispatch.eventId,
@@ -105,6 +115,7 @@ describe("drainHostedExecutionOutbox", () => {
       });
 
       expect(record?.status).toBe(expectedStatus);
+      expect(record?.dispatchState).toBe(expectedDispatchState);
     },
   );
 
@@ -125,6 +136,7 @@ describe("drainHostedExecutionOutbox", () => {
     });
 
     expect(record?.status).toBe(ExecutionOutboxStatus.delivery_failed);
+    expect(record?.dispatchState).toBe("queued");
     expect(record?.lastError).toBe("Hosted execution dispatch is not configured.");
     expect(record?.nextAttemptAt).toEqual(new Date("2026-03-28T11:00:05.000Z"));
   });
@@ -147,6 +159,7 @@ describe("drainHostedExecutionOutbox", () => {
     });
 
     expect(record?.status).toBe(ExecutionOutboxStatus.dispatched);
+    expect(record?.dispatchState).toBe("poisoned");
     expect(record?.lastError).toBeNull();
   });
 
@@ -171,7 +184,44 @@ describe("drainHostedExecutionOutbox", () => {
       });
 
       expect(record?.status).toBe(ExecutionOutboxStatus.dispatched);
+      expect(record?.dispatchState).toBe(eventState);
       expect(mocks.deleteHostedStoredDispatchPayloadBestEffort).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    "completed",
+    "duplicate_consumed",
+    "poisoned",
+  ] as const)(
+    "deletes stored payloads once a reference-backed dispatch is terminal (%s)",
+    async (eventState) => {
+      const dispatch = createGatewaySendDispatch();
+      const prisma = createOutboxPrisma(createOutboxRecord({
+        eventId: dispatch.eventId,
+        eventKind: dispatch.event.kind,
+        sourceType: "gateway_send",
+        userId: dispatch.event.userId,
+      }));
+      mocks.dispatchStoredHostedExecutionStatus.mockResolvedValue(createDispatchResult(eventState, {
+        eventId: dispatch.eventId,
+      }));
+
+      const [record] = await drainHostedExecutionOutbox({
+        now: "2026-03-28T11:00:00.000Z",
+        prisma,
+      });
+
+      expect(record?.status).toBe(ExecutionOutboxStatus.dispatched);
+      expect(record?.dispatchState).toBe(eventState);
+      expect(mocks.deleteHostedStoredDispatchPayloadBestEffort).toHaveBeenCalledWith(
+        expect.objectContaining({
+          dispatchRef: expect.objectContaining({
+            eventId: dispatch.eventId,
+          }),
+          storage: "reference",
+        }),
+      );
     },
   );
 
@@ -197,6 +247,7 @@ describe("drainHostedExecutionOutbox", () => {
     });
 
     expect(record?.status).toBe(ExecutionOutboxStatus.delivery_failed);
+    expect(record?.dispatchState).toBe("queued");
     expect(record?.nextAttemptAt).toBeNull();
   });
 
@@ -261,12 +312,47 @@ describe("drainHostedExecutionOutbox", () => {
     });
   });
 
+  it("accepts idempotent re-enqueue when an existing inline payload row is already pruned", async () => {
+    const dispatch = createShareDispatch();
+    const payload = readHostedExecutionOutboxPayload(serializeHostedExecutionOutboxPayload(dispatch));
+
+    expect(payload).not.toBeNull();
+    if (!payload) {
+      throw new Error("Expected an inline payload.");
+    }
+
+    const prunedPayloadJson = summarizeHostedExecutionOutboxPayload(payload);
+    expect(prunedPayloadJson).not.toBeNull();
+    if (!prunedPayloadJson) {
+      throw new Error("Expected a pruned payload summary.");
+    }
+
+    const prisma = createEnqueueOutboxPrisma(createOutboxRecord({
+      eventId: dispatch.eventId,
+      eventKind: dispatch.event.kind,
+      payloadJson: toStoredOutboxPayloadJson(prunedPayloadJson),
+      sourceId: "share_123",
+      sourceType: "hosted_share_link",
+      userId: dispatch.event.userId,
+    }));
+
+    await expect(enqueueHostedExecutionOutbox({
+      dispatch,
+      sourceId: "share_123",
+      sourceType: "hosted_share_link",
+      tx: prisma as never,
+    })).resolves.toMatchObject({
+      eventId: dispatch.eventId,
+    });
+  });
+
   it("persists inline outbox rows without staging a Cloudflare payload id", async () => {
     const dispatch = createMemberActivatedDispatch();
     const upsert = vi.fn(async ({ create }: {
       create: ExecutionOutbox;
     }) => structuredClone({
       ...createOutboxRecord({
+        dispatchState: create.dispatchState,
         eventId: dispatch.eventId,
         eventKind: dispatch.event.kind,
         payloadJson: create.payloadJson,
@@ -292,6 +378,7 @@ describe("drainHostedExecutionOutbox", () => {
     });
 
     expect(mocks.maybeStageHostedExecutionDispatchPayload).not.toHaveBeenCalled();
+    expect(record.dispatchState).toBe("queued");
     expect((record.payloadJson as { storage?: unknown }).storage).toBe("inline");
     expect(record.payloadJson).toEqual(serializeHostedExecutionOutboxPayload(dispatch, {
       storage: "inline",
@@ -304,6 +391,7 @@ describe("drainHostedExecutionOutbox", () => {
       create: ExecutionOutbox;
     }) => structuredClone({
       ...createOutboxRecord({
+        dispatchState: create.dispatchState,
         eventId: dispatch.eventId,
         eventKind: dispatch.event.kind,
         payloadJson: create.payloadJson,
@@ -331,6 +419,7 @@ describe("drainHostedExecutionOutbox", () => {
     expect((persistedPayload as { storage?: unknown }).storage).toBe("reference");
     expect(JSON.stringify(persistedPayload)).not.toContain("Please keep this private.");
     expect(JSON.stringify(persistedPayload)).not.toContain("gwcs_secret");
+    expect(record.dispatchState).toBe("queued");
     expect(record.payloadJson).toEqual(persistedPayload);
   });
 
@@ -352,6 +441,7 @@ describe("drainHostedExecutionOutbox", () => {
       create: ExecutionOutbox;
     }) => structuredClone({
       ...createOutboxRecord({
+        dispatchState: create.dispatchState,
         eventId: dispatch.eventId,
         eventKind: dispatch.event.kind,
         payloadJson: create.payloadJson,
@@ -433,6 +523,11 @@ function createMemberActivatedDispatch(): HostedExecutionDispatchRequest {
         threadIsDirect: true,
       },
       kind: "member.activated",
+      memberChannels: {
+        email: false,
+        linq: true,
+        telegram: false,
+      },
       userId: "member_123",
     },
     eventId: "member.activated:stripe:member_123:evt_invoice_paid_123",
@@ -473,13 +568,14 @@ function createGatewaySendDispatch(): HostedExecutionDispatchRequest {
 function createDispatchResult(
   eventState: HostedExecutionDispatchResult["event"]["state"],
   input: {
+    eventId?: string;
     eventLastError?: string | null;
     statusLastError?: string | null;
   } = {},
 ): HostedExecutionDispatchResult {
   return {
     event: {
-      eventId: "evt_tick",
+      eventId: input.eventId ?? "evt_tick",
       lastError: input.eventLastError ?? null,
       state: eventState,
       userId: "member_123",
@@ -501,6 +597,7 @@ function createDispatchResult(
 }
 
 function createOutboxRecord(input: {
+  dispatchState?: string | null;
   eventId: string;
   eventKind: string;
   payloadJson?: ExecutionOutbox["payloadJson"];
@@ -513,6 +610,9 @@ function createOutboxRecord(input: {
     claimExpiresAt: null,
     claimToken: null,
     createdAt: new Date("2026-03-28T11:00:00.000Z"),
+    dispatchState: isHostedExecutionEventDispatchState(input.dispatchState)
+      ? input.dispatchState
+      : "queued",
     eventId: input.eventId,
     eventKind: input.eventKind,
     id: "execout_123",
@@ -558,6 +658,21 @@ function createOutboxRecord(input: {
     updatedAt: new Date("2026-03-28T11:00:00.000Z"),
     userId: input.userId,
   };
+}
+
+function toStoredOutboxPayloadJson(value: Prisma.InputJsonValue): ExecutionOutbox["payloadJson"] {
+  return JSON.parse(JSON.stringify(value)) as Prisma.JsonValue;
+}
+
+function isHostedExecutionEventDispatchState(
+  value: string | null | undefined,
+): value is HostedExecutionEventDispatchState {
+  return value === "queued"
+    || value === "duplicate_pending"
+    || value === "duplicate_consumed"
+    || value === "backpressured"
+    || value === "completed"
+    || value === "poisoned";
 }
 
 function createOutboxPrisma(record: ExecutionOutbox): PrismaClient {

@@ -5,7 +5,7 @@ import {
   type HostedExecutionBundleKind,
   type HostedExecutionBundleRef,
   type HostedExecutionBundleRefIdentity,
-} from "@murphai/runtime-state/node";
+} from "@murphai/runtime-state/node/hosted-bundle-codec";
 
 import {
   buildHostedStorageAad,

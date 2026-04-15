@@ -9,6 +9,7 @@ export type WorkspaceSourceEntries<T extends WorkspaceSourceEntryRelativePaths> 
 export const HOSTED_WEB_WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS = {
   "@murphai/cloudflare-hosted-control": "../../packages/cloudflare-hosted-control/src/index.ts",
   "@murphai/contracts": "../../packages/contracts/src/index.ts",
+  "@murphai/gateway-core": "../../packages/gateway-core/src/index.ts",
   "@murphai/hosted-execution": "../../packages/hosted-execution/src/index.ts",
   "@murphai/messaging-ingress": "../../packages/messaging-ingress/src/index.ts",
   "@murphai/runtime-state": "../../packages/runtime-state/src/index.ts",
@@ -23,6 +24,11 @@ type VitestAlias = {
   find: RegExp;
   replacement: string;
 };
+
+export interface WorkspaceSourceImportExecOptions {
+  cwd: string;
+  env: NodeJS.ProcessEnv;
+}
 
 export function createWorkspaceSourcePackageNames<T extends WorkspaceSourceEntryRelativePaths>(
   entryRelativePaths: T,
@@ -40,6 +46,30 @@ export function resolveWorkspaceSourceEntries<T extends WorkspaceSourceEntryRela
       path.resolve(workspaceDir, relativeEntryPath),
     ]),
   ) as WorkspaceSourceEntries<T>;
+}
+
+export function resolveWorkspaceRepoRoot(workspaceDir: string): string {
+  return path.resolve(workspaceDir, "../..");
+}
+
+export function createWorkspaceSourceImportExecOptions(
+  workspaceDir: string,
+  env: NodeJS.ProcessEnv = process.env,
+): WorkspaceSourceImportExecOptions {
+  const repoRoot = resolveWorkspaceRepoRoot(workspaceDir);
+
+  return {
+    cwd: repoRoot,
+    env: {
+      HOME: env.HOME,
+      NODE_ENV: env.NODE_ENV,
+      PATH: env.PATH,
+      TEMP: env.TEMP,
+      TMP: env.TMP,
+      TMPDIR: env.TMPDIR,
+      TSX_TSCONFIG_PATH: path.join(repoRoot, "tsconfig.base.json"),
+    },
+  };
 }
 
 export function createVitestWorkspaceRuntimeAliases(

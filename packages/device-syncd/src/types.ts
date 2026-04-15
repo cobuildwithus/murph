@@ -1,14 +1,21 @@
 import type {
   DeviceSyncAccountStatus,
   DeviceSyncAccountRecord,
+  DeviceSyncJobRecord,
   DeviceSyncProviderDescriptor,
 } from "./client.ts";
 import type {
   DeviceProviderDescriptor,
   NamedDeviceProviderRegistry,
-} from "@murphai/importers";
+} from "@murphai/importers/device-providers/provider-descriptors";
 
 export type { DeviceSyncAccountStatus } from "./client.ts";
+export type { DeviceSyncJobRecord } from "./client.ts";
+
+export const DEFAULT_DEVICE_SYNC_HTTP_BODY_LIMIT_BYTES = 1_048_576;
+export const DEVICE_SYNC_WEBHOOK_TRACE_COMPLETED = {
+  webhookTraceCompleted: true,
+} as const;
 
 export interface DeviceSyncLogger {
   debug?(message: string, context?: Record<string, unknown>): void;
@@ -98,7 +105,6 @@ export interface DeviceSyncWebhookTraceRecord {
   externalAccountId: string;
   eventType: string;
   receivedAt: string;
-  payload?: Record<string, unknown>;
 }
 
 export interface ClaimDeviceSyncWebhookTraceInput extends DeviceSyncWebhookTraceRecord {
@@ -110,10 +116,27 @@ export type DeviceSyncWebhookTraceClaimResult =
   | "processed"
   | "processing";
 
+export type ConsumeOAuthStateResult =
+  | {
+      status: "consumed";
+      record: OAuthStateRecord;
+    }
+  | {
+      status: "missing";
+    }
+  | {
+      status: "provider_mismatch";
+      provider: string;
+    };
+
 export interface DeviceSyncPublicIngressStore {
   deleteExpiredOAuthStates(now: string): number | Promise<number>;
   createOAuthState(input: OAuthStateRecord): OAuthStateRecord | Promise<OAuthStateRecord>;
-  consumeOAuthState(state: string, now: string): OAuthStateRecord | null | Promise<OAuthStateRecord | null>;
+  consumeOAuthState(
+    state: string,
+    now: string,
+    expectedProvider?: string,
+  ): ConsumeOAuthStateResult | Promise<ConsumeOAuthStateResult>;
   upsertConnection(input: UpsertPublicDeviceSyncConnectionInput): PublicDeviceSyncAccount | Promise<PublicDeviceSyncAccount>;
   getConnectionByExternalAccount(
     provider: string,
@@ -132,28 +155,6 @@ export interface DeviceSyncJobInput {
   availableAt?: string;
   maxAttempts?: number;
   dedupeKey?: string;
-}
-
-export interface DeviceSyncJobRecord {
-  id: string;
-  provider: string;
-  accountId: string;
-  kind: string;
-  payload: Record<string, unknown>;
-  priority: number;
-  availableAt: string;
-  attempts: number;
-  maxAttempts: number;
-  dedupeKey: string | null;
-  status: "queued" | "running" | "succeeded" | "dead";
-  leaseOwner: string | null;
-  leaseExpiresAt: string | null;
-  lastErrorCode: string | null;
-  lastErrorMessage: string | null;
-  createdAt: string;
-  updatedAt: string;
-  startedAt: string | null;
-  finishedAt: string | null;
 }
 
 export interface ProviderCallbackContext {
@@ -184,8 +185,17 @@ export interface ProviderWebhookResult {
   eventType: string;
   traceId: string;
   occurredAt?: string;
-  payload?: Record<string, unknown>;
+  // Keep the shared parser result narrow so ingress hooks do not inherit raw provider payloads.
+  resourceCategory?: string | null;
   jobs: DeviceSyncJobInput[];
+}
+
+export interface DeviceSyncIngressWebhook {
+  eventType: string;
+  jobs: readonly DeviceSyncJobInput[];
+  occurredAt?: string;
+  // Accepted and unknown ingress hooks should receive only the stripped webhook summary.
+  resourceCategory?: string | null;
 }
 
 export interface ProviderWebhookAdminChallengeContext {
@@ -212,14 +222,20 @@ export interface DeviceSyncPublicIngressConnectionEstablishedInput {
 
 export interface DeviceSyncPublicIngressWebhookAcceptedInput {
   account: PublicDeviceSyncAccount;
-  webhook: ProviderWebhookResult;
+  traceId: string;
+  webhook: DeviceSyncIngressWebhook;
   provider: DeviceSyncProvider;
   now: string;
 }
 
+export interface DeviceSyncPublicIngressWebhookAcceptedResult {
+  webhookTraceCompleted: true;
+}
+
 export interface DeviceSyncPublicIngressUnknownWebhookInput {
   provider: DeviceSyncProvider;
-  webhook: ProviderWebhookResult;
+  traceId: string;
+  webhook: DeviceSyncIngressWebhook;
   externalAccountId: string;
   now: string;
 }
@@ -227,8 +243,10 @@ export interface DeviceSyncPublicIngressUnknownWebhookInput {
 export interface DeviceSyncPublicIngressHooks {
   onConnectionEstablished?(input: DeviceSyncPublicIngressConnectionEstablishedInput): void | Promise<void>;
   // When present, the hook owns durable webhook acceptance and must complete the claimed trace
-  // transactionally once its side effects are committed.
-  onWebhookAccepted?(input: DeviceSyncPublicIngressWebhookAcceptedInput): void | Promise<void>;
+  // transactionally once its side effects are committed by using traceId.
+  onWebhookAccepted?(
+    input: DeviceSyncPublicIngressWebhookAcceptedInput,
+  ): DeviceSyncPublicIngressWebhookAcceptedResult | Promise<DeviceSyncPublicIngressWebhookAcceptedResult>;
   onUnknownWebhook?(input: DeviceSyncPublicIngressUnknownWebhookInput): void | Promise<void>;
 }
 

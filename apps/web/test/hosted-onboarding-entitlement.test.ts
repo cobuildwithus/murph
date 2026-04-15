@@ -2,6 +2,7 @@ import { HostedBillingStatus } from "@prisma/client";
 import { describe, expect, it } from "vitest";
 
 import {
+  assertHostedMemberActiveAccessAllowed,
   deriveHostedEntitlement,
   hasHostedMemberActiveAccess,
   hasHostedMemberGeneralAccess,
@@ -57,5 +58,25 @@ describe("hosted onboarding entitlement", () => {
       accessAllowed: true,
       activationReady: true,
     });
+  });
+
+  it("reports billing-state-specific errors for non-active members", () => {
+    expect(() =>
+      assertHostedMemberActiveAccessAllowed({
+        billingStatus: HostedBillingStatus.canceled,
+        suspendedAt: null,
+      })).toThrowError(expect.objectContaining({
+      code: "HOSTED_ACCESS_REQUIRED",
+      message: "Your subscription is canceled. Open billing to resume access.",
+    }));
+
+    expect(() =>
+      assertHostedMemberActiveAccessAllowed({
+        billingStatus: HostedBillingStatus.past_due,
+        suspendedAt: null,
+      })).toThrowError(expect.objectContaining({
+      code: "HOSTED_ACCESS_REQUIRED",
+      message: "Your subscription payment is past due. Update billing before continuing.",
+    }));
   });
 });

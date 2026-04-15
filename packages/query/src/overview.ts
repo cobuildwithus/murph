@@ -1,24 +1,9 @@
-import { extractProfileTopGoalIds } from "./health/projectors/profile.ts";
-
 import type { VaultReadModel } from "./model.ts";
 
 export interface OverviewMetric {
   label: string;
   note: string;
   value: number;
-}
-
-export interface OverviewGoal {
-  id: string;
-  title: string;
-}
-
-export interface OverviewProfile {
-  id: string;
-  recordedAt: string | null;
-  summary: string | null;
-  title: string;
-  topGoals: OverviewGoal[];
 }
 
 export interface OverviewJournalEntry {
@@ -88,39 +73,6 @@ export function buildOverviewMetrics(vault: VaultReadModel): OverviewMetric[] {
       value: registryCount,
     },
   ];
-}
-
-export function summarizeCurrentOverviewProfile(
-  vault: VaultReadModel,
-): OverviewProfile | null {
-  const current = vault.currentProfile;
-  if (!current) {
-    return null;
-  }
-
-  const latestSnapshot = getLatestProfileSnapshot(vault);
-  const currentData = isRecord(current.attributes) ? current.attributes : null;
-  const currentProfileValue = getRecordField(currentData, "profile");
-  const currentProfileData = isRecord(currentProfileValue)
-    ? currentProfileValue
-    : null;
-  const latestSnapshotProfileValue = getRecordField(latestSnapshot?.attributes, "profile");
-  const latestSnapshotProfile = isRecord(latestSnapshotProfileValue)
-    ? latestSnapshotProfileValue
-    : null;
-  const topGoalIds = extractStringArray(
-    getRecordField(currentData, "topGoalIds"),
-    extractProfileTopGoalIds(currentProfileData),
-    extractProfileTopGoalIds(latestSnapshotProfile),
-  );
-
-  return {
-    id: current.entityId,
-    recordedAt: current.occurredAt,
-    summary: summarizeText(current.body),
-    title: current.title ?? current.entityId,
-    topGoals: resolveOverviewGoals(vault, topGoalIds),
-  };
 }
 
 export function summarizeRecentOverviewJournals(
@@ -250,30 +202,6 @@ export function summarizeOverviewExperiments(
   }));
 }
 
-function resolveOverviewGoals(
-  vault: VaultReadModel,
-  goalIds: readonly string[],
-): OverviewGoal[] {
-  const goalLookup = new Map<string, VaultReadModel["goals"][number]>();
-
-  for (const goal of vault.goals) {
-    for (const lookupId of [goal.entityId, goal.primaryLookupId, ...goal.lookupIds]) {
-      if (lookupId) {
-        goalLookup.set(lookupId, goal);
-      }
-    }
-  }
-
-  return goalIds.map((goalId) => {
-    const goal = goalLookup.get(goalId);
-
-    return {
-      id: goalId,
-      title: goal?.title ?? goalId,
-    };
-  });
-}
-
 function summarizeText(value: string | null): string | null {
   if (typeof value !== "string") {
     return null;
@@ -296,53 +224,6 @@ function summarizeText(value: string | null): string | null {
 
 function compactStrings(values: readonly (string | null | undefined)[]): string[] {
   return values.filter((value): value is string => typeof value === "string" && value.length > 0);
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
-
-function getRecordField(record: unknown, key: string): unknown {
-  if (!isRecord(record)) {
-    return undefined;
-  }
-
-  return record[key];
-}
-
-function extractStringArray(...values: unknown[]): string[] {
-  let fallback: string[] | null = null;
-
-  for (const value of values) {
-    if (!Array.isArray(value)) {
-      continue;
-    }
-
-    const strings = value.filter((entry): entry is string => typeof entry === "string");
-    if (fallback === null) {
-      fallback = strings;
-    }
-
-    if (strings.length > 0) {
-      return strings;
-    }
-  }
-
-  return fallback ?? [];
-}
-
-function getLatestProfileSnapshot(
-  vault: VaultReadModel,
-): VaultReadModel["profileSnapshots"][number] | null {
-  let latest: VaultReadModel["profileSnapshots"][number] | null = null;
-
-  for (const snapshot of vault.profileSnapshots) {
-    if (latest === null || compareLatestStrings(snapshot.occurredAt, latest.occurredAt) > 0) {
-      latest = snapshot;
-    }
-  }
-
-  return latest;
 }
 
 function compareLatestStrings(

@@ -1,7 +1,10 @@
+import { z } from "zod";
+
 import { stripEmptyObject, stripUndefined } from "../shared.ts";
 import {
   asArray,
   asPlainObject,
+  buildSyntheticDeletionResourceId,
   createRawArtifact,
   emitObservationMetrics,
   emitSampleMetrics,
@@ -32,7 +35,7 @@ import type { DeviceProviderAdapter, NormalizedDeviceBatch } from "./types.ts";
 import { WHOOP_DEVICE_PROVIDER_DESCRIPTOR } from "./provider-descriptors.ts";
 
 export interface WhoopSnapshotInput {
-  accountId?: string;
+  accountId?: string | number;
   importedAt?: string | number | Date;
   profile?: unknown;
   bodyMeasurement?: unknown;
@@ -42,6 +45,25 @@ export interface WhoopSnapshotInput {
   sleeps?: unknown[];
   workouts?: unknown[];
   deletions?: unknown[];
+}
+
+const whoopCollectionSchema = z.array(z.unknown());
+
+const whoopSnapshotSchema = z.object({
+  accountId: z.union([z.string(), z.number()]).optional(),
+  importedAt: z.union([z.string(), z.number(), z.date()]).optional(),
+  profile: z.unknown().optional(),
+  bodyMeasurement: z.unknown().optional(),
+  bodyMeasurements: z.unknown().optional(),
+  cycles: whoopCollectionSchema.optional(),
+  recoveries: whoopCollectionSchema.optional(),
+  sleeps: whoopCollectionSchema.optional(),
+  workouts: whoopCollectionSchema.optional(),
+  deletions: whoopCollectionSchema.optional(),
+}).catchall(z.unknown());
+
+function parseWhoopSnapshot(snapshot: unknown): WhoopSnapshotInput {
+  return whoopSnapshotSchema.parse(snapshot);
 }
 
 function makeExternalRef(
@@ -270,7 +292,6 @@ function pushDeletionObservation(
   deletion: PlainObject,
 ): void {
   const resourceType = slugify(deletion.resource_type ?? deletion.resourceType, "resource");
-  const resourceId = stringId(deletion.resource_id ?? deletion.resourceId) ?? `deleted-${events.length + 1}`;
   const occurredAt = toIso(deletion.occurred_at ?? deletion.occurredAt) ?? importedAt;
   const sourceEventType =
     typeof deletion.source_event_type === "string" && deletion.source_event_type.trim()
@@ -278,11 +299,19 @@ function pushDeletionObservation(
       : typeof deletion.sourceEventType === "string" && deletion.sourceEventType.trim()
         ? deletion.sourceEventType.trim()
         : undefined;
+  const resourceId =
+    stringId(deletion.resource_id ?? deletion.resourceId) ??
+    buildSyntheticDeletionResourceId({
+      provider: "whoop",
+      resourceType,
+      occurredAt,
+      sourceEventType,
+      deletion,
+    });
 
   pushSharedDeletionObservation(events, rawArtifacts, {
     provider: "whoop",
     providerDisplayName: "WHOOP",
-    deletion,
     resourceType,
     resourceId,
     occurredAt,
@@ -547,5 +576,6 @@ export function normalizeWhoopSnapshot(snapshot: WhoopSnapshotInput): Normalized
 
 export const whoopProviderAdapter: DeviceProviderAdapter<WhoopSnapshotInput> = {
   ...WHOOP_DEVICE_PROVIDER_DESCRIPTOR,
+  parseSnapshot: parseWhoopSnapshot,
   normalizeSnapshot: normalizeWhoopSnapshot,
 };

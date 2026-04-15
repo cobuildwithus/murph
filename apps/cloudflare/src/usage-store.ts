@@ -1,3 +1,5 @@
+import type { HostedRuntimeUsageRecordResponse } from "@murphai/assistant-runtime";
+
 import {
   buildHostedStorageAad,
   deriveHostedStorageOpaqueId,
@@ -7,24 +9,17 @@ import {
   readEncryptedR2Json,
   writeEncryptedR2Json,
 } from "./crypto.js";
+import {
+  deleteHostedPendingUsageDirtyUser,
+  writeHostedPendingUsageDirtyUser,
+} from "./usage-store/dirty-users.ts";
 
-const HOSTED_PENDING_USAGE_DIRTY_USER_SCHEMA = "murph.hosted-pending-usage-dirty.v1";
-const HOSTED_PENDING_USAGE_RECORD_SCHEMA = "murph.hosted-pending-usage-record.v2";
-const HOSTED_PENDING_USAGE_DIRTY_PREFIX = "transient/assistant-usage-dirty/";
+const HOSTED_PENDING_USAGE_RECORD_SCHEMA = "murph.hosted-pending-usage-record.v1";
 const HOSTED_PENDING_USAGE_RECORD_PREFIX = "transient/assistant-usage/";
-
-interface StoredHostedPendingUsageDirtyUser {
-  schema: typeof HOSTED_PENDING_USAGE_DIRTY_USER_SCHEMA;
-  updatedAt: string;
-  userId: string;
-}
 
 interface StoredHostedPendingUsageRecord {
   record: Record<string, unknown>;
   schema: typeof HOSTED_PENDING_USAGE_RECORD_SCHEMA;
-  updatedAt: string;
-  usageId: string;
-  userId: string;
 }
 
 interface HostedPendingUsageState {
@@ -35,7 +30,7 @@ export interface HostedPendingUsageStore {
   appendUsage(input: {
     usage: readonly Record<string, unknown>[];
     userId: string;
-  }): Promise<{ recorded: number; usageIds: string[] }>;
+  }): Promise<HostedRuntimeUsageRecordResponse>;
   deleteUsage(input: {
     usageIds: readonly string[];
     userId: string;
@@ -46,15 +41,10 @@ export interface HostedPendingUsageStore {
   }): Promise<Record<string, unknown>[]>;
 }
 
-export interface HostedPendingUsageDirtyUserStore {
-  listDirtyUsers(input?: { limit?: number | null }): Promise<string[]>;
-}
-
 export function createHostedPendingUsageStore(input: {
   bucket: R2BucketLike;
   dirtyKey: Uint8Array;
   dirtyKeyId: string;
-  dirtyKeysById?: Readonly<Record<string, Uint8Array>>;
   key: Uint8Array;
   keyId: string;
   keysById?: Readonly<Record<string, Uint8Array>>;
@@ -92,9 +82,10 @@ export function createHostedPendingUsageStore(input: {
         }
 
         await writeStoredHostedPendingUsageRecord({
-          ...input,
+          bucket: input.bucket,
+          key: input.key,
+          keyId: input.keyId,
           record,
-          updatedAt: now,
           userId: request.userId,
         });
         recordedIds.push(usageId);
@@ -122,7 +113,10 @@ export function createHostedPendingUsageStore(input: {
       );
       const shouldVacuumDirtyMarker = usageIds.size === 0;
       const state = await readHostedPendingUsageState({
-        ...input,
+        bucket: input.bucket,
+        key: input.key,
+        keyId: input.keyId,
+        keysById: input.keysById,
         requireListing: shouldVacuumDirtyMarker,
         userId: request.userId,
       });
@@ -143,7 +137,6 @@ export function createHostedPendingUsageStore(input: {
         await deleteHostedPendingUsageDirtyUser({
           bucket: input.bucket,
           key: input.dirtyKey,
-          keysById: input.dirtyKeysById,
           userId: request.userId,
         });
         return;
@@ -164,7 +157,10 @@ export function createHostedPendingUsageStore(input: {
 
     async readUsage(request) {
       const state = await readHostedPendingUsageState({
-        ...input,
+        bucket: input.bucket,
+        key: input.key,
+        keyId: input.keyId,
+        keysById: input.keysById,
         requireListing: true,
         userId: request.userId,
       });
@@ -176,59 +172,8 @@ export function createHostedPendingUsageStore(input: {
   };
 }
 
-export function createHostedPendingUsageDirtyUserStore(input: {
-  bucket: R2BucketLike;
-  key: Uint8Array;
-  keyId: string;
-  keysById?: Readonly<Record<string, Uint8Array>>;
-}): HostedPendingUsageDirtyUserStore {
-  return {
-    async listDirtyUsers(request = {}) {
-      const keys = await listHostedR2ObjectKeys({
-        bucket: input.bucket,
-        prefix: HOSTED_PENDING_USAGE_DIRTY_PREFIX,
-      });
-      const seen = new Set<string>();
-      const dirtyUsers: StoredHostedPendingUsageDirtyUser[] = [];
-
-      for (const key of keys) {
-        const record: StoredHostedPendingUsageDirtyUser | null = await readEncryptedR2Json({
-          aad: buildHostedStorageAad({
-            key,
-            purpose: "assistant-usage-dirty",
-          }),
-          bucket: input.bucket,
-          cryptoKey: input.key,
-          cryptoKeysById: input.keysById,
-          expectedKeyId: input.keyId,
-          key,
-          parse(value) {
-            return parseStoredHostedPendingUsageDirtyUser(value);
-          },
-          scope: "assistant-usage-dirty",
-        });
-
-        if (!record || seen.has(record.userId)) {
-          continue;
-        }
-
-        seen.add(record.userId);
-        dirtyUsers.push(record);
-      }
-
-      return dirtyUsers
-        .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt) || left.userId.localeCompare(right.userId))
-        .slice(0, request.limit ?? undefined)
-        .map((record) => record.userId);
-    },
-  };
-}
-
 async function readHostedPendingUsageState(input: {
   bucket: R2BucketLike;
-  dirtyKey: Uint8Array;
-  dirtyKeyId: string;
-  dirtyKeysById?: Readonly<Record<string, Uint8Array>>;
   key: Uint8Array;
   keyId: string;
   keysById?: Readonly<Record<string, Uint8Array>>;
@@ -299,7 +244,7 @@ async function readStoredHostedPendingUsageRecords(input: {
       continue;
     }
 
-    recordsByUsageId.set(stored.usageId, cloneUsageRecord(stored.record));
+    recordsByUsageId.set(readUsageId(stored.record), cloneUsageRecord(stored.record));
   }
 
   return [...recordsByUsageId.values()];
@@ -339,7 +284,6 @@ async function writeStoredHostedPendingUsageRecord(input: {
   key: Uint8Array;
   keyId: string;
   record: Record<string, unknown>;
-  updatedAt: string;
   userId: string;
 }): Promise<void> {
   const usageId = readUsageId(input.record);
@@ -358,51 +302,8 @@ async function writeStoredHostedPendingUsageRecord(input: {
     value: {
       record: cloneUsageRecord(input.record),
       schema: HOSTED_PENDING_USAGE_RECORD_SCHEMA,
-      updatedAt: input.updatedAt,
-      usageId,
-      userId: input.userId,
     } satisfies StoredHostedPendingUsageRecord,
   });
-}
-
-async function writeHostedPendingUsageDirtyUser(input: {
-  bucket: R2BucketLike;
-  key: Uint8Array;
-  keyId: string;
-  updatedAt: string;
-  userId: string;
-}): Promise<void> {
-  const key = await pendingUsageDirtyUserObjectKey(input.key, input.userId);
-  await writeEncryptedR2Json({
-    aad: buildHostedStorageAad({
-      key,
-      purpose: "assistant-usage-dirty",
-    }),
-    bucket: input.bucket,
-    cryptoKey: input.key,
-    key,
-    keyId: input.keyId,
-    scope: "assistant-usage-dirty",
-    value: {
-      schema: HOSTED_PENDING_USAGE_DIRTY_USER_SCHEMA,
-      updatedAt: input.updatedAt,
-      userId: input.userId,
-    } satisfies StoredHostedPendingUsageDirtyUser,
-  });
-}
-
-async function deleteHostedPendingUsageDirtyUser(input: {
-  bucket: R2BucketLike;
-  key: Uint8Array;
-  keysById?: Readonly<Record<string, Uint8Array>>;
-  userId: string;
-}): Promise<void> {
-  if (!input.bucket.delete) {
-    return;
-  }
-
-  const key = await pendingUsageDirtyUserObjectKey(input.key, input.userId);
-  await input.bucket.delete(key);
 }
 
 function parseStoredHostedPendingUsageRecord(value: unknown): StoredHostedPendingUsageRecord {
@@ -410,9 +311,9 @@ function parseStoredHostedPendingUsageRecord(value: unknown): StoredHostedPendin
   const usageRecord = cloneUsageRecord(
     requireRecord(record.record, "Hosted pending usage record.record"),
   );
-  const usageId = normalizeRequiredString(record.usageId, "Hosted pending usage record.usageId");
+  const usageId = readOptionalNormalizedString(record.usageId);
 
-  if (readUsageId(usageRecord) !== usageId) {
+  if (usageId && readUsageId(usageRecord) !== usageId) {
     throw new TypeError("Hosted pending usage record.usageId must match record.usageId.");
   }
 
@@ -423,26 +324,6 @@ function parseStoredHostedPendingUsageRecord(value: unknown): StoredHostedPendin
       "Hosted pending usage record.schema",
       HOSTED_PENDING_USAGE_RECORD_SCHEMA,
     ),
-    updatedAt: normalizeRequiredString(record.updatedAt, "Hosted pending usage record.updatedAt"),
-    usageId,
-    userId: normalizeRequiredString(record.userId, "Hosted pending usage record.userId"),
-  };
-}
-
-function parseStoredHostedPendingUsageDirtyUser(value: unknown): StoredHostedPendingUsageDirtyUser {
-  const record = requireRecord(value, "Hosted pending usage dirty user record");
-
-  return {
-    schema: requireSchema(
-      record.schema,
-      "Hosted pending usage dirty user record.schema",
-      HOSTED_PENDING_USAGE_DIRTY_USER_SCHEMA,
-    ),
-    updatedAt: normalizeRequiredString(
-      record.updatedAt,
-      "Hosted pending usage dirty user record.updatedAt",
-    ),
-    userId: normalizeRequiredString(record.userId, "Hosted pending usage dirty user record.userId"),
   };
 }
 
@@ -495,17 +376,6 @@ async function pendingUsageRecordObjectPrefix(rootKey: Uint8Array, userId: strin
   return `${HOSTED_PENDING_USAGE_RECORD_PREFIX}${userSegment}/`;
 }
 
-async function pendingUsageDirtyUserObjectKey(rootKey: Uint8Array, userId: string): Promise<string> {
-  const userSegment = await deriveHostedStorageOpaqueId({
-    length: 24,
-    rootKey,
-    scope: "assistant-usage-dirty-path",
-    value: `user:${userId}`,
-  });
-
-  return `${HOSTED_PENDING_USAGE_DIRTY_PREFIX}${userSegment}.json`;
-}
-
 async function listHostedR2ObjectKeys(input: {
   bucket: R2BucketLike;
   limit?: number | null;
@@ -555,18 +425,16 @@ function requireRecord(value: unknown, label: string): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
-function requireArray(value: unknown, label: string): unknown[] {
-  if (!Array.isArray(value)) {
-    throw new TypeError(`${label} must be an array.`);
-  }
-
-  return value;
-}
-
 function normalizeRequiredString(value: unknown, label: string): string {
   if (typeof value !== "string" || value.trim().length === 0) {
     throw new TypeError(`${label} must be a non-empty string.`);
   }
 
   return value.trim();
+}
+
+function readOptionalNormalizedString(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0
+    ? value.trim()
+    : null;
 }

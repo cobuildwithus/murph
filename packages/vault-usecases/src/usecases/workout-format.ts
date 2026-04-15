@@ -11,7 +11,7 @@ import {
 } from '@murphai/core'
 import { loadJsonInputObject } from '../json-input.js'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
-import { asListEnvelope } from './shared.js'
+import { asListEnvelope, toListEntity } from './shared.js'
 import {
   normalizeOptionalText,
   toVaultCliError,
@@ -61,10 +61,6 @@ function valueAsString(value: unknown): string | undefined {
   return typeof value === 'string' ? value : undefined
 }
 
-function valueAsNumber(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
-}
-
 function toWorkoutFormatEntity(record: WorkoutFormatRecord, includeMarkdown: boolean) {
   return {
     id: record.workoutFormatId,
@@ -90,6 +86,33 @@ function toWorkoutFormatEntity(record: WorkoutFormatRecord, includeMarkdown: boo
     },
     links: [],
   }
+}
+
+function toWorkoutFormatListEntity(record: WorkoutFormatRecord) {
+  return toListEntity({
+    id: record.workoutFormatId,
+    kind: 'workout_format',
+    title: record.title,
+    occurredAt: null,
+    path: record.relativePath,
+    markdown: record.markdown,
+    data: {
+      workoutFormatId: record.workoutFormatId,
+      slug: record.slug,
+      title: record.title,
+      status: record.status,
+      summary: record.summary,
+      activityType: record.activityType,
+      durationMinutes: record.durationMinutes,
+      distanceKm: record.distanceKm,
+      template: record.template,
+      tags: record.tags,
+      note: record.note,
+      text: record.templateText,
+      templateText: record.templateText,
+    },
+    links: [],
+  })
 }
 
 async function loadWorkoutFormats(vault: string): Promise<WorkoutFormatRecord[]> {
@@ -267,9 +290,7 @@ export async function listWorkoutFormats(input: {
   limit: number
 }) {
   const records = await loadWorkoutFormats(input.vault)
-  const items = records.slice(0, input.limit).map((record) =>
-    toWorkoutFormatEntity(record, false),
-  )
+  const items = records.slice(0, input.limit).map(toWorkoutFormatListEntity)
 
   return asListEnvelope(
     input.vault,

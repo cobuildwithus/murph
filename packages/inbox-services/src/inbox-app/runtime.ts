@@ -7,6 +7,7 @@ import type {
   InboxServices,
   InboxRunEvent,
   ParserRuntimeDrainResult,
+  PersistedCapture,
   PollConnector,
   RuntimeCaptureRecordInput,
 } from './types.js'
@@ -33,7 +34,7 @@ import {
   relativeToVault,
   runtimeNamespaceAccountId,
 } from '../inbox-services/shared.js'
-import { tryKillProcess } from '../process-kill.js'
+import { tryKillProcess } from '@murphai/runtime-state/node'
 
 const FOREGROUND_CONNECTOR_RESTART_POLICY = {
   enabled: true,
@@ -52,6 +53,23 @@ function instrumentConnectorForRunEvents(
     source: connector.source,
   } as const
 
+  const emitImportedCapture = (
+    capture: RuntimeCaptureRecordInput,
+    persisted: PersistedCapture,
+    phase: 'backfill' | 'watch',
+  ) => {
+    if (persisted.deduped) {
+      return
+    }
+    onEvent({
+      ...baseEvent,
+      capture,
+      persisted,
+      phase,
+      type: 'capture.imported',
+    })
+  }
+
   return {
     ...connector,
     async backfill(cursor, emit) {
@@ -65,7 +83,7 @@ function instrumentConnectorForRunEvents(
       let deduped = 0
 
       try {
-        const nextCursor = await connector.backfill?.(
+        const nextCursor = await connector.backfill(
           cursor,
           async (capture, checkpoint) => {
             const persisted = await emit(capture, checkpoint)
@@ -74,6 +92,7 @@ function instrumentConnectorForRunEvents(
             } else {
               imported += 1
             }
+            emitImportedCapture(capture, persisted, 'backfill')
             return persisted
           },
         )
@@ -107,19 +126,11 @@ function instrumentConnectorForRunEvents(
       })
 
       try {
-        return await connector.watch?.(
+        return await connector.watch(
           cursor,
           async (capture, checkpoint) => {
             const persisted = await emit(capture, checkpoint)
-            if (!persisted.deduped) {
-              onEvent({
-                ...baseEvent,
-                capture,
-                persisted,
-                phase: 'watch',
-                type: 'capture.imported',
-              })
-            }
+            emitImportedCapture(capture, persisted, 'watch')
             return persisted
           },
           signal,
@@ -146,27 +157,31 @@ function isVaultCliErrorCode(error: unknown, code: string): boolean {
   )
 }
 
-function shouldSkipConnectorStartup(
-  connector: { source: string },
-  error: unknown,
-): boolean {
-  return (
-    connector.source === 'imessage' &&
-    isVaultCliErrorCode(error, 'INBOX_IMESSAGE_UNAVAILABLE')
-  )
+function isSupportedRuntimeSource(source: string): boolean {
+  return source === 'telegram' || source === 'email' || source === 'linq'
 }
 
-function emitConnectorSkipped(
-  connector: { id: string; source: string },
-  error: unknown,
+function emitParserDrainEvent(
+  results: ParserRuntimeDrainResult[],
   onEvent?: ((event: InboxRunEvent) => void) | null,
 ): void {
-  onEvent?.({
-    connectorId: connector.id,
-    details: errorMessage(error),
-    phase: 'startup',
-    source: connector.source,
-    type: 'connector.skipped',
+  if (!onEvent || results.length === 0) {
+    return
+  }
+
+  const captureIds = [...new Set(results.map((result) => result.job.captureId))]
+  const failed = results.filter((result) => result.status === 'failed').length
+
+  onEvent({
+    connectorId: 'parser',
+    parser: {
+      captureIds,
+      failed,
+      processed: results.length,
+      succeeded: results.length - failed,
+    },
+    source: 'parser',
+    type: 'parser.jobs.drained',
   })
 }
 
@@ -241,7 +256,7 @@ export function createInboxRuntimeOps(
 
       try {
         const state = input.state ?? 'failed'
-        const count = runtime.requeueAttachmentParseJobs?.({
+        const count = runtime.requeueAttachmentParseJobs({
           attachmentId: input.attachmentId ?? undefined,
           captureId: input.captureId ?? undefined,
           state,
@@ -249,7 +264,7 @@ export function createInboxRuntimeOps(
 
         return {
           vault: paths.absoluteVaultRoot,
-          count: count ?? 0,
+          count,
           filters: {
             ...(input.captureId ? { captureId: input.captureId } : {}),
             ...(input.attachmentId ? { attachmentId: input.attachmentId } : {}),
@@ -266,6 +281,12 @@ export function createInboxRuntimeOps(
       const inboxd = await env.loadInbox()
       const config = await readConfig(paths)
       const connectorConfig = requireConnector(config, input.sourceId)
+      if (!isSupportedRuntimeSource(connectorConfig.source)) {
+        throw new VaultCliError(
+          'INBOX_SOURCE_UNSUPPORTED',
+          `Inbox source "${connectorConfig.source}" is not supported by the inbox runtime.`,
+        )
+      }
       const runtime = await inboxd.openInboxRuntime({
         vaultRoot: paths.absoluteVaultRoot,
       })
@@ -286,12 +307,9 @@ export function createInboxRuntimeOps(
           connector: connectorConfig,
           inputLimit: input.limit,
           loadInbox: env.loadInbox,
-          loadInboxImessage: env.loadInboxImessage,
-          loadImessageDriver: env.loadConfiguredImessageDriver,
           loadTelegramDriver: env.loadConfiguredTelegramDriver,
           loadEmailDriver: env.loadConfiguredEmailDriver,
           linqWebhookSecret: resolveLinqWebhookSecret(env.getEnvironment()),
-          ensureImessageReady: env.ensureConfiguredImessageReady,
         })
         let importedCount = 0
         let dedupedCount = 0
@@ -299,7 +317,7 @@ export function createInboxRuntimeOps(
         const cursorAccountId = runtimeNamespaceAccountId(connectorConfig)
         let cursor = runtime.getCursor(connector.source, cursorAccountId)
 
-        const nextCursor = await connector.backfill?.(
+        const nextCursor = await connector.backfill(
           cursor,
           async (capture, checkpoint) => {
             const persisted = await pipeline.processCapture(capture)
@@ -307,7 +325,7 @@ export function createInboxRuntimeOps(
               dedupedCount += 1
             } else {
               importedCount += 1
-              if (parserService && persisted.captureId) {
+              if (parserService) {
                 parseResults = parseResults.concat(
                   await parserService.drain({
                     captureId: persisted.captureId,
@@ -356,6 +374,9 @@ export function createInboxRuntimeOps(
       const enabledConnectors = config.connectors.filter(
         (connector) => connector.enabled,
       )
+      const activeConnectorConfigs = enabledConnectors.filter((connector) =>
+        isSupportedRuntimeSource(connector.source),
+      )
 
       if (enabledConnectors.length === 0) {
         throw new VaultCliError(
@@ -383,42 +404,31 @@ export function createInboxRuntimeOps(
       const configured = await parsers.createConfiguredParserRegistry({
         vaultRoot: paths.absoluteVaultRoot,
       })
-      const activeConnectorConfigs = [] as typeof enabledConnectors
       const instrumentedConnectors = [] as PollConnector[]
       const linqWebhookSecret = resolveLinqWebhookSecret(env.getEnvironment())
 
-      for (const connector of enabledConnectors) {
-        try {
-          const instantiated = await instantiateConnector({
-            connector,
-            loadInbox: env.loadInbox,
-            loadInboxImessage: env.loadInboxImessage,
-            loadImessageDriver: env.loadConfiguredImessageDriver,
-            loadTelegramDriver: env.loadConfiguredTelegramDriver,
-            loadEmailDriver: env.loadConfiguredEmailDriver,
-            linqWebhookSecret,
-            ensureImessageReady: env.ensureConfiguredImessageReady,
-          })
-          activeConnectorConfigs.push(connector)
-          instrumentedConnectors.push(
-            instrumentConnectorForRunEvents(instantiated, options?.onEvent),
-          )
-        } catch (error) {
-          if (shouldSkipConnectorStartup(connector, error)) {
-            emitConnectorSkipped(connector, error, options?.onEvent)
-            continue
-          }
-          throw error
-        }
+      for (const connector of activeConnectorConfigs) {
+        const instantiated = await instantiateConnector({
+          connector,
+          loadInbox: env.loadInbox,
+          loadTelegramDriver: env.loadConfiguredTelegramDriver,
+          loadEmailDriver: env.loadConfiguredEmailDriver,
+          linqWebhookSecret,
+        })
+        instrumentedConnectors.push(
+          instrumentConnectorForRunEvents(instantiated, options?.onEvent),
+        )
       }
 
       if (instrumentedConnectors.length === 0) {
         throw new VaultCliError(
           'INBOX_NO_SUPPORTED_SOURCES',
-          'All enabled inbox sources are unsupported on this host. Disable or remove iMessage here, add Telegram, Linq, or email connectors, or run iMessage from a macOS host.',
+          'No supported inbox sources are enabled. Enable a Telegram, Linq, or email connector first.',
           {
             connectorIds: enabledConnectors.map((connector) => connector.id),
-            platform: env.getPlatform(),
+            unsupportedConnectorIds: enabledConnectors
+              .filter((connector) => !isSupportedRuntimeSource(connector.source))
+              .map((connector) => connector.id),
           },
         )
       }
@@ -457,6 +467,9 @@ export function createInboxRuntimeOps(
           signal: runSignal,
           continueOnConnectorFailure: true,
           connectorRestartPolicy: FOREGROUND_CONNECTOR_RESTART_POLICY,
+          onParserDrain: (results) => {
+            emitParserDrainEvent(results, options?.onEvent)
+          },
         })
       } catch (error) {
         reason = runSignal.aborted ? 'signal' : 'error'

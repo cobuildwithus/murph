@@ -1,4 +1,6 @@
 import {
+  DEFAULT_DEVICE_SYNC_HTTP_BODY_LIMIT_BYTES,
+  DEVICE_SYNC_WEBHOOK_TRACE_COMPLETED,
   createDeviceSyncPublicIngress,
   deviceSyncError,
   sanitizeStoredDeviceSyncMetadata,
@@ -21,6 +23,7 @@ import {
   handleHostedDeviceSyncConnectionEstablished,
   handleHostedDeviceSyncWebhookAccepted,
 } from "./wake-service";
+import { readRawBodyBuffer } from "./http";
 import { requireHostedDeviceSyncRuntimeClient } from "./runtime-client";
 import { HostedDeviceSyncWebhookAdminService } from "./webhook-admin-service";
 
@@ -97,13 +100,15 @@ export class HostedDeviceSyncPublicIngressService {
 
           await this.webhookAdmin.ensureHostedWebhookAdminUpkeepForConnectionEstablished(provider);
         },
-        onWebhookAccepted: async ({ account, webhook, now }) => {
+        onWebhookAccepted: async ({ account, traceId, webhook, now }) => {
           await handleHostedDeviceSyncWebhookAccepted({
             account,
             now,
             store: this.context.store,
+            traceId,
             webhook,
           });
+          return DEVICE_SYNC_WEBHOOK_TRACE_COMPLETED;
         },
       },
     });
@@ -162,7 +167,25 @@ export class HostedDeviceSyncPublicIngressService {
   }
 
   async handleWebhook(provider: string): Promise<HandleWebhookResult> {
-    const rawBody = Buffer.from(await this.context.request.arrayBuffer());
+    let rawBody: Buffer;
+
+    try {
+      rawBody = await readRawBodyBuffer(this.context.request, {
+        limitBytes: DEFAULT_DEVICE_SYNC_HTTP_BODY_LIMIT_BYTES,
+      });
+    } catch (error) {
+      if (error instanceof RangeError) {
+        throw deviceSyncError({
+          code: "PAYLOAD_TOO_LARGE",
+          message: error.message,
+          retryable: false,
+          httpStatus: 413,
+        });
+      }
+
+      throw error;
+    }
+
     return this.ingress.handleWebhook(provider, this.context.request.headers, rawBody);
   }
 

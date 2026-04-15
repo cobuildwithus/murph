@@ -1,3 +1,5 @@
+/// <reference types="@cloudflare/vitest-pool-workers/types" />
+
 import { createPublicKey, generateKeyPairSync, sign } from "node:crypto";
 import { env, exports } from "cloudflare:workers";
 import { runDurableObjectAlarm } from "cloudflare:test";
@@ -33,11 +35,14 @@ const TEST_VERCEL_OIDC_PUBLIC_JWK = {
 };
 
 import type {
-  HostedExecutionDispatchResult,
-  HostedExecutionDispatchRequest,
   HostedExecutionBundleRef,
+  HostedExecutionDispatchRequest,
+  HostedExecutionDispatchResult,
   HostedExecutionUserStatus,
-} from "@murphai/runtime-state";
+} from "@murphai/hosted-execution";
+import {
+  HOSTED_EXECUTION_USER_ID_HEADER,
+} from "@murphai/hosted-execution/contracts";
 
 interface UserRunnerRpcStub {
   bootstrapUser(userId: string): Promise<{ userId: string }>;
@@ -53,6 +58,11 @@ interface UserRunnerRpcStub {
 }
 
 const describe = baseDescribe.sequential;
+const worker = (exports as {
+  default: {
+    fetch(input: Request): Promise<Response>;
+  };
+}).default;
 
 describe("cloudflare worker runtime suite", () => {
   afterEach(() => {
@@ -64,7 +74,7 @@ describe("cloudflare worker runtime suite", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-03-26T12:00:00.000Z"));
 
-    const response = await exports.default.fetch(
+    const response = await worker.fetch(
       await createSignedDispatchRequest("/internal/dispatch", createDispatch("evt_invalid"), {
         sub: `owner:${TEST_VERCEL_OIDC_TEAM_SLUG}:project:wrong-project:environment:production`,
       }),
@@ -88,7 +98,7 @@ describe("cloudflare worker runtime suite", () => {
 
     const dispatch = createDispatch("evt_signed_runtime", "member_signed_runtime");
     await resolveHostedUserCryptoContext(dispatch.event.userId);
-    const response = await exports.default.fetch(
+    const response = await worker.fetch(
       await createSignedDispatchRequest("/internal/dispatch", dispatch),
     );
 
@@ -120,7 +130,7 @@ describe("cloudflare worker runtime suite", () => {
     vi.setSystemTime(new Date("2026-03-26T12:00:00.000Z"));
     const userId = "member_removed_alias";
 
-    const response = await exports.default.fetch(
+    const response = await worker.fetch(
       await createSignedDispatchRequest("/internal/events", createDispatch("evt_removed_alias", userId)),
     );
 
@@ -137,7 +147,7 @@ describe("cloudflare worker runtime suite", () => {
 
   it("supports direct Durable Object RPC and alarm execution inside the Workers runtime", async () => {
     vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-03-26T12:00:00.000Z"));
+    vi.setSystemTime(new Date("2026-05-26T12:00:00.000Z"));
 
     const userId = "member_alarm";
     await resolveHostedUserCryptoContext(userId);
@@ -145,7 +155,10 @@ describe("cloudflare worker runtime suite", () => {
     const initialStatus = await stub.dispatch(createDispatch("evt_alarm_seed", userId));
 
     expect(initialStatus.lastEventId).toBe("evt_alarm_seed");
-    await expect(runDurableObjectAlarm(stub as never)).resolves.toBeTypeOf("boolean");
+    expect(initialStatus.nextWakeAt).toBe("2026-05-26T12:00:00.000Z");
+
+    vi.setSystemTime(new Date("2026-05-26T12:01:10.000Z"));
+    await expect(runDurableObjectAlarm(stub as never)).resolves.toBe(true);
     await vi.waitFor(async () => {
       await expect(stub.status()).resolves.toMatchObject({
         lastEventId: expect.stringMatching(/^alarm:/u),
@@ -182,34 +195,11 @@ describe("cloudflare worker runtime suite", () => {
     });
   });
 
-  it("rejects removed, operator-only, and unknown hosted user env keys through direct Durable Object RPC", async () => {
+  it("accepts canonical hosted user env keys through direct Durable Object RPC", async () => {
     const userId = "member_control_env_reject";
     await resolveHostedUserCryptoContext(userId);
     const stub = getUserRunnerStub(userId);
     await expect(stub.bootstrapUser(userId)).resolves.toEqual({ userId });
-
-    let rejectedError: unknown = null;
-    try {
-      await stub.updateUserEnv({
-        env: {
-          AGENTMAIL_API_BASE_URL: "https://legacy-mail.example.test/v0",
-          AGENTMAIL_TIMEOUT_MS: "5000",
-          FFMPEG_COMMAND: "/usr/local/bin/ffmpeg",
-          FFMPEG_THREADS: "2",
-          NODE_OPTIONS: "--require /tmp/evil-loader.js",
-          PARSER_FFMPEG_PATH: "/usr/local/bin/ffmpeg",
-        },
-        mode: "merge",
-      });
-    } catch (error) {
-      rejectedError = error;
-    }
-
-    expect(String(rejectedError)).toMatch(/Hosted user env key is not allowed/u);
-    await expect(stub.getUserEnvStatus()).resolves.toEqual({
-      configuredUserEnvKeys: [],
-      userId,
-    });
 
     await expect(stub.updateUserEnv({
       env: {
@@ -220,32 +210,21 @@ describe("cloudflare worker runtime suite", () => {
       configuredUserEnvKeys: ["OPENAI_API_KEY"],
       userId,
     });
+
+    await expect(stub.getUserEnvStatus()).resolves.toEqual({
+      configuredUserEnvKeys: ["OPENAI_API_KEY"],
+      userId,
+    });
   });
 
   it("hard-cuts the removed finalize route from the internal runner outbound handlers in the Workers runtime", async () => {
     const userId = "member_journal";
     const eventId = "evt_finalize_runtime";
     await resolveHostedUserCryptoContext(userId);
-
-    const commitResponse = await callRunnerOutbound(
-      new Request(`http://results.worker/events/${eventId}/commit`, {
-        body: JSON.stringify({
-          bundle: btoa("vault-commit"),
-          currentBundleRef: null,
-          result: {
-            eventsHandled: 1,
-            summary: "committed",
-          },
-        }),
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-        },
-        method: "POST",
-      }),
-      userId,
+    const dispatchResponse = await worker.fetch(
+      await createSignedDispatchRequest("/internal/dispatch", createDispatch(eventId, userId)),
     );
-
-    expect(commitResponse.status).toBe(200);
+    expect(dispatchResponse.status).toBe(200);
 
     const finalizeResponse = await callRunnerOutbound(
       new Request(`http://results.worker/events/${eventId}/finalize`, {
@@ -261,13 +240,7 @@ describe("cloudflare worker runtime suite", () => {
     );
 
     expect(finalizeResponse.status).toBe(404);
-    await expect((await createJournalStore(userId)).readCommittedResult(userId, eventId)).resolves.toMatchObject({
-      eventId,
-      finalizedAt: null,
-      result: {
-        summary: "committed",
-      },
-    });
+    await expect((await createJournalStore(userId)).readCommittedResult(userId, eventId)).resolves.toBeNull();
   });
 });
 
@@ -278,6 +251,11 @@ function createDispatch(
   return {
     event: {
       kind: "member.activated",
+      memberChannels: {
+        email: false,
+        linq: false,
+        telegram: false,
+      },
       userId,
     },
     eventId,
@@ -305,6 +283,7 @@ async function createSignedDispatchRequest(
   });
   const headers = new Headers(request.headers);
   headers.set("authorization", `Bearer ${createTestVercelOidcToken(input)}`);
+  headers.set(HOSTED_EXECUTION_USER_ID_HEADER, dispatch.event.userId);
 
   return new Request(request, { headers });
 }
@@ -366,7 +345,7 @@ async function resolveHostedUserCryptoContext(userId: string) {
     env as unknown as Readonly<Record<string, string | undefined>>,
   );
 
-  return createHostedUserKeyStore({
+  const store = createHostedUserKeyStore({
     automationRecipientKeyId: environment.automationRecipientKeyId,
     automationRecipientPrivateKey: environment.automationRecipientPrivateKey,
     automationRecipientPrivateKeysById: environment.automationRecipientPrivateKeysById,
@@ -379,7 +358,9 @@ async function resolveHostedUserCryptoContext(userId: string) {
     recoveryRecipientPublicKey: environment.recoveryRecipientPublicKey,
     teeAutomationRecipientKeyId: environment.teeAutomationRecipientKeyId,
     teeAutomationRecipientPublicKey: environment.teeAutomationRecipientPublicKey,
-  }).bootstrapManagedUserCryptoContext(userId);
+  });
+  await store.ensureManagedUserCryptoEnvelope(userId);
+  return store.requireUserCryptoContext(userId);
 }
 
 async function createJournalStore(userId: string) {

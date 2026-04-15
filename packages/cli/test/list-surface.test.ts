@@ -21,8 +21,7 @@ function listCliOptions() {
 
 test('list help and schemas no longer expose cursor pagination options', async () => {
   const help = await runRawSourceCli(['goal', 'list', '--help'], listCliOptions())
-  const profileHelp = await runRawSourceCli(['profile', 'list', '--help'], listCliOptions())
-  const historyHelp = await runRawSourceCli(['history', 'list', '--help'], listCliOptions())
+  const bloodTestHelp = await runRawSourceCli(['blood-test', 'list', '--help'], listCliOptions())
   const readSchema = JSON.parse(
     await runRawSourceCli(['list', '--schema', '--format', 'json'], listCliOptions()),
   ) as {
@@ -43,11 +42,9 @@ test('list help and schemas no longer expose cursor pagination options', async (
 
   assert.doesNotMatch(help, /--cursor/u)
   assert.doesNotMatch(help, /next-page token/u)
-  assert.match(profileHelp, /--from/u)
-  assert.match(profileHelp, /--to/u)
-  assert.match(historyHelp, /--kind/u)
-  assert.match(historyHelp, /--from/u)
-  assert.match(historyHelp, /--to/u)
+  assert.doesNotMatch(bloodTestHelp, /--kind/u)
+  assert.match(bloodTestHelp, /--from/u)
+  assert.match(bloodTestHelp, /--to/u)
   assert.equal('cursor' in readSchema.options.properties, false)
   assert.equal('recordType' in readSchema.options.properties, true)
   assert.equal('status' in readSchema.options.properties, true)
@@ -384,6 +381,8 @@ test('generic list exposes record-type, status, stream, and tag filter parity', 
       items: Array<{
         id: string
         kind: string
+        excerpt?: string | null
+        markdown?: string | null
       }>
     }>([
       'list',
@@ -413,6 +412,8 @@ test('generic list exposes record-type, status, stream, and tag filter parity', 
     assert.equal(requireData(experimentList).items.length, 1)
     assert.equal(requireData(experimentList).items[0]?.id, experimentId)
     assert.equal(requireData(experimentList).items[0]?.kind, 'experiment')
+    assert.match(requireData(experimentList).items[0]?.excerpt ?? '', /Sleep Window Notes\./u)
+    assert.equal('markdown' in (requireData(experimentList).items[0] ?? {}), false)
 
     const sampleList = await runSourceCli<{
       filters: {

@@ -7,8 +7,9 @@ import {
   initializeVault,
   readJsonlRecords,
   toMonthlyShardRelativePath,
-  upsertFood,
 } from '@murphai/core'
+import { createAssistantFoodAutoLogHooks } from '@murphai/assistant-engine/assistant-cron'
+import { upsertFoodRecord } from '@murphai/vault-usecases/records'
 
 const robustnessMocks = vi.hoisted(() => ({
   deliverAssistantMessageOverBinding: vi.fn(),
@@ -42,8 +43,8 @@ vi.mock('@murphai/assistant-engine/assistant-provider', async () => {
 })
 
 import {
-  addAssistantCronJob,
   getAssistantCronJob,
+  listAssistantCronJobs,
   runAssistantAutomation,
 } from '@murphai/assistant-cli/assistant/runtime'
 import { getAssistantStatus, readAssistantStatusSnapshot } from '@murphai/assistant-cli/assistant/status'
@@ -547,12 +548,15 @@ test('buildAssistantFailoverRoutes dedupes routes that only differ by null versu
   const routes = buildAssistantFailoverRoutes({
     provider: 'codex-cli',
     providerOptions: {
+      continuityFingerprint: 'fingerprint-robustness-codex',
       model: 'gpt-oss:20b',
       reasoningEffort: null,
       sandbox: null,
       approvalPolicy: null,
       profile: null,
       oss: false,
+      executionDriver: 'codex-cli',
+      resumeKind: 'codex-session',
     },
     backups: [
       {
@@ -596,6 +600,7 @@ test('buildAssistantFailoverRoutes dedupes identical routes even when their name
   const routes = buildAssistantFailoverRoutes({
     provider: 'openai-compatible',
     providerOptions: {
+      continuityFingerprint: 'fingerprint-robustness-openai',
       model: 'gpt-oss:20b',
       reasoningEffort: null,
       sandbox: null,
@@ -603,6 +608,8 @@ test('buildAssistantFailoverRoutes dedupes identical routes even when their name
       profile: null,
       oss: false,
       baseUrl: 'http://127.0.0.1:11434/v1',
+      executionDriver: 'openai-compatible',
+      resumeKind: null,
     },
     backups: [
       {
@@ -784,6 +791,7 @@ test('sendAssistantMessage fails over across provider routes and records cooldow
     const cooldownRoutes = buildAssistantFailoverRoutes({
       provider: 'codex-cli',
       providerOptions: {
+        continuityFingerprint: 'fingerprint-robustness-cooldown-route',
         model: 'gpt-oss:20b',
         reasoningEffort: null,
         sandbox: null,
@@ -792,7 +800,9 @@ test('sendAssistantMessage fails over across provider routes and records cooldow
         oss: false,
         baseUrl: null,
         apiKeyEnv: null,
+        executionDriver: 'codex-cli',
         providerName: null,
+        resumeKind: 'codex-session',
       },
       backups: [
         {
@@ -1109,6 +1119,7 @@ test('recordAssistantFailoverRouteFailure honors longer route cooldowns over the
   const routes = buildAssistantFailoverRoutes({
     provider: 'codex-cli',
     providerOptions: {
+      continuityFingerprint: 'fingerprint-robustness-cooldown',
       model: 'gpt-oss:20b',
       reasoningEffort: null,
       sandbox: null,
@@ -1117,7 +1128,9 @@ test('recordAssistantFailoverRouteFailure honors longer route cooldowns over the
       oss: false,
       baseUrl: null,
       apiKeyEnv: null,
+      executionDriver: 'codex-cli',
       providerName: null,
+      resumeKind: 'codex-session',
     },
     backups: [
       {
@@ -1162,9 +1175,18 @@ test('runAssistantAutomation exposes active run-lock status and rejects concurre
   const abortController = new AbortController()
   const firstRun = runAssistantAutomation({
     vault: vaultRoot,
-    inboxServices: {} as never,
-    startDaemon: false,
-    scanIntervalMs: 1_000,
+    inboxServices: {
+      list: async () => ({
+        items: [],
+      }),
+      run: async (_input: unknown, options?: { signal?: AbortSignal }) =>
+        await new Promise<void>((resolve) => {
+          options?.signal?.addEventListener('abort', () => resolve(), {
+            once: true,
+          })
+        }),
+    } as never,
+    startDaemon: true,
     signal: abortController.signal,
   })
 
@@ -1212,39 +1234,34 @@ test('runAssistantAutomation processes due recurring food autolog jobs on startu
     vaultRoot,
     timezone: 'America/New_York',
   })
+  vi.setSystemTime(new Date('2026-03-07T13:30:00.000Z'))
 
-  const food = await upsertFood({
-    vaultRoot,
-    title: 'Morning Smoothie',
-    slug: 'morning-smoothie',
-    note: 'Bone broth protein, creatine, inulin, GOS, coconut water.',
-    ingredients: [
-      'bone broth protein',
-      'creatine',
-      'inulin',
-      'GOS',
-      'coconut water',
-    ],
-    autoLogDaily: {
-      time: '08:00',
-    },
-  })
-
-  const job = await addAssistantCronJob({
+  const food = await upsertFoodRecord({
     vault: vaultRoot,
-    name: 'food-daily:morning-smoothie',
-    prompt: 'Auto-log recurring food "Morning Smoothie" as a note-only meal.',
-    foodAutoLog: {
-      foodId: food.record.foodId,
+    hooks: createAssistantFoodAutoLogHooks(),
+    payload: {
+      status: 'active',
+      title: 'Morning Smoothie',
+      slug: 'morning-smoothie',
+      note: 'Bone broth protein, creatine, inulin, GOS, coconut water.',
+      ingredients: [
+        'bone broth protein',
+        'creatine',
+        'inulin',
+        'GOS',
+        'coconut water',
+      ],
+      autoLogDaily: {
+        time: '08:00',
+      },
     },
-    schedule: {
-      kind: 'dailyLocal',
-      localTime: '08:00',
-      timeZone: 'America/New_York',
-    },
-    now: new Date('2026-03-07T13:30:00.000Z'),
   })
 
+  const [job] = (await listAssistantCronJobs(vaultRoot)).filter(
+    (candidate) => candidate.foodAutoLog?.foodId === food.foodId,
+  )
+
+  assert.ok(job)
   assert.equal(job.state.nextRunAt, '2026-03-08T12:00:00.000Z')
   vi.setSystemTime(new Date('2026-03-08T12:05:00.000Z'))
 
@@ -1298,7 +1315,7 @@ test('stopAssistantAutomation gracefully stops an active run lock', async () => 
 
   const paths = resolveAssistantStatePaths(vaultRoot)
   const lockPath = path.join(paths.assistantStateRoot, '.automation-run.lock')
-  const metadataPath = path.join(paths.assistantStateRoot, '.automation-run-lock.json')
+  const metadataPath = path.join(lockPath, 'owner.json')
   await mkdir(lockPath, { recursive: true })
   await writeFile(
     metadataPath,
@@ -1340,7 +1357,7 @@ test('stopAssistantAutomation force-kills a stubborn active run lock', async () 
 
   const paths = resolveAssistantStatePaths(vaultRoot)
   const lockPath = path.join(paths.assistantStateRoot, '.automation-run.lock')
-  const metadataPath = path.join(paths.assistantStateRoot, '.automation-run-lock.json')
+  const metadataPath = path.join(lockPath, 'owner.json')
   await mkdir(lockPath, { recursive: true })
   await writeFile(
     metadataPath,
@@ -1382,7 +1399,7 @@ test('stopAssistantAutomation clears a stale run lock without signalling a proce
 
   const paths = resolveAssistantStatePaths(vaultRoot)
   const lockPath = path.join(paths.assistantStateRoot, '.automation-run.lock')
-  const metadataPath = path.join(paths.assistantStateRoot, '.automation-run-lock.json')
+  const metadataPath = path.join(lockPath, 'owner.json')
   await mkdir(lockPath, { recursive: true })
   await writeFile(
     metadataPath,

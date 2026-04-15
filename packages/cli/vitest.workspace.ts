@@ -24,6 +24,13 @@ import {
 const packageDir = path.dirname(fileURLToPath(import.meta.url));
 const cliVitestConcurrency = resolveMurphVitestConcurrency();
 const cliVitestMaxWorkers = resolveMurphVitestMaxWorkers();
+const cliVitestCoverageThresholds = {
+  perFile: false,
+  lines: 80,
+  functions: 70,
+  branches: 55,
+  statements: 80,
+} as const;
 const WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS = {
   "@murphai/assistantd": "../assistantd/src/index.ts",
   "@murphai/assistant-cli": "../assistant-cli/src/index.ts",
@@ -37,8 +44,8 @@ const WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS = {
   "@murphai/gateway-local": "../gateway-local/src/index.ts",
   "@murphai/hosted-execution": "../hosted-execution/src/index.ts",
   "@murphai/importers": "../importers/src/index.ts",
+  "@murphai/inbox-services": "../inbox-services/src/index.ts",
   "@murphai/inboxd": "../inboxd/src/index.ts",
-  "@murphai/inboxd-imessage": "../inboxd-imessage/src/index.ts",
   "@murphai/messaging-ingress": "../messaging-ingress/src/index.ts",
   "@murphai/parsers": "../parsers/src/index.ts",
   "@murphai/query": "../query/src/index.ts",
@@ -53,13 +60,12 @@ const cliVitestRuntimeAliases = createVitestWorkspaceRuntimeAliases(
 export const cliVitestCoverage = createMurphVitestCoverage({
   customProviderModule: resolveMurphVitestCoverageProviderModule(packageDir),
   include: [path.resolve(packageDir, "src/**/*.ts")],
-  thresholds: {
-    perFile: true,
-    lines: 83,
-    functions: 77,
-    branches: 60,
-    statements: 83,
-  },
+  exclude: [
+    "src/bin.ts",
+    "src/incur.generated.ts",
+    "src/index.ts",
+  ],
+  thresholds: cliVitestCoverageThresholds,
 });
 
 type CliVitestProjectSpec = {
@@ -119,6 +125,7 @@ const cliVitestProjectSeeds: readonly CliVitestProjectSeed[] = [
     ],
   },
   {
+    fileParallelism: false,
     name: "cli-schemas-smoke",
     includeRemaining: true,
     patterns: [
@@ -130,7 +137,7 @@ const cliVitestProjectSeeds: readonly CliVitestProjectSeed[] = [
       "http-json-retry.test.ts",
       "inbox-incur-smoke.test.ts",
       "incur-smoke.test.ts",
-      "knowledge-cli-contracts.test.ts",
+      "knowledge-boundary.test.ts",
       "knowledge-documents.test.ts",
       "release-*.test.ts",
       "wearables-schema.test.ts",

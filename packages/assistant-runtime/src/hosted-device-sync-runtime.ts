@@ -1,4 +1,4 @@
-import { createSecretCodec } from "@murphai/device-syncd/crypto";
+import { buildDeviceSyncTokenCipherOptions, createSecretCodec } from "@murphai/device-syncd/crypto";
 import type { DeviceSyncService } from "@murphai/device-syncd/service";
 import type {
   DeviceSyncJobInput,
@@ -263,12 +263,18 @@ function buildHostedDeviceSyncRuntimeConnectionUpdate(input: {
     ? null
     : {
         accessToken: input.account.accessTokenEncrypted
-          ? input.codec.decrypt(input.account.accessTokenEncrypted)
+          ? input.codec.decrypt(
+            input.account.accessTokenEncrypted,
+            buildStoredDeviceSyncTokenCipherOptions(input.account, "device-sync-access-token"),
+          )
           : "",
         accessTokenExpiresAt: input.account.accessTokenExpiresAt ?? null,
         keyVersion: "local-runtime",
         refreshToken: input.account.refreshTokenEncrypted
-          ? input.codec.decrypt(input.account.refreshTokenEncrypted)
+          ? input.codec.decrypt(
+            input.account.refreshTokenEncrypted,
+            buildStoredDeviceSyncTokenCipherOptions(input.account, "device-sync-refresh-token"),
+          )
           : null,
         tokenVersion: input.observedTokenVersion ?? 1,
       } satisfies HostedDeviceSyncRuntimeTokenBundle;
@@ -365,6 +371,17 @@ function equalStringArrays(left: readonly string[], right: readonly string[]): b
   return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
+function buildStoredDeviceSyncTokenCipherOptions(
+  input: { externalAccountId: string; provider: string },
+  purpose: "device-sync-access-token" | "device-sync-refresh-token",
+) {
+  return buildDeviceSyncTokenCipherOptions({
+    externalAccountId: input.externalAccountId,
+    provider: input.provider,
+    purpose,
+  });
+}
+
 function buildHostedAccountHydrationInput(input: {
   codec: ReturnType<typeof createSecretCodec>;
   entry: HostedDeviceSyncRuntimeConnectionSnapshot;
@@ -408,11 +425,17 @@ function buildHostedAccountHydrationInput(input: {
       ? {
           tokens: {
             accessToken: input.entry.tokenBundle.accessToken,
-            accessTokenEncrypted: input.codec.encrypt(input.entry.tokenBundle.accessToken),
+            accessTokenEncrypted: input.codec.encrypt(
+              input.entry.tokenBundle.accessToken,
+              buildStoredDeviceSyncTokenCipherOptions(hostedConnection, "device-sync-access-token"),
+            ),
             accessTokenExpiresAt: input.entry.tokenBundle.accessTokenExpiresAt ?? undefined,
             refreshToken: input.entry.tokenBundle.refreshToken ?? undefined,
             refreshTokenEncrypted: input.entry.tokenBundle.refreshToken
-              ? input.codec.encrypt(input.entry.tokenBundle.refreshToken)
+              ? input.codec.encrypt(
+                input.entry.tokenBundle.refreshToken,
+                buildStoredDeviceSyncTokenCipherOptions(hostedConnection, "device-sync-refresh-token"),
+              )
               : null,
           },
         }

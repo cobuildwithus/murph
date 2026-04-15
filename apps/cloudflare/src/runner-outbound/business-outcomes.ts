@@ -12,49 +12,41 @@ import {
   CLOUDFLARE_HOSTED_SHARE_IMPORT_RELEASE_PATH,
 } from "../outbound-routes.ts";
 
-export async function applyHostedWebBusinessOutcomeIfNeeded(input: {
+type HostedBusinessOutcomeInput = {
   callbackSigning: import("../web-callback-auth.ts").HostedWebCallbackSigningEnvironment;
   dispatch: HostedExecutionDispatchRequest;
   env: Readonly<Record<string, string | undefined>>;
   fetchImpl?: typeof fetch;
-}): Promise<void> {
-  await applyHostedBusinessOutcomeIfNeeded(input);
-}
+};
 
 const DEFAULT_LINQ_API_BASE_URL = "https://api.linqapp.com/api/partner/v3";
 const DEFAULT_LINQ_API_TIMEOUT_MS = 10_000;
 
-export async function applyHostedBusinessOutcomeIfNeeded(input: {
-  callbackSigning: import("../web-callback-auth.ts").HostedWebCallbackSigningEnvironment;
-  dispatch: HostedExecutionDispatchRequest;
-  env: Readonly<Record<string, string | undefined>>;
-  fetchImpl?: typeof fetch;
-}): Promise<void> {
-  if (input.dispatch.event.kind === "vault.share.accepted") {
-    await completeHostedWebShareImport(input);
-    return;
-  }
-
-  if (input.dispatch.event.kind === "linq.message.received") {
-    await deleteHostedLinqMessageFromSystem(input);
+export async function applyHostedBusinessOutcomeIfNeeded(
+  input: HostedBusinessOutcomeInput,
+): Promise<void> {
+  switch (input.dispatch.event.kind) {
+    case "vault.share.accepted":
+      await completeHostedWebShareImport(input);
+      return;
+    case "linq.message.received":
+      await deleteHostedLinqMessageFromSystem(input);
+      return;
+    default:
+      return;
   }
 }
 
-async function completeHostedWebShareImport(input: {
-  callbackSigning: import("../web-callback-auth.ts").HostedWebCallbackSigningEnvironment;
-  dispatch: HostedExecutionDispatchRequest;
-  env: Readonly<Record<string, string | undefined>>;
-  fetchImpl?: typeof fetch;
-}): Promise<void> {
+export { applyHostedBusinessOutcomeIfNeeded as applyHostedWebBusinessOutcomeIfNeeded };
+
+async function completeHostedWebShareImport(
+  input: HostedBusinessOutcomeInput,
+): Promise<void> {
   if (input.dispatch.event.kind !== "vault.share.accepted") {
     return;
   }
 
-  const baseUrl = normalizeHostedWebControlBaseUrl(input.env.HOSTED_WEB_BASE_URL);
-
-  if (!baseUrl) {
-    throw new Error("HOSTED_WEB_BASE_URL must be configured for hosted web business outcome callbacks.");
-  }
+  const baseUrl = requireHostedWebBusinessOutcomeBaseUrl(input.env);
 
   const response = await fetchHostedExecutionWebControlPlaneResponse({
     baseUrl,
@@ -79,22 +71,16 @@ async function completeHostedWebShareImport(input: {
   );
 }
 
-export async function releaseHostedWebShareClaim(input: {
-  callbackSigning: import("../web-callback-auth.ts").HostedWebCallbackSigningEnvironment;
-  dispatch: HostedExecutionDispatchRequest;
-  env: Readonly<Record<string, string | undefined>>;
-  fetchImpl?: typeof fetch;
-  reason?: string | null;
-}): Promise<void> {
+export async function releaseHostedWebShareClaim(
+  input: HostedBusinessOutcomeInput & {
+    reason?: string | null;
+  },
+): Promise<void> {
   if (input.dispatch.event.kind !== "vault.share.accepted") {
     return;
   }
 
-  const baseUrl = normalizeHostedWebControlBaseUrl(input.env.HOSTED_WEB_BASE_URL);
-
-  if (!baseUrl) {
-    throw new Error("HOSTED_WEB_BASE_URL must be configured for hosted web business outcome callbacks.");
-  }
+  const baseUrl = requireHostedWebBusinessOutcomeBaseUrl(input.env);
 
   const response = await fetchHostedExecutionWebControlPlaneResponse({
     baseUrl,
@@ -182,6 +168,18 @@ async function deleteHostedLinqMessageFromSystem(input: {
   throw new Error(
     `Hosted Linq post-commit delete failed for ${input.dispatch.event.userId}/${input.dispatch.eventId}/${messageId} with HTTP ${response.status}.`,
   );
+}
+
+function requireHostedWebBusinessOutcomeBaseUrl(
+  env: Readonly<Record<string, string | undefined>>,
+): string {
+  const baseUrl = normalizeHostedWebControlBaseUrl(env.HOSTED_WEB_BASE_URL);
+
+  if (!baseUrl) {
+    throw new Error("HOSTED_WEB_BASE_URL must be configured for hosted web business outcome callbacks.");
+  }
+
+  return baseUrl;
 }
 
 function normalizeLinqApiBaseUrl(value: string | undefined): string {

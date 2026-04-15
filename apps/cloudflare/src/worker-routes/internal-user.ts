@@ -1,21 +1,27 @@
 import {
   buildHostedExecutionAssistantCronTickDispatch,
+} from "@murphai/hosted-execution";
+import {
+  readHostedEmailCapabilities,
+} from "@murphai/hosted-execution/hosted-email";
+import {
   parseHostedExecutionDispatchRequest,
   parseHostedExecutionOutboxPayload,
   parseHostedExecutionSharePack,
-  readHostedEmailCapabilities,
-} from "@murphai/hosted-execution";
+} from "@murphai/hosted-execution/parsers";
 import {
   parseHostedExecutionDeviceSyncRuntimeApplyRequest,
   parseHostedExecutionDeviceSyncRuntimeSnapshotRequest,
+  type HostedExecutionDeviceSyncRuntimeSnapshotResponse,
 } from "@murphai/device-syncd/hosted-runtime";
+import { toStringEnvSource } from "../string-env.ts";
 
 import {
   createHostedEmailUserAddress,
   readHostedEmailConfig,
 } from "../hosted-email.ts";
 import { parseHostedUserEnvUpdate } from "../user-env.ts";
-import { createHostedPendingUsageDirtyUserStore } from "../usage-store.ts";
+import { createHostedPendingUsageDirtyUserStore } from "../usage-store/dirty-users.ts";
 import { createHostedShareStore } from "../share-store.ts";
 import { json } from "../json.ts";
 import {
@@ -51,6 +57,17 @@ export async function handleStatusRoute(
   return json(await stub.status());
 }
 
+export async function handleEventStatusRoute(
+  context: WorkerRouteContext,
+  encodedUserId: string,
+  encodedEventId: string,
+): Promise<Response> {
+  const userId = decodeRouteParam(encodedUserId);
+  const eventId = decodeRouteParam(encodedEventId);
+  const stub = await resolveUserRunnerStub(context.env, userId);
+  return json(await requireUserRunnerStubMethod(stub, "getEventStatus")({ eventId }));
+}
+
 export async function handleUserEnvRoute(
   context: WorkerRouteContext,
   encodedUserId: string,
@@ -79,14 +96,18 @@ export async function handleUserDeviceSyncRuntimeRoute(
   const stub = await resolveUserRunnerStub(context.env, userId);
 
   if (context.request.method === "GET") {
+    const snapshot = await requireUserRunnerStubMethod(stub, "getDeviceSyncRuntimeSnapshot")({
+      request: parseHostedExecutionDeviceSyncRuntimeSnapshotRequest({
+        connectionId: normalizeNullableSearchString(context.url.searchParams.get("connectionId")),
+        provider: normalizeNullableSearchString(context.url.searchParams.get("provider")),
+        userId,
+      }, userId),
+    });
+
     return json(
-      await requireUserRunnerStubMethod(stub, "getDeviceSyncRuntimeSnapshot")({
-        request: parseHostedExecutionDeviceSyncRuntimeSnapshotRequest({
-          connectionId: normalizeNullableSearchString(context.url.searchParams.get("connectionId")),
-          provider: normalizeNullableSearchString(context.url.searchParams.get("provider")),
-          userId,
-        }, userId),
-      }),
+      readIncludeSecretsFlag(context.url.searchParams.get("includeSecrets"))
+        ? snapshot
+        : redactHostedExecutionDeviceSyncRuntimeSnapshot(snapshot),
     );
   }
 
@@ -105,18 +126,15 @@ export async function handleUserEmailAddressRoute(
   encodedUserId: string,
 ): Promise<Response> {
   const userId = decodeRouteParam(encodedUserId);
-  const capabilities = readHostedEmailCapabilities(
-    context.env as unknown as Readonly<Record<string, string | undefined>>,
-  );
+  const stringEnv = toStringEnvSource(context.env);
+  const capabilities = readHostedEmailCapabilities(stringEnv);
   if (!capabilities.ingressReady || !capabilities.senderIdentity) {
     return json({
       error: "Hosted email ingress is not configured.",
     }, 503);
   }
 
-  const config = readHostedEmailConfig(
-    context.env as unknown as Readonly<Record<string, string | undefined>>,
-  );
+  const config = readHostedEmailConfig(stringEnv);
   const address = await createHostedEmailUserAddress({
     bucket: context.env.BUNDLES,
     config,
@@ -307,9 +325,39 @@ function normalizeNullableSearchString(value: string | null): string | null {
   return normalized.length > 0 ? normalized : null;
 }
 
-function isMissingHostedUserCryptoContext(error: unknown, userId: string): boolean {
-  return error instanceof Error
-    && error.message.includes(`Hosted user root key envelope ${userId} is missing.`);
+function readIncludeSecretsFlag(value: string | null): boolean {
+  const normalized = value?.trim().toLowerCase() ?? null;
+
+  if (!normalized) {
+    return false;
+  }
+
+  if (normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on") {
+    return true;
+  }
+
+  if (normalized === "0" || normalized === "false" || normalized === "no" || normalized === "off") {
+    return false;
+  }
+
+  throw new TypeError("includeSecrets must be a boolean query flag.");
+}
+
+function redactHostedExecutionDeviceSyncRuntimeSnapshot(
+  snapshot: HostedExecutionDeviceSyncRuntimeSnapshotResponse,
+): HostedExecutionDeviceSyncRuntimeSnapshotResponse {
+  return {
+    ...snapshot,
+    connections: snapshot.connections.map((entry) => ({
+      connection: {
+        ...entry.connection,
+        metadata: { ...entry.connection.metadata },
+        scopes: [...entry.connection.scopes],
+      },
+      localState: { ...entry.localState },
+      tokenBundle: null,
+    })),
+  };
 }
 
 function isBackpressuredStatus(

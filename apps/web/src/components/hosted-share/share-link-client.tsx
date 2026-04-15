@@ -1,20 +1,13 @@
 "use client";
 
-import { usePrivy } from "@privy-io/react-auth";
 import { useEffect, useState, startTransition } from "react";
 
-import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
-import { Badge } from "@/src/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/src/components/ui/card";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import type { HostedSharePageData } from "@/src/lib/hosted-share/service";
 
 import { requestHostedOnboardingJson } from "../hosted-onboarding/client-api";
-import { ShareLinkPreviewAlert, ShareLinkStageContent } from "./share-link-sections";
-import {
-  buildHostedShareStatusUrl,
-  resolveShareLinkSubtitle,
-  resolveShareLinkTitle,
-} from "./share-link-state";
+import { ShareLinkStageContent } from "./share-link-sections";
+import { buildHostedShareStatusUrl } from "./share-link-state";
 
 interface ShareLinkClientProps {
   initialData: HostedSharePageData;
@@ -22,7 +15,6 @@ interface ShareLinkClientProps {
 }
 
 export function ShareLinkClient({ initialData, shareCode }: ShareLinkClientProps) {
-  const { authenticated, ready } = usePrivy();
   const [data, setData] = useState(initialData);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState<"accept" | null>(null);
@@ -57,23 +49,6 @@ export function ShareLinkClient({ initialData, shareCode }: ShareLinkClientProps
   }
 
   useEffect(() => {
-    if (!ready || !authenticated) {
-      return;
-    }
-
-    void requestHostedOnboardingJson<HostedSharePageData>({
-      auth: "optional",
-      url: statusUrl,
-    })
-      .then((payload) => {
-        startTransition(() => {
-          setData(payload);
-        });
-      })
-      .catch(() => null);
-  }, [authenticated, ready, statusUrl]);
-
-  useEffect(() => {
     if (!(data.stage === "processing" && data.share?.acceptedByCurrentMember)) {
       return;
     }
@@ -82,7 +57,6 @@ export function ShareLinkClient({ initialData, shareCode }: ShareLinkClientProps
     const poll = async () => {
       try {
         const payload = await requestHostedOnboardingJson<HostedSharePageData>({
-          auth: "optional",
           url: statusUrl,
         });
         if (cancelled) {
@@ -109,34 +83,16 @@ export function ShareLinkClient({ initialData, shareCode }: ShareLinkClientProps
   }, [data.share?.acceptedByCurrentMember, data.stage, statusUrl]);
 
   return (
-    <Card className="mx-auto w-full max-w-2xl shadow-sm">
-      <CardHeader className="gap-3">
-          <Badge variant="secondary" className="w-fit">
-            Murph share link
-          </Badge>
-          <div className="space-y-3">
-            <CardTitle className="text-4xl font-bold tracking-tight text-stone-900 md:text-5xl">
-              {resolveShareLinkTitle(data)}
-            </CardTitle>
-            <CardDescription className="leading-relaxed text-stone-500">
-              {resolveShareLinkSubtitle(data)}
-            </CardDescription>
-          </div>
-        </CardHeader>
+    <>
+      {errorMessage ? (
+        <Alert variant="destructive">
+          <AlertTitle>Unable to import the shared bundle</AlertTitle>
+          <AlertDescription>{errorMessage}</AlertDescription>
+        </Alert>
+      ) : null}
 
-      <CardContent className="flex flex-col gap-5">
-        <ShareLinkPreviewAlert data={data} />
-
-        {errorMessage ? (
-          <Alert variant="destructive">
-            <AlertTitle>Unable to import the shared bundle</AlertTitle>
-            <AlertDescription>{errorMessage}</AlertDescription>
-          </Alert>
-        ) : null}
-
-        <ShareLinkStageContent data={data} pendingAction={pendingAction} onAccept={handleAccept} shareCode={shareCode} />
-      </CardContent>
-    </Card>
+      <ShareLinkStageContent data={data} pendingAction={pendingAction} onAccept={handleAccept} shareCode={shareCode} />
+    </>
   );
 }
 

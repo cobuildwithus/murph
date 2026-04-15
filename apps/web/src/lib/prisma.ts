@@ -1,6 +1,8 @@
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "@prisma/client";
 
+import { installHostedWebWarningFilters } from "./process-warnings";
+
 const globalForPrisma = globalThis as typeof globalThis & {
   __murphHostedWebPrisma?: PrismaClient;
 };
@@ -11,6 +13,8 @@ const PG_CONNECTION_TIMEOUT_MS = 5_000;
 const PG_IDLE_TIMEOUT_MS = 30_000;
 const PRISMA_TRANSACTION_MAX_WAIT_MS = 10_000;
 const PRISMA_TRANSACTION_TIMEOUT_MS = 15_000;
+
+installHostedWebWarningFilters();
 
 function createPrismaAdapter(): PrismaPg {
   const databaseUrl = process.env.DATABASE_URL;
@@ -30,9 +34,11 @@ function createPrismaAdapter(): PrismaPg {
 }
 
 function createPrisma(): PrismaClient {
+  const logLevels = resolvePrismaLogLevels();
+
   return new PrismaClient({
     adapter: createPrismaAdapter(),
-    log: process.env.NODE_ENV === "development" ? ["warn", "error"] : ["error"],
+    ...(logLevels.length > 0 ? { log: logLevels } : {}),
     transactionOptions: {
       maxWait: PRISMA_TRANSACTION_MAX_WAIT_MS,
       timeout: PRISMA_TRANSACTION_TIMEOUT_MS,
@@ -48,6 +54,12 @@ if (process.env.NODE_ENV !== "production") {
 
 export function getPrisma(): PrismaClient {
   return prisma;
+}
+
+export function resolvePrismaLogLevels(
+  nodeEnv = process.env.NODE_ENV,
+): ("error" | "warn")[] {
+  return nodeEnv === "development" ? ["warn", "error"] : [];
 }
 
 export function normalizePrismaConnectionString(databaseUrl: string): string {

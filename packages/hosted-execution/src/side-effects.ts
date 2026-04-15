@@ -1,28 +1,52 @@
-export const HOSTED_EXECUTION_SIDE_EFFECT_KINDS = [
-  "assistant.delivery",
+import {
+  gatewayDeliveryTargetKindValues,
+  type GatewayDeliveryTargetKind,
+} from "@murphai/gateway-core";
+
+export const HOSTED_ASSISTANT_DELIVERY_KIND = "assistant.delivery" as const;
+export const HOSTED_ASSISTANT_DELIVERY_EFFECT_KIND =
+  HOSTED_ASSISTANT_DELIVERY_KIND;
+
+export const hostedAssistantDeliveryTargetKindValues =
+  gatewayDeliveryTargetKindValues;
+export const HOSTED_ASSISTANT_DELIVERY_KINDS = [
+  HOSTED_ASSISTANT_DELIVERY_KIND,
 ] as const;
 
-export const HOSTED_EXECUTION_SIDE_EFFECT_RECORD_STATES = [
+export const HOSTED_EXECUTION_SIDE_EFFECT_KINDS = [
+  HOSTED_ASSISTANT_DELIVERY_KIND,
+] as const;
+
+export const hostedAssistantDeliveryRecordStateValues = [
   "prepared",
   "sent",
 ] as const;
 
-export type HostedExecutionSideEffectKind =
-  (typeof HOSTED_EXECUTION_SIDE_EFFECT_KINDS)[number];
+export const HOSTED_EXECUTION_SIDE_EFFECT_RECORD_STATES =
+  hostedAssistantDeliveryRecordStateValues;
+export const HOSTED_ASSISTANT_DELIVERY_RECORD_STATES =
+  hostedAssistantDeliveryRecordStateValues;
 
-export type HostedExecutionSideEffectRecordState =
-  (typeof HOSTED_EXECUTION_SIDE_EFFECT_RECORD_STATES)[number];
+export type HostedAssistantDeliveryKind = typeof HOSTED_ASSISTANT_DELIVERY_KIND;
+export type HostedAssistantDeliveryTargetKind = GatewayDeliveryTargetKind;
+
+export type HostedExecutionSideEffectKind = HostedAssistantDeliveryKind;
+
+export type HostedAssistantDeliveryRecordState =
+  (typeof hostedAssistantDeliveryRecordStateValues)[number];
+
+export type HostedExecutionSideEffectRecordState = HostedAssistantDeliveryRecordState;
 
 export interface HostedAssistantDeliverySideEffect {
   effectId: string;
   fingerprint: string;
-  intentId: string;
-  kind: "assistant.delivery";
+  kind: HostedAssistantDeliveryKind;
 }
 
+export type HostedAssistantDeliveryEffect = HostedAssistantDeliverySideEffect;
 export type HostedExecutionSideEffect = HostedAssistantDeliverySideEffect;
 
-export interface HostedExecutionAssistantDelivery {
+export interface HostedAssistantDeliveryReceipt {
   channel: string;
   idempotencyKey: string;
   messageLength: number;
@@ -30,49 +54,61 @@ export interface HostedExecutionAssistantDelivery {
   providerThreadId: string | null;
   sentAt: string;
   target: string;
-  targetKind: "explicit" | "participant" | "thread";
+  targetKind: HostedAssistantDeliveryTargetKind;
 }
 
-interface HostedAssistantDeliverySideEffectRecordBase {
+export type HostedAssistantDelivery = HostedAssistantDeliveryReceipt;
+export type HostedExecutionAssistantDelivery = HostedAssistantDeliveryReceipt;
+
+interface HostedAssistantDeliveryRecordBase {
   effectId: string;
   fingerprint: string;
-  intentId: string;
-  kind: "assistant.delivery";
+  kind: HostedAssistantDeliveryKind;
   recordedAt: string;
 }
 
-export interface HostedAssistantDeliveryPreparedSideEffectRecord
-  extends HostedAssistantDeliverySideEffectRecordBase {
+export interface HostedAssistantDeliveryPreparedRecord
+  extends HostedAssistantDeliveryRecordBase {
   state: "prepared";
 }
 
-export interface HostedAssistantDeliverySentSideEffectRecord
-  extends HostedAssistantDeliverySideEffectRecordBase {
-  delivery: HostedExecutionAssistantDelivery;
+export interface HostedAssistantDeliverySentRecord
+  extends HostedAssistantDeliveryRecordBase {
+  delivery: HostedAssistantDeliveryReceipt;
   state: "sent";
 }
 
-export type HostedExecutionSideEffectRecord =
-  | HostedAssistantDeliveryPreparedSideEffectRecord
-  | HostedAssistantDeliverySentSideEffectRecord;
+export type HostedAssistantDeliveryPreparedSideEffectRecord =
+  HostedAssistantDeliveryPreparedRecord;
+
+export type HostedAssistantDeliverySentSideEffectRecord =
+  HostedAssistantDeliverySentRecord;
+
+export type HostedAssistantDeliveryRecord =
+  | HostedAssistantDeliveryPreparedRecord
+  | HostedAssistantDeliverySentRecord;
+
+export type HostedExecutionSideEffectRecord = HostedAssistantDeliveryRecord;
 
 export function buildHostedAssistantDeliverySideEffect(input: {
   dedupeKey: string;
-  intentId: string;
+  effectId: string;
 }): HostedAssistantDeliverySideEffect {
   return {
-    effectId: input.intentId,
+    effectId: input.effectId,
     fingerprint: input.dedupeKey,
-    intentId: input.intentId,
-    kind: "assistant.delivery",
+    kind: HOSTED_ASSISTANT_DELIVERY_KIND,
   };
 }
 
+export const buildHostedAssistantDeliveryEffect =
+  buildHostedAssistantDeliverySideEffect;
+
 export function buildHostedAssistantDeliveryPreparedRecord(input: {
   dedupeKey: string;
-  intentId: string;
+  effectId: string;
   recordedAt: string;
-}): HostedAssistantDeliveryPreparedSideEffectRecord {
+}): HostedAssistantDeliveryPreparedRecord {
   return {
     ...buildHostedAssistantDeliverySideEffect(input),
     recordedAt: requireString(input.recordedAt, "Hosted assistant prepared side effect recordedAt"),
@@ -82,12 +118,12 @@ export function buildHostedAssistantDeliveryPreparedRecord(input: {
 
 export function buildHostedAssistantDeliverySentRecord(input: {
   dedupeKey: string;
-  delivery: HostedExecutionAssistantDelivery;
-  intentId: string;
-}): HostedAssistantDeliverySentSideEffectRecord {
+  delivery: HostedAssistantDeliveryReceipt;
+  effectId: string;
+}): HostedAssistantDeliverySentRecord {
   return {
     ...buildHostedAssistantDeliverySideEffect(input),
-    delivery: parseHostedExecutionAssistantDelivery(
+    delivery: parseHostedAssistantDeliveryReceipt(
       input.delivery,
       "Hosted assistant sent side effect delivery",
     ),
@@ -104,14 +140,16 @@ export function parseHostedExecutionSideEffect(value: unknown): HostedExecutionS
   );
 
   switch (kind) {
-    case "assistant.delivery":
+    case HOSTED_ASSISTANT_DELIVERY_KIND:
       return {
-        effectId: requireString(record.effectId, "Hosted assistant side effect effectId"),
+        effectId: requireHostedAssistantDeliveryEffectId(
+          record,
+          "Hosted assistant side effect",
+        ),
         fingerprint: requireString(
           record.fingerprint,
           "Hosted assistant side effect fingerprint",
         ),
-        intentId: requireString(record.intentId, "Hosted assistant side effect intentId"),
         kind,
       };
     default:
@@ -137,19 +175,15 @@ export function parseHostedExecutionSideEffectRecord(
   );
 
   switch (kind) {
-    case "assistant.delivery": {
+    case HOSTED_ASSISTANT_DELIVERY_KIND: {
       const baseRecord = {
-        effectId: requireString(
-          record.effectId,
-          "Hosted assistant side effect record effectId",
+        effectId: requireHostedAssistantDeliveryEffectId(
+          record,
+          "Hosted assistant side effect record",
         ),
         fingerprint: requireString(
           record.fingerprint,
           "Hosted assistant side effect record fingerprint",
-        ),
-        intentId: requireString(
-          record.intentId,
-          "Hosted assistant side effect record intentId",
         ),
         kind,
         recordedAt: requireString(
@@ -165,7 +199,7 @@ export function parseHostedExecutionSideEffectRecord(
       return state === "sent"
         ? {
             ...baseRecord,
-            delivery: parseHostedExecutionAssistantDelivery(
+            delivery: parseHostedAssistantDeliveryReceipt(
               record.delivery,
               "Hosted assistant side effect record delivery",
             ),
@@ -181,21 +215,107 @@ export function parseHostedExecutionSideEffectRecord(
   }
 }
 
+export function parseHostedAssistantDeliverySideEffect(
+  value: unknown,
+): HostedAssistantDeliverySideEffect {
+  const record = requireObject(value, "Hosted assistant delivery side effect");
+
+  return {
+    effectId: requireHostedAssistantDeliveryEffectId(
+      record,
+      "Hosted assistant delivery side effect",
+    ),
+    fingerprint: requireString(
+      record.fingerprint,
+      "Hosted assistant delivery side effect fingerprint",
+    ),
+    kind: requireHostedAssistantDeliveryKind(
+      record.kind,
+      "Hosted assistant delivery side effect kind",
+    ),
+  };
+}
+
+export const parseHostedAssistantDeliveryEffect =
+  parseHostedAssistantDeliverySideEffect;
+
+export function parseHostedAssistantDeliverySideEffects(
+  value: unknown,
+): HostedAssistantDeliverySideEffect[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.map((entry) => parseHostedAssistantDeliverySideEffect(entry));
+}
+
+export const parseHostedAssistantDeliveryEffects =
+  parseHostedAssistantDeliverySideEffects;
+
+export function parseHostedAssistantDeliveryRecord(
+  value: unknown,
+): HostedAssistantDeliveryRecord {
+  const record = requireObject(value, "Hosted assistant delivery record");
+  const kind = requireHostedAssistantDeliveryKind(
+    record.kind,
+    "Hosted assistant delivery record kind",
+  );
+  const state = requireHostedAssistantDeliveryRecordState(
+    record.state,
+    "Hosted assistant delivery record state",
+  );
+  const baseRecord = {
+    effectId: requireHostedAssistantDeliveryEffectId(
+      record,
+      "Hosted assistant delivery record",
+    ),
+    fingerprint: requireString(
+      record.fingerprint,
+      "Hosted assistant delivery record fingerprint",
+    ),
+    kind,
+    recordedAt: requireString(
+      record.recordedAt,
+      "Hosted assistant delivery record recordedAt",
+    ),
+  };
+
+  return state === "sent"
+    ? {
+        ...baseRecord,
+        delivery: parseHostedAssistantDeliveryReceipt(
+          record.delivery,
+          "Hosted assistant delivery record delivery",
+        ),
+        state,
+      }
+    : {
+        ...baseRecord,
+        state,
+      };
+}
+
 export function sameHostedExecutionSideEffectIdentity(
-  left: Pick<HostedExecutionSideEffectRecord, "effectId" | "fingerprint" | "intentId" | "kind">,
-  right: Pick<HostedExecutionSideEffectRecord, "effectId" | "fingerprint" | "intentId" | "kind">,
+  left: Pick<HostedExecutionSideEffectRecord, "effectId" | "fingerprint" | "kind">,
+  right: Pick<HostedExecutionSideEffectRecord, "effectId" | "fingerprint" | "kind">,
 ): boolean {
   return (
     left.effectId === right.effectId
     && left.fingerprint === right.fingerprint
-    && left.intentId === right.intentId
     && left.kind === right.kind
   );
 }
 
-export function sameHostedExecutionAssistantDelivery(
-  left: HostedExecutionAssistantDelivery,
-  right: HostedExecutionAssistantDelivery,
+export function sameHostedAssistantDeliverySideEffectIdentity(
+  left: Pick<HostedAssistantDeliveryRecord, "effectId" | "fingerprint" | "kind">,
+  right: Pick<HostedAssistantDeliveryRecord, "effectId" | "fingerprint" | "kind">,
+): boolean {
+  return sameHostedExecutionSideEffectIdentity(left, right);
+}
+
+export function sameHostedAssistantDeliveryReceipt(
+  left: HostedAssistantDeliveryReceipt,
+  right: HostedAssistantDeliveryReceipt,
 ): boolean {
   return (
     left.channel === right.channel
@@ -207,6 +327,13 @@ export function sameHostedExecutionAssistantDelivery(
     && left.target === right.target
     && left.targetKind === right.targetKind
   );
+}
+
+export function sameHostedExecutionAssistantDelivery(
+  left: HostedExecutionAssistantDelivery,
+  right: HostedExecutionAssistantDelivery,
+): boolean {
+  return sameHostedAssistantDeliveryReceipt(left, right);
 }
 
 function requireObject(value: unknown, label: string): Record<string, unknown> {
@@ -223,6 +350,17 @@ function requireString(value: unknown, label: string): string {
   }
 
   return value;
+}
+
+function requireHostedAssistantDeliveryEffectId(
+  record: Record<string, unknown>,
+  label: string,
+): string {
+  if (record.intentId !== undefined) {
+    throw new TypeError(`${label} intentId is no longer supported.`);
+  }
+
+  return requireString(record.effectId, `${label} effectId`);
 }
 
 function requireNonNegativeInteger(value: unknown, label: string): number {
@@ -246,6 +384,19 @@ function requireHostedExecutionSideEffectKind(
   throw new TypeError(`Unsupported hosted execution side effect kind: ${kind}`);
 }
 
+function requireHostedAssistantDeliveryKind(
+  value: unknown,
+  label: string,
+): HostedAssistantDeliveryKind {
+  const kind = requireString(value, label);
+
+  if (isHostedAssistantDeliveryKind(kind)) {
+    return kind;
+  }
+
+  throw new TypeError(`Unsupported hosted assistant delivery kind: ${kind}`);
+}
+
 function requireHostedExecutionSideEffectRecordState(
   value: unknown,
   label: string,
@@ -259,22 +410,47 @@ function requireHostedExecutionSideEffectRecordState(
   throw new TypeError(`Unsupported hosted execution side effect record state: ${state}`);
 }
 
+function requireHostedAssistantDeliveryRecordState(
+  value: unknown,
+  label: string,
+): HostedAssistantDeliveryRecordState {
+  const state = requireString(value, label);
+
+  if (isHostedAssistantDeliveryRecordState(state)) {
+    return state;
+  }
+
+  throw new TypeError(`Unsupported hosted assistant delivery record state: ${state}`);
+}
+
 export function isHostedExecutionSideEffectKind(
   value: string,
 ): value is HostedExecutionSideEffectKind {
-  return (HOSTED_EXECUTION_SIDE_EFFECT_KINDS as readonly string[]).includes(value);
+  return isHostedAssistantDeliveryKind(value);
 }
 
 export function isHostedExecutionSideEffectRecordState(
   value: string,
 ): value is HostedExecutionSideEffectRecordState {
-  return (HOSTED_EXECUTION_SIDE_EFFECT_RECORD_STATES as readonly string[]).includes(value);
+  return isHostedAssistantDeliveryRecordState(value);
 }
 
-function parseHostedExecutionAssistantDelivery(
+export function isHostedAssistantDeliveryKind(
+  value: string,
+): value is HostedAssistantDeliveryKind {
+  return value === HOSTED_ASSISTANT_DELIVERY_KIND;
+}
+
+export function isHostedAssistantDeliveryRecordState(
+  value: string,
+): value is HostedAssistantDeliveryRecordState {
+  return (hostedAssistantDeliveryRecordStateValues as readonly string[]).includes(value);
+}
+
+function parseHostedAssistantDeliveryReceipt(
   value: unknown,
   label: string,
-): HostedExecutionAssistantDelivery {
+): HostedAssistantDeliveryReceipt {
   const record = requireObject(value, label);
 
   return {
@@ -315,15 +491,11 @@ function requireNullableString(value: unknown, label: string): string | null {
 function requireHostedExecutionAssistantDeliveryTargetKind(
   value: unknown,
   label: string,
-): HostedExecutionAssistantDelivery["targetKind"] {
+): HostedAssistantDeliveryTargetKind {
   const targetKind = requireString(value, label);
 
-  if (
-    targetKind === "explicit"
-    || targetKind === "participant"
-    || targetKind === "thread"
-  ) {
-    return targetKind;
+  if ((hostedAssistantDeliveryTargetKindValues as readonly string[]).includes(targetKind)) {
+    return targetKind as HostedAssistantDeliveryTargetKind;
   }
 
   throw new TypeError(

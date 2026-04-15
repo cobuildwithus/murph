@@ -22,13 +22,15 @@ export function buildDailyFoodCronExpression(time: string) {
 
 export function buildDailyFoodSchedule(
   time: string,
-  timeZone: string,
 ): AssistantCronSchedule {
   return {
     kind: 'dailyLocal',
     localTime: dailyFoodTimeSchema.parse(time),
-    timeZone,
   }
+}
+
+export function buildDailyFoodCronJobId(foodId: string) {
+  return `cronfood_${foodId.replace(/[^a-z0-9]/giu, "")}`
 }
 
 export function buildDailyFoodCronJobName(slug: string) {

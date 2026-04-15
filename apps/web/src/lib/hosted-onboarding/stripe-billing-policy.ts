@@ -1,366 +1,114 @@
-import {
-  HostedBillingStatus,
-  HostedRevnetIssuanceStatus,
-  type Prisma,
-} from "@prisma/client";
-import type Stripe from "stripe";
+import { HostedBillingStatus, Prisma } from "@prisma/client";
 
-import { provisionManagedUserCryptoInHostedExecution } from "../hosted-execution/control";
 import {
-  enqueueHostedExecutionOutbox,
-} from "../hosted-execution/outbox";
-import {
-  coerceStripeObjectId,
   mapStripeSubscriptionStatusToHostedBillingStatus,
 } from "./billing";
 import {
-  buildHostedMemberActivationDispatch,
-} from "./member-activation";
+  writeHostedMemberStripeBillingRefTx,
+} from "./hosted-member-billing-store";
 import {
-  deriveHostedEntitlement,
-  isHostedAccessBlockedBillingStatus,
-} from "./entitlement";
-import {
-  type HostedMemberSnapshot,
-  readHostedMemberSnapshot,
+  type HostedMemberBillingSnapshot,
+  readHostedMemberBillingSnapshot,
   updateHostedMemberCoreState,
 } from "./hosted-member-store";
-import {
-  findHostedMemberByStripeCustomerId,
-  findHostedMemberByStripeSubscriptionId,
-  writeHostedMemberStripeBillingRef,
-} from "./hosted-member-billing-store";
 import { requireHostedStripeApi } from "./runtime";
 import {
   lockHostedMemberRow,
-  withHostedOnboardingTransaction,
+  type HostedOnboardingReadClient,
 } from "./shared";
+import {
+  type HostedStripeDispatchContext,
+} from "./stripe-dispatch";
+import {
+  requiresHostedCanonicalStripeBillingStatus,
+  resolveHostedStripeBillingStatusForWrite,
+} from "./stripe-billing-status";
 
-export type HostedStripeDispatchContext = {
-  eventCreatedAt: Date;
-  occurredAt: string;
-  sourceEventId: string;
-  sourceType: string;
-};
-
-export type HostedMemberActivationResult = {
-  activated: boolean;
-  hostedExecutionEventId: string | null;
-  memberId: string;
-};
-
-export type HostedMemberActivationTransactionResult = HostedMemberActivationResult & {
-  postCommitProvisionUserId: string | null;
-};
-
-type HostedOnboardingPrismaClient = Prisma.TransactionClient;
-
-export async function activateHostedMemberFromConfirmedRevnetIssuance(input: {
-  member: HostedMemberSnapshot;
-  occurredAt: string;
-  prisma: HostedOnboardingPrismaClient;
-  sourceEventId: string;
-  sourceType: string;
-}): Promise<HostedMemberActivationResult> {
-  const activated = await tryActivateHostedMemberIfStillAllowed({
-    member: input.member,
-    prisma: input.prisma,
-    revnetIssuanceStatus: HostedRevnetIssuanceStatus.confirmed,
-    revnetRequired: true,
-  });
-
-  if (!activated) {
-    return {
-      activated: false,
-      hostedExecutionEventId: null,
-      memberId: input.member.core.id,
-    };
-  }
-
-  await provisionManagedUserCryptoInHostedExecution(input.member.core.id);
-
-  const dispatch = buildHostedMemberActivationDispatchForMember({
-    member: input.member,
-    occurredAt: input.occurredAt,
-    sourceEventId: input.sourceEventId,
-    sourceType: input.sourceType,
-  });
-  await enqueueHostedExecutionOutbox({
-    dispatch,
-    sourceId: input.sourceEventId,
-    sourceType: "hosted_revnet_issuance",
-    tx: input.prisma,
-  });
-
-  return {
-    activated: true,
-    hostedExecutionEventId: dispatch.eventId,
-    memberId: input.member.core.id,
-  };
-}
-
-export function resolveHostedSubscriptionBillingStatus(input: {
-  currentBillingStatus: HostedBillingStatus;
-  nextBillingStatus: HostedBillingStatus;
-}): HostedBillingStatus {
-  if (input.nextBillingStatus === HostedBillingStatus.active) {
-    return input.currentBillingStatus === HostedBillingStatus.active
-      ? HostedBillingStatus.active
-      : HostedBillingStatus.incomplete;
-  }
-
-  return input.nextBillingStatus;
-}
-
-export async function activateHostedMemberForPositiveSource(input: {
+export async function prepareHostedMemberStripeBillingWrite(input: {
   dispatchContext: HostedStripeDispatchContext;
-  member: HostedMemberSnapshot;
-  prisma: HostedOnboardingPrismaClient;
-  skipIfBillingAlreadyActive?: boolean;
-  sourceType: string;
-}): Promise<HostedMemberActivationTransactionResult> {
-  return withHostedOnboardingTransaction(input.prisma, async (tx) => {
-    await lockHostedMemberRow(tx, input.member.core.id);
+  member: HostedMemberBillingSnapshot;
+  prisma: HostedOnboardingReadClient;
+  stripeSubscriptionId?: string | null;
+}): Promise<{
+  canonicalBillingStatus: HostedBillingStatus | null;
+  member: HostedMemberBillingSnapshot;
+}> {
+  const requiresCanonicalBillingStatus = requiresHostedCanonicalStripeBillingStatus(
+    input.dispatchContext.sourceType,
+  );
+  const member =
+    requiresCanonicalBillingStatus && !input.stripeSubscriptionId
+      ? (await readHostedMemberBillingSnapshot({
+          memberId: input.member.core.id,
+          prisma: input.prisma,
+        })) ?? input.member
+      : input.member;
 
-    const currentMember = await findHostedMemberById(tx, input.member.core.id);
-
-    if (!currentMember || isHostedAccessBlockedBillingStatus(currentMember.core.billingStatus)) {
-      return buildHostedInactiveMemberActivationResult(input.member.core.id);
-    }
-
-    const dispatch = buildHostedMemberActivationDispatchForMember({
-      member: currentMember,
-      occurredAt: input.dispatchContext.occurredAt,
-      sourceEventId: input.dispatchContext.sourceEventId,
-      sourceType: input.sourceType,
-    });
-
-    if (
-      input.skipIfBillingAlreadyActive &&
-      currentMember.core.billingStatus === HostedBillingStatus.active
-    ) {
-      const existingDispatch = await tx.executionOutbox.findUnique({
-        where: {
-          eventId: dispatch.eventId,
-        },
-        select: {
-          eventId: true,
-        },
-      });
-
-      return existingDispatch
-        ? {
-            activated: false,
-            hostedExecutionEventId: existingDispatch.eventId,
-            memberId: currentMember.core.id,
-            postCommitProvisionUserId: currentMember.core.id,
-          }
-        : buildHostedInactiveMemberActivationResult(currentMember.core.id);
-    }
-
-    const entitlement = deriveHostedEntitlement({
-      billingStatus: HostedBillingStatus.active,
-      suspendedAt: currentMember.core.suspendedAt,
-    });
-
-    if (!entitlement.activationReady) {
-      return buildHostedInactiveMemberActivationResult(currentMember.core.id);
-    }
-
-    await updateHostedMemberCoreState({
-      billingStatus: HostedBillingStatus.active,
-      memberId: currentMember.core.id,
-      prisma: tx,
-    });
-
-    const outboxRecord = await enqueueHostedExecutionOutbox({
-      dispatch,
-      sourceId: `stripe:${input.dispatchContext.sourceEventId}`,
-      sourceType: "hosted_stripe_event",
-      tx,
-    });
-
-    return {
-      activated: true,
-      hostedExecutionEventId: outboxRecord.eventId,
-      memberId: currentMember.core.id,
-      postCommitProvisionUserId: currentMember.core.id,
-    };
-  });
-}
-
-async function tryActivateHostedMemberIfStillAllowed(input: {
-  member: HostedMemberSnapshot;
-  prisma: HostedOnboardingPrismaClient;
-  revnetIssuanceStatus?: HostedRevnetIssuanceStatus | null;
-  revnetRequired?: boolean;
-  skipIfBillingAlreadyActive?: boolean;
-}): Promise<boolean> {
-  return withHostedOnboardingTransaction(input.prisma, async (tx) => {
-    await lockHostedMemberRow(tx, input.member.core.id);
-
-    const currentMember = await findHostedMemberById(tx, input.member.core.id);
-
-    if (!currentMember || isHostedAccessBlockedBillingStatus(currentMember.core.billingStatus)) {
-      return false;
-    }
-
-    if (
-      input.skipIfBillingAlreadyActive &&
-      currentMember.core.billingStatus === HostedBillingStatus.active
-    ) {
-      return false;
-    }
-
-    const entitlement = deriveHostedEntitlement({
-      billingStatus: HostedBillingStatus.active,
-      revnetIssuanceStatus: input.revnetIssuanceStatus,
-      revnetRequired: input.revnetRequired,
-      suspendedAt: currentMember.core.suspendedAt,
-    });
-
-    if (!entitlement.activationReady) {
-      return false;
-    }
-
-    await updateHostedMemberCoreState({
-      billingStatus: HostedBillingStatus.active,
-      memberId: currentMember.core.id,
-      prisma: tx,
-    });
-
-    return true;
-  });
-}
-
-function buildHostedInactiveMemberActivationResult(
-  memberId: string,
-): HostedMemberActivationTransactionResult {
   return {
-    activated: false,
-    hostedExecutionEventId: null,
-    memberId,
-    postCommitProvisionUserId: null,
+    canonicalBillingStatus: requiresCanonicalBillingStatus
+      ? await readHostedCanonicalStripeBillingStatus({
+          member,
+          stripeSubscriptionId: input.stripeSubscriptionId,
+        })
+      : null,
+    member,
   };
 }
 
-function buildHostedMemberActivationDispatchForMember(input: {
-  member: HostedMemberSnapshot;
-  occurredAt: string;
-  sourceEventId: string;
-  sourceType: string;
-}) {
-  return buildHostedMemberActivationDispatch({
-    linqChatId: input.member.routing?.linqChatId ?? null,
-    memberId: input.member.core.id,
-    phoneLookupKey: input.member.identity?.phoneLookupKey ?? null,
-    occurredAt: input.occurredAt,
-    sourceEventId: input.sourceEventId,
-    sourceType: input.sourceType,
-  });
-}
-
-export async function updateHostedMemberStripeBillingIfFresh(input: {
+export async function updateHostedMemberStripeBillingIfFreshTx(input: {
   billingStatus: HostedBillingStatus;
+  canonicalBillingStatus: HostedBillingStatus | null;
   dispatchContext: HostedStripeDispatchContext;
-  member: HostedMemberSnapshot;
-  prisma: HostedOnboardingPrismaClient;
+  member: HostedMemberBillingSnapshot;
   stripeCustomerId?: string | null;
   stripeSubscriptionId?: string | null;
   suspendedAtOverride?: Date | null;
-}): Promise<HostedMemberSnapshot | null> {
-  return withHostedOnboardingTransaction(input.prisma, async (tx) => {
-    await lockHostedMemberRow(tx, input.member.core.id);
+  tx: Prisma.TransactionClient;
+}): Promise<HostedMemberBillingSnapshot | null> {
+  await lockHostedMemberRow(input.tx, input.member.core.id);
 
-    const currentMember = await findHostedMemberById(tx, input.member.core.id);
+  const currentMember = await readHostedMemberBillingSnapshot({
+    memberId: input.member.core.id,
+    prisma: input.tx,
+  });
 
-    if (!currentMember) {
-      return null;
-    }
+  if (!currentMember) {
+    return null;
+  }
 
-    const nextBillingStatus = await resolveHostedBillingStatusForWrite({
-      billingStatus: input.billingStatus,
-      currentMember,
-      dispatchContext: input.dispatchContext,
-      stripeSubscriptionId: input.stripeSubscriptionId,
-    });
+  const nextBillingStatus = resolveHostedStripeBillingStatusForWrite({
+    billingStatus: input.billingStatus,
+    canonicalBillingStatus: input.canonicalBillingStatus,
+    currentBillingStatus: currentMember.core.billingStatus,
+    sourceType: input.dispatchContext.sourceType,
+  });
 
-    await updateHostedMemberCoreState({
-      billingStatus: nextBillingStatus,
-      memberId: currentMember.core.id,
-      prisma: tx,
-      suspendedAt: input.suspendedAtOverride,
-    });
+  await updateHostedMemberCoreState({
+    billingStatus: nextBillingStatus,
+    memberId: currentMember.core.id,
+    prisma: input.tx,
+    suspendedAt: input.suspendedAtOverride,
+  });
 
-    await writeHostedMemberStripeBillingRef({
-      memberId: currentMember.core.id,
-      prisma: tx,
-      stripeCustomerId: input.stripeCustomerId,
-      stripeSubscriptionId: input.stripeSubscriptionId,
-    });
+  await writeHostedMemberStripeBillingRefTx({
+    memberId: currentMember.core.id,
+    stripeCustomerId: input.stripeCustomerId,
+    stripeSubscriptionId: input.stripeSubscriptionId,
+    tx: input.tx,
+  });
 
-    return findHostedMemberById(tx, currentMember.core.id);
+  return readHostedMemberBillingSnapshot({
+    memberId: currentMember.core.id,
+    prisma: input.tx,
   });
 }
 
-async function findHostedMemberById(
-  prisma: HostedOnboardingPrismaClient,
-  memberId: string,
-): Promise<HostedMemberSnapshot | null> {
-  return readHostedMemberSnapshot({
-    memberId,
-    prisma,
-  });
-}
-
-async function resolveHostedBillingStatusForWrite(input: {
-  billingStatus: HostedBillingStatus;
-  currentMember: HostedMemberSnapshot;
-  dispatchContext: HostedStripeDispatchContext;
-  stripeSubscriptionId?: string | null;
-}): Promise<HostedBillingStatus> {
-  if (isHostedStripeBillingReversalSourceType(input.dispatchContext.sourceType)) {
-    return input.billingStatus;
-  }
-
-  const canonicalBillingStatus = await resolveHostedCanonicalStripeBillingStatus(input);
-
-  if (canonicalBillingStatus !== null) {
-    if (isHostedStripeSubscriptionSourceType(input.dispatchContext.sourceType)) {
-      return resolveHostedSubscriptionBillingStatus({
-        currentBillingStatus: input.currentMember.core.billingStatus,
-        nextBillingStatus: canonicalBillingStatus,
-      });
-    }
-
-    if (input.dispatchContext.sourceType === "stripe.invoice.paid") {
-      return canonicalBillingStatus === HostedBillingStatus.active
-        ? HostedBillingStatus.active
-        : canonicalBillingStatus;
-    }
-
-    return canonicalBillingStatus;
-  }
-
-  if (
-    isHostedStripeSubscriptionSourceType(input.dispatchContext.sourceType) ||
-    isHostedStripeInvoiceSourceType(input.dispatchContext.sourceType)
-  ) {
-    throw new Error(
-      `Canonical Stripe subscription state is required for ${input.dispatchContext.sourceType}.`,
-    );
-  }
-
-  return input.billingStatus;
-}
-
-async function resolveHostedCanonicalStripeBillingStatus(input: {
-  currentMember: HostedMemberSnapshot;
-  dispatchContext: HostedStripeDispatchContext;
+async function readHostedCanonicalStripeBillingStatus(input: {
+  member: HostedMemberBillingSnapshot;
   stripeSubscriptionId?: string | null;
 }): Promise<HostedBillingStatus | null> {
   const subscriptionId =
-    input.stripeSubscriptionId ?? input.currentMember.billingRef?.stripeSubscriptionId ?? null;
+    input.stripeSubscriptionId ?? input.member.billingRef?.stripeSubscriptionId ?? null;
 
   if (!subscriptionId) {
     return null;
@@ -371,171 +119,25 @@ async function resolveHostedCanonicalStripeBillingStatus(input: {
   return mapStripeSubscriptionStatusToHostedBillingStatus(subscription.status);
 }
 
-function isHostedStripeBillingReversalSourceType(sourceType: string): boolean {
-  return sourceType === "stripe.refund.created" || sourceType.startsWith("stripe.charge.dispute.");
-}
-
-function isHostedStripeSubscriptionSourceType(sourceType: string): boolean {
-  return sourceType === "stripe.customer.subscription.created" ||
-    sourceType === "stripe.customer.subscription.updated" ||
-    sourceType === "stripe.customer.subscription.deleted";
-}
-
-function isHostedStripeInvoiceSourceType(sourceType: string): boolean {
-  return sourceType === "stripe.invoice.paid" ||
-    sourceType === "stripe.invoice.payment_failed";
-}
-
-export async function suspendHostedMemberForBillingReversal(input: {
-  dispatchContext: Pick<HostedStripeDispatchContext, "eventCreatedAt" | "sourceEventId">;
-  member: HostedMemberSnapshot;
-  prisma: HostedOnboardingPrismaClient;
-  reason: string;
+export async function suspendHostedMemberForBillingReversalTx(input: {
+  canonicalBillingStatus: HostedBillingStatus | null;
+  dispatchContext: Pick<HostedStripeDispatchContext, "eventCreatedAt" | "sourceEventId" | "sourceType">;
+  member: HostedMemberBillingSnapshot;
   stripeCustomerId?: string | null;
+  tx: Prisma.TransactionClient;
 }): Promise<void> {
-  await updateHostedMemberStripeBillingIfFresh({
+  await updateHostedMemberStripeBillingIfFreshTx({
     billingStatus: HostedBillingStatus.unpaid,
+    canonicalBillingStatus: input.canonicalBillingStatus,
     dispatchContext: {
       eventCreatedAt: input.dispatchContext.eventCreatedAt,
       occurredAt: input.dispatchContext.eventCreatedAt.toISOString(),
       sourceEventId: input.dispatchContext.sourceEventId,
-      sourceType: input.reason,
+      sourceType: input.dispatchContext.sourceType,
     },
     member: input.member,
-    prisma: input.prisma,
     stripeCustomerId: input.stripeCustomerId,
     suspendedAtOverride: input.dispatchContext.eventCreatedAt,
+    tx: input.tx,
   });
-}
-
-export async function findMemberForStripeObject(input: {
-  clientReferenceId: string | null;
-  customerId: string | null;
-  memberId: string | null;
-  prisma: HostedOnboardingPrismaClient;
-  subscriptionId: string | null;
-}): Promise<HostedMemberSnapshot | null> {
-  if (input.memberId) {
-    const member = await findHostedMemberById(input.prisma, input.memberId);
-
-    if (member) {
-      return member;
-    }
-  }
-
-  if (input.clientReferenceId) {
-    const member = await findHostedMemberById(input.prisma, input.clientReferenceId);
-
-    if (member) {
-      return member;
-    }
-  }
-
-  if (input.subscriptionId) {
-    const member = await findHostedMemberByStripeSubscriptionId({
-      prisma: input.prisma,
-      stripeSubscriptionId: input.subscriptionId,
-    });
-
-    if (member) {
-      return findHostedMemberById(input.prisma, member.id);
-    }
-  }
-
-  if (input.customerId) {
-    const member = await findHostedMemberByStripeCustomerId({
-      prisma: input.prisma,
-      stripeCustomerId: input.customerId,
-    });
-
-    if (member) {
-      return findHostedMemberById(input.prisma, member.id);
-    }
-  }
-
-  return null;
-}
-
-export async function findMemberForStripeReversal(input: {
-  chargeId: string | null;
-  customerId: string | null;
-  paymentIntentId: string | null;
-  prisma: HostedOnboardingPrismaClient;
-  subscriptionId: string | null;
-}): Promise<HostedMemberSnapshot | null> {
-  const directMember = await findMemberForStripeObject({
-    clientReferenceId: null,
-    customerId: input.customerId,
-    memberId: null,
-    prisma: input.prisma,
-    subscriptionId: input.subscriptionId,
-  });
-
-  if (directMember) {
-    return directMember;
-  }
-
-  if (!input.chargeId && !input.paymentIntentId) {
-    return null;
-  }
-
-  const issuance = await input.prisma.hostedRevnetIssuance.findFirst({
-    where: {
-      OR: [
-        ...(input.chargeId
-          ? [
-              {
-                stripeChargeId: input.chargeId,
-              },
-            ]
-          : []),
-        ...(input.paymentIntentId
-          ? [
-              {
-                stripePaymentIntentId: input.paymentIntentId,
-              },
-            ]
-          : []),
-      ],
-    },
-    include: {
-      member: true,
-    },
-    orderBy: {
-      createdAt: "desc",
-    },
-  });
-
-  return issuance?.member
-    ? findHostedMemberById(input.prisma, issuance.member.id)
-    : null;
-}
-
-export async function resolveStripeCustomerContext(input: {
-  chargeId: string | null;
-  paymentIntentId: string | null;
-}): Promise<{ customerId: string | null }> {
-  const stripe = requireHostedStripeApi();
-
-  if (input.chargeId) {
-    const charge = await stripe.charges.retrieve(input.chargeId);
-
-    return {
-      customerId: coerceStripeObjectId((charge as Stripe.Charge & { customer?: unknown }).customer ?? null),
-    };
-  }
-
-  if (input.paymentIntentId) {
-    const paymentIntent = await stripe.paymentIntents.retrieve(input.paymentIntentId);
-
-    return {
-      customerId: coerceStripeObjectId(
-        (paymentIntent as Stripe.PaymentIntent & { customer?: unknown }).customer ?? null,
-      ),
-    };
-  }
-
-  return {
-    customerId: null,
-  };
 }

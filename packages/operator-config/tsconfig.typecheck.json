@@ -2,13 +2,20 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "noEmit": true,
-    "rootDir": ".",
+    "rootDir": "../..",
     "composite": false,
-    "incremental": false
+    "incremental": true,
+    "tsBuildInfoFile": "typecheck.tsbuildinfo"
   },
   "references": [
     {
       "path": "../contracts/tsconfig.build.json"
+    },
+    {
+      "path": "../query"
+    },
+    {
+      "path": "../gateway-core"
     },
     {
       "path": "../device-syncd"
@@ -21,6 +28,8 @@
     }
   ],
   "include": [
+    "*.ts",
+    "test/**/*.ts",
     "src/**/*.ts"
   ],
   "exclude": [

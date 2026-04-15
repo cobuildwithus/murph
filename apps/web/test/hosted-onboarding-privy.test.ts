@@ -9,12 +9,10 @@ const mocks = vi.hoisted(() => ({
     telegramBotUsername: null as string | null,
     telegramWebhookSecret: null as string | null,
   },
-  verifyAccessToken: vi.fn(),
   verifyIdentityToken: vi.fn(),
 }));
 
 vi.mock("@privy-io/node", () => ({
-  verifyAccessToken: mocks.verifyAccessToken,
   verifyIdentityToken: mocks.verifyIdentityToken,
 }));
 
@@ -39,13 +37,13 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
 
 import {
   hasHostedPrivyPhoneAuthConfig,
-  readHostedPrivyAccessTokenFromRequest,
+  readHostedPrivyIdentityTokenFromCookieHeader,
   readHostedPrivyIdentityTokenFromCookieStore,
+  readHostedPrivyIdentityTokenFromRequestCookies,
   requireHostedPrivyCompletionIdentityFromCookies,
   requireHostedPrivyIdentity,
   requireHostedPrivyIdentityFromCookies,
   requireHostedPrivyPhoneAuthConfig,
-  verifyHostedPrivyAccessToken,
   verifyHostedPrivyIdentityToken,
 } from "@/src/lib/hosted-onboarding/privy";
 
@@ -122,6 +120,7 @@ describe("hosted Privy verification", () => {
         number: "+14155552671",
         verifiedAt: 1741194420,
       },
+      telegram: null,
       userId: "did:privy:user_123",
       wallet: {
         address: "0xD8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
@@ -138,35 +137,23 @@ describe("hosted Privy verification", () => {
     });
   });
 
-  it("reads and verifies the Privy bearer token from the authorization header", async () => {
+  it("reads the hosted Privy identity token from the cookie header", () => {
+    expect(readHostedPrivyIdentityTokenFromCookieHeader(null)).toBeNull();
+    expect(readHostedPrivyIdentityTokenFromCookieHeader("other=value")).toBeNull();
+    expect(readHostedPrivyIdentityTokenFromCookieHeader("privy-id-token=cookie-token")).toBe("cookie-token");
+    expect(
+      readHostedPrivyIdentityTokenFromCookieHeader("foo=bar; privy-id-token=encoded%2Etoken; hello=world"),
+    ).toBe("encoded.token");
+  });
+
+  it("reads the hosted Privy identity token from request cookies", () => {
     const request = new Request("https://join.example.test/api/settings/email/sync", {
       headers: {
-        authorization: "Bearer signed-access-token",
+        cookie: "foo=bar; privy-id-token=cookie-token",
       },
     });
-    mocks.verifyAccessToken.mockResolvedValue({
-      app_id: "cm_app_123",
-      expiration: 1743067800,
-      issued_at: 1743064200,
-      issuer: "privy.io",
-      session_id: "session_123",
-      user_id: "did:privy:user_123",
-    });
 
-    expect(readHostedPrivyAccessTokenFromRequest(request)).toBe("signed-access-token");
-    await expect(verifyHostedPrivyAccessToken("  signed-access-token  ")).resolves.toEqual({
-      appId: "cm_app_123",
-      expiration: 1743067800,
-      issuedAt: 1743064200,
-      issuer: "privy.io",
-      sessionId: "session_123",
-      userId: "did:privy:user_123",
-    });
-    expect(mocks.verifyAccessToken).toHaveBeenCalledWith({
-      access_token: "signed-access-token",
-      app_id: "cm_app_123",
-      verification_key: "line-1\nline-2",
-    });
+    expect(readHostedPrivyIdentityTokenFromRequestCookies(request)).toBe("cookie-token");
   });
 
   it("reads and verifies the hosted Privy identity from request cookies", async () => {
@@ -202,6 +189,7 @@ describe("hosted Privy verification", () => {
       phone: {
         number: "+14155552671",
       },
+      telegram: null,
       wallet: {
         address: "0xD8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
       },
@@ -240,16 +228,7 @@ describe("hosted Privy verification", () => {
     });
   });
 
-  it("maps local access-token verifier failures to hosted auth errors", async () => {
-    mocks.verifyAccessToken.mockRejectedValue(new Error("bad token"));
-
-    await expect(verifyHostedPrivyAccessToken("signed-access-token")).rejects.toMatchObject({
-      code: "PRIVY_AUTH_FAILED",
-      httpStatus: 401,
-    });
-  });
-
-  it("maps missing server-side phone state to a retryable not-ready error for completion", async () => {
+  it("maps missing server-side account state to a retryable not-ready error for completion", async () => {
     mocks.cookies.mockResolvedValue({
       get: vi.fn().mockImplementation((name: string) =>
         name === "privy-id-token" ? { value: "cookie-token" } : undefined),
@@ -273,9 +252,38 @@ describe("hosted Privy verification", () => {
     });
 
     await expect(requireHostedPrivyCompletionIdentityFromCookies()).rejects.toMatchObject({
-      code: "PRIVY_PHONE_NOT_READY",
+      code: "PRIVY_ACCOUNT_NOT_READY",
       httpStatus: 409,
       retryable: true,
+    });
+  });
+
+  it("allows Telegram-only server-side completion state", async () => {
+    mocks.cookies.mockResolvedValue({
+      get: vi.fn().mockImplementation((name: string) =>
+        name === "privy-id-token" ? { value: "cookie-token" } : undefined),
+    });
+    mocks.verifyIdentityToken.mockResolvedValue({
+      id: "did:privy:user_123",
+      linked_accounts: [
+        {
+          first_name: "Alice",
+          id: 456,
+          type: "telegram",
+          username: "alice",
+        },
+      ],
+    });
+
+    await expect(requireHostedPrivyCompletionIdentityFromCookies()).resolves.toMatchObject({
+      phone: null,
+      telegram: {
+        firstName: "Alice",
+        telegramUserId: "456",
+        username: "alice",
+      },
+      userId: "did:privy:user_123",
+      wallet: null,
     });
   });
 
@@ -299,6 +307,7 @@ describe("hosted Privy verification", () => {
       phone: {
         number: "+14155552671",
       },
+      telegram: null,
       userId: "did:privy:user_123",
       wallet: null,
     });
@@ -361,7 +370,7 @@ describe("hosted Privy verification", () => {
     });
 
     await expect(requireHostedPrivyIdentity("signed-identity-token")).rejects.toMatchObject({
-      code: "PRIVY_PHONE_REQUIRED",
+      code: "PRIVY_ACCOUNT_REQUIRED",
       httpStatus: 400,
     });
   });
@@ -388,6 +397,7 @@ describe("hosted Privy verification", () => {
       phone: {
         number: "+14155552671",
       },
+      telegram: null,
       userId: "did:privy:user_123",
       wallet: null,
     });
@@ -421,6 +431,7 @@ describe("hosted Privy verification", () => {
       phone: {
         number: "+14155552671",
       },
+      telegram: null,
       userId: "did:privy:user_123",
       wallet: null,
     });

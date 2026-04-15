@@ -1,25 +1,20 @@
+import { buildDailyFoodCronJobId } from '@murphai/vault-usecases/records'
+import { getAssistantCronJob } from './cron.js'
+import { withAssistantCronWriteLock } from './cron/locking.ts'
 import {
-  buildDailyFoodCronExpression,
-  buildDailyFoodCronJobName,
-  buildDailyFoodCronPrompt,
-  buildDailyFoodSchedule,
-} from '@murphai/vault-usecases/records'
-import { loadRuntimeModule } from '@murphai/vault-usecases/runtime'
+  createAssistantCronCanonicalRuntimeRecord,
+  findAssistantCronCanonicalRuntimeRecord,
+  readAssistantCronCanonicalRuntimeStore,
+  removeAssistantCronCanonicalRuntimeRecord,
+  upsertAssistantCronCanonicalRuntimeRecord,
+  writeAssistantCronCanonicalRuntimeStore,
+} from './cron/runtime-state.js'
 import {
-  addAssistantCronJob,
-  listAssistantCronJobs,
-  removeAssistantCronJob,
-} from './cron.js'
-
-interface FoodAutoLogCoreRuntime {
-  loadVault(input: {
-    vaultRoot: string
-  }): Promise<{
-    metadata: {
-      timezone?: string | null
-    }
-  }>
-}
+  ensureAssistantCronState,
+  readAssistantCronStore,
+  writeAssistantCronStore,
+} from './cron/store.js'
+import { resolveAssistantStatePaths } from './store/paths.js'
 
 interface FoodAutoLogSyncRecord {
   foodId: string
@@ -45,8 +40,6 @@ interface FoodAutoLogHooks {
   }): Promise<FoodAutoLogSyncJob | null>
 }
 
-type AssistantCronJobRecord = Awaited<ReturnType<typeof listAssistantCronJobs>>[number]
-
 export function createAssistantFoodAutoLogHooks(): FoodAutoLogHooks {
   return {
     syncRecurringFood(input) {
@@ -59,70 +52,70 @@ async function reconcileDailyFoodAutoLog(input: {
   food: FoodAutoLogSyncRecord
   vault: string
 }): Promise<FoodAutoLogSyncJob | null> {
-  const existingJobs = (await listAssistantCronJobs(input.vault)).filter(
-    (job) => job.foodAutoLog?.foodId === input.food.foodId,
-  )
+  const paths = resolveAssistantStatePaths(input.vault)
+  const jobId = buildDailyFoodCronJobId(input.food.foodId)
+  await ensureAssistantCronState(paths)
+
+  await withAssistantCronWriteLock(paths, async () => {
+    const [localStore, runtimeStore] = await Promise.all([
+      readAssistantCronStore(paths),
+      readAssistantCronCanonicalRuntimeStore(paths),
+    ])
+
+    const nextLocalJobs = localStore.jobs.filter(
+      (job) => job.foodAutoLog?.foodId !== input.food.foodId,
+    )
+    const localChanged = nextLocalJobs.length !== localStore.jobs.length
+
+    if (!input.food.autoLogDaily) {
+      const runtimeChanged = removeAssistantCronCanonicalRuntimeRecord(runtimeStore, jobId)
+      if (localChanged) {
+        await writeAssistantCronStore(paths, {
+          ...localStore,
+          jobs: nextLocalJobs,
+        })
+      }
+      if (runtimeChanged) {
+        await writeAssistantCronCanonicalRuntimeStore(paths, runtimeStore)
+      }
+      return
+    }
+
+    const existingRuntimeRecord = findAssistantCronCanonicalRuntimeRecord(
+      runtimeStore,
+      jobId,
+    )
+    if (!existingRuntimeRecord) {
+      upsertAssistantCronCanonicalRuntimeRecord(
+        runtimeStore,
+        createAssistantCronCanonicalRuntimeRecord({
+          jobId,
+          now: new Date().toISOString(),
+        }),
+      )
+    }
+
+    if (localChanged) {
+      await writeAssistantCronStore(paths, {
+        ...localStore,
+        jobs: nextLocalJobs,
+      })
+    }
+    if (!existingRuntimeRecord) {
+      await writeAssistantCronCanonicalRuntimeStore(paths, runtimeStore)
+    }
+  })
 
   if (!input.food.autoLogDaily) {
-    for (const job of existingJobs) {
-      await removeAssistantCronJob(input.vault, job.jobId)
-    }
     return null
   }
 
-  const core = await loadFoodAutoLogCoreRuntime()
-  const vault = await core.loadVault({
-    vaultRoot: input.vault,
-  })
-  const time = input.food.autoLogDaily.time
-  const timeZone = vault.metadata.timezone ?? 'UTC'
-  const desiredName = buildDailyFoodCronJobName(input.food.slug)
-  const desiredPrompt = buildDailyFoodCronPrompt(input.food.title)
-  const desiredExpression = buildDailyFoodCronExpression(time)
-  const desiredJob = existingJobs.find((job) =>
-    job.name === desiredName &&
-    job.prompt === desiredPrompt &&
-    isDailyFoodScheduleMatch(job, {
-      desiredExpression,
-      time,
-      timeZone,
-    }),
-  )
-
-  if (desiredJob && existingJobs.length === 1) {
-    return desiredJob
-  }
-
-  for (const job of existingJobs) {
-    await removeAssistantCronJob(input.vault, job.jobId)
-  }
-
-  return addAssistantCronJob({
-    vault: input.vault,
-    name: desiredName,
-    prompt: desiredPrompt,
-    schedule: buildDailyFoodSchedule(time, timeZone),
-    foodAutoLog: {
-      foodId: input.food.foodId,
+  const job = await getAssistantCronJob(input.vault, jobId)
+  return {
+    jobId: job.jobId,
+    name: job.name,
+    state: {
+      nextRunAt: job.state.nextRunAt,
     },
-  })
-}
-
-function isDailyFoodScheduleMatch(
-  job: AssistantCronJobRecord,
-  input: {
-    desiredExpression: string
-    time: string
-    timeZone: string
-  },
-) {
-  if (job.schedule.kind === 'dailyLocal') {
-    return job.schedule.localTime === input.time && job.schedule.timeZone === input.timeZone
   }
-
-  return job.schedule.kind === 'cron' && job.schedule.expression === input.desiredExpression
-}
-
-async function loadFoodAutoLogCoreRuntime(): Promise<FoodAutoLogCoreRuntime> {
-  return loadRuntimeModule<FoodAutoLogCoreRuntime>('@murphai/core')
 }

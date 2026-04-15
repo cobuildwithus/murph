@@ -1,4 +1,7 @@
-import type { AssistantAutomationCursor } from '@murphai/operator-config/assistant-cli-contracts'
+import type {
+  AssistantAutomationCursor,
+  AssistantAutomationState,
+} from '@murphai/operator-config/assistant-cli-contracts'
 
 type ShutdownTimer = ReturnType<typeof setTimeout> | number
 
@@ -29,7 +32,6 @@ export interface AssistantRunEvent {
     | 'capture.routed'
     | 'capture.skipped'
     | 'daemon.failed'
-    | 'reply.scan.primed'
     | 'reply.scan.started'
     | 'scan.started'
 }
@@ -37,6 +39,7 @@ export interface AssistantRunEvent {
 export interface AssistantInboxScanResult {
   considered: number
   failed: number
+  nextWakeAt: string | null
   noAction: number
   routed: number
   skipped: number
@@ -45,24 +48,31 @@ export interface AssistantInboxScanResult {
 export interface AssistantAutoReplyScanResult {
   considered: number
   failed: number
+  nextWakeAt: string | null
   replied: number
   skipped: number
 }
 
 export interface AssistantAutomationStateProgress {
-  cursor: AssistantAutomationCursor | null
-  backlogChannels?: readonly string[]
-  primed: boolean
+  autoReply: AssistantAutomationState['autoReply']
+  cursor?: AssistantAutomationCursor | null
 }
 
 export interface AssistantAutomationScanStateProgress {
-  autoReplyBacklogChannels: string[]
-  autoReplyPrimed: boolean
-  autoReplyScanCursor: AssistantAutomationCursor | null
+  autoReply: AssistantAutomationState['autoReply']
   inboxScanCursor: AssistantAutomationCursor | null
 }
 
 export interface AssistantAutomationScanResult {
+  replies: AssistantAutoReplyScanResult
+  routing: AssistantInboxScanResult
+}
+
+export interface AssistantAutomationPassResult {
+  cronProcessed: number
+  nextWakeAt: string | null
+  outboxAttempted: number
+  progressed: boolean
   replies: AssistantAutoReplyScanResult
   routing: AssistantInboxScanResult
 }
@@ -109,6 +119,40 @@ export function isAssistantCaptureAfterCursor(
 
 export function normalizeEnabledChannels(channels: readonly string[]): string[] {
   return [...new Set(channels.map((channel) => channel.trim()).filter(Boolean))]
+}
+
+export function computeAssistantAutomationRetryAt(
+  delayMs: number,
+  nowMs = Date.now(),
+): string {
+  const normalizedDelayMs = Number.isFinite(delayMs)
+    ? Math.max(0, Math.trunc(delayMs))
+    : 0
+  return new Date(nowMs + normalizedDelayMs).toISOString()
+}
+
+export function earliestAssistantAutomationWakeAt(
+  ...values: Array<string | null | undefined>
+): string | null {
+  return values
+    .map((value) => normalizeAssistantAutomationWakeAt(value ?? null))
+    .filter((value): value is string => value !== null)
+    .sort((left, right) => Date.parse(left) - Date.parse(right))[0] ?? null
+}
+
+export function normalizeAssistantAutomationWakeAt(
+  value: string | null,
+): string | null {
+  if (!value) {
+    return null
+  }
+
+  const parsedMs = Date.parse(value)
+  if (!Number.isFinite(parsedMs)) {
+    return null
+  }
+
+  return new Date(parsedMs).toISOString()
 }
 
 export function bridgeAbortSignals(
@@ -174,6 +218,78 @@ export function bridgeAbortSignals(
   }
 }
 
+export interface AssistantAutomationWakeController {
+  consumePendingWake(): boolean
+  requestWake(): void
+  waitForWakeOrDeadline(
+    signal: AbortSignal,
+    nextWakeAt: string | null,
+  ): Promise<void>
+}
+
+export function createAssistantAutomationWakeController(): AssistantAutomationWakeController {
+  let pendingWake = false
+  const waiters = new Set<() => void>()
+
+  const notifyWaiters = () => {
+    for (const waiter of waiters) {
+      waiter()
+    }
+    waiters.clear()
+  }
+
+  return {
+    consumePendingWake() {
+      const hadPendingWake = pendingWake
+      pendingWake = false
+      return hadPendingWake
+    },
+    requestWake() {
+      pendingWake = true
+      notifyWaiters()
+    },
+    async waitForWakeOrDeadline(signal, nextWakeAt) {
+      if (signal.aborted || pendingWake) {
+        return
+      }
+
+      const timeoutMs = resolveAssistantAutomationWakeDelayMs(nextWakeAt)
+      if (timeoutMs === 0) {
+        return
+      }
+
+      await new Promise<void>((resolve) => {
+        const onWake = () => {
+          cleanup()
+          resolve()
+        }
+        const onAbort = () => {
+          cleanup()
+          resolve()
+        }
+        const timer =
+          timeoutMs === null
+            ? null
+            : setTimeout(() => {
+                cleanup()
+                resolve()
+              }, timeoutMs)
+
+        const cleanup = () => {
+          if (timer !== null) {
+            clearTimeout(timer)
+          }
+          waiters.delete(onWake)
+          signal.removeEventListener('abort', onAbort)
+        }
+
+        waiters.add(onWake)
+        signal.addEventListener('abort', onAbort, { once: true })
+      })
+    },
+  }
+}
+
 export async function waitForAbortOrTimeout(
   signal: AbortSignal,
   timeoutMs: number,
@@ -197,12 +313,15 @@ export async function waitForAbortOrTimeout(
   })
 }
 
-export function normalizeScanInterval(value?: number): number {
-  if (!Number.isFinite(value) || typeof value !== 'number') {
-    return 5000
+function resolveAssistantAutomationWakeDelayMs(
+  nextWakeAt: string | null,
+): number | null {
+  const normalizedWakeAt = normalizeAssistantAutomationWakeAt(nextWakeAt)
+  if (!normalizedWakeAt) {
+    return null
   }
 
-  return Math.min(Math.max(Math.trunc(value), 250), 60000)
+  return Math.max(0, Date.parse(normalizedWakeAt) - Date.now())
 }
 
 export function normalizeScanLimit(value?: number): number {
@@ -217,6 +336,7 @@ export function createEmptyInboxScanResult(): AssistantInboxScanResult {
   return {
     considered: 0,
     failed: 0,
+    nextWakeAt: null,
     noAction: 0,
     routed: 0,
     skipped: 0,
@@ -227,6 +347,7 @@ export function createEmptyAutoReplyScanResult(): AssistantAutoReplyScanResult {
   return {
     considered: 0,
     failed: 0,
+    nextWakeAt: null,
     replied: 0,
     skipped: 0,
   }

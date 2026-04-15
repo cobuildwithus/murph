@@ -22,6 +22,7 @@ vi.mock('@murphai/assistant-engine/assistant-service', async () => {
 
   return {
     ...actual,
+    sendAssistantNotificationLocal: cronServiceMocks.sendAssistantMessage,
     sendAssistantMessage: cronServiceMocks.sendAssistantMessage,
     sendAssistantMessageLocal: cronServiceMocks.sendAssistantMessage,
   }
@@ -162,7 +163,6 @@ test('assistant cron preset installs materialize regular cron jobs with resolved
   assert.equal(installed.job.target.channel, 'telegram')
   assert.equal(installed.job.target.alias, 'routine:mindfulness')
   assert.equal(installed.job.target.sourceThreadId, '123456789')
-  assert.equal(installed.job.target.deliverResponse, true)
   assert.equal(
     installed.resolvedVariables.practice_window,
     'a 10 minute seated meditation before work',
@@ -185,7 +185,7 @@ test('assistant cron preset installs materialize regular cron jobs with resolved
   assert.equal(automation?.status, 'active')
   assert.equal(automation?.route.channel, 'telegram')
   assert.equal(automation?.route.sourceThreadId, '123456789')
-  assert.match(automation?.prompt ?? '', /10 minute seated meditation before work/u)
+  assert.match(automation?.instructions ?? '', /10 minute seated meditation before work/u)
 })
 
 test('assistant cron jobs reuse the sole saved self-delivery target when no route flags are provided', async () => {
@@ -221,7 +221,6 @@ test('assistant cron jobs reuse the sole saved self-delivery target when no rout
     assert.equal(installed.job.target.channel, 'telegram')
     assert.equal(installed.job.target.participantId, 'saved-chat')
     assert.equal(installed.job.target.sourceThreadId, 'saved-chat')
-    assert.equal(installed.job.target.deliverResponse, true)
   } finally {
     process.env.HOME = originalHome
   }
@@ -312,20 +311,6 @@ test('assistant cron jobs require explicit outbound delivery routing', async () 
       /Email cron jobs require a configured email sender identity/u,
     )
 
-    await assert.rejects(
-      () =>
-        addAssistantCronJob({
-          vault: vaultRoot,
-          name: 'explicitly-disabled-delivery',
-          prompt: 'Send my weekly update.',
-          schedule: buildAssistantCronSchedule({
-            every: '1d',
-          }),
-          ...testCronDeliveryTarget,
-          deliverResponse: false,
-        }),
-      /always deliver their response/u,
-    )
   } finally {
     process.env.HOME = originalHome
   }
@@ -353,7 +338,6 @@ test('assistant cron jobs persist cleanly and can be enabled, disabled, and remo
   assert.equal(job.schedule.kind, 'every')
   assert.equal(job.keepAfterRun, true)
   assert.equal(job.enabled, true)
-  assert.equal(job.target.deliverResponse, true)
   assert.equal(job.state.nextRunAt !== null, true)
 
   const listed = await listAssistantCronJobs(vaultRoot)
@@ -481,7 +465,6 @@ test('assistant cron assigns vault timezones to cron schedules and computes next
   })
 
   assert.equal(job.schedule.kind, 'cron')
-  assert.equal(job.schedule.timeZone, 'Australia/Melbourne')
   assert.equal(job.state.nextRunAt, '2026-03-27T21:00:00.000Z')
 })
 
@@ -505,7 +488,6 @@ test('assistant cron daily-local schedules stay pinned to local time across DST 
     schedule: {
       kind: 'dailyLocal',
       localTime: '08:00',
-      timeZone: 'America/New_York',
     },
     now: new Date('2026-03-07T13:30:00.000Z'),
   })
@@ -527,7 +509,7 @@ test('assistant cron manual runs record history and remove completed one-shot jo
     prompt: 'Remind me to drink water.',
     response: 'Drink water now.',
     session: {
-      schema: 'murph.assistant-session.v4',
+      schema: 'murph.assistant-session.v1',
       sessionId: 'asst_cron_manual',
       target: {
         adapter: 'codex-cli',
@@ -590,8 +572,8 @@ test('assistant cron manual runs record history and remove completed one-shot jo
   assert.equal(result.run.sessionId, 'asst_cron_manual')
   assert.equal(result.run.response, 'Drink water now.')
   assert.equal(
-    cronServiceMocks.sendAssistantMessage.mock.calls[0]?.[0]?.deliverResponse,
-    true,
+    cronServiceMocks.sendAssistantMessage.mock.calls[0]?.[0]?.instructions,
+    'Remind me to drink water.',
   )
   assert.equal(
     cronServiceMocks.sendAssistantMessage.mock.calls[0]?.[0]?.channel,

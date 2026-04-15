@@ -17,14 +17,14 @@ import {
   slugSchema,
 } from '@murphai/operator-config/vault-cli-contracts'
 import {
+  knowledgeGetResultSchema as knowledgeShowResultSchema,
   knowledgeIndexRebuildResultSchema,
-  knowledgeLogTailResultSchema,
   knowledgeLintResultSchema,
   knowledgeListResultSchema,
+  knowledgeLogTailResultSchema,
   knowledgeSearchResultSchema,
-  knowledgeShowResultSchema,
   knowledgeUpsertResultSchema,
-} from '../knowledge-cli-contracts.js'
+} from '@murphai/query'
 
 export function registerKnowledgeCommands(cli: Cli.Cli) {
   const knowledge = Cli.create('knowledge', {

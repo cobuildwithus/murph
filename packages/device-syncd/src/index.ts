@@ -1,5 +1,10 @@
 export { createSecretCodec } from "./crypto.ts";
 export { redactPublicDeviceSyncMetadata, toRedactedPublicDeviceSyncAccount } from "./public-account.ts";
+export {
+  DEVICE_SYNC_CALLBACK_QUERY_PARAM_KEYS,
+  buildDeviceSyncCallbackErrorRedirectLocation,
+  buildDeviceSyncCallbackSuccessRedirectLocation,
+} from "./callback-redirect.ts";
 export { DeviceSyncError, deviceSyncError, isDeviceSyncError } from "./errors.ts";
 export { createDeviceSyncRegistry } from "./registry.ts";
 export { resolveDeviceSyncWebhookVerificationResponse } from "./webhook-verification.ts";
@@ -8,13 +13,18 @@ export { createDeviceSyncService, createDefaultImporterPort, DeviceSyncService }
 export type { CreateDeviceSyncServiceInput } from "./service.ts";
 export {
   createConfiguredDeviceSyncProviders,
+  createConfiguredDeviceSyncProvidersFromConfigs,
   createConsoleDeviceSyncLogger,
   loadDeviceSyncEnvironment,
+  readConfiguredDeviceSyncProviderConfigs,
   readConfiguredGarminDeviceSyncProviderConfig,
   readConfiguredOuraDeviceSyncProviderConfig,
   readConfiguredWhoopDeviceSyncProviderConfig,
 } from "./config.ts";
-export type { LoadedDeviceSyncEnvironment } from "./config.ts";
+export type {
+  ConfiguredDeviceSyncProviderConfigs,
+  LoadedDeviceSyncEnvironment,
+} from "./config.ts";
 export { buildPublicDeviceSyncErrorPayload, startDeviceSyncHttpServer } from "./http.ts";
 export type { CreateDeviceSyncHttpServerInput } from "./http.ts";
 export { SqliteDeviceSyncStore } from "./store.ts";

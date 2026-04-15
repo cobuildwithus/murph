@@ -1,7 +1,9 @@
 import {
+  type HostedExecutionRunContext,
   deriveHostedExecutionErrorCode,
   normalizeHostedExecutionOperatorMessage,
   summarizeHostedExecutionErrorCode,
+  type HostedExecutionEventDispatchStatus,
   type HostedExecutionDispatchRequest,
   type HostedExecutionRunLevel,
   type HostedExecutionRunPhase,
@@ -83,6 +85,12 @@ interface BundleRefSwapInput {
   nextBundleRef: RunnerStateRecord["bundleRef"];
 }
 
+interface LeaseOwnerInput {
+  eventId: string;
+  policy?: "matching-run" | "same-event";
+  run: HostedExecutionRunContext | null;
+}
+
 export class RunnerQueueStore {
   private readonly ready: Promise<void>;
   private volatileRun: HostedExecutionRunStatus | null = null;
@@ -154,6 +162,14 @@ export class RunnerQueueStore {
       pending: pending !== null,
       poisoned: poisoned !== null,
     };
+  }
+
+  async readEventDispatchStatus(
+    eventId: string,
+  ): Promise<HostedExecutionEventDispatchStatus | null> {
+    await this.ready;
+    this.pruneExpiredConsumedEventsSync();
+    return this.readEventDispatchStatusSync(eventId);
   }
 
   async listPendingDispatches(): Promise<PendingDispatchRecord[]> {
@@ -253,6 +269,7 @@ export class RunnerQueueStore {
   async claimNextDuePendingDispatch(nowMs: number): Promise<{
     pendingDispatch: PendingDispatchRecord | null;
     record: RunnerStateRecord;
+    run: HostedExecutionRunContext | null;
   }> {
     await this.ready;
     this.pruneExpiredConsumedEventsSync();
@@ -262,6 +279,7 @@ export class RunnerQueueStore {
       return {
         pendingDispatch: null,
         record: this.readStateFromMetaSync(meta),
+        run: null,
       };
     }
 
@@ -271,20 +289,37 @@ export class RunnerQueueStore {
       return {
         pendingDispatch: null,
         record: this.readStateFromMetaSync(refreshedMeta),
+        run: null,
       };
     }
 
+    const run = {
+      attempt: nextPending.attempts + 1,
+      runId: crypto.randomUUID(),
+      startedAt: new Date().toISOString(),
+    } satisfies HostedExecutionRunContext;
     meta.in_flight = 1;
+    this.assignActiveRunMetaSync(meta, nextPending.eventId, run);
+    this.volatileRun = {
+      attempt: run.attempt,
+      eventId: nextPending.eventId,
+      phase: "claimed",
+      runId: run.runId,
+      startedAt: run.startedAt,
+      updatedAt: run.startedAt,
+    };
     this.clearLastErrorMetaSync(meta);
     this.writeMetaRowSync(meta);
     return {
       pendingDispatch: nextPending,
       record: this.readStateFromMetaSync(meta),
+      run,
     };
   }
 
   async applyCommittedDispatch(
     committed: HostedExecutionCommittedResult,
+    leaseOwner: LeaseOwnerInput | null = null,
   ): Promise<RunnerStateRecord> {
     await this.ready;
     await this.bootstrapUserFromCommittedResult(committed);
@@ -305,7 +340,10 @@ export class RunnerQueueStore {
       nextConsumedEventExactExpiryIso(),
     );
     assignRunnerBundleRefs(bundleState, committed.bundleRef);
-    meta.in_flight = 0;
+    this.clearActiveRunLeaseSync(meta, leaseOwner ?? {
+      eventId: committed.eventId,
+      run: null,
+    });
     this.clearLastErrorMetaSync(meta);
     meta.last_run_at = committed.committedAt;
     this.writeMetaRowSync(meta);
@@ -316,6 +354,7 @@ export class RunnerQueueStore {
 
   async syncCommittedBundles(
     committed: HostedExecutionCommittedResult,
+    leaseOwner: LeaseOwnerInput | null = null,
   ): Promise<RunnerStateRecord> {
     await this.ready;
     await this.bootstrapUserFromCommittedResult(committed);
@@ -325,7 +364,13 @@ export class RunnerQueueStore {
     const bundleState = this.selectBundleStateSync();
     assignRunnerBundleRefs(bundleState, committed.bundleRef);
     this.deleteBackpressuredEventSync(committed.eventId);
-    meta.in_flight = 0;
+    if (leaseOwner?.policy === "same-event") {
+      this.clearActiveRunLeaseSync(meta, {
+        eventId: committed.eventId,
+        policy: "same-event",
+        run: leaseOwner.run ?? null,
+      });
+    }
     this.clearLastErrorMetaSync(meta);
     meta.last_run_at = committed.committedAt;
     this.writeMetaRowSync(meta);
@@ -349,6 +394,7 @@ export class RunnerQueueStore {
     const errorCode = deriveHostedExecutionErrorCode(input.error);
     if (!pending) {
       meta.in_flight = 0;
+      this.clearActiveRunMetaSync(meta);
       meta.last_error_at = errorAt;
       meta.last_error_code = errorCode;
       this.writeMetaRowSync(meta);
@@ -360,6 +406,7 @@ export class RunnerQueueStore {
 
     const nextAttempts = pending.attempts + 1;
     meta.in_flight = 0;
+    this.clearActiveRunMetaSync(meta);
     meta.last_error_at = errorAt;
     meta.last_error_code = errorCode;
 
@@ -407,6 +454,7 @@ export class RunnerQueueStore {
     const errorCode = deriveHostedExecutionErrorCode(input.error);
 
     meta.in_flight = 0;
+    this.clearActiveRunMetaSync(meta);
     meta.last_error_at = errorAt;
     meta.last_error_code = errorCode;
 
@@ -443,6 +491,7 @@ export class RunnerQueueStore {
     const errorCode = deriveHostedExecutionErrorCode(input.error);
     assignRunnerBundleRefs(bundleState, input.committed.bundleRef);
     meta.in_flight = 0;
+    this.clearActiveRunMetaSync(meta);
     meta.last_error_at = new Date().toISOString();
     meta.last_error_code = errorCode;
     meta.last_run_at = input.committed.committedAt;
@@ -462,16 +511,25 @@ export class RunnerQueueStore {
     return this.readStateFromMetaSync(meta);
   }
 
-  async rememberCommittedEvent(eventId: string): Promise<RunnerStateRecord> {
+  async rememberCommittedEvent(
+    eventId: string,
+    leaseOwner: LeaseOwnerInput | null = null,
+  ): Promise<RunnerStateRecord> {
     await this.ready;
     this.pruneExpiredConsumedEventsSync();
+    const meta = this.requireMetaRowSync();
+    this.clearActiveRunLeaseSync(meta, leaseOwner ?? {
+      eventId,
+      run: null,
+    });
+    this.writeMetaRowSync(meta);
     this.deleteBackpressuredEventSync(eventId);
 
     if (!this.hasConsumedEventSync(eventId)) {
       this.writeConsumedEventSync(eventId, new Date().toISOString(), nextConsumedEventExactExpiryIso());
     }
 
-    return this.readStateSync();
+    return this.readStateFromMetaSync(meta);
   }
 
   async recordRunPhase(input: {
@@ -568,7 +626,6 @@ export class RunnerQueueStore {
   }
 
   async syncNextWake(input: {
-    defaultAlarmDelayMs: number;
     preferredWakeAt?: string | null;
   }): Promise<RunnerStateRecord> {
     await this.ready;
@@ -577,8 +634,6 @@ export class RunnerQueueStore {
     const meta = this.requireMetaRowSync();
     const nextPendingAvailableAt = this.readNextPendingAvailableAtSync();
     meta.next_wake_at = resolveRunnerNextWakeAt({
-      runtimeBootstrapped: meta.runtime_bootstrapped === 1,
-      defaultAlarmDelayMs: input.defaultAlarmDelayMs,
       nextPendingAvailableAt,
       preferredWakeAt: input.preferredWakeAt ?? null,
     });
@@ -678,6 +733,10 @@ export class RunnerQueueStore {
     const row = this.sql.exec<RunnerMetaRow>(
       `SELECT
         user_id,
+        active_run_event_id,
+        active_run_id,
+        active_run_attempt,
+        active_run_started_at,
         runtime_bootstrapped,
         in_flight,
         last_error_at,
@@ -700,15 +759,23 @@ export class RunnerQueueStore {
       `INSERT OR REPLACE INTO runner_meta (
         singleton,
         user_id,
+        active_run_event_id,
+        active_run_id,
+        active_run_attempt,
+        active_run_started_at,
         runtime_bootstrapped,
         in_flight,
         last_error_at,
         last_error_code,
         last_run_at,
         next_wake_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       1,
       meta.user_id,
+      meta.active_run_event_id,
+      meta.active_run_id,
+      meta.active_run_attempt,
+      meta.active_run_started_at,
       meta.runtime_bootstrapped,
       meta.in_flight,
       meta.last_error_at,
@@ -721,6 +788,53 @@ export class RunnerQueueStore {
   private writeMetaRowSync(meta: RunnerMetaRow): void {
     this.insertMetaRowSync(meta);
     this.userId = meta.user_id;
+  }
+
+  private assignActiveRunMetaSync(
+    meta: RunnerMetaRow,
+    eventId: string,
+    run: HostedExecutionRunContext,
+  ): void {
+    meta.active_run_event_id = eventId;
+    meta.active_run_id = run.runId;
+    meta.active_run_attempt = run.attempt;
+    meta.active_run_started_at = run.startedAt;
+  }
+
+  private clearActiveRunMetaSync(meta: RunnerMetaRow): void {
+    meta.active_run_event_id = null;
+    meta.active_run_id = null;
+    meta.active_run_attempt = null;
+    meta.active_run_started_at = null;
+  }
+
+  private clearActiveRunLeaseSync(meta: RunnerMetaRow, owner: LeaseOwnerInput): void {
+    if (!meta.active_run_event_id) {
+      meta.in_flight = 0;
+      this.clearActiveRunMetaSync(meta);
+      return;
+    }
+
+    if (meta.active_run_event_id !== owner.eventId) {
+      return;
+    }
+
+    if (owner.policy === "same-event") {
+      meta.in_flight = 0;
+      this.clearActiveRunMetaSync(meta);
+      return;
+    }
+
+    if (!owner.run) {
+      return;
+    }
+
+    if (!sameHostedExecutionRun(this.readActiveRunContextSync(meta), owner.run)) {
+      return;
+    }
+
+    meta.in_flight = 0;
+    this.clearActiveRunMetaSync(meta);
   }
 
   private ensureCanonicalBundleSlotRowsSync(): void {
@@ -869,6 +983,55 @@ export class RunnerQueueStore {
 
   private hasPendingDispatchSync(eventId: string): boolean {
     return this.readPendingDispatchMetaByEventIdSync(eventId) !== null;
+  }
+
+  private readEventDispatchStatusSync(
+    eventId: string,
+  ): HostedExecutionEventDispatchStatus | null {
+    const userId = this.tryResolveUserIdSync();
+    if (!userId) {
+      return null;
+    }
+
+    const poisoned = this.readPoisonedEventByIdSync(eventId);
+    if (poisoned) {
+      return {
+        eventId,
+        lastError: summarizeHostedExecutionErrorCode(poisoned.last_error_code),
+        state: "poisoned",
+        userId,
+      };
+    }
+
+    if (this.hasBackpressuredEventSync(eventId)) {
+      return {
+        eventId,
+        lastError: null,
+        state: "backpressured",
+        userId,
+      };
+    }
+
+    const pending = this.readPendingDispatchMetaByEventIdSync(eventId);
+    if (pending) {
+      return {
+        eventId,
+        lastError: pending.lastError,
+        state: "queued",
+        userId,
+      };
+    }
+
+    if (this.hasConsumedEventSync(eventId)) {
+      return {
+        eventId,
+        lastError: null,
+        state: "completed",
+        userId,
+      };
+    }
+
+    return null;
   }
 
   private hasConsumedEventSync(eventId: string): boolean {
@@ -1165,6 +1328,25 @@ export class RunnerQueueStore {
     return rows[0]?.eventId ?? null;
   }
 
+  private readActiveRunContextSync(meta: RunnerMetaRow): HostedExecutionRunContext | null {
+    if (
+      !meta.active_run_event_id
+      || !meta.active_run_id
+      || typeof meta.active_run_attempt !== "number"
+      || !Number.isSafeInteger(meta.active_run_attempt)
+      || meta.active_run_attempt < 1
+      || !meta.active_run_started_at
+    ) {
+      return null;
+    }
+
+    return {
+      attempt: meta.active_run_attempt,
+      runId: meta.active_run_id,
+      startedAt: meta.active_run_started_at,
+    };
+  }
+
   private get sql() {
     const sql = this.state.storage.sql;
     if (!sql) {
@@ -1186,4 +1368,17 @@ export class RunnerQueueStore {
       MAX_POISONED_EVENT_IDS,
     );
   }
+}
+
+function sameHostedExecutionRun(
+  left: HostedExecutionRunContext | null,
+  right: HostedExecutionRunContext,
+): boolean {
+  if (!left) {
+    return false;
+  }
+
+  return left.attempt === right.attempt
+    && left.runId === right.runId
+    && left.startedAt === right.startedAt;
 }

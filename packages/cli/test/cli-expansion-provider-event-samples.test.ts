@@ -315,11 +315,11 @@ test('generic read and semantic summary help surfaces explain when to use them',
   )
   assert.match(
     searchHelp,
-    /Use `search query` for fuzzy recall or remembered phrases\. Use `show` for one exact id, `list` for structured filters, and `timeline` for chronology\./u,
+    /Use `search query <query>` for direct fuzzy recall, or `search query --text "<query>"` for explicit machine-oriented calls\. Use `show` for one exact id, `list` for structured filters, and `timeline` for chronology\./u,
   )
   assert.match(
     timelineHelp,
-    /Use `timeline` when you need chronology across journals, events, assessments, profile snapshots, and sample summaries\./u,
+    /Use `timeline` when you need chronology across journals, events, assessments, and sample summaries\./u,
   )
   assert.match(
     wearablesDayHelp,
@@ -440,6 +440,7 @@ test.sequential(
           id: string
           kind: string
           data: Record<string, unknown>
+          excerpt?: string | null
         }>
       }>([
         'recipe',
@@ -467,6 +468,11 @@ test.sequential(
       assert.equal(requireData(recipeList).count, 1)
       assert.equal(requireData(recipeList).items.length, 1)
       assert.equal(requireData(recipeList).items[0]?.kind, 'recipe')
+      assert.match(
+        requireData(recipeList).items[0]?.excerpt ?? '',
+        /Summary A reliable high protein salmon b/u,
+      )
+      assert.equal('markdown' in (requireData(recipeList).items[0] ?? {}), false)
       assert.equal(requireData(recipeList).items[0]?.data.dishType, 'dinner')
 
       const recipeMarkdown = await readFile(
@@ -496,6 +502,10 @@ test.sequential(
         payload: {
           title?: string
           aliases?: string[]
+          nutrition?: {
+            perServing?: Record<string, unknown>
+            provenance?: Record<string, unknown>
+          }
         }
       }>(['food', 'scaffold', '--vault', vaultRoot])
 
@@ -506,6 +516,18 @@ test.sequential(
         'regular acai bowl',
         'usual acai bowl',
       ])
+      assert.deepEqual(requireData(foodScaffold).payload.nutrition?.perServing, {
+        calories: 540,
+        proteinGrams: 11,
+        carbsGrams: 68,
+        fatGrams: 24,
+        fiberGrams: 11,
+      })
+      assert.deepEqual(requireData(foodScaffold).payload.nutrition?.provenance, {
+        source: 'estimated',
+        confidence: 'medium',
+        sourceDetail: 'Neighborhood menu plus standard granola serving.',
+      })
 
       await writeFile(
         foodPayloadPath,
@@ -518,6 +540,20 @@ test.sequential(
           vendor: 'Neighborhood Acai Bar',
           location: 'Brooklyn, NY',
           serving: '1 bowl',
+          nutrition: {
+            perServing: {
+              calories: 540,
+              proteinGrams: 11,
+              carbsGrams: 68,
+              fatGrams: 24,
+              fiberGrams: 11,
+            },
+            provenance: {
+              source: 'estimated',
+              confidence: 'medium',
+              sourceDetail: 'Neighborhood menu plus standard granola serving.',
+            },
+          },
           aliases: ['regular acai bowl', 'usual acai bowl'],
           ingredients: ['acai base', 'banana', 'strawberries', 'granola'],
           tags: ['breakfast', 'favorite'],
@@ -554,6 +590,10 @@ test.sequential(
           data: {
             vendor?: string
             ingredients?: string[]
+            nutrition?: {
+              perServing?: Record<string, unknown>
+              provenance?: Record<string, unknown>
+            }
           }
         }
       }>([
@@ -584,6 +624,7 @@ test.sequential(
           id: string
           kind: string
           data: Record<string, unknown>
+          excerpt?: string | null
         }>
       }>([
         'food',
@@ -605,6 +646,18 @@ test.sequential(
         'strawberries',
         'granola',
       ])
+      assert.deepEqual(requireData(foodShow).entity.data.nutrition?.perServing, {
+        calories: 540,
+        proteinGrams: 11,
+        carbsGrams: 68,
+        fatGrams: 24,
+        fiberGrams: 11,
+      })
+      assert.deepEqual(requireData(foodShow).entity.data.nutrition?.provenance, {
+        source: 'estimated',
+        confidence: 'medium',
+        sourceDetail: 'Neighborhood menu plus standard granola serving.',
+      })
       assert.equal(foodShowBySlug.ok, true)
       assert.equal(requireData(foodShowBySlug).entity.id, requireData(foodUpsert).foodId)
 
@@ -613,13 +666,33 @@ test.sequential(
       assert.equal(requireData(foodList).count, 1)
       assert.equal(requireData(foodList).items.length, 1)
       assert.equal(requireData(foodList).items[0]?.kind, 'food')
+      assert.match(
+        requireData(foodList).items[0]?.excerpt ?? '',
+        /Summary The usual acai bowl order from the neighborhood spot with re/u,
+      )
+      assert.equal('markdown' in (requireData(foodList).items[0] ?? {}), false)
       assert.equal(requireData(foodList).items[0]?.data.kind, 'acai bowl')
+      assert.deepEqual(
+        (requireData(foodList).items[0]?.data.nutrition as {
+          perServing?: Record<string, unknown>
+        } | undefined)?.perServing,
+        {
+        calories: 540,
+        proteinGrams: 11,
+        carbsGrams: 68,
+        fatGrams: 24,
+        fiberGrams: 11,
+        },
+      )
 
       const foodMarkdown = await readFile(
         path.join(vaultRoot, requireData(foodUpsert).path),
         'utf8',
       )
       assert.match(foodMarkdown, /foodId:/u)
+      assert.match(foodMarkdown, /nutrition:/u)
+      assert.match(foodMarkdown, /perServing:/u)
+      assert.match(foodMarkdown, /provenance:/u)
       assert.match(foodMarkdown, /## Aliases/u)
       assert.match(foodMarkdown, /## Ingredients/u)
     } finally {
@@ -698,10 +771,6 @@ test.sequential(
       assert.equal(jobs[0]?.name, 'food-daily:morning-smoothie')
       assert.equal(jobs[0]?.schedule.kind, 'dailyLocal')
       assert.equal(jobs[0]?.schedule.localTime, '08:00')
-      assert.equal(
-        jobs[0]?.schedule.timeZone,
-        Intl.DateTimeFormat().resolvedOptions().timeZone,
-      )
       assert.deepEqual(jobs[0]?.foodAutoLog, {
         foodId: requireData(foodSchedule).foodId,
       })
@@ -874,6 +943,8 @@ test.sequential(
         items: Array<{
           id: string
           kind: string
+          excerpt?: string | null
+          markdown?: string | null
           data: Record<string, unknown>
         }>
       }>([
@@ -902,6 +973,11 @@ test.sequential(
       assert.equal(requireData(providerList).items.length, 1)
       assert.equal(requireData(providerList).items[0]?.kind, 'provider')
       assert.equal(requireData(providerList).items[0]?.data.specialty, 'lab')
+      assert.match(
+        requireData(providerList).items[0]?.excerpt ?? '',
+        /Labcorp Primary lab partner\./u,
+      )
+      assert.equal('markdown' in (requireData(providerList).items[0] ?? {}), false)
 
       await writeFile(
         eventPayloadPath,
@@ -965,6 +1041,7 @@ test.sequential(
         items: Array<{
           id: string
           kind: string
+          markdown?: string | null
           data: Record<string, unknown>
           links: Array<{
             id: string
@@ -1010,6 +1087,7 @@ test.sequential(
       assert.equal(requireData(eventList).items[0]?.kind, 'symptom')
       assert.equal(requireData(eventList).items[0]?.data.symptom, 'headache')
       assert.equal(requireData(eventList).items[0]?.links[0]?.id, requireData(providerUpsert).providerId)
+      assert.equal('markdown' in (requireData(eventList).items[0] ?? {}), false)
 
       const csvEventList = await runSliceCli([
         'event',

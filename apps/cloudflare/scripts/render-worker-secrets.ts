@@ -1,4 +1,4 @@
-import { chmod, mkdir, stat, writeFile } from "node:fs/promises";
+import { access, chmod, mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -19,11 +19,11 @@ export async function renderWorkerSecretsFile(input: {
     ? path.resolve(process.cwd(), input.outputPath)
     : deployPaths.workerSecretsPath;
   const outputDirectory = path.dirname(outputPath);
-  const shouldHardenOutputDirectory = outputDirectory === deployPaths.deployDir
+  const shouldApplySecureDirectoryMode = outputDirectory === deployPaths.deployDir
     || !(await pathExists(outputDirectory));
 
   await mkdir(outputDirectory, { recursive: true, mode: DEPLOY_SECRET_DIRECTORY_MODE });
-  if (shouldHardenOutputDirectory) {
+  if (shouldApplySecureDirectoryMode) {
     await chmod(outputDirectory, DEPLOY_SECRET_DIRECTORY_MODE);
   }
   await writeFile(
@@ -48,11 +48,24 @@ if (isEntrypoint(import.meta.url)) {
 
 async function pathExists(targetPath: string): Promise<boolean> {
   try {
-    await stat(targetPath);
+    await access(targetPath);
     return true;
-  } catch {
-    return false;
+  } catch (error) {
+    if (isMissingFileError(error)) {
+      return false;
+    }
+
+    throw error;
   }
+}
+
+function isMissingFileError(error: unknown): boolean {
+  return Boolean(
+    error &&
+      typeof error === "object" &&
+      "code" in error &&
+      (error as { code?: unknown }).code === "ENOENT",
+  );
 }
 
 function isEntrypoint(moduleUrl: string): boolean {

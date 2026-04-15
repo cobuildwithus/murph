@@ -6,19 +6,8 @@ import { normalizeNullableString as normalizeDeviceSyncNullableString } from "..
 
 export { maskPhoneNumber, normalizePhoneNumber, normalizePhoneNumberForCountry } from "./phone";
 
-export type HostedOnboardingPrismaClient = PrismaClient | Prisma.TransactionClient;
-const HOSTED_ONBOARDING_TRANSACTION_MAX_WAIT_MS = 5_000;
-
-export async function withHostedOnboardingTransaction<TResult>(
-  prisma: HostedOnboardingPrismaClient,
-  callback: (tx: Prisma.TransactionClient) => Promise<TResult>,
-): Promise<TResult> {
-  return "$transaction" in prisma
-    ? prisma.$transaction((tx) => callback(tx), {
-        maxWait: HOSTED_ONBOARDING_TRANSACTION_MAX_WAIT_MS,
-      })
-    : callback(prisma);
-}
+export type HostedOnboardingReadClient = PrismaClient | Prisma.TransactionClient;
+export const HOSTED_ONBOARDING_TRANSACTION_OPTIONS = { maxWait: 5_000 } as const;
 
 export async function lockHostedMemberRow(
   tx: Prisma.TransactionClient,

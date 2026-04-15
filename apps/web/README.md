@@ -77,13 +77,17 @@ Hosted onboarding extras:
 - `HOSTED_ONBOARDING_SIGNUP_PHONE_NUMBER` to show a public `Text to start` CTA on `/`
 - `NEXT_PUBLIC_PRIVY_APP_ID`
 - `NEXT_PUBLIC_PRIVY_CLIENT_ID` if you want the hosted web app to select a specific Privy web client per environment
-- `PRIVY_CUSTOM_AUTH_DOMAIN` or `NEXT_PUBLIC_PRIVY_CUSTOM_AUTH_DOMAIN` when Privy uses a custom auth host such as `https://privy.example.com`; `apps/web` uses this to extend the CSP `connect-src` and `frame-src` allowlists for Privy's browser SDK
-- `PRIVY_BASE_DOMAIN` or `NEXT_PUBLIC_PRIVY_BASE_DOMAIN` as an optional fallback when the Privy custom host follows the `privy.<base-domain>` pattern
+- `PRIVY_CUSTOM_AUTH_DOMAIN` when Privy uses a custom auth host such as `https://privy.example.com`; `apps/web` uses this to extend the CSP `connect-src` and `frame-src` allowlists for Privy's browser SDK
+- `PRIVY_BASE_DOMAIN` as an optional fallback when the Privy custom host follows the `privy.<base-domain>` pattern
+- When neither `PRIVY_*` value is set, `apps/web` still derives the Privy CSP origin from the canonical hosted public origin (`HOSTED_ONBOARDING_PUBLIC_BASE_URL`, then `HOSTED_WEB_BASE_URL`, then Vercel's production URL), and it also admits the common hosted-web subdomain fallback (`app.<domain>`, `www.<domain>`, or `web.<domain>` -> `privy.<domain>`)
+- Telegram login/linking through Privy also requires the hosted CSP to allow `https://telegram.org` in `script-src` and `https://oauth.telegram.org` in `frame-src`; `apps/web` now bakes those origins into its default CSP
 - `PRIVY_VERIFICATION_KEY`
 - enable Privy email login/linking in the dashboard so `/settings` can verify account email addresses
 - enable Privy identity tokens in the dashboard under `User management > Authentication > Advanced`
-- enable Privy access + identity tokens so hosted browser requests can authenticate API calls with bearer + identity-token headers
+- hosted browser auth expects Privy to issue its normal `privy-id-token` cookie so same-origin requests can authenticate through server-side cookie verification instead of client-managed auth headers
 - `HOSTED_ONBOARDING_INVITE_TTL_HOURS`
+- `HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS` as a comma-separated or newline-separated pool of Murph Linq numbers for hosted home-line assignment
+- `HOSTED_ONBOARDING_LINQ_MAX_ACTIVE_MEMBERS_PER_PHONE_NUMBER` to cap how many active hosted members can be assigned to one pooled Linq number; defaults to `1000` when unset
 - `HOSTED_ONBOARDING_STRIPE_PRICE_ID`
 - `STRIPE_SECRET_KEY`
 - `STRIPE_WEBHOOK_SECRET`
@@ -95,7 +99,7 @@ Hosted onboarding extras:
 
 Hosted web now mounts one app-level Privy provider from `app/layout.tsx`. Hosted pages assume the full hosted Privy phone-auth config is present and fail fast at render time when it is missing instead of carrying page-local fallback UI branches.
 
-Hosted onboarding private state is now local to `apps/web`: blind lookup keys stay queryable in Postgres, while recoverable raw member ids and the raw source values needed to re-derive those lookup keys are encrypted into the owning Prisma rows instead of being mirrored into Cloudflare. Blind-index rotation follows one simple model: write one current version, read any configured keyring versions, backfill the owner tables in place, and only then remove the old version from the contact-privacy keyring. Drain lookup-bearing hosted execution outbox events before a write-mode rotation backfill so staged payload refs do not preserve stale lookup identities.
+Hosted onboarding private state is now local to `apps/web`: blind lookup keys stay queryable in Postgres, while recoverable raw member ids and the raw source values needed to re-derive those lookup keys are encrypted into the owning Prisma rows instead of being mirrored into Cloudflare. Contact privacy keeps the future rotation seam at the keyring layer: writes use the current key version and read paths can derive candidates from every configured version without widening the current schema or adding launch-time backfill tooling to the main operator workflow.
 
 Optional hosted AI usage metering:
 
@@ -129,6 +133,7 @@ Set these under `Settings -> Environment Variables` in the Vercel project that d
 - Enable Vercel OIDC for the project so the app-local hosted-execution auth adapter in `apps/web` can present bearer workload identity to Cloudflare on hosted execution dispatch/control requests.
 - `CRON_SECRET`: configure the Vercel cron bearer secret for the hosted cron routes under `/api/internal/**/cron`.
 - Configure the hosted public-origin envs and `HOSTED_WEB_CALLBACK_SIGNING_*` values exactly as documented in the `Hosted public origin and Cloudflare callback auth` section above.
+- Set `HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS` and, if you need a non-default pool cap, `HOSTED_ONBOARDING_LINQ_MAX_ACTIVE_MEMBERS_PER_PHONE_NUMBER` on the Vercel project that deploys `apps/web`. These are hosted-web onboarding settings, not Cloudflare worker vars and not GitHub Actions secrets.
 - `DEVICE_SYNC_TRUSTED_USER_SIGNING_SECRET`: generate a distinct strong random secret and use the same value in Vercel plus whichever trusted auth proxy or middleware signs the hosted user assertion headers. `apps/web` verifies that signature before trusting the lower-level assertion-backed device-sync bridge routes.
 
 If you prefer the CLI, Vercel's current docs cover `vercel env add`, `vercel env update`, and `vercel env pull` for managing these project environment variables.
@@ -156,10 +161,10 @@ The hosted control plane consumes each assertion nonce once, so replayed asserti
 
 ## Secret hygiene and rotation
 
-- Keep real hosted values in an untracked local `.env` for development or in the platform secret manager for deployed environments. The committed `.env.example` file must stay placeholder-only.
-- A raw filesystem archive of a repo clone is still an exposure when ignored local `apps/web/.env`, `.next`, `.next-dev`, or `.next-smoke` output exists, even when git has no tracked secret diff. Use the guarded `pnpm zip:src` / `scripts/package-audit-context.sh` flow for source sharing instead of archiving the clone directly; that path stages git-visible files, now includes the tracked `config/workspace-source-resolution.ts` helper, and filters blocked local residue from the bundle.
-- Treat `DATABASE_URL`, `DEVICE_SYNC_ENCRYPTION_KEY`, `GARMIN_CLIENT_SECRET`, `WHOOP_CLIENT_SECRET`, `OURA_CLIENT_SECRET`, and `OURA_WEBHOOK_VERIFICATION_TOKEN` as rotation-required if a real hosted `.env` or deploy secret was ever exposed.
-- Treat a leaked raw clone/archive that included the local hosted `.env` the same way as a direct secret exposure.
+- Keep the committed `.env.example` file placeholder-only. For local hosted-web work, use Vercel-backed process injection via `cd apps/web && pnpm dev` instead of storing real hosted secrets in repo-local `.env.local` or `.env` files. Use `pnpm dev:local-env` only for placeholder-only or manually exported shell env.
+- A raw filesystem archive of a repo clone is still an exposure when ignored local `apps/web/.env.local`, `apps/web/.env`, `.next`, `.next-dev`, or `.next-smoke` output exists, even when git has no tracked secret diff. Use the guarded `pnpm zip:src` / `scripts/package-audit-context.sh` flow for source sharing instead of archiving the clone directly; that path stages git-visible files, now includes the tracked `config/workspace-source-resolution.ts` helper, and filters blocked local residue from the bundle.
+- Treat `DATABASE_URL`, `DEVICE_SYNC_ENCRYPTION_KEY`, `GARMIN_CLIENT_SECRET`, `WHOOP_CLIENT_SECRET`, `OURA_CLIENT_SECRET`, and `OURA_WEBHOOK_VERIFICATION_TOKEN` as rotation-required if a real hosted `.env.local`, `.env`, or deploy secret was ever exposed.
+- Treat a leaked raw clone/archive that included the local hosted `.env.local` or `.env` the same way as a direct secret exposure.
 - Rotate `DEVICE_SYNC_ENCRYPTION_KEY_VERSION` whenever you rotate `DEVICE_SYNC_ENCRYPTION_KEY`, but do not assume the version field alone gives backwards-compatible reads. The current hosted control plane still uses this key for device-sync control-plane secrecy such as opaque browser connection ids and key-versioned audit metadata.
 - Canonical decryptable provider tokens no longer live in Postgres. The Cloudflare runtime store now owns token escrow under the user root key, so escrow rotation or revocation must follow the hosted-execution/Cloudflare key path rather than the removed `device_connection_secret` table.
 
@@ -172,11 +177,14 @@ pnpm --dir apps/web prisma:generate
 pnpm --dir apps/web prisma:migrate:deploy
 ```
 
-The hosted device-sync SQL hard-cut is currently greenfield/reset-only. Until a deployed hosted Postgres environment needs an in-place rollout, the repo keeps that hard-cut folded into the initial migration instead of carrying a separate forward migration for the removed raw-id/JSON columns.
+The hosted device-sync SQL hard-cut is still a pre-launch baseline change. Until a deployed hosted Postgres environment needs in-place preservation, the repo keeps that hard-cut folded into the initial migration instead of carrying a separate follow-up migration for the removed raw-id or JSON columns.
+The hosted Prisma schema is still a pre-launch baseline. `2026040600_init` already includes the current hosted-member owner tables, normalized webhook side-effect JSON columns, and `execution_outbox.dispatch_state`; until there is a live hosted Postgres database to preserve, cleanup changes to that baseline should be folded back into the init migration instead of shipped as separate cleanup follow-ups.
 
 ## Local verification
 
 - `pnpm --dir apps/web lint` runs the explicit ESLint CLI with `eslint-config-next`.
+- For local dev with hosted secrets, run `cd apps/web && pnpm dev` so Vercel injects the linked project's development env into that process without writing a local env file. Use `pnpm dev:local-env` only for placeholder-only or explicitly exported shell env.
+- `apps/web/prisma.config.ts` now reads `DATABASE_URL` from the process environment only. If you need hosted-web Prisma commands against Vercel-managed env, run them through `vercel env run -- ...` as well.
 - `pnpm --dir apps/web dev` now keeps interactive Next dev artifacts under `apps/web/.next-dev`.
 - The Next 16 Turbopack filesystem cache is disabled by default for local `next dev` in this repo; set `MURPH_NEXT_DEV_FILESYSTEM_CACHE=1` only when you explicitly want on-disk dev cache reuse.
 - `pnpm --dir apps/web build` and `pnpm --dir apps/web start` keep using `apps/web/.next`.
@@ -196,7 +204,7 @@ Hosted settings-authenticated wearable routes:
 - `POST /api/settings/device-sync/providers/:provider/connect`
 - `POST /api/settings/device-sync/connections/:connectionId/disconnect`
 
-These are the only browser-facing wearable-management routes. They power the `/settings` wearable-sources card and use the hosted onboarding Privy bearer + identity-token contract so the browser can manage calm connect, reconnect, refresh, and disconnect flows without the separate signed browser-assertion headers required by the lower-level agent bridge.
+These are the only browser-facing wearable-management routes. They power the `/settings` wearable-sources card and use the hosted device-sync signed browser-assertion flow so the browser can manage calm connect, reconnect, refresh, and disconnect flows without exposing the lower-level agent bridge directly.
 
 Assertion-authenticated browser-to-agent bridge routes:
 
@@ -263,7 +271,7 @@ The onboarding lane is intentionally thin:
 - a Linq webhook can text back a hosted join link to a new phone number or a trigger phrase like "I want to get healthy"
 - the public landing page can start the same flow with Privy SMS verification
 - the invite page binds the verified phone number to a hosted member row in Postgres, while the UI stage itself is derived from invite expiry, session match, billing entitlement, suspension facts, and post-checkout activation progress instead of persisted invite/member lifecycle enums
-- Privy handles phone OTP, the browser makes one explicit completion attempt after verifying phone and best-effort wallet provisioning, and the backend locally verifies the client's bearer access token plus identity token instead of minting a separate hosted session cookie; the wallet only becomes mandatory later if RevNet-backed billing is ever enabled again
+- Privy handles phone OTP, the browser makes one explicit completion attempt after verifying phone and best-effort wallet provisioning, and the backend locally verifies Privy's `privy-id-token` cookie directly instead of depending on client-managed auth headers or minting a separate Murph-owned session cookie; the wallet only becomes mandatory later if RevNet-backed billing is ever enabled again
 - checkout uses Stripe Checkout so Apple Pay can appear directly inside the hosted payment handoff when available in Safari, the hosted app creates a fresh Checkout Session for each start attempt, and durable Postgres state keeps only the stable Stripe customer/subscription refs needed for metering and reconciliation
 - Stripe webhook ingress now verifies and stores a minimal Stripe receipt quickly, then immediately re-fetches the live event from Stripe during reconciliation so billing activation and the durable inline `member.activated` outbox fact are not gated on a scheduler; receipt completion waits for post-commit managed-user crypto provisioning, and the hosted Stripe cron remains the recovery path for failed or deferred receipts
 - hosted billing is subscription-only, `invoice.paid` is the only positive Stripe entitlement source, `customer.subscription.*` only tracks negative or status transitions, and `checkout.session.completed` only binds stable Stripe refs without granting access by itself

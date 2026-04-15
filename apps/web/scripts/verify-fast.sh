@@ -5,6 +5,11 @@ script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd -- "$script_dir/../../.." && pwd)"
 sqlite_warning_filter_option="--require=$repo_root/config/sqlite-warning-filter.cjs"
 
+if [[ "${MURPH_WORKSPACE_ARTIFACT_LOCK_HELD:-0}" != "1" ]]; then
+  exec node "$repo_root/scripts/run-with-workspace-artifact-lock.mjs" "apps/web verify" -- \
+    bash "$script_dir/verify-fast.sh" "$@"
+fi
+
 compose_node_options_with_sqlite_warning_filter() {
   local node_options="${NODE_OPTIONS:-}"
 
@@ -21,8 +26,7 @@ compose_node_options_with_sqlite_warning_filter() {
   printf '%s\n' "$sqlite_warning_filter_option"
 }
 
-verify_step_parallel_default="$([[ -n "${CI:-}" ]] && echo 0 || echo 1)"
-verify_step_parallel="${MURPH_VERIFY_STEP_PARALLEL:-$verify_step_parallel_default}"
+verify_step_parallel="${MURPH_VERIFY_STEP_PARALLEL:-0}"
 tracked_background_pids=()
 
 register_background_pid() {
@@ -118,26 +122,29 @@ wait_for_background_jobs() {
   return 0
 }
 
+pnpm prisma:generate
+
+if [[ "$verify_step_parallel" != "1" ]]; then
+  pnpm test
+  pnpm lint
+  pnpm dev:smoke
+  next_build_node_options="$(compose_node_options_with_sqlite_warning_filter)"
+  NODE_OPTIONS="$next_build_node_options" next build
+  exit 0
+fi
+
 trap cleanup_background_jobs EXIT
 trap 'handle_termination_signal INT' INT
 trap 'handle_termination_signal TERM' TERM
 trap 'handle_termination_signal HUP' HUP
 
-pnpm prisma:generate
-pnpm typecheck:prepared
-pnpm lint
-
-if [[ "$verify_step_parallel" == "1" ]]; then
-  pnpm test &
-  test_pid="$!"
-  register_background_pid "$test_pid"
-  pnpm dev:smoke
-  next_build_node_options="$(compose_node_options_with_sqlite_warning_filter)"
-  NODE_OPTIONS="$next_build_node_options" next build
-  wait_for_background_jobs "$test_pid"
-else
-  pnpm test
-  pnpm dev:smoke
-  next_build_node_options="$(compose_node_options_with_sqlite_warning_filter)"
-  NODE_OPTIONS="$next_build_node_options" next build
-fi
+pnpm test &
+test_pid="$!"
+register_background_pid "$test_pid"
+pnpm lint &
+lint_pid="$!"
+register_background_pid "$lint_pid"
+pnpm dev:smoke
+next_build_node_options="$(compose_node_options_with_sqlite_warning_filter)"
+NODE_OPTIONS="$next_build_node_options" next build
+wait_for_background_jobs "$test_pid" "$lint_pid"

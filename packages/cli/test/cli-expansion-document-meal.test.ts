@@ -33,6 +33,24 @@ interface MealAddEnvelope {
   mealId: string
   eventId: string
   lookupId: string
+  occurredAt?: string | null
+  note?: string | null
+  source?: string | null
+  ingredients?: string[] | null
+  nutrition?: {
+    totals?: {
+      calories?: number
+      proteinGrams?: number
+      carbsGrams?: number
+      fatGrams?: number
+      fiberGrams?: number
+    }
+    provenance?: {
+      source: string
+      confidence?: string
+      sourceDetail?: string
+    }
+  } | null
 }
 
 interface ShowEnvelope {
@@ -69,6 +87,7 @@ interface ListEnvelope {
   items: Array<{
     id: string
     kind: string
+    excerpt?: string | null
     data: Record<string, unknown>
     links: Array<{
       id: string
@@ -110,6 +129,62 @@ interface ManifestEnvelope {
   }
 }
 
+interface MealTotalsEnvelope {
+  filters: {
+    from: string | null
+    to: string | null
+  }
+  mealCount: number
+  totals: {
+    calories: {
+      total: number | null
+      mealCount: number
+    }
+    proteinGrams: {
+      total: number | null
+      mealCount: number
+    }
+    carbsGrams: {
+      total: number | null
+      mealCount: number
+    }
+    fatGrams: {
+      total: number | null
+      mealCount: number
+    }
+    fiberGrams: {
+      total: number | null
+      mealCount: number
+    }
+  }
+  days: Array<{
+    date: string
+    mealCount: number
+    totals: {
+      calories: {
+        total: number | null
+        mealCount: number
+      }
+      proteinGrams: {
+        total: number | null
+        mealCount: number
+      }
+      carbsGrams: {
+        total: number | null
+        mealCount: number
+      }
+      fatGrams: {
+        total: number | null
+        mealCount: number
+      }
+      fiberGrams: {
+        total: number | null
+        mealCount: number
+      }
+    }
+  }>
+}
+
 const runSourceCli = runCli
 const runRawSourceCli = runRawCli
 const DOCUMENT_MEAL_SCHEMA_TIMEOUT_MS = 45_000
@@ -149,6 +224,9 @@ test(
     const mealListSchema = JSON.parse(
       await runRawSourceCli(['meal', 'list', '--schema', '--format', 'json']),
     ) as SchemaEnvelope
+    const mealTotalsSchema = JSON.parse(
+      await runRawSourceCli(['meal', 'totals', '--schema', '--format', 'json']),
+    ) as SchemaEnvelope
 
     assert.equal('title' in documentImportSchema.options.properties, true)
     assert.equal('occurredAt' in documentImportSchema.options.properties, true)
@@ -168,7 +246,12 @@ test(
     assert.deepEqual(documentEditSchema.options.required, ['vault'])
     assert.deepEqual(documentDeleteSchema.options.required, ['vault'])
 
+    assert.equal('input' in mealAddSchema.options.properties, true)
     assert.equal('source' in mealAddSchema.options.properties, true)
+    assert.match(
+      String((mealAddSchema.options.properties.input as { description?: unknown }).description),
+      /structured meal payload in @file\.json form or - for stdin/u,
+    )
     assert.deepEqual([...(mealAddSchema.options.required ?? [])].sort(), ['vault'])
 
     assert.equal('input' in mealEditSchema.options.properties, true)
@@ -182,9 +265,21 @@ test(
     assert.equal('to' in mealListSchema.options.properties, true)
     assert.equal('kind' in mealListSchema.options.properties, false)
     assert.deepEqual(mealListSchema.options.required, ['vault'])
+    assert.equal('from' in mealTotalsSchema.options.properties, true)
+    assert.equal('to' in mealTotalsSchema.options.properties, true)
+    assert.deepEqual(mealTotalsSchema.options.required, ['vault'])
   },
   DOCUMENT_MEAL_SCHEMA_TIMEOUT_MS,
 )
+
+test('meal add help documents the structured payload path and override rule', async () => {
+  const help = await runRawSourceCli(['meal', 'add', '--help'])
+
+  assert.match(help, /--input/u)
+  assert.match(help, /--input @meal\.json/u)
+  assert.match(help, /Explicit flags override payload fields\./u)
+  assert.match(help, /ingredients,\s+and nutrition/u)
+})
 
 test.sequential(
   'document import/show/list/manifest use stable document ids for canonical reads',
@@ -261,6 +356,8 @@ test.sequential(
         requireData(listedDocuments).items.map((item) => item.id),
         [currentDocument.documentId],
       )
+      assert.match(requireData(listedDocuments).items[0]?.excerpt ?? '', /Fasted lipid panel/u)
+      assert.equal('markdown' in (requireData(listedDocuments).items[0] ?? {}), false)
       assert.equal(requireData(listedDocuments).items[0]?.data.source, 'device')
       assert.deepEqual(requireData(listedDocuments).items[0]?.links, [])
       assert.equal(
@@ -281,7 +378,7 @@ test.sequential(
       assert.equal(requireData(manifest).lookupId, currentDocument.lookupId)
       assert.equal(requireData(manifest).kind, 'document')
       assert.match(requireData(manifest).manifestFile, /\/manifest\.json$/u)
-      assert.equal(requireData(manifest).manifest.schemaVersion, 'murph.raw-import-manifest.v2')
+      assert.equal(requireData(manifest).manifest.schemaVersion, 'murph.raw-import-manifest.v1')
       assert.equal(requireData(manifest).manifest.importKind, 'document')
       assert.equal(requireData(manifest).manifest.importId, currentDocument.documentId)
       assert.deepEqual(requireData(manifest).manifest.owner, {
@@ -425,6 +522,8 @@ test.sequential(
         'note=Green smoothie after training.',
         '--set',
         'ingredients=[\"spinach\",\"banana\",\"greek yogurt\"]',
+        '--set',
+        'nutrition={\"totals\":{\"calories\":430,\"proteinGrams\":32,\"carbsGrams\":46,\"fatGrams\":14,\"fiberGrams\":9},\"provenance\":{\"source\":\"estimated\",\"confidence\":\"medium\",\"sourceDetail\":\"Recipe estimate\"}}',
         '--vault',
         vaultRoot,
       ])
@@ -435,6 +534,58 @@ test.sequential(
         'spinach',
         'banana',
         'greek yogurt',
+      ])
+      assert.deepEqual(requireData(editedMeal).entity.data.nutrition, {
+        totals: {
+          calories: 430,
+          proteinGrams: 32,
+          carbsGrams: 46,
+          fatGrams: 14,
+          fiberGrams: 9,
+        },
+        provenance: {
+          source: 'estimated',
+          confidence: 'medium',
+          sourceDetail: 'Recipe estimate',
+        },
+      })
+
+      const mealTotals = await runSourceCli<MealTotalsEnvelope>([
+        'meal',
+        'totals',
+        '--from',
+        '2026-03-12',
+        '--to',
+        '2026-03-12',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(mealTotals.ok, true)
+      assert.equal(mealTotals.meta?.command, 'meal totals')
+      assert.deepEqual(requireData(mealTotals).filters, {
+        from: '2026-03-12',
+        to: '2026-03-12',
+      })
+      assert.equal(requireData(mealTotals).mealCount, 1)
+      assert.deepEqual(requireData(mealTotals).totals, {
+        calories: { total: 430, mealCount: 1 },
+        proteinGrams: { total: 32, mealCount: 1 },
+        carbsGrams: { total: 46, mealCount: 1 },
+        fatGrams: { total: 14, mealCount: 1 },
+        fiberGrams: { total: 9, mealCount: 1 },
+      })
+      assert.deepEqual(requireData(mealTotals).days, [
+        {
+          date: '2026-03-12',
+          mealCount: 1,
+          totals: {
+            calories: { total: 430, mealCount: 1 },
+            proteinGrams: { total: 32, mealCount: 1 },
+            carbsGrams: { total: 46, mealCount: 1 },
+            fatGrams: { total: 14, mealCount: 1 },
+            fiberGrams: { total: 9, mealCount: 1 },
+          },
+        },
       ])
 
       const deletedDocument = await runSourceCli<DeleteEnvelope>([
@@ -498,6 +649,18 @@ test.sequential(
     const vaultRoot = await createVault()
 
     try {
+      const whitespaceOnlyMeal = await runSourceCli([
+        'meal',
+        'add',
+        '--note',
+        '   ',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(whitespaceOnlyMeal.ok, false)
+      assert.equal(whitespaceOnlyMeal.error?.code, 'VALIDATION_ERROR')
+      assert.match(whitespaceOnlyMeal.error?.message ?? '', /Too small/u)
+
       const currentMeal = requireData(
         await runSourceCli<MealAddEnvelope>([
           'meal',
@@ -564,6 +727,8 @@ test.sequential(
         requireData(listedMeals).items.map((item) => item.id),
         [currentMeal.mealId],
       )
+      assert.match(requireData(listedMeals).items[0]?.excerpt ?? '', /Eggs and avocado/u)
+      assert.equal('markdown' in (requireData(listedMeals).items[0] ?? {}), false)
       assert.equal(requireData(listedMeals).items[0]?.data.source, 'device')
       assert.deepEqual(requireData(listedMeals).items[0]?.links, [])
       assert.equal(
@@ -590,6 +755,250 @@ test.sequential(
       assert.equal(requireData(manifest).manifest.provenance.lookupId, currentMeal.lookupId)
       assert.equal(requireData(manifest).manifest.provenance.note, 'Eggs and avocado.')
       assert.equal(requireData(manifest).manifest.artifacts[0]?.role, 'photo')
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true })
+    }
+  },
+  60_000,
+)
+
+test.sequential(
+  'meal add accepts structured payloads with ingredients and nutrition only',
+  async () => {
+    const vaultRoot = await createVault()
+    const payloadPath = path.join(vaultRoot, 'meal-structured.json')
+
+    try {
+      await writeFile(
+        payloadPath,
+        JSON.stringify({
+          occurredAt: '2026-03-14T08:30:00Z',
+          source: 'manual',
+          ingredients: ['rolled oats', 'blueberries', 'chia seeds'],
+          nutrition: {
+            totals: {
+              calories: 390,
+              proteinGrams: 15,
+              carbsGrams: 56,
+              fatGrams: 11,
+              fiberGrams: 12,
+            },
+            provenance: {
+              source: 'estimated',
+              confidence: 'medium',
+              sourceDetail: 'Recipe estimate',
+            },
+          },
+        }),
+        'utf8',
+      )
+
+      const createdMeal = await runSourceCli<MealAddEnvelope>([
+        'meal',
+        'add',
+        '--input',
+        `@${payloadPath}`,
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(createdMeal.ok, true)
+      assert.equal(createdMeal.meta?.command, 'meal add')
+      assert.equal(requireData(createdMeal).occurredAt, '2026-03-14T08:30:00.000Z')
+      assert.equal(requireData(createdMeal).note, null)
+      assert.equal(requireData(createdMeal).source, 'manual')
+      assert.deepEqual(requireData(createdMeal).ingredients, [
+        'rolled oats',
+        'blueberries',
+        'chia seeds',
+      ])
+      assert.deepEqual(requireData(createdMeal).nutrition, {
+        totals: {
+          calories: 390,
+          proteinGrams: 15,
+          carbsGrams: 56,
+          fatGrams: 11,
+          fiberGrams: 12,
+        },
+        provenance: {
+          source: 'estimated',
+          confidence: 'medium',
+          sourceDetail: 'Recipe estimate',
+        },
+      })
+
+      const shownMeal = await runSourceCli<ShowEnvelope>([
+        'meal',
+        'show',
+        requireData(createdMeal).mealId,
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(shownMeal.ok, true)
+      assert.equal(
+        requireData(shownMeal).entity.occurredAt,
+        '2026-03-14T08:30:00.000Z',
+      )
+      assert.equal(requireData(shownMeal).entity.data.note, undefined)
+      assert.equal(requireData(shownMeal).entity.data.source, 'manual')
+      assert.deepEqual(requireData(shownMeal).entity.data.ingredients, [
+        'rolled oats',
+        'blueberries',
+        'chia seeds',
+      ])
+      assert.deepEqual(requireData(shownMeal).entity.data.nutrition, {
+        totals: {
+          calories: 390,
+          proteinGrams: 15,
+          carbsGrams: 56,
+          fatGrams: 11,
+          fiberGrams: 12,
+        },
+        provenance: {
+          source: 'estimated',
+          confidence: 'medium',
+          sourceDetail: 'Recipe estimate',
+        },
+      })
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true })
+    }
+  },
+  60_000,
+)
+
+test.sequential(
+  'meal add lets explicit flags override structured payload fields',
+  async () => {
+    const vaultRoot = await createVault()
+
+    try {
+      const overriddenMeal = await runSourceCli<MealAddEnvelope>(
+        [
+          'meal',
+          'add',
+          '--input',
+          '-',
+          '--note',
+          'Override note from flags.',
+          '--occurred-at',
+          '2026-03-15T13:45:00Z',
+          '--source',
+          'derived',
+          '--vault',
+          vaultRoot,
+        ],
+        {
+          stdin: JSON.stringify({
+            note: 'Payload note that should be replaced.',
+            occurredAt: '2026-03-15T08:00:00Z',
+            source: 'import',
+            ingredients: ['salmon', 'rice', 'broccoli'],
+            nutrition: {
+              totals: {
+                calories: 610,
+                proteinGrams: 42,
+                carbsGrams: 51,
+                fatGrams: 22,
+                fiberGrams: 8,
+              },
+              provenance: {
+                source: 'label',
+                confidence: 'high',
+                sourceDetail: 'Packaged meal label',
+              },
+            },
+          }),
+        },
+      )
+
+      assert.equal(overriddenMeal.ok, true)
+      assert.equal(requireData(overriddenMeal).occurredAt, '2026-03-15T13:45:00.000Z')
+      assert.equal(requireData(overriddenMeal).note, 'Override note from flags.')
+      assert.equal(requireData(overriddenMeal).source, 'derived')
+      assert.deepEqual(requireData(overriddenMeal).ingredients, [
+        'salmon',
+        'rice',
+        'broccoli',
+      ])
+      assert.deepEqual(requireData(overriddenMeal).nutrition, {
+        totals: {
+          calories: 610,
+          proteinGrams: 42,
+          carbsGrams: 51,
+          fatGrams: 22,
+          fiberGrams: 8,
+        },
+        provenance: {
+          source: 'label',
+          confidence: 'high',
+          sourceDetail: 'Packaged meal label',
+        },
+      })
+
+      const shownMeal = await runSourceCli<ShowEnvelope>([
+        'meal',
+        'show',
+        requireData(overriddenMeal).mealId,
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(shownMeal.ok, true)
+      assert.equal(
+        requireData(shownMeal).entity.occurredAt,
+        '2026-03-15T13:45:00.000Z',
+      )
+      assert.equal(requireData(shownMeal).entity.data.note, 'Override note from flags.')
+      assert.equal(requireData(shownMeal).entity.data.source, 'derived')
+      assert.deepEqual(requireData(shownMeal).entity.data.ingredients, [
+        'salmon',
+        'rice',
+        'broccoli',
+      ])
+      assert.deepEqual(requireData(shownMeal).entity.data.nutrition, {
+        totals: {
+          calories: 610,
+          proteinGrams: 42,
+          carbsGrams: 51,
+          fatGrams: 22,
+          fiberGrams: 8,
+        },
+        provenance: {
+          source: 'label',
+          confidence: 'high',
+          sourceDetail: 'Packaged meal label',
+        },
+      })
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true })
+    }
+  },
+  60_000,
+)
+
+test.sequential(
+  'meal add rejects an empty structured payload',
+  async () => {
+    const vaultRoot = await createVault()
+    const payloadPath = path.join(vaultRoot, 'meal-empty.json')
+
+    try {
+      await writeFile(payloadPath, JSON.stringify({}), 'utf8')
+
+      const result = await runSourceCli([
+        'meal',
+        'add',
+        '--input',
+        `@${payloadPath}`,
+        '--vault',
+        vaultRoot,
+      ])
+
+      assert.equal(result.ok, false)
+      assert.equal(result.error?.code, 'invalid_option')
+      assert.match(
+        result.error?.message ?? '',
+        /Meal capture requires --photo, --audio, --note, or a structured --input payload with ingredients and\/or nutrition\./u,
+      )
     } finally {
       await rm(vaultRoot, { recursive: true, force: true })
     }

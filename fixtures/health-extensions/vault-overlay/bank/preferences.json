@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "updatedAt": "2026-03-12T13:10:00Z",
+  "workoutUnitPreferences": {
+    "distance": "km",
+    "weight": "kg"
+  }
+}

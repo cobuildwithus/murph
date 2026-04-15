@@ -49,6 +49,8 @@ export function formatHostedWorkerDeploymentVersionSpecs(
 export function resolveHostedWorkerGradualDeploymentSupport(
   config: Record<string, unknown>,
 ): HostedWorkerGradualDeploymentSupport {
+  // The workflow defaults to direct deploys. This helper only answers whether the
+  // lower-level gradual recovery path is safe for the rendered Durable Object set.
   const migrationTags = readHostedWorkerMigrationTags(config);
   const unsupportedMigrationTags = migrationTags.filter(
     (tag) => !HOSTED_WORKER_GRADUAL_DEPLOYMENT_SAFE_MIGRATION_TAGS.has(tag),
@@ -183,7 +185,11 @@ function readHostedWorkerMigrationTags(config: Record<string, unknown>): string[
       return [];
     }
 
-    const tag = "tag" in entry ? normalizeOptionalString(String(entry.tag)) : null;
+    const tag = readHostedWorkerMigrationTag(entry);
     return tag ? [tag] : [];
   });
+}
+
+function readHostedWorkerMigrationTag(entry: Record<string, unknown>): string | null {
+  return typeof entry.tag === "string" ? normalizeOptionalString(entry.tag) : null;
 }

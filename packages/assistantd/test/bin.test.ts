@@ -41,6 +41,11 @@ vi.mock('../src/http.js', () => ({
 const ASSISTANTD_DISABLE_CLIENT_ENV = 'MURPH_ASSISTANTD_DISABLE_CLIENT'
 const ORIGINAL_DISABLE_CLIENT = process.env[ASSISTANTD_DISABLE_CLIENT_ENV]
 
+async function loadAssistantdBin(modulePath: string): Promise<void> {
+  await import(modulePath)
+  await waitForImmediate()
+}
+
 beforeEach(() => {
   vi.clearAllMocks()
   vi.resetModules()
@@ -67,8 +72,7 @@ test('assistantd bin loads env, starts the server, and announces the bound addre
     return process
   })
 
-  await import('../src/bin.ts?success')
-  await waitForImmediate()
+  await loadAssistantdBin('../src/bin.ts?success')
 
   assert.equal(process.env[ASSISTANTD_DISABLE_CLIENT_ENV], '1')
   assert.deepEqual(mocks.loadAssistantdEnvFiles.mock.calls, [[]])
@@ -123,8 +127,7 @@ test('assistantd bin prints the startup error and exits non-zero on failure', as
     .spyOn(process, 'exit')
     .mockImplementation((() => undefined) as never)
 
-  await import('../src/bin.ts?failure')
-  await waitForImmediate()
+  await loadAssistantdBin('../src/bin.ts?failure')
 
   assert.match(String(errorSpy.mock.calls[0]?.[0]), /startup failed/u)
   assert.deepEqual(exitSpy.mock.calls, [[1]])
@@ -140,8 +143,7 @@ test('assistantd bin stringifies non-Error startup failures before exiting', asy
     .spyOn(process, 'exit')
     .mockImplementation((() => undefined) as never)
 
-  await import('../src/bin.ts?failure-string')
-  await waitForImmediate()
+  await loadAssistantdBin('../src/bin.ts?failure-string')
 
   assert.equal(errorSpy.mock.calls[0]?.[0], 'plain failure')
   assert.deepEqual(exitSpy.mock.calls, [[1]])

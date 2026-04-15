@@ -81,16 +81,26 @@ describe("PrismaDeviceSyncControlPlaneStore oauth state ingress", () => {
           callback: (transaction: {
             deviceOauthSession: {
               findUnique: ({ where }: { where: { state: string } }) => Promise<MutableOAuthSession | null>;
-              delete: ({ where }: { where: { state: string } }) => Promise<void>;
+              deleteMany: ({ where }: { where: { state: string; provider?: string } }) => Promise<{ count: number }>;
             };
           }) => Promise<TResult>,
         ) =>
           callback({
             deviceOauthSession: {
               findUnique: async ({ where }) => cloneOAuthSession(sessions.get(where.state) ?? null),
-              delete: async ({ where }) => {
+              deleteMany: async ({ where }) => {
+                const record = sessions.get(where.state);
+
+                if (!record) {
+                  return { count: 0 };
+                }
+
+                if (where.provider && record.provider !== where.provider) {
+                  return { count: 0 };
+                }
+
                 sessions.delete(where.state);
-                return undefined;
+                return { count: 1 };
               },
             },
           }),
@@ -98,19 +108,22 @@ describe("PrismaDeviceSyncControlPlaneStore oauth state ingress", () => {
     });
 
     await expect(store.consumeOAuthState("state-123", "2026-03-25T00:30:00.000Z")).resolves.toEqual({
-      state: "state-123",
-      provider: "oura",
-      returnTo: "https://example.test/return",
-      metadata: {
-        ownerId: "user-123",
+      status: "consumed",
+      record: {
+        state: "state-123",
+        provider: "oura",
+        returnTo: "https://example.test/return",
+        metadata: {
+          ownerId: "user-123",
+        },
+        createdAt: "2026-03-25T00:00:00.000Z",
+        expiresAt: "2026-03-25T01:00:00.000Z",
       },
-      createdAt: "2026-03-25T00:00:00.000Z",
-      expiresAt: "2026-03-25T01:00:00.000Z",
     });
     expect(sessions.has("state-123")).toBe(false);
   });
 
-  it("deletes an expired oauth state and returns null", async () => {
+  it("deletes an expired oauth state and returns missing", async () => {
     const sessions = new Map<string, MutableOAuthSession>([
       [
         "state-expired",
@@ -131,24 +144,96 @@ describe("PrismaDeviceSyncControlPlaneStore oauth state ingress", () => {
           callback: (transaction: {
             deviceOauthSession: {
               findUnique: ({ where }: { where: { state: string } }) => Promise<MutableOAuthSession | null>;
-              delete: ({ where }: { where: { state: string } }) => Promise<void>;
+              deleteMany: ({ where }: { where: { state: string; provider?: string } }) => Promise<{ count: number }>;
             };
           }) => Promise<TResult>,
         ) =>
           callback({
             deviceOauthSession: {
               findUnique: async ({ where }) => cloneOAuthSession(sessions.get(where.state) ?? null),
-              delete: async ({ where }) => {
+              deleteMany: async ({ where }) => {
+                const record = sessions.get(where.state);
+
+                if (!record) {
+                  return { count: 0 };
+                }
+
+                if (where.provider && record.provider !== where.provider) {
+                  return { count: 0 };
+                }
+
                 sessions.delete(where.state);
-                return undefined;
+                return { count: 1 };
               },
             },
           }),
       } as never,
     });
 
-    await expect(store.consumeOAuthState("state-expired", "2026-03-25T00:30:00.000Z")).resolves.toBeNull();
+    await expect(store.consumeOAuthState("state-expired", "2026-03-25T00:30:00.000Z")).resolves.toEqual({
+      status: "missing",
+    });
     expect(sessions.has("state-expired")).toBe(false);
+  });
+
+  it("keeps an unexpired oauth state when the provider does not match", async () => {
+    const sessions = new Map<string, MutableOAuthSession>([
+      [
+        "state-provider-mismatch",
+        {
+          state: "state-provider-mismatch",
+          userId: "user-123",
+          provider: "oura",
+          returnTo: "https://example.test/return",
+          createdAt: new Date("2026-03-25T00:00:00.000Z"),
+          expiresAt: new Date("2026-03-25T01:00:00.000Z"),
+        },
+      ],
+    ]);
+
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      prisma: {
+        $transaction: async <TResult>(
+          callback: (transaction: {
+            deviceOauthSession: {
+              findUnique: ({ where }: { where: { state: string } }) => Promise<MutableOAuthSession | null>;
+              deleteMany: ({ where }: { where: { state: string; provider?: string } }) => Promise<{ count: number }>;
+            };
+          }) => Promise<TResult>,
+        ) =>
+          callback({
+            deviceOauthSession: {
+              findUnique: async ({ where }) => cloneOAuthSession(sessions.get(where.state) ?? null),
+              deleteMany: async ({ where }) => {
+                const record = sessions.get(where.state);
+
+                if (!record) {
+                  return { count: 0 };
+                }
+
+                if (where.provider && record.provider !== where.provider) {
+                  return { count: 0 };
+                }
+
+                sessions.delete(where.state);
+                return { count: 1 };
+              },
+            },
+          }),
+      } as never,
+    });
+
+    await expect(
+      store.consumeOAuthState(
+        "state-provider-mismatch",
+        "2026-03-25T00:30:00.000Z",
+        "whoop",
+      ),
+    ).resolves.toEqual({
+      status: "provider_mismatch",
+      provider: "oura",
+    });
+    expect(sessions.has("state-provider-mismatch")).toBe(true);
   });
 });
 

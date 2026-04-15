@@ -1,17 +1,13 @@
-"use client";
-
-import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
-import { Badge } from "@/src/components/ui/badge";
-import { Button } from "@/src/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/src/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
   DialogDescription,
   DialogHeader,
   DialogTitle,
-} from "@/src/components/ui/dialog";
-import { Skeleton } from "@/src/components/ui/skeleton";
+} from "@/components/ui/dialog";
 import {
   formatAbsoluteTime,
   formatRelativeTime,
@@ -22,7 +18,6 @@ import { badgeClasses, sourceCardKey, sourceKey } from "./hosted-device-sync-set
 
 export function HostedDeviceSyncSettingsContent(props: {
   disconnectTarget: HostedDeviceSyncSettingsSource | null;
-  isLoading: boolean;
   isRefreshing: boolean;
   pendingActionKey: string | null;
   sources: HostedDeviceSyncSettingsSource[];
@@ -35,53 +30,23 @@ export function HostedDeviceSyncSettingsContent(props: {
       <div className="space-y-2">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="space-y-1">
-            <h2 className="text-2xl font-semibold tracking-tight text-stone-900">Wearable sources</h2>
+            <h2 className="text-lg font-semibold tracking-tight text-stone-900">Wearables</h2>
             <p className="text-sm leading-relaxed text-stone-500">
-              Connect Garmin, Oura, or WHOOP here. Murph keeps this lightweight: connect once, reconnect only when
-              access expires, and disconnect any time.
+              Connect your wearables. Disconnect or reconnect any time.
             </p>
           </div>
-          <Button type="button" onClick={() => void props.onRefresh()} disabled={props.isRefreshing || props.isLoading} variant="outline" size="lg">
+          <Button type="button" onClick={() => void props.onRefresh()} disabled={props.isRefreshing} variant="outline" size="md">
             {props.isRefreshing ? "Refreshing..." : "Refresh status"}
           </Button>
         </div>
       </div>
 
-      <Alert className="border-stone-200 bg-stone-50">
-        <AlertTitle>Quiet by default</AlertTitle>
-        <AlertDescription>
-          Murph will usually tell you only whether a source is connected, whether it has synced recently, and whether a
-          quick reconnect would help. Past history stays in place if you disconnect.
-        </AlertDescription>
-      </Alert>
-
-      {props.isLoading ? (
-        <div className="space-y-4">
-          {Array.from({ length: 3 }).map((_, index) => (
-            <Card key={`device-sync-skeleton-${index}`} className="shadow-sm">
-              <CardHeader className="space-y-3">
-                <Skeleton className="h-5 w-40" />
-                <Skeleton className="h-4 w-64" />
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <Skeleton className="h-4 w-full" />
-                <Skeleton className="h-4 w-5/6" />
-                <div className="grid gap-3 md:grid-cols-3">
-                  <Skeleton className="h-12 w-full" />
-                  <Skeleton className="h-12 w-full" />
-                  <Skeleton className="h-12 w-full" />
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      ) : props.sources.length === 0 ? (
+      {props.sources.length === 0 ? (
         <Card className="shadow-sm">
           <CardHeader>
-            <CardTitle className="text-lg text-stone-900">No wearable providers are enabled here yet</CardTitle>
+            <CardTitle className="text-lg text-stone-900">No wearables available yet</CardTitle>
             <CardDescription className="text-sm leading-relaxed text-stone-500">
-              This hosted environment is not currently configured for Garmin, Oura, or WHOOP. When a provider is
-              enabled, it will show up here as a quiet source you can connect when you want.
+              Wearable integrations will appear here once they&apos;re enabled for your account.
             </CardDescription>
           </CardHeader>
         </Card>
@@ -100,6 +65,32 @@ export function HostedDeviceSyncSettingsContent(props: {
         </div>
       )}
     </>
+  );
+}
+
+export function HostedDeviceSyncSettingsStatusCard(props: {
+  actionLabel?: string | null;
+  description: string;
+  disabled?: boolean;
+  title: string;
+  onAction?: (() => Promise<void>) | undefined;
+}) {
+  return (
+    <Card className="shadow-sm">
+      <CardHeader>
+        <CardTitle className="text-lg text-stone-900">{props.title}</CardTitle>
+        <CardDescription className="text-sm leading-relaxed text-stone-500">
+          {props.description}
+        </CardDescription>
+      </CardHeader>
+      {props.actionLabel && props.onAction ? (
+        <CardContent>
+          <Button type="button" onClick={() => void props.onAction?.()} disabled={props.disabled} variant="outline" size="md">
+            {props.disabled ? "Refreshing..." : props.actionLabel}
+          </Button>
+        </CardContent>
+      ) : null}
+    </Card>
   );
 }
 
@@ -150,7 +141,7 @@ function HostedDeviceSyncSourceCard(props: {
               type="button"
               onClick={() => void props.onConnect(props.source)}
               disabled={connectBusy || disconnectBusy}
-              size="lg"
+              size="md"
             >
               {connectBusy ? `${props.source.primaryAction.label}...` : props.source.primaryAction.label}
             </Button>
@@ -161,7 +152,7 @@ function HostedDeviceSyncSourceCard(props: {
               onClick={() => props.onDisconnectTargetChange(props.source)}
               disabled={connectBusy || disconnectBusy}
               variant="outline"
-              size="lg"
+              size="md"
             >
               {disconnectBusy ? "Disconnecting..." : props.source.secondaryAction.label}
             </Button>
@@ -184,8 +175,7 @@ export function HostedDeviceSyncDisconnectDialog(props: {
         <DialogHeader>
           <DialogTitle>Disconnect {props.disconnectTarget?.providerLabel ?? "source"}?</DialogTitle>
           <DialogDescription>
-            Murph will stop pulling new data from this source. Your earlier history stays in place, and you can
-            reconnect later if you want fresh updates again.
+            Murph will stop syncing new data. Your history is kept, and you can reconnect any time.
           </DialogDescription>
         </DialogHeader>
         <div className="flex flex-wrap justify-end gap-3">
@@ -193,7 +183,7 @@ export function HostedDeviceSyncDisconnectDialog(props: {
             Keep it connected
           </Button>
           <Button type="button" onClick={() => void props.onConfirm()} disabled={props.disconnectPending}>
-            {props.disconnectPending ? "Disconnecting..." : "Disconnect source"}
+            {props.disconnectPending ? "Disconnecting..." : "Disconnect"}
           </Button>
         </div>
       </DialogContent>

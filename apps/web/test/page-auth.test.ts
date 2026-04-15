@@ -1,0 +1,144 @@
+import { HostedBillingStatus, type HostedMember } from "@prisma/client";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const mocks = vi.hoisted(() => ({
+  getHostedPrivySession: vi.fn(),
+  getPrisma: vi.fn(),
+  lookupHostedMemberForPrivyIdentity: vi.fn(),
+  prisma: { __tag: "page-auth-prisma" },
+}));
+
+vi.mock("server-only", () => ({}));
+
+vi.mock("@/src/lib/prisma", () => ({
+  getPrisma: mocks.getPrisma,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/hosted-session", () => ({
+  getHostedPrivySession: mocks.getHostedPrivySession,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/member-identity-service", () => ({
+  lookupHostedMemberForPrivyIdentity: mocks.lookupHostedMemberForPrivyIdentity,
+}));
+
+describe("hosted page auth", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.clearAllMocks();
+    mocks.getHostedPrivySession.mockResolvedValue(null);
+    mocks.getPrisma.mockReturnValue(mocks.prisma);
+    mocks.lookupHostedMemberForPrivyIdentity.mockResolvedValue(null);
+  });
+
+  it("returns an anonymous snapshot when no hosted Privy session exists", async () => {
+    const { getHostedPageAuthSnapshot } = await import("@/src/lib/hosted-onboarding/page-auth");
+
+    await expect(getHostedPageAuthSnapshot()).resolves.toEqual({
+      authenticated: false,
+      authenticatedMember: null,
+      linkedAccounts: [],
+      memberLookup: null,
+      session: null,
+    });
+    expect(mocks.getPrisma).not.toHaveBeenCalled();
+    expect(mocks.lookupHostedMemberForPrivyIdentity).not.toHaveBeenCalled();
+  });
+
+  it("degrades invalid hosted Privy cookies to an anonymous snapshot", async () => {
+    const { hostedOnboardingError } = await import("@/src/lib/hosted-onboarding/errors");
+    mocks.getHostedPrivySession.mockRejectedValue(
+      hostedOnboardingError({
+        code: "PRIVY_AUTH_FAILED",
+        message: "We could not verify your Privy session. Request a fresh code and try again.",
+        httpStatus: 401,
+      }),
+    );
+    const { getHostedPageAuthSnapshot } = await import("@/src/lib/hosted-onboarding/page-auth");
+
+    await expect(getHostedPageAuthSnapshot()).resolves.toEqual({
+      authenticated: false,
+      authenticatedMember: null,
+      linkedAccounts: [],
+      memberLookup: null,
+      session: null,
+    });
+    expect(mocks.getPrisma).not.toHaveBeenCalled();
+    expect(mocks.lookupHostedMemberForPrivyIdentity).not.toHaveBeenCalled();
+  });
+
+  it("rethrows unexpected session failures", async () => {
+    const error = new Error("privy verifier misconfigured");
+    mocks.getHostedPrivySession.mockRejectedValue(error);
+    const { getHostedPageAuthSnapshot } = await import("@/src/lib/hosted-onboarding/page-auth");
+
+    await expect(getHostedPageAuthSnapshot()).rejects.toBe(error);
+    expect(mocks.getPrisma).not.toHaveBeenCalled();
+    expect(mocks.lookupHostedMemberForPrivyIdentity).not.toHaveBeenCalled();
+  });
+
+  it("returns the member-backed snapshot when the hosted Privy session verifies", async () => {
+    const session = {
+      identity: {
+        phone: {
+          number: "+14155552671",
+          verifiedAt: 1741194420,
+        },
+        userId: "did:privy:user_123",
+        wallet: null,
+      },
+      linkedAccounts: [
+        {
+          latest_verified_at: 1741194420,
+          phone_number: "+1 415 555 2671",
+          type: "phone",
+        },
+      ],
+      verifiedPrivyUser: {
+        id: "did:privy:user_123",
+      },
+    };
+    const member = createHostedMember();
+    const memberLookup = {
+      core: member,
+      identity: {
+        memberId: member.id,
+        phoneNumber: "+14155552671",
+        phoneNumberVerifiedAt: new Date("2025-03-05T18:27:00.000Z"),
+        privyUserId: "did:privy:user_123",
+        walletAddress: null,
+        walletChainType: null,
+        walletCreatedAt: null,
+        walletProvider: null,
+      },
+      matchedBy: ["privyUserId"],
+    };
+    mocks.getHostedPrivySession.mockResolvedValue(session);
+    mocks.lookupHostedMemberForPrivyIdentity.mockResolvedValue(memberLookup);
+    const { getHostedPageAuthSnapshot } = await import("@/src/lib/hosted-onboarding/page-auth");
+
+    await expect(getHostedPageAuthSnapshot()).resolves.toEqual({
+      authenticated: true,
+      authenticatedMember: member,
+      linkedAccounts: session.linkedAccounts,
+      memberLookup,
+      session,
+    });
+    expect(mocks.getPrisma).toHaveBeenCalledTimes(1);
+    expect(mocks.lookupHostedMemberForPrivyIdentity).toHaveBeenCalledWith({
+      identity: session.identity,
+      prisma: mocks.prisma,
+    });
+  });
+});
+
+function createHostedMember(overrides: Partial<HostedMember> = {}): HostedMember {
+  return {
+    billingStatus: HostedBillingStatus.active,
+    createdAt: new Date("2025-03-27T08:00:00.000Z"),
+    id: "member_123",
+    suspendedAt: null,
+    updatedAt: new Date("2025-03-27T08:00:00.000Z"),
+    ...overrides,
+  };
+}

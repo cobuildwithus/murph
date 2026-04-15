@@ -7,6 +7,8 @@ import type {
   HostedPrivyCompletionPayload,
 } from "@/src/lib/hosted-onboarding/types";
 
+import { JOIN_INVITE_ACTIVATION_PENDING_COPY } from "./join-invite-copy";
+
 export type JoinInviteShareImportState = "idle" | "processing" | "completed";
 
 export function resolveInviteStatusAfterPrivyCompletion(
@@ -15,6 +17,7 @@ export function resolveInviteStatusAfterPrivyCompletion(
 ): HostedInviteStatusPayload {
   return {
     ...status,
+    messagingSetupRequired: payload.messagingSetupRequired,
     session: {
       ...status.session,
       authenticated: true,
@@ -24,20 +27,32 @@ export function resolveInviteStatusAfterPrivyCompletion(
   };
 }
 
+export function resolveJoinInviteStatusFromRefresh(input: {
+  nextStatus: HostedInviteStatusPayload;
+  status: HostedInviteStatusPayload;
+}): HostedInviteStatusPayload {
+  if (
+    input.status.stage === "verify"
+    || !input.status.session.authenticated
+    || !input.status.session.matchesInvite
+    || input.nextStatus.stage !== "verify"
+    || !input.nextStatus.session.authenticated
+    || !input.nextStatus.session.matchesInvite
+  ) {
+    return input.nextStatus;
+  }
+
+  return {
+    ...input.nextStatus,
+    stage: input.status.stage,
+  };
+}
+
 export function shouldAwaitHostedInviteSessionResolution(input: {
-  authenticated: boolean;
-  ready: boolean;
+  hasCompletedInitialRefresh: boolean;
   status: HostedInviteStatusPayload;
 }): boolean {
-  if (input.status.stage !== "verify" || input.status.session.authenticated) {
-    return false;
-  }
-
-  if (!input.ready) {
-    return true;
-  }
-
-  return input.authenticated;
+  return input.status.stage === "verify" && !input.hasCompletedInitialRefresh;
 }
 
 export function resolveJoinInviteShareStateFromAccept(
@@ -86,8 +101,6 @@ export function resolveJoinInviteTitle(status: HostedInviteStatusPayload): strin
       return "Finish joining Murph";
     case "checkout":
       return "One last step";
-    case "activating":
-      return "We’re setting up your account";
     case "blocked":
       return "This account is blocked";
     case "active":
@@ -100,19 +113,21 @@ export function resolveJoinInviteTitle(status: HostedInviteStatusPayload): strin
 export function resolveJoinInviteSubtitle(status: HostedInviteStatusPayload): string {
   switch (status.stage) {
     case "invalid":
-      return "Text the Murph number again and we’ll send you a fresh hosted link.";
+      return "Text the Murph number again and we’ll send you a fresh link.";
     case "expired":
       return "Text the Murph number again and we’ll send you a fresh link.";
     case "verify":
       return "Verify the number that messaged Murph to finish joining.";
     case "checkout":
-      return "Your phone is confirmed. Finish checkout to start using Murph.";
-    case "activating":
-      return "Your payment went through. Murph is finishing hosted activation now.";
+      return status.messagingSetupRequired
+        ? "Before checkout, add a phone number or connect Telegram so Murph can message you after payment."
+        : "Your account is ready for checkout. Finish payment to start using Murph.";
     case "blocked":
-      return "This hosted account cannot continue from the invite right now. Contact support to restore access.";
+      return "This account can’t continue from this invite right now. Contact support and we’ll help restore access.";
     case "active":
-      return "Congrats, you’re all set. Here’s what to expect next.";
+      return status.activationPending
+        ? JOIN_INVITE_ACTIVATION_PENDING_COPY.subtitle
+        : "Congrats, you’re all set. Here’s what to expect next.";
     default:
       return "Murph signup";
   }

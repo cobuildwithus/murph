@@ -55,6 +55,21 @@
       "@murphai/runtime-state/node": [
         "packages/runtime-state/src/node/index.ts"
       ],
+      "@murphai/runtime-state/node/assistant-usage": [
+        "packages/runtime-state/src/node/assistant-usage.ts"
+      ],
+      "@murphai/runtime-state/node/loopback-control-plane-auth": [
+        "packages/runtime-state/src/node/loopback-control-plane-auth.ts"
+      ],
+      "@murphai/runtime-state/node/runtime-paths": [
+        "packages/runtime-state/src/node/runtime-paths.ts"
+      ],
+      "@murphai/runtime-state/node/sqlite-warning-filter": [
+        "packages/runtime-state/src/node/sqlite-warning-filter.ts"
+      ],
+      "@murphai/runtime-state/node/ulid": [
+        "packages/runtime-state/src/node/ulid.ts"
+      ],
       "@murphai/runtime-state/*": [
         "packages/runtime-state/src/*"
       ],
@@ -78,9 +93,6 @@
       ],
       "@murphai/inboxd": [
         "packages/inboxd/src/index.ts"
-      ],
-      "@murphai/inboxd-imessage": [
-        "packages/inboxd-imessage/src/index.ts"
       ],
       "@murphai/inboxd/connectors/email/normalize-parsed": [
         "packages/inboxd/src/connectors/email/normalize-parsed.ts"
@@ -139,14 +151,26 @@
       "@murphai/assistant-engine": [
         "packages/assistant-engine/src/index.ts"
       ],
+      "@murphai/assistant-engine/assistant-cli-access": [
+        "packages/assistant-engine/src/assistant-cli-access.ts"
+      ],
+      "@murphai/assistant-engine/assistant-cli-tools": [
+        "packages/assistant-engine/src/assistant-cli-tools.ts"
+      ],
       "@murphai/assistant-engine/assistant/*": [
         "packages/assistant-engine/src/assistant/*.ts"
       ],
       "@murphai/assistant-engine/*": [
         "packages/assistant-engine/src/*"
       ],
+      "@murphai/inbox-services/testing": [
+        "packages/inbox-services/src/testing.ts"
+      ],
       "@murphai/vault-usecases": [
         "packages/vault-usecases/src/index.ts"
+      ],
+      "@murphai/vault-usecases/testing": [
+        "packages/vault-usecases/src/testing.ts"
       ],
       "@murphai/vault-usecases/*": [
         "packages/vault-usecases/src/*"

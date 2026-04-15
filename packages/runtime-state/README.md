@@ -5,8 +5,10 @@ next to a vault without turning that state into canonical product truth.
 
 ## Scope
 
-- root `@murphai/runtime-state` exports the worker-safe hosted email/env/loopback/id helpers plus pure hosted bundle identity types/equality used by shared contracts
+- root `@murphai/runtime-state` exports the worker-safe hosted email/env/loopback helpers plus pure hosted bundle identity types/equality used by shared contracts
+- `@murphai/runtime-state/assistant-ids` exports shared assistant opaque-id normalization/validation for contract schemas and assistant runtime file-path guards
 - `@murphai/runtime-state/node` exports hosted bundle codec/materialization helpers plus the local filesystem, process, assistant runtime state, `.runtime` path, JSON-state versioning, and SQLite migration helpers used by Node-backed callers
+- narrow `@murphai/runtime-state/node/*` subpaths expose hosted-safe Node helpers such as assistant-usage parsing, hosted bundle codecs, loopback bearer auth, runtime path constants, SQLite warning filters, and ULID helpers without forcing callers through the broad `./node` barrel
 - runtime-state aggregates small per-subsystem descriptor manifests for operational path classification and hosted-snapshot portability instead of relying on one central hard-coded allowlist, including assistant, inbox, device-sync, parser, query, gateway-local, and write-operation owners
 - keep inbox, query, CLI, assistant-runtime, and other local runtime packages aligned on one explicit Node-only owner surface instead of letting each package invent its own local-state layout
 
@@ -29,6 +31,7 @@ That assistant runtime root is intentionally not a product-state incubator. If a
 - every durable local JSON store should carry an explicit schema/schemaVersion envelope
 - every durable local SQLite store should carry an explicit `PRAGMA user_version` migration seam
 - hosted execution snapshots canonical `vault/**`, only the runtime-state paths explicitly marked `portable`, and the minimal operator-home hosted config needed for bootstrap; they do **not** snapshot `machine_local` runtime state such as device-sync control/token stores, inbox daemon config/state, parser toolchain overrides, rebuildable projections, caches, or tmp state
+- hosted execution also treats incur CLI config autodiscovery as local-only convenience: `~/.config/murph/config.json` is not part of the hosted bundle contract, and hosted assistant/provider turns explicitly opt out of reading it
 - operational portability lives in subsystem descriptor manifests aggregated by `@murphai/runtime-state`; unknown operational paths still fail closed to `machine_local`
 - large raw artifacts under `vault/raw/**` may be externalized into separate encrypted content-addressed objects and restored back onto disk during hosted execution
 - hosted per-user env overrides live in a separate encrypted object and are not folded into the workspace snapshot

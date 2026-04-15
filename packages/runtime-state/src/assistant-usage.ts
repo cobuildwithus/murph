@@ -46,11 +46,7 @@ export interface AssistantUsageRecord {
   occurredAt: string;
   outputTokens: number | null;
   provider: string;
-  providerMetadataJson: unknown | null;
   providerName: string | null;
-  providerRequestId: string | null;
-  providerSessionId: string | null;
-  rawUsageJson: unknown | null;
   reasoningTokens: number | null;
   requestedModel: string | null;
   routeId: string | null;
@@ -156,11 +152,7 @@ export function parseAssistantUsageRecord(value: unknown): AssistantUsageRecord 
     occurredAt: normalizeRequiredString(record.occurredAt, "occurredAt"),
     outputTokens,
     provider: normalizeRequiredString(record.provider, "provider"),
-    providerMetadataJson: record.providerMetadataJson ?? null,
     providerName: normalizeOptionalString(record.providerName, "providerName"),
-    providerRequestId: normalizeOptionalString(record.providerRequestId, "providerRequestId"),
-    providerSessionId: normalizeOptionalString(record.providerSessionId, "providerSessionId"),
-    rawUsageJson: record.rawUsageJson ?? null,
     reasoningTokens: normalizeOptionalInteger(record.reasoningTokens, "reasoningTokens"),
     requestedModel: normalizeOptionalString(record.requestedModel, "requestedModel"),
     routeId: normalizeOptionalString(record.routeId, "routeId"),

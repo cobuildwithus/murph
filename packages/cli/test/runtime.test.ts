@@ -3,7 +3,7 @@ import { access, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { localParallelCliTest as test } from './local-parallel-test.js'
-import { createRuntimeUnavailableError } from '@murphai/operator-config/runtime-errors'
+import { createRuntimeUnavailableError } from '@murphai/vault-usecases/runtime'
 import {
   ensureCliRuntimeArtifactsWithOptions,
   repoRoot,
@@ -40,7 +40,7 @@ const sampleDocumentPath = path.join(
 )
 const runtimeCliTestTimeoutMs = 60_000
 
-test('runtime unavailable error preserves the shared operator guidance payload', () => {
+test('runtime unavailable error preserves the shared vault runtime guidance payload', () => {
   const result = createRuntimeUnavailableError(
     'samples/audit query reads',
     new Error('module missing'),
@@ -49,7 +49,7 @@ test('runtime unavailable error preserves the shared operator guidance payload',
   assert.equal(result.code, 'runtime_unavailable')
   assert.equal(
     result.message,
-    'packages/cli can describe samples/audit query reads, but local execution is blocked until the integrating workspace installs incur and links @murphai/core, @murphai/importers, and @murphai/query.',
+    'Local runtime for samples/audit query reads is unavailable until the integrating workspace installs incur and links @murphai/core, @murphai/importers, and @murphai/query.',
   )
   assert.deepEqual(result.context, {
     cause: 'module missing',
@@ -202,6 +202,9 @@ test(
         mealId: string
         lookupId: string
         manifestFile: string
+        source: string | null
+        ingredients: string[] | null
+        nutrition: Record<string, unknown> | null
       }>([
         'meal',
         'add',
@@ -215,6 +218,9 @@ test(
       assert.match(requireData(meal).mealId, /^meal_/u)
       assert.equal(requireData(meal).lookupId, requireData(meal).mealId)
       assert.equal(requireData(meal).manifestFile.length > 0, true)
+      assert.equal(requireData(meal).source, 'manual')
+      assert.equal(requireData(meal).ingredients, null)
+      assert.equal(requireData(meal).nutrition, null)
       await access(path.join(fixture.vaultRoot, requireData(meal).manifestFile))
 
       const noteOnlyMeal = await runCli<{
@@ -222,6 +228,9 @@ test(
         manifestFile: string
         photoPath: string | null
         note: string | null
+        source: string | null
+        ingredients: string[] | null
+        nutrition: Record<string, unknown> | null
       }>([
         'meal',
         'add',
@@ -235,8 +244,66 @@ test(
       assert.match(requireData(noteOnlyMeal).mealId, /^meal_/u)
       assert.equal(requireData(noteOnlyMeal).photoPath, null)
       assert.equal(requireData(noteOnlyMeal).note, 'Coffee and toast.')
+      assert.equal(requireData(noteOnlyMeal).source, 'manual')
+      assert.equal(requireData(noteOnlyMeal).ingredients, null)
+      assert.equal(requireData(noteOnlyMeal).nutrition, null)
       assert.equal(requireData(noteOnlyMeal).manifestFile.length > 0, true)
       await access(path.join(fixture.vaultRoot, requireData(noteOnlyMeal).manifestFile))
+
+      const mealPayloadPath = path.join(fixture.vaultRoot, 'meal.json')
+      await writeFile(
+        mealPayloadPath,
+        JSON.stringify({
+          note: 'Salmon rice bowl.',
+          source: 'derived',
+          ingredients: ['salmon', 'rice'],
+          nutrition: {
+            totals: {
+              calories: 690,
+              proteinGrams: 42,
+            },
+            provenance: {
+              source: 'estimated',
+              confidence: 'medium',
+            },
+          },
+        }),
+        'utf8',
+      )
+
+      const structuredMeal = await runCli<{
+        mealId: string
+        note: string | null
+        source: string | null
+        ingredients: string[] | null
+        nutrition: {
+          totals?: Record<string, number>
+          provenance?: Record<string, string>
+        } | null
+      }>([
+        'meal',
+        'add',
+        '--input',
+        `@${mealPayloadPath}`,
+        '--note',
+        'Salmon rice bowl with extra lemon.',
+        '--vault',
+        fixture.vaultRoot,
+      ])
+      assert.equal(structuredMeal.ok, true)
+      assert.equal(requireData(structuredMeal).note, 'Salmon rice bowl with extra lemon.')
+      assert.equal(requireData(structuredMeal).source, 'derived')
+      assert.deepEqual(requireData(structuredMeal).ingredients, ['salmon', 'rice'])
+      assert.deepEqual(requireData(structuredMeal).nutrition, {
+        totals: {
+          calories: 690,
+          proteinGrams: 42,
+        },
+        provenance: {
+          source: 'estimated',
+          confidence: 'medium',
+        },
+      })
 
       const samples = await runCli<{
         lookupIds: string[]

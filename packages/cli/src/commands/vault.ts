@@ -10,7 +10,6 @@ import {
   pathSchema,
   timeZoneSchema,
   vaultInitResultSchema,
-  vaultUpgradeResultSchema,
   vaultValidateResultSchema,
 } from '@murphai/operator-config/vault-cli-contracts'
 import type { VaultServices } from '@murphai/vault-usecases'
@@ -37,12 +36,10 @@ const vaultStatsResultSchema = z.object({
     samples: z.number().int().nonnegative(),
     audits: z.number().int().nonnegative(),
     assessments: z.number().int().nonnegative(),
-    profileSnapshots: z.number().int().nonnegative(),
     goals: z.number().int().nonnegative(),
     conditions: z.number().int().nonnegative(),
     allergies: z.number().int().nonnegative(),
     protocols: z.number().int().nonnegative(),
-    history: z.number().int().nonnegative(),
     familyMembers: z.number().int().nonnegative(),
     geneticVariants: z.number().int().nonnegative(),
   }),
@@ -78,7 +75,7 @@ export function registerVaultCommands(cli: Cli.Cli, services: VaultServices) {
   cli.command(
     'init',
     {
-      description: 'Create the baseline vault layout through the core write path.',
+      description: 'Create the current vault layout through the core write path.',
       args: emptyArgsSchema,
       options: withBaseOptions({
         timezone: timeZoneSchema.optional().describe('Optional IANA timezone for the new vault. Defaults to the local system timezone.'),
@@ -160,7 +157,7 @@ export function registerVaultCommands(cli: Cli.Cli, services: VaultServices) {
 
   vaultGroup.command('repair', {
     description:
-      'Repair scaffold-only drift on current-format vaults such as missing required directories. Legacy formatVersion vaults should run upgrade first.',
+      'Repair missing required directories on current-format vaults. Older formatVersion vaults fail closed and are not auto-migrated.',
     args: emptyArgsSchema,
     options: withBaseOptions(),
     output: vaultRepairResultSchema,
@@ -168,23 +165,6 @@ export function registerVaultCommands(cli: Cli.Cli, services: VaultServices) {
       return services.core.repairVault({
         vault: options.vault,
         requestId: requestIdFromOptions(options),
-      })
-    },
-  })
-
-  vaultGroup.command('upgrade', {
-    description:
-      'Plan or apply ordered canonical vault upgrades. Rebuildable .runtime projection stores stay separate.',
-    args: emptyArgsSchema,
-    options: withBaseOptions({
-      dryRun: z.boolean().default(false).describe('Preview the upgrade plan without writing canonical files.'),
-    }),
-    output: vaultUpgradeResultSchema,
-    async run({ options }) {
-      return services.core.upgradeVault({
-        vault: options.vault,
-        requestId: requestIdFromOptions(options),
-        dryRun: options.dryRun,
       })
     },
   })

@@ -45,6 +45,18 @@ export function resolveHostedPrivyClientAppId(source: NodeJS.ProcessEnv = proces
   return normalizeEnvValue(source.NEXT_PUBLIC_PRIVY_APP_ID);
 }
 
+export function requireHostedPrivyClientAppId(source: NodeJS.ProcessEnv = process.env): string {
+  const value = resolveHostedPrivyClientAppId(source);
+
+  if (!value) {
+    throw new TypeError(
+      "NEXT_PUBLIC_PRIVY_APP_ID must be configured for hosted Privy signup.",
+    );
+  }
+
+  return value;
+}
+
 export function resolveHostedPrivyClientId(source: NodeJS.ProcessEnv = process.env): string | null {
   return normalizeEnvValue(source.NEXT_PUBLIC_PRIVY_CLIENT_ID);
 }

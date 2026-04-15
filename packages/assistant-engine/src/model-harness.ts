@@ -1,7 +1,6 @@
 import {
   generateObject,
   generateText,
-  gateway,
   Output,
   stepCountIs,
   tool,
@@ -24,7 +23,7 @@ import {
   type AssistantToolSpec,
 } from './inbox-model-contracts.js'
 import { errorMessage } from '@murphai/operator-config/text/shared'
-import { isAssistantOpenAIBaseUrl } from './assistant/shared.js'
+import type { AssistantExecutionDriver } from '@murphai/operator-config/assistant-cli-contracts'
 
 export type JsonRecord = Record<string, unknown>
 
@@ -181,7 +180,7 @@ export function defineAssistantCapability<
 }
 
 function inferAssistantToolProvenance(name: string): AssistantToolProvenance {
-  if (name === 'murph.cli.run') {
+  if (name === 'vault.cli.run') {
     return {
       origin: 'cli-backed',
       localOnly: true,
@@ -276,7 +275,7 @@ function inferAssistantCapabilityMutationSemantics(
   name: string,
   provenance: AssistantToolProvenance,
 ): AssistantCapabilityMutationSemantics {
-  if (name === 'murph.cli.run' || provenance.origin === 'cli-backed') {
+  if (name === 'vault.cli.run' || provenance.origin === 'cli-backed') {
     return 'mixed'
   }
 
@@ -449,6 +448,10 @@ export interface AssistantModelMessage {
   content: string | AssistantModelContentPart[]
 }
 
+export interface AssistantResponsesRequestPolicy {
+  gatewayZeroDataRetention?: boolean
+}
+
 export interface AssistantToolCatalog {
   createAiSdkTools(
     mode?: AssistantToolExecutionMode,
@@ -467,9 +470,11 @@ export interface AssistantModelSpec {
   apiKey?: string
   apiKeyEnv?: string
   baseUrl?: string
+  executionDriver?: AssistantExecutionDriver
   headers?: Record<string, string>
   model: string
   providerName?: string
+  responsesRequestPolicy?: AssistantResponsesRequestPolicy
 }
 
 export interface GenerateAssistantObjectInput<TSchema extends z.ZodTypeAny> {
@@ -485,7 +490,7 @@ export interface GenerateAssistantObjectInput<TSchema extends z.ZodTypeAny> {
 }
 
 const OPENAI_RESPONSES_AUTO_COMPACTION_THRESHOLD = 200_000
-const OPENAI_RESPONSES_AUTO_COMPACTION_CONTEXT = Object.freeze([
+const ASSISTANT_RESPONSES_AUTO_COMPACTION_CONTEXT = Object.freeze([
   {
     type: 'compaction',
     compact_threshold: OPENAI_RESPONSES_AUTO_COMPACTION_THRESHOLD,
@@ -655,30 +660,40 @@ export async function generateAssistantObject<TSchema extends z.ZodTypeAny>(
 export function resolveAssistantLanguageModel(
   spec: AssistantModelSpec,
 ): LanguageModel {
-  if (spec.baseUrl) {
-    if (isAssistantOpenAIBaseUrl(spec.baseUrl)) {
+  switch (spec.executionDriver ?? 'openai-compatible') {
+    case 'responses': {
       const provider = createOpenAI({
         name: normalizeAssistantProviderName(spec.providerName),
         apiKey: resolveAssistantApiKey(spec),
-        baseURL: spec.baseUrl,
-        headers: spec.headers,
-        fetch: createAssistantOpenAIResponsesFetch(),
+        ...(spec.baseUrl ? { baseURL: spec.baseUrl } : {}),
+        ...(spec.headers ? { headers: spec.headers } : {}),
+        fetch: createAssistantResponsesFetch(spec.responsesRequestPolicy),
       })
 
       return provider.responses(spec.model)
     }
 
-    const provider = createOpenAICompatible({
-      name: normalizeAssistantProviderName(spec.providerName),
-      apiKey: resolveAssistantApiKey(spec),
-      baseURL: spec.baseUrl,
-      headers: spec.headers,
-    })
+    case 'codex-cli':
+      throw new Error('Codex models do not resolve through the AI SDK model harness.')
 
-    return provider(spec.model)
+    case 'openai-compatible':
+    default: {
+      if (!spec.baseUrl) {
+        throw new Error(
+          'OpenAI-compatible models require a base URL in the resolved model spec.',
+        )
+      }
+
+      const provider = createOpenAICompatible({
+        name: normalizeAssistantProviderName(spec.providerName),
+        apiKey: resolveAssistantApiKey(spec),
+        baseURL: spec.baseUrl,
+        ...(spec.headers ? { headers: spec.headers } : {}),
+      })
+
+      return provider(spec.model)
+    }
   }
-
-  return gateway(spec.model)
 }
 
 export function normalizeJsonRecord(value: unknown): JsonRecord {
@@ -850,23 +865,22 @@ function resolveAssistantPromptOrMessages(
   throw new Error('Assistant generation requires either a prompt string or at least one message.')
 }
 
-function createAssistantOpenAIResponsesFetch(
+function createAssistantResponsesFetch(
+  requestPolicy: AssistantResponsesRequestPolicy | undefined,
   baseFetch: typeof fetch = globalThis.fetch.bind(globalThis),
 ): typeof fetch {
   return async (input: AssistantFetchInput, init?: AssistantFetchInit) => {
-    const nextInit = await maybeInjectAssistantOpenAIResponsesCompaction(
-      input,
-      init,
-    )
+    const nextInit = await maybeMutateAssistantResponsesRequest(requestPolicy, input, init)
     return await baseFetch(input, nextInit)
   }
 }
 
-async function maybeInjectAssistantOpenAIResponsesCompaction(
+async function maybeMutateAssistantResponsesRequest(
+  requestPolicy: AssistantResponsesRequestPolicy | undefined,
   input: AssistantFetchInput,
   init?: AssistantFetchInit,
 ): Promise<AssistantFetchInit | undefined> {
-  if (!shouldInjectAssistantOpenAIResponsesCompaction(input, init)) {
+  if (!shouldMutateAssistantResponsesRequest(input, init)) {
     return init
   }
 
@@ -883,20 +897,57 @@ async function maybeInjectAssistantOpenAIResponsesCompaction(
     return init
   }
 
-  if ('context_management' in payload) {
+  const nextPayload = applyAssistantResponsesRequestPolicy(payload, requestPolicy)
+  if (!nextPayload) {
     return init
   }
 
   return {
     ...init,
-    body: JSON.stringify({
-      ...payload,
-      context_management: OPENAI_RESPONSES_AUTO_COMPACTION_CONTEXT,
-    }),
+    body: JSON.stringify(nextPayload),
   }
 }
 
-function shouldInjectAssistantOpenAIResponsesCompaction(
+function applyAssistantResponsesRequestPolicy(
+  payload: Record<string, unknown>,
+  requestPolicy: AssistantResponsesRequestPolicy | undefined,
+): Record<string, unknown> | null {
+  let nextPayload: Record<string, unknown> | null = null
+
+  if (!('context_management' in payload)) {
+    nextPayload = {
+      ...payload,
+      context_management: ASSISTANT_RESPONSES_AUTO_COMPACTION_CONTEXT,
+    }
+  }
+
+  if (requestPolicy?.gatewayZeroDataRetention === true) {
+    const currentProviderOptions = nextPayload?.providerOptions ?? payload.providerOptions
+    const nextProviderOptions = isAssistantPlainObject(currentProviderOptions)
+      ? {
+          ...currentProviderOptions,
+        }
+      : {}
+    const currentGatewayOptions = isAssistantPlainObject(nextProviderOptions.gateway)
+      ? {
+          ...nextProviderOptions.gateway,
+        }
+      : {}
+
+    if (currentGatewayOptions.zeroDataRetention !== true) {
+      currentGatewayOptions.zeroDataRetention = true
+      nextProviderOptions.gateway = currentGatewayOptions
+      nextPayload = {
+        ...(nextPayload ?? payload),
+        providerOptions: nextProviderOptions,
+      }
+    }
+  }
+
+  return nextPayload
+}
+
+function shouldMutateAssistantResponsesRequest(
   input: AssistantFetchInput,
   init?: AssistantFetchInit,
 ): boolean {
@@ -956,6 +1007,10 @@ async function readAssistantFetchBody(
   }
 
   return null
+}
+
+function isAssistantPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 function resolveAssistantApiKey(spec: AssistantModelSpec): string | undefined {

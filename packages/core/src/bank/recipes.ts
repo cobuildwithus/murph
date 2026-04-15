@@ -296,6 +296,11 @@ const recipeRegistryApi = createMarkdownRegistryApi<RecipeRecord>({
     commandName: "core.upsertRecipe",
     summary: (_created, recordId) => `Upserted recipe ${recordId}.`,
   },
+  deleteAudit: {
+    action: "recipe_delete",
+    commandName: "core.deleteRecipe",
+    summary: (recordId) => `Deleted recipe ${recordId}.`,
+  },
 });
 
 export async function upsertRecipe(input: UpsertRecipeInput): Promise<UpsertRecipeResult> {

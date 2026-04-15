@@ -5,6 +5,7 @@ import {
   mapDomainJsonError,
   readOptionalJsonObject,
   readJsonObject,
+  sanitizeJsonLogString,
 } from "../http";
 import { isHostedWebConfigurationError } from "../hosted-web/encryption";
 import { isHostedOnboardingError } from "./errors";
@@ -20,6 +21,16 @@ const HOSTED_ONBOARDING_SAFE_PRISMA_META_KEYS = new Set([
   "table",
   "target",
 ]);
+const HOSTED_ONBOARDING_LOG_STRING_MAX_LENGTH = 240;
+const HOSTED_ONBOARDING_DEVELOPMENT_LOG_STRING_MAX_LENGTH = 2_000;
+const HOSTED_ONBOARDING_DEVELOPMENT_STACK_MAX_LENGTH = 6_000;
+const HOSTED_ONBOARDING_DEVELOPMENT_LOG_MAX_DEPTH = 3;
+const HOSTED_ONBOARDING_DEVELOPMENT_LOG_MAX_ENTRIES = 20;
+const HOSTED_ONBOARDING_PERSISTED_ERROR_TOKEN_MAX_LENGTH = 128;
+const HOSTED_ONBOARDING_SENSITIVE_LOG_KEY_PATTERN =
+  /authorization|secret|token|password|cookie|set-cookie|api[-_]?key/iu;
+
+export const HOSTED_ONBOARDING_REDACTED_ERROR_MESSAGE = "[redacted]";
 
 export { readJsonObject, readOptionalJsonObject };
 
@@ -32,9 +43,25 @@ function mapHostedWebConfigurationError(error: unknown) {
 }
 
 function describeHostedOnboardingErrorForLog(error: unknown): Record<string, unknown> | null {
+  const prismaDetails = describeHostedOnboardingPrismaErrorForLog(error);
+  const developmentDetails = isHostedOnboardingDevelopmentLoggingEnabled()
+    ? describeHostedOnboardingDevelopmentErrorForLog(error)
+    : null;
+
+  if (prismaDetails || developmentDetails) {
+    return {
+      ...(prismaDetails ?? {}),
+      ...(developmentDetails ?? {}),
+    };
+  }
+
+  return null;
+}
+
+function describeHostedOnboardingPrismaErrorForLog(error: unknown): Record<string, unknown> | null {
   if (error instanceof Prisma.PrismaClientKnownRequestError) {
     const prismaMeta = sanitizeHostedOnboardingPrismaMeta(error.meta);
-    const prismaMessage = sanitizeHostedOnboardingPrismaLogString(error.message);
+    const prismaMessage = sanitizeHostedOnboardingLogString(error.message);
 
     return {
       prismaClientVersion: error.clientVersion,
@@ -45,7 +72,7 @@ function describeHostedOnboardingErrorForLog(error: unknown): Record<string, unk
   }
 
   if (error instanceof Prisma.PrismaClientInitializationError) {
-    const prismaMessage = sanitizeHostedOnboardingPrismaLogString(error.message);
+    const prismaMessage = sanitizeHostedOnboardingLogString(error.message);
 
     return {
       ...(typeof error.clientVersion === "string" && error.clientVersion
@@ -59,6 +86,34 @@ function describeHostedOnboardingErrorForLog(error: unknown): Record<string, unk
   }
 
   return null;
+}
+
+function describeHostedOnboardingDevelopmentErrorForLog(
+  error: unknown,
+): Record<string, unknown> | null {
+  if (!(error instanceof Error)) {
+    const errorValue = sanitizeHostedOnboardingDevelopmentLogValue(error);
+
+    return errorValue === null ? null : { errorValue };
+  }
+
+  const errorMessage = sanitizeHostedOnboardingLogString(
+    error.message,
+    HOSTED_ONBOARDING_DEVELOPMENT_LOG_STRING_MAX_LENGTH,
+  );
+  const errorStack = sanitizeHostedOnboardingLogString(
+    error.stack,
+    HOSTED_ONBOARDING_DEVELOPMENT_STACK_MAX_LENGTH,
+  );
+  const errorCause = sanitizeHostedOnboardingDevelopmentLogValue(error.cause);
+  const errorDetails = sanitizeHostedOnboardingDevelopmentObjectEntries(error);
+
+  return {
+    ...(errorMessage ? { errorMessage } : {}),
+    ...(errorStack ? { errorStack } : {}),
+    ...(errorCause !== null ? { errorCause } : {}),
+    ...(errorDetails ? { errorDetails } : {}),
+  };
 }
 
 function sanitizeHostedOnboardingPrismaMeta(meta: unknown): Record<string, unknown> | null {
@@ -80,7 +135,7 @@ function sanitizeHostedOnboardingPrismaMeta(meta: unknown): Record<string, unkno
 
 function sanitizeHostedOnboardingPrismaMetaValue(value: unknown): unknown {
   if (typeof value === "string") {
-    return sanitizeHostedOnboardingPrismaLogString(value);
+    return sanitizeHostedOnboardingLogString(value);
   }
 
   if (typeof value === "number" || typeof value === "boolean") {
@@ -97,17 +152,125 @@ function sanitizeHostedOnboardingPrismaMetaValue(value: unknown): unknown {
   return null;
 }
 
-function sanitizeHostedOnboardingPrismaLogString(value: string): string | null {
-  const normalized = value
-    .trim()
-    .replace(/\s+/gu, " ")
-    .replace(/\bhttps?:\/\/\S+/giu, "<redacted-url>")
-    .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/giu, "<redacted-email>")
-    .replace(/\+\d[\d().\s-]{7,}\d/gu, "<redacted-phone>")
-    .replace(/(^|[\s(])(?:\/Users|\/home|\/var|\/tmp|\/private|\/opt|\/etc)\/\S+/gu, "$1<redacted-path>")
-    .replace(/\b[A-Z]:\\[^\s]+/gu, "<redacted-path>");
+export function sanitizeHostedOnboardingLogString(
+  value: string | null | undefined,
+  maxLength = HOSTED_ONBOARDING_LOG_STRING_MAX_LENGTH,
+): string | null {
+  return sanitizeJsonLogString(value, maxLength);
+}
 
-  return normalized ? normalized.slice(0, 240) : null;
+export function sanitizeHostedOnboardingPersistedErrorCode(
+  value: string | null | undefined,
+): string | null {
+  return sanitizeHostedOnboardingLogString(
+    value,
+    HOSTED_ONBOARDING_PERSISTED_ERROR_TOKEN_MAX_LENGTH,
+  );
+}
+
+export function sanitizeHostedOnboardingPersistedErrorName(
+  value: string | null | undefined,
+): string | null {
+  return sanitizeHostedOnboardingLogString(
+    value,
+    HOSTED_ONBOARDING_PERSISTED_ERROR_TOKEN_MAX_LENGTH,
+  );
+}
+
+export function sanitizeHostedOnboardingPersistedErrorMessage(
+  value: string | null | undefined,
+): string | null {
+  return sanitizeHostedOnboardingLogString(value, 1)
+    ? HOSTED_ONBOARDING_REDACTED_ERROR_MESSAGE
+    : null;
+}
+
+function isHostedOnboardingDevelopmentLoggingEnabled(): boolean {
+  return process.env.NODE_ENV === "development";
+}
+
+function sanitizeHostedOnboardingDevelopmentObjectEntries(
+  value: Error,
+): Record<string, unknown> | null {
+  const entries = Object.entries(value).flatMap(([key, entryValue]) => {
+    if (HOSTED_ONBOARDING_SENSITIVE_LOG_KEY_PATTERN.test(key)) {
+      return [[key, HOSTED_ONBOARDING_REDACTED_ERROR_MESSAGE] as const];
+    }
+
+    const sanitizedValue = sanitizeHostedOnboardingDevelopmentLogValue(entryValue);
+
+    return sanitizedValue === null ? [] : [[key, sanitizedValue] as const];
+  });
+
+  return entries.length > 0 ? Object.fromEntries(entries) : null;
+}
+
+function sanitizeHostedOnboardingDevelopmentLogValue(
+  value: unknown,
+  depth = 0,
+  seen = new WeakSet<object>(),
+): unknown {
+  if (value === null) {
+    return null;
+  }
+
+  if (typeof value === "string") {
+    return sanitizeHostedOnboardingLogString(
+      value,
+      HOSTED_ONBOARDING_DEVELOPMENT_LOG_STRING_MAX_LENGTH,
+    );
+  }
+
+  if (typeof value === "number" || typeof value === "boolean") {
+    return value;
+  }
+
+  if (typeof value === "bigint") {
+    return value.toString();
+  }
+
+  if (typeof value !== "object") {
+    return null;
+  }
+
+  if (seen.has(value)) {
+    return "[circular]";
+  }
+
+  if (depth >= HOSTED_ONBOARDING_DEVELOPMENT_LOG_MAX_DEPTH) {
+    return Array.isArray(value) ? `[truncated-array:${value.length}]` : "[truncated-object]";
+  }
+
+  seen.add(value);
+
+  if (Array.isArray(value)) {
+    const sanitized = value
+      .slice(0, HOSTED_ONBOARDING_DEVELOPMENT_LOG_MAX_ENTRIES)
+      .map((entry) => sanitizeHostedOnboardingDevelopmentLogValue(entry, depth + 1, seen))
+      .filter((entry) => entry !== null);
+
+    seen.delete(value);
+    return sanitized;
+  }
+
+  const entries = Object.entries(value)
+    .slice(0, HOSTED_ONBOARDING_DEVELOPMENT_LOG_MAX_ENTRIES)
+    .flatMap(([key, entryValue]) => {
+      if (HOSTED_ONBOARDING_SENSITIVE_LOG_KEY_PATTERN.test(key)) {
+        return [[key, HOSTED_ONBOARDING_REDACTED_ERROR_MESSAGE] as const];
+      }
+
+      const sanitizedValue = sanitizeHostedOnboardingDevelopmentLogValue(
+        entryValue,
+        depth + 1,
+        seen,
+      );
+
+      return sanitizedValue === null ? [] : [[key, sanitizedValue] as const];
+    });
+
+  seen.delete(value);
+  return entries.length > 0 ? Object.fromEntries(entries) : null;
 }
 
 const hostedOnboardingJsonRouteHelpers = createJsonRouteHelpers({
@@ -116,6 +279,7 @@ const hostedOnboardingJsonRouteHelpers = createJsonRouteHelpers({
   logMessage: "Hosted onboarding route failed.",
   logDetails: describeHostedOnboardingErrorForLog,
   matchers: [mapHostedOnboardingError, mapHostedWebConfigurationError],
+  sanitizeLogString: sanitizeHostedOnboardingLogString,
 });
 
 export const jsonOk = hostedOnboardingJsonRouteHelpers.jsonOk;

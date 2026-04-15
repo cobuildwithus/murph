@@ -7,6 +7,7 @@ import {
   stopManagedDeviceSyncDaemon,
 } from "@murphai/operator-config/device-daemon"
 import { createDeviceSyncClient } from "@murphai/operator-config/device-sync-client"
+import { ALL_QUERY_ENTITY_FAMILIES } from "@murphai/query/entity-families"
 
 import type {
   ListFilters,
@@ -101,10 +102,7 @@ import {
   unlinkJournalEventIds,
   unlinkJournalStreams,
 } from "./experiment-journal-vault.js"
-import {
-  toVaultCliError,
-  toVaultUpgradeCliError,
-} from "./vault-usecase-helpers.js"
+import { toVaultCliError } from "./vault-usecase-helpers.js"
 
 interface IntegratedVaultServiceDependencies {
   foodAutoLogHooks?: FoodAutoLogHooks
@@ -154,44 +152,16 @@ function createIntegratedCoreServices(
         auditPath: result.auditPath,
       }
     },
-    async upgradeVault(
-      input: CommandContext & {
-        dryRun?: boolean
-      },
-    ) {
-      const { vault } = input
-      const { core } = await loadIntegratedRuntime()
-      try {
-        const result = await core.upgradeVault({
-          vaultRoot: vault,
-          dryRun: input.dryRun,
-        })
-
-        return {
-          vault,
-          metadataFile: result.metadataFile,
-          title: result.title,
-          timezone: result.timezone,
-          fromFormatVersion: result.fromFormatVersion,
-          toFormatVersion: result.toFormatVersion,
-          steps: result.steps,
-          affectedFiles: result.affectedFiles,
-          rebuildableProjectionStores: result.rebuildableProjectionStores,
-          updated: result.updated,
-          dryRun: result.dryRun,
-          auditPath: result.auditPath,
-        }
-      } catch (error) {
-        throw toVaultUpgradeCliError(error)
-      }
-    },
     async addMeal(input: CommandContext & {
       photo?: string
       audio?: string
       note?: string
       occurredAt?: string
+      source?: "manual" | "import" | "device" | "derived"
+      ingredients?: string[]
+      nutrition?: import('@murphai/contracts').MealNutrition
     }) {
-      const { vault, photo, audio, note, occurredAt } = input
+      const { vault, photo, audio, note, occurredAt, source, ingredients, nutrition } = input
       const { core } = await loadIntegratedRuntime()
       const result = await core.addMeal({
         vaultRoot: vault,
@@ -199,6 +169,9 @@ function createIntegratedCoreServices(
         audioPath: audio,
         note,
         occurredAt,
+        source,
+        ingredients,
+        nutrition,
       })
 
       return {
@@ -211,6 +184,9 @@ function createIntegratedCoreServices(
         audioPath: result.audio?.relativePath ?? null,
         manifestFile: result.manifestPath,
         note: result.event.note ?? note ?? null,
+        source: result.event.source ?? null,
+        ingredients: result.event.ingredients ?? null,
+        nutrition: result.event.nutrition ?? null,
       }
     },
     async createExperiment(input: CommandContext & {
@@ -405,20 +381,6 @@ function createIntegratedCoreServices(
       const { core } = await loadIntegratedRuntime()
       return { core }
     }),
-    async rebuildCurrentProfile(input: CommandContext) {
-      const { vault } = input
-      const { core } = await loadIntegratedRuntime()
-      const result = await core.rebuildCurrentProfile({
-        vaultRoot: vault,
-      })
-
-      return {
-        vault,
-        profilePath: result.relativePath,
-        snapshotId: result.snapshot?.id ?? null,
-        updated: result.updated,
-      }
-    },
   } satisfies CoreWriteServices
 }
 
@@ -545,6 +507,27 @@ function createIntegratedQueryServices(): QueryServices {
     }) {
       return listFoodRecords(input)
     },
+    async showMealNutritionTotals(input: CommandContext & {
+      from?: string
+      to?: string
+    }) {
+      const { query } = await loadIntegratedRuntime()
+      const result = await query.readMealNutritionTotals(input.vault, {
+        from: input.from,
+        to: input.to,
+      })
+
+      return {
+        vault: input.vault,
+        filters: {
+          from: result.from,
+          to: result.to,
+        },
+        mealCount: result.mealCount,
+        totals: result.totals,
+        days: result.days,
+      }
+    },
     async showEvent(input: CommandContext & {
       eventId: string
     }) {
@@ -632,7 +615,7 @@ function createIntegratedQueryServices(): QueryServices {
         normalizeRepeatableEnumFlagOption(
           recordType,
           "record-type",
-          query.ALL_QUERY_ENTITY_FAMILIES,
+          ALL_QUERY_ENTITY_FAMILIES,
         ) ?? []
       const readModel = await query.readVault(vault)
       const streams = normalizeRepeatableFlagOption(stream, "stream") ?? []

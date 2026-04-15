@@ -1,7 +1,7 @@
 import type {
   GatewayDeliveryTargetKind,
   GatewayReplyRouteKind,
-} from './contracts.js'
+} from './contracts.ts'
 
 export type GatewayLocalDispatchMode = 'immediate' | 'queue-only'
 export type GatewayLocalOutboxStatus =

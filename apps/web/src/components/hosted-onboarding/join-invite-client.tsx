@@ -1,7 +1,6 @@
 "use client";
 
-import { usePrivy } from "@privy-io/react-auth";
-import { useEffect, useState } from "react";
+import { useEffect, useEffectEvent, useState } from "react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { Badge } from "@/src/components/ui/badge";
@@ -11,15 +10,16 @@ import type {
   HostedInviteStatusPayload,
   HostedPrivyCompletionPayload,
 } from "@/src/lib/hosted-onboarding/types";
+import type { PrivyLinkedAccountLike } from "@/src/lib/hosted-onboarding/privy-shared";
 
-import { requestHostedOnboardingJson } from "./client-api";
+import { requestHostedBillingCheckout } from "./client-api";
 import {
   fetchHostedInviteStatus,
-  resolveHostedInviteStatusAuthMode,
   useHostedInviteStatusRefresh,
 } from "./invite-status-client";
 import {
   resolveInviteStatusAfterPrivyCompletion,
+  resolveJoinInviteStatusFromRefresh,
   resolveJoinInviteSubtitle,
   resolveJoinInviteTitle,
   shouldAwaitHostedInviteSessionResolution,
@@ -28,13 +28,11 @@ import {
   JoinInviteSharePreviewAlert,
   JoinInviteStageContent,
 } from "./join-invite-sections";
-import {
-  logHostedPrivySessionDebug,
-  sanitizeHostedPrivyDebugError,
-} from "./privy-session-debug";
 import { useJoinInviteShareImport } from "./use-join-invite-share-import";
 
 interface JoinInviteClientProps {
+  authenticated: boolean;
+  initialLinkedAccounts: readonly PrivyLinkedAccountLike[];
   initialStatus: HostedInviteStatusPayload;
   inviteCode: string;
   shareCode: string | null;
@@ -42,23 +40,28 @@ interface JoinInviteClientProps {
 }
 
 export function JoinInviteClient({
+  authenticated: _authenticated,
+  initialLinkedAccounts,
   initialStatus,
   inviteCode,
   shareCode,
   sharePreview,
 }: JoinInviteClientProps) {
-  const { authenticated, logout, ready } = usePrivy();
   const [status, setStatus] = useState(initialStatus);
+  const [hasCompletedInitialRefresh, setHasCompletedInitialRefresh] = useState(
+    initialStatus.stage !== "verify" || !initialStatus.session.authenticated,
+  );
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [pendingAction, setPendingAction] = useState<"checkout" | "logout" | "share" | null>(null);
+  const [pendingAction, setPendingAction] = useState<"checkout" | "share" | null>(null);
   const [statusRefreshErrorMessage, setStatusRefreshErrorMessage] = useState<string | null>(null);
   const [statusRefreshRetryPending, setStatusRefreshRetryPending] = useState(false);
+  const [autoCheckoutArmed, setAutoCheckoutArmed] = useState(false);
 
   const awaitingInviteSessionResolution = shouldAwaitHostedInviteSessionResolution({
-    authenticated,
-    ready,
+    hasCompletedInitialRefresh,
     status,
   });
+  const checkoutPending = autoCheckoutArmed || pendingAction === "checkout";
   const { handleAcceptShare, shareImportState } = useJoinInviteShareImport({
     inviteCode,
     onErrorMessage: setErrorMessage,
@@ -67,74 +70,37 @@ export function JoinInviteClient({
     statusStage: status.stage,
   });
 
+  function applyRefreshedStatus(payload: HostedInviteStatusPayload) {
+    setStatus((currentStatus) => resolveJoinInviteStatusFromRefresh({
+      nextStatus: payload,
+      status: currentStatus,
+    }));
+  }
+
   useHostedInviteStatusRefresh({
-    authenticated,
     inviteCode,
     onError: (error: unknown) => {
-      logHostedPrivySessionDebug("join:status-refresh-error", {
-        authenticated,
-        error: sanitizeHostedPrivyDebugError(error),
-        ready,
-        sessionAuthenticated: status.session.authenticated,
-        stage: status.stage,
-      });
       setStatusRefreshErrorMessage(
         error instanceof Error ? error.message : "We could not refresh your signup state.",
       );
     },
     onStatus: (payload) => {
-      logHostedPrivySessionDebug("join:status-refresh-success", {
-        authenticated,
-        ready,
-        sessionAuthenticated: payload.session.authenticated,
-        stage: payload.stage,
-      });
-      setStatus(payload);
+      applyRefreshedStatus(payload);
       setStatusRefreshErrorMessage(null);
+      if (!payload.session.authenticated || payload.stage !== "verify") {
+        setHasCompletedInitialRefresh(true);
+      }
     },
-    ready,
-    sessionAuthenticated: status.session.authenticated,
-    shouldPoll: status.stage === "activating",
+    shouldPoll: status.stage === "verify" || status.stage === "checkout" || status.activationPending,
   });
 
-  useEffect(() => {
-    logHostedPrivySessionDebug("join:state", {
-      authenticated,
-      awaitingInviteSessionResolution,
-      ready,
-      sessionAuthenticated: status.session.authenticated,
-      stage: status.stage,
-      statusMatchesInvite: status.session.matchesInvite,
-    });
-  }, [
-    authenticated,
-    awaitingInviteSessionResolution,
-    ready,
-    status.session.authenticated,
-    status.session.matchesInvite,
-    status.stage,
-  ]);
-
   async function refreshStatus(): Promise<HostedInviteStatusPayload> {
-    logHostedPrivySessionDebug("join:refresh-status:start", {
-      authenticated,
-      authMode: resolveHostedInviteStatusAuthMode(authenticated),
-      ready,
-      sessionAuthenticated: status.session.authenticated,
-      stage: status.stage,
-    });
-    const payload = await fetchHostedInviteStatus(
-      inviteCode,
-      resolveHostedInviteStatusAuthMode(authenticated),
-    );
-    logHostedPrivySessionDebug("join:refresh-status:success", {
-      authenticated,
-      ready,
-      sessionAuthenticated: payload.session.authenticated,
-      stage: payload.stage,
-    });
-    setStatus(payload);
+    const payload = await fetchHostedInviteStatus(inviteCode);
+    applyRefreshedStatus(payload);
     setStatusRefreshErrorMessage(null);
+    if (!payload.session.authenticated || payload.stage !== "verify") {
+      setHasCompletedInitialRefresh(true);
+    }
     return payload;
   }
 
@@ -153,17 +119,15 @@ export function JoinInviteClient({
     }
   }
 
-  async function handleCheckout() {
+  async function startCheckout() {
+    setAutoCheckoutArmed(false);
     setErrorMessage(null);
     setPendingAction("checkout");
 
     try {
-      const payload = await requestHostedOnboardingJson<{ alreadyActive: boolean; url: string | null }>({
-        payload: {
-          inviteCode,
-          shareCode,
-        },
-        url: "/api/hosted-onboarding/billing/checkout",
+      const payload = await requestHostedBillingCheckout({
+        inviteCode,
+        shareCode,
       });
 
       if (payload.alreadyActive) {
@@ -183,37 +147,31 @@ export function JoinInviteClient({
     }
   }
 
-  async function handleSignOut() {
-    setErrorMessage(null);
-    setPendingAction("logout");
+  const startAutoCheckout = useEffectEvent(() => {
+    void startCheckout();
+  });
 
-    try {
-      if (authenticated) {
-        await logout();
-      }
-      await refreshStatus();
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      setErrorMessage(message);
-      throw error;
-    } finally {
-      setPendingAction(null);
+  useEffect(() => {
+    if (
+      !autoCheckoutArmed
+      || !status.capabilities.billingReady
+      || status.messagingSetupRequired
+      || pendingAction !== null
+    ) {
+      return;
     }
-  }
+
+    startAutoCheckout();
+  }, [autoCheckoutArmed, pendingAction, startAutoCheckout, status.capabilities.billingReady, status.messagingSetupRequired]);
 
   async function handlePhoneVerified(payload: HostedPrivyCompletionPayload) {
     const nextStatus = resolveInviteStatusAfterPrivyCompletion(status, payload);
-    logHostedPrivySessionDebug("join:phone-verified", {
-      nextStage: nextStatus.stage,
-      payloadStage: payload.stage,
-      sessionAuthenticated: nextStatus.session.authenticated,
-      statusMatchesInvite: nextStatus.session.matchesInvite,
-    });
     setStatus(nextStatus);
-
-    if (payload.stage === "checkout" && nextStatus.capabilities.billingReady) {
-      await handleCheckout();
-    }
+    setAutoCheckoutArmed(
+      nextStatus.capabilities.billingReady
+      && payload.stage === "checkout"
+      && !payload.messagingSetupRequired,
+    );
   }
 
   return (
@@ -221,7 +179,7 @@ export function JoinInviteClient({
       <Card className="shadow-sm">
         <CardHeader className="gap-3">
           <Badge variant="secondary" className="w-fit">
-            Text signup
+            Murph signup
           </Badge>
           <div className="space-y-3">
             <CardTitle className="text-4xl font-bold tracking-tight text-stone-900 md:text-5xl">
@@ -246,7 +204,10 @@ export function JoinInviteClient({
           ) : null}
 
           <JoinInviteStageContent
+            authenticated={status.session.authenticated}
             awaitingInviteSessionResolution={awaitingInviteSessionResolution}
+            checkoutPending={checkoutPending}
+            initialLinkedAccounts={initialLinkedAccounts}
             inviteCode={inviteCode}
             pendingAction={pendingAction}
             shareImportState={shareImportState}
@@ -255,11 +216,13 @@ export function JoinInviteClient({
             statusRefreshErrorMessage={statusRefreshErrorMessage}
             statusRefreshRetryPending={statusRefreshRetryPending}
             onAcceptShare={handleAcceptShare}
-            onCheckout={handleCheckout}
+            onCheckout={startCheckout}
             onPhoneVerified={handlePhoneVerified}
             onRefreshStatus={refreshStatus}
             onRetryStatusRefresh={handleRetryStatusRefresh}
-            onSignOut={handleSignOut}
+            onSignOut={async () => {
+              await refreshStatus();
+            }}
           />
         </CardContent>
       </Card>
@@ -269,6 +232,7 @@ export function JoinInviteClient({
 
 export {
   resolveInviteStatusAfterPrivyCompletion,
+  resolveJoinInviteStatusFromRefresh,
   resolveJoinInviteShareStateFromAccept,
   resolveJoinInviteShareStateFromStatus,
   shouldAwaitHostedInviteSessionResolution,

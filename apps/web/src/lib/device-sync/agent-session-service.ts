@@ -1,4 +1,10 @@
 import { deviceSyncError, isDeviceSyncError } from "@murphai/device-syncd/public-ingress";
+import {
+  didHostedExecutionDeviceSyncRuntimeApplyConnectionWrite,
+  findHostedExecutionDeviceSyncRuntimeApplyEntry,
+  sanitizeHostedRuntimeErrorCode,
+  sanitizeHostedRuntimeErrorText,
+} from "@murphai/device-syncd/hosted-runtime";
 
 import type {
   DeviceSyncAccount,
@@ -19,13 +25,13 @@ import {
   findHostedDeviceSyncRuntimeConnection,
   requireHostedDeviceSyncRuntimeTokenBundle,
 } from "./internal-runtime";
+import type { HostedLocalHeartbeatPatch } from "./local-heartbeat";
 import { requireHostedDeviceSyncProvider } from "./providers";
 import {
   hostedConnectionRecordArgs,
   type HostedAgentSessionRecord,
   type HostedPrismaTransactionClient,
   mapHostedConnectionRecord,
-  type UpdateLocalHeartbeatInput,
   PrismaDeviceSyncControlPlaneStore,
 } from "./prisma-store";
 import { requireHostedDeviceSyncRuntimeClient } from "./runtime-client";
@@ -128,6 +134,7 @@ export class HostedDeviceSyncAgentSessionService {
         runtimeConnection: findHostedDeviceSyncRuntimeConnection(
           await requireHostedDeviceSyncRuntimeClient().getDeviceSyncRuntimeSnapshot(session.userId, {
             connectionId,
+            includeSecrets: true,
             provider: connection.provider,
           }),
           connectionId,
@@ -192,6 +199,7 @@ export class HostedDeviceSyncAgentSessionService {
         session.userId,
         {
           connectionId,
+          includeSecrets: true,
           provider: staticConnection.provider,
         },
       );
@@ -304,6 +312,7 @@ export class HostedDeviceSyncAgentSessionService {
             localState: {
               clearError: true,
             },
+            observedTokenVersion: currentTokenBundle.tokenVersion,
             seed: buildHostedDeviceSyncRuntimeSeedFromPublicAccount({
               account: {
                 ...currentConnection,
@@ -341,6 +350,7 @@ export class HostedDeviceSyncAgentSessionService {
         session.userId,
         {
           connectionId,
+          includeSecrets: true,
           provider: staticConnection.provider,
         },
       );
@@ -433,7 +443,7 @@ export class HostedDeviceSyncAgentSessionService {
   async recordLocalHeartbeat(
     userId: string,
     connectionId: string,
-    patch: UpdateLocalHeartbeatInput,
+    patch: HostedLocalHeartbeatPatch,
   ) {
     const connection = await this.store.updateConnectionFromLocalHeartbeat(userId, connectionId, patch);
 
@@ -525,16 +535,19 @@ export class HostedDeviceSyncAgentSessionService {
       };
     } catch (error) {
       if (isDeviceSyncError(error) && error.accountStatus) {
+        const sanitizedErrorCode = sanitizeHostedRuntimeErrorCode(error.code) ?? "TOKEN_REFRESH_FAILED";
+        const sanitizedErrorMessage =
+          sanitizeHostedRuntimeErrorText(error.message) ?? "Token refresh failed.";
         const seedAccount: PublicDeviceSyncAccount = {
           ...input.account,
-          lastErrorCode: error.code,
-          lastErrorMessage: error.message,
+          lastErrorCode: sanitizedErrorCode,
+          lastErrorMessage: sanitizedErrorMessage,
           lastSyncErrorAt: input.now,
           nextReconcileAt: error.accountStatus === "disconnected" ? null : input.account.nextReconcileAt,
           status: error.accountStatus,
         };
 
-        await requireHostedDeviceSyncRuntimeClient().applyDeviceSyncRuntimeUpdates(input.userId, {
+        const applyResponse = await requireHostedDeviceSyncRuntimeClient().applyDeviceSyncRuntimeUpdates(input.userId, {
           occurredAt: input.now,
           updates: [
             {
@@ -543,17 +556,18 @@ export class HostedDeviceSyncAgentSessionService {
               },
               connectionId: input.account.id,
               localState: {
-                lastErrorCode: error.code,
-                lastErrorMessage: error.message,
+                lastErrorCode: sanitizedErrorCode,
+                lastErrorMessage: sanitizedErrorMessage,
                 lastSyncErrorAt: input.now,
                 ...(error.accountStatus === "disconnected" ? { nextReconcileAt: null } : {}),
               },
+              observedTokenVersion: input.currentTokenBundle.tokenVersion,
               seed: buildHostedDeviceSyncRuntimeSeedFromPublicAccount({
                 account: seedAccount,
                 externalAccountId: input.account.externalAccountId,
                 localState: {
-                  lastErrorCode: error.code,
-                  lastErrorMessage: error.message,
+                  lastErrorCode: sanitizedErrorCode,
+                  lastErrorMessage: sanitizedErrorMessage,
                   lastSyncErrorAt: input.now,
                   ...(error.accountStatus === "disconnected" ? { nextReconcileAt: null } : {}),
                 },
@@ -565,6 +579,29 @@ export class HostedDeviceSyncAgentSessionService {
             },
           ],
         });
+        const appliedUpdate = findHostedExecutionDeviceSyncRuntimeApplyEntry(
+          applyResponse,
+          input.account.id,
+        );
+
+        if (
+          !appliedUpdate
+          || appliedUpdate.status === "missing"
+          || !didHostedExecutionDeviceSyncRuntimeApplyConnectionWrite(appliedUpdate)
+          || appliedUpdate.connection?.status !== error.accountStatus
+          || (
+            error.accountStatus === "disconnected"
+            && appliedUpdate.tokenUpdate === "skipped_version_mismatch"
+          )
+        ) {
+          throw deviceSyncError({
+            code: "RUNTIME_STATE_CONFLICT",
+            message: `Hosted device-sync runtime did not persist the ${error.accountStatus} state for connection ${input.account.id}.`,
+            retryable: true,
+            httpStatus: 409,
+          });
+        }
+
         await this.store.createSignal({
           userId: input.userId,
           connectionId: input.account.id,
@@ -573,8 +610,8 @@ export class HostedDeviceSyncAgentSessionService {
           occurredAt: input.now,
           reason: "token_refresh_failed",
           revokeWarning: {
-            code: error.code,
-            message: error.message,
+            code: sanitizedErrorCode,
+            message: sanitizedErrorMessage,
           },
           createdAt: input.now,
           tx: input.tx,

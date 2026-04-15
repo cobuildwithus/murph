@@ -50,14 +50,6 @@ export function formatAssistantRunEventForTerminal(
       : `scanning channel auto-reply: ${event.details ?? ''}`.trim()
   }
 
-  if (event.type === 'reply.scan.primed') {
-    const details = formatAssistantReplyScanPrimedDetails(
-      event.details,
-      options,
-    )
-    return details ? `primed channel auto-reply: ${details}` : 'primed channel auto-reply'
-  }
-
   if (event.type === 'capture.routed') {
     const tools = (event.tools ?? []).join(', ')
     return `routed ${event.captureId ?? 'capture'}${tools ? `: ${tools}` : ''}`
@@ -125,6 +117,8 @@ export function formatInboxRunEventForTerminal(
       )
     case 'capture.imported':
       return formatImportedCaptureEvent(event, options)
+    case 'parser.jobs.drained':
+      return formatParserDrainEvent(event)
     default:
       return null
   }
@@ -150,6 +144,17 @@ function formatImportedCaptureEvent(
   const phase = event.phase === 'backfill' ? 'backfill' : 'new'
   const source = humanizeSource(event.source)
   return `${phase} ${source} capture imported: ${summarizeCapturePayload(event.capture)}`
+}
+
+function formatParserDrainEvent(event: InboxRunEvent): string | null {
+  const processed = event.parser?.processed ?? 0
+  if (processed <= 0) {
+    return null
+  }
+
+  const succeeded = event.parser?.succeeded ?? 0
+  const failed = event.parser?.failed ?? 0
+  return `parser drained ${processed} attachment job${processed === 1 ? '' : 's'}: ${succeeded} succeeded, ${failed} failed`
 }
 
 function formatUnsafeImportedCaptureEvent(event: InboxRunEvent): string {
@@ -349,42 +354,6 @@ function formatAssistantReplyProgressDetails(
   }
 }
 
-function formatAssistantReplyScanPrimedDetails(
-  details: string | undefined,
-  options: ForegroundTerminalLogOptions,
-): string | null {
-  const normalized = normalizeLabel(details)
-  if (!normalized) {
-    return null
-  }
-
-  if (options.unsafeDetails) {
-    return normalized
-  }
-
-  if (
-    normalized ===
-    'no existing captures yet; auto-reply will start with the next inbound message'
-  ) {
-    return normalized
-  }
-
-  if (
-    normalized.startsWith('processing existing ') &&
-    normalized.endsWith(
-      ' backlog before switching to new inbound messages',
-    )
-  ) {
-    return normalized
-  }
-
-  if (normalized.startsWith('starting after ')) {
-    return 'starting after latest existing capture'
-  }
-
-  return null
-}
-
 function formatConnectorEventLine(
   message: string,
   details?: string | null,
@@ -457,8 +426,6 @@ function captureCountFromDetails(details?: string): number | null {
 
 function humanizeSource(source: string): string {
   switch (source) {
-    case 'imessage':
-      return 'iMessage'
     case 'telegram':
       return 'Telegram'
     case 'linq':

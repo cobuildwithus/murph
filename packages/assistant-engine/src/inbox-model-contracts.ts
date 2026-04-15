@@ -157,7 +157,7 @@ export const inboxModelRouteResultSchema = z.object({
   fallbackError: z.string().min(1).nullable(),
   model: z.object({
     model: z.string().min(1),
-    providerMode: z.enum(['gateway', 'openai-compatible']),
+    providerMode: z.literal('openai-compatible'),
     baseUrl: z.string().min(1).nullable(),
     providerName: z.string().min(1).nullable(),
   }),

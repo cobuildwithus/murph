@@ -86,6 +86,12 @@ test('setup assistant option normalization infers presets from explicit assistan
   )
   assert.equal(
     inferSetupAssistantPresetFromOptions({
+      assistantZeroDataRetention: true,
+    }),
+    'openai-compatible',
+  )
+  assert.equal(
+    inferSetupAssistantPresetFromOptions({
       assistantModel: 'gpt-5.4',
     }),
     'codex',
@@ -130,8 +136,10 @@ test('setup assistant defaults round-trip between saved operator defaults and se
       endpoint: 'https://openrouter.ai/api/v1',
       headers: null,
       model: 'openrouter/auto',
+      presetId: null,
       providerName: 'openrouter',
       reasoningEffort: 'high',
+      webSearch: null,
     },
     identityId: null,
     failoverRoutes: null,
@@ -156,6 +164,7 @@ test('setup assistant defaults round-trip between saved operator defaults and se
   })
   assert.deepEqual(buildSetupAssistantOptionsFromDefaults(openAiDefaults), {
     assistantPreset: 'openai-compatible',
+    assistantProviderPreset: undefined,
     assistantModel: 'openrouter/auto',
     assistantBaseUrl: 'https://openrouter.ai/api/v1',
     assistantApiKeyEnv: 'OPENROUTER_API_KEY',
@@ -496,8 +505,10 @@ test('setup assistant selection normalizes chosen assistant values into operator
       endpoint: 'https://openrouter.ai/api/v1',
       headers: null,
       model: 'gpt-4o-mini',
+      presetId: null,
       providerName: 'openrouter',
       reasoningEffort: 'high',
+      webSearch: null,
     },
     account: {
       source: 'codex-auth-json',
@@ -711,8 +722,10 @@ test('setup assistant defaults helpers retain explicit codex command and surface
         endpoint: null,
         headers: null,
         model: 'gpt-4.1-mini',
+        presetId: null,
         providerName: null,
         reasoningEffort: null,
+        webSearch: null,
       },
       identityId: null,
       failoverRoutes: null,
@@ -729,8 +742,10 @@ test('setup assistant defaults helpers retain explicit codex command and surface
         endpoint: null,
         headers: null,
         model: 'gpt-4.1-mini',
+        presetId: null,
         providerName: null,
         reasoningEffort: null,
+        webSearch: null,
       },
       identityId: null,
       failoverRoutes: null,
@@ -739,6 +754,7 @@ test('setup assistant defaults helpers retain explicit codex command and surface
     }),
     {
       assistantPreset: 'openai-compatible',
+      assistantProviderPreset: undefined,
       assistantModel: 'gpt-4.1-mini',
       assistantBaseUrl: undefined,
       assistantApiKeyEnv: undefined,
@@ -775,6 +791,15 @@ test('setup assistant provider preset resolution prefers explicit preset ids and
       assistantProviderName: undefined,
     }),
     null,
+  )
+  assert.equal(
+    resolveSetupAssistantProviderPreset({
+      assistantProviderPreset: undefined,
+      assistantBaseUrl: 'https://ai-gateway.vercel.sh/v1',
+      assistantApiKeyEnv: undefined,
+      assistantProviderName: undefined,
+    })?.id,
+    'vercel-ai-gateway',
   )
 })
 
@@ -847,6 +872,7 @@ test('setup assistant resolver handles skip, codex OSS, and discovered OpenAI-co
     model: 'gpt-oss:20b',
     baseUrl: null,
     apiKeyEnv: null,
+    presetId: null,
     providerName: null,
     codexCommand: 'codex-beta',
     codexHome: '/tmp/codex-home',
@@ -881,6 +907,7 @@ test('setup assistant resolver handles skip, codex OSS, and discovered OpenAI-co
     model: 'openai/gpt-4.1',
     baseUrl: 'https://openrouter.ai/api/v1',
     apiKeyEnv: 'OPENROUTER_API_KEY',
+    presetId: 'openrouter',
     providerName: 'openrouter',
     codexCommand: null,
     profile: null,

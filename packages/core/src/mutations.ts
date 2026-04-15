@@ -10,6 +10,7 @@ import type {
   EventSource,
   ExperimentEventRecord,
   JournalDayFrontmatter,
+  MealNutrition,
   SampleQuality,
   SampleRecord,
   SampleSource,
@@ -37,8 +38,6 @@ import {
 } from "./constants.ts";
 import { emitAuditRecord } from "./audit.ts";
 import {
-  buildAttachmentCompatibilityProjections,
-  buildAttachmentPathCompatibilityProjections,
   prepareEventAttachments,
   stagePreparedEventAttachmentsInBatch,
 } from "./event-attachments.ts";
@@ -48,11 +47,15 @@ import { pathExists, readUtf8File, writeVaultTextFile } from "./fs.ts";
 import { parseFrontmatterDocument, stringifyFrontmatterDocument } from "./frontmatter.ts";
 import { generateRecordId } from "./ids.ts";
 import { readJsonlRecords, toMonthlyShardRelativePath } from "./jsonl.ts";
+import {
+  normalizeMealNutrition,
+} from "./nutrition.ts";
 import { stageRawImportManifest } from "./operations/raw-manifests.ts";
 import { runCanonicalWrite, type WriteBatch } from "./operations/write-batch.ts";
 import { resolveVaultPath } from "./path-safety.ts";
 import { sanitizePathSegment } from "./path-safety.ts";
 import { prepareInlineRawArtifact, prepareRawArtifact, resolveRawAssetDirectory } from "./raw.ts";
+import { normalizeUniqueTextList } from "./bank/shared.ts";
 import {
   defaultTimeZone,
   normalizeTimeZone,
@@ -123,6 +126,8 @@ interface AddMealInput {
   note?: string;
   photoPath?: string;
   audioPath?: string;
+  ingredients?: string[];
+  nutrition?: MealNutrition;
   source?: string;
 }
 
@@ -364,7 +369,6 @@ interface NormalizedEventSeed<K extends EventKind> {
   note?: string;
   tags?: string[];
   links?: EventLinkInput[];
-  relatedIds?: string[];
   rawRefs?: string[];
   externalRef?: ExternalRef;
   fields: LooseRecord;
@@ -648,28 +652,10 @@ function deterministicContractId(prefix: string, seed: string): string {
 function buildPreparedAttachmentState(
   preparedAttachments: readonly PreparedEventAttachment[],
 ): {
-  projections: {
-    audioPaths: string[];
-    documentPath: string | null;
-    photoPaths: string[];
-    rawRefs: string[];
-  };
+  rawRefs: string[];
 } {
-  const projections = buildAttachmentPathCompatibilityProjections(
-    preparedAttachments.map((attachment) => ({
-      role: attachment.role,
-      kind: attachment.kind ?? "other",
-      relativePath: attachment.raw.relativePath,
-    })),
-  );
-
   return {
-    projections: {
-      audioPaths: projections.audioPaths,
-      documentPath: projections.documentPath,
-      photoPaths: projections.photoPaths,
-      rawRefs: projections.rawRefs,
-    },
+    rawRefs: [...new Set(preparedAttachments.map((attachment) => attachment.raw.relativePath))],
   };
 }
 
@@ -729,7 +715,6 @@ function buildNormalizedEventSeed<K extends EventKind>({
     note: typeof note === "string" && note.trim() ? note.trim() : undefined,
     tags: trimStringList(tags),
     links: canonicalRelations.links,
-    relatedIds: canonicalRelations.relatedIds,
     rawRefs: trimStringList(rawRefs),
     externalRef: normalizeExternalRef(externalRef),
     fields: normalizedFields,
@@ -757,7 +742,6 @@ function buildEventContractInput<K extends EventKind>(
     note: seed.note,
     tags: seed.tags,
     links: seed.links?.length ? seed.links : undefined,
-    relatedIds: seed.relatedIds,
     rawRefs: seed.rawRefs,
     externalRef: seed.externalRef,
     ...seed.fields,
@@ -1171,6 +1155,30 @@ function normalizeDeviceRawArtifactInputs(
   });
 }
 
+function normalizeDeviceBatchObjectArray<T extends LooseRecord>(input: {
+  value: unknown;
+  code: string;
+  message: string;
+  itemCode: string;
+  itemLabel: string;
+}): T[] {
+  if (input.value === undefined) {
+    return [];
+  }
+
+  if (!Array.isArray(input.value)) {
+    throw new VaultError(input.code, input.message);
+  }
+
+  return input.value.map((entry, index) =>
+    assertPlainObject<T>(
+      entry,
+      input.itemCode,
+      `${input.itemLabel} ${index + 1} must be a plain object.`,
+    ),
+  );
+}
+
 function normalizeDeviceBatchInputs({
   provider,
   accountId,
@@ -1193,33 +1201,27 @@ function normalizeDeviceBatchInputs({
     "VAULT_INVALID_DEVICE_PROVENANCE",
     "Device import provenance must be a plain object.",
   ) ?? {};
-  const eventInputs = Array.isArray(events)
-    ? events.map((event, index) =>
-        assertPlainObject<DeviceEventInput>(
-          event,
-          "VAULT_INVALID_EVENT",
-          `Device event ${index + 1} must be a plain object.`,
-        ),
-      )
-    : [];
-  const sampleInputs = Array.isArray(samples)
-    ? samples.map((sample, index) =>
-        assertPlainObject<DeviceSampleInput>(
-          sample,
-          "VAULT_INVALID_SAMPLE",
-          `Device sample ${index + 1} must be a plain object.`,
-        ),
-      )
-    : [];
-  const rawArtifactInputs = Array.isArray(rawArtifacts)
-    ? rawArtifacts.map((artifact, index) =>
-        assertPlainObject<DeviceRawArtifactInput>(
-          artifact,
-          "VAULT_INVALID_RAW_ARTIFACT",
-          `Device raw artifact ${index + 1} must be a plain object.`,
-        ),
-      )
-    : [];
+  const eventInputs = normalizeDeviceBatchObjectArray<DeviceEventInput>({
+    value: events,
+    code: "VAULT_INVALID_DEVICE_EVENTS",
+    message: "Device batch events must be an array when provided.",
+    itemCode: "VAULT_INVALID_EVENT",
+    itemLabel: "Device event",
+  });
+  const sampleInputs = normalizeDeviceBatchObjectArray<DeviceSampleInput>({
+    value: samples,
+    code: "VAULT_INVALID_DEVICE_SAMPLES",
+    message: "Device batch samples must be an array when provided.",
+    itemCode: "VAULT_INVALID_SAMPLE",
+    itemLabel: "Device sample",
+  });
+  const rawArtifactInputs = normalizeDeviceBatchObjectArray<DeviceRawArtifactInput>({
+    value: rawArtifacts,
+    code: "VAULT_INVALID_DEVICE_RAW_ARTIFACTS",
+    message: "Device batch rawArtifacts must be an array when provided.",
+    itemCode: "VAULT_INVALID_RAW_ARTIFACT",
+    itemLabel: "Device raw artifact",
+  });
 
   if (eventInputs.length === 0 && sampleInputs.length === 0 && rawArtifactInputs.length === 0) {
     throw new VaultError(
@@ -1437,11 +1439,10 @@ export async function importDocument({
     source,
     title: String(title ?? raw.originalFileName).trim(),
     note,
-    relatedIds: [documentId],
-    rawRefs: pendingAttachmentState.projections.rawRefs,
+    links: [{ type: "related_to", targetId: documentId }],
+    rawRefs: pendingAttachmentState.rawRefs,
     fields: {
       documentId,
-      documentPath: pendingAttachmentState.projections.documentPath,
       mimeType: raw.mediaType,
     },
   });
@@ -1473,7 +1474,6 @@ export async function importDocument({
       if (!stagedAttachments) {
         throw new VaultError("EVENT_ATTACHMENTS_MISSING", "Document import expected one staged attachment.");
       }
-      const projections = buildAttachmentCompatibilityProjections(stagedAttachments.attachments);
       const event = prepareStoredEventLedgerEntry(
         {
           ...eventSeed,
@@ -1481,7 +1481,6 @@ export async function importDocument({
           fields: {
             ...eventSeed.fields,
             attachments: stagedAttachments.attachments,
-            documentPath: projections.documentPath ?? raw.relativePath,
           },
         },
         eventId,
@@ -1517,14 +1516,20 @@ export async function addMeal({
   note,
   photoPath,
   audioPath,
+  ingredients,
+  nutrition,
   source = "manual",
 }: AddMealInput): Promise<AddMealResult> {
   const vault = await loadVault({ vaultRoot });
+  const normalizedNote =
+    typeof note === "string" && note.trim().length > 0 ? note.trim() : undefined;
+  const normalizedIngredients = normalizeUniqueTextList(ingredients, "ingredients");
+  const normalizedNutrition = normalizeMealNutrition(nutrition, "nutrition");
 
-  if (!photoPath && !audioPath && !note) {
+  if (!photoPath && !audioPath && !normalizedNote && !normalizedIngredients && !normalizedNutrition) {
     throw new VaultError(
       "VAULT_MEAL_CONTENT_REQUIRED",
-      "Meal imports require at least one of photoPath, audioPath, or note.",
+      "Meal imports require at least one of photoPath, audioPath, note, ingredients, or nutrition.",
     );
   }
 
@@ -1572,13 +1577,13 @@ export async function addMeal({
     timeZone: vault.metadata.timezone,
     source,
     title: "Meal",
-    note,
-    relatedIds: [mealId],
-    rawRefs: pendingAttachmentState.projections.rawRefs,
+    note: normalizedNote,
+    links: [{ type: "related_to", targetId: mealId }],
+    rawRefs: pendingAttachmentState.rawRefs,
     fields: {
       mealId,
-      photoPaths: pendingAttachmentState.projections.photoPaths,
-      audioPaths: pendingAttachmentState.projections.audioPaths,
+      ingredients: normalizedIngredients,
+      nutrition: normalizedNutrition,
     },
   });
   return runCanonicalWrite({
@@ -1607,15 +1612,10 @@ export async function addMeal({
       });
       let rawRefs = eventSeed.rawRefs;
       let attachments: EventAttachment[] | undefined;
-      let photoPaths = eventSeed.fields.photoPaths as string[];
-      let audioPaths = eventSeed.fields.audioPaths as string[];
 
       if (stagedAttachments) {
-        const projections = buildAttachmentCompatibilityProjections(stagedAttachments.attachments);
-        rawRefs = projections.rawRefs;
+        rawRefs = stagedAttachments.rawRefs;
         attachments = stagedAttachments.attachments;
-        photoPaths = projections.photoPaths;
-        audioPaths = projections.audioPaths;
       }
       const manifestPath = stagedAttachments
         ? stagedAttachments.manifestPath
@@ -1648,8 +1648,6 @@ export async function addMeal({
           fields: {
             ...eventSeed.fields,
             attachments,
-            photoPaths,
-            audioPaths,
           },
         },
         eventId,

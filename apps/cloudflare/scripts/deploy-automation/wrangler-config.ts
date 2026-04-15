@@ -15,7 +15,6 @@ export function buildHostedWranglerDeployConfig(
 ): Record<string, unknown> {
   const vars: Record<string, string> = {
     HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY_ID: environment.platformEnvelopeKeyId,
-    HOSTED_EXECUTION_DEFAULT_ALARM_DELAY_MS: environment.defaultAlarmDelayMs,
     HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS: environment.maxEventAttempts,
     HOSTED_EXECUTION_RETRY_DELAY_MS: environment.retryDelayMs,
     HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: environment.runnerCommitTimeoutMs,
@@ -37,6 +36,7 @@ export function buildHostedWranglerDeployConfig(
       {
         class_name: "RunnerContainer",
         image: "../../../Dockerfile.cloudflare-hosted-runner",
+        image_build_context: "..",
         instance_type: environment.containerInstanceType,
         max_instances: environment.containerMaxInstances,
       },
@@ -73,8 +73,15 @@ export function buildHostedWranglerDeployConfig(
     observability: {
       enabled: true,
       head_sampling_rate: environment.logHeadSamplingRate,
+      logs: {
+        enabled: true,
+        invocation_logs: true,
+        persist: true,
+        head_sampling_rate: environment.logHeadSamplingRate,
+      },
       traces: {
         enabled: true,
+        persist: true,
         head_sampling_rate: environment.traceHeadSamplingRate,
       },
     },

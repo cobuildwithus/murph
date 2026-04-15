@@ -5,6 +5,27 @@ script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd -- "$script_dir/.." && pwd)"
 cd "$repo_root"
 
+workspace_artifact_lock_label="workspace-verify"
+if [[ "$#" -gt 0 ]]; then
+  workspace_artifact_lock_label+=" $1"
+fi
+
+command_requires_workspace_artifact_lock() {
+  case "${1:-}" in
+    "typecheck" | "typecheck:packages" | "test:packages:coverage" | "test:coverage" | "verify:cli")
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+if [[ "${MURPH_WORKSPACE_ARTIFACT_LOCK_HELD:-0}" != "1" ]] && command_requires_workspace_artifact_lock "${1:-}"; then
+  exec node "$repo_root/scripts/run-with-workspace-artifact-lock.mjs" "$workspace_artifact_lock_label" -- \
+    bash "$repo_root/scripts/workspace-verify.sh" "$@"
+fi
+
 readonly shell_syntax_check_scripts=(
   "scripts/check-agent-docs-drift.sh"
   "scripts/doc-gardening.sh"
@@ -32,6 +53,7 @@ readonly shell_syntax_check_scripts=(
 
 readonly node_syntax_check_scripts=(
   "scripts/build-test-runtime-prepared.mjs"
+  "scripts/run-with-workspace-artifact-lock.mjs"
   "scripts/check-workspace-package-cycles.mjs"
   "scripts/release-helpers.mjs"
   "scripts/verify-release-target.mjs"
@@ -46,6 +68,7 @@ readonly typecheck_package_dirs=(
   "packages/contracts"
   "packages/hosted-execution"
   "packages/runtime-state"
+  "packages/cloudflare-hosted-control"
   "packages/operator-config"
   "packages/assistant-engine"
   "packages/assistant-cli"
@@ -54,14 +77,17 @@ readonly typecheck_package_dirs=(
   "packages/importers"
   "packages/device-syncd"
   "packages/query"
+  "packages/inbox-services"
   "packages/inboxd"
   "packages/parsers"
+  "packages/messaging-ingress"
   "packages/gateway-core"
   "packages/gateway-local"
   "packages/cli"
   "packages/openclaw-plugin"
   "packages/assistantd"
   "packages/assistant-runtime"
+  "packages/vault-usecases"
   "apps/web"
   "apps/cloudflare"
 )
@@ -94,7 +120,11 @@ readonly app_verify_parallel_default="$([[ -n "${CI:-}" ]] && echo 0 || echo 1)"
 readonly app_verify_parallel="${MURPH_APP_VERIFY_PARALLEL:-$app_verify_parallel_default}"
 readonly test_lane_parallel_default="$([[ -n "${CI:-}" ]] && echo 0 || echo 1)"
 readonly test_lane_parallel="${MURPH_TEST_LANES_PARALLEL:-$test_lane_parallel_default}"
-readonly typecheck_workspace_concurrency_default="$([[ -n "${CI:-}" ]] && echo 2 || echo 4)"
+readonly package_coverage_concurrency_default="$([[ -n "${CI:-}" ]] && echo 1 || echo 4)"
+readonly package_coverage_concurrency_limit="$(normalize_positive_integer "${MURPH_PACKAGE_COVERAGE_CONCURRENCY:-$package_coverage_concurrency_default}" "$package_coverage_concurrency_default")"
+readonly package_coverage_vitest_max_workers_default="$([[ -n "${CI:-}" ]] && echo 50% || echo 100%)"
+readonly package_coverage_vitest_max_workers="${MURPH_PACKAGE_COVERAGE_VITEST_MAX_WORKERS:-$package_coverage_vitest_max_workers_default}"
+readonly typecheck_workspace_concurrency_default="2"
 readonly typecheck_workspace_concurrency="$(normalize_positive_integer "${MURPH_TYPECHECK_WORKSPACE_CONCURRENCY:-$typecheck_workspace_concurrency_default}" "$typecheck_workspace_concurrency_default")"
 readonly verify_retry_count="$(normalize_non_negative_integer "${MURPH_VERIFY_RETRY_COUNT:-0}" "0")"
 readonly sqlite_warning_filter_option="--require=$repo_root/config/sqlite-warning-filter.cjs"
@@ -108,10 +138,16 @@ run_timed_step() {
   local label="$1"
   shift
   local started_at="$SECONDS"
+  local step_status=0
 
   verify_log "start ${label}"
-  "$@"
-  verify_log "done ${label} (${SECONDS}s total, $((SECONDS - started_at))s step)"
+  if "$@"; then
+    verify_log "done ${label} (${SECONDS}s total, $((SECONDS - started_at))s step)"
+    return 0
+  else
+    step_status=$?
+    return "$step_status"
+  fi
 }
 
 register_background_pid() {
@@ -199,7 +235,7 @@ readonly cli_verify_test_files=(
   "packages/cli/test/assistant-observability.test.ts"
   "packages/cli/test/assistant-robustness.test.ts"
   "packages/cli/test/incur-smoke.test.ts"
-  "packages/cli/test/inbox-cli.test.ts"
+  "packages/cli/test/inbox-service-boundaries.test.ts"
   "packages/cli/test/inbox-incur-smoke.test.ts"
   "packages/cli/test/inbox-model-harness.test.ts"
   "packages/cli/test/inbox-model-route.test.ts"
@@ -303,10 +339,6 @@ compose_node_options_with_sqlite_warning_filter() {
   printf '%s\n' "$sqlite_warning_filter_option"
 }
 
-run_repo_build_with_retry() {
-  run_command_with_retry "Workspace build" pnpm build:workspace:incremental
-}
-
 run_test_runtime_artifact_build_with_retry() {
   local filtered_node_options
   filtered_node_options="$(compose_node_options_with_sqlite_warning_filter)"
@@ -329,48 +361,6 @@ run_package_command_without_node_v8_coverage_with_retry() {
   run_command_with_retry \
     "Package command for ${package_dir} (${command})" \
     env -u NODE_V8_COVERAGE pnpm --dir "$package_dir" "$command"
-}
-
-is_repo_internal_fast_path_file() {
-  local file_path="$1"
-
-  case "$file_path" in
-    agent-docs/*|config/*|docs/*|scripts/*)
-      return 0
-      ;;
-    AGENTS.md|ARCHITECTURE.md|README.md|vitest.config.ts|tsconfig.json|tsconfig.*.json)
-      return 0
-      ;;
-    *)
-      return 1
-      ;;
-  esac
-}
-
-should_skip_app_verification() {
-  local changed_file
-  local saw_changed_file=0
-
-  while IFS= read -r changed_file; do
-    if [[ -z "$changed_file" ]]; then
-      continue
-    fi
-
-    saw_changed_file=1
-
-    if ! is_repo_internal_fast_path_file "$changed_file"; then
-      return 1
-    fi
-  done < <(
-    git diff --name-only --relative HEAD -- 2>/dev/null || true
-    git ls-files --others --exclude-standard 2>/dev/null || true
-  )
-
-  if [[ "$saw_changed_file" -eq 0 ]]; then
-    return 1
-  fi
-
-  return 0
 }
 
 wait_for_background_jobs() {
@@ -399,14 +389,29 @@ wait_for_background_jobs() {
   return 0
 }
 
+wait_for_background_jobs_allow_failures() {
+  local failed=0
+  local pid
+
+  for pid in "$@"; do
+    if ! wait "$pid"; then
+      failed=1
+    fi
+
+    unregister_background_pid "$pid"
+  done
+
+  if [[ "$failed" -ne 0 ]]; then
+    return 1
+  fi
+
+  return 0
+}
+
 run_test_packages_common() {
   if [[ "$test_lane_parallel" == "1" ]]; then
     local pids=()
 
-    run_timed_step "Tracked artifact hygiene" pnpm no-js &
-    local no_js_pid="$!"
-    pids+=("$no_js_pid")
-    register_background_pid "$no_js_pid"
     run_timed_step "Contracts package test" pnpm --dir "packages/contracts" test &
     local contracts_test_pid="$!"
     pids+=("$contracts_test_pid")
@@ -423,19 +428,11 @@ run_test_packages_common() {
     return 0
   fi
 
-  run_timed_step "Tracked artifact hygiene" pnpm no-js
   run_timed_step "Contracts package test" pnpm --dir "packages/contracts" test
   run_timed_step "OpenClaw plugin test" pnpm --dir "packages/openclaw-plugin" test
 }
 
 run_test_apps() {
-  local mode="${1:-auto}"
-
-  if [[ "$mode" != "force" ]] && should_skip_app_verification; then
-    verify_log "skip app verification (repo-internal fast path: changed files are limited to docs/process/verification tooling)"
-    return 0
-  fi
-
   if [[ "$app_verify_parallel" == "1" ]]; then
     local pids=()
 
@@ -471,59 +468,180 @@ run_repo_acceptance_guards() {
 }
 
 run_fixture_smoke_verification() {
-  pnpm exec tsx "e2e/smoke/verify-fixtures.ts" "$@"
+  pnpm exec tsx "e2e/smoke/verify-scenario-integrity.ts" "$@"
 }
 
 run_repo_vitest() {
   # Keep worker selection centralized in the Vitest configs so local runs use
   # the faster 75% default while CI stays at 50%, with the same env override
   # path (`MURPH_VITEST_MAX_WORKERS`) for both lanes.
-  MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 pnpm exec vitest run --config "vitest.config.ts" "$@"
+  pnpm exec vitest run --config "vitest.config.ts" "$@"
 }
 
-run_owner_package_coverage() {
+run_workspace_package_coverage() {
+  local package_dir="$1"
+  local label="$2"
+
+  if [[ "$package_dir" == "packages/cli" ]]; then
+    run_timed_step \
+      "$label" \
+      env MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 MURPH_VITEST_MAX_WORKERS="$package_coverage_vitest_max_workers" pnpm exec vitest run --config "packages/cli/vitest.workspace.ts" --coverage
+    return $?
+  fi
+
   run_timed_step \
-    "Core owner coverage" \
-    pnpm --dir "packages/core" exec vitest run --config "vitest.config.ts" --coverage
-  run_timed_step \
-    "Hosted execution owner coverage" \
-    pnpm --dir "packages/hosted-execution" exec vitest run --config "vitest.config.ts" --coverage
-  run_timed_step \
-    "Importers owner coverage" \
-    pnpm --dir "packages/importers" exec vitest run --config "vitest.config.ts" --coverage
-  run_timed_step \
-    "Query owner coverage" \
-    pnpm --dir "packages/query" exec vitest run --config "vitest.config.ts" --coverage
+    "$label" \
+    env MURPH_VITEST_MAX_WORKERS="$package_coverage_vitest_max_workers" pnpm --dir "$package_dir" test:coverage
 }
 
-run_rollout_package_coverage() {
-  run_timed_step \
-    "Assistant engine package coverage" \
-    pnpm --dir "packages/assistant-engine" exec vitest run --config "vitest.config.ts" --coverage
-  run_timed_step \
-    "Assistant runtime package coverage" \
-    pnpm --dir "packages/assistant-runtime" exec vitest run --config "vitest.config.ts" --coverage
-  run_timed_step \
-    "Assistantd package coverage" \
-    pnpm --dir "packages/assistantd" exec vitest run --config "vitest.config.ts" --coverage
-  run_timed_step \
-    "CLI package coverage" \
-    env MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 pnpm exec vitest run --config "packages/cli/vitest.workspace.ts" --coverage
-  run_timed_step \
-    "Contracts package coverage" \
-    pnpm --dir "packages/contracts" exec vitest run --config "vitest.config.ts" --coverage
-  run_timed_step \
-    "Device syncd package coverage" \
-    pnpm --dir "packages/device-syncd" exec vitest run --config "vitest.config.ts" --coverage
-  run_timed_step \
-    "Inboxd package coverage" \
-    pnpm --dir "packages/inboxd" exec vitest run --config "vitest.config.ts" --coverage
-  run_timed_step \
-    "Messaging ingress package coverage" \
-    pnpm --dir "packages/messaging-ingress" exec vitest run --config "vitest.config.ts" --coverage
-  run_timed_step \
-    "OpenClaw package coverage" \
-    pnpm --dir "packages/openclaw-plugin" exec vitest run --config "vitest.config.ts" --coverage
+run_all_package_coverage() {
+  local package_coverage_dirs=(
+    "packages/assistant-cli"
+    "packages/assistant-engine"
+    "packages/assistant-runtime"
+    "packages/assistantd"
+    # Keep CLI out of the same outer batch as contracts: contracts artifact
+    # verification rebuilds shared dist outputs that the CLI built-runtime tests import.
+    "packages/cloudflare-hosted-control"
+    "packages/contracts"
+    "packages/core"
+    "packages/device-syncd"
+    "packages/cli"
+    "packages/gateway-core"
+    "packages/gateway-local"
+    "packages/hosted-execution"
+    "packages/importers"
+    "packages/inbox-services"
+    "packages/inboxd"
+    "packages/messaging-ingress"
+    "packages/openclaw-plugin"
+    "packages/operator-config"
+    "packages/parsers"
+    "packages/query"
+    "packages/runtime-state"
+    "packages/setup-cli"
+    "packages/vault-usecases"
+  )
+  local package_coverage_labels=(
+    "Assistant CLI package coverage"
+    "Assistant engine package coverage"
+    "Assistant runtime package coverage"
+    "Assistantd package coverage"
+    "Cloudflare hosted control package coverage"
+    "Contracts package coverage"
+    "Core owner coverage"
+    "Device syncd package coverage"
+    "CLI package coverage"
+    "Gateway core package coverage"
+    "Gateway local package coverage"
+    "Hosted execution owner coverage"
+    "Importers owner coverage"
+    "Inbox services package coverage"
+    "Inboxd package coverage"
+    "Messaging ingress package coverage"
+    "OpenClaw package coverage"
+    "Operator config package coverage"
+    "Parsers package coverage"
+    "Query owner coverage"
+    "Runtime state package coverage"
+    "Setup CLI package coverage"
+    "Vault usecases package coverage"
+  )
+  local package_count="${#package_coverage_dirs[@]}"
+  local package_coverage_concurrency="$package_coverage_concurrency_limit"
+  local package_index=0
+  local failed_package_labels=()
+  local saw_unreported_background_failure=0
+  local failure_dir
+  local failure_dir_quoted
+  failure_dir="$(mktemp -d "${TMPDIR:-/tmp}/murph-package-coverage-failures.XXXXXX")"
+  printf -v failure_dir_quoted '%q' "$failure_dir"
+
+  record_failed_package_coverage() {
+    local label="$1"
+    failed_package_labels+=("$label")
+  }
+
+  collect_failed_package_coverage_labels() {
+    local failure_file
+    local label
+
+    while IFS= read -r -d '' failure_file; do
+      if ! IFS= read -r label <"$failure_file"; then
+        continue
+      fi
+      [[ -n "$label" ]] || continue
+      record_failed_package_coverage "$label"
+    done < <(find "$failure_dir" -type f -print0 | sort -z)
+  }
+
+  trap "rm -rf -- $failure_dir_quoted" RETURN
+
+  # Each package coverage command manages its own Vitest workers, so keep the
+  # outer package fanout bounded to avoid oversubscribing local machines.
+  if [[ "$package_coverage_concurrency" -gt "$package_count" ]]; then
+    package_coverage_concurrency="$package_count"
+  fi
+
+  if [[ "$package_coverage_concurrency" -le 1 ]]; then
+    while [[ "$package_index" -lt "$package_count" ]]; do
+      if ! run_workspace_package_coverage \
+        "${package_coverage_dirs[$package_index]}" \
+        "${package_coverage_labels[$package_index]}"; then
+        record_failed_package_coverage "${package_coverage_labels[$package_index]}"
+      fi
+      package_index=$((package_index + 1))
+    done
+    if [[ "${#failed_package_labels[@]}" -gt 0 ]]; then
+      verify_log "package coverage failures: ${failed_package_labels[*]}"
+      return 1
+    fi
+    return 0
+  fi
+
+  while [[ "$package_index" -lt "$package_count" ]]; do
+    local batch_pids=()
+    local batch_slots=0
+
+    while [[ "$package_index" -lt "$package_count" && "$batch_slots" -lt "$package_coverage_concurrency" ]]; do
+      local failure_file="$failure_dir/$package_index"
+      (
+        if ! run_workspace_package_coverage \
+          "${package_coverage_dirs[$package_index]}" \
+          "${package_coverage_labels[$package_index]}"; then
+          printf '%s\n' "${package_coverage_labels[$package_index]}" >"$failure_file"
+          exit 1
+        fi
+      ) &
+      local coverage_pid="$!"
+      batch_pids+=("$coverage_pid")
+      register_background_pid "$coverage_pid"
+      package_index=$((package_index + 1))
+      batch_slots=$((batch_slots + 1))
+    done
+
+    if ! wait_for_background_jobs_allow_failures "${batch_pids[@]}"; then
+      saw_unreported_background_failure=1
+    fi
+  done
+
+  collect_failed_package_coverage_labels
+
+  if [[ "${#failed_package_labels[@]}" -gt 0 ]]; then
+    if [[ "$saw_unreported_background_failure" -ne 0 ]]; then
+      verify_log "package coverage failures: ${failed_package_labels[*]} plus an unreported background package coverage failure"
+      return 1
+    fi
+    verify_log "package coverage failures: ${failed_package_labels[*]}"
+    return 1
+  fi
+
+  if [[ "$saw_unreported_background_failure" -ne 0 ]]; then
+    verify_log "package coverage failures: unreported background package coverage failure"
+    return 1
+  fi
+
+  return 0
 }
 
 run_typecheck() {
@@ -533,23 +651,16 @@ run_typecheck() {
   run_timed_step "Workspace boundary checks" run_workspace_boundary_check
   run_timed_step "Repo TS tools typecheck" pnpm exec tsc -p "tsconfig.tools.json" --pretty false
   run_timed_step "Contracts build" pnpm --dir "packages/contracts" build
-  run_timed_step "Workspace build" run_repo_build_with_retry
   run_timed_step "Workspace package/app typecheck" run_typecheck_packages
 }
 
 run_test() {
-  run_repo_acceptance_guards
-  run_timed_step "Package smoke prerequisites" run_test_packages_common
+  run_timed_step "Package behavior prerequisites" run_test_packages_common
 
   if [[ "$test_lane_parallel" == "1" ]]; then
     local test_packages_pid
     local smoke_pid
 
-    # The app verify lane imports built workspace artifacts, so a clean run must
-    # finish the shared prepared-artifact build before any app checks start.
-    # Keep repo Vitest and fixture smoke parallel, but do not overlap them with
-    # app verify because hosted-web verify also runs Vitest and Prisma generation.
-    run_timed_step "Prepared runtime artifacts" prepare_repo_vitest_runtime_artifacts
     run_timed_step "Repo Vitest" run_repo_vitest --no-coverage &
     test_packages_pid="$!"
     register_background_pid "$test_packages_pid"
@@ -558,18 +669,14 @@ run_test() {
     register_background_pid "$smoke_pid"
 
     wait_for_background_jobs "$test_packages_pid" "$smoke_pid"
-    run_timed_step "App verification" run_test_apps
   else
-    run_timed_step "Prepared runtime artifacts" prepare_repo_vitest_runtime_artifacts
     run_timed_step "Repo Vitest" run_repo_vitest --no-coverage
-    run_timed_step "App verification" run_test_apps
     run_timed_step "Fixture smoke verification" run_fixture_smoke_verification
   fi
 }
 
 run_test_packages() {
-  run_timed_step "Package smoke prerequisites" run_test_packages_common
-  run_timed_step "Prepared runtime artifacts" prepare_repo_vitest_runtime_artifacts
+  run_timed_step "Package behavior prerequisites" run_test_packages_common
   run_timed_step "Repo Vitest" run_repo_vitest --no-coverage
 }
 
@@ -578,14 +685,12 @@ run_test_packages_coverage() {
 
   run_timed_step \
     "Coverage cleanup" \
-    node "scripts/rm-paths.mjs" "coverage" "packages/core/coverage" "packages/hosted-execution/coverage" "packages/importers/coverage" "packages/query/coverage"
-  run_timed_step "Package smoke prerequisites" run_test_packages_common
+    node "scripts/rm-paths.mjs" "coverage" "packages/*/coverage"
+  run_timed_step "Tracked artifact hygiene" pnpm no-js
   if [[ "$artifacts_prepared" != "1" ]]; then
     run_timed_step "Prepared runtime artifacts" prepare_repo_vitest_runtime_artifacts
   fi
-  run_timed_step "Repo Vitest" run_repo_vitest --no-coverage
-  run_timed_step "Owner package coverage" run_owner_package_coverage
-  run_timed_step "Rollout package coverage" run_rollout_package_coverage
+  run_timed_step "All package coverage" run_all_package_coverage
 }
 
 run_test_coverage() {
@@ -597,8 +702,9 @@ run_test_coverage() {
     local smoke_pid
 
     # Coverage and app verify both depend on the prepared runtime artifacts.
-    # Keep coverage and fixture smoke parallel, but wait to start app verify
-    # until the repo Vitest lane has released Prisma/client and app-test resources.
+    # Keep package coverage and fixture smoke parallel, but wait to start app
+    # verify until the package-coverage suite has released shared app-test
+    # resources such as Prisma/client generation.
     run_timed_step "Prepared runtime artifacts" prepare_repo_vitest_runtime_artifacts
     run_timed_step "Package coverage suite" run_test_packages_coverage 1 &
     coverage_pid="$!"
@@ -631,6 +737,7 @@ run_test_diff() {
   local typecheck_dirs=("${diff_typecheck_dirs[@]-}")
   local test_dirs=("${diff_test_dirs[@]-}")
   local affected_app_dirs=("${diff_affected_app_dirs[@]-}")
+  local run_repo_tools_tests="${diff_run_repo_tools_tests:-0}"
 
   verify_log "diff scope: ${diff_summary}"
 
@@ -643,6 +750,9 @@ run_test_diff() {
   if [[ "$diff_repo_internal_fast_path" == "1" ]]; then
     verify_log "diff-aware verification selected the repo-internal fast path"
     run_diff_repo_internal_fast_path
+    if [[ "$run_repo_tools_tests" == "1" ]]; then
+      run_timed_step "Repo tools tests" pnpm test:repo-tools
+    fi
     run_timed_step "Dependency policy" run_dependency_policy_check
     return 0
   fi
@@ -660,7 +770,11 @@ run_test_diff() {
   fi
 
   if [[ "$diff_run_verify_cli" == "1" ]]; then
-    run_timed_step "CLI targeted verification" run_verify_cli
+    run_timed_step "CLI targeted verification" run_verify_cli_with_workspace_artifact_lock
+  fi
+
+  if [[ "$run_repo_tools_tests" == "1" ]]; then
+    run_timed_step "Repo tools tests" pnpm test:repo-tools
   fi
 
   local package_dir
@@ -699,6 +813,15 @@ run_verify_cli() {
     env MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 pnpm exec vitest run --config "packages/cli/vitest.workspace.ts" "${cli_verify_test_files[@]}" --no-coverage
 }
 
+run_verify_cli_with_workspace_artifact_lock() {
+  if [[ "${MURPH_WORKSPACE_ARTIFACT_LOCK_HELD:-0}" == "1" ]]; then
+    run_verify_cli
+    return 0
+  fi
+
+  bash "$repo_root/scripts/workspace-verify.sh" verify:cli
+}
+
 main() {
   local command="${1:-}"
 
@@ -716,7 +839,7 @@ main() {
       run_test_packages
       ;;
     "test:apps")
-      run_test_apps "force"
+      run_test_apps
       ;;
     "test:packages:coverage")
       run_test_packages_coverage

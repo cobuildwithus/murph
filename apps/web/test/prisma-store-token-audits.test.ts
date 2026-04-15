@@ -9,27 +9,26 @@ describe("PrismaHostedTokenAuditStore logging", () => {
 
   it("redacts session-linked identifiers from token audit logs", async () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const createSpy = vi.fn(async ({ data }: { data: Record<string, unknown> }) => ({
+      ...data,
+      action: "token_exported",
+      channel: "agent_export",
+      connectionId: "dsc_123",
+      createdAt: new Date("2026-04-05T00:00:00.000Z"),
+      id: 7,
+      keyVersion: "v1",
+      provider: "oura",
+      sessionId: data.sessionId,
+      tokenVersion: 3,
+      userId: "user-123",
+    }));
     const store = new PrismaHostedTokenAuditStore({
       deviceTokenAudit: {
-        create: async () => ({
-          action: "token_exported",
-          channel: "agent_export",
-          connectionId: "dsc_123",
-          createdAt: new Date("2026-04-05T00:00:00.000Z"),
-          id: 7,
-          keyVersion: "v1",
-          metadataJson: {
-            origin: "test",
-          },
-          provider: "oura",
-          sessionId: "sess_123",
-          tokenVersion: 3,
-          userId: "user-123",
-        }),
+        create: createSpy,
       },
     } as never);
 
-    await store.createTokenAudit({
+    const audit = await store.createTokenAudit({
       action: "token_exported",
       channel: "agent_export",
       connectionId: "dsc_123",
@@ -40,6 +39,12 @@ describe("PrismaHostedTokenAuditStore logging", () => {
       userId: "user-123",
     });
 
+    expect(createSpy).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        sessionId: "sess_123",
+      }),
+    }));
+    expect(audit.sessionId).toBe("sess_123");
     expect(warnSpy).toHaveBeenCalledTimes(1);
     const payload = JSON.parse(warnSpy.mock.calls[0]?.[0] ?? "{}") as Record<string, unknown>;
     expect(payload).toMatchObject({

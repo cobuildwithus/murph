@@ -54,7 +54,6 @@ export interface AssistantLocalAutomationRunInput {
   modelSpec?: RunAssistantAutomationInput['modelSpec']
   once?: boolean
   requestId?: string | null
-  scanIntervalMs?: number
   sessionMaxAgeMs?: number | null
   startDaemon?: boolean
   vault?: string | null
@@ -287,9 +286,10 @@ export function createAssistantLocalService(vaultRoot: string): AssistantLocalSe
           modelSpec: input?.modelSpec,
           once: input?.once ?? true,
           requestId: input?.requestId ?? null,
-          scanIntervalMs: input?.scanIntervalMs,
           sessionMaxAgeMs: input?.sessionMaxAgeMs ?? null,
-          startDaemon: input?.startDaemon ?? false,
+          startDaemon:
+            input?.startDaemon ??
+            ((input?.once ?? true) ? false : true),
           vault: resolveAssistantdRequestVault(input?.vault, vaultRoot),
           vaultServices,
         }),

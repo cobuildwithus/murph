@@ -19,6 +19,7 @@ import {
   readHostedWebCallbackSigningEnvironment,
   type HostedWebCallbackSigningEnvironment,
 } from "./web-callback-auth.ts";
+import type { StringEnvSource } from "./string-env.ts";
 
 export type HostedExecutionEnvironment = Omit<
   HostedExecutionWorkerEnvironment,
@@ -41,10 +42,8 @@ export type HostedExecutionEnvironment = Omit<
   webCallbackSigning: HostedWebCallbackSigningEnvironment;
 };
 
-type EnvSource = Readonly<Record<string, string | undefined>>;
-
 export function readHostedExecutionEnvironment(
-  source: EnvSource = process.env,
+  source: StringEnvSource = process.env,
 ): HostedExecutionEnvironment {
   const {
     automationRecipientPrivateJwkJson,

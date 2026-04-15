@@ -21,12 +21,18 @@ vi.mock("../src/operations/canonical-write-lock.ts", () => ({
     state: "unlocked" as const,
     relativePath: ".runtime/locks/canonical-write",
   }),
+  withCanonicalWriteLockScope: vi.fn(async (_vaultRoot: string, run: () => Promise<unknown>) => {
+    return await run();
+  }),
 }));
 
 import {
+  addActivitySession,
+  addBodyMeasurement,
   appendJournal,
   checkpointExperiment,
   createExperiment,
+  addMeal,
   initializeVault,
   linkJournalEventIds,
   linkJournalStreams,
@@ -246,7 +252,55 @@ test("high-level core provider, event, and summary mutation ports preserve canon
   assert.equal(providerDocument.attributes.title, "Labcorp West");
   assert.ok(eventRecord);
   assert.deepEqual(eventRecord.links, [{ type: "related_to", targetId: createdProvider.providerId }]);
-  assert.deepEqual(eventRecord.relatedIds, [createdProvider.providerId]);
+});
+
+test("append-style mutation ports bypass the outer canonical write lock while explicit-id rewrites keep it", async () => {
+  const vaultRoot = await makeTempDirectory("murph-core-boundary-lock");
+  await initializeVault({ vaultRoot });
+
+  const { withCanonicalWriteLockScope } = await import("../src/operations/canonical-write-lock.ts");
+  const scopeMock = vi.mocked(withCanonicalWriteLockScope);
+
+  scopeMock.mockClear();
+
+  await addMeal({
+    vaultRoot,
+    occurredAt: "2026-03-13T12:00:00.000Z",
+    note: "Lunch",
+  });
+
+  assert.equal(scopeMock.mock.calls.length, 0);
+
+  await addActivitySession({
+    vaultRoot,
+    draft: {
+      id: "evt_01JQ9R7WF97M1WAB2B4QF2Q1AE",
+      occurredAt: "2026-03-13T15:00:00.000Z",
+      title: "Explicit activity rewrite",
+      activityType: "strength-training",
+      durationMinutes: 30,
+      workout: {
+        exercises: [],
+      },
+    },
+  });
+  await addBodyMeasurement({
+    vaultRoot,
+    draft: {
+      id: "evt_01JQ9R7WF97M1WAB2B4QF2Q1AF",
+      occurredAt: "2026-03-13T16:00:00.000Z",
+      title: "Explicit measurement rewrite",
+      measurements: [
+        {
+          type: "weight",
+          value: 182.4,
+          unit: "lb",
+        },
+      ],
+    },
+  });
+
+  assert.equal(scopeMock.mock.calls.length, 2);
 });
 
 test("high-level core experiment mutation ports reject invalid experiment statuses consistently", async () => {
@@ -298,7 +352,7 @@ test("helper-backed experiment mutation readers preserve exact invalid-frontmatt
   const capture = {
     captureId: "cap_01JNV422Y2M5ZBV64ZP4N1DRC1",
     eventId: "evt_01JNV422Y2M5ZBV64ZP4N1DRC2",
-    source: "imessage",
+    source: "telegram",
     occurredAt: "2026-03-13T08:00:00.000Z",
     text: "Reader boundary inbox note",
     thread: {
@@ -394,10 +448,6 @@ test("high-level canonical mutation ports dedupe trimmed duplicate experiment an
     { type: "related_to", targetId: created.experiment.id },
     { type: "related_to", targetId: "goal_01JNW7YJ7MNE7M9Q2QWQK4Z3F8" },
   ]);
-  assert.deepEqual(eventRecord.relatedIds, [
-    created.experiment.id,
-    "goal_01JNW7YJ7MNE7M9Q2QWQK4Z3F8",
-  ]);
   assert.deepEqual(eventRecord.rawRefs, ["raw/documents/a.pdf", "raw/documents/b.pdf"]);
 });
 
@@ -413,7 +463,7 @@ test("helper-backed journal mutation readers preserve exact invalid-frontmatter 
   const capture = {
     captureId: "cap_01JNV422Y2M5ZBV64ZP4N1DRD1",
     eventId: "evt_01JNV422Y2M5ZBV64ZP4N1DRD2",
-    source: "imessage",
+    source: "telegram",
     occurredAt: "2026-03-13T09:00:00.000Z",
     text: "Reader boundary journal note",
     thread: {
@@ -472,7 +522,7 @@ test("high-level core inbox promotion ports preserve journal and experiment-note
   const capture = {
     captureId: "cap_01JNV422Y2M5ZBV64ZP4N1DRB1",
     eventId: "evt_01JNV422Y2M5ZBV64ZP4N1DRB2",
-    source: "imessage",
+    source: "telegram",
     occurredAt: "2026-03-13T08:00:00.000Z",
     text: "Breakfast note from inbox",
     thread: {

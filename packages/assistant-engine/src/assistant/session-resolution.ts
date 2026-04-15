@@ -93,6 +93,13 @@ export function buildResolveAssistantSessionInput(
     baseUrl: providerConfig.baseUrl,
     apiKeyEnv: providerConfig.apiKeyEnv,
     providerName: providerConfig.providerName,
+    ...(providerConfig.provider === 'openai-compatible'
+      ? {
+          presetId: providerConfig.presetId,
+          webSearch: providerConfig.webSearch,
+          zeroDataRetention: providerConfig.zeroDataRetention ?? null,
+        }
+      : {}),
     headers:
       providerConfig.provider === 'openai-compatible' ? providerConfig.headers : null,
     reasoningEffort: providerConfig.reasoningEffort,

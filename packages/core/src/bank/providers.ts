@@ -283,6 +283,12 @@ export async function deleteProvider({
     operationType: "provider_delete",
     summary: `Delete provider ${provider.providerId}`,
     relativePath: provider.relativePath,
+    audit: {
+      action: "provider_delete",
+      commandName: "core.deleteProvider",
+      summary: `Deleted provider ${provider.providerId}.`,
+      targetIds: [provider.providerId],
+    },
   });
 
   return {

@@ -1,17 +1,19 @@
-import { parseHostedEmailSendRequest } from "@murphai/assistant-runtime";
+import { parseHostedEmailSendRequest } from "@murphai/assistant-runtime/hosted-email";
+import {
+  deriveHostedExecutionErrorCode,
+} from "@murphai/hosted-execution";
+import {
+  parseHostedAssistantDeliveryRecord,
+  parseHostedAssistantDeliveryEffects,
+} from "@murphai/hosted-execution/side-effects";
+import {
+  parseHostedExecutionBundlePayload,
+} from "@murphai/hosted-execution/parsers";
 import {
   HOSTED_EXECUTION_RUNNER_EMAIL_SEND_PATH,
-  parseHostedExecutionBundlePayload,
-  parseHostedExecutionBundleRef,
-  parseHostedExecutionSideEffectRecord,
-  parseHostedExecutionSideEffects,
-  type HostedExecutionBundleRef,
-  type HostedExecutionSideEffectRecord,
-} from "@murphai/hosted-execution";
-import { gatewayProjectionSnapshotSchema } from "@murphai/gateway-core";
+} from "@murphai/hosted-execution/routes";
 
 import { readHostedExecutionEnvironment } from "../env.ts";
-import type { HostedExecutionCommitPayload } from "../execution-journal.ts";
 import { json, methodNotAllowed, notFound, readJsonObject } from "../json.ts";
 import {
   readHostedEmailConfig,
@@ -19,9 +21,10 @@ import {
   sendHostedEmailMessage,
 } from "../hosted-email.ts";
 import {
-  HostedExecutionSideEffectConflictError,
-  createHostedExecutionSideEffectJournalStore,
+  HostedAssistantDeliveryConflictError,
+  createHostedAssistantDeliveryJournalStore,
 } from "../side-effect-journal.ts";
+import { asWorkerStringEnvironment } from "../worker-contracts.ts";
 import {
   decodeRouteParam,
   readOptionalString,
@@ -42,23 +45,13 @@ export async function handleRunnerResultsRequest(input: {
   url: URL;
   userId: string;
 }): Promise<Response> {
-  const commitMatch = /^\/events\/(?<eventId>[^/]+)\/commit$/u.exec(input.url.pathname);
-  if (commitMatch?.groups) {
-    if (input.request.method !== "POST") {
-      return methodNotAllowed();
-    }
-
-    const eventId = decodeRouteParam(commitMatch.groups.eventId);
-    return forwardRunnerCommit(input.userId, eventId, await readJsonObject(input.request), input.env);
-  }
-
-  const sideEffectMatch = /^\/(?:intents|effects)\/(?<effectId>[^/]+)$/u.exec(input.url.pathname);
+  const sideEffectMatch = /^\/effects\/(?<effectId>[^/]+)$/u.exec(input.url.pathname);
   if (sideEffectMatch?.groups) {
     if (input.request.method !== "DELETE" && input.request.method !== "GET" && input.request.method !== "PUT") {
       return methodNotAllowed();
     }
 
-    return handleRunnerSideEffectRequest({
+    return handleRunnerAssistantDeliveryRequest({
       bucket: input.bucket,
       env: input.env,
       effectId: decodeRouteParam(sideEffectMatch.groups.effectId),
@@ -144,9 +137,7 @@ async function handleRunnerEmailSendRequest(input: {
 }): Promise<Response> {
   const payload = await sendHostedEmailMessage({
     bucket: input.bucket,
-    config: readHostedEmailConfig(
-      input.env as unknown as Readonly<Record<string, string | undefined>>,
-    ),
+    config: readHostedEmailConfig(asWorkerStringEnvironment(input.env)),
     key: input.environment.platformEnvelopeKey,
     keyId: input.environment.platformEnvelopeKeyId,
     keysById: input.environment.platformEnvelopeKeysById,
@@ -160,24 +151,7 @@ async function handleRunnerEmailSendRequest(input: {
   });
 }
 
-async function forwardRunnerCommit(
-  userId: string,
-  eventId: string,
-  payload: Record<string, unknown>,
-  env: RunnerOutboundEnvironmentSource,
-): Promise<Response> {
-  const stub = await resolveRunnerOutboundUserRunnerStub(env, userId);
-
-  return json({
-    committed: await stub.commit({
-      eventId,
-      payload: parseHostedExecutionCommitRequest(payload),
-    }),
-    ok: true,
-  });
-}
-
-async function handleRunnerSideEffectRequest(input: {
+async function handleRunnerAssistantDeliveryRequest(input: {
   bucket: RunnerOutboundEnvironmentSource["BUNDLES"];
   env: RunnerOutboundEnvironmentSource;
   effectId: string;
@@ -192,7 +166,7 @@ async function handleRunnerSideEffectRequest(input: {
     environment: input.environment,
     userId: input.userId,
   });
-  const journalStore = createHostedExecutionSideEffectJournalStore({
+  const journalStore = createHostedAssistantDeliveryJournalStore({
     bucket: input.bucket,
     key: crypto.rootKey,
     keyId: crypto.rootKeyId,
@@ -201,20 +175,16 @@ async function handleRunnerSideEffectRequest(input: {
 
   try {
     if (input.request.method === "GET" || input.request.method === "DELETE") {
-      const kindValue = input.url.searchParams.get("kind");
       const fingerprint = input.url.searchParams.get("fingerprint");
 
-      if (!kindValue || !fingerprint) {
+      if (!fingerprint) {
         return notFound();
       }
-
-      const kind = requireSideEffectKind(kindValue);
 
       if (input.request.method === "DELETE") {
         await journalStore.deletePrepared({
           effectId: input.effectId,
           fingerprint,
-          kind,
           userId: input.userId,
         });
 
@@ -227,7 +197,6 @@ async function handleRunnerSideEffectRequest(input: {
       const record = await journalStore.read({
         effectId: input.effectId,
         fingerprint,
-        kind,
         userId: input.userId,
       });
 
@@ -237,16 +206,10 @@ async function handleRunnerSideEffectRequest(input: {
       });
     }
 
-    const nextRecord = parseHostedExecutionSideEffectRecord(await readJsonObject(input.request));
+    const nextRecord = parseHostedAssistantDeliveryRecord(await readJsonObject(input.request));
     if (nextRecord.effectId !== input.effectId) {
       return json({
         error: `effectId mismatch: expected ${input.effectId}, received ${nextRecord.effectId}.`,
-      }, 400);
-    }
-
-    if (nextRecord.intentId !== input.effectId) {
-      return json({
-        error: `intentId mismatch: expected ${input.effectId}, received ${nextRecord.intentId}.`,
       }, 400);
     }
 
@@ -260,7 +223,7 @@ async function handleRunnerSideEffectRequest(input: {
       record: savedRecord,
     });
   } catch (error) {
-    if (error instanceof HostedExecutionSideEffectConflictError) {
+    if (error instanceof HostedAssistantDeliveryConflictError) {
       return json({
         error: error.message,
       }, 409);
@@ -268,37 +231,6 @@ async function handleRunnerSideEffectRequest(input: {
 
     throw error;
   }
-}
-
-function parseHostedExecutionCommitRequest(payload: Record<string, unknown>): HostedExecutionCommitPayload & {
-  currentBundleRef: HostedExecutionBundleRef | null;
-} {
-  const result = requireRecord(payload.result, "result");
-
-  return {
-    bundle: parseHostedExecutionBundlePayload(payload.bundle, "bundle"),
-    currentBundleRef: parseHostedExecutionBundleRef(payload.currentBundleRef, "currentBundleRef"),
-    gatewayProjectionSnapshot:
-      payload.gatewayProjectionSnapshot === undefined || payload.gatewayProjectionSnapshot === null
-        ? null
-        : gatewayProjectionSnapshotSchema.parse(payload.gatewayProjectionSnapshot),
-    result: {
-      eventsHandled: requireNumber(result.eventsHandled, "result.eventsHandled"),
-      nextWakeAt: readOptionalString(result.nextWakeAt, "result.nextWakeAt"),
-      summary: requireString(result.summary, "result.summary"),
-    },
-    sideEffects: parseHostedExecutionSideEffects(payload.sideEffects),
-  };
-}
-
-function requireSideEffectKind(value: unknown): HostedExecutionSideEffectRecord["kind"] {
-  const kind = requireString(value, "kind");
-
-  if (kind !== "assistant.delivery") {
-    throw new TypeError(`Unsupported hosted side-effect kind: ${kind}`);
-  }
-
-  return kind;
 }
 
 function copyBytesToArrayBuffer(bytes: Uint8Array): ArrayBuffer {

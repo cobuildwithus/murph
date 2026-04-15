@@ -18,13 +18,13 @@ import {
   stringArray,
 } from '@murphai/vault-usecases/helpers'
 
-test('link-kind and queryable helpers preserve provider and current semantics', () => {
+test('link-kind and queryable helpers preserve provider and core singleton semantics', () => {
   assert.equal(inferVaultLinkKind('prov_01JNV422Y2M5ZBV64ZP4N1DRB1'), 'entity')
   assert.equal(
     inferVaultLinkKind('prov_01JNV422Y2M5ZBV64ZP4N1DRB1', { includeProviderIds: true }),
     'provider',
   )
-  assert.equal(inferVaultLinkKind('current'), 'entity')
+  assert.equal(inferVaultLinkKind('current'), 'core')
   assert.equal(inferVaultLinkKind('evt_01JNV422Y2M5ZBV64ZP4N1DRB1'), 'event')
   assert.equal(inferVaultLinkKind('xfm_01JNV422Y2M5ZBV64ZP4N1DRB1'), 'transform')
   assert.equal(inferVaultLinkKind('pack_focus'), 'export_pack')

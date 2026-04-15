@@ -29,76 +29,7 @@ test('payload-based commands accept stdin via --input -', async () => {
     const goalId = requireData(goalUpsert).goalId
     assert.match(goalId, /^goal_/u)
 
-    const profileUpsert = await runCli<{
-      snapshotId: string
-      currentProfilePath: string
-      profile: {
-        goals: {
-          topGoalIds: string[]
-        }
-      }
-    }>(
-      ['profile', 'upsert', '--input', '-', '--vault', vaultRoot],
-      {
-        stdin: JSON.stringify({
-          source: 'manual',
-          profile: {
-            goals: {
-              topGoalIds: [goalId],
-            },
-          },
-        }),
-      },
-    )
-
-    assert.equal(profileUpsert.ok, true)
-    assert.match(requireData(profileUpsert).snapshotId, /^psnap_/u)
-    assert.equal(
-      requireData(profileUpsert).currentProfilePath,
-      'bank/profile/current.md',
-    )
-    assert.deepEqual(requireData(profileUpsert).profile.goals.topGoalIds, [goalId])
-
-    const profileShow = await runCli<{
-      entity: {
-        id: string
-        data: {
-          topGoalIds: string[]
-        }
-      }
-    }>(['profile', 'show', 'current', '--vault', vaultRoot])
-
-    assert.equal(profileShow.ok, true)
-    assert.equal(requireData(profileShow).entity.id, 'current')
-    assert.deepEqual(requireData(profileShow).entity.data.topGoalIds, [goalId])
-
-    const historyUpsert = await runCli<{
-      eventId: string
-      lookupId: string
-      ledgerFile: string
-    }>(
-      ['history', 'upsert', '--input', '-', '--vault', vaultRoot],
-      {
-        stdin: JSON.stringify({
-          kind: 'encounter',
-          occurredAt: '2026-03-12T13:00:00.000Z',
-          title: 'Primary care follow-up',
-          encounterType: 'office_visit',
-          location: 'Primary care clinic',
-        }),
-      },
-    )
-
-    assert.equal(historyUpsert.ok, true)
-    assert.match(requireData(historyUpsert).eventId, /^evt_/u)
-    assert.equal(
-      requireData(historyUpsert).lookupId,
-      requireData(historyUpsert).eventId,
-    )
-    assert.equal(
-      requireData(historyUpsert).ledgerFile,
-      'ledger/events/2026/2026-03.jsonl',
-    )
+    assert.equal(goalId.length > 0, true)
 
     const bloodTestUpsert = await runCli<{
       eventId: string

@@ -1,5 +1,3 @@
-"use client";
-
 import { useId, type FormEvent } from "react";
 
 import { Button, buttonVariants } from "@/src/components/ui/button";
@@ -15,14 +13,14 @@ import { Input } from "@/src/components/ui/input";
 import { Label } from "@/src/components/ui/label";
 import { cn } from "@/src/lib/utils";
 
+import { HostedAuthLegalNotice } from "./hosted-auth-shared";
 import { HostedUseDifferentNumberButton } from "./hosted-phone-auth-use-different-number-button";
+import { HostedVerificationCodeStep } from "./hosted-verification-code-step";
 import type {
   HostedPhoneAuthIntent,
   HostedPhoneAuthPendingAction,
   HostedPhoneCountryOption,
 } from "./hosted-phone-auth-types";
-
-export { HostedCodeEntryStep } from "./hosted-phone-auth-code-entry-step";
 
 export function HostedInviteShortcutStep({
   disabled,
@@ -57,6 +55,7 @@ export function HostedInviteShortcutStep({
           onClick={onUseDifferentNumber}
         />
       </div>
+      <HostedAuthLegalNotice />
     </div>
   );
 }
@@ -70,6 +69,7 @@ export function HostedPhoneEntryStep({
   phoneNumber,
   sendCodeDisabled,
   selectedPhoneCountry,
+  showPassiveConsentNotice = true,
   onPhoneCountryChange,
   onPhoneNumberChange,
   onSubmitPhoneEntry,
@@ -82,6 +82,7 @@ export function HostedPhoneEntryStep({
   phoneNumber: string;
   sendCodeDisabled: boolean;
   selectedPhoneCountry: HostedPhoneCountryOption;
+  showPassiveConsentNotice?: boolean;
   onPhoneCountryChange: (code: string) => void;
   onPhoneNumberChange: (value: string) => void;
   onSubmitPhoneEntry: (event: FormEvent<HTMLFormElement>) => void;
@@ -92,7 +93,7 @@ export function HostedPhoneEntryStep({
     <form className="space-y-3" onSubmit={onSubmitPhoneEntry}>
       <div className="space-y-3">
         <Label htmlFor={phoneInputId}>
-          {phoneFieldLabel ?? (intent === "signin" ? "Phone number" : "Your phone number")}
+          {phoneFieldLabel ?? (intent === "signin" || intent === "link" ? "Phone number" : "Your phone")}
         </Label>
         <div className="flex flex-col gap-3 sm:flex-row">
           <Combobox
@@ -149,9 +150,74 @@ export function HostedPhoneEntryStep({
         <Button type="submit" disabled={sendCodeDisabled} size="lg" className="w-full">
           {pendingAction === "send-code"
             ? "Sending code..."
-            : "Text me a code"}
+            : intent === "link"
+              ? "Send verification code"
+              : "Text me a code"}
         </Button>
       </div>
+      {intent === "signup" && showPassiveConsentNotice ? (
+        <HostedAuthLegalNotice />
+      ) : null}
     </form>
+  );
+}
+
+export function HostedCodeEntryStep({
+  verificationPhoneNumberHint,
+  code,
+  disabled,
+  intent,
+  pendingAction,
+  secondaryActionSize,
+  onCodeChange,
+  onResendCode,
+  onUseDifferentNumber,
+  onVerifyCode,
+}: {
+  verificationPhoneNumberHint: string;
+  code: string;
+  disabled: boolean;
+  intent: HostedPhoneAuthIntent;
+  pendingAction: HostedPhoneAuthPendingAction;
+  secondaryActionSize: "sm" | "lg";
+  onCodeChange: (value: string) => void;
+  onResendCode: () => void;
+  onUseDifferentNumber: () => void;
+  onVerifyCode: () => void;
+}) {
+  return (
+    <HostedVerificationCodeStep
+      code={code}
+      description={`We texted the latest ${
+        intent === "signin" ? "sign-in code" : intent === "link" ? "verification code" : "code"
+      } to ${verificationPhoneNumberHint}.`}
+      disabled={disabled}
+      pendingAction={
+        pendingAction === "send-code" || pendingAction === "verify-code"
+          ? pendingAction
+          : null
+      }
+      primaryActionLabel={
+        intent === "signin" ? "Sign in" : intent === "link" ? "Link phone" : "Verify phone"
+      }
+      primaryActionPendingLabel={
+        intent === "signin"
+          ? "Signing in..."
+          : intent === "link"
+            ? "Saving phone..."
+            : "Finishing setup..."
+      }
+      secondaryAction={
+        <HostedUseDifferentNumberButton
+          disabled={disabled}
+          pendingAction={pendingAction}
+          size={secondaryActionSize}
+          onClick={onUseDifferentNumber}
+        />
+      }
+      onCodeChange={onCodeChange}
+      onResendCode={onResendCode}
+      onSubmit={onVerifyCode}
+    />
   );
 }

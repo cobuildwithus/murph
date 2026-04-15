@@ -1,3 +1,7 @@
+import {
+  buildDeviceSyncCallbackErrorRedirectLocation,
+  buildDeviceSyncCallbackSuccessRedirectLocation,
+} from "@murphai/device-syncd/callback-redirect";
 import { buildPublicDeviceSyncErrorPayload } from "@murphai/device-syncd/http";
 import {
   DeviceSyncError,
@@ -15,6 +19,7 @@ const HOSTED_DEVICE_SYNC_DEFAULT_HEADERS = {
 } as const;
 
 export {
+  InvalidRouteParamEncodingError,
   readJsonObject,
   readOptionalJsonObject,
   readRawBodyBuffer,
@@ -45,42 +50,12 @@ export function redirectTo(url: string): NextResponse {
   });
 }
 
-function resetDeviceSyncCallbackParams(destination: URL): void {
-  for (const key of [
-    "deviceSyncStatus",
-    "deviceSyncProvider",
-    "deviceSyncConnectionId",
-    "deviceSyncError",
-    "deviceSyncErrorMessage",
-  ]) {
-    destination.searchParams.delete(key);
-  }
-}
-
-function updateCallbackRedirect(
-  returnTo: string | null,
-  mutate: (destination: URL) => void,
-): NextResponse | null {
-  if (!returnTo) {
-    return null;
-  }
-
-  const destination = new URL(returnTo);
-  resetDeviceSyncCallbackParams(destination);
-  mutate(destination);
-  return redirectTo(destination.toString());
-}
-
 export function providerCallbackRedirect(input: {
   returnTo: string | null;
   provider: string;
-  connectionId: string;
 }): NextResponse | null {
-  return updateCallbackRedirect(input.returnTo, (destination) => {
-    destination.searchParams.set("deviceSyncStatus", "connected");
-    destination.searchParams.set("deviceSyncProvider", input.provider);
-    destination.searchParams.set("deviceSyncConnectionId", input.connectionId);
-  });
+  const location = buildDeviceSyncCallbackSuccessRedirectLocation(input);
+  return location ? redirectTo(location) : null;
 }
 
 export function errorToCallbackRedirect(input: {
@@ -88,12 +63,12 @@ export function errorToCallbackRedirect(input: {
   provider: string;
   error: DeviceSyncError;
 }): NextResponse | null {
-  return updateCallbackRedirect(input.returnTo, (destination) => {
-    destination.searchParams.delete("deviceSyncErrorMessage");
-    destination.searchParams.set("deviceSyncStatus", "error");
-    destination.searchParams.set("deviceSyncProvider", input.provider);
-    destination.searchParams.set("deviceSyncError", input.error.code);
+  const location = buildDeviceSyncCallbackErrorRedirectLocation({
+    returnTo: input.returnTo,
+    provider: input.provider,
+    errorCode: input.error.code,
   });
+  return location ? redirectTo(location) : null;
 }
 
 function escapeHtml(value: string): string {

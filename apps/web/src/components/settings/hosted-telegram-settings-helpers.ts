@@ -28,6 +28,7 @@ export interface HostedTelegramSettingsDisplayState {
 }
 
 export type HostedTelegramSyncMode = "link" | "resync";
+export type HostedTelegramSyncOverride = Pick<HostedPrivyTelegramAccount, "telegramUserId" | "username">;
 
 export interface HostedTelegramSyncPresentation {
   errorMessage: string | null;
@@ -36,11 +37,19 @@ export interface HostedTelegramSyncPresentation {
 }
 
 export function resolveHostedTelegramSettingsDisplayState(input: {
-  syncedTelegramOverride?: HostedPrivyTelegramAccount | null;
+  syncedTelegramOverride?: HostedTelegramSyncOverride | null;
   user: HostedPrivyLinkedAccountContainer | null | undefined;
 }): HostedTelegramSettingsDisplayState {
   return {
-    currentTelegram: input.syncedTelegramOverride ?? extractHostedPrivyTelegramAccount(input.user),
+    currentTelegram: input.syncedTelegramOverride
+      ? {
+          firstName: null,
+          lastName: null,
+          photoUrl: null,
+          telegramUserId: input.syncedTelegramOverride.telegramUserId,
+          username: input.syncedTelegramOverride.username,
+        }
+      : extractHostedPrivyTelegramAccount(input.user),
   };
 }
 
@@ -88,7 +97,10 @@ export async function syncHostedTelegramConnectionWithRetry(input: {
 }): Promise<HostedTelegramSyncResult> {
   return retrySyncOperation({
     errorFactory: (message) => new HostedTelegramSyncError(null, message),
-    operation: () => syncHostedTelegramConnection(input.expectedTelegramUserId, input.fetchImpl ?? fetch),
+    operation: () => syncHostedTelegramConnection({
+      expectedTelegramUserId: input.expectedTelegramUserId,
+      fetchImpl: input.fetchImpl ?? fetch,
+    }),
     retryable: (error) =>
       error instanceof HostedTelegramSyncError && error.code === "PRIVY_TELEGRAM_NOT_READY",
     sleepImpl: input.sleepImpl,
@@ -109,10 +121,12 @@ function formatHostedTelegramSyncSuccessMessage(
     : base;
 }
 
-async function syncHostedTelegramConnection(
-  expectedTelegramUserId: string,
-  fetchImpl: typeof fetch,
-): Promise<HostedTelegramSyncResult> {
+async function syncHostedTelegramConnection(input: {
+  expectedTelegramUserId: string;
+  fetchImpl: typeof fetch;
+}): Promise<HostedTelegramSyncResult> {
+  const { expectedTelegramUserId, fetchImpl } = input;
+
   if (fetchImpl === fetch) {
     try {
       const payload = await requestHostedOnboardingJson<{

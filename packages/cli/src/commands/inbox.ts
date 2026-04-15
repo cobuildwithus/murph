@@ -30,7 +30,6 @@ import {
   inboxSourceAddResultSchema,
   inboxSourceListResultSchema,
   inboxSourceRemoveResultSchema,
-  inboxSourceValues,
 } from '@murphai/operator-config/inbox-cli-contracts'
 import {
   inboxModelBundleResultSchema,
@@ -61,11 +60,6 @@ const inboxSetupOptionFields = {
     .min(1)
     .optional()
     .describe('Optional explicit ffmpeg command or path to persist.'),
-  pdftotextCommand: z
-    .string()
-    .min(1)
-    .optional()
-    .describe('Optional explicit pdftotext command or path to persist.'),
   whisperCommand: z
     .string()
     .min(1)
@@ -77,6 +71,8 @@ const inboxSetupOptionFields = {
     .optional()
     .describe('Optional explicit whisper model path to persist.'),
 }
+
+const inboxSourceAddValues = ['telegram', 'linq', 'email'] as const
 
 export function registerInboxCommands(
   cli: Cli.Cli,
@@ -92,16 +88,6 @@ export function registerInboxCommands(
     cta: {
       description: 'Next:',
       commands: [
-        {
-          command: 'vault-cli inbox source add imessage',
-          description: 'Add an iMessage connector.',
-          options: {
-            id: 'imessage:self',
-            account: 'self',
-            includeOwn: true,
-            vault: true,
-          },
-        },
         {
           command: 'vault-cli inbox source add telegram',
           description: 'Add a Telegram long-poll connector.',
@@ -123,13 +109,7 @@ export function registerInboxCommands(
         {
           command: 'vault-cli inbox doctor',
           description: 'Verify runtime setup before backfill.',
-          args: { sourceId: 'imessage:self' },
           options: { vault: true },
-        },
-        {
-          command: 'vault-cli inbox backfill',
-          description: 'Import recent messages into the inbox runtime.',
-          options: { source: 'imessage:self', vault: true },
         },
         {
           command: 'vault-cli inbox run',
@@ -208,7 +188,6 @@ export function registerInboxCommands(
         requestId: requestIdFromOptions(context.options),
         rebuild: context.options.rebuild,
         ffmpegCommand: context.options.ffmpegCommand,
-        pdftotextCommand: context.options.pdftotextCommand,
         whisperCommand: context.options.whisperCommand,
         whisperModelPath: context.options.whisperModelPath,
         strict: context.options.strict,
@@ -245,7 +224,6 @@ export function registerInboxCommands(
         vault: context.options.vault,
         requestId: requestIdFromOptions(context.options),
         ffmpegCommand: context.options.ffmpegCommand,
-        pdftotextCommand: context.options.pdftotextCommand,
         whisperCommand: context.options.whisperCommand,
         whisperModelPath: context.options.whisperModelPath,
       })
@@ -259,21 +237,11 @@ export function registerInboxCommands(
   source.command('add', {
     args: z.object({
       source: z
-        .enum(inboxSourceValues)
+        .enum(inboxSourceAddValues)
         .describe('Connector family to add.'),
     }),
     description: 'Add a connector configuration to the local inbox runtime config.',
     examples: [
-      {
-        args: { source: 'imessage' },
-        options: {
-          id: 'imessage:self',
-          account: 'self',
-          includeOwn: true,
-          vault: './vault',
-        },
-        description: 'Configure an iMessage source for the local account.',
-      },
       {
         args: { source: 'telegram' },
         options: {
@@ -310,23 +278,19 @@ export function registerInboxCommands(
       },
     ],
     hint:
-      'Use a stable runtime id such as `imessage:self`, `telegram:bot`, `linq:default`, or `email:agentmail`; each connector id must map to a unique source/account runtime namespace, while cursor state stays in SQLite.',
+      'Use a stable runtime id such as `telegram:bot`, `linq:default`, or `email:agentmail`; each connector id must map to a unique source/account runtime namespace, while cursor state stays in SQLite.',
     options: withBaseOptions({
       id: z.string().min(1).describe('Runtime connector id.'),
       account: z
         .string()
         .min(1)
         .optional()
-        .describe('Optional account identity for the connector. Defaults to `self` for iMessage, `bot` for Telegram, and should be an AgentMail inbox id for email unless `--provision` is used; for AgentMail this is often the inbox id or inbox email address.'),
+        .describe('Optional account identity for the connector. Defaults to `bot` for Telegram, `default` for Linq, and should be an AgentMail inbox id for email unless `--provision` is used; for AgentMail this is often the inbox id or inbox email address.'),
       address: z
         .string()
         .min(1)
         .optional()
         .describe('Optional email address to associate with an existing AgentMail inbox connector.'),
-      includeOwn: z
-        .boolean()
-        .optional()
-        .describe('Include messages sent by the local account when supported.'),
       backfillLimit: z
         .number()
         .int()
@@ -389,7 +353,6 @@ export function registerInboxCommands(
         id: context.options.id,
         account: context.options.account,
         address: context.options.address,
-        includeOwn: context.options.includeOwn,
         backfillLimit: context.options.backfillLimit,
         provision: context.options.provision,
         emailDisplayName: context.options.emailDisplayName,
@@ -470,11 +433,6 @@ export function registerInboxCommands(
       {
         options: { vault: './vault' },
         description: 'Check runtime config and SQLite availability.',
-      },
-      {
-        args: { sourceId: 'imessage:self' },
-        options: { vault: './vault' },
-        description: 'Run deep iMessage-specific checks for one connector.',
       },
     ],
     options: withBaseOptions(),

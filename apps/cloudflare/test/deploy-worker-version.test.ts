@@ -12,7 +12,6 @@ describe("runHostedWorkerDeployment", () => {
       readRenderedDeployConfig: vi.fn(async () => ({
         migrations: [
           { tag: "v1" },
-          { tag: "v2" },
           { tag: "v3" },
         ],
       })),
@@ -218,6 +217,26 @@ describe("runHostedWorkerDeployment", () => {
     expect(result.mode).toBe("direct");
   });
 
+  it("rejects rollout percentages with trailing non-digit characters", async () => {
+    const dependencies = createDependencies();
+
+    await expect(runHostedWorkerDeployment({
+      configPath: "/tmp/rendered-wrangler.json",
+      dependencies,
+      env: {
+        HOSTED_EXECUTION_DEPLOYMENT_MODE: "gradual",
+        HOSTED_EXECUTION_GRADUAL_ROLLOUT_PERCENTAGE: "10%",
+      },
+      resultPath: "/tmp/deploy-result.json",
+      secretsFilePath: "/tmp/worker-secrets.json",
+      workerName: "murph-worker",
+    })).rejects.toThrow(
+      "HOSTED_EXECUTION_GRADUAL_ROLLOUT_PERCENTAGE must be an integer between 0 and 100.",
+    );
+
+    expect(dependencies.mkdir).not.toHaveBeenCalled();
+  });
+
   it("keeps deployment and version message overrides scoped to the gradual upload flow", async () => {
     const currentDeployment: DeploymentStatusPayload = {
       created_on: "2026-03-27T00:00:00.000Z",
@@ -292,17 +311,38 @@ function createDependencies(
   uploadVersion: ReturnType<typeof vi.fn>;
   writeFile: ReturnType<typeof vi.fn>;
 } {
+  const deployDirect = vi.fn(
+    overrides.deployDirect ?? (async () => {}),
+  );
+  const deployVersions = vi.fn(
+    overrides.deployVersions ?? (async () => {}),
+  );
+  const mkdir = vi.fn(
+    overrides.mkdir ?? (async () => {}),
+  );
+  const readCurrentDeployment = vi.fn(
+    overrides.readCurrentDeployment ?? (async () => null),
+  );
+  const readRenderedDeployConfig = vi.fn(
+    overrides.readRenderedDeployConfig
+    ?? (async () => ({
+      migrations: [{ tag: "v1" }],
+    })),
+  );
+  const uploadVersion = vi.fn(
+    overrides.uploadVersion ?? (async () => "uploaded-version"),
+  );
+  const writeFile = vi.fn(
+    overrides.writeFile ?? (async () => {}),
+  );
+
   return {
-    deployDirect: overrides.deployDirect ?? vi.fn(async () => {}),
-    deployVersions: overrides.deployVersions ?? vi.fn(async () => {}),
-    mkdir: overrides.mkdir ?? vi.fn(async () => {}),
-    readCurrentDeployment: overrides.readCurrentDeployment
-      ?? vi.fn(async () => null),
-    readRenderedDeployConfig: overrides.readRenderedDeployConfig
-      ?? vi.fn(async () => ({
-        migrations: [{ tag: "v1" }, { tag: "v2" }],
-      })),
-    uploadVersion: overrides.uploadVersion ?? vi.fn(async () => "uploaded-version"),
-    writeFile: overrides.writeFile ?? vi.fn(async () => {}),
+    deployDirect,
+    deployVersions,
+    mkdir,
+    readCurrentDeployment,
+    readRenderedDeployConfig,
+    uploadVersion,
+    writeFile,
   };
 }

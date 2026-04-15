@@ -10,6 +10,7 @@ import {
 } from "@murphai/runtime-state/node";
 
 import { normalizeHostedAssistantRuntimeConfig } from "../src/hosted-runtime/environment.ts";
+import { parseHostedRuntimeUsageRecordResponse } from "../src/hosted-runtime/platform.ts";
 import { exportHostedPendingAssistantUsage } from "../src/hosted-runtime/usage.ts";
 import type { HostedRuntimePlatform } from "../src/hosted-runtime/platform.ts";
 import { createHostedRuntimeWorkspace } from "./hosted-runtime-test-helpers.ts";
@@ -18,6 +19,53 @@ test("hosted runtime config fails closed when the platform is not injected", () 
   assert.throws(
     () => normalizeHostedAssistantRuntimeConfig(undefined, null),
     /platform must be injected/u,
+  );
+});
+
+test("hosted runtime usage parser accepts a non-negative integer count and trims usage ids", () => {
+  assert.deepEqual(
+    parseHostedRuntimeUsageRecordResponse({
+      recorded: 2,
+      usageIds: [" usage_1 ", "usage_2"],
+    }),
+    {
+      recorded: 2,
+      usageIds: ["usage_1", "usage_2"],
+    },
+  );
+});
+
+test("hosted runtime usage parser rejects non-object payloads", () => {
+  assert.throws(
+    () => parseHostedRuntimeUsageRecordResponse(null),
+    /must be an object/u,
+  );
+});
+
+test("hosted runtime usage parser rejects fractional recorded counts", () => {
+  assert.throws(
+    () => parseHostedRuntimeUsageRecordResponse({
+      recorded: 1.5,
+      usageIds: [],
+    }),
+    /recorded must be a non-negative integer/u,
+  );
+});
+
+test("hosted runtime usage parser rejects non-string or blank usage ids", () => {
+  assert.throws(
+    () => parseHostedRuntimeUsageRecordResponse({
+      recorded: 1,
+      usageIds: ["usage_1", 2],
+    }),
+    /usageIds must be a string array of non-empty values/u,
+  );
+  assert.throws(
+    () => parseHostedRuntimeUsageRecordResponse({
+      recorded: 1,
+      usageIds: ["   "],
+    }),
+    /usageIds must be a string array of non-empty values/u,
   );
 });
 
@@ -42,11 +90,7 @@ test("hosted usage export stays non-fatal and leaves records pending when no usa
         occurredAt: "2026-04-07T00:00:00.000Z",
         outputTokens: 5,
         provider: "openai-compatible",
-        providerMetadataJson: null,
         providerName: "example",
-        providerRequestId: "req_123",
-        providerSessionId: null,
-        rawUsageJson: null,
         reasoningTokens: null,
         requestedModel: "gpt-5.4-mini",
         routeId: "primary",
@@ -112,11 +156,7 @@ test("hosted usage export deletes only the usage ids acknowledged by the injecte
           occurredAt: "2026-04-07T00:00:00.000Z",
           outputTokens: 5,
           provider: "openai-compatible",
-          providerMetadataJson: null,
           providerName: "example",
-          providerRequestId: `req_${turnId}`,
-          providerSessionId: null,
-          rawUsageJson: null,
           reasoningTokens: null,
           requestedModel: "gpt-5.4-mini",
           routeId: "primary",

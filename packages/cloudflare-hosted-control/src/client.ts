@@ -1,16 +1,24 @@
-import type {
-  HostedExecutionDispatchRequest,
-  HostedExecutionDispatchResult,
-  HostedExecutionOutboxPayload,
-  HostedExecutionUserStatus,
-} from "@murphai/hosted-execution";
+import {
+  HOSTED_EXECUTION_USER_ID_HEADER,
+  type HostedExecutionDispatchRequest,
+  type HostedExecutionDispatchResult,
+  type HostedExecutionEventDispatchStatus,
+  type HostedExecutionUserStatus,
+} from "@murphai/hosted-execution/contracts";
+import {
+  resolveHostedExecutionOutboxPayloadUserId,
+  type HostedExecutionOutboxPayload,
+} from "@murphai/hosted-execution/outbox-payload";
 import {
   normalizeHostedExecutionBaseUrl,
+} from "@murphai/hosted-execution/env";
+import {
   parseHostedExecutionDispatchRequest,
   parseHostedExecutionDispatchResult,
+  parseHostedExecutionEventDispatchStatus,
   parseHostedExecutionOutboxPayload,
   parseHostedExecutionUserStatus,
-} from "@murphai/hosted-execution";
+} from "@murphai/hosted-execution/parsers";
 
 import type {
   CloudflareHostedManagedUserCryptoStatus,
@@ -25,6 +33,7 @@ import {
 import {
   buildCloudflareHostedControlUserCryptoContextPath,
   buildCloudflareHostedControlUserDispatchPayloadPath,
+  buildCloudflareHostedControlUserEventStatusPath,
   buildCloudflareHostedControlUserEnvPath,
   buildCloudflareHostedControlUserRunPath,
   buildCloudflareHostedControlUserStatusPath,
@@ -35,6 +44,7 @@ export interface CloudflareHostedControlClient {
   clearUserEnv(userId: string): Promise<CloudflareHostedUserEnvStatus>;
   deleteStoredDispatchPayload(payload: HostedExecutionOutboxPayload): Promise<void>;
   dispatchStoredPayload(payload: HostedExecutionOutboxPayload): Promise<HostedExecutionDispatchResult>;
+  getEventStatus(userId: string, eventId: string): Promise<HostedExecutionEventDispatchStatus | null>;
   getStatus(userId: string): Promise<HostedExecutionUserStatus>;
   getUserEnvStatus(userId: string): Promise<CloudflareHostedUserEnvStatus>;
   provisionManagedUserCrypto(userId: string): Promise<CloudflareHostedManagedUserCryptoStatus>;
@@ -66,6 +76,7 @@ export function createCloudflareHostedControlClient(
     clearUserEnv(userId) {
       return requestHostedExecutionAuthorizedJson({
         baseUrl,
+        boundUserId: userId,
         fetchImpl,
         getAuthorizationHeader,
         label: "user env clear",
@@ -78,6 +89,7 @@ export function createCloudflareHostedControlClient(
     deleteStoredDispatchPayload(payload) {
       return requestHostedExecutionAuthorizedJson({
         baseUrl,
+        boundUserId: resolveHostedExecutionOutboxPayloadUserId(payload),
         fetchImpl,
         getAuthorizationHeader,
         label: "delete stored dispatch payload",
@@ -96,6 +108,7 @@ export function createCloudflareHostedControlClient(
     dispatchStoredPayload(payload) {
       return requestHostedExecutionAuthorizedJson({
         baseUrl,
+        boundUserId: resolveHostedExecutionOutboxPayloadUserId(payload),
         fetchImpl,
         getAuthorizationHeader,
         label: "stored dispatch",
@@ -111,9 +124,23 @@ export function createCloudflareHostedControlClient(
         timeoutMs: options.timeoutMs,
       });
     },
+    getEventStatus(userId, eventId) {
+      return requestHostedExecutionAuthorizedJson({
+        baseUrl,
+        boundUserId: userId,
+        fetchImpl,
+        getAuthorizationHeader,
+        label: "event status",
+        parse: parseHostedExecutionEventDispatchStatusOrNull,
+        path: buildCloudflareHostedControlUserEventStatusPath(userId, eventId),
+        request: { method: "GET" },
+        timeoutMs: options.timeoutMs,
+      });
+    },
     getStatus(userId) {
       return requestHostedExecutionAuthorizedJson({
         baseUrl,
+        boundUserId: userId,
         fetchImpl,
         getAuthorizationHeader,
         label: "status",
@@ -126,6 +153,7 @@ export function createCloudflareHostedControlClient(
     getUserEnvStatus(userId) {
       return requestHostedExecutionAuthorizedJson({
         baseUrl,
+        boundUserId: userId,
         fetchImpl,
         getAuthorizationHeader,
         label: "user env status",
@@ -138,6 +166,7 @@ export function createCloudflareHostedControlClient(
     provisionManagedUserCrypto(userId) {
       return requestHostedExecutionAuthorizedJson({
         baseUrl,
+        boundUserId: userId,
         fetchImpl,
         getAuthorizationHeader,
         label: "managed user crypto provision",
@@ -152,6 +181,7 @@ export function createCloudflareHostedControlClient(
     run(userId) {
       return requestHostedExecutionAuthorizedJson({
         baseUrl,
+        boundUserId: userId,
         fetchImpl,
         getAuthorizationHeader,
         label: "manual run",
@@ -170,11 +200,12 @@ export function createCloudflareHostedControlClient(
 
       return requestHostedExecutionAuthorizedJson({
         baseUrl,
+        boundUserId: requestPayload.event.userId,
         fetchImpl,
         getAuthorizationHeader,
         label: "store dispatch payload",
         parse: parseHostedExecutionOutboxPayload,
-        path: buildCloudflareHostedControlUserDispatchPayloadPath(dispatch.event.userId),
+        path: buildCloudflareHostedControlUserDispatchPayloadPath(requestPayload.event.userId),
         request: {
           body: JSON.stringify(requestPayload),
           headers: { "content-type": "application/json; charset=utf-8" },
@@ -188,6 +219,7 @@ export function createCloudflareHostedControlClient(
 
       return requestHostedExecutionAuthorizedJson({
         baseUrl,
+        boundUserId: userId,
         fetchImpl,
         getAuthorizationHeader,
         label: "user env update",
@@ -204,6 +236,12 @@ export function createCloudflareHostedControlClient(
   };
 }
 
+function parseHostedExecutionEventDispatchStatusOrNull(
+  value: unknown,
+): HostedExecutionEventDispatchStatus | null {
+  return value === null ? null : parseHostedExecutionEventDispatchStatus(value);
+}
+
 function requireHostedExecutionBaseUrl(value: string): string {
   const normalized = normalizeHostedExecutionBaseUrl(value);
 
@@ -212,10 +250,6 @@ function requireHostedExecutionBaseUrl(value: string): string {
   }
 
   return normalized;
-}
-
-function resolveHostedExecutionOutboxPayloadUserId(payload: HostedExecutionOutboxPayload): string {
-  return payload.storage === "inline" ? payload.dispatch.event.userId : payload.dispatchRef.userId;
 }
 
 function createHostedExecutionBearerAuthorizationHeaderProvider(
@@ -241,6 +275,7 @@ function createHostedExecutionBearerAuthorizationHeaderProvider(
 
 async function requestHostedExecutionAuthorizedJson<TResponse>(input: {
   baseUrl: string;
+  boundUserId?: string;
   fetchImpl: typeof fetch;
   getAuthorizationHeader: () => Promise<string>;
   label: string;
@@ -262,6 +297,10 @@ async function requestHostedExecutionAuthorizedJson<TResponse>(input: {
 
   const headers = new Headers(input.request.headers);
   headers.set("authorization", await input.getAuthorizationHeader());
+
+  if (input.boundUserId) {
+    headers.set(HOSTED_EXECUTION_USER_ID_HEADER, input.boundUserId);
+  }
 
   const response = await input.fetchImpl(url.toString(), {
     ...(input.request.body === undefined ? {} : { body: input.request.body }),

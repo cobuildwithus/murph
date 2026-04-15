@@ -36,6 +36,11 @@ interface CreateMarkdownRegistryApiOptions<TRecord> {
     commandName: string;
     summary: (created: boolean, recordId: string) => string;
   };
+  deleteAudit?: {
+    action: MarkdownRegistryAuditAction;
+    commandName: string;
+    summary: (recordId: string) => string;
+  };
 }
 
 interface UpsertMarkdownRegistryApiRecordInput<TRecord> {
@@ -97,6 +102,7 @@ export function createMarkdownRegistryApi<TRecord>({
   deleteOperationType,
   deleteSummary,
   audit,
+  deleteAudit,
 }: CreateMarkdownRegistryApiOptions<TRecord>) {
   async function loadRecords(vaultRoot: string): Promise<TRecord[]> {
     const records = await loadMarkdownRegistryDocuments({
@@ -215,7 +221,7 @@ export function createMarkdownRegistryApi<TRecord>({
       slug,
     });
 
-    if (!deleteOperationType || !deleteSummary) {
+    if (!deleteOperationType || !deleteSummary || !deleteAudit) {
       throw new Error("Markdown registry delete is not configured for this record type.");
     }
 
@@ -224,6 +230,12 @@ export function createMarkdownRegistryApi<TRecord>({
       operationType: deleteOperationType,
       summary: deleteSummary(getRecordId(record)),
       relativePath: getRecordRelativePath(record),
+      audit: {
+        action: deleteAudit.action,
+        commandName: deleteAudit.commandName,
+        summary: deleteAudit.summary(getRecordId(record)),
+        targetIds: [getRecordId(record)],
+      },
     });
 
     return {

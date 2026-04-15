@@ -1,45 +1,24 @@
 import assert from 'node:assert/strict'
 
-import { test, vi } from 'vitest'
-
-const daemonClientBarrelMocks = vi.hoisted(() => ({
-  canUseAssistantDaemonForMessage: vi.fn(),
-  maybeSendAssistantMessageViaDaemon: vi.fn(),
-  resolveAssistantDaemonClientConfig: vi.fn(),
-}))
-
-const runtimeBarrelMocks = vi.hoisted(() => ({
-  runAssistantChat: vi.fn(),
-}))
-
-vi.mock('../src/assistant-daemon-client.js', () => ({
-  canUseAssistantDaemonForMessage:
-    daemonClientBarrelMocks.canUseAssistantDaemonForMessage,
-  maybeSendAssistantMessageViaDaemon:
-    daemonClientBarrelMocks.maybeSendAssistantMessageViaDaemon,
-  resolveAssistantDaemonClientConfig:
-    daemonClientBarrelMocks.resolveAssistantDaemonClientConfig,
-}))
-
-vi.mock('../src/assistant-runtime.js', () => ({
-  runAssistantChat: runtimeBarrelMocks.runAssistantChat,
-}))
+import { test } from 'vitest'
 
 import * as daemonClientBarrel from '../src/assistant/daemon-client.ts'
+import * as daemonClientSurface from '../src/assistant-daemon-client.js'
 import * as runtimeBarrel from '../src/assistant/runtime.ts'
+import * as runtimeSurface from '../src/assistant-runtime.js'
 
 test('assistant barrel modules re-export their package-level seams', () => {
   assert.equal(
     daemonClientBarrel.canUseAssistantDaemonForMessage,
-    daemonClientBarrelMocks.canUseAssistantDaemonForMessage,
+    daemonClientSurface.canUseAssistantDaemonForMessage,
   )
   assert.equal(
     daemonClientBarrel.maybeSendAssistantMessageViaDaemon,
-    daemonClientBarrelMocks.maybeSendAssistantMessageViaDaemon,
+    daemonClientSurface.maybeSendAssistantMessageViaDaemon,
   )
   assert.equal(
     daemonClientBarrel.resolveAssistantDaemonClientConfig,
-    daemonClientBarrelMocks.resolveAssistantDaemonClientConfig,
+    daemonClientSurface.resolveAssistantDaemonClientConfig,
   )
-  assert.equal(runtimeBarrel.runAssistantChat, runtimeBarrelMocks.runAssistantChat)
+  assert.equal(runtimeBarrel.runAssistantChat, runtimeSurface.runAssistantChat)
 })

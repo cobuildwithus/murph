@@ -7,11 +7,11 @@ import {
   startLinqChatTypingIndicator,
   stopLinqChatTypingIndicator,
 } from '../src/linq-runtime.ts'
+import { createDeviceSyncClient, resolveDeviceSyncBaseUrl } from '../src/device-sync-client.ts'
 import { VaultCliError } from '../src/vault-cli-errors.ts'
 
 afterEach(() => {
   vi.restoreAllMocks()
-  vi.resetModules()
   vi.unstubAllGlobals()
 })
 
@@ -26,7 +26,10 @@ test('linq runtime covers no-content unavailable and raw-text error branches', a
       ),
     (error) =>
       error instanceof VaultCliError &&
-      error.code === 'LINQ_API_TOKEN_REQUIRED',
+      error.code === 'LINQ_API_TOKEN_REQUIRED' &&
+      error.context?.operation === 'typing_start' &&
+      error.context?.provider === 'linq' &&
+      error.context?.failureStage === 'configuration',
   )
 
   const originalFetch = globalThis.fetch
@@ -44,7 +47,10 @@ test('linq runtime covers no-content unavailable and raw-text error branches', a
       ),
     (error) =>
       error instanceof VaultCliError &&
-      error.code === 'LINQ_UNAVAILABLE',
+      error.code === 'LINQ_UNAVAILABLE' &&
+      error.context?.operation === 'typing_start' &&
+      error.context?.provider === 'linq' &&
+      error.context?.failureStage === 'configuration',
   )
 
   vi.stubGlobal('fetch', originalFetch)
@@ -67,6 +73,9 @@ test('linq runtime covers no-content unavailable and raw-text error branches', a
       error instanceof VaultCliError &&
       error.code === 'LINQ_API_REQUEST_FAILED' &&
       error.message === 'temporarily down' &&
+      error.context?.operation === 'typing_stop' &&
+      error.context?.provider === 'linq' &&
+      error.context?.failureStage === 'http' &&
       error.context?.retryable === false &&
       error.context?.status === 503,
   )
@@ -93,49 +102,13 @@ test('linq runtime covers no-content unavailable and raw-text error branches', a
   )
 })
 
-test('device sync client covers non-loopback passthrough and browser-open failure paths', async () => {
-  const { resolveDeviceSyncBaseUrl, createDeviceSyncClient } = await import(
-    '../src/device-sync-client.ts'
-  )
-
+test('device sync client covers non-loopback passthrough paths', async () => {
   assert.throws(
     () =>
       resolveDeviceSyncBaseUrl('http://[::1', {}, null),
     (error) => error instanceof TypeError,
   )
 
-  vi.resetModules()
-  const spawn = vi.fn(() => {
-    throw new Error('missing browser launcher')
-  })
-  vi.doMock('node:child_process', () => ({ spawn }))
-  const dynamicModule = await import('../src/device-sync-client.ts')
-  const browserClient = dynamicModule.createDeviceSyncClient({
-    baseUrl: 'http://127.0.0.1:8788',
-    fetchImpl: async () =>
-      new Response(
-        JSON.stringify({
-          authorizationUrl: 'https://example.test/oauth',
-          expiresAt: '2026-04-08T00:00:00.000Z',
-          provider: 'oura',
-          state: 'state-3',
-        }),
-        {
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          status: 200,
-        },
-      ),
-  })
-
-  const result = await browserClient.beginConnection({
-    open: true,
-    provider: 'oura',
-  })
-
-  assert.equal(result.openedBrowser, false)
-  assert.equal(spawn.mock.calls[0]?.[0], process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'cmd' : 'xdg-open')
   assert.equal(createDeviceSyncClient({ baseUrl: 'http://127.0.0.1:8788' }).baseUrl, 'http://127.0.0.1:8788')
 
   let remoteBaseUrlError: unknown

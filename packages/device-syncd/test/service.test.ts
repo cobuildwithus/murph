@@ -5,8 +5,10 @@ import { test, vi } from "vitest";
 import { openSqliteRuntimeDatabase, writeSqliteRuntimeUserVersion } from "@murphai/runtime-state/node";
 
 import { createWhoopDeviceSyncProvider } from "../src/providers/whoop.ts";
+import { buildDeviceSyncTokenCipherOptions, createSecretCodec } from "../src/crypto.ts";
 import { DeviceSyncError, deviceSyncError } from "../src/errors.ts";
 import { createDeviceSyncService } from "../src/service.ts";
+import { scopeWebhookTraceId } from "../src/shared.ts";
 import { SqliteDeviceSyncStore } from "../src/store.ts";
 import { createJsonResponse, makeTempDirectory, readUrl } from "./helpers.ts";
 
@@ -146,6 +148,11 @@ function createFakeProvider(overrides: Partial<DeviceSyncProvider> = {}): Device
   };
 }
 
+function requireCallback(callback: (() => void) | null, message: string): () => void {
+  assert.ok(callback, message);
+  return callback;
+}
+
 test("device sync service connects, imports, and deduplicates webhook traces", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd");
   const imports: unknown[] = [];
@@ -192,7 +199,7 @@ test("device sync service connects, imports, and deduplicates webhook traces", a
     (
       service.store.database
         .prepare("select status from webhook_trace where provider = ? and trace_id = ?")
-        .get("demo", "trace-1") as { status?: string } | undefined
+        .get("demo", scopeWebhookTraceId("demo", "demo-abc", "trace-1")) as { status?: string } | undefined
     )?.status,
     "processed",
   );
@@ -252,6 +259,70 @@ test("device sync service redacts connection metadata from public account respon
   assert.deepEqual(seenMetadata, {
     connectedBy: "sensitive-connect-code",
   });
+
+  service.close();
+});
+
+test("device sync service fails closed when stored token integrity validation fails", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-token-integrity");
+  const service = createDeviceSyncService({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    providers: [createFakeProvider()],
+  });
+
+  const begin = await service.startConnection({
+    provider: "demo",
+    returnTo: "/settings/devices",
+  });
+  const connected = await service.handleOAuthCallback({
+    provider: "demo",
+    state: begin.state,
+    code: "tampered",
+  });
+  const stored = service.store.getAccountById(connected.account.id);
+  assert.ok(stored);
+
+  const codec = createSecretCodec("secret-for-tests");
+  const updated = service.store.updateAccountTokens(stored.id, {
+    accessToken: "tampered-access-token",
+    accessTokenEncrypted: codec.encrypt(
+      "tampered-access-token",
+      buildDeviceSyncTokenCipherOptions({
+        externalAccountId: `${stored.externalAccountId}-other`,
+        provider: stored.provider,
+        purpose: "device-sync-access-token",
+      }),
+    ),
+    refreshToken: "tampered-refresh-token",
+    refreshTokenEncrypted: codec.encrypt(
+      "tampered-refresh-token",
+      buildDeviceSyncTokenCipherOptions({
+        externalAccountId: stored.externalAccountId,
+        provider: stored.provider,
+        purpose: "device-sync-refresh-token",
+      }),
+    ),
+  });
+  assert.ok(updated);
+
+  const reconcile = service.queueManualReconcile(stored.id);
+  const processedJob = await service.runWorkerOnce();
+
+  const failedJob = processedJob ? service.store.getJobById(processedJob.id) : null;
+  const queuedManualJob = service.store.getJobById(reconcile.job.id);
+  const reauthorizationAccount = service.store.getAccountById(stored.id);
+
+  assert.equal(processedJob?.id, reconcile.job.id);
+  assert.equal(failedJob?.status, "dead");
+  assert.equal(failedJob?.lastErrorCode, "ACCOUNT_TOKEN_DECRYPT_FAILED");
+  assert.match(failedJob?.lastErrorMessage ?? "", /failed integrity validation/u);
+  assert.equal(queuedManualJob?.status, "dead");
+  assert.equal(reauthorizationAccount?.status, "reauthorization_required");
 
   service.close();
 });
@@ -423,7 +494,10 @@ test("device sync service scheduler queues due active jobs and skips unsupported
     select count(*) as total
     from device_job
     where account_id = ?
-  `).get(service.store.getAccountByExternalAccount("unsupported", "unsupported-1")?.id) as { total: number };
+  `);
+  const unsupportedAccount = service.store.getAccountByExternalAccount("unsupported", "unsupported-1");
+  assert.ok(unsupportedAccount);
+  const unsupportedJobCount = unsupportedJobs.get(unsupportedAccount.id) as { total: number };
   const disconnectedJobs = service.store.database.prepare(`
     select count(*) as total
     from device_job
@@ -432,7 +506,7 @@ test("device sync service scheduler queues due active jobs and skips unsupported
 
   assert.deepEqual(scheduledJobs.map((job) => job.kind), ["scheduled-refresh"]);
   assert.equal(service.store.getAccountById(dueActive.id)?.nextReconcileAt, "2026-03-17T12:30:00.000Z");
-  assert.equal(unsupportedJobs.total, 0);
+  assert.equal(unsupportedJobCount.total, 0);
   assert.equal(disconnectedJobs.total, 0);
 
   service.close();
@@ -913,7 +987,7 @@ test("device sync service accepts configured external return origins and still r
   }
 });
 
-test("device sync service rejects manual reconcile and webhook enqueue for disconnected accounts", async () => {
+test("device sync service accepts and dedupes disconnected-account webhooks while manual reconcile stays blocked", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-disconnect");
   const imports: unknown[] = [];
   const importer: DeviceSyncImporterPort = {
@@ -931,7 +1005,25 @@ test("device sync service rejects manual reconcile and webhook enqueue for disco
       publicBaseUrl: "https://sync.example.test/device-sync",
       stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
     },
-    providers: [createFakeProvider()],
+    providers: [
+      createFakeProvider({
+        async verifyAndParseWebhook() {
+          return {
+            externalAccountId: "demo-xyz",
+            eventType: "demo.updated",
+            traceId: "trace-disconnected",
+            jobs: [
+              {
+                kind: "resource",
+                payload: {
+                  resourceId: "resource-disconnected",
+                },
+              },
+            ],
+          };
+        },
+      }),
+    ],
     importer,
   });
 
@@ -952,8 +1044,22 @@ test("device sync service rejects manual reconcile and webhook enqueue for disco
   );
 
   const webhook = await service.handleWebhook("demo", new Headers(), Buffer.from("{}"));
-  assert.equal(webhook.accepted, true);
-  assert.equal(webhook.duplicate, false);
+  assert.deepEqual(webhook, {
+    accepted: true,
+    duplicate: false,
+    eventType: "demo.updated",
+    provider: "demo",
+    traceId: scopeWebhookTraceId("demo", "demo-xyz", "trace-disconnected"),
+  });
+
+  const duplicate = await service.handleWebhook("demo", new Headers(), Buffer.from("{}"));
+  assert.deepEqual(duplicate, {
+    accepted: true,
+    duplicate: true,
+    eventType: "demo.updated",
+    provider: "demo",
+    traceId: scopeWebhookTraceId("demo", "demo-xyz", "trace-disconnected"),
+  });
 
   const nextJob = await service.runWorkerOnce();
   assert.equal(nextJob, null);
@@ -1269,7 +1375,7 @@ test("device sync service fences in-flight jobs after disconnect", async () => {
   const disconnected = await service.disconnectAccount(connected.account.id);
   assert.equal(disconnected.account.status, "disconnected");
 
-  releaseProviderResolve?.();
+  requireCallback(releaseProviderResolve, "provider release callback was not initialized")();
   await workerPromise;
 
   const storedAccount = service.store.getAccountById(connected.account.id);
@@ -1356,7 +1462,7 @@ test("device sync service next wake tracks scheduled reconciles and queued jobs"
 
   assert.equal(
     service.getNextWakeAt("2026-03-17T10:00:00.000Z"),
-    "2026-03-17T10:00:01.000Z",
+    "2026-03-17T09:59:00.000Z",
   );
 
   service.close();
@@ -1517,6 +1623,63 @@ test("device sync service string job failures still produce deterministic dead-j
   assert.equal(storedAccount?.lastErrorMessage, "plain failure");
   assert.equal(jobStatus.status, "dead");
   assert.equal(jobStatus.last_error_message, "plain failure");
+
+  service.close();
+});
+
+test("device sync service redacts secret-bearing job failures before persistence", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-job-error-redacted");
+  const service = createDeviceSyncService({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    providers: [
+      createFakeProvider({
+        async executeJob() {
+          throw new Error(
+            "authorization=Bearer secret-token refresh_token=refresh-secret eyJhbGciOiJIUzI1NiJ9.payload.signature",
+          );
+        },
+      }),
+    ],
+  });
+
+  const begin = await service.startConnection({
+    provider: "demo",
+  });
+  const connected = await service.handleOAuthCallback({
+    provider: "demo",
+    state: begin.state,
+    code: "secret-error",
+  });
+
+  await service.runWorkerOnce();
+  const storedAccount = service.store.getAccountById(connected.account.id);
+  const jobStatus = service.store.database.prepare(`
+    select status, last_error_code, last_error_message
+    from device_job
+    where account_id = ?
+    order by created_at asc, id asc
+  `).get(connected.account.id) as {
+    last_error_code: string | null;
+    last_error_message: string | null;
+    status: string;
+  };
+
+  assert.equal(storedAccount?.lastErrorCode, "SYNC_JOB_FAILED");
+  assert.equal(
+    storedAccount?.lastErrorMessage,
+    "authorization=[redacted] refresh_token=[redacted] [redacted.jwt]",
+  );
+  assert.equal(jobStatus.status, "dead");
+  assert.equal(jobStatus.last_error_code, "SYNC_JOB_FAILED");
+  assert.equal(
+    jobStatus.last_error_message,
+    "authorization=[redacted] refresh_token=[redacted] [redacted.jwt]",
+  );
 
   service.close();
 });

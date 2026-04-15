@@ -28,7 +28,10 @@ import {
 import type {
   HealthEntityEnvelope,
 } from "../health-cli-method-types.js"
-import type { VaultValidateResult } from "@murphai/operator-config/vault-cli-contracts"
+import type {
+  ListEntity,
+  VaultValidateResult,
+} from "@murphai/operator-config/vault-cli-contracts"
 import type {
   QueryEntity,
 } from "./types.js"
@@ -40,7 +43,10 @@ const DEFAULT_GENERIC_LIST_EXCLUDED_FAMILIES = new Set([
 const BLOOD_TEST_SPECIMEN_TYPE_SET = new Set<string>(BLOOD_TEST_SPECIMEN_TYPES)
 
 function isBloodTestEntity(entity: QueryEntity) {
-  if (entity.family !== "history" || entity.kind !== "test") {
+  if (
+    entity.family !== "event" ||
+    (entity.kind !== "test" && entity.kind !== "blood_test")
+  ) {
     return false
   }
 
@@ -126,7 +132,6 @@ const RESERVED_PAYLOAD_KEYS = new Set([
   "ledgerPath",
   "lookupId",
   "created",
-  "currentProfilePath",
 ])
 
 export async function readJsonPayload(
@@ -295,7 +300,7 @@ export function buildScaffoldPayload(noun: string) {
 }
 
 export function buildEntityLinks(record: {
-  data: JsonObject
+  data: Record<string, unknown>
   relatedIds?: string[]
 }) {
   const linkIds = new Set<string>()
@@ -358,10 +363,6 @@ export function buildEntityLinks(record: {
 }
 
 function normalizeGenericEntityKind(entity: QueryEntity) {
-  if (entity.family === "current_profile" || entity.family === "profile_snapshot") {
-    return "profile"
-  }
-
   if (isBloodTestEntity(entity)) {
     return "blood_test"
   }
@@ -377,6 +378,76 @@ function normalizeGenericEntityKind(entity: QueryEntity) {
   }
 
   return entity.kind || entity.family
+}
+
+export function summarizeListMarkdown(
+  markdown: string | null | undefined,
+  maxLength = 220,
+) {
+  if (typeof markdown !== "string") {
+    return null
+  }
+
+  const withoutFrontmatter = markdown.replace(
+    /^---\s*\n[\s\S]*?\n---\s*\n?/u,
+    "",
+  )
+
+  const normalized = withoutFrontmatter
+    .replace(/^#{1,6}\s+/gmu, "")
+    .replace(/\[([^\]]+)\]\([^)]+\)/gu, "$1")
+    .replace(/[*_`>#-]+/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim()
+
+  if (normalized.length === 0) {
+    return null
+  }
+
+  if (normalized.length <= maxLength) {
+    return normalized
+  }
+
+  return `${normalized.slice(0, Math.max(1, maxLength - 1)).trimEnd()}…`
+}
+
+export function toListEntity(input: {
+  id: string
+  kind: string
+  title: string | null
+  occurredAt: string | null
+  path: string | null
+  markdown?: string | null
+  data: Record<string, unknown>
+  links: ListEntity["links"]
+  excerpt?: string | null
+}): ListEntity {
+  const entity: ListEntity = {
+    id: input.id,
+    kind: input.kind,
+    title: input.title,
+    occurredAt: input.occurredAt,
+    path: input.path,
+    data: input.data,
+    links: input.links,
+  }
+
+  const normalizedExplicitExcerpt =
+    typeof input.excerpt === "string"
+      ? input.excerpt.trim()
+      : input.excerpt
+  const normalizedExcerpt =
+    normalizedExplicitExcerpt === null
+      ? null
+      : typeof normalizedExplicitExcerpt === "string" && normalizedExplicitExcerpt.length > 0
+        ? normalizedExplicitExcerpt
+        : summarizeListMarkdown(input.markdown)
+
+  if (typeof normalizedExcerpt === "string" && normalizedExcerpt.length > 0) {
+    entity.excerpt = normalizedExcerpt
+  }
+
+  return entity
 }
 
 export function toGenericShowEntity(entity: QueryEntity) {
@@ -396,7 +467,7 @@ export function toGenericShowEntity(entity: QueryEntity) {
 }
 
 export function toGenericListItem(entity: QueryEntity) {
-  return {
+  return toListEntity({
     id: entity.entityId,
     kind: normalizeGenericEntityKind(entity),
     title: entity.title ?? null,
@@ -408,7 +479,7 @@ export function toGenericListItem(entity: QueryEntity) {
       data: entity.attributes,
       relatedIds: entity.relatedIds,
     }),
-  }
+  })
 }
 
 export function matchesGenericKindFilter(entity: QueryEntity, kind?: string) {

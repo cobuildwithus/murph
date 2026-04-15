@@ -1,10 +1,14 @@
-import type { CloudflareHostedUserEnvStatus } from "@murphai/cloudflare-hosted-control";
+import type { CloudflareHostedUserEnvStatus } from "@murphai/cloudflare-hosted-control/contracts";
+import type { HostedRuntimeUsageRecordResponse } from "@murphai/assistant-runtime";
 import type {
   HostedExecutionDispatchRequest,
   HostedExecutionDispatchResult,
-  HostedExecutionOutboxPayload,
+  HostedExecutionEventDispatchStatus,
   HostedExecutionUserStatus,
-} from "@murphai/hosted-execution";
+} from "@murphai/hosted-execution/contracts";
+import type {
+  HostedExecutionOutboxPayload,
+} from "@murphai/hosted-execution/outbox-payload";
 import type {
   HostedExecutionDeviceSyncRuntimeApplyRequest,
   HostedExecutionDeviceSyncRuntimeApplyResponse,
@@ -13,7 +17,6 @@ import type {
 } from "@murphai/device-syncd/hosted-runtime";
 
 import { readHostedExecutionEnvironment } from "../env.ts";
-import type { HostedExecutionCommittedResult } from "../execution-journal.js";
 import { requireJsonObject } from "../json.ts";
 import type { HostedExecutionContainerNamespaceLike } from "../runner-container.js";
 import {
@@ -22,7 +25,6 @@ import {
 import type { HostedUserEnvUpdate } from "../user-env.ts";
 import type {
   WorkerEnvironmentContract,
-  WorkerUserRunnerCommitInput,
   WorkerUserRunnerStubLike,
 } from "../worker-contracts.ts";
 
@@ -32,6 +34,7 @@ export interface UserRunnerDurableObjectStubLike extends WorkerUserRunnerStubLik
   clearUserEnv(): Promise<CloudflareHostedUserEnvStatus>;
   dispatch(input: HostedExecutionDispatchRequest): Promise<HostedExecutionUserStatus>;
   dispatchWithOutcome(input: HostedExecutionDispatchRequest): Promise<HostedExecutionDispatchResult>;
+  getEventStatus(input: { eventId: string }): Promise<HostedExecutionEventDispatchStatus | null>;
   getUserEnvStatus(): Promise<CloudflareHostedUserEnvStatus>;
   getDeviceSyncRuntimeSnapshot(input: {
     request: HostedExecutionDeviceSyncRuntimeSnapshotRequest;
@@ -41,7 +44,7 @@ export interface UserRunnerDurableObjectStubLike extends WorkerUserRunnerStubLik
   }): Promise<HostedExecutionDeviceSyncRuntimeApplyResponse>;
   putPendingUsage(input: {
     usage: readonly Record<string, unknown>[];
-  }): Promise<{ recorded: number; usageIds: string[] }>;
+  }): Promise<HostedRuntimeUsageRecordResponse>;
   readPendingUsage(input?: { limit?: number | null }): Promise<Record<string, unknown>[]>;
   deleteStoredDispatchPayload(input: { payload: HostedExecutionOutboxPayload }): Promise<void>;
   dispatchStoredPayload(input: { payload: HostedExecutionOutboxPayload }): Promise<HostedExecutionDispatchResult>;
@@ -49,7 +52,6 @@ export interface UserRunnerDurableObjectStubLike extends WorkerUserRunnerStubLik
   storeDispatchPayload(input: { dispatch: HostedExecutionDispatchRequest }): Promise<HostedExecutionOutboxPayload>;
   updateUserEnv(update: HostedUserEnvUpdate): Promise<CloudflareHostedUserEnvStatus>;
   deletePendingUsage(input: { usageIds: readonly string[] }): Promise<void>;
-  commit(input: WorkerUserRunnerCommitInput): Promise<HostedExecutionCommittedResult>;
 }
 
 export interface WorkerEnvironmentSource

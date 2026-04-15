@@ -2,14 +2,16 @@ import assert from "node:assert/strict";
 
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { beforeEach, test, vi } from "vitest";
+import { test, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  usePrivy: vi.fn(),
+  getHostedPageAuthSnapshot: vi.fn(),
 }));
 
-vi.mock("@privy-io/react-auth", () => ({
-  usePrivy: mocks.usePrivy,
+vi.mock("server-only", () => ({}));
+
+vi.mock("@/src/lib/hosted-onboarding/page-auth", () => ({
+  getHostedPageAuthSnapshot: mocks.getHostedPageAuthSnapshot,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/landing", () => {
@@ -19,16 +21,75 @@ vi.mock("@/src/lib/hosted-onboarding/landing", () => {
   };
 });
 
-vi.mock("@/src/components/hosted-onboarding/hosted-phone-auth", () => {
+vi.mock("@/src/components/hosted-onboarding/hosted-auth-panel", () => {
   return {
-    HostedPhoneAuth(input: { intent?: string }) {
+    HostedAuthPanel(input: {
+      intent?: string;
+      methods: string[];
+      showLegalNotice?: boolean;
+    }) {
       return createElement(
         "div",
         {
-          "data-hosted-phone-auth-intent": input.intent ?? "signup",
-          "data-hosted-phone-auth": "public",
+          "data-hosted-auth-panel-intent": input.intent ?? "signup",
+          "data-hosted-auth-panel-methods": input.methods.join(","),
+          "data-hosted-auth-panel-legal":
+            input.showLegalNotice === true ? "shown" : "hidden",
         },
-        "Hosted phone auth",
+        "Hosted auth panel",
+        input.methods.includes("phone")
+          ? createElement(
+              "span",
+              {
+                "data-hosted-phone-auth-passive-consent": "hidden",
+              },
+              "Hosted phone auth",
+            )
+          : null,
+        input.methods.includes("telegram")
+          ? createElement("span", null, "OR")
+          : null,
+        input.methods.includes("telegram")
+          ? createElement(
+              "span",
+              {
+                "data-hosted-telegram-auth-button": "true",
+              },
+              "Hosted Telegram auth",
+            )
+          : null,
+        input.methods.includes("email")
+          ? createElement(
+              "span",
+              {
+                "data-hosted-email-auth-button": "true",
+              },
+              "Hosted Email auth",
+            )
+          : null,
+        input.showLegalNotice === true
+          ? createElement(
+              "span",
+              null,
+              "By signing up, you agree to our ",
+              createElement(
+                "a",
+                {
+                  href: "/legal/terms.pdf",
+                },
+                "Terms",
+              ),
+              " and ",
+              createElement(
+                "a",
+                {
+                  href: "/legal/privacy.pdf",
+                },
+                "Privacy Policy",
+              ),
+              ".",
+            )
+          : null,
       );
     },
   };
@@ -48,96 +109,128 @@ vi.mock("@/src/components/hosted-onboarding/hosted-existing-account-sign-in-dial
   };
 });
 
-beforeEach(() => {
+test("HomePage keeps the hosted auth entrypoints visible when no hosted session exists", async () => {
   vi.clearAllMocks();
-  mocks.usePrivy.mockReturnValue({
+  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
     authenticated: false,
-    ready: true,
+    authenticatedMember: null,
+    linkedAccounts: [],
+    memberLookup: null,
+    session: null,
   });
-});
-
-test("HomePage keeps the hosted auth entrypoints visible in the shared app shell", async () => {
   const { default: HomePage } = await import("../app/page");
-  const {
-    resolveHostedInstallScriptUrl,
-    resolveHostedSignupPhoneNumber,
-  } = await import(
+  const { resolveHostedInstallScriptUrl } = await import(
     "@/src/lib/hosted-onboarding/landing"
   );
-  const mockedResolveHostedInstallScriptUrl = vi.mocked(resolveHostedInstallScriptUrl);
-  const mockedResolveHostedSignupPhoneNumber = vi.mocked(resolveHostedSignupPhoneNumber);
 
-  mockedResolveHostedInstallScriptUrl.mockReturnValue(null);
-  mockedResolveHostedSignupPhoneNumber.mockReturnValue(null);
+  vi.mocked(resolveHostedInstallScriptUrl).mockReturnValue(null);
 
-  const markup = renderToStaticMarkup(HomePage());
+  const markup = renderToStaticMarkup(await HomePage());
 
   assert.match(markup, /Open source — Apache 2\.0/u);
   assert.match(markup, /https:\/\/github\.com\/cobuildwithus\/murph/u);
-  assert.match(markup, /Syncs with Garmin, Oura, and WHOOP/);
-  assert.match(markup, /Local mode keeps your data on your device\. Hosted runs use encrypted cloud snapshots\./);
-  assert.match(markup, /Local mode keeps your data on your device, and hosted runs use encrypted cloud snapshots\./);
-  assert.match(markup, /Encrypted cloud snapshots for hosted runs/);
-  assert.match(markup, /curl -fsSL https:\/\/YOUR_DOMAIN\/install\.sh \| bash/u);
-  assert.match(markup, /Your health data stays yours\./);
-  assert.match(markup, /local-first processing where possible, encrypted infrastructure for hosted runs, and privacy-first defaults\./i);
-  assert.match(markup, /No data sales/);
-  assert.doesNotMatch(markup, /Zero data retention/);
-  assert.doesNotMatch(markup, /--no-onboard/u);
-  assert.match(markup, /Sign up with your phone\./);
+  assert.match(markup, /Zero Data Retention/);
+  assert.match(markup, /Your data does not train AI models/u);
+  assert.match(markup, /restricted system access/u);
+  assert.match(markup, /Signup/);
+  assert.match(markup, /Hosted auth panel/);
+  assert.match(markup, /Hosted Telegram auth/);
+  assert.match(markup, /Hosted Email auth/);
+  assert.match(markup, /data-hosted-auth-panel-methods="phone,telegram,email"/);
+  assert.match(markup, /data-hosted-telegram-auth-button="true"/);
+  assert.match(markup, /data-hosted-email-auth-button="true"/);
   assert.match(markup, /Hosted phone auth/);
+  assert.match(markup, /data-hosted-phone-auth-passive-consent="hidden"/);
+  assert.match(markup, /OR/u);
   assert.match(markup, /data-existing-account-sign-in-dialog="true"/);
+  assert.match(markup, /By signing up, you agree to our/);
+  assert.match(markup, /\/legal\/terms\.pdf/);
+  assert.match(markup, /\/legal\/privacy\.pdf/);
+  assert.equal(
+    markup.match(/By signing up, you agree to our/g)?.length ?? 0,
+    1,
+  );
+  assert.ok(
+    markup.indexOf('data-hosted-telegram-auth-button="true"') <
+      markup.indexOf("By signing up, you agree to our"),
+  );
   assert.match(markup, /Get started free/);
   assert.match(markup, /href="#signup-title"/);
 });
 
 test("HomePage renders the hosted phone auth UI in the shared app shell", async () => {
+  vi.clearAllMocks();
+  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+    authenticated: false,
+    authenticatedMember: null,
+    linkedAccounts: [],
+    memberLookup: null,
+    session: null,
+  });
   const { default: HomePage } = await import("../app/page");
-  const {
-    resolveHostedInstallScriptUrl,
-    resolveHostedSignupPhoneNumber,
-  } = await import(
+  const { resolveHostedInstallScriptUrl } = await import(
     "@/src/lib/hosted-onboarding/landing"
   );
-  const mockedResolveHostedInstallScriptUrl = vi.mocked(resolveHostedInstallScriptUrl);
-  const mockedResolveHostedSignupPhoneNumber = vi.mocked(resolveHostedSignupPhoneNumber);
 
-  mockedResolveHostedInstallScriptUrl.mockReturnValue("https://murph.example.test/install.sh");
-  mockedResolveHostedSignupPhoneNumber.mockReturnValue(null);
+  vi.mocked(resolveHostedInstallScriptUrl).mockReturnValue(
+    "https://murph.example.test/install.sh",
+  );
 
-  const markup = renderToStaticMarkup(HomePage());
+  const markup = renderToStaticMarkup(await HomePage());
 
   assert.match(markup, /Open source — Apache 2\.0/u);
   assert.match(markup, /https:\/\/github\.com\/cobuildwithus\/murph/u);
-  assert.match(markup, /Sign up with your phone\./);
+  assert.match(markup, /Signup/);
+  assert.match(markup, /Hosted auth panel/);
+  assert.match(markup, /Hosted Telegram auth/);
+  assert.match(markup, /Hosted Email auth/);
   assert.match(markup, /Hosted phone auth/);
+  assert.match(markup, /data-hosted-phone-auth-passive-consent="hidden"/);
+  assert.match(markup, /data-hosted-auth-panel-methods="phone,telegram,email"/);
+  assert.match(markup, /OR/u);
   assert.match(markup, /data-existing-account-sign-in-dialog="true"/);
   assert.match(markup, /Existing account sign in/);
-  assert.match(markup, /Local mode keeps your data on your device\. Hosted runs use encrypted cloud snapshots\./);
-  assert.match(markup, /Local mode keeps your data on your device, and hosted runs use encrypted cloud snapshots\./);
-  assert.match(markup, /Encrypted cloud snapshots for hosted runs/);
-  assert.match(markup, /curl -fsSL https:\/\/murph\.example\.test\/install\.sh \| bash/u);
-  assert.match(markup, /Your health data stays yours\./);
-  assert.match(markup, /local-first processing where possible, encrypted infrastructure for hosted runs, and privacy-first defaults\./i);
-  assert.match(markup, /No data sales/);
-  assert.doesNotMatch(markup, /Zero data retention/);
-  assert.doesNotMatch(markup, /--no-onboard/u);
+  assert.match(markup, /By signing up, you agree to our/);
+  assert.match(markup, /\/legal\/terms\.pdf/);
+  assert.match(markup, /\/legal\/privacy\.pdf/);
+  assert.equal(
+    markup.match(/By signing up, you agree to our/g)?.length ?? 0,
+    1,
+  );
+  assert.match(
+    markup,
+    /curl -fsSL https:\/\/murph\.example\.test\/install\.sh \| bash/u,
+  );
   assert.match(markup, /Get started free/);
   assert.match(markup, /href="#signup-title"/);
 });
 
 test("HomePage hides homepage auth entrypoints once the hosted session is authenticated", async () => {
-  mocks.usePrivy.mockReturnValue({
+  vi.clearAllMocks();
+  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
     authenticated: true,
-    ready: true,
+    authenticatedMember: {
+      billingStatus: "active",
+      createdAt: new Date("2025-03-27T08:00:00.000Z"),
+      id: "member_123",
+      suspendedAt: null,
+      updatedAt: new Date("2025-03-27T08:00:00.000Z"),
+    },
+    linkedAccounts: [],
+    memberLookup: null,
+    session: null,
   });
 
   const { default: HomePage } = await import("../app/page");
-  const { resolveHostedInstallScriptUrl } = await import("@/src/lib/hosted-onboarding/landing");
+  const { resolveHostedInstallScriptUrl } = await import(
+    "@/src/lib/hosted-onboarding/landing"
+  );
 
-  vi.mocked(resolveHostedInstallScriptUrl).mockReturnValue("https://murph.example.test/install.sh");
+  vi.mocked(resolveHostedInstallScriptUrl).mockReturnValue(
+    "https://murph.example.test/install.sh",
+  );
 
-  const markup = renderToStaticMarkup(HomePage());
+  const markup = renderToStaticMarkup(await HomePage());
 
   assert.match(markup, /You&#x27;re already signed in\./);
   assert.match(markup, /You&#x27;re already in\./);
@@ -145,24 +238,6 @@ test("HomePage hides homepage auth entrypoints once the hosted session is authen
   assert.match(markup, /href="\/settings"/);
   assert.doesNotMatch(markup, /Hosted phone auth/);
   assert.doesNotMatch(markup, /data-existing-account-sign-in-dialog="true"/);
-  assert.doesNotMatch(markup, /Get started free/);
-});
-
-test("HomePage keeps homepage auth entrypoints hidden while the hosted session is still loading", async () => {
-  mocks.usePrivy.mockReturnValue({
-    authenticated: false,
-    ready: false,
-  });
-
-  const { default: HomePage } = await import("../app/page");
-  const { resolveHostedInstallScriptUrl } = await import("@/src/lib/hosted-onboarding/landing");
-
-  vi.mocked(resolveHostedInstallScriptUrl).mockReturnValue("https://murph.example.test/install.sh");
-
-  const markup = renderToStaticMarkup(HomePage());
-
-  assert.match(markup, /Checking your session\./);
-  assert.doesNotMatch(markup, /Hosted phone auth/);
-  assert.doesNotMatch(markup, /data-existing-account-sign-in-dialog="true"/);
+  assert.doesNotMatch(markup, /By signing up, you agree to our/);
   assert.doesNotMatch(markup, /Get started free/);
 });

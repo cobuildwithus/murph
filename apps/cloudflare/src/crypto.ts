@@ -4,7 +4,7 @@ import {
   type HostedStorageScope,
 } from "./crypto-context.js";
 
-const HOSTED_CIPHER_SCHEMA = "murph.hosted-cipher.v2";
+const HOSTED_CIPHER_SCHEMA = "murph.hosted-cipher.v1";
 
 type HostedCipherSchema = typeof HOSTED_CIPHER_SCHEMA;
 

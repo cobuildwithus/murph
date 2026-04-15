@@ -23,16 +23,15 @@ import { exportGatewayProjectionSnapshotLocal } from "@murphai/gateway-local";
 import { reconcileHostedVerifiedEmailSelfTarget } from "../hosted-email-route.ts";
 import { createHostedArtifactUploadSink } from "./artifacts.ts";
 import {
-  collectHostedExecutionSideEffects,
-  drainHostedCommittedSideEffectsAfterCommit,
+  collectHostedAssistantDeliverySideEffects,
+  drainHostedCommittedAssistantDeliveriesAfterCommit,
 } from "./callbacks.ts";
 import { executeHostedDispatchEvent } from "./events.ts";
 import { runHostedMaintenanceLoop } from "./maintenance.ts";
 import type {
-  HostedAssistantRuntimeJobResult,
+  HostedAssistantRuntimeCompletedJobResult,
   HostedAssistantRuntimeJobRequest,
   HostedCommittedExecutionState,
-  HostedExecutionCommitCallback,
   HostedRestoredExecutionContext,
   NormalizedHostedAssistantRuntimeConfig,
   HostedWorkspaceArtifactMaterializer,
@@ -48,17 +47,21 @@ export async function executeHostedDispatchForCommit(input: {
   restored: HostedRestoredExecutionContext;
   runtime: Pick<
     NormalizedHostedAssistantRuntimeConfig,
-    "commitTimeoutMs" | "platform" | "userEnv"
+    "commitTimeoutMs" | "platform" | "resolvedConfig" | "userEnv"
   >;
   runtimeEnv: Readonly<Record<string, string>>;
 }): Promise<HostedCommittedExecutionState> {
   emitHostedExecutionStructuredLog({
     component: "runtime",
     dispatch: input.request.dispatch,
+    details: {
+      runElapsedMs: computeHostedRunElapsedMs(input.request.run ?? null),
+    },
     message: "Hosted runtime executing dispatch handlers.",
     phase: "dispatch.running",
     run: input.request.run ?? null,
   });
+  const dispatchHandlersStartedAtMs = Date.now();
   const dispatchMetrics = await executeHostedDispatchEvent({
     dispatch: input.request.dispatch,
     runtime: input.runtime,
@@ -66,18 +69,43 @@ export async function executeHostedDispatchForCommit(input: {
     sharePack: input.request.sharePack ?? null,
     vaultRoot: input.restored.vaultRoot,
   });
+  emitHostedExecutionStructuredLog({
+    component: "runtime",
+    dispatch: input.request.dispatch,
+    details: {
+      dispatchHandlerLatencyMs: Date.now() - dispatchHandlersStartedAtMs,
+      runElapsedMs: computeHostedRunElapsedMs(input.request.run ?? null),
+    },
+    message: "Hosted runtime finished dispatch handlers.",
+    phase: "dispatch.running",
+    run: input.request.run ?? null,
+  });
+  const maintenanceStartedAtMs = Date.now();
   const maintenanceMetrics = await runHostedMaintenanceLoop({
     artifactMaterializer: input.artifactMaterializer ?? null,
     deviceSyncPort: input.runtime.platform.deviceSyncPort,
     dispatch: input.request.dispatch,
     executionContext: input.executionContext,
     requestId: input.request.dispatch.eventId,
+    resolvedConfig: input.runtime.resolvedConfig,
     skipAssistantAutomation: input.request.dispatch.event.kind === "member.activated"
       && dispatchMetrics.bootstrapResult?.assistantConfigured === false,
     timeoutMs: input.runtime.commitTimeoutMs,
-    runtimeEnv: input.runtimeEnv,
     vaultRoot: input.restored.vaultRoot,
   });
+  emitHostedExecutionStructuredLog({
+    component: "runtime",
+    dispatch: input.request.dispatch,
+    details: {
+      maintenanceLatencyMs: Date.now() - maintenanceStartedAtMs,
+      nextWakeAt: maintenanceMetrics.nextWakeAt,
+      runElapsedMs: computeHostedRunElapsedMs(input.request.run ?? null),
+    },
+    message: "Hosted runtime finished maintenance loop.",
+    phase: "dispatch.running",
+    run: input.request.run ?? null,
+  });
+  const snapshotStartedAtMs = Date.now();
   const committedSnapshot = await snapshotHostedExecutionContext({
     artifactSink: createHostedArtifactUploadSink({
       artifactStore: input.runtime.platform.artifactStore,
@@ -92,7 +120,20 @@ export async function executeHostedDispatchForCommit(input: {
     }),
     vaultRoot: input.restored.vaultRoot,
   });
-  const committedSideEffects = await collectHostedExecutionSideEffects(input.restored.vaultRoot);
+  emitHostedExecutionStructuredLog({
+    component: "runtime",
+    dispatch: input.request.dispatch,
+    details: {
+      runElapsedMs: computeHostedRunElapsedMs(input.request.run ?? null),
+      snapshotLatencyMs: Date.now() - snapshotStartedAtMs,
+    },
+    message: "Hosted runtime snapshotted execution context.",
+    phase: "commit.recorded",
+    run: input.request.run ?? null,
+  });
+  const committedAssistantDeliveryEffects = await collectHostedAssistantDeliverySideEffects(
+    input.restored.vaultRoot,
+  );
   const committedGatewayProjectionSnapshot = await exportGatewayProjectionSnapshotLocal(
     input.restored.vaultRoot,
     {
@@ -113,34 +154,36 @@ export async function executeHostedDispatchForCommit(input: {
         }),
       },
     },
-    committedSideEffects,
+    committedAssistantDeliveryEffects,
   };
 }
 
 export async function completeHostedExecutionAfterCommit(input: {
-  commit: HostedExecutionCommitCallback | null;
   dispatch: HostedExecutionDispatchRequest;
   materializedArtifactPaths?: ReadonlySet<string>;
   run?: HostedExecutionRunContext | null;
   runtime: Pick<
     NormalizedHostedAssistantRuntimeConfig,
-    "commitTimeoutMs" | "platform" | "userEnv"
+    "commitTimeoutMs" | "platform" | "resolvedConfig" | "userEnv"
   >;
   restored: HostedRestoredExecutionContext;
   committedExecution: HostedCommittedExecutionState;
-}): Promise<HostedAssistantRuntimeJobResult> {
+}): Promise<HostedAssistantRuntimeCompletedJobResult> {
   emitHostedExecutionStructuredLog({
     component: "runtime",
     dispatch: input.dispatch,
+    details: {
+      runElapsedMs: computeHostedRunElapsedMs(input.run ?? null),
+    },
     message: "Hosted runtime draining committed side effects.",
     phase: "side-effects.draining",
     run: input.run ?? null,
   });
-  await drainHostedCommittedSideEffectsAfterCommit({
-    commit: input.commit,
+  const sideEffectsStartedAtMs = Date.now();
+  await drainHostedCommittedAssistantDeliveriesAfterCommit({
     dispatch: input.dispatch,
     effectsPort: input.runtime.platform.effectsPort,
-    sideEffects: input.committedExecution.committedSideEffects,
+    assistantDeliveryEffects: input.committedExecution.committedAssistantDeliveryEffects,
     vaultRoot: input.restored.vaultRoot,
   });
   await exportHostedPendingAssistantUsage({
@@ -153,7 +196,19 @@ export async function completeHostedExecutionAfterCommit(input: {
     vaultRoot: input.restored.vaultRoot,
   });
   await refreshAssistantStatusSnapshot(input.restored.vaultRoot);
+  emitHostedExecutionStructuredLog({
+    component: "runtime",
+    dispatch: input.dispatch,
+    details: {
+      runElapsedMs: computeHostedRunElapsedMs(input.run ?? null),
+      sideEffectsDrainLatencyMs: Date.now() - sideEffectsStartedAtMs,
+    },
+    message: "Hosted runtime drained committed side effects.",
+    phase: "side-effects.draining",
+    run: input.run ?? null,
+  });
 
+  const finalSnapshotStartedAtMs = Date.now();
   const finalSnapshot = await snapshotHostedExecutionContext({
     artifactSink: createHostedArtifactUploadSink({
       artifactStore: input.runtime.platform.artifactStore,
@@ -168,6 +223,17 @@ export async function completeHostedExecutionAfterCommit(input: {
     }),
     vaultRoot: input.restored.vaultRoot,
   });
+  emitHostedExecutionStructuredLog({
+    component: "runtime",
+    dispatch: input.dispatch,
+    details: {
+      finalSnapshotLatencyMs: Date.now() - finalSnapshotStartedAtMs,
+      runElapsedMs: computeHostedRunElapsedMs(input.run ?? null),
+    },
+    message: "Hosted runtime snapshotted final execution state.",
+    phase: "completed",
+    run: input.run ?? null,
+  });
   const finalGatewayProjectionSnapshot = await exportGatewayProjectionSnapshotLocal(
     input.restored.vaultRoot,
     {
@@ -181,6 +247,7 @@ export async function completeHostedExecutionAfterCommit(input: {
 
   return {
     finalGatewayProjectionSnapshot,
+    phase: "completed",
     result: finalResult,
   };
 }
@@ -218,4 +285,19 @@ function collectPreservedHostedArtifacts(input: {
   } catch {
     return [];
   }
+}
+
+function computeHostedRunElapsedMs(
+  run: HostedAssistantRuntimeJobRequest["run"] | null | undefined,
+): number | null {
+  if (!run?.startedAt) {
+    return null;
+  }
+
+  const startedAtMs = Date.parse(run.startedAt);
+  if (!Number.isFinite(startedAtMs)) {
+    return null;
+  }
+
+  return Math.max(0, Date.now() - startedAtMs);
 }

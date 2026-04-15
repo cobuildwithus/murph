@@ -110,7 +110,7 @@ export async function sendHostedLinqChatMessage(input: {
   message: string;
   replyToMessageId?: string | null;
   signal?: AbortSignal;
-}): Promise<{ chatId: string | null; messageId: string | null }> {
+}): Promise<void> {
   const { apiBaseUrl, apiToken } = requireHostedOnboardingLinqConfig();
   const replyToMessageId = normalizeNullableString(input.replyToMessageId);
   let response: Response;
@@ -148,15 +148,6 @@ export async function sendHostedLinqChatMessage(input: {
       retryable: isRetryableHostedLinqStatus(response.status),
     });
   }
-
-  const payload = (await response.json()) as Record<string, unknown>;
-  return {
-    chatId: normalizeNullableString(payload.chat_id),
-    messageId:
-      payload.message && typeof payload.message === "object"
-        ? normalizeNullableString((payload.message as Record<string, unknown>).id)
-        : null,
-  };
 }
 
 export async function createHostedLinqChat(input: {
@@ -312,6 +303,16 @@ export function resolveHostedLinqParticipantPhoneNumber(
   );
 }
 
+export function resolveHostedLinqRecipientPhoneNumber(
+  event: HostedLinqMessageReceivedEvent,
+): string | null {
+  return (
+    normalizePhoneNumber(event.data.recipient_phone)
+    ?? normalizePhoneNumber(event.data.recipient_handle?.handle)
+    ?? normalizePhoneNumber(event.data.chat?.owner_handle?.handle)
+  );
+}
+
 export function resolveHostedLinqOccurredAt(event: HostedLinqMessageReceivedEvent): string {
   return resolveLinqWebhookOccurredAt(event);
 }
@@ -325,14 +326,23 @@ export function buildHostedInviteReply(input: {
 
 Sign in here:
 ${input.joinUrl}`
-    : `Murph signup link
+    : `Welcome to Murph.
 
-Verify your phone and finish signup here:
+Verify your phone to finish signup here:
 ${input.joinUrl}`;
 }
 
 export function buildHostedDailyQuotaReply(): string {
   return "You have reached Murph's daily text limit of 100 messages. Try again tomorrow.";
+}
+
+export function buildHostedLinqConversationHomeRedirectReply(input: {
+  homeRecipientPhone: string;
+}): string {
+  return `You're already set up with Murph.
+
+Save this number and text me here instead:
+${input.homeRecipientPhone}`;
 }
 
 function resolveHostedLinqOutboundFallbackPhoneNumber(

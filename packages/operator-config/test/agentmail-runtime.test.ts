@@ -284,7 +284,13 @@ test('agentmail download and pagination helpers surface deterministic failures',
   const listedPageTokens: Array<string | null> = []
   assert.deepEqual(
     await listAllAgentmailInboxes({
-      async listInboxes(input?: { pageToken?: string | null }) {
+      async listInboxes(
+        inputOrSignal?: { pageToken?: string | null } | AbortSignal,
+      ) {
+        const input =
+          inputOrSignal && typeof inputOrSignal === 'object' && 'aborted' in inputOrSignal
+            ? undefined
+            : inputOrSignal
         listedPageTokens.push(input?.pageToken ?? null)
         if (!input?.pageToken) {
           return {
@@ -317,7 +323,13 @@ test('agentmail download and pagination helpers surface deterministic failures',
   await assert.rejects(
     () =>
       listAllAgentmailInboxes({
-        async listInboxes(input?: { pageToken?: string | null }) {
+        async listInboxes(
+          inputOrSignal?: { pageToken?: string | null } | AbortSignal,
+        ) {
+          const input =
+            inputOrSignal && typeof inputOrSignal === 'object' && 'aborted' in inputOrSignal
+              ? undefined
+              : inputOrSignal
           return {
             count: 1,
             inboxes: [{ email: 'loop@example.test', inbox_id: 'inbox-1' }],

@@ -11,6 +11,7 @@ import {
   resolveAssistantFirstContactStateDocIds,
 } from './first-contact.js'
 import { ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE } from './first-contact-welcome.js'
+import { buildAssistantFirstContactWelcomeTurnMetadata } from './first-contact-welcome-turn-metadata.js'
 import { createAssistantRuntimeStateService } from './runtime-state-service.js'
 import { buildResolveAssistantSessionInput } from './session-resolution.js'
 import type { AssistantSessionResolutionFields } from './service-contracts.js'
@@ -18,9 +19,12 @@ import { withAssistantTurnLock } from './turn-lock.js'
 
 export interface AssistantFirstContactWelcomeInput extends Pick<
   AssistantSessionResolutionFields,
-  'channel' | 'identityId' | 'threadId' | 'threadIsDirect'
+  'actorId' | 'channel' | 'identityId' | 'threadId' | 'threadIsDirect'
 > {
   abortSignal?: AbortSignal
+  fromPhoneNumber?: string | null
+  kind?: 'linq-materialize-home-thread' | 'thread'
+  toPhoneNumber?: string | null
   vault: string
 }
 
@@ -56,6 +60,7 @@ async function runAssistantFirstContactWelcomeLocal(
     run: async () => {
       const state = createAssistantRuntimeStateService(input.vault)
       const sessionInput = buildResolveAssistantSessionInput({
+        actorId: input.actorId ?? input.toPhoneNumber ?? null,
         channel: input.channel,
         identityId: input.identityId,
         threadId: input.threadId,
@@ -64,13 +69,9 @@ async function runAssistantFirstContactWelcomeLocal(
       }, defaults, createDefaultLocalAssistantModelTarget())
       const resolveInput = (({ vault: _vault, ...rest }) => rest)(sessionInput)
       const resolved = await state.sessions.resolve(resolveInput)
-      const firstContactStateDocIds = resolveAssistantFirstContactStateDocIds({
-        actorId: resolved.session.binding.actorId,
-        channel: resolved.session.binding.channel,
-        identityId: resolved.session.binding.identityId,
-        threadId: resolved.session.binding.threadId,
-        threadIsDirect: resolved.session.binding.threadIsDirect,
-      })
+      const firstContactStateDocIds = resolveAssistantFirstContactStateDocIdsForSession(
+        resolved.session,
+      )
 
       if (await hasAssistantSeenFirstContact({
         docIds: firstContactStateDocIds,
@@ -113,7 +114,7 @@ async function runAssistantFirstContactWelcomeLocal(
         }
       }
 
-      if (resolved.session.turnCount > 0) {
+      if (resolved.session.turnCount > 0 && shouldSkipFirstContactMaterialization(input, resolved.session)) {
         await markAssistantFirstContactSeen({
           docIds: firstContactStateDocIds,
           seenAt: new Date().toISOString(),
@@ -130,9 +131,11 @@ async function runAssistantFirstContactWelcomeLocal(
       const receipt = await state.turns.readReceipt(turnId)
         ?? await state.turns.createReceipt({
           deliveryRequested: true,
-          metadata: {
-            kind: 'assistant-first-contact-welcome',
-          },
+          metadata: buildAssistantFirstContactWelcomeTurnMetadata({
+            fromPhoneNumber: input.kind === 'linq-materialize-home-thread'
+              ? input.fromPhoneNumber
+              : null,
+          }),
           prompt: ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE,
           provider: resolved.session.provider,
           providerModel: resolved.session.providerOptions.model ?? null,
@@ -217,16 +220,21 @@ async function runAssistantFirstContactWelcomeLocal(
           },
         ],
       )
+      const deliveredSession = outcome.session ?? resolved.session
       const session = await state.sessions.save({
-        ...resolved.session,
+        ...deliveredSession,
         updatedAt: outcome.delivery.sentAt,
         lastTurnAt: outcome.delivery.sentAt,
-        turnCount: resolved.session.turnCount + 1,
+        turnCount: deliveredSession.turnCount + 1,
       })
+      const finalizedFirstContactStateDocIds = mergeFirstContactStateDocIds(
+        firstContactStateDocIds,
+        resolveAssistantFirstContactStateDocIdsForSession(session),
+      )
 
       await finalizeAssistantTurnFromDeliveryOutcome({
         firstTurnCheckInInjected: true,
-        firstTurnCheckInStateDocIds: firstContactStateDocIds,
+        firstTurnCheckInStateDocIds: finalizedFirstContactStateDocIds,
         outcome: {
           kind: 'sent',
           delivery: outcome.delivery,
@@ -250,6 +258,41 @@ async function runAssistantFirstContactWelcomeLocal(
 
 function buildAssistantFirstContactWelcomeTurnId(sessionId: string): string {
   return `turn_first_contact_${createHash('sha256').update(sessionId).digest('hex').slice(0, 24)}`
+}
+
+function shouldSkipFirstContactMaterialization(
+  input: AssistantFirstContactWelcomeInput,
+  session: AssistantSession,
+): boolean {
+  if (input.kind !== 'linq-materialize-home-thread') {
+    return true
+  }
+
+  return session.binding.delivery?.kind === 'thread' && session.binding.threadId !== null
+}
+
+function resolveAssistantFirstContactStateDocIdsForSession(
+  session:
+    | Pick<
+        AssistantSessionResolutionFields,
+        'actorId' | 'channel' | 'identityId' | 'threadId' | 'threadIsDirect'
+      >
+    | Pick<AssistantSession, 'binding'>,
+): string[] {
+  const binding = 'binding' in session ? session.binding : session
+  return resolveAssistantFirstContactStateDocIds({
+    actorId: binding.actorId,
+    channel: binding.channel,
+    identityId: binding.identityId,
+    threadId: binding.threadId,
+    threadIsDirect: binding.threadIsDirect,
+  })
+}
+
+function mergeFirstContactStateDocIds(
+  ...docIdSets: ReadonlyArray<readonly string[]>
+): string[] {
+  return [...new Set(docIdSets.flat())]
 }
 
 function buildAssistantFirstContactWelcomeDeliveryIdempotencyKey(

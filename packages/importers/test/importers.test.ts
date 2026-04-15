@@ -1,15 +1,10 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "vitest";
 
 import * as coreRuntime from "@murphai/core";
-import type {
-  DocumentImportPayload,
-  MealImportPayload,
-  SampleImportPayload,
-} from "../src/index.ts";
 import {
   addMeal,
   createSamplePresetRegistry,
@@ -19,45 +14,8 @@ import {
   prepareCsvSampleImport,
   prepareMealImport,
 } from "../src/index.ts";
-
-async function createTempFile(name: string, contents: string): Promise<string> {
-  const directory = await mkdtemp(join(tmpdir(), "murph-importers-"));
-  const filePath = join(directory, name);
-  await writeFile(filePath, contents);
-  return filePath;
-}
-
-interface CorePortSpyCalls {
-  documents: DocumentImportPayload[];
-  meals: MealImportPayload[];
-  samples: SampleImportPayload[];
-}
-
-function createCorePortSpy() {
-  const calls: CorePortSpyCalls = {
-    documents: [],
-    meals: [],
-    samples: [],
-  };
-
-  return {
-    calls,
-    corePort: {
-      async importDocument(payload: DocumentImportPayload) {
-        calls.documents.push(payload);
-        return { ok: true, kind: "document" as const };
-      },
-      async addMeal(payload: MealImportPayload) {
-        calls.meals.push(payload);
-        return { ok: true, kind: "meal" as const };
-      },
-      async importSamples(payload: SampleImportPayload) {
-        calls.samples.push(payload);
-        return { ok: true, kind: "samples" as const };
-      },
-    },
-  };
-}
+import type { DocumentImportPayload } from "../src/index.ts";
+import { createCorePortSpy, createTempFile } from "./test-helpers.ts";
 
 test("importDocument delegates a core-shaped document payload", async () => {
   const filePath = await createTempFile("labs.pdf", "pdf-placeholder");
@@ -106,6 +64,44 @@ test("addMeal validates attachments and maps to addMeal-compatible input", async
   assert.equal(mealPayload.note, "salmon and rice");
 });
 
+test("addMeal accepts structured-only meal input with ingredients and nutrition", async () => {
+  const { calls, corePort } = createCorePortSpy();
+
+  await addMeal(
+    {
+      source: "derived",
+      ingredients: [" salmon  ", "rice"],
+      nutrition: {
+        totals: {
+          calories: 690,
+          proteinGrams: 42,
+        },
+        provenance: {
+          source: "estimated",
+        },
+      },
+    },
+    { corePort },
+  );
+
+  const [mealPayload] = calls.meals;
+
+  assert.ok(mealPayload);
+  assert.equal(mealPayload.photoPath, undefined);
+  assert.equal(mealPayload.audioPath, undefined);
+  assert.equal(mealPayload.source, "derived");
+  assert.deepEqual(mealPayload.ingredients, ["salmon", "rice"]);
+  assert.deepEqual(mealPayload.nutrition, {
+    totals: {
+      calories: 690,
+      proteinGrams: 42,
+    },
+    provenance: {
+      source: "estimated",
+    },
+  });
+});
+
 test("addMeal accepts text-only meal notes without requiring a photo", async () => {
   const { calls, corePort } = createCorePortSpy();
 
@@ -123,7 +119,7 @@ test("addMeal accepts text-only meal notes without requiring a photo", async () 
   assert.equal(mealPayload.note, "soup");
 });
 
-test("addMeal rejects requests without a photo, audio note, or meal note", async () => {
+test("addMeal rejects requests without any supported meal content", async () => {
   const { corePort } = createCorePortSpy();
 
   await assert.rejects(
@@ -133,7 +129,7 @@ test("addMeal rejects requests without a photo, audio note, or meal note", async
         },
         { corePort },
       ),
-    /photoPath, audioPath, or note/,
+    /photoPath, audioPath, note, ingredients, or nutrition/,
   );
 });
 
@@ -381,6 +377,49 @@ test("prepareMealImport accepts note-only meal input", async () => {
   assert.equal(payload.audioPath, undefined);
   assert.equal(payload.vaultRoot, "/tmp/example-vault");
   assert.equal(payload.note, "eggs and fruit");
+});
+
+test("prepareMealImport preserves structured-only meal data", async () => {
+  const payload = await prepareMealImport({
+    vaultRoot: "/tmp/example-vault",
+    source: "derived",
+    ingredients: [" salmon  ", "rice"],
+    nutrition: {
+      totals: {
+        calories: 690,
+      },
+      provenance: {
+        source: "estimated",
+      },
+    },
+  });
+
+  assert.equal(payload.photoPath, undefined);
+  assert.equal(payload.audioPath, undefined);
+  assert.equal(payload.vaultRoot, "/tmp/example-vault");
+  assert.equal(payload.source, "derived");
+  assert.deepEqual(payload.ingredients, ["salmon", "rice"]);
+  assert.deepEqual(payload.nutrition, {
+    totals: {
+      calories: 690,
+    },
+    provenance: {
+      source: "estimated",
+    },
+  });
+});
+
+test("prepareMealImport accepts ingredients-only structured meals", async () => {
+  const payload = await prepareMealImport({
+    vaultRoot: "/tmp/example-vault",
+    ingredients: [" salmon  ", "rice"],
+  });
+
+  assert.equal(payload.photoPath, undefined);
+  assert.equal(payload.audioPath, undefined);
+  assert.equal(payload.note, undefined);
+  assert.deepEqual(payload.ingredients, ["salmon", "rice"]);
+  assert.equal(payload.nutrition, undefined);
 });
 
 test("prepareCsvSampleImport skips blank rows and omits empty metadata columns", async () => {

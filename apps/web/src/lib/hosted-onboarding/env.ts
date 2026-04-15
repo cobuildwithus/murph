@@ -2,8 +2,17 @@ import { decodeHostedEncryptionKey } from "../device-sync/crypto";
 import { normalizeNullableString, parseInteger } from "../device-sync/shared";
 import { readHostedPublicBaseUrl } from "../hosted-web/public-url";
 import { readLinqEnvironment } from "../linq/env";
+import { normalizePhoneNumber } from "./phone";
 
 const HOSTED_CONTACT_PRIVACY_VERSION_PATTERN = /^v[0-9]+$/u;
+const LOCAL_DEV_HOSTED_CONTACT_PRIVACY_VERSION = "v1";
+const LOCAL_DEV_HOSTED_CONTACT_PRIVACY_KEYRING = {
+  currentVersion: LOCAL_DEV_HOSTED_CONTACT_PRIVACY_VERSION,
+  keysByVersion: {
+    [LOCAL_DEV_HOSTED_CONTACT_PRIVACY_VERSION]: Buffer.alloc(32, 0x64),
+  },
+  readVersions: [LOCAL_DEV_HOSTED_CONTACT_PRIVACY_VERSION],
+} as const satisfies HostedContactPrivacyKeyring;
 
 export interface HostedContactPrivacyKeyring {
   currentVersion: string;
@@ -17,6 +26,8 @@ export interface HostedOnboardingEnvironment {
   isProduction: boolean;
   linqApiBaseUrl: string;
   linqApiToken: string | null;
+  linqConversationPhoneNumbers: readonly string[];
+  linqMaxActiveMembersPerConversationPhone: number | null;
   linqWebhookSecret: string | null;
   linqWebhookTimestampToleranceMs: number;
   privyAppId: string | null;
@@ -47,6 +58,12 @@ export function readHostedOnboardingEnvironment(
     isProduction: (source.NODE_ENV ?? "development") === "production",
     linqApiBaseUrl: linq.apiBaseUrl,
     linqApiToken: linq.apiToken,
+    linqConversationPhoneNumbers: readHostedLinqConversationPhoneNumbers(source),
+    linqMaxActiveMembersPerConversationPhone: readPositiveInteger(
+      readEnv(source, "HOSTED_ONBOARDING_LINQ_MAX_ACTIVE_MEMBERS_PER_PHONE_NUMBER"),
+      1000,
+      "HOSTED_ONBOARDING_LINQ_MAX_ACTIVE_MEMBERS_PER_PHONE_NUMBER",
+    ),
     linqWebhookSecret: linq.webhookSecret,
     linqWebhookTimestampToleranceMs: linq.webhookTimestampToleranceMs,
     privyAppId: readEnv(source, "NEXT_PUBLIC_PRIVY_APP_ID"),
@@ -66,6 +83,10 @@ function readHostedContactPrivacyKeyring(
   const keyringValue = readEnv(source, "HOSTED_CONTACT_PRIVACY_KEYS");
 
   if (!keyringValue) {
+    if ((source.NODE_ENV ?? "development") !== "production") {
+      return LOCAL_DEV_HOSTED_CONTACT_PRIVACY_KEYRING;
+    }
+
     throw new TypeError(
       "HOSTED_CONTACT_PRIVACY_KEYS is required for hosted contact privacy.",
     );
@@ -134,6 +155,38 @@ function readHostedContactPrivacyKeyring(
       ...readVersions.filter((version) => version !== currentVersion),
     ],
   };
+}
+
+function readHostedLinqConversationPhoneNumbers(
+  source: HostedOnboardingEnvSource,
+): string[] {
+  const configured = readEnv(source, "HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS");
+
+  if (!configured) {
+    return [];
+  }
+
+  const values = configured
+    .split(/[\n,]+/u)
+    .map((value) => value.trim())
+    .filter((value) => value.length > 0);
+  const recipientPhones: string[] = [];
+
+  for (const value of values) {
+    const recipientPhone = normalizePhoneNumber(value);
+
+    if (!recipientPhone) {
+      throw new TypeError(
+        `HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS contains an invalid phone number: ${JSON.stringify(value)}.`,
+      );
+    }
+
+    if (!recipientPhones.includes(recipientPhone)) {
+      recipientPhones.push(recipientPhone);
+    }
+  }
+
+  return recipientPhones;
 }
 
 function readEnv(source: HostedOnboardingEnvSource, key: string): string | null {

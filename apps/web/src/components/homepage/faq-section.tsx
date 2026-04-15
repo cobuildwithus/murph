@@ -1,7 +1,8 @@
 const faqItems = [
   {
     question: "Do I need to download an app?",
-    answer: "No. Murph works through iMessage, Telegram, or email — tools you already have.",
+    answer:
+      "No. Murph works through iMessage, Telegram, or email — tools you already have.",
   },
   {
     question: "How does wearable syncing work?",
@@ -9,11 +10,13 @@ const faqItems = [
   },
   {
     question: "Is my health data private?",
-    answer: "Yes. Local mode keeps your data on your device, and hosted runs use encrypted cloud snapshots. We never sell or share your health information with third parties.",
+    answer:
+      "Yes. Local mode keeps your data on your device, and hosted runs use encrypted cloud snapshots. We never sell or share your health information with third parties.",
   },
   {
     question: "What can I ask Murph?",
-    answer: "Anything about your health. Log meals, ask about supplement timing, check sleep trends, get pre-workout food suggestions — all in plain English.",
+    answer:
+      "Anything about your health. Log meals, ask about supplement timing, check sleep trends, get pre-workout food suggestions — all in plain English.",
   },
   {
     question: "How much does it cost?",
@@ -42,7 +45,10 @@ export function FaqSection() {
                   <h3 className="text-lg font-semibold text-stone-900 transition-colors group-hover:text-olive">
                     {item.question}
                   </h3>
-                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-stone-200 text-stone-400 transition-all group-open:rotate-45 group-open:border-olive group-open:text-olive" aria-hidden="true">
+                  <span
+                    className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-stone-200 text-stone-400 transition-all group-open:rotate-45 group-open:border-olive group-open:text-olive"
+                    aria-hidden="true"
+                  >
                     +
                   </span>
                 </summary>

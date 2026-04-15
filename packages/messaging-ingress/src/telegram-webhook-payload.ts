@@ -23,7 +23,7 @@ import type {
   TelegramUpdateLike,
   TelegramUser,
   TelegramVenue,
-} from "./telegram-webhook.ts";
+} from "./telegram-types.ts";
 
 export function parseTelegramWebhookUpdate(rawBody: string): TelegramUpdateLike {
   let payload: unknown;

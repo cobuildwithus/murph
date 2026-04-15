@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const workspaceMemberPackageJsonCache = new Map();
 
 export async function main() {
   const failures = [];
@@ -11,6 +12,8 @@ export async function main() {
   await verifyTypecheckTsconfigs(failures);
   await verifyWorkspacePackageExports(failures);
   await verifyAssistantEnginePublicSourceSurface(failures);
+  await verifyAssistantRuntimePublicSourceSurface(failures);
+  await verifyFocusedOwnerSourceSurfaces(failures);
   await verifyWorkspacePackageExportTargets(failures);
   await verifyTsconfigPathMappings(failures);
   await verifyWorkspaceImports(failures);
@@ -95,6 +98,93 @@ async function verifyWorkspacePackageExports(failures) {
           `${path.relative(repoRoot, packageJsonPath)} declares ${JSON.stringify(exportKey)} as a public entrypoint; assistant-engine must keep CLI/inbox/usecase helper modules behind its canonical owner surfaces instead of exporting the internal helper directly.`,
         );
       }
+
+      if (
+        packageJson.name === "@murphai/operator-config"
+        && exportKey === "./runtime-errors"
+      ) {
+        failures.push(
+          `${path.relative(repoRoot, packageJsonPath)} declares ${JSON.stringify(exportKey)} as a public entrypoint; runtime-unavailable helpers belong with @murphai/vault-usecases/runtime instead of the operator-config contract surface.`,
+        );
+      }
+
+      if (
+        packageJson.name === "@murphai/operator-config"
+        && exportKey === "./knowledge-contracts"
+      ) {
+        failures.push(
+          `${path.relative(repoRoot, packageJsonPath)} declares ${JSON.stringify(exportKey)} as a public entrypoint; knowledge result contracts are owned by @murphai/query and must not leak back through the operator-config boundary.`,
+        );
+      }
+
+      if (
+        packageJson.name === "@murphai/messaging-ingress"
+        && exportKey === "."
+      ) {
+        failures.push(
+          `${path.relative(repoRoot, packageJsonPath)} declares ${JSON.stringify(exportKey)} as a public entrypoint; messaging-ingress should expose provider-specific seams only instead of a root convenience barrel.`,
+        );
+      }
+
+      if (
+        packageJson.name === "@murphai/cloudflare-hosted-control"
+        && exportKey === "."
+      ) {
+        failures.push(
+          `${path.relative(repoRoot, packageJsonPath)} declares ${JSON.stringify(exportKey)} as a public entrypoint; cloudflare-hosted-control should expose only its dedicated client/contracts/parsers/routes seams instead of a root umbrella barrel.`,
+        );
+      }
+
+      if (
+        packageJson.name === "@murphai/murph"
+        && exportKey === "./knowledge-cli-contracts"
+      ) {
+        failures.push(
+          `${path.relative(repoRoot, packageJsonPath)} declares ${JSON.stringify(exportKey)} as a public entrypoint; shared knowledge result contracts belong on @murphai/query, so the published CLI package must not grow a second public knowledge-contract surface.`,
+        );
+      }
+
+      if (
+        packageJson.name === "@murphai/importers"
+        && exportKey === "./device-providers"
+      ) {
+        failures.push(
+          `${path.relative(repoRoot, packageJsonPath)} declares ${JSON.stringify(exportKey)} as a public entrypoint; cross-package wearable metadata must stay on @murphai/importers/device-providers/provider-descriptors instead of leaking the full device-provider implementation barrel.`,
+        );
+      }
+
+      if (
+        packageJson.name === "@murphai/query"
+        && exportKey === "./knowledge-contracts"
+      ) {
+        failures.push(
+          `${path.relative(repoRoot, packageJsonPath)} declares ${JSON.stringify(exportKey)} as a public entrypoint; derived-knowledge result contracts already live on the @murphai/query root surface and should not leak as a duplicate subpath boundary.`,
+        );
+      }
+
+      if (
+        packageJson.name === "@murphai/query"
+        && exportKey === "./knowledge-search"
+      ) {
+        failures.push(
+          `${path.relative(repoRoot, packageJsonPath)} declares ${JSON.stringify(exportKey)} as a public entrypoint; derived-knowledge search helpers already live on the @murphai/query root surface and should not leak as a duplicate subpath boundary.`,
+        );
+      }
+
+      if (
+        packageJson.name === "@murphai/query"
+        && exportKey === "./search"
+      ) {
+        failures.push(
+          `${path.relative(repoRoot, packageJsonPath)} declares ${JSON.stringify(exportKey)} as a public entrypoint; lexical vault search already lives on the @murphai/query root surface, so the internal search module should not leak as a second boundary.`,
+        );
+      }
+
+      if (exportKey === "./testing") {
+        failures.push(
+          `${path.relative(repoRoot, packageJsonPath)} declares ${JSON.stringify(exportKey)} as a public entrypoint; test helpers must stay package-local or use package-local Vitest aliases instead of leaking through the workspace package surface.`,
+        );
+      }
     }
   }
 }
@@ -116,10 +206,14 @@ async function verifyAssistantEnginePublicSourceSurface(failures) {
     "./assistant-cli-access.js",
     "./assistant-cli-tools.js",
     "./assistant-vault-paths.js",
+    "./knowledge.js",
+    "./process-kill.js",
   ]) {
     if (sourceReexportsSpecifier(indexSource, specifier)) {
       failures.push(
-        `packages/assistant-engine/src/index.ts re-exports ${JSON.stringify(specifier)}; assistant-engine's public root must stay on canonical runtime surfaces instead of leaking internal CLI/config helpers.`,
+        specifier === "./knowledge.js"
+          ? "packages/assistant-engine/src/index.ts re-exports ./knowledge.js; knowledge operations already have a dedicated @murphai/assistant-engine/knowledge entrypoint and should not leak through the ambient root barrel."
+          : `packages/assistant-engine/src/index.ts re-exports ${JSON.stringify(specifier)}; assistant-engine's public root must stay on canonical runtime surfaces instead of leaking internal CLI/config helpers.`,
       );
     }
   }
@@ -127,6 +221,304 @@ async function verifyAssistantEnginePublicSourceSurface(failures) {
   if (sourceReexportsSpecifier(providerSource, "./assistant/provider-config.js")) {
     failures.push(
       "packages/assistant-engine/src/assistant-provider.ts re-exports ./assistant/provider-config.js; assistant provider config remains owned by @murphai/operator-config and should not leak through the assistant-provider surface.",
+    );
+  }
+
+  for (const specifier of [
+    "./assistant-cli-access.js",
+    "./assistant-cli-tools.js",
+  ]) {
+    if (sourceReexportsSpecifier(providerSource, specifier)) {
+      failures.push(
+        `packages/assistant-engine/src/assistant-provider.ts re-exports ${JSON.stringify(specifier)}; assistant-provider must stay on provider runtime state and recovery instead of leaking CLI access or tool-catalog helpers.`,
+      );
+    }
+  }
+}
+
+async function verifyAssistantRuntimePublicSourceSurface(failures) {
+  const assistantRuntimeIndexPath = path.join(repoRoot, "packages", "assistant-runtime", "src", "index.ts");
+  const indexSource = await readFile(assistantRuntimeIndexPath, "utf8");
+
+  if (sourceMentionsSpecifier(indexSource, "./hosted-email-route.ts")) {
+    failures.push(
+      "packages/assistant-runtime/src/index.ts re-exports ./hosted-email-route.ts; hosted email self-target reconciliation is an internal runtime helper and must not leak through the assistant-runtime root barrel.",
+    );
+  }
+
+  if (sourceMentionsSpecifier(indexSource, "./hosted-email.ts")) {
+    failures.push(
+      "packages/assistant-runtime/src/index.ts re-exports ./hosted-email.ts; hosted email transport codecs should stay on @murphai/assistant-runtime/hosted-email so Cloudflare transport code does not depend on the ambient runtime root.",
+    );
+  }
+}
+
+async function verifyFocusedOwnerSourceSurfaces(failures) {
+  const deletedCompatibilityFiles = [
+    {
+      path: path.join(repoRoot, "packages", "operator-config", "src", "knowledge-contracts.ts"),
+      message:
+        "packages/operator-config/src/knowledge-contracts.ts exists; knowledge result contracts are owned by @murphai/query and must not return through an operator-config compatibility shim.",
+    },
+    {
+      path: path.join(repoRoot, "packages", "assistant-engine", "src", "knowledge", "contracts.ts"),
+      message:
+        "packages/assistant-engine/src/knowledge/contracts.ts exists; assistant-engine knowledge helpers must depend on @murphai/query directly instead of reviving a local compatibility shim.",
+    },
+    {
+      path: path.join(repoRoot, "packages", "operator-config", "src", "assistant", "state-ids.ts"),
+      message:
+        "packages/operator-config/src/assistant/state-ids.ts exists; shared assistant opaque id validation is owned by @murphai/runtime-state and must not return through an operator-config helper copy.",
+    },
+    {
+      path: path.join(repoRoot, "packages", "cli", "src", "knowledge-cli-contracts.ts"),
+      message:
+        "packages/cli/src/knowledge-cli-contracts.ts exists; CLI knowledge command wiring should import query-owned schemas directly instead of carrying a second local knowledge-contract alias layer.",
+    },
+  ];
+  const sourceChecks = [
+    {
+      path: path.join(repoRoot, "packages", "operator-config", "src", "index.ts"),
+      failures: [
+        {
+          specifier: "./knowledge-contracts.js",
+          message:
+            "packages/operator-config/src/index.ts mentions ./knowledge-contracts.js; knowledge result contracts are owned by @murphai/query and should not leak through the operator-config umbrella barrel.",
+        },
+      ],
+      predicate: sourceMentionsSpecifier,
+    },
+    {
+      path: path.join(repoRoot, "packages", "assistant-engine", "src", "knowledge", "documents.ts"),
+      failures: [
+        {
+          specifier: "./contracts.js",
+          message:
+            "packages/assistant-engine/src/knowledge/documents.ts imports ./contracts.js; knowledge document helpers should depend on @murphai/query for KnowledgePage types instead of reviving a local compatibility shim.",
+        },
+      ],
+      predicate: sourceMentionsSpecifier,
+    },
+    {
+      path: path.join(repoRoot, "packages", "assistant-engine", "src", "knowledge.ts"),
+      failures: [
+        {
+          specifier: "assertKnowledgeSourcePathAllowed",
+          message:
+            "packages/assistant-engine/src/knowledge.ts mentions assertKnowledgeSourcePathAllowed; the assistant-engine public knowledge surface should stay on service operations instead of leaking lower-level validation helpers.",
+        },
+        {
+          specifier: "./knowledge/documents.js",
+          message:
+            "packages/assistant-engine/src/knowledge.ts mentions ./knowledge/documents.js; the assistant-engine public knowledge surface should stay on service operations instead of leaking document-normalization helpers through a second boundary.",
+        },
+        {
+          specifier: "@murphai/query",
+          message:
+            "packages/assistant-engine/src/knowledge.ts mentions @murphai/query; knowledge result contracts are owned by @murphai/query and should be imported from there directly instead of re-exporting them through @murphai/assistant-engine/knowledge.",
+        },
+      ],
+      predicate: sourceMentionsSpecifier,
+    },
+    {
+      path: path.join(repoRoot, "packages", "assistant-engine", "src", "assistant", "state-ids.ts"),
+      failures: [
+        {
+          specifier: "export function isValidAssistantOpaqueId",
+          message:
+            "packages/assistant-engine/src/assistant/state-ids.ts declares isValidAssistantOpaqueId locally; shared assistant opaque id helpers are owned by @murphai/runtime-state/assistant-ids and must not be duplicated here.",
+        },
+      ],
+      predicate: sourceMentionsText,
+    },
+    {
+      path: path.join(repoRoot, "packages", "assistant-engine", "src", "assistant", "state-ids.ts"),
+      failures: [
+        {
+          specifier: "@murphai/runtime-state/assistant-ids",
+          message:
+            "packages/assistant-engine/src/assistant/state-ids.ts re-exports @murphai/runtime-state/assistant-ids; assistant opaque id helpers should stay on the dedicated runtime-state subpath instead of leaking through the assistant-engine state surface.",
+        },
+      ],
+      predicate: sourceReexportsSpecifier,
+    },
+    {
+      path: path.join(repoRoot, "packages", "runtime-state", "src", "index.ts"),
+      failures: [
+        {
+          specifier: "assistant-ids",
+          message:
+            "packages/runtime-state/src/index.ts mentions assistant-ids; assistant opaque id helpers should stay on the dedicated @murphai/runtime-state/assistant-ids subpath instead of the broad runtime-state root barrel.",
+        },
+      ],
+      predicate: sourceMentionsText,
+    },
+    {
+      path: path.join(repoRoot, "packages", "operator-config", "src", "assistant-cli-contracts.ts"),
+      failures: [
+        {
+          specifier: "./assistant/state-ids.js",
+          message:
+            "packages/operator-config/src/assistant-cli-contracts.ts imports ./assistant/state-ids.js; assistant opaque id validation should come from @murphai/runtime-state/assistant-ids instead of an operator-config helper copy.",
+        },
+      ],
+      predicate: sourceMentionsSpecifier,
+    },
+    {
+      path: path.join(repoRoot, "packages", "vault-usecases", "src", "query-runtime.ts"),
+      failures: [
+        {
+          specifier: "export const ALL_QUERY_ENTITY_FAMILIES",
+          message:
+            "packages/vault-usecases/src/query-runtime.ts re-exports ALL_QUERY_ENTITY_FAMILIES; query entity-family metadata is owned by @murphai/query/entity-families and should not flow through the vault-usecases runtime helper layer.",
+        },
+      ],
+      predicate: sourceMentionsSpecifier,
+    },
+    {
+      path: path.join(repoRoot, "packages", "vault-usecases", "src", "runtime.ts"),
+      failures: [
+        {
+          specifier: "ALL_QUERY_ENTITY_FAMILIES",
+          message:
+            "packages/vault-usecases/src/runtime.ts mentions ALL_QUERY_ENTITY_FAMILIES; query entity-family metadata should stay on @murphai/query/entity-families instead of leaking through @murphai/vault-usecases/runtime.",
+        },
+      ],
+      predicate: sourceMentionsSpecifier,
+    },
+    {
+      path: path.join(repoRoot, "packages", "query", "src", "index.ts"),
+      failures: [
+        {
+          specifier: "ALL_QUERY_ENTITY_FAMILIES",
+          message:
+            "packages/query/src/index.ts mentions ALL_QUERY_ENTITY_FAMILIES; query entity-family metadata should stay on the dedicated @murphai/query/entity-families subpath instead of the broad query root barrel.",
+        },
+      ],
+      predicate: sourceMentionsText,
+    },
+    {
+      path: path.join(repoRoot, "packages", "device-syncd", "src", "public-ingress.ts"),
+      failures: [
+        {
+          specifier: "./config.ts",
+          message:
+            "packages/device-syncd/src/public-ingress.ts imports or re-exports ./config.ts; the shared public-ingress seam must stay on provider-agnostic callback and webhook behavior instead of leaking daemon config readers through a second boundary.",
+        },
+        {
+          specifier: "./http.ts",
+          message:
+            "packages/device-syncd/src/public-ingress.ts imports or re-exports ./http.ts; the shared public-ingress seam must not depend on daemon HTTP helpers when @murphai/device-syncd/http already owns that surface.",
+        },
+      ],
+      predicate: sourceMentionsSpecifier,
+    },
+    {
+      path: path.join(repoRoot, "packages", "cli", "src", "index.ts"),
+      failures: [
+        {
+          specifier: "./knowledge-cli-contracts.js",
+          message:
+            "packages/cli/src/index.ts re-exports ./knowledge-cli-contracts.js; shared knowledge result contracts belong on @murphai/query, not on the published CLI root surface.",
+        },
+      ],
+      predicate: sourceMentionsSpecifier,
+    },
+    {
+      path: path.join(repoRoot, "packages", "cli", "src", "commands", "knowledge.ts"),
+      failures: [
+        {
+          specifier: "../knowledge-cli-contracts.js",
+          message:
+            "packages/cli/src/commands/knowledge.ts imports ../knowledge-cli-contracts.js; CLI knowledge commands should consume query-owned schemas directly instead of routing through a package-local alias layer.",
+        },
+      ],
+      predicate: sourceMentionsSpecifier,
+    },
+    {
+      path: path.join(repoRoot, "packages", "cli", "src", "vault-cli-command-manifest.ts"),
+      failures: [
+        {
+          specifier: "./knowledge-cli-contracts.js",
+          message:
+            "packages/cli/src/vault-cli-command-manifest.ts imports ./knowledge-cli-contracts.js; CLI manifest metadata should reference query-owned knowledge schemas directly instead of a local alias boundary.",
+        },
+      ],
+      predicate: sourceMentionsSpecifier,
+    },
+    {
+      path: path.join(repoRoot, "packages", "messaging-ingress", "src", "index.ts"),
+      failures: [
+        {
+          specifier: "./telegram-webhook.ts",
+          message:
+            "packages/messaging-ingress/src/index.ts mentions ./telegram-webhook.ts; Telegram ingress must stay on explicit telegram-webhook and telegram-webhook-payload subpaths instead of drifting back through a package-root barrel.",
+        },
+        {
+          specifier: "./telegram-webhook-payload.ts",
+          message:
+            "packages/messaging-ingress/src/index.ts mentions ./telegram-webhook-payload.ts; messaging-ingress must keep Telegram ingress on explicit subpaths instead of leaking raw payload parsing through a package-root barrel.",
+        },
+      ],
+      predicate: sourceMentionsSpecifier,
+    },
+    {
+      path: path.join(repoRoot, "packages", "messaging-ingress", "src", "telegram-webhook.ts"),
+      failures: [
+        {
+          specifier: "./telegram-webhook-payload.ts",
+          message:
+            "packages/messaging-ingress/src/telegram-webhook.ts imports or re-exports ./telegram-webhook-payload.ts; raw Telegram payload parsing must stay on its dedicated owner surface instead of hiding behind the thread-target and summary entrypoint.",
+        },
+      ],
+      predicate: sourceMentionsSpecifier,
+    },
+    {
+      path: path.join(repoRoot, "packages", "messaging-ingress", "src", "telegram-webhook-payload.ts"),
+      failures: [
+        {
+          specifier: "./telegram-webhook.ts",
+          message:
+            "packages/messaging-ingress/src/telegram-webhook-payload.ts imports ./telegram-webhook.ts; raw Telegram payload parsing should depend on shared telegram-types.ts instead of the higher-level summary entrypoint.",
+        },
+      ],
+      predicate: sourceMentionsSpecifier,
+    },
+    {
+      path: path.join(repoRoot, "packages", "query", "src", "knowledge-graph.ts"),
+      failures: [
+        {
+          specifier: "./knowledge-search.ts",
+          message:
+            "packages/query/src/knowledge-graph.ts imports or re-exports ./knowledge-search.ts; derived-knowledge graph loading must stay readable without routing back through the search owner surface.",
+        },
+      ],
+      predicate: sourceMentionsSpecifier,
+    },
+  ];
+
+  for (const check of sourceChecks) {
+    const source = await readFile(check.path, "utf8");
+
+    for (const failure of check.failures) {
+      if (check.predicate(source, failure.specifier)) {
+        failures.push(failure.message);
+      }
+    }
+  }
+
+  for (const check of deletedCompatibilityFiles) {
+    if (await pathExists(check.path)) {
+      failures.push(check.message);
+    }
+  }
+
+  const knowledgeGraphPath = path.join(repoRoot, "packages", "query", "src", "knowledge-graph.ts");
+  const knowledgeGraphSource = await readFile(knowledgeGraphPath, "utf8");
+
+  if (/\bDerivedKnowledgeSearch(?:Filters|Hit|Result)\b/u.test(knowledgeGraphSource)) {
+    failures.push(
+      "packages/query/src/knowledge-graph.ts still declares derived-knowledge search types; search contracts belong with packages/query/src/knowledge-search.ts so graph loading stays on one owner surface.",
     );
   }
 }
@@ -213,6 +605,7 @@ async function verifyWorkspaceImports(failures) {
     for (const specifier of extractModuleSpecifiers(source)) {
       const importPolicyFailure = verifyWorkspaceImportPolicy({
         filePath,
+        source,
         sourceMember,
         specifier,
       });
@@ -259,10 +652,25 @@ async function verifyWorkspaceImports(failures) {
         continue;
       }
 
-      if (!allowedPatterns.some((pattern) => pattern.test(specifier))) {
+      const importsDeclaredPublicEntrypoint = allowedPatterns.some((pattern) => pattern.test(specifier));
+
+      if (!importsDeclaredPublicEntrypoint) {
         failures.push(
           `${path.relative(repoRoot, filePath)} imports ${JSON.stringify(specifier)}, which is not a declared public workspace entrypoint for ${packageName}.`,
         );
+        continue;
+      }
+
+      const dependencyDeclarationFailure = await verifyWorkspaceDependencyDeclaration({
+        filePath,
+        isTestFile,
+        packageName,
+        sourceMember,
+        specifier,
+      });
+
+      if (dependencyDeclarationFailure) {
+        failures.push(dependencyDeclarationFailure);
       }
     }
   }
@@ -326,8 +734,62 @@ function workspacePackageAllowsRootSpecifier(packageJson) {
   return Object.hasOwn(exportsField, ".");
 }
 
+async function verifyWorkspaceDependencyDeclaration({
+  filePath,
+  isTestFile,
+  packageName,
+  sourceMember,
+  specifier,
+}) {
+  if (
+    isTestFile
+    || sourceMember === null
+    || sourceMember.startsWith("e2e/")
+  ) {
+    return null;
+  }
+
+  const sourcePackageJson = await readWorkspaceMemberPackageJson(sourceMember);
+
+  if (!sourcePackageJson || sourcePackageJson.name === packageName) {
+    return null;
+  }
+
+  if (workspacePackageDeclaresDependency(sourcePackageJson, packageName)) {
+    return null;
+  }
+
+  return `${path.relative(repoRoot, filePath)} imports ${JSON.stringify(specifier)}, but ${sourceMember}/package.json does not declare ${packageName} as a direct dependency. Add the direct workspace dependency so the package graph reflects the real owner boundary instead of relying on a transitive install.`;
+}
+
+async function readWorkspaceMemberPackageJson(workspaceMember) {
+  if (workspaceMemberPackageJsonCache.has(workspaceMember)) {
+    return workspaceMemberPackageJsonCache.get(workspaceMember);
+  }
+
+  const packageJsonPath = path.join(repoRoot, workspaceMember, "package.json");
+  const packageJson = await pathExists(packageJsonPath)
+    ? JSON.parse(await readFile(packageJsonPath, "utf8"))
+    : null;
+
+  workspaceMemberPackageJsonCache.set(workspaceMember, packageJson);
+  return packageJson;
+}
+
+function workspacePackageDeclaresDependency(packageJson, dependencyName) {
+  return [
+    packageJson.dependencies,
+    packageJson.devDependencies,
+    packageJson.peerDependencies,
+    packageJson.optionalDependencies,
+  ].some((dependencies) =>
+    Boolean(dependencies && typeof dependencies === "object" && dependencyName in dependencies)
+  );
+}
+
 function verifyWorkspaceImportPolicy({
   filePath,
+  source,
   sourceMember,
   specifier,
 }) {
@@ -365,6 +827,275 @@ function verifyWorkspaceImportPolicy({
 
   if (
     sourceMember === "apps/cloudflare"
+    && specifier === "@murphai/assistant-runtime"
+    && importsNamedBindingsFromSpecifier(source, specifier, [
+      "HostedEmailSendRequest",
+      "HostedEmailSendTargetKind",
+      "hostedEmailSendTargetKindValues",
+      "parseHostedEmailSendRequest",
+    ])
+  ) {
+    return `${path.relative(repoRoot, filePath)} imports hosted email transport codecs from ${JSON.stringify(specifier)}; Cloudflare transport code must use @murphai/assistant-runtime/hosted-email so the assistant-runtime root stays on the canonical hosted runtime surface.`;
+  }
+
+  if (
+    (
+      sourceMember === "packages/assistant-runtime"
+      || sourceMember === "apps/cloudflare"
+    )
+    && specifier === "@murphai/hosted-execution"
+    && importsNamedBindingsFromSpecifier(source, specifier, [
+      "readHostedEmailCapabilities",
+      "resolveHostedEmailSenderIdentity",
+    ])
+  ) {
+    return `${path.relative(repoRoot, filePath)} imports hosted email helpers from ${JSON.stringify(specifier)}; use @murphai/hosted-execution/hosted-email so hosted email policy and sender identity stay on their focused owner surface.`;
+  }
+
+  if (
+    (
+      sourceMember === "packages/assistant-runtime"
+      || sourceMember === "packages/cloudflare-hosted-control"
+      || sourceMember === "apps/cloudflare"
+      || sourceMember === "apps/web"
+    )
+    && specifier === "@murphai/hosted-execution"
+    && importsNamedBindingsFromSpecifier(source, specifier, [
+      "parseHostedExecutionDispatchRequest",
+      "parseHostedExecutionDispatchResult",
+      "parseHostedExecutionEventDispatchStatus",
+      "parseHostedExecutionOutboxPayload",
+      "parseHostedExecutionUserStatus",
+      "parseHostedExecutionSharePack",
+      "parseHostedExecutionBundlePayload",
+      "parseHostedExecutionBundleRef",
+      "parseHostedExecutionRunnerRequest",
+    ])
+  ) {
+    return `${path.relative(repoRoot, filePath)} imports hosted execution parsers from ${JSON.stringify(specifier)}; use @murphai/hosted-execution/parsers so parse helpers stay on the dedicated parser surface instead of the hosted-execution root barrel.`;
+  }
+
+  if (
+    (
+      sourceMember === "apps/cloudflare"
+      || sourceMember === "apps/web"
+    )
+    && specifier === "@murphai/hosted-execution"
+    && importsNamedBindingsFromSpecifier(source, specifier, [
+      "HostedExecutionOutboxPayload",
+      "HostedExecutionOutboxPayloadStorage",
+      "HostedExecutionReferenceOutboxPayload",
+      "buildHostedExecutionOutboxPayload",
+      "readHostedExecutionOutboxPayload",
+      "readHostedExecutionStagedPayloadId",
+      "resolveHostedExecutionOutboxPayloadEventId",
+      "resolveHostedExecutionOutboxPayloadStorage",
+      "resolveHostedExecutionOutboxPayloadUserId",
+    ])
+  ) {
+    return `${path.relative(repoRoot, filePath)} imports hosted execution outbox payload helpers from ${JSON.stringify(specifier)}; use @murphai/hosted-execution/outbox-payload so staged payload envelopes stay on their dedicated owner surface.`;
+  }
+
+  if (
+    (
+      sourceMember === "apps/cloudflare"
+      || sourceMember === "apps/web"
+    )
+    && specifier === "@murphai/hosted-execution"
+    && importsNamedBindingsFromSpecifier(source, specifier, [
+      "HostedExecutionDispatchRef",
+      "buildHostedExecutionDispatchRef",
+      "readHostedExecutionDispatchRef",
+    ])
+  ) {
+    return `${path.relative(repoRoot, filePath)} imports hosted execution dispatch-ref helpers from ${JSON.stringify(specifier)}; use @murphai/hosted-execution/dispatch-ref so stored-dispatch identity stays on the focused ref surface.`;
+  }
+
+  if (
+    (
+      sourceMember === "packages/assistant-runtime"
+      || sourceMember === "apps/cloudflare"
+    )
+    && specifier === "@murphai/hosted-execution"
+    && importsNamedBindingsFromSpecifier(source, specifier, [
+      "HostedAssistantDeliveryEffect",
+      "HostedAssistantDeliveryRecord",
+      "HostedAssistantDeliverySideEffect",
+      "assertHostedAssistantDeliveryRecordConsistency",
+      "buildHostedAssistantDeliveryEffect",
+      "buildHostedAssistantDeliveryPreparedRecord",
+      "buildHostedAssistantDeliverySentRecord",
+      "parseHostedAssistantDeliveryEffects",
+      "parseHostedAssistantDeliveryRecord",
+      "sameHostedAssistantDeliveryReceipt",
+      "sameHostedAssistantDeliverySideEffectIdentity",
+    ])
+  ) {
+    return `${path.relative(repoRoot, filePath)} imports hosted assistant delivery helpers from ${JSON.stringify(specifier)}; use @murphai/hosted-execution/side-effects so assistant delivery records stay on their dedicated owner surface.`;
+  }
+
+  if (
+    (
+      sourceMember === "apps/cloudflare"
+      || sourceMember === "apps/web"
+    )
+    && specifier === "@murphai/hosted-execution"
+    && importsNamedBindingsFromSpecifier(source, specifier, [
+      "encodeHostedExecutionSignedRequestPayload",
+      "readHostedExecutionSignatureHeaders",
+    ])
+  ) {
+    return `${path.relative(repoRoot, filePath)} imports hosted execution callback-auth helpers from ${JSON.stringify(specifier)}; use @murphai/hosted-execution/auth so signed-request codecs stay on their dedicated auth surface.`;
+  }
+
+  if (
+    (
+      sourceMember === "apps/cloudflare"
+      || sourceMember === "apps/web"
+    )
+    && specifier === "@murphai/hosted-execution"
+    && importsNamedBindingsFromSpecifier(source, specifier, [
+      "HOSTED_EXECUTION_NONCE_HEADER",
+      "HOSTED_EXECUTION_SIGNATURE_HEADER",
+      "HOSTED_EXECUTION_SIGNING_KEY_ID_HEADER",
+      "HOSTED_EXECUTION_TIMESTAMP_HEADER",
+      "HOSTED_EXECUTION_USER_ID_HEADER",
+    ])
+  ) {
+    return `${path.relative(repoRoot, filePath)} imports hosted execution callback-auth headers from ${JSON.stringify(specifier)}; use @murphai/hosted-execution/contracts so signed-request header names stay on the dedicated contract surface.`;
+  }
+
+  if (
+    sourceMember === "packages/inbox-services"
+    && specifier === "@murphai/inboxd"
+    && filePath.includes(`${path.sep}src${path.sep}`)
+    && importsNamedBindingsFromSpecifier(source, specifier, [
+      "ConnectorRestartPolicy",
+    ])
+  ) {
+    return `${path.relative(repoRoot, filePath)} imports ConnectorRestartPolicy from ${JSON.stringify(specifier)}; use @murphai/inboxd/runtime so inbox-services runtime composition stays off the inboxd root barrel for daemon restart-policy typing.`;
+  }
+
+  if (
+    (
+      sourceMember === "packages/cloudflare-hosted-control"
+      || sourceMember === "apps/cloudflare"
+      || sourceMember === "apps/web"
+    )
+    && specifier === "@murphai/hosted-execution"
+    && importsNamedBindingsFromSpecifier(source, specifier, [
+      "normalizeHostedExecutionBaseUrl",
+    ])
+  ) {
+    return `${path.relative(repoRoot, filePath)} imports hosted execution base-url normalization from ${JSON.stringify(specifier)}; use @murphai/hosted-execution/env so env normalization stays on the dedicated env surface.`;
+  }
+
+  if (
+    (
+      sourceMember === "apps/cloudflare"
+      || sourceMember === "apps/web"
+    )
+    && specifier === "@murphai/cloudflare-hosted-control"
+    && importsNamedBindingsFromSpecifier(source, specifier, [
+      "buildCloudflareHostedControlPendingUsageUsersPath",
+      "buildCloudflareHostedControlSharePackPath",
+      "buildCloudflareHostedControlUserPendingUsagePath",
+      "buildCloudflareHostedControlUserRunPath",
+      "buildCloudflareHostedControlUserStatusPath",
+    ])
+  ) {
+    return `${path.relative(repoRoot, filePath)} imports Cloudflare hosted-control route helpers from ${JSON.stringify(specifier)}; use @murphai/cloudflare-hosted-control/routes so route ownership stays on the dedicated control-route surface.`;
+  }
+
+  if (
+    (
+      sourceMember === "apps/cloudflare"
+      || sourceMember === "apps/web"
+    )
+    && specifier === "@murphai/cloudflare-hosted-control"
+    && importsNamedBindingsFromSpecifier(source, specifier, [
+      "CloudflareHostedManagedUserCryptoStatus",
+      "CloudflareHostedUserEnvStatus",
+      "CloudflareHostedUserEnvUpdate",
+    ])
+  ) {
+    return `${path.relative(repoRoot, filePath)} imports Cloudflare hosted-control contract types from ${JSON.stringify(specifier)}; use @murphai/cloudflare-hosted-control/contracts so mutable control contracts stay on the dedicated contract surface.`;
+  }
+
+  if (
+    sourceMember === "apps/cloudflare"
+    && specifier === "@murphai/cloudflare-hosted-control"
+    && importsNamedBindingsFromSpecifier(source, specifier, [
+      "parseCloudflareHostedManagedUserCryptoStatus",
+      "parseCloudflareHostedUserEnvStatus",
+      "parseCloudflareHostedUserEnvUpdate",
+    ])
+  ) {
+    return `${path.relative(repoRoot, filePath)} imports Cloudflare hosted-control parsers from ${JSON.stringify(specifier)}; use @murphai/cloudflare-hosted-control/parsers so parsing stays on the dedicated codec surface.`;
+  }
+
+  if (
+    sourceMember === "apps/web"
+    && specifier === "@murphai/cloudflare-hosted-control"
+    && importsNamedBindingsFromSpecifier(source, specifier, [
+      "CloudflareHostedControlClient",
+      "createCloudflareHostedControlClient",
+    ])
+  ) {
+    return `${path.relative(repoRoot, filePath)} imports the Cloudflare hosted-control client from ${JSON.stringify(specifier)}; use @murphai/cloudflare-hosted-control/client so requester logic stays on the dedicated client surface.`;
+  }
+
+  if (
+    sourceMember === "apps/cloudflare"
+    && specifier === "@murphai/hosted-execution"
+    && importsNamedBindingsFromSpecifier(source, specifier, [
+      "HOSTED_EXECUTION_RUNNER_EMAIL_SEND_PATH",
+      "buildHostedExecutionRunnerCommitPath",
+      "buildHostedExecutionRunnerEmailMessagePath",
+      "buildHostedExecutionRunnerSideEffectPath",
+    ])
+  ) {
+    return `${path.relative(repoRoot, filePath)} imports runner route helpers from ${JSON.stringify(specifier)}; apps/cloudflare must use @murphai/hosted-execution/routes so runtime route construction stays on the focused route surface.`;
+  }
+
+  if (
+    (sourceMember === "packages/assistant-runtime" || sourceMember === "packages/assistantd")
+    && specifier === "@murphai/vault-usecases"
+    && filePath.includes(`${path.sep}src${path.sep}`)
+  ) {
+    return `${path.relative(repoRoot, filePath)} imports ${JSON.stringify(specifier)} from the vault-usecases root; headless assistant runtimes must depend on @murphai/vault-usecases/vault-services or @murphai/vault-usecases/runtime so they do not couple to CLI descriptor exports.`;
+  }
+
+  if (
+    specifier === "@murphai/runtime-state"
+    && importsNamedBindingsFromSpecifier(source, specifier, [
+      "isValidAssistantOpaqueId",
+      "normalizeAssistantOpaqueId",
+    ])
+  ) {
+    return `${path.relative(repoRoot, filePath)} imports assistant opaque id helpers from ${JSON.stringify(specifier)}; use @murphai/runtime-state/assistant-ids so the dedicated helper stays off the broad runtime-state root barrel.`;
+  }
+
+  if (
+    specifier === "@murphai/query"
+    && importsNamedBindingsFromSpecifier(source, specifier, [
+      "ALL_QUERY_ENTITY_FAMILIES",
+    ])
+  ) {
+    return `${path.relative(repoRoot, filePath)} imports query entity-family metadata from ${JSON.stringify(specifier)}; use @murphai/query/entity-families so the constant stays on its dedicated query-owned surface instead of the broad query root barrel.`;
+  }
+
+  if (
+    specifier === "@murphai/vault-usecases/runtime"
+    && importsNamedBindingsFromSpecifier(source, specifier, [
+      "ALL_QUERY_ENTITY_FAMILIES",
+    ])
+  ) {
+    return `${path.relative(repoRoot, filePath)} imports query entity-family metadata from ${JSON.stringify(specifier)}; import ALL_QUERY_ENTITY_FAMILIES from @murphai/query/entity-families so the constant stays on its query-owned surface instead of the vault-usecases runtime helper layer.`;
+  }
+
+  if (
+    sourceMember === "apps/cloudflare"
     && (
       specifier === "@murphai/assistant-engine"
       || specifier.startsWith("@murphai/assistant-engine/")
@@ -374,6 +1105,28 @@ function verifyWorkspaceImportPolicy({
     && filePath.includes(`${path.sep}apps${path.sep}cloudflare${path.sep}src${path.sep}`)
   ) {
     return `${path.relative(repoRoot, filePath)} imports ${JSON.stringify(specifier)} directly; apps/cloudflare must depend on @murphai/assistant-runtime or another hosted-runtime owner surface instead of lower local assistant owner packages.`;
+  }
+
+  if (
+    specifier === "@murphai/importers"
+    && sourceMember !== "packages/importers"
+    && importsNamedBindingsFromSpecifier(source, specifier, [
+      "GARMIN_DEVICE_PROVIDER_DESCRIPTOR",
+      "OURA_DEVICE_PROVIDER_DESCRIPTOR",
+      "WHOOP_DEVICE_PROVIDER_DESCRIPTOR",
+      "defaultDeviceProviderDescriptors",
+      "createNamedDeviceProviderRegistry",
+      "resolveDeviceProviderDescriptor",
+      "resolveDeviceProviderSourcePriority",
+      "requireDeviceProviderOAuthDescriptor",
+      "requireDeviceProviderSyncDescriptor",
+      "requireDeviceProviderWebhookDescriptor",
+      "DeviceProviderDescriptor",
+      "DeviceProviderMetricFamily",
+      "NamedDeviceProviderRegistry",
+    ])
+  ) {
+    return `${path.relative(repoRoot, filePath)} imports provider-descriptor metadata from ${JSON.stringify(specifier)}; workspace consumers must use @murphai/importers/device-providers/provider-descriptors so they do not depend on the full device-provider barrel.`;
   }
 
   return null;
@@ -393,7 +1146,19 @@ function isTestOnlyInternalAssistantSpecifier({
       && specifier.startsWith("@murphai/assistant-cli/assistant/"))
     || (
       packageName === "@murphai/assistant-engine"
-      && specifier.startsWith("@murphai/assistant-engine/assistant/")
+      && (
+        specifier.startsWith("@murphai/assistant-engine/assistant/")
+        || specifier === "@murphai/assistant-engine/assistant-cli-access"
+        || specifier === "@murphai/assistant-engine/assistant-cli-tools"
+      )
+    )
+    || (
+      packageName === "@murphai/inbox-services"
+      && specifier === "@murphai/inbox-services/testing"
+    )
+    || (
+      packageName === "@murphai/vault-usecases"
+      && specifier === "@murphai/vault-usecases/testing"
     )
   );
 }
@@ -493,7 +1258,10 @@ function isAssistantEngineWildcardHelperNamespace(exportKey) {
 
 function isAssistantEngineInternalHelperExport(exportKey) {
   return (
-    exportKey === "./health-registry-command-metadata"
+    exportKey === "./assistant-cli-access"
+    || exportKey === "./assistant-cli-tools"
+    || exportKey === "./process-kill"
+    || exportKey === "./health-registry-command-metadata"
     || exportKey === "./inbox-app/types"
     || exportKey === "./inbox-services/connectors"
     || exportKey === "./inbox-services/daemon"
@@ -509,6 +1277,77 @@ function sourceReexportsSpecifier(source, specifier) {
     `^\\s*export\\s+(?:\\*|\\{[^}]+\\})\\s+from\\s+["']${escapeRegExp(specifier)}["']`,
     "mu",
   ).test(source);
+}
+
+function sourceMentionsSpecifier(source, specifier) {
+  return extractModuleSpecifiers(source).includes(specifier);
+}
+
+function sourceMentionsText(source, snippet) {
+  return source.includes(snippet);
+}
+
+function importsNamedBindingsFromSpecifier(source, specifier, bindingNames) {
+  const bindingPattern = bindingNames
+    .map((name) => escapeRegExp(name))
+    .join("|");
+
+  if (new RegExp(
+    String.raw`^\s*import\s+type\s*\{[^}]*\b(?:${bindingPattern})\b[^}]*\}\s+from\s+["']${escapeRegExp(specifier)}["']|^\s*import\s*\{[^}]*\b(?:${bindingPattern})\b[^}]*\}\s+from\s+["']${escapeRegExp(specifier)}["']`,
+    "mu",
+  ).test(source)) {
+    return true;
+  }
+
+  const importedAliases = [
+    ...extractNamespaceImportAliasesFromSpecifier(source, specifier),
+    ...extractDefaultImportAliasesFromSpecifier(source, specifier),
+  ];
+
+  return importedAliases.some((alias) =>
+    (
+      new RegExp(
+        String.raw`\b${escapeRegExp(alias)}\s*\.\s*(?:${bindingPattern})\b`,
+        "u",
+      ).test(source)
+      || new RegExp(
+        String.raw`\{[^}]*\b(?:${bindingPattern})\b[^}]*\}\s*=\s*${escapeRegExp(alias)}\b`,
+        "u",
+      ).test(source)
+    ),
+  );
+}
+
+function extractNamespaceImportAliasesFromSpecifier(source, specifier) {
+  const aliases = [];
+  const pattern = new RegExp(
+    String.raw`^\s*import\s+(?:type\s+)?\*\s+as\s+([A-Za-z_$][\w$]*)\s+from\s+["']${escapeRegExp(specifier)}["']`,
+    "gmu",
+  );
+
+  let match = pattern.exec(source);
+  while (match !== null) {
+    aliases.push(match[1]);
+    match = pattern.exec(source);
+  }
+
+  return aliases;
+}
+
+function extractDefaultImportAliasesFromSpecifier(source, specifier) {
+  const aliases = [];
+  const pattern = new RegExp(
+    String.raw`^\s*import\s+(?:type\s+)?([A-Za-z_$][\w$]*)\s*(?:,\s*(?:\{[^}]*\}|\*\s+as\s+[A-Za-z_$][\w$]*))?\s+from\s+["']${escapeRegExp(specifier)}["']`,
+    "gmu",
+  );
+
+  let match = pattern.exec(source);
+  while (match !== null) {
+    aliases.push(match[1]);
+    match = pattern.exec(source);
+  }
+
+  return aliases;
 }
 
 function collectWorkspaceExportTargets(exportValue) {

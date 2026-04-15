@@ -58,6 +58,19 @@ describe("HostedPhoneAuth", () => {
     assert.doesNotMatch(markup, /Defaulting to United States/);
   });
 
+  it("can hide the passive consent notice for homepage layouts that render their own copy", async () => {
+    const { HostedPhoneAuth } = await import("@/src/components/hosted-onboarding/hosted-phone-auth");
+
+    const markup = renderToStaticMarkup(
+      React.createElement(HostedPhoneAuth, {
+        showPassiveConsentNotice: false,
+      }),
+    );
+
+    assert.match(markup, /Text me a code/);
+    assert.doesNotMatch(markup, /By signing up, you agree to our/);
+  });
+
   it("uses unique phone input ids for separate public auth instances", async () => {
     const { HostedPhoneAuth } = await import("@/src/components/hosted-onboarding/hosted-phone-auth");
 
@@ -92,7 +105,7 @@ describe("HostedPhoneAuth", () => {
       }),
     );
 
-    assert.match(markup, /You already started signup in this browser/);
+    assert.match(markup, /You already started signup\./);
     assert.match(markup, /Continue signup/);
     assert.match(markup, /Use a different number/);
     assert.doesNotMatch(markup, /Preparing your account/);
@@ -165,6 +178,9 @@ describe("HostedPhoneAuth", () => {
 
     assert.match(markup, /Send me a code/);
     assert.match(markup, /Use a different number/);
+    assert.match(markup, /By signing up, you agree to our/);
+    assert.match(markup, /\/legal\/terms\.pdf/);
+    assert.match(markup, /\/legal\/privacy\.pdf/);
     assert.match(markup, /underline-offset-4/);
     assert.equal(markup.match(/w-full/g)?.length ?? 0, 2);
   });
@@ -198,6 +214,7 @@ describe("HostedPhoneAuth", () => {
 
     assert.match(markup, /Phone number/);
     assert.match(markup, /Text me a code/);
+    assert.match(markup, /By signing up, you agree to our/);
     assert.match(markup, /disabled=""/);
   });
 
@@ -230,6 +247,7 @@ describe("HostedPhoneAuth", () => {
 
     assert.match(markup, /Phone number/);
     assert.match(markup, /Text me a code/);
+    assert.match(markup, /By signing up, you agree to our/);
     assert.doesNotMatch(markup, /disabled=""/);
   });
 
@@ -246,7 +264,7 @@ describe("HostedPhoneAuth", () => {
       }),
     );
 
-    assert.match(markup, /You already started signup in this browser/);
+    assert.match(markup, /You already started signup\./);
     assert.match(markup, /Continue signup/);
     assert.match(markup, /Use a different number/);
     assert.ok((markup.match(/h-14/g)?.length ?? 0) >= 2);
@@ -352,7 +370,7 @@ describe("HostedPhoneAuth", () => {
   });
 
   it("builds the active verification attempt with a masked phone hint", async () => {
-    const { createHostedPhoneVerificationAttempt } = await import("@/src/components/hosted-onboarding/hosted-phone-auth");
+    const { createHostedPhoneVerificationAttempt } = await import("@/src/components/hosted-onboarding/hosted-phone-auth-support");
 
     assert.deepEqual(
       createHostedPhoneVerificationAttempt("+14155552671"),
@@ -364,7 +382,7 @@ describe("HostedPhoneAuth", () => {
   });
 
   it("prefers the just-submitted phone input over a stale draft value", async () => {
-    const { resolveHostedPhoneSubmission } = await import("@/src/components/hosted-onboarding/hosted-phone-auth");
+    const { resolveHostedPhoneSubmission } = await import("@/src/components/hosted-onboarding/hosted-phone-auth-support");
 
     assert.deepEqual(
       resolveHostedPhoneSubmission({
@@ -383,7 +401,7 @@ describe("HostedPhoneAuth", () => {
     const {
       isHostedPhoneVerificationCodeComplete,
       normalizeHostedPhoneVerificationCode,
-    } = await import("@/src/components/hosted-onboarding/hosted-phone-auth");
+    } = await import("@/src/components/hosted-onboarding/hosted-phone-auth-support");
 
     assert.equal(normalizeHostedPhoneVerificationCode("12 34-56 78"), "123456");
     assert.equal(isHostedPhoneVerificationCodeComplete("12345"), false);
@@ -391,7 +409,7 @@ describe("HostedPhoneAuth", () => {
   });
 
   it("resends from the active attempt number when a verification attempt already exists", async () => {
-    const { resolveHostedPhoneResendTarget } = await import("@/src/components/hosted-onboarding/hosted-phone-auth");
+    const { resolveHostedPhoneResendTarget } = await import("@/src/components/hosted-onboarding/hosted-phone-auth-support");
 
     assert.deepEqual(
       resolveHostedPhoneResendTarget({
@@ -408,7 +426,7 @@ describe("HostedPhoneAuth", () => {
   });
 
   it("falls back to the draft-submit resend path when no active attempt exists", async () => {
-    const { resolveHostedPhoneResendTarget } = await import("@/src/components/hosted-onboarding/hosted-phone-auth");
+    const { resolveHostedPhoneResendTarget } = await import("@/src/components/hosted-onboarding/hosted-phone-auth-support");
 
     assert.deepEqual(
       resolveHostedPhoneResendTarget({
@@ -432,13 +450,13 @@ describe("HostedPhoneAuth", () => {
       }),
     );
 
-    assert.match(markup, /You already started signup in this browser/);
+    assert.match(markup, /You already started signup\./);
     assert.match(markup, /Continue signup/);
     assert.doesNotMatch(markup, /Preparing your account/);
   });
 
   it("clears the pending action after a failed manual continue finalization attempt", async () => {
-    const { runHostedPrivyFinalizationAttempt } = await import("@/src/components/hosted-onboarding/hosted-phone-auth");
+    const { runHostedPrivyFinalizationAttempt } = await import("@/src/components/hosted-onboarding/hosted-phone-auth-support");
 
     let finalizationState: "idle" | "running" | "completed" = "idle";
     const pendingActions: Array<string | null> = [];
@@ -465,7 +483,7 @@ describe("HostedPhoneAuth", () => {
   });
 
   it("writes a queued confirm mutation when invite confirmation does not finish inline", async () => {
-    const { finalizeInvitePhoneCodeSendConfirmation } = await import("@/src/components/hosted-onboarding/hosted-phone-auth");
+    const { finalizeInvitePhoneCodeSendConfirmation } = await import("@/src/components/hosted-onboarding/hosted-phone-auth-support");
 
     const queued: Array<{ inviteCode: string; kind: "abort" | "confirm"; sendAttemptId: string }> = [];
 
@@ -490,7 +508,7 @@ describe("HostedPhoneAuth", () => {
   });
 
   it("skips queueing when invite confirmation finishes inline", async () => {
-    const { finalizeInvitePhoneCodeSendConfirmation } = await import("@/src/components/hosted-onboarding/hosted-phone-auth");
+    const { finalizeInvitePhoneCodeSendConfirmation } = await import("@/src/components/hosted-onboarding/hosted-phone-auth-support");
 
     const queued: Array<{ inviteCode: string; kind: "abort" | "confirm"; sendAttemptId: string }> = [];
 
@@ -509,7 +527,7 @@ describe("HostedPhoneAuth", () => {
   });
 
   it("queues invite confirmation when the background confirm throws", async () => {
-    const { finalizeInvitePhoneCodeSendConfirmation } = await import("@/src/components/hosted-onboarding/hosted-phone-auth");
+    const { finalizeInvitePhoneCodeSendConfirmation } = await import("@/src/components/hosted-onboarding/hosted-phone-auth-support");
 
     const queued: Array<{ inviteCode: string; kind: "abort" | "confirm"; sendAttemptId: string }> = [];
 
@@ -534,7 +552,7 @@ describe("HostedPhoneAuth", () => {
   });
 
   it("resolves authenticated phone auth recovery states in priority order", async () => {
-    const { resolveHostedAuthenticatedPhoneAuthView } = await import("@/src/components/hosted-onboarding/hosted-phone-auth");
+    const { resolveHostedAuthenticatedPhoneAuthView } = await import("@/src/components/hosted-onboarding/hosted-phone-auth-controller");
 
     assert.equal(
       resolveHostedAuthenticatedPhoneAuthView({
@@ -563,14 +581,16 @@ describe("HostedPhoneAuth", () => {
   });
 
   it("sends active existing-account sign-ins straight to settings", async () => {
-    const { resolveHostedPrivyCompletionRedirectUrl } = await import("@/src/components/hosted-onboarding/hosted-phone-auth");
+    const { resolveHostedPrivyCompletionRedirectUrl } = await import("@/src/components/hosted-onboarding/hosted-phone-auth-support");
 
     assert.equal(
       resolveHostedPrivyCompletionRedirectUrl({
         intent: "signin",
         payload: {
+          activationPending: false,
           inviteCode: "invite-code",
           joinUrl: "/join/invite-code",
+          messagingSetupRequired: false,
           stage: "active",
         },
       }),
@@ -580,8 +600,10 @@ describe("HostedPhoneAuth", () => {
       resolveHostedPrivyCompletionRedirectUrl({
         intent: "signup",
         payload: {
+          activationPending: false,
           inviteCode: "invite-code",
           joinUrl: "/join/invite-code",
+          messagingSetupRequired: false,
           stage: "active",
         },
       }),
@@ -591,8 +613,10 @@ describe("HostedPhoneAuth", () => {
       resolveHostedPrivyCompletionRedirectUrl({
         intent: "signup",
         payload: {
+          activationPending: false,
           inviteCode: "invite-code",
           joinUrl: "https://www.withmurph.ai/join/invite-code",
+          messagingSetupRequired: false,
           stage: "checkout",
         },
       }),
@@ -600,15 +624,22 @@ describe("HostedPhoneAuth", () => {
     );
   });
 
-  it("keeps checkout-stage homepage verification on the local join route", async () => {
+  it("sends checkout-stage homepage verification straight to Stripe checkout", async () => {
     vi.resetModules();
 
     const ensureHostedPrivyPhoneReady = vi.fn().mockResolvedValue(undefined);
-    const requestHostedOnboardingJson = vi.fn().mockResolvedValue({
-      inviteCode: "invite-code",
-      joinUrl: "/join/invite-code",
-      stage: "checkout",
-    });
+    const requestHostedOnboardingJson = vi.fn()
+      .mockResolvedValueOnce({
+        activationPending: false,
+        inviteCode: "invite-code",
+        joinUrl: "/join/invite-code",
+        messagingSetupRequired: false,
+        stage: "checkout",
+      })
+      .mockResolvedValueOnce({
+        alreadyActive: false,
+        url: "https://stripe.example.test/checkout",
+      });
     const assign = vi.fn();
 
     vi.doMock("@/src/lib/hosted-onboarding/privy-client", () => ({
@@ -619,6 +650,12 @@ describe("HostedPhoneAuth", () => {
       HostedOnboardingApiError: class HostedOnboardingApiError extends Error {
         code: string | null = null;
         retryable = false;
+      },
+      requestHostedBillingCheckout(input: { inviteCode: string }) {
+        return requestHostedOnboardingJson({
+          payload: input,
+          url: "/api/hosted-onboarding/billing/checkout",
+        });
       },
       requestHostedOnboardingJson,
     }));
@@ -641,10 +678,150 @@ describe("HostedPhoneAuth", () => {
     }
 
     assert.equal(ensureHostedPrivyPhoneReady.mock.calls.length, 1);
-    assert.equal(requestHostedOnboardingJson.mock.calls.length, 1);
+    assert.equal(requestHostedOnboardingJson.mock.calls.length, 2);
     assert.equal(requestHostedOnboardingJson.mock.calls[0]?.[0]?.url, "/api/hosted-onboarding/privy/complete");
+    assert.equal(requestHostedOnboardingJson.mock.calls[1]?.[0]?.url, "/api/hosted-onboarding/billing/checkout");
+    assert.deepEqual(requestHostedOnboardingJson.mock.calls[1]?.[0]?.payload, {
+      inviteCode: "invite-code",
+    });
     assert.equal(assign.mock.calls.length, 1);
-    assert.equal(assign.mock.calls[0]?.[0], "/join/invite-code");
+    assert.equal(assign.mock.calls[0]?.[0], "https://stripe.example.test/checkout");
+  });
+
+  it("retries hosted completion once when the Privy cookie has not propagated yet", async () => {
+    vi.resetModules();
+
+    const ensureHostedPrivyPhoneReady = vi.fn().mockResolvedValue(undefined);
+    class TestHostedOnboardingApiError extends Error {
+      code: string | null;
+      retryable: boolean;
+
+      constructor(code: string | null, message: string, retryable = false) {
+        super(message);
+        this.code = code;
+        this.retryable = retryable;
+      }
+    }
+    const requestHostedOnboardingJson = vi.fn()
+      .mockRejectedValueOnce(new TestHostedOnboardingApiError("AUTH_REQUIRED", "Verify your phone to continue."))
+      .mockResolvedValueOnce({
+        activationPending: false,
+        inviteCode: "invite-code",
+        joinUrl: "/join/invite-code",
+        stage: "checkout",
+      })
+      .mockResolvedValueOnce({
+        alreadyActive: false,
+        url: "https://stripe.example.test/retry-checkout",
+      });
+    const assign = vi.fn();
+
+    vi.doMock("@/src/lib/hosted-onboarding/privy-client", () => ({
+      HOSTED_PRIVY_COMPLETION_RETRY_DELAYS_MS: [0, 0],
+      ensureHostedPrivyPhoneReady,
+    }));
+    vi.doMock("@/src/components/hosted-onboarding/client-api", () => ({
+      HostedOnboardingApiError: TestHostedOnboardingApiError,
+      requestHostedBillingCheckout(input: { inviteCode: string }) {
+        return requestHostedOnboardingJson({
+          payload: input,
+          url: "/api/hosted-onboarding/billing/checkout",
+        });
+      },
+      requestHostedOnboardingJson,
+    }));
+    vi.stubGlobal("window", {
+      location: {
+        assign,
+      },
+    });
+
+    try {
+      const { finalizeHostedPrivyVerification } = await import("@/src/components/hosted-onboarding/hosted-phone-auth-support");
+
+      await finalizeHostedPrivyVerification({
+        createWallet: vi.fn(),
+        intent: "signup",
+        user: null,
+      });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+
+    assert.equal(ensureHostedPrivyPhoneReady.mock.calls.length, 1);
+    assert.equal(requestHostedOnboardingJson.mock.calls.length, 3);
+    assert.equal(assign.mock.calls.length, 1);
+    assert.equal(assign.mock.calls[0]?.[0], "https://stripe.example.test/retry-checkout");
+  });
+
+  it("retries hosted completion once when the verified Telegram account has not reached the server-side session yet", async () => {
+    vi.resetModules();
+
+    const ensureHostedPrivyPhoneReady = vi.fn().mockResolvedValue(undefined);
+    class TestHostedOnboardingApiError extends Error {
+      code: string | null;
+      retryable: boolean;
+
+      constructor(code: string | null, message: string, retryable = false) {
+        super(message);
+        this.code = code;
+        this.retryable = retryable;
+      }
+    }
+    const requestHostedOnboardingJson = vi.fn()
+      .mockRejectedValueOnce(new TestHostedOnboardingApiError(
+        "PRIVY_ACCOUNT_NOT_READY",
+        "Your verified Privy account has not reached the server-side session yet.",
+        true,
+      ))
+      .mockResolvedValueOnce({
+        activationPending: false,
+        inviteCode: "invite-code",
+        joinUrl: "/join/invite-code",
+        stage: "checkout",
+      })
+      .mockResolvedValueOnce({
+        alreadyActive: false,
+        url: "https://stripe.example.test/telegram-retry-checkout",
+      });
+    const assign = vi.fn();
+
+    vi.doMock("@/src/lib/hosted-onboarding/privy-client", () => ({
+      HOSTED_PRIVY_COMPLETION_RETRY_DELAYS_MS: [0, 0],
+      ensureHostedPrivyPhoneReady,
+    }));
+    vi.doMock("@/src/components/hosted-onboarding/client-api", () => ({
+      HostedOnboardingApiError: TestHostedOnboardingApiError,
+      requestHostedBillingCheckout(input: { inviteCode: string }) {
+        return requestHostedOnboardingJson({
+          payload: input,
+          url: "/api/hosted-onboarding/billing/checkout",
+        });
+      },
+      requestHostedOnboardingJson,
+    }));
+    vi.stubGlobal("window", {
+      location: {
+        assign,
+      },
+    });
+
+    try {
+      const { finalizeHostedPrivyVerification } = await import("@/src/components/hosted-onboarding/hosted-phone-auth-support");
+
+      await finalizeHostedPrivyVerification({
+        createWallet: vi.fn(),
+        intent: "signup",
+        user: null,
+      });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+
+    assert.equal(ensureHostedPrivyPhoneReady.mock.calls.length, 1);
+    assert.equal(requestHostedOnboardingJson.mock.calls.length, 3);
+    assert.equal(assign.mock.calls.length, 1);
+    assert.equal(assign.mock.calls[0]?.[0], "https://stripe.example.test/telegram-retry-checkout");
   });
 
   it("uses the invite shortcut route for the first invite send-code request", async () => {
@@ -661,7 +838,6 @@ describe("HostedPhoneAuth", () => {
 
     assert.equal(harness.requestHostedOnboardingJson.mock.calls.length, 1);
     assert.match(String(harness.requestHostedOnboardingJson.mock.calls[0]?.[0]?.url), /\/invites\/invite-code\/send-code$/);
-    assert.deepEqual(harness.requestHostedOnboardingJson.mock.calls[0]?.[0]?.auth, "none");
     assert.equal(harness.controller.sendVerificationCode.mock.calls[0]?.[0], "+14044092523");
     assert.equal(harness.finalizeInvitePhoneCodeSendConfirmation.mock.calls[0]?.[0]?.sendAttemptId, "attempt-id");
     assert.equal(harness.controller.handleResendCode.mock.calls.length, 0);

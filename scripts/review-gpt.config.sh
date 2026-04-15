@@ -9,6 +9,12 @@ review_gpt_register_dir_preset "security" "security-audit.md" \
   "General correctness and security audit focused on vault trust boundaries." \
   "security-audit" \
   "audit-security"
+review_gpt_register_dir_preset "privacy" "privacy.md" \
+  "Privacy and data-minimization audit focused on storing as little user data as possible." \
+  "data-minimization" \
+  "privacy-minimization" \
+  "minimal-retention" \
+  "data-retention"
 review_gpt_register_dir_preset "architecture" "architecture-review.md" \
   "Architecture and data-model review focused on simplification, composability, and long-term maintainability." \
   "architecture-review" \
@@ -38,6 +44,13 @@ review_gpt_register_dir_preset "bad-code" "bad-code-quality.md" \
   "anti-patterns-and-bad-practices" \
   "code-quality" \
   "bad-code-quality"
+review_gpt_register_dir_preset "bug-hunt" "bug-hunt-high-value-seams.md" \
+  "Bug-finding review focused on Murph's highest-value seams, invariants, and failure modes." \
+  "bugs" \
+  "bug-hunt" \
+  "high-value-seams" \
+  "failure-modes" \
+  "invariant-violations"
 review_gpt_register_dir_preset "legacy-removal" "legacy-removal.md" \
   "Greenfield hard-cut audit for removable legacy compatibility, migrations, and fallback paths." \
   "remove-legacy" \

@@ -88,7 +88,10 @@ async function holdCanonicalWriteLock(vaultRoot: string) {
 async function withCliUsecaseMocks<TResult>(options: {
   coreRuntime: unknown;
   queryRuntime?: unknown;
-  run: () => Promise<TResult>;
+  run: (modules: {
+    records: typeof import("@murphai/vault-usecases/records");
+    testing: typeof import("@murphai/vault-usecases/testing");
+  }) => Promise<TResult>;
 }): Promise<TResult> {
   vi.resetModules();
   const runtimeMock = () => ({
@@ -105,7 +108,12 @@ async function withCliUsecaseMocks<TResult>(options: {
   }));
 
   try {
-    return await options.run();
+    const modules = {
+      records: await import("@murphai/vault-usecases/records"),
+      testing: await import("@murphai/vault-usecases/testing"),
+    };
+
+    return await options.run(modules);
   } finally {
     vi.doUnmock("@murphai/vault-usecases/runtime");
     vi.doUnmock(vaultUsecasesRuntimeModuleId);
@@ -320,11 +328,8 @@ test.sequential("provider and event CLI usecases map renamed core error codes to
         });
       },
     },
-    run: async () => {
-      const { listProviderRecords, upsertEventRecord, upsertProviderRecord } = await import(
-        "@murphai/vault-usecases/records"
-      );
-
+    run: async ({ records }) => {
+      const { listProviderRecords, upsertEventRecord, upsertProviderRecord } = records;
       await assert.rejects(
         () =>
           upsertProviderRecord({
@@ -371,11 +376,8 @@ test.sequential("provider and event CLI usecases map renamed core error codes to
 
         await withCliUsecaseMocks({
           coreRuntime: eventRuntime,
-          run: async () => {
-            const { upsertEventRecord: upsertEventRecordWithRuntime } = await import(
-              "@murphai/vault-usecases/records"
-            );
-
+          run: async ({ records }) => {
+            const { upsertEventRecord: upsertEventRecordWithRuntime } = records;
             await assert.rejects(
               () =>
                 upsertEventRecordWithRuntime({
@@ -411,9 +413,8 @@ test.sequential("provider and event CLI usecases map renamed core error codes to
             readVault: async () => ({}),
             lookupEntityById: () => eventRecord,
           },
-          run: async () => {
-            const { editEventRecord } = await import("@murphai/vault-usecases/records");
-
+          run: async ({ records }) => {
+            const { editEventRecord } = records;
             await assert.rejects(
               () =>
                 editEventRecord({
@@ -487,9 +488,8 @@ test.sequential("editEventRecord strips stored lifecycle metadata before calling
       readVault: async () => ({}),
       lookupEntityById: () => eventRecord,
     },
-    run: async () => {
-      const { editEventRecord } = await import("@murphai/vault-usecases/records");
-
+    run: async ({ records }) => {
+      const { editEventRecord } = records;
       await editEventRecord({
         vault: "/tmp/mock-vault",
         lookup: eventRecord.primaryLookupId,
@@ -524,11 +524,8 @@ test.sequential("experiment and journal CLI usecases map renamed core error code
         path: "experiments/focus-sprint.md",
       }),
     },
-    run: async () => {
-      const { appendJournalText, checkpointExperimentRecord } = await import(
-        "@murphai/vault-usecases/testing"
-      );
-
+    run: async ({ testing }) => {
+      const { appendJournalText, checkpointExperimentRecord } = testing;
       await assert.rejects(
         () =>
           appendJournalText({

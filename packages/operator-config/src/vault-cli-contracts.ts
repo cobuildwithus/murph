@@ -1,5 +1,17 @@
-import { isValidIanaTimeZone } from '@murphai/contracts'
+import {
+  eventSourceSchema,
+  isValidIanaTimeZone,
+  mealNutritionSchema,
+} from '@murphai/contracts'
+import { ALL_QUERY_ENTITY_FAMILIES } from '@murphai/query/entity-families'
 import { z } from 'zod'
+
+function describeQueryRecordTypes(values: readonly string[]): string {
+  return `Optional query record families. Repeat --record-type for multiple values: ${values.join(', ')}.`
+}
+
+const queryRecordTypeValues = ALL_QUERY_ENTITY_FAMILIES
+const queryRecordTypeDescription = describeQueryRecordTypes(queryRecordTypeValues)
 
 export const isoTimestampSchema = z
   .string()
@@ -10,6 +22,12 @@ export const localDateSchema = z
   .string()
   .regex(/^\d{4}-\d{2}-\d{2}$/u, 'Expected a calendar date in YYYY-MM-DD form.')
   .describe('Calendar date in YYYY-MM-DD form.')
+
+export const occurredAtOptionSchema = z
+  .union([isoTimestampSchema, localDateSchema])
+  .describe(
+    'Occurrence timestamp in ISO 8601 format with an explicit UTC offset, or a calendar date in YYYY-MM-DD form.',
+  )
 
 export const timeZoneSchema = z
   .string()
@@ -62,27 +80,6 @@ export const vaultValidateResultSchema = z.object({
   issues: z.array(validationIssueSchema),
 })
 
-export const vaultUpgradeStepSchema = z.object({
-  description: z.string().min(1),
-  fromFormatVersion: z.number().int().nonnegative(),
-  toFormatVersion: z.number().int().nonnegative(),
-})
-
-export const vaultUpgradeResultSchema = z.object({
-  vault: pathSchema,
-  metadataFile: pathSchema,
-  title: z.string().min(1),
-  timezone: z.string().min(1),
-  fromFormatVersion: z.number().int().nonnegative(),
-  toFormatVersion: z.number().int().nonnegative(),
-  steps: z.array(vaultUpgradeStepSchema),
-  affectedFiles: z.array(pathSchema),
-  rebuildableProjectionStores: z.array(z.string().min(1)),
-  updated: z.boolean(),
-  dryRun: z.boolean(),
-  auditPath: pathSchema.nullable(),
-})
-
 export const documentImportResultSchema = z.object({
   vault: pathSchema,
   sourceFile: pathSchema,
@@ -103,6 +100,9 @@ export const mealAddResultSchema = z.object({
   audioPath: pathSchema.nullable(),
   manifestFile: pathSchema,
   note: z.string().nullable(),
+  source: eventSourceSchema.nullable(),
+  ingredients: z.array(z.string().min(1)).nullable(),
+  nutrition: mealNutritionSchema.nullable(),
 })
 
 const workoutSetResultSchema = z.object({
@@ -146,9 +146,8 @@ const bodyMeasurementEntryResultSchema = z.object({
   note: z.string().min(1).optional(),
 })
 
-export const profileUnitPreferencesResultSchema = z.object({
+export const workoutUnitPreferenceValuesResultSchema = z.object({
   weight: z.enum(['lb', 'kg']).nullable(),
-  distance: z.enum(['km', 'mi']).nullable(),
   bodyMeasurement: z.enum(['cm', 'in']).nullable(),
 })
 
@@ -252,10 +251,10 @@ export const workoutMeasurementAddResultSchema = z.object({
 
 export const workoutUnitPreferencesResultSchema = z.object({
   vault: pathSchema,
-  snapshotId: z.string().min(1).nullable(),
+  preferencesPath: pathSchema,
   updated: z.boolean(),
   recordedAt: isoTimestampSchema.nullable(),
-  unitPreferences: profileUnitPreferencesResultSchema,
+  unitPreferences: workoutUnitPreferenceValuesResultSchema,
 })
 
 export const workoutImportInspectResultSchema = z.object({
@@ -290,16 +289,6 @@ export const workoutFormatSaveResultSchema = z.object({
   slug: slugSchema,
   path: pathSchema,
   created: z.boolean(),
-})
-
-export const workoutFormatListResultSchema = z.object({
-  vault: pathSchema,
-  filters: z.object({
-    limit: z.number().int().positive().max(200),
-  }),
-  items: z.array(z.lazy(() => readEntitySchema)),
-  count: z.number().int().nonnegative(),
-  nextCursor: z.string().min(1).nullable(),
 })
 
 export const interventionAddResultSchema = z.object({
@@ -362,6 +351,20 @@ export const readEntitySchema = z.object({
   links: z.array(entityRefSchema),
 })
 
+export const listEntitySchema = readEntitySchema
+  .omit({
+    markdown: true,
+  })
+  .extend({
+    data: z.record(z.string(), z.any()),
+    excerpt: z
+      .string()
+      .min(1)
+      .nullable()
+      .optional()
+      .describe('Optional compact body excerpt for list summaries.'),
+  })
+
 export const showResultSchema = z.object({
   vault: pathSchema,
   entity: readEntitySchema,
@@ -371,9 +374,7 @@ export const listFilterSchema = z.object({
   recordType: z
     .array(z.string().min(1))
     .optional()
-    .describe(
-      'Optional query record families such as event, journal, assessment, profile_snapshot, current_profile, goal, condition, allergy, protocol, history, family, genetics, food, recipe, provider, or sample.',
-    ),
+    .describe(queryRecordTypeDescription),
   kind: z
     .string()
     .min(1)
@@ -404,12 +405,22 @@ export const listFilterSchema = z.object({
   limit: z.number().int().positive().max(200).default(50),
 })
 
-export const listItemSchema = readEntitySchema
+export const listItemSchema = listEntitySchema
+
+export const workoutFormatListResultSchema = z.object({
+  vault: pathSchema,
+  filters: z.object({
+    limit: z.number().int().positive().max(200),
+  }),
+  items: z.array(listEntitySchema),
+  count: z.number().int().nonnegative(),
+  nextCursor: z.string().min(1).nullable(),
+})
 
 export const listResultSchema = z.object({
   vault: pathSchema,
   filters: listFilterSchema,
-  items: z.array(listItemSchema),
+  items: z.array(listEntitySchema),
   count: z.number().int().nonnegative(),
   nextCursor: z.string().min(1).nullable(),
 })
@@ -440,7 +451,6 @@ export type DocumentImportResult = z.infer<typeof documentImportResultSchema>
 export type MealAddResult = z.infer<typeof mealAddResultSchema>
 export type WorkoutAddResult = z.infer<typeof workoutAddResultSchema>
 export type WorkoutFormatSaveResult = z.infer<typeof workoutFormatSaveResultSchema>
-export type WorkoutFormatListResult = z.infer<typeof workoutFormatListResultSchema>
 export type WorkoutImportInspectResult = z.infer<typeof workoutImportInspectResultSchema>
 export type WorkoutImportCsvResult = z.infer<typeof workoutImportCsvResultSchema>
 export type InterventionAddResult = z.infer<typeof interventionAddResultSchema>
@@ -452,8 +462,15 @@ export type ExperimentCreateResult = z.infer<
 >
 export type JournalEnsureResult = z.infer<typeof journalEnsureResultSchema>
 export type ReadEntity = z.infer<typeof readEntitySchema>
+export interface ListEntity extends Omit<ReadEntity, 'markdown' | 'data'> {
+  [key: string]: any
+  data: any
+  excerpt?: string | null
+}
+export type ListItem = ListEntity
 export type ShowResult = z.infer<typeof showResultSchema>
 export type ListFilters = z.infer<typeof listFilterSchema>
+export type WorkoutFormatListResult = z.infer<typeof workoutFormatListResultSchema>
 export type ListResult = z.infer<typeof listResultSchema>
 export type DeleteResult = z.infer<typeof deleteResultSchema>
 export type ExportPackResult = z.infer<typeof exportPackResultSchema>

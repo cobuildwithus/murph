@@ -1,25 +1,31 @@
 import {
   createCloudflareHostedControlClient,
   type CloudflareHostedControlClient,
-  type CloudflareHostedManagedUserCryptoStatus,
-} from "@murphai/cloudflare-hosted-control";
+} from "@murphai/cloudflare-hosted-control/client";
+import type {
+  HostedExecutionDispatchRequest,
+} from "@murphai/hosted-execution/contracts";
+import type {
+  HostedExecutionOutboxPayload,
+} from "@murphai/hosted-execution/outbox-payload";
 import {
-  type HostedExecutionDispatchRequest,
-  type HostedExecutionOutboxPayload,
-} from "@murphai/hosted-execution";
-import { createHostedVerifiedEmailUserEnv } from "@murphai/runtime-state";
+  HOSTED_USER_VERIFIED_EMAIL_ENV_KEY,
+  createHostedVerifiedEmailUserEnv,
+} from "@murphai/runtime-state";
 
 import { createHostedExecutionVercelOidcBearerTokenProvider } from "./auth-adapter";
 import { readHostedExecutionControlBaseUrl } from "./environment";
+import { formatHostedExecutionSafeLogError } from "./logging";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 
 export interface HostedVerifiedEmailSyncResult {
   emailAddress: string;
-  runTriggered: boolean;
   verifiedAt: string;
 }
 
-export function readHostedExecutionControlClientIfConfigured(): CloudflareHostedControlClient | null {
+export function readHostedExecutionControlClientIfConfigured(
+  timeoutMs?: number,
+): CloudflareHostedControlClient | null {
   const baseUrl = readHostedExecutionControlBaseUrl();
 
   if (!baseUrl) {
@@ -29,6 +35,7 @@ export function readHostedExecutionControlClientIfConfigured(): CloudflareHosted
   return createCloudflareHostedControlClient({
     baseUrl,
     getBearerToken: createHostedExecutionVercelOidcBearerTokenProvider(),
+    ...(typeof timeoutMs === "number" ? { timeoutMs } : {}),
   });
 }
 
@@ -67,7 +74,7 @@ export async function deleteHostedStoredDispatchPayloadBestEffort(
   } catch (error) {
     console.error(
       "Hosted stored dispatch payload cleanup failed.",
-      error instanceof Error ? error.message : String(error),
+      formatHostedExecutionSafeLogError(error),
     );
   }
 }
@@ -87,30 +94,27 @@ export async function syncHostedVerifiedEmailToHostedExecution(input: {
     mode: "merge",
   });
 
-  try {
-    await client.run(input.userId);
-
-    return {
-      emailAddress: input.emailAddress,
-      runTriggered: true,
-      verifiedAt: input.verifiedAt,
-    };
-  } catch (error) {
-    console.error(
-      `Hosted verified email sync saved user env but could not trigger a hosted run for ${input.userId}.`,
-      error instanceof Error ? error.message : String(error),
-    );
-
-    return {
-      emailAddress: input.emailAddress,
-      runTriggered: false,
-      verifiedAt: input.verifiedAt,
-    };
-  }
+  return {
+    emailAddress: input.emailAddress,
+    verifiedAt: input.verifiedAt,
+  };
 }
 
-export async function provisionManagedUserCryptoInHostedExecution(
-  userId: string,
-): Promise<CloudflareHostedManagedUserCryptoStatus> {
-  return requireHostedExecutionControlClient().provisionManagedUserCrypto(userId);
+export async function hasHostedVerifiedEmailUserEnv(userId: string): Promise<boolean | null> {
+  const client = readHostedExecutionControlClientIfConfigured();
+
+  if (!client) {
+    return null;
+  }
+
+  try {
+    const status = await client.getUserEnvStatus(userId);
+    return status.configuredUserEnvKeys.includes(HOSTED_USER_VERIFIED_EMAIL_ENV_KEY);
+  } catch (error) {
+    console.error(
+      "Hosted verified email status lookup failed.",
+      formatHostedExecutionSafeLogError(error),
+    );
+    return null;
+  }
 }

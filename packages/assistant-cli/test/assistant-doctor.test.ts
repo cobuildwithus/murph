@@ -93,7 +93,7 @@ import { runAssistantDoctor } from '../src/assistant/doctor.ts'
 const testNow = '2026-04-08T12:00:00.000Z'
 
 const BASE_SESSION: AssistantSession = {
-  schema: 'murph.assistant-session.v4',
+  schema: 'murph.assistant-session.v1',
   sessionId: 'session-doctor-demo',
   target: {
     adapter: 'codex-cli',
@@ -108,12 +108,15 @@ const BASE_SESSION: AssistantSession = {
   resumeState: null,
   provider: 'codex-cli',
   providerOptions: {
+    continuityFingerprint: 'fingerprint-doctor',
     model: null,
     reasoningEffort: null,
     sandbox: null,
     approvalPolicy: null,
     profile: null,
     oss: false,
+    executionDriver: 'codex-cli',
+    resumeKind: 'codex-session',
   },
   providerBinding: null,
   alias: 'chat:doctor',
@@ -265,12 +268,9 @@ test('runAssistantDoctor reports a clean assistant state as healthy', async () =
     BASE_OUTBOX_INTENT,
   )
   await writeJson(paths.automationStatePath, {
-    version: 2,
+    version: 1,
     inboxScanCursor: null,
-    autoReplyScanCursor: null,
-    autoReplyChannels: [],
-    autoReplyBacklogChannels: [],
-    autoReplyPrimed: false,
+    autoReply: [],
     updatedAt: testNow,
   })
   await writeJsonl(paths.diagnosticEventsPath, [
@@ -362,10 +362,7 @@ test('runAssistantDoctor reports a clean assistant state as healthy', async () =
       },
       automation: {
         inboxScanCursor: null,
-        autoReplyScanCursor: null,
-        autoReplyChannels: [],
-        autoReplyBacklogChannels: [],
-        autoReplyPrimed: false,
+        autoReply: [],
         updatedAt: null,
       },
       outbox: {

@@ -2,6 +2,711 @@
 
 All notable changes to `@murphai/murph` will be documented in this file.
 
+## [0.2.13] - 2026-04-15
+
+### Added
+- enable codex image passthrough
+- add gpt5 prompt behavior profile
+- add Telegram to homepage sign-in dialog
+- support email sign-in in homepage dialog
+- improve linq delivery observability
+
+### Fixed
+- tighten parity retry and validation edges
+- restore workspace acceptance
+- always forward multimodal auto-reply input
+- keep hosted checkout tax monitoring-only
+- enable automatic tax for hosted checkout
+- queue canonical write lock and narrow outer wrappers
+- reject blank mixed search query input
+- preserve linq auto-reply bootstrap
+- support positional search query input
+- update hosted onboarding signup sms copy
+- refine hosted onboarding welcome copy
+- tighten hosted onboarding signup copy
+- load sqlite via esm in source builds
+- match homepage telegram auth button styling
+- log linq error messages at webhook boundary
+- avoid nested prisma tx
+- silence sqlite experimental warning noise
+- background best-effort nudges
+- background hosted execution nudges
+- enrich redacted error logging
+- treat linq delivery as idempotent
+
+### Changed
+- centralize promotion and source normalization
+- clear meal parity coordination lane
+- simplify codex image passthrough
+- record pdftotext cleanup sweep
+- hard cut local pdftotext support
+- Update first-contact-welcome.ts
+- unify email channel resolution policy
+- sync member channels explicitly
+- add linq webhook timing logs
+- simplify recurring cron lookup flow
+- follow vault timezone for recurring cron
+- add latency instrumentation
+- make normal replies more conversational
+- simplify hosted onboarding seams
+- Refactor vault-local automation schedule shape
+- hard cut hosted onboarding transaction ownership
+- add hosted-safe node subpaths
+- share sqlite warning filters
+- simplify linq observability helpers
+- materialize Linq home threads from first contact
+- simplify sqlite warning parsing
+- Update hosted-existing-account-sign-in-dialog.tsx
+
+## [0.2.12] - 2026-04-15
+
+### Fixed
+- prune hosted metadata surfaces
+- support phone and telegram messaging setup
+- bind hosted control requests to users
+- land encryption hardening wake patch
+- clear recovered commit leases
+- harden hosted email and device-sync errors
+
+### Changed
+- bump review-gpt to 0.5.62
+- drop stale agentmail api base url refs
+- hard-cut greenfield version residue
+- tighten hosted callback imports
+- align runtime type ownership
+- extract usage and revnet reconciliation seams
+- remove greenfield legacy compatibility
+- narrow hosted onboarding billing snapshots
+- Reuse canonical automation contracts for local cron state
+- simplify wake patch internals
+
+## [0.2.11] - 2026-04-14
+
+### Added
+- add homepage email auth
+- tighten homepage auth copy
+- add homepage telegram auth
+- accept date-only occurred-at and audit event writes
+- make murph use a single active vault
+
+### Fixed
+- restore release green state
+- restore hosted phone auth error export
+- shorten homepage phone label
+- tweak sign-in cta copy
+- refine homepage auth options
+- allow Telegram auth origins in CSP
+- prioritize inbox before cron
+- quiet sqlite and duplicate prisma log noise
+
+### Changed
+- upgrade next.js to 16.2.3
+- simplify hosted auth flows
+- fix worker runtime wake expectation
+- simplify audited write seam
+- clarify required audit passes
+- simplify homepage email auth form
+- audit public canonical writes
+- use multiline prompt blocks
+- make system prompt composition readable
+- cover duplicate activation commit replay
+
+## [0.2.10] - 2026-04-14
+
+### Fixed
+- Fixed hosted-web release verification so CI smoke uses the repo-local `dev:local-env` path instead of depending on a globally installed `vercel` CLI.
+
+### Changed
+- Added regression coverage for hosted-web smoke command selection across CI and linked-local development modes.
+
+## [0.2.9] - 2026-04-14
+
+### Added
+- Added meal and food nutrition tracking.
+- Routed automation notifications through notification turns and hardened notification targets.
+- Added clearer homepage and invite CTAs, including the support footer action and messages call-to-action.
+- Added a repo-root hosted local development lane with end-to-end runner verification coverage.
+
+### Fixed
+- Fixed Cloudflare hosted execution stability issues across outbound handler registration, duplicate commit delivery handling, durable run ownership, stale recovery, teardown, and telemetry.
+- Fixed hosted onboarding and checkout edge cases across setup copy, bootstrap replay, billing-state messaging, checkout success redirects, warmup logging, and Privy CSP fallback behavior.
+- Fixed release and CI verification lanes so `pnpm release:check` and the push workflows pass cleanly again.
+- Fixed segmented workout duration notes to fail closed instead of accepting malformed input.
+
+### Changed
+- Simplified the hosted local development harness and verification flow.
+- Simplified the assistant hosted runtime seams and resumed execution around the responses-first path.
+- Removed remaining greenfield legacy hosted driver branches and related compatibility cleanup.
+
+## [0.2.8] - 2026-04-13
+
+### Added
+- add hosted onboarding timing logs
+- warm hosted onboarding Cloudflare provisioning
+
+### Fixed
+- tighten outbox payload and retry route handling
+- harden session secret seams
+- harden execution journal finalize replay
+- preserve invoked launcher name
+- centralize callback redirect cleanup
+- anchor outbox retry timing and simplify setup seams
+- decouple hosted privy layout env
+- remove dead deploy vars
+- default hosted linq pool cap
+- remove bogus staging deploy option
+- unblock release-check coverage lanes
+- degrade invalid privy homepage sessions
+- allow local dev contact privacy fallback
+- improve dev error logging
+- minimize webhook traces and preserve redirect fallback
+- hard-cut assistant and query helper barrels
+- harden callback redirect validation
+- minimize webhook trace residue
+- canonicalize execution journal comparisons
+- restore deploy migration history
+
+### Changed
+- stabilize hosted contact privacy fixtures
+- align oauth state fixture with deleteMany semantics
+- cover hosted device-sync settings callback cleanup
+- remove stale active patch plan
+- clean stale coordination state
+- remove greenfield compatibility branches
+- record cloudflare fixture hard-cut verification
+- simplify privy auth helper names
+- refresh hosted prisma bootstrap migration
+- record privy reset helper removal
+- hard-cut privy auth helper names
+- trim hosted privy auth lookups
+- simplify dev script names
+- default dev to vercel env injection
+- remove local secret file flow
+- land watched audit patch
+- centralize channel policy
+- Hard-cut package boundary ownership leaks
+- remove legacy internal wrapper shims
+- unify shared data-model owners
+- split setup and outbox helper seams
+- simplify hosted email helpers
+- centralize reply route inference
+- stabilize ambient runner env fallback
+
+## [0.2.7] - 2026-04-12
+
+### Added
+- split hosted linq home routing
+- auto-launch hosted invite checkout
+
+### Fixed
+- restore green verification lanes
+- clarify model and assistant command wording
+- clarify food and supplement capture guidance
+- land hosted target-area review patch
+- honor device-sync runtime write conflicts
+- collapse assistant-delivery effect identity
+- harden resume-state persistence
+- keep target-area seam patch scoped
+- tighten target-area boundary seams
+- tighten env rollback and share finalization
+- narrow hosted local-heartbeat seam
+- harden hosted runtime apply CAS
+- harden hosted linq home routing
+- route rich user content by provider capability
+- tighten assistant target runtime persistence
+- preserve target config on session updates
+- land runtime log wake patch
+- minimize durable runtime payloads
+- harden env and share acceptance state
+- hard-cut target runtime cleanup
+- hard-cut greenfield legacy runtime state
+- return new linq home chat as first contact
+- refine hosted onboarding Stripe billing status seam
+- keep runner runtime env authoritative
+- tighten smoke env integer parsing
+- harden assistant api key env allowlist
+- harden listener port validation and shutdown
+- land target-area follow-up patch
+- harden target-area listener startup
+- tighten webhook summaries
+- avoid eager device-sync require setup
+- canonicalize deletion fallback ids
+- harden target-area follow-up
+- harden webhook wake ingress
+- land webhook follow-up patch
+- land web-fetch production follow-up
+- harden durable webhook and deletion ids
+- land target-area follow-up
+- harden runner bundle assembly
+- preserve typed hosted runner runtime
+- harden smoke validation and cli lookup
+- land watched audit follow-up patch
+- harden hosted runner env forwarding
+- keep canonical mapbox env name
+- align cloudflare mapbox secret name
+- send hosted signup straight to stripe checkout
+- unify staged canonical write runtime
+- restore list excerpts
+- harden directory lock publication
+- replace Linq product copy with iMessage
+- formalize list summary surfaces
+- finish memory resource-lock adoption
+- recover failed receipts in normal passes
+- slim list and tool payloads
+- tighten route point lookup resolution
+- frame automation cron turns
+- finish hosted settings server-first boundaries
+- refine hosted share and join success RSC boundaries
+- wake on self-authored imports
+- harden hiking routing and argv redaction
+- server-first settings auth
+
+### Changed
+- clean up hosted email worker boundaries
+- centralize string env narrowing
+- split store persistence helpers
+- tighten hosted execution subpaths
+- unify hosted runtime parsing
+- hard-cut versioned legacy state
+- bump review-gpt to 0.5.57
+- resolve target runtime explicitly
+- split activation and stripe dispatch owners
+- hard-cut CLI knowledge contract alias
+- hard-cut boundary leaks
+- share loopback control-plane auth helpers
+- cut stale knowledge contract shims
+- restore patch-release acceptance
+- restore green checks and clean worktree
+- split web fetch seams
+- harden telegram and knowledge seams
+- tighten ingress and knowledge owner seams
+- tighten helper failure handling
+- simplify smoke and cli launch paths
+- split runner bundle assembler
+- simplify resource lock ownership
+- cover concurrent vault summary resource locks
+- add canonical resource lock runtime
+- explicit list summary contract
+- close review-gpt bug-hunt preset ledger row
+- add review-gpt bug-hunt preset
+- trim hosted client residue
+- split CLI mapbox module
+- make hosted privy auth server-first
+- share hosted auto-reply reconciliation helper
+- close auto-reply ledger row
+- share auto-reply channel reconciliation
+
+## [0.2.6] - 2026-04-10
+
+### Fixed
+- keep cli package build on dist imports
+
+### Changed
+- keep diff-aware cli checks source-first
+
+## [0.2.5] - 2026-04-10
+
+### Added
+- simplify offline auto-reply catch-up
+- add Mapbox route estimate
+- persist wearable onboarding preferences
+- cut over to event-driven scheduling
+- minimize onboarding error retention
+
+### Fixed
+- retry onboarding after session mismatch
+- stabilize coverage and workspace exports
+- fix hosted scheduler retry wakes
+- restore wizard channel selections after runtime wipes
+- preserve timed-step failures
+- propagate CLI coverage failures
+- restore node shared helper exports
+
+### Changed
+- fix clean workspace release builds
+- stabilize workers alarm runtime coverage
+- finish cleanup for green release checks
+- scrub imessage-era fixture paths
+- finish iMessage decommission
+- share wearable provider normalization
+- remove assistant imessage remnants
+- clean inbox imessage greenfield coverage
+- clean inbox iMessage legacy coverage
+- remove stale imessage coverage
+- align assistant automation scheduling coverage
+- cover explicit-empty wearable preference idempotency
+- honor explicit empty channel state
+- Update system-prompt.ts
+- bump review-gpt to 0.5.53
+- Update README.md
+- optimize README hero image
+- simplify fail-closed release guard
+- add hero image
+- default hosted workflow to production
+- align assistant receipt preview assertion
+
+## [0.2.4] - 2026-04-10
+
+### Fixed
+- remove whisper arm arch override
+- minimize persisted email and turn preview data
+- fail closed on release checks
+
+### Changed
+- clean coordination ledger
+
+## [0.2.3] - 2026-04-10
+
+### Fixed
+- harden resolved runtime config ownership
+- restore hosted and release boundaries
+- include imessage in runner bundle closure
+
+### Changed
+- privacy
+- resolve hosted env semantics at the Cloudflare boundary
+- cut duplicated workflow guidance
+- isolate node-runner env from device sync
+- restore explicit audit-pass authorization
+- trim workflow defaults
+- simplify task router table
+
+## [0.2.2] - 2026-04-09
+
+### Fixed
+- tighten workspace dependency boundary checks
+- serialize workspace artifact writers
+- scrub oauth callback state
+- wake automation loop for next-turn batching
+- align incur command-surface descriptors
+
+### Changed
+- clean coordination ledger
+- restore hosted web build env placeholders
+- bump review-gpt to 0.5.52
+- prepare built cli runtime artifacts
+- restore hosted web verify env plumbing
+- commit current worktree updates
+- unify health registry family seams
+- split parser helpers
+- remove dead vault upgrade seam
+- centralize hosted wake hint parsing
+- simplify deploy scripts
+- clean ledger and restore green verification
+- use native incur config schema output
+- simplify incur surface helpers
+- require gpt-5.4-mini coverage audit
+
+## [0.2.1] - 2026-04-09
+
+### Added
+- add hosted telegram typing feedback
+- add hosted linq typing feedback
+- add blood-test bootstrap overview signal
+- add automation overview signal
+- add journal and document overview signals
+- add more user-centric overview signals
+- add experiment and wearable overview signals
+- add bootstrap vault overview prompt
+- batch adjacent chat auto-replies
+- add vercel ai gateway support
+
+### Fixed
+- unblock app verification and acceptance
+- stabilize cron handling and prompt guidance
+- split memory create and update commands
+- stabilize profile hard-cut follow-ups
+- make prompt access mode explicit
+- update Murph identity prompt copy
+- restore release check assertions
+- skip local first-contact intro
+- inject user-local day into system prompt
+- recover safe auto-replies on startup
+- load prisma env.local for prisma cli
+- recover stale codex resume sessions
+- link setup runtime modules
+- point hosted auth legal links at bundled pdfs
+- restore green verification
+- clean smoke bundle build output
+- default hosted vercel gateway zdr
+- add gateway-core source alias
+- canonicalize cloudflare dispatch outcomes
+- split hosted execution outbox outcome state
+- ignore local incur config in hosted cli runs
+- land residual review seams
+- remove query boundary leak
+- simplify assistant wizard flow test
+
+### Changed
+- stabilize cli and setup coverage harnesses
+- restore audit prompt references
+- trim completion workflow duplication
+- stabilize package coverage lane
+- share workspace source import resolution
+- require owner coverage verification
+- add coverage seam regression suite
+- lower shared per-file thresholds
+- generalize vitest tooling coverage
+- keep typecheck package-local
+- widen typecheck coverage
+- Update first-contact-welcome.ts
+- update system prompt
+- simplify prompt helper wiring
+- simplify murph prompt guidance
+- rename bound vault cli tool
+- centralize telegram typing transport
+- clarify blood-test prompt wording
+- trim dead unit preference state
+- share hosted typing lifecycle
+- extract hosted typing orchestration
+- clean history prompt wording
+- fix widened typecheck failures
+- drop dead history helper
+- hard-cut history into projected events
+- hard-cut profile into preferences and memory
+- clean prompt access surface copy
+- simplify vault overview aggregation
+- simplify local verification lanes
+- centralize build cleanup paths
+- align acceptance command docs
+- sync verification command docs
+- drop profile query and assistant surfaces
+- clarify smoke integrity lane
+- restore sane shared timeouts
+- default app verifies to serial
+- add explicit acceptance alias
+- split local and acceptance verification scripts
+- speed up local typecheck harness
+- hard-cut unit preferences to canonical singleton
+- relabel activity overview as workout
+- finalize
+- aggregate package coverage failures
+- add optional coverage-write audit pass
+- simplify startup auto-reply recovery
+- trim duplicate web verify work
+- raise local coverage parallelism
+- stabilize coverage verification
+- remove greenfield compatibility baggage
+- restore inbox loader ownership
+- speed up coverage lane
+- fix telegram env ownership
+- cache package no-emit state
+- stabilize release-check regressions
+- extract next review seams
+- simplify hosted smoke parser proof
+- extract follow-up review seams
+- add hosted runner image smoke
+- clear hosted cleanup coordination row
+- finish greenfield lookup and dispatch seams
+- extract setup and operator helper seams
+- finalize hosted legal pdfs
+- upgrade Node baseline to 24.14.1
+- forbid docs-only data-model patches
+- clear remaining repo acceptance blockers
+
+## [0.2.0] - 2026-04-08
+
+### Added
+- auto-submit hosted phone auth code
+- add hosted phone sign-in dialog
+- add hosted Stripe billing portal handoff
+- normalize auth action sizing
+- increase default input height
+- autofocus invite verification code input
+- add vercel analytics providers
+- delete linq messages after hosted commit
+
+### Fixed
+- restore green clean workspace
+- narrow runner container build context
+- harden hosted runtime redaction
+- harden attachment path persistence
+- restore root verification green
+- harden device ingest boundaries
+- unblock hosted deploy bundle
+- add built package smoke proof
+- harden runner bundle contract
+- align package coverage configs and restore typecheck
+- move section labels above cards, remove duplicates
+- remove extra top padding from messaging cards
+- deduplicate messaging labels and hide save button when unlinked
+- derive local service contracts from owners
+- restore runtime error entrypoints
+- restore inboxd-imessage package shape
+- restore workspace verification
+- keep hosted auth redirect local
+- restore homepage public auth mode
+- hide homepage auth for signed-in users
+- simplify hosted phone auth cta
+- tidy hosted sign-in phone copy
+- shorten hosted sign-in dialog copy
+- remove hosted sign-in phone hint
+- move hosted privy provider to app shell
+- resume hosted invites after checkout cancel
+- guard hosted invite verify rehydration
+- restore workspace metadata after bundle build
+- prepare hosted artifacts before verify
+- scope raw assets by owner
+- wire food autolog hooks in assistant flows
+- land downloaded audit patch
+- tighten helper public surface
+- guard hosted billing portal route origin
+- show hosted activation progress after checkout
+- rely on privy hook state during signup
+- align hosted privy auth with local-storage sessions
+- warm per-user runner containers safely
+- pin active phone auth attempt
+- reduce hosted privy auth burst traffic
+- keep invite code flow out of phone entry
+- trim hosted latency regressions
+- tune prisma pooled runtime
+- raise hosted onboarding transaction max wait
+- stabilize prisma singleton
+- improve hosted onboarding route diagnostics
+- repair package test regressions
+- drain active webhook dispatches
+- make join invite send-code button full width
+- tighten package export boundaries
+- defer assistant cli adapter path resolution
+- green and speed up cloudflare verify
+- surface hosted onboarding config errors
+- remove duplicate join invite CTA
+
+### Changed
+- stabilize runner timeout assertion
+- close remaining active plan paths
+- tighten package entrypoints
+- narrow assistant delivery seams
+- land code-quality patch cleanup
+- remove hosted fallback paths
+- split command factory seams
+- simplify timeline helpers
+- green package coverage and harden runtime-state tests
+- narrow identity and stripe lookups
+- drop legacy assistant vault path helper
+- consolidate shared helper owners
+- narrow assistant-delivery journal seam
+- extract edit command input helpers
+- simplify shared vault cli bootstrap
+- remove legacy verifier guards
+- add composability seam notes
+- close package coverage gaps
+- simplify hosted onboarding stores
+- get package coverage green
+- tighten leaked package surfaces
+- share knowledge contracts
+- add deterministic coverage seams
+- extract setup wizard and http protocol seams
+- drop legacy raw manifest and imessage shims
+- close final test cleanup plans
+- get package-local coverage green
+- get package green above local coverage thresholds
+- share query runtime owner types
+- clean up remaining test seams
+- get package green
+- unify package coverage policy
+- remove dead internal helpers
+- dedupe prompt output capture helpers
+- mark assistant-engine threshold lane complete
+- remove http test seam
+- finish assistant-engine threshold coverage
+- simplify importer test seams
+- simplify package seam coverage
+- narrow assistant-engine coverage gaps
+- remove assessment test barrel seam
+- dedupe wizard inference assertions
+- add event attachment coverage
+- add event threshold coverage
+- raise package coverage
+- raise package-local coverage
+- finish package coverage
+- add deterministic memory wrapper coverage
+- raise package coverage proof
+- add core coverage branches
+- cover Oura normalization branches
+- restore package coverage
+- simplify cli-entry imports
+- clean up runtime and workout imports
+- simplify built runtime loader helpers
+- dedupe vault-usecases imports in canonical lock test
+- simplify record service barrel imports
+- drop redundant device-sync reset
+- simplify device-sync imports
+- dedupe device daemon process mocks
+- clean up more test import patterns
+- clean up more test import patterns
+- dedupe bin import helper
+- clean up more test import patterns
+- clean up hacky import patterns
+- clean up settings page design and copy
+- remove lazy package boundary import
+- add package-local coverage suite
+- add product marketing context
+- inline device-daemon child fixture
+- align foreground logging assertions
+- clear coverage rollout ledger
+- add package coverage commands
+- add memory and shares coverage cases
+- raise package coverage
+- use published murph package in runner bundle
+- forbid pnpm verify-deps bypass
+- add hosted privy session diagnostics
+- finish package-wide coverage rollout
+- align package coverage helper usage
+- load imessage via optional seam
+- split imessage owner package
+- align inbox imessage split seams
+- finalize runner leaf artifact cleanup
+- trim hosted phone auth wrappers
+- stop enforcing pnpm verify-before-run
+- split invite phone auth wrapper
+- raise telegram and persist coverage
+- tighten cloudflare runner artifact contract
+- harden runner bundle assembly
+- raise rollout package gates
+- remove file whitelists from coverage and split runners
+- close package coverage thresholds plan
+- add scoped coverage thresholds
+- expand follow-up helper coverage
+- split oversized hosted components
+- expand package coverage
+- align cloudflare runner artifact contract
+- expand helper coverage
+- expand package coverage rollout
+- expand helper coverage
+- expand package helper coverage
+- expand client coverage
+- expand config helper coverage
+- add package boundary hygiene rules
+- centralize vault family registry
+- stand up initial vitest suites
+- tighten assistant package boundaries
+- finish deploy artifact cleanup
+- tighten public surface
+- unify canonical markdown document writes
+- remove assistant-engine inbox runtime duplicates
+- package hosted runner as built artifact
+- add diff-aware verification lane
+- widen package coverage acceptance lane
+- simplify hosted phone auth flow
+- Update button.tsx
+- move invite send-code confirm off critical path
+- split invite and public phone auth flows
+- clear closed review-gpt row
+- bump to 0.5.51
+- remove shadow thread wake helpers
+- clear stale coordination ledger entries
+- clear full hosted assistant env in node-runner cases
+- make cloudflare node-runner env-stable
+- remove dead compatibility helpers
+- keep hosted member slices nested
+- refresh data-model seam review
+- share deploy automation helpers
+- simplify chatgpt watch helpers
+- split telegram webhook payload helpers
+- speed up backpressure route tests
+- Update deploy-cloudflare-hosted.yml
+
 ## [0.1.18] - 2026-04-07
 
 ### Fixed

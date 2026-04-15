@@ -1,4 +1,5 @@
 import { Cli, z } from 'incur'
+import { eventSourceSchema } from '@murphai/contracts'
 import { withBaseOptions } from '@murphai/operator-config/command-helpers'
 import {
   inputFileOptionSchema,
@@ -6,6 +7,7 @@ import {
 } from '@murphai/vault-usecases'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
+  occurredAtOptionSchema,
   isoTimestampSchema,
   listResultSchema,
   pathSchema,
@@ -53,8 +55,11 @@ import {
   createDirectEntityDeleteCommandDefinition,
   createDirectEventBackedEntityEditCommandDefinition,
 } from './record-mutation-command-helpers.js'
-
-const eventSourceSchema = z.enum(['manual', 'import', 'device', 'derived'])
+import {
+  commonDateRangeOptionDescriptions,
+  commonListLimitOptionSchema,
+} from './command-factory-primitives.js'
+import { normalizeOccurredAtOption } from './occurred-at-option.js'
 
 export function registerWorkoutCommands(
   cli: Cli.Cli,
@@ -73,8 +78,9 @@ export function registerWorkoutCommands(
         .string()
         .min(1)
         .max(4000)
+        .optional()
         .describe(
-          'Freeform workout text such as "Went for a 30-minute run."',
+          'Optional freeform workout text such as "Went for a 30-minute run." Omit it when using --input.',
         ),
     }),
     examples: [
@@ -97,7 +103,7 @@ export function registerWorkoutCommands(
       },
     ],
     hint:
-      'Use freeform text for lightweight logging, or pass --input @workout.json to store a rich nested workout payload with exercises, sets, notes, grouping, and source metadata.',
+      'Use freeform text for lightweight logging, or omit the positional text and pass --input @workout.json to store a rich nested workout payload with exercises, sets, notes, grouping, and source metadata.',
     options: withBaseOptions({
       input: inputFileOptionSchema
         .optional()
@@ -125,9 +131,9 @@ export function registerWorkoutCommands(
         .max(1_000)
         .optional()
         .describe('Optional workout distance override in kilometers.'),
-      occurredAt: isoTimestampSchema
+      occurredAt: occurredAtOptionSchema
         .optional()
-        .describe('Optional occurrence timestamp in ISO 8601 form.'),
+        .describe('Optional occurrence timestamp in ISO 8601 form or YYYY-MM-DD form.'),
       source: eventSourceSchema
         .optional()
         .describe(
@@ -154,10 +160,13 @@ export function registerWorkoutCommands(
           typeof options.distanceKm === 'number'
             ? options.distanceKm
             : undefined,
-        occurredAt:
-          typeof options.occurredAt === 'string'
-            ? options.occurredAt
-            : undefined,
+        occurredAt: await normalizeOccurredAtOption({
+          vault: options.vault,
+          occurredAt:
+            typeof options.occurredAt === 'string'
+              ? options.occurredAt
+              : undefined,
+        }),
         source: typeof options.source === 'string' ? options.source : undefined,
         mediaPaths: Array.isArray(options.media)
           ? options.media.filter((entry): entry is string => typeof entry === 'string')
@@ -182,9 +191,17 @@ export function registerWorkoutCommands(
     description: 'List workout sessions with optional date bounds.',
     args: z.object({}),
     options: withBaseOptions({
-      from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u).optional(),
-      to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u).optional(),
-      limit: z.number().int().positive().max(200).default(50),
+      from: z
+        .string()
+        .regex(/^\d{4}-\d{2}-\d{2}$/u)
+        .optional()
+        .describe(commonDateRangeOptionDescriptions.from),
+      to: z
+        .string()
+        .regex(/^\d{4}-\d{2}-\d{2}$/u)
+        .optional()
+        .describe(commonDateRangeOptionDescriptions.to),
+      limit: commonListLimitOptionSchema,
     }),
     output: listResultSchema,
     async run({ options }) {
@@ -293,9 +310,9 @@ export function registerWorkoutCommands(
         .max(160)
         .optional()
         .describe('Optional measurement title override.'),
-      occurredAt: isoTimestampSchema
+      occurredAt: occurredAtOptionSchema
         .optional()
-        .describe('Optional occurrence timestamp in ISO 8601 form.'),
+        .describe('Optional occurrence timestamp in ISO 8601 form or YYYY-MM-DD form.'),
       source: eventSourceSchema
         .optional()
         .describe('Optional event source (`manual`, `import`, `device`, or `derived`).'),
@@ -317,10 +334,13 @@ export function registerWorkoutCommands(
         unit: typeof options.unit === 'string' ? options.unit : undefined,
         note: typeof options.note === 'string' ? options.note : undefined,
         title: typeof options.title === 'string' ? options.title : undefined,
-        occurredAt:
-          typeof options.occurredAt === 'string'
-            ? options.occurredAt
-            : undefined,
+        occurredAt: await normalizeOccurredAtOption({
+          vault: options.vault,
+          occurredAt:
+            typeof options.occurredAt === 'string'
+              ? options.occurredAt
+              : undefined,
+        }),
         source: typeof options.source === 'string' ? options.source : undefined,
         mediaPaths: Array.isArray(options.media)
           ? options.media.filter((entry): entry is string => typeof entry === 'string')
@@ -374,11 +394,11 @@ export function registerWorkoutCommands(
 
   const units = Cli.create('units', {
     description:
-      'Profile-level workout unit preferences used by workout and body-measurement capture flows.',
+      'Canonical weight and body-measurement unit preferences used by measurement capture flows.',
   })
 
   units.command('show', {
-    description: 'Show the saved workout unit preferences from the current profile snapshot.',
+    description: 'Show the saved workout unit preferences from the canonical preferences singleton.',
     args: z.object({}),
     options: withBaseOptions(),
     output: workoutUnitPreferencesResultSchema,
@@ -388,25 +408,23 @@ export function registerWorkoutCommands(
   })
 
   units.command('set', {
-    description: 'Set one or more workout unit preferences on the current profile snapshot.',
+    description: 'Set one or more workout unit preferences on the canonical preferences singleton.',
     args: z.object({}),
     options: withBaseOptions({
       weight: z.enum(['lb', 'kg']).optional(),
-      distance: z.enum(['km', 'mi']).optional(),
       bodyMeasurement: z
         .enum(['cm', 'in'])
         .optional()
         .describe('Preferred circumference/body-measurement unit.'),
       recordedAt: isoTimestampSchema
         .optional()
-        .describe('Optional profile-snapshot timestamp override in ISO 8601 form.'),
+        .describe('Optional preferences update timestamp override in ISO 8601 form.'),
     }),
     output: workoutUnitPreferencesResultSchema,
     async run({ options }) {
       return setWorkoutUnitPreferences({
         vault: options.vault,
         weight: typeof options.weight === 'string' ? options.weight : undefined,
-        distance: typeof options.distance === 'string' ? options.distance : undefined,
         bodyMeasurement:
           typeof options.bodyMeasurement === 'string'
             ? options.bodyMeasurement
@@ -678,9 +696,9 @@ export function registerWorkoutCommands(
         .max(1_000)
         .optional()
         .describe('Optional workout distance override in kilometers.'),
-      occurredAt: isoTimestampSchema
+      occurredAt: occurredAtOptionSchema
         .optional()
-        .describe('Optional occurrence timestamp in ISO 8601 form.'),
+        .describe('Optional occurrence timestamp in ISO 8601 form or YYYY-MM-DD form.'),
       source: eventSourceSchema
         .optional()
         .describe(
@@ -703,10 +721,13 @@ export function registerWorkoutCommands(
           typeof options.distanceKm === 'number'
             ? options.distanceKm
             : undefined,
-        occurredAt:
-          typeof options.occurredAt === 'string'
-            ? options.occurredAt
-            : undefined,
+        occurredAt: await normalizeOccurredAtOption({
+          vault: options.vault,
+          occurredAt:
+            typeof options.occurredAt === 'string'
+              ? options.occurredAt
+              : undefined,
+        }),
         source: typeof options.source === 'string' ? options.source : undefined,
         mediaPaths: Array.isArray(options.media)
           ? options.media.filter((entry): entry is string => typeof entry === 'string')

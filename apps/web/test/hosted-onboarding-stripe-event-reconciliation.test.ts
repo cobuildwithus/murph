@@ -2,6 +2,8 @@ import { HostedStripeEventStatus } from "@prisma/client";
 import type Stripe from "stripe";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "@/src/lib/hosted-onboarding/shared";
+
 const mocks = vi.hoisted(() => ({
   applyStripeCheckoutCompleted: vi.fn(),
   applyStripeCheckoutExpired: vi.fn(),
@@ -11,7 +13,6 @@ const mocks = vi.hoisted(() => ({
   applyStripeRefundCreated: vi.fn(),
   applyStripeSubscriptionUpdated: vi.fn(),
   drainHostedRevnetIssuanceSubmissionQueue: vi.fn(),
-  provisionManagedUserCryptoInHostedExecution: vi.fn(),
   resolveStripeCustomerContext: vi.fn(),
   stripe: {
     events: {
@@ -30,10 +31,10 @@ vi.mock("@/src/lib/hosted-onboarding/stripe-billing-events", () => ({
   applyStripeSubscriptionUpdated: mocks.applyStripeSubscriptionUpdated,
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/stripe-billing-policy", async () => {
+vi.mock("@/src/lib/hosted-onboarding/stripe-billing-lookup", async () => {
   const actual = await vi.importActual<
-    typeof import("@/src/lib/hosted-onboarding/stripe-billing-policy")
-  >("@/src/lib/hosted-onboarding/stripe-billing-policy");
+    typeof import("@/src/lib/hosted-onboarding/stripe-billing-lookup")
+  >("@/src/lib/hosted-onboarding/stripe-billing-lookup");
 
   return {
     ...actual,
@@ -49,18 +50,6 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", async () => {
   return {
     ...actual,
     requireHostedStripeApi: () => mocks.stripe,
-  };
-});
-
-vi.mock("@/src/lib/hosted-execution/control", async () => {
-  const actual = await vi.importActual<
-    typeof import("@/src/lib/hosted-execution/control")
-  >("@/src/lib/hosted-execution/control");
-
-  return {
-    ...actual,
-    provisionManagedUserCryptoInHostedExecution:
-      mocks.provisionManagedUserCryptoInHostedExecution,
   };
 });
 
@@ -83,6 +72,7 @@ import {
 describe("hosted Stripe event reconciliation", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.spyOn(console, "info").mockImplementation(() => {});
     mocks.applyStripeCheckoutCompleted.mockResolvedValue({
       activatedMemberId: null,
       hostedExecutionEventId: null,
@@ -93,7 +83,6 @@ describe("hosted Stripe event reconciliation", () => {
       activatedMemberId: "member_123",
       createdOrUpdatedRevnetIssuance: false,
       hostedExecutionEventId: "dispatch_123",
-      postCommitProvisionUserId: "member_123",
     });
     mocks.applyStripeInvoicePaymentFailed.mockResolvedValue(undefined);
     mocks.applyStripeRefundCreated.mockResolvedValue(undefined);
@@ -102,7 +91,6 @@ describe("hosted Stripe event reconciliation", () => {
       customerId: null,
     });
     mocks.drainHostedRevnetIssuanceSubmissionQueue.mockResolvedValue([]);
-    mocks.provisionManagedUserCryptoInHostedExecution.mockResolvedValue(undefined);
   });
 
   it("stores only minimal Stripe receipt state when recording an event", async () => {
@@ -162,7 +150,10 @@ describe("hosted Stripe event reconciliation", () => {
       }),
       expect.anything(),
     );
-    expect(mocks.provisionManagedUserCryptoInHostedExecution).toHaveBeenCalledWith("member_123");
+    expect(prisma.client.$transaction).toHaveBeenCalledWith(
+      expect.any(Function),
+      HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+    );
     expect(prisma.rows[0]).toEqual(expect.objectContaining({
       eventId: "evt_invoice_paid_123",
       lastErrorCode: null,
@@ -305,47 +296,11 @@ describe("hosted Stripe event reconciliation", () => {
     expect(prisma.rows[0]).toEqual(expect.objectContaining({
       eventId: "evt_invoice_paid_123",
       lastErrorCode: "Error",
-      lastErrorMessage: "Stripe unavailable",
+      lastErrorMessage: "[redacted]",
       status: HostedStripeEventStatus.failed,
     }));
   });
 
-  it("marks the receipt failed when post-commit provisioning fails", async () => {
-    const prisma = createStripeEventPrismaHarness();
-    const event = makeInvoicePaidEvent();
-    mocks.stripe.events.retrieve.mockResolvedValue(event);
-    mocks.provisionManagedUserCryptoInHostedExecution.mockRejectedValue(
-      new Error("Cloudflare provisioning failed"),
-    );
-
-    await recordHostedStripeEvent({
-      event,
-      prisma: prisma.client as never,
-    });
-
-    await expect(
-      reconcileHostedStripeEventById({
-        eventId: event.id,
-        prisma: prisma.client as never,
-      }),
-    ).resolves.toEqual({
-      activatedMemberId: null,
-      createdOrUpdatedRevnetIssuance: false,
-      eventId: "evt_invoice_paid_123",
-      hostedExecutionEventId: null,
-      status: "failed",
-    });
-
-    expect(mocks.applyStripeInvoicePaid).toHaveBeenCalledTimes(1);
-    expect(mocks.provisionManagedUserCryptoInHostedExecution).toHaveBeenCalledWith("member_123");
-    expect(prisma.rows[0]).toEqual(expect.objectContaining({
-      eventId: "evt_invoice_paid_123",
-      lastErrorCode: "Error",
-      lastErrorMessage: "Cloudflare provisioning failed",
-      processedAt: null,
-      status: HostedStripeEventStatus.failed,
-    }));
-  });
 });
 
 function makeInvoicePaidEvent(): Stripe.Event {
@@ -423,7 +378,9 @@ function createStripeEventPrismaHarness() {
   const rows: MutableStripeEventRow[] = [];
 
   const client: StripeEventPrismaHarnessClient = {
-    $transaction: async <T>(callback: (tx: StripeEventPrismaHarnessClient) => Promise<T>) => callback(client),
+    $transaction: vi.fn(
+      async <T>(callback: (tx: StripeEventPrismaHarnessClient) => Promise<T>) => callback(client),
+    ),
     hostedStripeEvent: {
       create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
         const row: MutableStripeEventRow = {
@@ -557,7 +514,7 @@ type StripeEventWhere = {
 };
 
 type StripeEventPrismaHarnessClient = {
-  $transaction: <T>(callback: (tx: StripeEventPrismaHarnessClient) => Promise<T>) => Promise<T>;
+  $transaction: ReturnType<typeof vi.fn>;
   hostedStripeEvent: {
     create: ReturnType<typeof vi.fn>;
     findMany: ReturnType<typeof vi.fn>;

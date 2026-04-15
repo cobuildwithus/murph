@@ -4,11 +4,10 @@ import path from "node:path";
 import { promises as fs } from "node:fs";
 import { test } from "vitest";
 
-import { initializeVault } from "@murphai/core";
+import { initializeVault, listWriteOperationMetadataPaths, readStoredWriteOperation } from "@murphai/core";
 
 import * as indexSurface from "../src/index.ts";
 import * as runtimeSurface from "../src/runtime.ts";
-import type { StoredCaptureEnvelope } from "../src/indexing/persist.ts";
 import type { InboundCapture } from "../src/contracts/capture.ts";
 import { findStoredCaptureEnvelope } from "../src/indexing/persist.ts";
 import { createDeterministicInboxCaptureId } from "../src/shared.ts";
@@ -17,15 +16,60 @@ async function makeTempDirectory(name: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), `${name}-`));
 }
 
+async function makeHomeTempDirectory(name: string): Promise<string> {
+  return fs.mkdtemp(path.join(os.homedir(), `${name}-`));
+}
+
 async function writeExternalFile(directory: string, fileName: string, content: string): Promise<string> {
   const filePath = path.join(directory, fileName);
   await fs.writeFile(filePath, content, "utf8");
   return filePath;
 }
 
+async function markInboxCapturePersistOperationInterrupted(vaultRoot: string, capturePath: string): Promise<void> {
+  const operationPaths = await listWriteOperationMetadataPaths(vaultRoot);
+  const matchingPath = (
+    await Promise.all(
+      operationPaths.map(async (relativePath) => ({
+        relativePath,
+        operation: await readStoredWriteOperation(vaultRoot, relativePath),
+      })),
+    )
+  ).find((entry) => entry.operation.operationType === "inbox_capture_persist")?.relativePath;
+  assert.ok(matchingPath);
+
+  const metadataPath = path.join(vaultRoot, matchingPath);
+  const rawOperation = JSON.parse(await fs.readFile(metadataPath, "utf8")) as {
+    operationType: string;
+    status: string;
+    updatedAt: string;
+    actions: Array<Record<string, unknown>>;
+  };
+  assert.equal(rawOperation.operationType, "inbox_capture_persist");
+  rawOperation.status = "committing";
+  rawOperation.updatedAt = "2026-03-13T12:33:30.000Z";
+  rawOperation.actions = rawOperation.actions.map((action) => {
+    if (action.kind !== "jsonl_append" || action.targetRelativePath !== capturePath) {
+      return action;
+    }
+
+    return {
+      ...action,
+      state: "staged",
+      effect: undefined,
+      existedBefore: undefined,
+      originalSize: undefined,
+      committedPayloadReceipt: undefined,
+      appliedAt: undefined,
+    };
+  });
+
+  await fs.writeFile(metadataPath, `${JSON.stringify(rawOperation, null, 2)}\n`, "utf8");
+}
+
 function createCapture(overrides: Partial<InboundCapture> = {}): InboundCapture {
   return {
-    source: "imessage",
+    source: "email",
     externalId: "msg-persist-edge-1",
     accountId: "self",
     thread: {
@@ -43,26 +87,18 @@ function createCapture(overrides: Partial<InboundCapture> = {}): InboundCapture 
   };
 }
 
-async function readEnvelopeFile(
-  absolutePath: string,
-): Promise<StoredCaptureEnvelope & { stored: { attachments: Array<Record<string, unknown>> } }> {
-  return JSON.parse(await fs.readFile(absolutePath, "utf8")) as StoredCaptureEnvelope & {
-    stored: { attachments: Array<Record<string, unknown>> };
-  };
-}
-
 test("runtime barrel keeps the rebuild seam aligned with the package surface", () => {
   assert.equal(runtimeSurface.rebuildRuntimeFromVault, indexSurface.rebuildRuntimeFromVault);
 });
 
-test("findStoredCaptureEnvelope quarantines unsafe canonical envelopes with a collision-safe suffix and falls back to a legacy-safe envelope", async () => {
+test("findStoredCaptureEnvelope resolves canonical ledger records even when the raw envelope file is later corrupted", async () => {
   const vaultRoot = await makeTempDirectory("murph-inbox-find-envelope-vault");
   const sourceRoot = await makeTempDirectory("murph-inbox-find-envelope-source");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
   const attachmentPath = await writeExternalFile(sourceRoot, "fallback-note.txt", "legacy attachment");
   const inbound = createCapture({
-    externalId: "msg-find-envelope-fallback",
+    externalId: "msg-find-envelope-canonical",
     attachments: [
       {
         externalId: "att-find-envelope",
@@ -73,130 +109,152 @@ test("findStoredCaptureEnvelope quarantines unsafe canonical envelopes with a co
       },
     ],
   });
-  const canonicalCaptureId = createDeterministicInboxCaptureId(inbound);
-  const legacyCaptureId = "cap_legacy_safe_fallback";
-
-  await indexSurface.persistRawCapture({
+  const captureId = createDeterministicInboxCaptureId(inbound);
+  const persisted = await indexSurface.persistCanonicalInboxCapture({
     vaultRoot,
-    captureId: legacyCaptureId,
-    eventId: "evt_01HQW7K0M9N8P7Q6R5S4T3VA01",
-    input: inbound,
-    storedAt: "2026-03-13T12:31:00.000Z",
-  });
-  const canonicalStored = await indexSurface.persistRawCapture({
-    vaultRoot,
-    captureId: canonicalCaptureId,
+    captureId,
     eventId: "evt_01HQW7K0M9N8P7Q6R5S4T3VA02",
     input: inbound,
     storedAt: "2026-03-13T12:32:00.000Z",
   });
 
-  const canonicalEnvelopePath = path.join(vaultRoot, canonicalStored.envelopePath);
-  const canonicalEnvelope = await readEnvelopeFile(canonicalEnvelopePath);
-  canonicalEnvelope.captureId = "../../escaped-capture";
-  await fs.writeFile(canonicalEnvelopePath, `${JSON.stringify(canonicalEnvelope, null, 2)}\n`, "utf8");
-
-  const quarantinePath = path.join(
-    path.dirname(canonicalEnvelopePath),
-    "envelope.quarantined-invalid-capture-id.json",
-  );
-  await fs.writeFile(quarantinePath, "{\"existing\":true}\n", "utf8");
+  const canonicalEnvelopePath = path.join(vaultRoot, persisted.stored.envelopePath);
+  await fs.writeFile(canonicalEnvelopePath, "{\"captureId\":\"../../escaped-capture\"}\n", "utf8");
 
   const envelope = await findStoredCaptureEnvelope({
     vaultRoot,
     inbound,
-    captureId: canonicalCaptureId,
+    captureId,
   });
 
   assert.ok(envelope);
-  assert.equal(envelope.captureId, canonicalCaptureId);
-  assert.equal(envelope.stored.captureId, canonicalCaptureId);
-  assert.equal(envelope.stored.attachments[0]?.attachmentId, `att_${canonicalCaptureId}_01`);
+  assert.equal(envelope.captureId, captureId);
+  assert.equal(envelope.stored.captureId, captureId);
+  assert.equal(envelope.stored.attachments[0]?.attachmentId, `att_${captureId}_01`);
   assert.match(envelope.stored.attachments[0]?.storedPath ?? "", /fallback-note\.txt$/u);
-  assert.equal(await pathExists(canonicalEnvelopePath), false);
-  assert.equal(await pathExists(quarantinePath), true);
-  assert.equal(
-    await pathExists(
-      path.join(
-        path.dirname(canonicalEnvelopePath),
-        "envelope.quarantined-invalid-capture-id-1.json",
-      ),
-    ),
-    true,
-  );
 });
 
-test("rebuildRuntimeFromVault rewrites legacy attachment ids from canonical ordinals before indexing parse jobs", async () => {
-  const vaultRoot = await makeTempDirectory("murph-inbox-rebuild-attachment-normalization-vault");
-  const sourceRoot = await makeTempDirectory("murph-inbox-rebuild-attachment-normalization-source");
+test("findStoredCaptureEnvelope falls back to the deterministic raw inbox envelope when canonical ledger evidence is missing", async () => {
+  const vaultRoot = await makeTempDirectory("murph-inbox-find-envelope-raw-only-vault");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
-  const firstAttachmentPath = await writeExternalFile(sourceRoot, "first.txt", "first attachment");
-  const secondAttachmentPath = await writeExternalFile(sourceRoot, "second.txt", "second attachment");
   const inbound = createCapture({
-    externalId: "msg-rebuild-attachment-normalization",
-    attachments: [
-      {
-        externalId: "att-first",
-        kind: "document",
-        mime: "text/plain",
-        originalPath: firstAttachmentPath,
-        fileName: "first.txt",
-      },
-      {
-        externalId: "att-second",
-        kind: "document",
-        mime: "text/plain",
-        originalPath: secondAttachmentPath,
-        fileName: "second.txt",
-      },
-    ],
+    externalId: "msg-find-envelope-raw-only",
   });
-  const canonicalCaptureId = createDeterministicInboxCaptureId(inbound);
-  const legacyCaptureId = "cap_legacyattachmentnorm";
-  const stored = await indexSurface.persistRawCapture({
+  const captureId = createDeterministicInboxCaptureId(inbound);
+  const persisted = await indexSurface.persistCanonicalInboxCapture({
     vaultRoot,
-    captureId: legacyCaptureId,
+    captureId,
     eventId: "evt_01HQW7K0M9N8P7Q6R5S4T3VA03",
     input: inbound,
     storedAt: "2026-03-13T12:33:00.000Z",
   });
 
-  const legacyEnvelopePath = path.join(vaultRoot, stored.envelopePath);
-  const legacyEnvelope = await readEnvelopeFile(legacyEnvelopePath);
-  legacyEnvelope.stored.attachments = legacyEnvelope.stored.attachments.map((attachment, index) => ({
-    ...attachment,
-    attachmentId: `legacy-att-${index + 1}`,
-  }));
-  await fs.writeFile(legacyEnvelopePath, `${JSON.stringify(legacyEnvelope, null, 2)}\n`, "utf8");
+  await fs.rm(
+    path.join(vaultRoot, persisted.capture.relativePath),
+    { force: true },
+  );
+  await markInboxCapturePersistOperationInterrupted(vaultRoot, persisted.capture.relativePath);
 
-  const runtime = await indexSurface.openInboxRuntime({ vaultRoot });
+  const envelope = await findStoredCaptureEnvelope({
+    vaultRoot,
+    inbound,
+    captureId,
+  });
 
-  try {
-    await indexSurface.rebuildRuntimeFromVault({ vaultRoot, runtime });
-
-    const capture = runtime.getCapture(canonicalCaptureId);
-    assert.ok(capture);
-    assert.equal(capture.captureId, canonicalCaptureId);
-    assert.equal(runtime.getCapture(legacyCaptureId), null);
-    assert.deepEqual(
-      capture.attachments.map((attachment) => attachment.attachmentId),
-      [`att_${canonicalCaptureId}_01`, `att_${canonicalCaptureId}_02`],
-    );
-    assert.deepEqual(
-      runtime.listAttachmentParseJobs({ limit: 10 }).map((job) => job.attachmentId).sort(),
-      [`att_${canonicalCaptureId}_01`, `att_${canonicalCaptureId}_02`],
-    );
-  } finally {
-    runtime.close();
-  }
+  assert.ok(envelope);
+  assert.equal(envelope.captureId, captureId);
+  assert.equal(envelope.eventId, "evt_01HQW7K0M9N8P7Q6R5S4T3VA03");
+  assert.equal(envelope.stored.envelopePath, persisted.stored.envelopePath);
 });
 
-async function pathExists(targetPath: string): Promise<boolean> {
+test("persistCanonicalInboxCapture only stores trusted temp-root attachment files and drops blocked path metadata", async () => {
+  const vaultRoot = await makeTempDirectory("murph-inbox-trusted-attachment-vault");
+  const trustedSourceRoot = await makeTempDirectory("murph-inbox-trusted-attachment-source");
+  const untrustedSourceRoot = await makeHomeTempDirectory("murph-inbox-untrusted-attachment-source-");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
+
   try {
-    await fs.access(targetPath);
-    return true;
-  } catch {
-    return false;
+    const trustedAttachmentPath = await writeExternalFile(
+      trustedSourceRoot,
+      "trusted-note.txt",
+      "trusted attachment",
+    );
+    const blockedAttachmentPath = await writeExternalFile(
+      untrustedSourceRoot,
+      "do-not-copy.txt",
+      "blocked attachment",
+    );
+    const trustedDirectoryPath = path.join(trustedSourceRoot, "directory-only");
+    await fs.mkdir(trustedDirectoryPath);
+
+    const inbound = createCapture({
+      externalId: "msg-trusted-email-attachments",
+      attachments: [
+        {
+          externalId: "att-trusted",
+          kind: "document",
+          mime: "text/plain",
+          originalPath: trustedAttachmentPath,
+        },
+        {
+          externalId: "att-blocked",
+          kind: "document",
+          mime: "text/plain",
+          originalPath: blockedAttachmentPath,
+        },
+        {
+          externalId: "att-directory",
+          kind: "document",
+          mime: "text/plain",
+          originalPath: trustedDirectoryPath,
+        },
+      ],
+    });
+
+    const captureId = createDeterministicInboxCaptureId(inbound);
+    const persisted = await indexSurface.persistCanonicalInboxCapture({
+      vaultRoot,
+      captureId,
+      eventId: "evt_01HQW7K0M9N8P7Q6R5S4T3VA04",
+      input: inbound,
+      storedAt: "2026-03-13T12:34:00.000Z",
+    });
+    const stored = persisted.stored;
+
+    assert.equal(stored.attachments.length, 3);
+    const trustedAttachment = stored.attachments[0];
+    const blockedAttachment = stored.attachments[1];
+    const directoryAttachment = stored.attachments[2];
+
+    assert.ok(trustedAttachment);
+    assert.match(trustedAttachment.storedPath ?? "", /trusted-note\.txt$/u);
+    assert.equal(trustedAttachment.fileName, "trusted-note.txt");
+    assert.notEqual(trustedAttachment.sha256, null);
+
+    assert.ok(blockedAttachment);
+    assert.equal(blockedAttachment.storedPath, null);
+    assert.equal(blockedAttachment.fileName, undefined);
+    assert.equal(blockedAttachment.sha256, null);
+    assert.equal(blockedAttachment.originalPath, null);
+
+    assert.ok(directoryAttachment);
+    assert.equal(directoryAttachment.storedPath, null);
+    assert.equal(directoryAttachment.fileName, undefined);
+    assert.equal(directoryAttachment.sha256, null);
+    assert.equal(directoryAttachment.originalPath, null);
+
+    const envelope = await findStoredCaptureEnvelope({
+      vaultRoot,
+      inbound,
+      captureId,
+    });
+    assert.ok(envelope);
+    assert.equal(envelope.input.attachments.length, 3);
+    assert.equal(envelope.input.attachments[0]?.originalPath, null);
+    assert.equal(envelope.input.attachments[1]?.originalPath, null);
+    assert.equal(envelope.input.attachments[2]?.originalPath, null);
+  } finally {
+    await fs.rm(untrustedSourceRoot, { recursive: true, force: true });
   }
-}
+});

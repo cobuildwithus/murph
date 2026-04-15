@@ -50,7 +50,6 @@ export function makeSetupResult(
     toolchainRoot: '~/.murph/toolchain',
     tools: {
       ffmpegCommand: '/usr/local/bin/ffmpeg',
-      pdftotextCommand: '/usr/local/bin/pdftotext',
       whisperCommand: '/usr/local/bin/whisper-cli',
       whisperModelPath: '~/.murph/toolchain/models/whisper/ggml-base.en.bin',
     },
@@ -113,6 +112,25 @@ export class FakeTtyStream extends PassThrough {
   unref(): void {}
 }
 
+export function createCapturedOutputStream(): {
+  output: PassThrough
+  readOutput: () => string
+} {
+  const output = new PassThrough()
+  let rendered = ''
+
+  output.on('data', (chunk) => {
+    rendered += chunk.toString()
+  })
+
+  return {
+    output,
+    readOutput: () => rendered,
+  }
+}
+
+let ttyHarnessLock: Promise<void> = Promise.resolve()
+
 export async function withMockProcessTty<TResult>(
   run: (context: {
     flush: () => Promise<void>
@@ -122,6 +140,13 @@ export async function withMockProcessTty<TResult>(
     writeInput: (value: string) => Promise<void>
   }) => Promise<TResult>,
 ): Promise<TResult> {
+  const waitForPreviousHarness = ttyHarnessLock
+  let releaseHarness = () => {}
+  ttyHarnessLock = new Promise<void>((resolve) => {
+    releaseHarness = resolve
+  })
+  await waitForPreviousHarness
+
   const stdinDescriptor = Object.getOwnPropertyDescriptor(process, 'stdin')
   const stderrDescriptor = Object.getOwnPropertyDescriptor(process, 'stderr')
   const stdin = new FakeTtyStream()
@@ -132,43 +157,71 @@ export async function withMockProcessTty<TResult>(
     rendered += chunk.toString()
   })
 
-  Object.defineProperty(process, 'stdin', {
-    configurable: true,
-    value: stdin,
-  })
-  Object.defineProperty(process, 'stderr', {
-    configurable: true,
-    value: stderr,
-  })
-
   const flush = async () => {
     await new Promise((resolve) => setTimeout(resolve, 10))
   }
 
   try {
-    return await run({
-      flush,
-      readOutput: () => rendered,
-      stderr,
-      stdin,
-      writeInput: async (value) => {
-        stdin.write(value)
-        await flush()
-      },
-    })
-  } finally {
-    stdin.end()
-    stderr.end()
+    try {
+      Object.defineProperty(process, 'stdin', {
+        configurable: true,
+        value: stdin,
+      })
+      Object.defineProperty(process, 'stderr', {
+        configurable: true,
+        value: stderr,
+      })
 
-    if (stdinDescriptor) {
-      Object.defineProperty(process, 'stdin', stdinDescriptor)
+      return await run({
+        flush,
+        readOutput: () => rendered,
+        stderr,
+        stdin,
+        writeInput: async (value) => {
+          stdin.write(value)
+          await flush()
+        },
+      })
+    } finally {
+      stdin.end()
+      stderr.end()
+
+      if (stdinDescriptor) {
+        Object.defineProperty(process, 'stdin', stdinDescriptor)
+      }
+      if (stderrDescriptor) {
+        Object.defineProperty(process, 'stderr', stderrDescriptor)
+      }
     }
-    if (stderrDescriptor) {
-      Object.defineProperty(process, 'stderr', stderrDescriptor)
-    }
+  } finally {
+    releaseHarness()
   }
 }
 
 export function stripAnsi(text: string): string {
   return text.replace(/\u001B\[[0-9;?]*[ -/]*[@-~]/gu, '')
+}
+
+export async function waitForRenderedText(
+  flush: () => Promise<void>,
+  readOutput: () => string,
+  pattern: RegExp,
+  options: {
+    timeoutMs?: number
+  } = {},
+): Promise<string> {
+  const timeoutMs = options.timeoutMs ?? 10_000
+  const deadline = Date.now() + timeoutMs
+
+  while (Date.now() < deadline) {
+    const output = stripAnsi(readOutput())
+    if (pattern.test(output)) {
+      await flush()
+      return stripAnsi(readOutput())
+    }
+
+    await flush()
+  }
+
+  return stripAnsi(readOutput())
 }
