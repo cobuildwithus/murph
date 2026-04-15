@@ -2,6 +2,28 @@
 
 All notable changes to `@murphai/murph` will be documented in this file.
 
+## [0.2.12] - 2026-04-15
+
+### Fixed
+- prune hosted metadata surfaces
+- support phone and telegram messaging setup
+- bind hosted control requests to users
+- land encryption hardening wake patch
+- clear recovered commit leases
+- harden hosted email and device-sync errors
+
+### Changed
+- bump review-gpt to 0.5.62
+- drop stale agentmail api base url refs
+- hard-cut greenfield version residue
+- tighten hosted callback imports
+- align runtime type ownership
+- extract usage and revnet reconciliation seams
+- remove greenfield legacy compatibility
+- narrow hosted onboarding billing snapshots
+- Reuse canonical automation contracts for local cron state
+- simplify wake patch internals
+
 ## [0.2.11] - 2026-04-14
 
 ### Added
