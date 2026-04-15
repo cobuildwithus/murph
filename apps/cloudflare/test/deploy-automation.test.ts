@@ -177,7 +177,6 @@ describe("hosted deploy automation helpers", () => {
 
   it("ignores removed deploy alias inputs and keeps only canonical worker vars", () => {
     const environment = readHostedDeployAutomationEnvironment({
-      AGENTMAIL_API_BASE_URL: "https://legacy-mail.example.test/v0",
       CF_BUNDLES_BUCKET: "hosted-bundles",
       CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
       CF_WORKER_NAME: "hosted-worker",

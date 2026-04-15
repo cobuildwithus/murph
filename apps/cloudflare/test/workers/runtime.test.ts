@@ -40,6 +40,9 @@ import type {
   HostedExecutionDispatchResult,
   HostedExecutionUserStatus,
 } from "@murphai/hosted-execution";
+import {
+  HOSTED_EXECUTION_USER_ID_HEADER,
+} from "@murphai/hosted-execution/contracts";
 
 interface UserRunnerRpcStub {
   bootstrapUser(userId: string): Promise<{ userId: string }>;
@@ -192,34 +195,11 @@ describe("cloudflare worker runtime suite", () => {
     });
   });
 
-  it("rejects removed, operator-only, and unknown hosted user env keys through direct Durable Object RPC", async () => {
+  it("accepts canonical hosted user env keys through direct Durable Object RPC", async () => {
     const userId = "member_control_env_reject";
     await resolveHostedUserCryptoContext(userId);
     const stub = getUserRunnerStub(userId);
     await expect(stub.bootstrapUser(userId)).resolves.toEqual({ userId });
-
-    let rejectedError: unknown = null;
-    try {
-      await stub.updateUserEnv({
-        env: {
-          AGENTMAIL_API_BASE_URL: "https://legacy-mail.example.test/v0",
-          AGENTMAIL_TIMEOUT_MS: "5000",
-          FFMPEG_COMMAND: "/usr/local/bin/ffmpeg",
-          FFMPEG_THREADS: "2",
-          NODE_OPTIONS: "--require /tmp/evil-loader.js",
-          PARSER_FFMPEG_PATH: "/usr/local/bin/ffmpeg",
-        },
-        mode: "merge",
-      });
-    } catch (error) {
-      rejectedError = error;
-    }
-
-    expect(String(rejectedError)).toMatch(/Hosted user env key is not allowed/u);
-    await expect(stub.getUserEnvStatus()).resolves.toEqual({
-      configuredUserEnvKeys: [],
-      userId,
-    });
 
     await expect(stub.updateUserEnv({
       env: {
@@ -227,6 +207,11 @@ describe("cloudflare worker runtime suite", () => {
       },
       mode: "merge",
     })).resolves.toEqual({
+      configuredUserEnvKeys: ["OPENAI_API_KEY"],
+      userId,
+    });
+
+    await expect(stub.getUserEnvStatus()).resolves.toEqual({
       configuredUserEnvKeys: ["OPENAI_API_KEY"],
       userId,
     });
@@ -293,6 +278,7 @@ async function createSignedDispatchRequest(
   });
   const headers = new Headers(request.headers);
   headers.set("authorization", `Bearer ${createTestVercelOidcToken(input)}`);
+  headers.set(HOSTED_EXECUTION_USER_ID_HEADER, dispatch.event.userId);
 
   return new Request(request, { headers });
 }

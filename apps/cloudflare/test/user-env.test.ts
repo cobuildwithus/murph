@@ -74,7 +74,7 @@ describe("hosted user env helpers", () => {
       current: {},
       update: {
         env: {
-          AGENTMAIL_API_BASE_URL: "https://legacy-mail.example.test/v0",
+          AGENTMAIL_BASE_URL: "https://mail.example.test/v0",
         },
         mode: "replace",
       },
