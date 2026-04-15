@@ -72,7 +72,7 @@ const LINQ_CHANNEL_ADAPTER = createAssistantChannelAdapter({
   isReadyForSetup(env) {
     return resolveLinqApiToken(env) !== null && resolveLinqWebhookSecret(env) !== null
   },
-  supportsIdempotencyKey: false,
+  supportsIdempotencyKey: true,
   targetRequiredMessage:
     'Linq delivery requires an explicit chat id or a stored thread binding.',
   async startTypingIndicator({ candidate, dependencies }) {
