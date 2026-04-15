@@ -13,6 +13,9 @@
       "@murphai/runtime-state/node/assistant-usage": [
         "./src/node/assistant-usage.ts"
       ],
+      "@murphai/runtime-state/node/hosted-bundle-codec": [
+        "./src/node/hosted-bundle-codec.ts"
+      ],
       "@murphai/runtime-state/node/loopback-control-plane-auth": [
         "./src/node/loopback-control-plane-auth.ts"
       ],

@@ -1,4 +1,4 @@
-import type { HostedExecutionBundleKind } from "@murphai/runtime-state/node";
+import type { HostedExecutionBundleKind } from "@murphai/runtime-state/node/hosted-bundle-codec";
 
 import { deriveHostedStorageOpaqueId } from "./crypto-context.js";
 

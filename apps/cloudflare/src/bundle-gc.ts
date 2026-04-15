@@ -1,7 +1,7 @@
 import {
   listHostedBundleArtifacts,
   sameHostedBundlePayloadRef,
-} from "@murphai/runtime-state/node";
+} from "@murphai/runtime-state/node/hosted-bundle-codec";
 import type { HostedExecutionBundleRef } from "@murphai/hosted-execution/contracts";
 
 import {

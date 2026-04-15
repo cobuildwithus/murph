@@ -27,6 +27,10 @@
       "types": "./dist/node/assistant-usage.d.ts",
       "default": "./dist/node/assistant-usage.js"
     },
+    "./node/hosted-bundle-codec": {
+      "types": "./dist/node/hosted-bundle-codec.d.ts",
+      "default": "./dist/node/hosted-bundle-codec.js"
+    },
     "./node/loopback-control-plane-auth": {
       "types": "./dist/node/loopback-control-plane-auth.d.ts",
       "default": "./dist/node/loopback-control-plane-auth.js"
