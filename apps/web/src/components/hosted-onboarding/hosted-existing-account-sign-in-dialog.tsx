@@ -31,14 +31,14 @@ export function HostedExistingAccountSignInDialog() {
         <DialogContent className="max-w-md p-6 md:p-7">
           <DialogHeader className="pr-10">
             <DialogTitle className="text-xl font-bold tracking-tight text-stone-900">
-              Sign in with your phone
+              Sign in to Murph
             </DialogTitle>
             <DialogDescription>
-              We&apos;ll text you a sign-in code.
+              Use your phone number or email address to get a sign-in code.
             </DialogDescription>
           </DialogHeader>
           {open ? (
-            <HostedAuthPanel intent="signin" methods={["phone"]} />
+            <HostedAuthPanel intent="signin" methods={["phone", "email"]} />
           ) : null}
         </DialogContent>
       </Dialog>
