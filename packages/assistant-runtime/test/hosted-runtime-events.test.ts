@@ -136,6 +136,7 @@ describe("executeHostedDispatchEvent", () => {
       runtime.resolvedConfig,
     );
     expect(mocks.queueAssistantFirstContactWelcome).toHaveBeenCalledWith({
+      actorId: null,
       channel: "linq",
       identityId: "hbidx:phone:v1:test",
       threadId: "thread_123",
@@ -146,6 +147,37 @@ describe("executeHostedDispatchEvent", () => {
       bootstrapResult,
       shareImportResult: null,
       shareImportTitle: null,
+    });
+  });
+
+  it("passes Linq home-thread materialization first-contact data through unchanged", async () => {
+    const dispatch = buildHostedExecutionMemberActivatedDispatch({
+      eventId: "evt_member_activated_materialize_linq_home",
+      firstContact: {
+        channel: "linq",
+        fromPhoneNumber: "+15550001111",
+        identityId: "hbidx:phone:v1:test",
+        kind: "linq-materialize-home-thread",
+        toPhoneNumber: "+15550002222",
+      },
+      memberId: "member_123",
+      occurredAt: "2026-04-08T00:00:00.000Z",
+    });
+
+    await executeHostedDispatchEvent({
+      dispatch,
+      runtime: createRuntime(),
+      runtimeEnv: {},
+      vaultRoot: "/tmp/assistant-runtime-events",
+    });
+
+    expect(mocks.queueAssistantFirstContactWelcome).toHaveBeenCalledWith({
+      channel: "linq",
+      fromPhoneNumber: "+15550001111",
+      identityId: "hbidx:phone:v1:test",
+      kind: "linq-materialize-home-thread",
+      toPhoneNumber: "+15550002222",
+      vault: "/tmp/assistant-runtime-events",
     });
   });
 

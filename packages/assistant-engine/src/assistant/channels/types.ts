@@ -52,13 +52,17 @@ export interface AssistantChannelDependencies {
     | void
   >
   sendLinq?: (input: {
+    fromPhoneNumber?: string | null
     idempotencyKey?: string | null
     message: string
     replyToMessageId?: string | null
     target: string
+    targetKind?: AssistantDeliveryCandidate['kind']
   }) => Promise<
     | {
         providerMessageId?: string | null
+        providerThreadId?: string | null
+        target?: string | null
       }
     | void
   >

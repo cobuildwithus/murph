@@ -11,7 +11,11 @@ import type {
   AssistantChannelDelivery,
   AssistantDeliveryError,
   AssistantOutboxIntent,
+  AssistantSession,
 } from '@murphai/operator-config/assistant-cli-contracts'
+import { createAssistantModelTarget } from '@murphai/operator-config/assistant-backend'
+import { serializeAssistantProviderSessionOptions } from '@murphai/operator-config/assistant/provider-config'
+import { buildAssistantFirstContactWelcomeTurnMetadata } from '../src/assistant/first-contact-welcome-turn-metadata.ts'
 import {
   buildAssistantOutboxSummary,
   createAssistantOutboxIntent,
@@ -24,6 +28,9 @@ import {
 } from '../src/assistant/outbox.ts'
 import { ensureAssistantState } from '../src/assistant/store/persistence.ts'
 import { resolveAssistantStatePaths } from '../src/assistant/store/paths.ts'
+import * as assistantStore from '../src/assistant/store.ts'
+import { getAssistantSession, saveAssistantSession } from '../src/assistant/store.ts'
+import { createAssistantTurnReceipt } from '../src/assistant/turns.ts'
 import { deliverAssistantMessageOverBinding } from '../src/outbound-channel.ts'
 import { createTempVaultContext } from './test-helpers.ts'
 
@@ -300,6 +307,303 @@ describe('assistant outbox runtime', () => {
     expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledTimes(1)
   })
 
+  it('materializes Linq first-contact chats from receipt metadata and upgrades the session binding', async () => {
+    const { vaultRoot } = await createAssistantVault('assistant-outbox-linq-first-contact-')
+
+    await saveAssistantSession(
+      vaultRoot,
+      createAssistantSession({
+        binding: {
+          actorId: '+15550001',
+          channel: 'linq',
+          conversationKey: 'channel:linq|identity:phone_lookup_1|actor:%2B15550001',
+          delivery: {
+            kind: 'participant',
+            target: '+15550001',
+          },
+          identityId: 'phone_lookup_1',
+          threadId: null,
+          threadIsDirect: true,
+        },
+        sessionId: 'session-linq-first-contact',
+      }),
+    )
+    await createAssistantTurnReceipt({
+      deliveryRequested: true,
+      metadata: buildAssistantFirstContactWelcomeTurnMetadata({
+        fromPhoneNumber: '+15550000',
+      }),
+      prompt: 'welcome',
+      provider: 'codex-cli',
+      providerModel: 'gpt-5.4',
+      sessionId: 'session-linq-first-contact',
+      turnId: 'turn-linq-first-contact',
+      vault: vaultRoot,
+    })
+    const queued = await createAssistantOutboxIntent({
+      actorId: '+15550001',
+      bindingDelivery: {
+        kind: 'participant',
+        target: '+15550001',
+      },
+      channel: 'linq',
+      deliveryIdempotencyKey: 'idem-linq-first-contact',
+      identityId: 'phone_lookup_1',
+      message: 'welcome',
+      sessionId: 'session-linq-first-contact',
+      threadId: null,
+      threadIsDirect: true,
+      turnId: 'turn-linq-first-contact',
+      vault: vaultRoot,
+    })
+    const sendLinq = vi.fn().mockResolvedValue({
+      providerMessageId: 'linq-message-created',
+      providerThreadId: 'linq-chat-created',
+      target: 'linq-chat-created',
+    })
+
+    const dispatched = await dispatchAssistantOutboxIntent({
+      dependencies: {
+        sendLinq,
+      },
+      force: true,
+      intentId: queued.intentId,
+      vault: vaultRoot,
+    })
+
+    expect(sendLinq).toHaveBeenCalledWith({
+      fromPhoneNumber: '+15550000',
+      idempotencyKey: 'idem-linq-first-contact',
+      message: 'welcome',
+      replyToMessageId: null,
+      target: '+15550001',
+      targetKind: 'participant',
+    })
+    expect(mockedDeliverAssistantMessageOverBinding).not.toHaveBeenCalled()
+    expect(dispatched.intent.status).toBe('sent')
+    expect(dispatched.intent.delivery).toMatchObject({
+      channel: 'linq',
+      providerMessageId: 'linq-message-created',
+      providerThreadId: 'linq-chat-created',
+      target: 'linq-chat-created',
+      targetKind: 'thread',
+    })
+    expect(dispatched.session?.binding).toMatchObject({
+      delivery: {
+        kind: 'thread',
+        target: 'linq-chat-created',
+      },
+      threadId: 'linq-chat-created',
+      threadIsDirect: true,
+    })
+    await expect(
+      getAssistantSession(vaultRoot, 'session-linq-first-contact'),
+    ).resolves.toMatchObject({
+      binding: {
+        delivery: {
+          kind: 'thread',
+          target: 'linq-chat-created',
+        },
+        threadId: 'linq-chat-created',
+      },
+    })
+  })
+
+  it('keeps materialized Linq first-contact intents retryable when persisting the upgraded session fails', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-linq-first-contact-persist-failure-',
+    )
+
+    await saveAssistantSession(
+      vaultRoot,
+      createAssistantSession({
+        binding: {
+          actorId: '+15550001',
+          channel: 'linq',
+          conversationKey: 'channel:linq|identity:phone_lookup_1|actor:%2B15550001',
+          delivery: {
+            kind: 'participant',
+            target: '+15550001',
+          },
+          identityId: 'phone_lookup_1',
+          threadId: null,
+          threadIsDirect: true,
+        },
+        sessionId: 'session-linq-first-contact-persist-failure',
+      }),
+    )
+    await createAssistantTurnReceipt({
+      deliveryRequested: true,
+      metadata: buildAssistantFirstContactWelcomeTurnMetadata({
+        fromPhoneNumber: '+15550000',
+      }),
+      prompt: 'welcome',
+      provider: 'codex-cli',
+      providerModel: 'gpt-5.4',
+      sessionId: 'session-linq-first-contact-persist-failure',
+      turnId: 'turn-linq-first-contact-persist-failure',
+      vault: vaultRoot,
+    })
+    const queued = await createAssistantOutboxIntent({
+      actorId: '+15550001',
+      bindingDelivery: {
+        kind: 'participant',
+        target: '+15550001',
+      },
+      channel: 'linq',
+      deliveryIdempotencyKey: 'idem-linq-first-contact-persist-failure',
+      identityId: 'phone_lookup_1',
+      message: 'welcome',
+      sessionId: 'session-linq-first-contact-persist-failure',
+      threadId: null,
+      threadIsDirect: true,
+      turnId: 'turn-linq-first-contact-persist-failure',
+      vault: vaultRoot,
+    })
+    const persistDeliveredIntent = vi.fn()
+    const sendLinq = vi.fn().mockResolvedValue({
+      providerMessageId: 'linq-message-created',
+      providerThreadId: 'linq-chat-created',
+      target: 'linq-chat-created',
+    })
+    const originalSaveAssistantSession = assistantStore.saveAssistantSession
+    const saveAssistantSessionSpy = vi
+      .spyOn(assistantStore, 'saveAssistantSession')
+      .mockImplementation(async (...args) => {
+        const [, session] = args
+        if (
+          session.sessionId === 'session-linq-first-contact-persist-failure' &&
+          session.binding.threadId === 'linq-chat-created'
+        ) {
+          throw new Error('session persist failed')
+        }
+        return await originalSaveAssistantSession(...args)
+      })
+
+    try {
+      const dispatched = await dispatchAssistantOutboxIntent({
+        dependencies: {
+          sendLinq,
+        },
+        dispatchHooks: {
+          persistDeliveredIntent,
+        },
+        force: true,
+        intentId: queued.intentId,
+        vault: vaultRoot,
+      })
+
+      expect(dispatched.intent.status).toBe('retryable')
+      expect(dispatched.intent.deliveryConfirmationPending).toBe(true)
+      expect(dispatched.deliveryError).toMatchObject({
+        code: 'ASSISTANT_DELIVERY_CONFIRMATION_PENDING',
+      })
+      expect(persistDeliveredIntent).not.toHaveBeenCalled()
+      await expect(
+        getAssistantSession(vaultRoot, 'session-linq-first-contact-persist-failure'),
+      ).resolves.toMatchObject({
+        binding: {
+          delivery: {
+            kind: 'participant',
+            target: '+15550001',
+          },
+          threadId: null,
+        },
+      })
+    } finally {
+      saveAssistantSessionSpy.mockRestore()
+    }
+  })
+
+  it('treats missing Linq chat ids after materialized send as confirmation-pending', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-linq-first-contact-missing-chat-',
+    )
+
+    await saveAssistantSession(
+      vaultRoot,
+      createAssistantSession({
+        binding: {
+          actorId: '+15550001',
+          channel: 'linq',
+          conversationKey: 'channel:linq|identity:phone_lookup_1|actor:%2B15550001',
+          delivery: {
+            kind: 'participant',
+            target: '+15550001',
+          },
+          identityId: 'phone_lookup_1',
+          threadId: null,
+          threadIsDirect: true,
+        },
+        sessionId: 'session-linq-first-contact-missing-chat',
+      }),
+    )
+    await createAssistantTurnReceipt({
+      deliveryRequested: true,
+      metadata: buildAssistantFirstContactWelcomeTurnMetadata({
+        fromPhoneNumber: '+15550000',
+      }),
+      prompt: 'welcome',
+      provider: 'codex-cli',
+      providerModel: 'gpt-5.4',
+      sessionId: 'session-linq-first-contact-missing-chat',
+      turnId: 'turn-linq-first-contact-missing-chat',
+      vault: vaultRoot,
+    })
+    const queued = await createAssistantOutboxIntent({
+      actorId: '+15550001',
+      bindingDelivery: {
+        kind: 'participant',
+        target: '+15550001',
+      },
+      channel: 'linq',
+      deliveryIdempotencyKey: 'idem-linq-first-contact-missing-chat',
+      identityId: 'phone_lookup_1',
+      message: 'welcome',
+      sessionId: 'session-linq-first-contact-missing-chat',
+      threadId: null,
+      threadIsDirect: true,
+      turnId: 'turn-linq-first-contact-missing-chat',
+      vault: vaultRoot,
+    })
+    const persistDeliveredIntent = vi.fn()
+    const sendLinq = vi.fn().mockResolvedValue({
+      providerMessageId: 'linq-message-created',
+      providerThreadId: null,
+      target: null,
+    })
+
+    const dispatched = await dispatchAssistantOutboxIntent({
+      dependencies: {
+        sendLinq,
+      },
+      dispatchHooks: {
+        persistDeliveredIntent,
+      },
+      force: true,
+      intentId: queued.intentId,
+      vault: vaultRoot,
+    })
+
+    expect(dispatched.intent.status).toBe('retryable')
+    expect(dispatched.intent.deliveryConfirmationPending).toBe(true)
+    expect(dispatched.deliveryError).toMatchObject({
+      code: 'ASSISTANT_DELIVERY_CONFIRMATION_PENDING',
+    })
+    expect(persistDeliveredIntent).not.toHaveBeenCalled()
+    await expect(
+      getAssistantSession(vaultRoot, 'session-linq-first-contact-missing-chat'),
+    ).resolves.toMatchObject({
+      binding: {
+        delivery: {
+          kind: 'participant',
+          target: '+15550001',
+        },
+        threadId: null,
+      },
+    })
+  })
+
   it('clears prepared dispatches on definite failures and falls back to confirmation-pending retries when cleanup is ambiguous', async () => {
     const { vaultRoot } = await createAssistantVault('assistant-outbox-failure-')
 
@@ -544,6 +848,59 @@ function createDelivery(
     target: 'participant-1',
     targetKind: 'participant',
     ...overrides,
+  }
+}
+
+function createAssistantSession(input?: {
+  binding?: AssistantSession['binding']
+  sessionId?: string
+  turnCount?: number
+}): AssistantSession {
+  const target = createAssistantModelTarget({
+    approvalPolicy: 'never',
+    codexHome: null,
+    model: 'gpt-5.4',
+    oss: false,
+    profile: null,
+    provider: 'codex-cli',
+    reasoningEffort: null,
+    sandbox: 'danger-full-access',
+  })
+  if (!target) {
+    throw new Error('Expected assistant session target.')
+  }
+
+  return {
+    alias: null,
+    binding: input?.binding ?? {
+      actorId: null,
+      channel: null,
+      conversationKey: null,
+      delivery: null,
+      identityId: null,
+      threadId: null,
+      threadIsDirect: null,
+    },
+    createdAt: '2026-04-08T00:00:00.000Z',
+    lastTurnAt: null,
+    provider: target.adapter,
+    providerBinding: null,
+    providerOptions: serializeAssistantProviderSessionOptions({
+      approvalPolicy: 'never',
+      codexHome: null,
+      model: 'gpt-5.4',
+      oss: false,
+      profile: null,
+      provider: 'codex-cli',
+      reasoningEffort: null,
+      sandbox: 'danger-full-access',
+    }),
+    resumeState: null,
+    schema: 'murph.assistant-session.v1',
+    sessionId: input?.sessionId ?? 'session-test',
+    target,
+    turnCount: input?.turnCount ?? 0,
+    updatedAt: '2026-04-08T00:00:00.000Z',
   }
 }
 

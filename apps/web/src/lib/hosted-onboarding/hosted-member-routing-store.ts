@@ -174,6 +174,64 @@ export async function upsertHostedMemberHomeLinqBinding(input: {
   });
 }
 
+export async function upsertHostedMemberHomeLinqRecipientPhone(input: {
+  clearPending?: boolean;
+  memberId: string;
+  prisma: HostedOnboardingPrismaClient;
+  recipientPhone: string;
+}): Promise<void> {
+  const recipientPhone = normalizePhoneNumber(input.recipientPhone);
+  const recipientPhoneLookupKey = createHostedPhoneLookupKey(recipientPhone);
+
+  if (!recipientPhone || !recipientPhoneLookupKey) {
+    throw new TypeError("Hosted Linq home-line assignment requires a non-empty recipient phone.");
+  }
+
+  const routingPrivateColumns = buildHostedMemberRoutingPrivateColumns({
+    linqChatId: null,
+    linqRecipientPhone: recipientPhone,
+    memberId: input.memberId,
+    pendingLinqChatId: null,
+    pendingLinqRecipientPhone: null,
+    telegramUserId: null,
+  });
+
+  await withHostedOnboardingTransaction(input.prisma, async (tx) => {
+    await tx.hostedMemberRouting.upsert({
+      where: {
+        memberId: input.memberId,
+      },
+      create: {
+        linqChatIdEncrypted: null,
+        linqChatLookupKey: null,
+        linqRecipientPhoneEncrypted: routingPrivateColumns.linqRecipientPhoneEncrypted,
+        linqRecipientPhoneLookupKey: recipientPhoneLookupKey,
+        memberId: input.memberId,
+        pendingLinqChatIdEncrypted: null,
+        pendingLinqChatLookupKey: null,
+        pendingLinqRecipientPhoneEncrypted: null,
+        pendingLinqRecipientPhoneLookupKey: null,
+        telegramUserIdEncrypted: null,
+        telegramUserLookupKey: null,
+      },
+      update: {
+        linqChatIdEncrypted: null,
+        linqChatLookupKey: null,
+        linqRecipientPhoneEncrypted: routingPrivateColumns.linqRecipientPhoneEncrypted,
+        linqRecipientPhoneLookupKey: recipientPhoneLookupKey,
+        ...(input.clearPending
+          ? {
+              pendingLinqChatIdEncrypted: null,
+              pendingLinqChatLookupKey: null,
+              pendingLinqRecipientPhoneEncrypted: null,
+              pendingLinqRecipientPhoneLookupKey: null,
+            }
+          : {}),
+      },
+    });
+  });
+}
+
 export async function countHostedMemberHomeLinqBindingsByRecipientPhone(input: {
   prisma: HostedOnboardingPrismaClient;
   recipientPhones: readonly string[];
@@ -195,9 +253,6 @@ export async function countHostedMemberHomeLinqBindingsByRecipientPhone(input: {
 
   const routingRecords = await input.prisma.hostedMemberRouting.findMany({
     where: {
-      linqChatLookupKey: {
-        not: null,
-      },
       linqRecipientPhoneLookupKey: {
         in: recipientPhoneEntries.map(({ lookupKey }) => lookupKey),
       },

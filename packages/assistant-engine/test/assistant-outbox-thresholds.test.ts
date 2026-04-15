@@ -176,8 +176,7 @@ describe('assistant outbox thresholds', () => {
     })
   })
 
-  it('warns and still marks delivery sent when session persistence fails after send', async () => {
-    const warnAssistantBestEffortFailure = vi.fn()
+  it('marks delivery confirmation pending when session persistence fails after send', async () => {
     const deliverAssistantMessageOverBinding = vi.fn(async () => ({
       delivery: createDelivery({
         providerMessageId: 'provider-session-warning',
@@ -190,7 +189,6 @@ describe('assistant outbox thresholds', () => {
     }))
     const { outbox } = await loadOutboxModule({
       deliverAssistantMessageOverBinding,
-      warnAssistantBestEffortFailure,
     })
     const { vaultRoot } = await createAssistantVault(
       'assistant-outbox-thresholds-session-warning-',
@@ -210,15 +208,13 @@ describe('assistant outbox thresholds', () => {
         vault: vaultRoot,
       }),
     ).resolves.toMatchObject({
-      deliveryError: null,
+      deliveryError: {
+        code: 'ASSISTANT_DELIVERY_CONFIRMATION_PENDING',
+      },
       intent: {
         intentId: seeded.intentId,
-        status: 'sent',
+        status: 'retryable',
       },
-    })
-    expect(warnAssistantBestEffortFailure).toHaveBeenCalledWith({
-      error: expect.any(Error),
-      operation: 'post-delivery session persistence',
     })
   })
 
@@ -398,7 +394,6 @@ async function loadOutboxModule(options: {
   deliverAssistantMessageOverBinding?: (...args: never[]) => Promise<unknown>
   rename?: (...args: never[]) => Promise<unknown>
   saveAssistantSession?: (...args: never[]) => Promise<unknown>
-  warnAssistantBestEffortFailure?: (...args: never[]) => unknown
 } = {}) {
   vi.resetModules()
   vi.doMock('../src/outbound-channel.ts', () => ({
@@ -426,18 +421,6 @@ async function loadOutboxModule(options: {
       return {
         ...actual,
         saveAssistantSession: options.saveAssistantSession,
-      }
-    })
-  }
-
-  if (options.warnAssistantBestEffortFailure) {
-    vi.doMock('../src/assistant/shared.js', async () => {
-      const actual = await vi.importActual<typeof import('../src/assistant/shared.ts')>(
-        '../src/assistant/shared.ts',
-      )
-      return {
-        ...actual,
-        warnAssistantBestEffortFailure: options.warnAssistantBestEffortFailure,
       }
     })
   }

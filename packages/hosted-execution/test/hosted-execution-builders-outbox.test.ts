@@ -54,6 +54,33 @@ describe("hosted execution builders", () => {
     });
   });
 
+  it("preserves Linq home-thread materialization first-contact data when present", () => {
+    const dispatch = buildHostedExecutionMemberActivatedDispatch({
+      eventId: "member-activated-linq-home",
+      firstContact: {
+        channel: "linq",
+        fromPhoneNumber: "+15550001111",
+        identityId: "hbidx:phone:v1:test",
+        kind: "linq-materialize-home-thread",
+        toPhoneNumber: "+15550002222",
+      },
+      memberId: "user_123",
+      occurredAt,
+    });
+
+    expect(dispatch.event).toMatchObject({
+      firstContact: {
+        channel: "linq",
+        fromPhoneNumber: "+15550001111",
+        identityId: "hbidx:phone:v1:test",
+        kind: "linq-materialize-home-thread",
+        toPhoneNumber: "+15550002222",
+      },
+      kind: "member.activated",
+      userId: "user_123",
+    });
+  });
+
   it("copies linq event objects and preserves explicit null message ids", () => {
     const linqEvent = {
       delivery: "incoming",

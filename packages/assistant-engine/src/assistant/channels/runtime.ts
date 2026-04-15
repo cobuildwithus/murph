@@ -9,6 +9,7 @@ import {
   resolveAgentmailBaseUrl,
 } from '@murphai/operator-config/agentmail-runtime'
 import {
+  createLinqChat,
   resolveLinqApiToken,
   sendLinqChatMessage,
   startLinqChatTypingIndicator,
@@ -83,13 +84,19 @@ export async function sendTelegramMessage(
 
 export async function sendLinqMessage(
   input: {
+    fromPhoneNumber?: string | null
     idempotencyKey?: string | null
     message: string
     replyToMessageId?: string | null
     target: string
+    targetKind?: AssistantDeliveryCandidate['kind']
   },
   dependencies: LinqRuntimeDependencies = {},
-): Promise<{ providerMessageId: string | null }> {
+): Promise<{
+  providerMessageId: string | null
+  providerThreadId: string | null
+  target: string | null
+}> {
   const env = dependencies.env ?? process.env
   const token = resolveLinqApiToken(env)
   if (!token) {
@@ -99,9 +106,46 @@ export async function sendLinqMessage(
     )
   }
 
+  const target = input.target.trim()
+  if (target.length === 0) {
+    throw new VaultCliError(
+      'ASSISTANT_CHANNEL_TARGET_REQUIRED',
+      'Linq delivery requires an explicit chat id or a stored thread binding.',
+    )
+  }
+
+  if (input.targetKind === 'participant') {
+    const fromPhoneNumber = normalizeOptionalText(input.fromPhoneNumber)
+    if (!fromPhoneNumber) {
+      throw new VaultCliError(
+        'ASSISTANT_LINQ_FROM_PHONE_REQUIRED',
+        'Materializing a Linq direct chat requires a sender phone number.',
+      )
+    }
+
+    const created = await createLinqChat(
+      {
+        from: fromPhoneNumber,
+        idempotencyKey: input.idempotencyKey ?? null,
+        message: input.message,
+        to: [target],
+      },
+      {
+        env,
+        fetchImplementation: dependencies.fetchImplementation,
+      },
+    )
+
+    return {
+      providerMessageId: normalizeOptionalText(created.messageId),
+      providerThreadId: normalizeOptionalText(created.chatId),
+      target: normalizeOptionalText(created.chatId),
+    }
+  }
+
   const delivered = await sendLinqChatMessage(
     {
-      chatId: input.target,
+      chatId: target,
       idempotencyKey: input.idempotencyKey ?? null,
       message: input.message,
       replyToMessageId: input.replyToMessageId ?? null,
@@ -113,6 +157,8 @@ export async function sendLinqMessage(
   )
   return {
     providerMessageId: normalizeOptionalText(delivered.message?.id ?? null),
+    providerThreadId: null,
+    target,
   }
 }
 

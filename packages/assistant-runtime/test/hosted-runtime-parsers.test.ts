@@ -69,6 +69,41 @@ describe("parseHostedAssistantRuntimeJobInput", () => {
     expect(parsed.runtime?.userEnv).toEqual({ OPENAI_API_KEY: "secret" });
   });
 
+  it("parses Linq first-contact targets that materialize a home thread on first welcome delivery", () => {
+    const parsed = parseHostedAssistantRuntimeJobInput({
+      request: {
+        bundle: null,
+        dispatch: {
+          event: {
+            firstContact: {
+              channel: "linq",
+              fromPhoneNumber: "+15550001111",
+              identityId: "hbidx:phone:v1:test",
+              kind: "linq-materialize-home-thread",
+              toPhoneNumber: "+15550002222",
+            },
+            kind: "member.activated",
+            userId: "member_123",
+          },
+          eventId: "evt_materialize_linq_home",
+          occurredAt: "2026-04-01T00:00:00.000Z",
+        },
+      },
+    });
+
+    expect(parsed.request.dispatch.event).toEqual({
+      firstContact: {
+        channel: "linq",
+        fromPhoneNumber: "+15550001111",
+        identityId: "hbidx:phone:v1:test",
+        kind: "linq-materialize-home-thread",
+        toPhoneNumber: "+15550002222",
+      },
+      kind: "member.activated",
+      userId: "member_123",
+    });
+  });
+
   it("rejects malformed nested runtime env records", () => {
     expect(() => parseHostedAssistantRuntimeJobInput({
       request: {

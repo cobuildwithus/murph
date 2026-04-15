@@ -8,6 +8,7 @@ import type { InboxShowResult } from '@murphai/operator-config/inbox-cli-contrac
 
 const runtimeMocks = vi.hoisted(() => ({
   createAgentmailApiClient: vi.fn(),
+  createLinqChat: vi.fn(),
   sendLinqChatMessage: vi.fn(),
   startLinqChatTypingIndicator: vi.fn(),
   stopLinqChatTypingIndicator: vi.fn(),
@@ -27,6 +28,7 @@ vi.mock('@murphai/operator-config/linq-runtime', async (importOriginal) => {
     await importOriginal<typeof import('@murphai/operator-config/linq-runtime')>()
   return {
     ...actual,
+    createLinqChat: runtimeMocks.createLinqChat,
     sendLinqChatMessage: runtimeMocks.sendLinqChatMessage,
     startLinqChatTypingIndicator: runtimeMocks.startLinqChatTypingIndicator,
     stopLinqChatTypingIndicator: runtimeMocks.stopLinqChatTypingIndicator,
@@ -53,6 +55,7 @@ beforeEach(() => {
   vi.useRealTimers()
   vi.restoreAllMocks()
   runtimeMocks.createAgentmailApiClient.mockReset()
+  runtimeMocks.createLinqChat.mockReset()
   runtimeMocks.sendLinqChatMessage.mockReset()
   runtimeMocks.startLinqChatTypingIndicator.mockReset()
   runtimeMocks.stopLinqChatTypingIndicator.mockReset()
@@ -308,6 +311,10 @@ describe('assistant channels runtime seam', () => {
         id: '  linq-message-id  ',
       },
     })
+    runtimeMocks.createLinqChat.mockResolvedValue({
+      chatId: '  linq-chat-id  ',
+      messageId: '  linq-created-message-id  ',
+    })
     runtimeMocks.startLinqChatTypingIndicator.mockResolvedValue(undefined)
     runtimeMocks.stopLinqChatTypingIndicator.mockResolvedValue(undefined)
 
@@ -356,6 +363,8 @@ describe('assistant channels runtime seam', () => {
       ),
     ).resolves.toEqual({
       providerMessageId: 'linq-message-id',
+      providerThreadId: null,
+      target: 'chat-1',
     })
 
     expect(runtimeMocks.sendLinqChatMessage).toHaveBeenCalledWith(
@@ -372,6 +381,56 @@ describe('assistant channels runtime seam', () => {
         fetchImplementation: undefined,
       },
     )
+    await expect(
+      sendLinqMessage(
+        {
+          fromPhoneNumber: '+15550000',
+          idempotencyKey: 'idem-created',
+          message: 'welcome',
+          target: '+15550001',
+          targetKind: 'participant',
+        },
+        {
+          env: {
+            LINQ_API_TOKEN: 'linq-token',
+          },
+        },
+      ),
+    ).resolves.toEqual({
+      providerMessageId: 'linq-created-message-id',
+      providerThreadId: 'linq-chat-id',
+      target: 'linq-chat-id',
+    })
+    expect(runtimeMocks.createLinqChat).toHaveBeenCalledWith(
+      {
+        from: '+15550000',
+        idempotencyKey: 'idem-created',
+        message: 'welcome',
+        to: ['+15550001'],
+      },
+      {
+        env: {
+          LINQ_API_TOKEN: 'linq-token',
+        },
+        fetchImplementation: undefined,
+      },
+    )
+    await expect(
+      sendLinqMessage(
+        {
+          message: 'welcome',
+          target: '+15550001',
+          targetKind: 'participant',
+        },
+        {
+          env: {
+            LINQ_API_TOKEN: 'linq-token',
+          },
+        },
+      ),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_LINQ_FROM_PHONE_REQUIRED',
+    })
 
     const handle = await startLinqTypingIndicator(
       {

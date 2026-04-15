@@ -67,7 +67,12 @@ describe("hosted onboarding member activation", () => {
     mocks.provisionManagedUserCryptoInHostedExecution.mockResolvedValue(undefined);
     mocks.readHostedMemberSnapshot.mockResolvedValue(makeMemberSnapshot());
     mocks.resolveHostedMemberActivationLinqRoute.mockResolvedValue({
-      firstContactLinqChatId: "chat_home_123",
+      firstContact: {
+        channel: "linq",
+        identityId: "hbidx:phone:v1:lookup",
+        threadId: "chat_home_123",
+        threadIsDirect: true,
+      },
     });
     mocks.updateHostedMemberCoreState.mockResolvedValue({
       billingStatus: HostedBillingStatus.active,
@@ -109,8 +114,6 @@ describe("hosted onboarding member activation", () => {
     expect(mocks.resolveHostedMemberActivationLinqRoute).toHaveBeenCalledWith({
       member,
       prisma: expect.anything(),
-      sourceEventId: "evt_123",
-      sourceType: "stripe.invoice.paid",
     });
     expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith({
       dispatch: expect.objectContaining({
@@ -152,8 +155,6 @@ describe("hosted onboarding member activation", () => {
     expect(mocks.resolveHostedMemberActivationLinqRoute).toHaveBeenCalledWith({
       member,
       prisma: expect.anything(),
-      sourceEventId: "revnet_evt_123",
-      sourceType: "hosted.revnet.issuance.confirmed",
     });
     expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -161,6 +162,54 @@ describe("hosted onboarding member activation", () => {
         sourceType: "hosted_revnet_issuance",
       }),
     );
+  });
+
+  it("passes through a Linq thread-materialization target when web only assigned the home line", async () => {
+    const member = makeMemberSnapshot();
+    mocks.resolveHostedMemberActivationLinqRoute.mockResolvedValueOnce({
+      firstContact: {
+        channel: "linq",
+        fromPhoneNumber: "+15550100099",
+        identityId: "hbidx:phone:v1:lookup",
+        kind: "linq-materialize-home-thread",
+        toPhoneNumber: "+15550100001",
+      },
+    });
+
+    await expect(
+      activateHostedMemberForPositiveSource({
+        dispatchContext: {
+          eventCreatedAt: new Date("2026-04-12T00:00:00.000Z"),
+          occurredAt: "2026-04-12T00:00:00.000Z",
+          sourceEventId: "evt_materialize",
+          sourceType: "stripe.invoice.paid",
+        },
+        member,
+        prisma: makeTransactionHarness() as never,
+      }),
+    ).resolves.toEqual({
+      activated: true,
+      hostedExecutionEventId: "member.activated:stripe.invoice.paid:member_123:evt_123",
+      memberId: "member_123",
+      postCommitProvisionUserId: "member_123",
+    });
+
+    expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith({
+      dispatch: expect.objectContaining({
+        event: expect.objectContaining({
+          firstContact: {
+            channel: "linq",
+            fromPhoneNumber: "+15550100099",
+            identityId: "hbidx:phone:v1:lookup",
+            kind: "linq-materialize-home-thread",
+            toPhoneNumber: "+15550100001",
+          },
+        }),
+      }),
+      sourceId: "stripe:evt_materialize",
+      sourceType: "hosted_stripe_event",
+      tx: expect.anything(),
+    });
   });
 
   it("emits Telegram first-contact without a Linq lookup for phone-less members", async () => {
@@ -220,6 +269,8 @@ describe("hosted onboarding member activation", () => {
   it("builds Telegram first contact even when the member has no Linq thread yet", () => {
     expect(buildHostedMemberActivationFirstContact({
       linqChatId: null,
+      linqRecipientPhone: null,
+      memberPhoneNumber: null,
       phoneLookupKey: null,
       telegramUserId: "telegram_user_456",
     })).toEqual({
@@ -227,6 +278,22 @@ describe("hosted onboarding member activation", () => {
       identityId: null,
       threadId: "telegram_user_456",
       threadIsDirect: true,
+    });
+  });
+
+  it("builds a Linq first-contact materialization target when activation only knows the chosen home line", () => {
+    expect(buildHostedMemberActivationFirstContact({
+      linqChatId: null,
+      linqRecipientPhone: "+15550100099",
+      memberPhoneNumber: "+15550100001",
+      phoneLookupKey: "hbidx:phone:v1:lookup",
+      telegramUserId: null,
+    })).toEqual({
+      channel: "linq",
+      fromPhoneNumber: "+15550100099",
+      identityId: "hbidx:phone:v1:lookup",
+      kind: "linq-materialize-home-thread",
+      toPhoneNumber: "+15550100001",
     });
   });
 
