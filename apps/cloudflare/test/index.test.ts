@@ -1,37 +1,101 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { createPublicKey, generateKeyPairSync, sign } from "node:crypto";
+import { readFile } from "node:fs/promises";
+import { createServer, type IncomingMessage } from "node:http";
+import path from "node:path";
 
+import { ContainerProxy as PackageContainerProxy } from "@cloudflare/containers";
+import type { HostedAssistantRuntimeJobResult } from "@murphai/assistant-runtime";
+import {
+  buildHostedStorageAad,
+  deriveHostedStorageOpaqueId,
+} from "../src/crypto-context.ts";
+import { writeEncryptedR2Json } from "../src/crypto.ts";
+import { readHostedExecutionEnvironment } from "../src/env.ts";
+import worker, { ContainerProxy as ExportedContainerProxy } from "../src/index.ts";
+import { HOSTED_EXECUTION_INTERNAL_PROXY_HOST_HEADER } from "../src/internal-hosts.ts";
+import { hostedArtifactObjectKey } from "../src/storage-paths.ts";
+import { createHostedUserKeyStore } from "../src/user-key-store.ts";
+import { asWorkerStringEnvironment } from "../src/worker-contracts.ts";
+import type {
+  UserRunnerDurableObjectStubLike,
+  WorkerEnvironmentSource,
+} from "../src/worker-routes/shared.ts";
+import { handleRunnerOutboundRequest } from "../src/runner-outbound.ts";
 import type { HostedExecutionDispatchRequest } from "@murphai/hosted-execution";
-import { HOSTED_EXECUTION_USER_ID_HEADER } from "@murphai/hosted-execution/contracts";
+import {
+  HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER,
+  HOSTED_EXECUTION_USER_ID_HEADER,
+} from "@murphai/hosted-execution/contracts";
+import { afterEach, describe as baseDescribe, expect, it, vi } from "vitest";
 
 import { createHostedExecutionTestEnv } from "./hosted-execution-fixtures";
 
-const mockedAuth = vi.hoisted(() => ({
-  verifyHostedExecutionVercelOidcRequest: vi.fn(async () => true),
-}));
+const describe = baseDescribe.sequential;
 
-vi.mock("../src/auth-adapter.ts", async () => {
-  const actual = await vi.importActual<typeof import("../src/auth-adapter.ts")>(
-    "../src/auth-adapter.ts",
-  );
-
-  return {
-    ...actual,
-    verifyHostedExecutionVercelOidcRequest: mockedAuth.verifyHostedExecutionVercelOidcRequest,
-  };
-});
-
-const { default: worker } = await import("../src/index.ts");
+const RUNNER_PROXY_TOKEN = "runner-proxy-token";
+const TEST_VERCEL_OIDC_TEAM_SLUG = "murph-team";
+const TEST_VERCEL_OIDC_PROJECT_NAME = "murph-web";
+const TEST_VERCEL_OIDC_ISSUER = `https://oidc.vercel.com/${TEST_VERCEL_OIDC_TEAM_SLUG}`;
+const TEST_VERCEL_OIDC_AUDIENCE = `https://vercel.com/${TEST_VERCEL_OIDC_TEAM_SLUG}`;
+const TEST_VERCEL_OIDC_SUBJECT =
+  `owner:${TEST_VERCEL_OIDC_TEAM_SLUG}:project:${TEST_VERCEL_OIDC_PROJECT_NAME}:environment:production`;
+const TEST_VERCEL_OIDC_JWKS_URL = `${TEST_VERCEL_OIDC_ISSUER}/.well-known/jwks`;
+const TEST_VERCEL_OIDC_PRIVATE_KEY = generateKeyPairSync("rsa", { modulusLength: 2048 }).privateKey;
+const TEST_VERCEL_OIDC_PUBLIC_JWK = {
+  ...(createPublicKey(TEST_VERCEL_OIDC_PRIVATE_KEY).export({ format: "jwk" }) as JsonWebKey),
+  alg: "RS256",
+  kid: "test-kid",
+  use: "sig",
+};
 
 afterEach(() => {
-  mockedAuth.verifyHostedExecutionVercelOidcRequest.mockReset().mockResolvedValue(true);
+  vi.useRealTimers();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 describe("cloudflare worker routes", () => {
+  it("re-exports ContainerProxy for container outbound routing", () => {
+    expect(ExportedContainerProxy).toBe(PackageContainerProxy);
+  });
+
+  it("keeps inbox email parsing isolated to the hosted email ingress module", async () => {
+    const [workerSource, hostedEmailIngressSource] = await Promise.all([
+      readFile(path.resolve("apps/cloudflare/src/index.ts"), "utf8"),
+      readFile(path.resolve("apps/cloudflare/src/hosted-email/worker-ingress.ts"), "utf8"),
+    ]);
+
+    expect(workerSource).not.toMatch(/from "@murphai\/inboxd";/u);
+    expect(workerSource).not.toMatch(/@murphai\/inboxd\/connectors\/email\/parsed/u);
+    expect(hostedEmailIngressSource).not.toMatch(/from "@murphai\/inboxd";/u);
+    expect(hostedEmailIngressSource).toMatch(/@murphai\/inboxd\/connectors\/email\/parsed/u);
+  });
+
+  it("serves a health endpoint even before secrets are configured", async () => {
+    const response = await worker.fetch(
+      new Request("https://runner.example.test/health"),
+      {
+        BUNDLES: createBucketStore().api,
+        RUNNER_CONTAINER: createRunnerContainerNamespace(),
+        USER_RUNNER: {
+          getByName() {
+            return createUserRunnerStub();
+          },
+        },
+      } as never,
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      service: "cloudflare-hosted-runner",
+    });
+  });
+
   it("serves the service banner for root and health and 404s unknown routes", async () => {
     const rootResponse = await worker.fetch(
       new Request("https://runner.example.test/"),
-      {} as never,
+      createWorkerEnv(),
     );
 
     expect(rootResponse.status).toBe(200);
@@ -42,7 +106,7 @@ describe("cloudflare worker routes", () => {
 
     const healthResponse = await worker.fetch(
       new Request("https://runner.example.test/health"),
-      {} as never,
+      createWorkerEnv(),
     );
 
     expect(healthResponse.status).toBe(200);
@@ -62,61 +126,197 @@ describe("cloudflare worker routes", () => {
     });
   });
 
-  it("dispatches through the canonical internal dispatch route", async () => {
-    const stub = createUserRunnerStub();
-    const dispatch = createDispatch("evt_123");
-
-    const response = await worker.fetch(
-      createInternalRequest("/internal/dispatch", {
-        body: JSON.stringify(dispatch),
+  it("proxies local loopback requests through the worker when a local proxy token is configured", async () => {
+    const upstreamFetch = vi.fn(async (input: RequestInfo | URL) =>
+      new Response(JSON.stringify({
+        ok: true,
+        proxied: input instanceof Request ? input.url : String(input),
+      }), {
         headers: {
           "content-type": "application/json; charset=utf-8",
-          [HOSTED_EXECUTION_USER_ID_HEADER]: dispatch.event.userId,
+          connection: "keep-alive",
+        },
+        status: 202,
+      }));
+    vi.stubGlobal("fetch", upstreamFetch as typeof fetch);
+
+    const response = await worker.fetch(
+      new Request(
+        "https://runner.example.test/__murph/local-loopback-proxy/local-token/http%3A%2F%2F127.0.0.1%3A8788/chats/chat_123/messages?foo=bar",
+        {
+          body: JSON.stringify({ message: "hello" }),
+          headers: {
+            authorization: "Bearer local",
+            connection: "keep-alive",
+            "content-type": "application/json; charset=utf-8",
+          },
+          method: "POST",
+        },
+      ),
+      createWorkerEnv(createUserRunnerStub(), {
+        HOSTED_EXECUTION_LOCAL_LOOPBACK_PROXY_TOKEN: "local-token",
+      }),
+    );
+
+    expect(upstreamFetch).toHaveBeenCalledTimes(1);
+    const [upstreamInput] = upstreamFetch.mock.calls[0] ?? [];
+    expect(upstreamInput).toBeInstanceOf(Request);
+    const upstreamRequest = upstreamInput as Request;
+    expect(upstreamRequest.url).toBe("http://127.0.0.1:8788/chats/chat_123/messages?foo=bar");
+    expect(upstreamRequest.method).toBe("POST");
+    expect(await upstreamRequest.text()).toBe(JSON.stringify({ message: "hello" }));
+    expect(upstreamRequest.headers.get("authorization")).toBe("Bearer local");
+    expect(upstreamRequest.headers.get("connection")).toBeNull();
+
+    expect(response.status).toBe(202);
+    expect(response.headers.get("connection")).toBeNull();
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      proxied: "http://127.0.0.1:8788/chats/chat_123/messages?foo=bar",
+    });
+  });
+
+  it("streams local loopback proxy POST bodies to a real loopback upstream", async () => {
+    const observedRequests: Array<{
+      body: string;
+      headers: Record<string, string | string[] | undefined>;
+      method: string;
+      url: string;
+    }> = [];
+    const server = createServer(async (request, response) => {
+      observedRequests.push({
+        body: await readIncomingMessageBody(request),
+        headers: request.headers,
+        method: request.method ?? "GET",
+        url: request.url ?? "/",
+      });
+      response.statusCode = 201;
+      response.setHeader("connection", "keep-alive");
+      response.setHeader("content-type", "application/json; charset=utf-8");
+      response.end(JSON.stringify({ ok: true }));
+    });
+
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(0, "127.0.0.1", () => resolve());
+    });
+
+    try {
+      const address = server.address();
+      if (!address || typeof address === "string") {
+        throw new Error("Expected the loopback proxy test server to expose a TCP port.");
+      }
+
+      const response = await worker.fetch(
+        new Request(
+          `https://runner.example.test/__murph/local-loopback-proxy/local-token/${encodeURIComponent(`http://127.0.0.1:${address.port}`)}/chats/chat_123/messages?foo=bar`,
+          {
+            body: JSON.stringify({ message: "hello" }),
+            headers: {
+              authorization: "Bearer local",
+              connection: "keep-alive",
+              "content-type": "application/json; charset=utf-8",
+            },
+            method: "POST",
+          },
+        ),
+        createWorkerEnv(createUserRunnerStub(), {
+          HOSTED_EXECUTION_LOCAL_LOOPBACK_PROXY_TOKEN: "local-token",
+        }),
+      );
+
+      expect(response.status).toBe(201);
+      expect(response.headers.get("connection")).toBeNull();
+      await expect(response.json()).resolves.toEqual({ ok: true });
+      expect(observedRequests).toHaveLength(1);
+      expect(observedRequests[0]).toMatchObject({
+        body: JSON.stringify({ message: "hello" }),
+        headers: expect.objectContaining({
+          authorization: "Bearer local",
+          "content-type": "application/json; charset=utf-8",
+        }),
+        method: "POST",
+        url: "/chats/chat_123/messages?foo=bar",
+      });
+    } finally {
+      await new Promise<void>((resolve) => {
+        server.close(() => resolve());
+      });
+    }
+  });
+
+  it("rejects non-loopback local proxy targets and bad local proxy tokens", async () => {
+    const env = createWorkerEnv(createUserRunnerStub(), {
+      HOSTED_EXECUTION_LOCAL_LOOPBACK_PROXY_TOKEN: "local-token",
+    });
+
+    const unauthorizedResponse = await worker.fetch(
+      new Request(
+        "https://runner.example.test/__murph/local-loopback-proxy/wrong-token/http%3A%2F%2F127.0.0.1%3A8788/ping",
+      ),
+      env,
+    );
+    expect(unauthorizedResponse.status).toBe(401);
+
+    const invalidTargetResponse = await worker.fetch(
+      new Request(
+        "https://runner.example.test/__murph/local-loopback-proxy/local-token/http%3A%2F%2Fexample.com%2Fapi/ping",
+      ),
+      env,
+    );
+    expect(invalidTargetResponse.status).toBe(400);
+    await expect(invalidTargetResponse.json()).resolves.toEqual({
+      error: "Local loopback proxy only supports loopback http(s) targets.",
+    });
+  });
+
+  it("injects the path user id into manual run requests through direct RPC", async () => {
+    const stub = createUserRunnerStub();
+
+    const response = await worker.fetch(
+      await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/run", {
+        body: JSON.stringify({ note: "manual" }),
+        headers: {
+          "content-type": "application/json; charset=utf-8",
         },
         method: "POST",
-      }),
+      })),
       createWorkerEnv(stub),
     );
 
     expect(response.status).toBe(200);
-    expect(stub.dispatchWithOutcome).toHaveBeenCalledWith(dispatch);
+    expect(stub.dispatch).toHaveBeenCalledTimes(1);
+    expect(stub.dispatch).toHaveBeenCalledWith(expect.objectContaining({
+      event: {
+        kind: "assistant.cron.tick",
+        reason: "manual",
+        userId: "member_123",
+      },
+      eventId: expect.stringMatching(/^manual:/u),
+    }));
   });
 
-  it("rejects dispatches when OIDC auth fails or the bound user header is missing", async () => {
+  it("accepts an empty manual run body and still injects the path user id", async () => {
     const stub = createUserRunnerStub();
-    const dispatch = createDispatch("evt_123");
 
-    mockedAuth.verifyHostedExecutionVercelOidcRequest.mockResolvedValueOnce(false);
-    const unauthorizedResponse = await worker.fetch(
-      createInternalRequest("/internal/dispatch", {
-        body: JSON.stringify(dispatch),
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-          [HOSTED_EXECUTION_USER_ID_HEADER]: dispatch.event.userId,
-        },
-        method: "POST",
-      }),
-      createWorkerEnv(stub),
-    );
-
-    expect(unauthorizedResponse.status).toBe(401);
-
-    const missingHeaderResponse = await worker.fetch(
-      createInternalRequest("/internal/dispatch", {
-        body: JSON.stringify(dispatch),
+    const response = await worker.fetch(
+      await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/run", {
+        body: "",
         headers: {
           "content-type": "application/json; charset=utf-8",
         },
         method: "POST",
-      }),
+      })),
       createWorkerEnv(stub),
     );
 
-    expect(missingHeaderResponse.status).toBe(401);
-    await expect(missingHeaderResponse.json()).resolves.toEqual({
-      error: `${HOSTED_EXECUTION_USER_ID_HEADER} header is required for hosted execution user-bound control routes.`,
-    });
-    expect(stub.dispatchWithOutcome).not.toHaveBeenCalled();
+    expect(response.status).toBe(200);
+    expect(stub.dispatch).toHaveBeenCalledTimes(1);
+    expect(stub.dispatch).toHaveBeenCalledWith(expect.objectContaining({
+      event: expect.objectContaining({
+        userId: "member_123",
+      }),
+    }));
   });
 
   it("injects the route user into manual runs and returns 429 when the queue backpressures", async () => {
@@ -137,14 +337,13 @@ describe("cloudflare worker routes", () => {
     });
 
     const response = await worker.fetch(
-      createInternalRequest("/internal/users/member_123/run", {
+      await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/run", {
         body: JSON.stringify({ note: "manual" }),
         headers: {
-          [HOSTED_EXECUTION_USER_ID_HEADER]: "member_123",
           "content-type": "application/json; charset=utf-8",
         },
         method: "POST",
-      }),
+      })),
       createWorkerEnv(stub),
     );
 
@@ -160,12 +359,104 @@ describe("cloudflare worker routes", () => {
     }));
   });
 
+  it("accepts OIDC bearer dispatches through the canonical internal dispatch route", async () => {
+    const stub = createUserRunnerStub();
+    const dispatch = createDispatch("evt_123");
+    const request = await createSignedDispatchRequest("/internal/dispatch", dispatch);
+
+    const response = await worker.fetch(
+      request,
+      createWorkerEnv(stub),
+    );
+
+    expect(response.status).toBe(200);
+    expect(stub.dispatchWithOutcome).toHaveBeenCalledTimes(1);
+    expect(stub.dispatchWithOutcome).toHaveBeenCalledWith(dispatch);
+  });
+
+  it("rejects internal dispatch requests when the bound user header is missing or mismatched", async () => {
+    const stub = createUserRunnerStub();
+    const dispatch = createDispatch("evt_123");
+
+    const missingHeaderResponse = await worker.fetch(
+      await createSignedDispatchRequest("/internal/dispatch", dispatch, { boundUserId: null }),
+      createWorkerEnv(stub),
+    );
+
+    expect(missingHeaderResponse.status).toBe(401);
+    await expect(missingHeaderResponse.json()).resolves.toEqual({
+      error: `${HOSTED_EXECUTION_USER_ID_HEADER} header is required for hosted execution user-bound control routes.`,
+    });
+
+    const mismatchedHeaderResponse = await worker.fetch(
+      await createSignedDispatchRequest("/internal/dispatch", dispatch, { boundUserId: "member_other" }),
+      createWorkerEnv(stub),
+    );
+
+    expect(mismatchedHeaderResponse.status).toBe(401);
+    await expect(mismatchedHeaderResponse.json()).resolves.toEqual({
+      error: "Hosted execution bound user does not match the dispatch user.",
+    });
+    expect(stub.dispatchWithOutcome).not.toHaveBeenCalled();
+  });
+
+  it("keeps the removed internal events alias hidden from OIDC dispatch callers", async () => {
+    const stub = createUserRunnerStub();
+    const request = await createSignedDispatchRequest("/internal/events", createDispatch("evt_removed_alias"));
+
+    const response = await worker.fetch(request, createWorkerEnv(stub));
+
+    expect(response.status).toBe(404);
+    expect(stub.dispatchWithOutcome).not.toHaveBeenCalled();
+  });
+
+  it("rejects missing, malformed, and mismatched OIDC bearer dispatch requests", async () => {
+    const stub = createUserRunnerStub();
+    const dispatch = createDispatch("evt_signed");
+
+    const missingAuthorizationResponse = await worker.fetch(
+      new Request("https://runner.example.test/internal/dispatch", {
+        body: JSON.stringify(dispatch),
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "POST",
+      }),
+      createWorkerEnv(stub),
+    );
+    expect(missingAuthorizationResponse.status).toBe(401);
+
+    const malformedResponse = await worker.fetch(
+      new Request("https://runner.example.test/internal/dispatch", {
+        body: JSON.stringify(dispatch),
+        headers: {
+          authorization: "Bearer not-a-jwt",
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "POST",
+      }),
+      createWorkerEnv(stub),
+    );
+    expect(malformedResponse.status).toBe(401);
+
+    const wrongSubjectResponse = await worker.fetch(
+      await createSignedDispatchRequest("/internal/dispatch", dispatch, {
+        sub: `owner:${TEST_VERCEL_OIDC_TEAM_SLUG}:project:wrong-project:environment:production`,
+      }),
+      createWorkerEnv(stub),
+    );
+    expect(wrongSubjectResponse.status).toBe(401);
+    expect(stub.dispatch).not.toHaveBeenCalled();
+  });
+
   it("reads canonical per-user status and per-event status from the durable object", async () => {
     const stub = createUserRunnerStub({
       getEventStatus: vi.fn(async ({ eventId }: { eventId: string }) => ({
         acknowledgedAt: "2026-04-16T10:05:00.000Z",
         eventId,
+        lastError: null,
         state: "completed",
+        userId: "member_123",
       })),
       status: vi.fn(async () => ({
         backpressuredEventIds: [],
@@ -183,12 +474,9 @@ describe("cloudflare worker routes", () => {
     });
 
     const statusResponse = await worker.fetch(
-      createInternalRequest("/internal/users/member_123/status", {
-        headers: {
-          [HOSTED_EXECUTION_USER_ID_HEADER]: "member_123",
-        },
+      await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/status", {
         method: "GET",
-      }),
+      })),
       createWorkerEnv(stub),
     );
 
@@ -199,70 +487,776 @@ describe("cloudflare worker routes", () => {
     });
 
     const eventStatusResponse = await worker.fetch(
-      createInternalRequest("/internal/users/member_123/events/evt_done/status", {
-        headers: {
-          [HOSTED_EXECUTION_USER_ID_HEADER]: "member_123",
-        },
-        method: "GET",
-      }),
+      await signControlRequest(new Request(
+        "https://runner.example.test/internal/users/member_123/events/evt_done/status",
+        { method: "GET" },
+      )),
       createWorkerEnv(stub),
     );
 
     expect(eventStatusResponse.status).toBe(200);
-    await expect(eventStatusResponse.json()).resolves.toEqual({
+    await expect(eventStatusResponse.json()).resolves.toMatchObject({
       acknowledgedAt: "2026-04-16T10:05:00.000Z",
       eventId: "evt_done",
       state: "completed",
     });
   });
+
+  it("stores and reads encrypted hosted artifact objects through the outbound artifacts.worker handler", async () => {
+    const env = createWorkerEnv();
+    const artifactBytes = Buffer.from("artifact-payload\n", "utf8");
+    const artifactSha256 = "fec80655c7d8a98cd92de1c1a21057808541e5fd289183d3c9f99f20c60c6d2b";
+
+    const writeResponse = await callRunnerOutbound(
+      new Request(`http://artifacts.worker/objects/${artifactSha256}`, {
+        body: artifactBytes,
+        headers: {
+          "content-type": "application/octet-stream",
+        },
+        method: "PUT",
+      }),
+      env,
+    );
+
+    expect(writeResponse.status).toBe(200);
+    await expect(writeResponse.json()).resolves.toMatchObject({
+      ok: true,
+      sha256: artifactSha256,
+      size: artifactBytes.byteLength,
+    });
+
+    const readResponse = await callRunnerOutbound(
+      new Request(`http://artifacts.worker/objects/${artifactSha256}`, {
+        method: "GET",
+      }),
+      env,
+    );
+
+    expect(readResponse.status).toBe(200);
+    expect(Buffer.from(await readResponse.arrayBuffer())).toEqual(artifactBytes);
+    await expect(hostedArtifactObjectKeyForTest(env, "member_123", artifactSha256)).resolves.toSatisfy(
+      (expectedKey) => env.__bucketStore.keys().includes(expectedKey),
+    );
+  });
+
+  it("rejects artifact writes when the request hash does not match the payload", async () => {
+    const env = createWorkerEnv();
+    const artifactSha256 = "fec80655c7d8a98cd92de1c1a21057808541e5fd289183d3c9f99f20c60c6d2b";
+
+    await expect(() => callRunnerOutbound(
+      new Request(`http://artifacts.worker/objects/${artifactSha256}`, {
+        body: Buffer.from("wrong-payload\n", "utf8"),
+        headers: {
+          "content-type": "application/octet-stream",
+        },
+        method: "PUT",
+      }),
+      env,
+    )).rejects.toThrow(
+      `Hosted artifact hash mismatch: expected ${artifactSha256}`,
+    );
+
+    expect(env.__bucketStore.keys()).toHaveLength(1);
+    await expect(hostedUserKeyEnvelopeObjectKeyForTest(env, "member_123")).resolves.toBe(
+      env.__bucketStore.keys()[0],
+    );
+  });
+
+  it("keeps hosted artifact objects isolated per user", async () => {
+    const env = createWorkerEnv();
+    const artifactBytes = Buffer.from("artifact-payload\n", "utf8");
+    const artifactSha256 = "fec80655c7d8a98cd92de1c1a21057808541e5fd289183d3c9f99f20c60c6d2b";
+
+    const writeResponse = await callRunnerOutbound(
+      new Request(`http://artifacts.worker/objects/${artifactSha256}`, {
+        body: artifactBytes,
+        headers: {
+          "content-type": "application/octet-stream",
+        },
+        method: "PUT",
+      }),
+      env,
+      "member_alpha",
+    );
+
+    expect(writeResponse.status).toBe(200);
+
+    const readResponse = await callRunnerOutbound(
+      new Request(`http://artifacts.worker/objects/${artifactSha256}`, {
+        method: "GET",
+      }),
+      env,
+      "member_bravo",
+    );
+
+    expect(readResponse.status).toBe(404);
+    await expect(hostedArtifactObjectKeyForTest(env, "member_alpha", artifactSha256)).resolves.toSatisfy(
+      (expectedKey) => env.__bucketStore.keys().includes(expectedKey),
+    );
+  });
+
+  it("hard-cuts the removed commit and finalize routes from the outbound results.worker handler", async () => {
+    const env = createWorkerEnv();
+
+    const commitResponse = await callRunnerOutbound(
+      new Request("http://results.worker/events/evt_finalize/commit", {
+        body: JSON.stringify({}),
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "POST",
+      }),
+      env,
+    );
+    const finalizeResponse = await callRunnerOutbound(
+      new Request("http://results.worker/events/evt_finalize/finalize", {
+        body: JSON.stringify({
+          bundle: Buffer.from("vault-final").toString("base64"),
+        }),
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "POST",
+      }),
+      env,
+    );
+
+    expect(commitResponse.status).toBe(404);
+    expect(finalizeResponse.status).toBe(404);
+  });
+
+  it("keeps removed outbound callback routes hidden from public and internal callers", async () => {
+    const env = createWorkerEnv();
+
+    const removedFinalizeResponse = await callRunnerOutbound(
+      new Request("http://results.worker/events/evt_finalize_auth/finalize", {
+        body: JSON.stringify({
+          bundle: 42,
+        }),
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "POST",
+      }),
+      env,
+    );
+    expect(removedFinalizeResponse.status).toBe(404);
+
+    const removedCommitResponse = await callRunnerOutbound(
+      new Request("http://results.worker/events/evt_bad_commit/commit", {
+        body: JSON.stringify({
+          ignored: true,
+        }),
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "POST",
+      }),
+      env,
+    );
+    expect(removedCommitResponse.status).toBe(404);
+
+    const publicCommitResponse = await worker.fetch(
+      new Request("https://runner.example.test/internal/runner-events/member_123/evt_commit/commit", {
+        method: "POST",
+      }),
+      env,
+    );
+    expect(publicCommitResponse.status).toBe(404);
+
+    const publicOutboxResponse = await worker.fetch(
+      new Request("https://runner.example.test/internal/runner-outbox/member_123/outbox_123", {
+        method: "GET",
+      }),
+      env,
+    );
+    expect(publicOutboxResponse.status).toBe(404);
+  });
+
+  it("persists side-effect journal records through the side-effects route and reads them back through the outbox route", async () => {
+    const env = createWorkerEnv();
+
+    const response = await callRunnerOutbound(
+      new Request("http://results.worker/effects/outbox_123?fingerprint=dedupe_123", {
+        body: JSON.stringify(createPreparedSideEffectRecord({
+          effectId: "outbox_123",
+          fingerprint: "dedupe_123",
+        })),
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "PUT",
+      }),
+      env,
+    );
+
+    expect(response.status).toBe(200);
+
+    const readResponse = await callRunnerOutbound(
+      new Request("http://results.worker/effects/outbox_123?fingerprint=dedupe_123", {
+        method: "GET",
+      }),
+      env,
+    );
+
+    expect(readResponse.status).toBe(200);
+    await expect(readResponse.json()).resolves.toMatchObject({
+      effectId: "outbox_123",
+      record: {
+        effectId: "outbox_123",
+        kind: "assistant.delivery",
+        state: "prepared",
+      },
+    });
+  });
+
+  it("routes local loopback proxy requests onto the results.worker handler when the intended host is carried in headers", async () => {
+    const env = createWorkerEnv(undefined, {
+      HOSTED_EXECUTION_INTERNAL_PROXY_UPSTREAM_BASE_URL: "http://127.0.0.1:8787",
+    });
+
+    const response = await worker.fetch(
+      new Request("http://127.0.0.1:8787/effects/outbox_local_proxy?fingerprint=dedupe_local_proxy", {
+        body: JSON.stringify(createPreparedSideEffectRecord({
+          effectId: "outbox_local_proxy",
+          fingerprint: "dedupe_local_proxy",
+        })),
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+          [HOSTED_EXECUTION_INTERNAL_PROXY_HOST_HEADER]: "results.worker",
+          [HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER]: RUNNER_PROXY_TOKEN,
+          [HOSTED_EXECUTION_USER_ID_HEADER]: "member_123",
+        },
+        method: "PUT",
+      }),
+      env,
+    );
+
+    expect(response.status).toBe(200);
+
+    const readResponse = await worker.fetch(
+      new Request("http://127.0.0.1:8787/effects/outbox_local_proxy?fingerprint=dedupe_local_proxy", {
+        headers: {
+          [HOSTED_EXECUTION_INTERNAL_PROXY_HOST_HEADER]: "results.worker",
+          [HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER]: RUNNER_PROXY_TOKEN,
+          [HOSTED_EXECUTION_USER_ID_HEADER]: "member_123",
+        },
+        method: "GET",
+      }),
+      env,
+    );
+
+    expect(readResponse.status).toBe(200);
+    await expect(readResponse.json()).resolves.toMatchObject({
+      effectId: "outbox_local_proxy",
+      record: {
+        effectId: "outbox_local_proxy",
+        kind: "assistant.delivery",
+        state: "prepared",
+      },
+    });
+  });
+
+  it("routes local loopback proxy requests onto the results.worker handler when only the Host header survives the proxy hop", async () => {
+    const env = createWorkerEnv(undefined, {
+      HOSTED_EXECUTION_INTERNAL_PROXY_UPSTREAM_BASE_URL: "http://127.0.0.1:8787",
+    });
+
+    const response = await worker.fetch(
+      new Request("http://127.0.0.1:8787/effects/outbox_local_proxy_host?fingerprint=dedupe_local_proxy_host", {
+        body: JSON.stringify(createPreparedSideEffectRecord({
+          effectId: "outbox_local_proxy_host",
+          fingerprint: "dedupe_local_proxy_host",
+        })),
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+          host: "results.worker",
+          [HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER]: RUNNER_PROXY_TOKEN,
+          [HOSTED_EXECUTION_USER_ID_HEADER]: "member_123",
+        },
+        method: "PUT",
+      }),
+      env,
+    );
+
+    expect(response.status).toBe(200);
+
+    const readResponse = await worker.fetch(
+      new Request("http://127.0.0.1:8787/effects/outbox_local_proxy_host?fingerprint=dedupe_local_proxy_host", {
+        headers: {
+          host: "results.worker",
+          [HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER]: RUNNER_PROXY_TOKEN,
+          [HOSTED_EXECUTION_USER_ID_HEADER]: "member_123",
+        },
+        method: "GET",
+      }),
+      env,
+    );
+
+    expect(readResponse.status).toBe(200);
+    await expect(readResponse.json()).resolves.toMatchObject({
+      effectId: "outbox_local_proxy_host",
+      record: {
+        effectId: "outbox_local_proxy_host",
+        kind: "assistant.delivery",
+        state: "prepared",
+      },
+    });
+  });
+
+  it("rejects direct runner-outbound proxy requests on non-loopback worker hosts", async () => {
+    const env = createWorkerEnv(undefined, {
+      HOSTED_EXECUTION_INTERNAL_PROXY_UPSTREAM_BASE_URL: "http://127.0.0.1:8787",
+    });
+
+    const response = await worker.fetch(
+      new Request("https://runner.example.test/effects/outbox_direct_probe?fingerprint=dedupe_direct_probe", {
+        body: JSON.stringify(createPreparedSideEffectRecord({
+          effectId: "outbox_direct_probe",
+          fingerprint: "dedupe_direct_probe",
+        })),
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+          [HOSTED_EXECUTION_INTERNAL_PROXY_HOST_HEADER]: "results.worker",
+          [HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER]: RUNNER_PROXY_TOKEN,
+          [HOSTED_EXECUTION_USER_ID_HEADER]: "member_123",
+        },
+        method: "PUT",
+      }),
+      env,
+    );
+
+    expect(response.status).toBe(401);
+    await expect(response.json()).resolves.toEqual({
+      error: "Unauthorized",
+    });
+    expect(env.__bucketStore.keys()).toEqual([]);
+  });
+
+  it("reads side-effect journal records even when the outbound bridge drops the fingerprint query", async () => {
+    const env = createWorkerEnv();
+
+    await callRunnerOutbound(
+      new Request("http://results.worker/effects/outbox_missing_fingerprint?fingerprint=dedupe_missing", {
+        body: JSON.stringify(createPreparedSideEffectRecord({
+          effectId: "outbox_missing_fingerprint",
+          fingerprint: "dedupe_missing",
+        })),
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "PUT",
+      }),
+      env,
+    );
+
+    const response = await callRunnerOutbound(
+      new Request("http://results.worker/effects/outbox_missing_fingerprint", {
+        method: "GET",
+      }),
+      env,
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      effectId: "outbox_missing_fingerprint",
+      record: {
+        effectId: "outbox_missing_fingerprint",
+        kind: "assistant.delivery",
+        state: "prepared",
+      },
+    });
+  });
+
+  it("returns 409 when the same effect id is reused with a mismatched fingerprint", async () => {
+    const env = createWorkerEnv();
+
+    await callRunnerOutbound(
+      new Request("http://results.worker/effects/outbox_a?fingerprint=dedupe_123", {
+        body: JSON.stringify(createPreparedSideEffectRecord({
+          effectId: "outbox_a",
+          fingerprint: "dedupe_123",
+        })),
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "PUT",
+      }),
+      env,
+    );
+
+    const conflictResponse = await callRunnerOutbound(
+      new Request("http://results.worker/effects/outbox_a?fingerprint=dedupe_conflict", {
+        body: JSON.stringify(createPreparedSideEffectRecord({
+          effectId: "outbox_a",
+          fingerprint: "dedupe_conflict",
+        })),
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "PUT",
+      }),
+      env,
+    );
+
+    expect(conflictResponse.status).toBe(409);
+    await expect(conflictResponse.json()).resolves.toMatchObject({
+      error: expect.stringContaining("cannot change identity"),
+    });
+  });
+
+  it("deletes only prepared side-effect reservations through the side-effects route", async () => {
+    const env = createWorkerEnv();
+
+    await callRunnerOutbound(
+      new Request("http://results.worker/effects/outbox_prepared?fingerprint=dedupe_prepared", {
+        body: JSON.stringify(createPreparedSideEffectRecord({
+          effectId: "outbox_prepared",
+          fingerprint: "dedupe_prepared",
+        })),
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "PUT",
+      }),
+      env,
+    );
+    await callRunnerOutbound(
+      new Request("http://results.worker/effects/outbox_sent?fingerprint=dedupe_sent", {
+        body: JSON.stringify(createSentSideEffectRecord({
+          effectId: "outbox_sent",
+          fingerprint: "dedupe_sent",
+        })),
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "PUT",
+      }),
+      env,
+    );
+
+    const deletePreparedResponse = await callRunnerOutbound(
+      new Request("http://results.worker/effects/outbox_prepared?fingerprint=dedupe_prepared", {
+        method: "DELETE",
+      }),
+      env,
+    );
+    expect(deletePreparedResponse.status).toBe(200);
+
+    const readPreparedResponse = await callRunnerOutbound(
+      new Request("http://results.worker/effects/outbox_prepared?fingerprint=dedupe_prepared", {
+        method: "GET",
+      }),
+      env,
+    );
+    await expect(readPreparedResponse.json()).resolves.toMatchObject({
+      effectId: "outbox_prepared",
+      record: null,
+    });
+
+    const deleteSentResponse = await callRunnerOutbound(
+      new Request("http://results.worker/effects/outbox_sent?fingerprint=dedupe_sent", {
+        method: "DELETE",
+      }),
+      env,
+    );
+    expect(deleteSentResponse.status).toBe(200);
+
+    const readSentResponse = await callRunnerOutbound(
+      new Request("http://results.worker/effects/outbox_sent?fingerprint=dedupe_sent", {
+        method: "GET",
+      }),
+      env,
+    );
+    await expect(readSentResponse.json()).resolves.toMatchObject({
+      effectId: "outbox_sent",
+      record: {
+        effectId: "outbox_sent",
+        kind: "assistant.delivery",
+        state: "sent",
+      },
+    });
+  });
+
+  it("deletes prepared side-effect reservations even when the outbound bridge omits the fingerprint query", async () => {
+    const env = createWorkerEnv();
+
+    await callRunnerOutbound(
+      new Request("http://results.worker/effects/outbox_delete_missing_fingerprint?fingerprint=dedupe_delete_missing", {
+        body: JSON.stringify(createPreparedSideEffectRecord({
+          effectId: "outbox_delete_missing_fingerprint",
+          fingerprint: "dedupe_delete_missing",
+        })),
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "PUT",
+      }),
+      env,
+    );
+
+    const deleteResponse = await callRunnerOutbound(
+      new Request("http://results.worker/effects/outbox_delete_missing_fingerprint", {
+        method: "DELETE",
+      }),
+      env,
+    );
+    expect(deleteResponse.status).toBe(200);
+
+    const readResponse = await callRunnerOutbound(
+      new Request("http://results.worker/effects/outbox_delete_missing_fingerprint", {
+        method: "GET",
+      }),
+      env,
+    );
+    await expect(readResponse.json()).resolves.toMatchObject({
+      effectId: "outbox_delete_missing_fingerprint",
+      record: null,
+    });
+  });
+
+  it("reads pre-existing side-effect journal records through the outbound route using the user's root key", async () => {
+    const env = createWorkerEnv();
+    const record = createSentSideEffectRecord({
+      effectId: "outbox_rotated",
+      fingerprint: "dedupe_rotated",
+    });
+    const crypto = await resolveHostedUserCryptoContextForTest(env, "member_123");
+    const key = await sideEffectRecordObjectKey(crypto.rootKey, "member_123", record.effectId);
+
+    await writeEncryptedR2Json({
+      aad: buildHostedStorageAad({
+        effectId: record.effectId,
+        key,
+        purpose: "side-effect-journal",
+        userId: "member_123",
+      }),
+      bucket: env.BUNDLES,
+      cryptoKey: crypto.rootKey,
+      key,
+      keyId: crypto.rootKeyId,
+      scope: "side-effect-journal",
+      value: record,
+    });
+
+    const response = await callRunnerOutbound(
+      new Request(`http://results.worker/effects/${record.effectId}?fingerprint=${record.fingerprint}`, {
+        method: "GET",
+      }),
+      env,
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      effectId: "outbox_rotated",
+      record: {
+        delivery: {
+          channel: "telegram",
+          target: "thread_123",
+        },
+        effectId: "outbox_rotated",
+        kind: "assistant.delivery",
+        state: "sent",
+      },
+    });
+  });
+
+  it("returns method and auth errors on protected routes in the same order as before", async () => {
+    const unauthorizedRunResponse = await worker.fetch(
+      new Request("https://runner.example.test/internal/users/member_123/run", {
+        method: "GET",
+      }),
+      createWorkerEnv(),
+    );
+
+    expect(unauthorizedRunResponse.status).toBe(401);
+    await expect(unauthorizedRunResponse.json()).resolves.toEqual({
+      error: "Unauthorized",
+    });
+
+    const wrongMethodOutboxResponse = await callRunnerOutbound(
+      new Request("http://results.worker/effects/outbox_123", {
+        method: "POST",
+      }),
+      createWorkerEnv(),
+    );
+
+    expect(wrongMethodOutboxResponse.status).toBe(405);
+    await expect(wrongMethodOutboxResponse.json()).resolves.toEqual({
+      error: "Method not allowed.",
+    });
+  });
+
+  it("returns 405 before bound-user validation on user-bound routes", async () => {
+    const response = await worker.fetch(
+      await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/run", {
+        method: "GET",
+      }), {
+        boundUserId: "member_other",
+      }),
+      createWorkerEnv(),
+    );
+
+    expect(response.status).toBe(405);
+    await expect(response.json()).resolves.toEqual({
+      error: "Method not allowed.",
+    });
+  });
+
+  it("keeps malformed encoded route params behind existing auth and hidden-method boundaries", async () => {
+    const controlResponse = await worker.fetch(
+      new Request("https://runner.example.test/internal/users/%E0%A4%A/run", {
+        method: "GET",
+      }),
+      createWorkerEnv(),
+    );
+
+    expect(controlResponse.status).toBe(401);
+    await expect(controlResponse.json()).resolves.toEqual({
+      error: "Unauthorized",
+    });
+
+    const runnerEventResponse = await worker.fetch(
+      new Request("https://runner.example.test/internal/runner-events/%E0%A4%A/evt_commit/commit", {
+        method: "GET",
+      }),
+      createWorkerEnv(),
+    );
+
+    expect(runnerEventResponse.status).toBe(404);
+    await expect(runnerEventResponse.json()).resolves.toEqual({
+      error: "Not found",
+    });
+  });
+
+  it("preserves hidden not-found responses for wrong methods on worker routes that were never public", async () => {
+    const dispatchResponse = await worker.fetch(
+      new Request("https://runner.example.test/internal/dispatch", {
+        method: "GET",
+      }),
+      createWorkerEnv(),
+    );
+
+    expect(dispatchResponse.status).toBe(404);
+    await expect(dispatchResponse.json()).resolves.toEqual({
+      error: "Not found",
+    });
+  });
 });
 
-function createInternalRequest(
-  path: string,
-  init: RequestInit = {},
-): Request {
-  const headers = new Headers(init.headers ?? {});
-  headers.set("authorization", "Bearer test-oidc-token");
+type WorkerTestEnv = WorkerEnvironmentSource & {
+  __bucketStore: ReturnType<typeof createBucketStore>;
+} & Record<string, unknown>;
 
-  return new Request(`https://runner.example.test${path}`, {
-    ...init,
-    headers,
-  });
+type UserRunnerStub = ReturnType<typeof createUserRunnerStub>;
+
+function createRunnerContainerNamespace(): WorkerEnvironmentSource["RUNNER_CONTAINER"] {
+  return {
+    getByName() {
+      return {
+        async destroyInstance() {},
+        async invoke(): Promise<HostedAssistantRuntimeJobResult> {
+          throw new Error("Runner container should not be invoked by route tests.");
+        },
+      };
+    },
+  };
 }
 
 function createWorkerEnv(
-  stub = createUserRunnerStub(),
-  overrides: Partial<Record<string, unknown>> = {},
-) {
-  return {
+  userRunnerStub: UserRunnerStub = createUserRunnerStub(),
+  overrides: Partial<WorkerEnvironmentSource & Record<string, unknown>> = {},
+): WorkerTestEnv {
+  const bucketStore = createBucketStore();
+  const wrappedUserRunnerStubs = new Map<string, UserRunnerStub>();
+  const defaultUserRunnerNamespace: WorkerEnvironmentSource["USER_RUNNER"] = {
+    getByName(userId: string) {
+      return getOrCreateWrappedUserRunnerStub(userId, userRunnerStub);
+    },
+  };
+  const userRunnerNamespace = overrides.USER_RUNNER ?? defaultUserRunnerNamespace;
+  const env: WorkerTestEnv = {
+    __bucketStore: bucketStore,
     ...createHostedExecutionTestEnv(),
-    BUNDLES: createBucketStore(),
-    RUNNER_CONTAINER: {
-      getByName() {
-        return {
-          async destroyInstance() {},
-          async invoke() {
-            throw new Error("Runner container should not be invoked by route tests.");
-          },
-        };
-      },
-    },
-    USER_RUNNER: {
-      getByName() {
-        return stub;
-      },
-    },
+    BUNDLES: bucketStore.api,
+    RUNNER_CONTAINER: createRunnerContainerNamespace(),
     ...overrides,
-  } as never;
+    USER_RUNNER: {
+      getByName(userId: string) {
+        return userRunnerNamespace.getByName(userId);
+      },
+    },
+  };
+
+  return env;
+
+  function getOrCreateWrappedUserRunnerStub(userId: string, seedStub: UserRunnerStub): UserRunnerStub {
+    const existing = wrappedUserRunnerStubs.get(userId);
+
+    if (existing) {
+      return existing;
+    }
+
+    const baseStub = wrappedUserRunnerStubs.size === 0 ? seedStub : createUserRunnerStub();
+    const wrappedStub: UserRunnerStub = {
+      ...baseStub,
+      bootstrapUser: vi.fn(async (boundUserId: string) => {
+        await resolveHostedUserCryptoContextForTest(env, boundUserId);
+        return baseStub.bootstrapUser(boundUserId);
+      }),
+    };
+    wrappedUserRunnerStubs.set(userId, wrappedStub);
+    return wrappedStub;
+  }
+}
+
+function callRunnerOutbound(
+  request: Request,
+  env: WorkerTestEnv,
+  userId = "member_123",
+): Promise<Response> {
+  const headers = new Headers(request.headers);
+  headers.set(HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER, RUNNER_PROXY_TOKEN);
+  return handleRunnerOutboundRequest(
+    new Request(request, { headers }),
+    env,
+    userId,
+    RUNNER_PROXY_TOKEN,
+  );
 }
 
 function createBucketStore() {
+  const values = new Map<string, string>();
+
   return {
-    async delete() {},
-    async get() {
-      return null;
+    api: {
+      async delete(key: string) {
+        values.delete(key);
+      },
+      async get(key: string) {
+        const value = values.get(key);
+
+        if (!value) {
+          return null;
+        }
+
+        return {
+          async arrayBuffer() {
+            const bytes = Buffer.from(value, "utf8");
+            return bytes.buffer.slice(
+              bytes.byteOffset,
+              bytes.byteOffset + bytes.byteLength,
+            );
+          },
+        };
+      },
+      async put(key: string, value: string) {
+        values.set(key, value);
+      },
     },
-    async put() {},
+    keys() {
+      return [...values.keys()].sort();
+    },
   };
 }
 
@@ -276,6 +1270,111 @@ function createDispatch(eventId: string): HostedExecutionDispatchRequest {
     eventId,
     occurredAt: "2026-04-16T10:00:00.000Z",
   };
+}
+
+function createOutboxDelivery() {
+  return {
+    channel: "telegram",
+    idempotencyKey: "assistant-outbox:intent_123",
+    messageLength: "Queued reply".length,
+    sentAt: "2026-03-26T12:00:00.000Z",
+    target: "thread_123",
+    targetKind: "thread" as const,
+  };
+}
+
+function createPreparedSideEffectRecord(input: {
+  effectId: string;
+  fingerprint: string;
+}) {
+  return {
+    effectId: input.effectId,
+    fingerprint: input.fingerprint,
+    kind: "assistant.delivery" as const,
+    recordedAt: "2026-03-26T12:00:05.000Z",
+    state: "prepared" as const,
+  };
+}
+
+function createSentSideEffectRecord(input: {
+  effectId: string;
+  fingerprint: string;
+}) {
+  return {
+    ...createPreparedSideEffectRecord(input),
+    delivery: createOutboxDelivery(),
+    recordedAt: "2026-03-26T12:00:00.000Z",
+    state: "sent" as const,
+  };
+}
+
+async function sideEffectRecordObjectKey(
+  rootKey: Uint8Array,
+  userId: string,
+  effectId: string,
+): Promise<string> {
+  const userSegment = await deriveHostedStorageOpaqueId({
+    length: 24,
+    rootKey,
+    scope: "side-effect-path",
+    value: `user:${userId}`,
+  });
+  const effectSegment = await deriveHostedStorageOpaqueId({
+    length: 40,
+    rootKey,
+    scope: "side-effect-path",
+    value: `effect:${userId}:${effectId}`,
+  });
+
+  return `transient/side-effects/${userSegment}/${effectSegment}.json`;
+}
+
+async function hostedArtifactObjectKeyForTest(
+  env: WorkerTestEnv,
+  userId: string,
+  sha256: string,
+): Promise<string> {
+  const crypto = await resolveHostedUserCryptoContextForTest(env, userId);
+  return hostedArtifactObjectKey(crypto.rootKey, userId, sha256);
+}
+
+async function hostedUserKeyEnvelopeObjectKeyForTest(
+  env: WorkerTestEnv,
+  userId: string,
+): Promise<string> {
+  const environment = readHostedExecutionEnvironment(asWorkerStringEnvironment(env));
+  const userSegment = await deriveHostedStorageOpaqueId({
+    length: 24,
+    rootKey: environment.platformEnvelopeKey,
+    scope: "user-key-envelope-path",
+    value: `user:${userId}`,
+  });
+
+  return `users/keys/${userSegment}.json`;
+}
+
+async function resolveHostedUserCryptoContextForTest(
+  env: WorkerTestEnv,
+  userId: string,
+) {
+  const environment = readHostedExecutionEnvironment(asWorkerStringEnvironment(env));
+
+  const store = createHostedUserKeyStore({
+    automationRecipientKeyId: environment.automationRecipientKeyId,
+    automationRecipientPrivateKey: environment.automationRecipientPrivateKey,
+    automationRecipientPrivateKeysById: environment.automationRecipientPrivateKeysById,
+    automationRecipientPublicKey: environment.automationRecipientPublicKey,
+    bucket: env.BUNDLES,
+    envelopeEncryptionKey: environment.platformEnvelopeKey,
+    envelopeEncryptionKeyId: environment.platformEnvelopeKeyId,
+    envelopeEncryptionKeysById: environment.platformEnvelopeKeysById,
+    recoveryRecipientKeyId: environment.recoveryRecipientKeyId,
+    recoveryRecipientPublicKey: environment.recoveryRecipientPublicKey,
+    teeAutomationRecipientKeyId: environment.teeAutomationRecipientKeyId,
+    teeAutomationRecipientPublicKey: environment.teeAutomationRecipientPublicKey,
+  });
+  await store.ensureManagedUserCryptoEnvelope(userId);
+  return store.requireUserCryptoContext(userId);
 }
 
 function createUserRunnerStub(overrides: Record<string, unknown> = {}) {
@@ -294,30 +1393,14 @@ function createUserRunnerStub(overrides: Record<string, unknown> = {}) {
       retryingEventId: null,
       userId: input.event.userId,
     })),
-    dispatchWithOutcome: vi.fn(async (input: HostedExecutionDispatchRequest) => ({
-      event: {
-        acknowledgedAt: "2026-04-16T10:00:00.000Z",
-        eventId: input.eventId,
-        state: "queued" as const,
-      },
-      status: {
-        backpressuredEventIds: [],
-        bundleRef: null,
-        inFlight: false,
-        lastError: null,
-        lastEventId: input.eventId,
-        lastRunAt: null,
-        nextWakeAt: null,
-        pendingEventCount: 1,
-        poisonedEventIds: [],
-        retryingEventId: null,
-        userId: input.event.userId,
-      },
-    })),
-    getEventStatus: vi.fn(async ({ eventId }: { eventId: string }) => ({
+    dispatchWithOutcome: vi.fn(async (input: HostedExecutionDispatchRequest) =>
+      buildDispatchResultFixture(input.event.userId, input.eventId)),
+    getEventStatus: vi.fn(async (input: { eventId: string }) => ({
       acknowledgedAt: "2026-04-16T10:00:00.000Z",
-      eventId,
+      eventId: input.eventId,
+      lastError: null,
       state: "queued" as const,
+      userId: "member_123",
     })),
     status: vi.fn(async () => ({
       backpressuredEventIds: [],
@@ -333,5 +1416,141 @@ function createUserRunnerStub(overrides: Record<string, unknown> = {}) {
       userId: "member_123",
     })),
     ...overrides,
+  } satisfies UserRunnerDurableObjectStubLike;
+}
+
+function buildDispatchResultFixture(userId: string, eventId: string) {
+  return {
+    event: {
+      acknowledgedAt: "2026-04-16T10:00:00.000Z",
+      eventId,
+      lastError: null,
+      state: "queued" as const,
+      userId,
+    },
+    status: {
+      backpressuredEventIds: [],
+      bundleRef: null,
+      inFlight: false,
+      lastError: null,
+      lastEventId: eventId,
+      lastRunAt: null,
+      nextWakeAt: null,
+      pendingEventCount: 1,
+      poisonedEventIds: [],
+      retryingEventId: null,
+      userId,
+    },
   };
+}
+
+async function createSignedDispatchRequest(
+  path: string,
+  dispatch: HostedExecutionDispatchRequest,
+  input: {
+    aud?: string;
+    boundUserId?: string | null;
+    iss?: string;
+    sub?: string;
+  } = {},
+): Promise<Request> {
+  installOidcJwksFetch();
+
+  const headers = new Headers({
+    authorization: `Bearer ${createTestVercelOidcToken(input)}`,
+    "content-type": "application/json; charset=utf-8",
+  });
+
+  if (input.boundUserId !== null) {
+    headers.set(HOSTED_EXECUTION_USER_ID_HEADER, input.boundUserId ?? dispatch.event.userId);
+  }
+
+  return new Request(`https://runner.example.test${path}`, {
+    body: JSON.stringify(dispatch),
+    headers,
+    method: "POST",
+  });
+}
+
+async function signControlRequest(
+  request: Request,
+  input: {
+    aud?: string;
+    boundUserId?: string | null;
+    iss?: string;
+    sub?: string;
+  } = {},
+): Promise<Request> {
+  installOidcJwksFetch();
+  const headers = new Headers(request.headers);
+  headers.set("authorization", `Bearer ${createTestVercelOidcToken(input)}`);
+  const derivedUserId = /^\/internal\/users\/(?<userId>[^/]+)/u.exec(new URL(request.url).pathname)?.groups?.userId;
+
+  if (input.boundUserId !== null && (input.boundUserId || derivedUserId)) {
+    headers.set(HOSTED_EXECUTION_USER_ID_HEADER, input.boundUserId ?? derivedUserId ?? "");
+  }
+
+  return new Request(request, { headers });
+}
+
+function installOidcJwksFetch(delegate?: typeof fetch): void {
+  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (String(input) === TEST_VERCEL_OIDC_JWKS_URL) {
+      return new Response(JSON.stringify({ keys: [TEST_VERCEL_OIDC_PUBLIC_JWK] }), {
+        headers: {
+          "content-type": "application/json",
+        },
+        status: 200,
+      });
+    }
+
+    if (delegate) {
+      return delegate(input, init);
+    }
+
+    throw new Error(`Unexpected fetch during Cloudflare OIDC test: ${String(input)}`);
+  }));
+}
+
+function createTestVercelOidcToken(
+  input: Partial<{
+    aud: string;
+    iss: string;
+    sub: string;
+  }> = {},
+): string {
+  const now = Math.floor(Date.now() / 1000);
+  const header = {
+    alg: "RS256",
+    kid: "test-kid",
+    typ: "JWT",
+  };
+  const payload = {
+    aud: TEST_VERCEL_OIDC_AUDIENCE,
+    exp: now + 300,
+    iat: now,
+    iss: TEST_VERCEL_OIDC_ISSUER,
+    sub: TEST_VERCEL_OIDC_SUBJECT,
+    ...input,
+  };
+  const encodedHeader = base64UrlEncode(JSON.stringify(header));
+  const encodedPayload = base64UrlEncode(JSON.stringify(payload));
+  const signingInput = `${encodedHeader}.${encodedPayload}`;
+  const signature = sign("RSA-SHA256", Buffer.from(signingInput), TEST_VERCEL_OIDC_PRIVATE_KEY);
+
+  return `${signingInput}.${base64UrlEncode(signature)}`;
+}
+
+function base64UrlEncode(value: string | Buffer): string {
+  return Buffer.from(value).toString("base64url");
+}
+
+async function readIncomingMessageBody(request: IncomingMessage): Promise<string> {
+  const chunks: Buffer[] = [];
+
+  for await (const chunk of request) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+
+  return Buffer.concat(chunks).toString("utf8");
 }
