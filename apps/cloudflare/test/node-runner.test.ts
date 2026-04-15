@@ -34,6 +34,8 @@ const hostedCliMocks = vi.hoisted(() => ({
   dispatchAssistantOutboxIntent: vi.fn(),
   runAssistantAutomation: vi.fn(),
 }));
+const ASSISTANT_AUTOMATION_STATE_FILENAME =
+  path.basename(resolveAssistantStatePaths("/tmp/placeholder").automationStatePath);
 
 vi.mock("@murphai/assistant-engine", async () => {
   const actual = await vi.importActual<typeof import("@murphai/assistant-engine")>(
@@ -118,8 +120,12 @@ async function readAssistantAutomationState(assistantStateRoot: string): Promise
   autoReplyChannels: string[];
 }> {
   try {
+    const automationStatePath = path.join(
+      assistantStateRoot,
+      ASSISTANT_AUTOMATION_STATE_FILENAME,
+    );
     const parsed = JSON.parse(
-      await readFile(path.join(assistantStateRoot, "automation.json"), "utf8"),
+      await readFile(automationStatePath, "utf8"),
     ) as {
       autoReply?: Array<{ channel?: string }>;
       autoReplyChannels?: string[];
@@ -429,6 +435,99 @@ describe("runHostedExecutionJob", () => {
       restoreEnvVar("HOSTED_EMAIL_DOMAIN", previousHostedEmailDomain);
       restoreEnvVar("HOSTED_EMAIL_LOCAL_PART", previousHostedEmailLocalPart);
       restoreEnvVar("HOSTED_EMAIL_SIGNING_SECRET", previousHostedEmailSigningSecret);
+      restoreEnvVars(previousHostedAssistantEnv);
+    }
+  });
+
+  it("bootstraps managed Linq auto-reply when activation first contact is a Linq thread", async () => {
+    const previousHostedAssistantEnv = setHostedAssistantSeedEnv();
+
+    try {
+      const result = await runHostedExecutionJob({
+        bundles: {
+          agentState: null,
+          vault: null,
+        },
+        dispatch: {
+          event: {
+            kind: "member.activated",
+            firstContact: {
+              channel: "linq",
+              identityId: "hbidx:phone:v1:test",
+              threadId: "chat_123",
+              threadIsDirect: true,
+            },
+            userId: "member_linq_bootstrap",
+          },
+          eventId: "evt_activation_linq_bootstrap",
+          occurredAt: "2026-03-26T12:00:00.000Z",
+        },
+      });
+      const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-linq-bootstrap-"));
+      cleanupPaths.push(workspaceRoot);
+      const restored = await restoreHostedExecutionContext({
+        agentStateBundle: decodeHostedBundleBase64(result.bundles.agentState),
+        vaultBundle: Buffer.from(result.bundles.vault!, "base64"),
+        workspaceRoot,
+      });
+      const automationState = await readAssistantAutomationState(restored.assistantStateRoot);
+
+      expect(result.result.summary).toContain("seeded explicit hosted assistant config (openai-compatible)");
+      expect(automationState.autoReplyChannels).toContain("linq");
+    } finally {
+      restoreEnvVars(previousHostedAssistantEnv);
+    }
+  });
+
+  it("preserves managed Linq auto-reply on repeated activation after Linq bootstrap", async () => {
+    const previousHostedAssistantEnv = setHostedAssistantSeedEnv();
+
+    try {
+      const firstActivation = await runHostedExecutionJob({
+        bundles: {
+          agentState: null,
+          vault: null,
+        },
+        dispatch: {
+          event: {
+            kind: "member.activated",
+            firstContact: {
+              channel: "linq",
+              identityId: "hbidx:phone:v1:test",
+              threadId: "chat_123",
+              threadIsDirect: true,
+            },
+            userId: "member_linq_bootstrap",
+          },
+          eventId: "evt_activation_linq_bootstrap_first",
+          occurredAt: "2026-03-26T12:00:00.000Z",
+        },
+      });
+
+      const secondActivation = await runHostedExecutionJob({
+        bundles: firstActivation.bundles,
+        dispatch: {
+          event: {
+            kind: "member.activated",
+            userId: "member_linq_bootstrap",
+          },
+          eventId: "evt_activation_linq_bootstrap_second",
+          occurredAt: "2026-03-26T12:05:00.000Z",
+        },
+      });
+
+      const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-linq-bootstrap-replay-"));
+      cleanupPaths.push(workspaceRoot);
+      const restored = await restoreHostedExecutionContext({
+        agentStateBundle: decodeHostedBundleBase64(secondActivation.bundles.agentState),
+        vaultBundle: Buffer.from(secondActivation.bundles.vault!, "base64"),
+        workspaceRoot,
+      });
+      const automationState = await readAssistantAutomationState(restored.assistantStateRoot);
+
+      expect(secondActivation.result.summary).toContain("reused explicit hosted assistant config (openai-compatible)");
+      expect(automationState.autoReplyChannels).toContain("linq");
+    } finally {
       restoreEnvVars(previousHostedAssistantEnv);
     }
   });
