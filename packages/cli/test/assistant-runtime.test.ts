@@ -5068,11 +5068,12 @@ test('scanAssistantAutoReplyOnce forwards multimodal content for photo-only capt
   })
 })
 
-test('scanAssistantAutoReplyOnce skips photo-only captures when the configured provider cannot consume rich user content', async () => {
+test('scanAssistantAutoReplyOnce keeps photo-only multimodal content when Codex CLI is the configured provider', async () => {
   const { homeRoot, inboxServices, vaultRoot } =
     await createPhotoOnlyAutoReplyFixture(
       'murph-auto-reply-text-only-provider-',
     )
+  mockSuccessfulPhotoOnlyAutoReply()
 
   await withTemporaryHome(homeRoot, async () => {
     await saveAssistantOperatorDefaultsPatch(
@@ -5105,24 +5106,29 @@ test('scanAssistantAutoReplyOnce skips photo-only captures when the configured p
     assertAssistantAutoReplyScanResult(result, {
       considered: 1,
       failed: 0,
-      replied: 0,
-      skipped: 1,
+      replied: 1,
+      skipped: 0,
     })
-    assert.equal(runtimeMocks.executeAssistantProviderTurn.mock.calls.length, 0)
+    assert.equal(runtimeMocks.executeAssistantProviderTurn.mock.calls.length, 1)
+    const providerCall = runtimeMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]
+    assert.equal(providerCall?.provider, 'codex-cli')
+    assert.equal(Array.isArray(providerCall?.userMessageContent), true)
+    assert.equal(providerCall?.userMessageContent?.[2]?.type, 'image')
+    assert.deepEqual(
+      providerCall?.userMessageContent?.[2]?.image,
+      PHOTO_ONLY_ATTACHMENT_BUFFER,
+    )
     assert.equal(
-      events.some(
-        (event) =>
-          event.type === 'capture.reply-skipped' &&
-          event.captureId === PHOTO_ONLY_CAPTURE_ID &&
-          event.details ===
-            'capture has image/PDF evidence but the configured assistant provider only accepts text input',
+      providerCall?.userPrompt.includes(
+        'No parsed attachment text is available. Use attached image or PDF evidence if present.',
       ),
       true,
     )
+    assert.equal(events.some((event) => event.type === 'capture.reply-skipped'), false)
   })
 })
 
-test('scanAssistantAutoReplyOnce reroutes photo-only captures to a multimodal failover provider when one is configured', async () => {
+test('scanAssistantAutoReplyOnce keeps the primary Codex route for photo-only captures even when a multimodal failover is configured', async () => {
   const { homeRoot, inboxServices, vaultRoot } =
     await createPhotoOnlyAutoReplyFixture(
       'murph-auto-reply-rich-failover-',
@@ -5180,14 +5186,14 @@ test('scanAssistantAutoReplyOnce reroutes photo-only captures to a multimodal fa
       skipped: 0,
     })
     const providerCall = runtimeMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]
-    assert.equal(providerCall?.provider, 'openai-compatible')
-    assert.equal(providerCall?.apiKeyEnv, 'OLLAMA_API_KEY')
-    assert.equal(providerCall?.approvalPolicy, null)
-    assert.equal(providerCall?.baseUrl, 'http://127.0.0.1:11434/v1')
+    assert.equal(providerCall?.provider, 'codex-cli')
+    assert.equal(providerCall?.apiKeyEnv, undefined)
+    assert.equal(providerCall?.approvalPolicy, 'never')
+    assert.equal(providerCall?.baseUrl, undefined)
     assert.equal(providerCall?.codexCommand, undefined)
-    assert.equal(providerCall?.model, 'gpt-oss:20b')
-    assert.equal(providerCall?.providerName, 'ollama')
-    assert.equal(providerCall?.sandbox, null)
+    assert.equal(providerCall?.model, 'gpt-5.4-mini')
+    assert.equal(providerCall?.providerName, undefined)
+    assert.equal(providerCall?.sandbox, 'danger-full-access')
     assert.equal(Array.isArray(providerCall?.userMessageContent), true)
     assert.equal(providerCall?.userMessageContent?.[2]?.type, 'image')
   })

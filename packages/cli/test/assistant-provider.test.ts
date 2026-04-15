@@ -667,6 +667,50 @@ test('executeAssistantProviderTurn dispatches to the Codex adapter and preserves
   })
 })
 
+test('executeAssistantProviderTurn forwards image attachments to the Codex adapter but omits unsupported files', async () => {
+  const imageBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47])
+  providerMocks.executeCodexPrompt.mockResolvedValue({
+    finalMessage: 'assistant reply',
+    jsonEvents: [],
+    sessionId: 'thread-456',
+    stderr: '',
+    stdout: '',
+  })
+
+  await executeAssistantProviderTurn({
+    provider: 'codex-cli',
+    workingDirectory: '/tmp/vault',
+    userPrompt: 'Use the attached evidence.',
+    userMessageContent: [
+      {
+        type: 'text',
+        text: 'Photo from Telegram.',
+      },
+      {
+        type: 'image',
+        image: imageBytes,
+        mediaType: 'image/png',
+        mimeType: 'image/png',
+      },
+      {
+        type: 'file',
+        data: new Uint8Array([1, 2, 3]),
+        filename: 'report.pdf',
+        mediaType: 'application/pdf',
+      },
+    ],
+  })
+
+  const call = providerMocks.executeCodexPrompt.mock.calls[0]?.[0]
+  assert.deepEqual(call?.images, [
+    {
+      data: imageBytes,
+      mimeType: 'image/png',
+    },
+  ])
+  assert.match(call?.prompt ?? '', /Use the attached evidence\./u)
+})
+
 test('executeAssistantProviderTurnAttempt collects provider-agnostic activity labels from Codex progress events', async () => {
   const onEvent = vi.fn()
   providerMocks.executeCodexPrompt.mockImplementation(async (input: { onProgress?: Function }) => {
