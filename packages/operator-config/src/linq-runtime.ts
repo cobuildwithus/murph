@@ -13,7 +13,11 @@ import {
   readJsonErrorResponse,
   requestJsonWithRetry,
 } from './http-json-retry.js'
-import { errorMessage, normalizeNullableString } from './text/shared.js'
+import {
+  errorMessage,
+  normalizeNullableString,
+  redactSensitivePathSegments,
+} from './text/shared.js'
 import { VaultCliError } from './vault-cli-errors.js'
 
 const DEFAULT_LINQ_API_BASE_URL = 'https://api.linqapp.com/api/partner/v3'
@@ -416,7 +420,7 @@ function resolveLinqRequest(input: {
       authorization: `Bearer ${token}`,
       ...(body ? { 'content-type': 'application/json' } : {}),
     },
-    url: new URL(input.path.replace(/^\//u, ''), `${baseUrl}/`).toString(),
+    url: buildLinqRequestUrl(baseUrl, input.path),
   }
 }
 
@@ -446,9 +450,10 @@ async function fetchLinqResponse(input: {
     createTransportError: ({ error, timedOut }) =>
       createLinqRequestError({
         details: input.details,
+        error,
+        requestOrigin: readRequestOrigin(input.url),
         method: input.method,
         path: input.path,
-        error,
         timedOut,
         retryable: shouldRetryLinqTransportFailure(input.method),
       }),
@@ -486,25 +491,31 @@ async function createLinqHttpError(
 
 function createLinqRequestError(input: {
   details: LinqSafeRequestDetails
+  error: unknown
+  requestOrigin: string | null
   method: LinqHttpMethod
   path: string
-  error: unknown
   timedOut: boolean
   retryable: boolean
 }): VaultCliError {
+  const transportError = readTransportErrorDetail(input.error)
   const baseMessage = input.timedOut
     ? `Linq request ${input.method} ${input.path} timed out after ${LINQ_HTTP_TIMEOUT_MS}ms.`
     : `Linq request ${input.method} ${input.path} failed before a response was returned.`
+  const message = transportError
+    ? `${baseMessage} Cause: ${transportError}.`
+    : baseMessage
 
   return new VaultCliError(
     'LINQ_API_REQUEST_FAILED',
-    baseMessage,
+    message,
     {
       ...input.details,
-      error: errorMessage(input.error),
+      error: transportError ?? errorMessage(input.error),
       failureStage: 'transport',
       method: input.method,
       path: input.path,
+      ...(input.requestOrigin ? { requestOrigin: input.requestOrigin } : {}),
       retryable: input.retryable,
       timeoutMs: LINQ_HTTP_TIMEOUT_MS,
       timedOut: input.timedOut,
@@ -558,8 +569,52 @@ function extractLinqErrorMessage(payload: unknown, rawText: string | null): stri
   return normalizeNullableString(rawText)
 }
 
+function readRequestOrigin(value: string): string | null {
+  try {
+    return new URL(value).origin
+  } catch {
+    return null
+  }
+}
+
+function readTransportErrorDetail(error: unknown): string | null {
+  const seenMessages = new Set<string>()
+  const messages: string[] = []
+  let current: unknown = error
+  let depth = 0
+
+  while (current !== null && current !== undefined && depth < 4) {
+    const message = normalizeNullableString(redactSensitivePathSegments(errorMessage(current)))
+    if (message && !seenMessages.has(message)) {
+      seenMessages.add(message)
+      messages.push(message)
+    }
+
+    if (typeof current !== 'object' || current === null || !('cause' in current)) {
+      break
+    }
+
+    current = (current as { cause?: unknown }).cause
+    depth += 1
+  }
+
+  return messages.length > 0 ? messages.join(' <- ') : null
+}
+
 function normalizeLinqBaseUrl(value: string): string {
   return normalizeRequiredString(value, 'base url').replace(/\/+$/u, '')
+}
+
+function buildLinqRequestUrl(baseUrl: string, path: string): string {
+  const url = new URL(normalizeLinqBaseUrl(baseUrl))
+  const basePathname = url.pathname.replace(/\/+$/u, '')
+  const requestPathname = normalizeRequiredString(path, 'path').replace(/^\/+/u, '')
+
+  url.pathname = `${basePathname}/${requestPathname}`
+  url.search = ''
+  url.hash = ''
+
+  return url.toString()
 }
 
 function normalizeRequiredString(value: string | null | undefined, label: string): string {

@@ -3,6 +3,7 @@ import path from "node:path";
 
 import { VAULT_LAYOUT } from "@murphai/contracts";
 import {
+  emitHostedExecutionStructuredLog,
   type HostedExecutionDispatchRequest,
   type HostedExecutionMemberChannels,
 } from "@murphai/hosted-execution";
@@ -10,6 +11,8 @@ import {
   createAssistantFoodAutoLogHooks,
 } from "@murphai/assistant-engine";
 import {
+  enableAssistantAutoReplyChannelLocal,
+  readAssistantAutomationState,
   reconcileManagedAssistantAutoReplyChannelsLocal,
 } from "@murphai/assistant-engine/assistant-state";
 import { createIntegratedInboxServices } from "@murphai/inbox-services";
@@ -46,6 +49,17 @@ type HostedAssistantRuntimeState = Pick<
   | "linqAutoReplyEnabled"
   | "telegramAutoReplyEnabled"
 >;
+
+type HostedAssistantAutoReplyChannelState = Pick<
+  HostedBootstrapResult,
+  "emailAutoReplyEnabled" | "linqAutoReplyEnabled" | "telegramAutoReplyEnabled"
+>;
+
+const EMPTY_HOSTED_AUTO_REPLY_CHANNEL_STATE: HostedAssistantAutoReplyChannelState = {
+  emailAutoReplyEnabled: false,
+  linqAutoReplyEnabled: false,
+  telegramAutoReplyEnabled: false,
+};
 
 export async function prepareHostedDispatchContext(
   vaultRoot: string,
@@ -125,12 +139,16 @@ async function bootstrapHostedAssistantRuntimeState(
         resolveHostedDispatchMemberChannels(dispatch),
         channelCapabilities,
         assistantBootstrap.configured,
+        {
+          dispatch,
+        },
       )
-    : {
-        emailAutoReplyEnabled: false,
-        linqAutoReplyEnabled: false,
-        telegramAutoReplyEnabled: false,
-      };
+    : await ensureHostedAssistantAutoReplyChannelForDispatch(
+        vaultRoot,
+        dispatch,
+        channelCapabilities,
+        assistantBootstrap.configured,
+      );
 
   return {
     assistantConfigStatus: normalizeHostedAssistantBootstrapStatus(assistantBootstrap),
@@ -139,6 +157,71 @@ async function bootstrapHostedAssistantRuntimeState(
     assistantSeeded: assistantBootstrap.seeded,
     ...reconciledChannelCapabilities,
   };
+}
+
+async function ensureHostedAssistantAutoReplyChannelForDispatch(
+  vaultRoot: string,
+  dispatch: HostedExecutionDispatchRequest,
+  channelCapabilities: HostedAssistantRuntimeChannelCapabilities,
+  assistantConfigured: boolean,
+): Promise<HostedAssistantAutoReplyChannelState> {
+  const target = resolveHostedAutoReplySelfHealTarget(dispatch, channelCapabilities);
+
+  if (target === null) {
+    return EMPTY_HOSTED_AUTO_REPLY_CHANNEL_STATE;
+  }
+
+  if (!assistantConfigured || !target.capabilityReady) {
+    emitHostedExecutionStructuredLog({
+      component: "runtime",
+      details: {
+        assistantConfigured,
+        autoReplyChanged: false,
+        capabilityReady: target.capabilityReady,
+        channel: target.channel,
+        reason: !assistantConfigured ? "assistant_unconfigured" : "channel_unavailable",
+      },
+      dispatch,
+      message: "Hosted assistant auto-reply self-heal skipped.",
+      phase: "dispatch.running",
+    });
+    return EMPTY_HOSTED_AUTO_REPLY_CHANNEL_STATE;
+  }
+
+  const beforeState = await readAssistantAutomationState(vaultRoot);
+  const beforeEnabled = beforeState.autoReply.some((entry) => entry.channel === target.channel);
+
+  if (!beforeEnabled) {
+    await enableAssistantAutoReplyChannelLocal({
+      channel: target.channel,
+      isManagedChannel: isHostedManagedAutoReplyChannel,
+      vault: vaultRoot,
+    });
+  }
+
+  const afterState = beforeEnabled ? beforeState : await readAssistantAutomationState(vaultRoot);
+  const afterEnabled = afterState.autoReply.some((entry) => entry.channel === target.channel);
+
+  emitHostedExecutionStructuredLog({
+    component: "runtime",
+    details: {
+      assistantConfigured,
+      autoReplyChanged: beforeEnabled !== afterEnabled,
+      autoReplyChannels: afterState.autoReply.map((entry) => entry.channel).join(","),
+      autoReplyCursorSummary: afterState.autoReply.map((entry) =>
+        `${entry.channel}:${entry.cursor?.captureId ?? "null"}`
+      ).join(","),
+      capabilityReady: target.capabilityReady,
+      channel: target.channel,
+      previouslyEnabled: beforeEnabled,
+      selfHealEnabled: afterEnabled,
+    },
+    dispatch,
+    message: "Hosted assistant auto-reply self-heal evaluated.",
+    phase: "dispatch.running",
+  });
+
+  return resolveHostedAssistantAutoReplyState(afterState.autoReply.map((entry) => entry.channel));
 }
 
 export async function readHostedAssistantRuntimeState(): Promise<Pick<
@@ -169,6 +252,9 @@ export async function reconcileHostedAssistantChannelState(
   memberChannels: HostedExecutionMemberChannels,
   channelCapabilities: HostedAssistantRuntimeChannelCapabilities,
   assistantConfigured: boolean,
+  options?: {
+    dispatch?: HostedExecutionDispatchRequest;
+  },
 ): Promise<Pick<
   HostedBootstrapResult,
   "emailAutoReplyEnabled" | "linqAutoReplyEnabled" | "telegramAutoReplyEnabled"
@@ -182,21 +268,67 @@ export async function reconcileHostedAssistantChannelState(
     && memberChannels.telegram
     && channelCapabilities.telegramBotConfigured;
 
-  await reconcileManagedAssistantAutoReplyChannelsLocal({
-    desiredChannels: resolveHostedAssistantAutoReplyChannels({
-      emailAutoReplyEnabled,
-      linqAutoReplyEnabled,
-      telegramAutoReplyEnabled,
-    }),
+  const desiredChannels = resolveHostedAssistantAutoReplyChannels({
+    emailAutoReplyEnabled,
+    linqAutoReplyEnabled,
+    telegramAutoReplyEnabled,
+  });
+  const reconciliation = await reconcileManagedAssistantAutoReplyChannelsLocal({
+    desiredChannels,
     isManagedChannel: isHostedManagedAutoReplyChannel,
     vault: vaultRoot,
   });
+  if (options?.dispatch) {
+    emitHostedExecutionStructuredLog({
+      component: "runtime",
+      details: {
+        assistantConfigured,
+        autoReplyChanged: reconciliation.changed,
+        autoReplyChannels: reconciliation.state.autoReply.map((entry) => entry.channel).join(","),
+        autoReplyCursorSummary: reconciliation.state.autoReply.map((entry) =>
+          `${entry.channel}:${entry.cursor?.captureId ?? "null"}`
+        ).join(","),
+        desiredAutoReplyChannels: desiredChannels.join(","),
+      },
+      dispatch: options.dispatch,
+      message: "Hosted assistant auto-reply channels reconciled.",
+      phase: "dispatch.running",
+    });
+  }
 
   return {
     emailAutoReplyEnabled,
     linqAutoReplyEnabled,
     telegramAutoReplyEnabled,
   };
+}
+
+function resolveHostedAutoReplySelfHealTarget(
+  dispatch: HostedExecutionDispatchRequest,
+  channelCapabilities: HostedAssistantRuntimeChannelCapabilities,
+): {
+  capabilityReady: boolean;
+  channel: HostedAutoReplyChannel;
+} | null {
+  switch (dispatch.event.kind) {
+    case "email.message.received":
+      return {
+        capabilityReady: channelCapabilities.emailSendReady,
+        channel: "email",
+      };
+    case "linq.message.received":
+      return {
+        capabilityReady: true,
+        channel: "linq",
+      };
+    case "telegram.message.received":
+      return {
+        capabilityReady: channelCapabilities.telegramBotConfigured,
+        channel: "telegram",
+      };
+    default:
+      return null;
+  }
 }
 
 function isHostedManagedAutoReplyChannel(channel: string): channel is HostedAutoReplyChannel {
@@ -223,6 +355,18 @@ function resolveHostedAssistantAutoReplyChannels(input: {
   }
 
   return nextChannels;
+}
+
+function resolveHostedAssistantAutoReplyState(
+  autoReplyChannels: readonly string[],
+): HostedAssistantAutoReplyChannelState {
+  const channelSet = new Set(autoReplyChannels);
+
+  return {
+    emailAutoReplyEnabled: channelSet.has("email"),
+    linqAutoReplyEnabled: channelSet.has("linq"),
+    telegramAutoReplyEnabled: channelSet.has("telegram"),
+  };
 }
 
 function resolveHostedDispatchMemberChannels(

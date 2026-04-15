@@ -434,6 +434,187 @@ test("hosted activation replay preserves managed Linq auto-reply after Linq boot
   }
 });
 
+test("hosted Linq inbound dispatch self-heals managed Linq auto-reply when the hosted assistant is configured", async () => {
+  const { cleanup, operatorHomeRoot, vaultRoot } = await createHostedRuntimeWorkspace("hosted-runtime-context-");
+  const previousHostedAssistantEnv = setHostedAssistantSeedEnv();
+
+  try {
+    await withOperatorHomeRoot(operatorHomeRoot, async () => {
+      await prepareHostedDispatchContext(
+        vaultRoot,
+        {
+          event: {
+            kind: "member.activated",
+            memberChannels: {
+              email: false,
+              linq: false,
+              telegram: false,
+            },
+            userId: "member_123",
+          },
+          eventId: "evt_activation_without_channels",
+          occurredAt: "2026-03-28T09:05:00.000Z",
+        },
+        buildHostedAssistantSeedRuntimeEnv(),
+        HOSTED_RUNTIME_RESOLVED_CONFIG,
+      );
+
+      assert.deepEqual((await readAutomationState(vaultRoot)).autoReply, []);
+
+      const result = await prepareHostedDispatchContext(
+        vaultRoot,
+        {
+          event: {
+            kind: "linq.message.received",
+            linqEvent: {
+              data: {
+                chat_id: "chat_123",
+              },
+            },
+            phoneLookupKey: "phone_lookup_key",
+            userId: "member_123",
+          },
+          eventId: "evt_linq_message_received",
+          occurredAt: "2026-03-28T09:10:00.000Z",
+        },
+        buildHostedAssistantSeedRuntimeEnv(),
+        HOSTED_RUNTIME_RESOLVED_CONFIG,
+      );
+
+      assert.equal(result, null);
+    });
+
+    assert.deepEqual((await readAutomationState(vaultRoot)).autoReply, [
+      {
+        channel: "linq",
+        cursor: null,
+      },
+    ]);
+  } finally {
+    restoreEnvVar("HOSTED_ASSISTANT_MODEL", previousHostedAssistantEnv.HOSTED_ASSISTANT_MODEL);
+    restoreEnvVar("HOSTED_ASSISTANT_PROVIDER", previousHostedAssistantEnv.HOSTED_ASSISTANT_PROVIDER);
+    await cleanup();
+  }
+});
+
+test("hosted Linq inbound dispatch self-heal preserves existing managed channels", async () => {
+  const { cleanup, operatorHomeRoot, vaultRoot } = await createHostedRuntimeWorkspace("hosted-runtime-context-");
+  const previousHostedAssistantEnv = setHostedAssistantSeedEnv();
+
+  try {
+    await withOperatorHomeRoot(operatorHomeRoot, async () => {
+      await prepareHostedDispatchContext(
+        vaultRoot,
+        {
+          event: {
+            kind: "member.activated",
+            memberChannels: {
+              email: true,
+              linq: false,
+              telegram: false,
+            },
+            userId: "member_123",
+          },
+          eventId: "evt_activation_email_only",
+          occurredAt: "2026-03-28T09:05:00.000Z",
+        },
+        buildHostedAssistantSeedRuntimeEnv(),
+        HOSTED_RUNTIME_RESOLVED_CONFIG,
+      );
+
+      const result = await prepareHostedDispatchContext(
+        vaultRoot,
+        {
+          event: {
+            kind: "linq.message.received",
+            linqEvent: {
+              data: {
+                chat_id: "chat_123",
+              },
+            },
+            phoneLookupKey: "phone_lookup_key",
+            userId: "member_123",
+          },
+          eventId: "evt_linq_message_received",
+          occurredAt: "2026-03-28T09:10:00.000Z",
+        },
+        buildHostedAssistantSeedRuntimeEnv(),
+        HOSTED_RUNTIME_RESOLVED_CONFIG,
+      );
+
+      assert.equal(result, null);
+    });
+
+    assert.deepEqual((await readAutomationState(vaultRoot)).autoReply, [
+      {
+        channel: "email",
+        cursor: null,
+      },
+      {
+        channel: "linq",
+        cursor: null,
+      },
+    ]);
+  } finally {
+    restoreEnvVar("HOSTED_ASSISTANT_MODEL", previousHostedAssistantEnv.HOSTED_ASSISTANT_MODEL);
+    restoreEnvVar("HOSTED_ASSISTANT_PROVIDER", previousHostedAssistantEnv.HOSTED_ASSISTANT_PROVIDER);
+    await cleanup();
+  }
+});
+
+test("hosted Linq inbound dispatch self-heal does not enable auto-reply when the hosted assistant is not configured", async () => {
+  const { cleanup, operatorHomeRoot, vaultRoot } = await createHostedRuntimeWorkspace("hosted-runtime-context-");
+
+  try {
+    await withOperatorHomeRoot(operatorHomeRoot, async () => {
+      await prepareHostedDispatchContext(
+        vaultRoot,
+        {
+          event: {
+            kind: "member.activated",
+            memberChannels: {
+              email: false,
+              linq: false,
+              telegram: false,
+            },
+            userId: "member_123",
+          },
+          eventId: "evt_activation_without_config",
+          occurredAt: "2026-03-28T09:05:00.000Z",
+        },
+        {},
+        HOSTED_RUNTIME_RESOLVED_CONFIG,
+      );
+
+      const result = await prepareHostedDispatchContext(
+        vaultRoot,
+        {
+          event: {
+            kind: "linq.message.received",
+            linqEvent: {
+              data: {
+                chat_id: "chat_123",
+              },
+            },
+            phoneLookupKey: "phone_lookup_key",
+            userId: "member_123",
+          },
+          eventId: "evt_linq_message_received_without_config",
+          occurredAt: "2026-03-28T09:10:00.000Z",
+        },
+        {},
+        HOSTED_RUNTIME_RESOLVED_CONFIG,
+      );
+
+      assert.equal(result, null);
+    });
+
+    assert.deepEqual((await readAutomationState(vaultRoot)).autoReply, []);
+  } finally {
+    await cleanup();
+  }
+});
+
 test("hosted dispatch context does not change auto-reply state on non-channel follow-up events", async () => {
   const { cleanup, operatorHomeRoot, vaultRoot } = await createHostedRuntimeWorkspace("hosted-runtime-context-");
 
