@@ -5,14 +5,14 @@ import type { HostedMemberSnapshot } from "@/src/lib/hosted-onboarding/hosted-me
 const mocks = vi.hoisted(() => ({
   countHostedMemberHomeLinqBindingsByRecipientPhone: vi.fn(),
   getHostedOnboardingEnvironment: vi.fn(),
-  upsertHostedMemberHomeLinqBinding: vi.fn(),
-  upsertHostedMemberHomeLinqRecipientPhone: vi.fn(),
+  upsertHostedMemberHomeLinqBindingTx: vi.fn(),
+  upsertHostedMemberHomeLinqRecipientPhoneTx: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
   countHostedMemberHomeLinqBindingsByRecipientPhone: mocks.countHostedMemberHomeLinqBindingsByRecipientPhone,
-  upsertHostedMemberHomeLinqBinding: mocks.upsertHostedMemberHomeLinqBinding,
-  upsertHostedMemberHomeLinqRecipientPhone: mocks.upsertHostedMemberHomeLinqRecipientPhone,
+  upsertHostedMemberHomeLinqBindingTx: mocks.upsertHostedMemberHomeLinqBindingTx,
+  upsertHostedMemberHomeLinqRecipientPhoneTx: mocks.upsertHostedMemberHomeLinqRecipientPhoneTx,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", async () => {
@@ -36,8 +36,8 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
       linqConversationPhoneNumbers: [],
       linqMaxActiveMembersPerConversationPhone: null,
     });
-    mocks.upsertHostedMemberHomeLinqBinding.mockResolvedValue(undefined);
-    mocks.upsertHostedMemberHomeLinqRecipientPhone.mockResolvedValue(undefined);
+    mocks.upsertHostedMemberHomeLinqBindingTx.mockResolvedValue(undefined);
+    mocks.upsertHostedMemberHomeLinqRecipientPhoneTx.mockResolvedValue(undefined);
   });
 
   it("clears stale pending state when a durable home chat already exists", async () => {
@@ -60,8 +60,8 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
       },
     });
 
-    expect(mocks.upsertHostedMemberHomeLinqRecipientPhone).not.toHaveBeenCalled();
-    expect(mocks.upsertHostedMemberHomeLinqBinding).toHaveBeenCalledWith({
+    expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberHomeLinqBindingTx).toHaveBeenCalledWith({
       clearPending: true,
       linqChatId: "chat_home",
       memberId: "member_123",
@@ -99,8 +99,8 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
       },
     });
 
-    expect(mocks.upsertHostedMemberHomeLinqRecipientPhone).not.toHaveBeenCalled();
-    expect(mocks.upsertHostedMemberHomeLinqBinding).toHaveBeenCalledWith({
+    expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberHomeLinqBindingTx).toHaveBeenCalledWith({
       clearPending: true,
       linqChatId: "chat_pending",
       memberId: "member_123",
@@ -139,8 +139,8 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
       },
     });
 
-    expect(mocks.upsertHostedMemberHomeLinqBinding).not.toHaveBeenCalled();
-    expect(mocks.upsertHostedMemberHomeLinqRecipientPhone).toHaveBeenCalledWith({
+    expect(mocks.upsertHostedMemberHomeLinqBindingTx).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).toHaveBeenCalledWith({
       clearPending: true,
       memberId: "member_123",
       prisma: {} as never,
@@ -162,8 +162,8 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
       httpStatus: 500,
     });
 
-    expect(mocks.upsertHostedMemberHomeLinqRecipientPhone).not.toHaveBeenCalled();
-    expect(mocks.upsertHostedMemberHomeLinqBinding).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberHomeLinqBindingTx).not.toHaveBeenCalled();
   });
 });
 

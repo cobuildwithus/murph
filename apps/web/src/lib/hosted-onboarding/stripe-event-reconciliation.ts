@@ -364,7 +364,7 @@ async function processClaimedHostedStripeEvent(
       result = await processHostedStripeEventRecord(
         stripeEvent,
         processingContext,
-        transaction as Prisma.TransactionClient,
+        transaction,
       );
     });
     await runHostedMemberActivationPostCommitEffects(result);

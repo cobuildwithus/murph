@@ -23,7 +23,7 @@ import {
 import {
   ensureHostedMemberForPhone,
 } from "@/src/lib/hosted-onboarding/member-identity-service";
-import { upsertHostedMemberHomeLinqBinding } from "@/src/lib/hosted-onboarding/hosted-member-routing-store";
+import { upsertHostedMemberHomeLinqBindingTx } from "@/src/lib/hosted-onboarding/hosted-member-routing-store";
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", async () => {
   const actual = await vi.importActual<typeof import("@/src/lib/hosted-onboarding/runtime")>(
@@ -115,7 +115,7 @@ describe("ensureHostedMemberForPhone", () => {
 
       return null;
     });
-    const prisma = {
+    const prisma = asRootPrisma({
       hostedMember: {
         findUnique: vi.fn().mockResolvedValue(existingMember),
       },
@@ -124,11 +124,11 @@ describe("ensureHostedMemberForPhone", () => {
         findUnique: identityFindUnique,
         upsert: identityUpsert,
       },
-    } as never;
+    });
 
     await ensureHostedMemberForPhone({
       phoneNumber: "+15551234567",
-      prisma,
+      prisma: prisma as never,
     });
 
     expect(identityUpsert).toHaveBeenCalledWith(expect.objectContaining({
@@ -182,7 +182,7 @@ describe("ensureHostedMemberForPhone", () => {
       id: "member_123",
       suspendedAt: null,
     }));
-    const prisma = {
+    const prisma = asRootPrisma({
       hostedMember: {
         create,
         findUnique: vi.fn().mockResolvedValue(null),
@@ -192,11 +192,11 @@ describe("ensureHostedMemberForPhone", () => {
         findUnique: vi.fn().mockResolvedValue(null),
         upsert: identityUpsert,
       },
-    } as never;
+    });
 
     await ensureHostedMemberForPhone({
       phoneNumber: "+15551234567",
-      prisma,
+      prisma: prisma as never,
     });
 
     expect(create).toHaveBeenCalledWith({
@@ -265,7 +265,7 @@ describe("ensureHostedMemberForPhone", () => {
         code: "P2002",
       }),
     );
-    const prisma = {
+    const prisma = asRootPrisma({
       hostedMember: {
         create,
         findUnique: vi.fn()
@@ -277,11 +277,11 @@ describe("ensureHostedMemberForPhone", () => {
         findUnique: identityFindUnique,
         upsert: identityUpsert,
       },
-    } as never;
+    });
 
     await ensureHostedMemberForPhone({
       phoneNumber: "+15551234567",
-      prisma,
+      prisma: prisma as never,
     });
 
     expect(create).toHaveBeenCalledTimes(1);
@@ -297,16 +297,16 @@ describe("ensureHostedMemberForPhone", () => {
   });
 
   it("rejects invalid phone numbers", async () => {
-    const prisma = {
+    const prisma = asRootPrisma({
       hostedMember: {
         findUnique: vi.fn(),
       },
-    } as never;
+    });
 
     await expect(
       ensureHostedMemberForPhone({
         phoneNumber: "not-a-phone",
-        prisma,
+        prisma: prisma as never,
       }),
     ).rejects.toMatchObject({
       code: "PHONE_NUMBER_INVALID",
@@ -337,19 +337,19 @@ describe("prepareHostedInvitePhoneCode", () => {
       })),
       update: vi.fn().mockResolvedValue({}),
     };
-    const prisma = {
+    const prisma = asRootPrisma({
       $queryRaw: vi.fn().mockResolvedValue([]),
       hostedInvite: {
         findUnique: vi.fn().mockResolvedValue(makeInviteRecord()),
       },
       hostedMemberIdentity,
-    } as never;
+    });
 
     await expect(
       prepareHostedInvitePhoneCode({
         inviteCode: "invite-code",
         now: NOW,
-        prisma,
+        prisma: prisma as never,
       }),
     ).resolves.toEqual({
       phoneNumber: "+15551234567",
@@ -368,7 +368,7 @@ describe("prepareHostedInvitePhoneCode", () => {
   });
 
   it("falls back to manual entry when the stored signup phone is unavailable", async () => {
-    const prisma = {
+    const prisma = asRootPrisma({
       $queryRaw: vi.fn().mockResolvedValue([]),
       hostedInvite: {
         findUnique: vi.fn().mockResolvedValue(makeInviteRecord()),
@@ -380,13 +380,13 @@ describe("prepareHostedInvitePhoneCode", () => {
         })),
         update: vi.fn(),
       },
-    } as never;
+    });
 
     await expect(
       prepareHostedInvitePhoneCode({
         inviteCode: "invite-code",
         now: NOW,
-        prisma,
+        prisma: prisma as never,
       }),
     ).rejects.toMatchObject({
       code: "SIGNUP_PHONE_UNAVAILABLE",
@@ -403,19 +403,19 @@ describe("prepareHostedInvitePhoneCode", () => {
       })),
       update: vi.fn().mockResolvedValue({}),
     };
-    const prisma = {
+    const prisma = asRootPrisma({
       $queryRaw: vi.fn().mockResolvedValue([]),
       hostedInvite: {
         findUnique: vi.fn().mockResolvedValue(makeInviteRecord()),
       },
       hostedMemberIdentity,
-    } as never;
+    });
 
     await expect(
       prepareHostedInvitePhoneCode({
         inviteCode: "invite-code",
         now: NOW,
-        prisma,
+        prisma: prisma as never,
       }),
     ).resolves.toEqual({
       phoneNumber: "+15557654321",
@@ -425,7 +425,7 @@ describe("prepareHostedInvitePhoneCode", () => {
 
   it("rate limits repeated invite send-code requests", async () => {
     const update = vi.fn();
-    const prisma = {
+    const prisma = asRootPrisma({
       $queryRaw: vi.fn().mockResolvedValue([]),
       hostedInvite: {
         findUnique: vi.fn().mockResolvedValue(makeInviteRecord()),
@@ -438,13 +438,13 @@ describe("prepareHostedInvitePhoneCode", () => {
         })),
         update,
       },
-    } as never;
+    });
 
     await expect(
       prepareHostedInvitePhoneCode({
         inviteCode: "invite-code",
         now: new Date("2026-04-07T01:00:45.000Z"),
-        prisma,
+        prisma: prisma as never,
       }),
     ).rejects.toMatchObject({
       code: "PHONE_CODE_COOLDOWN",
@@ -466,19 +466,19 @@ describe("confirmHostedInvitePhoneCode", () => {
       })),
       update: vi.fn().mockResolvedValue({}),
     };
-    const prisma = {
+    const prisma = asRootPrisma({
       $queryRaw: vi.fn().mockResolvedValue([]),
       hostedInvite: {
         findUnique: vi.fn().mockResolvedValue(makeInviteRecord()),
       },
       hostedMemberIdentity,
-    } as never;
+    });
 
     await expect(
       confirmHostedInvitePhoneCode({
         inviteCode: "invite-code",
         now: new Date("2026-04-07T01:00:08.000Z"),
-        prisma,
+        prisma: prisma as never,
         sendAttemptId: "hbpc_confirm",
       }),
     ).resolves.toEqual({
@@ -499,7 +499,7 @@ describe("confirmHostedInvitePhoneCode", () => {
 
   it("rejects stale or mismatched invite send-code confirmations", async () => {
     const update = vi.fn();
-    const prisma = {
+    const prisma = asRootPrisma({
       $queryRaw: vi.fn().mockResolvedValue([]),
       hostedInvite: {
         findUnique: vi.fn().mockResolvedValue(makeInviteRecord()),
@@ -514,13 +514,13 @@ describe("confirmHostedInvitePhoneCode", () => {
         })),
         update,
       },
-    } as never;
+    });
 
     await expect(
       confirmHostedInvitePhoneCode({
         inviteCode: "invite-code",
         now: new Date("2026-04-07T01:00:20.000Z"),
-        prisma,
+        prisma: prisma as never,
         sendAttemptId: "hbpc_old",
       }),
     ).rejects.toMatchObject({
@@ -543,19 +543,19 @@ describe("abortHostedInvitePhoneCode", () => {
       })),
       update: vi.fn().mockResolvedValue({}),
     };
-    const prisma = {
+    const prisma = asRootPrisma({
       $queryRaw: vi.fn().mockResolvedValue([]),
       hostedInvite: {
         findUnique: vi.fn().mockResolvedValue(makeInviteRecord()),
       },
       hostedMemberIdentity,
-    } as never;
+    });
 
     await expect(
       abortHostedInvitePhoneCode({
         inviteCode: "invite-code",
         now: new Date("2026-04-07T01:00:05.000Z"),
-        prisma,
+        prisma: prisma as never,
         sendAttemptId: "hbpc_abort",
       }),
     ).resolves.toEqual({
@@ -575,7 +575,7 @@ describe("abortHostedInvitePhoneCode", () => {
 
   it("ignores stale abort requests so they cannot clear a later cooldown", async () => {
     const update = vi.fn();
-    const prisma = {
+    const prisma = asRootPrisma({
       $queryRaw: vi.fn().mockResolvedValue([]),
       hostedInvite: {
         findUnique: vi.fn().mockResolvedValue(makeInviteRecord()),
@@ -590,13 +590,13 @@ describe("abortHostedInvitePhoneCode", () => {
         })),
         update,
       },
-    } as never;
+    });
 
     await expect(
       abortHostedInvitePhoneCode({
         inviteCode: "invite-code",
         now: new Date("2026-04-07T01:00:05.000Z"),
-        prisma,
+        prisma: prisma as never,
         sendAttemptId: "hbpc_old",
       }),
     ).resolves.toEqual({
@@ -610,17 +610,17 @@ describe("upsertHostedMemberHomeLinqBinding", () => {
   it("stores the latest Linq home chat id in the routing table for future activation welcomes", async () => {
     const updateMany = vi.fn().mockResolvedValue({ count: 0 });
     const upsert = vi.fn().mockResolvedValue({});
-    const prisma = {
+    const prisma = asRootPrisma({
       hostedMemberRouting: {
         updateMany,
         upsert,
       },
-    } as never;
+    });
 
-    await upsertHostedMemberHomeLinqBinding({
+    await upsertHostedMemberHomeLinqBindingTx({
       linqChatId: "chat_new",
       memberId: "member_123",
-      prisma,
+      prisma: prisma as never,
       recipientPhone: "+15550100001",
     });
 
@@ -681,18 +681,18 @@ describe("upsertHostedMemberHomeLinqBinding", () => {
   it("rejects empty chat ids", async () => {
     const upsert = vi.fn();
     const updateMany = vi.fn();
-    const prisma = {
+    const prisma = asRootPrisma({
       hostedMemberRouting: {
         updateMany,
         upsert,
       },
-    } as never;
+    });
 
     await expect(
-      upsertHostedMemberHomeLinqBinding({
+      upsertHostedMemberHomeLinqBindingTx({
         linqChatId: null as never,
         memberId: "member_123",
-        prisma,
+        prisma: prisma as never,
         recipientPhone: null,
       }),
     ).rejects.toThrow("Hosted Linq routing requires a non-empty chat id.");
@@ -721,6 +721,15 @@ function makeInviteRecord() {
       },
     },
     memberId: "member_123",
+  };
+}
+
+function asRootPrisma<T extends object>(tx: T): T & {
+  $transaction: ReturnType<typeof vi.fn>;
+} {
+  return {
+    ...tx,
+    $transaction: vi.fn(async (callback: (innerTx: T) => Promise<unknown>) => callback(tx)),
   };
 }
 

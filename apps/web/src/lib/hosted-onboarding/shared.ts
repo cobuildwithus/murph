@@ -6,69 +6,9 @@ import { normalizeNullableString as normalizeDeviceSyncNullableString } from "..
 
 export { maskPhoneNumber, normalizePhoneNumber, normalizePhoneNumberForCountry } from "./phone";
 
-export type HostedOnboardingPrismaClient = PrismaClient | Prisma.TransactionClient;
-const HOSTED_ONBOARDING_TRANSACTION_MAX_WAIT_MS = 5_000;
-// Prisma omits `$transaction` from the TransactionClient type only at compile time.
-// At runtime, nested interactive transaction clients still expose `$transaction`.
-const PRISMA_TRANSACTION_SCOPE_CONTEXT = Symbol.for("prisma.client.transaction.scope_context");
-
-type PrismaTransactionScopeContext = {
-  kind: "nested";
-  scopeId: string;
-  scopeState: {
-    stack: string[];
-  };
-  txId: string;
-};
-
-export async function withHostedOnboardingTransaction<TResult>(
-  prisma: HostedOnboardingPrismaClient,
-  callback: (tx: Prisma.TransactionClient) => Promise<TResult>,
-): Promise<TResult> {
-  if (isPrismaInteractiveTransactionClient(prisma)) {
-    return callback(prisma);
-  }
-
-  if ("$transaction" in prisma) {
-    const prismaClient = prisma as PrismaClient;
-
-    return prismaClient.$transaction((tx) => callback(tx), {
-      maxWait: HOSTED_ONBOARDING_TRANSACTION_MAX_WAIT_MS,
-    });
-  }
-
-  return callback(prisma);
-}
-
-function isPrismaInteractiveTransactionClient(
-  prisma: HostedOnboardingPrismaClient,
-): prisma is Prisma.TransactionClient {
-  const scopeContext = (
-    prisma as HostedOnboardingPrismaClient & {
-      [PRISMA_TRANSACTION_SCOPE_CONTEXT]?: unknown;
-    }
-  )[PRISMA_TRANSACTION_SCOPE_CONTEXT];
-
-  return isPrismaTransactionScopeContext(scopeContext);
-}
-
-function isPrismaTransactionScopeContext(
-  value: unknown,
-): value is PrismaTransactionScopeContext {
-  if (!value || typeof value !== "object") {
-    return false;
-  }
-
-  const scopeContext = value as Partial<PrismaTransactionScopeContext>;
-
-  return (
-    scopeContext.kind === "nested"
-    && typeof scopeContext.txId === "string"
-    && typeof scopeContext.scopeId === "string"
-    && Boolean(scopeContext.scopeState)
-    && Array.isArray(scopeContext.scopeState?.stack)
-  );
-}
+export type HostedOnboardingReadClient = PrismaClient | Prisma.TransactionClient;
+export type HostedOnboardingPrismaClient = HostedOnboardingReadClient;
+export const HOSTED_ONBOARDING_TRANSACTION_OPTIONS = { maxWait: 5_000 } as const;
 
 export async function lockHostedMemberRow(
   tx: Prisma.TransactionClient,

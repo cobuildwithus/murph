@@ -81,11 +81,11 @@ describe("hosted-onboarding member-identity-service", () => {
       }),
       upsert: identityUpsert,
     };
-    const prisma = {
+    const prisma = asRootPrisma({
       $queryRaw: lockQuery,
       hostedMember,
       hostedMemberIdentity,
-    };
+    });
 
     const result = await reconcileHostedPrivyIdentityOnMember({
       identity: makeIdentity(),
@@ -128,7 +128,7 @@ describe("hosted-onboarding member-identity-service", () => {
   });
 
   it("fails closed when the member disappears before the locked reconciliation write", async () => {
-    const prisma = {
+    const prisma = asRootPrisma({
       $queryRaw: vi.fn().mockResolvedValue([]),
       hostedMember: {
         findUnique: vi.fn().mockResolvedValue(null),
@@ -138,7 +138,7 @@ describe("hosted-onboarding member-identity-service", () => {
         findUnique: vi.fn(),
         upsert: vi.fn(),
       },
-    };
+    });
 
     await expect(reconcileHostedPrivyIdentityOnMember({
       identity: makeIdentity(),
@@ -166,7 +166,7 @@ describe("hosted-onboarding member-identity-service", () => {
       ...create,
       ...updateData,
     }));
-    const prisma = {
+    const prisma = asRootPrisma({
       $queryRaw: vi.fn().mockResolvedValue([]),
       hostedMember: {
         findUnique: vi.fn().mockResolvedValue(makeMember()),
@@ -187,7 +187,7 @@ describe("hosted-onboarding member-identity-service", () => {
         }),
         upsert: identityUpsert,
       },
-    };
+    });
 
     await expect(reconcileHostedPrivyIdentityOnMember({
       identity: makeIdentity({
@@ -325,4 +325,13 @@ function restoreEnvValue(key: string, value: string | undefined): void {
   }
 
   process.env[key] = value;
+}
+
+function asRootPrisma<T extends object>(tx: T): T & {
+  $transaction: ReturnType<typeof vi.fn>;
+} {
+  return {
+    ...tx,
+    $transaction: vi.fn(async (callback: (innerTx: T) => Promise<unknown>) => callback(tx)),
+  };
 }

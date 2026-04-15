@@ -5,8 +5,10 @@ import {
   type HostedMember,
   type HostedMemberBillingRef,
   Prisma,
+  type PrismaClient,
 } from "@prisma/client";
 
+import { getPrisma } from "../prisma";
 import {
   createHostedStripeCustomerLookupKey,
   createHostedStripeCustomerLookupKeyReadCandidates,
@@ -18,9 +20,9 @@ import {
   readHostedMemberBillingPrivateState,
 } from "./member-private-codecs";
 import {
+  HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
   lockHostedMemberRow,
-  type HostedOnboardingPrismaClient,
-  withHostedOnboardingTransaction,
+  type HostedOnboardingReadClient,
 } from "./shared";
 
 export interface HostedMemberStripeBillingRefSnapshot {
@@ -41,13 +43,13 @@ export interface HostedMemberStripeBillingLookup {
 
 export interface HostedMemberStripeBillingRefWriteInput {
   memberId: string;
-  prisma: HostedOnboardingPrismaClient;
   stripeCustomerId?: string | null;
   stripeSubscriptionId?: string | null;
+  tx: Prisma.TransactionClient;
 }
 
 export async function lookupHostedMemberStripeBillingRefByStripeCustomerId(input: {
-  prisma: HostedOnboardingPrismaClient;
+  prisma: HostedOnboardingReadClient;
   stripeCustomerId: string;
 }): Promise<HostedMemberStripeBillingLookup | null> {
   const stripeCustomerLookupKeys = createHostedStripeCustomerLookupKeyReadCandidates(
@@ -75,7 +77,7 @@ export async function lookupHostedMemberStripeBillingRefByStripeCustomerId(input
 }
 
 export async function lookupHostedMemberStripeBillingRefByStripeSubscriptionId(input: {
-  prisma: HostedOnboardingPrismaClient;
+  prisma: HostedOnboardingReadClient;
   stripeSubscriptionId: string;
 }): Promise<HostedMemberStripeBillingLookup | null> {
   const stripeSubscriptionLookupKeys = createHostedStripeSubscriptionLookupKeyReadCandidates(
@@ -104,7 +106,7 @@ export async function lookupHostedMemberStripeBillingRefByStripeSubscriptionId(i
 
 export async function readHostedMemberStripeBillingRef(input: {
   memberId: string;
-  prisma: HostedOnboardingPrismaClient;
+  prisma: HostedOnboardingReadClient;
 }): Promise<HostedMemberStripeBillingRefSnapshot | null> {
   const billingRef = await input.prisma.hostedMemberBillingRef.findUnique({
     where: {
@@ -115,26 +117,24 @@ export async function readHostedMemberStripeBillingRef(input: {
   return billingRef ? projectHostedMemberStripeBillingRefSnapshot(billingRef) : null;
 }
 
-export async function writeHostedMemberStripeBillingRef(
+export async function writeHostedMemberStripeBillingRefTx(
   input: HostedMemberStripeBillingRefWriteInput,
 ): Promise<HostedMemberStripeBillingRefSnapshot> {
-  return withHostedOnboardingTransaction(input.prisma, async (tx) => {
-    const billingRef = await tx.hostedMemberBillingRef.upsert({
-      where: {
-        memberId: input.memberId,
-      },
-      create: buildHostedMemberBillingRefCreateData(input),
-      update: buildHostedMemberBillingRefUpdateData(input),
-    });
-
-    return projectHostedMemberStripeBillingRefSnapshot(billingRef);
+  const billingRef = await input.tx.hostedMemberBillingRef.upsert({
+    where: {
+      memberId: input.memberId,
+    },
+    create: buildHostedMemberBillingRefCreateData(input),
+    update: buildHostedMemberBillingRefUpdateData(input),
   });
+
+  return projectHostedMemberStripeBillingRefSnapshot(billingRef);
 }
 
-export async function bindHostedMemberStripeCustomerIdIfMissing(input: {
+export async function bindHostedMemberStripeCustomerIdIfMissingTx(input: {
   memberId: string;
-  prisma: HostedOnboardingPrismaClient;
   stripeCustomerId: string;
+  tx: Prisma.TransactionClient;
 }): Promise<HostedMemberStripeBillingRefSnapshot | null> {
   const stripeCustomerLookupKey = createHostedStripeCustomerLookupKey(input.stripeCustomerId);
 
@@ -148,37 +148,49 @@ export async function bindHostedMemberStripeCustomerIdIfMissing(input: {
     stripeSubscriptionId: null,
   });
 
-  return withHostedOnboardingTransaction(input.prisma, async (tx) => {
-    await lockHostedMemberRow(tx, input.memberId);
+  await lockHostedMemberRow(input.tx, input.memberId);
 
-    const currentBillingRef = await tx.hostedMemberBillingRef.findUnique({
-      where: {
-        memberId: input.memberId,
-      },
-    });
-
-    if (currentBillingRef?.stripeCustomerLookupKey) {
-      return projectHostedMemberStripeBillingRefSnapshot(currentBillingRef);
-    }
-
-    const billingRef = await tx.hostedMemberBillingRef.upsert({
-      where: {
-        memberId: input.memberId,
-      },
-      create: {
-        ...billingPrivateColumns,
-        memberId: input.memberId,
-        stripeCustomerLookupKey,
-        stripeSubscriptionLookupKey: null,
-      },
-      update: {
-        stripeCustomerIdEncrypted: billingPrivateColumns.stripeCustomerIdEncrypted,
-        stripeCustomerLookupKey,
-      },
-    });
-
-    return projectHostedMemberStripeBillingRefSnapshot(billingRef);
+  const currentBillingRef = await input.tx.hostedMemberBillingRef.findUnique({
+    where: {
+      memberId: input.memberId,
+    },
   });
+
+  if (currentBillingRef?.stripeCustomerLookupKey) {
+    return projectHostedMemberStripeBillingRefSnapshot(currentBillingRef);
+  }
+
+  const billingRef = await input.tx.hostedMemberBillingRef.upsert({
+    where: {
+      memberId: input.memberId,
+    },
+    create: {
+      ...billingPrivateColumns,
+      memberId: input.memberId,
+      stripeCustomerLookupKey,
+      stripeSubscriptionLookupKey: null,
+    },
+    update: {
+      stripeCustomerIdEncrypted: billingPrivateColumns.stripeCustomerIdEncrypted,
+      stripeCustomerLookupKey,
+    },
+  });
+
+  return projectHostedMemberStripeBillingRefSnapshot(billingRef);
+}
+
+export async function bindHostedMemberStripeCustomerIdIfMissing(input: {
+  memberId: string;
+  prisma?: PrismaClient;
+  stripeCustomerId: string;
+}): Promise<HostedMemberStripeBillingRefSnapshot | null> {
+  const prisma = input.prisma ?? getPrisma();
+
+  return prisma.$transaction((tx) => bindHostedMemberStripeCustomerIdIfMissingTx({
+    memberId: input.memberId,
+    stripeCustomerId: input.stripeCustomerId,
+    tx,
+  }), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 }
 
 export function projectHostedMemberStripeBillingRefSnapshot(

@@ -1,10 +1,10 @@
-import { HostedBillingStatus } from "@prisma/client";
+import { HostedBillingStatus, Prisma } from "@prisma/client";
 
 import {
   mapStripeSubscriptionStatusToHostedBillingStatus,
 } from "./billing";
 import {
-  writeHostedMemberStripeBillingRef,
+  writeHostedMemberStripeBillingRefTx,
 } from "./hosted-member-billing-store";
 import {
   type HostedMemberBillingSnapshot,
@@ -15,7 +15,6 @@ import { requireHostedStripeApi } from "./runtime";
 import {
   lockHostedMemberRow,
   type HostedOnboardingPrismaClient,
-  withHostedOnboardingTransaction,
 } from "./shared";
 import {
   type HostedStripeDispatchContext,
@@ -25,69 +24,82 @@ import {
   resolveHostedStripeBillingStatusForWrite,
 } from "./stripe-billing-status";
 
-export async function updateHostedMemberStripeBillingIfFresh(input: {
-  billingStatus: HostedBillingStatus;
+export async function prepareHostedMemberStripeBillingWrite(input: {
   dispatchContext: HostedStripeDispatchContext;
   member: HostedMemberBillingSnapshot;
   prisma: HostedOnboardingPrismaClient;
-  stripeCustomerId?: string | null;
   stripeSubscriptionId?: string | null;
-  suspendedAtOverride?: Date | null;
-}): Promise<HostedMemberBillingSnapshot | null> {
+}): Promise<{
+  canonicalBillingStatus: HostedBillingStatus | null;
+  member: HostedMemberBillingSnapshot;
+}> {
   const requiresCanonicalBillingStatus = requiresHostedCanonicalStripeBillingStatus(
     input.dispatchContext.sourceType,
   );
-  const canonicalLookupMember =
+  const member =
     requiresCanonicalBillingStatus && !input.stripeSubscriptionId
       ? (await readHostedMemberBillingSnapshot({
           memberId: input.member.core.id,
           prisma: input.prisma,
         })) ?? input.member
       : input.member;
-  const canonicalBillingStatus = requiresCanonicalBillingStatus
+
+  return {
+    canonicalBillingStatus: requiresCanonicalBillingStatus
     ? await readHostedCanonicalStripeBillingStatus({
-        member: canonicalLookupMember,
+        member,
         stripeSubscriptionId: input.stripeSubscriptionId,
       })
-    : null;
+    : null,
+    member,
+  };
+}
 
-  return withHostedOnboardingTransaction(input.prisma, async (tx) => {
-    await lockHostedMemberRow(tx, input.member.core.id);
+export async function updateHostedMemberStripeBillingIfFreshTx(input: {
+  billingStatus: HostedBillingStatus;
+  canonicalBillingStatus: HostedBillingStatus | null;
+  dispatchContext: HostedStripeDispatchContext;
+  member: HostedMemberBillingSnapshot;
+  stripeCustomerId?: string | null;
+  stripeSubscriptionId?: string | null;
+  suspendedAtOverride?: Date | null;
+  tx: Prisma.TransactionClient;
+}): Promise<HostedMemberBillingSnapshot | null> {
+  await lockHostedMemberRow(input.tx, input.member.core.id);
 
-    const currentMember = await readHostedMemberBillingSnapshot({
-      memberId: input.member.core.id,
-      prisma: tx,
-    });
+  const currentMember = await readHostedMemberBillingSnapshot({
+    memberId: input.member.core.id,
+    prisma: input.tx,
+  });
 
-    if (!currentMember) {
-      return null;
-    }
+  if (!currentMember) {
+    return null;
+  }
 
-    const nextBillingStatus = resolveHostedStripeBillingStatusForWrite({
-      billingStatus: input.billingStatus,
-      canonicalBillingStatus,
-      currentBillingStatus: currentMember.core.billingStatus,
-      sourceType: input.dispatchContext.sourceType,
-    });
+  const nextBillingStatus = resolveHostedStripeBillingStatusForWrite({
+    billingStatus: input.billingStatus,
+    canonicalBillingStatus: input.canonicalBillingStatus,
+    currentBillingStatus: currentMember.core.billingStatus,
+    sourceType: input.dispatchContext.sourceType,
+  });
 
-    await updateHostedMemberCoreState({
-      billingStatus: nextBillingStatus,
-      memberId: currentMember.core.id,
-      prisma: tx,
-      suspendedAt: input.suspendedAtOverride,
-    });
+  await updateHostedMemberCoreState({
+    billingStatus: nextBillingStatus,
+    memberId: currentMember.core.id,
+    prisma: input.tx,
+    suspendedAt: input.suspendedAtOverride,
+  });
 
-    await writeHostedMemberStripeBillingRef({
-      memberId: currentMember.core.id,
-      prisma: tx,
-      stripeCustomerId: input.stripeCustomerId,
-      stripeSubscriptionId: input.stripeSubscriptionId,
-    });
+  await writeHostedMemberStripeBillingRefTx({
+    memberId: currentMember.core.id,
+    stripeCustomerId: input.stripeCustomerId,
+    stripeSubscriptionId: input.stripeSubscriptionId,
+    tx: input.tx,
+  });
 
-    return readHostedMemberBillingSnapshot({
-      memberId: currentMember.core.id,
-      prisma: tx,
-    });
+  return readHostedMemberBillingSnapshot({
+    memberId: currentMember.core.id,
+    prisma: input.tx,
   });
 }
 
@@ -107,24 +119,25 @@ async function readHostedCanonicalStripeBillingStatus(input: {
   return mapStripeSubscriptionStatusToHostedBillingStatus(subscription.status);
 }
 
-export async function suspendHostedMemberForBillingReversal(input: {
-  dispatchContext: Pick<HostedStripeDispatchContext, "eventCreatedAt" | "sourceEventId">;
+export async function suspendHostedMemberForBillingReversalTx(input: {
+  canonicalBillingStatus: HostedBillingStatus | null;
+  dispatchContext: Pick<HostedStripeDispatchContext, "eventCreatedAt" | "sourceEventId" | "sourceType">;
   member: HostedMemberBillingSnapshot;
-  prisma: HostedOnboardingPrismaClient;
-  reason: string;
   stripeCustomerId?: string | null;
+  tx: Prisma.TransactionClient;
 }): Promise<void> {
-  await updateHostedMemberStripeBillingIfFresh({
+  await updateHostedMemberStripeBillingIfFreshTx({
     billingStatus: HostedBillingStatus.unpaid,
+    canonicalBillingStatus: input.canonicalBillingStatus,
     dispatchContext: {
       eventCreatedAt: input.dispatchContext.eventCreatedAt,
       occurredAt: input.dispatchContext.eventCreatedAt.toISOString(),
       sourceEventId: input.dispatchContext.sourceEventId,
-      sourceType: input.reason,
+      sourceType: input.dispatchContext.sourceType,
     },
     member: input.member,
-    prisma: input.prisma,
     stripeCustomerId: input.stripeCustomerId,
     suspendedAtOverride: input.dispatchContext.eventCreatedAt,
+    tx: input.tx,
   });
 }

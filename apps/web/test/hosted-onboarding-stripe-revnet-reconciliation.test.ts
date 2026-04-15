@@ -2,10 +2,11 @@ import { HostedRevnetIssuanceStatus } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  activateHostedMemberFromConfirmedRevnetIssuance: vi.fn(),
+  activateHostedMemberFromConfirmedRevnetIssuanceTx: vi.fn(),
   isHostedOnboardingRevnetEnabled: vi.fn(),
   readHostedMemberSnapshot: vi.fn(),
   readHostedRevnetPaymentReceipt: vi.fn(),
+  runHostedMemberActivationPostCommitEffects: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/member-activation", async () => {
@@ -15,8 +16,10 @@ vi.mock("@/src/lib/hosted-onboarding/member-activation", async () => {
 
   return {
     ...actual,
-    activateHostedMemberFromConfirmedRevnetIssuance:
-      mocks.activateHostedMemberFromConfirmedRevnetIssuance,
+    activateHostedMemberFromConfirmedRevnetIssuanceTx:
+      mocks.activateHostedMemberFromConfirmedRevnetIssuanceTx,
+    runHostedMemberActivationPostCommitEffects:
+      mocks.runHostedMemberActivationPostCommitEffects,
   };
 });
 
@@ -51,9 +54,15 @@ type ReconcileSubmittedHostedRevnetIssuancesPrisma =
 describe("hosted Stripe RevNet reconciliation", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.activateHostedMemberFromConfirmedRevnetIssuance.mockResolvedValue(undefined);
+    mocks.activateHostedMemberFromConfirmedRevnetIssuanceTx.mockResolvedValue({
+      activated: true,
+      hostedExecutionEventId:
+        "member.activated:hosted.revnet.issuance.confirmed:member_123:iss_confirmed_123",
+      memberId: "member_123",
+      postCommitProvisionUserId: "member_123",
+    });
     mocks.isHostedOnboardingRevnetEnabled.mockReturnValue(true);
-    mocks.readHostedMemberSnapshot.mockResolvedValue({ id: "member_123" });
+    mocks.readHostedMemberSnapshot.mockResolvedValue({ core: { id: "member_123" } });
     mocks.readHostedRevnetPaymentReceipt.mockResolvedValue({
       status: "confirmed",
     });
@@ -61,6 +70,7 @@ describe("hosted Stripe RevNet reconciliation", () => {
 
   it("confirms submitted issuances and activates the matching member", async () => {
     const update = vi.fn().mockResolvedValue(undefined);
+    const updateMany = vi.fn().mockResolvedValue({ count: 0 });
     const transactionClient = {
       hostedRevnetIssuance: {
         update,
@@ -78,6 +88,7 @@ describe("hosted Stripe RevNet reconciliation", () => {
           }),
         ]),
         update: vi.fn(),
+        updateMany,
       },
     });
 
@@ -90,6 +101,23 @@ describe("hosted Stripe RevNet reconciliation", () => {
     expect(mocks.readHostedRevnetPaymentReceipt).toHaveBeenCalledWith({
       chainId: 8453,
       payTxHash: "0xabc123",
+    });
+    expect(prisma.hostedRevnetIssuance.findMany).toHaveBeenCalledWith({
+      where: {
+        nextAttemptAt: {
+          lte: expect.any(Date),
+        },
+        payTxHash: {
+          not: null,
+        },
+        status: HostedRevnetIssuanceStatus.submitted,
+      },
+      orderBy: [
+        {
+          createdAt: "asc",
+        },
+      ],
+      take: 25,
     });
     expect(update).toHaveBeenCalledWith({
       where: {
@@ -106,13 +134,17 @@ describe("hosted Stripe RevNet reconciliation", () => {
       memberId: "member_123",
       prisma: transactionClient,
     });
-    expect(mocks.activateHostedMemberFromConfirmedRevnetIssuance).toHaveBeenCalledWith({
-      member: { id: "member_123" },
+    expect(mocks.activateHostedMemberFromConfirmedRevnetIssuanceTx).toHaveBeenCalledWith({
+      member: { core: { id: "member_123" } },
       occurredAt: expect.any(String),
       prisma: transactionClient,
       sourceEventId: "iss_confirmed_123",
       sourceType: "hosted.revnet.issuance.confirmed",
     });
+    expect(mocks.runHostedMemberActivationPostCommitEffects).toHaveBeenCalledWith({
+      postCommitProvisionUserId: "member_123",
+    });
+    expect(updateMany).not.toHaveBeenCalled();
   });
 
   it("marks reverted submitted issuances failed without attempting activation", async () => {
@@ -152,23 +184,89 @@ describe("hosted Stripe RevNet reconciliation", () => {
     });
     expect(prisma.$transaction).not.toHaveBeenCalled();
     expect(mocks.readHostedMemberSnapshot).not.toHaveBeenCalled();
-    expect(mocks.activateHostedMemberFromConfirmedRevnetIssuance).not.toHaveBeenCalled();
+    expect(mocks.activateHostedMemberFromConfirmedRevnetIssuanceTx).not.toHaveBeenCalled();
+    expect(mocks.runHostedMemberActivationPostCommitEffects).not.toHaveBeenCalled();
+  });
+
+  it("reschedules a submitted issuance when post-commit provisioning fails", async () => {
+    mocks.runHostedMemberActivationPostCommitEffects.mockRejectedValueOnce(
+      new Error("control unavailable"),
+    );
+    const update = vi.fn().mockResolvedValue(undefined);
+    const updateMany = vi.fn().mockResolvedValue({ count: 1 });
+    const transactionClient = {
+      hostedRevnetIssuance: {
+        update,
+      },
+    };
+    const prisma = asReconcilePrisma({
+      $transaction: async <T>(callback: (tx: typeof transactionClient) => Promise<T>) =>
+        callback(transactionClient),
+      hostedRevnetIssuance: {
+        findMany: vi.fn().mockResolvedValue([
+          makeIssuance({
+            attemptCount: 1,
+            id: "iss_retry_123",
+            payTxHash: "0xretry123",
+            status: HostedRevnetIssuanceStatus.submitted,
+          }),
+        ]),
+        update: vi.fn(),
+        updateMany,
+      },
+    });
+
+    await expect(
+      reconcileSubmittedHostedRevnetIssuances({
+        prisma,
+      }),
+    ).rejects.toThrow("control unavailable");
+
+    expect(update).toHaveBeenCalledWith({
+      where: {
+        id: "iss_retry_123",
+      },
+      data: expect.objectContaining({
+        confirmedAt: expect.any(Date),
+        failureCode: null,
+        failureMessage: null,
+        status: HostedRevnetIssuanceStatus.confirmed,
+      }),
+    });
+    expect(updateMany).toHaveBeenCalledWith({
+      where: {
+        id: "iss_retry_123",
+        status: HostedRevnetIssuanceStatus.confirmed,
+      },
+      data: {
+        attemptCount: 2,
+        confirmedAt: null,
+        failureCode: "Error",
+        failureMessage: "control unavailable",
+        nextAttemptAt: expect.any(Date),
+        status: HostedRevnetIssuanceStatus.submitted,
+      },
+    });
   });
 });
 
 function makeIssuance(overrides: Partial<{
+  attemptCount: number;
   chainId: number;
   createdAt: Date;
   id: string;
   memberId: string;
+  nextAttemptAt: Date;
   payTxHash: string | null;
   status: HostedRevnetIssuanceStatus;
 }> = {}) {
   return {
+    attemptCount: 0,
     chainId: 8453,
     createdAt: new Date("2026-03-26T12:00:00.000Z"),
     id: "iss_123",
     memberId: "member_123",
+    nextAttemptAt: new Date("2026-03-26T12:00:00.000Z"),
     payTxHash: null,
     status: HostedRevnetIssuanceStatus.pending,
     ...overrides,

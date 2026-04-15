@@ -1,6 +1,7 @@
 import { HostedBillingStatus } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "@/src/lib/hosted-onboarding/shared";
 import type { HostedInviteStatusPayload } from "@/src/lib/hosted-onboarding/types";
 
 const mocks = vi.hoisted(() => {
@@ -16,7 +17,7 @@ const mocks = vi.hoisted(() => {
   };
 
   return {
-    activateHostedMemberForPositiveSource: vi.fn(),
+    activateHostedMemberForPositiveSourceTx: vi.fn(),
     drainHostedExecutionOutboxBestEffort: vi.fn(),
     findMemberForStripeObject: vi.fn(),
     getHostedInviteStatus: vi.fn(),
@@ -51,7 +52,7 @@ vi.mock("@/src/lib/hosted-onboarding/invite-service", async () => {
 });
 
 vi.mock("@/src/lib/hosted-onboarding/member-activation", () => ({
-  activateHostedMemberForPositiveSource: mocks.activateHostedMemberForPositiveSource,
+  activateHostedMemberForPositiveSourceTx: mocks.activateHostedMemberForPositiveSourceTx,
   runHostedMemberActivationPostCommitEffects: mocks.runHostedMemberActivationPostCommitEffects,
 }));
 
@@ -64,11 +65,11 @@ vi.mock("@/src/lib/hosted-onboarding/stripe-billing-lookup", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/stripe-billing-policy", () => ({
-  updateHostedMemberStripeBillingIfFresh: mocks.updateHostedMemberStripeBillingIfFresh,
+  updateHostedMemberStripeBillingIfFreshTx: mocks.updateHostedMemberStripeBillingIfFresh,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-billing-store", () => ({
-  writeHostedMemberStripeBillingRef: mocks.writeHostedMemberStripeBillingRef,
+  writeHostedMemberStripeBillingRefTx: mocks.writeHostedMemberStripeBillingRef,
 }));
 
 import { reconcileHostedBillingCheckoutSuccess } from "@/src/lib/hosted-onboarding/billing-success-service";
@@ -100,7 +101,7 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
         billingStatus: HostedBillingStatus.active,
       }),
     );
-    mocks.activateHostedMemberForPositiveSource.mockResolvedValue({
+    mocks.activateHostedMemberForPositiveSourceTx.mockResolvedValue({
       activated: true,
       hostedExecutionEventId: "member.activated:stripe.checkout.session.success_redirect:member_123:cs_123",
       memberId: "member_123",
@@ -113,12 +114,17 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
   });
 
   it("reconciles a paid checkout session and returns the refreshed invite status", async () => {
-    const prisma = {} as never;
+    const tx = {
+      __tag: "tx",
+    };
+    const prisma = {
+      $transaction: vi.fn(async (callback: (innerTx: typeof tx) => Promise<unknown>) => callback(tx)),
+    };
 
     await expect(reconcileHostedBillingCheckoutSuccess({
       inviteCode: "invite-code",
       member: createAuthenticatedMember(),
-      prisma,
+      prisma: prisma as never,
       sessionId: "cs_123",
     })).resolves.toEqual(createStatus({
       activationPending: true,
@@ -128,28 +134,31 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
     expect(mocks.stripe.checkout.sessions.retrieve).toHaveBeenCalledWith("cs_123", {
       expand: ["subscription"],
     });
-    expect(mocks.writeHostedMemberStripeBillingRef).toHaveBeenCalledWith({
-      memberId: "member_123",
-      prisma,
-      stripeCustomerId: "cus_123",
-      stripeSubscriptionId: "sub_123",
-    });
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    expect(prisma.$transaction).toHaveBeenCalledWith(
+      expect.any(Function),
+      HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+    );
+    expect(mocks.writeHostedMemberStripeBillingRef).not.toHaveBeenCalled();
     expect(mocks.updateHostedMemberStripeBillingIfFresh).toHaveBeenCalledWith(expect.objectContaining({
       billingStatus: HostedBillingStatus.active,
+      canonicalBillingStatus: HostedBillingStatus.active,
       dispatchContext: expect.objectContaining({
         sourceEventId: "cs_123",
         sourceType: "stripe.checkout.session.success_redirect",
       }),
       stripeCustomerId: "cus_123",
       stripeSubscriptionId: "sub_123",
+      tx,
     }));
-    expect(mocks.activateHostedMemberForPositiveSource).toHaveBeenCalledWith(expect.objectContaining({
+    expect(mocks.activateHostedMemberForPositiveSourceTx).toHaveBeenCalledWith(expect.objectContaining({
       member: expect.objectContaining({
         core: expect.objectContaining({
           billingStatus: HostedBillingStatus.active,
           id: "member_123",
         }),
       }),
+      prisma: tx,
       skipIfBillingAlreadyActive: false,
     }));
     expect(mocks.runHostedMemberActivationPostCommitEffects).toHaveBeenCalledWith({
@@ -160,6 +169,51 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
       limit: 1,
       prisma,
     });
+  });
+
+  it("only writes the durable billing reference when the checkout session has no subscription object", async () => {
+    const tx = {
+      __tag: "tx",
+    };
+    const prisma = {
+      $transaction: vi.fn(async (callback: (innerTx: typeof tx) => Promise<unknown>) => callback(tx)),
+    };
+    mocks.stripe.checkout.sessions.retrieve.mockResolvedValueOnce({
+      client_reference_id: "member_123",
+      customer: "cus_123",
+      id: "cs_no_subscription",
+      metadata: {
+        memberId: "member_123",
+      },
+      subscription: null,
+    });
+
+    await expect(reconcileHostedBillingCheckoutSuccess({
+      inviteCode: "invite-code",
+      member: createAuthenticatedMember(),
+      prisma: prisma as never,
+      sessionId: "cs_no_subscription",
+    })).resolves.toEqual(createStatus({
+      activationPending: true,
+      stage: "active",
+    }));
+
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    expect(prisma.$transaction).toHaveBeenCalledWith(
+      expect.any(Function),
+      HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+    );
+    expect(mocks.stripe.subscriptions.retrieve).not.toHaveBeenCalled();
+    expect(mocks.writeHostedMemberStripeBillingRef).toHaveBeenCalledWith({
+      memberId: "member_123",
+      stripeCustomerId: "cus_123",
+      stripeSubscriptionId: null,
+      tx,
+    });
+    expect(mocks.updateHostedMemberStripeBillingIfFresh).not.toHaveBeenCalled();
+    expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
+    expect(mocks.runHostedMemberActivationPostCommitEffects).not.toHaveBeenCalled();
+    expect(mocks.drainHostedExecutionOutboxBestEffort).not.toHaveBeenCalled();
   });
 
   it("rejects checkout sessions that resolve to a different member", async () => {
@@ -186,14 +240,16 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
     await expect(reconcileHostedBillingCheckoutSuccess({
       inviteCode: "invite-code",
       member: createAuthenticatedMember(),
-      prisma: {} as never,
+      prisma: {
+        $transaction: vi.fn(),
+      } as never,
       sessionId: "cs_other",
     })).rejects.toMatchObject({
       code: "STRIPE_CHECKOUT_MEMBER_MISMATCH",
     });
 
     expect(mocks.writeHostedMemberStripeBillingRef).not.toHaveBeenCalled();
-    expect(mocks.activateHostedMemberForPositiveSource).not.toHaveBeenCalled();
+    expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
   });
 });
 

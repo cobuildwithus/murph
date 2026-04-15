@@ -9,17 +9,20 @@ import {
   mapStripeSubscriptionStatusToHostedBillingStatus,
 } from "./billing";
 import { hostedOnboardingError } from "./errors";
-import { writeHostedMemberStripeBillingRef } from "./hosted-member-billing-store";
+import { writeHostedMemberStripeBillingRefTx } from "./hosted-member-billing-store";
 import { readHostedMemberSnapshot } from "./hosted-member-store";
 import { getHostedInviteStatus, requireHostedInviteForAuthentication } from "./invite-service";
 import {
-  activateHostedMemberForPositiveSource,
+  activateHostedMemberForPositiveSourceTx,
   runHostedMemberActivationPostCommitEffects,
 } from "./member-activation";
 import { requireHostedStripeApi } from "./runtime";
-import { normalizeNullableString } from "./shared";
+import {
+  HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+  normalizeNullableString,
+} from "./shared";
 import { findMemberForStripeObject } from "./stripe-billing-lookup";
-import { updateHostedMemberStripeBillingIfFresh } from "./stripe-billing-policy";
+import { updateHostedMemberStripeBillingIfFreshTx } from "./stripe-billing-policy";
 
 const STRIPE_CHECKOUT_SUCCESS_REDIRECT_SOURCE_TYPE = "stripe.checkout.session.success_redirect";
 
@@ -55,7 +58,6 @@ export async function reconcileHostedBillingCheckoutSuccess(input: {
     memberId: invite.memberId,
     prisma,
     session,
-    stripe,
   });
 
   return getHostedInviteStatus({
@@ -69,7 +71,6 @@ async function applyHostedCheckoutSessionSuccess(input: {
   memberId: string;
   prisma: PrismaClient;
   session: Stripe.Checkout.Session;
-  stripe: Stripe;
 }) {
   const member = await readHostedMemberSnapshot({
     memberId: input.memberId,
@@ -87,20 +88,21 @@ async function applyHostedCheckoutSessionSuccess(input: {
   const subscriptionId = coerceStripeSubscriptionId(input.session.subscription);
   const stripeCustomerId = coerceStripeObjectId(input.session.customer) ?? member.billingRef?.stripeCustomerId ?? null;
 
-  await writeHostedMemberStripeBillingRef({
-    memberId: member.core.id,
-    prisma: input.prisma,
-    stripeCustomerId,
-    stripeSubscriptionId: subscriptionId ?? member.billingRef?.stripeSubscriptionId ?? null,
-  });
-
   if (!subscriptionId) {
+    await input.prisma.$transaction(async (tx) => {
+      await writeHostedMemberStripeBillingRefTx({
+        memberId: member.core.id,
+        stripeCustomerId,
+        stripeSubscriptionId: member.billingRef?.stripeSubscriptionId ?? null,
+        tx,
+      });
+    }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
     return;
   }
 
   const subscription = await readHostedCheckoutSessionSubscription({
     session: input.session,
-    stripe: input.stripe,
+    stripe: requireHostedStripeApi(),
     subscriptionId,
   });
   const dispatchContext = {
@@ -110,25 +112,33 @@ async function applyHostedCheckoutSessionSuccess(input: {
     sourceType: STRIPE_CHECKOUT_SUCCESS_REDIRECT_SOURCE_TYPE,
   } as const;
   const hadActiveBilling = member.core.billingStatus === HostedBillingStatus.active;
-  const updatedMember = await updateHostedMemberStripeBillingIfFresh({
-    billingStatus: mapStripeSubscriptionStatusToHostedBillingStatus(subscription.status),
-    dispatchContext,
-    member,
-    prisma: input.prisma,
-    stripeCustomerId,
-    stripeSubscriptionId: subscription.id,
-  });
+  const canonicalBillingStatus = mapStripeSubscriptionStatusToHostedBillingStatus(subscription.status);
+  const activation = await input.prisma.$transaction(async (tx) => {
+    const updatedMember = await updateHostedMemberStripeBillingIfFreshTx({
+      billingStatus: canonicalBillingStatus,
+      canonicalBillingStatus,
+      dispatchContext,
+      member,
+      stripeCustomerId,
+      stripeSubscriptionId: subscription.id,
+      tx,
+    });
 
-  if (!updatedMember || updatedMember.core.billingStatus !== HostedBillingStatus.active) {
+    if (!updatedMember || updatedMember.core.billingStatus !== HostedBillingStatus.active) {
+      return null;
+    }
+
+    return activateHostedMemberForPositiveSourceTx({
+      dispatchContext,
+      member: updatedMember,
+      prisma: tx,
+      skipIfBillingAlreadyActive: hadActiveBilling,
+    });
+  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+
+  if (!activation) {
     return;
   }
-
-  const activation = await activateHostedMemberForPositiveSource({
-    dispatchContext,
-    member: updatedMember,
-    prisma: input.prisma,
-    skipIfBillingAlreadyActive: hadActiveBilling,
-  });
 
   await runHostedMemberActivationPostCommitEffects({
     postCommitProvisionUserId: activation.postCommitProvisionUserId,
