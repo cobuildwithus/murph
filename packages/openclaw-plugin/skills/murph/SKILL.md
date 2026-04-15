@@ -27,7 +27,7 @@ Discovery order:
 Read-command chooser:
 - `vault-cli show <id>` for one exact record id.
 - `vault-cli list ...` for structured filters.
-- `vault-cli search query --text "<query>"` for fuzzy recall.
+- `vault-cli search query "<query>"` for fuzzy recall. `--text "<query>"` remains valid for explicit callers.
 - `vault-cli timeline ...` for chronological questions.
 - `vault-cli memory show` plus `vault-cli knowledge ...` reads for saved user context.
 - `vault-cli wearables day ...` or other `wearables ... list` commands for wearable summaries.

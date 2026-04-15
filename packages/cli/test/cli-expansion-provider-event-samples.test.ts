@@ -315,7 +315,7 @@ test('generic read and semantic summary help surfaces explain when to use them',
   )
   assert.match(
     searchHelp,
-    /Use `search query` for fuzzy recall or remembered phrases\. Use `show` for one exact id, `list` for structured filters, and `timeline` for chronology\./u,
+    /Use `search query <query>` for direct fuzzy recall, or `search query --text "<query>"` for explicit machine-oriented calls\. Use `show` for one exact id, `list` for structured filters, and `timeline` for chronology\./u,
   )
   assert.match(
     timelineHelp,

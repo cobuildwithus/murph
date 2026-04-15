@@ -380,6 +380,10 @@ function renderAssistantCliOptionValueSuffix(
     return `=${schema.type}`
   }
 
+  if (schema.type === 'string') {
+    return '=string'
+  }
+
   return ''
 }
 

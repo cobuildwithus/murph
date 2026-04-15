@@ -5426,9 +5426,9 @@
                           "maxLength": 128
                         },
                         "text": {
+                          "description": "Named search text alias. Required when the positional query is omitted; use this for explicit machine-oriented calls.",
                           "type": "string",
-                          "minLength": 1,
-                          "description": "Required search text to run across titles, notes, tags, ids, and record payloads."
+                          "minLength": 1
                         },
                         "recordType": {
                           "description": "Optional query record families. Repeat --record-type for multiple values: allergy, assessment, audit, condition, core, event, experiment, family, food, genetics, goal, journal, protocol, provider, recipe, sample, workout_format.",
