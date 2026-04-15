@@ -41,21 +41,22 @@ test("secret codec binds structured ciphertext to account context and token purp
     ));
 });
 
-test("secret codec still decrypts legacy unscoped ciphertext for compatibility", () => {
+test("secret codec rejects unscoped ciphertext from the removed pre-v1 format", () => {
   const secret = "secret-for-tests";
   const codec = createSecretCodec(secret);
-  const legacyCiphertext = encryptLegacySecret(secret, "legacy-refresh-token");
+  const unscopedCiphertext = encryptUnscopedSecretForTest(secret, "stale-refresh-token");
 
-  assert.equal(
-    codec.decrypt(
-      legacyCiphertext,
-      buildDeviceSyncTokenCipherOptions({
-        externalAccountId: "account-1",
-        provider: "whoop",
-        purpose: "device-sync-refresh-token",
-      }),
-    ),
-    "legacy-refresh-token",
+  assert.throws(
+    () =>
+      codec.decrypt(
+        unscopedCiphertext,
+        buildDeviceSyncTokenCipherOptions({
+          externalAccountId: "account-1",
+          provider: "whoop",
+          purpose: "device-sync-refresh-token",
+        }),
+      ),
+    /Encrypted payload is invalid\./u,
   );
 });
 
@@ -80,9 +81,14 @@ test("secret codec rejects malformed structured payload segments", () => {
     () => codec.decrypt(`${structuredCiphertext}:junk`),
     /Encrypted payload is invalid\./u,
   );
+
+  assert.throws(
+    () => codec.decrypt(encryptUnscopedSecretForTest("secret-for-tests", "stale-refresh-token")),
+    /Encrypted payload is invalid\./u,
+  );
 });
 
-function encryptLegacySecret(secret: string, value: string): string {
+function encryptUnscopedSecretForTest(secret: string, value: string): string {
   const key = createHash("sha256").update(secret).digest();
   const iv = randomBytes(12);
   const cipher = createCipheriv("aes-256-gcm", key, iv);

@@ -5,7 +5,7 @@ const ENCRYPTED_SECRET_VERSION = "v1";
 const AES_256_GCM = "aes-256-gcm";
 const GCM_IV_BYTES = 12;
 const GCM_AUTH_TAG_BYTES = 16;
-const SECRET_SCOPE_SALT = Buffer.from("murph.device-sync.secret.v2", "utf8");
+const SECRET_SCOPE_SALT = Buffer.from("murph.device-sync.secret.v1", "utf8");
 const BASE64URL_CANONICAL_PATTERN = /^[A-Za-z0-9_-]*$/u;
 
 export type DeviceSyncTokenCipherPurpose =
@@ -81,7 +81,7 @@ export function createSecretCodec(secret: string): SecretCodec {
       const structuredPayload = parseStructuredSecretPayload(payload);
 
       if (!structuredPayload) {
-        return decryptLegacySecretPayload(rootKey, payload);
+        throw new TypeError("Encrypted payload is invalid.");
       }
 
       const decipher = createDecipheriv(
@@ -187,22 +187,6 @@ function parseStructuredSecretPayload(payload: string): {
     ciphertext: decodeStrictBase64UrlSegment(ciphertextText, "Encrypted payload ciphertext"),
     iv,
   };
-}
-
-function decryptLegacySecretPayload(rootKey: Buffer, payload: string): string {
-  const decoded = decodeStrictBase64UrlSegment(payload, "Encrypted payload");
-
-  if (decoded.length < GCM_IV_BYTES + GCM_AUTH_TAG_BYTES) {
-    throw new TypeError("Encrypted payload is invalid.");
-  }
-
-  const iv = decoded.subarray(0, GCM_IV_BYTES);
-  const authTag = decoded.subarray(GCM_IV_BYTES, GCM_IV_BYTES + GCM_AUTH_TAG_BYTES);
-  const ciphertext = decoded.subarray(GCM_IV_BYTES + GCM_AUTH_TAG_BYTES);
-  const decipher = createDecipheriv(AES_256_GCM, rootKey, iv);
-  decipher.setAuthTag(authTag);
-  const plaintext = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
-  return plaintext.toString("utf8");
 }
 
 function decodeStrictBase64UrlSegment(value: string, label: string): Buffer {

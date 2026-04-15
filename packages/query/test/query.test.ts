@@ -3265,10 +3265,10 @@ test("searchVaultRuntime discards unsupported local stores before serving result
 
   try {
     await rebuildQueryProjection(vaultRoot);
-    const legacyDatabase = openSqliteRuntimeDatabase(runtimeDatabasePath, { create: false });
+    const staleDatabase = openSqliteRuntimeDatabase(runtimeDatabasePath, { create: false });
 
     try {
-      legacyDatabase.exec(`
+      staleDatabase.exec(`
         PRAGMA user_version = 2;
         CREATE TABLE IF NOT EXISTS query_lookup_ids (
           lookup_id TEXT NOT NULL,
@@ -3278,19 +3278,19 @@ test("searchVaultRuntime discards unsupported local stores before serving result
           PRIMARY KEY (lookup_id, entity_id)
         );
       `);
-      legacyDatabase
+      staleDatabase
         .prepare(`
           INSERT INTO query_meta (key, value)
           VALUES ('schema_version', ?)
           ON CONFLICT(key) DO UPDATE SET value = excluded.value
         `)
-        .run("murph.query-projection.v2");
+        .run("murph.query-projection.unsupported");
     } finally {
-      legacyDatabase.close();
+      staleDatabase.close();
     }
 
     const statusBefore = await getQueryProjectionStatus(vaultRoot);
-    assert.equal(statusBefore.schemaVersion, "murph.query-projection.v2");
+    assert.equal(statusBefore.schemaVersion, "murph.query-projection.unsupported");
     assert.equal(statusBefore.fresh, false);
 
     const searchResult = await searchVaultRuntime(vaultRoot, "lab report", {
@@ -3306,14 +3306,14 @@ test("searchVaultRuntime discards unsupported local stores before serving result
 
     try {
       assert.equal(readSqliteRuntimeUserVersion(reopened), 1);
-      const legacyLookupTable = reopened
+      const staleLookupTable = reopened
         .prepare(`
           SELECT name
           FROM sqlite_master
           WHERE type = 'table' AND name = 'query_lookup_ids'
         `)
         .get() as { name?: string } | undefined;
-      assert.equal(legacyLookupTable?.name ?? null, null);
+      assert.equal(staleLookupTable?.name ?? null, null);
     } finally {
       reopened.close();
     }

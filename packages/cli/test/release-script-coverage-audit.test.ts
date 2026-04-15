@@ -279,7 +279,8 @@ describe('monorepo release flow coverage audit', () => {
       const fullEntries = listZipEntries(fullBundle.zipPath)
 
       expect(leanEntries).toContain('agent-docs/operations/verification-and-runtime.md')
-      expect(leanEntries).toContain('agent-docs/product-specs/repo-v1.md')
+      expect(leanEntries).toContain('agent-docs/product-specs/repo.md')
+      expect(leanEntries).not.toContain('agent-docs/product-specs/repo-v1.md')
       expect(leanEntries).toContain('docs/architecture.md')
       expect(leanEntries).not.toContain('agent-docs/generated/doc-inventory.md')
       expect(leanEntries).not.toContain('agent-docs/exec-plans/completed/README.md')

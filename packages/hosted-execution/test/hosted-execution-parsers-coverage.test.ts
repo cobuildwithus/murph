@@ -656,7 +656,7 @@ describe("hosted execution parsers coverage", () => {
           kind: "telegram.message.received",
           telegramMessage: {
             messageId: "message_123",
-            schema: "murph.hosted-telegram-message.v2",
+            schema: "murph.hosted-telegram-message.unsupported",
             threadId: "thread_123",
           },
           userId: "user_123",

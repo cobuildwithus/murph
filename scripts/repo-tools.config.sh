@@ -34,7 +34,7 @@ required_files=(
   "agent-docs/RELIABILITY.md"
   "agent-docs/SECURITY.md"
   "agent-docs/product-specs/index.md"
-  "agent-docs/product-specs/repo-v1.md"
+  "agent-docs/product-specs/repo.md"
   "agent-docs/references/README.md"
   "agent-docs/references/repo-scope.md"
   "agent-docs/references/testing-ci-map.md"

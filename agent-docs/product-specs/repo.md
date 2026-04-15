@@ -1,10 +1,10 @@
-# Repo V1
+# Repo
 
 Last verified: 2026-04-06
 
 ## Current State
 
-- This repository is Murph's canonical v1 monorepo.
+- This repository is Murph's canonical monorepo.
 - `README.md`, `ARCHITECTURE.md`, and `docs/architecture.md` describe the live system rather than a planned scaffold.
 - The hosted web schema is represented by one canonical baseline migration generated from the current Prisma schema.
 - Historical architecture reviews, migration guides, and legacy-removal audits do not belong in the live repo surface.
