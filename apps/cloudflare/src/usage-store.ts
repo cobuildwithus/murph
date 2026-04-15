@@ -24,9 +24,6 @@ interface StoredHostedPendingUsageDirtyUser {
 interface StoredHostedPendingUsageRecord {
   record: Record<string, unknown>;
   schema: typeof HOSTED_PENDING_USAGE_RECORD_SCHEMA;
-  updatedAt: string;
-  usageId: string;
-  userId: string;
 }
 
 interface HostedPendingUsageState {
@@ -96,7 +93,6 @@ export function createHostedPendingUsageStore(input: {
         await writeStoredHostedPendingUsageRecord({
           ...input,
           record,
-          updatedAt: now,
           userId: request.userId,
         });
         recordedIds.push(usageId);
@@ -124,7 +120,10 @@ export function createHostedPendingUsageStore(input: {
       );
       const shouldVacuumDirtyMarker = usageIds.size === 0;
       const state = await readHostedPendingUsageState({
-        ...input,
+        bucket: input.bucket,
+        key: input.key,
+        keyId: input.keyId,
+        keysById: input.keysById,
         requireListing: shouldVacuumDirtyMarker,
         userId: request.userId,
       });
@@ -145,7 +144,6 @@ export function createHostedPendingUsageStore(input: {
         await deleteHostedPendingUsageDirtyUser({
           bucket: input.bucket,
           key: input.dirtyKey,
-          keysById: input.dirtyKeysById,
           userId: request.userId,
         });
         return;
@@ -166,7 +164,10 @@ export function createHostedPendingUsageStore(input: {
 
     async readUsage(request) {
       const state = await readHostedPendingUsageState({
-        ...input,
+        bucket: input.bucket,
+        key: input.key,
+        keyId: input.keyId,
+        keysById: input.keysById,
         requireListing: true,
         userId: request.userId,
       });
@@ -228,9 +229,6 @@ export function createHostedPendingUsageDirtyUserStore(input: {
 
 async function readHostedPendingUsageState(input: {
   bucket: R2BucketLike;
-  dirtyKey: Uint8Array;
-  dirtyKeyId: string;
-  dirtyKeysById?: Readonly<Record<string, Uint8Array>>;
   key: Uint8Array;
   keyId: string;
   keysById?: Readonly<Record<string, Uint8Array>>;
@@ -301,7 +299,7 @@ async function readStoredHostedPendingUsageRecords(input: {
       continue;
     }
 
-    recordsByUsageId.set(stored.usageId, cloneUsageRecord(stored.record));
+    recordsByUsageId.set(readUsageId(stored.record), cloneUsageRecord(stored.record));
   }
 
   return [...recordsByUsageId.values()];
@@ -341,7 +339,6 @@ async function writeStoredHostedPendingUsageRecord(input: {
   key: Uint8Array;
   keyId: string;
   record: Record<string, unknown>;
-  updatedAt: string;
   userId: string;
 }): Promise<void> {
   const usageId = readUsageId(input.record);
@@ -360,9 +357,6 @@ async function writeStoredHostedPendingUsageRecord(input: {
     value: {
       record: cloneUsageRecord(input.record),
       schema: HOSTED_PENDING_USAGE_RECORD_SCHEMA,
-      updatedAt: input.updatedAt,
-      usageId,
-      userId: input.userId,
     } satisfies StoredHostedPendingUsageRecord,
   });
 }
@@ -396,7 +390,6 @@ async function writeHostedPendingUsageDirtyUser(input: {
 async function deleteHostedPendingUsageDirtyUser(input: {
   bucket: R2BucketLike;
   key: Uint8Array;
-  keysById?: Readonly<Record<string, Uint8Array>>;
   userId: string;
 }): Promise<void> {
   if (!input.bucket.delete) {
@@ -412,9 +405,9 @@ function parseStoredHostedPendingUsageRecord(value: unknown): StoredHostedPendin
   const usageRecord = cloneUsageRecord(
     requireRecord(record.record, "Hosted pending usage record.record"),
   );
-  const usageId = normalizeRequiredString(record.usageId, "Hosted pending usage record.usageId");
+  const usageId = readOptionalNormalizedString(record.usageId);
 
-  if (readUsageId(usageRecord) !== usageId) {
+  if (usageId && readUsageId(usageRecord) !== usageId) {
     throw new TypeError("Hosted pending usage record.usageId must match record.usageId.");
   }
 
@@ -425,9 +418,6 @@ function parseStoredHostedPendingUsageRecord(value: unknown): StoredHostedPendin
       "Hosted pending usage record.schema",
       HOSTED_PENDING_USAGE_RECORD_SCHEMA,
     ),
-    updatedAt: normalizeRequiredString(record.updatedAt, "Hosted pending usage record.updatedAt"),
-    usageId,
-    userId: normalizeRequiredString(record.userId, "Hosted pending usage record.userId"),
   };
 }
 
@@ -563,4 +553,10 @@ function normalizeRequiredString(value: unknown, label: string): string {
   }
 
   return value.trim();
+}
+
+function readOptionalNormalizedString(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0
+    ? value.trim()
+    : null;
 }
