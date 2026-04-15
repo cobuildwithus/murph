@@ -54,7 +54,11 @@ import {
 import {
   type HostedExecutionContainerNamespaceLike,
 } from "./runner-container.js";
-import { listHostedUserEnvKeys, type HostedUserEnvUpdate } from "./user-env.js";
+import {
+  applyHostedUserEnvUpdate,
+  listHostedUserEnvKeys,
+  type HostedUserEnvUpdate,
+} from "./user-env.js";
 import {
   createRunnerCommitRecovery,
   type RunnerCommitRecovery,
@@ -235,8 +239,6 @@ export class HostedUserRunner {
     const crypto = await this.userKeyStore.requireUserCryptoContext(userId, {
       reason: "user-runner-store-refresh",
     });
-    const allowedUserEnvSource = this.readAllowedUserEnvSource();
-    const hostedEmailConfig = readHostedEmailConfig(this.readWorkerStringEnvSource());
 
     const stores: RunnerUserStores = {
       bundleSync: new RunnerBundleSync(
@@ -260,17 +262,7 @@ export class HostedUserRunner {
         keyId: crypto.rootKeyId,
         keysById: crypto.keysById,
       }),
-      userEnv: new RunnerUserEnvService(
-        this.bucket,
-        crypto.rootKey,
-        crypto.rootKeyId,
-        crypto.keysById,
-        this.env.platformEnvelopeKey,
-        this.env.platformEnvelopeKeyId,
-        this.env.platformEnvelopeKeysById,
-        allowedUserEnvSource,
-        hostedEmailConfig,
-      ),
+      userEnv: this.createRunnerUserEnvService(crypto),
       userId,
     };
 
@@ -581,12 +573,20 @@ export class HostedUserRunner {
   }
 
   async getUserEnvStatus(): Promise<CloudflareHostedUserEnvStatus> {
-    const userId = await this.requireBoundUserId();
-    const { userEnv } = await this.ensureRunnerStores(userId);
-    return {
-      configuredUserEnvKeys: listHostedUserEnvKeys(await userEnv.readUserEnv(userId)),
-      userId,
-    };
+    return this.withUserKeyEnvelopeLock(async () => {
+      const userId = await this.requireBoundUserId();
+      const userEnv = await this.resolveUserEnvServiceWhileHoldingKeyLock(userId, {
+        createIfMissing: false,
+        reason: "hosted-user-env-status",
+      });
+
+      return {
+        configuredUserEnvKeys: userEnv
+          ? listHostedUserEnvKeys(await userEnv.readUserEnv(userId))
+          : [],
+        userId,
+      };
+    });
   }
 
   async updateUserEnv(
@@ -594,7 +594,18 @@ export class HostedUserRunner {
   ): Promise<CloudflareHostedUserEnvStatus> {
     return this.withUserKeyEnvelopeLock(async () => {
       const userId = await this.requireBoundUserId();
-      const { userEnv } = await this.ensureRunnerStoresWhileHoldingKeyLock(userId);
+      const userEnv = await this.resolveUserEnvServiceWhileHoldingKeyLock(userId, {
+        createIfMissing: this.hostedUserEnvUpdateRequiresEnvelope(update),
+        reason: "hosted-user-env-write",
+      });
+
+      if (!userEnv) {
+        return {
+          configuredUserEnvKeys: [],
+          userId,
+        };
+      }
+
       return this.withUserEnvLock(() => userEnv.updateUserEnv(userId, update));
     });
   }
@@ -628,6 +639,28 @@ export class HostedUserRunner {
     };
   }
 
+  private createRunnerUserEnvService(crypto: HostedUserCryptoContext): RunnerUserEnvService {
+    return new RunnerUserEnvService(
+      this.bucket,
+      crypto.rootKey,
+      crypto.rootKeyId,
+      crypto.keysById,
+      this.env.platformEnvelopeKey,
+      this.env.platformEnvelopeKeyId,
+      this.env.platformEnvelopeKeysById,
+      this.readAllowedUserEnvSource(),
+      readHostedEmailConfig(this.readWorkerStringEnvSource()),
+    );
+  }
+
+  private hostedUserEnvUpdateRequiresEnvelope(update: HostedUserEnvUpdate): boolean {
+    return Object.keys(applyHostedUserEnvUpdate({
+      current: {},
+      source: this.readAllowedUserEnvSource(),
+      update,
+    })).length > 0;
+  }
+
   private readRunnerRuntimeConfigSource(): Readonly<Record<string, string | undefined>> {
     return {
       ...this.readWorkerStringEnvSource(),
@@ -637,6 +670,37 @@ export class HostedUserRunner {
 
   private readWorkerStringEnvSource(): Readonly<Record<string, string | undefined>> {
     return toStringEnvSource(this.runnerRuntimeEnvSource);
+  }
+
+  private async resolveUserEnvServiceWhileHoldingKeyLock(
+    userId: string,
+    options: {
+      createIfMissing: boolean;
+      reason: string;
+    },
+  ): Promise<RunnerUserEnvService | null> {
+    if (this.runnerStores?.userId === userId) {
+      return this.runnerStores.userEnv;
+    }
+
+    if (!options.createIfMissing && !(await this.userKeyStore.hasManagedUserCryptoEnvelope(userId))) {
+      return null;
+    }
+
+    if (options.createIfMissing) {
+      const status = await this.userKeyStore.ensureManagedUserCryptoEnvelope(userId, {
+        reason: options.reason,
+      });
+
+      if (status.needsRunnerStoreRefresh && this.runnerStores?.userId === userId) {
+        this.runnerStores = null;
+      }
+    }
+
+    const crypto = await this.userKeyStore.requireUserCryptoContext(userId, {
+      reason: options.reason,
+    });
+    return this.createRunnerUserEnvService(crypto);
   }
 
   private async requireBoundUserId(): Promise<string> {

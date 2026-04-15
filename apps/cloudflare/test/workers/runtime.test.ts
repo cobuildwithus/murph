@@ -195,6 +195,37 @@ describe("cloudflare worker runtime suite", () => {
     });
   });
 
+  it("returns empty hosted user-env status for an unactivated user in the Workers runtime", async () => {
+    const userId = "member_control_unactivated";
+    const stub = getUserRunnerStub(userId);
+    await expect(stub.bootstrapUser(userId)).resolves.toEqual({ userId });
+
+    await expect(stub.getUserEnvStatus()).resolves.toEqual({
+      configuredUserEnvKeys: [],
+      userId,
+    });
+  });
+
+  it("bootstraps managed crypto on first hosted user-env write in the Workers runtime", async () => {
+    const userId = "member_control_first_write";
+    const stub = getUserRunnerStub(userId);
+    await expect(stub.bootstrapUser(userId)).resolves.toEqual({ userId });
+
+    await expect(stub.updateUserEnv({
+      env: {
+        OPENAI_API_KEY: "first-key",
+      },
+      mode: "merge",
+    })).resolves.toEqual({
+      configuredUserEnvKeys: ["OPENAI_API_KEY"],
+      userId,
+    });
+    await expect(stub.getUserEnvStatus()).resolves.toEqual({
+      configuredUserEnvKeys: ["OPENAI_API_KEY"],
+      userId,
+    });
+  });
+
   it("accepts canonical hosted user env keys through direct Durable Object RPC", async () => {
     const userId = "member_control_env_reject";
     await resolveHostedUserCryptoContext(userId);

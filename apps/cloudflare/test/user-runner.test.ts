@@ -2924,6 +2924,43 @@ describe("HostedUserRunner", () => {
     });
   });
 
+  it("returns an empty hosted user env status before managed crypto exists", async () => {
+    const runner = new HostedUserRunner(storage.state, {
+      ...environment,
+      allowedUserEnvKeys: "OPENAI_API_KEY",
+    }, bucket.api);
+
+    await runner.bootstrapUser("member_123");
+
+    await expect(runner.getUserEnvStatus()).resolves.toEqual({
+      configuredUserEnvKeys: [],
+      userId: "member_123",
+    });
+  });
+
+  it("bootstraps managed crypto on first hosted user env write", async () => {
+    const runner = new HostedUserRunner(storage.state, {
+      ...environment,
+      allowedUserEnvKeys: "OPENAI_API_KEY",
+    }, bucket.api);
+
+    await runner.bootstrapUser("member_123");
+
+    await expect(runner.updateUserEnv({
+      env: {
+        OPENAI_API_KEY: "sk-user",
+      },
+      mode: "replace",
+    })).resolves.toEqual({
+      configuredUserEnvKeys: ["OPENAI_API_KEY"],
+      userId: "member_123",
+    });
+    await expect(runner.getUserEnvStatus()).resolves.toEqual({
+      configuredUserEnvKeys: ["OPENAI_API_KEY"],
+      userId: "member_123",
+    });
+  });
+
   it("reads per-user env encrypted with a previous key id after rotation", async () => {
     const previousKey = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
     const previousEnvironment = {
