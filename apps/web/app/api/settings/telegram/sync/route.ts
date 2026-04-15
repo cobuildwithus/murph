@@ -7,7 +7,7 @@ import { upsertHostedMemberTelegramRoutingBindingTx } from "@/src/lib/hosted-onb
 import { jsonOk, withJsonError, readOptionalJsonObject } from "@/src/lib/hosted-onboarding/http";
 import {
   enqueueHostedMemberChannelsUpdatedTx,
-  resolveHostedMemberChannelSyncEmailLinked,
+  resolveHostedMemberEmailLinked,
 } from "@/src/lib/hosted-onboarding/member-channel-sync";
 import { resolveHostedPrivyTelegramAccountSelection } from "@/src/lib/hosted-onboarding/privy-shared";
 import { requirePrivyMemberAuth } from "@/src/lib/hosted-onboarding/request-auth";
@@ -56,9 +56,10 @@ export const POST = withJsonError(async (request: Request) => {
   const shouldDispatchChannelsUpdate = hasHostedMemberActiveAccess(auth.member);
   const now = new Date();
   const emailLinked = shouldDispatchChannelsUpdate
-    ? await resolveHostedMemberChannelSyncEmailLinked({
+    ? await resolveHostedMemberEmailLinked({
       linkedAccounts: auth.linkedAccounts,
       memberId: auth.member.id,
+      onUnconfirmed: "retry",
     })
     : false;
   const channelSyncDispatch = await prisma.$transaction(async (tx) => {

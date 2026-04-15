@@ -1,6 +1,5 @@
 import {
   HostedRevnetIssuanceStatus,
-  Prisma,
   type PrismaClient,
 } from "@prisma/client";
 
@@ -8,7 +7,7 @@ import {
   activateHostedMemberFromConfirmedRevnetIssuanceTx,
   runHostedMemberActivationPostCommitEffects,
 } from "./member-activation";
-import { resolveHostedMemberActivationEmailLinked } from "./member-channel-sync";
+import { resolveHostedMemberEmailLinked } from "./member-channel-sync";
 import { readHostedMemberSnapshot } from "./hosted-member-store";
 import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "./shared";
 import {
@@ -94,8 +93,9 @@ export async function reconcileSubmittedHostedRevnetIssuances(input: {
       }
 
       return activateHostedMemberFromConfirmedRevnetIssuanceTx({
-        emailLinked: await resolveHostedMemberActivationEmailLinked({
+        emailLinked: await resolveHostedMemberEmailLinked({
           memberId: issuance.memberId,
+          onUnconfirmed: "disable",
         }),
         member,
         occurredAt: new Date().toISOString(),

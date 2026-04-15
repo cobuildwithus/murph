@@ -11,7 +11,7 @@ const mocks = vi.hoisted(() => ({
     label: "test-prisma",
     $transaction: vi.fn(),
   },
-  resolveHostedMemberChannelSyncEmailLinked: vi.fn(),
+  resolveHostedMemberEmailLinked: vi.fn(),
   requirePrivyMemberAuth: vi.fn(),
   upsertHostedMemberTelegramRoutingBindingTx: vi.fn(),
 }));
@@ -34,7 +34,7 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
 
 vi.mock("@/src/lib/hosted-onboarding/member-channel-sync", () => ({
   enqueueHostedMemberChannelsUpdatedTx: mocks.enqueueHostedMemberChannelsUpdatedTx,
-  resolveHostedMemberChannelSyncEmailLinked: mocks.resolveHostedMemberChannelSyncEmailLinked,
+  resolveHostedMemberEmailLinked: mocks.resolveHostedMemberEmailLinked,
 }));
 
 vi.mock("@/src/lib/hosted-execution/outbox", () => ({
@@ -66,7 +66,7 @@ describe("settings telegram sync route", () => {
       callback(mocks.prismaClient)
     );
     mocks.upsertHostedMemberTelegramRoutingBindingTx.mockResolvedValue(undefined);
-    mocks.resolveHostedMemberChannelSyncEmailLinked.mockResolvedValue(false);
+    mocks.resolveHostedMemberEmailLinked.mockResolvedValue(false);
     mocks.enqueueHostedMemberChannelsUpdatedTx.mockResolvedValue({
       eventId: "member.channels.updated:settings.telegram.sync:member_123:evt_123",
     });
@@ -116,9 +116,10 @@ describe("settings telegram sync route", () => {
       prisma: mocks.prismaClient,
       telegramUserId: "456",
     });
-    expect(mocks.resolveHostedMemberChannelSyncEmailLinked).toHaveBeenCalledWith({
+    expect(mocks.resolveHostedMemberEmailLinked).toHaveBeenCalledWith({
       linkedAccounts: [],
       memberId: "member_123",
+      onUnconfirmed: "retry",
     });
     expect(mocks.enqueueHostedMemberChannelsUpdatedTx).toHaveBeenCalledWith({
       emailLinked: false,
@@ -175,7 +176,7 @@ describe("settings telegram sync route", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(mocks.resolveHostedMemberChannelSyncEmailLinked).not.toHaveBeenCalled();
+    expect(mocks.resolveHostedMemberEmailLinked).not.toHaveBeenCalled();
     expect(mocks.enqueueHostedMemberChannelsUpdatedTx).not.toHaveBeenCalled();
     expect(mocks.drainHostedExecutionOutboxBestEffort).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({

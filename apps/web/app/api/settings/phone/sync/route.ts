@@ -7,7 +7,7 @@ import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import {
   enqueueHostedMemberChannelsUpdatedTx,
-  resolveHostedMemberChannelSyncEmailLinked,
+  resolveHostedMemberEmailLinked,
 } from "@/src/lib/hosted-onboarding/member-channel-sync";
 import { reconcileHostedPrivyIdentityOnMemberTx } from "@/src/lib/hosted-onboarding/member-identity-service";
 import { requirePrivyMemberAuth } from "@/src/lib/hosted-onboarding/request-auth";
@@ -31,9 +31,10 @@ export const POST = withJsonError(async (request: Request) => {
   const shouldDispatchChannelsUpdate = hasHostedMemberActiveAccess(auth.member);
   const now = new Date();
   const emailLinked = shouldDispatchChannelsUpdate
-    ? await resolveHostedMemberChannelSyncEmailLinked({
+    ? await resolveHostedMemberEmailLinked({
       linkedAccounts: auth.linkedAccounts,
       memberId: auth.member.id,
+      onUnconfirmed: "retry",
     })
     : false;
   const channelSyncDispatch = await prisma.$transaction(async (tx) => {

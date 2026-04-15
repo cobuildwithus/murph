@@ -22,7 +22,7 @@ const mocks = vi.hoisted(() => {
     findMemberForStripeObject: vi.fn(),
     getHostedInviteStatus: vi.fn(),
     readHostedMemberSnapshot: vi.fn(),
-    resolveHostedMemberActivationEmailLinked: vi.fn(),
+    resolveHostedMemberEmailLinked: vi.fn(),
     requireHostedInviteForAuthentication: vi.fn(),
     requireHostedStripeApi: vi.fn(),
     runHostedMemberActivationPostCommitEffects: vi.fn(),
@@ -58,7 +58,7 @@ vi.mock("@/src/lib/hosted-onboarding/member-activation", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/member-channel-sync", () => ({
-  resolveHostedMemberActivationEmailLinked: mocks.resolveHostedMemberActivationEmailLinked,
+  resolveHostedMemberEmailLinked: mocks.resolveHostedMemberEmailLinked,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
@@ -83,7 +83,7 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.requireHostedStripeApi.mockReturnValue(mocks.stripe);
-    mocks.resolveHostedMemberActivationEmailLinked.mockResolvedValue(false);
+    mocks.resolveHostedMemberEmailLinked.mockResolvedValue(false);
     mocks.requireHostedInviteForAuthentication.mockResolvedValue({
       inviteCode: "invite-code",
       memberId: "member_123",
@@ -140,9 +140,10 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
     expect(mocks.stripe.checkout.sessions.retrieve).toHaveBeenCalledWith("cs_123", {
       expand: ["subscription"],
     });
-    expect(mocks.resolveHostedMemberActivationEmailLinked).toHaveBeenCalledWith({
+    expect(mocks.resolveHostedMemberEmailLinked).toHaveBeenCalledWith({
       linkedAccounts: undefined,
       memberId: "member_123",
+      onUnconfirmed: "disable",
     });
     expect(prisma.$transaction).toHaveBeenCalledTimes(1);
     expect(prisma.$transaction).toHaveBeenCalledWith(

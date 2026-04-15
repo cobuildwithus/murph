@@ -16,7 +16,7 @@ import {
   activateHostedMemberForPositiveSourceTx,
   runHostedMemberActivationPostCommitEffects,
 } from "./member-activation";
-import { resolveHostedMemberActivationEmailLinked } from "./member-channel-sync";
+import { resolveHostedMemberEmailLinked } from "./member-channel-sync";
 import type { PrivyLinkedAccountLike } from "./privy-shared";
 import { requireHostedStripeApi } from "./runtime";
 import {
@@ -58,9 +58,10 @@ export async function reconcileHostedBillingCheckoutSuccess(input: {
   });
 
   await applyHostedCheckoutSessionSuccess({
-    emailLinked: await resolveHostedMemberActivationEmailLinked({
+    emailLinked: await resolveHostedMemberEmailLinked({
       linkedAccounts: input.linkedAccounts,
       memberId: invite.memberId,
+      onUnconfirmed: "disable",
     }),
     memberId: invite.memberId,
     prisma,
