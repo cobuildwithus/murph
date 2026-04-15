@@ -31,9 +31,17 @@ export type HostedMemberCoreState = Prisma.HostedMemberGetPayload<{
   select: typeof hostedMemberCoreStateSelect;
 }>;
 
-export interface HostedMemberSnapshot {
+/**
+ * Billing orchestration should depend on the core+billing slice instead of the
+ * full hosted member snapshot so Stripe flows do not silently couple to
+ * identity and routing ownership.
+ */
+export interface HostedMemberBillingSnapshot {
   billingRef: HostedMemberStripeBillingRefSnapshot | null;
   core: HostedMemberCoreState;
+}
+
+export interface HostedMemberSnapshot extends HostedMemberBillingSnapshot {
   identity: HostedMemberIdentityState | null;
   routing: HostedMemberRoutingStateSnapshot | null;
 }
@@ -70,6 +78,31 @@ export async function readHostedMemberCoreState(input: {
   });
 }
 
+export async function readHostedMemberBillingSnapshot(input: {
+  memberId: string;
+  prisma: HostedOnboardingPrismaClient;
+}): Promise<HostedMemberBillingSnapshot | null> {
+  const memberRecord = await input.prisma.hostedMember.findUnique({
+    where: {
+      id: input.memberId,
+    },
+    include: {
+      billingRef: true,
+    },
+  });
+
+  if (!memberRecord) {
+    return null;
+  }
+
+  return composeHostedMemberBillingSnapshot(
+    projectHostedMemberCoreState(memberRecord),
+    memberRecord.billingRef
+      ? projectHostedMemberStripeBillingRefSnapshot(memberRecord.billingRef)
+      : null,
+  );
+}
+
 export async function readHostedMemberSnapshot(input: {
   memberId: string;
   prisma: HostedOnboardingPrismaClient;
@@ -95,24 +128,18 @@ export async function readHostedMemberSnapshot(input: {
   const routing = memberRecord.routing
     ? projectHostedMemberRoutingState(memberRecord.routing)
     : null;
-  const billingRef = memberRecord.billingRef
-    ? projectHostedMemberStripeBillingRefSnapshot(memberRecord.billingRef)
-    : null;
-
-  return composeHostedMemberSnapshot(
-    {
-      billingStatus: memberRecord.billingStatus,
-      createdAt: memberRecord.createdAt,
-      id: memberRecord.id,
-      suspendedAt: memberRecord.suspendedAt,
-      updatedAt: memberRecord.updatedAt,
-    },
-    {
-      billingRef,
-      identity,
-      routing,
-    },
+  const billing = composeHostedMemberBillingSnapshot(
+    projectHostedMemberCoreState(memberRecord),
+    memberRecord.billingRef
+      ? projectHostedMemberStripeBillingRefSnapshot(memberRecord.billingRef)
+      : null,
   );
+
+  return composeHostedMemberSnapshot(billing.core, {
+    billingRef: billing.billingRef,
+    identity,
+    routing,
+  });
 }
 
 export async function updateHostedMemberCoreState(input: {
@@ -147,6 +174,16 @@ export async function updateHostedMemberCoreState(input: {
   });
 }
 
+export function composeHostedMemberBillingSnapshot(
+  core: HostedMemberCoreState,
+  billingRef: HostedMemberStripeBillingRefSnapshot | null,
+): HostedMemberBillingSnapshot {
+  return {
+    billingRef,
+    core,
+  };
+}
+
 export function composeHostedMemberSnapshot(
   core: HostedMemberCoreState,
   input: {
@@ -160,5 +197,20 @@ export function composeHostedMemberSnapshot(
     core,
     identity: input.identity,
     routing: input.routing,
+  };
+}
+
+function projectHostedMemberCoreState(
+  member: Pick<
+    HostedMember,
+    "billingStatus" | "createdAt" | "id" | "suspendedAt" | "updatedAt"
+  >,
+): HostedMemberCoreState {
+  return {
+    billingStatus: member.billingStatus,
+    createdAt: member.createdAt,
+    id: member.id,
+    suspendedAt: member.suspendedAt,
+    updatedAt: member.updatedAt,
   };
 }

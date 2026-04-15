@@ -17,11 +17,16 @@ import {
   isHostedAccessBlockedBillingStatus,
 } from "./entitlement";
 import {
+  type HostedMemberBillingSnapshot,
   type HostedMemberSnapshot,
   readHostedMemberSnapshot,
   updateHostedMemberCoreState,
 } from "./hosted-member-store";
 import { resolveHostedMemberActivationLinqRoute } from "./linq-home-routing";
+import {
+  resolveHostedMemberFirstContactTarget,
+  resolveHostedMemberMessagingState,
+} from "./messaging-state";
 import {
   type HostedStripeDispatchContext,
 } from "./stripe-dispatch";
@@ -81,7 +86,7 @@ export async function activateHostedMemberFromConfirmedRevnetIssuance(input: {
 
     await provisionManagedUserCryptoInHostedExecution(input.member.core.id);
 
-    const linqRoute = await resolveHostedMemberActivationLinqRoute({
+    const linqRoute = await resolveHostedMemberActivationFirstContactLinqRoute({
       member: input.member,
       prisma: input.prisma,
       sourceEventId: input.sourceEventId,
@@ -121,7 +126,7 @@ export async function activateHostedMemberFromConfirmedRevnetIssuance(input: {
 
 export async function activateHostedMemberForPositiveSource(input: {
   dispatchContext: HostedStripeDispatchContext;
-  member: HostedMemberSnapshot;
+  member: Pick<HostedMemberBillingSnapshot, "core">;
   prisma: HostedOnboardingPrismaClient;
   skipIfBillingAlreadyActive?: boolean;
 }): Promise<HostedMemberActivationTransactionResult> {
@@ -189,7 +194,7 @@ export async function activateHostedMemberForPositiveSource(input: {
         prisma: tx,
       });
 
-      const linqRoute = await resolveHostedMemberActivationLinqRoute({
+      const linqRoute = await resolveHostedMemberActivationFirstContactLinqRoute({
         member: currentMember,
         prisma: tx,
         sourceEventId: input.dispatchContext.sourceEventId,
@@ -233,18 +238,21 @@ export async function activateHostedMemberForPositiveSource(input: {
 }
 
 export function buildHostedMemberActivationDispatch(input: {
+  firstContact?: HostedExecutionMemberActivatedEvent["firstContact"];
   linqChatId?: string | null;
   memberId: string;
   phoneLookupKey?: string | null;
+  telegramUserId?: string | null;
   occurredAt: string;
   sourceEventId: string;
   sourceType: string;
 }): HostedExecutionDispatchRequest {
   return buildHostedExecutionMemberActivatedDispatch({
     eventId: buildHostedMemberActivationEventId(input),
-    firstContact: buildHostedMemberActivationFirstContact({
+    firstContact: input.firstContact ?? buildHostedMemberActivationFirstContact({
       linqChatId: input.linqChatId ?? null,
       phoneLookupKey: input.phoneLookupKey ?? null,
+      telegramUserId: input.telegramUserId ?? null,
     }),
     memberId: input.memberId,
     occurredAt: input.occurredAt,
@@ -254,15 +262,19 @@ export function buildHostedMemberActivationDispatch(input: {
 export function buildHostedMemberActivationFirstContact(input: {
   linqChatId: string | null;
   phoneLookupKey: string | null;
+  telegramUserId: string | null;
 }): HostedExecutionMemberActivatedEvent["firstContact"] {
-  return input.linqChatId && input.phoneLookupKey
-    ? {
-        channel: "linq",
-        identityId: input.phoneLookupKey,
-        threadId: input.linqChatId,
-        threadIsDirect: true,
-      }
-    : null;
+  return resolveHostedMemberFirstContactTarget({
+    linqChatId: input.linqChatId,
+    messaging: resolveHostedMemberMessagingState({
+      identity: {
+        phoneLookupKey: input.phoneLookupKey,
+      },
+      routing: {
+        telegramUserId: input.telegramUserId,
+      },
+    }),
+  });
 }
 
 export async function runHostedMemberActivationPostCommitEffects(input: {
@@ -291,6 +303,21 @@ export async function runHostedMemberActivationPostCommitEffects(input: {
     });
     throw error;
   }
+}
+
+async function resolveHostedMemberActivationFirstContactLinqRoute(input: {
+  member: HostedMemberSnapshot;
+  prisma: HostedOnboardingPrismaClient;
+  sourceEventId: string;
+  sourceType: string;
+}): Promise<{ firstContactLinqChatId: string | null }> {
+  if (!input.member.identity?.phoneNumber) {
+    return {
+      firstContactLinqChatId: input.member.routing?.linqChatId ?? null,
+    };
+  }
+
+  return resolveHostedMemberActivationLinqRoute(input);
 }
 
 async function tryActivateHostedMemberIfStillAllowed(input: {
@@ -354,6 +381,7 @@ function buildHostedMemberActivationDispatchForMember(input: {
     linqChatId: input.firstContactLinqChatId,
     memberId: input.member.core.id,
     phoneLookupKey: input.member.identity?.phoneLookupKey ?? null,
+    telegramUserId: input.member.routing?.telegramUserId ?? null,
     occurredAt: input.occurredAt,
     sourceEventId: input.sourceEventId,
     sourceType: input.sourceType,

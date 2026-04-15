@@ -64,6 +64,10 @@ type BillingServiceInvite = {
   member: {
     billingStatus: HostedBillingStatus;
     id: string;
+    identity: {
+      phoneLookupKey: string | null;
+    } | null;
+    routing: null;
     suspendedAt: Date | null;
   };
   memberId: string;
@@ -93,6 +97,8 @@ describe("createHostedBillingCheckout", () => {
         member: {
           billingStatus: HostedBillingStatus.active,
           id: "member_123",
+          identity: null,
+          routing: null,
           suspendedAt: null,
         },
       }),
@@ -109,6 +115,37 @@ describe("createHostedBillingCheckout", () => {
       alreadyActive: true,
       url: null,
     });
+    expect(mocks.stripe.customers.create).not.toHaveBeenCalled();
+    expect(mocks.stripe.checkout.sessions.create).not.toHaveBeenCalled();
+  });
+
+  it("blocks checkout until the invite member has a phone or Telegram messaging channel", async () => {
+    mocks.requireHostedInviteForAuthentication.mockResolvedValue(
+      makeInvite({
+        member: {
+          billingStatus: HostedBillingStatus.not_started,
+          id: "member_123",
+          identity: {
+            phoneLookupKey: null,
+          },
+          routing: null,
+          suspendedAt: null,
+        },
+      }),
+    );
+
+    await expect(
+      createHostedBillingCheckout({
+        inviteCode: "invite-code",
+        member: makeAuthenticatedMember(),
+        now: new Date("2026-03-27T12:00:00.000Z"),
+        prisma: makePrisma() as never,
+      }),
+    ).rejects.toMatchObject({
+      code: "HOSTED_MESSAGING_CHANNEL_REQUIRED",
+      httpStatus: 409,
+    });
+
     expect(mocks.stripe.customers.create).not.toHaveBeenCalled();
     expect(mocks.stripe.checkout.sessions.create).not.toHaveBeenCalled();
   });
@@ -271,6 +308,10 @@ function makeInvite(overrides: Partial<BillingServiceInvite> = {}): BillingServi
     member: {
       billingStatus: HostedBillingStatus.not_started,
       id: "member_123",
+      identity: {
+        phoneLookupKey: "hbidx:phone:v1:test",
+      },
+      routing: null,
       suspendedAt: null,
     },
     memberId: "member_123",
