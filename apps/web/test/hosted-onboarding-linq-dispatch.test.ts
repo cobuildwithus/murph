@@ -249,6 +249,60 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
   });
 
+  it("does not wait for the hosted execution dispatch nudge when one is deferred", async () => {
+    const prisma = asPrismaTransactionClient({
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventType: "message.received",
+            receiptAttemptCount: 1,
+            receiptStatus: "processing",
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({
+          billingStatus: HostedBillingStatus.active,
+          id: "member_123",
+          invites: [],
+          linqChatId: "chat_123",
+          phoneLookupKey: "+15551234567",
+        }),
+      },
+    });
+    const deferred: Array<() => Promise<void>> = [];
+
+    await expect(handleHostedOnboardingLinqWebhook({
+      defer: (drain) => {
+        deferred.push(drain);
+      },
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        eventId: "evt_deferred_dispatch",
+      }),
+      signature: null,
+      timestamp: null,
+    })).resolves.toMatchObject({
+      ok: true,
+      reason: "dispatched-active-member",
+    });
+
+    expect(deferred).toHaveLength(1);
+    expect(mocks.drainHostedExecutionOutboxBestEffort).not.toHaveBeenCalled();
+
+    await deferred[0]?.();
+
+    expect(mocks.drainHostedExecutionOutboxBestEffort).toHaveBeenCalledWith({
+      eventIds: [
+        "evt_deferred_dispatch",
+      ],
+      limit: 1,
+      prisma,
+    });
+  });
+
   it("opens a Prisma transaction when dispatching an active-member Linq message from a root client", async () => {
     const transactionReceiptUpdateMany = vi.fn().mockResolvedValue({ count: 1 });
     const transactionHostedMemberFindUnique = vi.fn().mockResolvedValue({
