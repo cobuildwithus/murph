@@ -1,12 +1,7 @@
-import type {
-  CloudflareHostedUserEnvUpdate,
-} from "@murphai/cloudflare-hosted-control/contracts";
-import {
-  parseCloudflareHostedUserEnvUpdate,
-} from "@murphai/cloudflare-hosted-control/parsers";
-
 import { isHostedUserEnvKeyAllowed } from "./hosted-env-policy.ts";
 
+// This payload is the runner-secret subset of per-user configuration. Product
+// facts must not be stored through this Cloudflare-owned seam.
 export const HOSTED_USER_ENV_SCHEMA = "murph.hosted-user-env.v1";
 
 export interface HostedUserEnvConfig {
@@ -15,7 +10,15 @@ export interface HostedUserEnvConfig {
   updatedAt: string;
 }
 
-export type HostedUserEnvUpdate = CloudflareHostedUserEnvUpdate;
+export interface HostedUserEnvStatus {
+  configuredUserEnvKeys: string[];
+  userId: string;
+}
+
+export interface HostedUserEnvUpdate {
+  env: Record<string, string | null>;
+  mode: "merge" | "replace";
+}
 
 const utf8Decoder = new TextDecoder();
 const utf8Encoder = new TextEncoder();
@@ -110,13 +113,29 @@ export function parseHostedUserEnvUpdate(value: unknown): HostedUserEnvUpdate {
     "Hosted user env request body must be a JSON object.",
   );
 
-  return parseCloudflareHostedUserEnvUpdate({
-    env: requireHostedUserEnvObject(
-      payload.env,
-      "Hosted user env request body field `env` must be a JSON object.",
-    ),
-    mode: payload.mode,
-  });
+  const mode = payload.mode;
+
+  if (mode !== "merge" && mode !== "replace") {
+    throw new TypeError("Hosted user env request body field `mode` is invalid.");
+  }
+
+  const env = requireHostedUserEnvObject(
+    payload.env,
+    "Hosted user env request body field `env` must be a JSON object.",
+  );
+
+  return {
+    env: Object.fromEntries(Object.entries(env).map(([key, entry]) => {
+      if (entry !== null && typeof entry !== "string") {
+        throw new TypeError(
+          `Hosted user env request body field \`env.${key}\` must be a string or null.`,
+        );
+      }
+
+      return [key, entry] as const;
+    })),
+    mode,
+  };
 }
 
 export function createHostedUserEnvConfig(

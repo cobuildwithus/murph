@@ -19,8 +19,6 @@ export { readHostedEmailConfig } from "./hosted-email/config.ts";
 export type { HostedEmailInboundRoute } from "./hosted-email/routes.ts";
 export {
   createHostedEmailUserAddress,
-  ensureHostedEmailVerifiedSenderRouteAvailable,
-  reconcileHostedEmailVerifiedSenderRoute,
   resolveHostedEmailIngressRoute,
   resolveHostedEmailInboundRoute,
 } from "./hosted-email/routes.ts";

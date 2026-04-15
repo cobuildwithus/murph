@@ -136,24 +136,3 @@ export async function hostedDispatchPayloadObjectKeyForSignature(
 
   return `transient/dispatch-payloads/${userSegment}/${payloadSegment}.json`;
 }
-
-export async function hostedSharePackObjectKey(
-  rootKey: Uint8Array,
-  userId: string,
-  shareId: string,
-): Promise<string> {
-  const userSegment = await deriveHostedStorageOpaqueId({
-    length: 24,
-    rootKey,
-    scope: "share-pack-path",
-    value: `user:${userId}`,
-  });
-  const shareSegment = await deriveHostedStorageOpaqueId({
-    length: 48,
-    rootKey,
-    scope: "share-pack-path",
-    value: `share:${userId}:${shareId}`,
-  });
-
-  return `transient/share-packs/${userSegment}/${shareSegment}.json`;
-}

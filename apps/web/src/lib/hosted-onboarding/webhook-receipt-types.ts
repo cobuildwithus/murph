@@ -112,6 +112,11 @@ export type HostedWebhookSideEffect =
   | HostedWebhookLinqMessageSideEffect
   | HostedWebhookRevnetIssuanceSideEffect;
 
+export type HostedWebhookReceiptLocalSideEffect = Exclude<
+  HostedWebhookSideEffect,
+  HostedWebhookDispatchSideEffect
+>;
+
 export type HostedWebhookReceiptStatus = "completed" | "failed" | "processing";
 
 export type HostedWebhookReceiptState = {
@@ -140,8 +145,8 @@ export type HostedWebhookSideEffectResult =
 export type HostedWebhookReceiptPersistenceClient = PrismaClient | Prisma.TransactionClient;
 
 export type HostedWebhookDispatchEnqueueInput = {
+  dispatch: HostedExecutionDispatchRequest;
   eventId: string;
-  payload: HostedWebhookStoredDispatchSideEffectPayload;
   prismaOrTransaction: HostedWebhookReceiptPersistenceClient;
   source: string;
 };
@@ -151,7 +156,7 @@ export type HostedWebhookReceiptHandlers = {
     effect: HostedWebhookSideEffect;
     prisma: HostedWebhookReceiptPersistenceClient;
   }) => Promise<void>;
-  enqueueDispatchEffect: (input: HostedWebhookDispatchEnqueueInput) => Promise<void>;
+  enqueueDispatch: (input: HostedWebhookDispatchEnqueueInput) => Promise<void>;
   performSideEffect: (
     effect: HostedWebhookSideEffect,
     options: {

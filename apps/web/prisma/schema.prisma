@@ -12,6 +12,15 @@ model DeviceConnection {
   provider                 String
   providerAccountBlindIndex String            @map("provider_account_blind_index")
   status                   String             @default("active")
+  displayName              String?            @map("display_name")
+  scopesJson               Json?              @map("scopes_json")
+  metadataJson             Json?              @map("metadata_json")
+  externalAccountIdEncrypted String?          @map("external_account_id_encrypted")
+  accessTokenEncrypted     String?            @map("access_token_encrypted")
+  refreshTokenEncrypted    String?            @map("refresh_token_encrypted")
+  accessTokenExpiresAt     DateTime?          @map("access_token_expires_at")
+  tokenVersion             Int?               @map("token_version")
+  keyVersion               String?            @map("key_version")
   connectedAt              DateTime           @map("connected_at")
   lastWebhookAt            DateTime?          @map("last_webhook_at")
   lastSyncStartedAt        DateTime?          @map("last_sync_started_at")
@@ -214,6 +223,7 @@ model HostedMember {
   identity        HostedMemberIdentity?
   routing         HostedMemberRouting?
   billingRef      HostedMemberBillingRef?
+  emailAuthorization HostedMemberEmailAuthorization?
 
   @@index([billingStatus])
   @@map("hosted_member")
@@ -277,6 +287,21 @@ model HostedMemberBillingRef {
   member                        HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
 
   @@map("hosted_member_billing_ref")
+}
+
+model HostedMemberEmailAuthorization {
+  memberId                         String       @unique @map("member_id")
+  verifiedEmailLookupKey           String?      @unique @map("verified_email_lookup_key")
+  verifiedEmailAddressEncrypted    String?      @map("verified_email_address_encrypted")
+  verifiedEmailVerifiedAt          DateTime?    @map("verified_email_verified_at")
+  directPublicSenderLookupKey      String?      @unique @map("direct_public_sender_lookup_key")
+  directPublicSenderAddressEncrypted String?    @map("direct_public_sender_address_encrypted")
+  directPublicSenderAuthorizedAt   DateTime?    @map("direct_public_sender_authorized_at")
+  createdAt                        DateTime     @default(now()) @map("created_at")
+  updatedAt                        DateTime     @updatedAt @map("updated_at")
+  member                           HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@map("hosted_member_email_authorization")
 }
 
 model HostedInvite {
@@ -364,12 +389,24 @@ model HostedShareLink {
   lastEventId        String?   @map("last_event_id")
   createdAt          DateTime  @default(now()) @map("created_at")
   updatedAt          DateTime  @updatedAt @map("updated_at")
+  payload            HostedSharePayload?
 
   @@index([senderMemberId, createdAt])
   @@index([expiresAt])
   @@index([acceptedByMemberId, acceptedAt])
   @@index([consumedByMemberId, consumedAt])
   @@map("hosted_share_link")
+}
+
+model HostedSharePayload {
+  shareId          String          @unique @map("share_id")
+  payloadSchema    String          @default("murph.hosted-share-payload.v1") @map("payload_schema")
+  payloadEncrypted String          @map("payload_encrypted")
+  createdAt        DateTime        @default(now()) @map("created_at")
+  updatedAt        DateTime        @updatedAt @map("updated_at")
+  share            HostedShareLink @relation(fields: [shareId], references: [id], onDelete: Cascade)
+
+  @@map("hosted_share_payload")
 }
 
 model HostedWebhookReceipt {

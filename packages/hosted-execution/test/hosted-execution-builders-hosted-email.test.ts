@@ -3,10 +3,6 @@ import { describe, expect, it } from "vitest";
 import type { HostedExecutionTelegramAttachment } from "../src/contracts.ts";
 
 import {
-  buildHostedExecutionDispatchRef,
-  readHostedExecutionDispatchRef,
-} from "../src/dispatch-ref.ts";
-import {
   buildHostedExecutionEmailMessageReceivedDispatch,
   buildHostedExecutionLinqMessageReceivedDispatch,
   buildHostedExecutionMemberActivatedDispatch,
@@ -18,13 +14,6 @@ import {
   resolveHostedEmailSelfAddresses,
   resolveHostedEmailSenderIdentity,
 } from "../src/hosted-email.ts";
-import {
-  buildHostedExecutionOutboxPayload,
-  readHostedExecutionOutboxPayload,
-  readHostedExecutionStagedPayloadId,
-  resolveHostedExecutionCanonicalOutboxPayloadStorage,
-} from "../src/outbox-payload.ts";
-import { parseHostedExecutionOutboxPayload } from "../src/parsers.ts";
 
 const occurredAt = "2026-04-08T00:00:00.000Z";
 const defaultMemberChannels = {
@@ -122,7 +111,7 @@ describe("hosted execution builders", () => {
       {
         fileId: "file_1",
         fileName: "photo.jpg",
-        kind: "photo" as const,
+        kind: "photo",
       },
     ];
     const dispatch = buildHostedExecutionTelegramMessageReceivedDispatch({
@@ -304,170 +293,5 @@ describe("hosted email helpers", () => {
       "assistant@example.com",
       "assistant+route@example.com",
     ]);
-  });
-});
-
-describe("dispatch refs and outbox payloads", () => {
-  it("builds and reads reference dispatch metadata for reference-only events", () => {
-    const dispatch = buildHostedExecutionEmailMessageReceivedDispatch({
-      eventId: "email-ref-1",
-      identityId: "identity_123",
-      occurredAt,
-      rawMessageKey: "raw_123",
-      selfAddress: "assistant@example.com",
-      userId: "user_123",
-    });
-    const dispatchRef = buildHostedExecutionDispatchRef(dispatch);
-
-    expect(dispatchRef).toEqual({
-      eventId: "email-ref-1",
-      eventKind: "email.message.received",
-      occurredAt,
-      userId: "user_123",
-    });
-    expect(readHostedExecutionDispatchRef({
-      dispatchRef,
-      storage: "reference",
-    })).toEqual(dispatchRef);
-  });
-
-  it("rejects invalid dispatch ref payloads", () => {
-    expect(readHostedExecutionDispatchRef({
-      dispatchRef: {
-        eventId: "member-activated-1",
-        eventKind: "member.activated",
-        occurredAt,
-        userId: "user_123",
-      },
-      storage: "reference",
-    })).toBeNull();
-
-    expect(readHostedExecutionDispatchRef({
-      dispatchRef: {
-        eventId: "email-ref-2",
-        eventKind: "email.message.received",
-        occurredAt,
-        unexpected: true,
-        userId: "user_123",
-      },
-      storage: "reference",
-    })).toBeNull();
-
-    expect(readHostedExecutionDispatchRef({
-      dispatchRef: {
-        eventId: " ",
-        eventKind: "email.message.received",
-        occurredAt,
-        userId: "user_123",
-      },
-      storage: "reference",
-    })).toBeNull();
-
-    expect(readHostedExecutionDispatchRef({
-      dispatchRef: {
-        eventId: "email-ref-3",
-        eventKind: "email.message.received",
-        occurredAt,
-        userId: "user_123",
-      },
-      storage: "inline",
-    })).toBeNull();
-  });
-
-  it("round-trips canonical inline and reference outbox payloads", () => {
-    const inlineDispatch = buildHostedExecutionMemberActivatedDispatch({
-      eventId: "member-inline-1",
-      memberId: "user_123",
-      memberChannels: defaultMemberChannels,
-      occurredAt,
-    });
-    const referenceDispatch = buildHostedExecutionEmailMessageReceivedDispatch({
-      eventId: "email-ref-4",
-      identityId: "identity_123",
-      occurredAt,
-      rawMessageKey: "raw_456",
-      userId: "user_123",
-    });
-    const inlinePayload = buildHostedExecutionOutboxPayload(inlineDispatch, { storage: "auto" });
-    const referencePayload = buildHostedExecutionOutboxPayload(referenceDispatch, {
-      stagedPayloadId: "staged_123",
-      storage: "auto",
-    });
-
-    expect(readHostedExecutionOutboxPayload(inlinePayload)).toEqual(inlinePayload);
-    expect(readHostedExecutionOutboxPayload(referencePayload)).toEqual(referencePayload);
-  });
-
-  it("validates staged payload ids and invalid outbox payload shapes", () => {
-    const referenceDispatch = buildHostedExecutionEmailMessageReceivedDispatch({
-      eventId: "email-ref-5",
-      identityId: "identity_123",
-      occurredAt,
-      rawMessageKey: "raw_789",
-      userId: "user_123",
-    });
-
-    expect(() => buildHostedExecutionOutboxPayload(referenceDispatch)).toThrow(
-      /require a staged payload id/i,
-    );
-    expect(() => buildHostedExecutionOutboxPayload(referenceDispatch, {
-      stagedPayloadId: " ",
-    })).toThrow(/require a staged payload id/i);
-
-    expect(readHostedExecutionStagedPayloadId("staged_456")).toBe("staged_456");
-    expect(readHostedExecutionStagedPayloadId(" ")).toBeNull();
-
-    expect(readHostedExecutionOutboxPayload({
-      dispatch: referenceDispatch,
-      storage: "inline",
-    })).toBeNull();
-
-    expect(readHostedExecutionOutboxPayload({
-      dispatchRef: {
-        eventId: "member-inline-2",
-        eventKind: "member.activated",
-        occurredAt,
-        userId: "user_123",
-      },
-      stagedPayloadId: "staged_789",
-      storage: "reference",
-    })).toBeNull();
-
-    expect(readHostedExecutionOutboxPayload({
-      dispatchRef: {
-        eventId: "email-ref-6",
-        eventKind: "email.message.received",
-        occurredAt,
-        userId: "user_123",
-      },
-      stagedPayloadId: " ",
-      storage: "reference",
-    })).toBeNull();
-
-    expect(readHostedExecutionOutboxPayload({
-      dispatch: buildHostedExecutionMemberActivatedDispatch({
-        eventId: "member-inline-3",
-        memberId: "user_123",
-        memberChannels: defaultMemberChannels,
-        occurredAt,
-      }),
-      dispatchRef: {
-        eventId: "email-ref-7",
-        eventKind: "email.message.received",
-        occurredAt,
-        userId: "user_123",
-      },
-      storage: "inline",
-    })).toBeNull();
-
-    expect(() => parseHostedExecutionOutboxPayload({
-      storage: "bogus",
-    })).toThrow(/outbox payload is invalid/i);
-  });
-
-  it("rejects unsupported canonical storage kinds", () => {
-    expect(() => resolveHostedExecutionCanonicalOutboxPayloadStorage(
-      "unknown.event" as never,
-    )).toThrow(/unsupported hosted execution event kind/i);
   });
 });

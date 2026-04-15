@@ -17,7 +17,6 @@ const mocks = vi.hoisted(() => ({
   listHostedBundleArtifacts: vi.fn(),
   materializeHostedExecutionArtifacts: vi.fn(),
   normalizeHostedAssistantRuntimeConfig: vi.fn(),
-  reconcileHostedVerifiedEmailSelfTarget: vi.fn(),
   refreshAssistantStatusSnapshot: vi.fn(),
   restoreHostedExecutionContext: vi.fn(),
   resumeHostedCommittedExecution: vi.fn(),
@@ -63,11 +62,6 @@ vi.mock("@murphai/assistant-engine/gateway-local-adapter", () => ({
 
 vi.mock("@murphai/gateway-local", () => ({
   exportGatewayProjectionSnapshotLocal: mocks.exportGatewayProjectionSnapshotLocal,
-}));
-
-vi.mock("../src/hosted-email-route.ts", () => ({
-  reconcileHostedVerifiedEmailSelfTarget:
-    mocks.reconcileHostedVerifiedEmailSelfTarget,
 }));
 
 vi.mock("../src/hosted-runtime/artifacts.ts", () => ({
@@ -157,12 +151,6 @@ beforeEach(() => {
     exported: 0,
     failed: 0,
     pending: 0,
-  });
-  mocks.reconcileHostedVerifiedEmailSelfTarget.mockResolvedValue({
-    emailAddress: "member@example.com",
-    identityId: "assistant@example.com",
-    selfTargetUpdated: true,
-    status: "saved",
   });
   mocks.refreshAssistantStatusSnapshot.mockResolvedValue(undefined);
 });
@@ -399,9 +387,7 @@ describe("completeHostedExecutionAfterCommit", () => {
           usageExportPort: null,
         },
         resolvedConfig: createHostedRuntimeResolvedConfig(),
-        userEnv: {
-          HOSTED_USER_VERIFIED_EMAIL: "member@example.com",
-        },
+        userEnv: {},
       },
     });
 
@@ -421,13 +407,6 @@ describe("completeHostedExecutionAfterCommit", () => {
     });
     expect(mocks.exportHostedPendingAssistantUsage).toHaveBeenCalledWith({
       usageExportPort: null,
-      vaultRoot: "/tmp/vault-root",
-    });
-    expect(mocks.reconcileHostedVerifiedEmailSelfTarget).toHaveBeenCalledWith({
-      operatorHomeRoot: "/tmp/operator-home",
-      source: {
-        HOSTED_USER_VERIFIED_EMAIL: "member@example.com",
-      },
       vaultRoot: "/tmp/vault-root",
     });
     expect(mocks.refreshAssistantStatusSnapshot).toHaveBeenCalledWith("/tmp/vault-root");

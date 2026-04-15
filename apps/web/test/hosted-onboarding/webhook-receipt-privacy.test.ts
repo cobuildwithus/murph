@@ -3,23 +3,16 @@ import type {
   HostedExecutionDispatchRequest,
 } from "@murphai/hosted-execution";
 import { Prisma } from "@prisma/client";
-import type {
-  HostedExecutionOutboxPayload,
-} from "../../src/lib/hosted-execution/outbox-payload";
 
 const {
-  deleteHostedStoredDispatchPayloadBestEffort,
   claimHostedWebhookReceiptForContinuation,
   continueHostedWebhookReceipt,
   createHostedWebhookReceiptHandlers,
-  maybeStageHostedExecutionDispatchPayload,
   listHostedWebhookReceiptContinuationCandidates,
 } = vi.hoisted(() => ({
-  deleteHostedStoredDispatchPayloadBestEffort: vi.fn(),
   claimHostedWebhookReceiptForContinuation: vi.fn(),
   continueHostedWebhookReceipt: vi.fn(),
   createHostedWebhookReceiptHandlers: vi.fn(),
-  maybeStageHostedExecutionDispatchPayload: vi.fn(),
   listHostedWebhookReceiptContinuationCandidates: vi.fn(),
 }));
 
@@ -28,35 +21,6 @@ vi.mock("@prisma/client", () => ({
     DbNull: null,
     JsonNull: null,
   },
-}));
-
-vi.mock("@murphai/hosted-execution", async () => {
-  const actual = await vi.importActual<typeof import("@murphai/hosted-execution")>(
-    "@murphai/hosted-execution",
-  );
-
-  return {
-    ...actual,
-    parseHostedExecutionDispatchRequest: (value: unknown) => {
-      if (!looksLikeDispatchRequest(value)) {
-        throw new TypeError("Hosted execution dispatch request is invalid.");
-      }
-
-      return cloneJson(value);
-    },
-    readHostedExecutionOutboxPayload: (value: unknown) => {
-      if (!looksLikeReferenceOutboxPayload(value)) {
-        return null;
-      }
-
-      return cloneJson(value);
-    },
-  };
-});
-
-vi.mock("../../src/lib/hosted-execution/control", () => ({
-  deleteHostedStoredDispatchPayloadBestEffort,
-  maybeStageHostedExecutionDispatchPayload,
 }));
 
 vi.mock("../../src/lib/hosted-execution/outbox", () => ({
@@ -142,11 +106,8 @@ import {
   stageHostedWebhookDispatchSideEffectPayload,
 } from "../../src/lib/hosted-onboarding/webhook-dispatch-payload";
 import {
-  queueHostedWebhookReceiptSideEffects,
-} from "../../src/lib/hosted-onboarding/webhook-receipt-store";
-import {
   createHostedWebhookDispatchSideEffect,
-  type HostedWebhookReceiptClaim,
+  createHostedWebhookLinqMessageSideEffect,
   type HostedWebhookReceiptState,
   type HostedWebhookSideEffect,
 } from "../../src/lib/hosted-onboarding/webhook-receipt-types";
@@ -159,16 +120,16 @@ describe("hosted webhook receipt privacy baseline", () => {
     vi.resetAllMocks();
   });
 
-  it("stages dispatch side effects into reference-only Cloudflare payload refs", async () => {
+  it("stages dispatch side effects into inline canonical outbox payloads", async () => {
     const dispatch = createSensitiveDispatch();
-    const referencePayload = createReferencePayload(dispatch, "staged/dispatch-1");
-    maybeStageHostedExecutionDispatchPayload.mockResolvedValue(referencePayload);
-
     const pendingEffect = createHostedWebhookDispatchSideEffect({ dispatch });
     const stagedPayload = await stageHostedWebhookDispatchSideEffectPayload(pendingEffect.payload);
 
-    expect(stagedPayload).toEqual(referencePayload);
-    expect(maybeStageHostedExecutionDispatchPayload).toHaveBeenCalledWith(dispatch);
+    expect(stagedPayload).toEqual({
+      dispatch,
+      storage: "inline",
+    });
+    expect(buildHostedWebhookDispatchFromPayload(stagedPayload)).toEqual(dispatch);
   });
 
   it("fails closed when a dispatch side effect reaches receipt JSON before staging", () => {
@@ -178,90 +139,6 @@ describe("hosted webhook receipt privacy baseline", () => {
     expect(() =>
       serializeHostedWebhookReceiptSideEffect(pendingEffect),
     ).toThrowError(/must be staged/i);
-  });
-
-  it("fails closed when Cloudflare staging is unavailable for a reference-only dispatch", async () => {
-    const dispatch = createSensitiveDispatch();
-    const pendingEffect = createHostedWebhookDispatchSideEffect({ dispatch });
-    maybeStageHostedExecutionDispatchPayload.mockResolvedValue(null);
-
-    await expect(stageHostedWebhookDispatchSideEffectPayload(pendingEffect.payload)).rejects.toMatchObject({
-      code: "HOSTED_WEBHOOK_DISPATCH_PAYLOAD_REF_REQUIRED",
-      name: "HostedOnboardingError",
-    });
-  });
-
-  it("cleans up newly staged payloads when receipt persistence fails", async () => {
-    const dispatch = createSensitiveDispatch();
-    const referencePayload = createReferencePayload(dispatch, "staged/dispatch-cleanup");
-    maybeStageHostedExecutionDispatchPayload.mockResolvedValue(referencePayload);
-
-    const claimedReceipt: HostedWebhookReceiptClaim = {
-      eventId: dispatch.eventId,
-      source: "linq",
-      state: createReceiptState({ sideEffects: [] }),
-      version: 1,
-    };
-    const prisma = {
-      hostedWebhookReceipt: {
-        updateMany: vi.fn(async () => {
-          throw new Error("receipt write failed");
-        }),
-      },
-    };
-
-    await expect(queueHostedWebhookReceiptSideEffects({
-      claimedReceipt,
-      desiredSideEffects: [createHostedWebhookDispatchSideEffect({ dispatch })],
-      eventId: dispatch.eventId,
-      // @ts-expect-error Minimal receipt persistence stub for cleanup-path coverage.
-      prisma,
-      source: "linq",
-    })).rejects.toThrow("receipt write failed");
-
-    expect(deleteHostedStoredDispatchPayloadBestEffort).toHaveBeenCalledWith(referencePayload);
-  });
-
-  it("cleans up already staged payloads when a later staging step fails", async () => {
-    const firstDispatch = createSensitiveDispatch();
-    const secondDispatch = {
-      ...createSensitiveDispatch(),
-      eventId: "linq-event-456",
-    };
-    const firstReferencePayload = createReferencePayload(firstDispatch, "staged/dispatch-first");
-    maybeStageHostedExecutionDispatchPayload
-      .mockResolvedValueOnce(firstReferencePayload)
-      .mockResolvedValueOnce(null);
-
-    const claimedReceipt: HostedWebhookReceiptClaim = {
-      eventId: firstDispatch.eventId,
-      source: "linq",
-      state: createReceiptState({ sideEffects: [] }),
-      version: 1,
-    };
-    const prisma = {
-      hostedWebhookReceipt: {
-        updateMany: vi.fn(async () => ({ count: 1 })),
-      },
-    };
-
-    await expect(queueHostedWebhookReceiptSideEffects({
-      claimedReceipt,
-      desiredSideEffects: [
-        createHostedWebhookDispatchSideEffect({ dispatch: firstDispatch }),
-        createHostedWebhookDispatchSideEffect({ dispatch: secondDispatch }),
-      ],
-      eventId: firstDispatch.eventId,
-      // @ts-expect-error Minimal receipt persistence stub for cleanup-path coverage.
-      prisma,
-      source: "linq",
-    })).rejects.toMatchObject({
-      code: "HOSTED_WEBHOOK_DISPATCH_PAYLOAD_REF_REQUIRED",
-      name: "HostedOnboardingError",
-    });
-
-    expect(deleteHostedStoredDispatchPayloadBestEffort).toHaveBeenCalledWith(firstReferencePayload);
-    expect(prisma.hostedWebhookReceipt.updateMany).not.toHaveBeenCalled();
   });
 
   it("fails closed when receipt hydration sees a legacy dispatch snapshot shape", () => {
@@ -310,11 +187,14 @@ describe("hosted webhook receipt privacy baseline", () => {
     ).toThrowError(/invalid or legacy payload shape/i);
   });
 
-  it("serializes staged dispatch side effects without leaking message content into receipt storage", () => {
+  it("round-trips inline dispatch payloads when legacy receipt storage still contains them", async () => {
     const dispatch = createSensitiveDispatch();
+    const payload = await stageHostedWebhookDispatchSideEffectPayload(
+      createHostedWebhookDispatchSideEffect({ dispatch }).payload,
+    );
     const stagedEffect = {
       ...createHostedWebhookDispatchSideEffect({ dispatch }),
-      payload: createReferencePayload(dispatch, "dispatch/staged-2"),
+      payload,
     };
 
     const serialized = serializeHostedWebhookReceiptStateRecords(
@@ -325,11 +205,9 @@ describe("hosted webhook receipt privacy baseline", () => {
     const serializedText = JSON.stringify(serialized);
     const roundTripped = readHostedWebhookReceiptState(serialized);
 
-    expect(serializedText).toContain("dispatch/staged-2");
-    expect(serializedText).not.toContain("super secret hello from linq");
-    expect(serializedText).not.toContain("hbidx:phone:v1:sensitive-phone-key");
-    expect(readHostedWebhookReceiptDispatchByEventId(roundTripped, dispatch.eventId)).toBeNull();
-    expect(buildHostedWebhookDispatchFromPayload(stagedEffect.payload)).toBeNull();
+    expect(serializedText).toContain("\"storage\":\"inline\"");
+    expect(readHostedWebhookReceiptDispatchByEventId(roundTripped, dispatch.eventId)).toEqual(dispatch);
+    expect(buildHostedWebhookDispatchFromPayload(stagedEffect.payload)).toEqual(dispatch);
     expect(roundTripped.sideEffects).toEqual([
       expect.objectContaining({
         effectId: stagedEffect.effectId,
@@ -337,6 +215,30 @@ describe("hosted webhook receipt privacy baseline", () => {
         payload: stagedEffect.payload,
       }),
     ]);
+  });
+
+  it("serializes receipt-local side effects without introducing dispatch payload storage", () => {
+    const linqEffect = createHostedWebhookLinqMessageSideEffect({
+      chatId: "chat_123",
+      inviteId: "invite_123",
+      replyToMessageId: "msg_123",
+      sourceEventId: "evt_local",
+      template: "invite_signup",
+    });
+
+    const serialized = serializeHostedWebhookReceiptStateRecords(
+      createReceiptState({
+        sideEffects: [linqEffect],
+      }),
+    );
+    const serializedText = JSON.stringify(serialized);
+
+    expect(serializedText).toContain("\"kind\":\"linq_message_send\"");
+    expect(serializedText).not.toContain("\"kind\":\"hosted_execution_dispatch\"");
+    expect(readHostedWebhookReceiptDispatchByEventId(
+      readHostedWebhookReceiptState(serialized),
+      "evt_local",
+    )).toBeNull();
   });
 
   it("redacts persisted receipt error messages while keeping sanitized codes and names", () => {
@@ -425,22 +327,6 @@ function createSensitiveDispatch(): HostedExecutionDispatchRequest {
   };
 }
 
-function createReferencePayload(
-  dispatch: ReturnType<typeof createSensitiveDispatch>,
-  stagedPayloadId: string,
-): HostedExecutionOutboxPayload {
-  return {
-    dispatchRef: {
-      eventId: dispatch.eventId,
-      eventKind: "linq.message.received" as const,
-      occurredAt: dispatch.occurredAt,
-      userId: dispatch.event.userId,
-    },
-    stagedPayloadId,
-    storage: "reference" as const,
-  };
-}
-
 function createReceiptState(input: {
   sideEffects: HostedWebhookSideEffect[];
 }): HostedWebhookReceiptState {
@@ -479,70 +365,28 @@ function normalizeSerializedSideEffectForRead(
   effectId: string,
   effect: ReturnType<typeof serializeHostedWebhookReceiptSideEffect>,
 ): NonNullable<Parameters<typeof readHostedWebhookReceiptState>[0]["sideEffects"]>[number] {
-  const resultJson: Prisma.InputJsonValue | null =
-    effect.resultJson === Prisma.DbNull
-      ? null
-      : effect.resultJson as Prisma.InputJsonValue;
+  const {
+    resultJson,
+    ...rest
+  } = effect;
+
+  if (isPrismaDbNull(resultJson)) {
+    return {
+      effectId,
+      ...rest,
+      resultJson: null,
+    };
+  }
 
   return {
     effectId,
-    ...effect,
-    payloadJson: effect.payloadJson as Prisma.InputJsonValue,
+    ...rest,
     resultJson,
   };
 }
 
-function cloneJson<T>(value: T): T {
-  return JSON.parse(JSON.stringify(value)) as T;
-}
-
-function looksLikeDispatchRequest(value: unknown): value is {
-  event: {
-    kind: string;
-    userId: string;
-  };
-  eventId: string;
-  occurredAt: string;
-} {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return false;
-  }
-
-  const dispatch = value as Record<string, unknown>;
-  const event = dispatch.event;
-
-  return typeof dispatch.eventId === "string"
-    && typeof dispatch.occurredAt === "string"
-    && !!event
-    && typeof event === "object"
-    && !Array.isArray(event)
-    && typeof (event as Record<string, unknown>).kind === "string"
-    && typeof (event as Record<string, unknown>).userId === "string";
-}
-
-function looksLikeReferenceOutboxPayload(value: unknown): value is {
-  dispatchRef: {
-    eventId: string;
-    eventKind: string;
-    userId: string;
-  };
-  stagedPayloadId: string;
-  storage: "reference";
-} {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return false;
-  }
-
-  const payload = value as Record<string, unknown>;
-  const dispatchRef = payload.dispatchRef;
-  const stagedPayloadId = payload.stagedPayloadId;
-
-  return payload.storage === "reference"
-    && !!dispatchRef
-    && typeof dispatchRef === "object"
-    && !Array.isArray(dispatchRef)
-    && typeof (dispatchRef as Record<string, unknown>).eventId === "string"
-    && typeof (dispatchRef as Record<string, unknown>).eventKind === "string"
-    && typeof (dispatchRef as Record<string, unknown>).userId === "string"
-    && typeof stagedPayloadId === "string";
+function isPrismaDbNull(
+  value: ReturnType<typeof serializeHostedWebhookReceiptSideEffect>["resultJson"],
+): value is typeof Prisma.DbNull {
+  return value === Prisma.DbNull;
 }

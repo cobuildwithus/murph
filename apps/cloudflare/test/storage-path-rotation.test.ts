@@ -311,7 +311,7 @@ describe("opaque storage path rotation", () => {
     });
 
     expect(await rotatedStore.readStoredDispatch(payloadJson)).toEqual(dispatch);
-    await rotatedStore.deleteStoredDispatchPayload(payloadJson);
+    await rotatedStore.deleteStoredPayloadEnvelope(payloadJson);
     expect(bucket.deleted.length).toBeGreaterThanOrEqual(1);
   });
 

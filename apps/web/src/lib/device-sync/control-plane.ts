@@ -88,14 +88,6 @@ export class HostedDeviceSyncControlPlane {
     return this.connections.listConnections(userId);
   }
 
-  async ensureHostedWebhookAdminUpkeepForRuntimeSnapshot(input: {
-    userId: string;
-    provider?: string | null;
-    connectionId?: string | null;
-  }): Promise<void> {
-    return this.webhookAdmin.ensureHostedWebhookAdminUpkeepForRuntimeSnapshot(input);
-  }
-
   async getConnectionStatus(userId: string, publicConnectionId: string) {
     return this.connections.getConnectionStatus(userId, publicConnectionId);
   }

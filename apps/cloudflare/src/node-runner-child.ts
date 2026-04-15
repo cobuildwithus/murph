@@ -4,6 +4,7 @@ import {
   runHostedAssistantRuntimeJobInProcessDetailed,
 } from "@murphai/assistant-runtime";
 
+import { readHostedExecutionEnvironment } from "./env.js";
 import { buildHostedExecutionRuntimePlatform } from "./runtime-platform.js";
 
 async function main(): Promise<void> {
@@ -12,6 +13,7 @@ async function main(): Promise<void> {
   );
 
   try {
+    const environment = readHostedExecutionEnvironment();
     const result = await runHostedAssistantRuntimeJobInProcessDetailed(
       input.job,
       {
@@ -19,6 +21,8 @@ async function main(): Promise<void> {
           boundUserId: input.job.request.dispatch.event.userId,
           commitTimeoutMs: input.job.runtime?.commitTimeoutMs ?? null,
           internalWorkerProxyToken: input.internalWorkerProxyToken,
+          webCallbackSigning: environment.webCallbackSigning,
+          webControlBaseUrl: process.env.HOSTED_WEB_BASE_URL ?? null,
         }),
       },
     );

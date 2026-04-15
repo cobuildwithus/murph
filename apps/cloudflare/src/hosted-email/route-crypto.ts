@@ -1,7 +1,7 @@
 /**
- * Hosted email route crypto owns alias-token signing plus verified-sender hash
- * derivation. Keeping these HMAC helpers separate lets routing code reuse them
- * without also depending on storage layout details.
+ * Hosted email route crypto owns reply-alias token signing. Keeping these HMAC
+ * helpers separate lets routing code reuse them without also depending on
+ * storage layout details.
  */
 
 export async function createHostedEmailRouteToken(input: {
@@ -40,23 +40,6 @@ export async function parseHostedEmailRouteToken(input: {
 
 export async function deriveStableHostedEmailKey(secret: string, payload: string): Promise<string> {
   return (await createHostedEmailRouteSignature({ payload, secret })).slice(0, 16);
-}
-
-export async function deriveHostedEmailVerifiedSenderKey(
-  secret: string,
-  verifiedEmailAddress: string,
-): Promise<string> {
-  return deriveStableHostedEmailKey(secret, `verified-sender:${verifiedEmailAddress}`);
-}
-
-export async function deriveHostedEmailVerifiedSenderHash(
-  secret: string,
-  verifiedEmailAddress: string,
-): Promise<string> {
-  return createHostedEmailRouteHash({
-    payload: `verified-owner:${verifiedEmailAddress}`,
-    secret,
-  });
 }
 
 async function createHostedEmailRouteHash(input: {

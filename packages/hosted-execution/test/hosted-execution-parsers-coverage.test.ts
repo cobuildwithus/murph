@@ -5,7 +5,6 @@ import {
   parseHostedExecutionDispatchRequest,
   parseHostedExecutionDispatchResult,
   parseHostedExecutionEvent,
-  parseHostedExecutionOutboxPayload,
   parseHostedExecutionRunnerRequest,
   parseHostedExecutionRunnerResult,
   parseHostedExecutionSharePack,
@@ -141,31 +140,7 @@ describe("hosted execution parsers coverage", () => {
       });
     });
 
-    it("parses inline outbox payloads and share packs", () => {
-      expect(parseHostedExecutionOutboxPayload({
-        dispatch: {
-          event: {
-            kind: "member.activated",
-            memberChannels: DEFAULT_MEMBER_CHANNELS,
-            userId: "user_123",
-          },
-          eventId: "evt_member",
-          occurredAt: "2026-04-08T00:00:00.000Z",
-        },
-        storage: "inline",
-      })).toEqual({
-        dispatch: {
-          event: {
-            kind: "member.activated",
-            memberChannels: DEFAULT_MEMBER_CHANNELS,
-            userId: "user_123",
-          },
-          eventId: "evt_member",
-          occurredAt: "2026-04-08T00:00:00.000Z",
-        },
-        storage: "inline",
-      });
-
+    it("parses share packs for runner-owned hydration only", () => {
       expect(parseHostedExecutionSharePack(TEST_HOSTED_SHARE_PACK)).toEqual(TEST_HOSTED_SHARE_PACK);
     });
   });
@@ -285,7 +260,7 @@ describe("hosted execution parsers coverage", () => {
       });
     });
 
-    it("rejects invalid run phases, timeline levels, and dispatch states", () => {
+    it("rejects invalid run phases, timeline levels, and dispatch lifecycle states", () => {
       expect(() =>
         parseHostedExecutionUserStatus({
           bundleRef: null,
@@ -356,7 +331,7 @@ describe("hosted execution parsers coverage", () => {
             userId: "user_123",
           },
         }),
-      ).toThrow(/Unsupported hosted execution event dispatch state/i);
+      ).toThrow(/Unsupported hosted execution dispatch lifecycle state/i);
     });
   });
 

@@ -37,12 +37,13 @@ const DEFAULT_SMOKE_STATUS_TIMEOUT_MS = 60_000;
 export function resolveSmokeWorkerBaseUrl(source: EnvSource = process.env): string {
   const workerBaseUrl = readFirstConfiguredString(
     source.HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL,
+    source.CF_PUBLIC_BASE_URL,
     source.HOSTED_EXECUTION_DISPATCH_URL,
   );
 
   if (!workerBaseUrl) {
     throw new Error(
-      "HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL or HOSTED_EXECUTION_DISPATCH_URL must be configured.",
+      "HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL, CF_PUBLIC_BASE_URL, or HOSTED_EXECUTION_DISPATCH_URL must be configured.",
     );
   }
 
@@ -86,6 +87,11 @@ export async function runSmokeHostedDeploy(input: {
   const versionOverrideHeaders = buildVersionOverrideHeaders(source);
   const smokeBaseUrl = `${workerBaseUrl}/`;
 
+  await assertServiceBanner(
+    fetchImpl,
+    new URL("/", smokeBaseUrl).toString(),
+    versionOverrideHeaders,
+  );
   await assertHealth(
     fetchImpl,
     new URL("/health", smokeBaseUrl).toString(),
@@ -145,19 +151,44 @@ async function assertHealth(
   url: string,
   versionOverrideHeaders: Record<string, string> | undefined,
 ): Promise<void> {
+  const payload = await readSmokePublicPayload(fetchImpl, url, versionOverrideHeaders, "worker health check");
+
+  if (payload.ok !== true) {
+    throw new Error("worker health check did not return ok=true.");
+  }
+}
+
+async function assertServiceBanner(
+  fetchImpl: FetchLike,
+  url: string,
+  versionOverrideHeaders: Record<string, string> | undefined,
+): Promise<void> {
+  const payload = await readSmokePublicPayload(fetchImpl, url, versionOverrideHeaders, "worker banner check");
+
+  if (payload.ok !== true) {
+    throw new Error("worker banner check did not return ok=true.");
+  }
+
+  if (payload.service !== "cloudflare-hosted-runner") {
+    throw new Error("worker banner check did not return the expected service id.");
+  }
+}
+
+async function readSmokePublicPayload(
+  fetchImpl: FetchLike,
+  url: string,
+  versionOverrideHeaders: Record<string, string> | undefined,
+  action: string,
+): Promise<{ ok?: unknown; service?: unknown }> {
   const response = await fetchImpl(url, {
     headers: versionOverrideHeaders,
   });
 
   if (!response.ok) {
-    throw new Error(`worker health check failed with HTTP ${response.status}.`);
+    throw new Error(`${action} failed with HTTP ${response.status}.`);
   }
 
-  const payload = await response.json() as { ok?: unknown };
-
-  if (payload.ok !== true) {
-    throw new Error("worker health check did not return ok=true.");
-  }
+  return await response.json() as { ok?: unknown; service?: unknown };
 }
 
 async function invokeManualRun(input: SmokeControlRequest): Promise<void> {

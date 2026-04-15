@@ -1,4 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import {
   encodeHostedExecutionSignedRequestPayload,
@@ -8,18 +11,14 @@ import { buildHostedExecutionMemberActivatedDispatch } from "../src/builders.ts"
 import { createHostedExecutionDispatchClient } from "../src/client.ts";
 import {
   HOSTED_EXECUTION_DISPATCH_NOT_CONFIGURED_ERROR,
-  HOSTED_EXECUTION_EVENT_DISPATCH_STATES,
+  HOSTED_EXECUTION_DISPATCH_LIFECYCLE_STATES,
   HOSTED_EXECUTION_EVENT_KINDS,
-  HOSTED_EXECUTION_INLINE_ONLY_OUTBOX_EVENT_KINDS,
   HOSTED_EXECUTION_NONCE_HEADER,
-  HOSTED_EXECUTION_REFERENCE_ONLY_OUTBOX_EVENT_KINDS,
   HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER,
   HOSTED_EXECUTION_SIGNATURE_HEADER,
   HOSTED_EXECUTION_SIGNING_KEY_ID_HEADER,
   HOSTED_EXECUTION_TIMESTAMP_HEADER,
   HOSTED_EXECUTION_USER_ID_HEADER,
-  resolveHostedExecutionDispatchOutcome,
-  resolveHostedExecutionDispatchOutcomeState,
 } from "../src/contracts.ts";
 import {
   normalizeHostedExecutionBaseUrl,
@@ -137,7 +136,7 @@ describe("hosted execution coverage gaps", () => {
     );
   });
 
-  it("exports canonical hosted execution contracts and resolves dispatch outcomes", () => {
+  it("exports canonical hosted execution contracts without staged payload helpers", async () => {
     expect(HOSTED_EXECUTION_EVENT_KINDS).toEqual([
       "member.activated",
       "member.channels.updated",
@@ -149,23 +148,8 @@ describe("hosted execution coverage gaps", () => {
       "vault.share.accepted",
       "gateway.message.send",
     ]);
-    expect(HOSTED_EXECUTION_REFERENCE_ONLY_OUTBOX_EVENT_KINDS).toEqual([
-      "linq.message.received",
-      "telegram.message.received",
-      "email.message.received",
-      "device-sync.wake",
-      "gateway.message.send",
-    ]);
-    expect(HOSTED_EXECUTION_INLINE_ONLY_OUTBOX_EVENT_KINDS).toEqual([
-      "member.activated",
-      "member.channels.updated",
-      "assistant.cron.tick",
-      "vault.share.accepted",
-    ]);
-    expect(HOSTED_EXECUTION_EVENT_DISPATCH_STATES).toEqual([
+    expect(HOSTED_EXECUTION_DISPATCH_LIFECYCLE_STATES).toEqual([
       "queued",
-      "duplicate_pending",
-      "duplicate_consumed",
       "backpressured",
       "completed",
       "poisoned",
@@ -184,79 +168,27 @@ describe("hosted execution coverage gaps", () => {
       "x-hosted-execution-runner-proxy-token",
     );
 
-    expect(
-      resolveHostedExecutionDispatchOutcomeState({
-        initialStatus: null,
-        nextStatus: {
-          lastError: null,
-          state: "poisoned",
-        },
-      }),
-    ).toBe("poisoned");
-    expect(
-      resolveHostedExecutionDispatchOutcomeState({
-        initialStatus: null,
-        nextStatus: {
-          lastError: null,
-          state: "backpressured",
-        },
-      }),
-    ).toBe("backpressured");
-    expect(
-      resolveHostedExecutionDispatchOutcomeState({
-        initialStatus: {
-          lastError: null,
-          state: "completed",
-        },
-        nextStatus: null,
-      }),
-    ).toBe("duplicate_consumed");
-    expect(
-      resolveHostedExecutionDispatchOutcomeState({
-        initialStatus: {
-          lastError: "Hosted execution runtime failed.",
-          state: "queued",
-        },
-        nextStatus: {
-          lastError: "Hosted execution runtime failed.",
-          state: "queued",
-        },
-      }),
-    ).toBe("duplicate_pending");
-    expect(
-      resolveHostedExecutionDispatchOutcomeState({
-        initialStatus: null,
-        nextStatus: {
-          lastError: null,
-          state: "completed",
-        },
-      }),
-    ).toBe("completed");
-    expect(
-      resolveHostedExecutionDispatchOutcomeState({
-        initialStatus: null,
-        nextStatus: null,
-      }),
-    ).toBe("queued");
-    expect(
-      resolveHostedExecutionDispatchOutcome({
-        eventId: "evt_queued",
-        initialStatus: {
-          lastError: "Hosted execution runtime failed.",
-          state: "queued",
-        },
-        nextStatus: {
-          lastError: null,
-          state: "queued",
-        },
-        userId: "user_123",
-      }),
-    ).toEqual({
-      eventId: "evt_queued",
-      lastError: "Hosted execution runtime failed.",
-      state: "duplicate_pending",
-      userId: "user_123",
-    });
+    const packageJsonPath = path.resolve(
+      path.dirname(fileURLToPath(import.meta.url)),
+      "..",
+      "package.json",
+    );
+    const packageJson = JSON.parse(await readFile(packageJsonPath, "utf8")) as {
+      exports?: Record<string, unknown>;
+    };
+
+    expect(Object.keys(packageJson.exports ?? {}).sort()).not.toContain("./dispatch-ref");
+    expect(Object.keys(packageJson.exports ?? {}).sort()).not.toContain("./outbox-payload");
+
+    const importBySpecifier = new Function(
+      "specifier",
+      "return import(specifier);",
+    ) as (specifier: string) => Promise<unknown>;
+    const rootModule = await import("@murphai/hosted-execution");
+
+    expect("buildHostedExecutionOutboxPayload" in rootModule).toBe(false);
+    await expect(importBySpecifier("@murphai/hosted-execution/dispatch-ref")).rejects.toThrow();
+    await expect(importBySpecifier("@murphai/hosted-execution/outbox-payload")).rejects.toThrow();
   });
 
   it("dispatches hosted execution requests through the client and handles failures", async () => {

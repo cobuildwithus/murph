@@ -2,7 +2,6 @@ import {
   applyGatewayProjectionSnapshotToEventLog,
   DEFAULT_GATEWAY_EVENT_RETENTION,
   fetchGatewayAttachmentsFromSnapshot,
-  gatewayEventSchema,
   gatewayListOpenPermissionsInputSchema,
   gatewayPermissionRequestSchema,
   gatewayPollEventsInputSchema,
@@ -28,16 +27,9 @@ import {
   type GatewayRespondToPermissionInput,
 } from "@murphai/gateway-core";
 
-import { buildHostedStorageAad } from "./crypto-context.js";
-import {
-  decryptHostedBundle,
-  encryptHostedBundle,
-  type HostedCipherEnvelope,
-} from "./crypto.js";
 import {
   mergeGatewayPermissionOverrides,
   pruneGatewayPermissionOverrides,
-  readGatewayPermissionOverrides,
   sameGatewayPermissionResolutionOverrides,
   upsertGatewayPermissionOverride,
   type GatewayPermissionResolutionOverride,
@@ -45,24 +37,8 @@ import {
 import { sameStructuredJsonValue } from "./structured-json.js";
 import type { DurableObjectStateLike } from "./user-runner/types.js";
 
-const GATEWAY_STATE_SCHEMA = "murph.hosted-gateway-state.v1";
-const GATEWAY_STATE_STORAGE_KEY = "gateway.state";
-const GATEWAY_STATE_STORAGE_AAD = buildHostedStorageAad({
-  key: GATEWAY_STATE_STORAGE_KEY,
-  purpose: "gateway-store",
-  record: "state",
-});
-const utf8Decoder = new TextDecoder();
-const utf8Encoder = new TextEncoder();
-
-interface StoredGatewayStateRecord {
-  baseSnapshot: GatewayProjectionSnapshot | null;
-  events: GatewayEvent[];
-  nextCursor: number;
-  permissionOverrides: GatewayPermissionResolutionOverride[];
-  schema: typeof GATEWAY_STATE_SCHEMA;
-}
-
+// Gateway projection state is a transient DO-local cache. Durable truth comes
+// from committed runtime snapshots, not a separate Cloudflare-owned record.
 interface StoredGatewayState {
   baseSnapshot: GatewayProjectionSnapshot | null;
   events: GatewayEvent[];
@@ -78,12 +54,22 @@ interface HostedGatewayProjectionStoreCrypto {
 }
 
 export class HostedGatewayProjectionStore {
+  private cachedState: StoredGatewayState = {
+    baseSnapshot: null,
+    events: [],
+    nextCursor: 0,
+    permissionOverrides: [],
+    projectedSnapshot: null,
+  };
   private stateLock: Promise<void> | null = null;
 
   constructor(
-    private readonly state: DurableObjectStateLike,
-    private readonly crypto: HostedGatewayProjectionStoreCrypto,
-  ) {}
+    _state: DurableObjectStateLike,
+    _crypto: HostedGatewayProjectionStoreCrypto,
+  ) {
+    void _state;
+    void _crypto;
+  }
 
   async applySnapshot(snapshot: GatewayProjectionSnapshot | null): Promise<void> {
     if (!snapshot) {
@@ -234,40 +220,7 @@ export class HostedGatewayProjectionStore {
   }
 
   private async readStoredState(): Promise<StoredGatewayState> {
-    const envelope = await this.state.storage.get<HostedCipherEnvelope>(GATEWAY_STATE_STORAGE_KEY);
-
-    if (!envelope) {
-      return {
-        baseSnapshot: null,
-        events: [],
-        nextCursor: 0,
-        permissionOverrides: [],
-        projectedSnapshot: null,
-      };
-    }
-
-    const plaintext = await decryptHostedBundle({
-      aad: GATEWAY_STATE_STORAGE_AAD,
-      envelope,
-      expectedKeyId: this.crypto.keyId,
-      key: this.crypto.key,
-      keysById: this.crypto.keysById,
-      scope: "gateway-store",
-    });
-    const record = parseStoredGatewayStateRecord(
-      JSON.parse(utf8Decoder.decode(plaintext)) as unknown,
-    );
-
-    return {
-      baseSnapshot: record.baseSnapshot,
-      events: record.events,
-      nextCursor: record.nextCursor,
-      permissionOverrides: record.permissionOverrides,
-      projectedSnapshot: mergeGatewayPermissionOverrides(
-        record.baseSnapshot,
-        record.permissionOverrides,
-      ),
-    };
+    return this.cachedState;
   }
 
   private async writeStoredState(state: {
@@ -276,21 +229,16 @@ export class HostedGatewayProjectionStore {
     nextCursor: number;
     permissionOverrides: GatewayPermissionResolutionOverride[];
   }): Promise<void> {
-    const envelope = await encryptHostedBundle({
-      aad: GATEWAY_STATE_STORAGE_AAD,
-      key: this.crypto.key,
-      keyId: this.crypto.keyId,
-      plaintext: utf8Encoder.encode(JSON.stringify({
-        baseSnapshot: state.baseSnapshot,
-        events: state.events,
-        nextCursor: state.nextCursor,
-        permissionOverrides: state.permissionOverrides,
-        schema: GATEWAY_STATE_SCHEMA,
-      } satisfies StoredGatewayStateRecord)),
-      scope: "gateway-store",
-    });
-
-    await this.state.storage.put(GATEWAY_STATE_STORAGE_KEY, envelope);
+    this.cachedState = {
+      baseSnapshot: state.baseSnapshot,
+      events: state.events,
+      nextCursor: state.nextCursor,
+      permissionOverrides: state.permissionOverrides,
+      projectedSnapshot: mergeGatewayPermissionOverrides(
+        state.baseSnapshot,
+        state.permissionOverrides,
+      ),
+    };
   }
 
   private async withStateLock<T>(run: () => Promise<T>): Promise<T> {
@@ -319,38 +267,6 @@ function toGatewayEventLogState(state: StoredGatewayState): GatewayEventLogState
     events: state.events,
     nextCursor: state.nextCursor,
     snapshot: state.projectedSnapshot,
-  };
-}
-
-function parseStoredGatewayStateRecord(value: unknown): StoredGatewayStateRecord {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError("gateway.state storage is invalid.");
-  }
-
-  const record = value as Record<string, unknown>;
-  if (record.schema !== GATEWAY_STATE_SCHEMA) {
-    throw new TypeError("gateway.state storage schema is invalid.");
-  }
-
-  const baseSnapshotValue = record.baseSnapshot;
-  const eventsValue = record.events;
-  const permissionOverridesValue = record.permissionOverrides;
-  const nextCursorValue = record.nextCursor;
-
-  return {
-    baseSnapshot:
-      baseSnapshotValue === null || baseSnapshotValue === undefined
-        ? null
-        : gatewayProjectionSnapshotSchema.parse(baseSnapshotValue),
-    events: Array.isArray(eventsValue)
-      ? eventsValue.map((event) => gatewayEventSchema.parse(event))
-      : [],
-    nextCursor:
-      typeof nextCursorValue === "number" && Number.isFinite(nextCursorValue) && nextCursorValue >= 0
-        ? nextCursorValue
-        : 0,
-    permissionOverrides: readGatewayPermissionOverrides(permissionOverridesValue),
-    schema: GATEWAY_STATE_SCHEMA,
   };
 }
 

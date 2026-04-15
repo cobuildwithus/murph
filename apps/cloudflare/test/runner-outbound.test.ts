@@ -398,11 +398,7 @@ describe("handleRunnerOutboundRequest", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("records hosted AI usage locally instead of proxying through hosted web", async () => {
-    const putPendingUsage = vi.fn(async (input: { usage: Array<{ usageId?: string }> }) => ({
-      recorded: input.usage.length,
-      usageIds: input.usage.map((entry) => entry.usageId ?? "missing"),
-    }));
+  it("does not expose a runner-local pending-usage route anymore", async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({
       recorded: 1,
       usageIds: ["usage_123"],
@@ -428,28 +424,12 @@ describe("handleRunnerOutboundRequest", () => {
         }),
         method: "POST",
       }),
-      createRunnerOutboundEnv({
-        USER_RUNNER: {
-          getByName() {
-            return {
-              async commit() {
-                throw new Error("not used");
-              },
-              putPendingUsage,
-            };
-          },
-        },
-      }),
+      createRunnerOutboundEnv(),
       "member_123",
       RUNNER_PROXY_TOKEN,
     );
 
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({
-      recorded: 1,
-      usageIds: ["usage_123"],
-    });
-    expect(putPendingUsage).not.toHaveBeenCalled();
+    expect(response.status).toBe(404);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -510,12 +490,6 @@ function createRunnerOutboundEnv(
             connections: [],
             generatedAt: "2026-04-05T00:00:00.000Z",
             userId: input.request.userId,
-          };
-        },
-        async putPendingUsage(input: { usage: Array<{ usageId?: string }> }) {
-          return {
-            recorded: input.usage.length,
-            usageIds: input.usage.map((entry) => entry.usageId ?? "missing"),
           };
         },
       };

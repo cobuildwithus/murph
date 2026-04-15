@@ -71,7 +71,6 @@ const cloudflareNodeVitestProjectSpecs = resolveVitestBucketFiles(
       patterns: [
         "auth*.test.ts",
         "base64.test.ts",
-        "business-outcomes.test.ts",
         "container-entrypoint.test.ts",
         "crypto.test.ts",
         "device-sync-runtime-store.test.ts",
@@ -79,9 +78,7 @@ const cloudflareNodeVitestProjectSpecs = resolveVitestBucketFiles(
         "env.test.ts",
         "hosted-email*.test.ts",
         "index*.test.ts",
-        "share-store.test.ts",
         "storage-path*.test.ts",
-        "usage-store.test.ts",
         "wrangler-runner.test.ts",
       ],
     },

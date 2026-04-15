@@ -10,7 +10,6 @@ import {
   type GatewayProjectionSnapshot,
 } from "@murphai/gateway-core";
 import {
-  buildHostedExecutionGatewayMessageSendDispatch,
   deriveHostedExecutionErrorCode,
 } from "@murphai/hosted-execution";
 import type {
@@ -26,6 +25,7 @@ import {
 import {
   createHostedArtifactStore,
   createHostedBundleStore,
+  createHostedUserEnvStore,
 } from "../src/bundle-store.js";
 import { HostedBundleGarbageCollector } from "../src/bundle-gc.js";
 import { deriveHostedStorageOpaqueId } from "../src/crypto-context.js";
@@ -44,9 +44,9 @@ import {
 } from "../src/auth-adapter.ts";
 import { writeHostedEmailRawMessage } from "../src/hosted-email.js";
 import { hostedArtifactObjectKey } from "../src/storage-paths.js";
-import { createHostedPendingUsageStore } from "../src/usage-store.js";
 import { createHostedUserKeyStore } from "../src/user-key-store.js";
 import { HostedUserRunner } from "../src/user-runner.js";
+import { encodeHostedUserEnvPayload } from "../src/user-env.js";
 import {
   TEST_AUTOMATION_RECIPIENT_KEY_ID,
   TEST_AUTOMATION_RECIPIENT_PRIVATE_JWK,
@@ -101,6 +101,48 @@ describe("HostedUserRunner", () => {
     vi.restoreAllMocks();
     vi.useRealTimers();
   });
+
+  async function seedManagedUserCryptoForTest(
+    runner: HostedUserRunner,
+    userId: string,
+    envOverride: HostedExecutionEnvironment = environment,
+  ): Promise<void> {
+    await runner.bootstrapUser(userId);
+    await resolveHostedUserCryptoContextForTest({
+      bucket,
+      environment: envOverride,
+      userId,
+    });
+  }
+
+  async function writeRunnerSecretsForTest(input: {
+    env: Record<string, string>;
+    environmentOverride?: HostedExecutionEnvironment;
+    userId: string;
+  }): Promise<void> {
+    const environmentOverride = input.environmentOverride ?? environment;
+    const crypto = await resolveHostedUserCryptoContextForTest({
+      bucket,
+      environment: environmentOverride,
+      userId: input.userId,
+    });
+    const store = createHostedUserEnvStore({
+      bucket: bucket.api,
+      key: crypto.rootKey,
+      keyId: crypto.rootKeyId,
+      keysById: crypto.keysById,
+    });
+    const payload = encodeHostedUserEnvPayload({
+      env: input.env,
+    });
+
+    if (payload) {
+      await store.writeUserEnv(input.userId, payload);
+      return;
+    }
+
+    await store.clearUserEnv(input.userId);
+  }
 
   it("roundtrips encrypted bundle payloads through object storage", async () => {
     const bundleStore = createHostedBundleStore({
@@ -645,50 +687,6 @@ describe("HostedUserRunner", () => {
     expect(finalized).toEqual(finalizedRecord);
     expect(bucket.putCount()).toBe(writesBeforeFinalize);
   });
-
-
-  it("stores pending hosted AI usage in worker-owned storage and supports read/delete", async () => {
-    const runner = new HostedUserRunner(storage.state, environment, bucket.api);
-    await runner.provisionManagedUserCrypto("member_123");
-    await expect(runner.putPendingUsage({
-      usage: [{
-        apiKeyEnv: null,
-        attemptCount: 1,
-        baseUrl: null,
-        cacheWriteTokens: null,
-        cachedInputTokens: null,
-        credentialSource: "platform",
-        inputTokens: 10,
-        memberId: "member_123",
-        occurredAt: "2026-03-29T10:05:00.000Z",
-        outputTokens: 4,
-        provider: "codex-cli",
-        providerName: null,
-        reasoningTokens: null,
-        requestedModel: "gpt-5.4",
-        routeId: "primary",
-        schema: "murph.assistant-usage.v1",
-        servedModel: "gpt-5.4",
-        sessionId: "asst_usage_flush",
-        totalTokens: 14,
-        turnId: "turn_usage_flush",
-        usageId: "turn_usage_flush.attempt-1",
-      }],
-    })).resolves.toEqual({
-      recorded: 1,
-      usageIds: ["turn_usage_flush.attempt-1"],
-    });
-
-    await expect(runner.readPendingUsage({ limit: 50 })).resolves.toEqual([expect.objectContaining({
-      memberId: "member_123",
-      usageId: "turn_usage_flush.attempt-1",
-    })]);
-    await expect(runner.deletePendingUsage({
-      usageIds: ["turn_usage_flush.attempt-1"],
-    })).resolves.toBeUndefined();
-    await expect(runner.readPendingUsage({ limit: 50 })).resolves.toEqual([]);
-  });
-
   it("reapplies committed gateway snapshots from the durable journal before finalize completes", async () => {
     const crypto = await resolveHostedUserCryptoContextForTest({
       bucket,
@@ -966,54 +964,6 @@ describe("HostedUserRunner", () => {
     expectHostedBundleKeys(bucket.keys(), ["vault"]);
   });
 
-  it("reuses one staged payload id across stored handoff and queue persistence", async () => {
-    const firstRun = createDeferred<Response>();
-    const fetchMock = vi.fn().mockImplementationOnce(async () => firstRun.promise);
-    vi.stubGlobal("fetch", fetchMock);
-    const runner = new HostedUserRunner(storage.state, environment, bucket.api);
-    const dispatch = createReferenceDispatch("evt_root_key_payload");
-    const crypto = await resolveHostedUserCryptoContextForTest({
-      bucket,
-      environment,
-      userId: dispatch.event.userId,
-    });
-    const userStore = createHostedDispatchPayloadStore({
-      bucket: bucket.api,
-      key: crypto.rootKey,
-      keyId: crypto.rootKeyId,
-      keysById: crypto.keysById,
-    });
-
-    const payload = await userStore.writeStoredDispatch(dispatch);
-    const dispatchPromise = runner.dispatchStoredPayload({ payload });
-    await vi.waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledTimes(1);
-    });
-
-    const sql = storage.state.storage.sql;
-    if (!sql) {
-      throw new Error("Test storage.sql is required.");
-    }
-
-    const payloadKey = sql.exec<{ payload_key: string }>(
-      "SELECT payload_key FROM pending_events WHERE event_id = ?",
-      dispatch.eventId,
-    ).one().payload_key;
-
-    expect(payload.storage).toBe("reference");
-    if (payload.storage !== "reference") {
-      throw new Error("Expected stored dispatch payload to use reference storage.");
-    }
-    expect(payloadKey).toBe(payload.stagedPayloadId);
-    expect(bucket.keys()).toContain(payload.stagedPayloadId);
-    expect(bucket.keys().filter((key) => key.startsWith("transient/dispatch-payloads/"))).toEqual([
-      payload.stagedPayloadId,
-    ]);
-
-    firstRun.resolve(new Response("runner failed", { status: 503 }));
-    await dispatchPromise;
-  });
-
   it("deletes hosted raw email bodies from the per-user root-key path after a successful run", async () => {
     vi.stubGlobal(
       "fetch",
@@ -1176,12 +1126,12 @@ describe("HostedUserRunner", () => {
         OPENAI_API_KEY: "sk-worker",
       },
     );
-    await runner.provisionManagedUserCrypto("member_123");
-    await runner.updateUserEnv({
+    await seedManagedUserCryptoForTest(runner, "member_123");
+    await writeRunnerSecretsForTest({
       env: {
         CUSTOM_API_KEY: "custom-user",
       },
-      mode: "replace",
+      userId: "member_123",
     });
 
     await runner.dispatch({
@@ -1302,7 +1252,7 @@ describe("HostedUserRunner", () => {
       }),
     );
     const runner = new HostedUserRunner(storage.state, environment, bucket.api);
-    await runner.provisionManagedUserCrypto("member_123");
+    await seedManagedUserCryptoForTest(runner, "member_123");
 
     await runner.dispatch(createDispatch("evt_commit_callback"));
 
@@ -1366,15 +1316,18 @@ describe("HostedUserRunner", () => {
       bucket.api,
     );
 
-    await runner.provisionManagedUserCrypto("member_123");
-    await runner.updateUserEnv({
+    await seedManagedUserCryptoForTest(runner, "member_123");
+    await writeRunnerSecretsForTest({
       env: {
         OPENAI_API_KEY: "sk-user",
       },
-      mode: "replace",
+      userId: "member_123",
     });
     await runner.dispatch(createDispatch("evt_user_env_set"));
-    await runner.clearUserEnv();
+    await writeRunnerSecretsForTest({
+      env: {},
+      userId: "member_123",
+    });
     await runner.dispatch(createDispatch("evt_user_env_cleared"));
 
     const invokePayloads = await Promise.all(
@@ -1446,7 +1399,7 @@ describe("HostedUserRunner", () => {
       }),
     );
     const runner = new HostedUserRunner(storage.state, environment, bucket.api);
-    await runner.provisionManagedUserCrypto("member_123");
+    await seedManagedUserCryptoForTest(runner, "member_123");
 
     const status = await runner.dispatch({
       event: {
@@ -1747,7 +1700,7 @@ describe("HostedUserRunner", () => {
       });
     vi.stubGlobal("fetch", fetchSpy);
     const runner = new HostedUserRunner(storage.state, environment, bucket.api);
-    await runner.provisionManagedUserCrypto("member_123");
+    await seedManagedUserCryptoForTest(runner, "member_123");
 
     const firstStatus = await runner.dispatch({
       event: {
@@ -1928,7 +1881,7 @@ describe("HostedUserRunner", () => {
     });
     vi.stubGlobal("fetch", fetchSpy);
     const runner = new HostedUserRunner(storage.state, environment, bucket.api);
-    await runner.provisionManagedUserCrypto("member_123");
+    await seedManagedUserCryptoForTest(runner, "member_123");
 
     const firstDispatch = runner.dispatch(dispatch);
     await firstCommitRecorded.promise;
@@ -1971,7 +1924,7 @@ describe("HostedUserRunner", () => {
       }),
     );
     const runner = new HostedUserRunner(storage.state, environment, bucket.api);
-    await runner.provisionManagedUserCrypto("member_123");
+    await seedManagedUserCryptoForTest(runner, "member_123");
 
     const first = await runner.dispatch({
       event: {
@@ -2014,7 +1967,7 @@ describe("HostedUserRunner", () => {
       ),
     );
     const runner = new HostedUserRunner(storage.state, environment, bucket.api);
-    await runner.provisionManagedUserCrypto("member_123");
+    await seedManagedUserCryptoForTest(runner, "member_123");
 
     const first = await runner.dispatch({
       event: {
@@ -2081,7 +2034,7 @@ describe("HostedUserRunner", () => {
       ),
     );
     const runner = new HostedUserRunner(storage.state, environment, bucket.api);
-    await runner.provisionManagedUserCrypto("member_123");
+    await seedManagedUserCryptoForTest(runner, "member_123");
 
     const status = await runner.dispatch({
       event: {
@@ -2172,7 +2125,7 @@ describe("HostedUserRunner", () => {
       }));
     vi.stubGlobal("fetch", fetchMock);
     const runner = new HostedUserRunner(storage.state, environment, bucket.api);
-    await runner.provisionManagedUserCrypto("member_123");
+    await seedManagedUserCryptoForTest(runner, "member_123");
 
     const firstDispatch = runner.dispatch(createDispatch("evt_000"));
     await vi.waitFor(() => {
@@ -2221,7 +2174,7 @@ describe("HostedUserRunner", () => {
       }));
     vi.stubGlobal("fetch", fetchMock);
     const runner = new HostedUserRunner(storage.state, environment, bucket.api);
-    await runner.provisionManagedUserCrypto("member_123");
+    await seedManagedUserCryptoForTest(runner, "member_123");
 
     const firstDispatch = runner.dispatch(createDispatch("evt_000"));
     await vi.waitFor(() => {
@@ -2263,7 +2216,7 @@ describe("HostedUserRunner", () => {
       }));
     vi.stubGlobal("fetch", fetchMock);
     const runner = new HostedUserRunner(storage.state, environment, bucket.api);
-    await runner.provisionManagedUserCrypto("member_123");
+    await seedManagedUserCryptoForTest(runner, "member_123");
 
     const dispatchA = runner.dispatch(createDispatch("evt_idle_a"));
     const dispatchB = runner.dispatch(createDispatch("evt_idle_b"));
@@ -2304,7 +2257,7 @@ describe("HostedUserRunner", () => {
         })),
     );
     const runner = new HostedUserRunner(storage.state, environment, bucket.api);
-    await runner.provisionManagedUserCrypto("member_123");
+    await seedManagedUserCryptoForTest(runner, "member_123");
 
     const firstDispatch = runner.dispatch(createDispatch("evt_000"));
     await vi.waitFor(() => {
@@ -2347,7 +2300,7 @@ describe("HostedUserRunner", () => {
       }));
     vi.stubGlobal("fetch", fetchMock);
     const runner = new HostedUserRunner(storage.state, environment, bucket.api);
-    await runner.provisionManagedUserCrypto("member_123");
+    await seedManagedUserCryptoForTest(runner, "member_123");
 
     const firstDispatch = runner.dispatch(createDispatch("evt_000"));
     await vi.waitFor(() => {
@@ -2393,7 +2346,7 @@ describe("HostedUserRunner", () => {
       }));
     vi.stubGlobal("fetch", fetchMock);
     const runner = new HostedUserRunner(storage.state, environment, bucket.api);
-    await runner.provisionManagedUserCrypto("member_123");
+    await seedManagedUserCryptoForTest(runner, "member_123");
 
     const firstDispatch = runner.dispatch(createDispatch("evt_000"));
     await vi.waitFor(() => {
@@ -2459,7 +2412,7 @@ describe("HostedUserRunner", () => {
       }),
     );
     const runner = new HostedUserRunner(storage.state, environment, bucket.api);
-    await runner.provisionManagedUserCrypto("member_123");
+    await seedManagedUserCryptoForTest(runner, "member_123");
     const dispatch = {
       event: {
         kind: "assistant.cron.tick" as const,
@@ -2482,7 +2435,7 @@ describe("HostedUserRunner", () => {
 
   it("reports duplicate pending events through the shared dispatch outcome surface", async () => {
     const runner = new HostedUserRunner(storage.state, environment, bucket.api);
-    await runner.provisionManagedUserCrypto("member_123");
+    await seedManagedUserCryptoForTest(runner, "member_123");
     const dispatch = createDispatch("evt_duplicate_pending");
     await seedRunnerQueueState({
       bucket,
@@ -2506,7 +2459,7 @@ describe("HostedUserRunner", () => {
     expect(result.event).toEqual({
       eventId: "evt_duplicate_pending",
       lastError: null,
-      state: "duplicate_pending",
+      state: "queued",
       userId: "member_123",
     });
     expect(result.status.pendingEventCount).toBe(1);
@@ -2521,7 +2474,7 @@ describe("HostedUserRunner", () => {
     }));
     vi.stubGlobal("fetch", fetchMock);
     const runner = new HostedUserRunner(storage.state, environment, bucket.api);
-    await runner.provisionManagedUserCrypto("member_123");
+    await seedManagedUserCryptoForTest(runner, "member_123");
     const dispatch = createDispatch("evt_duplicate_consumed");
 
     const first = await runner.dispatchWithOutcome(dispatch);
@@ -2531,7 +2484,7 @@ describe("HostedUserRunner", () => {
     expect(second.event).toEqual({
       eventId: "evt_duplicate_consumed",
       lastError: null,
-      state: "duplicate_consumed",
+      state: "completed",
       userId: "member_123",
     });
     expect(fetchMock).toHaveBeenCalledTimes(2);
@@ -2547,7 +2500,7 @@ describe("HostedUserRunner", () => {
     );
     vi.stubGlobal("fetch", failingFetch);
     const runner = new HostedUserRunner(storage.state, environment, bucket.api);
-    await runner.provisionManagedUserCrypto("member_123");
+    await seedManagedUserCryptoForTest(runner, "member_123");
     const dispatch = createDispatch("evt_duplicate_poisoned");
 
     await runner.dispatch(dispatch);
@@ -2590,7 +2543,7 @@ describe("HostedUserRunner", () => {
     );
     vi.stubGlobal("fetch", fetchMock);
     const runner = new HostedUserRunner(storage.state, environment, bucket.api);
-    await runner.provisionManagedUserCrypto("member_123");
+    await seedManagedUserCryptoForTest(runner, "member_123");
     const dispatch = {
       event: {
         kind: "assistant.cron.tick" as const,
@@ -2740,7 +2693,7 @@ describe("HostedUserRunner", () => {
     const runner = new HostedUserRunner(storage.state, {
       ...environment,
     }, bucket.api);
-    await runner.provisionManagedUserCrypto("member_123");
+    await seedManagedUserCryptoForTest(runner, "member_123");
 
     const status = await runner.dispatch({
       event: {
@@ -2776,7 +2729,7 @@ describe("HostedUserRunner", () => {
     vi.stubGlobal("fetch", fetchSpy);
 
     const firstRunner = new HostedUserRunner(storage.state, environment, bucket.api);
-    await firstRunner.provisionManagedUserCrypto("member_123");
+    await seedManagedUserCryptoForTest(firstRunner, "member_123");
     await firstRunner.dispatch({
       event: {
         kind: "assistant.cron.tick",
@@ -2813,7 +2766,7 @@ describe("HostedUserRunner", () => {
     vi.stubGlobal("fetch", fetchSpy);
 
     const firstRunner = new HostedUserRunner(storage.state, environment, bucket.api);
-    await firstRunner.provisionManagedUserCrypto("member_123");
+    await seedManagedUserCryptoForTest(firstRunner, "member_123");
     await firstRunner.dispatch({
       event: {
         kind: "assistant.cron.tick",
@@ -2853,7 +2806,7 @@ describe("HostedUserRunner", () => {
       ),
     );
     const runner = new HostedUserRunner(storage.state, environment, bucket.api);
-    await runner.provisionManagedUserCrypto("member_123");
+    await seedManagedUserCryptoForTest(runner, "member_123");
 
     await runner.dispatch({
       event: {
@@ -2890,25 +2843,21 @@ describe("HostedUserRunner", () => {
     expect(replayed.poisonedEventIds).toContain("evt_poison_expiry");
   });
 
-  it("stores encrypted per-user env config in a dedicated hosted object", async () => {
+  it("stores encrypted runner-secret config in a dedicated hosted object", async () => {
     const runner = new HostedUserRunner(storage.state, {
       ...environment,
       allowedUserEnvKeys: "OPENAI_API_KEY,XAI_API_KEY",
     }, bucket.api);
 
-    await runner.provisionManagedUserCrypto("member_123");
-    const saved = await runner.updateUserEnv({
+    await seedManagedUserCryptoForTest(runner, "member_123");
+    await writeRunnerSecretsForTest({
       env: {
         OPENAI_API_KEY: "sk-user",
         XAI_API_KEY: "xai-user",
       },
-      mode: "replace",
+      userId: "member_123",
     });
 
-    expect(saved.configuredUserEnvKeys).toEqual([
-      "OPENAI_API_KEY",
-      "XAI_API_KEY",
-    ]);
     const crypto = await resolveHostedUserCryptoContextForTest({
       bucket,
       environment,
@@ -2918,47 +2867,6 @@ describe("HostedUserRunner", () => {
       await userEnvObjectKeyForTest(crypto.rootKey, "member_123"),
       await userKeyEnvelopeObjectKeyForTest(environment.platformEnvelopeKey, "member_123"),
     ]));
-    await expect(runner.getUserEnvStatus()).resolves.toEqual({
-      configuredUserEnvKeys: ["OPENAI_API_KEY", "XAI_API_KEY"],
-      userId: "member_123",
-    });
-  });
-
-  it("returns an empty hosted user env status before managed crypto exists", async () => {
-    const runner = new HostedUserRunner(storage.state, {
-      ...environment,
-      allowedUserEnvKeys: "OPENAI_API_KEY",
-    }, bucket.api);
-
-    await runner.bootstrapUser("member_123");
-
-    await expect(runner.getUserEnvStatus()).resolves.toEqual({
-      configuredUserEnvKeys: [],
-      userId: "member_123",
-    });
-  });
-
-  it("bootstraps managed crypto on first hosted user env write", async () => {
-    const runner = new HostedUserRunner(storage.state, {
-      ...environment,
-      allowedUserEnvKeys: "OPENAI_API_KEY",
-    }, bucket.api);
-
-    await runner.bootstrapUser("member_123");
-
-    await expect(runner.updateUserEnv({
-      env: {
-        OPENAI_API_KEY: "sk-user",
-      },
-      mode: "replace",
-    })).resolves.toEqual({
-      configuredUserEnvKeys: ["OPENAI_API_KEY"],
-      userId: "member_123",
-    });
-    await expect(runner.getUserEnvStatus()).resolves.toEqual({
-      configuredUserEnvKeys: ["OPENAI_API_KEY"],
-      userId: "member_123",
-    });
   });
 
   it("reads per-user env encrypted with a previous key id after rotation", async () => {
@@ -2984,12 +2892,13 @@ describe("HostedUserRunner", () => {
     };
     const previousRunner = new HostedUserRunner(storage.state, previousEnvironment, bucket.api);
 
-    await previousRunner.provisionManagedUserCrypto("member_123");
-    await previousRunner.updateUserEnv({
+    await seedManagedUserCryptoForTest(previousRunner, "member_123", previousEnvironment);
+    await writeRunnerSecretsForTest({
       env: {
         OPENAI_API_KEY: "sk-legacy",
       },
-      mode: "replace",
+      environmentOverride: previousEnvironment,
+      userId: "member_123",
     });
 
     const runner = new HostedUserRunner(storage.state, rotatedEnvironment, bucket.api);
@@ -3044,10 +2953,6 @@ describe("HostedUserRunner", () => {
         },
       },
     ]);
-    await expect(runner.getUserEnvStatus()).resolves.toEqual({
-      configuredUserEnvKeys: ["OPENAI_API_KEY"],
-      userId: "member_123",
-    });
   });
 
   it("clears per-user env config without dropping unrelated agent-state bundle data", async () => {
@@ -3100,11 +3005,11 @@ describe("HostedUserRunner", () => {
     });
     const writesAfterBootstrap = bucket.putCount();
 
-    await runner.updateUserEnv({
+    await writeRunnerSecretsForTest({
       env: {
         OPENAI_API_KEY: "sk-user",
       },
-      mode: "replace",
+      userId: "member_123",
     });
     expect(bucket.putCount()).toBe(writesAfterBootstrap + 1);
     expectHostedBundleKeys(bucket.keys(), ["vault"]);
@@ -3117,39 +3022,15 @@ describe("HostedUserRunner", () => {
       await userEnvObjectKeyForTest(crypto.rootKey, "member_123"),
     );
 
-    const cleared = await runner.clearUserEnv();
+    await writeRunnerSecretsForTest({
+      env: {},
+      userId: "member_123",
+    });
 
-    expect(cleared.configuredUserEnvKeys).toEqual([]);
     expectHostedBundleKeys(bucket.keys(), ["vault"]);
     expect(bucket.keys()).not.toContain(
       await userEnvObjectKeyForTest(crypto.rootKey, "member_123"),
     );
-  });
-
-  it("supports extension-only keys across update and status reads", async () => {
-    const runner = new HostedUserRunner(
-      storage.state,
-      {
-        ...environment,
-        allowedUserEnvKeys: "CUSTOM_API_KEY",
-      },
-      bucket.api,
-    );
-
-    await runner.provisionManagedUserCrypto("member_123");
-    await expect(runner.updateUserEnv({
-      env: {
-        CUSTOM_API_KEY: "custom-secret",
-      },
-      mode: "replace",
-    })).resolves.toEqual({
-      configuredUserEnvKeys: ["CUSTOM_API_KEY"],
-      userId: "member_123",
-    });
-    await expect(runner.getUserEnvStatus()).resolves.toEqual({
-      configuredUserEnvKeys: ["CUSTOM_API_KEY"],
-      userId: "member_123",
-    });
   });
 
   it("clears the durable-object alarm when no next wake remains", async () => {
@@ -3703,18 +3584,6 @@ async function seedPendingCommitEvent(input: {
     }],
     storage: input.storage,
     userId: input.userId,
-  });
-}
-
-function createReferenceDispatch(eventId: string) {
-  return buildHostedExecutionGatewayMessageSendDispatch({
-    clientRequestId: `req_${eventId}`,
-    eventId,
-    occurredAt: "2026-03-26T12:00:00.000Z",
-    replyToMessageId: "5001",
-    sessionKey: createGatewayConversationSessionKey("conversation_123"),
-    text: "Please keep this private.",
-    userId: "member_123",
   });
 }
 

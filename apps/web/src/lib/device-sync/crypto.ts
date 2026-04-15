@@ -116,7 +116,10 @@ export function buildHostedSecretAad(
 export function buildHostedConnectionTokenCipherOptions(input: {
   connectionId: string;
   provider: string;
-  purpose: "device-sync-access-token" | "device-sync-refresh-token";
+  purpose:
+    | "device-sync-access-token"
+    | "device-sync-refresh-token"
+    | "device-sync-external-account-id";
 }): HostedSecretCipherOptions {
   return {
     aad: buildHostedSecretAad({

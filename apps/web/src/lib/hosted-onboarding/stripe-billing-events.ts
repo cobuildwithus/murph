@@ -171,7 +171,6 @@ export async function applyStripeInvoicePaid(
     dispatchContext,
     emailLinked: await resolveHostedMemberEmailLinked({
       memberId: updatedMember.core.id,
-      onUnconfirmed: "disable",
     }),
     member: updatedMember,
     prisma,

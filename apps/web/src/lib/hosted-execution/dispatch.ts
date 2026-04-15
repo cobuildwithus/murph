@@ -5,15 +5,9 @@ import {
   type HostedExecutionUserStatus,
 } from "@murphai/hosted-execution/contracts";
 import {
-  resolveHostedExecutionOutboxPayloadEventId,
-  resolveHostedExecutionOutboxPayloadUserId,
-  type HostedExecutionOutboxPayload,
-} from "@murphai/hosted-execution/outbox-payload";
-import {
   createHostedExecutionDispatchClient,
 } from "@murphai/hosted-execution/client";
 
-import { readHostedExecutionControlClientIfConfigured } from "./control";
 import { createHostedExecutionVercelOidcBearerTokenProvider } from "./auth-adapter";
 import { formatHostedExecutionSafeLogError } from "./logging";
 import {
@@ -34,21 +28,6 @@ export async function dispatchHostedExecutionStatus(
   }
 
   return postHostedExecutionDispatch(input, environment);
-}
-
-export async function dispatchStoredHostedExecutionStatus(
-  payload: HostedExecutionOutboxPayload,
-): Promise<HostedExecutionDispatchResult> {
-  const client = readHostedExecutionControlClientIfConfigured();
-
-  if (!client) {
-    return buildHostedExecutionNotConfiguredStatus({
-      eventId: resolveHostedExecutionOutboxPayloadEventId(payload),
-      userId: resolveHostedExecutionOutboxPayloadUserId(payload),
-    });
-  }
-
-  return client.dispatchStoredPayload(payload);
 }
 
 export async function dispatchHostedExecution(

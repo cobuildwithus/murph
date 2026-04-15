@@ -1,16 +1,12 @@
 import { PrismaClient } from "@prisma/client";
 
-import { deviceSyncError, type PublicDeviceSyncAccount } from "@murphai/device-syncd/public-ingress";
-import {
-  didHostedExecutionDeviceSyncRuntimeApplyConnectionWrite,
-  findHostedExecutionDeviceSyncRuntimeApplyEntry,
-} from "@murphai/device-syncd/hosted-runtime";
+import type { PublicDeviceSyncAccount } from "@murphai/device-syncd/public-ingress";
 
 import {
   buildHostedLocalHeartbeatRuntimeLocalStateUpdate,
   type HostedLocalHeartbeatPatch,
 } from "../local-heartbeat";
-import { requireHostedDeviceSyncRuntimeClient } from "../runtime-client";
+import { readHostedDeviceSyncRuntimeClientIfConfigured } from "../runtime-client";
 import { PrismaHostedConnectionStore } from "./connections";
 
 export class PrismaHostedLocalHeartbeatStore {
@@ -27,46 +23,38 @@ export class PrismaHostedLocalHeartbeatStore {
     connectionId: string,
     patch: HostedLocalHeartbeatPatch,
   ): Promise<PublicDeviceSyncAccount | null> {
-    const existing = await this.connections.getRuntimeConnectionForUser(userId, connectionId);
+    const existing = await this.connections.getConnectionForUser(userId, connectionId);
 
     if (!existing) {
       return null;
     }
 
-    const response = await requireHostedDeviceSyncRuntimeClient().applyDeviceSyncRuntimeUpdates(userId, {
-      occurredAt: new Date().toISOString(),
-      updates: [
-        {
-          connectionId,
-          localState: buildHostedLocalHeartbeatRuntimeLocalStateUpdate(existing, patch),
-          observedUpdatedAt: existing.updatedAt,
-        },
-      ],
-    });
-    const update = findHostedExecutionDeviceSyncRuntimeApplyEntry(response, connectionId);
+    const localState = buildHostedLocalHeartbeatRuntimeLocalStateUpdate(existing, patch);
+    const connection: PublicDeviceSyncAccount = {
+      ...existing,
+      ...localState,
+      updatedAt: new Date().toISOString(),
+    };
 
-    if (update?.status === "missing") {
-      throw deviceSyncError({
-        code: "RUNTIME_STATE_CONFLICT",
-        message: `Hosted device-sync runtime is missing connection ${connectionId}.`,
-        retryable: true,
-        httpStatus: 409,
-      });
-    }
+    await this.connections.syncDurableConnectionState(connection);
 
-    if (!didHostedExecutionDeviceSyncRuntimeApplyConnectionWrite(update)) {
-      throw deviceSyncError({
-        code: "RUNTIME_STATE_CONFLICT",
-        message: `Hosted device-sync runtime rejected a stale local heartbeat for connection ${connectionId}.`,
-        retryable: true,
-        httpStatus: 409,
-      });
-    }
+    const runtimeClient = readHostedDeviceSyncRuntimeClientIfConfigured();
 
-    const connection = await this.connections.getRuntimeConnectionForUser(userId, connectionId);
-
-    if (connection) {
-      await this.connections.syncDurableConnectionState(connection);
+    if (runtimeClient) {
+      try {
+        await runtimeClient.applyDeviceSyncRuntimeUpdates(userId, {
+          occurredAt: new Date().toISOString(),
+          updates: [
+            {
+              connectionId,
+              localState,
+              observedUpdatedAt: existing.updatedAt,
+            },
+          ],
+        });
+      } catch (error) {
+        console.warn(`Hosted device-sync runtime projection write failed for local heartbeat ${connectionId}.`, error);
+      }
     }
 
     return connection;
