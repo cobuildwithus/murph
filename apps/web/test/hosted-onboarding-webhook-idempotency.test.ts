@@ -963,6 +963,66 @@ describe("hosted onboarding webhook retry safety", () => {
     expect(mocks.drainHostedRevnetIssuanceSubmissionQueue).not.toHaveBeenCalled();
   });
 
+  it("does not wait for the hosted execution nudge when Stripe reconciliation defers it", async () => {
+    mocks.stripeConstructEvent.mockReturnValue({
+      created: Math.floor(new Date("2026-03-28T10:00:00.000Z").getTime() / 1000),
+      data: {
+        object: {
+          customer: "cus_123",
+          id: "in_123",
+          payment_intent: "pi_123",
+          parent: {
+            subscription_details: {
+              subscription: "sub_123",
+            },
+          },
+        },
+      },
+      id: "evt_stripe_deferred_123",
+      type: "invoice.paid",
+    });
+    mocks.recordHostedStripeEvent.mockResolvedValue({
+      duplicate: false,
+      type: "invoice.paid",
+    });
+    mocks.reconcileHostedStripeEventById.mockResolvedValue({
+      activatedMemberId: "member_123",
+      createdOrUpdatedRevnetIssuance: false,
+      eventId: "evt_stripe_deferred_123",
+      hostedExecutionEventId: "member.activated:stripe.invoice.paid:member_123:evt_stripe_deferred_123",
+      status: "completed",
+    });
+    const prisma = withPrismaTransaction({});
+    const deferred: Array<() => Promise<void>> = [];
+
+    await expect(
+      handleHostedStripeWebhook({
+        defer: (drain) => {
+          deferred.push(drain);
+        },
+        prisma,
+        rawBody: JSON.stringify({ id: "evt_stripe_deferred_123" }),
+        signature: "sig_123",
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      type: "invoice.paid",
+    });
+
+    expect(deferred).toHaveLength(1);
+    expect(mocks.drainHostedExecutionOutboxBestEffort).not.toHaveBeenCalled();
+
+    await deferred[0]?.();
+
+    expect(mocks.drainHostedExecutionOutboxBestEffort).toHaveBeenCalledWith({
+      eventIds: [
+        "member.activated:stripe.invoice.paid:member_123:evt_stripe_deferred_123",
+      ],
+      limit: 1,
+      prisma,
+    });
+  });
+
   it("best-effort drains RevNet submissions when inline reconciliation queues one", async () => {
     mocks.stripeConstructEvent.mockReturnValue({
       created: Math.floor(new Date("2026-03-28T10:00:00.000Z").getTime() / 1000),
@@ -1011,6 +1071,63 @@ describe("hosted onboarding webhook retry safety", () => {
       prisma,
     });
     expect(mocks.drainHostedExecutionOutboxBestEffort).not.toHaveBeenCalled();
+  });
+
+  it("does not wait for the RevNet nudge when Stripe reconciliation defers it", async () => {
+    mocks.stripeConstructEvent.mockReturnValue({
+      created: Math.floor(new Date("2026-03-28T10:00:00.000Z").getTime() / 1000),
+      data: {
+        object: {
+          customer: "cus_123",
+          id: "in_123",
+          payment_intent: "pi_123",
+          parent: {
+            subscription_details: {
+              subscription: "sub_123",
+            },
+          },
+        },
+      },
+      id: "evt_stripe_revnet_deferred_123",
+      type: "invoice.paid",
+    });
+    mocks.recordHostedStripeEvent.mockResolvedValue({
+      duplicate: false,
+      type: "invoice.paid",
+    });
+    mocks.reconcileHostedStripeEventById.mockResolvedValue({
+      activatedMemberId: null,
+      createdOrUpdatedRevnetIssuance: true,
+      eventId: "evt_stripe_revnet_deferred_123",
+      hostedExecutionEventId: null,
+      status: "completed",
+    });
+    const prisma = withPrismaTransaction({});
+    const deferred: Array<() => Promise<void>> = [];
+
+    await expect(
+      handleHostedStripeWebhook({
+        defer: (drain) => {
+          deferred.push(drain);
+        },
+        prisma,
+        rawBody: JSON.stringify({ id: "evt_stripe_revnet_deferred_123" }),
+        signature: "sig_123",
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      type: "invoice.paid",
+    });
+
+    expect(deferred).toHaveLength(1);
+    expect(mocks.drainHostedRevnetIssuanceSubmissionQueue).not.toHaveBeenCalled();
+
+    await deferred[0]?.();
+
+    expect(mocks.drainHostedRevnetIssuanceSubmissionQueue).toHaveBeenCalledWith({
+      limit: 1,
+      prisma,
+    });
   });
 
   it("treats duplicate Stripe events as ingress duplicates without replaying durable work", async () => {

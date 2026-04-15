@@ -121,6 +121,7 @@ export async function handleHostedOnboardingTelegramWebhook(input: {
 }
 
 export async function handleHostedStripeWebhook(input: {
+  defer?: (drain: () => Promise<void>) => Promise<void> | void;
   rawBody: string;
   signature: string | null;
   prisma?: PrismaClient;
@@ -163,17 +164,35 @@ export async function handleHostedStripeWebhook(input: {
     });
 
     if (reconciled?.createdOrUpdatedRevnetIssuance) {
-      await drainHostedRevnetIssuanceSubmissionQueueBestEffort(prisma);
+      if (input.defer) {
+        await input.defer(() => drainHostedRevnetIssuanceSubmissionQueueBestEffort(prisma));
+      } else {
+        await drainHostedRevnetIssuanceSubmissionQueueBestEffort(prisma);
+      }
     }
 
-    if (reconciled?.hostedExecutionEventId) {
-      await drainHostedExecutionOutboxBestEffort({
-        eventIds: [
-          reconciled.hostedExecutionEventId,
-        ],
-        limit: 1,
-        prisma,
-      });
+    const hostedExecutionEventId = reconciled?.hostedExecutionEventId ?? null;
+
+    if (hostedExecutionEventId) {
+      if (input.defer) {
+        await input.defer(() =>
+          drainHostedExecutionOutboxBestEffort({
+            eventIds: [
+              hostedExecutionEventId,
+            ],
+            limit: 1,
+            prisma,
+          }),
+        );
+      } else {
+        await drainHostedExecutionOutboxBestEffort({
+          eventIds: [
+            hostedExecutionEventId,
+          ],
+          limit: 1,
+          prisma,
+        });
+      }
     }
   }
 
