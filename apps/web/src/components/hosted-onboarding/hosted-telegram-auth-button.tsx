@@ -66,7 +66,7 @@ export function HostedTelegramAuthButton({
       <HostedInlineAuthButton
         active={active}
         disabled={!ready || loading}
-        className="order-1 border-[#5b9fc6] bg-[#5b9fc6] text-white hover:bg-[#4e92b8] hover:text-white"
+        className="order-1"
         icon={<TelegramIcon className="h-5 w-5" />}
         onClick={handleClick}
       >
