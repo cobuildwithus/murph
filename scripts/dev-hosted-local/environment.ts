@@ -133,25 +133,8 @@ export function parseEnvText(raw: string): Record<string, string> {
 
   return Object.fromEntries(
     Object.entries(parsed)
-      .filter((entry): entry is [string, string] => typeof entry[1] === "string")
-      .map(([key, value]) => [key, normalizeLoadedEnvValue(key, value)]),
+      .filter((entry): entry is [string, string] => typeof entry[1] === "string"),
   );
-}
-
-export function normalizeLoadedEnvValue(key: string, value: string): string {
-  const prefix = `${key}=`;
-  let normalized = value;
-
-  // Guard against values pasted into Vercel as `KEY=value` instead of just `value`.
-  if (normalized.startsWith(prefix)) {
-    normalized = normalized.slice(prefix.length);
-  }
-
-  if (normalized.startsWith("{\\\"") || normalized.startsWith("[\\\"")) {
-    normalized = normalized.replace(/\\"/gu, "\"");
-  }
-
-  return normalized;
 }
 
 export function assertLocalWorkerOidcEnvironment(cloudflareDevVars: Record<string, string>): void {

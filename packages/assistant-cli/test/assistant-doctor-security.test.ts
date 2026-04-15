@@ -143,7 +143,6 @@ test('inspectAndRepairAssistantStateSecrecy counts inline secrets, malformed sid
   await writeFile(
     path.join(paths.sessionSecretsDirectory, `${BASE_SESSION.sessionId}.json`),
     JSON.stringify({
-      providerBindingHeaders: null,
       providerHeaders: {
         Authorization: 'Bearer sidecar-token-12345678',
       },
@@ -156,7 +155,6 @@ test('inspectAndRepairAssistantStateSecrecy counts inline secrets, malformed sid
   await writeFile(
     path.join(paths.sessionSecretsDirectory, 'session-orphan.json'),
     JSON.stringify({
-      providerBindingHeaders: null,
       providerHeaders: {
         Authorization: 'Bearer orphan-token-12345678',
       },
@@ -169,10 +167,22 @@ test('inspectAndRepairAssistantStateSecrecy counts inline secrets, malformed sid
   await writeFile(
     path.join(paths.sessionSecretsDirectory, 'session-mismatch.json'),
     JSON.stringify({
-      providerBindingHeaders: null,
       providerHeaders: null,
       schema: 'murph.assistant-session-secrets.v1',
       sessionId: 'different-session',
+      updatedAt: BASE_SESSION.updatedAt,
+    }),
+    'utf8',
+  )
+  await writeFile(
+    path.join(paths.sessionSecretsDirectory, 'session-legacy.json'),
+    JSON.stringify({
+      providerBindingHeaders: null,
+      providerHeaders: {
+        Authorization: 'Bearer legacy-token-12345678',
+      },
+      schema: 'murph.assistant-session-secrets.v1',
+      sessionId: 'session-legacy',
       updatedAt: BASE_SESSION.updatedAt,
     }),
     'utf8',
@@ -188,7 +198,7 @@ test('inspectAndRepairAssistantStateSecrecy counts inline secrets, malformed sid
   })
 
   assert.deepEqual(result, {
-    malformedSessionSecretSidecars: 2,
+    malformedSessionSecretSidecars: 3,
     orphanSessionSecretSidecars: 1,
     permissionAudit: {
       incorrectEntries: 2,
@@ -201,7 +211,7 @@ test('inspectAndRepairAssistantStateSecrecy counts inline secrets, malformed sid
     sessionFilesScanned: 1,
     sessionInlineSecretFiles: 1,
     sessionInlineSecretHeaders: 1,
-    sessionSecretSidecarFiles: 4,
+    sessionSecretSidecarFiles: 5,
   })
 
   assert.deepEqual(runtimeMocks.auditAssistantStatePermissions.mock.calls[0]?.[0], {

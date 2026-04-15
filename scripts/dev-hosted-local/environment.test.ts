@@ -5,7 +5,6 @@ import {
   buildHostedLocalDevOverrides,
   buildWranglerVarArgs,
   mergeCloudflareLocalEnv,
-  normalizeLoadedEnvValue,
   parseEnvText,
 } from "./environment.ts";
 import type {
@@ -38,30 +37,13 @@ const callbackPrivateJwkJson = JSON.stringify({
   y: "callback-y",
 });
 
-describe("normalizeLoadedEnvValue", () => {
-  it("strips duplicated key prefixes from pasted values", () => {
-    expect(
-      normalizeLoadedEnvValue("DATABASE_URL", "DATABASE_URL=postgresql://127.0.0.1:5432/murph"),
-    ).toBe("postgresql://127.0.0.1:5432/murph");
-  });
-
-  it("unescapes legacy JSON strings", () => {
-    expect(
-      normalizeLoadedEnvValue(
-        "HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK",
-        "{\\\"kty\\\":\\\"EC\\\",\\\"crv\\\":\\\"P-256\\\"}",
-      ),
-    ).toBe("{\"kty\":\"EC\",\"crv\":\"P-256\"}");
-  });
-});
-
 describe("parseEnvText", () => {
-  it("parses dotenv text and normalizes each string value", () => {
+  it("parses dotenv text values verbatim", () => {
     expect(
       parseEnvText(
         [
-          "DATABASE_URL=DATABASE_URL=postgresql://127.0.0.1:5432/murph",
-          "HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK={\\\"kty\\\":\\\"EC\\\"}",
+          "DATABASE_URL=postgresql://127.0.0.1:5432/murph",
+          "HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK={\"kty\":\"EC\"}",
           "EMPTY=",
         ].join("\n"),
       ),
