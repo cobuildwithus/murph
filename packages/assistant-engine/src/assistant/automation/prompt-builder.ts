@@ -34,7 +34,6 @@ export type AssistantAutoReplyPreparedInput =
   | {
       kind: 'ready'
       prompt: string
-      requiresRichUserMessageContent: boolean
       userMessageContent: AssistantUserMessageContentPart[] | null
     }
   | { kind: 'skip'; reason: string }
@@ -140,8 +139,6 @@ export async function prepareAssistantAutoReplyInput(
   return {
     kind: 'ready',
     prompt: nextPrompt,
-    requiresRichUserMessageContent:
-      !hasTextualContent && preparedMultimodalInput.userMessageContent !== null,
     userMessageContent: preparedMultimodalInput.userMessageContent,
   }
 }

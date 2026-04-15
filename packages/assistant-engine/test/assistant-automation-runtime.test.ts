@@ -63,7 +63,6 @@ const runLoopMocks = vi.hoisted(() => ({
 }))
 
 const replyMocks = vi.hoisted(() => ({
-  assistantRoutesSupportRichUserMessageContent: vi.fn(),
   assistantAutoReplyGroupOutcomeArtifactExists: vi.fn(),
   assistantChatReplyArtifactExists: vi.fn(),
   collectAssistantAutoReplyGroup: vi.fn(),
@@ -79,9 +78,7 @@ const replyMocks = vi.hoisted(() => ({
   normalizeNullableString: vi.fn(),
   prepareAssistantAutoReplyInput: vi.fn(),
   resolveAcceptedInboundMessageOperatorAuthority: vi.fn(),
-  resolveAssistantOperatorDefaults: vi.fn(),
   resolveAssistantSession: vi.fn(),
-  resolveAssistantTurnRoutesForMessage: vi.fn(),
   sendAssistantMessage: vi.fn(),
   writeAssistantAutoReplyGroupOutcomeArtifact: vi.fn(),
   writeAssistantChatDeferredArtifacts: vi.fn(),
@@ -215,15 +212,6 @@ vi.mock('../src/assistant/operator-authority.ts', () => ({
     replyMocks.resolveAcceptedInboundMessageOperatorAuthority,
 }))
 
-vi.mock('../src/assistant/rich-content-routing.ts', () => ({
-  assistantRoutesSupportRichUserMessageContent:
-    replyMocks.assistantRoutesSupportRichUserMessageContent,
-}))
-
-vi.mock('@murphai/operator-config/operator-config', () => ({
-  resolveAssistantOperatorDefaults: replyMocks.resolveAssistantOperatorDefaults,
-}))
-
 vi.mock('../src/assistant/provider-turn-recovery.ts', () => ({
   isAssistantProviderConnectionLostError:
     replyMocks.isAssistantProviderConnectionLostError,
@@ -236,11 +224,6 @@ vi.mock('../src/assistant/receipts.ts', () => ({
 
 vi.mock('../src/assistant/service.ts', () => ({
   sendAssistantMessage: replyMocks.sendAssistantMessage,
-}))
-
-vi.mock('../src/assistant/service-turn-routes.ts', () => ({
-  resolveAssistantTurnRoutesForMessage:
-    replyMocks.resolveAssistantTurnRoutesForMessage,
 }))
 
 vi.mock('../src/assistant/automation/failure-observability.ts', () => ({
@@ -788,22 +771,16 @@ beforeEach(() => {
   replyMocks.prepareAssistantAutoReplyInput.mockReset().mockResolvedValue({
     kind: 'ready',
     prompt: 'reply prompt',
-    requiresRichUserMessageContent: false,
     userMessageContent: null,
   })
   replyMocks.resolveAcceptedInboundMessageOperatorAuthority
     .mockReset()
     .mockReturnValue('accepted-inbound-message')
-  replyMocks.resolveAssistantOperatorDefaults.mockReset().mockResolvedValue({})
-  replyMocks.assistantRoutesSupportRichUserMessageContent
-    .mockReset()
-    .mockReturnValue(false)
   replyMocks.resolveAssistantSession.mockReset().mockRejectedValue(
     Object.assign(new Error('not found'), {
       code: 'ASSISTANT_SESSION_NOT_FOUND',
     }),
   )
-  replyMocks.resolveAssistantTurnRoutesForMessage.mockReset().mockResolvedValue([])
   replyMocks.sendAssistantMessage.mockReset().mockResolvedValue({
     delivery: {
       channel: 'telegram',
@@ -2174,7 +2151,7 @@ describe('assistant auto-reply runtime', () => {
     })
   })
 
-  it('skips rich-content prompts when the selected provider only accepts text', async () => {
+  it('does not skip rich-content prompts when the selected provider only accepts text', async () => {
     const primaryCapture = createCaptureDetail({
       attachmentCount: 1,
       attachments: [
@@ -2200,7 +2177,6 @@ describe('assistant auto-reply runtime', () => {
     replyMocks.prepareAssistantAutoReplyInput.mockResolvedValue({
       kind: 'ready',
       prompt: 'rich prompt',
-      requiresRichUserMessageContent: true,
       userMessageContent: [
         {
           type: 'text',
@@ -2240,10 +2216,20 @@ describe('assistant auto-reply runtime', () => {
       advanceCursor: true,
       failed: 0,
       nextWakeAt: null,
-      replied: 0,
-      skipped: 1,
+      replied: 1,
+      skipped: 0,
       stopScanning: false,
     })
+    expect(replyMocks.sendAssistantMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userMessageContent: [
+          {
+            type: 'text',
+            text: 'rich content',
+          },
+        ],
+      }),
+    )
   })
 
   it('writes result artifacts for successful replies', async () => {
@@ -2925,7 +2911,6 @@ describe('assistant auto-reply runtime', () => {
     replyMocks.prepareAssistantAutoReplyInput.mockResolvedValue({
       kind: 'ready',
       prompt: 'rich prompt',
-      requiresRichUserMessageContent: true,
       userMessageContent: [
         {
           type: 'text',
@@ -2933,27 +2918,6 @@ describe('assistant auto-reply runtime', () => {
         },
       ],
     })
-    replyMocks.resolveAssistantTurnRoutesForMessage.mockResolvedValue([
-      {
-        codexCommand: null,
-        cooldownMs: 60_000,
-        label: 'murph-openai',
-        provider: 'openai-compatible',
-        providerOptions: {
-          continuityFingerprint: 'openai-compatible-route',
-          model: 'gpt-5.4',
-          reasoningEffort: null,
-          sandbox: null,
-          approvalPolicy: null,
-          profile: null,
-          oss: false,
-          executionDriver: 'openai-compatible',
-          resumeKind: null,
-        },
-        routeId: 'openai-compatible-route',
-      },
-    ])
-    replyMocks.assistantRoutesSupportRichUserMessageContent.mockReturnValue(true)
     const inboxServices = createInboxServices({
       show: vi.fn().mockResolvedValue(
         createShowResult(
@@ -3025,13 +2989,6 @@ describe('assistant auto-reply runtime', () => {
         ],
       }),
     )
-    expect(
-      replyMocks.assistantRoutesSupportRichUserMessageContent,
-    ).toHaveBeenCalledWith([
-      expect.objectContaining({
-        provider: 'openai-compatible',
-      }),
-    ])
   })
 
   it('uses Linq external ids as the outbound reply target when replying in-thread', async () => {

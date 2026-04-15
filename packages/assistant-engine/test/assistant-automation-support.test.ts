@@ -1267,7 +1267,6 @@ describe('assistant auto-reply prompt builder support', () => {
       prompt: expect.stringContaining(
         'No parsed attachment text is available. Use attached image or PDF evidence if present.',
       ),
-      requiresRichUserMessageContent: true,
       userMessageContent: [
         {
           text: 'image prompt payload',

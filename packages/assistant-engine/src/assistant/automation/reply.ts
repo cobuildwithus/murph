@@ -1,5 +1,4 @@
 import type { AssistantAutomationCursor } from '@murphai/operator-config/assistant-cli-contracts'
-import { createDefaultLocalAssistantModelTarget } from '@murphai/operator-config/assistant-backend'
 import type { InboxShowResult } from '@murphai/operator-config/inbox-cli-contracts'
 import type { InboxServices } from '@murphai/inbox-services'
 import type { AssistantUserMessageContentPart } from '../../model-harness.js'
@@ -12,9 +11,6 @@ import {
 import type { AssistantExecutionContext } from '../execution-context.js'
 import type { AssistantOutboxDispatchMode } from '../outbox.js'
 import {
-  resolveAssistantOperatorDefaults,
-} from '@murphai/operator-config/operator-config'
-import {
   isAssistantProviderConnectionLostError,
   isAssistantProviderStalledError,
 } from '../provider-turn-recovery.js'
@@ -22,16 +18,9 @@ import { listAssistantTurnReceipts } from '../receipts.js'
 import { errorMessage, normalizeNullableString } from '../shared.js'
 import { sendAssistantMessage } from '../service.js'
 import {
-  resolveAssistantTurnRoutesForMessage,
-} from '../service-turn-routes.js'
-import {
-  assistantRoutesSupportRichUserMessageContent,
-} from '../rich-content-routing.js'
-import {
   listAssistantTranscriptEntries,
   resolveAssistantSession,
 } from '../store.js'
-import type { AssistantMessageInput } from '../service-contracts.js'
 import {
   assistantAutoReplyGroupOutcomeArtifactExists,
   assistantChatReplyArtifactExists,
@@ -752,21 +741,6 @@ async function evaluateAssistantAutoReplyGroup(input: {
   if (preparedInput.kind === 'skip') {
     return createAdvancingSkipDecision(preparedInput.reason)
   }
-  if (
-    preparedInput.requiresRichUserMessageContent
-  ) {
-    const richContentSupported = await canAutoReplyRouteRichContent({
-      capture: primaryCapture,
-      prompt: preparedInput.prompt,
-      userMessageContent: preparedInput.userMessageContent,
-      vault: input.vault,
-    })
-    if (!richContentSupported) {
-      return createAdvancingSkipDecision(
-        'capture has image/PDF evidence but the configured assistant provider only accepts text input',
-      )
-    }
-  }
 
   if (
     input.group.firstItem.summary.actorIsSelf &&
@@ -1133,25 +1107,4 @@ async function isRecentSelfAuthoredAssistantEcho(input: {
 
 function normalizeComparableText(text: string): string {
   return text.replace(/\s+/gu, ' ').trim()
-}
-
-async function canAutoReplyRouteRichContent(input: {
-  capture: InboxShowResult['capture']
-  prompt: string
-  userMessageContent: AssistantUserMessageContentPart[] | null
-  vault: string
-}): Promise<boolean> {
-  const defaults = await resolveAssistantOperatorDefaults()
-  const messageInput = {
-    conversation: conversationRefFromCapture(input.capture),
-    prompt: input.prompt,
-    userMessageContent: input.userMessageContent,
-    vault: input.vault,
-  } satisfies AssistantMessageInput
-  const routes = await resolveAssistantTurnRoutesForMessage(
-    messageInput,
-    defaults,
-    createDefaultLocalAssistantModelTarget(),
-  )
-  return assistantRoutesSupportRichUserMessageContent(routes)
 }
