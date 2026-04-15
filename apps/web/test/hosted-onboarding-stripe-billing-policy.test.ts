@@ -8,12 +8,11 @@ const mocks = vi.hoisted(() => ({
   readHostedMemberBillingSnapshot: vi.fn(),
   retrieveStripeSubscription: vi.fn(),
   updateHostedMemberCoreState: vi.fn(),
-  withHostedOnboardingTransaction: vi.fn(),
   writeHostedMemberStripeBillingRef: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-billing-store", () => ({
-  writeHostedMemberStripeBillingRef: mocks.writeHostedMemberStripeBillingRef,
+  writeHostedMemberStripeBillingRefTx: mocks.writeHostedMemberStripeBillingRef,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", async () => {
@@ -44,11 +43,13 @@ vi.mock("@/src/lib/hosted-onboarding/shared", async () => {
   return {
     ...actual,
     lockHostedMemberRow: mocks.lockHostedMemberRow,
-    withHostedOnboardingTransaction: mocks.withHostedOnboardingTransaction,
   };
 });
 
-import { updateHostedMemberStripeBillingIfFresh } from "@/src/lib/hosted-onboarding/stripe-billing-policy";
+import {
+  prepareHostedMemberStripeBillingWrite,
+  updateHostedMemberStripeBillingIfFreshTx,
+} from "@/src/lib/hosted-onboarding/stripe-billing-policy";
 
 describe("hosted onboarding stripe billing policy", () => {
   beforeEach(() => {
@@ -60,9 +61,6 @@ describe("hosted onboarding stripe billing policy", () => {
       status: "active",
     });
     mocks.updateHostedMemberCoreState.mockResolvedValue(undefined);
-    mocks.withHostedOnboardingTransaction.mockImplementation(async (prisma, callback) =>
-      callback(prisma as never),
-    );
     mocks.writeHostedMemberStripeBillingRef.mockResolvedValue({
       memberId: "member_123",
       stripeCustomerId: "cus_123",
@@ -72,12 +70,15 @@ describe("hosted onboarding stripe billing policy", () => {
 
   it("reads the canonical Stripe subscription before acquiring the hosted member lock", async () => {
     const trace: string[] = [];
-    const transaction = {
+    const rootPrisma = {
+      __tag: "root",
+    };
+    const tx = {
       __tag: "tx",
     };
 
     mocks.readHostedMemberBillingSnapshot.mockImplementation(async ({ prisma }) => {
-      trace.push(prisma === transaction ? "locked-read" : "pre-lock-read");
+      trace.push(prisma === tx ? "locked-read" : "pre-lock-read");
       return makeMemberSnapshot({
         billingRef: {
           memberId: "member_123",
@@ -92,27 +93,35 @@ describe("hosted onboarding stripe billing policy", () => {
         status: "active",
       };
     });
-    mocks.withHostedOnboardingTransaction.mockImplementation(async (_prisma, callback) => {
-      trace.push("with-transaction");
-      return callback(transaction as never);
-    });
     mocks.lockHostedMemberRow.mockImplementation(async () => {
       trace.push("lock-row");
     });
+    const prepared = await prepareHostedMemberStripeBillingWrite({
+      dispatchContext: {
+        eventCreatedAt: new Date("2026-04-12T00:00:00.000Z"),
+        occurredAt: "2026-04-12T00:00:00.000Z",
+        sourceEventId: "evt_123",
+        sourceType: "stripe.customer.subscription.updated",
+      },
+      member: makeMemberSnapshot(),
+      prisma: rootPrisma as never,
+      stripeSubscriptionId: "sub_123",
+    });
 
     await expect(
-      updateHostedMemberStripeBillingIfFresh({
+      updateHostedMemberStripeBillingIfFreshTx({
         billingStatus: HostedBillingStatus.past_due,
+        canonicalBillingStatus: prepared.canonicalBillingStatus,
         dispatchContext: {
           eventCreatedAt: new Date("2026-04-12T00:00:00.000Z"),
           occurredAt: "2026-04-12T00:00:00.000Z",
           sourceEventId: "evt_123",
           sourceType: "stripe.customer.subscription.updated",
         },
-        member: makeMemberSnapshot(),
-        prisma: {} as never,
+        member: prepared.member,
         stripeCustomerId: "cus_123",
         stripeSubscriptionId: "sub_123",
+        tx: tx as never,
       }),
     ).resolves.toEqual(
       makeMemberSnapshot({
@@ -126,7 +135,6 @@ describe("hosted onboarding stripe billing policy", () => {
 
     expect(trace).toEqual([
       "stripe-read",
-      "with-transaction",
       "lock-row",
       "locked-read",
       "locked-read",
@@ -138,7 +146,7 @@ describe("hosted onboarding stripe billing policy", () => {
     const rootPrisma = {
       __tag: "root",
     };
-    const transaction = {
+    const tx = {
       __tag: "tx",
     };
 
@@ -164,26 +172,33 @@ describe("hosted onboarding stripe billing policy", () => {
         status: "past_due",
       };
     });
-    mocks.withHostedOnboardingTransaction.mockImplementation(async (_prisma, callback) => {
-      trace.push("with-transaction");
-      return callback(transaction as never);
-    });
     mocks.lockHostedMemberRow.mockImplementation(async () => {
       trace.push("lock-row");
     });
+    const prepared = await prepareHostedMemberStripeBillingWrite({
+      dispatchContext: {
+        eventCreatedAt: new Date("2026-04-12T00:00:00.000Z"),
+        occurredAt: "2026-04-12T00:00:00.000Z",
+        sourceEventId: "evt_456",
+        sourceType: "stripe.invoice.payment_failed",
+      },
+      member: makeMemberSnapshot(),
+      prisma: rootPrisma as never,
+    });
 
     await expect(
-      updateHostedMemberStripeBillingIfFresh({
+      updateHostedMemberStripeBillingIfFreshTx({
         billingStatus: HostedBillingStatus.past_due,
+        canonicalBillingStatus: prepared.canonicalBillingStatus,
         dispatchContext: {
           eventCreatedAt: new Date("2026-04-12T00:00:00.000Z"),
           occurredAt: "2026-04-12T00:00:00.000Z",
           sourceEventId: "evt_456",
           sourceType: "stripe.invoice.payment_failed",
         },
-        member: makeMemberSnapshot(),
-        prisma: rootPrisma as never,
+        member: prepared.member,
         stripeCustomerId: "cus_123",
+        tx: tx as never,
       }),
     ).resolves.toEqual(
       makeMemberSnapshot({
@@ -201,7 +216,6 @@ describe("hosted onboarding stripe billing policy", () => {
     expect(trace).toEqual([
       "pre-lock-read",
       "stripe-read:sub_456",
-      "with-transaction",
       "lock-row",
       "locked-read",
       "locked-read",

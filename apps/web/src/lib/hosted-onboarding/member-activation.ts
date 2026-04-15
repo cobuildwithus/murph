@@ -1,6 +1,7 @@
 import {
   HostedBillingStatus,
   HostedRevnetIssuanceStatus,
+  type Prisma,
 } from "@prisma/client";
 import {
   buildHostedExecutionMemberActivatedDispatch,
@@ -35,11 +36,7 @@ import {
   finishHostedOnboardingTiming,
   startHostedOnboardingTiming,
 } from "./logging";
-import {
-  lockHostedMemberRow,
-  type HostedOnboardingPrismaClient,
-  withHostedOnboardingTransaction,
-} from "./shared";
+import { lockHostedMemberRow } from "./shared";
 
 export type HostedMemberActivationResult = {
   activated: boolean;
@@ -51,13 +48,13 @@ export type HostedMemberActivationTransactionResult = HostedMemberActivationResu
   postCommitProvisionUserId: string | null;
 };
 
-export async function activateHostedMemberFromConfirmedRevnetIssuance(input: {
+export async function activateHostedMemberFromConfirmedRevnetIssuanceTx(input: {
   member: HostedMemberSnapshot;
   occurredAt: string;
-  prisma: HostedOnboardingPrismaClient;
+  prisma: Prisma.TransactionClient;
   sourceEventId: string;
   sourceType: string;
-}): Promise<HostedMemberActivationResult> {
+}): Promise<HostedMemberActivationTransactionResult> {
   const timing = startHostedOnboardingTiming(
     "hosted-onboarding.member-activation.revnet-confirmed",
     {
@@ -66,7 +63,7 @@ export async function activateHostedMemberFromConfirmedRevnetIssuance(input: {
   );
 
   try {
-    const activated = await tryActivateHostedMemberIfStillAllowed({
+    const activated = await tryActivateHostedMemberIfStillAllowedTx({
       member: input.member,
       prisma: input.prisma,
       revnetIssuanceStatus: HostedRevnetIssuanceStatus.confirmed,
@@ -81,10 +78,9 @@ export async function activateHostedMemberFromConfirmedRevnetIssuance(input: {
         activated: false,
         hostedExecutionEventId: null,
         memberId: input.member.core.id,
+        postCommitProvisionUserId: null,
       };
     }
-
-    await provisionManagedUserCryptoInHostedExecution(input.member.core.id);
 
     const linqRoute = await resolveHostedMemberActivationFirstContactLinqRoute({
       member: input.member,
@@ -107,12 +103,14 @@ export async function activateHostedMemberFromConfirmedRevnetIssuance(input: {
     finishHostedOnboardingTiming(timing, "completed", {
       activated: true,
       outboxEnqueued: true,
+      postCommitProvisionScheduled: true,
     });
 
     return {
       activated: true,
       hostedExecutionEventId: dispatch.eventId,
       memberId: input.member.core.id,
+      postCommitProvisionUserId: input.member.core.id,
     };
   } catch (error) {
     finishHostedOnboardingTiming(timing, "failed", {
@@ -122,10 +120,10 @@ export async function activateHostedMemberFromConfirmedRevnetIssuance(input: {
   }
 }
 
-export async function activateHostedMemberForPositiveSource(input: {
+export async function activateHostedMemberForPositiveSourceTx(input: {
   dispatchContext: HostedStripeDispatchContext;
   member: Pick<HostedMemberBillingSnapshot, "core">;
-  prisma: HostedOnboardingPrismaClient;
+  prisma: Prisma.TransactionClient;
   skipIfBillingAlreadyActive?: boolean;
 }): Promise<HostedMemberActivationTransactionResult> {
   const timing = startHostedOnboardingTiming(
@@ -136,87 +134,7 @@ export async function activateHostedMemberForPositiveSource(input: {
   );
 
   try {
-    const result = await withHostedOnboardingTransaction(input.prisma, async (tx) => {
-      await lockHostedMemberRow(tx, input.member.core.id);
-
-      const currentMember = await readHostedMemberSnapshot({
-        memberId: input.member.core.id,
-        prisma: tx,
-      });
-
-      if (!currentMember || isHostedAccessBlockedBillingStatus(currentMember.core.billingStatus)) {
-        return buildHostedInactiveMemberActivationResult(input.member.core.id);
-      }
-
-      const activationEventId = buildHostedMemberActivationEventId({
-        memberId: currentMember.core.id,
-        sourceEventId: input.dispatchContext.sourceEventId,
-        sourceType: input.dispatchContext.sourceType,
-      });
-
-      if (
-        input.skipIfBillingAlreadyActive &&
-        currentMember.core.billingStatus === HostedBillingStatus.active
-      ) {
-        const existingDispatch = await tx.executionOutbox.findUnique({
-          where: {
-            eventId: activationEventId,
-          },
-          select: {
-            eventId: true,
-          },
-        });
-
-        return existingDispatch
-          ? {
-              activated: false,
-              hostedExecutionEventId: existingDispatch.eventId,
-              memberId: currentMember.core.id,
-              postCommitProvisionUserId: currentMember.core.id,
-            }
-          : buildHostedInactiveMemberActivationResult(currentMember.core.id);
-      }
-
-      const entitlement = deriveHostedEntitlement({
-        billingStatus: HostedBillingStatus.active,
-        suspendedAt: currentMember.core.suspendedAt,
-      });
-
-      if (!entitlement.activationReady) {
-        return buildHostedInactiveMemberActivationResult(currentMember.core.id);
-      }
-
-      await updateHostedMemberCoreState({
-        billingStatus: HostedBillingStatus.active,
-        memberId: currentMember.core.id,
-        prisma: tx,
-      });
-
-      const linqRoute = await resolveHostedMemberActivationFirstContactLinqRoute({
-        member: currentMember,
-        prisma: tx,
-      });
-      const dispatch = buildHostedMemberActivationDispatchForMember({
-        firstContact: linqRoute.firstContact,
-        member: currentMember,
-        occurredAt: input.dispatchContext.occurredAt,
-        sourceEventId: input.dispatchContext.sourceEventId,
-        sourceType: input.dispatchContext.sourceType,
-      });
-      const outboxRecord = await enqueueHostedExecutionOutbox({
-        dispatch,
-        sourceId: `stripe:${input.dispatchContext.sourceEventId}`,
-        sourceType: "hosted_stripe_event",
-        tx,
-      });
-
-      return {
-        activated: true,
-        hostedExecutionEventId: outboxRecord.eventId,
-        memberId: currentMember.core.id,
-        postCommitProvisionUserId: currentMember.core.id,
-      };
-    });
+    const result = await activateHostedMemberForPositiveSourceTxInner(input);
 
     finishHostedOnboardingTiming(timing, "completed", {
       activated: result.activated,
@@ -231,6 +149,93 @@ export async function activateHostedMemberForPositiveSource(input: {
     });
     throw error;
   }
+}
+
+async function activateHostedMemberForPositiveSourceTxInner(input: {
+  dispatchContext: HostedStripeDispatchContext;
+  member: Pick<HostedMemberBillingSnapshot, "core">;
+  prisma: Prisma.TransactionClient;
+  skipIfBillingAlreadyActive?: boolean;
+}): Promise<HostedMemberActivationTransactionResult> {
+  await lockHostedMemberRow(input.prisma, input.member.core.id);
+
+  const currentMember = await readHostedMemberSnapshot({
+    memberId: input.member.core.id,
+    prisma: input.prisma,
+  });
+
+  if (!currentMember || isHostedAccessBlockedBillingStatus(currentMember.core.billingStatus)) {
+    return buildHostedInactiveMemberActivationResult(input.member.core.id);
+  }
+
+  const activationEventId = buildHostedMemberActivationEventId({
+    memberId: currentMember.core.id,
+    sourceEventId: input.dispatchContext.sourceEventId,
+    sourceType: input.dispatchContext.sourceType,
+  });
+
+  if (
+    input.skipIfBillingAlreadyActive &&
+    currentMember.core.billingStatus === HostedBillingStatus.active
+  ) {
+    const existingDispatch = await input.prisma.executionOutbox.findUnique({
+      where: {
+        eventId: activationEventId,
+      },
+      select: {
+        eventId: true,
+      },
+    });
+
+    return existingDispatch
+      ? {
+          activated: false,
+          hostedExecutionEventId: existingDispatch.eventId,
+          memberId: currentMember.core.id,
+          postCommitProvisionUserId: currentMember.core.id,
+        }
+      : buildHostedInactiveMemberActivationResult(currentMember.core.id);
+  }
+
+  const entitlement = deriveHostedEntitlement({
+    billingStatus: HostedBillingStatus.active,
+    suspendedAt: currentMember.core.suspendedAt,
+  });
+
+  if (!entitlement.activationReady) {
+    return buildHostedInactiveMemberActivationResult(currentMember.core.id);
+  }
+
+  await updateHostedMemberCoreState({
+    billingStatus: HostedBillingStatus.active,
+    memberId: currentMember.core.id,
+    prisma: input.prisma,
+  });
+
+  const linqRoute = await resolveHostedMemberActivationFirstContactLinqRoute({
+    member: currentMember,
+    prisma: input.prisma,
+  });
+  const dispatch = buildHostedMemberActivationDispatchForMember({
+    firstContact: linqRoute.firstContact,
+    member: currentMember,
+    occurredAt: input.dispatchContext.occurredAt,
+    sourceEventId: input.dispatchContext.sourceEventId,
+    sourceType: input.dispatchContext.sourceType,
+  });
+  const outboxRecord = await enqueueHostedExecutionOutbox({
+    dispatch,
+    sourceId: `stripe:${input.dispatchContext.sourceEventId}`,
+    sourceType: "hosted_stripe_event",
+    tx: input.prisma,
+  });
+
+  return {
+    activated: true,
+    hostedExecutionEventId: outboxRecord.eventId,
+    memberId: currentMember.core.id,
+    postCommitProvisionUserId: currentMember.core.id,
+  };
 }
 
 export function buildHostedMemberActivationDispatch(input: {
@@ -311,7 +316,7 @@ export async function runHostedMemberActivationPostCommitEffects(input: {
 
 async function resolveHostedMemberActivationFirstContactLinqRoute(input: {
   member: HostedMemberSnapshot;
-  prisma: HostedOnboardingPrismaClient;
+  prisma: Prisma.TransactionClient;
 }): Promise<{ firstContact: HostedExecutionMemberActivatedEvent["firstContact"] }> {
   if (!input.member.identity?.phoneNumber) {
     return {
@@ -328,43 +333,41 @@ async function resolveHostedMemberActivationFirstContactLinqRoute(input: {
   return resolveHostedMemberActivationLinqRoute(input);
 }
 
-async function tryActivateHostedMemberIfStillAllowed(input: {
+async function tryActivateHostedMemberIfStillAllowedTx(input: {
   member: HostedMemberSnapshot;
-  prisma: HostedOnboardingPrismaClient;
+  prisma: Prisma.TransactionClient;
   revnetIssuanceStatus?: HostedRevnetIssuanceStatus | null;
   revnetRequired?: boolean;
 }): Promise<boolean> {
-  return withHostedOnboardingTransaction(input.prisma, async (tx) => {
-    await lockHostedMemberRow(tx, input.member.core.id);
+  await lockHostedMemberRow(input.prisma, input.member.core.id);
 
-    const currentMember = await readHostedMemberSnapshot({
-      memberId: input.member.core.id,
-      prisma: tx,
-    });
-
-    if (!currentMember || isHostedAccessBlockedBillingStatus(currentMember.core.billingStatus)) {
-      return false;
-    }
-
-    const entitlement = deriveHostedEntitlement({
-      billingStatus: HostedBillingStatus.active,
-      revnetIssuanceStatus: input.revnetIssuanceStatus,
-      revnetRequired: input.revnetRequired,
-      suspendedAt: currentMember.core.suspendedAt,
-    });
-
-    if (!entitlement.activationReady) {
-      return false;
-    }
-
-    await updateHostedMemberCoreState({
-      billingStatus: HostedBillingStatus.active,
-      memberId: currentMember.core.id,
-      prisma: tx,
-    });
-
-    return true;
+  const currentMember = await readHostedMemberSnapshot({
+    memberId: input.member.core.id,
+    prisma: input.prisma,
   });
+
+  if (!currentMember || isHostedAccessBlockedBillingStatus(currentMember.core.billingStatus)) {
+    return false;
+  }
+
+  const entitlement = deriveHostedEntitlement({
+    billingStatus: HostedBillingStatus.active,
+    revnetIssuanceStatus: input.revnetIssuanceStatus,
+    revnetRequired: input.revnetRequired,
+    suspendedAt: currentMember.core.suspendedAt,
+  });
+
+  if (!entitlement.activationReady) {
+    return false;
+  }
+
+  await updateHostedMemberCoreState({
+    billingStatus: HostedBillingStatus.active,
+    memberId: currentMember.core.id,
+    prisma: input.prisma,
+  });
+
+  return true;
 }
 
 function buildHostedInactiveMemberActivationResult(

@@ -5,13 +5,21 @@ import {
 } from "@prisma/client";
 
 import {
-  activateHostedMemberFromConfirmedRevnetIssuance,
+  activateHostedMemberFromConfirmedRevnetIssuanceTx,
+  runHostedMemberActivationPostCommitEffects,
 } from "./member-activation";
 import { readHostedMemberSnapshot } from "./hosted-member-store";
 import {
   isHostedOnboardingRevnetEnabled,
   readHostedRevnetPaymentReceipt,
 } from "./revnet";
+
+const HOSTED_REVNET_CONFIRMATION_RETRY_DELAYS_MS = [
+  30 * 1000,
+  2 * 60 * 1000,
+  10 * 60 * 1000,
+  30 * 60 * 1000,
+] as const;
 
 export async function reconcileSubmittedHostedRevnetIssuances(input: {
   limit?: number;
@@ -22,8 +30,12 @@ export async function reconcileSubmittedHostedRevnetIssuances(input: {
   }
 
   const confirmedIssuanceIds: string[] = [];
+  const now = new Date();
   const issuances = await input.prisma.hostedRevnetIssuance.findMany({
     where: {
+      nextAttemptAt: {
+        lte: now,
+      },
       payTxHash: {
         not: null,
       },
@@ -61,7 +73,7 @@ export async function reconcileSubmittedHostedRevnetIssuances(input: {
       continue;
     }
 
-    await input.prisma.$transaction(async (transaction) => {
+    const activationResult = await input.prisma.$transaction(async (transaction) => {
       await transaction.hostedRevnetIssuance.update({
         where: {
           id: issuance.id,
@@ -80,20 +92,90 @@ export async function reconcileSubmittedHostedRevnetIssuances(input: {
       });
 
       if (!member) {
-        return;
+        return null;
       }
 
-      await activateHostedMemberFromConfirmedRevnetIssuance({
+      return activateHostedMemberFromConfirmedRevnetIssuanceTx({
         member,
         occurredAt: new Date().toISOString(),
-        prisma: transaction as Prisma.TransactionClient,
+        prisma: transaction,
         sourceEventId: issuance.id,
         sourceType: "hosted.revnet.issuance.confirmed",
       });
     });
+    try {
+      await runHostedMemberActivationPostCommitEffects({
+        postCommitProvisionUserId: activationResult?.postCommitProvisionUserId ?? null,
+      });
+    } catch (error) {
+      await scheduleHostedRevnetConfirmationRetry({
+        attemptCount: issuance.attemptCount + 1,
+        error,
+        issuanceId: issuance.id,
+        prisma: input.prisma,
+      });
+      throw error;
+    }
 
     confirmedIssuanceIds.push(issuance.id);
   }
 
   return confirmedIssuanceIds;
+}
+
+async function scheduleHostedRevnetConfirmationRetry(input: {
+  attemptCount: number;
+  error: unknown;
+  issuanceId: string;
+  prisma: PrismaClient;
+}): Promise<void> {
+  await input.prisma.hostedRevnetIssuance.updateMany({
+    where: {
+      id: input.issuanceId,
+      status: HostedRevnetIssuanceStatus.confirmed,
+    },
+    data: {
+      attemptCount: input.attemptCount,
+      confirmedAt: null,
+      failureCode: deriveHostedRevnetConfirmationRetryErrorCode(input.error),
+      failureMessage: deriveHostedRevnetConfirmationRetryErrorMessage(input.error),
+      nextAttemptAt: computeHostedRevnetConfirmationNextAttemptAt(input.attemptCount),
+      status: HostedRevnetIssuanceStatus.submitted,
+    },
+  });
+}
+
+function computeHostedRevnetConfirmationNextAttemptAt(
+  attemptCount: number,
+  now = new Date(),
+): Date {
+  const delayMs =
+    HOSTED_REVNET_CONFIRMATION_RETRY_DELAYS_MS[
+      Math.min(
+        Math.max(attemptCount - 1, 0),
+        HOSTED_REVNET_CONFIRMATION_RETRY_DELAYS_MS.length - 1,
+      )
+    ];
+
+  return new Date(now.getTime() + delayMs);
+}
+
+function deriveHostedRevnetConfirmationRetryErrorCode(error: unknown): string {
+  if (error && typeof error === "object" && "code" in error && typeof error.code === "string") {
+    return error.code;
+  }
+
+  if (error instanceof Error && error.name) {
+    return error.name;
+  }
+
+  return "REVNET_CONFIRMATION_POST_COMMIT_FAILED";
+}
+
+function deriveHostedRevnetConfirmationRetryErrorMessage(error: unknown): string {
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+
+  return "Hosted RevNet confirmation post-commit work failed.";
 }

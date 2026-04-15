@@ -19,8 +19,8 @@ import {
   readHostedMemberIdentityPrivateState,
 } from "./member-private-codecs";
 import {
+  type HostedOnboardingReadClient,
   normalizeNullableString,
-  type HostedOnboardingPrismaClient,
 } from "./shared";
 
 export interface HostedMemberIdentityState {
@@ -62,7 +62,7 @@ export interface HostedMemberIdentityWriteInput {
   memberId: string;
   phoneLookupKey: string | null;
   phoneNumberVerifiedAt: Date | null;
-  prisma: HostedOnboardingPrismaClient;
+  prisma: Prisma.TransactionClient;
   phoneNumber: string | null;
   privyUserId: string | null;
   signupPhoneCodeSendAttemptId: string | null;
@@ -77,7 +77,7 @@ export interface HostedMemberIdentityWriteInput {
 
 export interface HostedMemberSignupPhoneStateWriteInput {
   memberId: string;
-  prisma: HostedOnboardingPrismaClient;
+  prisma: Prisma.TransactionClient;
   signupPhoneCodeSendAttemptId?: string | null;
   signupPhoneCodeSendAttemptStartedAt?: Date | null;
   signupPhoneCodeSentAt?: Date | null;
@@ -85,7 +85,7 @@ export interface HostedMemberSignupPhoneStateWriteInput {
 }
 
 export async function lookupHostedMemberIdentityByPrivyUserId(input: {
-  prisma: HostedOnboardingPrismaClient;
+  prisma: HostedOnboardingReadClient;
   privyUserId: string;
 }): Promise<HostedMemberIdentityLookup | null> {
   const privyUserLookupKeys = createHostedPrivyUserLookupKeyReadCandidates(input.privyUserId);
@@ -112,7 +112,7 @@ export async function lookupHostedMemberIdentityByPrivyUserId(input: {
 
 export async function lookupHostedMemberIdentityByPhoneLookupKey(input: {
   phoneLookupKey: string;
-  prisma: HostedOnboardingPrismaClient;
+  prisma: HostedOnboardingReadClient;
 }): Promise<HostedMemberIdentityLookup | null> {
   const identityRecord = await input.prisma.hostedMemberIdentity.findUnique({
     where: {
@@ -130,7 +130,7 @@ export async function lookupHostedMemberIdentityByPhoneLookupKey(input: {
 
 export async function lookupHostedMemberIdentityByPhoneNumber(input: {
   phoneNumber: string;
-  prisma: HostedOnboardingPrismaClient;
+  prisma: HostedOnboardingReadClient;
 }): Promise<HostedMemberIdentityLookup | null> {
   const phoneLookupKeys = createHostedPhoneLookupKeyReadCandidates(input.phoneNumber);
 
@@ -155,7 +155,7 @@ export async function lookupHostedMemberIdentityByPhoneNumber(input: {
 }
 
 export async function lookupHostedMemberIdentityByWalletAddress(input: {
-  prisma: HostedOnboardingPrismaClient;
+  prisma: HostedOnboardingReadClient;
   walletAddress: string;
 }): Promise<HostedMemberIdentityLookup | null> {
   const walletAddressLookupKeys = createHostedWalletAddressLookupKeyReadCandidates(
@@ -184,7 +184,7 @@ export async function lookupHostedMemberIdentityByWalletAddress(input: {
 
 export async function readHostedMemberIdentity(input: {
   memberId: string;
-  prisma: HostedOnboardingPrismaClient;
+  prisma: HostedOnboardingReadClient;
 }): Promise<HostedMemberIdentityState | null> {
   const identityRecord = await input.prisma.hostedMemberIdentity.findUnique({
     where: {

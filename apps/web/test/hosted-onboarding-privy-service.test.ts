@@ -1275,6 +1275,13 @@ function asCompleteHostedPrivyVerificationPrisma<T extends Record<string, unknow
       value: vi.fn(async () => []),
     });
   }
+  if (!("$transaction" in prismaWithQueryRaw)) {
+    Object.defineProperty(prismaWithQueryRaw, "$transaction", {
+      configurable: true,
+      value: vi.fn(async (callback: (transaction: CompleteHostedPrivyVerificationPrisma) => Promise<unknown>) =>
+        callback(prismaWithQueryRaw)),
+    });
+  }
   return prismaWithQueryRaw;
 }
 

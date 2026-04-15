@@ -1,8 +1,8 @@
 import { type HostedMemberSnapshot } from "./hosted-member-store";
 import {
   countHostedMemberHomeLinqBindingsByRecipientPhone,
-  upsertHostedMemberHomeLinqBinding,
-  upsertHostedMemberHomeLinqRecipientPhone,
+  upsertHostedMemberHomeLinqBindingTx,
+  upsertHostedMemberHomeLinqRecipientPhoneTx,
 } from "./hosted-member-routing-store";
 import { chooseHostedLinqConversationRecipientPhone } from "./linq-routing-policy";
 import {
@@ -11,9 +11,9 @@ import {
 } from "./messaging-state";
 import { normalizePhoneNumber } from "./phone";
 import { getHostedOnboardingEnvironment } from "./runtime";
-import { type HostedOnboardingPrismaClient } from "./shared";
 import { hostedOnboardingError } from "./errors";
 import type { HostedExecutionMemberActivatedEvent } from "@murphai/hosted-execution";
+import type { Prisma } from "@prisma/client";
 
 export interface HostedMemberActivationLinqRouteResolution {
   firstContact: HostedExecutionMemberActivatedEvent["firstContact"];
@@ -21,7 +21,7 @@ export interface HostedMemberActivationLinqRouteResolution {
 
 export async function resolveHostedMemberActivationLinqRoute(input: {
   member: HostedMemberSnapshot;
-  prisma: HostedOnboardingPrismaClient;
+  prisma: Prisma.TransactionClient;
 }): Promise<HostedMemberActivationLinqRouteResolution> {
   const routing = input.member.routing;
   const messaging = resolveHostedMemberMessagingState({
@@ -31,7 +31,7 @@ export async function resolveHostedMemberActivationLinqRoute(input: {
 
   if (routing?.linqChatId) {
     if (routing.pendingLinqChatId) {
-      await upsertHostedMemberHomeLinqBinding({
+      await upsertHostedMemberHomeLinqBindingTx({
         clearPending: true,
         linqChatId: routing.linqChatId,
         memberId: input.member.core.id,
@@ -60,7 +60,7 @@ export async function resolveHostedMemberActivationLinqRoute(input: {
     && targetRecipientPhone
     && normalizePhoneNumber(routing.pendingLinqRecipientPhone) === targetRecipientPhone
   ) {
-    await upsertHostedMemberHomeLinqBinding({
+    await upsertHostedMemberHomeLinqBindingTx({
       clearPending: true,
       linqChatId: routing.pendingLinqChatId,
       memberId: input.member.core.id,
@@ -94,7 +94,7 @@ export async function resolveHostedMemberActivationLinqRoute(input: {
     });
   }
 
-  await upsertHostedMemberHomeLinqRecipientPhone({
+  await upsertHostedMemberHomeLinqRecipientPhoneTx({
     clearPending: true,
     memberId: input.member.core.id,
     prisma: input.prisma,
@@ -113,7 +113,7 @@ export async function resolveHostedMemberActivationLinqRoute(input: {
 
 async function resolveHostedMemberActivationTargetRecipientPhone(input: {
   member: HostedMemberSnapshot;
-  prisma: HostedOnboardingPrismaClient;
+  prisma: Prisma.TransactionClient;
 }): Promise<string | null> {
   const environment = getHostedOnboardingEnvironment();
   const preferredRecipientPhone = input.member.routing?.linqRecipientPhone

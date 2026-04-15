@@ -1,17 +1,19 @@
+import type { Prisma } from "@prisma/client";
+
 import {
   buildHostedInviteUrl,
-  issueHostedInvite,
+  issueHostedInviteTx,
 } from "./invite-service";
 import {
   hasHostedMemberActiveAccess,
   isHostedMemberSuspended,
 } from "./entitlement";
-import { ensureHostedMemberForPhone } from "./member-identity-service";
+import { ensureHostedMemberForPhoneTx } from "./member-identity-service";
 import { lookupHostedMemberIdentityByPhoneNumber } from "./hosted-member-identity-store";
 import { readHostedMemberSnapshot } from "./hosted-member-store";
 import {
-  upsertHostedMemberHomeLinqBinding,
-  upsertHostedMemberPendingLinqBinding,
+  upsertHostedMemberHomeLinqBindingTx,
+  upsertHostedMemberPendingLinqBindingTx,
 } from "./hosted-member-routing-store";
 import {
   claimHostedLinqOnboardingLinkNotice,
@@ -40,7 +42,6 @@ import {
   createHostedWebhookDispatchSideEffect,
   createHostedWebhookLinqMessageSideEffect,
   type HostedWebhookPlan,
-  type HostedWebhookReceiptPersistenceClient,
 } from "./webhook-receipts";
 import { buildHostedExecutionLinqMessageReceivedDispatch } from "@murphai/hosted-execution";
 
@@ -55,7 +56,7 @@ export type HostedOnboardingLinqWebhookResponse = {
 
 export async function planHostedOnboardingLinqWebhook(input: {
   event: HostedLinqWebhookEvent;
-  prisma: HostedWebhookReceiptPersistenceClient;
+  prisma: Prisma.TransactionClient;
 }): Promise<HostedWebhookPlan<HostedOnboardingLinqWebhookResponse>> {
   if (input.event.event_type !== "message.received") {
     return buildIgnoredLinqWebhookPlan(input.event.event_type);
@@ -187,7 +188,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
     };
   }
 
-  const member = existingMember ?? await ensureHostedMemberForPhone({
+  const member = existingMember ?? await ensureHostedMemberForPhoneTx({
     phoneNumber: participantPhoneNumber,
     prisma: input.prisma,
   });
@@ -213,7 +214,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
     return buildIgnoredLinqWebhookPlan("signup-link-already-sent");
   }
 
-  const invite = await issueHostedInvite({
+  const invite = await issueHostedInviteTx({
     channel: "linq",
     memberId: member.id,
     prisma: input.prisma,
@@ -323,10 +324,10 @@ async function bindHostedMemberHomeLinqChatAndTrackInbound(input: {
   chatId: string;
   memberId: string;
   occurredAt: string;
-  prisma: HostedWebhookReceiptPersistenceClient;
+  prisma: Prisma.TransactionClient;
   recipientPhone: string | null;
 }) {
-  await upsertHostedMemberHomeLinqBinding({
+  await upsertHostedMemberHomeLinqBindingTx({
     clearPending: true,
     linqChatId: input.chatId,
     memberId: input.memberId,
@@ -345,10 +346,10 @@ async function bindHostedMemberPendingLinqChatAndTrackInbound(input: {
   chatId: string;
   memberId: string;
   occurredAt: string;
-  prisma: HostedWebhookReceiptPersistenceClient;
+  prisma: Prisma.TransactionClient;
   recipientPhone: string | null;
 }) {
-  await upsertHostedMemberPendingLinqBinding({
+  await upsertHostedMemberPendingLinqBindingTx({
     linqChatId: input.chatId,
     memberId: input.memberId,
     prisma: input.prisma,

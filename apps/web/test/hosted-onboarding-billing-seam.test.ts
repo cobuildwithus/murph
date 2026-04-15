@@ -8,7 +8,7 @@ import {
 } from "@/src/lib/hosted-onboarding/hosted-member-store";
 
 type PositiveSourceMemberInput = Parameters<
-  typeof import("@/src/lib/hosted-onboarding/member-activation").activateHostedMemberForPositiveSource
+  typeof import("@/src/lib/hosted-onboarding/member-activation").activateHostedMemberForPositiveSourceTx
 >[0]["member"];
 
 type StripeLookupResult = Awaited<
@@ -18,7 +18,7 @@ type StripeLookupResult = Awaited<
 >;
 
 type StripeBillingPolicyMemberInput = Parameters<
-  typeof import("@/src/lib/hosted-onboarding/stripe-billing-policy").updateHostedMemberStripeBillingIfFresh
+  typeof import("@/src/lib/hosted-onboarding/stripe-billing-policy").updateHostedMemberStripeBillingIfFreshTx
 >[0]["member"];
 
 describe("hosted onboarding billing seam", () => {

@@ -340,42 +340,51 @@ function makePrisma(input: {
         .mockResolvedValueOnce(input.findUniqueResults[0] ?? null)
         .mockResolvedValueOnce(input.findUniqueResults[1] ?? null)
     : vi.fn().mockResolvedValue(input.billingRef ?? null);
-
-  return {
+  const upsert = vi.fn().mockImplementation(
+    async (inputData: {
+      create: {
+        memberId: string;
+        stripeCustomerIdEncrypted: string | null;
+        stripeCustomerLookupKey: string | null;
+        stripeSubscriptionIdEncrypted: string | null;
+        stripeSubscriptionLookupKey: string | null;
+      };
+      update: {
+        stripeCustomerIdEncrypted?: string | null;
+        stripeCustomerLookupKey?: string | null;
+        stripeSubscriptionIdEncrypted?: string | null;
+        stripeSubscriptionLookupKey?: string | null;
+      };
+    }) => ({
+      memberId: inputData.create.memberId,
+      stripeCustomerIdEncrypted:
+        inputData.update.stripeCustomerIdEncrypted
+        ?? inputData.create.stripeCustomerIdEncrypted,
+      stripeCustomerLookupKey:
+        inputData.update.stripeCustomerLookupKey
+        ?? inputData.create.stripeCustomerLookupKey,
+      stripeSubscriptionIdEncrypted:
+        inputData.update.stripeSubscriptionIdEncrypted
+        ?? inputData.create.stripeSubscriptionIdEncrypted,
+      stripeSubscriptionLookupKey:
+        inputData.update.stripeSubscriptionLookupKey
+        ?? inputData.create.stripeSubscriptionLookupKey,
+    }),
+  );
+  const prismaTx = {
     $queryRaw: vi.fn().mockResolvedValue([]),
     hostedMemberBillingRef: {
       findUnique,
-      upsert: vi.fn().mockImplementation(
-        async (inputData: {
-          create: {
-            memberId: string;
-            stripeCustomerIdEncrypted: string | null;
-            stripeCustomerLookupKey: string | null;
-            stripeSubscriptionIdEncrypted: string | null;
-            stripeSubscriptionLookupKey: string | null;
-          };
-          update: {
-            stripeCustomerIdEncrypted?: string | null;
-            stripeCustomerLookupKey?: string | null;
-            stripeSubscriptionIdEncrypted?: string | null;
-            stripeSubscriptionLookupKey?: string | null;
-          };
-        }) => ({
-          memberId: inputData.create.memberId,
-          stripeCustomerIdEncrypted:
-            inputData.update.stripeCustomerIdEncrypted
-            ?? inputData.create.stripeCustomerIdEncrypted,
-          stripeCustomerLookupKey:
-            inputData.update.stripeCustomerLookupKey
-            ?? inputData.create.stripeCustomerLookupKey,
-          stripeSubscriptionIdEncrypted:
-            inputData.update.stripeSubscriptionIdEncrypted
-            ?? inputData.create.stripeSubscriptionIdEncrypted,
-          stripeSubscriptionLookupKey:
-            inputData.update.stripeSubscriptionLookupKey
-            ?? inputData.create.stripeSubscriptionLookupKey,
-        }),
-      ),
+      upsert,
+    },
+  };
+
+  return {
+    $queryRaw: vi.fn().mockResolvedValue([]),
+    $transaction: vi.fn(async (callback: (tx: typeof prismaTx) => Promise<unknown>) => callback(prismaTx)),
+    hostedMemberBillingRef: {
+      findUnique,
+      upsert,
     },
   } as const;
 }

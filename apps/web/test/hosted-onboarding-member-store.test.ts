@@ -13,12 +13,12 @@ import {
   type HostedMemberCoreState,
 } from "@/src/lib/hosted-onboarding/hosted-member-store";
 import {
-  bindHostedMemberStripeCustomerIdIfMissing,
+  bindHostedMemberStripeCustomerIdIfMissingTx,
   lookupHostedMemberStripeBillingRefByStripeCustomerId,
   lookupHostedMemberStripeBillingRefByStripeSubscriptionId,
   readHostedMemberStripeBillingRef,
   type HostedMemberStripeBillingRefSnapshot,
-  writeHostedMemberStripeBillingRef,
+  writeHostedMemberStripeBillingRefTx,
 } from "@/src/lib/hosted-onboarding/hosted-member-billing-store";
 import {
   lookupHostedMemberIdentityByPhoneLookupKey,
@@ -33,9 +33,9 @@ import {
   lookupHostedMemberRoutingByTelegramUserLookupKey,
   readHostedMemberRoutingState,
   type HostedMemberRoutingStateSnapshot,
-  upsertHostedMemberHomeLinqBinding,
-  upsertHostedMemberHomeLinqRecipientPhone,
-  upsertHostedMemberTelegramRoutingBinding,
+  upsertHostedMemberHomeLinqBindingTx,
+  upsertHostedMemberHomeLinqRecipientPhoneTx,
+  upsertHostedMemberTelegramRoutingBindingTx,
 } from "@/src/lib/hosted-onboarding/hosted-member-routing-store";
 
 const TEST_CONTACT_PRIVACY_KEY = "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=";
@@ -438,7 +438,7 @@ describe("hosted-member-store", () => {
       },
     } as never;
 
-    await upsertHostedMemberHomeLinqBinding({
+    await upsertHostedMemberHomeLinqBindingTx({
       linqChatId: "chat_123",
       memberId: "member_123",
       prisma,
@@ -518,7 +518,7 @@ describe("hosted-member-store", () => {
     } as never;
 
     await expect(
-      upsertHostedMemberHomeLinqBinding({
+      upsertHostedMemberHomeLinqBindingTx({
         linqChatId: "chat_123",
         memberId: "member_123",
         prisma,
@@ -538,7 +538,7 @@ describe("hosted-member-store", () => {
       },
     } as never;
 
-    await upsertHostedMemberHomeLinqRecipientPhone({
+    await upsertHostedMemberHomeLinqRecipientPhoneTx({
       clearPending: true,
       memberId: "member_123",
       prisma,
@@ -636,7 +636,7 @@ describe("hosted-member-store", () => {
       },
     } as never;
 
-    await upsertHostedMemberTelegramRoutingBinding({
+    await upsertHostedMemberTelegramRoutingBindingTx({
       memberId: "member_123",
       prisma,
       telegramUserId: "456",
@@ -920,11 +920,11 @@ describe("hosted-member-store", () => {
     } as never;
 
     await expect(
-      writeHostedMemberStripeBillingRef({
+      writeHostedMemberStripeBillingRefTx({
         memberId: "member_123",
-        prisma,
         stripeCustomerId: "cus_123",
         stripeSubscriptionId: "sub_123",
+        tx: prisma,
       }),
     ).resolves.toEqual({
       memberId: "member_123",
@@ -973,10 +973,10 @@ describe("hosted-member-store", () => {
     } as never;
 
     await expect(
-      bindHostedMemberStripeCustomerIdIfMissing({
+      bindHostedMemberStripeCustomerIdIfMissingTx({
         memberId: "member_123",
-        prisma,
         stripeCustomerId: "cus_123",
+        tx: prisma,
       }),
     ).resolves.toEqual({
       memberId: "member_123",
@@ -1037,10 +1037,10 @@ describe("hosted-member-store", () => {
     } as never;
 
     await expect(
-      bindHostedMemberStripeCustomerIdIfMissing({
+      bindHostedMemberStripeCustomerIdIfMissingTx({
         memberId: "member_123",
-        prisma,
         stripeCustomerId: "cus_123",
+        tx: prisma,
       }),
     ).resolves.toEqual({
       memberId: "member_123",
@@ -1078,10 +1078,10 @@ describe("hosted-member-store", () => {
     } as never;
 
     await expect(
-      bindHostedMemberStripeCustomerIdIfMissing({
+      bindHostedMemberStripeCustomerIdIfMissingTx({
         memberId: "member_123",
-        prisma,
         stripeCustomerId: "cus_123",
+        tx: prisma,
       }),
     ).resolves.toEqual({
       memberId: "member_123",

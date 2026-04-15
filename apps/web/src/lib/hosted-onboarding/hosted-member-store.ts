@@ -17,7 +17,7 @@ import {
   type HostedMemberRoutingStateSnapshot,
   projectHostedMemberRoutingState,
 } from "./hosted-member-routing-store";
-import { type HostedOnboardingPrismaClient } from "./shared";
+import { type HostedOnboardingReadClient } from "./shared";
 
 const hostedMemberCoreStateSelect = Prisma.validator<Prisma.HostedMemberSelect>()({
   billingStatus: true,
@@ -49,7 +49,7 @@ export interface HostedMemberSnapshot extends HostedMemberBillingSnapshot {
 export async function createHostedMember(input: {
   billingStatus: HostedMember["billingStatus"];
   memberId: string;
-  prisma: HostedOnboardingPrismaClient;
+  prisma: Prisma.TransactionClient;
   suspendedAt?: Date | null;
 }): Promise<HostedMemberCoreState> {
   return input.prisma.hostedMember.create({
@@ -68,7 +68,7 @@ export async function createHostedMember(input: {
 
 export async function readHostedMemberCoreState(input: {
   memberId: string;
-  prisma: HostedOnboardingPrismaClient;
+  prisma: HostedOnboardingReadClient;
 }): Promise<HostedMemberCoreState | null> {
   return input.prisma.hostedMember.findUnique({
     where: {
@@ -80,7 +80,7 @@ export async function readHostedMemberCoreState(input: {
 
 export async function readHostedMemberBillingSnapshot(input: {
   memberId: string;
-  prisma: HostedOnboardingPrismaClient;
+  prisma: HostedOnboardingReadClient;
 }): Promise<HostedMemberBillingSnapshot | null> {
   const memberRecord = await input.prisma.hostedMember.findUnique({
     where: {
@@ -105,7 +105,7 @@ export async function readHostedMemberBillingSnapshot(input: {
 
 export async function readHostedMemberSnapshot(input: {
   memberId: string;
-  prisma: HostedOnboardingPrismaClient;
+  prisma: HostedOnboardingReadClient;
 }): Promise<HostedMemberSnapshot | null> {
   const memberRecord = await input.prisma.hostedMember.findUnique({
     where: {
@@ -145,7 +145,7 @@ export async function readHostedMemberSnapshot(input: {
 export async function updateHostedMemberCoreState(input: {
   billingStatus?: HostedMember["billingStatus"];
   memberId: string;
-  prisma: HostedOnboardingPrismaClient;
+  prisma: Prisma.TransactionClient;
   suspendedAt?: Date | null;
 }): Promise<HostedMemberCoreState> {
   const data = {

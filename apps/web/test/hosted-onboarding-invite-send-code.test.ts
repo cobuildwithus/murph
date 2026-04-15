@@ -165,7 +165,7 @@ describe("invite send-code lifecycle", () => {
 });
 
 function makeInvitePrisma() {
-  return {
+  const tx = {
     $queryRaw: vi.fn().mockResolvedValue([]),
     hostedInvite: {
       findUnique: vi.fn().mockResolvedValue({
@@ -180,6 +180,11 @@ function makeInvitePrisma() {
         memberId: "member_123",
       }),
     },
+  };
+
+  return {
+    ...tx,
+    $transaction: vi.fn(async (callback: (innerTx: typeof tx) => Promise<unknown>) => callback(tx)),
   } as never;
 }
 

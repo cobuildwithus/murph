@@ -18,20 +18,20 @@ import {
   readHostedMemberIdentity,
   writeHostedMemberSignupPhoneState,
 } from "./hosted-member-identity-store";
-import { ensureHostedMemberForPhone } from "./member-identity-service";
+import { ensureHostedMemberForPhoneTx } from "./member-identity-service";
 import { hasHostedPrivyPhoneAuthConfig } from "./privy";
 import {
   getHostedOnboardingEnvironment,
   requireHostedOnboardingPublicBaseUrl,
 } from "./runtime";
 import {
+  HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
   generateHostedInviteCode,
   generateHostedInviteId,
   generateHostedPhoneCodeAttemptId,
   inviteExpiresAt,
   lockHostedMemberRow,
-  type HostedOnboardingPrismaClient,
-  withHostedOnboardingTransaction,
+  type HostedOnboardingReadClient,
 } from "./shared";
 import { normalizePhoneNumber } from "./phone";
 
@@ -133,12 +133,12 @@ export async function issueHostedInviteForPhone(input: {
 }): Promise<{ invite: HostedInvite; inviteUrl: string; member: HostedMember }> {
   const prisma = input.prisma ?? getPrisma();
 
-  return withHostedOnboardingTransaction(prisma, async (tx) => {
-    const member = await ensureHostedMemberForPhone({
+  return prisma.$transaction(async (tx) => {
+    const member = await ensureHostedMemberForPhoneTx({
       phoneNumber: input.phoneNumber,
       prisma: tx,
     });
-    const invite = await issueHostedInvite({
+    const invite = await issueHostedInviteTx({
       channel: input.channel ?? "share",
       memberId: member.id,
       prisma: tx,
@@ -149,51 +149,63 @@ export async function issueHostedInviteForPhone(input: {
       inviteUrl: buildHostedInviteUrl(invite.inviteCode),
       member,
     };
-  });
+  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 }
 
 export async function issueHostedInvite(input: {
   channel: "linq" | "share" | "web";
   memberId: string;
-  prisma: PrismaClient | Prisma.TransactionClient;
+  prisma?: PrismaClient;
 }): Promise<HostedInvite> {
-  return withHostedOnboardingTransaction(input.prisma, async (tx) => {
-    const now = new Date();
+  const prisma = input.prisma ?? getPrisma();
 
-    await lockHostedMemberRow(tx, input.memberId);
+  return prisma.$transaction((tx) => issueHostedInviteTx({
+    channel: input.channel,
+    memberId: input.memberId,
+    prisma: tx,
+  }), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+}
 
-    const existingInvite = await tx.hostedInvite.findFirst({
+export async function issueHostedInviteTx(input: {
+  channel: "linq" | "share" | "web";
+  memberId: string;
+  prisma: Prisma.TransactionClient;
+}): Promise<HostedInvite> {
+  const now = new Date();
+
+  await lockHostedMemberRow(input.prisma, input.memberId);
+
+  const existingInvite = await input.prisma.hostedInvite.findFirst({
+    where: {
+      memberId: input.memberId,
+      expiresAt: {
+        gt: now,
+      },
+    },
+    orderBy: {
+      createdAt: "desc",
+    },
+  });
+
+  if (existingInvite) {
+    return input.prisma.hostedInvite.update({
       where: {
-        memberId: input.memberId,
-        expiresAt: {
-          gt: now,
-        },
+        id: existingInvite.id,
       },
-      orderBy: {
-        createdAt: "desc",
-      },
-    });
-
-    if (existingInvite) {
-      return tx.hostedInvite.update({
-        where: {
-          id: existingInvite.id,
-        },
-        data: {
-          channel: input.channel,
-        },
-      });
-    }
-
-    return tx.hostedInvite.create({
       data: {
-        id: generateHostedInviteId(),
-        memberId: input.memberId,
-        inviteCode: generateHostedInviteCode(),
         channel: input.channel,
-        expiresAt: inviteExpiresAt(now, getHostedOnboardingEnvironment().inviteTtlHours),
       },
     });
+  }
+
+  return input.prisma.hostedInvite.create({
+    data: {
+      id: generateHostedInviteId(),
+      memberId: input.memberId,
+      inviteCode: generateHostedInviteCode(),
+      channel: input.channel,
+      expiresAt: inviteExpiresAt(now, getHostedOnboardingEnvironment().inviteTtlHours),
+    },
   });
 }
 
@@ -232,9 +244,10 @@ export async function prepareHostedInvitePhoneCode(input: {
   now?: Date;
   prisma?: PrismaClient;
 }): Promise<{ phoneNumber: string; sendAttemptId: string }> {
-  const prisma = input.prisma ?? getPrisma();
   const now = input.now ?? new Date();
-  return withHostedOnboardingTransaction(prisma, async (tx) => {
+  const prisma = input.prisma ?? getPrisma();
+
+  return prisma.$transaction(async (tx) => {
     const invite = await requireHostedInviteForAuthentication(input.inviteCode, tx, now);
     await lockHostedMemberRow(tx, invite.memberId);
 
@@ -278,7 +291,7 @@ export async function prepareHostedInvitePhoneCode(input: {
       phoneNumber: resumePhoneNumber,
       sendAttemptId,
     };
-  });
+  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 }
 
 export async function confirmHostedInvitePhoneCode(input: {
@@ -287,9 +300,10 @@ export async function confirmHostedInvitePhoneCode(input: {
   prisma?: PrismaClient;
   sendAttemptId: string;
 }): Promise<{ ok: true }> {
-  const prisma = input.prisma ?? getPrisma();
   const now = input.now ?? new Date();
-  return withHostedOnboardingTransaction(prisma, async (tx) => {
+  const prisma = input.prisma ?? getPrisma();
+
+  return prisma.$transaction(async (tx) => {
     const invite = await requireHostedInviteForAuthentication(input.inviteCode, tx, now);
     await lockHostedMemberRow(tx, invite.memberId);
 
@@ -314,7 +328,7 @@ export async function confirmHostedInvitePhoneCode(input: {
     return {
       ok: true,
     };
-  });
+  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 }
 
 export async function abortHostedInvitePhoneCode(input: {
@@ -323,9 +337,10 @@ export async function abortHostedInvitePhoneCode(input: {
   prisma?: PrismaClient;
   sendAttemptId: string;
 }): Promise<{ ok: true }> {
-  const prisma = input.prisma ?? getPrisma();
   const now = input.now ?? new Date();
-  return withHostedOnboardingTransaction(prisma, async (tx) => {
+  const prisma = input.prisma ?? getPrisma();
+
+  return prisma.$transaction(async (tx) => {
     const invite = await requireHostedInviteForAuthentication(input.inviteCode, tx, now);
     await lockHostedMemberRow(tx, invite.memberId);
 
@@ -342,7 +357,7 @@ export async function abortHostedInvitePhoneCode(input: {
     return {
       ok: true,
     };
-  });
+  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 }
 
 export function requireHostedInviteMemberIdentity(
@@ -385,7 +400,7 @@ function resolveHostedInviteMurphPhoneNumber(input: {
 
 async function findHostedInviteByCode(
   inviteCode: string,
-  prisma: HostedOnboardingPrismaClient,
+  prisma: HostedOnboardingReadClient,
 ) {
   return prisma.hostedInvite.findUnique({
     where: {
@@ -404,7 +419,7 @@ async function findHostedInviteByCode(
 
 async function readHostedInviteIdentityStateOrThrow(
   memberId: string,
-  prisma: HostedOnboardingPrismaClient,
+  prisma: HostedOnboardingReadClient,
 ) {
   const identity = await readHostedMemberIdentity({
     memberId,

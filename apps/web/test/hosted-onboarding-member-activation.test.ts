@@ -11,7 +11,6 @@ const mocks = vi.hoisted(() => ({
   readHostedMemberSnapshot: vi.fn(),
   resolveHostedMemberActivationLinqRoute: vi.fn(),
   updateHostedMemberCoreState: vi.fn(),
-  withHostedOnboardingTransaction: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-execution/control", () => ({
@@ -47,13 +46,12 @@ vi.mock("@/src/lib/hosted-onboarding/shared", async () => {
   return {
     ...actual,
     lockHostedMemberRow: mocks.lockHostedMemberRow,
-    withHostedOnboardingTransaction: mocks.withHostedOnboardingTransaction,
   };
 });
 
 import {
-  activateHostedMemberForPositiveSource,
-  activateHostedMemberFromConfirmedRevnetIssuance,
+  activateHostedMemberForPositiveSourceTx,
+  activateHostedMemberFromConfirmedRevnetIssuanceTx,
   buildHostedMemberActivationFirstContact,
   runHostedMemberActivationPostCommitEffects,
 } from "@/src/lib/hosted-onboarding/member-activation";
@@ -84,9 +82,6 @@ describe("hosted onboarding member activation", () => {
     mocks.enqueueHostedExecutionOutbox.mockResolvedValue({
       eventId: "member.activated:stripe.invoice.paid:member_123:evt_123",
     });
-    mocks.withHostedOnboardingTransaction.mockImplementation(async (prisma, callback) =>
-      callback(prisma as never),
-    );
   });
 
   it("keeps the Linq routing lookup and activation dispatch ownership together for Stripe activations", async () => {
@@ -99,7 +94,7 @@ describe("hosted onboarding member activation", () => {
     };
 
     await expect(
-      activateHostedMemberForPositiveSource({
+      activateHostedMemberForPositiveSourceTx({
         dispatchContext,
         member,
         prisma: makeTransactionHarness() as never,
@@ -138,7 +133,7 @@ describe("hosted onboarding member activation", () => {
     const member = makeMemberSnapshot();
 
     await expect(
-      activateHostedMemberFromConfirmedRevnetIssuance({
+      activateHostedMemberFromConfirmedRevnetIssuanceTx({
         member,
         occurredAt: "2026-04-12T00:00:00.000Z",
         prisma: makeTransactionHarness() as never,
@@ -149,9 +144,10 @@ describe("hosted onboarding member activation", () => {
       activated: true,
       hostedExecutionEventId: "member.activated:hosted.revnet.issuance.confirmed:member_123:revnet_evt_123",
       memberId: "member_123",
+      postCommitProvisionUserId: "member_123",
     });
 
-    expect(mocks.provisionManagedUserCryptoInHostedExecution).toHaveBeenCalledWith("member_123");
+    expect(mocks.provisionManagedUserCryptoInHostedExecution).not.toHaveBeenCalled();
     expect(mocks.resolveHostedMemberActivationLinqRoute).toHaveBeenCalledWith({
       member,
       prisma: expect.anything(),
@@ -177,7 +173,7 @@ describe("hosted onboarding member activation", () => {
     });
 
     await expect(
-      activateHostedMemberForPositiveSource({
+      activateHostedMemberForPositiveSourceTx({
         dispatchContext: {
           eventCreatedAt: new Date("2026-04-12T00:00:00.000Z"),
           occurredAt: "2026-04-12T00:00:00.000Z",
@@ -231,7 +227,7 @@ describe("hosted onboarding member activation", () => {
     mocks.readHostedMemberSnapshot.mockResolvedValue(member);
 
     await expect(
-      activateHostedMemberForPositiveSource({
+      activateHostedMemberForPositiveSourceTx({
         dispatchContext: {
           eventCreatedAt: new Date("2026-04-12T00:00:00.000Z"),
           occurredAt: "2026-04-12T00:00:00.000Z",
@@ -311,7 +307,7 @@ describe("hosted onboarding member activation", () => {
     mocks.readHostedMemberSnapshot.mockResolvedValue(member);
 
     await expect(
-      activateHostedMemberForPositiveSource({
+      activateHostedMemberForPositiveSourceTx({
         dispatchContext: {
           eventCreatedAt: new Date("2026-04-12T00:00:00.000Z"),
           occurredAt: "2026-04-12T00:00:00.000Z",
