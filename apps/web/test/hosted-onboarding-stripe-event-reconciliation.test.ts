@@ -2,6 +2,8 @@ import { HostedStripeEventStatus } from "@prisma/client";
 import type Stripe from "stripe";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "@/src/lib/hosted-onboarding/shared";
+
 const mocks = vi.hoisted(() => ({
   applyStripeCheckoutCompleted: vi.fn(),
   applyStripeCheckoutExpired: vi.fn(),
@@ -162,6 +164,10 @@ describe("hosted Stripe event reconciliation", () => {
         sourceType: "stripe.invoice.paid",
       }),
       expect.anything(),
+    );
+    expect(prisma.client.$transaction).toHaveBeenCalledWith(
+      expect.any(Function),
+      HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
     );
     expect(mocks.provisionManagedUserCryptoInHostedExecution).toHaveBeenCalledWith("member_123");
     expect(prisma.rows[0]).toEqual(expect.objectContaining({
@@ -424,7 +430,9 @@ function createStripeEventPrismaHarness() {
   const rows: MutableStripeEventRow[] = [];
 
   const client: StripeEventPrismaHarnessClient = {
-    $transaction: async <T>(callback: (tx: StripeEventPrismaHarnessClient) => Promise<T>) => callback(client),
+    $transaction: vi.fn(
+      async <T>(callback: (tx: StripeEventPrismaHarnessClient) => Promise<T>) => callback(client),
+    ),
     hostedStripeEvent: {
       create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
         const row: MutableStripeEventRow = {
@@ -558,7 +566,7 @@ type StripeEventWhere = {
 };
 
 type StripeEventPrismaHarnessClient = {
-  $transaction: <T>(callback: (tx: StripeEventPrismaHarnessClient) => Promise<T>) => Promise<T>;
+  $transaction: ReturnType<typeof vi.fn>;
   hostedStripeEvent: {
     create: ReturnType<typeof vi.fn>;
     findMany: ReturnType<typeof vi.fn>;

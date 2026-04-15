@@ -35,6 +35,7 @@ import {
   startHostedOnboardingTiming,
 } from "./logging";
 import { requireHostedStripeApi } from "./runtime";
+import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "./shared";
 import { drainHostedRevnetIssuanceSubmissionQueue } from "./stripe-revnet-issuance";
 
 const STRIPE_EVENT_LEASE_MS = 10 * 60_000;
@@ -366,7 +367,7 @@ async function processClaimedHostedStripeEvent(
         processingContext,
         transaction,
       );
-    });
+    }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
     await runHostedMemberActivationPostCommitEffects(result);
     await prisma.hostedStripeEvent.update({
       where: {

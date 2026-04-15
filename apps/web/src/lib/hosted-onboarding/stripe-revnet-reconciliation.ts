@@ -9,17 +9,14 @@ import {
   runHostedMemberActivationPostCommitEffects,
 } from "./member-activation";
 import { readHostedMemberSnapshot } from "./hosted-member-store";
+import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "./shared";
 import {
   isHostedOnboardingRevnetEnabled,
   readHostedRevnetPaymentReceipt,
 } from "./revnet";
-
-const HOSTED_REVNET_CONFIRMATION_RETRY_DELAYS_MS = [
-  30 * 1000,
-  2 * 60 * 1000,
-  10 * 60 * 1000,
-  30 * 60 * 1000,
-] as const;
+import {
+  computeHostedRevnetNextAttemptAt,
+} from "./stripe-revnet-issuance";
 
 export async function reconcileSubmittedHostedRevnetIssuances(input: {
   limit?: number;
@@ -102,7 +99,7 @@ export async function reconcileSubmittedHostedRevnetIssuances(input: {
         sourceEventId: issuance.id,
         sourceType: "hosted.revnet.issuance.confirmed",
       });
-    });
+    }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
     try {
       await runHostedMemberActivationPostCommitEffects({
         postCommitProvisionUserId: activationResult?.postCommitProvisionUserId ?? null,
@@ -149,15 +146,7 @@ function computeHostedRevnetConfirmationNextAttemptAt(
   attemptCount: number,
   now = new Date(),
 ): Date {
-  const delayMs =
-    HOSTED_REVNET_CONFIRMATION_RETRY_DELAYS_MS[
-      Math.min(
-        Math.max(attemptCount - 1, 0),
-        HOSTED_REVNET_CONFIRMATION_RETRY_DELAYS_MS.length - 1,
-      )
-    ];
-
-  return new Date(now.getTime() + delayMs);
+  return computeHostedRevnetNextAttemptAt(attemptCount, now);
 }
 
 function deriveHostedRevnetConfirmationRetryErrorCode(error: unknown): string {

@@ -19,7 +19,11 @@ import {
   requireHostedRevnetConfig,
   submitHostedRevnetPayment,
 } from "./revnet";
-import { generateHostedRevnetIssuanceId, normalizeNullableString } from "./shared";
+import {
+  generateHostedRevnetIssuanceId,
+  normalizeNullableString,
+  type HostedOnboardingReadClient,
+} from "./shared";
 
 const REVNET_BROADCAST_STATUS_UNKNOWN_CODE = "REVNET_PAYMENT_BROADCAST_STATUS_UNKNOWN";
 const REVNET_ISSUANCE_RECORDING_FAILED_CODE = "REVNET_ISSUANCE_RECORDING_FAILED";
@@ -67,7 +71,7 @@ type HostedRevnetIssuanceEligibility =
     memberId: string;
     paymentAmount: bigint;
     paymentIntentId: string | null;
-    prisma: PrismaClient | Prisma.TransactionClient;
+    prisma: HostedOnboardingReadClient;
   };
 
 type HostedRevnetIssuanceSubmissionState =
@@ -102,7 +106,7 @@ type HostedRevnetIssuanceClaimState =
 export async function maybeIssueHostedRevnetForStripeInvoice(input: {
   invoice: Stripe.Invoice;
   member: HostedMemberSnapshot;
-  prisma: PrismaClient | Prisma.TransactionClient;
+  prisma: HostedOnboardingReadClient;
 }): Promise<void> {
   const issuance = await ensureHostedRevnetIssuanceForStripeInvoice(input);
 
@@ -136,7 +140,7 @@ export async function maybeIssueHostedRevnetForStripeInvoice(input: {
 export async function ensureHostedRevnetIssuanceForStripeInvoice(input: {
   invoice: Stripe.Invoice;
   member: HostedMemberSnapshot;
-  prisma: PrismaClient | Prisma.TransactionClient;
+  prisma: HostedOnboardingReadClient;
 }): Promise<HostedRevnetIssuanceRecord | null> {
   const eligibility = loadHostedRevnetIssuanceEligibility(input);
 
@@ -239,7 +243,7 @@ function isHostedRevnetIssuanceSubmittingStale(updatedAt: Date): boolean {
   return updatedAt.getTime() <= Date.now() - HOSTED_REVNET_SUBMITTING_STALE_MS;
 }
 
-function computeHostedRevnetNextAttemptAt(attemptCount: number, now = new Date()): Date {
+export function computeHostedRevnetNextAttemptAt(attemptCount: number, now = new Date()): Date {
   const delayMs =
     HOSTED_REVNET_RETRY_DELAYS_MS[
       Math.min(Math.max(attemptCount - 1, 0), HOSTED_REVNET_RETRY_DELAYS_MS.length - 1)
@@ -333,7 +337,7 @@ function isHostedRevnetIssuanceBroadcastStatusUnknown(issuance: HostedRevnetIssu
 function loadHostedRevnetIssuanceEligibility(input: {
   invoice: Stripe.Invoice;
   member: HostedMemberSnapshot;
-  prisma: PrismaClient | Prisma.TransactionClient;
+  prisma: HostedOnboardingReadClient;
 }): HostedRevnetIssuanceEligibility {
   if (input.member.core.suspendedAt) {
     return {
@@ -523,7 +527,7 @@ async function patchHostedRevnetIssuanceStripeReferencesIfNeeded(input: {
   chargeId: string | null;
   issuance: HostedRevnetIssuanceRecord;
   paymentIntentId: string | null;
-  prisma: PrismaClient | Prisma.TransactionClient;
+  prisma: HostedOnboardingReadClient;
 }): Promise<HostedRevnetIssuanceRecord> {
   const updateData: {
     stripeChargeId?: string;
@@ -561,7 +565,7 @@ async function claimHostedRevnetIssuanceSubmission(input: {
   idempotencyKey: string;
   invoiceId: string;
   issuance: HostedRevnetIssuanceRecord;
-  prisma: PrismaClient | Prisma.TransactionClient;
+  prisma: HostedOnboardingReadClient;
 }): Promise<HostedRevnetIssuanceClaimState> {
   const claimedIssuance = await input.prisma.hostedRevnetIssuance.updateMany({
     where: {
@@ -608,7 +612,7 @@ async function claimHostedRevnetIssuanceSubmission(input: {
 
 async function submitAndPersistHostedRevnetIssuance(input: {
   issuance: HostedRevnetIssuanceRecord;
-  prisma: PrismaClient | Prisma.TransactionClient;
+  prisma: HostedOnboardingReadClient;
 }): Promise<void> {
   let submission;
 
@@ -698,7 +702,7 @@ async function persistHostedRevnetIssuanceSubmissionFailure(input: {
   attemptCount: number;
   error: unknown;
   issuanceId: string;
-  prisma: PrismaClient | Prisma.TransactionClient;
+  prisma: HostedOnboardingReadClient;
 }): Promise<void> {
   const failure = classifyHostedRevnetIssuanceFailure(input.error);
 
