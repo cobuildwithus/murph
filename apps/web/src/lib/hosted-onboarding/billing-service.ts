@@ -112,15 +112,9 @@ export async function createHostedBillingCheckout(
       memberId: invite.member.id,
     };
     const checkoutSession = await stripe.checkout.sessions.create({
-      automatic_tax: {
-        enabled: true,
-      },
       cancel_url: buildStripeCancelUrl(publicBaseUrl, invite.inviteCode, shareCode),
       client_reference_id: invite.member.id,
       customer: customerId,
-      customer_update: {
-        address: "auto",
-      },
       line_items: [
         {
           price: priceId,
