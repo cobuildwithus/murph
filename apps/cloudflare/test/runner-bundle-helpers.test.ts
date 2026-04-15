@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { createHostedVerifiedEmailUserEnv } from "@murphai/runtime-state";
-import { encodeHostedBundleBase64 } from "@murphai/runtime-state/node";
+import { encodeHostedBundleBase64 } from "@murphai/runtime-state/node/hosted-bundle-codec";
 
 import {
   createHostedArtifactStore,
