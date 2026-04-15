@@ -5,6 +5,19 @@ export const metadata: Metadata = {
   title: "Murph — Turn wearable data into answers about your body",
   description:
     "Expert-backed health experiments measured by your wearable. Pick a protocol, follow it, see what changed. Works with Oura, Whoop, and Garmin.",
+  openGraph: {
+    title: "Murph — Turn wearable data into answers about your body",
+    description:
+      "Expert-backed health experiments measured by your wearable. Pick a protocol, follow it, see what changed.",
+    siteName: "Murph",
+    type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Murph — Wearable data, made useful.",
+    description:
+      "Expert-backed health experiments measured by your wearable.",
+  },
 };
 
 export default function LandingPage() {
