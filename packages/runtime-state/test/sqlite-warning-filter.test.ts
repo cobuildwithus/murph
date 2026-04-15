@@ -22,7 +22,7 @@ describe("runtime-state sqlite warning filter", () => {
     process.emitWarning = originalEmitWarning;
     delete (process as ProcessWithSqliteWarningFilterFlag)[SQLITE_WARNING_FILTER_FLAG];
     delete (process as ProcessWithSqliteWarningFilterFlag)[SQLITE_WARNING_FILTER_INCLUDES_FLAG];
-    vi.doUnmock("node:module");
+    vi.doUnmock("node:sqlite");
   });
 
   it("suppresses only the sqlite experimental warning", async () => {
@@ -117,34 +117,21 @@ describe("runtime-state sqlite warning filter", () => {
     expect(process.emitWarning).toBe(includesWrappedEmitWarning);
   });
 
-  it("installs the sqlite warning filter before requiring node:sqlite", async () => {
+  it("installs the sqlite warning filter before importing node:sqlite", async () => {
     const forwardedWarnings: unknown[][] = [];
 
     process.emitWarning = ((warning: string | Error, ...args: unknown[]) => {
       forwardedWarnings.push([warning, ...args]);
     }) as typeof process.emitWarning;
 
-    vi.doMock("node:module", async () => {
-      const actual = await vi.importActual<typeof import("node:module")>("node:module");
+    vi.doMock("node:sqlite", () => {
+      process.emitWarning(
+        "SQLite is an experimental feature and might change at any time",
+        "ExperimentalWarning",
+      );
 
       return {
-        ...actual,
-        createRequire() {
-          return ((specifier: string) => {
-            if (specifier !== "node:sqlite") {
-              throw new Error(`Unexpected require: ${specifier}`);
-            }
-
-            process.emitWarning(
-              "SQLite is an experimental feature and might change at any time",
-              "ExperimentalWarning",
-            );
-
-            return {
-              DatabaseSync: class FakeDatabaseSync {},
-            };
-          }) as NodeJS.Require;
-        },
+        DatabaseSync: class FakeDatabaseSync {},
       };
     });
 

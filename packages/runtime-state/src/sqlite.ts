@@ -1,15 +1,13 @@
 import { mkdirSync } from "node:fs";
-import { createRequire } from "node:module";
 import path from "node:path";
 
-import { installSqliteExperimentalWarningFilter } from "./sqlite-warning-filter.js";
+import { installSqliteExperimentalWarningFilter } from "./sqlite-warning-filter.ts";
 
 type DatabaseSync = import("node:sqlite").DatabaseSync;
 
 installSqliteExperimentalWarningFilter();
 
-const require = createRequire(import.meta.url);
-const { DatabaseSync: NodeSqliteDatabaseSync } = require("node:sqlite") as typeof import("node:sqlite");
+const { DatabaseSync: NodeSqliteDatabaseSync } = await import("node:sqlite");
 
 export const DEFAULT_SQLITE_TIMEOUT_MS = 5_000;
 
