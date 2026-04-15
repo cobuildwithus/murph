@@ -64,6 +64,12 @@ describe('buildAssistantSystemPrompt', () => {
     const prompt = buildPrompt('bound-tools')
 
     expect(prompt).toContain(
+      'Answer in natural conversation by default. Use structured sections only when the user asks for a breakdown, when you are compiling research or a longer synthesis, or when structure materially improves clarity.',
+    )
+    expect(prompt).toContain(
+      'Keep the distinction between what the vault shows, what you infer, and what you suggest clear in your reasoning. In normal replies, express that naturally in prose rather than labeled sections.',
+    )
+    expect(prompt).toContain(
       'try hard to capture the full ingredient or component list, serving size or per-item amounts, dose units, and calories for future reference',
     )
     expect(prompt).toContain('inspect any attached labels, menus, or photos first')
@@ -101,5 +107,14 @@ describe('buildAssistantSystemPrompt', () => {
     expect(prompt).not.toContain(
       'This turn was triggered by an existing scheduled automation run.',
     )
+  })
+
+  it('keeps local chat evidence guidance direct instead of path-heavy by default', () => {
+    const prompt = buildPrompt('bound-tools')
+
+    expect(prompt).toContain(
+      'In local chat, mention relative file paths, record ids, dates, or source details when they genuinely help the user verify something or when the user asks for that level of detail.',
+    )
+    expect(prompt).toContain('Otherwise, keep the reply natural and direct.')
   })
 })
