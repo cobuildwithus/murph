@@ -3,8 +3,6 @@ const utf8Encoder = new TextEncoder();
 
 export type HostedStorageScope =
   | "artifact"
-  | "assistant-usage"
-  | "assistant-usage-dirty"
   | "bundle"
   | "dispatch-payload"
   | "device-sync-runtime"
@@ -14,7 +12,6 @@ export type HostedStorageScope =
   | "gateway-store"
   | "root-key-envelope"
   | "root-key-recipient"
-  | "share-pack"
   | "side-effect-journal"
   | "user-env";
 

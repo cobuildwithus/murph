@@ -27,19 +27,26 @@ import {
   CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS,
   CLOUDFLARE_HOSTED_RUNTIME_INTERNAL_HOSTNAMES,
 } from "./internal-hosts.ts";
-import { CLOUDFLARE_HOSTED_USAGE_RECORD_PATH } from "./outbound-routes.ts";
+import { fetchHostedExecutionWebControlPlaneResponse } from "./web-control-plane.ts";
+import type { HostedWebCallbackSigningEnvironment } from "./web-callback-auth.ts";
+
+const HOSTED_WEB_USAGE_RECORD_PATH = "/api/internal/hosted-execution/usage/record";
 
 export function buildHostedExecutionRuntimePlatform(input: {
   boundUserId: string;
   commitTimeoutMs?: number | null;
   fetchImpl?: typeof fetch;
   internalWorkerProxyToken?: string | null;
+  webCallbackSigning?: HostedWebCallbackSigningEnvironment | null;
+  webControlBaseUrl?: string | null;
 }): HostedRuntimePlatform {
   const fetchImpl = createCloudflareHostedRuntimeFetch(
     input.internalWorkerProxyToken ?? null,
     input.fetchImpl ?? fetch,
   );
   const timeoutMs = readHostedRunnerCommitTimeoutMs(input.commitTimeoutMs ?? null);
+  const webControlBaseUrl = input.webControlBaseUrl ?? null;
+  const webCallbackSigning = input.webCallbackSigning ?? null;
 
   return {
     artifactStore: {
@@ -204,25 +211,37 @@ export function buildHostedExecutionRuntimePlatform(input: {
         );
       },
     },
-    usageExportPort: {
-      async recordUsage(usage) {
-        const payload = await fetchHostedJson({
-          body: {
-            usage,
-          },
-          description: "Hosted usage export",
-          fetchImpl,
-          method: "POST",
-          timeoutMs,
-          url: new URL(
-            CLOUDFLARE_HOSTED_USAGE_RECORD_PATH,
-            `${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.usageExportPort}/`,
-          ),
-        });
+    ...(webControlBaseUrl && webCallbackSigning
+      ? {
+          usageExportPort: {
+            async recordUsage(usage) {
+              const body = JSON.stringify({
+                usage,
+              });
+              const response = await fetchHostedExecutionWebControlPlaneResponse({
+                baseUrl: webControlBaseUrl,
+                body,
+                boundUserId: input.boundUserId,
+                callbackSigning: webCallbackSigning,
+                fetchImpl,
+                method: "POST",
+                path: HOSTED_WEB_USAGE_RECORD_PATH,
+                timeoutMs,
+              });
+              assertHostedOk(response, "Hosted usage export");
+              const text = await response.text();
 
-        return parseHostedRuntimeUsageRecordResponse(payload);
-      },
-    },
+              try {
+                return parseHostedRuntimeUsageRecordResponse(JSON.parse(text) as unknown);
+              } catch (error) {
+                throw new Error("Hosted usage export returned invalid JSON.", {
+                  cause: error,
+                });
+              }
+            },
+          },
+        }
+      : {}),
   };
 }
 

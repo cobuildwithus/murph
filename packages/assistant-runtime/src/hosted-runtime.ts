@@ -381,12 +381,8 @@ function buildHostedRuntimeStartDetails(
         "VENICE_API_KEY",
         "XAI_API_KEY",
       ]),
-      verifiedEmailPresent: typeof runtime.userEnv.HOSTED_USER_VERIFIED_EMAIL === "string"
-        && runtime.userEnv.HOSTED_USER_VERIFIED_EMAIL.length > 0,
     },
     userEnvKeyCount: Object.keys(runtime.userEnv).length,
-    verifiedEmailPresent: typeof runtime.userEnv.HOSTED_USER_VERIFIED_EMAIL === "string"
-      && runtime.userEnv.HOSTED_USER_VERIFIED_EMAIL.length > 0,
   };
 }
 

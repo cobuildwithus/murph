@@ -17,6 +17,8 @@ import {
   writeEncryptedR2Json,
 } from "./crypto.js";
 
+// Side-effect journals provide idempotent recovery evidence for delivery drains
+// only. They are not canonical business state.
 export class HostedAssistantDeliveryConflictError extends Error {
   constructor(message: string) {
     super(message);

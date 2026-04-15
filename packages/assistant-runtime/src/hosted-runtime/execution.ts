@@ -20,7 +20,6 @@ import {
 import { assistantGatewayLocalProjectionSourceReader } from "@murphai/assistant-engine/gateway-local-adapter";
 import { exportGatewayProjectionSnapshotLocal } from "@murphai/gateway-local";
 
-import { reconcileHostedVerifiedEmailSelfTarget } from "../hosted-email-route.ts";
 import { createHostedArtifactUploadSink } from "./artifacts.ts";
 import {
   collectHostedAssistantDeliverySideEffects,
@@ -188,11 +187,6 @@ export async function completeHostedExecutionAfterCommit(input: {
   });
   await exportHostedPendingAssistantUsage({
     usageExportPort: input.runtime.platform.usageExportPort,
-    vaultRoot: input.restored.vaultRoot,
-  });
-  await reconcileHostedVerifiedEmailSelfTarget({
-    operatorHomeRoot: input.restored.operatorHomeRoot,
-    source: input.runtime.userEnv,
     vaultRoot: input.restored.vaultRoot,
   });
   await refreshAssistantStatusSnapshot(input.restored.vaultRoot);

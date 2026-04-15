@@ -1,24 +1,16 @@
 import {
+  HOSTED_EMAIL_PUBLIC_SENDER_ROUTE_CALLBACK_USER_ID,
   readHostedEmailCapabilities,
 } from "@murphai/hosted-execution/hosted-email";
-import {
-  isHostedEmailInboundSenderAuthorized,
-  readHostedVerifiedEmailFromEnv,
-} from "@murphai/runtime-state";
 import {
   parseRawEmailMessage,
   readRawEmailHeaderValue,
 } from "@murphai/inboxd/connectors/email/parsed";
 
-import { createHostedUserEnvStore } from "../bundle-store.ts";
 import { readHostedExecutionEnvironment } from "../env.ts";
 import type {
-  HostedEmailInboundRoute,
   HostedEmailWorkerRequest,
 } from "../hosted-email.ts";
-import {
-  decodeHostedUserEnvPayload,
-} from "../user-env.ts";
 import {
   readHostedEmailConfig,
   readHostedEmailMessageBytes,
@@ -33,6 +25,13 @@ import {
 } from "../worker-routes/shared.ts";
 import { asWorkerStringEnvironment } from "../worker-contracts.ts";
 import { buildHostedExecutionEmailMessageReceivedDispatch } from "@murphai/hosted-execution";
+import {
+  fetchHostedExecutionWebControlPlaneResponse,
+} from "../web-control-plane.ts";
+import type { HostedWebCallbackSigningEnvironment } from "../web-callback-auth.ts";
+
+const HOSTED_WEB_EMAIL_AUTHORIZATION_PATH = "/api/internal/hosted-execution/email/authorization";
+const HOSTED_WEB_EMAIL_AUTHORIZATION_TIMEOUT_MS = 1_500;
 
 export async function handleHostedEmailIngress(
   message: HostedEmailWorkerRequest,
@@ -40,6 +39,7 @@ export async function handleHostedEmailIngress(
 ): Promise<void> {
   const stringEnv = asWorkerStringEnvironment(env);
   const environment = readHostedExecutionEnvironment(stringEnv);
+  const webControlBaseUrl = stringEnv.HOSTED_WEB_BASE_URL ?? null;
   const capabilities = readHostedEmailCapabilities(stringEnv);
   if (!capabilities.ingressReady) {
     message.setReject?.("Hosted email ingress is not configured.");
@@ -79,15 +79,33 @@ export async function handleHostedEmailIngress(
     bucket: env.BUNDLES,
     config,
     envelopeFrom: message.from,
+    fetchImpl: fetch,
     hasRepeatedHeaderFrom: headerFrom.repeated,
     headerFrom: resolvedHeaderFrom,
     key: environment.platformEnvelopeKey,
     keyId: environment.platformEnvelopeKeyId,
     keysById: environment.platformEnvelopeKeysById,
     to: message.to,
+    webCallbackSigning: environment.webCallbackSigning,
+    webControlBaseUrl,
   });
 
   if (!route) {
+    rejectIngressFailure();
+    return;
+  }
+
+  if (
+    route.authorization === "verified-email"
+    && !await authorizeHostedEmailIngress({
+      callbackSigning: environment.webCallbackSigning,
+      envelopeFrom: message.from,
+      hasRepeatedHeaderFrom: headerFrom.repeated,
+      headerFrom: resolvedHeaderFrom,
+      routeUserId: route.userId,
+      webControlBaseUrl,
+    })
+  ) {
     rejectIngressFailure();
     return;
   }
@@ -98,18 +116,6 @@ export async function handleHostedEmailIngress(
     environment,
     userId: route.userId,
   });
-
-  if (!await authorizeHostedEmailIngress({
-    env,
-    envelopeFrom: message.from,
-    hasRepeatedHeaderFrom: headerFrom.repeated,
-    headerFrom: resolvedHeaderFrom,
-    route,
-    userCrypto,
-  })) {
-    rejectIngressFailure();
-    return;
-  }
 
   const rawMessageKey = await writeHostedEmailRawMessage({
     bucket: env.BUNDLES,
@@ -130,29 +136,40 @@ export async function handleHostedEmailIngress(
 }
 
 async function authorizeHostedEmailIngress(input: {
-  env: WorkerEnvironmentSource;
+  callbackSigning: HostedWebCallbackSigningEnvironment;
   envelopeFrom: string | null | undefined;
   hasRepeatedHeaderFrom: boolean;
   headerFrom: string | null | undefined;
-  route: HostedEmailInboundRoute;
-  userCrypto: Awaited<ReturnType<typeof resolveHostedExecutionUserCryptoContext>>;
+  routeUserId: string;
+  webControlBaseUrl: string | null;
 }): Promise<boolean> {
-  const userEnvPayload = await createHostedUserEnvStore({
-    bucket: input.env.BUNDLES,
-    key: input.userCrypto.rootKey,
-    keyId: input.userCrypto.rootKeyId,
-    keysById: input.userCrypto.keysById,
-  }).readUserEnv(input.route.userId);
-  const userEnv = decodeHostedUserEnvPayload(
-    userEnvPayload,
-    asWorkerStringEnvironment(input.env),
-  );
-  const verifiedEmailAddress = readHostedVerifiedEmailFromEnv(userEnv)?.address ?? null;
+  if (!input.callbackSigning || !input.webControlBaseUrl || input.routeUserId === HOSTED_EMAIL_PUBLIC_SENDER_ROUTE_CALLBACK_USER_ID) {
+    return false;
+  }
 
-  return isHostedEmailInboundSenderAuthorized({
-    envelopeFrom: input.envelopeFrom,
-    hasRepeatedHeaderFrom: input.hasRepeatedHeaderFrom,
-    headerFrom: input.headerFrom,
-    verifiedEmailAddress,
-  });
+  try {
+    const response = await fetchHostedExecutionWebControlPlaneResponse({
+      baseUrl: input.webControlBaseUrl,
+      body: JSON.stringify({
+        envelopeFrom: input.envelopeFrom ?? null,
+        hasRepeatedHeaderFrom: input.hasRepeatedHeaderFrom,
+        headerFrom: input.headerFrom ?? null,
+      }),
+      boundUserId: input.routeUserId,
+      callbackSigning: input.callbackSigning,
+      fetchImpl: fetch,
+      method: "POST",
+      path: HOSTED_WEB_EMAIL_AUTHORIZATION_PATH,
+      timeoutMs: HOSTED_WEB_EMAIL_AUTHORIZATION_TIMEOUT_MS,
+    });
+
+    if (!response.ok) {
+      return false;
+    }
+
+    const payload = await response.json() as { authorized?: unknown };
+    return payload.authorized === true;
+  } catch {
+    return false;
+  }
 }

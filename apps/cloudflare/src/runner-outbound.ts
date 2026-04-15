@@ -10,13 +10,9 @@ import {
 import { asWorkerStringEnvironment } from "./worker-contracts.ts";
 import { CLOUDFLARE_HOSTED_RUNTIME_HOSTS } from "./internal-hosts.ts";
 import { json, methodNotAllowed, notFound, readJsonObject } from "./json.ts";
-import { CLOUDFLARE_HOSTED_USAGE_RECORD_PATH } from "./outbound-routes.ts";
-import { createHostedPendingUsageStore } from "./usage-store.ts";
 import { handleRunnerDeviceSyncControlRequest } from "./runner-outbound/device-sync.ts";
 import { handleRunnerResultsRequest } from "./runner-outbound/results.ts";
 import {
-  requireArray,
-  requireRecord,
   requireRunnerInternalProxyAuthorization,
   resolveRunnerOutboundUserCryptoContext,
   type RunnerOutboundEnvironmentSource,
@@ -75,17 +71,6 @@ export async function handleRunnerOutboundRequest(
 
     if (url.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.deviceSyncPort) {
       return handleRunnerDeviceSyncControlRequest({
-        env,
-        environment,
-        request,
-        url,
-        userId,
-      });
-    }
-
-    if (url.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.usageExportPort) {
-      return handleRunnerUsageRecordRequest({
-        bucket: env.BUNDLES,
         env,
         environment,
         request,
@@ -164,52 +149,6 @@ async function handleRunnerArtifactRequest(input: {
     sha256: input.sha256,
     size: bytes.byteLength,
   });
-}
-
-async function handleRunnerUsageRecordRequest(input: {
-  bucket: RunnerOutboundEnvironmentSource["BUNDLES"];
-  env: RunnerOutboundEnvironmentSource;
-  environment: ReturnType<typeof readHostedExecutionEnvironment>;
-  request: Request;
-  url: URL;
-  userId: string;
-}): Promise<Response> {
-  if (input.request.method !== "POST" || input.url.pathname !== CLOUDFLARE_HOSTED_USAGE_RECORD_PATH) {
-    return input.url.pathname === CLOUDFLARE_HOSTED_USAGE_RECORD_PATH
-      ? methodNotAllowed()
-      : notFound();
-  }
-
-  const payload = parseHostedAiUsageRecordRequest(await readJsonObject(input.request));
-  const crypto = await resolveRunnerOutboundUserCryptoContext({
-    bucket: input.bucket,
-    env: input.env,
-    environment: input.environment,
-    userId: input.userId,
-  });
-  const result = await createHostedPendingUsageStore({
-    bucket: input.bucket,
-    dirtyKey: input.environment.platformEnvelopeKey,
-    dirtyKeyId: input.environment.platformEnvelopeKeyId,
-    key: crypto.rootKey,
-    keyId: crypto.rootKeyId,
-    keysById: crypto.keysById,
-  }).appendUsage({
-    usage: payload.usage,
-    userId: input.userId,
-  });
-
-  return json(result);
-}
-
-function parseHostedAiUsageRecordRequest(
-  value: Record<string, unknown>,
-): { usage: readonly Record<string, unknown>[] } {
-  return {
-    usage: requireArray(value.usage, "usage").map((entry, index) =>
-      requireRecord(entry, `usage[${index}]`)
-    ),
-  };
 }
 
 function copyBytesToArrayBuffer(bytes: Uint8Array): ArrayBuffer {

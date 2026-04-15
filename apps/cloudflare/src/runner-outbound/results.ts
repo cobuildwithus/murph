@@ -1,14 +1,7 @@
 import { parseHostedEmailSendRequest } from "@murphai/assistant-runtime/hosted-email";
 import {
-  deriveHostedExecutionErrorCode,
-} from "@murphai/hosted-execution";
-import {
   parseHostedAssistantDeliveryRecord,
-  parseHostedAssistantDeliveryEffects,
 } from "@murphai/hosted-execution/side-effects";
-import {
-  parseHostedExecutionBundlePayload,
-} from "@murphai/hosted-execution/parsers";
 import {
   HOSTED_EXECUTION_RUNNER_EMAIL_SEND_PATH,
 } from "@murphai/hosted-execution/routes";
@@ -27,13 +20,7 @@ import {
 import { asWorkerStringEnvironment } from "../worker-contracts.ts";
 import {
   decodeRouteParam,
-  readOptionalString,
-  requireNumber,
-  requireRecord,
-  requireRunnerOutboundUserStubMethod,
-  requireString,
   resolveRunnerOutboundUserCryptoContext,
-  resolveRunnerOutboundUserRunnerStub,
   type RunnerOutboundEnvironmentSource,
 } from "./shared.ts";
 

@@ -1,8 +1,8 @@
 import { getPrisma } from "@/src/lib/prisma";
-import { syncHostedVerifiedEmailToHostedExecution } from "@/src/lib/hosted-execution/control";
 import { drainHostedExecutionOutboxBestEffort } from "@/src/lib/hosted-execution/outbox";
 import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
+import { upsertHostedMemberEmailAuthorization } from "@/src/lib/hosted-onboarding/hosted-member-store";
 import { jsonOk, withJsonError, readOptionalJsonObject } from "@/src/lib/hosted-onboarding/http";
 import { enqueueHostedMemberChannelsUpdatedTx } from "@/src/lib/hosted-onboarding/member-channel-sync";
 import {
@@ -33,29 +33,37 @@ export const POST = withJsonError(async (request: Request) => {
 
   const now = new Date().toISOString();
   const verifiedAt = new Date(verifiedEmail.verifiedAt * 1000).toISOString();
-  const syncResult = await syncHostedVerifiedEmailToHostedExecution({
-    emailAddress: verifiedEmail.address,
-    userId: auth.member.id,
-    verifiedAt,
-  });
   const channelSyncDispatch = await getPrisma().$transaction((tx) => {
-    return enqueueHostedMemberChannelsUpdatedTx({
-      emailLinked: true,
+    return upsertHostedMemberEmailAuthorization({
+      directPublicSender: {
+        address: verifiedEmail.address,
+        authorizedAt: new Date(verifiedAt),
+      },
       memberId: auth.member.id,
-      occurredAt: now,
       prisma: tx,
-      sourceType: "settings.email.sync",
-    });
+      verifiedEmail: {
+        address: verifiedEmail.address,
+        verifiedAt: new Date(verifiedAt),
+      },
+    }).then(() =>
+      enqueueHostedMemberChannelsUpdatedTx({
+        emailLinked: true,
+        memberId: auth.member.id,
+        occurredAt: now,
+        prisma: tx,
+        sourceType: "settings.email.sync",
+      })
+    );
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
   await drainHostedExecutionOutboxBestEffort({
     eventIds: [channelSyncDispatch.eventId],
   });
 
   return jsonOk({
-    emailAddress: syncResult.emailAddress,
+    emailAddress: verifiedEmail.address,
     ok: true,
     runTriggered: true,
-    verifiedAt: syncResult.verifiedAt,
+    verifiedAt,
   });
 });
 

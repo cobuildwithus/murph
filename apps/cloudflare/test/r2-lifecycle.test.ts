@@ -11,7 +11,7 @@ import {
 describe("r2 lifecycle helpers", () => {
   it("requires at least one configured bundles bucket", () => {
     expect(() => resolveHostedLifecycleBucketNames({})).toThrowError(
-      "CF_BUNDLES_BUCKET or CF_BUNDLES_PREVIEW_BUCKET must be configured.",
+      "CF_BUNDLES_BUCKET or CF_BUNDLES_PREVIEW_BUCKET must be configured to apply execution-transient lifecycle rules.",
     );
   });
 
@@ -71,9 +71,6 @@ describe("R2 transient lifecycle rules", () => {
     expect(maxAgeByPrefix.get("transient/execution-journal/")).toBe(21600);
     expect(maxAgeByPrefix.get("transient/side-effects/")).toBe(21600);
     expect(maxAgeByPrefix.get("transient/dispatch-payloads/")).toBe(21600);
-    expect(maxAgeByPrefix.get("transient/assistant-usage/")).toBe(604800);
-    expect(maxAgeByPrefix.get("transient/assistant-usage-dirty/")).toBe(604800);
-    expect(maxAgeByPrefix.get("transient/share-packs/")).toBe(86400);
     expect(maxAgeByPrefix.get("transient/hosted-email/messages/")).toBe(3600);
     expect(maxAgeByPrefix.has("transient/hosted-email/threads/")).toBe(false);
   });

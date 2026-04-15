@@ -5,10 +5,11 @@ import {
   type HostedExecutionMemberChannels,
 } from "@murphai/hosted-execution";
 
-import { hasHostedVerifiedEmailUserEnv } from "../hosted-execution/control";
+import { getPrisma } from "../prisma";
 import { enqueueHostedExecutionOutbox } from "../hosted-execution/outbox";
 import { hostedOnboardingError } from "./errors";
 import {
+  readHostedMemberEmailAuthorization,
   readHostedMemberSnapshot,
   type HostedMemberSnapshot,
 } from "./hosted-member-store";
@@ -84,29 +85,17 @@ export async function enqueueHostedMemberChannelsUpdatedTx(input: {
 export async function resolveHostedMemberEmailLinked(input: {
   linkedAccounts?: readonly PrivyLinkedAccountLike[];
   memberId: string;
-  onUnconfirmed: "disable" | "retry";
 }): Promise<boolean> {
   if (extractHostedPrivyVerifiedEmailAccount(input.linkedAccounts ?? []) !== null) {
     return true;
   }
 
-  const emailLinked = await hasHostedVerifiedEmailUserEnv(input.memberId);
+  const emailAuthorization = await readHostedMemberEmailAuthorization({
+    memberId: input.memberId,
+    prisma: getPrisma(),
+  });
 
-  if (emailLinked === null) {
-    if (input.onUnconfirmed === "disable") {
-      return false;
-    }
-
-    throw hostedOnboardingError({
-      code: "HOSTED_EMAIL_SYNC_STATUS_UNAVAILABLE",
-      message:
-        "We could not confirm your hosted email status yet. Wait a moment and try again so channel sync stays consistent.",
-      httpStatus: 409,
-      retryable: true,
-    });
-  }
-
-  return emailLinked;
+  return Boolean(emailAuthorization?.verifiedEmail);
 }
 
 export function buildHostedMemberChannelsUpdatedEventId(input: {

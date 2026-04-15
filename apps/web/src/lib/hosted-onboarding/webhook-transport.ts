@@ -1,6 +1,6 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
 
-import { enqueueHostedExecutionOutboxPayload } from "../hosted-execution/outbox";
+import { enqueueHostedExecutionOutbox } from "../hosted-execution/outbox";
 import { hostedOnboardingError } from "./errors";
 import { sanitizeHostedOnboardingLogString } from "./http";
 import { readHostedMemberRoutingState } from "./hosted-member-routing-store";
@@ -37,19 +37,21 @@ export function createHostedWebhookReceiptHandlers(): HostedWebhookReceiptHandle
         await markHostedInviteSentBestEffort(effect.payload.inviteId, prisma);
       }
     },
-    enqueueDispatchEffect: enqueueHostedWebhookDispatchEffect,
+    enqueueDispatch: enqueueHostedWebhookDispatch,
     performSideEffect: performHostedWebhookSideEffect,
   };
 }
 
-async function enqueueHostedWebhookDispatchEffect(input: HostedWebhookDispatchEnqueueInput): Promise<void> {
+async function enqueueHostedWebhookDispatch(
+  input: HostedWebhookDispatchEnqueueInput,
+): Promise<void> {
   if (isPrismaClient(input.prismaOrTransaction)) {
     return input.prismaOrTransaction.$transaction((tx) =>
-      enqueueHostedWebhookDispatchEffectWithTransaction(input, tx),
+      enqueueHostedWebhookDispatchWithTransaction(input, tx),
     );
   }
 
-  return enqueueHostedWebhookDispatchEffectWithTransaction(input, input.prismaOrTransaction);
+  return enqueueHostedWebhookDispatchWithTransaction(input, input.prismaOrTransaction);
 }
 
 function isPrismaClient(
@@ -58,12 +60,12 @@ function isPrismaClient(
   return "$transaction" in client && typeof client.$transaction === "function";
 }
 
-async function enqueueHostedWebhookDispatchEffectWithTransaction(
+async function enqueueHostedWebhookDispatchWithTransaction(
   input: HostedWebhookDispatchEnqueueInput,
   transaction: Prisma.TransactionClient,
 ): Promise<void> {
-  await enqueueHostedExecutionOutboxPayload({
-    payload: input.payload,
+  await enqueueHostedExecutionOutbox({
+    dispatch: input.dispatch,
     sourceId: `${input.source}:${input.eventId}`,
     sourceType: "hosted_webhook_receipt",
     tx: transaction,

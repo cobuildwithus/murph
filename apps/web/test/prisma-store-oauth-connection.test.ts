@@ -53,6 +53,11 @@ type MutableConnectionRecord = {
 };
 
 const BLIND_INDEX_KEY = Buffer.alloc(32, 7);
+const TEST_CODEC = {
+  decrypt: (value: string) => value.replace(/^enc:/u, ""),
+  encrypt: (value: string) => `enc:${value}`,
+  keyVersion: "v1",
+};
 
 describe("PrismaDeviceSyncControlPlaneStore oauth state ingress", () => {
   beforeEach(() => {
@@ -276,6 +281,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
     };
 
     const store = new PrismaDeviceSyncControlPlaneStore({
+      codec: TEST_CODEC,
       prisma: {
         $transaction: async <TResult>(callback: (transaction: typeof tx) => Promise<TResult>) => callback(tx),
       } as never,
@@ -351,6 +357,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
     };
 
     const store = new PrismaDeviceSyncControlPlaneStore({
+      codec: TEST_CODEC,
       prisma: {
         $transaction: async <TResult>(callback: (transaction: typeof tx) => Promise<TResult>) => callback(tx),
       } as never,
@@ -418,47 +425,12 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
     expect(runtimeMocks.getDeviceSyncRuntimeSnapshot).not.toHaveBeenCalled();
   });
 
-  it("keeps webhook-ingress external-account lookups on the live runtime path", async () => {
+  it("keeps webhook-ingress external-account lookups on the durable Prisma owner", async () => {
     const connection = createConnection({
       id: "dsc_123",
       provider: "oura",
+      status: "active",
       userId: "user-123",
-    });
-
-    runtimeMocks.getDeviceSyncRuntimeSnapshot.mockResolvedValue({
-      connections: [
-        {
-          connection: {
-            accessTokenExpiresAt: null,
-            connectedAt: "2026-03-25T00:00:00.000Z",
-            createdAt: "2026-03-25T00:00:00.000Z",
-            displayName: "Oura ring",
-            externalAccountId: "acct_456",
-            id: "dsc_123",
-            metadata: {},
-            provider: "oura",
-            scopes: ["daily"],
-            status: "disconnected",
-            updatedAt: "2026-03-25T08:00:00.000Z",
-          },
-          localState: {
-            lastErrorCode: null,
-            lastErrorMessage: null,
-            lastSyncCompletedAt: null,
-            lastSyncErrorAt: null,
-            lastSyncStartedAt: null,
-            lastWebhookAt: null,
-            nextReconcileAt: null,
-          },
-          tokenBundle: null,
-        },
-      ],
-      generatedAt: "2026-03-25T08:00:00.000Z",
-      userId: "user-123",
-    });
-    runtimeMocks.readHostedDeviceSyncRuntimeClientIfConfigured.mockReturnValue({
-      applyDeviceSyncRuntimeUpdates: runtimeMocks.applyDeviceSyncRuntimeUpdates,
-      getDeviceSyncRuntimeSnapshot: runtimeMocks.getDeviceSyncRuntimeSnapshot,
     });
 
     const store = new PrismaDeviceSyncControlPlaneStore({
@@ -480,58 +452,23 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
 
     await expect(store.getConnectionByExternalAccount("oura", "acct_456")).resolves.toEqual(expect.objectContaining({
       id: "dsc_123",
-      status: "disconnected",
-      updatedAt: "2026-03-25T08:00:00.000Z",
-    }));
-    expect(runtimeMocks.getDeviceSyncRuntimeSnapshot).toHaveBeenCalledWith("user-123", {
-      connectionId: "dsc_123",
       provider: "oura",
-    });
+      status: "active",
+    }));
+    expect(runtimeMocks.getDeviceSyncRuntimeSnapshot).not.toHaveBeenCalled();
   });
 
-  it("keeps explicit operational connection reads on the live Cloudflare runtime path", async () => {
+  it("keeps explicit operational connection reads on durable Prisma metadata", async () => {
     const connection = createConnection({
       id: "dsc_123",
       provider: "oura",
       userId: "user-123",
-    });
-
-    runtimeMocks.getDeviceSyncRuntimeSnapshot.mockResolvedValue({
-      connections: [
-        {
-          connection: {
-            accessTokenExpiresAt: null,
-            connectedAt: "2026-03-25T00:00:00.000Z",
-            createdAt: "2026-03-25T00:00:00.000Z",
-            displayName: "Oura ring",
-            externalAccountId: "acct_456",
-            id: "dsc_123",
-            metadata: {
-              region: "us",
-            },
-            provider: "oura",
-            scopes: ["daily"],
-            status: "disconnected",
-            updatedAt: "2026-03-25T08:00:00.000Z",
-          },
-          localState: {
-            lastErrorCode: "REMOTE_REVOKE_FAILED",
-            lastErrorMessage: "Provider revoke request failed during disconnect.",
-            lastSyncCompletedAt: null,
-            lastSyncErrorAt: "2026-03-25T08:00:00.000Z",
-            lastSyncStartedAt: null,
-            lastWebhookAt: "2026-03-25T07:00:00.000Z",
-            nextReconcileAt: null,
-          },
-          tokenBundle: null,
-        },
-      ],
-      generatedAt: "2026-03-25T08:00:00.000Z",
-      userId: "user-123",
-    });
-    runtimeMocks.readHostedDeviceSyncRuntimeClientIfConfigured.mockReturnValue({
-      applyDeviceSyncRuntimeUpdates: runtimeMocks.applyDeviceSyncRuntimeUpdates,
-      getDeviceSyncRuntimeSnapshot: runtimeMocks.getDeviceSyncRuntimeSnapshot,
+      lastErrorCode: "REMOTE_REVOKE_FAILED",
+      lastErrorMessage: "Provider revoke request failed during disconnect.",
+      lastSyncErrorAt: new Date("2026-03-25T08:00:00.000Z"),
+      lastWebhookAt: new Date("2026-03-25T07:00:00.000Z"),
+      status: "disconnected",
+      updatedAt: new Date("2026-03-25T08:00:00.000Z"),
     });
 
     const store = new PrismaDeviceSyncControlPlaneStore({
@@ -542,17 +479,14 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
       } as never,
     });
 
-    await expect(store.getRuntimeConnectionForUser("user-123", "dsc_123")).resolves.toEqual(expect.objectContaining({
+    await expect(store.getConnectionForUser("user-123", "dsc_123")).resolves.toEqual(expect.objectContaining({
       id: "dsc_123",
       status: "disconnected",
       metadata: {},
       lastWebhookAt: "2026-03-25T07:00:00.000Z",
       updatedAt: "2026-03-25T08:00:00.000Z",
     }));
-    expect(runtimeMocks.getDeviceSyncRuntimeSnapshot).toHaveBeenCalledWith("user-123", {
-      connectionId: "dsc_123",
-      provider: "oura",
-    });
+    expect(runtimeMocks.getDeviceSyncRuntimeSnapshot).not.toHaveBeenCalled();
   });
 
   it("forwards webhook receipt timestamps into the Cloudflare runtime instead of Prisma runtime columns", async () => {

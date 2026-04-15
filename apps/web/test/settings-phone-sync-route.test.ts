@@ -109,7 +109,6 @@ describe("settings phone sync route", () => {
     expect(mocks.resolveHostedMemberEmailLinked).toHaveBeenCalledWith({
       linkedAccounts: [],
       memberId: "member_123",
-      onUnconfirmed: "retry",
     });
     expect(mocks.enqueueHostedMemberChannelsUpdatedTx).toHaveBeenCalledWith({
       emailLinked: false,

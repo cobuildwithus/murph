@@ -1,4 +1,5 @@
 import { Prisma, type PrismaClient } from "@prisma/client";
+import type { HostedExecutionDispatchRequest } from "@murphai/hosted-execution";
 
 import { hostedOnboardingError } from "./errors";
 import {
@@ -9,8 +10,8 @@ import {
 import {
   deleteHostedStoredDispatchPayloadBestEffort,
   requireHostedWebhookStoredDispatchSideEffectPayload,
-  stageHostedWebhookDispatchSideEffectPayload,
 } from "./webhook-dispatch-payload";
+import { buildHostedWebhookDispatchFromPayload } from "./webhook-receipt-dispatch";
 import {
   claimHostedWebhookReceipt,
   completeHostedWebhookReceipt,
@@ -22,6 +23,7 @@ import type {
   HostedWebhookDispatchSideEffect,
   HostedWebhookReceiptClaim,
   HostedWebhookReceiptHandlers,
+  HostedWebhookReceiptLocalSideEffect,
   HostedWebhookReceiptPersistenceClient,
   HostedWebhookReceiptState,
   HostedWebhookSideEffect,
@@ -175,28 +177,21 @@ export async function pruneHostedWebhookReceiptHistory(input: {
 
 export async function queueHostedWebhookReceiptSideEffects(input: {
   claimedReceipt: HostedWebhookReceiptClaim;
-  desiredSideEffects: HostedWebhookSideEffect[];
+  desiredSideEffects: HostedWebhookReceiptLocalSideEffect[];
   eventId: string;
   prisma: HostedWebhookReceiptPersistenceClient;
   source: string;
 }): Promise<HostedWebhookReceiptClaim> {
-  const stagedSideEffects = await stageHostedWebhookReceiptSideEffects(input.desiredSideEffects);
-
-  try {
-    return await updateHostedWebhookReceiptClaim({
-      claimedReceipt: input.claimedReceipt,
-      eventId: input.eventId,
-      mutate: (currentState) =>
-        queueHostedWebhookReceiptStateSideEffects(currentState, stagedSideEffects.sideEffects, {
-          plannedAt: new Date().toISOString(),
-        }),
-      prisma: input.prisma,
-      source: input.source,
-    });
-  } catch (error) {
-    await cleanupHostedWebhookReceiptStagedPayloads(stagedSideEffects.cleanupPayloads);
-    throw error;
-  }
+  return updateHostedWebhookReceiptClaim({
+    claimedReceipt: input.claimedReceipt,
+    eventId: input.eventId,
+    mutate: (currentState) =>
+      queueHostedWebhookReceiptStateSideEffects(currentState, input.desiredSideEffects, {
+        plannedAt: new Date().toISOString(),
+      }),
+    prisma: input.prisma,
+    source: input.source,
+  });
 }
 
 export async function markHostedWebhookReceiptCompleted(input: {
@@ -272,16 +267,22 @@ export async function updateHostedWebhookReceiptClaim(input: {
 export async function markHostedWebhookDispatchEffectQueued(input: {
   claimedReceipt: HostedWebhookReceiptClaim;
   dispatchEffect: HostedWebhookDispatchSideEffect;
-  enqueueDispatchEffect: HostedWebhookReceiptHandlers["enqueueDispatchEffect"];
+  enqueueDispatch: HostedWebhookReceiptHandlers["enqueueDispatch"];
   eventId: string;
   prisma: HostedWebhookReceiptPersistenceClient;
   sentAt: string;
   source: string;
 }): Promise<HostedWebhookReceiptClaim> {
-  const payload = requireHostedWebhookStoredDispatchSideEffectPayload(
-    input.dispatchEffect.payload,
-    input.dispatchEffect.effectId,
-  );
+  const dispatch = buildHostedWebhookDispatchFromPayload(input.dispatchEffect.payload);
+
+  if (!dispatch) {
+    throw hostedOnboardingError({
+      code: "HOSTED_WEBHOOK_DISPATCH_PAYLOAD_INVALID",
+      message: `Hosted webhook dispatch side effect ${input.dispatchEffect.effectId} could not be rebuilt as an inline outbox dispatch.`,
+      httpStatus: 500,
+      retryable: false,
+    });
+  }
 
   return compareAndSwapHostedWebhookReceiptClaim({
     claimedReceipt: input.claimedReceipt,
@@ -312,50 +313,12 @@ export async function markHostedWebhookDispatchEffectQueued(input: {
     updateReceipt: ({ currentClaim, nextClaim }) =>
       writeQueuedHostedWebhookDispatchEffect({
         currentClaim,
-        enqueueDispatchEffect: input.enqueueDispatchEffect,
+        dispatch,
+        enqueueDispatch: input.enqueueDispatch,
         nextClaim,
-        payload,
         prisma: input.prisma,
       }),
   });
-}
-
-async function stageHostedWebhookReceiptSideEffects(
-  desiredSideEffects: readonly HostedWebhookSideEffect[],
-): Promise<{
-  cleanupPayloads: HostedWebhookStoredDispatchSideEffectPayload[];
-  sideEffects: HostedWebhookSideEffect[];
-}> {
-  const cleanupPayloads: HostedWebhookStoredDispatchSideEffectPayload[] = [];
-  const sideEffects: HostedWebhookSideEffect[] = [];
-
-  try {
-    for (const effect of desiredSideEffects) {
-      if (effect.kind !== "hosted_execution_dispatch") {
-        sideEffects.push(effect);
-        continue;
-      }
-
-      const stagedPayload = await stageHostedWebhookDispatchSideEffectPayload(effect.payload);
-
-      if (effect.payload.storage !== "reference") {
-        cleanupPayloads.push(stagedPayload);
-      }
-
-      sideEffects.push({
-        ...effect,
-        payload: stagedPayload,
-      });
-    }
-  } catch (error) {
-    await cleanupHostedWebhookReceiptStagedPayloads(cleanupPayloads);
-    throw error;
-  }
-
-  return {
-    cleanupPayloads,
-    sideEffects,
-  };
 }
 
 async function cleanupHostedWebhookReceiptStagedPayloads(
@@ -860,9 +823,9 @@ async function writeHostedWebhookReceiptClaimState(input: {
 
 async function writeQueuedHostedWebhookDispatchEffect(input: {
   currentClaim: HostedWebhookReceiptClaim;
-  enqueueDispatchEffect: HostedWebhookReceiptHandlers["enqueueDispatchEffect"];
+  dispatch: HostedExecutionDispatchRequest;
+  enqueueDispatch: HostedWebhookReceiptHandlers["enqueueDispatch"];
   nextClaim: HostedWebhookReceiptClaim;
-  payload: HostedWebhookStoredDispatchSideEffectPayload;
   prisma: HostedWebhookReceiptPersistenceClient;
 }): Promise<HostedWebhookReceiptWriteResult> {
   const updatedCount = await runHostedWebhookReceiptTransaction(input.prisma, async (transaction) => {
@@ -886,9 +849,9 @@ async function writeQueuedHostedWebhookDispatchEffect(input: {
     }
 
     await syncHostedWebhookReceiptSideEffects(transaction, input.nextClaim);
-    await input.enqueueDispatchEffect({
+    await input.enqueueDispatch({
+      dispatch: input.dispatch,
       eventId: input.currentClaim.eventId,
-      payload: input.payload,
       prismaOrTransaction: transaction,
       source: input.currentClaim.source,
     });

@@ -1,20 +1,9 @@
-import type { CloudflareHostedUserEnvStatus } from "@murphai/cloudflare-hosted-control/contracts";
-import type { HostedRuntimeUsageRecordResponse } from "@murphai/assistant-runtime";
 import type {
   HostedExecutionDispatchRequest,
   HostedExecutionDispatchResult,
-  HostedExecutionEventDispatchStatus,
+  HostedExecutionDispatchStatus,
   HostedExecutionUserStatus,
 } from "@murphai/hosted-execution/contracts";
-import type {
-  HostedExecutionOutboxPayload,
-} from "@murphai/hosted-execution/outbox-payload";
-import type {
-  HostedExecutionDeviceSyncRuntimeApplyRequest,
-  HostedExecutionDeviceSyncRuntimeApplyResponse,
-  HostedExecutionDeviceSyncRuntimeSnapshotRequest,
-  HostedExecutionDeviceSyncRuntimeSnapshotResponse,
-} from "@murphai/device-syncd/hosted-runtime";
 
 import { readHostedExecutionEnvironment } from "../env.ts";
 import { requireJsonObject } from "../json.ts";
@@ -22,7 +11,6 @@ import type { HostedExecutionContainerNamespaceLike } from "../runner-container.
 import {
   createHostedUserKeyStore,
 } from "../user-key-store.js";
-import type { HostedUserEnvUpdate } from "../user-env.ts";
 import type {
   WorkerEnvironmentContract,
   WorkerUserRunnerStubLike,
@@ -30,28 +18,10 @@ import type {
 
 export interface UserRunnerDurableObjectStubLike extends WorkerUserRunnerStubLike {
   bootstrapUser(userId: string): Promise<{ userId: string }>;
-  provisionManagedUserCrypto(userId: string): Promise<{ recipientKinds: string[]; rootKeyId: string; userId: string }>;
-  clearUserEnv(): Promise<CloudflareHostedUserEnvStatus>;
   dispatch(input: HostedExecutionDispatchRequest): Promise<HostedExecutionUserStatus>;
   dispatchWithOutcome(input: HostedExecutionDispatchRequest): Promise<HostedExecutionDispatchResult>;
-  getEventStatus(input: { eventId: string }): Promise<HostedExecutionEventDispatchStatus | null>;
-  getUserEnvStatus(): Promise<CloudflareHostedUserEnvStatus>;
-  getDeviceSyncRuntimeSnapshot(input: {
-    request: HostedExecutionDeviceSyncRuntimeSnapshotRequest;
-  }): Promise<HostedExecutionDeviceSyncRuntimeSnapshotResponse>;
-  applyDeviceSyncRuntimeUpdates(input: {
-    request: HostedExecutionDeviceSyncRuntimeApplyRequest;
-  }): Promise<HostedExecutionDeviceSyncRuntimeApplyResponse>;
-  putPendingUsage(input: {
-    usage: readonly Record<string, unknown>[];
-  }): Promise<HostedRuntimeUsageRecordResponse>;
-  readPendingUsage(input?: { limit?: number | null }): Promise<Record<string, unknown>[]>;
-  deleteStoredDispatchPayload(input: { payload: HostedExecutionOutboxPayload }): Promise<void>;
-  dispatchStoredPayload(input: { payload: HostedExecutionOutboxPayload }): Promise<HostedExecutionDispatchResult>;
+  getEventStatus(input: { eventId: string }): Promise<HostedExecutionDispatchStatus | null>;
   status(): Promise<HostedExecutionUserStatus>;
-  storeDispatchPayload(input: { dispatch: HostedExecutionDispatchRequest }): Promise<HostedExecutionOutboxPayload>;
-  updateUserEnv(update: HostedUserEnvUpdate): Promise<CloudflareHostedUserEnvStatus>;
-  deletePendingUsage(input: { usageIds: readonly string[] }): Promise<void>;
 }
 
 export interface WorkerEnvironmentSource
@@ -74,17 +44,6 @@ export async function resolveUserRunnerStub(
   const stub = env.USER_RUNNER.getByName(userId);
   await stub.bootstrapUser(userId);
   return stub;
-}
-
-export function requireUserRunnerStubMethod<TKey extends keyof UserRunnerDurableObjectStubLike>(
-  stub: UserRunnerDurableObjectStubLike,
-  key: TKey,
-): Exclude<UserRunnerDurableObjectStubLike[TKey], undefined> {
-  const method = stub[key];
-  if (typeof method !== "function") {
-    throw new TypeError(`User runner stub does not implement ${String(key)}.`);
-  }
-  return method as Exclude<UserRunnerDurableObjectStubLike[TKey], undefined>;
 }
 
 export async function resolveHostedExecutionUserCryptoContext(input: {
@@ -119,12 +78,6 @@ export async function readCachedRequestText(
 ): Promise<string> {
   context.requestText ??= context.request.text();
   return context.requestText;
-}
-
-export async function readCachedJsonObject(
-  context: Pick<WorkerRouteContext, "request" | "requestText">,
-): Promise<Record<string, unknown>> {
-  return requireJsonObject(JSON.parse(await readCachedRequestText(context)) as unknown);
 }
 
 export async function readCachedOptionalJsonObject(

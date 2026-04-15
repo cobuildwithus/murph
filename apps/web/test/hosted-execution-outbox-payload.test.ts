@@ -26,7 +26,7 @@ describe("hosted execution outbox payload storage", () => {
     expect(JSON.stringify(payload)).not.toContain("Shared breakfast");
   });
 
-  it("stores device-sync wake events by reference instead of persisting hint payloads inline", () => {
+  it("stores device-sync wake events inline in the web-owned outbox row", () => {
     const payload = serializeHostedExecutionOutboxPayload({
       event: {
         kind: "device-sync.wake",
@@ -41,15 +41,12 @@ describe("hosted execution outbox payload storage", () => {
       },
       eventId: "evt_wake_123",
       occurredAt: "2026-04-04T00:00:00.000Z",
-    }, {
-      stagedPayloadId: buildTestPayloadRef("evt_wake_123"),
     });
 
-    expect((payload as { storage?: unknown }).storage).toBe("reference");
-    expect((payload as { stagedPayloadId?: unknown }).stagedPayloadId)
-      .toBe("staged/dispatch-payloads/member_123/evt_wake_123");
-    expect(JSON.stringify(payload)).not.toContain("sleep.updated");
-    expect(JSON.stringify(payload)).not.toContain("trace_123");
+    expect((payload as { storage?: unknown }).storage).toBe("inline");
+    expect(payload).not.toHaveProperty("stagedPayloadId");
+    expect(JSON.stringify(payload)).toContain("sleep.updated");
+    expect(JSON.stringify(payload)).toContain("trace_123");
     expect(summarizeHostedExecutionOutboxPayload(
       readHostedExecutionOutboxPayload(payload) as NonNullable<
         ReturnType<typeof readHostedExecutionOutboxPayload>
@@ -61,7 +58,8 @@ describe("hosted execution outbox payload storage", () => {
         occurredAt: "2026-04-04T00:00:00.000Z",
         userId: "member_123",
       },
-      schema: "murph.hosted-execution-reference-outbox-payload-pruned.v1",
+      payloadHash: expect.any(String),
+      schema: "murph.hosted-execution-inline-outbox-payload-pruned.v1",
       storage: "pruned",
     });
   });
@@ -106,7 +104,7 @@ describe("hosted execution outbox payload storage", () => {
     expect(JSON.stringify(payload)).toContain("\"memberChannels\"");
   });
 
-  it("stores gateway message sends by reference without persisting text or session identifiers", () => {
+  it("stores gateway message sends inline when the web layer serializes them directly", () => {
     const payload = serializeHostedExecutionOutboxPayload({
       event: {
         clientRequestId: "req_123",
@@ -118,20 +116,17 @@ describe("hosted execution outbox payload storage", () => {
       },
       eventId: "evt_gateway_123",
       occurredAt: "2026-04-04T00:00:00.000Z",
-    }, {
-      stagedPayloadId: buildTestPayloadRef("evt_gateway_123"),
     });
 
-    expect((payload as { storage?: unknown }).storage).toBe("reference");
-    expect((payload as { stagedPayloadId?: unknown }).stagedPayloadId)
-      .toBe("staged/dispatch-payloads/member_123/evt_gateway_123");
-    expect(JSON.stringify(payload)).not.toContain("private outbound message");
-    expect(JSON.stringify(payload)).not.toContain("gwcs_secret_123");
-    expect(JSON.stringify(payload)).not.toContain("req_123");
+    expect((payload as { storage?: unknown }).storage).toBe("inline");
+    expect(payload).not.toHaveProperty("stagedPayloadId");
+    expect(JSON.stringify(payload)).toContain("private outbound message");
+    expect(JSON.stringify(payload)).toContain("gwcs_secret_123");
+    expect(JSON.stringify(payload)).toContain("req_123");
   });
 
-  it("rejects forced inline storage for gateway message sends", () => {
-    expect(() => serializeHostedExecutionOutboxPayload(
+  it("ignores legacy storage hints and still serializes direct outbox payloads inline", () => {
+    const payload = serializeHostedExecutionOutboxPayload(
       {
         event: {
           clientRequestId: null,
@@ -144,10 +139,13 @@ describe("hosted execution outbox payload storage", () => {
         eventId: "evt_gateway_456",
         occurredAt: "2026-04-04T00:00:00.000Z",
       },
-      {
-        storage: "inline",
-      },
-    )).toThrow("Hosted execution gateway.message.send outbox payloads must use reference storage.");
+        {
+          storage: "inline",
+        },
+    );
+
+    expect((payload as { storage?: unknown }).storage).toBe("inline");
+    expect(payload).not.toHaveProperty("stagedPayloadId");
   });
 
   it("summarizes settled inline payloads down to a hashed inline dispatch ref", () => {
@@ -224,7 +222,7 @@ describe("hosted execution outbox payload storage", () => {
     }, serialized)).toBe(false);
   });
 
-  it("treats pruned reference payload summaries as idempotent equivalents", () => {
+  it("treats pruned inline gateway payload summaries as idempotent equivalents", () => {
     const serialized = serializeHostedExecutionOutboxPayload({
       event: {
         clientRequestId: "req_123",
@@ -236,14 +234,12 @@ describe("hosted execution outbox payload storage", () => {
       },
       eventId: "evt_gateway_123",
       occurredAt: "2026-04-04T00:00:00.000Z",
-    }, {
-      stagedPayloadId: buildTestPayloadRef("evt_gateway_123"),
     });
     const payload = readHostedExecutionOutboxPayload(serialized);
 
     expect(payload).not.toBeNull();
     if (!payload) {
-      throw new Error("Expected a reference payload.");
+      throw new Error("Expected an inline payload.");
     }
 
     const summary = summarizeHostedExecutionOutboxPayload(payload);
@@ -255,13 +251,10 @@ describe("hosted execution outbox payload storage", () => {
         occurredAt: "2026-04-04T00:00:00.000Z",
         userId: "member_123",
       },
-      schema: "murph.hosted-execution-reference-outbox-payload-pruned.v1",
+      payloadHash: expect.any(String),
+      schema: "murph.hosted-execution-inline-outbox-payload-pruned.v1",
       storage: "pruned",
     });
     expect(areHostedExecutionOutboxPayloadsEquivalent(summary, serialized)).toBe(true);
   });
 });
-
-function buildTestPayloadRef(eventId: string): string {
-  return `staged/dispatch-payloads/member_123/${eventId}`;
-}

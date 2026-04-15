@@ -149,7 +149,7 @@ describe("requireHostedCloudflareCallbackRequest", () => {
     const request = await createSignedCallbackRequest({
       body: JSON.stringify({ eventId: "evt_123", shareId: "share_123" }),
       nonce: "0123456789abcdef0123456789abcdef",
-      path: "/api/internal/hosted-execution/share-import/complete",
+      path: "/api/internal/hosted-execution/share/share_123/payload",
       privateJwkJson: currentPrivateJwkJson,
       search: "?attempt=1",
       userId: "member_123",
@@ -165,7 +165,7 @@ describe("requireHostedCloudflareCallbackRequest", () => {
     const replayedRequest = await createSignedCallbackRequest({
       body: JSON.stringify({ eventId: "evt_123", shareId: "share_123" }),
       nonce: "0123456789abcdef0123456789abcdef",
-      path: "/api/internal/hosted-execution/share-import/complete",
+      path: "/api/internal/hosted-execution/share/share_123/payload",
       privateJwkJson: currentPrivateJwkJson,
       search: "?attempt=1",
       userId: "member_123",

@@ -1,59 +1,24 @@
 import {
   HOSTED_EXECUTION_USER_ID_HEADER,
-  type HostedExecutionDispatchRequest,
-  type HostedExecutionDispatchResult,
-  type HostedExecutionEventDispatchStatus,
+  type HostedExecutionDispatchStatus,
   type HostedExecutionUserStatus,
 } from "@murphai/hosted-execution/contracts";
+import { normalizeHostedExecutionBaseUrl } from "@murphai/hosted-execution/env";
 import {
-  resolveHostedExecutionOutboxPayloadUserId,
-  type HostedExecutionOutboxPayload,
-} from "@murphai/hosted-execution/outbox-payload";
-import {
-  normalizeHostedExecutionBaseUrl,
-} from "@murphai/hosted-execution/env";
-import {
-  parseHostedExecutionDispatchRequest,
-  parseHostedExecutionDispatchResult,
-  parseHostedExecutionEventDispatchStatus,
-  parseHostedExecutionOutboxPayload,
+  parseHostedExecutionDispatchStatus,
   parseHostedExecutionUserStatus,
 } from "@murphai/hosted-execution/parsers";
 
-import type {
-  CloudflareHostedManagedUserCryptoStatus,
-  CloudflareHostedUserEnvStatus,
-  CloudflareHostedUserEnvUpdate,
-} from "./contracts.ts";
 import {
-  parseCloudflareHostedManagedUserCryptoStatus,
-  parseCloudflareHostedUserEnvStatus,
-  parseCloudflareHostedUserEnvUpdate,
-} from "./parsers.ts";
-import {
-  buildCloudflareHostedControlUserCryptoContextPath,
-  buildCloudflareHostedControlUserDispatchPayloadPath,
   buildCloudflareHostedControlUserEventStatusPath,
-  buildCloudflareHostedControlUserEnvPath,
   buildCloudflareHostedControlUserRunPath,
   buildCloudflareHostedControlUserStatusPath,
-  buildCloudflareHostedControlUserStoredDispatchPath,
 } from "./routes.ts";
 
 export interface CloudflareHostedControlClient {
-  clearUserEnv(userId: string): Promise<CloudflareHostedUserEnvStatus>;
-  deleteStoredDispatchPayload(payload: HostedExecutionOutboxPayload): Promise<void>;
-  dispatchStoredPayload(payload: HostedExecutionOutboxPayload): Promise<HostedExecutionDispatchResult>;
-  getEventStatus(userId: string, eventId: string): Promise<HostedExecutionEventDispatchStatus | null>;
+  getEventStatus(userId: string, eventId: string): Promise<HostedExecutionDispatchStatus | null>;
   getStatus(userId: string): Promise<HostedExecutionUserStatus>;
-  getUserEnvStatus(userId: string): Promise<CloudflareHostedUserEnvStatus>;
-  provisionManagedUserCrypto(userId: string): Promise<CloudflareHostedManagedUserCryptoStatus>;
   run(userId: string): Promise<HostedExecutionUserStatus>;
-  storeDispatchPayload(dispatch: HostedExecutionDispatchRequest): Promise<HostedExecutionOutboxPayload>;
-  updateUserEnv(
-    userId: string,
-    update: CloudflareHostedUserEnvUpdate,
-  ): Promise<CloudflareHostedUserEnvStatus>;
 }
 
 export interface CloudflareHostedControlClientOptions {
@@ -73,57 +38,6 @@ export function createCloudflareHostedControlClient(
   );
 
   return {
-    clearUserEnv(userId) {
-      return requestHostedExecutionAuthorizedJson({
-        baseUrl,
-        boundUserId: userId,
-        fetchImpl,
-        getAuthorizationHeader,
-        label: "user env clear",
-        parse: parseCloudflareHostedUserEnvStatus,
-        path: buildCloudflareHostedControlUserEnvPath(userId),
-        request: { method: "DELETE" },
-        timeoutMs: options.timeoutMs,
-      });
-    },
-    deleteStoredDispatchPayload(payload) {
-      return requestHostedExecutionAuthorizedJson({
-        baseUrl,
-        boundUserId: resolveHostedExecutionOutboxPayloadUserId(payload),
-        fetchImpl,
-        getAuthorizationHeader,
-        label: "delete stored dispatch payload",
-        parse: () => undefined,
-        path: buildCloudflareHostedControlUserDispatchPayloadPath(
-          resolveHostedExecutionOutboxPayloadUserId(payload),
-        ),
-        request: {
-          body: JSON.stringify(payload),
-          headers: { "content-type": "application/json; charset=utf-8" },
-          method: "DELETE",
-        },
-        timeoutMs: options.timeoutMs,
-      });
-    },
-    dispatchStoredPayload(payload) {
-      return requestHostedExecutionAuthorizedJson({
-        baseUrl,
-        boundUserId: resolveHostedExecutionOutboxPayloadUserId(payload),
-        fetchImpl,
-        getAuthorizationHeader,
-        label: "stored dispatch",
-        parse: parseHostedExecutionDispatchResult,
-        path: buildCloudflareHostedControlUserStoredDispatchPath(
-          resolveHostedExecutionOutboxPayloadUserId(payload),
-        ),
-        request: {
-          body: JSON.stringify(payload),
-          headers: { "content-type": "application/json; charset=utf-8" },
-          method: "POST",
-        },
-        timeoutMs: options.timeoutMs,
-      });
-    },
     getEventStatus(userId, eventId) {
       return requestHostedExecutionAuthorizedJson({
         baseUrl,
@@ -131,7 +45,7 @@ export function createCloudflareHostedControlClient(
         fetchImpl,
         getAuthorizationHeader,
         label: "event status",
-        parse: parseHostedExecutionEventDispatchStatusOrNull,
+        parse: parseHostedExecutionDispatchStatusOrNull,
         path: buildCloudflareHostedControlUserEventStatusPath(userId, eventId),
         request: { method: "GET" },
         timeoutMs: options.timeoutMs,
@@ -147,34 +61,6 @@ export function createCloudflareHostedControlClient(
         parse: parseHostedExecutionUserStatus,
         path: buildCloudflareHostedControlUserStatusPath(userId),
         request: { method: "GET" },
-        timeoutMs: options.timeoutMs,
-      });
-    },
-    getUserEnvStatus(userId) {
-      return requestHostedExecutionAuthorizedJson({
-        baseUrl,
-        boundUserId: userId,
-        fetchImpl,
-        getAuthorizationHeader,
-        label: "user env status",
-        parse: parseCloudflareHostedUserEnvStatus,
-        path: buildCloudflareHostedControlUserEnvPath(userId),
-        request: { method: "GET" },
-        timeoutMs: options.timeoutMs,
-      });
-    },
-    provisionManagedUserCrypto(userId) {
-      return requestHostedExecutionAuthorizedJson({
-        baseUrl,
-        boundUserId: userId,
-        fetchImpl,
-        getAuthorizationHeader,
-        label: "managed user crypto provision",
-        parse: parseCloudflareHostedManagedUserCryptoStatus,
-        path: buildCloudflareHostedControlUserCryptoContextPath(userId),
-        request: {
-          method: "PUT",
-        },
         timeoutMs: options.timeoutMs,
       });
     },
@@ -195,51 +81,13 @@ export function createCloudflareHostedControlClient(
         timeoutMs: options.timeoutMs,
       });
     },
-    storeDispatchPayload(dispatch) {
-      const requestPayload = parseHostedExecutionDispatchRequest(dispatch);
-
-      return requestHostedExecutionAuthorizedJson({
-        baseUrl,
-        boundUserId: requestPayload.event.userId,
-        fetchImpl,
-        getAuthorizationHeader,
-        label: "store dispatch payload",
-        parse: parseHostedExecutionOutboxPayload,
-        path: buildCloudflareHostedControlUserDispatchPayloadPath(requestPayload.event.userId),
-        request: {
-          body: JSON.stringify(requestPayload),
-          headers: { "content-type": "application/json; charset=utf-8" },
-          method: "PUT",
-        },
-        timeoutMs: options.timeoutMs,
-      });
-    },
-    updateUserEnv(userId, update) {
-      const requestPayload = parseCloudflareHostedUserEnvUpdate(update);
-
-      return requestHostedExecutionAuthorizedJson({
-        baseUrl,
-        boundUserId: userId,
-        fetchImpl,
-        getAuthorizationHeader,
-        label: "user env update",
-        parse: parseCloudflareHostedUserEnvStatus,
-        path: buildCloudflareHostedControlUserEnvPath(userId),
-        request: {
-          body: JSON.stringify(requestPayload),
-          headers: { "content-type": "application/json; charset=utf-8" },
-          method: "PUT",
-        },
-        timeoutMs: options.timeoutMs,
-      });
-    },
   };
 }
 
-function parseHostedExecutionEventDispatchStatusOrNull(
+function parseHostedExecutionDispatchStatusOrNull(
   value: unknown,
-): HostedExecutionEventDispatchStatus | null {
-  return value === null ? null : parseHostedExecutionEventDispatchStatus(value);
+): HostedExecutionDispatchStatus | null {
+  return value === null ? null : parseHostedExecutionDispatchStatus(value);
 }
 
 function requireHostedExecutionBaseUrl(value: string): string {
@@ -284,7 +132,7 @@ async function requestHostedExecutionAuthorizedJson<TResponse>(input: {
   request: {
     body?: string;
     headers?: HeadersInit;
-    method: "DELETE" | "GET" | "POST" | "PUT";
+    method: "GET" | "POST";
     search?: string | null;
   };
   timeoutMs: number | undefined;
@@ -312,10 +160,6 @@ async function requestHostedExecutionAuthorizedJson<TResponse>(input: {
 
   if (!response.ok) {
     throw new Error(`Hosted execution ${input.label} failed with HTTP ${response.status}.`);
-  }
-
-  if (response.status === 204) {
-    return input.parse(undefined);
   }
 
   return input.parse(await response.json());

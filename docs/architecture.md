@@ -116,6 +116,27 @@ repo/
   - `apps/cloudflare`
   - `packages/assistant-runtime`
 
+## Hosted Hard Cut
+
+- `apps/web` and hosted Postgres own hosted control-plane truth: hosted member
+  identity, routing, billing, email authorization, hosted share payloads,
+  device-sync authority, hosted AI usage reconciliation, and the canonical
+  dispatch lifecycle around `execution_outbox`.
+- `apps/cloudflare` owns execution coordination only: authenticated dispatch,
+  per-user queueing, encrypted hosted workspace snapshots, encrypted artifact
+  blobs, encrypted runner-secret blobs, execution journals, and other opaque
+  runtime blobs needed to execute one hosted job safely.
+- Cloudflare is not the canonical owner of hosted share payloads, device-sync
+  control-plane state, pending usage, or gateway product truth.
+- The broad Cloudflare control seam is intentionally gone. There is no generic
+  worker user-env CRUD route surface, no staged dispatch payload control plane
+  or CRUD seam, and only transient queue-local encrypted dispatch envelopes
+  under `transient/dispatch-payloads/` as an internal execution detail,
+  and no Cloudflare-owned share-pack or pending-usage durable seam.
+- Narrow Cloudflare-to-web signed callbacks remain only where the execution
+  runtime still needs them, such as execution-time device connect-link starts,
+  canonical hosted share payload reads, and direct hosted usage recording.
+
 ## Explicit Non-Goals
 
 - SQLite or any other canonical database of record

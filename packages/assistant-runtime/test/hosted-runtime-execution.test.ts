@@ -17,7 +17,6 @@ const mocks = vi.hoisted(() => ({
   exportGatewayProjectionSnapshotLocal: vi.fn(),
   exportHostedPendingAssistantUsage: vi.fn(),
   listHostedBundleArtifacts: vi.fn(),
-  reconcileHostedVerifiedEmailSelfTarget: vi.fn(),
   refreshAssistantStatusSnapshot: vi.fn(),
   runHostedMaintenanceLoop: vi.fn(),
   snapshotHostedExecutionContext: vi.fn(),
@@ -57,11 +56,6 @@ vi.mock("@murphai/assistant-engine/gateway-local-adapter", () => ({
 
 vi.mock("@murphai/gateway-local", () => ({
   exportGatewayProjectionSnapshotLocal: mocks.exportGatewayProjectionSnapshotLocal,
-}));
-
-vi.mock("../src/hosted-email-route.ts", () => ({
-  reconcileHostedVerifiedEmailSelfTarget:
-    mocks.reconcileHostedVerifiedEmailSelfTarget,
 }));
 
 vi.mock("../src/hosted-runtime/artifacts.ts", () => ({
@@ -154,12 +148,6 @@ beforeEach(() => {
     failed: 0,
     pending: 0,
   });
-  mocks.reconcileHostedVerifiedEmailSelfTarget.mockResolvedValue({
-    emailAddress: "member@example.com",
-    identityId: "assistant@example.com",
-    selfTargetUpdated: true,
-    status: "saved",
-  });
   mocks.refreshAssistantStatusSnapshot.mockResolvedValue(undefined);
 });
 
@@ -230,9 +218,7 @@ describe("executeHostedDispatchForCommit", () => {
           usageExportPort: null,
         },
         resolvedConfig: createHostedRuntimeResolvedConfig(),
-        userEnv: {
-          HOSTED_USER_VERIFIED_EMAIL: "member@example.com",
-        },
+        userEnv: {},
       },
       runtimeEnv: {
         OPENAI_API_KEY: "secret",
@@ -383,9 +369,7 @@ describe("completeHostedExecutionAfterCommit", () => {
           },
         },
         resolvedConfig: createHostedRuntimeResolvedConfig(),
-        userEnv: {
-          HOSTED_USER_VERIFIED_EMAIL: "member@example.com",
-        },
+        userEnv: {},
       },
     });
 
@@ -411,13 +395,6 @@ describe("completeHostedExecutionAfterCommit", () => {
     });
     expect(mocks.exportHostedPendingAssistantUsage).toHaveBeenCalledWith({
       usageExportPort: expect.any(Object),
-      vaultRoot: "/tmp/vault-root",
-    });
-    expect(mocks.reconcileHostedVerifiedEmailSelfTarget).toHaveBeenCalledWith({
-      operatorHomeRoot: "/tmp/operator-home",
-      source: {
-        HOSTED_USER_VERIFIED_EMAIL: "member@example.com",
-      },
       vaultRoot: "/tmp/vault-root",
     });
     expect(mocks.refreshAssistantStatusSnapshot).toHaveBeenCalledWith("/tmp/vault-root");

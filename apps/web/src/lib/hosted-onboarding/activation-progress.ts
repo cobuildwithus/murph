@@ -5,8 +5,8 @@ import {
   type Prisma,
 } from "@prisma/client";
 import {
-  HOSTED_EXECUTION_EVENT_DISPATCH_STATES,
-  type HostedExecutionEventDispatchState,
+  HOSTED_EXECUTION_DISPATCH_LIFECYCLE_STATES,
+  type HostedExecutionDispatchLifecycleState,
 } from "@murphai/hosted-execution";
 
 import { readHostedExecutionControlClientIfConfigured } from "../hosted-execution/control";
@@ -15,10 +15,10 @@ type HostedActivationProgressPrismaClient = PrismaClient | Prisma.TransactionCli
 
 const HOSTED_MEMBER_ACTIVATION_EVENT_KIND = "member.activated";
 const HOSTED_MEMBER_ACTIVATION_STATUS_TIMEOUT_MS = 1_500;
-const HOSTED_EXECUTION_EVENT_DISPATCH_STATE_SET = new Set<HostedExecutionEventDispatchState>(
-  HOSTED_EXECUTION_EVENT_DISPATCH_STATES,
+const HOSTED_EXECUTION_EVENT_DISPATCH_STATE_SET = new Set<HostedExecutionDispatchLifecycleState>(
+  HOSTED_EXECUTION_DISPATCH_LIFECYCLE_STATES,
 );
-const DEFAULT_HOSTED_EXECUTION_EVENT_DISPATCH_STATE: HostedExecutionEventDispatchState = "queued";
+const DEFAULT_HOSTED_EXECUTION_EVENT_DISPATCH_STATE: HostedExecutionDispatchLifecycleState = "queued";
 
 export async function isHostedMemberActivationPending(input: {
   billingStatus: HostedBillingStatus;
@@ -84,21 +84,20 @@ export async function isHostedMemberActivationPending(input: {
 
 function readHostedExecutionEventDispatchState(
   value: string | null | undefined,
-): HostedExecutionEventDispatchState {
+): HostedExecutionDispatchLifecycleState {
   if (
     value
-    && HOSTED_EXECUTION_EVENT_DISPATCH_STATE_SET.has(value as HostedExecutionEventDispatchState)
+    && HOSTED_EXECUTION_EVENT_DISPATCH_STATE_SET.has(value as HostedExecutionDispatchLifecycleState)
   ) {
-    return value as HostedExecutionEventDispatchState;
+    return value as HostedExecutionDispatchLifecycleState;
   }
 
   return DEFAULT_HOSTED_EXECUTION_EVENT_DISPATCH_STATE;
 }
 
 function isHostedExecutionEventDispatchTerminal(
-  state: HostedExecutionEventDispatchState,
+  state: HostedExecutionDispatchLifecycleState,
 ): boolean {
-  return state === "duplicate_consumed"
-    || state === "completed"
+  return state === "completed"
     || state === "poisoned";
 }

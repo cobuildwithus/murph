@@ -8,7 +8,6 @@ import { readHostedExecutionEnvironment } from "../../src/env.ts";
 import type { HostedExecutionContainerNamespaceLike } from "../../src/runner-container.js";
 import { createHostedUserKeyStore } from "../../src/user-key-store.js";
 import { HostedUserRunner } from "../../src/user-runner.ts";
-import { parseHostedUserEnvUpdate } from "../../src/user-env.ts";
 import type { WorkerEnvironmentSource } from "../../src/worker-routes/shared.ts";
 import {
   armRunnerCommitPause,
@@ -56,20 +55,6 @@ export class VitestUserRunnerDurableObject extends DurableObject {
 
   async status(): Promise<HostedExecutionUserStatus> {
     return this.runner.status();
-  }
-
-  async getUserEnvStatus(): Promise<{ configuredUserEnvKeys: string[]; userId: string }> {
-    return this.runner.getUserEnvStatus();
-  }
-
-  async updateUserEnv(
-    update: Record<string, unknown>,
-  ): Promise<{ configuredUserEnvKeys: string[]; userId: string }> {
-    return this.runner.updateUserEnv(parseHostedUserEnvUpdate(update));
-  }
-
-  async clearUserEnv(): Promise<{ configuredUserEnvKeys: string[]; userId: string }> {
-    return this.runner.clearUserEnv();
   }
 
   override async alarm(): Promise<void> {
