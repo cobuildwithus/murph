@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
-import { DEVICE_SYNC_DB_RELATIVE_PATH, encodeRandomCrockford, generateUlid } from "@murphai/runtime-state/node";
+import { DEVICE_SYNC_DB_RELATIVE_PATH } from "@murphai/runtime-state/node/runtime-paths";
+import { encodeRandomCrockford, generateUlid } from "@murphai/runtime-state/node/ulid";
 
 export const DEFAULT_DEVICE_SYNC_HOST = "127.0.0.1";
 

@@ -61,6 +61,21 @@
       "@murphai/runtime-state/node": [
         "packages/runtime-state/src/node/index.ts"
       ],
+      "@murphai/runtime-state/node/assistant-usage": [
+        "packages/runtime-state/src/node/assistant-usage.ts"
+      ],
+      "@murphai/runtime-state/node/loopback-control-plane-auth": [
+        "packages/runtime-state/src/node/loopback-control-plane-auth.ts"
+      ],
+      "@murphai/runtime-state/node/runtime-paths": [
+        "packages/runtime-state/src/node/runtime-paths.ts"
+      ],
+      "@murphai/runtime-state/node/sqlite-warning-filter": [
+        "packages/runtime-state/src/node/sqlite-warning-filter.ts"
+      ],
+      "@murphai/runtime-state/node/ulid": [
+        "packages/runtime-state/src/node/ulid.ts"
+      ],
       "@murphai/runtime-state/*": [
         "packages/runtime-state/src/*"
       ],

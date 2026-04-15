@@ -6,7 +6,7 @@ import {
   assertUnbracketedListenerHost,
   getLoopbackControlRequestRejectionReason,
 } from "@murphai/runtime-state";
-import { hasMatchingLoopbackControlBearerToken } from "@murphai/runtime-state/node";
+import { hasMatchingLoopbackControlBearerToken } from "@murphai/runtime-state/node/loopback-control-plane-auth";
 
 import {
   buildDeviceSyncCallbackErrorRedirectLocation,

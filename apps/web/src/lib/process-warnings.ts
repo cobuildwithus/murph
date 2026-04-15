@@ -1,7 +1,7 @@
 import {
   installSqliteExperimentalWarningFilterWithOptions,
   isSqliteExperimentalWarning,
-} from "@murphai/runtime-state/node";
+} from "@murphai/runtime-state/node/sqlite-warning-filter";
 
 export function installHostedWebWarningFilters(): void {
   installSqliteExperimentalWarningFilterWithOptions({
