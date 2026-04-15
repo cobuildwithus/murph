@@ -679,7 +679,7 @@ describe('assistant CLI tool capability seam', () => {
       photo: 'raw/inbox/captures/cap_123/attachments/1/photo.jpg',
     })
     await executeTool(writeTools, 'vault.meal.add', {
-      ingredients: ['banana', 'almond butter'],
+      ingredients: ['banana', 'banana', 'almond butter'],
       nutrition: {
         totals: {
           calories: 210,
@@ -787,7 +787,7 @@ describe('assistant CLI tool capability seam', () => {
       .filter((candidate) => candidate.name === 'addMeal')
       .map((candidate) => candidate.input as Record<string, unknown>)
     expect(mealAddCalls[2]).toMatchObject({
-      ingredients: ['banana', 'almond butter'],
+      ingredients: ['banana', 'banana', 'almond butter'],
       nutrition: {
         totals: {
           calories: 210,

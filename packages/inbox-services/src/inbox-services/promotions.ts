@@ -139,6 +139,13 @@ export async function promoteCanonicalAttachmentImport<
         promotionStore,
         existing,
       }) => {
+        const resolvedNote = resolveCapturePromotionNote({
+          text: input.input.note ?? capture.text ?? null,
+        })
+        const resolvedOccurredAt = normalizeNullableString(
+          input.input.occurredAt ?? capture.occurredAt ?? null,
+        )
+        const resolvedSource = normalizeNullableString(input.input.source ?? 'import')
         const attachment = input.findRequiredAttachment(capture)
         if (!attachment) {
           throw input.missingAttachmentError()
@@ -154,6 +161,11 @@ export async function promoteCanonicalAttachmentImport<
             prepared,
             attachment,
           }),
+          metadata: {
+            note: resolvedNote,
+            occurredAt: resolvedOccurredAt,
+            source: resolvedSource,
+          },
         })
         const promotion = await reconcileCanonicalImportPromotion({
           paths,
@@ -163,6 +175,7 @@ export async function promoteCanonicalAttachmentImport<
           clock: input.clock,
           target: input.target,
           canonicalPromotion,
+          note: resolvedNote,
           createPromotion: () =>
             input.createPromotion({
               paths,
@@ -230,6 +243,11 @@ export async function preserveCanonicalDocumentAttachments(input: {
             attachment,
           ),
           title,
+        },
+        metadata: {
+          note: resolveCapturePromotionNote(capture),
+          occurredAt: normalizeNullableString(capture.occurredAt),
+          source: 'import',
         },
       })
 
@@ -711,9 +729,13 @@ async function findCanonicalPromotionMatch<
   capture: RuntimeCaptureRecord
   absoluteVaultRoot: string
   context: TContext
+  metadata: {
+    note: string | null
+    occurredAt: string | null
+    source: string | null
+  }
   spec: CanonicalPromotionLookupSpec<TManifest, TContext>
 }): Promise<CanonicalPromotionMatch | null> {
-  const note = normalizeNullableString(input.capture.text)
   const matches = (
     await Promise.all(
       (
@@ -734,7 +756,7 @@ async function findCanonicalPromotionMatch<
         if (!input.spec.matchesManifest(manifest, input.context)) {
           return null
         }
-        if (normalizeNullableString(manifest.source) !== 'import') {
+        if (normalizeNullableString(manifest.source) !== input.metadata.source) {
           return null
         }
 
@@ -742,13 +764,13 @@ async function findCanonicalPromotionMatch<
           manifest.provenance,
           'occurredAt',
         )
-        if (occurredAt !== input.capture.occurredAt) {
+        if (occurredAt !== input.metadata.occurredAt) {
           return null
         }
 
         if (
           normalizeNullableString(extractCanonicalString(manifest.provenance, 'note')) !==
-          note
+          input.metadata.note
         ) {
           return null
         }
@@ -846,6 +868,7 @@ async function reconcileCanonicalImportPromotion(input: {
   clock: () => Date
   target: CanonicalPromotionLookupTarget
   canonicalPromotion: CanonicalPromotionMatch | null
+  note: string | null
   createPromotion(): Promise<{
     lookupId: string
     relatedId: string
@@ -869,7 +892,7 @@ async function reconcileCanonicalImportPromotion(input: {
       lookupId: input.canonicalPromotion.lookupId,
       promotedAt: input.canonicalPromotion.promotedAt,
       relatedId: input.canonicalPromotion.relatedId,
-      note: input.capture.text ?? null,
+      note: input.note,
     })
 
     return {
@@ -892,7 +915,7 @@ async function reconcileCanonicalImportPromotion(input: {
     lookupId: createdPromotion.lookupId,
     promotedAt: input.clock().toISOString(),
     relatedId: createdPromotion.relatedId,
-    note: input.capture.text ?? null,
+    note: input.note,
   })
 
   return {

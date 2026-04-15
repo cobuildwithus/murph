@@ -80,9 +80,6 @@ const mealIngredientSchema = z.string().trim().min(1).max(4000)
 const mealIngredientsSchema = z
   .array(mealIngredientSchema)
   .max(100)
-  .refine((items) => new Set(items).size === items.length, {
-    message: 'Ingredients must be unique.',
-  })
 const assistantWebFetchExtractModeSchema = z.enum(assistantWebFetchExtractModeValues)
 const assistantWebSearchProviderSchema = z.enum(assistantWebSearchProviderValues)
 const assistantWebSearchFreshnessSchema = z.enum(assistantWebSearchFreshnessValues)

@@ -1222,6 +1222,21 @@ test('app promotion ops exercise meal, document, journal, and experiment flows',
         }),
       ],
     }),
+    createCapture('capture-meal-overrides-retry', {
+      text: 'meal override retry fallback',
+      attachments: [
+        createAttachment({
+          ordinal: 1,
+          kind: 'image',
+          storedPath: 'raw/inbox/email/capture-meal-overrides-retry/attachments/photo.jpg',
+        }),
+        createAttachment({
+          ordinal: 2,
+          kind: 'audio',
+          storedPath: 'raw/inbox/email/capture-meal-overrides-retry/attachments/audio.m4a',
+        }),
+      ],
+    }),
     createCapture('capture-document-created', {
       text: ' document note ',
       attachments: [
@@ -1288,6 +1303,16 @@ test('app promotion ops exercise meal, document, journal, and experiment flows',
   )
   await writeTextFile(
     paths.absoluteVaultRoot,
+    'raw/inbox/email/capture-meal-overrides-retry/attachments/photo.jpg',
+    'override retry meal photo',
+  )
+  await writeTextFile(
+    paths.absoluteVaultRoot,
+    'raw/inbox/email/capture-meal-overrides-retry/attachments/audio.m4a',
+    'override retry meal audio',
+  )
+  await writeTextFile(
+    paths.absoluteVaultRoot,
     'raw/inbox/email/capture-document-created/attachments/report.pdf',
     'report body',
   )
@@ -1309,6 +1334,25 @@ test('app promotion ops exercise meal, document, journal, and experiment flows',
         occurredAt: captures[0]?.occurredAt,
         note: captures[0]?.text,
         lookupId: 'meal-existing',
+      },
+    },
+  )
+  await writeJsonFile(
+    paths.absoluteVaultRoot,
+    'raw/meals/overrides-existing/manifest.json',
+    {
+      importId: 'meal-overrides-existing',
+      importKind: 'meal',
+      importedAt: '2026-04-08T07:05:00.000Z',
+      source: 'manual',
+      artifacts: [
+        { role: 'photo', sha256: sha256('override retry meal photo') },
+        { role: 'audio', sha256: sha256('override retry meal audio') },
+      ],
+      provenance: {
+        occurredAt: '2026-04-08T12:15:00.000Z',
+        note: 'Only ate the sweet potatoes and green beans.',
+        lookupId: 'meal-overrides-existing',
       },
     },
   )
@@ -1449,6 +1493,24 @@ test('app promotion ops exercise meal, document, journal, and experiment flows',
     overriddenMealCall?.audioPath ?? '',
     /capture-meal-overrides\/attachments\/audio\.m4a$/,
   )
+  const promotionsByCapture = await readPromotionsByCapture(paths)
+  assert.equal(
+    promotionsByCapture.get('capture-meal-overrides')?.[0]?.note,
+    'Only ate the sweet potatoes and green beans.',
+  )
+  const mealCallsBeforeRetry = mealCalls.length
+  const retriedOverriddenMeal = await ops.promoteMeal({
+    vault: paths.absoluteVaultRoot,
+    captureId: 'capture-meal-overrides-retry',
+    requestId: null,
+    note: 'Only ate the sweet potatoes and green beans.',
+    occurredAt: '2026-04-08T12:15:00.000Z',
+    source: 'manual',
+  })
+  assert.equal(retriedOverriddenMeal.created, false)
+  assert.equal(retriedOverriddenMeal.lookupId, 'meal-overrides-existing')
+  assert.equal(retriedOverriddenMeal.relatedId, 'meal-overrides-existing')
+  assert.equal(mealCalls.length, mealCallsBeforeRetry)
 
   const createdDocument = await ops.promoteDocument({
     vault: paths.absoluteVaultRoot,
