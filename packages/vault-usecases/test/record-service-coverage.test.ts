@@ -444,10 +444,9 @@ describe("record patching and duration helpers", () => {
     assert.equal(dailyFoodTimeSchema.parse("07:05"), "07:05");
     assert.equal(slugifyFoodLookup("  Acai Bowl!  "), "acai-bowl");
     assert.equal(buildDailyFoodCronExpression("07:05"), "5 7 * * *");
-    assert.deepEqual(buildDailyFoodSchedule("07:05", "America/New_York"), {
+    assert.deepEqual(buildDailyFoodSchedule("07:05"), {
       kind: "dailyLocal",
       localTime: "07:05",
-      timeZone: "America/New_York",
     });
     assert.equal(buildDailyFoodCronJobName("acai-bowl"), "food-daily:acai-bowl");
     assert.equal(buildDailyFoodCronPrompt("Acai Bowl"), 'Auto-log recurring food "Acai Bowl" as a note-only meal.');

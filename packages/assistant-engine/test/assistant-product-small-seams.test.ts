@@ -10,10 +10,7 @@ import type {
 import { createAssistantModelTarget } from '@murphai/operator-config/assistant-backend'
 import { serializeAssistantProviderSessionOptions } from '@murphai/operator-config/assistant/provider-config'
 import {
-  buildDailyFoodCronExpression,
-  buildDailyFoodCronJobName,
-  buildDailyFoodCronPrompt,
-  buildDailyFoodSchedule,
+  buildDailyFoodCronJobId,
 } from '@murphai/vault-usecases/records'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -1412,54 +1409,102 @@ describe('assistant product small seams', () => {
     expect(markAssistantFirstContactSeenMock).not.toHaveBeenCalled()
   })
 
-  it('reconciles recurring food auto-log jobs across remove, reuse, and recreate paths', async () => {
-    const listAssistantCronJobs = vi.fn()
-    const removeAssistantCronJob = vi.fn().mockResolvedValue(undefined)
-    const addAssistantCronJob = vi.fn()
-    const loadVault = vi.fn()
-    const loadRuntimeModule = vi.fn().mockResolvedValue({
-      loadVault,
+  it('removes legacy local food jobs and refreshes canonical runtime state', async () => {
+    const getAssistantCronJob = vi.fn()
+    const ensureAssistantCronState = vi.fn().mockResolvedValue(undefined)
+    const readAssistantCronStore = vi.fn()
+    const writeAssistantCronStore = vi.fn().mockResolvedValue(undefined)
+    const readAssistantCronCanonicalRuntimeStore = vi.fn()
+    const writeAssistantCronCanonicalRuntimeStore = vi.fn().mockResolvedValue(undefined)
+    const withAssistantCronWriteLock = vi
+      .fn()
+      .mockImplementation(async (_paths, callback: () => Promise<unknown>) => callback())
+    const resolveAssistantStatePathsMock = vi.fn().mockReturnValue({
+      cronAutomationStatePath: '/tmp/test-vault/.runtime/automation-runtime.json',
+      cronDirectory: '/tmp/test-vault/.runtime',
+      cronJobsPath: '/tmp/test-vault/.runtime/cron-jobs.json',
     })
     const foodHooksModule = await loadFoodAutoLogHooksModule({
-      addAssistantCronJob,
-      listAssistantCronJobs,
-      loadRuntimeModule,
-      removeAssistantCronJob,
+      ensureAssistantCronState,
+      getAssistantCronJob,
+      readAssistantCronCanonicalRuntimeStore,
+      readAssistantCronStore,
+      resolveAssistantStatePaths: resolveAssistantStatePathsMock,
+      withAssistantCronWriteLock,
+      writeAssistantCronCanonicalRuntimeStore,
+      writeAssistantCronStore,
     })
     const hooks = foodHooksModule.createAssistantFoodAutoLogHooks()
+    const canonicalJobId = buildDailyFoodCronJobId('food-1')
 
-    listAssistantCronJobs.mockResolvedValueOnce([
-      {
-        foodAutoLog: {
-          foodId: 'food-1',
+    readAssistantCronStore.mockResolvedValueOnce({
+      jobs: [
+        {
+          foodAutoLog: {
+            foodId: 'food-1',
+          },
+          jobId: 'job-remove',
+          state: {
+            nextRunAt: null,
+          },
         },
-        jobId: 'job-remove',
-        name: 'old-job',
-        prompt: 'old-prompt',
-        schedule: {
-          kind: 'cron',
-          expression: '0 6 * * *',
+        {
+          foodAutoLog: {
+            foodId: 'food-other',
+          },
+          jobId: 'job-other',
+          state: {
+            nextRunAt: null,
+          },
         },
-        state: {
-          nextRunAt: null,
+      ],
+    })
+    readAssistantCronCanonicalRuntimeStore.mockResolvedValueOnce({
+      jobs: [
+        {
+          alias: null,
+          createdAt: '2026-04-09T00:00:00.000Z',
+          jobId: canonicalJobId,
+          schema: 'murph.assistant-canonical-cron-runtime-state.v2',
+          sessionId: null,
+          state: {
+            activatedAt: '2026-04-09T00:00:00.000Z',
+            consecutiveFailures: 0,
+            lastError: null,
+            lastFailedAt: null,
+            lastRunAt: null,
+            lastSucceededAt: null,
+            pendingOccurrenceAt: null,
+            retryAfterAt: null,
+            runningAt: null,
+            runningPid: null,
+          },
+          updatedAt: '2026-04-09T00:00:00.000Z',
         },
-      },
-      {
-        foodAutoLog: {
-          foodId: 'food-other',
+        {
+          alias: null,
+          createdAt: '2026-04-09T00:00:00.000Z',
+          jobId: buildDailyFoodCronJobId('food-other'),
+          schema: 'murph.assistant-canonical-cron-runtime-state.v2',
+          sessionId: null,
+          state: {
+            activatedAt: '2026-04-09T00:00:00.000Z',
+            consecutiveFailures: 0,
+            lastError: null,
+            lastFailedAt: null,
+            lastRunAt: null,
+            lastSucceededAt: null,
+            pendingOccurrenceAt: null,
+            retryAfterAt: null,
+            runningAt: null,
+            runningPid: null,
+          },
+          updatedAt: '2026-04-09T00:00:00.000Z',
         },
-        jobId: 'job-other',
-        name: 'other-job',
-        prompt: 'other-prompt',
-        schedule: {
-          kind: 'cron',
-          expression: '0 7 * * *',
-        },
-        state: {
-          nextRunAt: null,
-        },
-      },
-    ])
+      ],
+      version: 2,
+    })
+
     await expect(
       hooks.syncRecurringFood({
         food: {
@@ -1471,129 +1516,52 @@ describe('assistant product small seams', () => {
         vault: '/tmp/test-vault',
       }),
     ).resolves.toBeNull()
-    expect(removeAssistantCronJob).toHaveBeenCalledWith('/tmp/test-vault', 'job-remove')
-
-    loadVault.mockResolvedValueOnce({
-      metadata: {
-        timezone: null,
-      },
-    })
-    listAssistantCronJobs.mockResolvedValueOnce([
-      {
-        foodAutoLog: {
-          foodId: 'food-1',
-        },
-        jobId: 'job-keep-daily',
-        name: buildDailyFoodCronJobName('banana'),
-        prompt: buildDailyFoodCronPrompt('Banana'),
-        schedule: {
-          kind: 'dailyLocal',
-          localTime: '07:30',
-          timeZone: 'UTC',
-        },
-        state: {
-          nextRunAt: '2026-04-09T07:30:00.000Z',
-        },
-      },
-    ])
-    await expect(
-      hooks.syncRecurringFood({
-        food: {
-          autoLogDaily: {
-            time: '07:30',
-          },
-          foodId: 'food-1',
-          slug: 'banana',
-          title: 'Banana',
-        },
-        vault: '/tmp/test-vault',
+    expect(writeAssistantCronStore).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        jobs: [
+          expect.objectContaining({
+            foodAutoLog: {
+              foodId: 'food-other',
+            },
+            jobId: 'job-other',
+          }),
+        ],
       }),
-    ).resolves.toMatchObject({
-      jobId: 'job-keep-daily',
-    })
-
-    loadVault.mockResolvedValueOnce({
-      metadata: {
-        timezone: 'Australia/Sydney',
-      },
-    })
-    listAssistantCronJobs.mockResolvedValueOnce([
-      {
-        foodAutoLog: {
-          foodId: 'food-1',
-        },
-        jobId: 'job-keep-cron',
-        name: buildDailyFoodCronJobName('banana'),
-        prompt: buildDailyFoodCronPrompt('Banana'),
-        schedule: {
-          expression: buildDailyFoodCronExpression('08:15'),
-          kind: 'cron',
-        },
-        state: {
-          nextRunAt: '2026-04-09T08:15:00.000Z',
-        },
-      },
-    ])
-    await expect(
-      hooks.syncRecurringFood({
-        food: {
-          autoLogDaily: {
-            time: '08:15',
-          },
-          foodId: 'food-1',
-          slug: 'banana',
-          title: 'Banana',
-        },
-        vault: '/tmp/test-vault',
+    )
+    expect(writeAssistantCronCanonicalRuntimeStore).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        jobs: [
+          expect.objectContaining({
+            jobId: buildDailyFoodCronJobId('food-other'),
+          }),
+        ],
       }),
-    ).resolves.toMatchObject({
-      jobId: 'job-keep-cron',
-    })
+    )
 
-    loadVault.mockResolvedValueOnce({
-      metadata: {
-        timezone: 'Australia/Sydney',
-      },
+    readAssistantCronStore.mockResolvedValueOnce({
+      jobs: [
+        {
+          foodAutoLog: {
+            foodId: 'food-1',
+          },
+          jobId: 'job-recreate-1',
+          state: {
+            nextRunAt: null,
+          },
+        },
+      ],
     })
-    listAssistantCronJobs.mockResolvedValueOnce([
-      {
-        foodAutoLog: {
-          foodId: 'food-1',
-        },
-        jobId: 'job-recreate-1',
-        name: 'stale',
-        prompt: 'stale',
-        schedule: {
-          kind: 'dailyLocal',
-          localTime: '07:00',
-          timeZone: 'UTC',
-        },
-        state: {
-          nextRunAt: null,
-        },
-      },
-      {
-        foodAutoLog: {
-          foodId: 'food-1',
-        },
-        jobId: 'job-recreate-2',
-        name: buildDailyFoodCronJobName('banana'),
-        prompt: buildDailyFoodCronPrompt('Banana'),
-        schedule: {
-          kind: 'dailyLocal',
-          localTime: '09:00',
-          timeZone: 'Australia/Sydney',
-        },
-        state: {
-          nextRunAt: null,
-        },
-      },
-    ])
-    addAssistantCronJob.mockResolvedValueOnce({
-      jobId: 'job-new',
-      name: buildDailyFoodCronJobName('banana'),
+    readAssistantCronCanonicalRuntimeStore.mockResolvedValueOnce({
+      jobs: [],
+      version: 2,
+    })
+    getAssistantCronJob.mockResolvedValueOnce({
+      jobId: canonicalJobId,
+      name: 'food-daily:banana',
       state: {
-        nextRunAt: null,
+        nextRunAt: '2026-04-09T09:30:00.000Z',
       },
     })
     await expect(
@@ -1609,25 +1577,27 @@ describe('assistant product small seams', () => {
         vault: '/tmp/test-vault',
       }),
     ).resolves.toMatchObject({
-      jobId: 'job-new',
+      jobId: canonicalJobId,
+      name: 'food-daily:banana',
     })
-    expect(removeAssistantCronJob).toHaveBeenCalledWith(
-      '/tmp/test-vault',
-      'job-recreate-1',
+    expect(writeAssistantCronStore).toHaveBeenLastCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        jobs: [],
+      }),
     )
-    expect(removeAssistantCronJob).toHaveBeenCalledWith(
-      '/tmp/test-vault',
-      'job-recreate-2',
+    expect(writeAssistantCronCanonicalRuntimeStore).toHaveBeenLastCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        jobs: [
+          expect.objectContaining({
+            jobId: canonicalJobId,
+          }),
+        ],
+        version: 2,
+      }),
     )
-    expect(addAssistantCronJob).toHaveBeenCalledWith({
-      foodAutoLog: {
-        foodId: 'food-1',
-      },
-      name: buildDailyFoodCronJobName('banana'),
-      prompt: buildDailyFoodCronPrompt('Banana'),
-      schedule: buildDailyFoodSchedule('09:30', 'Australia/Sydney'),
-      vault: '/tmp/test-vault',
-    })
+    expect(getAssistantCronJob).toHaveBeenCalledWith('/tmp/test-vault', canonicalJobId)
   })
 
   it('delegates local-service conversation open and option updates through the existing store helpers', async () => {
@@ -1737,18 +1707,40 @@ async function loadPromptAttemptsModule(input: {
 }
 
 async function loadFoodAutoLogHooksModule(input: {
-  addAssistantCronJob: ReturnType<typeof vi.fn>
-  listAssistantCronJobs: ReturnType<typeof vi.fn>
-  loadRuntimeModule: ReturnType<typeof vi.fn>
-  removeAssistantCronJob: ReturnType<typeof vi.fn>
+  ensureAssistantCronState: ReturnType<typeof vi.fn>
+  getAssistantCronJob: ReturnType<typeof vi.fn>
+  readAssistantCronCanonicalRuntimeStore: ReturnType<typeof vi.fn>
+  readAssistantCronStore: ReturnType<typeof vi.fn>
+  resolveAssistantStatePaths: ReturnType<typeof vi.fn>
+  withAssistantCronWriteLock: ReturnType<typeof vi.fn>
+  writeAssistantCronCanonicalRuntimeStore: ReturnType<typeof vi.fn>
+  writeAssistantCronStore: ReturnType<typeof vi.fn>
 }) {
   vi.doMock('../src/assistant/cron.js', () => ({
-    addAssistantCronJob: input.addAssistantCronJob,
-    listAssistantCronJobs: input.listAssistantCronJobs,
-    removeAssistantCronJob: input.removeAssistantCronJob,
+    getAssistantCronJob: input.getAssistantCronJob,
   }))
-  vi.doMock('@murphai/vault-usecases/runtime', () => ({
-    loadRuntimeModule: input.loadRuntimeModule,
+  vi.doMock('../src/assistant/cron/locking.ts', () => ({
+    withAssistantCronWriteLock: input.withAssistantCronWriteLock,
+  }))
+  vi.doMock('../src/assistant/cron/runtime-state.js', async () => {
+    const actual = await vi.importActual('../src/assistant/cron/runtime-state.js')
+    return {
+      ...actual,
+      readAssistantCronCanonicalRuntimeStore: input.readAssistantCronCanonicalRuntimeStore,
+      writeAssistantCronCanonicalRuntimeStore: input.writeAssistantCronCanonicalRuntimeStore,
+    }
+  })
+  vi.doMock('../src/assistant/cron/store.js', async () => {
+    const actual = await vi.importActual('../src/assistant/cron/store.js')
+    return {
+      ...actual,
+      ensureAssistantCronState: input.ensureAssistantCronState,
+      readAssistantCronStore: input.readAssistantCronStore,
+      writeAssistantCronStore: input.writeAssistantCronStore,
+    }
+  })
+  vi.doMock('../src/assistant/store/paths.js', () => ({
+    resolveAssistantStatePaths: input.resolveAssistantStatePaths,
   }))
 
   return await import('../src/assistant/food-auto-log-hooks.ts')

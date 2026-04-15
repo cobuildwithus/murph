@@ -235,11 +235,49 @@ describe('assistant cron automation runtime store seams', () => {
     })
 
     expect(JSON.parse(await readFile(paths.cronAutomationStatePath, 'utf8'))).toEqual({
-      automations: [betaRecord, alphaRecord],
-      version: 1,
+      jobs: [
+        expect.objectContaining({
+          createdAt: alphaRecord.createdAt,
+          jobId: 'alpha',
+          schema: 'murph.assistant-canonical-cron-runtime-state.v2',
+          state: expect.objectContaining({
+            activatedAt: alphaRecord.createdAt,
+            pendingOccurrenceAt: null,
+            retryAfterAt: null,
+          }),
+          updatedAt: alphaRecord.updatedAt,
+        }),
+        expect.objectContaining({
+          createdAt: betaRecord.createdAt,
+          jobId: 'beta',
+          schema: 'murph.assistant-canonical-cron-runtime-state.v2',
+          state: expect.objectContaining({
+            activatedAt: betaRecord.createdAt,
+            pendingOccurrenceAt: null,
+            retryAfterAt: null,
+          }),
+          updatedAt: betaRecord.updatedAt,
+        }),
+      ],
+      version: 2,
     })
     await expect(readAssistantCronAutomationRuntimeStore(paths)).resolves.toEqual({
-      automations: [alphaRecord, betaRecord],
+      automations: [
+        {
+          ...alphaRecord,
+          state: {
+            ...alphaRecord.state,
+            nextRunAt: null,
+          },
+        },
+        {
+          ...betaRecord,
+          state: {
+            ...betaRecord.state,
+            nextRunAt: null,
+          },
+        },
+      ],
       version: 1,
     })
   })

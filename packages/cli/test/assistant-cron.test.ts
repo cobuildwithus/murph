@@ -465,7 +465,6 @@ test('assistant cron assigns vault timezones to cron schedules and computes next
   })
 
   assert.equal(job.schedule.kind, 'cron')
-  assert.equal(job.schedule.timeZone, 'Australia/Melbourne')
   assert.equal(job.state.nextRunAt, '2026-03-27T21:00:00.000Z')
 })
 
@@ -489,7 +488,6 @@ test('assistant cron daily-local schedules stay pinned to local time across DST 
     schedule: {
       kind: 'dailyLocal',
       localTime: '08:00',
-      timeZone: 'America/New_York',
     },
     now: new Date('2026-03-07T13:30:00.000Z'),
   })

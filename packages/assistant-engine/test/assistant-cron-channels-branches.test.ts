@@ -890,7 +890,6 @@ describe('assistant cron helpers and wrappers', () => {
         {
           kind: 'dailyLocal',
           localTime: '25:61',
-          timeZone: 'UTC',
         },
         new Date('2026-04-08T00:00:00.000Z'),
       ),
@@ -930,9 +929,42 @@ describe('assistant cron helpers and wrappers', () => {
     expect(installed.job.schedule).toMatchObject({
       expression: '0 7 * * *',
       kind: 'cron',
-      timeZone: 'Australia/Sydney',
     })
     expect(installed.resolvedPrompt).toContain('Send me a short morning mindfulness prompt')
+
+    const slugLookupJob = await addAssistantCronJob({
+      channel: 'telegram',
+      deliveryTarget: 'slug-room',
+      name: 'Morning Check In',
+      prompt: 'slug lookup job',
+      schedule: {
+        kind: 'dailyLocal',
+        localTime: '09:00',
+      },
+      vault: vaultRoot,
+    })
+    const slugLookupRecord = getVaultAutomationStore(vaultRoot).find(
+      (record) => record.automationId === slugLookupJob.jobId,
+    )
+    if (slugLookupRecord) {
+      slugLookupRecord.slug = 'morning-check-in'
+    }
+    await expect(
+      getAssistantCronJobTarget(vaultRoot, 'morning-check-in'),
+    ).resolves.toMatchObject({
+      target: {
+        channel: 'telegram',
+        deliveryTarget: 'slug-room',
+      },
+    })
+    await expect(
+      getAssistantCronJobTarget(vaultRoot, 'MORNING CHECK IN'),
+    ).resolves.toMatchObject({
+      target: {
+        channel: 'telegram',
+        deliveryTarget: 'slug-room',
+      },
+    })
 
     cronMocks.loadVault.mockRejectedValueOnce(new Error('vault unavailable'))
     const fallbackTimeZoneJob = await addAssistantCronJob({
@@ -949,7 +981,6 @@ describe('assistant cron helpers and wrappers', () => {
     expect(fallbackTimeZoneJob.schedule).toMatchObject({
       expression: '0 8 * * *',
       kind: 'cron',
-      timeZone: resolveSystemTimeZone(),
     })
     await expect(
       addAssistantCronJob({
@@ -968,17 +999,20 @@ describe('assistant cron helpers and wrappers', () => {
     })
 
     const canonicalRecords = getVaultAutomationStore(vaultRoot)
-    expect(canonicalRecords).toHaveLength(2)
+    expect(canonicalRecords).toHaveLength(3)
     if (canonicalRecords[0]) {
       const [firstRecord] = canonicalRecords
       firstRecord.continuityPolicy = 'reset'
     }
 
     const listedJobs = await listAssistantCronJobs(vaultRoot)
-    expect(listedJobs).toHaveLength(2)
+    expect(listedJobs).toHaveLength(3)
     const resetJob = listedJobs.find((job) => job.jobId === installed.job.jobId)
     expect(resetJob?.target.alias).toBeNull()
     expect(resetJob?.target.sessionId).toBeNull()
+    expect(listedJobs.find((job) => job.jobId === slugLookupJob.jobId)?.name).toBe(
+      'Morning Check In',
+    )
 
     await expect(getAssistantCronJobTarget(vaultRoot, installed.job.jobId)).resolves.toMatchObject({
       bindingDelivery: {

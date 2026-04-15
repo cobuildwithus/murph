@@ -6,9 +6,7 @@ import {
   automationScheduleDailyLocalSchema,
   automationScheduleEverySchema,
   automationScheduleKindValues,
-  automationScheduleSchema,
   type AutomationRoute,
-  type AutomationSchedule,
   type AutomationScheduleKind,
 } from '@murphai/contracts'
 import { normalizeAssistantOpaqueId } from '@murphai/runtime-state/assistant-ids'
@@ -21,7 +19,6 @@ import {
 import {
   isoTimestampSchema,
   pathSchema,
-  timeZoneSchema,
 } from './vault-cli-contracts.js'
 import {
   setupAssistantProviderPresetValues,
@@ -834,18 +831,21 @@ export const assistantCronAtScheduleSchema = automationScheduleAtSchema
 export const assistantCronEveryScheduleSchema = automationScheduleEverySchema
 
 export const assistantCronExpressionScheduleSchema = automationScheduleCronSchema
-
-export const assistantCronExpressionScheduleInputSchema = z
-  .object({
-    kind: z.literal('cron'),
-    expression: z.string().min(1),
-    timeZone: timeZoneSchema.optional(),
-  })
+  .omit({ timeZone: true })
   .strict()
 
-export const assistantCronDailyLocalScheduleSchema = automationScheduleDailyLocalSchema
+export const assistantCronExpressionScheduleInputSchema = assistantCronExpressionScheduleSchema
 
-export const assistantCronScheduleSchema = automationScheduleSchema
+export const assistantCronDailyLocalScheduleSchema = automationScheduleDailyLocalSchema
+  .omit({ timeZone: true })
+  .strict()
+
+export const assistantCronScheduleSchema = z.discriminatedUnion('kind', [
+  assistantCronAtScheduleSchema,
+  assistantCronEveryScheduleSchema,
+  assistantCronExpressionScheduleSchema,
+  assistantCronDailyLocalScheduleSchema,
+])
 
 export const assistantCronScheduleInputSchema = z.discriminatedUnion('kind', [
   assistantCronAtScheduleSchema,
@@ -1257,7 +1257,7 @@ export type AssistantSessionListResult = z.infer<
 export type AssistantSessionShowResult = z.infer<
   typeof assistantSessionShowResultSchema
 >
-export type AssistantCronSchedule = AutomationSchedule
+export type AssistantCronSchedule = z.infer<typeof assistantCronScheduleSchema>
 export type AssistantCronScheduleInput = z.infer<typeof assistantCronScheduleInputSchema>
 export type AssistantCronTarget = Omit<AutomationRoute, 'channel'> & {
   alias: string | null

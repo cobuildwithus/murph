@@ -74,12 +74,10 @@ describe('assistant cron schedule helpers', () => {
     expect(
       buildAssistantCronSchedule({
         cron: '0 6 * * 7',
-        timeZone: '  UTC  ',
       }),
     ).toEqual({
       expression: '0 6 * * 7',
       kind: 'cron',
-      timeZone: 'UTC',
     })
   })
 
@@ -173,7 +171,6 @@ describe('assistant cron schedule helpers', () => {
         {
           expression: '30 8 * * *',
           kind: 'cron',
-          timeZone: 'UTC',
         },
         after,
       ),
@@ -183,7 +180,6 @@ describe('assistant cron schedule helpers', () => {
         {
           kind: 'dailyLocal',
           localTime: '09:15',
-          timeZone: 'UTC',
         },
         new Date('2026-04-08T09:15:00.000Z'),
       ),
