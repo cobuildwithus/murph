@@ -22,6 +22,8 @@ Always read these before repo code/docs/test/config work:
 2. `ARCHITECTURE.md`
 3. `agent-docs/references/repo-scope.md`
 4. `agent-docs/operations/agent-workflow-routing.md`
+5. `agent-docs/PRODUCT_SENSE.md`
+6. `agent-docs/PRODUCT_CONSTITUTION.md`
 
 ## Task Router
 
@@ -30,10 +32,11 @@ Always read these before repo code/docs/test/config work:
 | Review-only inspection with no planned file edits             | `agent-docs/operations/verification-and-runtime.md`                                                 | No repo ledger or repo-wide checks by default. Only add runtime proof when the user asks for it or static inspection is not enough. |
 | Docs or process only                                          | `agent-docs/operations/verification-and-runtime.md`                                                 | No audit subagents by default.                                                                                                      |
 | Repo code, tests, or config                                   | `agent-docs/operations/completion-workflow.md`, `agent-docs/operations/verification-and-runtime.md` | Follow the task classes in the workflow-routing doc. When that workflow requires `coverage-write` and/or `task-finish-review`, treat them as mandatory completion steps for the task class, not optional post-implementation or post-commit checks. |
+| User-facing frontend/UI work in `apps/web`                    | `agent-docs/FRONTEND.md`                                                                            | Read the frontend guidance before implementation. Treat the completion workflow's frontend-review pass as mandatory when the change touches user-facing pages, components, or design-system-facing UI. |
 | Auth, secrets, trust boundaries, or external runtime surfaces | `agent-docs/SECURITY.md`                                                                            | Treat as higher risk by default.                                                                                                    |
 | Retries, queues, cron, concurrency, or failure handling       | `agent-docs/RELIABILITY.md`                                                                         | Capture direct proof for operational changes.                                                                                       |
 | Test selection or verification changes                        | `agent-docs/references/testing-ci-map.md`                                                           | Keep test coverage and doc claims aligned.                                                                                          |
-| Product behavior or UX tradeoffs                              | `agent-docs/PRODUCT_SENSE.md`, `agent-docs/PRODUCT_CONSTITUTION.md`                                 | Prefer repo-local durable specs over chat memory.                                                                                   |
+| Product behavior or UX tradeoffs                              | `agent-docs/PRODUCT_SENSE.md`, `agent-docs/PRODUCT_CONSTITUTION.md`                                 | These docs are already part of the always-read set. Prefer repo-local durable specs over chat memory.                              |
 | Marketing, positioning, copy, or experiment library work      | `agent-docs/product-marketing-context.md`                                                           | Use the repo marketing context for positioning, differentiation, customer language, and brand voice.                                |
 
 ## Hard Rules (Non-Negotiable)

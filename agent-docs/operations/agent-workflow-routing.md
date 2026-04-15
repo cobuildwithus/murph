@@ -13,6 +13,8 @@ Before repo code/docs/test/config work, read:
 2. `ARCHITECTURE.md`
 3. `agent-docs/references/repo-scope.md`
 4. this file
+5. `agent-docs/PRODUCT_SENSE.md`
+6. `agent-docs/PRODUCT_CONSTITUTION.md`
 
 Then load only the task-relevant docs listed below.
 
@@ -29,6 +31,7 @@ Then load only the task-relevant docs listed below.
 
 ## Speciality Reads
 
+- Read `agent-docs/FRONTEND.md` for user-facing `apps/web` UI work such as pages, shared components, or design-system-facing surfaces.
 - Read `agent-docs/PRODUCT_SENSE.md` and `agent-docs/PRODUCT_CONSTITUTION.md` for product behavior, UX tradeoffs, or user-facing spec decisions.
 - Read `agent-docs/references/testing-ci-map.md` when selecting, adding, or debugging tests.
 - Read `agent-docs/SECURITY.md` for auth, secrets, external interfaces, or trust-boundary changes.
@@ -42,6 +45,7 @@ Then load only the task-relevant docs listed below.
 - Treat supplied patches as behavioral intent, not overwrite authority.
 - If a change introduces or changes a durable repo rule, update the durable doc in the same turn.
 - Required completion-workflow audit subagent passes are mandatory for the repo task classes that require them. Treat this workflow doc plus `AGENTS.md` as standing permission to spawn those required audit subagents when a repo task reaches that workflow; do not stop after implementation, verification, or commit and do not pause only to ask for a second explicit "use subagents" instruction.
+- For user-facing `apps/web` UI changes, the completion workflow's `frontend-review` pass is a mandatory audit alongside any other required passes for the task class.
 - `scripts/finish-task` resolves the file/directory paths you pass into exact changed file paths, removes the one coordination-ledger row whose `Plan` cell exactly matches the active plan path, closes the active plan, moves it to `agent-docs/exec-plans/completed/`, and creates a scoped commit containing the closed-plan artifact plus those resolved paths. It fails closed if that ledger match is missing or ambiguous.
 
 ## Quick Path
