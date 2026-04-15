@@ -22,6 +22,7 @@ import type {
   HostedWebhookReceiptHandlers,
   HostedWebhookSideEffect,
 } from "./webhook-receipt-types";
+import { sanitizeHostedOnboardingStructuredLogDetails } from "./logging";
 
 export function createHostedWebhookReceiptHandlers(): HostedWebhookReceiptHandlers {
   return {
@@ -155,37 +156,12 @@ function buildHostedLinqSideEffectLogDetails(
     provider: "linq",
     retryable: readHostedLinqSideEffectRetryable(error),
     template: effect.payload.template,
-    ...sanitizeHostedLinqLogDetails({
+    ...sanitizeHostedOnboardingStructuredLogDetails({
       errorCode: readHostedLinqSideEffectString(errorRecord, "code"),
       errorName: error instanceof Error ? error.name : null,
       ...(nestedDetails ?? {}),
     }),
   };
-}
-
-function sanitizeHostedLinqLogDetails(
-  details: Record<string, unknown>,
-): Record<string, boolean | number | string> {
-  const sanitizedEntries: Array<readonly [string, boolean | number | string]> = [];
-  for (const [key, value] of Object.entries(details)) {
-    if (typeof value === "boolean") {
-      sanitizedEntries.push([key, value]);
-      continue;
-    }
-    if (typeof value === "number") {
-      if (Number.isFinite(value)) {
-        sanitizedEntries.push([key, value]);
-      }
-      continue;
-    }
-    const sanitizedValue = sanitizeHostedOnboardingLogString(
-      typeof value === "string" ? value : null,
-    );
-    if (sanitizedValue) {
-      sanitizedEntries.push([key, sanitizedValue]);
-    }
-  }
-  return Object.fromEntries(sanitizedEntries);
 }
 
 function readHostedLinqSideEffectRetryable(error: unknown): boolean {

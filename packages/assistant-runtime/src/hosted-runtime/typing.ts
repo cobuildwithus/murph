@@ -21,6 +21,8 @@ type HostedTypingHandle = {
   stop(): Promise<void>;
 };
 
+type HostedLinqTypingOperation = "typing_start" | "typing_stop";
+
 type HostedDispatchTypingIndicator = {
   channelLabel: "Linq" | "Telegram";
   startLogDetails?: Record<string, boolean | string>;
@@ -96,11 +98,7 @@ function startHostedLinqDispatchTypingIndicator(input: {
   } catch (error) {
     emitHostedExecutionStructuredLog({
       component: "runtime",
-      details: {
-        chatIdPresent: false,
-        operation: "typing_start",
-        provider: "linq",
-      },
+      details: buildHostedLinqTypingLogDetails("typing_start", false),
       dispatch: input.dispatch,
       error,
       level: "warn",
@@ -115,16 +113,8 @@ function startHostedLinqDispatchTypingIndicator(input: {
     channelLabel: "Linq",
     dispatch: input.dispatch,
     run: input.run,
-    startLogDetails: {
-      chatIdPresent: true,
-      operation: "typing_start",
-      provider: "linq",
-    },
-    stopLogDetails: {
-      chatIdPresent: true,
-      operation: "typing_stop",
-      provider: "linq",
-    },
+    startLogDetails: buildHostedLinqTypingLogDetails("typing_start", true),
+    stopLogDetails: buildHostedLinqTypingLogDetails("typing_stop", true),
     start: async () => {
       await startLinqChatTypingIndicator(
         {
@@ -185,6 +175,17 @@ function isHostedLinqMessageReceivedDispatch(
   >;
 } {
   return dispatch.event.kind === "linq.message.received";
+}
+
+function buildHostedLinqTypingLogDetails(
+  operation: HostedLinqTypingOperation,
+  chatIdPresent: boolean,
+): Record<string, boolean | string> {
+  return {
+    chatIdPresent,
+    operation,
+    provider: "linq",
+  };
 }
 
 function createAsyncHostedTypingIndicator(input: {

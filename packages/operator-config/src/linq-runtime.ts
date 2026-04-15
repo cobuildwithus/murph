@@ -318,57 +318,9 @@ async function requestLinqJson<T>(input: {
   body?: Record<string, unknown>
   signal?: AbortSignal
 }): Promise<T> {
-  const token = resolveLinqApiToken(input.env)
-  if (!token) {
-    throw new VaultCliError(
-      'LINQ_API_TOKEN_REQUIRED',
-      'Linq access requires LINQ_API_TOKEN.',
-      {
-        ...input.details,
-        failureStage: 'configuration',
-      },
-    )
-  }
-
-  const fetchImplementation = input.fetchImplementation ?? globalThis.fetch?.bind(globalThis)
-  if (typeof fetchImplementation !== 'function') {
-    throw new VaultCliError(
-      'LINQ_UNAVAILABLE',
-      'Linq access requires fetch support in the current Node.js runtime.',
-      {
-        ...input.details,
-        failureStage: 'configuration',
-      },
-    )
-  }
-
-  const baseUrl = normalizeLinqBaseUrl(
-    resolveLinqApiBaseUrl(input.env) ?? DEFAULT_LINQ_API_BASE_URL,
-  )
-  const url = new URL(input.path.replace(/^\//u, ''), `${baseUrl}/`)
-
-  return requestJsonWithRetry<T, LinqFetchResponse>({
-    createHttpError: (response) =>
-      createLinqHttpError(response, input.details, input.method, input.path),
-    fetchResponse: () =>
-      fetchLinqResponse({
-        details: input.details,
-        fetchImplementation,
-        url: url.toString(),
-        method: input.method,
-        headers: {
-          authorization: `Bearer ${token}`,
-          ...(input.body ? { 'content-type': 'application/json' } : {}),
-        },
-        body: input.body ? JSON.stringify(input.body) : undefined,
-        signal: input.signal,
-        path: input.path,
-      }),
-    isRetryableError: isRetryableLinqRequestError,
-    maxAttempts: LINQ_HTTP_MAX_ATTEMPTS,
+  return requestLinq<T>({
+    ...input,
     parseResponse: async (response) => (await response.json()) as T,
-    signal: input.signal,
-    waitForRetryDelay: waitForLinqRetryDelay,
   })
 }
 
@@ -380,59 +332,104 @@ async function requestLinqNoContent(input: {
   path: string
   signal?: AbortSignal
 }): Promise<void> {
+  await requestLinq<void>({
+    ...input,
+    parseResponse: async () => undefined,
+  })
+}
+
+type LinqHttpMethod = 'DELETE' | 'GET' | 'POST'
+
+async function requestLinq<T>(input: {
+  details: LinqSafeRequestDetails
+  env: NodeJS.ProcessEnv
+  fetchImplementation?: LinqFetch
+  method: LinqHttpMethod
+  path: string
+  body?: Record<string, unknown>
+  parseResponse(response: LinqFetchResponse): Promise<T>
+  signal?: AbortSignal
+}): Promise<T> {
+  const request = resolveLinqRequest(input)
+
+  return requestJsonWithRetry<T, LinqFetchResponse>({
+    createHttpError: (response) =>
+      createLinqHttpError(response, input.details, input.method, input.path),
+    fetchResponse: () =>
+      fetchLinqResponse({
+        body: request.body,
+        details: input.details,
+        fetchImplementation: request.fetchImplementation,
+        headers: request.headers,
+        method: input.method,
+        path: input.path,
+        signal: input.signal,
+        url: request.url,
+      }),
+    isRetryableError: isRetryableLinqRequestError,
+    maxAttempts: LINQ_HTTP_MAX_ATTEMPTS,
+    parseResponse: input.parseResponse,
+    signal: input.signal,
+    waitForRetryDelay: waitForLinqRetryDelay,
+  })
+}
+
+function resolveLinqRequest(input: {
+  details: LinqSafeRequestDetails
+  env: NodeJS.ProcessEnv
+  fetchImplementation?: LinqFetch
+  path: string
+  body?: Record<string, unknown>
+}): {
+  body?: string
+  fetchImplementation: LinqFetch
+  headers: Record<string, string>
+  url: string
+} {
   const token = resolveLinqApiToken(input.env)
   if (!token) {
-    throw new VaultCliError(
+    throw createLinqConfigurationError(
       'LINQ_API_TOKEN_REQUIRED',
       'Linq access requires LINQ_API_TOKEN.',
-      {
-        ...input.details,
-        failureStage: 'configuration',
-      },
+      input.details,
     )
   }
 
   const fetchImplementation = input.fetchImplementation ?? globalThis.fetch?.bind(globalThis)
   if (typeof fetchImplementation !== 'function') {
-    throw new VaultCliError(
+    throw createLinqConfigurationError(
       'LINQ_UNAVAILABLE',
       'Linq access requires fetch support in the current Node.js runtime.',
-      {
-        ...input.details,
-        failureStage: 'configuration',
-      },
+      input.details,
     )
   }
 
   const baseUrl = normalizeLinqBaseUrl(
     resolveLinqApiBaseUrl(input.env) ?? DEFAULT_LINQ_API_BASE_URL,
   )
-  const url = new URL(input.path.replace(/^\//u, ''), `${baseUrl}/`)
+  const body = input.body ? JSON.stringify(input.body) : undefined
 
-  await requestJsonWithRetry<void, LinqFetchResponse>({
-    createHttpError: (response) =>
-      createLinqHttpError(response, input.details, input.method, input.path),
-    fetchResponse: () =>
-      fetchLinqResponse({
-        details: input.details,
-        fetchImplementation,
-        url: url.toString(),
-        method: input.method,
-        headers: {
-          authorization: `Bearer ${token}`,
-        },
-        signal: input.signal,
-        path: input.path,
-      }),
-    isRetryableError: isRetryableLinqRequestError,
-    maxAttempts: LINQ_HTTP_MAX_ATTEMPTS,
-    parseResponse: async () => undefined,
-    signal: input.signal,
-    waitForRetryDelay: waitForLinqRetryDelay,
-  })
+  return {
+    body,
+    fetchImplementation,
+    headers: {
+      authorization: `Bearer ${token}`,
+      ...(body ? { 'content-type': 'application/json' } : {}),
+    },
+    url: new URL(input.path.replace(/^\//u, ''), `${baseUrl}/`).toString(),
+  }
 }
 
-type LinqHttpMethod = 'DELETE' | 'GET' | 'POST'
+function createLinqConfigurationError(
+  code: 'LINQ_API_TOKEN_REQUIRED' | 'LINQ_UNAVAILABLE',
+  message: string,
+  details: LinqSafeRequestDetails,
+): VaultCliError {
+  return new VaultCliError(code, message, {
+    ...details,
+    failureStage: 'configuration',
+  })
+}
 
 async function fetchLinqResponse(input: {
   details: LinqSafeRequestDetails

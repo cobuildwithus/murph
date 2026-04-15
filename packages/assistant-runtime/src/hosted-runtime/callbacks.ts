@@ -28,6 +28,9 @@ import type {
 } from "./platform.ts";
 
 const HOSTED_MAX_COMMITTED_ASSISTANT_DELIVERY_EFFECTS = 20;
+const HOSTED_ASSISTANT_DELIVERY_BOUNDARY = "hosted_runtime_finalize";
+
+type HostedAssistantDeliveryDetails = Record<string, boolean | null | string>;
 
 export function resumeHostedCommittedExecution(
   request: HostedAssistantRuntimeJobRequest,
@@ -363,14 +366,15 @@ function createHostedAssistantDeliveryConfirmationPendingError(input: {
     retryable: true,
     status: null,
   };
-  error.details = {
-    assistantDeliveryBoundary: "hosted_runtime_finalize",
-    deliveryMayHaveSucceeded: true,
+  error.details = buildHostedAssistantDeliveryDetails({
     effectId: input.effectId,
-    failureDomain: "confirmation_pending",
-    retryable: true,
+    extra: {
+      deliveryMayHaveSucceeded: true,
+      failureDomain: "confirmation_pending",
+      retryable: true,
+    },
     userId: input.userId,
-  };
+  });
   error.deliveryMayHaveSucceeded = true;
   error.retryable = true;
   if (input.cause !== undefined) {
@@ -423,15 +427,16 @@ function createHostedAssistantDeliveryJournalError(
     retryable: true,
     status,
   };
-  error.details = {
-    assistantDeliveryBoundary: "hosted_runtime_finalize",
+  error.details = buildHostedAssistantDeliveryDetails({
     effectId,
-    failureDomain: "journal",
-    journalMethod: input.method,
-    retryable: true,
-    status: status === null ? null : String(status),
+    extra: {
+      failureDomain: "journal",
+      journalMethod: input.method,
+      retryable: true,
+      status: status === null ? null : String(status),
+    },
     userId: input.userId,
-  };
+  });
   error.retryable = true;
   if (cause !== undefined) {
     error.cause = cause;
@@ -457,11 +462,27 @@ function attachHostedAssistantDeliveryDispatchDetails(
   Object.assign(error, {
     details: {
       ...(existingDetails ?? {}),
-      assistantDeliveryBoundary: "hosted_runtime_finalize",
-      effectFingerprint: input.fingerprint,
-      effectId: input.effectId,
-      userId: input.userId,
+      ...buildHostedAssistantDeliveryDetails({
+        effectFingerprint: input.fingerprint,
+        effectId: input.effectId,
+        userId: input.userId,
+      }),
     },
   });
   return error;
+}
+
+function buildHostedAssistantDeliveryDetails(input: {
+  effectFingerprint?: string;
+  effectId: string;
+  extra?: HostedAssistantDeliveryDetails;
+  userId: string;
+}): HostedAssistantDeliveryDetails {
+  return {
+    assistantDeliveryBoundary: HOSTED_ASSISTANT_DELIVERY_BOUNDARY,
+    ...(input.effectFingerprint ? { effectFingerprint: input.effectFingerprint } : {}),
+    effectId: input.effectId,
+    userId: input.userId,
+    ...(input.extra ?? {}),
+  };
 }

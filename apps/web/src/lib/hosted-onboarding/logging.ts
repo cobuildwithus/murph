@@ -3,9 +3,9 @@ import { sanitizeHostedOnboardingLogString } from "./http";
 const HOSTED_ONBOARDING_TIMING_LABEL_MAX_LENGTH = 80;
 const HOSTED_ONBOARDING_TIMING_STEP_MAX_LENGTH = 120;
 
-type HostedOnboardingTimingDetailValue = boolean | number | string | null | undefined;
-
-export type HostedOnboardingTimingDetails = Record<string, HostedOnboardingTimingDetailValue>;
+export type HostedOnboardingStructuredLogValue = boolean | number | string | null | undefined;
+export type HostedOnboardingStructuredLogDetails = Record<string, HostedOnboardingStructuredLogValue>;
+export type HostedOnboardingTimingDetails = HostedOnboardingStructuredLogDetails;
 
 export interface HostedOnboardingTimingHandle {
   readonly baseDetails: HostedOnboardingTimingDetails;
@@ -70,12 +70,12 @@ function logHostedOnboardingTiming(input: {
         input.step,
         HOSTED_ONBOARDING_TIMING_STEP_MAX_LENGTH,
       ) ?? "unknown",
-    ...sanitizeHostedOnboardingTimingDetails(input.details),
+    ...sanitizeHostedOnboardingStructuredLogDetails(input.details),
   });
 }
 
-function sanitizeHostedOnboardingTimingDetails(
-  details: HostedOnboardingTimingDetails | undefined,
+export function sanitizeHostedOnboardingStructuredLogDetails(
+  details: HostedOnboardingStructuredLogDetails | undefined,
 ): Record<string, boolean | number | string> {
   if (!details) {
     return {};
@@ -90,7 +90,7 @@ function sanitizeHostedOnboardingTimingDetails(
 }
 
 function sanitizeHostedOnboardingTimingDetailValue(
-  value: HostedOnboardingTimingDetailValue,
+  value: HostedOnboardingStructuredLogValue,
 ): boolean | number | string | null {
   if (typeof value === "boolean") {
     return value;
