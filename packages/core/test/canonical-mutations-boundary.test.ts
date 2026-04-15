@@ -21,13 +21,18 @@ vi.mock("../src/operations/canonical-write-lock.ts", () => ({
     state: "unlocked" as const,
     relativePath: ".runtime/locks/canonical-write",
   }),
-  withCanonicalWriteLockScope: async (_vaultRoot: string, run: () => Promise<unknown>) => await run(),
+  withCanonicalWriteLockScope: vi.fn(async (_vaultRoot: string, run: () => Promise<unknown>) => {
+    return await run();
+  }),
 }));
 
 import {
+  addActivitySession,
+  addBodyMeasurement,
   appendJournal,
   checkpointExperiment,
   createExperiment,
+  addMeal,
   initializeVault,
   linkJournalEventIds,
   linkJournalStreams,
@@ -247,6 +252,55 @@ test("high-level core provider, event, and summary mutation ports preserve canon
   assert.equal(providerDocument.attributes.title, "Labcorp West");
   assert.ok(eventRecord);
   assert.deepEqual(eventRecord.links, [{ type: "related_to", targetId: createdProvider.providerId }]);
+});
+
+test("append-style mutation ports bypass the outer canonical write lock while explicit-id rewrites keep it", async () => {
+  const vaultRoot = await makeTempDirectory("murph-core-boundary-lock");
+  await initializeVault({ vaultRoot });
+
+  const { withCanonicalWriteLockScope } = await import("../src/operations/canonical-write-lock.ts");
+  const scopeMock = vi.mocked(withCanonicalWriteLockScope);
+
+  scopeMock.mockClear();
+
+  await addMeal({
+    vaultRoot,
+    occurredAt: "2026-03-13T12:00:00.000Z",
+    note: "Lunch",
+  });
+
+  assert.equal(scopeMock.mock.calls.length, 0);
+
+  await addActivitySession({
+    vaultRoot,
+    draft: {
+      id: "evt_01JQ9R7WF97M1WAB2B4QF2Q1AE",
+      occurredAt: "2026-03-13T15:00:00.000Z",
+      title: "Explicit activity rewrite",
+      activityType: "strength-training",
+      durationMinutes: 30,
+      workout: {
+        exercises: [],
+      },
+    },
+  });
+  await addBodyMeasurement({
+    vaultRoot,
+    draft: {
+      id: "evt_01JQ9R7WF97M1WAB2B4QF2Q1AF",
+      occurredAt: "2026-03-13T16:00:00.000Z",
+      title: "Explicit measurement rewrite",
+      measurements: [
+        {
+          type: "weight",
+          value: 182.4,
+          unit: "lb",
+        },
+      ],
+    },
+  });
+
+  assert.equal(scopeMock.mock.calls.length, 2);
 });
 
 test("high-level core experiment mutation ports reject invalid experiment statuses consistently", async () => {

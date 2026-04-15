@@ -167,7 +167,7 @@ test("canonical write lock rejects concurrent acquisition with an active VaultEr
   );
 
   await assert.rejects(
-    () => acquireCanonicalWriteLock(vaultRoot),
+    () => acquireCanonicalWriteLock(vaultRoot, { timeoutMs: 0 }),
     (error: unknown) => {
       assert.equal((error as { name?: string }).name, "VaultError");
       const lockError = error as {
@@ -234,10 +234,10 @@ test("canonical write lock releases its queue slot after a failed acquisition", 
   const actualRuntimeState = await vi.importActual<typeof import("@murphai/runtime-state/node")>(
     "@murphai/runtime-state/node",
   );
-  const acquireDirectoryLock = vi
-    .fn()
-    .mockRejectedValueOnce(
-      new actualRuntimeState.DirectoryLockHeldError({
+  let allowSuccess = false;
+  const acquireDirectoryLock = vi.fn(async () => {
+    if (!allowSuccess) {
+      throw new actualRuntimeState.DirectoryLockHeldError({
         lockPath: "/tmp/mock-vault/.runtime/locks/canonical-write",
         metadataPath: "/tmp/mock-vault/.runtime/locks/canonical-write/owner.json",
         metadata: {
@@ -247,9 +247,10 @@ test("canonical write lock releases its queue slot after a failed acquisition", 
           host: "stale-host",
         },
         state: "active",
-      }),
-    )
-    .mockResolvedValueOnce({
+      });
+    }
+
+    return {
       metadata: {
         pid: process.pid,
         command: "vitest",
@@ -257,7 +258,8 @@ test("canonical write lock releases its queue slot after a failed acquisition", 
         host: "test-host",
       },
       release: async () => {},
-    });
+    };
+  });
 
   vi.doMock("@murphai/runtime-state/node", async () => ({
     ...actualRuntimeState,
@@ -268,7 +270,7 @@ test("canonical write lock releases its queue slot after a failed acquisition", 
   const vaultRoot = await makeScratchRoot("murph-core-lock-queue-failure-");
 
   await assert.rejects(
-    () => acquireCanonicalWriteLock(vaultRoot),
+    () => acquireCanonicalWriteLock(vaultRoot, { timeoutMs: 0 }),
     (error: unknown) => {
       assert.equal((error as { name?: string }).name, "VaultError");
       const lockError = error as { code?: string };
@@ -277,6 +279,7 @@ test("canonical write lock releases its queue slot after a failed acquisition", 
     },
   );
 
+  allowSuccess = true;
   let timeout: ReturnType<typeof setTimeout> | undefined;
   try {
     const secondLock = await Promise.race([
@@ -353,6 +356,8 @@ test("canonical write lock rejects stale held locks with a rich VaultError", asy
       return true;
     },
   );
+
+  assert.equal(acquireDirectoryLock.mock.calls.length, 1);
 });
 
 test("canonical write lock re-inspects EEXIST failures and either rethrows or reports stale locks", async () => {
@@ -422,9 +427,11 @@ test("canonical write lock re-inspects EEXIST failures and either rethrows or re
     },
   );
 
+  assert.equal(acquireDirectoryLock.mock.calls.length, 1);
+
   const unlockedVaultRoot = await makeScratchRoot("murph-core-lock-eexist-unlocked-");
   await assert.rejects(
-    () => acquireCanonicalWriteLock(unlockedVaultRoot),
+    () => acquireCanonicalWriteLock(unlockedVaultRoot, { timeoutMs: 0 }),
     (error: unknown) => {
       assert.equal((error as { code?: string }).code, "EEXIST");
       assert.equal((error as { message?: string }).message, "lock already exists");
