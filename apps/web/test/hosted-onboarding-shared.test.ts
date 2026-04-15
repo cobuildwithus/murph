@@ -8,6 +8,8 @@ import {
   withHostedOnboardingTransaction,
 } from "@/src/lib/hosted-onboarding/shared";
 
+const PRISMA_TRANSACTION_SCOPE_CONTEXT = Symbol.for("prisma.client.transaction.scope_context");
+
 describe("hosted onboarding shared helpers", () => {
   it("normalizes E.164-ish phone numbers", () => {
     expect(normalizePhoneNumber("+61 400-111-222")).toBe("+61400111222");
@@ -63,7 +65,21 @@ describe("hosted onboarding shared helpers", () => {
   });
 
   it("passes through an existing transaction client without nesting another transaction", async () => {
-    const tx = { kind: "existing-tx" };
+    const transaction = vi.fn(async () => "nested");
+    const tx = {
+      $transaction: transaction,
+      kind: "existing-tx",
+      [PRISMA_TRANSACTION_SCOPE_CONTEXT]: {
+        kind: "nested",
+        scopeId: "scope_123",
+        scopeState: {
+          stack: [
+            "scope_123",
+          ],
+        },
+        txId: "tx_123",
+      },
+    };
     const callback = vi.fn(async () => "ok");
 
     const result = await withHostedOnboardingTransaction(
@@ -72,6 +88,7 @@ describe("hosted onboarding shared helpers", () => {
     );
 
     expect(result).toBe("ok");
+    expect(transaction).not.toHaveBeenCalled();
     expect(callback).toHaveBeenCalledWith(tx);
   });
 });
