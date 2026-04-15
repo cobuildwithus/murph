@@ -1,6 +1,15 @@
 import { mkdirSync } from "node:fs";
+import { createRequire } from "node:module";
 import path from "node:path";
-import { DatabaseSync } from "node:sqlite";
+
+import { installSqliteExperimentalWarningFilter } from "./sqlite-warning-filter.js";
+
+type DatabaseSync = import("node:sqlite").DatabaseSync;
+
+installSqliteExperimentalWarningFilter();
+
+const require = createRequire(import.meta.url);
+const { DatabaseSync: NodeSqliteDatabaseSync } = require("node:sqlite") as typeof import("node:sqlite");
 
 export const DEFAULT_SQLITE_TIMEOUT_MS = 5_000;
 
@@ -34,7 +43,7 @@ export function openSqliteRuntimeDatabase(
     mkdirSync(path.dirname(databasePath), { recursive: true });
   }
 
-  const database = new DatabaseSync(databasePath, {
+  const database = new NodeSqliteDatabaseSync(databasePath, {
     readOnly,
     timeout: options.timeoutMs ?? DEFAULT_SQLITE_TIMEOUT_MS,
   });
