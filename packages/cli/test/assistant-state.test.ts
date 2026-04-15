@@ -884,7 +884,7 @@ test('resolveAssistantSession rebuilds torn indexes from session files and listA
   )
   await writeFile(
     path.join(statePaths.sessionsDirectory, 'broken-session.json'),
-    '{"schema":"murph.assistant-session.v3"',
+    '{"schema":"murph.assistant-session.unsupported"',
     'utf8',
   )
 
@@ -959,7 +959,7 @@ test('getAssistantSession rejects non-canonical assistant state payloads with ex
     path.join(statePaths.sessionsDirectory, `${sessionId}.json`),
     `${JSON.stringify(
       {
-        schema: 'murph.assistant-session.v3',
+        schema: 'murph.assistant-session.unsupported',
         sessionId,
         provider: 'codex-cli',
         providerSessionId: 'thread-legacy',
@@ -1013,9 +1013,9 @@ test('getAssistantSession rejects invalid provider payloads instead of coercing 
     path.join(statePaths.sessionsDirectory, `${sessionId}.json`),
     `${JSON.stringify(
       {
-        schema: 'murph.assistant-session.v3',
+        schema: 'murph.assistant-session.unsupported',
         sessionId,
-        provider: 'legacy-provider',
+        provider: 'unsupported-provider',
         providerSessionId: 'thread-legacy',
         providerOptions: {
           model: 'gpt-oss:20b',
