@@ -326,7 +326,6 @@ function buildHostedRuntimeStartDetails(
       ]),
       parserToolingConfigured: hasAnyHostedRuntimeConfigKey(runtime.forwardedEnv, [
         "FFMPEG_COMMAND",
-        "PDFTOTEXT_COMMAND",
         "WHISPER_COMMAND",
         "WHISPER_MODEL_PATH",
       ]),

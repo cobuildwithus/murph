@@ -133,7 +133,6 @@ describe("hosted runner user env policy", () => {
     expect(isHostedUserEnvKeyAllowed("OPENAI_API_KEY")).toBe(true);
 
     expect(isHostedUserEnvKeyAllowed("FFMPEG_COMMAND")).toBe(false);
-    expect(isHostedUserEnvKeyAllowed("PDFTOTEXT_COMMAND")).toBe(false);
     expect(isHostedUserEnvKeyAllowed("WHISPER_COMMAND")).toBe(false);
     expect(isHostedUserEnvKeyAllowed("WHISPER_MODEL_PATH")).toBe(false);
   });

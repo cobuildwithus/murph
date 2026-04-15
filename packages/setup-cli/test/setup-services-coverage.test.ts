@@ -232,12 +232,6 @@ function makeInboxBootstrapResult(
           reason: 'configured for tests',
           source: 'config',
         },
-        pdftotext: {
-          available: true,
-          command: '/usr/bin/pdftotext',
-          reason: 'configured for tests',
-          source: 'config',
-        },
         whisper: {
           available: true,
           command: '/usr/bin/whisper-cli',
@@ -2199,7 +2193,7 @@ test('createSetupServices reuses deterministic linux toolchain inputs and writes
   await mkdir(path.dirname(cliBinPath), { recursive: true })
   await writeFile(cliBinPath, '// cli stub\n', 'utf8')
 
-  for (const tool of ['ffmpeg', 'pdftotext', 'whisper-cli']) {
+  for (const tool of ['ffmpeg', 'whisper-cli']) {
     const toolPath = path.join(binDirectory, tool)
     await writeFile(toolPath, '#!/usr/bin/env bash\nexit 0\n', 'utf8')
     await chmod(toolPath, 0o755)
@@ -2373,7 +2367,7 @@ test('createSetupServices saves canonical wearable preferences, including explic
   await mkdir(path.dirname(cliBinPath), { recursive: true })
   await writeFile(cliBinPath, '// cli stub\n', 'utf8')
 
-  for (const tool of ['ffmpeg', 'pdftotext', 'whisper-cli']) {
+  for (const tool of ['ffmpeg', 'whisper-cli']) {
     const toolPath = path.join(binDirectory, tool)
     await writeFile(toolPath, '#!/usr/bin/env bash\nexit 0\n', 'utf8')
     await chmod(toolPath, 0o755)
@@ -2646,13 +2640,6 @@ test('createSetupServices on linux records apt provisioning failures and saves a
             stdout: '',
           }
         }
-        if (input.args.includes('poppler-utils')) {
-          return {
-            exitCode: 1,
-            stderr: '',
-            stdout: 'pdftotext install failed',
-          }
-        }
         if (input.args.includes('whisper-cpp')) {
           return {
             exitCode: 0,
@@ -2694,7 +2681,6 @@ test('createSetupServices on linux records apt provisioning failures and saves a
     assert.equal(result.platform, 'linux')
     assert.equal(result.vault, vaultPath)
     assert.equal(result.steps.find((step) => step.id === 'ffmpeg')?.status, 'skipped')
-    assert.equal(result.steps.find((step) => step.id === 'pdftotext')?.status, 'skipped')
     assert.equal(result.steps.find((step) => step.id === 'whisper-cpp')?.status, 'skipped')
     assert.equal(
       result.steps.find((step) => step.id === 'assistant-defaults')?.status,
@@ -2705,20 +2691,18 @@ test('createSetupServices on linux records apt provisioning failures and saves a
       'completed',
     )
     assert.match(result.notes.join('\n'), /apt update denied/u)
-    assert.match(result.notes.join('\n'), /pdftotext install failed/u)
     assert.match(
       result.notes.join('\n'),
       /Export OPENROUTER_API_KEY before using the saved OpenAI-compatible assistant backend\./u,
     )
     assert.equal(result.tools.ffmpegCommand, null)
-    assert.equal(result.tools.pdftotextCommand, null)
     assert.equal(result.tools.whisperCommand, null)
     assert.equal(
       result.bootstrap?.setup.configPath,
       path.join('~', '.runtime', 'toolchain.json'),
     )
     assert.ok(runCalls.some((call) => call.includes(' update')))
-    assert.ok(runCalls.some((call) => call.includes(' install -y poppler-utils')))
+    assert.ok(runCalls.some((call) => call.includes(' install -y whisper-cpp')))
 
     toolchainMockState.unavailableCommands = new Set([
       'apt-get',
@@ -2832,12 +2816,6 @@ test('createSetupServices on linux covers root apt install success paths', async
             return { exitCode: 0, stderr: '', stdout: '' }
           }
 
-          if (input.args.includes('install') && input.args.includes('poppler-utils')) {
-            await writeFile(path.join(rootBinDirectory, 'pdftotext'), '#!/usr/bin/env bash\nexit 0\n', 'utf8')
-            await chmod(path.join(rootBinDirectory, 'pdftotext'), 0o755)
-            return { exitCode: 0, stderr: '', stdout: '' }
-          }
-
           if (input.args.includes('install') && input.args.includes('whisper-cpp')) {
             await writeFile(path.join(rootBinDirectory, 'whisper-cli'), '#!/usr/bin/env bash\nexit 0\n', 'utf8')
             await chmod(path.join(rootBinDirectory, 'whisper-cli'), 0o755)
@@ -2876,15 +2854,10 @@ test('createSetupServices on linux covers root apt install success paths', async
         'completed',
       )
       assert.equal(
-        rootResult.steps.find((step) => step.id === 'pdftotext')?.status,
-        'completed',
-      )
-      assert.equal(
         rootResult.steps.find((step) => step.id === 'whisper-cpp')?.status,
         'completed',
       )
       assert.match(rootResult.tools.ffmpegCommand ?? '', /ffmpeg$/u)
-      assert.match(rootResult.tools.pdftotextCommand ?? '', /pdftotext$/u)
       assert.match(rootResult.tools.whisperCommand ?? '', /whisper-cli$/u)
     } finally {
       getuidMock?.mockRestore()

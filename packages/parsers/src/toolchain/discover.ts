@@ -2,7 +2,6 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 
 import type { FfmpegToolOptions } from "../adapters/ffmpeg.js";
-import { createPdfToTextProvider } from "../adapters/pdftotext.js";
 import { createTextFileProvider } from "../adapters/text-file.js";
 import { createWhisperCppProvider } from "../adapters/whisper-cpp.js";
 import type { ParserRegistry } from "../registry/registry.js";
@@ -67,13 +66,6 @@ async function discoverParserToolchainFromContext(input: {
         availableReason: "ffmpeg CLI available.",
         missingReason: "ffmpeg CLI not found.",
       }),
-      pdftotext: await discoverCommandTool({
-        config: input.config?.tools.pdftotext,
-        envValue: readConfiguredEnvValue(process.env, ["PDFTOTEXT_COMMAND"]),
-        fallbackCommands: ["pdftotext"],
-        availableReason: "pdftotext CLI available.",
-        missingReason: "pdftotext CLI not found.",
-      }),
       whisper: await discoverWhisperTool(input.config, input.vaultRoot),
     },
   };
@@ -108,11 +100,6 @@ export async function createConfiguredParserRegistry(input: {
         modelPath: whisperModelResolution.modelPath
           ? resolveModelPathAbsolute(input.vaultRoot, whisperModelResolution)
           : undefined,
-      }),
-      createPdfToTextProvider({
-        commandCandidates: toCommandCandidates(
-          context.config?.tools.pdftotext?.command,
-        ),
       }),
     ]),
     ffmpeg: ffmpegOptionsFromDoctor(doctor),

@@ -13,7 +13,6 @@ export const BREW_INSTALL_COMMAND =
 
 export type FormulaCommandKey =
   | 'ffmpegCommand'
-  | 'pdftotextCommand'
   | 'whisperCommand'
 
 export interface MacosToolRequirementSpec {
@@ -84,26 +83,6 @@ export function buildBaseFormulaSpecs(): ToolRequirementSpec[] {
         missingPlanDetail:
           'Would install ffmpeg through Homebrew for audio/video normalization.',
         title: 'ffmpeg',
-      },
-    },
-    {
-      commandCandidates: ['pdftotext'],
-      id: 'pdftotext',
-      key: 'pdftotextCommand',
-      linux: {
-        installPackages: ['poppler-utils'],
-        missingPlanDetail:
-          'Would reuse pdftotext from PATH when available, or install poppler-utils via apt-get for PDF parsing.',
-        missingStepDetail:
-          'pdftotext was not found on PATH and Murph could not install it automatically. Install poppler-utils manually or rerun setup with apt/sudo access.',
-        title: 'pdftotext',
-      },
-      macos: {
-        formula: 'poppler',
-        installDetail: 'Installed poppler so pdftotext is available for PDF parsing.',
-        missingPlanDetail:
-          'Would install poppler through Homebrew so pdftotext is available for PDF parsing.',
-        title: 'pdftotext',
       },
     },
     {

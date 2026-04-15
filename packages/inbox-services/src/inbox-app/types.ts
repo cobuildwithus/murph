@@ -10,6 +10,7 @@ import type {
   PollConnector as SharedPollConnector,
 } from '@murphai/inboxd'
 import type { ConnectorRestartPolicy } from '@murphai/inboxd/runtime'
+import type { EventSource, MealNutrition } from '@murphai/contracts'
 import type { RuntimePaths } from '@murphai/runtime-state/node'
 import { z } from 'zod'
 import type { AgentmailApiClient } from '@murphai/operator-config/agentmail-runtime'
@@ -283,7 +284,6 @@ export interface ParserDoctorRuntimeReport {
   discoveredAt: string
   tools: {
     ffmpeg: ParserToolRuntimeStatus
-    pdftotext: ParserToolRuntimeStatus
     whisper: ParserToolRuntimeStatus & {
       modelPath: string | null
     }
@@ -359,7 +359,9 @@ export interface CoreRuntimeModule {
     note?: string
     photoPath?: string
     audioPath?: string
-    source?: string
+    source?: EventSource
+    ingredients?: string[]
+    nutrition?: MealNutrition
   }): Promise<{
     mealId: string
     event: {
@@ -543,7 +545,6 @@ export interface InitInput extends CommandContext {
 
 export interface SetupInput extends CommandContext {
   ffmpegCommand?: string
-  pdftotextCommand?: string
   whisperCommand?: string
   whisperModelPath?: string
 }
@@ -584,6 +585,11 @@ export interface SearchInput extends ListInput {
 
 export interface PromoteInput extends CommandContext {
   captureId: string
+  note?: string
+  occurredAt?: string
+  source?: EventSource
+  ingredients?: string[]
+  nutrition?: MealNutrition
 }
 
 export interface InboxServices {

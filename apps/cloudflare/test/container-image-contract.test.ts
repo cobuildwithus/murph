@@ -319,7 +319,6 @@ describe("hosted runner container image contract", () => {
     expect(dockerfile).not.toContain("runner-bundle-builder");
     expect(dockerfile).not.toContain("pnpm install --frozen-lockfile");
     expect(dockerfile).toContain("PATH=/app/node_modules/.bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin");
-    expect(dockerfile).toContain("PDFTOTEXT_COMMAND=/usr/bin/pdftotext");
     expect(dockerfile).toContain("WHISPER_COMMAND=/usr/local/bin/whisper-cli");
     expect(dockerfile).toContain(
       "WHISPER_MODEL_PATH=/home/runner/.murph/models/whisper/${WHISPER_MODEL_FILE}",

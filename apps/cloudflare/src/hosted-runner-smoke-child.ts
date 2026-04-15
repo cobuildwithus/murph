@@ -47,10 +47,8 @@ async function main(): Promise<void> {
         vaultRoot: restored.vaultRoot,
       },
       async () => runSmokeChecks({
-        expectedPdfText: input.expectedPdfText,
         expectedTranscriptSnippet: input.expectedTranscriptSnippet,
         expectedVaultId: input.expectedVaultId,
-        pdfRelativePath: input.pdfRelativePath,
         vaultRoot: restored.vaultRoot,
         wavRelativePath: input.wavRelativePath,
         workspaceRoot,
@@ -64,10 +62,8 @@ async function main(): Promise<void> {
 }
 
 async function runSmokeChecks(input: {
-  expectedPdfText: string;
   expectedTranscriptSnippet: string | null;
   expectedVaultId: string;
-  pdfRelativePath: string;
   vaultRoot: string;
   wavRelativePath: string;
   workspaceRoot: string;
@@ -106,19 +102,11 @@ async function runSmokeChecks(input: {
     );
   }
 
-  const pdfPath = path.join(input.vaultRoot, input.pdfRelativePath);
   const wavPath = path.join(input.vaultRoot, input.wavRelativePath);
-  await assertPathExists(pdfPath);
   await assertPathExists(wavPath);
 
   const parserScratchRoot = path.join(input.workspaceRoot, "parser-scratch");
   const parserRegistry = await createSmokeParserRegistry();
-  const pdfParse = await parsePdf({
-    expectedText: input.expectedPdfText,
-    pdfPath,
-    registry: parserRegistry,
-    scratchRoot: path.join(parserScratchRoot, "pdf"),
-  });
   const wavParse = await transcribeWave({
     expectedSnippet: input.expectedTranscriptSnippet,
     registry: parserRegistry,
@@ -134,13 +122,10 @@ async function runSmokeChecks(input: {
 
   return {
     childCwd: process.cwd(),
-    expectedPdfText: input.expectedPdfText,
     murphBin,
     normalizedTranscript: normalizedParse.text,
     normalizedTranscriptProviderId: normalizedParse.providerId,
     operatorHomeRoot: process.env.HOME ?? "",
-    pdfProviderId: pdfParse.providerId,
-    pdfText: pdfParse.text,
     reportedVaultId,
     schema: HOSTED_RUNNER_SMOKE_RESULT_SCHEMA,
     vaultCliBin,
@@ -149,35 +134,6 @@ async function runSmokeChecks(input: {
     wavTranscript: wavParse.text,
     wavTranscriptProviderId: wavParse.providerId,
   };
-}
-
-async function parsePdf(input: {
-  expectedText: string;
-  pdfPath: string;
-  registry: ParserRegistry;
-  scratchRoot: string;
-}): Promise<SmokeParseResult> {
-  const result = await parseSmokeAttachment({
-    artifact: createSmokeArtifact({
-      absolutePath: input.pdfPath,
-      attachmentId: "att_hosted_runner_pdf",
-      captureId: "cap_hosted_runner_pdf",
-      kind: "document",
-      mime: "application/pdf",
-      storedPath: "raw/smoke/hosted-runner.pdf",
-    }),
-    expectedProviderId: "pdftotext",
-    registry: input.registry,
-    scratchRoot: input.scratchRoot,
-  });
-
-  if (!result.text.includes(input.expectedText)) {
-    throw new Error(
-      `Hosted runner smoke PDF text did not include the expected fixture text: ${input.expectedText}`,
-    );
-  }
-
-  return result;
 }
 
 async function transcribeWave(input: {

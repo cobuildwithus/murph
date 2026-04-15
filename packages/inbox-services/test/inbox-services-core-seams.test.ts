@@ -631,12 +631,6 @@ test('parser helpers build service context, summarize drains, and enforce runtim
       reason: 'found',
       source: 'system' as const,
     },
-    pdftotext: {
-      available: false,
-      command: '/usr/local/bin/pdftotext',
-      reason: 'missing dependency',
-      source: 'config' as const,
-    },
     whisper: {
       available: true,
       command: '/Users/example/bin/whisper',
@@ -664,12 +658,6 @@ test('parser helpers build service context, summarize drains, and enforce runtim
           ffmpeg: {
             available: true,
             command: 'ffmpeg',
-            reason: 'ok',
-            source: 'system',
-          },
-          pdftotext: {
-            available: true,
-            command: 'pdftotext',
             reason: 'ok',
             source: 'system',
           },
@@ -719,24 +707,18 @@ test('parser helpers build service context, summarize drains, and enforce runtim
         parserToolchain: {
           configPath: '.runtime/operations/parsers/toolchain.json',
           discoveredAt: '2026-04-08T00:00:00.000Z',
-          tools: {
-            ffmpeg: {
-              available: true,
-              command: 'ffmpeg',
-              reason: 'ok',
-              source: 'system',
-            },
-            pdftotext: {
-              available: false,
-              command: 'pdftotext',
-              reason: 'not configured',
-              source: 'config',
-            },
-            whisper: {
-              available: true,
-              command: 'whisper',
-              modelPath: null,
-              reason: 'ok',
+        tools: {
+          ffmpeg: {
+            available: true,
+            command: 'ffmpeg',
+            reason: 'ok',
+            source: 'system',
+          },
+          whisper: {
+            available: true,
+            command: 'whisper',
+            modelPath: null,
+            reason: 'ok',
               source: 'system',
             },
           },
@@ -766,13 +748,6 @@ test('parser helpers build service context, summarize drains, and enforce runtim
           reason: 'found',
           source: 'system',
         },
-        pdftotext: {
-          available: false,
-          command: '/usr/local/bin/pdftotext',
-          modelPath: undefined,
-          reason: 'missing dependency',
-          source: 'config',
-        },
         whisper: {
           available: true,
           command: '<REDACTED_PATH>',
@@ -793,15 +768,6 @@ test('parser helpers build service context, summarize drains, and enforce runtim
       message: 'found',
       name: 'parser-ffmpeg',
       status: 'pass',
-    },
-    {
-      details: {
-        command: '/usr/local/bin/pdftotext',
-        source: 'config',
-      },
-      message: 'missing dependency',
-      name: 'parser-pdftotext',
-      status: 'warn',
     },
     {
       details: {

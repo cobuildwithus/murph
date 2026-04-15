@@ -238,7 +238,6 @@ export function createSetupServices(
 
       bootstrap = await inboxServices.bootstrap({
         ffmpegCommand: tools.ffmpegCommand ?? undefined,
-        pdftotextCommand: tools.pdftotextCommand ?? undefined,
         rebuild: input.rebuild,
         requestId,
         strict,
@@ -351,7 +350,6 @@ export function createSetupServices(
       toolchainRoot: redactHomePath(toolchainRoot, homeDirectory),
       tools: {
         ffmpegCommand: redactNullableHomePath(tools.ffmpegCommand, homeDirectory),
-        pdftotextCommand: redactNullableHomePath(tools.pdftotextCommand, homeDirectory),
         whisperCommand: redactNullableHomePath(tools.whisperCommand, homeDirectory),
         whisperModelPath: redactHomePath(tools.whisperModelPath, homeDirectory),
       },

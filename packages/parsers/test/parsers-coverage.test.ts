@@ -7,7 +7,6 @@ import { initializeVault } from "@murphai/core";
 import { afterEach, test } from "vitest";
 
 import * as parsers from "../src/index.js";
-import { createPdfToTextProvider } from "../src/adapters/pdftotext.js";
 import { prepareAudioInput, resolveFfmpegCommand } from "../src/adapters/ffmpeg.js";
 import { createTextFileProvider } from "../src/adapters/text-file.js";
 import type { ParserArtifactRef } from "../src/contracts/artifact.js";
@@ -46,7 +45,6 @@ import {
 
 const envSnapshot = {
   FFMPEG_COMMAND: process.env.FFMPEG_COMMAND,
-  PDFTOTEXT_COMMAND: process.env.PDFTOTEXT_COMMAND,
   WHISPER_COMMAND: process.env.WHISPER_COMMAND,
   WHISPER_MODEL_PATH: process.env.WHISPER_MODEL_PATH,
   PATH: process.env.PATH,
@@ -54,7 +52,6 @@ const envSnapshot = {
 
 afterEach(() => {
   process.env.FFMPEG_COMMAND = envSnapshot.FFMPEG_COMMAND;
-  process.env.PDFTOTEXT_COMMAND = envSnapshot.PDFTOTEXT_COMMAND;
   process.env.WHISPER_COMMAND = envSnapshot.WHISPER_COMMAND;
   process.env.WHISPER_MODEL_PATH = envSnapshot.WHISPER_MODEL_PATH;
   process.env.PATH = envSnapshot.PATH;
@@ -131,13 +128,13 @@ test("parser barrel exports the default registry and key helpers", () => {
   const registry = parsers.createDefaultParserRegistry();
   assert.deepEqual(
     registry.providers.map((provider) => provider.id),
-    ["text-file", "whisper.cpp", "pdftotext"],
+    ["text-file", "whisper.cpp"],
   );
   assert.equal(parsers.createParserRegistry, createParserRegistry);
   assert.equal(parsers.createTextFileProvider, createTextFileProvider);
 });
 
-test("text-file and pdftotext providers cover discovery, support, and run edge cases", async () => {
+test("text-file provider covers discovery, support, and run edge cases", async () => {
   const directory = await makeTempDirectory("murph-parsers-provider");
   const plainTextPath = await writeFile(directory, "notes.txt", "alpha\nbeta\n");
   const markdownPath = await writeFile(directory, "notes.md", "# heading\n\n- item");
@@ -179,51 +176,6 @@ test("text-file and pdftotext providers cover discovery, support, and run edge c
     scratchDirectory: directory,
   });
   assert.equal(markdownResult.markdown, "# heading\n\n- item");
-
-  const emptyPdfTool = await writeExecutable(
-    directory,
-    "fake-pdftotext-empty",
-    "#!/usr/bin/env node\nprocess.stdout.write('   ');\n",
-  );
-  const pdfPath = await writeFile(directory, "scan", "pdf-placeholder");
-  const pdfProvider = createPdfToTextProvider({
-    commandCandidates: [emptyPdfTool],
-    extraArgs: ["-nopgbrk"],
-  });
-  assert.equal(
-    pdfProvider.supports({
-      artifact: buildArtifact({
-        absolutePath: pdfPath,
-        fileName: null,
-        mime: "application/pdf",
-      }),
-      inputPath: pdfPath,
-      intent: "attachment_text",
-      scratchDirectory: directory,
-    }),
-    true,
-  );
-  await assert.rejects(
-    pdfProvider.run({
-      artifact: buildArtifact({
-        absolutePath: pdfPath,
-        fileName: "scan.pdf",
-        mime: "application/pdf",
-      }),
-      inputPath: pdfPath,
-      intent: "attachment_text",
-      scratchDirectory: directory,
-    }),
-    /did not produce extractable text/u,
-  );
-  process.env.PDFTOTEXT_COMMAND = "";
-  process.env.PATH = "";
-  assert.deepEqual(await createPdfToTextProvider({
-    commandCandidates: ["definitely-not-a-real-pdftotext"],
-  }).discover(), {
-    available: false,
-    reason: "pdftotext CLI not found.",
-  });
 });
 
 test("ffmpeg helpers cover env lookup, system fallback, passthrough, and video failure paths", async () => {
@@ -515,11 +467,6 @@ test("parser toolchain config and discovery cover null reads, clearing updates, 
     process.platform === "win32" ? "ffmpeg.cmd" : "ffmpeg",
     process.platform === "win32" ? "@echo off\r\nexit /b 0\r\n" : "#!/usr/bin/env node\nprocess.exit(0);\n",
   );
-  const pdftotextPath = await writeExecutable(
-    toolDirectory,
-    process.platform === "win32" ? "pdftotext.cmd" : "pdftotext",
-    process.platform === "win32" ? "@echo off\r\nexit /b 0\r\n" : "#!/usr/bin/env node\nprocess.exit(0);\n",
-  );
   const whisperPath = await writeExecutable(
     toolDirectory,
     process.platform === "win32" ? "whisper-cli.cmd" : "whisper-cli",
@@ -554,7 +501,6 @@ test("parser toolchain config and discovery cover null reads, clearing updates, 
   });
 
   process.env.FFMPEG_COMMAND = ffmpegPath;
-  process.env.PDFTOTEXT_COMMAND = "";
   process.env.WHISPER_COMMAND = whisperPath;
   process.env.WHISPER_MODEL_PATH = modelPath;
   process.env.PATH = `${toolDirectory}${path.delimiter}${envSnapshot.PATH ?? ""}`;
@@ -563,8 +509,6 @@ test("parser toolchain config and discovery cover null reads, clearing updates, 
   assert.equal(doctor.configPath, getParserToolchainPaths(vaultRoot).configPath);
   assert.equal(doctor.tools.ffmpeg.source, "env");
   assert.equal(doctor.tools.ffmpeg.command, ffmpegPath);
-  assert.equal(doctor.tools.pdftotext.source, "system");
-  assert.equal(doctor.tools.pdftotext.command, pdftotextPath);
   assert.equal(doctor.tools.whisper.source, "config");
   assert.equal(doctor.tools.whisper.modelPath, modelPath);
   assert.deepEqual(ffmpegOptionsFromDoctor(doctor), {
@@ -573,7 +517,6 @@ test("parser toolchain config and discovery cover null reads, clearing updates, 
   });
 
   delete process.env.FFMPEG_COMMAND;
-  delete process.env.PDFTOTEXT_COMMAND;
   delete process.env.WHISPER_COMMAND;
   delete process.env.WHISPER_MODEL_PATH;
   process.env.PATH = envSnapshot.PATH;

@@ -122,7 +122,6 @@ Optional non-secret provider/toolchain variables to expose through the worker an
 - `TELEGRAM_API_BASE_URL`
 - `TELEGRAM_FILE_BASE_URL`
 - `FFMPEG_COMMAND`
-- `PDFTOTEXT_COMMAND`
 - `WHISPER_MODEL_PATH`
 - `WHISPER_COMMAND`
 
@@ -134,7 +133,7 @@ For Venice as the platform default hosted assistant, set these GitHub environmen
 
 You do not need to set `HOSTED_ASSISTANT_API_KEY_ENV` for that path because the Venice preset resolves it to `VENICE_API_KEY`.
 
-The default container image already installs `ffmpeg`, `pdftotext`, a pinned `whisper.cpp` `whisper-cli`, and the default `base.en` model, and it sets `FFMPEG_COMMAND`, `PDFTOTEXT_COMMAND`, `WHISPER_COMMAND`, and `WHISPER_MODEL_PATH` inside the image. `WHISPER_MODEL_PATH` now follows the selected `WHISPER_MODEL_FILE` build arg instead of always pointing at the base model path. The app-owned assembly step writes the built runtime bundle into `apps/cloudflare/.deploy/runner-bundle/`, installs the real `@murphai/murph` package there so the image gets the standard `vault-cli` bin on `PATH`, and leaves `wrangler.generated.jsonc` plus `worker-secrets.json` outside the image as deploy-only inputs. Only set those vars in Worker config when you want to override the baked defaults.
+The default container image already installs `ffmpeg`, a pinned `whisper.cpp` `whisper-cli`, and the default `base.en` model, and it sets `FFMPEG_COMMAND`, `WHISPER_COMMAND`, and `WHISPER_MODEL_PATH` inside the image. `WHISPER_MODEL_PATH` now follows the selected `WHISPER_MODEL_FILE` build arg instead of always pointing at the base model path. The app-owned assembly step writes the built runtime bundle into `apps/cloudflare/.deploy/runner-bundle/`, installs the real `@murphai/murph` package there so the image gets the standard `vault-cli` bin on `PATH`, and leaves `wrangler.generated.jsonc` plus `worker-secrets.json` outside the image as deploy-only inputs. Only set those vars in Worker config when you want to override the baked defaults.
 
 ### Required environment secrets
 

@@ -22,7 +22,6 @@ import {
   createConfiguredParserRegistry,
   createInboxParserService,
   createParserRegistry,
-  createPdfToTextProvider,
   createTextFileProvider,
   createWhisperCppProvider,
   discoverParserToolchain,
@@ -428,78 +427,6 @@ test("parser toolchain config rejects relative whisper model paths that escape t
 
   await fs.rm(vaultRoot, { recursive: true, force: true });
   await fs.rm(outsideRoot, { recursive: true, force: true });
-});
-
-test("pdftotext provider discovers explicit executables and parses PDF text output", async () => {
-  const directory = await makeTempDirectory("murph-parser-pdftotext");
-  const executablePath = await writeExecutableFile(
-    directory,
-    "fake-pdftotext",
-    "#!/usr/bin/env node\nprocess.stdout.write('Page one\\fPage two\\n');\n",
-  );
-  const inputPath = await writeExternalFile(directory, "scan.pdf", "pdf-placeholder");
-  const provider = createPdfToTextProvider({
-    commandCandidates: [executablePath],
-  });
-
-  assert.deepEqual(await provider.discover(), {
-    available: true,
-    reason: "pdftotext CLI available.",
-    executablePath,
-  });
-  assert.equal(
-    provider.supports({
-      intent: "attachment_text",
-      artifact: {
-        captureId: "cap_pdf_support",
-        attachmentId: "att_pdf_support",
-        kind: "document",
-        fileName: "scan.pdf",
-        mime: "application/pdf",
-        storedPath: "raw/inbox/example/scan.pdf",
-        absolutePath: inputPath,
-      },
-      inputPath,
-      scratchDirectory: directory,
-    }),
-    true,
-  );
-  assert.equal(
-    provider.supports({
-      intent: "attachment_text",
-      artifact: {
-        captureId: "cap_text_support",
-        attachmentId: "att_text_support",
-        kind: "document",
-        fileName: "note.txt",
-        mime: "text/plain",
-        storedPath: "raw/inbox/example/note.txt",
-        absolutePath: inputPath,
-      },
-      inputPath,
-      scratchDirectory: directory,
-    }),
-    false,
-  );
-
-  const result = await provider.run({
-    intent: "attachment_text",
-    artifact: {
-      captureId: "cap_pdf_run",
-      attachmentId: "att_pdf_run",
-      kind: "document",
-      fileName: "scan.pdf",
-      mime: "application/pdf",
-      storedPath: "raw/inbox/example/scan.pdf",
-      absolutePath: inputPath,
-    },
-    inputPath,
-    scratchDirectory: directory,
-  });
-
-  assert.equal(result.text, "Page one\fPage two");
-  assert.equal(result.metadata?.pageCount, 2);
-  assert.match(result.markdown ?? "", /Page one/u);
 });
 
 test("whisper.cpp provider reports missing model paths and parses transcript artifacts", async () => {

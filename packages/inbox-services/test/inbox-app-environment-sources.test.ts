@@ -232,12 +232,6 @@ function createParserDoctor() {
         reason: 'configured',
         source: 'config' as const,
       },
-      pdftotext: {
-        available: true,
-        command: '/usr/bin/pdftotext',
-        reason: 'configured',
-        source: 'config' as const,
-      },
       whisper: {
         available: true,
         command: '/usr/bin/whisper',

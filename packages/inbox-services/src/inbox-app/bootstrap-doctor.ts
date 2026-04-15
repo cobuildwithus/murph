@@ -83,7 +83,6 @@ export function createInboxBootstrapDoctorOps(
     vault: string
     requestId: string | null
     ffmpegCommand?: string
-    pdftotextCommand?: string
     whisperCommand?: string
     whisperModelPath?: string
   }) => {
@@ -100,13 +99,6 @@ export function createInboxBootstrapDoctorOps(
           ? {
               ffmpeg: {
                 command: input.ffmpegCommand,
-              },
-            }
-          : {}),
-        ...(input.pdftotextCommand
-          ? {
-              pdftotext: {
-                command: input.pdftotextCommand,
               },
             }
           : {}),

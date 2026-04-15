@@ -2,22 +2,17 @@ export const HOSTED_RUNNER_SMOKE_RESULT_SCHEMA = "murph.cloudflare-hosted-runner
 
 export interface HostedRunnerSmokeInput {
   bundle: string;
-  expectedPdfText: string;
   expectedTranscriptSnippet: string | null;
   expectedVaultId: string;
-  pdfRelativePath: string;
   wavRelativePath: string;
 }
 
 export interface HostedRunnerSmokeResult {
   childCwd: string;
-  expectedPdfText: string;
   murphBin: string;
   normalizedTranscript: string;
   normalizedTranscriptProviderId: string;
   operatorHomeRoot: string;
-  pdfProviderId: string;
-  pdfText: string;
   reportedVaultId: string;
   schema: typeof HOSTED_RUNNER_SMOKE_RESULT_SCHEMA;
   vaultCliBin: string;
@@ -32,10 +27,6 @@ export function parseHostedRunnerSmokeInput(value: unknown): HostedRunnerSmokeIn
 
   return {
     bundle: readNonEmptyString(record.bundle, "Hosted runner smoke input.bundle"),
-    expectedPdfText: readNonEmptyString(
-      record.expectedPdfText,
-      "Hosted runner smoke input.expectedPdfText",
-    ),
     expectedTranscriptSnippet: readNullableString(
       record.expectedTranscriptSnippet,
       "Hosted runner smoke input.expectedTranscriptSnippet",
@@ -43,10 +34,6 @@ export function parseHostedRunnerSmokeInput(value: unknown): HostedRunnerSmokeIn
     expectedVaultId: readNonEmptyString(
       record.expectedVaultId,
       "Hosted runner smoke input.expectedVaultId",
-    ),
-    pdfRelativePath: readNonEmptyString(
-      record.pdfRelativePath,
-      "Hosted runner smoke input.pdfRelativePath",
     ),
     wavRelativePath: readNonEmptyString(
       record.wavRelativePath,
@@ -66,10 +53,6 @@ export function parseHostedRunnerSmokeResult(value: unknown): HostedRunnerSmokeR
 
   return {
     childCwd: readNonEmptyString(record.childCwd, "Hosted runner smoke result.childCwd"),
-    expectedPdfText: readNonEmptyString(
-      record.expectedPdfText,
-      "Hosted runner smoke result.expectedPdfText",
-    ),
     murphBin: readNonEmptyString(record.murphBin, "Hosted runner smoke result.murphBin"),
     normalizedTranscript: readNonEmptyString(
       record.normalizedTranscript,
@@ -83,11 +66,6 @@ export function parseHostedRunnerSmokeResult(value: unknown): HostedRunnerSmokeR
       record.operatorHomeRoot,
       "Hosted runner smoke result.operatorHomeRoot",
     ),
-    pdfProviderId: readNonEmptyString(
-      record.pdfProviderId,
-      "Hosted runner smoke result.pdfProviderId",
-    ),
-    pdfText: readNonEmptyString(record.pdfText, "Hosted runner smoke result.pdfText"),
     reportedVaultId: readNonEmptyString(
       record.reportedVaultId,
       "Hosted runner smoke result.reportedVaultId",

@@ -106,10 +106,10 @@ describe("readConfiguredEnvValue", () => {
       readConfiguredEnvValue(
         {
           PARSER_BIN: "   ",
-          PARSER_PATH: " /usr/local/bin/pdftotext ",
+          PARSER_PATH: " /usr/local/bin/parser-cli ",
         },
         ["PARSER_BIN", "PARSER_PATH"],
       ),
-    ).toBe("/usr/local/bin/pdftotext");
+    ).toBe("/usr/local/bin/parser-cli");
   });
 });

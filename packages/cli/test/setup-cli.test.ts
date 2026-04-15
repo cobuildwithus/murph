@@ -748,12 +748,6 @@ function makeBootstrapResult(vault: string, options?: {
           reason: 'ffmpeg CLI available.',
           source: 'config' as const,
         },
-        pdftotext: {
-          available: true,
-          command: '/usr/local/bin/pdftotext',
-          reason: 'pdftotext CLI available.',
-          source: 'config' as const,
-        },
         whisper: {
           available: true,
           command: options?.whisperCommand ?? '/usr/local/bin/whisper-cli',
@@ -779,12 +773,6 @@ function makeBootstrapResult(vault: string, options?: {
                 available: true,
                 command: '/usr/local/bin/ffmpeg',
                 reason: 'ffmpeg CLI available.',
-                source: 'config' as const,
-              },
-              pdftotext: {
-                available: true,
-                command: '/usr/local/bin/pdftotext',
-                reason: 'pdftotext CLI available.',
                 source: 'config' as const,
               },
               whisper: {
@@ -834,7 +822,6 @@ function makeSetupResult(
     toolchainRoot: '~/.murph/toolchain',
     tools: {
       ffmpegCommand: '/usr/local/bin/ffmpeg',
-      pdftotextCommand: '/usr/local/bin/pdftotext',
       whisperCommand: '/usr/local/bin/whisper-cli',
       whisperModelPath: '~/.murph/toolchain/models/whisper/ggml-base.en.bin',
     },
@@ -2157,15 +2144,13 @@ test.sequential('setup service configures Telegram and enables assistant auto-re
   const homebrewBin = path.join(tempRoot, 'brew', 'bin')
   const formulaPrefixes = {
     ffmpeg: path.join(tempRoot, 'Cellar', 'ffmpeg'),
-    poppler: path.join(tempRoot, 'Cellar', 'poppler'),
     'whisper-cpp': path.join(tempRoot, 'Cellar', 'whisper-cpp'),
   }
   const brewCommand = path.join(homebrewBin, 'brew')
   const ffmpegCommand = path.join(formulaPrefixes.ffmpeg, 'bin', 'ffmpeg')
-  const pdftotextCommand = path.join(formulaPrefixes.poppler, 'bin', 'pdftotext')
   const whisperCommand = path.join(formulaPrefixes['whisper-cpp'], 'bin', 'whisper-cli')
   const cliBinPath = path.join(tempRoot, 'packages', 'cli', 'dist', 'bin.js')
-  const installedFormulas = new Set(['ffmpeg', 'poppler', 'whisper-cpp'])
+  const installedFormulas = new Set(['ffmpeg', 'whisper-cpp'])
   const sourceAddCalls: Array<Record<string, unknown>> = []
   const doctorCalls: Array<Record<string, unknown>> = []
 
@@ -2173,7 +2158,6 @@ test.sequential('setup service configures Telegram and enables assistant auto-re
   await writeFile(path.join(vaultRoot, 'vault.json'), '{}\n', 'utf8')
   await writeExecutable(brewCommand)
   await writeExecutable(ffmpegCommand)
-  await writeExecutable(pdftotextCommand)
   await writeExecutable(whisperCommand)
 
   const services = createSetupServices({
@@ -2330,21 +2314,18 @@ test.sequential('setup service keeps Telegram configured but disables auto-reply
   const homebrewBin = path.join(tempRoot, 'brew', 'bin')
   const formulaPrefixes = {
     ffmpeg: path.join(tempRoot, 'Cellar', 'ffmpeg'),
-    poppler: path.join(tempRoot, 'Cellar', 'poppler'),
     'whisper-cpp': path.join(tempRoot, 'Cellar', 'whisper-cpp'),
   }
   const brewCommand = path.join(homebrewBin, 'brew')
   const ffmpegCommand = path.join(formulaPrefixes.ffmpeg, 'bin', 'ffmpeg')
-  const pdftotextCommand = path.join(formulaPrefixes.poppler, 'bin', 'pdftotext')
   const whisperCommand = path.join(formulaPrefixes['whisper-cpp'], 'bin', 'whisper-cli')
   const cliBinPath = path.join(tempRoot, 'packages', 'cli', 'dist', 'bin.js')
-  const installedFormulas = new Set(['ffmpeg', 'poppler', 'whisper-cpp'])
+  const installedFormulas = new Set(['ffmpeg', 'whisper-cpp'])
 
   await mkdir(vaultRoot, { recursive: true })
   await writeFile(path.join(vaultRoot, 'vault.json'), '{}\n', 'utf8')
   await writeExecutable(brewCommand)
   await writeExecutable(ffmpegCommand)
-  await writeExecutable(pdftotextCommand)
   await writeExecutable(whisperCommand)
 
   const services = createSetupServices({
@@ -2553,12 +2534,10 @@ test.sequential('setup service provisions formulas, downloads the model, and boo
   const homebrewBin = path.join(tempRoot, 'brew', 'bin')
   const formulaPrefixes = {
     ffmpeg: path.join(tempRoot, 'Cellar', 'ffmpeg'),
-    poppler: path.join(tempRoot, 'Cellar', 'poppler'),
     'whisper-cpp': path.join(tempRoot, 'Cellar', 'whisper-cpp'),
   }
   const brewCommand = path.join(homebrewBin, 'brew')
   const ffmpegCommand = path.join(formulaPrefixes.ffmpeg, 'bin', 'ffmpeg')
-  const pdftotextCommand = path.join(formulaPrefixes.poppler, 'bin', 'pdftotext')
   const whisperCommand = path.join(formulaPrefixes['whisper-cpp'], 'bin', 'whisper-cli')
   const cliBinPath = path.join(tempRoot, 'packages', 'cli', 'dist', 'bin.js')
   const murphShimPath = path.join(homeRoot, '.local', 'bin', 'murph')
@@ -2571,7 +2550,6 @@ test.sequential('setup service provisions formulas, downloads the model, and boo
 
   await writeExecutable(brewCommand)
   await writeExecutable(ffmpegCommand)
-  await writeExecutable(pdftotextCommand)
   await writeExecutable(whisperCommand)
 
   const services = createSetupServices({
@@ -2690,7 +2668,6 @@ test.sequential('setup service provisions formulas, downloads the model, and boo
     assert.equal(bootstrapCalls.length, 1)
     assert.equal(bootstrapCalls[0]?.vault, vaultRoot)
     assert.equal(bootstrapCalls[0]?.ffmpegCommand, ffmpegCommand)
-    assert.equal(bootstrapCalls[0]?.pdftotextCommand, pdftotextCommand)
     assert.equal(bootstrapCalls[0]?.whisperCommand, whisperCommand)
     assert.equal(
       bootstrapCalls[0]?.whisperModelPath,
@@ -2702,7 +2679,6 @@ test.sequential('setup service provisions formulas, downloads the model, and boo
     )
     assert.equal(result.toolchainRoot, '~/.murph/toolchain')
     assert.equal(installedFormulas.has('ffmpeg'), true)
-    assert.equal(installedFormulas.has('poppler'), true)
     assert.equal(installedFormulas.has('whisper-cpp'), true)
     assert.equal(
       result.steps.some((step) => step.id === 'cli-shims' && step.status === 'completed'),
@@ -2801,12 +2777,10 @@ test.sequential('setup preserves saved public OpenAI-compatible headers when re-
   const homebrewBin = path.join(tempRoot, 'brew', 'bin')
   const formulaPrefixes = {
     ffmpeg: path.join(tempRoot, 'Cellar', 'ffmpeg'),
-    poppler: path.join(tempRoot, 'Cellar', 'poppler'),
     'whisper-cpp': path.join(tempRoot, 'Cellar', 'whisper-cpp'),
   }
   const brewCommand = path.join(homebrewBin, 'brew')
   const ffmpegCommand = path.join(formulaPrefixes.ffmpeg, 'bin', 'ffmpeg')
-  const pdftotextCommand = path.join(formulaPrefixes.poppler, 'bin', 'pdftotext')
   const whisperCommand = path.join(formulaPrefixes['whisper-cpp'], 'bin', 'whisper-cli')
 
   await saveAssistantOperatorDefaultsPatch(
@@ -2829,7 +2803,6 @@ test.sequential('setup preserves saved public OpenAI-compatible headers when re-
 
   await writeExecutable(brewCommand)
   await writeExecutable(ffmpegCommand)
-  await writeExecutable(pdftotextCommand)
   await writeExecutable(whisperCommand)
   await mkdir(path.dirname(expectedWhisperModelPath), { recursive: true })
   await writeFile(expectedWhisperModelPath, 'model', 'utf8')
@@ -2930,12 +2903,10 @@ test.sequential('setup updates codexCommand when provided and preserves a saved 
   const homebrewBin = path.join(tempRoot, 'brew', 'bin')
   const formulaPrefixes = {
     ffmpeg: path.join(tempRoot, 'Cellar', 'ffmpeg'),
-    poppler: path.join(tempRoot, 'Cellar', 'poppler'),
     'whisper-cpp': path.join(tempRoot, 'Cellar', 'whisper-cpp'),
   }
   const brewCommand = path.join(homebrewBin, 'brew')
   const ffmpegCommand = path.join(formulaPrefixes.ffmpeg, 'bin', 'ffmpeg')
-  const pdftotextCommand = path.join(formulaPrefixes.poppler, 'bin', 'pdftotext')
   const whisperCommand = path.join(formulaPrefixes['whisper-cpp'], 'bin', 'whisper-cli')
 
   await saveAssistantOperatorDefaultsPatch(
@@ -2955,7 +2926,6 @@ test.sequential('setup updates codexCommand when provided and preserves a saved 
 
   await writeExecutable(brewCommand)
   await writeExecutable(ffmpegCommand)
-  await writeExecutable(pdftotextCommand)
   await writeExecutable(whisperCommand)
   await mkdir(path.dirname(expectedWhisperModelPath), { recursive: true })
   await writeFile(expectedWhisperModelPath, 'model', 'utf8')
@@ -3272,14 +3242,12 @@ test.sequential('setup service reuses an existing vault and still bootstraps inb
   const homebrewBin = path.join(tempRoot, 'brew', 'bin')
   const formulaPrefixes = {
     ffmpeg: path.join(tempRoot, 'Cellar', 'ffmpeg'),
-    poppler: path.join(tempRoot, 'Cellar', 'poppler'),
     'whisper-cpp': path.join(tempRoot, 'Cellar', 'whisper-cpp'),
   }
   const brewCommand = path.join(homebrewBin, 'brew')
   const ffmpegCommand = path.join(formulaPrefixes.ffmpeg, 'bin', 'ffmpeg')
-  const pdftotextCommand = path.join(formulaPrefixes.poppler, 'bin', 'pdftotext')
   const whisperCommand = path.join(formulaPrefixes['whisper-cpp'], 'bin', 'whisper-cli')
-  const installedFormulas = new Set(['ffmpeg', 'poppler', 'whisper-cpp'])
+  const installedFormulas = new Set(['ffmpeg', 'whisper-cpp'])
   const initCalls: Array<{ requestId: string | null; vault: string }> = []
   const bootstrapCalls: Array<Record<string, unknown>> = []
 
@@ -3287,7 +3255,6 @@ test.sequential('setup service reuses an existing vault and still bootstraps inb
   await writeFile(path.join(vaultRoot, 'vault.json'), '{}\n', 'utf8')
   await writeExecutable(brewCommand)
   await writeExecutable(ffmpegCommand)
-  await writeExecutable(pdftotextCommand)
   await writeExecutable(whisperCommand)
 
   const services = createSetupServices({
@@ -3361,7 +3328,6 @@ test.sequential('setup service reuses an existing vault and still bootstraps inb
     assert.equal(bootstrapCalls.length, 1)
     assert.equal(bootstrapCalls[0]?.vault, vaultRoot)
     assert.equal(bootstrapCalls[0]?.ffmpegCommand, ffmpegCommand)
-    assert.equal(bootstrapCalls[0]?.pdftotextCommand, pdftotextCommand)
     assert.equal(bootstrapCalls[0]?.whisperCommand, whisperCommand)
     assert.equal(result.bootstrap?.vault, vaultRoot)
     assert.equal(
@@ -3385,12 +3351,10 @@ test.sequential('setup service redacts nested bootstrap toolchain paths under th
   const homebrewBin = path.join(tempRoot, 'brew', 'bin')
   const formulaPrefixes = {
     ffmpeg: path.join(tempRoot, 'Cellar', 'ffmpeg'),
-    poppler: path.join(tempRoot, 'Cellar', 'poppler'),
     'whisper-cpp': path.join(tempRoot, 'Cellar', 'whisper-cpp'),
   }
   const brewCommand = path.join(homebrewBin, 'brew')
   const ffmpegCommand = path.join(formulaPrefixes.ffmpeg, 'bin', 'ffmpeg')
-  const pdftotextCommand = path.join(formulaPrefixes.poppler, 'bin', 'pdftotext')
   const whisperFormulaCommand = path.join(formulaPrefixes['whisper-cpp'], 'bin', 'whisper-cli')
   const homeWhisperCommand = path.join(homeRoot, '.murph', 'toolchain', 'bin', 'whisper-cli')
   const homeWhisperModel = path.join(
@@ -3402,14 +3366,13 @@ test.sequential('setup service redacts nested bootstrap toolchain paths under th
     'ggml-base.en.bin',
   )
   const siblingPrefixPath = path.join(tempRoot, 'homebrew', 'bin', 'ffmpeg')
-  const installedFormulas = new Set(['ffmpeg', 'poppler', 'whisper-cpp'])
+  const installedFormulas = new Set(['ffmpeg', 'whisper-cpp'])
   let bootstrapCalls = 0
 
   await mkdir(vaultRoot, { recursive: true })
   await writeFile(path.join(vaultRoot, 'vault.json'), '{}\n', 'utf8')
   await writeExecutable(brewCommand)
   await writeExecutable(ffmpegCommand)
-  await writeExecutable(pdftotextCommand)
   await writeExecutable(whisperFormulaCommand)
 
   const services = createSetupServices({
@@ -3857,7 +3820,7 @@ test.sequential('setup-macos wrapper dry-run prints a plan without mutating the 
     )
     assert.match(
       result.stdout,
-      /ffmpeg, poppler\/pdftotext, whisper\.cpp, and a local Whisper model/u,
+      /ffmpeg, whisper\.cpp, and a local Whisper model/u,
     )
     assert.match(
       result.stdout,
@@ -3914,7 +3877,6 @@ test.sequential('Linux setup reuses one apt update across declarative tool insta
   const aptGetCommand = path.join(binRoot, 'apt-get')
   const sudoCommand = path.join(binRoot, 'sudo')
   const ffmpegCommand = path.join(binRoot, 'ffmpeg')
-  const pdftotextCommand = path.join(binRoot, 'pdftotext')
   const whisperCommand = path.join(binRoot, 'whisper-cli')
   const expectedWhisperModelPath = path.join(
     homeRoot,
@@ -3977,8 +3939,6 @@ test.sequential('Linux setup reuses one apt update across declarative tool insta
         for (const packageName of aptArgs.slice(2)) {
           if (packageName === 'ffmpeg') {
             await writeExecutable(ffmpegCommand)
-          } else if (packageName === 'poppler-utils') {
-            await writeExecutable(pdftotextCommand)
           } else if (packageName === 'whisper-cpp') {
             await writeExecutable(whisperCommand)
           } else {
@@ -4025,17 +3985,14 @@ test.sequential('Linux setup reuses one apt update across declarative tool insta
       [
         'update',
         'install -y ffmpeg',
-        'install -y poppler-utils',
         'install -y whisper-cpp',
       ],
     )
     assert.equal(bootstrapCalls.length, 1)
     assert.equal(bootstrapCalls[0]?.ffmpegCommand, ffmpegCommand)
-    assert.equal(bootstrapCalls[0]?.pdftotextCommand, pdftotextCommand)
     assert.equal(bootstrapCalls[0]?.whisperCommand, whisperCommand)
     assert.equal(bootstrapCalls[0]?.whisperModelPath, expectedWhisperModelPath)
     assert.equal(result.tools.ffmpegCommand, ffmpegCommand)
-    assert.equal(result.tools.pdftotextCommand, pdftotextCommand)
     assert.equal(result.tools.whisperCommand, whisperCommand)
     assert.equal(
       result.tools.whisperModelPath,
@@ -4044,12 +4001,6 @@ test.sequential('Linux setup reuses one apt update across declarative tool insta
     assert.equal(
       result.steps.some(
         (step) => step.id === 'ffmpeg' && step.status === 'completed',
-      ),
-      true,
-    )
-    assert.equal(
-      result.steps.some(
-        (step) => step.id === 'pdftotext' && step.status === 'completed',
       ),
       true,
     )
@@ -4070,7 +4021,6 @@ test.sequential('Linux setup reuses existing email state while adding Telegram o
   const vaultRoot = path.join(tempRoot, 'vault')
   const binRoot = path.join(tempRoot, 'bin')
   const ffmpegCommand = path.join(binRoot, 'ffmpeg')
-  const pdftotextCommand = path.join(binRoot, 'pdftotext')
   const whisperCommand = path.join(binRoot, 'whisper-cli')
   const cliBinPath = path.join(tempRoot, 'packages', 'cli', 'dist', 'bin.js')
   const connectors: InboxConnectorConfig[] = [
@@ -4101,7 +4051,6 @@ test.sequential('Linux setup reuses existing email state while adding Telegram o
   await mkdir(vaultRoot, { recursive: true })
   await writeFile(path.join(vaultRoot, 'vault.json'), '{}\n', 'utf8')
   await writeExecutable(ffmpegCommand)
-  await writeExecutable(pdftotextCommand)
   await writeExecutable(whisperCommand)
   await saveAssistantAutomationState(vaultRoot, {
     version: 1,

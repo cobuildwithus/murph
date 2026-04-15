@@ -124,16 +124,6 @@ describe("hosted user env helpers", () => {
       current: {},
       update: {
         env: {
-          PDFTOTEXT_COMMAND: "/usr/local/bin/pdftotext",
-        },
-        mode: "replace",
-      },
-    })).toThrow(/not allowed/u);
-
-    expect(() => applyHostedUserEnvUpdate({
-      current: {},
-      update: {
-        env: {
           WHISPER_COMMAND: "/usr/local/bin/whisper-cli",
         },
         mode: "replace",
