@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   createIntegratedVaultServices: vi.fn(),
   emitHostedExecutionStructuredLog: vi.fn(),
   openInboxRuntime: vi.fn(),
+  readAssistantAutomationState: vi.fn(),
   readHostedAssistantRuntimeState: vi.fn(),
   rebuildRuntimeFromVault: vi.fn(),
   reconcileHostedDeviceSyncControlPlaneState: vi.fn(),
@@ -45,6 +46,7 @@ vi.mock("@murphai/parsers", () => ({
 
 vi.mock("@murphai/assistant-engine", () => ({
   createAssistantFoodAutoLogHooks: mocks.createAssistantFoodAutoLogHooks,
+  readAssistantAutomationState: mocks.readAssistantAutomationState,
   runAssistantAutomationPass: mocks.runAssistantAutomationPass,
 }));
 
@@ -110,6 +112,12 @@ beforeEach(() => {
     assistantConfigStatus: "saved",
     assistantConfigured: true,
     assistantProvider: "openai-compatible",
+  });
+  mocks.readAssistantAutomationState.mockResolvedValue({
+    autoReply: [],
+    inboxScanCursor: null,
+    updatedAt: "2026-04-08T00:00:00.000Z",
+    version: 1,
   });
   mocks.runAssistantAutomationPass.mockResolvedValue({
     nextWakeAt: "2026-04-08T01:00:00.000Z",
@@ -222,6 +230,15 @@ describe("runHostedAssistantAutomation", () => {
             userEnvKeys: [],
           },
         },
+        {
+          event: {
+            kind: "assistant.cron.tick",
+            reason: "manual",
+            userId: "member_123",
+          },
+          eventId: "evt_automation_gap",
+          occurredAt: "2026-04-08T00:00:00.000Z",
+        },
       ),
     ).resolves.toEqual({
       nextWakeAt: null,
@@ -242,6 +259,15 @@ describe("runHostedAssistantAutomation", () => {
             memberId: "member_123",
             userEnvKeys: [],
           },
+        },
+        {
+          event: {
+            kind: "assistant.cron.tick",
+            reason: "manual",
+            userId: "member_123",
+          },
+          eventId: "evt_automation_failure",
+          occurredAt: "2026-04-08T00:00:00.000Z",
         },
       ),
     ).rejects.toThrow("automation failed");
@@ -551,10 +577,11 @@ describe("runHostedMaintenanceLoop", () => {
             userEnvKeys: [],
           },
         },
-        inboxServices: expect.any(Symbol),
+        inboxServices: expect.anything(),
+        onEvent: expect.any(Function),
         requestId: "req_123",
         vault: "/tmp/vault-root",
-        vaultServices: expect.any(Symbol),
+        vaultServices: expect.anything(),
       });
     } finally {
       vi.useRealTimers();

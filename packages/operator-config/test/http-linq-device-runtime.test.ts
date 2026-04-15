@@ -309,6 +309,35 @@ test('linq runtime normalizes happy-path payloads and retries retryable GET fail
   })
 })
 
+test('linq runtime preserves path-prefixed base urls when building requests', async () => {
+  const seenUrls: string[] = []
+
+  await sendLinqChatMessage(
+    {
+      chatId: 'chat:123',
+      message: 'hello',
+    },
+    {
+      env: {
+        LINQ_API_BASE_URL:
+          'http://host.docker.internal:8902/__murph/local-loopback-proxy/token/http%3A%2F%2F127.0.0.1%3A64283',
+        LINQ_API_TOKEN: 'token',
+      },
+      fetchImplementation: async (url) => {
+        seenUrls.push(url)
+        return createJsonResponse({
+          chat_id: 'chat:123',
+          id: 'message-1',
+        })
+      },
+    },
+  )
+
+  assert.deepEqual(seenUrls, [
+    'http://host.docker.internal:8902/__murph/local-loopback-proxy/token/http%3A%2F%2F127.0.0.1%3A64283/chats/chat%3A123/messages',
+  ])
+})
+
 test('linq runtime surfaces non-retryable transport, http, and configuration failures', async () => {
   await assert.rejects(
     () =>
@@ -554,12 +583,13 @@ test('linq runtime covers optional payload omissions, fallback http messages, an
       error instanceof VaultCliError &&
       error.code === 'LINQ_API_REQUEST_FAILED' &&
       error.message ===
-        'Linq request POST /chats/chat-123/messages timed out after 30000ms.' &&
+        'Linq request POST /chats/chat-123/messages timed out after 30000ms. Cause: timed out downstream.' &&
       error.context?.operation === 'send_message' &&
       error.context?.provider === 'linq' &&
       error.context?.failureStage === 'transport' &&
       error.context?.hasIdempotencyKey === false &&
       error.context?.hasReplyToMessageId === false &&
+      error.context?.requestOrigin === 'https://api.linqapp.com' &&
       error.context?.retryable === false &&
       error.context?.timedOut === true &&
       error.context?.timeoutMs === 30000 &&
