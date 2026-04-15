@@ -2,6 +2,62 @@
 
 All notable changes to `@murphai/murph` will be documented in this file.
 
+## [0.2.13] - 2026-04-15
+
+### Added
+- enable codex image passthrough
+- add gpt5 prompt behavior profile
+- add Telegram to homepage sign-in dialog
+- support email sign-in in homepage dialog
+- improve linq delivery observability
+
+### Fixed
+- tighten parity retry and validation edges
+- restore workspace acceptance
+- always forward multimodal auto-reply input
+- keep hosted checkout tax monitoring-only
+- enable automatic tax for hosted checkout
+- queue canonical write lock and narrow outer wrappers
+- reject blank mixed search query input
+- preserve linq auto-reply bootstrap
+- support positional search query input
+- update hosted onboarding signup sms copy
+- refine hosted onboarding welcome copy
+- tighten hosted onboarding signup copy
+- load sqlite via esm in source builds
+- match homepage telegram auth button styling
+- log linq error messages at webhook boundary
+- avoid nested prisma tx
+- silence sqlite experimental warning noise
+- background best-effort nudges
+- background hosted execution nudges
+- enrich redacted error logging
+- treat linq delivery as idempotent
+
+### Changed
+- centralize promotion and source normalization
+- clear meal parity coordination lane
+- simplify codex image passthrough
+- record pdftotext cleanup sweep
+- hard cut local pdftotext support
+- Update first-contact-welcome.ts
+- unify email channel resolution policy
+- sync member channels explicitly
+- add linq webhook timing logs
+- simplify recurring cron lookup flow
+- follow vault timezone for recurring cron
+- add latency instrumentation
+- make normal replies more conversational
+- simplify hosted onboarding seams
+- Refactor vault-local automation schedule shape
+- hard cut hosted onboarding transaction ownership
+- add hosted-safe node subpaths
+- share sqlite warning filters
+- simplify linq observability helpers
+- materialize Linq home threads from first contact
+- simplify sqlite warning parsing
+- Update hosted-existing-account-sign-in-dialog.tsx
+
 ## [0.2.12] - 2026-04-15
 
 ### Fixed
