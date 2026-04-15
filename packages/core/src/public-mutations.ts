@@ -147,6 +147,10 @@ function withCanonicalInputWriteLock<TInput extends { vaultRoot: string }, TResu
   return withCanonicalWriteLock(input.vaultRoot, () => operation(input));
 }
 
+function hasStableCanonicalId(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
 function buildStaleCanonicalWriteLockIssue(
   issue: Awaited<ReturnType<typeof inspectCanonicalWriteLock>>,
 ): ValidationIssue | null {
@@ -438,25 +442,29 @@ export async function stopExperiment(
 export async function importDocument(
   input: Parameters<typeof importDocumentInternal>[0],
 ): ReturnType<typeof importDocumentInternal> {
-  return withCanonicalInputWriteLock(input, importDocumentInternal);
+  return importDocumentInternal(input);
 }
 
 export async function addMeal(
   input: Parameters<typeof addMealInternal>[0],
 ): ReturnType<typeof addMealInternal> {
-  return withCanonicalInputWriteLock(input, addMealInternal);
+  return addMealInternal(input);
 }
 
 export async function addActivitySession(
   input: Parameters<typeof addActivitySessionInternal>[0],
 ): ReturnType<typeof addActivitySessionInternal> {
-  return withCanonicalInputWriteLock(input, addActivitySessionInternal);
+  return hasStableCanonicalId(input.draft.id)
+    ? withCanonicalInputWriteLock(input, addActivitySessionInternal)
+    : addActivitySessionInternal(input);
 }
 
 export async function addBodyMeasurement(
   input: Parameters<typeof addBodyMeasurementInternal>[0],
 ): ReturnType<typeof addBodyMeasurementInternal> {
-  return withCanonicalInputWriteLock(input, addBodyMeasurementInternal);
+  return hasStableCanonicalId(input.draft.id)
+    ? withCanonicalInputWriteLock(input, addBodyMeasurementInternal)
+    : addBodyMeasurementInternal(input);
 }
 
 export async function importSamples(
@@ -522,7 +530,7 @@ export async function importDeviceBatch(
 export async function importAssessmentResponse(
   input: Parameters<typeof importAssessmentResponseInternal>[0],
 ): ReturnType<typeof importAssessmentResponseInternal> {
-  return withCanonicalInputWriteLock(input, importAssessmentResponseInternal);
+  return importAssessmentResponseInternal(input);
 }
 
 export async function updateWorkoutUnitPreferences(
@@ -540,13 +548,13 @@ export async function updateWearablePreferences(
 export async function appendHistoryEvent(
   input: Parameters<typeof appendHistoryEventInternal>[0],
 ): ReturnType<typeof appendHistoryEventInternal> {
-  return withCanonicalInputWriteLock(input, appendHistoryEventInternal);
+  return appendHistoryEventInternal(input);
 }
 
 export async function appendBloodTest(
   input: Parameters<typeof appendBloodTestInternal>[0],
 ): ReturnType<typeof appendBloodTestInternal> {
-  return withCanonicalInputWriteLock(input, appendBloodTestInternal);
+  return appendBloodTestInternal(input);
 }
 
 export async function upsertFamilyMember(
