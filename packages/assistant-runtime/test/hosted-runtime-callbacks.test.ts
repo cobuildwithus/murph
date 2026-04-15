@@ -10,10 +10,21 @@ import {
 
 const mocks = vi.hoisted(() => ({
   dispatchAssistantOutboxIntent: vi.fn(),
+  emitHostedExecutionStructuredLog: vi.fn(),
   listAssistantOutboxIntents: vi.fn(),
   normalizeAssistantDeliveryError: vi.fn(),
   shouldDispatchAssistantOutboxIntent: vi.fn(),
 }));
+
+vi.mock("@murphai/hosted-execution", async () => {
+  const actual = await vi.importActual<typeof import("@murphai/hosted-execution")>(
+    "@murphai/hosted-execution",
+  );
+  return {
+    ...actual,
+    emitHostedExecutionStructuredLog: mocks.emitHostedExecutionStructuredLog,
+  };
+});
 
 vi.mock("@murphai/assistant-engine", () => ({
   dispatchAssistantOutboxIntent: mocks.dispatchAssistantOutboxIntent,
@@ -129,6 +140,13 @@ describe("hosted runtime callbacks", () => {
 
     mocks.dispatchAssistantOutboxIntent.mockImplementation(async (input) => {
       observedDispatchHooks = input.dispatchHooks;
+      return {
+        deliveryError: null,
+        intent: {
+          status: "sent",
+        },
+        session: null,
+      };
     });
 
     await drainHostedCommittedAssistantDeliveriesAfterCommit({
@@ -166,6 +184,241 @@ describe("hosted runtime callbacks", () => {
     expect(observedDispatchHooks).toBeDefined();
   });
 
+  it("emits a structured hosted log when a committed delivery stays retryable", async () => {
+    mocks.dispatchAssistantOutboxIntent.mockResolvedValue({
+      deliveryError: {
+        code: "LINQ_SEND_FAILED",
+        message: "Linq outbound chat creation failed with HTTP 403.",
+      },
+      intent: {
+        status: "retryable",
+      },
+      session: null,
+    });
+
+    await drainHostedCommittedAssistantDeliveriesAfterCommit({
+      dispatch: {
+        event: {
+          kind: "assistant.cron.tick",
+          reason: "manual",
+          userId: "member_123",
+        },
+        eventId: "evt_retryable_delivery",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+      },
+      effectsPort: createHostedRuntimeEffectsPortStub(),
+      assistantDeliveryEffects: [
+        buildHostedAssistantDeliverySideEffect({
+          dedupeKey: "dedupe_retryable",
+          effectId: "intent_retryable",
+        }),
+      ],
+      vaultRoot: "/tmp/vault",
+    });
+
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith({
+      component: "assistant-delivery",
+      details: {
+        assistantDeliveryBoundary: "hosted_runtime_finalize",
+        deliveryErrorCode: "LINQ_SEND_FAILED",
+        deliveryStatus: "retryable",
+        effectFingerprint: "dedupe_retryable",
+        effectId: "intent_retryable",
+        failureDomain: "dispatch",
+        retryable: true,
+        userId: "member_123",
+      },
+      dispatch: {
+        event: {
+          kind: "assistant.cron.tick",
+          reason: "manual",
+          userId: "member_123",
+        },
+        eventId: "evt_retryable_delivery",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+      },
+      level: "warn",
+      message: "Linq outbound chat creation failed with HTTP 403.",
+      phase: "side-effects.draining",
+      userId: "member_123",
+    });
+  });
+
+  it("emits an error-level hosted log when a committed delivery fails without a normalized error", async () => {
+    mocks.dispatchAssistantOutboxIntent.mockResolvedValue({
+      deliveryError: null,
+      intent: {
+        status: "failed",
+      },
+      session: null,
+    });
+
+    await drainHostedCommittedAssistantDeliveriesAfterCommit({
+      dispatch: {
+        event: {
+          kind: "assistant.cron.tick",
+          reason: "manual",
+          userId: "member_123",
+        },
+        eventId: "evt_failed_delivery",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+      },
+      effectsPort: createHostedRuntimeEffectsPortStub(),
+      assistantDeliveryEffects: [
+        buildHostedAssistantDeliverySideEffect({
+          dedupeKey: "dedupe_failed",
+          effectId: "intent_failed",
+        }),
+      ],
+      vaultRoot: "/tmp/vault",
+    });
+
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith({
+      component: "assistant-delivery",
+      details: {
+        assistantDeliveryBoundary: "hosted_runtime_finalize",
+        deliveryErrorCode: null,
+        deliveryStatus: "failed",
+        effectFingerprint: "dedupe_failed",
+        effectId: "intent_failed",
+        failureDomain: "dispatch",
+        retryable: false,
+        userId: "member_123",
+      },
+      dispatch: {
+        event: {
+          kind: "assistant.cron.tick",
+          reason: "manual",
+          userId: "member_123",
+        },
+        eventId: "evt_failed_delivery",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+      },
+      level: "error",
+      message: "Hosted assistant delivery finished with failed status during post-commit dispatch.",
+      phase: "side-effects.draining",
+      userId: "member_123",
+    });
+  });
+
+  it("emits a structured hosted log when post-commit dispatch throws a retry-classified error", async () => {
+    const error = Object.assign(
+      new Error("Linq request POST /chats failed with HTTP 429."),
+      {
+        code: "LINQ_API_REQUEST_FAILED",
+        context: {
+          operation: "create_chat",
+          path: "/chats",
+          retryable: false,
+          status: 429,
+        },
+      },
+    );
+    mocks.dispatchAssistantOutboxIntent.mockRejectedValue(error);
+
+    await expect(drainHostedCommittedAssistantDeliveriesAfterCommit({
+      dispatch: {
+        event: {
+          kind: "assistant.cron.tick",
+          reason: "manual",
+          userId: "member_123",
+        },
+        eventId: "evt_throwing_delivery",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+      },
+      effectsPort: createHostedRuntimeEffectsPortStub(),
+      assistantDeliveryEffects: [
+        buildHostedAssistantDeliverySideEffect({
+          dedupeKey: "dedupe_throwing",
+          effectId: "intent_throwing",
+        }),
+      ],
+      vaultRoot: "/tmp/vault",
+    })).rejects.toBe(error);
+
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith({
+      component: "assistant-delivery",
+      details: {
+        assistantDeliveryBoundary: "hosted_runtime_finalize",
+        effectFingerprint: "dedupe_throwing",
+        effectId: "intent_throwing",
+        failureDomain: "dispatch",
+        retryable: false,
+        userId: "member_123",
+      },
+      dispatch: {
+        event: {
+          kind: "assistant.cron.tick",
+          reason: "manual",
+          userId: "member_123",
+        },
+        eventId: "evt_throwing_delivery",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+      },
+      error,
+      message: "Hosted assistant delivery threw during post-commit dispatch.",
+      phase: "side-effects.draining",
+      userId: "member_123",
+    });
+    expect(error).toMatchObject({
+      details: expect.objectContaining({
+        assistantDeliveryBoundary: "hosted_runtime_finalize",
+        effectFingerprint: "dedupe_throwing",
+        effectId: "intent_throwing",
+        userId: "member_123",
+      }),
+    });
+  });
+
+  it("still logs primitive post-commit dispatch throws with redacted hosted metadata", async () => {
+    mocks.dispatchAssistantOutboxIntent.mockRejectedValue("plain failure");
+
+    await expect(drainHostedCommittedAssistantDeliveriesAfterCommit({
+      dispatch: {
+        event: {
+          kind: "assistant.cron.tick",
+          reason: "manual",
+          userId: "member_123",
+        },
+        eventId: "evt_primitive_throw",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+      },
+      effectsPort: createHostedRuntimeEffectsPortStub(),
+      assistantDeliveryEffects: [
+        buildHostedAssistantDeliverySideEffect({
+          dedupeKey: "dedupe_primitive",
+          effectId: "intent_primitive",
+        }),
+      ],
+      vaultRoot: "/tmp/vault",
+    })).rejects.toBe("plain failure");
+
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith({
+      component: "assistant-delivery",
+      details: {
+        assistantDeliveryBoundary: "hosted_runtime_finalize",
+        effectFingerprint: "dedupe_primitive",
+        effectId: "intent_primitive",
+        failureDomain: "dispatch",
+        retryable: null,
+        userId: "member_123",
+      },
+      dispatch: {
+        event: {
+          kind: "assistant.cron.tick",
+          reason: "manual",
+          userId: "member_123",
+        },
+        eventId: "evt_primitive_throw",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+      },
+      error: "plain failure",
+      message: "Hosted assistant delivery threw during post-commit dispatch.",
+      phase: "side-effects.draining",
+      userId: "member_123",
+    });
+  });
+
   it("writes prepared and sent delivery records through the hosted side-effect journal hooks", async () => {
     let observedDispatchHooks:
       | {
@@ -196,6 +449,13 @@ describe("hosted runtime callbacks", () => {
 
     mocks.dispatchAssistantOutboxIntent.mockImplementation(async (input) => {
       observedDispatchHooks = input.dispatchHooks;
+      return {
+        deliveryError: null,
+        intent: {
+          status: "sent",
+        },
+        session: null,
+      };
     });
 
     await drainHostedCommittedAssistantDeliveriesAfterCommit({

@@ -2,6 +2,9 @@ import type {
   HostedExecutionDispatchRequest,
 } from "@murphai/hosted-execution/contracts";
 import {
+  emitHostedExecutionStructuredLog,
+} from "@murphai/hosted-execution";
+import {
   buildHostedAssistantDeliveryEffect,
   buildHostedAssistantDeliveryPreparedRecord,
   buildHostedAssistantDeliverySentRecord,
@@ -82,6 +85,7 @@ export async function drainHostedCommittedAssistantDeliveriesAfterCommit(input: 
 }): Promise<void> {
   for (const assistantDeliveryEffect of input.assistantDeliveryEffects) {
     await dispatchHostedCommittedAssistantDelivery({
+      dispatch: input.dispatch,
       effectsPort: input.effectsPort,
       assistantDeliveryEffect,
       userId: input.dispatch.event.userId,
@@ -91,13 +95,14 @@ export async function drainHostedCommittedAssistantDeliveriesAfterCommit(input: 
 }
 
 async function dispatchHostedCommittedAssistantDelivery(input: {
+  dispatch: HostedExecutionDispatchRequest;
   effectsPort: HostedRuntimeEffectsPort;
   assistantDeliveryEffect: HostedAssistantDeliveryEffect;
   userId: string;
   vaultRoot: string;
 }): Promise<void> {
   try {
-    await dispatchAssistantOutboxIntent({
+    const dispatched = await dispatchAssistantOutboxIntent({
       dependencies: {
         sendEmail: (request: Parameters<HostedRuntimeEffectsPort["sendEmail"]>[0]) =>
           input.effectsPort.sendEmail(request),
@@ -109,13 +114,77 @@ async function dispatchHostedCommittedAssistantDelivery(input: {
       intentId: input.assistantDeliveryEffect.effectId,
       vault: input.vaultRoot,
     });
+
+    if (!dispatched || typeof dispatched !== "object" || !("intent" in dispatched)) {
+      return;
+    }
+
+    if (dispatched.intent.status !== "sent") {
+      emitHostedAssistantDeliveryDispatchOutcome({
+        deliveryError: dispatched.deliveryError,
+        dispatch: input.dispatch,
+        effect: input.assistantDeliveryEffect,
+        intentStatus: dispatched.intent.status,
+        userId: input.userId,
+      });
+    }
   } catch (error) {
-    throw attachHostedAssistantDeliveryDispatchDetails(error, {
+    const enrichedError = attachHostedAssistantDeliveryDispatchDetails(error, {
       effectId: input.assistantDeliveryEffect.effectId,
       fingerprint: input.assistantDeliveryEffect.fingerprint,
       userId: input.userId,
     });
+    emitHostedExecutionStructuredLog({
+      component: "assistant-delivery",
+      details: buildHostedAssistantDeliveryDetails({
+        effectFingerprint: input.assistantDeliveryEffect.fingerprint,
+        effectId: input.assistantDeliveryEffect.effectId,
+        extra: {
+          failureDomain: "dispatch",
+          retryable: readHostedAssistantDeliveryRetryableFlag(error),
+        },
+        userId: input.userId,
+      }),
+      dispatch: input.dispatch,
+      error: enrichedError,
+      message: "Hosted assistant delivery threw during post-commit dispatch.",
+      phase: "side-effects.draining",
+      userId: input.userId,
+    });
+    throw enrichedError;
   }
+}
+
+function emitHostedAssistantDeliveryDispatchOutcome(input: {
+  deliveryError: { code: string | null; message: string } | null;
+  dispatch: HostedExecutionDispatchRequest;
+  effect: HostedAssistantDeliveryEffect;
+  intentStatus: "abandoned" | "failed" | "pending" | "retryable" | "sending";
+  userId: string;
+}): void {
+  const retryable = input.intentStatus === "pending"
+    || input.intentStatus === "retryable"
+    || input.intentStatus === "sending";
+  emitHostedExecutionStructuredLog({
+    component: "assistant-delivery",
+    details: buildHostedAssistantDeliveryDetails({
+      effectFingerprint: input.effect.fingerprint,
+      effectId: input.effect.effectId,
+      extra: {
+        deliveryErrorCode: input.deliveryError?.code ?? null,
+        deliveryStatus: input.intentStatus,
+        failureDomain: "dispatch",
+        retryable,
+      },
+      userId: input.userId,
+    }),
+    dispatch: input.dispatch,
+    level: retryable ? "warn" : "error",
+    message: input.deliveryError?.message
+      ?? `Hosted assistant delivery finished with ${input.intentStatus} status during post-commit dispatch.`,
+    phase: "side-effects.draining",
+    userId: input.userId,
+  });
 }
 
 function createHostedAssistantDeliveryDispatchHooks(input: {
@@ -470,6 +539,28 @@ function attachHostedAssistantDeliveryDispatchDetails(
     },
   });
   return error;
+}
+
+function readHostedAssistantDeliveryRetryableFlag(error: unknown): boolean | null {
+  if (!error || typeof error !== "object") {
+    return null;
+  }
+
+  if ("retryable" in error && typeof error.retryable === "boolean") {
+    return error.retryable;
+  }
+
+  if (
+    "context" in error
+    && error.context
+    && typeof error.context === "object"
+    && "retryable" in error.context
+    && typeof error.context.retryable === "boolean"
+  ) {
+    return error.context.retryable;
+  }
+
+  return null;
 }
 
 function buildHostedAssistantDeliveryDetails(input: {
