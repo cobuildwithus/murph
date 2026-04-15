@@ -4,6 +4,11 @@ type ProcessEmitWarningRestArgs = Parameters<typeof process.emitWarning> extends
 ]
   ? Rest
   : never;
+type WarningTypeOption = { type: string };
+type WarningDetails = {
+  message: string;
+  type: string;
+};
 
 const SQLITE_EXPERIMENTAL_WARNING_MESSAGE =
   "SQLite is an experimental feature and might change at any time";
@@ -39,35 +44,41 @@ export function isSqliteExperimentalWarning(
   warning: string | Error,
   args: readonly unknown[],
 ): boolean {
-  const warningType = resolveWarningType(warning, args);
-  const message = resolveWarningMessage(warning);
+  const warningDetails = readWarningDetails(warning, args);
 
   return (
-    warningType === "ExperimentalWarning" &&
-    message === SQLITE_EXPERIMENTAL_WARNING_MESSAGE
+    warningDetails.type === "ExperimentalWarning" &&
+    warningDetails.message === SQLITE_EXPERIMENTAL_WARNING_MESSAGE
   );
 }
 
-function resolveWarningMessage(warning: string | Error): string {
-  return typeof warning === "string" ? warning : warning.message;
-}
-
-function resolveWarningType(
+function readWarningDetails(
   warning: string | Error,
   args: readonly unknown[],
-): string {
+): WarningDetails {
+  const message = typeof warning === "string" ? warning : warning.message;
+
   if (typeof args[0] === "string") {
-    return args[0];
+    return {
+      message,
+      type: args[0],
+    };
   }
 
   if (isWarningOptionsWithType(args[0])) {
-    return args[0].type;
+    return {
+      message,
+      type: args[0].type,
+    };
   }
 
-  return warning instanceof Error ? warning.name : "";
+  return {
+    message,
+    type: warning instanceof Error ? warning.name : "",
+  };
 }
 
-function isWarningOptionsWithType(value: unknown): value is { type: string } {
+function isWarningOptionsWithType(value: unknown): value is WarningTypeOption {
   return (
     typeof value === "object" &&
     value !== null &&
