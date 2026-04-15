@@ -979,6 +979,94 @@ test("note-only meals stay first-class meal events without raw artifacts", async
   assert.deepEqual(manifest.artifacts, []);
 });
 
+test("structured-only meals persist source, ingredients, and nutrition without raw artifacts", async () => {
+  const vaultRoot = await makeTempDirectory("murph-vault");
+  await initializeVault({ vaultRoot });
+
+  const meal = await addMeal({
+    vaultRoot,
+    occurredAt: "2026-03-10T18:30:00.000Z",
+    source: "derived",
+    ingredients: [" salmon  ", "rice", "salmon"],
+    nutrition: {
+      totals: {
+        calories: 690,
+        proteinGrams: 42,
+      },
+      provenance: {
+        source: "estimated",
+        confidence: "medium",
+      },
+    },
+  });
+
+  const mealEvents = await readJsonlRecords({
+    vaultRoot,
+    relativePath: meal.eventPath,
+  });
+  const mealEvent = expectRecord<MealEventRecord>(mealEvents[0]);
+  const manifest = JSON.parse(
+    await fs.readFile(path.join(vaultRoot, meal.manifestPath), "utf8"),
+  ) as {
+    artifacts?: unknown[];
+  };
+
+  assert.equal(mealEvent.kind, "meal");
+  assert.equal(mealEvent.source, "derived");
+  assert.deepEqual(mealEvent.ingredients, ["salmon", "rice"]);
+  assert.deepEqual(mealEvent.nutrition, {
+    totals: {
+      calories: 690,
+      proteinGrams: 42,
+    },
+    provenance: {
+      source: "estimated",
+      confidence: "medium",
+    },
+  });
+  assert.deepEqual(mealEvent.attachments ?? [], []);
+  assert.deepEqual(mealEvent.rawRefs, [meal.manifestPath]);
+  assert.equal(meal.photo, null);
+  assert.equal(meal.audio, null);
+  assert.deepEqual(manifest.artifacts, []);
+});
+
+test("nutrition-only structured meals remain valid meal events", async () => {
+  const vaultRoot = await makeTempDirectory("murph-vault");
+  await initializeVault({ vaultRoot });
+
+  const meal = await addMeal({
+    vaultRoot,
+    occurredAt: "2026-03-10T18:30:00.000Z",
+    nutrition: {
+      totals: {
+        calories: 420,
+      },
+      provenance: {
+        source: "estimated",
+      },
+    },
+  });
+
+  const mealEvents = await readJsonlRecords({
+    vaultRoot,
+    relativePath: meal.eventPath,
+  });
+  const mealEvent = expectRecord<MealEventRecord>(mealEvents[0]);
+
+  assert.equal(mealEvent.kind, "meal");
+  assert.equal(mealEvent.note, undefined);
+  assert.deepEqual(mealEvent.ingredients, undefined);
+  assert.deepEqual(mealEvent.nutrition, {
+    totals: {
+      calories: 420,
+    },
+    provenance: {
+      source: "estimated",
+    },
+  });
+});
+
 test("meal events persist optional nutrition totals without affecting attachment flows", async () => {
   const vaultRoot = await makeTempDirectory("murph-vault");
   const sourceRoot = await makeTempDirectory("murph-source");
@@ -3708,6 +3796,16 @@ test("mutation helpers reject empty meal imports and invalid sample batches", as
       addMeal({
         vaultRoot,
         note: "   ",
+      }),
+    (error: unknown) =>
+      error instanceof VaultError && error.code === "VAULT_MEAL_CONTENT_REQUIRED",
+  );
+
+  await assert.rejects(
+    () =>
+      addMeal({
+        vaultRoot,
+        nutrition: {},
       }),
     (error: unknown) =>
       error instanceof VaultError && error.code === "VAULT_MEAL_CONTENT_REQUIRED",

@@ -345,6 +345,44 @@ test("addMeal validates attachments and maps to addMeal-compatible input", async
   assert.equal((mealPayload as { photoPath: string }).photoPath, photoPath);
 });
 
+test("addMeal accepts structured-only meal input with ingredients and nutrition", async () => {
+  const { calls, corePort } = createCorePortSpy();
+
+  await addMeal(
+    {
+      source: "derived",
+      ingredients: [" salmon  ", "rice"],
+      nutrition: {
+        totals: {
+          calories: 690,
+          proteinGrams: 42,
+        },
+        provenance: {
+          source: "estimated",
+        },
+      },
+    },
+    { corePort },
+  );
+
+  const [mealPayload] = calls.meals;
+
+  assert.ok(mealPayload);
+  assert.equal((mealPayload as { photoPath?: string }).photoPath, undefined);
+  assert.equal((mealPayload as { audioPath?: string }).audioPath, undefined);
+  assert.equal((mealPayload as { source?: string }).source, "derived");
+  assert.deepEqual((mealPayload as { ingredients?: string[] }).ingredients, ["salmon", "rice"]);
+  assert.deepEqual((mealPayload as { nutrition?: unknown }).nutrition, {
+    totals: {
+      calories: 690,
+      proteinGrams: 42,
+    },
+    provenance: {
+      source: "estimated",
+    },
+  });
+});
+
 test("addMeal accepts text-only meal notes without requiring a photo", async () => {
   const { calls, corePort } = createCorePortSpy();
 
@@ -362,7 +400,7 @@ test("addMeal accepts text-only meal notes without requiring a photo", async () 
   assert.equal((mealPayload as { note: string }).note, "soup");
 });
 
-test("addMeal rejects requests without a photo, audio note, or meal note", async () => {
+test("addMeal rejects requests without any supported meal content", async () => {
   const { corePort } = createCorePortSpy();
 
   await assert.rejects(
@@ -372,7 +410,7 @@ test("addMeal rejects requests without a photo, audio note, or meal note", async
         },
         { corePort },
       ),
-    /photoPath, audioPath, or note/,
+    /photoPath, audioPath, note, ingredients, or nutrition/,
   );
 });
 
@@ -546,6 +584,49 @@ test("prepareMealImport accepts note-only meal input", async () => {
   assert.equal(payload.audioPath, undefined);
   assert.equal(payload.vaultRoot, "/tmp/example-vault");
   assert.equal(payload.note, "eggs and fruit");
+});
+
+test("prepareMealImport preserves structured-only meal data", async () => {
+  const payload = await prepareMealImport({
+    vaultRoot: "/tmp/example-vault",
+    source: "derived",
+    ingredients: [" salmon  ", "rice"],
+    nutrition: {
+      totals: {
+        calories: 690,
+      },
+      provenance: {
+        source: "estimated",
+      },
+    },
+  });
+
+  assert.equal(payload.photoPath, undefined);
+  assert.equal(payload.audioPath, undefined);
+  assert.equal(payload.vaultRoot, "/tmp/example-vault");
+  assert.equal(payload.source, "derived");
+  assert.deepEqual(payload.ingredients, ["salmon", "rice"]);
+  assert.deepEqual(payload.nutrition, {
+    totals: {
+      calories: 690,
+    },
+    provenance: {
+      source: "estimated",
+    },
+  });
+});
+
+test("prepareMealImport accepts ingredients-only structured meals", async () => {
+  const payload = await prepareMealImport({
+    vaultRoot: "/tmp/example-vault",
+    ingredients: [" salmon  ", "rice"],
+  });
+
+  assert.equal(payload.photoPath, undefined);
+  assert.equal(payload.audioPath, undefined);
+  assert.equal(payload.note, undefined);
+  assert.deepEqual(payload.ingredients, ["salmon", "rice"]);
+  assert.equal(payload.nutrition, undefined);
 });
 
 test("prepareCsvSampleImport skips blank rows and omits empty metadata columns", async () => {

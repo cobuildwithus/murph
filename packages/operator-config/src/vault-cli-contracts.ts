@@ -1,4 +1,8 @@
-import { isValidIanaTimeZone } from '@murphai/contracts'
+import {
+  eventSourceSchema,
+  isValidIanaTimeZone,
+  mealNutritionSchema,
+} from '@murphai/contracts'
 import { ALL_QUERY_ENTITY_FAMILIES } from '@murphai/query/entity-families'
 import { z } from 'zod'
 
@@ -96,6 +100,9 @@ export const mealAddResultSchema = z.object({
   audioPath: pathSchema.nullable(),
   manifestFile: pathSchema,
   note: z.string().nullable(),
+  source: eventSourceSchema.nullable(),
+  ingredients: z.array(z.string().min(1)).nullable(),
+  nutrition: mealNutritionSchema.nullable(),
 })
 
 const workoutSetResultSchema = z.object({

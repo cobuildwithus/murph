@@ -1,3 +1,5 @@
+import type { MealNutrition } from "@murphai/contracts";
+
 export interface DocumentImportPayload {
   vaultRoot?: string;
   sourcePath: string;
@@ -14,6 +16,8 @@ export interface MealImportPayload {
   occurredAt?: string;
   note?: string;
   source?: string;
+  ingredients?: string[];
+  nutrition?: MealNutrition;
 }
 
 export interface SampleImportRecord {

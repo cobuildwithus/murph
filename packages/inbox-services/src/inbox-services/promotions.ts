@@ -25,6 +25,7 @@ import type {
   CoreRuntimeModule,
   InboxPaths,
   InboxRuntimeModule,
+  PromoteInput,
   PromotionStore,
   PromotionTarget,
   QueryRuntimeModule,
@@ -44,12 +45,6 @@ const INBOX_PROMOTION_STORE_SCHEMA = 'murph.inbox-promotion-store.v1'
 const INBOX_PROMOTION_STORE_SCHEMA_VERSION = 1
 const RAW_MEALS_DIRECTORY = path.posix.join('raw', 'meals')
 const RAW_DOCUMENTS_DIRECTORY = path.posix.join('raw', 'documents')
-
-interface PromoteInput {
-  captureId: string
-  requestId: string | null
-  vault: string
-}
 
 interface PromotionScope<TPrepared, TDerived> {
   input: PromoteInput
