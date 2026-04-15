@@ -8,7 +8,10 @@ import {
 import {
   createAssistantFoodAutoLogHooks,
 } from "@murphai/assistant-engine";
-import { reconcileManagedAssistantAutoReplyChannelsLocal } from "@murphai/assistant-engine/assistant-state";
+import {
+  readAssistantAutomationState,
+  reconcileManagedAssistantAutoReplyChannelsLocal,
+} from "@murphai/assistant-engine/assistant-state";
 import { createIntegratedInboxServices } from "@murphai/inbox-services";
 import { createIntegratedVaultServices } from "@murphai/vault-usecases/vault-services";
 import {
@@ -29,7 +32,7 @@ interface HostedMemberBootstrapResult {
   vaultCreated: boolean;
 }
 
-const HOSTED_AUTO_REPLY_CHANNELS = ["email", "telegram"] as const;
+const HOSTED_AUTO_REPLY_CHANNELS = ["email", "linq", "telegram"] as const;
 
 type HostedAutoReplyChannel = typeof HOSTED_AUTO_REPLY_CHANNELS[number];
 
@@ -61,6 +64,7 @@ export async function prepareHostedDispatchContext(
 
   const assistantRuntimeState = await bootstrapHostedAssistantRuntimeState(
     vaultRoot,
+    dispatch,
     runtimeEnv,
     resolvedConfig.channelCapabilities,
     {
@@ -101,6 +105,7 @@ export async function bootstrapHostedMemberContext(
 
 async function bootstrapHostedAssistantRuntimeState(
   vaultRoot: string,
+  dispatch: HostedExecutionDispatchRequest,
   runtimeEnv: Readonly<Record<string, string>>,
   channelCapabilities: HostedAssistantRuntimeChannelCapabilities,
   options: {
@@ -116,6 +121,9 @@ async function bootstrapHostedAssistantRuntimeState(
         vaultRoot,
         channelCapabilities,
         assistantBootstrap.configured,
+        {
+          linqAutoReplyEnabled: shouldEnableHostedManagedLinqAutoReply(dispatch),
+        },
       )
     : {
         emailAutoReplyEnabled: false,
@@ -158,15 +166,24 @@ export async function reconcileHostedAssistantChannelCapabilities(
   vaultRoot: string,
   channelCapabilities: HostedAssistantRuntimeChannelCapabilities,
   assistantConfigured: boolean,
+  options: {
+    linqAutoReplyEnabled?: boolean;
+  } = {},
 ): Promise<Pick<HostedBootstrapResult, "emailAutoReplyEnabled" | "telegramAutoReplyEnabled">> {
   const emailAutoReplyEnabled = assistantConfigured
     && channelCapabilities.emailSendReady;
+  const linqAutoReplyEnabled = assistantConfigured
+    && (
+      options.linqAutoReplyEnabled === true
+      || await hasHostedManagedAutoReplyChannel(vaultRoot, "linq")
+    );
   const telegramAutoReplyEnabled = assistantConfigured
     && channelCapabilities.telegramBotConfigured;
 
   await reconcileManagedAssistantAutoReplyChannelsLocal({
     desiredChannels: resolveHostedAssistantAutoReplyChannels({
       emailAutoReplyEnabled,
+      linqAutoReplyEnabled,
       telegramAutoReplyEnabled,
     }),
     isManagedChannel: isHostedManagedAutoReplyChannel,
@@ -180,11 +197,12 @@ export async function reconcileHostedAssistantChannelCapabilities(
 }
 
 function isHostedManagedAutoReplyChannel(channel: string): channel is HostedAutoReplyChannel {
-  return channel === "email" || channel === "telegram";
+  return channel === "email" || channel === "linq" || channel === "telegram";
 }
 
 function resolveHostedAssistantAutoReplyChannels(input: {
   emailAutoReplyEnabled: boolean;
+  linqAutoReplyEnabled: boolean;
   telegramAutoReplyEnabled: boolean;
 }): HostedAutoReplyChannel[] {
   const nextChannels: HostedAutoReplyChannel[] = [];
@@ -193,11 +211,34 @@ function resolveHostedAssistantAutoReplyChannels(input: {
     nextChannels.push("email");
   }
 
+  if (input.linqAutoReplyEnabled) {
+    nextChannels.push("linq");
+  }
+
   if (input.telegramAutoReplyEnabled) {
     nextChannels.push("telegram");
   }
 
   return nextChannels;
+}
+
+function shouldEnableHostedManagedLinqAutoReply(
+  dispatch: HostedExecutionDispatchRequest,
+): boolean {
+  if (dispatch.event.kind !== "member.activated") {
+    return false;
+  }
+
+  return dispatch.event.firstContact?.channel === "linq";
+}
+
+async function hasHostedManagedAutoReplyChannel(
+  vaultRoot: string,
+  channel: HostedAutoReplyChannel,
+): Promise<boolean> {
+  const automationState = await readAssistantAutomationState(vaultRoot);
+
+  return automationState.autoReply.some((entry) => entry.channel === channel);
 }
 
 function normalizeHostedAssistantBootstrapStatus(

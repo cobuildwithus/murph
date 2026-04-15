@@ -362,6 +362,9 @@ describe("hosted runtime context coverage", () => {
             telegramBotConfigured: true,
           },
           true,
+          {
+            linqAutoReplyEnabled: true,
+          },
         ),
       ).resolves.toEqual({
         emailAutoReplyEnabled: true,
@@ -437,6 +440,9 @@ describe("hosted runtime context coverage", () => {
             telegramBotConfigured: false,
           },
           true,
+          {
+            linqAutoReplyEnabled: true,
+          },
         ),
       ).resolves.toEqual({
         emailAutoReplyEnabled: true,
