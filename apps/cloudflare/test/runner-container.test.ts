@@ -1,5 +1,19 @@
 import type { HostedAssistantRuntimeJobResult } from "@murphai/assistant-runtime";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const mocks = vi.hoisted(() => ({
+  emitHostedExecutionStructuredLog: vi.fn(),
+}));
+
+vi.mock("@murphai/hosted-execution", async () => {
+  const actual = await vi.importActual<typeof import("@murphai/hosted-execution")>(
+    "@murphai/hosted-execution",
+  );
+  return {
+    ...actual,
+    emitHostedExecutionStructuredLog: mocks.emitHostedExecutionStructuredLog,
+  };
+});
 
 import {
   destroyHostedExecutionContainer,
@@ -11,6 +25,10 @@ import {
 import { CLOUDFLARE_HOSTED_RUNTIME_HOSTS } from "../src/internal-hosts.ts";
 
 describe("RunnerContainer", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it("reuses a warm per-user shell across back-to-back invocations", async () => {
     const { container, containerFetch, destroy, setOutboundByHosts, startAndWaitForPorts } =
       createContainerDouble({
@@ -271,6 +289,36 @@ describe("RunnerContainer", () => {
     expect(startOptions?.cancellationOptions.instanceGetTimeoutMS).toBeGreaterThan(0);
     expect(startOptions?.cancellationOptions.portReadyTimeoutMS).toBeLessThanOrEqual(1_000);
     expect(startOptions?.cancellationOptions.portReadyTimeoutMS).toBeGreaterThan(0);
+  });
+
+  it("emits claim-relative readiness timing in container logs", async () => {
+    const { container } = createContainerDouble();
+
+    await container.invoke({
+      job: {
+        request: createRunnerRequest("evt_run_elapsed", {
+          run: {
+            attempt: 1,
+            runId: "run_123",
+            startedAt: "2026-03-27T00:00:00.000Z",
+          },
+        }),
+      },
+      timeoutMs: 60_000,
+      userId: "member_123",
+    });
+
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "container",
+        details: expect.objectContaining({
+          readinessLatencyMs: expect.any(Number),
+          runElapsedMs: expect.any(Number),
+        }),
+        message: "Hosted execution container is ready.",
+        phase: "container.ready",
+      }),
+    );
   });
 
   it("propagates safe configuration failures from the runner shell with the inner error code", async () => {

@@ -202,6 +202,7 @@ export class RunnerContainer extends Container {
           dispatch,
           details: {
             readinessLatencyMs: Date.now() - readinessStartedAt,
+            runElapsedMs: computeHostedRunElapsedMs(run),
             startMode: "warm",
           },
           message: "Hosted execution container is ready.",
@@ -215,6 +216,7 @@ export class RunnerContainer extends Container {
           dispatch,
           details: {
             readinessLatencyMs: Date.now() - readinessStartedAt,
+            runElapsedMs: computeHostedRunElapsedMs(run),
             startMode: "warm",
           },
           error,
@@ -233,6 +235,7 @@ export class RunnerContainer extends Container {
       component: "container",
       dispatch,
       details: {
+        runElapsedMs: computeHostedRunElapsedMs(run),
         startMode: "cold",
       },
       message: "Hosted execution container starting.",
@@ -266,6 +269,7 @@ export class RunnerContainer extends Container {
       dispatch,
       details: {
         readinessLatencyMs: Date.now() - readinessStartedAt,
+        runElapsedMs: computeHostedRunElapsedMs(run),
         startMode: "cold",
       },
       message: "Hosted execution container is ready.",
@@ -554,6 +558,21 @@ function readRunnerIdleTtlMs(source: RunnerContainerEnvironmentSource): number {
   }
 
   return parsed;
+}
+
+function computeHostedRunElapsedMs(
+  run: HostedAssistantRuntimeJobInput["request"]["run"] | null,
+): number | null {
+  if (!run?.startedAt) {
+    return null;
+  }
+
+  const startedAtMs = Date.parse(run.startedAt);
+  if (!Number.isFinite(startedAtMs)) {
+    return null;
+  }
+
+  return Math.max(0, Date.now() - startedAtMs);
 }
 
 function formatRunnerSleepAfter(idleTtlMs: number): `${number}s` {

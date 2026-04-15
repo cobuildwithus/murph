@@ -560,6 +560,7 @@ export class RunnerDispatchProcessor {
           ]),
         },
         forwardedEnvKeyCount: Object.keys(forwardedEnv).length,
+        runElapsedMs: computeHostedRunElapsedMs(run),
         resumeFromCommit: Boolean(resume),
         sharePackAttached: Boolean(sharePack),
         userEnvCategories: {
@@ -828,6 +829,9 @@ export class RunnerDispatchProcessor {
 
     emitHostedExecutionStructuredLog({
       component: "runner",
+      details: {
+        runElapsedMs: computeHostedRunElapsedMs(input.run),
+      },
       dispatch: input.dispatch,
       error: input.error,
       level: input.level,
@@ -888,6 +892,21 @@ export class RunnerDispatchProcessor {
       // Best-effort cleanup only; lifecycle TTL still backstops raw message deletion.
     }
   }
+}
+
+function computeHostedRunElapsedMs(
+  run: HostedExecutionRunContext | null | undefined,
+): number | null {
+  if (!run?.startedAt) {
+    return null;
+  }
+
+  const startedAtMs = Date.parse(run.startedAt);
+  if (!Number.isFinite(startedAtMs)) {
+    return null;
+  }
+
+  return Math.max(0, Date.now() - startedAtMs);
 }
 
 function createMissingHostedSharePackError(input: {

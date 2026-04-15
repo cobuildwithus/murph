@@ -120,6 +120,7 @@ export async function runHostedAssistantRuntimeJobInProcessDetailed(
       artifactStore: runtime.platform.artifactStore,
     });
     const materializedArtifactPaths = new Set<string>();
+    const restoreStartedAtMs = Date.now();
     const restored = await restoreHostedExecutionContext({
       artifactResolver,
       bundle: incomingBundle,
@@ -140,6 +141,18 @@ export async function runHostedAssistantRuntimeJobInProcessDetailed(
         userEnvKeys: Object.keys(runtime.userEnv),
       },
     };
+    emitHostedExecutionStructuredLog({
+      component: "runtime",
+      details: {
+        bundlePresent: incomingBundle !== null,
+        restoreLatencyMs: Date.now() - restoreStartedAtMs,
+        runElapsedMs: computeHostedRunElapsedMs(input.request.run ?? null),
+      },
+      dispatch: input.request.dispatch,
+      message: "Hosted runtime restored execution context.",
+      phase: "runtime.starting",
+      run: input.request.run ?? null,
+    });
 
     return await withHostedProcessEnvironment(
       {
@@ -179,6 +192,7 @@ export async function runHostedAssistantRuntimeJobInProcessDetailed(
               details: {
                 assistantDeliveryEffectCount:
                   committedExecution.committedAssistantDeliveryEffects.length,
+                runElapsedMs: computeHostedRunElapsedMs(input.request.run ?? null),
               },
               message: "Hosted runtime prepared a durable commit for the worker.",
               phase: "commit.recorded",
@@ -207,6 +221,9 @@ export async function runHostedAssistantRuntimeJobInProcessDetailed(
           emitHostedExecutionStructuredLog({
             component: "runtime",
             dispatch: input.request.dispatch,
+            details: {
+              runElapsedMs: computeHostedRunElapsedMs(input.request.run ?? null),
+            },
             message: "Hosted runtime completed.",
             phase: "completed",
             run: input.request.run ?? null,
@@ -336,6 +353,7 @@ function buildHostedRuntimeStartDetails(
       effectsPortBound: Boolean(runtime.platform.effectsPort),
       usageExportBound: Boolean(runtime.platform.usageExportPort),
     },
+    runElapsedMs: computeHostedRunElapsedMs(input.request.run ?? null),
     resumeFromCommit: Boolean(input.request.resume?.committedResult),
     sharePackAttached: Boolean(input.request.sharePack),
     userEnvCategories: {
@@ -371,6 +389,21 @@ function buildHostedRuntimeStartDetails(
     verifiedEmailPresent: typeof runtime.userEnv.HOSTED_USER_VERIFIED_EMAIL === "string"
       && runtime.userEnv.HOSTED_USER_VERIFIED_EMAIL.length > 0,
   };
+}
+
+function computeHostedRunElapsedMs(
+  run: HostedAssistantRuntimeJobInput["request"]["run"] | null,
+): number | null {
+  if (!run?.startedAt) {
+    return null;
+  }
+
+  const startedAtMs = Date.parse(run.startedAt);
+  if (!Number.isFinite(startedAtMs)) {
+    return null;
+  }
+
+  return Math.max(0, Date.now() - startedAtMs);
 }
 
 function hasAnyHostedRuntimeConfigKey(
