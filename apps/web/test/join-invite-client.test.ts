@@ -465,6 +465,7 @@ test("active invite state renders message and settings actions with client navig
     }),
   );
 
+  assert.match(markup, /Murph should reach out shortly\. Just reply there to start chatting\./);
   assert.ok(markup.includes('href="sms:+15550100001"'));
   assert.match(markup, /Text Murph/);
   assert.ok(markup.includes('download="Murph.vcf"'));
@@ -526,6 +527,8 @@ test("active invite state explains when vault and assistant setup is still runni
     }),
   );
 
+  assert.match(markup, /Welcome to Murph/);
+  assert.match(markup, /Your personal health home is almost ready\./);
   assert.match(markup, /Your account is ready\. Murph is getting your space ready\./);
   assert.match(
     markup,
