@@ -25,6 +25,9 @@ import {
   collectHostedAssistantDeliverySideEffects,
   drainHostedCommittedAssistantDeliveriesAfterCommit,
 } from "./callbacks.ts";
+import {
+  readHostedAssistantExecutionDefaultTarget,
+} from "./context.ts";
 import { executeHostedDispatchEvent } from "./events.ts";
 import { runHostedMaintenanceLoop } from "./maintenance.ts";
 import type {
@@ -79,12 +82,15 @@ export async function executeHostedDispatchForCommit(input: {
     phase: "dispatch.running",
     run: input.request.run ?? null,
   });
+  const maintenanceExecutionContext = await resolveHostedMaintenanceExecutionContext(
+    input.executionContext,
+  );
   const maintenanceStartedAtMs = Date.now();
   const maintenanceMetrics = await runHostedMaintenanceLoop({
     artifactMaterializer: input.artifactMaterializer ?? null,
     deviceSyncPort: input.runtime.platform.deviceSyncPort,
     dispatch: input.request.dispatch,
-    executionContext: input.executionContext,
+    executionContext: maintenanceExecutionContext,
     requestId: input.request.dispatch.eventId,
     resolvedConfig: input.runtime.resolvedConfig,
     skipAssistantAutomation: input.request.dispatch.event.kind === "member.activated"
@@ -157,6 +163,27 @@ export async function executeHostedDispatchForCommit(input: {
   };
 }
 
+async function resolveHostedMaintenanceExecutionContext(
+  executionContext: AssistantExecutionContext,
+): Promise<AssistantExecutionContext> {
+  if (!executionContext.hosted) {
+    return executionContext;
+  }
+
+  const defaultTarget = await readHostedAssistantExecutionDefaultTarget();
+  if (!defaultTarget) {
+    return executionContext;
+  }
+
+  return {
+    ...executionContext,
+    hosted: {
+      ...executionContext.hosted,
+      defaultTarget,
+    },
+  };
+}
+
 export async function completeHostedExecutionAfterCommit(input: {
   dispatch: HostedExecutionDispatchRequest;
   materializedArtifactPaths?: ReadonlySet<string>;
@@ -179,7 +206,7 @@ export async function completeHostedExecutionAfterCommit(input: {
     run: input.run ?? null,
   });
   const sideEffectsStartedAtMs = Date.now();
-  await drainHostedCommittedAssistantDeliveriesAfterCommit({
+  const assistantDeliveryOutcomes = await drainHostedCommittedAssistantDeliveriesAfterCommit({
     dispatch: input.dispatch,
     effectsPort: input.runtime.platform.effectsPort,
     assistantDeliveryEffects: input.committedExecution.committedAssistantDeliveryEffects,
@@ -240,6 +267,7 @@ export async function completeHostedExecutionAfterCommit(input: {
   };
 
   return {
+    assistantDeliveryOutcomes,
     finalGatewayProjectionSnapshot,
     phase: "completed",
     result: finalResult,

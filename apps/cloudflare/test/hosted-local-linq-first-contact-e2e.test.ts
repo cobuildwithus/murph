@@ -42,18 +42,11 @@ interface ObservedLinqRequest {
   url: string;
 }
 
-interface ObservedAssistantProviderRequest {
-  body: string;
-  method: string;
-  url: string;
-}
-
 const nextEnvPath = path.join(repoRoot, "apps/web/next-env.d.ts");
 const userId = `member_local_linq_first_contact_${Date.now()}`;
 const directReplyUserId = `member_local_linq_direct_reply_${Date.now()}`;
 
 const observedLinqRequests: ObservedLinqRequest[] = [];
-const observedAssistantProviderRequests: ObservedAssistantProviderRequest[] = [];
 const devEnv: NodeJS.ProcessEnv = {
   ...process.env,
   MURPH_DEV_CF_WRANGLER_LOG_LEVEL: "debug",
@@ -851,14 +844,8 @@ async function stopLinqStubServer(server: ReturnType<typeof createServer> | null
 }
 
 async function startAssistantProviderStubServer(): Promise<ReturnType<typeof createServer>> {
-  observedAssistantProviderRequests.length = 0;
   const server = createServer(async (request, response) => {
-    const body = await readRequestBody(request);
-    observedAssistantProviderRequests.push({
-      body,
-      method: request.method ?? "GET",
-      url: request.url ?? "/",
-    });
+    await readRequestBody(request);
 
     if (request.method === "GET" && request.url === "/v1/models") {
       writeJsonResponse(response, 200, {
