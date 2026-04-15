@@ -353,12 +353,6 @@ function createParsersModule(
         reason: 'configured',
         source: 'config',
       },
-      pdftotext: {
-        available: true,
-        command: '/usr/bin/pdftotext',
-        reason: 'configured',
-        source: 'config',
-      },
       whisper: {
         available: true,
         command: '/usr/bin/whisper',

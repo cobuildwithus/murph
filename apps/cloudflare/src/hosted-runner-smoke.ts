@@ -82,7 +82,6 @@ function readHostedNativeToolEnv(): Record<string, string> {
 
   for (const key of [
     "FFMPEG_COMMAND",
-    "PDFTOTEXT_COMMAND",
     "WHISPER_COMMAND",
     "WHISPER_MODEL_PATH",
   ] as const) {

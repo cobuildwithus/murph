@@ -7,7 +7,6 @@ This package consumes attachment-level parse jobs from the inbox runtime, select
 ## Current default stack
 
 - text-like documents: built-in Node text reader
-- native-text PDFs: `pdftotext` when available
 - audio and extracted video audio: `whisper.cpp`
 - media normalization: `ffmpeg`
 

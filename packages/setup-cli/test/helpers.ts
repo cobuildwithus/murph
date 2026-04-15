@@ -50,7 +50,6 @@ export function makeSetupResult(
     toolchainRoot: '~/.murph/toolchain',
     tools: {
       ffmpegCommand: '/usr/local/bin/ffmpeg',
-      pdftotextCommand: '/usr/local/bin/pdftotext',
       whisperCommand: '/usr/local/bin/whisper-cli',
       whisperModelPath: '~/.murph/toolchain/models/whisper/ggml-base.en.bin',
     },

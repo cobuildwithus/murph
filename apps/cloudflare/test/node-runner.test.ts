@@ -2693,7 +2693,6 @@ describe("runHostedExecutionJob", () => {
         "BRAVE_API_KEY",
         "FFMPEG_COMMAND",
         "HOSTED_EXECUTION_RUNNER_ENV_PROFILES",
-        "PDFTOTEXT_COMMAND",
         "WHISPER_COMMAND",
         "WHISPER_MODEL_PATH",
         ...HOSTED_ASSISTANT_ALLOWED_API_KEY_ENV_NAMES,

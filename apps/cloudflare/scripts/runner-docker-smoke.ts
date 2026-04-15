@@ -17,9 +17,7 @@ const repoRoot = path.resolve(appDir, "../..");
 
 const FIXTURE_VAULT_ROOT = path.join(repoRoot, "fixtures", "demo-web-vault");
 const EXPECTED_VAULT_ID = "vault_01JNV40W8VFYQ2H7CMJY5A9R4K";
-const PDF_RELATIVE_PATH = "raw/smoke/hosted-runner.pdf";
 const WAV_RELATIVE_PATH = "raw/smoke/hosted-runner.wav";
-const EXPECTED_PDF_TEXT = "Murph hosted PDF smoke fixture";
 const EXPECTED_TRANSCRIPT_SNIPPET = "hello";
 const IMAGE_TAG = "murph-cloudflare-runner";
 
@@ -45,10 +43,8 @@ async function main(): Promise<void> {
     "dist/hosted-runner-smoke.js",
   ], JSON.stringify({
     bundle,
-    expectedPdfText: EXPECTED_PDF_TEXT,
     expectedTranscriptSnippet: EXPECTED_TRANSCRIPT_SNIPPET,
     expectedVaultId: EXPECTED_VAULT_ID,
-    pdfRelativePath: PDF_RELATIVE_PATH,
     wavRelativePath: WAV_RELATIVE_PATH,
   }));
 
@@ -59,8 +55,6 @@ async function main(): Promise<void> {
   console.log(`murphBin=${result.murphBin}`);
   console.log(`vaultCliBin=${result.vaultCliBin}`);
   console.log(`reportedVaultId=${result.reportedVaultId}`);
-  console.log(`pdfProviderId=${result.pdfProviderId}`);
-  console.log(`pdfText=${JSON.stringify(result.pdfText)}`);
   console.log(`wavTranscriptProviderId=${result.wavTranscriptProviderId}`);
   console.log(`wavTranscript=${JSON.stringify(result.wavTranscript)}`);
   console.log(`normalizedTranscriptProviderId=${result.normalizedTranscriptProviderId}`);

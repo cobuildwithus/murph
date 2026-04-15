@@ -94,7 +94,7 @@ declare module 'incur' {
       'inbox attachment show': { args: { attachmentId: string }; options: { vault: string; requestId?: string } }
       'inbox attachment show-status': { args: { attachmentId: string }; options: { vault: string; requestId?: string } }
       'inbox backfill': { args: {}; options: { vault: string; requestId?: string; source: string; limit?: number; parse?: boolean } }
-      'inbox bootstrap': { args: {}; options: { vault: string; requestId?: string; rebuild?: boolean; ffmpegCommand?: string; pdftotextCommand?: string; whisperCommand?: string; whisperModelPath?: string; strict?: boolean } }
+      'inbox bootstrap': { args: {}; options: { vault: string; requestId?: string; rebuild?: boolean; ffmpegCommand?: string; whisperCommand?: string; whisperModelPath?: string; strict?: boolean } }
       'inbox doctor': { args: { sourceId?: string }; options: { vault: string; requestId?: string } }
       'inbox init': { args: {}; options: { vault: string; requestId?: string; rebuild?: boolean } }
       'inbox list': { args: {}; options: { vault: string; requestId?: string; source?: string; limit: number } }
@@ -108,7 +108,7 @@ declare module 'incur' {
       'inbox requeue': { args: {}; options: { vault: string; requestId?: string; captureId?: string; attachmentId?: string; state: "failed" | "running" } }
       'inbox run': { args: {}; options: { vault: string; requestId?: string } }
       'inbox search': { args: {}; options: { vault: string; requestId?: string; text: string; source?: string; limit: number } }
-      'inbox setup': { args: {}; options: { vault: string; requestId?: string; ffmpegCommand?: string; pdftotextCommand?: string; whisperCommand?: string; whisperModelPath?: string } }
+      'inbox setup': { args: {}; options: { vault: string; requestId?: string; ffmpegCommand?: string; whisperCommand?: string; whisperModelPath?: string } }
       'inbox show': { args: { captureId: string }; options: { vault: string; requestId?: string } }
       'inbox source add': { args: { source: "telegram" | "linq" | "email" }; options: { vault: string; requestId?: string; id: string; account?: string; address?: string; backfillLimit: number; provision?: boolean; emailDisplayName?: string; emailUsername?: string; emailDomain?: string; emailClientId?: string; linqWebhookHost?: string; linqWebhookPath?: string; linqWebhookPort?: number; enableAutoReply?: boolean } }
       'inbox source list': { args: {}; options: { vault: string; requestId?: string } }
@@ -139,7 +139,7 @@ declare module 'incur' {
       'knowledge show': { args: { slug: string }; options: { vault: string; requestId?: string } }
       'knowledge upsert': { args: {}; options: { vault: string; requestId?: string; body: string; title?: string; slug?: string; pageType?: string; status?: string; clearLibraryLinks?: boolean; relatedSlug?: string[]; librarySlug?: string[]; sourcePath?: string[] } }
       'list': { args: {}; options: { vault: string; requestId?: string; recordType?: string[]; kind?: string; status?: string; stream?: string[]; experiment?: string; from?: string; to?: string; tag?: string[]; limit: number } }
-      'meal add': { args: {}; options: { vault: string; requestId?: string; photo?: string; audio?: string; note?: string; occurredAt?: string | string; source?: "manual" | "import" | "device" | "derived" } }
+      'meal add': { args: {}; options: { vault: string; requestId?: string; input?: string; photo?: string; audio?: string; note?: string; occurredAt?: string | string; source?: "manual" | "import" | "device" | "derived" } }
       'meal delete': { args: { id: string }; options: { vault: string; requestId?: string } }
       'meal edit': { args: { id: string }; options: { vault: string; requestId?: string; input?: string; set?: string[]; clear?: string[]; dayKeyPolicy?: "keep" | "recompute" } }
       'meal list': { args: {}; options: { vault: string; requestId?: string; from?: string; to?: string } }

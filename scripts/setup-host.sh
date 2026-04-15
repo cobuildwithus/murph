@@ -138,7 +138,7 @@ print_linux_install_plan() {
   printf '  - Node >= %s from PATH when available, otherwise an isolated download under ~/.murph/bootstrap\n' "$required_node"
   printf '  - pnpm@%s via corepack\n' "$pnpm_version"
   printf '%s\n' '  - workspace dependencies and build output'
-  printf '%s\n' '  - ffmpeg, poppler/pdftotext, whisper.cpp, and a local Whisper model through the Murph Linux toolchain setup'
+  printf '%s\n' '  - ffmpeg, whisper.cpp, and a local Whisper model through the Murph Linux toolchain setup'
   printf '%s\n' '  - vault bootstrap, default config, user-level murph/vault-cli shims, onboarding channel selection, wearables, and assistant automation/chat handoff'
   printf '%s\n' '  - supported inbox channels and local runtime tools stay available on Linux for server or VM deployments'
 }

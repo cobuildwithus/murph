@@ -60,11 +60,6 @@ const inboxSetupOptionFields = {
     .min(1)
     .optional()
     .describe('Optional explicit ffmpeg command or path to persist.'),
-  pdftotextCommand: z
-    .string()
-    .min(1)
-    .optional()
-    .describe('Optional explicit pdftotext command or path to persist.'),
   whisperCommand: z
     .string()
     .min(1)
@@ -193,7 +188,6 @@ export function registerInboxCommands(
         requestId: requestIdFromOptions(context.options),
         rebuild: context.options.rebuild,
         ffmpegCommand: context.options.ffmpegCommand,
-        pdftotextCommand: context.options.pdftotextCommand,
         whisperCommand: context.options.whisperCommand,
         whisperModelPath: context.options.whisperModelPath,
         strict: context.options.strict,
@@ -230,7 +224,6 @@ export function registerInboxCommands(
         vault: context.options.vault,
         requestId: requestIdFromOptions(context.options),
         ffmpegCommand: context.options.ffmpegCommand,
-        pdftotextCommand: context.options.pdftotextCommand,
         whisperCommand: context.options.whisperCommand,
         whisperModelPath: context.options.whisperModelPath,
       })

@@ -48,7 +48,6 @@ export const inboxParserToolchainStatusSchema = z.object({
   discoveredAt: isoTimestampSchema,
   tools: z.object({
     ffmpeg: inboxParserToolStatusSchema,
-    pdftotext: inboxParserToolStatusSchema,
     whisper: inboxParserToolStatusSchema.extend({
       modelPath: z.string().min(1).nullable(),
     }),

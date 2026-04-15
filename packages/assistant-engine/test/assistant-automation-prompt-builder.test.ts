@@ -97,7 +97,6 @@ function createAttachment(
           extractedText: null,
           transcriptText: null,
           derivedPath: null,
-          parserProviderId: null,
           parseState: 'succeeded',
           ...overrides,
         },

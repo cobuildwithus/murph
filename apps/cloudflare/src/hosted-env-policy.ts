@@ -10,7 +10,6 @@ import { toStringEnvSource, type StringEnvSource } from "./string-env.ts";
 
 const OPERATOR_ONLY_RUNNER_BINARY_ENV_KEYS = [
   "FFMPEG_COMMAND",
-  "PDFTOTEXT_COMMAND",
   "WHISPER_COMMAND",
   "WHISPER_MODEL_PATH",
 ] as const;
@@ -117,7 +116,6 @@ const RUNNER_ENV_PROFILE_KEYS = {
   ],
   parsers: [
     "FFMPEG_COMMAND",
-    "PDFTOTEXT_COMMAND",
     "WHISPER_COMMAND",
     "WHISPER_MODEL_PATH",
   ],

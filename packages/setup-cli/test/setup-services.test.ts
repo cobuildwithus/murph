@@ -49,7 +49,6 @@ test('service-step helpers preserve the stable toolchain ordering and step shape
     specs.map((spec) => [spec.id, spec.commandCandidates, spec.key]),
     [
       ['ffmpeg', ['ffmpeg'], 'ffmpegCommand'],
-      ['pdftotext', ['pdftotext'], 'pdftotextCommand'],
       ['whisper-cpp', ['whisper-cli', 'whisper-cpp'], 'whisperCommand'],
     ],
   )
@@ -124,7 +123,6 @@ test('setup scheduling helpers respect terminal gating and launch routing', () =
           toolchainRoot: '~/.murph/toolchain',
           tools: {
             ffmpegCommand: null,
-            pdftotextCommand: null,
             whisperCommand: null,
             whisperModelPath: '~/.murph/toolchain/models/whisper/ggml-base.en.bin',
           },
@@ -156,7 +154,6 @@ test('setup scheduling helpers respect terminal gating and launch routing', () =
           toolchainRoot: '~/.murph/toolchain',
           tools: {
             ffmpegCommand: null,
-            pdftotextCommand: null,
             whisperCommand: null,
             whisperModelPath: '~/.murph/toolchain/models/whisper/ggml-base.en.bin',
           },
@@ -188,7 +185,6 @@ test('setup scheduling helpers respect terminal gating and launch routing', () =
           toolchainRoot: '~/.murph/toolchain',
           tools: {
             ffmpegCommand: null,
-            pdftotextCommand: null,
             whisperCommand: null,
             whisperModelPath: '~/.murph/toolchain/models/whisper/ggml-base.en.bin',
           },
@@ -220,7 +216,6 @@ test('setup scheduling helpers respect terminal gating and launch routing', () =
           toolchainRoot: '~/.murph/toolchain',
           tools: {
             ffmpegCommand: null,
-            pdftotextCommand: null,
             whisperCommand: null,
             whisperModelPath: '~/.murph/toolchain/models/whisper/ggml-base.en.bin',
           },
@@ -244,13 +239,12 @@ test('setup scheduling helpers respect terminal gating and launch routing', () =
       platform: 'darwin',
       scheduledUpdates: [],
       steps: [],
-      toolchainRoot: '~/.murph/toolchain',
-      tools: {
-        ffmpegCommand: null,
-        pdftotextCommand: null,
-        whisperCommand: null,
-        whisperModelPath: '~/.murph/toolchain/models/whisper/ggml-base.en.bin',
-      },
+        toolchainRoot: '~/.murph/toolchain',
+        tools: {
+          ffmpegCommand: null,
+          whisperCommand: null,
+          whisperModelPath: '~/.murph/toolchain/models/whisper/ggml-base.en.bin',
+        },
       vault: '~/vault',
       wearables: [
         {
@@ -283,13 +277,12 @@ test('setup scheduling helpers respect terminal gating and launch routing', () =
       platform: 'darwin',
       scheduledUpdates: [],
       steps: [],
-      toolchainRoot: '~/.murph/toolchain',
-      tools: {
-        ffmpegCommand: null,
-        pdftotextCommand: null,
-        whisperCommand: null,
-        whisperModelPath: '~/.murph/toolchain/models/whisper/ggml-base.en.bin',
-      },
+        toolchainRoot: '~/.murph/toolchain',
+        tools: {
+          ffmpegCommand: null,
+          whisperCommand: null,
+          whisperModelPath: '~/.murph/toolchain/models/whisper/ggml-base.en.bin',
+        },
       vault: '~/vault',
       wearables: [
         {

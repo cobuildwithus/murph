@@ -83,7 +83,6 @@ export const setupStepResultSchema = z.object({
 
 export const setupToolsSchema = z.object({
   ffmpegCommand: pathSchema.nullable(),
-  pdftotextCommand: pathSchema.nullable(),
   whisperCommand: pathSchema.nullable(),
   whisperModelPath: pathSchema,
 })

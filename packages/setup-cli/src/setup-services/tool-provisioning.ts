@@ -23,7 +23,7 @@ import type {
 } from './process.js'
 
 /**
- * Tool provisioning owns the OS-specific ffmpeg/pdftotext/whisper install and
+ * Tool provisioning owns the OS-specific ffmpeg/whisper install and
  * validation flow so setup-services.ts can stay focused on the higher-level
  * host setup sequence.
  */
@@ -88,7 +88,6 @@ async function provisionMacosToolchain(
 
   const formulaCommands: Record<FormulaCommandKey, string | null> = {
     ffmpegCommand: null,
-    pdftotextCommand: null,
     whisperCommand: null,
   }
   for (const requirement of buildBaseFormulaSpecs()) {
@@ -112,7 +111,6 @@ async function provisionMacosToolchain(
     env: state.env,
     tools: {
       ffmpegCommand: formulaCommands.ffmpegCommand,
-      pdftotextCommand: formulaCommands.pdftotextCommand,
       whisperCommand: formulaCommands.whisperCommand,
       whisperModelPath,
     },
@@ -125,7 +123,6 @@ async function provisionLinuxToolchain(
   let apt = await resolveAptRunner(input.env)
   const resolvedCommands: Record<FormulaCommandKey, string | null> = {
     ffmpegCommand: null,
-    pdftotextCommand: null,
     whisperCommand: null,
   }
   for (const requirement of buildBaseFormulaSpecs()) {
@@ -148,7 +145,6 @@ async function provisionLinuxToolchain(
     env: input.env,
     tools: {
       ffmpegCommand: resolvedCommands.ffmpegCommand,
-      pdftotextCommand: resolvedCommands.pdftotextCommand,
       whisperCommand: resolvedCommands.whisperCommand,
       whisperModelPath,
     },

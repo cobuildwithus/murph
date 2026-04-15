@@ -131,12 +131,6 @@ function createParserDoctor() {
         reason: 'ffmpeg configured',
         source: 'config' as const,
       },
-      pdftotext: {
-        available: true,
-        command: '/usr/bin/pdftotext',
-        reason: 'pdftotext configured',
-        source: 'config' as const,
-      },
       whisper: {
         available: true,
         command: '/usr/bin/whisper',
@@ -157,12 +151,6 @@ function createParserToolchain() {
         available: true,
         command: '/usr/bin/ffmpeg',
         reason: 'ffmpeg configured',
-        source: 'config' as const,
-      },
-      pdftotext: {
-        available: true,
-        command: '/usr/bin/pdftotext',
-        reason: 'pdftotext configured',
         source: 'config' as const,
       },
       whisper: {
@@ -409,7 +397,6 @@ beforeEach(() => {
   toCliParserToolchainMock.mockImplementation(() => createParserToolchain())
   toParserToolChecksMock.mockImplementation(() => [
     passCheck('parser-ffmpeg', 'ffmpeg configured'),
-    passCheck('parser-pdftotext', 'pdftotext configured'),
     warnCheck('parser-whisper', 'whisper configured but optional'),
   ])
   probeLinqApiMock.mockResolvedValue({

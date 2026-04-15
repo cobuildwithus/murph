@@ -109,7 +109,6 @@ export function toCliParserToolchain(
     discoveredAt: doctor.discoveredAt,
     tools: {
       ffmpeg: toCliParserToolStatus(doctor.tools.ffmpeg),
-      pdftotext: toCliParserToolStatus(doctor.tools.pdftotext),
       whisper: {
         ...toCliParserToolStatus(doctor.tools.whisper),
         modelPath: redactSensitivePath(doctor.tools.whisper.modelPath),
@@ -123,7 +122,6 @@ export function toParserToolChecks(
 ): InboxDoctorCheck[] {
   return [
     toParserToolCheck('ffmpeg', tools.ffmpeg),
-    toParserToolCheck('pdftotext', tools.pdftotext),
     toParserToolCheck('whisper', tools.whisper),
   ]
 }

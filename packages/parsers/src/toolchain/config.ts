@@ -13,7 +13,7 @@ import { ensureDirectory } from "../shared.js";
 export const PARSER_TOOLCHAIN_SCHEMA = "murph.parser-toolchain-config.v1" as const;
 export const PARSER_TOOLCHAIN_SCHEMA_VERSION = 1 as const;
 
-export type ParserToolName = "ffmpeg" | "pdftotext" | "whisper";
+export type ParserToolName = "ffmpeg" | "whisper";
 
 export interface ParserToolchainToolConfig {
   command?: string | null;
@@ -300,6 +300,5 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 
 const parserToolNames = [
   "ffmpeg",
-  "pdftotext",
   "whisper",
 ] as const satisfies readonly ParserToolName[];

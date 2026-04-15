@@ -66,7 +66,6 @@ const assistantCliAllowedEnvKeys = new Set<string>([
   'OURA_CLIENT_SECRET',
   'PATH',
   'PATHEXT',
-  'PDFTOTEXT_COMMAND',
   'PROGRAMDATA',
   'SSL_CERT_DIR',
   'SSL_CERT_FILE',

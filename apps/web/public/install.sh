@@ -928,7 +928,7 @@ install_from_npm() {
   local setup_args=("${PREPARED_SETUP_ARGS[@]}")
 
   ui_section "Running Murph setup"
-  ui_info "Murph will provision or reuse ffmpeg, poppler/pdftotext, whisper.cpp, a local Whisper model, optional OCR support, your vault bootstrap, and user-level murph/vault-cli shims."
+  ui_info "Murph will provision or reuse ffmpeg, whisper.cpp, a local Whisper model, optional OCR support, your vault bootstrap, and user-level murph/vault-cli shims."
 
   if can_attach_tty_for_onboarding; then
     "$murph_bin" onboard "${setup_args[@]}" < /dev/tty
@@ -1035,7 +1035,7 @@ print_plan() {
     echo "Murph args:     ${rendered_args% }"
   fi
   echo
-  echo "Murph setup itself will provision or reuse ffmpeg, poppler/pdftotext, whisper.cpp, a local Whisper model, your vault bootstrap, and user-level murph/vault-cli shims."
+  echo "Murph setup itself will provision or reuse ffmpeg, whisper.cpp, a local Whisper model, your vault bootstrap, and user-level murph/vault-cli shims."
 }
 
 main() {

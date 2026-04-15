@@ -542,7 +542,6 @@ export class RunnerDispatchProcessor {
           ]),
           parserToolingConfigured: hasAnyRunnerConfigKey(forwardedEnv, [
             "FFMPEG_COMMAND",
-            "PDFTOTEXT_COMMAND",
             "WHISPER_COMMAND",
             "WHISPER_MODEL_PATH",
           ]),

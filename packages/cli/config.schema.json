@@ -2184,6 +2184,10 @@
                           "minLength": 1,
                           "maxLength": 128
                         },
+                        "input": {
+                          "description": "Optional structured meal payload in @file.json form or - for stdin.",
+                          "type": "string"
+                        },
                         "photo": {
                           "description": "Optional meal photo path.",
                           "type": "string",
@@ -6462,11 +6466,6 @@
                           "type": "string",
                           "minLength": 1
                         },
-                        "pdftotextCommand": {
-                          "description": "Optional explicit pdftotext command or path to persist.",
-                          "type": "string",
-                          "minLength": 1
-                        },
                         "whisperCommand": {
                           "description": "Optional explicit whisper.cpp command or path to persist.",
                           "type": "string",
@@ -6506,11 +6505,6 @@
                         },
                         "ffmpegCommand": {
                           "description": "Optional explicit ffmpeg command or path to persist.",
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "pdftotextCommand": {
-                          "description": "Optional explicit pdftotext command or path to persist.",
                           "type": "string",
                           "minLength": 1
                         },
