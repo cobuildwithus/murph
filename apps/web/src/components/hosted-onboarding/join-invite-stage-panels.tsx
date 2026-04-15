@@ -201,7 +201,7 @@ export function JoinInviteCheckoutButton({
       {checkoutPending
         ? "Opening checkout..."
         : billingReady
-          ? "Continue to Apple Pay"
+          ? "Continue to checkout"
           : "Billing is not configured yet"}
     </Button>
   );

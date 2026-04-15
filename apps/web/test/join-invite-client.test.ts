@@ -270,7 +270,7 @@ test("failed auto checkout falls back to the manual checkout button", async () =
 
   const checkoutButton = view.container.querySelector("button");
   assert.ok(checkoutButton);
-  assert.match(checkoutButton.textContent ?? "", /Continue to Apple Pay/);
+  assert.match(checkoutButton.textContent ?? "", /Continue to checkout/);
   assert.equal(checkoutButton.hasAttribute("disabled"), false);
 
   await act(async () => {
@@ -331,7 +331,7 @@ test("stale verify refreshes still leave the manual checkout fallback available 
 
   const checkoutButton = view.container.querySelector("button");
   assert.ok(checkoutButton);
-  assert.match(checkoutButton.textContent ?? "", /Continue to Apple Pay/);
+  assert.match(checkoutButton.textContent ?? "", /Continue to checkout/);
 
   await act(async () => {
     checkoutButton.click();
@@ -389,7 +389,7 @@ test("already-active checkout refreshes preserve the current stage when the retu
   expect(fetchMock).toHaveBeenCalledTimes(1);
   expect(mocks.fetchHostedInviteStatus).toHaveBeenCalledTimes(1);
   assert.match(view.container.textContent ?? "", /One last step/);
-  assert.match(view.container.textContent ?? "", /Continue to Apple Pay/);
+  assert.match(view.container.textContent ?? "", /Continue to checkout/);
 
   await view.cleanup();
 });
@@ -526,8 +526,11 @@ test("active invite state explains when vault and assistant setup is still runni
     }),
   );
 
-  assert.match(markup, /Your account is ready\. We’re setting up your private, encrypted vault/);
   assert.match(markup, /Your account is ready\. Murph is getting your space ready\./);
+  assert.match(
+    markup,
+    /We’re setting up your private, encrypted vault and getting your Murph assistant ready to text you\./,
+  );
   assert.match(markup, /We’ll add your shared bundle as soon as your vault is ready\./);
 });
 
