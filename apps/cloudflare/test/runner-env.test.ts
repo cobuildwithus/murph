@@ -114,9 +114,9 @@ describe("buildHostedRunnerContainerEnv", () => {
     });
   });
 
-  it("ignores removed AgentMail and ffmpeg alias keys", () => {
+  it("ignores stale AgentMail and ffmpeg alias keys", () => {
     expect(buildHostedRunnerContainerEnv({
-      AGENTMAIL_API_BASE_URL: "https://legacy-mail.example.test/v0",
+      AGENTMAIL_BASE_URL: "https://mail.example.test/v0",
       PARSER_FFMPEG_PATH: "/usr/local/bin/ffmpeg",
     })).toEqual({
       HOSTED_EMAIL_INGRESS_READY: "false",
