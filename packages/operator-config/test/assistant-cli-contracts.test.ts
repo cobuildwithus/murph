@@ -1,4 +1,13 @@
 import { describe, expect, it } from 'vitest'
+import {
+  automationRouteSchema,
+  automationScheduleAtSchema,
+  automationScheduleCronSchema,
+  automationScheduleDailyLocalSchema,
+  automationScheduleEverySchema,
+  automationScheduleKindValues,
+  automationScheduleSchema,
+} from '@murphai/contracts'
 
 import {
   gatewayDeliveryTargetKindValues,
@@ -6,13 +15,22 @@ import {
 } from '@murphai/gateway-core'
 
 import {
+  assistantCronAtScheduleSchema,
+  assistantCronDailyLocalScheduleSchema,
+  assistantCronEveryScheduleSchema,
+  assistantCronExpressionScheduleInputSchema,
+  assistantCronExpressionScheduleSchema,
   assistantCronJobSchema,
+  assistantCronScheduleKindValues,
+  assistantCronScheduleSchema,
+  assistantCronTargetSchema,
   assistantCronRunRecordSchema,
   assistantBindingDeliveryKindValues,
   assistantChannelDeliveryTargetKindValues,
   assistantOutboxIntentSchema,
   assistantSessionSecretsSchema,
   assistantSessionIdSchema,
+  assistantSelfDeliveryTargetSchema,
   assistantTurnReceiptSchema,
 } from '../src/assistant-cli-contracts.ts'
 
@@ -210,5 +228,106 @@ describe('assistant CLI delivery contracts', () => {
         'X-Upstream-Auth': 'Bearer firstsecret123',
       },
     })
+  })
+})
+
+describe('assistant CLI automation shape ownership', () => {
+  it('reuses the canonical automation schedule owners directly', () => {
+    expect(assistantCronScheduleKindValues).toBe(automationScheduleKindValues)
+    expect(assistantCronAtScheduleSchema).toBe(automationScheduleAtSchema)
+    expect(assistantCronEveryScheduleSchema).toBe(automationScheduleEverySchema)
+    expect(assistantCronExpressionScheduleSchema).toBe(automationScheduleCronSchema)
+    expect(assistantCronDailyLocalScheduleSchema).toBe(automationScheduleDailyLocalSchema)
+    expect(assistantCronScheduleSchema).toBe(automationScheduleSchema)
+  })
+
+  it('reuses the canonical automation route for saved self-delivery targets', () => {
+    expect(assistantSelfDeliveryTargetSchema).toBe(automationRouteSchema)
+
+    const route = {
+      channel: 'slack',
+      deliveryTarget: 'channel:alerts',
+      identityId: 'idn_123',
+      participantId: 'user_123',
+      sourceThreadId: 'thread_123',
+    }
+
+    expect(assistantSelfDeliveryTargetSchema.parse(route)).toEqual(
+      automationRouteSchema.parse(route),
+    )
+  })
+
+  it('composes canonical route fields into cron targets while keeping local selector fields', () => {
+    const target = assistantCronTargetSchema.parse({
+      channel: 'telegram',
+      deliveryTarget: 'chat:123',
+      identityId: null,
+      participantId: 'participant_123',
+      sourceThreadId: null,
+      alias: 'personal',
+      sessionId: null,
+    })
+
+    const { alias, sessionId, ...route } = target
+    expect({ alias, sessionId }).toEqual({
+      alias: 'personal',
+      sessionId: null,
+    })
+    expect(route).toEqual(automationRouteSchema.parse(route))
+  })
+
+  it('keeps route-less cron targets valid for local-only jobs', () => {
+    expect(
+      assistantCronTargetSchema.parse({
+        channel: null,
+        deliveryTarget: null,
+        identityId: null,
+        participantId: null,
+        sourceThreadId: null,
+        alias: null,
+        sessionId: null,
+      }),
+    ).toEqual({
+      channel: null,
+      deliveryTarget: null,
+      identityId: null,
+      participantId: null,
+      sourceThreadId: null,
+      alias: null,
+      sessionId: null,
+    })
+  })
+
+  it('keeps cron schedule input-only optionality separate from persisted schedules', () => {
+    expect(
+      assistantCronExpressionScheduleInputSchema.parse({
+        kind: 'cron',
+        expression: '0 9 * * *',
+      }),
+    ).toEqual({
+      kind: 'cron',
+      expression: '0 9 * * *',
+    })
+
+    expect(() =>
+      assistantCronScheduleSchema.parse({
+        kind: 'cron',
+        expression: '0 9 * * *',
+      }),
+    ).toThrow()
+
+    expect(
+      assistantCronScheduleSchema.parse({
+        kind: 'cron',
+        expression: '0 9 * * *',
+        timeZone: 'America/Los_Angeles',
+      }),
+    ).toEqual(
+      automationScheduleSchema.parse({
+        kind: 'cron',
+        expression: '0 9 * * *',
+        timeZone: 'America/Los_Angeles',
+      }),
+    )
   })
 })

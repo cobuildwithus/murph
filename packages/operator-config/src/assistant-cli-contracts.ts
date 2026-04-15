@@ -1,4 +1,16 @@
 import { z } from 'zod'
+import {
+  automationRouteSchema,
+  automationScheduleAtSchema,
+  automationScheduleCronSchema,
+  automationScheduleDailyLocalSchema,
+  automationScheduleEverySchema,
+  automationScheduleKindValues,
+  automationScheduleSchema,
+  type AutomationRoute,
+  type AutomationSchedule,
+  type AutomationScheduleKind,
+} from '@murphai/contracts'
 import { normalizeAssistantOpaqueId } from '@murphai/runtime-state/assistant-ids'
 import {
   gatewayDeliveryTargetKindValues,
@@ -74,12 +86,7 @@ export const assistantTurnEventKindValues = [
   'failed',
   'completed',
 ] as const
-export const assistantCronScheduleKindValues = [
-  'at',
-  'every',
-  'cron',
-  'dailyLocal',
-] as const
+export const assistantCronScheduleKindValues = automationScheduleKindValues
 export const assistantCronTriggerValues = ['manual', 'scheduled'] as const
 export const assistantCronRunStatusValues = [
   'succeeded',
@@ -826,27 +833,11 @@ export const assistantDoctorResultSchema = z
   })
   .strict()
 
-export const assistantCronAtScheduleSchema = z
-  .object({
-    kind: z.literal('at'),
-    at: isoTimestampSchema,
-  })
-  .strict()
+export const assistantCronAtScheduleSchema = automationScheduleAtSchema
 
-export const assistantCronEveryScheduleSchema = z
-  .object({
-    kind: z.literal('every'),
-    everyMs: z.number().int().positive(),
-  })
-  .strict()
+export const assistantCronEveryScheduleSchema = automationScheduleEverySchema
 
-export const assistantCronExpressionScheduleSchema = z
-  .object({
-    kind: z.literal('cron'),
-    expression: z.string().min(1),
-    timeZone: timeZoneSchema,
-  })
-  .strict()
+export const assistantCronExpressionScheduleSchema = automationScheduleCronSchema
 
 export const assistantCronExpressionScheduleInputSchema = z
   .object({
@@ -856,22 +847,9 @@ export const assistantCronExpressionScheduleInputSchema = z
   })
   .strict()
 
-export const assistantCronDailyLocalScheduleSchema = z
-  .object({
-    kind: z.literal('dailyLocal'),
-    localTime: z
-      .string()
-      .regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/u, 'Expected a 24-hour HH:MM time.'),
-    timeZone: timeZoneSchema,
-  })
-  .strict()
+export const assistantCronDailyLocalScheduleSchema = automationScheduleDailyLocalSchema
 
-export const assistantCronScheduleSchema = z.discriminatedUnion('kind', [
-  assistantCronAtScheduleSchema,
-  assistantCronEveryScheduleSchema,
-  assistantCronExpressionScheduleSchema,
-  assistantCronDailyLocalScheduleSchema,
-])
+export const assistantCronScheduleSchema = automationScheduleSchema
 
 export const assistantCronScheduleInputSchema = z.discriminatedUnion('kind', [
   assistantCronAtScheduleSchema,
@@ -880,27 +858,21 @@ export const assistantCronScheduleInputSchema = z.discriminatedUnion('kind', [
   assistantCronDailyLocalScheduleSchema,
 ])
 
-export const assistantCronTargetSchema = z
-  .object({
-    sessionId: assistantSessionIdSchema.nullable(),
-    alias: z.string().min(1).nullable(),
+const assistantCronRouteSchema = automationRouteSchema
+  .omit({ channel: true })
+  .extend({
     channel: z.string().min(1).nullable(),
-    identityId: z.string().min(1).nullable(),
-    participantId: z.string().min(1).nullable(),
-    sourceThreadId: z.string().min(1).nullable(),
-    deliveryTarget: z.string().min(1).nullable(),
   })
   .strict()
 
-export const assistantSelfDeliveryTargetSchema = z
-  .object({
-    channel: z.string().min(1),
-    identityId: z.string().min(1).nullable(),
-    participantId: z.string().min(1).nullable(),
-    sourceThreadId: z.string().min(1).nullable(),
-    deliveryTarget: z.string().min(1).nullable(),
+export const assistantCronTargetSchema = assistantCronRouteSchema
+  .extend({
+    sessionId: assistantSessionIdSchema.nullable(),
+    alias: z.string().min(1).nullable(),
   })
   .strict()
+
+export const assistantSelfDeliveryTargetSchema = automationRouteSchema
 
 export const assistantCronJobStateSchema = z
   .object({
@@ -1289,9 +1261,13 @@ export type AssistantSessionListResult = z.infer<
 export type AssistantSessionShowResult = z.infer<
   typeof assistantSessionShowResultSchema
 >
-export type AssistantCronSchedule = z.infer<typeof assistantCronScheduleSchema>
+export type AssistantCronSchedule = AutomationSchedule
 export type AssistantCronScheduleInput = z.infer<typeof assistantCronScheduleInputSchema>
-export type AssistantCronTarget = z.infer<typeof assistantCronTargetSchema>
+export type AssistantCronTarget = Omit<AutomationRoute, 'channel'> & {
+  alias: string | null
+  channel: string | null
+  sessionId: string | null
+}
 export type AssistantCronJobState = z.infer<typeof assistantCronJobStateSchema>
 export type AssistantCronFoodAutoLog = z.infer<typeof assistantCronFoodAutoLogSchema>
 export type AssistantCronJob = z.infer<typeof assistantCronJobSchema>
@@ -1337,9 +1313,7 @@ export type AssistantCronPresetShowResult = z.infer<
 export type AssistantCronPresetInstallResult = z.infer<
   typeof assistantCronPresetInstallResultSchema
 >
-export type AssistantSelfDeliveryTarget = z.infer<
-  typeof assistantSelfDeliveryTargetSchema
->
+export type AssistantSelfDeliveryTarget = AutomationRoute
 export type AssistantSelfDeliveryTargetListResult = z.infer<
   typeof assistantSelfDeliveryTargetListResultSchema
 >
@@ -1402,8 +1376,7 @@ export type AssistantTurnEventKind =
   (typeof assistantTurnEventKindValues)[number]
 export type AssistantOutboxIntentStatus =
   (typeof assistantOutboxIntentStatusValues)[number]
-export type AssistantCronScheduleKind =
-  (typeof assistantCronScheduleKindValues)[number]
+export type AssistantCronScheduleKind = AutomationScheduleKind
 export type AssistantCronTrigger = (typeof assistantCronTriggerValues)[number]
 export type AssistantCronRunStatus =
   (typeof assistantCronRunStatusValues)[number]
