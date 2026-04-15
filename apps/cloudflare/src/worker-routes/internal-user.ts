@@ -12,6 +12,7 @@ import {
 import {
   parseHostedExecutionDeviceSyncRuntimeApplyRequest,
   parseHostedExecutionDeviceSyncRuntimeSnapshotRequest,
+  type HostedExecutionDeviceSyncRuntimeSnapshotResponse,
 } from "@murphai/device-syncd/hosted-runtime";
 import { toStringEnvSource } from "../string-env.ts";
 
@@ -20,7 +21,7 @@ import {
   readHostedEmailConfig,
 } from "../hosted-email.ts";
 import { parseHostedUserEnvUpdate } from "../user-env.ts";
-import { createHostedPendingUsageDirtyUserStore } from "../usage-store.ts";
+import { createHostedPendingUsageDirtyUserStore } from "../usage-store/dirty-users.ts";
 import { createHostedShareStore } from "../share-store.ts";
 import { json } from "../json.ts";
 import {
@@ -95,14 +96,18 @@ export async function handleUserDeviceSyncRuntimeRoute(
   const stub = await resolveUserRunnerStub(context.env, userId);
 
   if (context.request.method === "GET") {
+    const snapshot = await requireUserRunnerStubMethod(stub, "getDeviceSyncRuntimeSnapshot")({
+      request: parseHostedExecutionDeviceSyncRuntimeSnapshotRequest({
+        connectionId: normalizeNullableSearchString(context.url.searchParams.get("connectionId")),
+        provider: normalizeNullableSearchString(context.url.searchParams.get("provider")),
+        userId,
+      }, userId),
+    });
+
     return json(
-      await requireUserRunnerStubMethod(stub, "getDeviceSyncRuntimeSnapshot")({
-        request: parseHostedExecutionDeviceSyncRuntimeSnapshotRequest({
-          connectionId: normalizeNullableSearchString(context.url.searchParams.get("connectionId")),
-          provider: normalizeNullableSearchString(context.url.searchParams.get("provider")),
-          userId,
-        }, userId),
-      }),
+      readIncludeSecretsFlag(context.url.searchParams.get("includeSecrets"))
+        ? snapshot
+        : redactHostedExecutionDeviceSyncRuntimeSnapshot(snapshot),
     );
   }
 
@@ -318,6 +323,41 @@ function normalizeNullableSearchString(value: string | null): string | null {
 
   const normalized = value.trim();
   return normalized.length > 0 ? normalized : null;
+}
+
+function readIncludeSecretsFlag(value: string | null): boolean {
+  const normalized = value?.trim().toLowerCase() ?? null;
+
+  if (!normalized) {
+    return false;
+  }
+
+  if (normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on") {
+    return true;
+  }
+
+  if (normalized === "0" || normalized === "false" || normalized === "no" || normalized === "off") {
+    return false;
+  }
+
+  throw new TypeError("includeSecrets must be a boolean query flag.");
+}
+
+function redactHostedExecutionDeviceSyncRuntimeSnapshot(
+  snapshot: HostedExecutionDeviceSyncRuntimeSnapshotResponse,
+): HostedExecutionDeviceSyncRuntimeSnapshotResponse {
+  return {
+    ...snapshot,
+    connections: snapshot.connections.map((entry) => ({
+      connection: {
+        ...entry.connection,
+        metadata: { ...entry.connection.metadata },
+        scopes: [...entry.connection.scopes],
+      },
+      localState: { ...entry.localState },
+      tokenBundle: null,
+    })),
+  };
 }
 
 function isBackpressuredStatus(
