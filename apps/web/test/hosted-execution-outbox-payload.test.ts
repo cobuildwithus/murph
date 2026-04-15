@@ -54,7 +54,16 @@ describe("hosted execution outbox payload storage", () => {
       readHostedExecutionOutboxPayload(payload) as NonNullable<
         ReturnType<typeof readHostedExecutionOutboxPayload>
       >,
-    )).toBeNull();
+    )).toEqual({
+      dispatchRef: {
+        eventId: "evt_wake_123",
+        eventKind: "device-sync.wake",
+        occurredAt: "2026-04-04T00:00:00.000Z",
+        userId: "member_123",
+      },
+      schema: "murph.hosted-execution-reference-outbox-payload-pruned.v1",
+      storage: "pruned",
+    });
   });
 
   it("stores member activation inline when first contact is omitted", () => {
@@ -183,6 +192,43 @@ describe("hosted execution outbox payload storage", () => {
       schema: "murph.hosted-execution-inline-outbox-payload-pruned.v1",
       storage: "pruned",
     }, serialized)).toBe(false);
+  });
+
+  it("treats pruned reference payload summaries as idempotent equivalents", () => {
+    const serialized = serializeHostedExecutionOutboxPayload({
+      event: {
+        clientRequestId: "req_123",
+        kind: "gateway.message.send",
+        replyToMessageId: null,
+        sessionKey: "gwcs_secret_123",
+        text: "private outbound message",
+        userId: "member_123",
+      },
+      eventId: "evt_gateway_123",
+      occurredAt: "2026-04-04T00:00:00.000Z",
+    }, {
+      stagedPayloadId: buildTestPayloadRef("evt_gateway_123"),
+    });
+    const payload = readHostedExecutionOutboxPayload(serialized);
+
+    expect(payload).not.toBeNull();
+    if (!payload) {
+      throw new Error("Expected a reference payload.");
+    }
+
+    const summary = summarizeHostedExecutionOutboxPayload(payload);
+
+    expect(summary).toEqual({
+      dispatchRef: {
+        eventId: "evt_gateway_123",
+        eventKind: "gateway.message.send",
+        occurredAt: "2026-04-04T00:00:00.000Z",
+        userId: "member_123",
+      },
+      schema: "murph.hosted-execution-reference-outbox-payload-pruned.v1",
+      storage: "pruned",
+    });
+    expect(areHostedExecutionOutboxPayloadsEquivalent(summary, serialized)).toBe(true);
   });
 });
 

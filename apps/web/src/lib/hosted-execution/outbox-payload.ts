@@ -8,6 +8,7 @@ import type {
 } from "@murphai/hosted-execution/contracts";
 import {
   HOSTED_EXECUTION_INLINE_ONLY_OUTBOX_EVENT_KINDS,
+  HOSTED_EXECUTION_REFERENCE_ONLY_OUTBOX_EVENT_KINDS,
 } from "@murphai/hosted-execution";
 import {
   buildHostedExecutionDispatchRef as buildSharedHostedExecutionDispatchRef,
@@ -32,10 +33,21 @@ interface HostedExecutionPrunedInlineOutboxPayload {
   storage: "pruned";
 }
 
+interface HostedExecutionPrunedReferenceOutboxPayload {
+  dispatchRef: HostedExecutionDispatchRef;
+  schema: typeof HOSTED_EXECUTION_PRUNED_REFERENCE_OUTBOX_PAYLOAD_SCHEMA;
+  storage: "pruned";
+}
+
 const HOSTED_EXECUTION_PRUNED_INLINE_OUTBOX_PAYLOAD_SCHEMA =
   "murph.hosted-execution-inline-outbox-payload-pruned.v1";
+const HOSTED_EXECUTION_PRUNED_REFERENCE_OUTBOX_PAYLOAD_SCHEMA =
+  "murph.hosted-execution-reference-outbox-payload-pruned.v1";
 const HOSTED_EXECUTION_INLINE_ONLY_OUTBOX_EVENT_KIND_SET = new Set<HostedExecutionEventKind>(
   HOSTED_EXECUTION_INLINE_ONLY_OUTBOX_EVENT_KINDS,
+);
+const HOSTED_EXECUTION_REFERENCE_ONLY_OUTBOX_EVENT_KIND_SET = new Set<HostedExecutionEventKind>(
+  HOSTED_EXECUTION_REFERENCE_ONLY_OUTBOX_EVENT_KINDS,
 );
 const HOSTED_EXECUTION_DISPATCH_REF_KEYS = new Set([
   "eventId",
@@ -46,6 +58,11 @@ const HOSTED_EXECUTION_DISPATCH_REF_KEYS = new Set([
 const HOSTED_EXECUTION_PRUNED_INLINE_OUTBOX_PAYLOAD_KEYS = new Set([
   "dispatchRef",
   "payloadHash",
+  "schema",
+  "storage",
+]);
+const HOSTED_EXECUTION_PRUNED_REFERENCE_OUTBOX_PAYLOAD_KEYS = new Set([
+  "dispatchRef",
   "schema",
   "storage",
 ]);
@@ -68,17 +85,21 @@ export function serializeHostedExecutionOutboxPayload(
 
 export function summarizeHostedExecutionOutboxPayload(
   payload: HostedExecutionOutboxPayload,
-): Prisma.InputJsonObject | null {
-  if (payload.storage !== "inline") {
-    return null;
+): Prisma.InputJsonObject {
+  if (payload.storage === "inline") {
+    return toPrismaInputJsonObject({
+      dispatchRef: buildSharedHostedExecutionDispatchRef(payload.dispatch),
+      payloadHash: hashHostedExecutionOutboxPayload(payload),
+      schema: HOSTED_EXECUTION_PRUNED_INLINE_OUTBOX_PAYLOAD_SCHEMA,
+      storage: "pruned",
+    } satisfies HostedExecutionPrunedInlineOutboxPayload);
   }
 
   return toPrismaInputJsonObject({
-    dispatchRef: buildSharedHostedExecutionDispatchRef(payload.dispatch),
-    payloadHash: hashHostedExecutionOutboxPayload(payload),
-    schema: HOSTED_EXECUTION_PRUNED_INLINE_OUTBOX_PAYLOAD_SCHEMA,
+    dispatchRef: payload.dispatchRef,
+    schema: HOSTED_EXECUTION_PRUNED_REFERENCE_OUTBOX_PAYLOAD_SCHEMA,
     storage: "pruned",
-  } satisfies HostedExecutionPrunedInlineOutboxPayload);
+  } satisfies HostedExecutionPrunedReferenceOutboxPayload);
 }
 
 export function areHostedExecutionOutboxPayloadsEquivalent(
@@ -92,17 +113,28 @@ export function areHostedExecutionOutboxPayloadsEquivalent(
     return areFullHostedExecutionOutboxPayloadsEquivalent(existingPayload, expectedPayload);
   }
 
-  const prunedExistingPayload = readHostedExecutionPrunedInlineOutboxPayload(existingPayloadJson);
+  const prunedInlinePayload = readHostedExecutionPrunedInlineOutboxPayload(existingPayloadJson);
 
-  if (!prunedExistingPayload || !expectedPayload || expectedPayload.storage !== "inline") {
-    return false;
+  if (prunedInlinePayload && expectedPayload?.storage === "inline") {
+    return prunedInlinePayload.payloadHash === hashHostedExecutionOutboxPayload(expectedPayload)
+      && areHostedExecutionDispatchRefsEquivalent(
+        prunedInlinePayload.dispatchRef,
+        buildSharedHostedExecutionDispatchRef(expectedPayload.dispatch),
+      );
   }
 
-  return prunedExistingPayload.payloadHash === hashHostedExecutionOutboxPayload(expectedPayload)
-    && areHostedExecutionDispatchRefsEquivalent(
-      prunedExistingPayload.dispatchRef,
-      buildSharedHostedExecutionDispatchRef(expectedPayload.dispatch),
-    );
+  const prunedReferencePayload = readHostedExecutionPrunedReferenceOutboxPayload(
+    existingPayloadJson,
+  );
+
+  return Boolean(
+    prunedReferencePayload
+      && expectedPayload?.storage === "reference"
+      && areHostedExecutionDispatchRefsEquivalent(
+        prunedReferencePayload.dispatchRef,
+        expectedPayload.dispatchRef,
+      ),
+  );
 }
 
 export function readHostedExecutionStagedPayloadId(value: unknown): string | null {
@@ -112,7 +144,10 @@ export function readHostedExecutionStagedPayloadId(value: unknown): string | nul
 export function readHostedExecutionDispatchRef(
   payloadJson: Prisma.InputJsonValue | Prisma.JsonValue | null,
 ): HostedExecutionDispatchRef | null {
-  return readSharedHostedExecutionDispatchRef(payloadJson);
+  return readSharedHostedExecutionDispatchRef(payloadJson)
+    ?? readHostedExecutionPrunedInlineOutboxPayload(payloadJson)?.dispatchRef
+    ?? readHostedExecutionPrunedReferenceOutboxPayload(payloadJson)?.dispatchRef
+    ?? null;
 }
 
 export function readHostedExecutionOutboxPayload(
@@ -149,6 +184,32 @@ function readHostedExecutionPrunedInlineOutboxPayload(
   };
 }
 
+function readHostedExecutionPrunedReferenceOutboxPayload(
+  payloadJson: Prisma.InputJsonValue | Prisma.JsonValue | null,
+): HostedExecutionPrunedReferenceOutboxPayload | null {
+  const record = toHostedExecutionObject(payloadJson);
+
+  if (
+    readHostedExecutionText(record.storage) !== "pruned"
+    || readHostedExecutionText(record.schema) !== HOSTED_EXECUTION_PRUNED_REFERENCE_OUTBOX_PAYLOAD_SCHEMA
+    || !hasOnlyHostedExecutionKeys(record, HOSTED_EXECUTION_PRUNED_REFERENCE_OUTBOX_PAYLOAD_KEYS)
+  ) {
+    return null;
+  }
+
+  const dispatchRef = readHostedExecutionReferenceDispatchRef(record.dispatchRef);
+
+  if (!dispatchRef) {
+    return null;
+  }
+
+  return {
+    dispatchRef,
+    schema: HOSTED_EXECUTION_PRUNED_REFERENCE_OUTBOX_PAYLOAD_SCHEMA,
+    storage: "pruned",
+  };
+}
+
 function readHostedExecutionInlineDispatchRef(value: unknown): HostedExecutionDispatchRef | null {
   const record = toHostedExecutionObject(value);
 
@@ -158,6 +219,30 @@ function readHostedExecutionInlineDispatchRef(value: unknown): HostedExecutionDi
 
   const eventId = readHostedExecutionText(record.eventId);
   const eventKind = readHostedExecutionInlineEventKind(record.eventKind);
+  const occurredAt = readHostedExecutionText(record.occurredAt);
+  const userId = readHostedExecutionText(record.userId);
+
+  if (!eventId || !eventKind || !occurredAt || !userId) {
+    return null;
+  }
+
+  return {
+    eventId,
+    eventKind,
+    occurredAt,
+    userId,
+  };
+}
+
+function readHostedExecutionReferenceDispatchRef(value: unknown): HostedExecutionDispatchRef | null {
+  const record = toHostedExecutionObject(value);
+
+  if (!hasOnlyHostedExecutionKeys(record, HOSTED_EXECUTION_DISPATCH_REF_KEYS)) {
+    return null;
+  }
+
+  const eventId = readHostedExecutionText(record.eventId);
+  const eventKind = readHostedExecutionReferenceEventKind(record.eventKind);
   const occurredAt = readHostedExecutionText(record.occurredAt);
   const userId = readHostedExecutionText(record.userId);
 
@@ -203,6 +288,13 @@ function stableSortValue(value: unknown): unknown {
 function readHostedExecutionInlineEventKind(value: unknown): HostedExecutionEventKind | null {
   return typeof value === "string"
     && HOSTED_EXECUTION_INLINE_ONLY_OUTBOX_EVENT_KIND_SET.has(value as HostedExecutionEventKind)
+    ? value as HostedExecutionEventKind
+    : null;
+}
+
+function readHostedExecutionReferenceEventKind(value: unknown): HostedExecutionEventKind | null {
+  return typeof value === "string"
+    && HOSTED_EXECUTION_REFERENCE_ONLY_OUTBOX_EVENT_KIND_SET.has(value as HostedExecutionEventKind)
     ? value as HostedExecutionEventKind
     : null;
 }

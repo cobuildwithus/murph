@@ -41,6 +41,7 @@ const CLAIM_LEASE_MS = 30_000;
 const RETRY_BASE_DELAY_MS = 5_000;
 const RETRY_MAX_DELAY_MS = 5 * 60_000;
 const DEFAULT_DRAIN_LIMIT = 8;
+const TERMINAL_OUTBOX_RETENTION_DAYS = 30;
 const DEFAULT_HOSTED_EXECUTION_EVENT_DISPATCH_STATE: HostedExecutionEventDispatchState = "queued";
 const HOSTED_EXECUTION_EVENT_DISPATCH_STATE_SET = new Set<HostedExecutionEventDispatchState>(
   HOSTED_EXECUTION_EVENT_DISPATCH_STATES,
@@ -175,6 +176,22 @@ export async function drainHostedExecutionOutboxBestEffort(input: {
   }
 }
 
+export async function pruneHostedExecutionOutbox(input: {
+  now?: string;
+  prisma?: PrismaClient;
+} = {}): Promise<number> {
+  const prisma = input.prisma ?? getPrisma();
+  const now = new Date(input.now ?? new Date().toISOString());
+  const cutoff = new Date(
+    now.getTime() - (TERMINAL_OUTBOX_RETENTION_DAYS * 24 * 60 * 60_000),
+  );
+  const deleted = await prisma.executionOutbox.deleteMany({
+    where: buildPrunableOutboxWhere(cutoff),
+  });
+
+  return deleted.count;
+}
+
 function buildDueOutboxWhere(
   now: Date,
   eventIds: readonly string[] | null,
@@ -213,6 +230,28 @@ function buildDueOutboxWhere(
         claimExpiresAt: {
           lt: now,
         },
+      },
+    ],
+  };
+}
+
+function buildPrunableOutboxWhere(
+  cutoff: Date,
+): Prisma.ExecutionOutboxWhereInput {
+  return {
+    updatedAt: {
+      lt: cutoff,
+    },
+    OR: [
+      {
+        status: ExecutionOutboxStatus.dispatched,
+        dispatchState: {
+          in: ["duplicate_consumed", "completed", "poisoned"],
+        },
+      },
+      {
+        status: ExecutionOutboxStatus.delivery_failed,
+        nextAttemptAt: null,
       },
     ],
   };

@@ -29,6 +29,7 @@ import type {
 } from "./webhook-receipt-types";
 
 const RECEIPT_CLAIM_LEASE_MS = 10 * 60_000;
+const TERMINAL_WEBHOOK_RECEIPT_RETENTION_DAYS = 30;
 
 type HostedWebhookReceiptWriteResult = {
   cleanupPayloads?: HostedWebhookStoredDispatchSideEffectPayload[];
@@ -135,6 +136,41 @@ export async function listHostedWebhookReceiptContinuationCandidates(input: {
   });
 
   return candidates;
+}
+
+export async function pruneHostedWebhookReceiptHistory(input: {
+  now?: string;
+  prisma: PrismaClient;
+}): Promise<number> {
+  const now = new Date(input.now ?? new Date().toISOString());
+  const cutoff = new Date(
+    now.getTime() - (TERMINAL_WEBHOOK_RECEIPT_RETENTION_DAYS * 24 * 60 * 60_000),
+  );
+  const deleted = await input.prisma.hostedWebhookReceipt.deleteMany({
+    where: {
+      lastReceivedAt: {
+        lt: cutoff,
+      },
+      OR: [
+        {
+          status: "completed",
+        },
+        {
+          status: "failed",
+          OR: [
+            {
+              lastErrorRetryable: false,
+            },
+            {
+              lastErrorRetryable: null,
+            },
+          ],
+        },
+      ],
+    },
+  });
+
+  return deleted.count;
 }
 
 export async function queueHostedWebhookReceiptSideEffects(input: {

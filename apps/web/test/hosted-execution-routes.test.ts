@@ -9,6 +9,8 @@ const mocks = vi.hoisted(() => ({
   drainHostedAiUsageStripeMetering: vi.fn(),
   drainHostedOnboardingWebhookReceipts: vi.fn(),
   getPrisma: vi.fn(),
+  pruneHostedExecutionOutbox: vi.fn(),
+  pruneHostedWebhookReceiptHistory: vi.fn(),
   requireVercelCronRequest: vi.fn(),
   getPrivyMemberAuth: vi.fn(),
 }));
@@ -19,6 +21,7 @@ vi.mock("@/src/lib/hosted-execution/vercel-cron", () => ({
 
 vi.mock("@/src/lib/hosted-execution/outbox", () => ({
   drainHostedExecutionOutbox: mocks.drainHostedExecutionOutbox,
+  pruneHostedExecutionOutbox: mocks.pruneHostedExecutionOutbox,
 }));
 
 vi.mock("@/src/lib/hosted-execution/usage", () => ({
@@ -35,6 +38,10 @@ vi.mock("@/src/lib/hosted-share/service", () => ({
 
 vi.mock("@/src/lib/hosted-onboarding/webhook-service", () => ({
   drainHostedOnboardingWebhookReceipts: mocks.drainHostedOnboardingWebhookReceipts,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/webhook-receipt-store", () => ({
+  pruneHostedWebhookReceiptHistory: mocks.pruneHostedWebhookReceiptHistory,
 }));
 
 vi.mock("@/src/lib/prisma", () => ({
@@ -91,6 +98,7 @@ describe("hosted execution async routes", () => {
         status: "delivery_failed",
       },
     ]);
+    mocks.pruneHostedExecutionOutbox.mockResolvedValue(4);
     mocks.drainHostedAiUsageStripeMetering.mockResolvedValue({
       configured: true,
       failed: 0,
@@ -119,9 +127,10 @@ describe("hosted execution async routes", () => {
         status: "failed",
       },
     ]);
+    mocks.pruneHostedWebhookReceiptHistory.mockResolvedValue(2);
   });
 
-  it("returns drain counts, event ids, and per-event statuses from the cron route", async () => {
+  it("returns aggregate hosted execution cron counts without event identifiers", async () => {
     const response = await hostedExecutionCronRoute.GET(
       new Request("https://join.example.test/api/internal/hosted-execution/outbox/cron", {
         headers: {
@@ -135,19 +144,14 @@ describe("hosted execution async routes", () => {
     expect(mocks.requireVercelCronRequest).toHaveBeenCalledTimes(1);
     expect(mocks.requireVercelCronRequest).toHaveBeenCalledWith(expect.any(Request));
     expect(mocks.drainHostedExecutionOutbox).toHaveBeenCalledTimes(1);
+    expect(mocks.pruneHostedExecutionOutbox).toHaveBeenCalledTimes(1);
     await expect(response.json()).resolves.toEqual({
       drained: 2,
-      eventIds: ["evt_1", "evt_2"],
-      statuses: [
-        {
-          eventId: "evt_1",
-          status: "dispatched",
-        },
-        {
-          eventId: "evt_2",
-          status: "delivery_failed",
-        },
-      ],
+      pruned: 4,
+      statusCounts: {
+        delivery_failed: 1,
+        dispatched: 1,
+      },
     });
   });
 
@@ -223,7 +227,7 @@ describe("hosted execution async routes", () => {
     });
   });
 
-  it("returns hosted webhook receipt continuation counts and statuses from the cron route", async () => {
+  it("returns aggregate hosted webhook receipt cron counts without receipt identifiers", async () => {
     const response = await hostedOnboardingWebhookReceiptCronRoute.GET(
       new Request("https://join.example.test/api/internal/hosted-onboarding/webhook-receipts/cron", {
         headers: {
@@ -240,26 +244,15 @@ describe("hosted execution async routes", () => {
         prisma: true,
       },
     });
+    expect(mocks.pruneHostedWebhookReceiptHistory).toHaveBeenCalledWith({
+      prisma: {
+        prisma: true,
+      },
+    });
     await expect(response.json()).resolves.toEqual({
       continued: 1,
       failed: 1,
-      receipts: [
-        {
-          eventId: "evt_linq",
-          source: "linq",
-          status: "continued",
-        },
-        {
-          eventId: "evt_telegram",
-          source: "telegram",
-          status: "skipped",
-        },
-        {
-          eventId: "evt_failed",
-          source: "linq",
-          status: "failed",
-        },
-      ],
+      pruned: 2,
       skipped: 1,
     });
   });
