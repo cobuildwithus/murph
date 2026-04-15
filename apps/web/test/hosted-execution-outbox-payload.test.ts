@@ -70,6 +70,11 @@ describe("hosted execution outbox payload storage", () => {
     const payload = serializeHostedExecutionOutboxPayload({
       event: {
         kind: "member.activated",
+        memberChannels: {
+          email: false,
+          linq: true,
+          telegram: false,
+        },
         userId: "member_123",
       },
       eventId: "evt_activation_123",
@@ -79,6 +84,26 @@ describe("hosted execution outbox payload storage", () => {
     expect((payload as { storage?: unknown }).storage).toBe("inline");
     expect(payload).not.toHaveProperty("stagedPayloadId");
     expect(JSON.stringify(payload)).not.toContain("firstContact");
+  });
+
+  it("stores member channel sync inline as a compact explicit channel snapshot", () => {
+    const payload = serializeHostedExecutionOutboxPayload({
+      event: {
+        kind: "member.channels.updated",
+        memberChannels: {
+          email: true,
+          linq: false,
+          telegram: true,
+        },
+        userId: "member_123",
+      },
+      eventId: "evt_member_channels_123",
+      occurredAt: "2026-04-04T00:00:00.000Z",
+    });
+
+    expect((payload as { storage?: unknown }).storage).toBe("inline");
+    expect(payload).not.toHaveProperty("stagedPayloadId");
+    expect(JSON.stringify(payload)).toContain("\"memberChannels\"");
   });
 
   it("stores gateway message sends by reference without persisting text or session identifiers", () => {
@@ -165,6 +190,11 @@ describe("hosted execution outbox payload storage", () => {
     const serialized = serializeHostedExecutionOutboxPayload({
       event: {
         kind: "member.activated",
+        memberChannels: {
+          email: false,
+          linq: false,
+          telegram: false,
+        },
         userId: "member_123",
       },
       eventId: "evt_activation_123",

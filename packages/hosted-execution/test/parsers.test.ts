@@ -3,6 +3,28 @@ import { describe, expect, it } from "vitest";
 import { parseHostedExecutionEvent } from "../src/parsers.ts";
 
 describe("parseHostedExecutionEvent", () => {
+  it("parses explicit member channel sync events", () => {
+    expect(
+      parseHostedExecutionEvent({
+        kind: "member.channels.updated",
+        memberChannels: {
+          email: true,
+          linq: false,
+          telegram: true,
+        },
+        userId: "user-1",
+      }),
+    ).toEqual({
+      kind: "member.channels.updated",
+      memberChannels: {
+        email: true,
+        linq: false,
+        telegram: true,
+      },
+      userId: "user-1",
+    });
+  });
+
   it("parses Linq first-contact targets that materialize a home thread on welcome delivery", () => {
     expect(
       parseHostedExecutionEvent({
@@ -14,6 +36,11 @@ describe("parseHostedExecutionEvent", () => {
           toPhoneNumber: "+15550002222",
         },
         kind: "member.activated",
+        memberChannels: {
+          email: false,
+          linq: true,
+          telegram: false,
+        },
         userId: "user-1",
       }),
     ).toEqual({
@@ -25,6 +52,11 @@ describe("parseHostedExecutionEvent", () => {
         toPhoneNumber: "+15550002222",
       },
       kind: "member.activated",
+      memberChannels: {
+        email: false,
+        linq: true,
+        telegram: false,
+      },
       userId: "user-1",
     });
   });
@@ -190,6 +222,11 @@ describe("parseHostedExecutionEvent", () => {
           toPhoneNumber: "+15550002222",
         },
         kind: "member.activated",
+        memberChannels: {
+          email: true,
+          linq: false,
+          telegram: false,
+        },
         userId: "user-1",
       }),
     ).toThrow(/requires channel linq/i);

@@ -93,6 +93,11 @@ describe("hosted runtime event coverage", () => {
     const dispatch = buildHostedExecutionMemberActivatedDispatch({
       eventId: "evt_member_activated",
       memberId: "member_123",
+      memberChannels: {
+        email: false,
+        linq: false,
+        telegram: false,
+      },
       occurredAt: "2026-04-08T00:00:00.000Z",
     });
 

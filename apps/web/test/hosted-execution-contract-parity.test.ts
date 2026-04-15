@@ -8,6 +8,7 @@ import {
   buildHostedExecutionGatewayMessageSendDispatch,
   buildHostedExecutionLinqMessageReceivedDispatch,
   buildHostedExecutionMemberActivatedDispatch,
+  buildHostedExecutionMemberChannelsUpdatedDispatch,
   buildHostedExecutionTelegramMessageReceivedDispatch,
   buildHostedExecutionVaultShareAcceptedDispatch,
   parseHostedExecutionEvent,
@@ -82,7 +83,22 @@ describe("hosted execution contract parity", () => {
       "member.activated": () => buildHostedExecutionMemberActivatedDispatch({
         eventId: "evt_member",
         memberId: "member_123",
+        memberChannels: {
+          email: false,
+          linq: true,
+          telegram: false,
+        },
         occurredAt: "2026-03-26T12:04:00.000Z",
+      }),
+      "member.channels.updated": () => buildHostedExecutionMemberChannelsUpdatedDispatch({
+        eventId: "evt_member_channels",
+        memberChannels: {
+          email: true,
+          linq: true,
+          telegram: false,
+        },
+        memberId: "member_123",
+        occurredAt: "2026-03-26T12:04:15.000Z",
       }),
       "telegram.message.received": () => buildHostedExecutionTelegramMessageReceivedDispatch({
         eventId: "evt_telegram",

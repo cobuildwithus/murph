@@ -71,6 +71,8 @@ async function handleHostedDispatchEvent(input: {
         );
       }
       return createNoopDispatchEffect();
+    case "member.channels.updated":
+      return createNoopDispatchEffect();
     case "linq.message.received":
       await ingestHostedLinqMessage(input.vaultRoot, {
         ...dispatch,

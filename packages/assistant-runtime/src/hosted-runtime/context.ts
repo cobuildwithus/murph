@@ -4,12 +4,12 @@ import path from "node:path";
 import { VAULT_LAYOUT } from "@murphai/contracts";
 import {
   type HostedExecutionDispatchRequest,
+  type HostedExecutionMemberChannels,
 } from "@murphai/hosted-execution";
 import {
   createAssistantFoodAutoLogHooks,
 } from "@murphai/assistant-engine";
 import {
-  readAssistantAutomationState,
   reconcileManagedAssistantAutoReplyChannelsLocal,
 } from "@murphai/assistant-engine/assistant-state";
 import { createIntegratedInboxServices } from "@murphai/inbox-services";
@@ -43,6 +43,7 @@ type HostedAssistantRuntimeState = Pick<
   | "assistantProvider"
   | "assistantSeeded"
   | "emailAutoReplyEnabled"
+  | "linqAutoReplyEnabled"
   | "telegramAutoReplyEnabled"
 >;
 
@@ -68,7 +69,9 @@ export async function prepareHostedDispatchContext(
     runtimeEnv,
     resolvedConfig.channelCapabilities,
     {
-      enableChannelCapabilityReconciliation: isMemberActivation,
+      enableAssistantChannelReconciliation:
+        dispatch.event.kind === "member.activated"
+        || dispatch.event.kind === "member.channels.updated",
     },
   );
 
@@ -109,24 +112,23 @@ async function bootstrapHostedAssistantRuntimeState(
   runtimeEnv: Readonly<Record<string, string>>,
   channelCapabilities: HostedAssistantRuntimeChannelCapabilities,
   options: {
-    enableChannelCapabilityReconciliation: boolean;
+    enableAssistantChannelReconciliation: boolean;
   },
 ): Promise<HostedAssistantRuntimeState> {
   const assistantBootstrap = await ensureHostedAssistantOperatorDefaults({
     allowMissing: true,
     env: runtimeEnv,
   });
-  const reconciledChannelCapabilities = options.enableChannelCapabilityReconciliation
-    ? await reconcileHostedAssistantChannelCapabilities(
+  const reconciledChannelCapabilities = options.enableAssistantChannelReconciliation
+    ? await reconcileHostedAssistantChannelState(
         vaultRoot,
+        resolveHostedDispatchMemberChannels(dispatch),
         channelCapabilities,
         assistantBootstrap.configured,
-        {
-          linqAutoReplyEnabled: shouldEnableHostedManagedLinqAutoReply(dispatch),
-        },
       )
     : {
         emailAutoReplyEnabled: false,
+        linqAutoReplyEnabled: false,
         telegramAutoReplyEnabled: false,
       };
 
@@ -162,22 +164,22 @@ export async function readHostedAssistantRuntimeState(): Promise<Pick<
   };
 }
 
-export async function reconcileHostedAssistantChannelCapabilities(
+export async function reconcileHostedAssistantChannelState(
   vaultRoot: string,
+  memberChannels: HostedExecutionMemberChannels,
   channelCapabilities: HostedAssistantRuntimeChannelCapabilities,
   assistantConfigured: boolean,
-  options: {
-    linqAutoReplyEnabled?: boolean;
-  } = {},
-): Promise<Pick<HostedBootstrapResult, "emailAutoReplyEnabled" | "telegramAutoReplyEnabled">> {
+): Promise<Pick<
+  HostedBootstrapResult,
+  "emailAutoReplyEnabled" | "linqAutoReplyEnabled" | "telegramAutoReplyEnabled"
+>> {
   const emailAutoReplyEnabled = assistantConfigured
+    && memberChannels.email
     && channelCapabilities.emailSendReady;
   const linqAutoReplyEnabled = assistantConfigured
-    && (
-      options.linqAutoReplyEnabled === true
-      || await hasHostedManagedAutoReplyChannel(vaultRoot, "linq")
-    );
+    && memberChannels.linq;
   const telegramAutoReplyEnabled = assistantConfigured
+    && memberChannels.telegram
     && channelCapabilities.telegramBotConfigured;
 
   await reconcileManagedAssistantAutoReplyChannelsLocal({
@@ -192,6 +194,7 @@ export async function reconcileHostedAssistantChannelCapabilities(
 
   return {
     emailAutoReplyEnabled,
+    linqAutoReplyEnabled,
     telegramAutoReplyEnabled,
   };
 }
@@ -222,23 +225,19 @@ function resolveHostedAssistantAutoReplyChannels(input: {
   return nextChannels;
 }
 
-function shouldEnableHostedManagedLinqAutoReply(
+function resolveHostedDispatchMemberChannels(
   dispatch: HostedExecutionDispatchRequest,
-): boolean {
-  if (dispatch.event.kind !== "member.activated") {
-    return false;
+): HostedExecutionMemberChannels {
+  if (
+    dispatch.event.kind === "member.activated"
+    || dispatch.event.kind === "member.channels.updated"
+  ) {
+    return dispatch.event.memberChannels;
   }
 
-  return dispatch.event.firstContact?.channel === "linq";
-}
-
-async function hasHostedManagedAutoReplyChannel(
-  vaultRoot: string,
-  channel: HostedAutoReplyChannel,
-): Promise<boolean> {
-  const automationState = await readAssistantAutomationState(vaultRoot);
-
-  return automationState.autoReply.some((entry) => entry.channel === channel);
+  throw new TypeError(
+    `Hosted execution ${dispatch.event.kind} does not carry member channel state.`,
+  );
 }
 
 function normalizeHostedAssistantBootstrapStatus(

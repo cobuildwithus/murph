@@ -19,11 +19,17 @@ import {
   resolveHostedExecutionOutboxPayloadUserId,
 } from "../src/outbox-payload.js";
 const occurredAt = "2026-04-04T00:00:00.000Z";
+const defaultMemberChannels = {
+  email: false,
+  linq: false,
+  telegram: false,
+} as const;
 
 function createInlineDispatch() {
   return buildHostedExecutionMemberActivatedDispatch({
     eventId: "member-activated-inline",
     memberId: "user-inline",
+    memberChannels: defaultMemberChannels,
     occurredAt,
   });
 }
@@ -45,6 +51,7 @@ describe("resolveHostedExecutionDispatchPayloadStorage", () => {
         buildHostedExecutionMemberActivatedDispatch({
           eventId: "member-activated-1",
           memberId: "user_123",
+          memberChannels: defaultMemberChannels,
           occurredAt,
         }),
         "auto",
@@ -114,6 +121,7 @@ describe("resolveHostedExecutionDispatchPayloadStorage", () => {
         buildHostedExecutionMemberActivatedDispatch({
           eventId: "member-activated-2",
           memberId: "user_123",
+          memberChannels: defaultMemberChannels,
           occurredAt,
         }),
       ).storage,
@@ -276,6 +284,7 @@ describe("resolveHostedExecutionDispatchPayloadStorage", () => {
       dispatch: {
         event: {
           kind: "member.activated",
+          memberChannels: defaultMemberChannels,
           userId: "user-inline",
         },
         occurredAt,
@@ -289,6 +298,7 @@ describe("resolveHostedExecutionDispatchPayloadStorage", () => {
       buildHostedExecutionMemberActivatedDispatch({
         eventId: "member-activated-3",
         memberId: "user-inline",
+        memberChannels: defaultMemberChannels,
         occurredAt,
       }),
     );

@@ -140,6 +140,7 @@ describe("hosted execution coverage gaps", () => {
   it("exports canonical hosted execution contracts and resolves dispatch outcomes", () => {
     expect(HOSTED_EXECUTION_EVENT_KINDS).toEqual([
       "member.activated",
+      "member.channels.updated",
       "linq.message.received",
       "telegram.message.received",
       "email.message.received",
@@ -157,6 +158,7 @@ describe("hosted execution coverage gaps", () => {
     ]);
     expect(HOSTED_EXECUTION_INLINE_ONLY_OUTBOX_EVENT_KINDS).toEqual([
       "member.activated",
+      "member.channels.updated",
       "assistant.cron.tick",
       "vault.share.accepted",
     ]);
@@ -300,6 +302,11 @@ describe("hosted execution coverage gaps", () => {
     const dispatch = buildHostedExecutionMemberActivatedDispatch({
       eventId: "evt_123",
       memberId: "user_123",
+      memberChannels: {
+        email: false,
+        linq: false,
+        telegram: false,
+      },
       occurredAt: "2026-04-07T00:00:00.000Z",
     });
 

@@ -7,6 +7,7 @@ import {
   buildHostedExecutionGatewayMessageSendDispatch,
   buildHostedExecutionLinqMessageReceivedDispatch,
   buildHostedExecutionMemberActivatedDispatch,
+  buildHostedExecutionMemberChannelsUpdatedDispatch,
   buildHostedExecutionTelegramMessageReceivedDispatch,
   buildHostedExecutionVaultShareAcceptedDispatch,
 } from "@murphai/hosted-execution";
@@ -100,6 +101,7 @@ describe("executeHostedDispatchEvent", () => {
       assistantProvider: "openai-compatible" as const,
       assistantSeeded: false,
       emailAutoReplyEnabled: true,
+      linqAutoReplyEnabled: true,
       telegramAutoReplyEnabled: true,
       vaultCreated: false,
     };
@@ -114,6 +116,11 @@ describe("executeHostedDispatchEvent", () => {
         threadIsDirect: true,
       },
       memberId: "member_123",
+      memberChannels: {
+        email: true,
+        linq: true,
+        telegram: true,
+      },
       occurredAt: "2026-04-08T00:00:00.000Z",
     });
 
@@ -161,6 +168,11 @@ describe("executeHostedDispatchEvent", () => {
         toPhoneNumber: "+15550002222",
       },
       memberId: "member_123",
+      memberChannels: {
+        email: true,
+        linq: true,
+        telegram: true,
+      },
       occurredAt: "2026-04-08T00:00:00.000Z",
     });
 
@@ -246,6 +258,33 @@ describe("executeHostedDispatchEvent", () => {
       runtime.platform.effectsPort,
       runtime.userEnv,
     );
+  });
+
+  it("treats explicit member channel sync events as no-op dispatch handlers", async () => {
+    const dispatch = buildHostedExecutionMemberChannelsUpdatedDispatch({
+      eventId: "evt_member_channels_updated",
+      memberChannels: {
+        email: true,
+        linq: false,
+        telegram: true,
+      },
+      memberId: "member_123",
+      occurredAt: "2026-04-08T00:03:00.000Z",
+    });
+
+    const result = await executeHostedDispatchEvent({
+      dispatch,
+      runtime: createRuntime(),
+      runtimeEnv: {},
+      vaultRoot: "/tmp/assistant-runtime-events",
+    });
+
+    expect(mocks.queueAssistantFirstContactWelcome).not.toHaveBeenCalled();
+    assert.deepEqual(result, {
+      bootstrapResult: null,
+      shareImportResult: null,
+      shareImportTitle: null,
+    });
   });
 
   it("requires a hydrated share pack for hosted share acceptance", async () => {

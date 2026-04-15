@@ -66,6 +66,19 @@ const HOSTED_DEVICE_SYNC_ENV_PREFIXES = [
   "OURA_",
   "WHOOP_",
 ] as const;
+const MEMBER_CHANNELS_NONE = {
+  email: false,
+  linq: false,
+  telegram: false,
+} as const;
+const MEMBER_CHANNELS_EMAIL = {
+  ...MEMBER_CHANNELS_NONE,
+  email: true,
+} as const;
+const MEMBER_CHANNELS_LINQ = {
+  ...MEMBER_CHANNELS_NONE,
+  linq: true,
+} as const;
 
 type NodeRunnerTestInput =
   Pick<
@@ -317,6 +330,7 @@ describe("runHostedExecutionJob", () => {
         dispatch: {
           event: {
             kind: "member.activated",
+            memberChannels: MEMBER_CHANNELS_NONE,
             userId: "member_123",
           },
           eventId: "evt_123",
@@ -363,6 +377,7 @@ describe("runHostedExecutionJob", () => {
         dispatch: {
           event: {
             kind: "member.activated",
+            memberChannels: MEMBER_CHANNELS_NONE,
             userId: "member_123",
           },
           eventId: "evt_activation_first",
@@ -375,6 +390,7 @@ describe("runHostedExecutionJob", () => {
         dispatch: {
           event: {
             kind: "member.activated",
+            memberChannels: MEMBER_CHANNELS_NONE,
             userId: "member_123",
           },
           eventId: "evt_activation_second",
@@ -412,6 +428,7 @@ describe("runHostedExecutionJob", () => {
         dispatch: {
           event: {
             kind: "member.activated",
+            memberChannels: MEMBER_CHANNELS_EMAIL,
             userId: "member_email_partial",
           },
           eventId: "evt_activation_email_partial",
@@ -457,6 +474,7 @@ describe("runHostedExecutionJob", () => {
               threadId: "chat_123",
               threadIsDirect: true,
             },
+            memberChannels: MEMBER_CHANNELS_LINQ,
             userId: "member_linq_bootstrap",
           },
           eventId: "evt_activation_linq_bootstrap",
@@ -497,6 +515,7 @@ describe("runHostedExecutionJob", () => {
               threadId: "chat_123",
               threadIsDirect: true,
             },
+            memberChannels: MEMBER_CHANNELS_LINQ,
             userId: "member_linq_bootstrap",
           },
           eventId: "evt_activation_linq_bootstrap_first",
@@ -509,6 +528,7 @@ describe("runHostedExecutionJob", () => {
         dispatch: {
           event: {
             kind: "member.activated",
+            memberChannels: MEMBER_CHANNELS_LINQ,
             userId: "member_linq_bootstrap",
           },
           eventId: "evt_activation_linq_bootstrap_second",
@@ -532,6 +552,82 @@ describe("runHostedExecutionJob", () => {
     }
   });
 
+  it("syncs hosted managed auto-reply channels from explicit member channel update events", async () => {
+    const previousHostedAssistantEnv = setHostedAssistantSeedEnv();
+
+    try {
+      const activation = await runHostedExecutionJob({
+        bundles: {
+          agentState: null,
+          vault: null,
+        },
+        dispatch: {
+          event: {
+            kind: "member.activated",
+            memberChannels: MEMBER_CHANNELS_NONE,
+            userId: "member_channel_sync",
+          },
+          eventId: "evt_activation_channel_sync",
+          occurredAt: "2026-03-26T12:00:00.000Z",
+        },
+      });
+
+      const enabled = await runHostedExecutionJob({
+        bundles: activation.bundles,
+        dispatch: {
+          event: {
+            kind: "member.channels.updated",
+            memberChannels: MEMBER_CHANNELS_LINQ,
+            userId: "member_channel_sync",
+          },
+          eventId: "evt_member_channels_enabled",
+          occurredAt: "2026-03-26T12:05:00.000Z",
+        },
+      });
+      const enabledWorkspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-channel-sync-enabled-"));
+      cleanupPaths.push(enabledWorkspaceRoot);
+      const enabledContext = await restoreHostedExecutionContext({
+        agentStateBundle: decodeHostedBundleBase64(enabled.bundles.agentState),
+        vaultBundle: Buffer.from(enabled.bundles.vault!, "base64"),
+        workspaceRoot: enabledWorkspaceRoot,
+      });
+      const enabledAutomationState = await readAssistantAutomationState(
+        enabledContext.assistantStateRoot,
+      );
+
+      expect(enabled.result.summary).toContain("Processed member channel sync");
+      expect(enabledAutomationState.autoReplyChannels).toContain("linq");
+
+      const disabled = await runHostedExecutionJob({
+        bundles: enabled.bundles,
+        dispatch: {
+          event: {
+            kind: "member.channels.updated",
+            memberChannels: MEMBER_CHANNELS_NONE,
+            userId: "member_channel_sync",
+          },
+          eventId: "evt_member_channels_disabled",
+          occurredAt: "2026-03-26T12:10:00.000Z",
+        },
+      });
+      const disabledWorkspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-channel-sync-disabled-"));
+      cleanupPaths.push(disabledWorkspaceRoot);
+      const disabledContext = await restoreHostedExecutionContext({
+        agentStateBundle: decodeHostedBundleBase64(disabled.bundles.agentState),
+        vaultBundle: Buffer.from(disabled.bundles.vault!, "base64"),
+        workspaceRoot: disabledWorkspaceRoot,
+      });
+      const disabledAutomationState = await readAssistantAutomationState(
+        disabledContext.assistantStateRoot,
+      );
+
+      expect(disabled.result.summary).toContain("Processed member channel sync");
+      expect(disabledAutomationState.autoReplyChannels).not.toContain("linq");
+    } finally {
+      restoreEnvVars(previousHostedAssistantEnv);
+    }
+  });
+
   it("persists hosted Telegram captures from webhook-style dispatches", async () => {
     const previousRunnerEnvProfiles = setHostedRunnerEnvProfiles("telegram");
     const activation = await runHostedExecutionJob({
@@ -542,6 +638,7 @@ describe("runHostedExecutionJob", () => {
       dispatch: {
         event: {
           kind: "member.activated",
+          memberChannels: MEMBER_CHANNELS_NONE,
           userId: "member_telegram_ingress",
         },
         eventId: "evt_activation_telegram_ingress",
@@ -626,6 +723,7 @@ describe("runHostedExecutionJob", () => {
         dispatch: {
           event: {
             kind: "member.activated",
+            memberChannels: MEMBER_CHANNELS_EMAIL,
             userId: "member_email",
           },
           eventId: "evt_activation_email",
@@ -676,6 +774,7 @@ describe("runHostedExecutionJob", () => {
         dispatch: {
           event: {
             kind: "member.activated",
+            memberChannels: MEMBER_CHANNELS_EMAIL,
             userId: "member_email_no_domain",
           },
           eventId: "evt_activation_email_no_domain",
@@ -729,6 +828,7 @@ describe("runHostedExecutionJob", () => {
         dispatch: {
           event: {
             kind: "member.activated",
+            memberChannels: MEMBER_CHANNELS_EMAIL,
             userId: "member_email_late_env",
           },
           eventId: "evt_activation_email_late_env",
@@ -789,6 +889,7 @@ describe("runHostedExecutionJob", () => {
       dispatch: {
         event: {
           kind: "member.activated",
+          memberChannels: MEMBER_CHANNELS_NONE,
           userId: "member_email_fetch",
         },
         eventId: "evt_activation_email_fetch",
@@ -870,6 +971,7 @@ describe("runHostedExecutionJob", () => {
       dispatch: {
         event: {
           kind: "member.activated",
+          memberChannels: MEMBER_CHANNELS_NONE,
           userId: "member_email_alias",
         },
         eventId: "evt_activation_email_alias",
@@ -971,6 +1073,7 @@ describe("runHostedExecutionJob", () => {
       dispatch: {
         event: {
           kind: "member.activated",
+          memberChannels: MEMBER_CHANNELS_NONE,
           userId: "member_telegram",
         },
         eventId: "evt_activation_telegram",
@@ -1109,6 +1212,7 @@ describe("runHostedExecutionJob", () => {
         dispatch: {
           event: {
             kind: "member.activated",
+            memberChannels: MEMBER_CHANNELS_NONE,
             userId: "member_telegram_attachment",
           },
           eventId: "evt_activation_telegram_attachment",
@@ -1235,6 +1339,7 @@ describe("runHostedExecutionJob", () => {
       dispatch: {
         event: {
           kind: "member.activated",
+          memberChannels: MEMBER_CHANNELS_NONE,
           userId: "member_123",
         },
         eventId: "evt_activation",
@@ -1267,6 +1372,7 @@ describe("runHostedExecutionJob", () => {
       dispatch: {
         event: {
           kind: "member.activated",
+          memberChannels: MEMBER_CHANNELS_NONE,
           userId: "member_artifacts",
         },
         eventId: "evt_activation_artifacts",
@@ -1396,6 +1502,7 @@ describe("runHostedExecutionJob", () => {
       dispatch: {
         event: {
           kind: "member.activated",
+          memberChannels: MEMBER_CHANNELS_NONE,
           userId: "member_artifacts_missing",
         },
         eventId: "evt_activation_artifacts_missing",
@@ -1552,6 +1659,7 @@ describe("runHostedExecutionJob", () => {
       dispatch: {
         event: {
           kind: "member.activated",
+          memberChannels: MEMBER_CHANNELS_NONE,
           userId: "member_456",
         },
         eventId: "evt_activation_share",
@@ -1638,6 +1746,7 @@ describe("runHostedExecutionJob", () => {
         dispatch: {
           event: {
             kind: "member.activated",
+            memberChannels: MEMBER_CHANNELS_NONE,
             userId: "member_proxy",
           },
           eventId: "evt_activation_share_proxy",
@@ -1696,6 +1805,7 @@ describe("runHostedExecutionJob", () => {
         dispatch: {
           event: {
             kind: "member.activated",
+            memberChannels: MEMBER_CHANNELS_NONE,
             userId: "member_isolated_env",
           },
           eventId: "evt_isolated_env",
@@ -1717,6 +1827,7 @@ describe("runHostedExecutionJob", () => {
       dispatch: {
         event: {
           kind: "member.activated",
+          memberChannels: MEMBER_CHANNELS_NONE,
           userId: "member_123",
         },
         eventId: "evt_user_env",
@@ -1752,6 +1863,7 @@ describe("runHostedExecutionJob", () => {
       dispatch: {
         event: {
           kind: "member.activated",
+          memberChannels: MEMBER_CHANNELS_NONE,
           userId: "member_usage_proxy",
         },
         eventId: "evt_activation_usage_proxy",
@@ -1873,6 +1985,7 @@ describe("runHostedExecutionJob", () => {
         dispatch: {
           event: {
             kind: "member.activated",
+            memberChannels: MEMBER_CHANNELS_NONE,
             userId: "member_123",
           },
           eventId: "evt_user_env_restore",
@@ -1966,6 +2079,7 @@ describe("runHostedExecutionJob", () => {
         dispatch: {
           event: {
             kind: "member.activated",
+            memberChannels: MEMBER_CHANNELS_NONE,
             userId: "member_1",
           },
           eventId: "evt_one",
@@ -1987,6 +2101,7 @@ describe("runHostedExecutionJob", () => {
         dispatch: {
           event: {
             kind: "member.activated",
+            memberChannels: MEMBER_CHANNELS_NONE,
             userId: "member_2",
           },
           eventId: "evt_two",
@@ -2114,6 +2229,7 @@ describe("runHostedExecutionJob", () => {
       dispatch: {
         event: {
           kind: "member.activated",
+          memberChannels: MEMBER_CHANNELS_NONE,
           userId: "member_123",
         },
         eventId: "evt_outbox",
@@ -2235,6 +2351,7 @@ describe("runHostedExecutionJob", () => {
         dispatch: {
           event: {
             kind: "member.activated",
+            memberChannels: MEMBER_CHANNELS_NONE,
             userId: "member_123",
           },
           eventId: "evt_outbox_send",

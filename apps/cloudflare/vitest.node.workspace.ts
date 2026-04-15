@@ -97,7 +97,7 @@ const cloudflareNodeVitestProjectSpecs = resolveVitestBucketFiles(
   ],
   {
     ignorePatterns: [
-      "hosted-local-e2e.test.ts",
+      "*e2e.test.ts",
       "workers/*.test.ts",
       "workers/**/*.test.ts",
     ],

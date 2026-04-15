@@ -20,6 +20,7 @@ export const POST = withJsonError(async (request: Request) => {
 
   return jsonOk(await reconcileHostedBillingCheckoutSuccess({
     inviteCode,
+    linkedAccounts: auth.linkedAccounts,
     member: auth.member,
     sessionId,
   }));

@@ -40,6 +40,11 @@ describe("runHostedExecutionJob abort forwarding", () => {
         dispatch: {
           event: {
             kind: "member.activated",
+            memberChannels: {
+              email: false,
+              linq: false,
+              telegram: false,
+            },
             userId: "member_abort_forwarding",
           },
           eventId: "evt_abort_forwarding",

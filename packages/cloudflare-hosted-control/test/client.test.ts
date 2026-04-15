@@ -120,6 +120,11 @@ describe("createCloudflareHostedControlClient", () => {
     const dispatch = buildHostedExecutionMemberActivatedDispatch({
       eventId: "evt_123",
       memberId: "user_123",
+      memberChannels: {
+        email: false,
+        linq: false,
+        telegram: false,
+      },
       occurredAt: "2026-04-08T00:00:00.000Z",
     });
     const storedPayload = buildHostedExecutionOutboxPayload(dispatch);

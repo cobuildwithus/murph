@@ -131,6 +131,30 @@ describe("hosted settings sync helpers", () => {
     });
   });
 
+  it("syncs Telegram from settings without client-authored email state", async () => {
+    const { syncHostedLinkedTelegram } = await import(
+      "@/src/components/settings/hosted-telegram-settings-helpers"
+    );
+    mocks.requestHostedOnboardingJson.mockResolvedValue({
+      botLink: "https://t.me/murph_bot",
+      runTriggered: true,
+      telegramUserId: "12345",
+      telegramUsername: "murph_user",
+    });
+
+    await syncHostedLinkedTelegram({
+      expectedTelegramUserId: "12345",
+      mode: "resync",
+    });
+
+    expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
+      payload: {
+        expectedTelegramUserId: "12345",
+      },
+      url: "/api/settings/telegram/sync",
+    });
+  });
+
   it("builds a displayable telegram account from the slim sync override shape", async () => {
     const { resolveHostedTelegramSettingsDisplayState } = await import(
       "@/src/components/settings/hosted-telegram-settings-helpers"

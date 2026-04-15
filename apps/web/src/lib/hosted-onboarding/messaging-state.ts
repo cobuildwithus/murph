@@ -1,6 +1,6 @@
 import type {
   HostedExecutionFirstContactTarget,
-  HostedExecutionMemberActivatedEvent,
+  HostedExecutionMemberChannels,
 } from "@murphai/hosted-execution";
 
 import { normalizePhoneNumber } from "./phone";
@@ -46,6 +46,20 @@ export function isHostedMemberMessagingSetupRequired(input: {
   routing: HostedMemberMessagingRoutingSlice | null;
 }): boolean {
   return !resolveHostedMemberMessagingState(input).hasDirectMessagingChannel;
+}
+
+export function resolveHostedMemberChannels(input: {
+  emailLinked: boolean;
+  identity: HostedMemberMessagingIdentitySlice | null;
+  routing: HostedMemberMessagingRoutingSlice | null;
+}): HostedExecutionMemberChannels {
+  const messaging = resolveHostedMemberMessagingState(input);
+
+  return {
+    email: input.emailLinked,
+    linq: messaging.hasPhone,
+    telegram: messaging.hasTelegram,
+  };
 }
 
 export function resolveHostedMemberFirstContactTarget(input: {
