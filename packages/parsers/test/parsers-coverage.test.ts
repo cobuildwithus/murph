@@ -128,7 +128,7 @@ test("parser barrel exports the default registry and key helpers", () => {
   const registry = parsers.createDefaultParserRegistry();
   assert.deepEqual(
     registry.providers.map((provider) => provider.id),
-    ["text-file", "whisper.cpp"],
+    ["text-file", "zxing-wasm", "whisper.cpp"],
   );
   assert.equal(parsers.createParserRegistry, createParserRegistry);
   assert.equal(parsers.createTextFileProvider, createTextFileProvider);

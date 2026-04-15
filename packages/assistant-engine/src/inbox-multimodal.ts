@@ -250,6 +250,11 @@ function buildMetadataFragment(
     `fileName: ${attachment.fileName ?? 'unknown'}`,
     `storedPath: ${attachment.storedPath ?? 'missing'}`,
     `parseState: ${attachment.parseState ?? 'unknown'}`,
+    ...(attachment.kind === 'image'
+      ? [
+          'automaticImageCodeScan: image attachments are automatically scanned for QR and barcode payloads during parsing; decoded values appear in extracted text when found',
+        ]
+      : []),
     `routingImageEligible: ${String(routingImage.eligible)}`,
     `routingImageReason: ${routingImage.reason}`,
     `routingImageMediaType: ${routingImage.mediaType ?? 'unknown'}`,
