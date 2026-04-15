@@ -34,11 +34,11 @@ export function HostedExistingAccountSignInDialog() {
               Sign in to Murph
             </DialogTitle>
             <DialogDescription>
-              Use your phone number or email address to get a sign-in code.
+              Use your phone number, email address, or Telegram to sign in.
             </DialogDescription>
           </DialogHeader>
           {open ? (
-            <HostedAuthPanel intent="signin" methods={["phone", "email"]} />
+            <HostedAuthPanel intent="signin" methods={["phone", "telegram", "email"]} />
           ) : null}
         </DialogContent>
       </Dialog>
