@@ -208,6 +208,7 @@ function buildMember(
       memberId: "member_123",
       pendingLinqChatId: null,
       pendingLinqRecipientPhone: null,
+      telegramUserId: null,
       telegramUserLookupKey: null,
       ...overrides,
     },

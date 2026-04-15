@@ -74,7 +74,7 @@ export function buildHostedExecutionTelegramMessageReceivedDispatch(input: {
 
 export function buildHostedExecutionEmailMessageReceivedDispatch(input: {
   eventId: string;
-  identityId: string;
+  identityId: string | null;
   occurredAt: string;
   rawMessageKey: string;
   selfAddress?: string | null;

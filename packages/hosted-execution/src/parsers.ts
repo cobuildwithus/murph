@@ -348,7 +348,12 @@ export function parseHostedExecutionEvent(value: unknown): HostedExecutionEvent 
     }
     case "email.message.received":
       return {
-        identityId: requireString(record.identityId, "Hosted execution email message identityId"),
+        identityId: record.identityId === null
+          ? null
+          : readNullableStringValue(
+              record.identityId,
+              "Hosted execution email message identityId",
+            ),
         kind,
         rawMessageKey: requireString(
           record.rawMessageKey,
@@ -448,10 +453,12 @@ function parseHostedExecutionFirstContactTarget(
 
   return {
     channel,
-    identityId: requireString(
-      record.identityId,
-      "Hosted execution member.activated firstContact identityId",
-    ),
+    identityId: record.identityId === null
+      ? null
+      : requireString(
+          record.identityId,
+          "Hosted execution member.activated firstContact identityId",
+        ),
     threadId: requireString(
       record.threadId,
       "Hosted execution member.activated firstContact threadId",

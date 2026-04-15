@@ -17,6 +17,7 @@ export function resolveInviteStatusAfterPrivyCompletion(
 ): HostedInviteStatusPayload {
   return {
     ...status,
+    messagingSetupRequired: payload.messagingSetupRequired,
     session: {
       ...status.session,
       authenticated: true,
@@ -118,7 +119,9 @@ export function resolveJoinInviteSubtitle(status: HostedInviteStatusPayload): st
     case "verify":
       return "Verify the number that messaged Murph to finish joining.";
     case "checkout":
-      return "Your phone is confirmed. Finish checkout to start using Murph.";
+      return status.messagingSetupRequired
+        ? "Before checkout, add a phone number or connect Telegram so Murph can message you after payment."
+        : "Your account is ready for checkout. Finish payment to start using Murph.";
     case "blocked":
       return "This account can’t continue from this invite right now. Contact support and we’ll help restore access.";
     case "active":

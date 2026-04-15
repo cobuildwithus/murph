@@ -488,6 +488,22 @@ describe("hosted execution parsers coverage", () => {
       });
     });
 
+    it("parses email events with a nullable identity id", () => {
+      expect(parseHostedExecutionEvent({
+        identityId: null,
+        kind: "email.message.received",
+        rawMessageKey: "raw_123",
+        selfAddress: null,
+        userId: "user_123",
+      })).toEqual({
+        identityId: null,
+        kind: "email.message.received",
+        rawMessageKey: "raw_123",
+        selfAddress: null,
+        userId: "user_123",
+      });
+    });
+
     it("parses null device-sync hint and revoke warning values", () => {
       expect(parseHostedExecutionEvent({
         hint: null,

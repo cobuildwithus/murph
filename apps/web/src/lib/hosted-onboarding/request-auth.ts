@@ -104,7 +104,7 @@ export async function requireVerifiedPrivyMemberAuth(
   if (!context) {
     throw hostedOnboardingError({
       code: "AUTH_REQUIRED",
-      message: "Verify your phone to continue.",
+      message: "Sign in to continue.",
       httpStatus: 401,
     });
   }
@@ -120,7 +120,7 @@ export async function requirePrivySession(
   if (!context) {
     throw hostedOnboardingError({
       code: "AUTH_REQUIRED",
-      message: "Verify your phone to continue.",
+      message: "Sign in to continue.",
       httpStatus: 401,
     });
   }

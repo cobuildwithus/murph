@@ -135,6 +135,7 @@ function createStatus(
       expiresAt: null,
       matchesInvite: stage !== "verify",
     },
+    messagingSetupRequired: false,
     stage,
   };
 }

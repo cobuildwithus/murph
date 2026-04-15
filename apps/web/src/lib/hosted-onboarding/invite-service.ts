@@ -12,6 +12,7 @@ import { isHostedMemberActivationPending } from "./activation-progress";
 import { readHostedPhoneHint } from "./contact-privacy";
 import { hostedOnboardingError } from "./errors";
 import { projectHostedMemberRoutingState } from "./hosted-member-routing-store";
+import { isHostedMemberMessagingSetupRequired } from "./messaging-state";
 import { deriveHostedOnboardingStage } from "./lifecycle";
 import {
   readHostedMemberIdentity,
@@ -57,6 +58,7 @@ export async function getHostedInviteStatus(input: {
         phoneAuthReady,
       },
       invite: null,
+      messagingSetupRequired: false,
       session: {
         authenticated: Boolean(input.authenticatedMember),
         expiresAt: null,
@@ -85,6 +87,10 @@ export async function getHostedInviteStatus(input: {
     sessionMatchesInvite,
     suspendedAt: invite.member.suspendedAt,
   });
+  const messagingSetupRequired = isHostedMemberMessagingSetupRequired({
+    identity: invite.member.identity,
+    routing: inviteRouting,
+  });
 
   return {
     activationPending,
@@ -97,6 +103,7 @@ export async function getHostedInviteStatus(input: {
       expiresAt: invite.expiresAt.toISOString(),
       phoneHint: readHostedPhoneHint(inviteIdentity.maskedPhoneNumberHint),
     },
+    messagingSetupRequired,
     murphPhoneNumber: resolveHostedInviteMurphPhoneNumber({
       routing: inviteRouting,
       sessionMatchesInvite,

@@ -22,7 +22,7 @@ export const POST = withJsonError(async (request: Request) => {
       identity: auth.identity,
       inviteCode: typeof body.inviteCode === "string" ? body.inviteCode : null,
     });
-    const warmupScheduled = result.stage === "checkout";
+    const warmupScheduled = result.stage === "checkout" && !result.messagingSetupRequired;
 
     if (warmupScheduled) {
       scheduleManagedUserCryptoWarmupBestEffort({
@@ -41,6 +41,7 @@ export const POST = withJsonError(async (request: Request) => {
       activationPending: result.activationPending,
       inviteCode: result.inviteCode,
       joinUrl: result.joinUrl,
+      messagingSetupRequired: result.messagingSetupRequired,
       ok: true,
       stage: result.stage,
     });

@@ -11,6 +11,7 @@ export interface HostedInviteStatusPayload {
     expiresAt: string;
     phoneHint: string;
   } | null;
+  messagingSetupRequired: boolean;
   murphPhoneNumber?: string | null;
   session: {
     authenticated: boolean;
@@ -24,5 +25,6 @@ export interface HostedPrivyCompletionPayload {
   activationPending: boolean;
   inviteCode: string;
   joinUrl: string;
+  messagingSetupRequired: boolean;
   stage: "checkout" | "blocked" | "active";
 }

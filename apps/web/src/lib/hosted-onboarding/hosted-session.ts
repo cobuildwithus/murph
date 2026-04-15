@@ -41,7 +41,7 @@ export async function requireHostedPrivySession(): Promise<HostedPrivySession> {
   if (!session) {
     throw hostedOnboardingError({
       code: "AUTH_REQUIRED",
-      message: "Verify your phone to continue.",
+      message: "Sign in to continue.",
       httpStatus: 401,
     });
   }

@@ -16,12 +16,15 @@ import type {
   HostedInviteStatusPayload,
   HostedPrivyCompletionPayload,
 } from "@/src/lib/hosted-onboarding/types";
+import type { PrivyLinkedAccountLike } from "@/src/lib/hosted-onboarding/privy-shared";
 
 import { HostedInvitePhoneAuth } from "./hosted-invite-phone-auth";
 import { JOIN_INVITE_ACTIVE_FEATURE_CARDS } from "./join-invite-active-feature-cards";
 import { JOIN_INVITE_ACTIVATION_PENDING_COPY } from "./join-invite-copy";
 import type { JoinInviteShareImportState } from "./join-invite-state";
 import { describeHostedSharePreview } from "../hosted-share/hosted-share-preview";
+import { HostedPhoneSettings } from "../settings/hosted-phone-settings";
+import { HostedTelegramSettings } from "../settings/hosted-telegram-settings";
 
 const MURPH_CONTACT_DOWNLOAD_FILENAME = "Murph.vcf";
 
@@ -42,9 +45,9 @@ export function JoinInviteSignedInMismatchAlert({
 }) {
   return (
     <Alert className="border-amber-200 bg-amber-50 text-amber-900">
-      <AlertTitle>This browser is signed in with a different number.</AlertTitle>
+      <AlertTitle>This browser is signed in with a different Murph account.</AlertTitle>
       <AlertDescription>
-        This browser is already signed in with a different number. Sign out first to continue with this invite.
+        This browser is already signed in with a different Murph account. Sign out first to continue with this invite.
       </AlertDescription>
       <div className="mt-3">
         <HostedInviteSignOutButton onSignOut={onSignOut} />
@@ -141,6 +144,49 @@ export function JoinInviteBlockedAlert() {
   );
 }
 
+export function JoinInviteMessagingSetupPanel({
+  authenticated,
+  initialLinkedAccounts,
+  onRefreshStatus,
+}: {
+  authenticated: boolean;
+  initialLinkedAccounts: readonly PrivyLinkedAccountLike[];
+  onRefreshStatus: () => Promise<HostedInviteStatusPayload>;
+}) {
+  return (
+    <div className="space-y-4">
+      <Alert className="border-amber-200 bg-amber-50 text-amber-900">
+        <AlertTitle>Add a message channel before checkout</AlertTitle>
+        <AlertDescription>
+          Murph needs a phone number or Telegram connection before payment so the bot knows where to reach you right after signup.
+        </AlertDescription>
+      </Alert>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <div className="rounded-xl border border-stone-200/60 bg-stone-50/60 p-5">
+          <HostedPhoneSettings
+            authenticated={authenticated}
+            autoOpen
+            initialLinkedAccounts={initialLinkedAccounts}
+            onLinked={async () => {
+              await onRefreshStatus();
+            }}
+          />
+        </div>
+        <div className="rounded-xl border border-stone-200/60 bg-stone-50/60 p-5">
+          <HostedTelegramSettings
+            authenticated={authenticated}
+            initialLinkedAccounts={initialLinkedAccounts}
+            onSynced={async () => {
+              await onRefreshStatus();
+            }}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function JoinInviteCheckoutButton({
   billingReady,
   checkoutPending,
@@ -193,7 +239,7 @@ export function JoinInviteActivePanel({
         <div className="flex items-center gap-3 rounded-xl border border-olive/20 bg-olive/5 px-5 py-4">
           <CheckCircleIcon className="h-6 w-6 shrink-0 text-olive" />
           <p className="text-sm leading-relaxed text-olive">
-            You should receive a text message from Murph shortly. Just reply to start chatting.
+            Murph should reach out shortly in your linked channel. Just reply there to start chatting.
           </p>
         </div>
       )}

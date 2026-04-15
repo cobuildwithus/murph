@@ -93,7 +93,7 @@ export function HostedPhoneEntryStep({
     <form className="space-y-3" onSubmit={onSubmitPhoneEntry}>
       <div className="space-y-3">
         <Label htmlFor={phoneInputId}>
-          {phoneFieldLabel ?? (intent === "signin" ? "Phone number" : "Your phone")}
+          {phoneFieldLabel ?? (intent === "signin" || intent === "link" ? "Phone number" : "Your phone")}
         </Label>
         <div className="flex flex-col gap-3 sm:flex-row">
           <Combobox
@@ -150,7 +150,9 @@ export function HostedPhoneEntryStep({
         <Button type="submit" disabled={sendCodeDisabled} size="lg" className="w-full">
           {pendingAction === "send-code"
             ? "Sending code..."
-            : "Text me a code"}
+            : intent === "link"
+              ? "Send verification code"
+              : "Text me a code"}
         </Button>
       </div>
       {intent === "signup" && showPassiveConsentNotice ? (
@@ -187,7 +189,7 @@ export function HostedCodeEntryStep({
     <HostedVerificationCodeStep
       code={code}
       description={`We texted the latest ${
-        intent === "signin" ? "sign-in code" : "code"
+        intent === "signin" ? "sign-in code" : intent === "link" ? "verification code" : "code"
       } to ${verificationPhoneNumberHint}.`}
       disabled={disabled}
       pendingAction={
@@ -195,9 +197,15 @@ export function HostedCodeEntryStep({
           ? pendingAction
           : null
       }
-      primaryActionLabel={intent === "signin" ? "Sign in" : "Verify phone"}
+      primaryActionLabel={
+        intent === "signin" ? "Sign in" : intent === "link" ? "Link phone" : "Verify phone"
+      }
       primaryActionPendingLabel={
-        intent === "signin" ? "Signing in..." : "Finishing setup..."
+        intent === "signin"
+          ? "Signing in..."
+          : intent === "link"
+            ? "Saving phone..."
+            : "Finishing setup..."
       }
       secondaryAction={
         <HostedUseDifferentNumberButton

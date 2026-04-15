@@ -248,6 +248,7 @@ function createStatus(input?: {
       expiresAt: null,
       matchesInvite: true,
     },
+    messagingSetupRequired: false,
     stage: input?.stage ?? "checkout",
   };
 }

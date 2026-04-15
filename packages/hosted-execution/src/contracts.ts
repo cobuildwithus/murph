@@ -68,7 +68,7 @@ export interface HostedExecutionMemberActivatedEvent extends HostedExecutionBase
 
 export interface HostedExecutionFirstContactTarget {
   channel: "email" | "linq" | "telegram";
-  identityId: string;
+  identityId: string | null;
   threadId: string;
   threadIsDirect: boolean;
 }
@@ -110,7 +110,7 @@ export interface HostedExecutionTelegramMessageReceivedEvent extends HostedExecu
 
 export interface HostedExecutionEmailMessageReceivedEvent extends HostedExecutionBaseEvent {
   kind: "email.message.received";
-  identityId: string;
+  identityId: string | null;
   rawMessageKey: string;
   selfAddress?: string | null;
 }

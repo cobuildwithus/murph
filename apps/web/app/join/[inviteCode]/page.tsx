@@ -7,15 +7,15 @@ import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth
 
 export const metadata: Metadata = {
   title: "Murph hosted invite",
-  description: "Verify your phone and finish hosted Murph checkout.",
+  description: "Finish signup, then add a phone number or connect Telegram so Murph can reach you.",
   openGraph: {
     title: "Murph hosted invite",
-    description: "Verify your phone and finish hosted Murph checkout.",
+    description: "Finish signup, then add a phone number or connect Telegram so Murph can reach you.",
   },
   twitter: {
     card: "summary_large_image",
     title: "Murph hosted invite",
-    description: "Verify your phone and finish hosted Murph checkout.",
+    description: "Finish signup, then add a phone number or connect Telegram so Murph can reach you.",
   },
 };
 
@@ -26,7 +26,7 @@ export default async function JoinInvitePage(input: {
   const { inviteCode } = await input.params;
   const searchParams = await input.searchParams;
   const decodedInviteCode = decodeURIComponent(inviteCode);
-  const { authenticatedMember } = await getHostedPageAuthSnapshot();
+  const { authenticated, authenticatedMember, linkedAccounts } = await getHostedPageAuthSnapshot();
   const initialStatus = await buildHostedInvitePageData({
     authenticatedMember,
     inviteCode: decodedInviteCode,
@@ -44,6 +44,8 @@ export default async function JoinInvitePage(input: {
     <main className="min-h-screen px-5 py-12 md:px-8">
       <div className="mx-auto max-w-3xl">
         <JoinInviteClient
+          authenticated={authenticated}
+          initialLinkedAccounts={linkedAccounts}
           inviteCode={decodedInviteCode}
           initialStatus={initialStatus}
           shareCode={shareCode}

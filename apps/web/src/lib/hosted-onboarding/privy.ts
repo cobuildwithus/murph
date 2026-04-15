@@ -8,6 +8,7 @@ import {
   type HostedPrivyPhoneAccount,
   type HostedPrivyTelegramAccount,
   type HostedPrivyWalletAccount,
+  extractHostedPrivyPreferredEmailAccount,
   resolveHostedPrivyLinkedAccountState,
   resolveHostedPrivyTelegramAccountSelection,
 } from "./privy-shared";
@@ -43,7 +44,7 @@ export async function requireHostedPrivyIdentityFromCookies(): Promise<HostedPri
   if (!identityToken) {
     throw hostedOnboardingError({
       code: "PRIVY_IDENTITY_TOKEN_REQUIRED",
-      message: "A Privy identity cookie is required to continue. Refresh and verify your phone again.",
+      message: "A Privy identity cookie is required to continue. Refresh and sign in again.",
       httpStatus: 401,
     });
   }
@@ -65,7 +66,7 @@ export async function requireHostedPrivyIdentityFromRequest(request: Request): P
   if (!identityToken) {
     throw hostedOnboardingError({
       code: "PRIVY_IDENTITY_TOKEN_REQUIRED",
-      message: "A Privy identity cookie is required to continue. Refresh and verify your phone again.",
+      message: "A Privy identity cookie is required to continue. Refresh and sign in again.",
       httpStatus: 401,
     });
   }
@@ -119,7 +120,9 @@ export async function verifyHostedPrivyIdentityToken(identityToken: string): Pro
 }
 
 export function resolveHostedPrivyIdentityFromVerifiedUser(user: HostedPrivyUser): HostedPrivyIdentity {
-  const { phone, wallet } = resolveHostedPrivyLinkedAccountState(user, HOSTED_PRIVY_EMBEDDED_WALLET_CHAIN_TYPE);
+  const linkedAccountState = resolveHostedPrivyLinkedAccountState(user, HOSTED_PRIVY_EMBEDDED_WALLET_CHAIN_TYPE);
+  const { phone, wallet } = linkedAccountState;
+  const email = extractHostedPrivyPreferredEmailAccount(linkedAccountState.linkedAccounts);
   const telegramSelection = resolveHostedPrivyTelegramAccountSelection(user);
 
   if (telegramSelection.ambiguous) {
@@ -130,10 +133,10 @@ export function resolveHostedPrivyIdentityFromVerifiedUser(user: HostedPrivyUser
     });
   }
 
-  if (!phone && !telegramSelection.account) {
+  if (!phone && !telegramSelection.account && !email) {
     throw hostedOnboardingError({
       code: "PRIVY_ACCOUNT_REQUIRED",
-      message: "Finish phone or Telegram verification before continuing.",
+      message: "Finish email, phone, or Telegram verification before continuing.",
       httpStatus: 400,
     });
   }
