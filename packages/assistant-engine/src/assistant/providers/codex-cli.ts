@@ -14,6 +14,7 @@ import {
   resolveAssistantProviderPrompt,
 } from './helpers.js'
 import type { AssistantProviderDefinition } from './types.js'
+import type { AssistantUserMessageContentPart } from '../../model-harness.js'
 
 export const codexCliProviderDefinition: AssistantProviderDefinition = {
   capabilities: {
@@ -57,6 +58,7 @@ export const codexCliProviderDefinition: AssistantProviderDefinition = {
       oss: providerConfig.oss,
       profile: providerConfig.profile ?? undefined,
       prompt: resolveAssistantProviderPrompt(input),
+      images: extractCodexUserMessageImages(input.userMessageContent),
       reasoningEffort: providerConfig.reasoningEffort ?? undefined,
       sandbox: providerConfig.sandbox ?? undefined,
       workingDirectory: input.workingDirectory,
@@ -110,4 +112,23 @@ export const codexCliProviderDefinition: AssistantProviderDefinition = {
   resolveStaticModels() {
     return DEFAULT_CODEX_MODELS
   },
+}
+
+function extractCodexUserMessageImages(
+  userMessageContent: readonly AssistantUserMessageContentPart[] | null | undefined,
+) {
+  const images = (userMessageContent ?? []).flatMap((part) => {
+    if (part.type !== 'image') {
+      return []
+    }
+
+    return [
+      {
+        data: part.image,
+        mimeType: part.mimeType ?? part.mediaType ?? null,
+      },
+    ]
+  })
+
+  return images.length > 0 ? images : undefined
 }

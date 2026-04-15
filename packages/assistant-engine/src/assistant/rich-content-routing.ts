@@ -12,8 +12,9 @@ export function prioritizeAssistantRoutesForRichUserMessageContent(input: {
   routes: readonly ResolvedAssistantFailoverRoute[]
   userMessageContent: readonly AssistantUserMessageContentPart[] | null | undefined
 }): ResolvedAssistantFailoverRoute[] {
+  const normalized = normalizeAssistantUserMessageContent(input.userMessageContent)
   const routes = [...input.routes]
-  if (!hasAssistantRichUserMessageContent(input.userMessageContent)) {
+  if (!hasAssistantRichUserMessageContent(normalized)) {
     return routes
   }
 
@@ -21,7 +22,13 @@ export function prioritizeAssistantRoutesForRichUserMessageContent(input: {
   const textOnlyRoutes: ResolvedAssistantFailoverRoute[] = []
 
   for (const route of routes) {
-    if (assistantRouteSupportsRichUserMessageContent(route)) {
+    if (
+      normalized
+      && routeSupportsAssistantUserMessageContent({
+        route,
+        userMessageContent: normalized,
+      })
+    ) {
       richRoutes.push(route)
       continue
     }
@@ -49,9 +56,12 @@ export function resolveAssistantRouteUserMessageContent(input: {
     return normalized
   }
 
-  return assistantRouteSupportsRichUserMessageContent(input.route)
-    ? normalized
-    : null
+  const supported = filterAssistantRouteUserMessageContent({
+    route: input.route,
+    userMessageContent: normalized,
+  })
+
+  return hasAssistantRichUserMessageContent(supported) ? supported : null
 }
 
 export function assistantRouteSupportsRichUserMessageContent(
@@ -71,4 +81,34 @@ function normalizeAssistantUserMessageContent(
   }
 
   return [...userMessageContent]
+}
+
+function routeSupportsAssistantUserMessageContent(input: {
+  route: ResolvedAssistantFailoverRoute
+  userMessageContent: readonly AssistantUserMessageContentPart[]
+}): boolean {
+  return hasAssistantRichUserMessageContent(
+    filterAssistantRouteUserMessageContent(input),
+  )
+}
+
+function filterAssistantRouteUserMessageContent(input: {
+  route: ResolvedAssistantFailoverRoute
+  userMessageContent: readonly AssistantUserMessageContentPart[]
+}): AssistantUserMessageContentPart[] {
+  if (assistantRouteSupportsRichUserMessageContent(input.route)) {
+    return [...input.userMessageContent]
+  }
+
+  return input.userMessageContent.flatMap<AssistantUserMessageContentPart>((part) => {
+    if (part.type === 'text') {
+      return [part]
+    }
+
+    if (input.route.provider === 'codex-cli' && part.type === 'image') {
+      return [part]
+    }
+
+    return []
+  })
 }

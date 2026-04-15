@@ -32,13 +32,26 @@ const TEXT_ONLY_USER_MESSAGE_CONTENT: AssistantUserMessageContentPart[] = [
   },
 ]
 
+const TEXT_AND_FILE_USER_MESSAGE_CONTENT: AssistantUserMessageContentPart[] = [
+  {
+    type: 'text',
+    text: 'Review this PDF.',
+  },
+  {
+    type: 'file',
+    data: new Uint8Array([9, 8, 7]),
+    filename: 'report.pdf',
+    mediaType: 'application/pdf',
+  },
+]
+
 describe('rich-content-routing', () => {
   it('detects when a user message contains multimodal evidence', () => {
     expect(hasAssistantRichUserMessageContent(TEXT_ONLY_USER_MESSAGE_CONTENT)).toBe(false)
     expect(hasAssistantRichUserMessageContent(TEXT_AND_IMAGE_USER_MESSAGE_CONTENT)).toBe(true)
   })
 
-  it('prefers multimodal-capable routes when text and image evidence are both present', () => {
+  it('keeps Codex CLI eligible when the current rich content is image-only', () => {
     const codexRoute = createRoute('codex-cli')
     const openAiRoute = createRoute('openai-compatible')
 
@@ -47,10 +60,22 @@ describe('rich-content-routing', () => {
       userMessageContent: TEXT_AND_IMAGE_USER_MESSAGE_CONTENT,
     })
 
+    expect(prioritizedRoutes).toEqual([codexRoute, openAiRoute])
+  })
+
+  it('prefers non-Codex routes when the current rich content is unsupported files', () => {
+    const codexRoute = createRoute('codex-cli')
+    const openAiRoute = createRoute('openai-compatible')
+
+    const prioritizedRoutes = prioritizeAssistantRoutesForRichUserMessageContent({
+      routes: [codexRoute, openAiRoute],
+      userMessageContent: TEXT_AND_FILE_USER_MESSAGE_CONTENT,
+    })
+
     expect(prioritizedRoutes).toEqual([openAiRoute, codexRoute])
   })
 
-  it('keeps multimodal evidence for capable providers and degrades Codex CLI to text-only', () => {
+  it('keeps image evidence for Codex CLI but still drops unsupported file parts', () => {
     const codexRoute = createRoute('codex-cli')
     const openAiRoute = createRoute('openai-compatible')
 
@@ -67,6 +92,12 @@ describe('rich-content-routing', () => {
       resolveAssistantRouteUserMessageContent({
         route: codexRoute,
         userMessageContent: TEXT_AND_IMAGE_USER_MESSAGE_CONTENT,
+      }),
+    ).toEqual(TEXT_AND_IMAGE_USER_MESSAGE_CONTENT)
+    expect(
+      resolveAssistantRouteUserMessageContent({
+        route: codexRoute,
+        userMessageContent: TEXT_AND_FILE_USER_MESSAGE_CONTENT,
       }),
     ).toBeNull()
     expect(

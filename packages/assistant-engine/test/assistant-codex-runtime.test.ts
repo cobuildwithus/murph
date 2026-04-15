@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events'
-import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { PassThrough } from 'node:stream'
@@ -62,6 +62,7 @@ describe('assistant codex runtime', () => {
       buildCodexArgs({
         approvalPolicy: 'on-request',
         configOverrides: ['model="gpt-5"', 'theme="clean"'],
+        imagePaths: ['/tmp/image-1.png', '/tmp/image-2.jpg'],
         model: 'gpt-5',
         oss: true,
         outputFile: '/tmp/output.txt',
@@ -94,6 +95,10 @@ describe('assistant codex runtime', () => {
       'gpt-5',
       '--config',
       'model_reasoning_effort="high"',
+      '--image',
+      '/tmp/image-1.png',
+      '--image',
+      '/tmp/image-2.jpg',
       '-',
     ])
 
@@ -169,12 +174,14 @@ describe('assistant codex runtime', () => {
   it('executes Codex prompts, sanitizes env, and prefers output-file messages', async () => {
     const workingDirectory = await createTempDir('assistant-codex-workdir-')
     const codexHome = await createTempDir('assistant-codex-home-')
+    const imageBytes = Buffer.from([0xff, 0xd8, 0xff])
     const onProgress = vi.fn()
     const onTraceEvent = vi.fn()
 
     codexMocks.spawn.mockImplementation((_command, args, options) => {
       const child = new MockChildProcess()
       const outputFile = readOutputFilePath(args)
+      const imagePath = readImagePath(args)
 
       queueMicrotask(() => {
         child.stdout.write(
@@ -200,6 +207,8 @@ describe('assistant codex runtime', () => {
         child.stderr.write('Retrying after timeout\n')
 
         void (async () => {
+          expect(imagePath.endsWith('.jpg')).toBe(true)
+          await expect(readFile(imagePath)).resolves.toEqual(imageBytes)
           await writeFile(outputFile, 'Final message from output file\n', 'utf8')
           child.emit('close', 0, null)
         })()
@@ -226,6 +235,12 @@ describe('assistant codex runtime', () => {
           NODE_V8_COVERAGE: '/coverage',
           PATH: '/custom/bin',
         },
+        images: [
+          {
+            data: imageBytes,
+            mimeType: 'image/jpeg',
+          },
+        ],
         onProgress,
         onTraceEvent,
         prompt: 'Explain this',
@@ -1730,6 +1745,20 @@ function readOutputFilePath(args: readonly unknown[]): string {
   }
 
   return outputPath
+}
+
+function readImagePath(args: readonly unknown[]): string {
+  const imageFlagIndex = args.findIndex((value) => value === '--image')
+  if (imageFlagIndex < 0) {
+    throw new Error('Expected --image in Codex args.')
+  }
+
+  const imagePath = args[imageFlagIndex + 1]
+  if (typeof imagePath !== 'string') {
+    throw new TypeError('Expected a string image path after --image.')
+  }
+
+  return imagePath
 }
 
 function requireMockChildProcess(
