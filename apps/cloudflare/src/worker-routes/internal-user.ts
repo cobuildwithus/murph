@@ -320,11 +320,6 @@ function normalizeNullableSearchString(value: string | null): string | null {
   return normalized.length > 0 ? normalized : null;
 }
 
-function isMissingHostedUserCryptoContext(error: unknown, userId: string): boolean {
-  return error instanceof Error
-    && error.message.includes(`Hosted user root key envelope ${userId} is missing.`);
-}
-
 function isBackpressuredStatus(
   status: { backpressuredEventIds?: string[] },
   eventId: string,
