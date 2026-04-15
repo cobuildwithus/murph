@@ -55,7 +55,7 @@ export const automationScheduleCronSchema = z
   .object({
     kind: z.literal("cron"),
     expression: z.string().min(1),
-    timeZone: timeZoneSchema(),
+    timeZone: timeZoneSchema().optional(),
   })
   .strict();
 
@@ -63,7 +63,7 @@ export const automationScheduleDailyLocalSchema = z
   .object({
     kind: z.literal("dailyLocal"),
     localTime: z.string().regex(dailyLocalTimePattern, "Expected a 24-hour HH:MM time."),
-    timeZone: timeZoneSchema(),
+    timeZone: timeZoneSchema().optional(),
   })
   .strict();
 

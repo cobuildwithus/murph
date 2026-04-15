@@ -24,7 +24,6 @@ test("automation scaffold payload uses the canonical default shape", () => {
     schedule: {
       kind: "cron",
       expression: "0 9 * * 1",
-      timeZone: "Australia/Sydney",
     },
     route: {
       channel: "telegram",
@@ -55,7 +54,6 @@ test("automation record schema accepts the canonical automation shape", () => {
     schedule: {
       kind: "cron",
       expression: "0 9 * * 1",
-      timeZone: "Australia/Sydney",
     },
     route: {
       channel: "telegram",
@@ -78,6 +76,38 @@ test("automation record schema accepts the canonical automation shape", () => {
   assert.equal(parsed.schedule.kind, "cron");
 });
 
+test("automation record schema still accepts legacy recurring schedules with timeZone", () => {
+  const parsed = automationRecordSchema.parse({
+    automationId: "automation_01HZXW2Y6Y8QWQ8QWQ8QWQ8QWX",
+    slug: "legacy-weekly-check-in",
+    title: "Legacy weekly check-in",
+    status: "active",
+    summary: "Legacy scheduled assistant notification instructions.",
+    schedule: {
+      kind: "cron",
+      expression: "0 9 * * 1",
+      timeZone: "Australia/Sydney",
+    },
+    route: {
+      channel: "telegram",
+      deliveryTarget: null,
+      identityId: null,
+      participantId: null,
+      sourceThreadId: null,
+    },
+    continuityPolicy: "preserve",
+    tags: ["assistant", "scheduled"],
+    createdAt: "2026-04-06T00:00:00.000Z",
+    updatedAt: "2026-04-06T00:00:00.000Z",
+    instructions: "Write the scheduled assistant instructions here.",
+    relativePath: "bank/automations/legacy-weekly-check-in.md",
+    markdown: "---\n...\n---\nWrite the scheduled assistant instructions here.\n",
+  });
+
+  assert.equal(parsed.schedule.kind, "cron");
+  assert.equal(parsed.schedule.timeZone, "Australia/Sydney");
+});
+
 test("automation record schema rejects invalid slugs", () => {
   assert.throws(() => automationRecordSchema.parse({
     automationId: "automation_01HZXW2Y6Y8QWQ8QWQ8QWQ8QWQ",
@@ -88,7 +118,6 @@ test("automation record schema rejects invalid slugs", () => {
     schedule: {
       kind: "cron",
       expression: "0 9 * * 1",
-      timeZone: "Australia/Sydney",
     },
     route: {
       channel: "telegram",
