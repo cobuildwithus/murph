@@ -224,6 +224,77 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     );
   });
 
+  it("does not wait for the hosted execution dispatch nudge when one is deferred", async () => {
+    mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
+    const prisma = withPrismaTransaction({
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventPayload: {
+              updateId: 654,
+            },
+            receiptState: {
+              attemptCount: 1,
+              status: "processing",
+            },
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedMemberRouting: {
+        findUnique: vi.fn().mockResolvedValue({
+          member: {
+            billingStatus: HostedBillingStatus.active,
+            id: "member_telegram_123",
+            suspendedAt: null,
+          },
+        }),
+      },
+    }) as unknown as Parameters<typeof handleHostedOnboardingTelegramWebhook>[0]["prisma"];
+    const deferred: Array<() => Promise<void>> = [];
+
+    await expect(handleHostedOnboardingTelegramWebhook({
+      defer: (drain) => {
+        deferred.push(drain);
+      },
+      prisma,
+      rawBody: JSON.stringify({
+        message: {
+          chat: {
+            id: 123,
+            type: "private",
+          },
+          date: 1_774_522_600,
+          from: {
+            first_name: "Alice",
+            id: 456,
+          },
+          message_id: 1,
+          text: "hello",
+        },
+        update_id: 654,
+      }),
+      secretToken: "telegram-secret",
+    })).resolves.toMatchObject({
+      ok: true,
+      reason: "dispatched-active-member",
+    });
+
+    expect(deferred).toHaveLength(1);
+    expect(mocks.drainHostedExecutionOutboxBestEffort).not.toHaveBeenCalled();
+
+    await deferred[0]?.();
+
+    expect(mocks.drainHostedExecutionOutboxBestEffort).toHaveBeenCalledWith({
+      eventIds: [
+        "telegram:update:654",
+      ],
+      limit: 1,
+      prisma,
+    });
+  });
+
   it("rejects Telegram webhooks whose configured secret token is missing", async () => {
     mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
     const hostedMemberRoutingFindUnique = vi.fn();

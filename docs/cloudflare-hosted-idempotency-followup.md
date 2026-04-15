@@ -13,6 +13,7 @@ This repo now has durable owner-specific idempotency lanes for every currently i
 - hosted side-effect sends are reconciled through a hosted delivery journal so later hosted wakes can mark already-recorded actions sent without re-sending them first
 - Cloudflare-bound hosted execution dispatches from onboarding, hosted share acceptance, and hosted device-sync wakes now go through the shared Postgres `execution_outbox` instead of fire-and-forget dispatches
 - hosted onboarding webhook receipts now persist the planned response plus receipt-local side-effect state for Cloudflare dispatches and Linq or Telegram replies before send, transactionally queue hosted execution dispatches into `execution_outbox`, and reclaim expired processing leases so abandoned attempts can resume instead of burning the event
+- third-party webhook request paths now acknowledge after the durable receipt and `execution_outbox` enqueue complete; any immediate hosted-execution drain is only a non-blocking best-effort nudge, with cron recovery still owning retries
 - Stripe webhook ingress now dedupes at durable fact insertion time and retries through the hosted Stripe event queue plus reconciler instead of trying to resume receipt-local inline work
 - hosted RevNet issuance now fails closed once a tx hash exists, so a broadcast followed by a write-back failure is held for operator repair instead of being misclassified as a clean retry
 - committed hosted retries now resume post-commit side effects from the committed journal without rerunning the original one-shot compute stage first

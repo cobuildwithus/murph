@@ -75,6 +75,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
     source: "linq",
   });
   await maybeDrainHostedExecutionWebhookDispatch({
+    defer: input.defer,
     eventId: event.event_id,
     prisma,
     response,
@@ -83,6 +84,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
 }
 
 export async function handleHostedOnboardingTelegramWebhook(input: {
+  defer?: (drain: () => Promise<void>) => Promise<void> | void;
   rawBody: string;
   secretToken: string | null;
   prisma?: PrismaClient;
@@ -110,6 +112,7 @@ export async function handleHostedOnboardingTelegramWebhook(input: {
     source: "telegram",
   });
   await maybeDrainHostedExecutionWebhookDispatch({
+    defer: input.defer,
     eventId: buildHostedTelegramWebhookEventId(update),
     prisma,
     response,
@@ -344,6 +347,7 @@ async function drainHostedRevnetIssuanceSubmissionQueueBestEffort(
 }
 
 async function maybeDrainHostedExecutionWebhookDispatch(input: {
+  defer?: (drain: () => Promise<void>) => Promise<void> | void;
   eventId: string;
   prisma: PrismaClient;
   response:
@@ -351,6 +355,19 @@ async function maybeDrainHostedExecutionWebhookDispatch(input: {
     | HostedOnboardingTelegramWebhookResponse;
 }): Promise<void> {
   if (input.response.reason !== "dispatched-active-member") {
+    return;
+  }
+
+  if (input.defer) {
+    await input.defer(() =>
+      drainHostedExecutionOutboxBestEffort({
+        eventIds: [
+          input.eventId,
+        ],
+        limit: 1,
+        prisma: input.prisma,
+      }),
+    );
     return;
   }
 
