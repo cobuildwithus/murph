@@ -23,6 +23,32 @@ interface CommitLeaseOwner {
   run: HostedExecutionRunContext | null;
 }
 
+// Recovered durable commits may outlive the original run context, but they
+// still own the event-specific lease that must be cleared before the queue can
+// resume work.
+function resolveCommitLeaseOwner(
+  eventId: string,
+  leaseOwner: CommitLeaseOwner | null,
+): {
+  eventId: string;
+  policy?: "matching-run" | "same-event";
+  run: HostedExecutionRunContext | null;
+} {
+  if (!leaseOwner || (leaseOwner.run === null && leaseOwner.policy === undefined)) {
+    return {
+      eventId,
+      policy: "same-event",
+      run: null,
+    };
+  }
+
+  return {
+    eventId,
+    policy: leaseOwner.policy,
+    run: leaseOwner.run,
+  };
+}
+
 export class RunnerCommitRecovery {
   constructor(
     private readonly queueStore: RunnerQueueStore,
@@ -94,11 +120,10 @@ export class RunnerCommitRecovery {
     return this.applyCommittedQueueTransition(
       userId,
       committed,
-      () => this.queueStore.applyCommittedDispatch(committed, {
-        eventId: committed.eventId,
-        policy: leaseOwner?.policy,
-        run: leaseOwner?.run ?? null,
-      }),
+      () => this.queueStore.applyCommittedDispatch(
+        committed,
+        resolveCommitLeaseOwner(committed.eventId, leaseOwner),
+      ),
     );
   }
 
@@ -110,11 +135,10 @@ export class RunnerCommitRecovery {
     return this.applyCommittedQueueTransition(
       userId,
       committed,
-      () => this.queueStore.syncCommittedBundles(committed, {
-        eventId: committed.eventId,
-        policy: leaseOwner?.policy,
-        run: leaseOwner?.run ?? null,
-      }),
+      () => this.queueStore.syncCommittedBundles(
+        committed,
+        resolveCommitLeaseOwner(committed.eventId, leaseOwner),
+      ),
     );
   }
 
