@@ -13,6 +13,7 @@ import type {
 } from "@murphai/assistant-runtime";
 import {
   emitHostedExecutionStructuredLog,
+  formatHostedExecutionLogMessage,
 } from "@murphai/hosted-execution";
 
 import type { R2BucketLike } from "../bundle-store.js";
@@ -811,6 +812,7 @@ export class RunnerDispatchProcessor {
     phase: HostedExecutionRunPhase;
     run: HostedExecutionRunContext;
   }): Promise<RunnerStateRecord> {
+    const message = formatHostedExecutionLogMessage(input.message, input.error);
     const record = await this.dependencies.queueStore.recordRunPhase({
       attempt: input.run.attempt,
       clearError: input.clearError,
@@ -818,7 +820,7 @@ export class RunnerDispatchProcessor {
       error: input.error,
       eventId: input.dispatch.eventId,
       level: input.level,
-      message: input.message,
+      message,
       phase: input.phase,
       runId: input.run.runId,
       startedAt: input.run.startedAt,
@@ -829,7 +831,7 @@ export class RunnerDispatchProcessor {
       dispatch: input.dispatch,
       error: input.error,
       level: input.level,
-      message: input.message,
+      message,
       phase: input.phase,
       run: input.run,
     });

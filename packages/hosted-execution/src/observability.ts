@@ -46,7 +46,7 @@ const HOSTED_EXECUTION_SAFE_ERROR_NAMES = new Set([
   "URIError",
 ]);
 
-const HOSTED_EXECUTION_MAX_OPERATOR_MESSAGE_LENGTH = 200;
+const HOSTED_EXECUTION_MAX_OPERATOR_MESSAGE_LENGTH = 400;
 const HOSTED_EXECUTION_MAX_DIAGNOSTIC_MESSAGE_LENGTH = 320;
 const HOSTED_EXECUTION_MAX_STACK_PREVIEW_LINES = 3;
 const HOSTED_EXECUTION_MAX_DETAIL_ARRAY_LENGTH = 32;
@@ -278,6 +278,36 @@ export function summarizeHostedExecutionErrorCode(
     : HOSTED_EXECUTION_ERROR_SUMMARIES.runtime_error;
 }
 
+export function formatHostedExecutionLogMessage(message: string, error?: unknown): string {
+  const normalizedMessage = normalizeHostedExecutionOperatorMessage(message);
+
+  if (error === undefined) {
+    return normalizedMessage;
+  }
+
+  const errorFragments = buildHostedExecutionInlineErrorFragments(error);
+
+  if (errorFragments.length === 0) {
+    return normalizedMessage;
+  }
+
+  let combinedMessage = normalizedMessage === "Hosted execution event."
+    ? ""
+    : normalizedMessage;
+
+  for (const fragment of errorFragments) {
+    if (combinedMessage.includes(fragment)) {
+      continue;
+    }
+
+    combinedMessage = combinedMessage.length > 0
+      ? normalizeHostedExecutionOperatorMessage(`${combinedMessage} ${fragment}`)
+      : fragment;
+  }
+
+  return combinedMessage.length > 0 ? combinedMessage : normalizedMessage;
+}
+
 export function buildHostedExecutionStructuredLogRecord(
   input: HostedExecutionStructuredLogInput,
 ): HostedExecutionStructuredLogRecord {
@@ -298,7 +328,7 @@ export function buildHostedExecutionStructuredLogRecord(
     }),
     eventId: input.dispatch?.eventId ?? input.eventId ?? null,
     level: input.level ?? (error === undefined ? "info" : "error"),
-    message: normalizeHostedExecutionOperatorMessage(input.message),
+    message: formatHostedExecutionLogMessage(input.message, error),
     phase: input.phase,
     runId: input.run?.runId ?? null,
     schema: "murph.hosted-execution.log.v1",
@@ -495,6 +525,95 @@ function mergeHostedExecutionStructuredLogDetails(
     ...(primary ?? {}),
     ...(secondary ?? {}),
   };
+}
+
+function buildHostedExecutionInlineErrorFragments(error: unknown): string[] {
+  const summary = normalizeHostedExecutionOperatorMessage(summarizeHostedExecutionError(error));
+  const details = buildHostedExecutionSafeErrorDetails(error);
+  const fragments = [summary];
+  const detail = readHostedExecutionInlineDetailFragment(
+    details,
+    "errorDetail",
+    "Detail",
+    fragments,
+  );
+  const cause = readHostedExecutionInlineDetailFragment(
+    details,
+    "errorCause",
+    "Cause",
+    [...fragments, ...(detail ? [detail] : [])],
+  );
+  const errorCode = readHostedExecutionInlineDetailFragment(
+    details,
+    "errorCodeDetail",
+    "Code",
+    [...fragments, ...(detail ? [detail] : []), ...(cause ? [cause] : [])],
+  );
+  const errorStatus = readHostedExecutionInlineStatusFragment(
+    details,
+    [...fragments, ...(detail ? [detail] : []), ...(cause ? [cause] : []), ...(errorCode ? [errorCode] : [])],
+  );
+
+  if (detail) {
+    fragments.push(detail);
+  }
+
+  if (cause) {
+    fragments.push(cause);
+  }
+
+  if (errorCode) {
+    fragments.push(errorCode);
+  }
+
+  if (errorStatus) {
+    fragments.push(errorStatus);
+  }
+
+  return fragments;
+}
+
+function readHostedExecutionInlineDetailFragment(
+  details: HostedExecutionStructuredLogDetails | null,
+  key: "errorCause" | "errorCodeDetail" | "errorDetail",
+  label: "Cause" | "Code" | "Detail",
+  existingFragments: readonly string[],
+): string | null {
+  const value = details?.[key];
+
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const fragment = normalizeHostedExecutionOperatorMessage(`${label}: ${value}`);
+  return existingFragments.some((existing) => hostedExecutionFragmentsOverlap(existing, fragment))
+    ? null
+    : fragment;
+}
+
+function readHostedExecutionInlineStatusFragment(
+  details: HostedExecutionStructuredLogDetails | null,
+  existingFragments: readonly string[],
+): string | null {
+  const value = details?.errorStatus;
+
+  if (typeof value !== "number" || !Number.isInteger(value)) {
+    return null;
+  }
+
+  const fragment = `Status: ${value}.`;
+  return existingFragments.some((existing) => hostedExecutionFragmentsOverlap(existing, fragment))
+    ? null
+    : fragment;
+}
+
+function hostedExecutionFragmentsOverlap(left: string, right: string): boolean {
+  const normalizedLeft = left.trim().toLowerCase();
+  const normalizedRight = right.trim().toLowerCase();
+
+  return normalizedLeft.length > 0
+    && normalizedRight.length > 0
+    && (normalizedLeft.includes(normalizedRight) || normalizedRight.includes(normalizedLeft));
 }
 
 function sanitizeHostedExecutionDetailNode(

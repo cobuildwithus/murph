@@ -1,6 +1,5 @@
 import {
-  normalizeHostedExecutionErrorMessage,
-  normalizeHostedExecutionOperatorMessage,
+  emitHostedExecutionStructuredLog,
 } from "@murphai/hosted-execution";
 import {
   createHostedUserRootKeyEnvelope,
@@ -518,9 +517,17 @@ async function emitHostedUserKeyAudit(
   try {
     await auditLog(record);
   } catch (error) {
-    console.error(
-      `Hosted user key audit logging failed during ${record.action}.`,
-      normalizeHostedExecutionOperatorMessage(normalizeHostedExecutionErrorMessage(error)),
-    );
+    emitHostedExecutionStructuredLog({
+      component: "hosted.user-key-store",
+      details: {
+        action: record.action,
+        reason: record.reason,
+      },
+      error,
+      level: "error",
+      message: `Hosted user key audit logging failed during ${record.action}.`,
+      phase: "runtime.starting",
+      userId: record.userId,
+    });
   }
 }
