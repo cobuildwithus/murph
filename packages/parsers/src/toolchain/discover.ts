@@ -4,6 +4,7 @@ import path from "node:path";
 import type { FfmpegToolOptions } from "../adapters/ffmpeg.js";
 import { createTextFileProvider } from "../adapters/text-file.js";
 import { createWhisperCppProvider } from "../adapters/whisper-cpp.js";
+import { createZxingWasmProvider } from "../adapters/zxing-wasm.js";
 import type { ParserRegistry } from "../registry/registry.js";
 import { createParserRegistry } from "../registry/registry.js";
 import { readConfiguredEnvValue, resolveExecutable } from "../shared.js";
@@ -93,6 +94,7 @@ export async function createConfiguredParserRegistry(input: {
     doctor,
     registry: createParserRegistry([
       createTextFileProvider(),
+      createZxingWasmProvider(),
       createWhisperCppProvider({
         commandCandidates: toCommandCandidates(
           context.config?.tools.whisper?.command,

@@ -61,6 +61,15 @@ export type { FfmpegToolOptions } from "./adapters/ffmpeg.js";
 export { prepareAudioInput, resolveFfmpegCommand } from "./adapters/ffmpeg.js";
 export type { WhisperCppProviderOptions } from "./adapters/whisper-cpp.js";
 export { createWhisperCppProvider } from "./adapters/whisper-cpp.js";
+export type {
+  NormalizedZxingReadResult,
+  ZxingWasmProviderOptions,
+} from "./adapters/zxing-wasm.js";
+export {
+  buildDecodedImageCodeText,
+  createZxingWasmProvider,
+  normalizeZxingReadResults,
+} from "./adapters/zxing-wasm.js";
 export { createTextFileProvider } from "./adapters/text-file.js";
 export type { PublishedParserArtifacts } from "./publish/writer.js";
 export { writeParserArtifacts } from "./publish/writer.js";
@@ -78,16 +87,22 @@ export type { CommandResult } from "./shared.js";
 export { runCommand } from "./shared.js";
 
 import { createTextFileProvider } from "./adapters/text-file.js";
+import {
+  createZxingWasmProvider,
+  type ZxingWasmProviderOptions,
+} from "./adapters/zxing-wasm.js";
 import { createWhisperCppProvider, type WhisperCppProviderOptions } from "./adapters/whisper-cpp.js";
 import { createParserRegistry } from "./registry/registry.js";
 
 export interface DefaultParserRegistryOptions {
   whisper?: WhisperCppProviderOptions;
+  zxingWasm?: ZxingWasmProviderOptions;
 }
 
 export function createDefaultParserRegistry(options: DefaultParserRegistryOptions = {}) {
   return createParserRegistry([
     createTextFileProvider(),
+    createZxingWasmProvider(options.zxingWasm),
     createWhisperCppProvider(options.whisper),
   ]);
 }

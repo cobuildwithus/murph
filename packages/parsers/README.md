@@ -7,6 +7,7 @@ This package consumes attachment-level parse jobs from the inbox runtime, select
 ## Current default stack
 
 - text-like documents: built-in Node text reader
+- image QR/barcode scanning: `zxing-wasm`
 - audio and extracted video audio: `whisper.cpp`
 - media normalization: `ffmpeg`
 

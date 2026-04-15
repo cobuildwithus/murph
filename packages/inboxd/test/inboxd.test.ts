@@ -449,7 +449,14 @@ test("runtime search indexes attachment metadata and can rebuild from envelope f
   assert.equal(hits.length, 1);
   assert.equal(hits[0]?.captureId, capture.captureId);
   assert.match(hits[0]?.snippet ?? "", /Toast with avocado/);
-  assert.equal(runtime.listAttachmentParseJobs({ limit: 10 }).length, 0);
+  const jobs = runtime.listAttachmentParseJobs({ limit: 10 });
+  assert.equal(jobs.length, 1);
+  assert.equal(jobs[0]?.captureId, capture.captureId);
+  assert.equal(
+    jobs[0]?.attachmentId,
+    runtime.getCapture(capture.captureId)?.attachments[0]?.attachmentId,
+  );
+  assert.equal(jobs[0]?.state, "pending");
 
   const fallbackHits = runtime.searchCaptures({
     text: "   ",
@@ -468,7 +475,7 @@ test("runtime search indexes attachment metadata and can rebuild from envelope f
   assert.ok(rebuilt);
   assert.equal(rebuilt.text, "Toast with avocado");
   assert.equal(rebuilt.attachments[0]?.fileName, "toast-photo.jpg");
-  assert.equal(rebuiltRuntime.listAttachmentParseJobs({ limit: 10 }).length, 0);
+  assert.equal(rebuiltRuntime.listAttachmentParseJobs({ limit: 10 }).length, 1);
   assert.equal(
     rebuilt.attachments[0]?.attachmentId,
     runtime.getCapture(capture.captureId)?.attachments[0]?.attachmentId,
