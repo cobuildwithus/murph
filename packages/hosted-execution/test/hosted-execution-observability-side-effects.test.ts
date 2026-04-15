@@ -9,6 +9,7 @@ import {
   buildHostedExecutionStructuredLogRecord,
   deriveHostedExecutionErrorCode,
   emitHostedExecutionStructuredLog,
+  formatHostedExecutionLogMessage,
   isHostedAssistantDeliveryKind,
   isHostedExecutionRunLevel,
   isHostedExecutionRunPhase,
@@ -84,8 +85,11 @@ describe("hosted execution observability", () => {
 
     const repeated = "x".repeat(260);
     const normalized = normalizeHostedExecutionOperatorMessage(repeated);
-    expect(normalized).toHaveLength(200);
-    expect(normalized.endsWith("…")).toBe(true);
+    expect(normalized).toHaveLength(260);
+
+    const truncated = normalizeHostedExecutionOperatorMessage("x".repeat(460));
+    expect(truncated).toHaveLength(400);
+    expect(truncated.endsWith("…")).toBe(true);
   });
 
   it("redacts non-bearer authorization and other secret-bearing key-value pairs", () => {
@@ -158,7 +162,8 @@ describe("hosted execution observability", () => {
       errorName: "TypeError",
       eventId: "evt_dispatch",
       level: "error",
-      message: "Bearer [redacted] [redacted-email]",
+      message:
+        "Bearer [redacted] [redacted-email] Hosted execution runtime failed. Detail: wrong type",
       phase: "runtime.starting",
       runId: "run_123",
       schema: "murph.hosted-execution.log.v1",
@@ -198,10 +203,31 @@ describe("hosted execution observability", () => {
       errorMessage: "Hosted execution configuration is invalid.",
       errorName: "HostedExecutionConfigurationError",
       level: "error",
-      message: "authorization=[redacted] cookie=[redacted] [redacted-email]",
+      message:
+        "authorization=[redacted] cookie=[redacted] [redacted-email] Hosted execution configuration is invalid. Detail: HOSTED_WEB_BASE_URL must be configured for [redacted-email].",
       phase: "failed",
     });
     expect(record.details?.stackPreview).toEqual(expect.any(Array));
+  });
+
+  it("formats operator-facing log messages with redacted detail appended only once", () => {
+    expect(
+      formatHostedExecutionLogMessage(
+        "Hosted worker route failed.",
+        new Error("Runner returned HTTP 502 from upstream"),
+      ),
+    ).toBe(
+      "Hosted worker route failed. Hosted runner container returned HTTP 502. Detail: Runner returned HTTP 502 from upstream",
+    );
+
+    expect(
+      formatHostedExecutionLogMessage(
+        "Hosted worker route failed. Hosted runner container returned HTTP 502.",
+        new Error("Runner returned HTTP 502 from upstream"),
+      ),
+    ).toBe(
+      "Hosted worker route failed. Hosted runner container returned HTTP 502. Detail: Runner returned HTTP 502 from upstream",
+    );
   });
 
   it("redacts linux home paths from diagnostic details and stack previews", () => {

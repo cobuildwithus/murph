@@ -1735,6 +1735,11 @@ describe("HostedUserRunner", () => {
 
     expect(firstStatus.pendingEventCount).toBe(1);
     expect(firstStatus.retryingEventId).toBe("evt_finalize_retry");
+    expect(firstStatus.timeline?.at(-1)).toMatchObject({
+      message:
+        "Hosted dispatch scheduled a finalize retry. Hosted execution failed while finalizing a committed run. Detail: finalize failed",
+      phase: "retry.scheduled",
+    });
     expect(firstStatus.bundleRef).toMatchObject({
       key: expect.stringMatching(/^bundles\/vault\/[0-9a-f]+\.bundle\.json$/u),
     });

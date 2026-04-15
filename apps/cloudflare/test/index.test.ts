@@ -1380,6 +1380,43 @@ describe("cloudflare worker routes", () => {
     expect(stub.status).toHaveBeenCalledTimes(1);
   });
 
+  it("logs safe route error summaries inline for worker control failures", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const priorOverride = process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS;
+    process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS = "on";
+    const stub = createUserRunnerStub();
+    stub.status.mockRejectedValueOnce(new Error("Runner returned HTTP 502 from upstream"));
+
+    try {
+      const response = await worker.fetch(
+        await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/status", {
+          method: "GET",
+        })),
+        createWorkerEnv(stub),
+      );
+
+      expect(response.status).toBe(500);
+      await expect(response.json()).resolves.toEqual({
+        error: "Internal error.",
+      });
+      expect(errorSpy).toHaveBeenCalledTimes(1);
+      expect(JSON.parse(String(errorSpy.mock.calls[0]?.[0]))).toMatchObject({
+        component: "worker",
+        errorCode: "runner_http_error",
+        errorMessage: "Hosted runner container returned HTTP 502.",
+        message:
+          "Hosted worker route failed. Hosted runner container returned HTTP 502. Detail: Runner returned HTTP 502 from upstream",
+        phase: "failed",
+      });
+    } finally {
+      if (priorOverride === undefined) {
+        delete process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS;
+      } else {
+        process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS = priorOverride;
+      }
+    }
+  });
+
   it("rejects control routes with a bearer token for the wrong workload identity", async () => {
     const stub = createUserRunnerStub();
 
