@@ -326,9 +326,9 @@ export function buildHostedInviteReply(input: {
 
 Sign in here:
 ${input.joinUrl}`
-    : `Finish signing up for Murph
+    : `Welcome to Murph.
 
-Verify your phone to complete sign-up:
+Verify your phone to finish signup here:
 ${input.joinUrl}`;
 }
 
