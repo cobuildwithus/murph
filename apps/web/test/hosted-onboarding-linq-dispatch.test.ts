@@ -10,14 +10,21 @@ import {
 
 const mocks = vi.hoisted(() => ({
   deleteHostedStoredDispatchPayloadBestEffort: vi.fn(),
+  deriveHostedOnboardingTimingErrorName: vi.fn(() => "Error"),
   claimHostedLinqOnboardingLinkNotice: vi.fn(),
   claimHostedLinqQuotaReplyNotice: vi.fn(),
   drainHostedExecutionOutboxBestEffort: vi.fn(),
   enqueueHostedExecutionOutbox: vi.fn(),
+  finishHostedOnboardingTiming: vi.fn(),
   incrementHostedLinqInboundDailyState: vi.fn(),
   incrementHostedLinqOutboundDailyState: vi.fn(),
   maybeStageHostedExecutionDispatchPayload: vi.fn(),
   sendHostedLinqChatMessage: vi.fn(),
+  startHostedOnboardingTiming: vi.fn((step: string, baseDetails: Record<string, unknown> = {}) => ({
+    baseDetails,
+    startedAtMs: 0,
+    step,
+  })),
   stagedDispatches: new Map<string, HostedExecutionDispatchRequest>(),
 }));
 
@@ -121,6 +128,19 @@ vi.mock("@/src/lib/prisma", () => ({
     throw new Error("Unexpected getPrisma call in hosted-onboarding-linq-dispatch.test.ts");
   }),
 }));
+
+vi.mock("@/src/lib/hosted-onboarding/logging", async () => {
+  const actual = await vi.importActual<typeof import("@/src/lib/hosted-onboarding/logging")>(
+    "@/src/lib/hosted-onboarding/logging",
+  );
+
+  return {
+    ...actual,
+    deriveHostedOnboardingTimingErrorName: mocks.deriveHostedOnboardingTimingErrorName,
+    finishHostedOnboardingTiming: mocks.finishHostedOnboardingTiming,
+    startHostedOnboardingTiming: mocks.startHostedOnboardingTiming,
+  };
+});
 
 import { handleHostedOnboardingLinqWebhook } from "@/src/lib/hosted-onboarding/webhook-service";
 
@@ -247,6 +267,49 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       occurredAt: "2026-03-26T12:00:00.000Z",
       prisma,
     });
+    expect(mocks.startHostedOnboardingTiming).toHaveBeenCalledWith(
+      "hosted-onboarding.webhook.linq.verify-request",
+      expect.objectContaining({
+        signaturePresent: false,
+        timestampPresent: false,
+      }),
+    );
+    expect(mocks.startHostedOnboardingTiming).toHaveBeenCalledWith(
+      "hosted-onboarding.webhook.linq.receipt",
+      expect.objectContaining({
+        eventId: "evt_123",
+        eventType: "message.received",
+      }),
+    );
+    expect(mocks.finishHostedOnboardingTiming).toHaveBeenCalledWith(
+      expect.objectContaining({
+        step: "hosted-onboarding.webhook.linq",
+      }),
+      "completed",
+      expect.objectContaining({
+        duplicate: false,
+        eventId: "evt_123",
+        eventType: "message.received",
+        responseReason: "dispatched-active-member",
+        signalAbortedBeforeReturn: false,
+      }),
+    );
+    expect(
+      mocks.finishHostedOnboardingTiming.mock.calls.some(
+        ([handle, outcome]) =>
+          (handle as { step?: string } | undefined)?.step === "hosted-onboarding.webhook.linq.outbox-drain"
+          && outcome === "completed",
+      ),
+    ).toBe(true);
+    expect(mocks.finishHostedOnboardingTiming).toHaveBeenCalledWith(
+      expect.objectContaining({
+        step: "hosted-onboarding.webhook.linq.outbox-handoff",
+      }),
+      "completed",
+      expect.objectContaining({
+        deferred: false,
+      }),
+    );
   });
 
   it("does not wait for the hosted execution dispatch nudge when one is deferred", async () => {
@@ -301,6 +364,22 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       limit: 1,
       prisma,
     });
+    expect(mocks.finishHostedOnboardingTiming).toHaveBeenCalledWith(
+      expect.objectContaining({
+        step: "hosted-onboarding.webhook.linq.outbox-handoff",
+      }),
+      "scheduled",
+      expect.objectContaining({
+        deferred: true,
+      }),
+    );
+    expect(
+      mocks.finishHostedOnboardingTiming.mock.calls.some(
+        ([handle, outcome]) =>
+          (handle as { step?: string } | undefined)?.step === "hosted-onboarding.webhook.linq.outbox-drain"
+          && outcome === "completed",
+      ),
+    ).toBe(true);
   });
 
   it("opens a Prisma transaction when dispatching an active-member Linq message from a root client", async () => {
