@@ -1,12 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { randomBytesMock, runtimeMocks } = vi.hoisted(() => ({
+const { randomBytesMock } = vi.hoisted(() => ({
   randomBytesMock: vi.fn((length: number) => Buffer.from(Array.from({ length }, (_, index) => index))),
-  runtimeMocks: {
-    applyDeviceSyncRuntimeUpdates: vi.fn(),
-    getDeviceSyncRuntimeSnapshot: vi.fn(),
-    readHostedDeviceSyncRuntimeClientIfConfigured: vi.fn(),
-  },
 }));
 
 vi.mock("node:crypto", async () => {
@@ -16,11 +11,6 @@ vi.mock("node:crypto", async () => {
     randomBytes: randomBytesMock,
   };
 });
-
-vi.mock("@/src/lib/device-sync/runtime-client", () => ({
-  readHostedDeviceSyncRuntimeClientIfConfigured:
-    runtimeMocks.readHostedDeviceSyncRuntimeClientIfConfigured,
-}));
 
 import { buildHostedProviderAccountBlindIndex } from "@/src/lib/device-sync/crypto";
 import { PrismaDeviceSyncControlPlaneStore } from "@/src/lib/device-sync/prisma-store";
@@ -62,7 +52,6 @@ const TEST_CODEC = {
 describe("PrismaDeviceSyncControlPlaneStore oauth state ingress", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    runtimeMocks.readHostedDeviceSyncRuntimeClientIfConfigured.mockReturnValue(null);
   });
 
   it("consumes and deletes an unexpired oauth state record", async () => {
@@ -245,7 +234,6 @@ describe("PrismaDeviceSyncControlPlaneStore oauth state ingress", () => {
 describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    runtimeMocks.readHostedDeviceSyncRuntimeClientIfConfigured.mockReturnValue(null);
   });
 
   it("creates new hosted connections without creating a Prisma secret row", async () => {
@@ -398,11 +386,6 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
       userId: "user-123",
     });
 
-    runtimeMocks.readHostedDeviceSyncRuntimeClientIfConfigured.mockReturnValue({
-      applyDeviceSyncRuntimeUpdates: runtimeMocks.applyDeviceSyncRuntimeUpdates,
-      getDeviceSyncRuntimeSnapshot: runtimeMocks.getDeviceSyncRuntimeSnapshot,
-    });
-
     const store = new PrismaDeviceSyncControlPlaneStore({
       prisma: {
         deviceConnection: {
@@ -422,7 +405,6 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
         updatedAt: "2026-03-25T00:00:00.000Z",
       }),
     ]);
-    expect(runtimeMocks.getDeviceSyncRuntimeSnapshot).not.toHaveBeenCalled();
   });
 
   it("keeps webhook-ingress external-account lookups on the durable Prisma owner", async () => {
@@ -455,7 +437,6 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
       provider: "oura",
       status: "active",
     }));
-    expect(runtimeMocks.getDeviceSyncRuntimeSnapshot).not.toHaveBeenCalled();
   });
 
   it("keeps explicit operational connection reads on durable Prisma metadata", async () => {
@@ -486,20 +467,15 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
       lastWebhookAt: "2026-03-25T07:00:00.000Z",
       updatedAt: "2026-03-25T08:00:00.000Z",
     }));
-    expect(runtimeMocks.getDeviceSyncRuntimeSnapshot).not.toHaveBeenCalled();
   });
 
-  it("forwards webhook receipt timestamps into the Cloudflare runtime instead of Prisma runtime columns", async () => {
+  it("persists webhook receipt timestamps in durable Prisma state", async () => {
     const connection = createConnection({
       id: "dsc_123",
       provider: "oura",
       userId: "user-123",
     });
     const updateConnection = vi.fn(async () => undefined);
-    runtimeMocks.readHostedDeviceSyncRuntimeClientIfConfigured.mockReturnValue({
-      applyDeviceSyncRuntimeUpdates: runtimeMocks.applyDeviceSyncRuntimeUpdates,
-      getDeviceSyncRuntimeSnapshot: runtimeMocks.getDeviceSyncRuntimeSnapshot,
-    });
 
     const store = new PrismaDeviceSyncControlPlaneStore({
       prisma: {
@@ -525,17 +501,6 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
       data: {
         lastWebhookAt: new Date("2026-03-25T06:00:00.000Z"),
       },
-    });
-    expect(runtimeMocks.applyDeviceSyncRuntimeUpdates).toHaveBeenCalledWith("user-123", {
-      occurredAt: "2026-03-25T06:00:00.000Z",
-      updates: [
-        {
-          connectionId: "dsc_123",
-          localState: {
-            lastWebhookAt: "2026-03-25T06:00:00.000Z",
-          },
-        },
-      ],
     });
   });
 });

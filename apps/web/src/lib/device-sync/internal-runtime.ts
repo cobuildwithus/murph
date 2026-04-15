@@ -10,8 +10,6 @@ import {
   sanitizeHostedRuntimeErrorText,
 } from "@murphai/device-syncd/hosted-runtime";
 import type {
-  HostedExecutionDeviceSyncRuntimeConnectionSeed,
-  HostedExecutionDeviceSyncRuntimeLocalStateSnapshot,
   HostedExecutionDeviceSyncRuntimeTokenBundle,
 } from "@murphai/device-syncd/hosted-runtime";
 
@@ -127,43 +125,6 @@ export function buildHostedPublicDeviceSyncAccount(input: {
     createdAt: fallback.createdAt ?? input.record.createdAt,
     updatedAt: fallback.updatedAt ?? input.record.updatedAt,
   } satisfies PublicDeviceSyncAccount;
-}
-
-export function buildHostedDeviceSyncRuntimeSeedFromPublicAccount(input: {
-  account: PublicDeviceSyncAccount;
-  externalAccountId: string;
-  localState?: Partial<HostedExecutionDeviceSyncRuntimeLocalStateSnapshot>;
-  tokenBundle: HostedExecutionDeviceSyncRuntimeTokenBundle | null;
-}): HostedExecutionDeviceSyncRuntimeConnectionSeed {
-  return {
-    connection: {
-      accessTokenExpiresAt: input.tokenBundle?.accessTokenExpiresAt ?? input.account.accessTokenExpiresAt ?? null,
-      connectedAt: input.account.connectedAt,
-      createdAt: input.account.createdAt,
-      displayName: input.account.displayName,
-      externalAccountId: input.externalAccountId,
-      id: input.account.id,
-      metadata: sanitizeStoredDeviceSyncMetadata(input.account.metadata ?? {}),
-      provider: input.account.provider,
-      scopes: [...input.account.scopes],
-      status: input.account.status,
-      updatedAt: input.account.updatedAt,
-    },
-    localState: {
-      lastErrorCode: sanitizeHostedRuntimeErrorCode(
-        input.localState?.lastErrorCode ?? input.account.lastErrorCode ?? null,
-      ),
-      lastErrorMessage: sanitizeHostedRuntimeErrorText(
-        input.localState?.lastErrorMessage ?? input.account.lastErrorMessage ?? null,
-      ),
-      lastSyncCompletedAt: input.localState?.lastSyncCompletedAt ?? input.account.lastSyncCompletedAt ?? null,
-      lastSyncErrorAt: input.localState?.lastSyncErrorAt ?? input.account.lastSyncErrorAt ?? null,
-      lastSyncStartedAt: input.localState?.lastSyncStartedAt ?? input.account.lastSyncStartedAt ?? null,
-      lastWebhookAt: input.localState?.lastWebhookAt ?? input.account.lastWebhookAt ?? null,
-      nextReconcileAt: input.localState?.nextReconcileAt ?? input.account.nextReconcileAt ?? null,
-    },
-    tokenBundle: input.tokenBundle ? { ...input.tokenBundle } : null,
-  } satisfies HostedExecutionDeviceSyncRuntimeConnectionSeed;
 }
 
 function normalizeHostedExternalAccountId(

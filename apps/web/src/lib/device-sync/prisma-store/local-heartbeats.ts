@@ -6,7 +6,6 @@ import {
   buildHostedLocalHeartbeatRuntimeLocalStateUpdate,
   type HostedLocalHeartbeatPatch,
 } from "../local-heartbeat";
-import { readHostedDeviceSyncRuntimeClientIfConfigured } from "../runtime-client";
 import { PrismaHostedConnectionStore } from "./connections";
 
 export class PrismaHostedLocalHeartbeatStore {
@@ -37,25 +36,6 @@ export class PrismaHostedLocalHeartbeatStore {
     };
 
     await this.connections.syncDurableConnectionState(connection);
-
-    const runtimeClient = readHostedDeviceSyncRuntimeClientIfConfigured();
-
-    if (runtimeClient) {
-      try {
-        await runtimeClient.applyDeviceSyncRuntimeUpdates(userId, {
-          occurredAt: new Date().toISOString(),
-          updates: [
-            {
-              connectionId,
-              localState,
-              observedUpdatedAt: existing.updatedAt,
-            },
-          ],
-        });
-      } catch (error) {
-        console.warn(`Hosted device-sync runtime projection write failed for local heartbeat ${connectionId}.`, error);
-      }
-    }
 
     return connection;
   }

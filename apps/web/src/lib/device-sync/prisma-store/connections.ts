@@ -18,7 +18,6 @@ import {
   buildHostedPublicDeviceSyncAccount,
   type HostedStaticDeviceSyncConnectionRecord,
 } from "../internal-runtime";
-import { readHostedDeviceSyncRuntimeClientIfConfigured } from "../runtime-client";
 import {
   maybeDate,
   maybeIsoTimestamp,
@@ -250,27 +249,6 @@ export class PrismaHostedConnectionStore {
       },
     });
 
-    const controlClient = readHostedDeviceSyncRuntimeClientIfConfigured();
-
-    if (!controlClient) {
-      return;
-    }
-
-    try {
-      await controlClient.applyDeviceSyncRuntimeUpdates(record.userId, {
-        occurredAt: now,
-        updates: [
-          {
-            connectionId: record.id,
-            localState: {
-              lastWebhookAt: now,
-            },
-          },
-        ],
-      });
-    } catch (error) {
-      console.warn(`Hosted device-sync runtime projection write failed for webhook receipt ${accountId}.`, error);
-    }
   }
 
   async syncDurableConnectionState(
