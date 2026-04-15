@@ -1,7 +1,5 @@
-import { createGateway, gateway, generateText, stepCountIs, type ToolSet } from 'ai'
-import { openai } from '@ai-sdk/openai'
+import { generateText, stepCountIs, type ToolSet } from 'ai'
 import {
-  type AssistantModelSpec,
   resolveAssistantLanguageModel,
   type AssistantAiSdkToolEvent,
 } from '../../model-harness.js'
@@ -177,7 +175,6 @@ export const openAiCompatibleProviderDefinition: AssistantProviderDefinition = {
     let executedToolCount = 0
     const tools = resolveOpenAiCompatibleAiSdkTools({
       input,
-      languageModelSpec,
       onToolEvent: (event) => {
         if (event.kind === 'started' && event.mode === 'apply') {
           executedToolCount += 1
@@ -288,26 +285,26 @@ export const openAiCompatibleProviderDefinition: AssistantProviderDefinition = {
 
 function resolveOpenAiCompatibleAiSdkTools(input: {
   input: Parameters<AssistantProviderDefinition['executeTurn']>[0]
-  languageModelSpec: AssistantModelSpec
   onToolEvent: (event: AssistantAiSdkToolEvent) => void
   providerConfig: AssistantProviderConfig
 }): ToolSet | undefined {
+  const requestedNativeWebSearch =
+    shouldAssistantProviderUseProviderWebSearch(input.providerConfig) ||
+    shouldAssistantProviderUseGatewayWebSearch(input.providerConfig)
   const murphTools = filterOpenAiCompatibleMurphAiSdkTools({
     tools:
       input.input.toolRuntime?.toolCatalog?.createAiSdkTools('apply', {
         onToolEvent: input.onToolEvent,
       }) ?? null,
-    useMurphWebSearch: shouldAssistantProviderUseMurphWebSearch(
-      input.providerConfig,
-    ),
-  })
-  const nativeSearchTools = resolveOpenAiCompatibleNativeSearchTools({
-    languageModelSpec: input.languageModelSpec,
-    providerConfig: input.providerConfig,
+    // The current AI SDK generateText stack still throws on provider-defined
+    // tools before the provider adapter can handle them. Keep OpenAI-compatible
+    // turns on Murph-owned search until that upstream path is safe.
+    useMurphWebSearch:
+      shouldAssistantProviderUseMurphWebSearch(input.providerConfig) ||
+      requestedNativeWebSearch,
   })
   const tools: ToolSet = {
-    ...(murphTools ?? {}),
-    ...(nativeSearchTools ?? {}),
+    ...remapOpenAiCompatibleToolNames(murphTools),
   }
 
   return Object.keys(tools).length > 0 ? tools : undefined
@@ -328,35 +325,38 @@ function filterOpenAiCompatibleMurphAiSdkTools(input: {
   return filteredEntries.length > 0 ? Object.fromEntries(filteredEntries) : null
 }
 
-function resolveOpenAiCompatibleNativeSearchTools(input: {
-  languageModelSpec: AssistantModelSpec
-  providerConfig: AssistantProviderConfig
-}): ToolSet | null {
-  if (shouldAssistantProviderUseProviderWebSearch(input.providerConfig)) {
-    return {
-      web_search: openai.tools.webSearch({}),
-    } as ToolSet
+function remapOpenAiCompatibleToolNames(tools: ToolSet | null): ToolSet {
+  if (!tools) {
+    return {}
   }
 
-  if (shouldAssistantProviderUseGatewayWebSearch(input.providerConfig)) {
-    return {
-      perplexity_search: resolveOpenAiCompatibleGatewayProvider(
-        input.languageModelSpec,
-      ).tools.perplexitySearch(),
-    } as ToolSet
+  const remapped: ToolSet = {}
+  const seenNames = new Set<string>()
+
+  for (const [name, definition] of Object.entries(tools)) {
+    const baseName = sanitizeOpenAiCompatibleToolName(name)
+    let nextName = baseName
+    let suffix = 2
+
+    while (seenNames.has(nextName)) {
+      nextName = `${baseName}_${suffix}`
+      suffix += 1
+    }
+
+    seenNames.add(nextName)
+    remapped[nextName] = definition
   }
 
-  return null
+  return remapped
 }
 
-function resolveOpenAiCompatibleGatewayProvider(spec: AssistantModelSpec) {
-  return spec.baseUrl || spec.headers || spec.apiKey
-    ? createGateway({
-        ...(spec.baseUrl ? { baseURL: spec.baseUrl } : {}),
-        ...(spec.headers ? { headers: spec.headers } : {}),
-        ...(spec.apiKey ? { apiKey: spec.apiKey } : {}),
-      })
-    : gateway
+function sanitizeOpenAiCompatibleToolName(name: string): string {
+  const sanitized = name
+    .replace(/[^a-zA-Z0-9_-]+/g, '_')
+    .replace(/^_+/g, '')
+    .replace(/_+$/g, '')
+
+  return sanitized.length > 0 ? sanitized : 'tool'
 }
 
 function resolveOpenAiCompatibleProviderOptions(input: {
