@@ -5,6 +5,7 @@ import {
   buildHostedExecutionMemberActivatedDispatch,
   buildHostedExecutionOutboxPayload,
 } from "@murphai/hosted-execution";
+import { HOSTED_EXECUTION_USER_ID_HEADER } from "@murphai/hosted-execution/contracts";
 import {
   parseHostedExecutionDispatchRequest,
 } from "@murphai/hosted-execution/parsers";
@@ -76,6 +77,7 @@ describe("createCloudflareHostedControlClient", () => {
     expect(request.url).toBe("https://runner.example.test/root/internal/users/user_123/env");
     expect(request.init?.method).toBe("GET");
     expect(new Headers(request.init?.headers).get("authorization")).toBe("Bearer token-123");
+    expect(new Headers(request.init?.headers).get(HOSTED_EXECUTION_USER_ID_HEADER)).toBe("user_123");
     expect(request.init?.redirect).toBe("error");
     expect(request.init?.signal).toBeInstanceOf(AbortSignal);
   });
@@ -140,6 +142,7 @@ describe("createCloudflareHostedControlClient", () => {
     );
     expect(request.init?.method).toBe("PUT");
     expect(new Headers(request.init?.headers).get("authorization")).toBe("Bearer token-123");
+    expect(new Headers(request.init?.headers).get(HOSTED_EXECUTION_USER_ID_HEADER)).toBe("user_123");
     expect(new Headers(request.init?.headers).get("content-type")).toBe(
       "application/json; charset=utf-8",
     );
@@ -176,6 +179,7 @@ describe("createCloudflareHostedControlClient", () => {
     );
     expect(request.init?.method).toBe("DELETE");
     expect(new Headers(request.init?.headers).get("authorization")).toBe("Bearer token-123");
+    expect(new Headers(request.init?.headers).get(HOSTED_EXECUTION_USER_ID_HEADER)).toBe("user_123");
     expect(JSON.parse(String(request.init?.body))).toEqual(payload);
   });
 
@@ -197,6 +201,7 @@ describe("createCloudflareHostedControlClient", () => {
     expect(request.url).toBe("https://runner.example.test/root/internal/users/user_123/run");
     expect(request.init?.method).toBe("POST");
     expect(new Headers(request.init?.headers).get("authorization")).toBe("Bearer token-123");
+    expect(new Headers(request.init?.headers).get(HOSTED_EXECUTION_USER_ID_HEADER)).toBe("user_123");
     expect(new Headers(request.init?.headers).get("content-type")).toBe(
       "application/json; charset=utf-8",
     );

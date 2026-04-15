@@ -9,10 +9,11 @@ import {
 import type {
   HostedExecutionOutboxPayload,
 } from "@murphai/hosted-execution/outbox-payload";
-import type {
-  HostedExecutionDispatchRequest,
-  HostedExecutionDispatchResult,
-  HostedExecutionUserStatus,
+import {
+  HOSTED_EXECUTION_USER_ID_HEADER,
+  type HostedExecutionDispatchRequest,
+  type HostedExecutionDispatchResult,
+  type HostedExecutionUserStatus,
 } from "@murphai/hosted-execution/contracts";
 import {
   parseHostedExecutionDispatchRequest,
@@ -71,6 +72,7 @@ import {
   asWorkerStringEnvironment,
 } from "./worker-contracts.ts";
 import {
+  decodeRouteParam,
   readCachedRequestText,
   resolveUserRunnerStub,
   type UserRunnerDurableObjectStubLike,
@@ -118,6 +120,7 @@ const workerInternalRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
   {
     authorizeBeforeMethod: true,
     authorization: "vercel-oidc",
+    beforeMethod: requireBoundInternalRouteUser,
     async handle(context, params) {
       return handleManualRunRoute(context, params.userId);
     },
@@ -128,6 +131,7 @@ const workerInternalRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
   {
     authorizeBeforeMethod: true,
     authorization: "vercel-oidc",
+    beforeMethod: requireBoundInternalRouteUser,
     async handle(context, params) {
       return handleEventStatusRoute(context, params.userId, params.eventId);
     },
@@ -138,6 +142,7 @@ const workerInternalRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
   {
     authorizeBeforeMethod: true,
     authorization: "vercel-oidc",
+    beforeMethod: requireBoundInternalRouteUser,
     async handle(context, params) {
       return handleStatusRoute(context, params.userId);
     },
@@ -148,6 +153,7 @@ const workerInternalRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
   {
     authorizeBeforeMethod: true,
     authorization: "vercel-oidc",
+    beforeMethod: requireBoundInternalRouteUser,
     async handle(context, params) {
       return handleUserEnvRoute(context, params.userId);
     },
@@ -158,6 +164,7 @@ const workerInternalRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
   {
     authorizeBeforeMethod: true,
     authorization: "vercel-oidc",
+    beforeMethod: requireBoundInternalRouteUser,
     async handle(context, params) {
       return handleUserDeviceSyncRuntimeRoute(context, params.userId);
     },
@@ -168,6 +175,7 @@ const workerInternalRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
   {
     authorizeBeforeMethod: true,
     authorization: "vercel-oidc",
+    beforeMethod: requireBoundInternalRouteUser,
     async handle(context, params) {
       return handleUserCryptoContextRoute(context, params.userId);
     },
@@ -178,6 +186,7 @@ const workerInternalRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
   {
     authorizeBeforeMethod: true,
     authorization: "vercel-oidc",
+    beforeMethod: requireBoundInternalRouteUser,
     async handle(context, params) {
       return handleSharePackRoute(context, params.userId, params.shareId);
     },
@@ -188,6 +197,7 @@ const workerInternalRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
   {
     authorizeBeforeMethod: true,
     authorization: "vercel-oidc",
+    beforeMethod: requireBoundInternalRouteUser,
     async handle(context, params) {
       return handleUserEmailAddressRoute(context, params.userId);
     },
@@ -198,6 +208,7 @@ const workerInternalRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
   {
     authorizeBeforeMethod: true,
     authorization: "vercel-oidc",
+    beforeMethod: requireBoundInternalRouteUser,
     async handle(context, params) {
       return handleUserDispatchPayloadRoute(context, params.userId);
     },
@@ -208,6 +219,7 @@ const workerInternalRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
   {
     authorizeBeforeMethod: true,
     authorization: "vercel-oidc",
+    beforeMethod: requireBoundInternalRouteUser,
     async handle(context, params) {
       return handleUserStoredDispatchRoute(context, params.userId);
     },
@@ -228,6 +240,7 @@ const workerInternalRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
   {
     authorizeBeforeMethod: true,
     authorization: "vercel-oidc",
+    beforeMethod: requireBoundInternalRouteUser,
     async handle(context, params) {
       return handlePendingUsageRoute(context, params.userId);
     },
@@ -238,6 +251,7 @@ const workerInternalRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
   {
     authorizeBeforeMethod: true,
     authorization: "vercel-oidc",
+    beforeMethod: requireBoundInternalRouteUser,
     async handle(context, params) {
       return handleGatewayRoute(context, params.userId, params.resource);
     },
@@ -425,13 +439,13 @@ async function dispatchDeclarativeRoute<Context>(
       }
     }
 
+    if (!route.methods.includes(context.request.method)) {
+      return respondToWrongMethod(route.wrongMethodResponse ?? "not-found");
+    }
+
     const preMethodResponse = await route.beforeMethod?.(context, params);
     if (preMethodResponse) {
       return preMethodResponse;
-    }
-
-    if (!route.methods.includes(context.request.method)) {
-      return respondToWrongMethod(route.wrongMethodResponse ?? "not-found");
     }
 
     if (!route.authorizeBeforeMethod) {
@@ -476,8 +490,62 @@ async function authorizeRoute(
 async function handleDispatchRoute(context: WorkerRouteContext): Promise<Response> {
   const payload = await readCachedRequestText(context);
   const dispatch = parseHostedExecutionDispatchRequest(JSON.parse(payload) as unknown);
+  const boundUserError = requireHostedExecutionBoundUserResponse(
+    context.request,
+    dispatch.event.userId,
+    "Hosted execution bound user does not match the dispatch user.",
+  );
+
+  if (boundUserError) {
+    return boundUserError;
+  }
+
   const result = await (await resolveUserRunnerStub(context.env, dispatch.event.userId)).dispatchWithOutcome(dispatch);
   return result.event.state === "backpressured" ? json(result, 429) : json(result);
+}
+
+function requireBoundInternalRouteUser(
+  context: Pick<WorkerRouteContext, "request">,
+  params: RouteParams,
+): Response | null {
+  return requireHostedExecutionBoundUserResponse(
+    context.request,
+    decodeRouteParam(params.userId),
+    "Hosted execution bound user does not match the route user.",
+  );
+}
+
+function requireHostedExecutionBoundUserResponse(
+  request: Request,
+  expectedUserId: string,
+  mismatchMessage: string,
+): Response | null {
+  const boundUserId = readHostedExecutionBoundUserId(request);
+
+  if (!boundUserId) {
+    return json({
+      error: `${HOSTED_EXECUTION_USER_ID_HEADER} header is required for hosted execution user-bound control routes.`,
+    }, 401);
+  }
+
+  if (boundUserId !== expectedUserId) {
+    return json({
+      error: mismatchMessage,
+    }, 401);
+  }
+
+  return null;
+}
+
+function readHostedExecutionBoundUserId(request: Request): string | null {
+  const value = request.headers.get(HOSTED_EXECUTION_USER_ID_HEADER);
+
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : null;
 }
 
 function matchExactPath(...paths: readonly string[]): RouteMatcher {

@@ -1,6 +1,7 @@
-import type {
-  HostedExecutionDispatchRequest,
-  HostedExecutionDispatchResult,
+import {
+  HOSTED_EXECUTION_USER_ID_HEADER,
+  type HostedExecutionDispatchRequest,
+  type HostedExecutionDispatchResult,
 } from "./contracts.ts";
 import { normalizeHostedExecutionBaseUrl } from "./env.ts";
 import {
@@ -37,6 +38,7 @@ export function createHostedExecutionDispatchClient(
 
       return requestHostedExecutionAuthorizedJson({
         baseUrl,
+        boundUserId: requestPayload.event.userId,
         fetchImpl,
         getAuthorizationHeader,
         label: "dispatch",
@@ -86,6 +88,7 @@ function createHostedExecutionBearerAuthorizationHeaderProvider(
 
 async function requestHostedExecutionAuthorizedJson<TResponse>(input: {
   baseUrl: string;
+  boundUserId?: string;
   fetchImpl: typeof fetch;
   getAuthorizationHeader: () => Promise<string>;
   label: string;
@@ -107,6 +110,10 @@ async function requestHostedExecutionAuthorizedJson<TResponse>(input: {
 
   const headers = new Headers(input.request.headers);
   headers.set("authorization", await input.getAuthorizationHeader());
+
+  if (input.boundUserId) {
+    headers.set(HOSTED_EXECUTION_USER_ID_HEADER, input.boundUserId);
+  }
 
   const response = await input.fetchImpl(url.toString(), {
     ...(input.request.body === undefined ? {} : { body: input.request.body }),

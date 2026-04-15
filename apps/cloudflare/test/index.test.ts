@@ -6,6 +6,7 @@ import { afterEach, describe as baseDescribe, expect, it, vi } from "vitest";
 
 import { ContainerProxy as PackageContainerProxy } from "@cloudflare/containers";
 import type { HostedExecutionDispatchRequest } from "@murphai/hosted-execution";
+import { HOSTED_EXECUTION_USER_ID_HEADER } from "@murphai/hosted-execution/contracts";
 import { buildHostedStorageAad, deriveHostedStorageOpaqueId } from "../src/crypto-context.ts";
 import {
   createHostedVerifiedEmailUserEnv,
@@ -177,6 +178,32 @@ describe("cloudflare worker routes", () => {
     expect(response.status).toBe(200);
     expect(stub.dispatchWithOutcome).toHaveBeenCalledTimes(1);
     expect(stub.dispatchWithOutcome).toHaveBeenCalledWith(dispatch);
+  });
+
+  it("rejects internal dispatch requests when the bound user header is missing or mismatched", async () => {
+    const stub = createUserRunnerStub();
+    const dispatch = createDispatch("evt_123");
+
+    const missingHeaderResponse = await worker.fetch(
+      await createSignedDispatchRequest("/internal/dispatch", dispatch, { boundUserId: null }),
+      createWorkerEnv(stub),
+    );
+
+    expect(missingHeaderResponse.status).toBe(401);
+    await expect(missingHeaderResponse.json()).resolves.toEqual({
+      error: `${HOSTED_EXECUTION_USER_ID_HEADER} header is required for hosted execution user-bound control routes.`,
+    });
+
+    const mismatchedHeaderResponse = await worker.fetch(
+      await createSignedDispatchRequest("/internal/dispatch", dispatch, { boundUserId: "member_other" }),
+      createWorkerEnv(stub),
+    );
+
+    expect(mismatchedHeaderResponse.status).toBe(401);
+    await expect(mismatchedHeaderResponse.json()).resolves.toEqual({
+      error: "Hosted execution bound user does not match the dispatch user.",
+    });
+    expect(stub.dispatchWithOutcome).not.toHaveBeenCalled();
   });
 
   it("keeps the removed internal events alias hidden from OIDC dispatch callers", async () => {
@@ -683,6 +710,44 @@ describe("cloudflare worker routes", () => {
     });
   });
 
+  it("rejects pending-usage reads when the bound user header is missing or mismatched", async () => {
+    const stub = createUserRunnerStub();
+    const env = createWorkerEnv(stub, {
+      HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
+    });
+
+    const missingHeaderResponse = await worker.fetch(
+      await signControlRequest(new Request(
+        "https://runner.example.test/internal/users/member_123/usage/pending",
+        { method: "GET" },
+      ), {
+        boundUserId: null,
+      }),
+      env,
+    );
+
+    expect(missingHeaderResponse.status).toBe(401);
+    await expect(missingHeaderResponse.json()).resolves.toEqual({
+      error: `${HOSTED_EXECUTION_USER_ID_HEADER} header is required for hosted execution user-bound control routes.`,
+    });
+
+    const mismatchedHeaderResponse = await worker.fetch(
+      await signControlRequest(new Request(
+        "https://runner.example.test/internal/users/member_123/usage/pending",
+        { method: "GET" },
+      ), {
+        boundUserId: "member_other",
+      }),
+      env,
+    );
+
+    expect(mismatchedHeaderResponse.status).toBe(401);
+    await expect(mismatchedHeaderResponse.json()).resolves.toEqual({
+      error: "Hosted execution bound user does not match the route user.",
+    });
+    expect(stub.readPendingUsage).not.toHaveBeenCalled();
+  });
+
   it("forwards device-sync runtime reads and apply updates through the signed user route", async () => {
     const stub = createUserRunnerStub();
     const env = createWorkerEnv(stub, {
@@ -751,6 +816,89 @@ describe("cloudflare worker routes", () => {
         ],
         userId: "member_123",
       },
+    });
+  });
+
+  it("redacts device-sync token bundles by default and only returns them when includeSecrets=true", async () => {
+    const stub = createUserRunnerStub();
+    const snapshot: Awaited<ReturnType<UserRunnerDurableObjectStubLike["getDeviceSyncRuntimeSnapshot"]>> = {
+      connections: [
+        {
+          connection: {
+            accessTokenExpiresAt: "2026-04-05T11:00:00.000Z",
+            connectedAt: "2026-04-05T10:00:00.000Z",
+            createdAt: "2026-04-05T10:00:00.000Z",
+            displayName: "Oura Test",
+            externalAccountId: "oura-account-123",
+            id: "dsc_123",
+            metadata: { ring: "4" },
+            provider: "oura",
+            scopes: ["email", "offline"],
+            status: "active",
+            updatedAt: "2026-04-05T10:45:00.000Z",
+          },
+          localState: {
+            lastErrorCode: null,
+            lastErrorMessage: null,
+            lastSyncCompletedAt: null,
+            lastSyncErrorAt: null,
+            lastSyncStartedAt: null,
+            lastWebhookAt: null,
+            nextReconcileAt: null,
+          },
+          tokenBundle: {
+            accessToken: "secret-access-token",
+            accessTokenExpiresAt: "2026-04-05T11:00:00.000Z",
+            keyVersion: "v1",
+            refreshToken: "secret-refresh-token",
+            tokenVersion: 2,
+          },
+        },
+      ],
+      generatedAt: "2026-04-05T10:45:00.000Z",
+      userId: "member_123",
+    };
+    stub.getDeviceSyncRuntimeSnapshot.mockResolvedValue(snapshot);
+    const env = createWorkerEnv(stub, {
+      HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
+    });
+
+    const redactedResponse = await worker.fetch(
+      await signControlRequest(new Request(
+        "https://runner.example.test/internal/users/member_123/device-sync/runtime?connectionId=dsc_123&provider=oura",
+        { method: "GET" },
+      )),
+      env,
+    );
+
+    expect(redactedResponse.status).toBe(200);
+    await expect(redactedResponse.json()).resolves.toMatchObject({
+      connections: [
+        {
+          tokenBundle: null,
+        },
+      ],
+    });
+
+    const secretsResponse = await worker.fetch(
+      await signControlRequest(new Request(
+        "https://runner.example.test/internal/users/member_123/device-sync/runtime?connectionId=dsc_123&provider=oura&includeSecrets=true",
+        { method: "GET" },
+      )),
+      env,
+    );
+
+    expect(secretsResponse.status).toBe(200);
+    await expect(secretsResponse.json()).resolves.toMatchObject({
+      connections: [
+        {
+          tokenBundle: {
+            accessToken: "secret-access-token",
+            refreshToken: "secret-refresh-token",
+            tokenVersion: 2,
+          },
+        },
+      ],
     });
   });
 
@@ -2026,6 +2174,22 @@ describe("cloudflare worker routes", () => {
     });
   });
 
+  it("returns 405 before bound-user validation on user-bound routes", async () => {
+    const response = await worker.fetch(
+      await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/run", {
+        method: "GET",
+      }), {
+        boundUserId: "member_other",
+      }),
+      createWorkerEnv(),
+    );
+
+    expect(response.status).toBe(405);
+    await expect(response.json()).resolves.toEqual({
+      error: "Method not allowed.",
+    });
+  });
+
   it("keeps malformed encoded route params behind existing auth and hidden-method boundaries", async () => {
     const controlResponse = await worker.fetch(
       new Request("https://runner.example.test/internal/users/%E0%A4%A/run", {
@@ -2655,11 +2819,9 @@ function createUserRunnerStub() {
       nextCursor: null,
     })),
     gatewayRespondToPermission: vi.fn(async () => null),
-    getDeviceSyncRuntimeSnapshot: vi.fn(async (input: {
-      request: {
-        userId: string;
-      };
-    }) => ({
+    getDeviceSyncRuntimeSnapshot: vi.fn(async (
+      input: Parameters<NonNullable<UserRunnerDurableObjectStubLike["getDeviceSyncRuntimeSnapshot"]>>[0],
+    ): Promise<Awaited<ReturnType<NonNullable<UserRunnerDurableObjectStubLike["getDeviceSyncRuntimeSnapshot"]>>>> => ({
       connections: [],
       generatedAt: "2026-04-05T10:45:00.000Z",
       userId: input.request.userId,
@@ -2765,18 +2927,25 @@ async function createSignedDispatchRequest(
   dispatch: HostedExecutionDispatchRequest,
   input: {
     aud?: string;
+    boundUserId?: string | null;
     iss?: string;
     sub?: string;
   } = {},
 ): Promise<Request> {
   installOidcJwksFetch();
 
+  const headers = new Headers({
+    authorization: `Bearer ${createTestVercelOidcToken(input)}`,
+    "content-type": "application/json; charset=utf-8",
+  });
+
+  if (input.boundUserId !== null) {
+    headers.set(HOSTED_EXECUTION_USER_ID_HEADER, input.boundUserId ?? dispatch.event.userId);
+  }
+
   return new Request(`https://runner.example.test${path}`, {
     body: JSON.stringify(dispatch),
-    headers: {
-      authorization: `Bearer ${createTestVercelOidcToken(input)}`,
-      "content-type": "application/json; charset=utf-8",
-    },
+    headers,
     method: "POST",
   });
 }
@@ -2785,6 +2954,7 @@ async function signControlRequest(
   request: Request,
   input: {
     aud?: string;
+    boundUserId?: string | null;
     iss?: string;
     sub?: string;
   } = {},
@@ -2792,6 +2962,11 @@ async function signControlRequest(
   installOidcJwksFetch();
   const headers = new Headers(request.headers);
   headers.set("authorization", `Bearer ${createTestVercelOidcToken(input)}`);
+  const derivedUserId = /^\/internal\/users\/(?<userId>[^/]+)/u.exec(new URL(request.url).pathname)?.groups?.userId;
+
+  if (input.boundUserId !== null && (input.boundUserId || derivedUserId)) {
+    headers.set(HOSTED_EXECUTION_USER_ID_HEADER, input.boundUserId ?? derivedUserId ?? "");
+  }
 
   return new Request(request, { headers });
 }

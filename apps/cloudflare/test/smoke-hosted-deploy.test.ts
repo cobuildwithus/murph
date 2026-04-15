@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { HOSTED_EXECUTION_USER_ID_HEADER } from "@murphai/hosted-execution/contracts";
 import {
   readBearerAuthorizationToken,
 } from "../src/auth-adapter.js";
@@ -151,6 +152,7 @@ describe("runSmokeHostedDeploy", () => {
         headers: {
           "Cloudflare-Workers-Version-Overrides": "hosted-worker=\"version-123\"",
           authorization: "Bearer vercel-oidc-token",
+          [HOSTED_EXECUTION_USER_ID_HEADER]: "member_123",
         },
         method: "GET",
         url: "https://worker.example.test/internal/users/member_123/status",
@@ -161,6 +163,7 @@ describe("runSmokeHostedDeploy", () => {
           "Cloudflare-Workers-Version-Overrides": "hosted-worker=\"version-123\"",
           authorization: "Bearer vercel-oidc-token",
           "content-type": "application/json; charset=utf-8",
+          [HOSTED_EXECUTION_USER_ID_HEADER]: "member_123",
         },
         method: "POST",
         url: "https://worker.example.test/internal/users/member_123/run",
@@ -170,6 +173,7 @@ describe("runSmokeHostedDeploy", () => {
         headers: {
           "Cloudflare-Workers-Version-Overrides": "hosted-worker=\"version-123\"",
           authorization: "Bearer vercel-oidc-token",
+          [HOSTED_EXECUTION_USER_ID_HEADER]: "member_123",
         },
         method: "GET",
         url: "https://worker.example.test/internal/users/member_123/status",

@@ -5,8 +5,9 @@ import {
 import {
   parseHostedExecutionUserStatus,
 } from "@murphai/hosted-execution/parsers";
-import type {
-  HostedExecutionUserStatus,
+import {
+  HOSTED_EXECUTION_USER_ID_HEADER,
+  type HostedExecutionUserStatus,
 } from "@murphai/hosted-execution/contracts";
 import {
   normalizeOptionalString,
@@ -22,6 +23,7 @@ type FetchLike = typeof fetch;
 
 interface SmokeControlRequest {
   authorizationHeader: string;
+  boundUserId: string;
   fetchImpl: FetchLike;
   url: string;
   versionOverrideHeaders: Record<string, string> | undefined;
@@ -115,6 +117,7 @@ export async function runSmokeHostedDeploy(input: {
 
   const statusRequest: SmokeControlRequest = {
     authorizationHeader,
+    boundUserId: smokeUserId,
     fetchImpl,
     url: new URL(buildCloudflareHostedControlUserStatusPath(smokeUserId), smokeBaseUrl).toString(),
     versionOverrideHeaders,
@@ -218,6 +221,7 @@ async function sendSmokeControlRequest(input: SmokeControlRequest & {
       ...(input.body ? { "content-type": "application/json; charset=utf-8" } : {}),
       ...(input.versionOverrideHeaders ?? {}),
       authorization: input.authorizationHeader,
+      [HOSTED_EXECUTION_USER_ID_HEADER]: input.boundUserId,
     },
     method: input.method ?? "GET",
   });

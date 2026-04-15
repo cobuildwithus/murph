@@ -65,6 +65,7 @@ export async function disconnectHostedDeviceSyncConnection(input: {
   const runtimeClient = requireHostedDeviceSyncRuntimeClient();
   const runtimeSnapshot = await runtimeClient.getDeviceSyncRuntimeSnapshot(input.userId, {
     connectionId: input.connectionId,
+    includeSecrets: true,
     provider: existing.provider,
   });
   const runtimeConnection = findHostedDeviceSyncRuntimeConnection(runtimeSnapshot, input.connectionId);
