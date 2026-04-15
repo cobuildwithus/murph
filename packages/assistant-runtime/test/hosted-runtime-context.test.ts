@@ -35,6 +35,7 @@ vi.mock("@murphai/vault-usecases/vault-services", () => ({
 
 import {
   prepareHostedDispatchContext,
+  readHostedAssistantExecutionDefaultTarget,
   reconcileHostedAssistantChannelState,
 } from "../src/hosted-runtime/context.ts";
 import {
@@ -363,6 +364,48 @@ test("hosted member activation enables managed Linq auto-reply when first contac
         cursor: null,
       },
     ]);
+  } finally {
+    restoreEnvVar("HOSTED_ASSISTANT_MODEL", previousHostedAssistantEnv.HOSTED_ASSISTANT_MODEL);
+    restoreEnvVar("HOSTED_ASSISTANT_PROVIDER", previousHostedAssistantEnv.HOSTED_ASSISTANT_PROVIDER);
+    await cleanup();
+  }
+});
+
+test("hosted assistant bootstrap exposes an execution default target for later maintenance turns", async () => {
+  const { cleanup, operatorHomeRoot, vaultRoot } = await createHostedRuntimeWorkspace("hosted-runtime-context-");
+  const previousHostedAssistantEnv = setHostedAssistantSeedEnv();
+
+  try {
+    await withOperatorHomeRoot(operatorHomeRoot, async () => {
+      await prepareHostedDispatchContext(
+        vaultRoot,
+        {
+          event: {
+            kind: "member.activated",
+            memberChannels: DEFAULT_MEMBER_CHANNELS,
+            userId: "member_123",
+          },
+          eventId: "evt_activation_default_target",
+          occurredAt: "2026-03-28T09:05:00.000Z",
+        },
+        buildHostedAssistantSeedRuntimeEnv(),
+        HOSTED_RUNTIME_RESOLVED_CONFIG,
+      );
+
+      const defaultTarget = await readHostedAssistantExecutionDefaultTarget();
+
+      assert.deepEqual(defaultTarget, {
+        adapter: "openai-compatible",
+        apiKeyEnv: "OPENAI_API_KEY",
+        endpoint: "https://api.openai.com/v1",
+        headers: null,
+        model: "gpt-4.1-mini",
+        presetId: "openai",
+        providerName: "openai",
+        reasoningEffort: null,
+        webSearch: null,
+      });
+    });
   } finally {
     restoreEnvVar("HOSTED_ASSISTANT_MODEL", previousHostedAssistantEnv.HOSTED_ASSISTANT_MODEL);
     restoreEnvVar("HOSTED_ASSISTANT_PROVIDER", previousHostedAssistantEnv.HOSTED_ASSISTANT_PROVIDER);

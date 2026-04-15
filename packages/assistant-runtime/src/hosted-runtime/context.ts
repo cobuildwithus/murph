@@ -10,6 +10,8 @@ import {
 import {
   createAssistantFoodAutoLogHooks,
 } from "@murphai/assistant-engine";
+import type { AssistantModelTarget } from "@murphai/operator-config/assistant-backend";
+import { createAssistantModelTarget } from "@murphai/operator-config/assistant-backend";
 import {
   enableAssistantAutoReplyChannelLocal,
   readAssistantAutomationState,
@@ -19,6 +21,7 @@ import { createIntegratedInboxServices } from "@murphai/inbox-services";
 import { createIntegratedVaultServices } from "@murphai/vault-usecases/vault-services";
 import {
   ensureHostedAssistantOperatorDefaults,
+  resolveHostedAssistantProviderConfig,
   resolveHostedAssistantOperatorDefaultsState,
 } from "@murphai/operator-config/hosted-assistant-config";
 import {
@@ -245,6 +248,16 @@ export async function readHostedAssistantRuntimeState(): Promise<Pick<
     assistantConfigured: hostedAssistantState.configured,
     assistantProvider: hostedAssistantState.provider,
   };
+}
+
+export async function readHostedAssistantExecutionDefaultTarget(): Promise<AssistantModelTarget | null> {
+  const operatorConfig = await readOperatorConfig();
+  const hostedAssistantConfig = operatorConfig?.hostedAssistant
+    ?? (await resolveHostedAssistantConfig());
+
+  return createAssistantModelTarget(
+    resolveHostedAssistantProviderConfig(hostedAssistantConfig),
+  );
 }
 
 export async function reconcileHostedAssistantChannelState(

@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   exportGatewayProjectionSnapshotLocal: vi.fn(),
   exportHostedPendingAssistantUsage: vi.fn(),
   listHostedBundleArtifacts: vi.fn(),
+  readHostedAssistantExecutionDefaultTarget: vi.fn(),
   refreshAssistantStatusSnapshot: vi.fn(),
   runHostedMaintenanceLoop: vi.fn(),
   snapshotHostedExecutionContext: vi.fn(),
@@ -75,6 +76,11 @@ vi.mock("../src/hosted-runtime/events.ts", () => ({
 
 vi.mock("../src/hosted-runtime/maintenance.ts", () => ({
   runHostedMaintenanceLoop: mocks.runHostedMaintenanceLoop,
+}));
+
+vi.mock("../src/hosted-runtime/context.ts", () => ({
+  readHostedAssistantExecutionDefaultTarget:
+    mocks.readHostedAssistantExecutionDefaultTarget,
 }));
 
 vi.mock("../src/hosted-runtime/usage.ts", () => ({
@@ -142,11 +148,38 @@ beforeEach(() => {
     nextWakeAt: "2026-04-08T00:30:00.000Z",
     parserProcessed: 3,
   });
-  mocks.drainHostedCommittedAssistantDeliveriesAfterCommit.mockResolvedValue(undefined);
+  mocks.drainHostedCommittedAssistantDeliveriesAfterCommit.mockResolvedValue([
+    {
+      debugTrace: [],
+      deliveryChannel: "linq",
+      deliveryErrorCode: null,
+      deliveryStatus: "sent",
+      effectFingerprint: "dedupe_123",
+      effectId: "intent_123",
+      journalMethod: null,
+      journalStatus: null,
+      providerMessageId: "linq_message_123",
+      providerThreadId: "chat_123",
+      retryable: false,
+      target: "chat_123",
+      targetKind: "thread",
+    },
+  ]);
   mocks.exportHostedPendingAssistantUsage.mockResolvedValue({
     exported: 1,
     failed: 0,
     pending: 0,
+  });
+  mocks.readHostedAssistantExecutionDefaultTarget.mockResolvedValue({
+    adapter: "openai-compatible",
+    apiKeyEnv: "OPENAI_API_KEY",
+    endpoint: "https://api.openai.com/v1",
+    headers: null,
+    model: "gpt-4.1-mini",
+    presetId: null,
+    providerName: "OpenAI",
+    reasoningEffort: null,
+    webSearch: null,
   });
   mocks.refreshAssistantStatusSnapshot.mockResolvedValue(undefined);
 });
@@ -250,6 +283,24 @@ describe("executeHostedDispatchForCommit", () => {
     });
     expect(mocks.runHostedMaintenanceLoop).toHaveBeenCalledWith(
       expect.objectContaining({
+        executionContext: {
+          hosted: {
+            defaultTarget: {
+              adapter: "openai-compatible",
+              apiKeyEnv: "OPENAI_API_KEY",
+              endpoint: "https://api.openai.com/v1",
+              headers: null,
+              model: "gpt-4.1-mini",
+              presetId: null,
+              providerName: "OpenAI",
+              reasoningEffort: null,
+              webSearch: null,
+            },
+            issueDeviceConnectLink: expect.any(Function),
+            memberId: "member_123",
+            userEnvKeys: [],
+          },
+        },
         skipAssistantAutomation: true,
         timeoutMs: 45_000,
       }),
@@ -416,6 +467,23 @@ describe("completeHostedExecutionAfterCommit", () => {
       vaultRoot: "/tmp/vault-root",
     });
     assert.deepEqual(result, {
+      assistantDeliveryOutcomes: [
+        {
+          debugTrace: [],
+          deliveryChannel: "linq",
+          deliveryErrorCode: null,
+          deliveryStatus: "sent",
+          effectFingerprint: "dedupe_123",
+          effectId: "intent_123",
+          journalMethod: null,
+          journalStatus: null,
+          providerMessageId: "linq_message_123",
+          providerThreadId: "chat_123",
+          retryable: false,
+          target: "chat_123",
+          targetKind: "thread",
+        },
+      ],
       finalGatewayProjectionSnapshot: {
         schema: "murph.gateway-projection-snapshot.v1",
         generatedAt: "2026-04-08T00:10:00.000Z",
