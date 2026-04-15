@@ -1,6 +1,5 @@
 import type {
   AttachmentParseJobRecord as SharedAttachmentParseJobRecord,
-  ConnectorRestartPolicy,
   InboxCaptureRecord as SharedInboxCaptureRecord,
   InboxPipeline as SharedInboxPipeline,
   InboxRuntimeStore as SharedInboxRuntimeStore,
@@ -10,6 +9,7 @@ import type {
   PersistedCapture as SharedPersistedCapture,
   PollConnector as SharedPollConnector,
 } from '@murphai/inboxd'
+import type { ConnectorRestartPolicy } from '@murphai/inboxd/runtime'
 import type { RuntimePaths } from '@murphai/runtime-state/node'
 import { z } from 'zod'
 import type { AgentmailApiClient } from '@murphai/operator-config/agentmail-runtime'

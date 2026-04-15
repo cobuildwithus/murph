@@ -8,6 +8,9 @@ export type {
   PipelineContext,
 } from "./kernel/pipeline.ts";
 export type {
+  ConnectorRestartPolicy,
+} from "./kernel/daemon.ts";
+export type {
   IndexedAttachment,
 } from "./contracts/capture.ts";
 export type {

@@ -1,10 +1,12 @@
 import {
-  HOSTED_EXECUTION_SIGNING_KEY_ID_HEADER,
   HOSTED_EXECUTION_NONCE_HEADER,
   HOSTED_EXECUTION_SIGNATURE_HEADER,
+  HOSTED_EXECUTION_SIGNING_KEY_ID_HEADER,
   HOSTED_EXECUTION_TIMESTAMP_HEADER,
+} from "@murphai/hosted-execution/contracts";
+import {
   encodeHostedExecutionSignedRequestPayload,
-} from "@murphai/hosted-execution";
+} from "@murphai/hosted-execution/auth";
 
 const DEFAULT_HOSTED_WEB_CALLBACK_SIGNING_KEY_ID = "v1";
 const HOSTED_WEB_CALLBACK_SIGNING_IMPORT_ALGORITHM: EcKeyImportParams = {

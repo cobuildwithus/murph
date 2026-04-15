@@ -39,11 +39,40 @@ describe("cloudflare hosted control routes", () => {
       exports?: Record<string, unknown>;
     };
 
-    expect(packageJson.exports).toMatchObject({
-      "./client": expect.any(Object),
-      "./contracts": expect.any(Object),
-      "./parsers": expect.any(Object),
-      "./routes": expect.any(Object),
+    expect(Object.keys(packageJson.exports ?? {}).sort()).toEqual([
+      "./client",
+      "./contracts",
+      "./parsers",
+      "./routes",
+    ]);
+  });
+
+  it("rejects the package root while keeping the focused subpaths importable", async () => {
+    const importBySpecifier = new Function(
+      "specifier",
+      "return import(specifier);",
+    ) as (specifier: string) => Promise<unknown>;
+
+    await expect(
+      importBySpecifier(["@murphai", "cloudflare-hosted-control"].join("/")),
+    ).rejects.toThrow();
+    await expect(import("@murphai/cloudflare-hosted-control/client")).resolves.toMatchObject({
+      createCloudflareHostedControlClient: expect.any(Function),
+    });
+    await expect(import("@murphai/cloudflare-hosted-control/contracts")).resolves.toSatisfy(
+      (contractsModule) => Object.keys(contractsModule as Record<string, unknown>).length === 0,
+    );
+    await expect(import("@murphai/cloudflare-hosted-control/parsers")).resolves.toMatchObject({
+      parseCloudflareHostedManagedUserCryptoStatus: expect.any(Function),
+      parseCloudflareHostedUserEnvStatus: expect.any(Function),
+      parseCloudflareHostedUserEnvUpdate: expect.any(Function),
+    });
+    await expect(import("@murphai/cloudflare-hosted-control/routes")).resolves.toMatchObject({
+      buildCloudflareHostedControlPendingUsageUsersPath: expect.any(Function),
+      buildCloudflareHostedControlSharePackPath: expect.any(Function),
+      buildCloudflareHostedControlUserPendingUsagePath: expect.any(Function),
+      buildCloudflareHostedControlUserRunPath: expect.any(Function),
+      buildCloudflareHostedControlUserStatusPath: expect.any(Function),
     });
   });
 });
