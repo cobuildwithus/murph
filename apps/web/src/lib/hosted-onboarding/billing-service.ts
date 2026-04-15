@@ -15,6 +15,8 @@ import {
 } from "./hosted-member-billing-store";
 import { requireHostedInviteForAuthentication } from "./invite-service";
 import { requiresHostedBillingCheckout } from "./lifecycle";
+import { projectHostedMemberRoutingState } from "./hosted-member-routing-store";
+import { isHostedMemberMessagingSetupRequired } from "./messaging-state";
 import {
   deriveHostedOnboardingTimingErrorName,
   finishHostedOnboardingTiming,
@@ -83,6 +85,19 @@ export async function createHostedBillingCheckout(
         code: "HOSTED_BILLING_CHECKOUT_BLOCKED",
         message: "This hosted account cannot start a new checkout right now. Contact support to restore access.",
         httpStatus: 403,
+      });
+    }
+
+    if (isHostedMemberMessagingSetupRequired({
+      identity: invite.member.identity,
+      routing: invite.member.routing
+        ? projectHostedMemberRoutingState(invite.member.routing)
+        : null,
+    })) {
+      throw hostedOnboardingError({
+        code: "HOSTED_MESSAGING_CHANNEL_REQUIRED",
+        message: "Verify your phone number or connect Telegram before checkout so Murph can message you.",
+        httpStatus: 409,
       });
     }
 

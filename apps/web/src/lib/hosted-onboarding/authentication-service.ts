@@ -13,6 +13,13 @@ import {
   startHostedOnboardingTiming,
 } from "./logging";
 import { isHostedMemberActivationPending } from "./activation-progress";
+import { readHostedMemberSnapshot } from "./hosted-member-store";
+import {
+  syncHostedMemberTelegramRoutingBinding,
+} from "./hosted-member-routing-store";
+import {
+  isHostedMemberMessagingSetupRequired,
+} from "./messaging-state";
 import { type HostedPrivyIdentity } from "./privy";
 import {
   buildHostedInviteUrl,
@@ -35,6 +42,7 @@ export async function completeHostedPrivyVerification(input: {
   inviteCode: string;
   joinUrl: string;
   memberId: string;
+  messagingSetupRequired: boolean;
   stage: "active" | "checkout" | "blocked";
 }> {
   const prisma = input.prisma ?? getPrisma();
@@ -67,6 +75,19 @@ export async function completeHostedPrivyVerification(input: {
           now,
         });
 
+    if (input.identity.telegram?.telegramUserId) {
+      await syncHostedMemberTelegramRoutingBinding({
+        memberId: member.id,
+        prisma,
+        telegramUserId: input.identity.telegram.telegramUserId,
+      });
+    }
+
+    const memberSnapshot = await readHostedMemberSnapshot({
+      memberId: member.id,
+      prisma,
+    });
+
     if (isHostedMemberSuspended(member.suspendedAt)) {
       throw hostedOnboardingError({
         code: "HOSTED_MEMBER_SUSPENDED",
@@ -91,8 +112,13 @@ export async function completeHostedPrivyVerification(input: {
       billingStatus: member.billingStatus,
       suspendedAt: member.suspendedAt,
     });
+    const messagingSetupRequired = isHostedMemberMessagingSetupRequired({
+      identity: memberSnapshot?.identity ?? null,
+      routing: memberSnapshot?.routing ?? null,
+    });
 
     finishHostedOnboardingTiming(timing, "completed", {
+      messagingSetupRequired,
       stage,
       usedInvite,
     });
@@ -102,6 +128,7 @@ export async function completeHostedPrivyVerification(input: {
       inviteCode: activeInvite.inviteCode,
       joinUrl: buildHostedInviteUrl(activeInvite.inviteCode),
       memberId: member.id,
+      messagingSetupRequired,
       stage,
     };
   } catch (error) {

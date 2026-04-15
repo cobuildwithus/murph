@@ -74,6 +74,7 @@ describe("hosted Linq webhook transport", () => {
       memberId: "member-1",
       pendingLinqChatId: null,
       pendingLinqRecipientPhone: null,
+      telegramUserId: null,
       telegramUserLookupKey: null,
     });
     const handlers = createHostedWebhookReceiptHandlers();

@@ -7,9 +7,10 @@ import {
 import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
 
 import { completeHostedPrivyAuth } from "./hosted-auth-completion";
-import { requestHostedOnboardingJson } from "./client-api";
+import { HostedOnboardingApiError, requestHostedOnboardingJson } from "./client-api";
 import type {
   HostedPhoneAuthIntent,
+  HostedPhoneLinkPayload,
   HostedPhoneVerificationAttempt,
   HostedResolvedPhoneSubmission,
 } from "./hosted-phone-auth-types";
@@ -112,6 +113,40 @@ export async function finalizeHostedPrivyVerification(input: {
   window.location.assign(result.redirectUrl);
 }
 
+export async function finalizeHostedPhoneLink(input: {
+  onLinked?: (payload: HostedPhoneLinkPayload) => Promise<void> | void;
+}): Promise<void> {
+  const payload = await requestHostedPhoneLinkSyncWithRetry();
+  await input.onLinked?.(payload);
+}
+
+export async function requestHostedPhoneLinkSyncWithRetry(): Promise<HostedPhoneLinkPayload> {
+  let lastError: unknown = null;
+
+  for (const delayMs of [0, 500] as const) {
+    if (delayMs > 0) {
+      await waitForRetryDelay(delayMs);
+    }
+
+    try {
+      return await requestHostedOnboardingJson<HostedPhoneLinkPayload>({
+        method: "POST",
+        url: "/api/settings/phone/sync",
+      });
+    } catch (error) {
+      lastError = error;
+
+      if (!isRetryableHostedPhoneLinkError(error)) {
+        throw error;
+      }
+    }
+  }
+
+  throw lastError instanceof Error
+    ? lastError
+    : new Error("We could not save your verified phone number.");
+}
+
 export function resolveHostedPrivyCompletionRedirectUrl(input: {
   intent: HostedPhoneAuthIntent;
   payload: HostedPrivyCompletionPayload;
@@ -121,6 +156,23 @@ export function resolveHostedPrivyCompletionRedirectUrl(input: {
   }
 
   return `/join/${encodeURIComponent(input.payload.inviteCode)}`;
+}
+
+function isRetryableHostedPhoneLinkError(error: unknown): boolean {
+  if (!(error instanceof HostedOnboardingApiError)) {
+    return false;
+  }
+
+  if (error.code === "AUTH_REQUIRED") {
+    return true;
+  }
+
+  return (
+    error.retryable
+    && (error.code === "PRIVY_ACCOUNT_NOT_READY"
+      || error.code === "PRIVY_PHONE_NOT_READY"
+      || error.code === "PRIVY_WALLET_NOT_READY")
+  );
 }
 
 export async function finalizeInvitePhoneCodeSendConfirmation(input: {

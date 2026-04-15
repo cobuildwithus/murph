@@ -6,7 +6,7 @@ import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/t
 
 import { requestHostedBillingCheckout } from "./client-api";
 import { requestHostedPrivyCompletionWithRetry } from "./hosted-privy-auth-support";
-import type { HostedAuthIntent } from "./hosted-auth-shared";
+import type { HostedPhoneAuthIntent } from "./hosted-phone-auth-types";
 
 interface HostedAuthCompletionUser {
   linkedAccounts?: unknown;
@@ -14,7 +14,7 @@ interface HostedAuthCompletionUser {
 
 interface HostedAuthCompletionInput {
   createWallet: () => Promise<unknown>;
-  intent: HostedAuthIntent;
+  intent: HostedPhoneAuthIntent;
   inviteCode?: string | null;
   refreshUser?: () => Promise<HostedAuthCompletionUser | null>;
   requirePhone?: boolean;
@@ -59,10 +59,14 @@ export async function completeHostedPrivyAuth(
 }
 
 async function resolveHostedAuthRedirectUrl(input: {
-  intent: HostedAuthIntent;
+  intent: HostedPhoneAuthIntent;
   payload: HostedPrivyCompletionPayload;
 }): Promise<string> {
   if (input.payload.stage === "checkout") {
+    if (input.payload.messagingSetupRequired) {
+      return input.payload.joinUrl;
+    }
+
     const checkout = await requestHostedBillingCheckout({
       inviteCode: input.payload.inviteCode,
     });

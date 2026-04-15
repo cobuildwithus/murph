@@ -225,6 +225,7 @@ describe("completeHostedPrivyVerification", () => {
       inviteCode: "invite-code",
       joinUrl: "https://join.example.test/join/invite-code",
       memberId: inviteMember.id,
+      messagingSetupRequired: false,
       stage: "checkout",
     });
   });
@@ -303,7 +304,9 @@ describe("completeHostedPrivyVerification", () => {
       },
       hostedMember: {
         create: vi.fn().mockResolvedValue(createdMember),
-        findUnique: vi.fn().mockResolvedValue(null),
+        findUnique: vi.fn().mockImplementation(async ({ where }: { where: Record<string, unknown> }) => (
+          where.id === createdMember.id ? createdMember : null
+        )),
       },
     });
 
@@ -313,7 +316,7 @@ describe("completeHostedPrivyVerification", () => {
       prisma,
     });
 
-    expect(prisma.hostedMember.findUnique).toHaveBeenCalledTimes(3);
+    expect(prisma.hostedMember.findUnique).toHaveBeenCalledTimes(4);
     expect(prisma.hostedMember.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         billingStatus: HostedBillingStatus.not_started,
@@ -335,6 +338,7 @@ describe("completeHostedPrivyVerification", () => {
     expect(prisma.hostedInvite.update).not.toHaveBeenCalled();
     expect(result.joinUrl).toBe("https://join.example.test/join/public-invite-code");
     expect(result.inviteCode).toBe("public-invite-code");
+    expect(result.messagingSetupRequired).toBe(false);
     expect(result.stage).toBe("checkout");
   });
 
@@ -363,7 +367,9 @@ describe("completeHostedPrivyVerification", () => {
       },
       hostedMember: {
         create: vi.fn().mockResolvedValue(createdMember),
-        findUnique: vi.fn().mockResolvedValue(null),
+        findUnique: vi.fn().mockImplementation(async ({ where }: { where: Record<string, unknown> }) => (
+          where.id === createdMember.id ? createdMember : null
+        )),
       },
     });
 
@@ -380,6 +386,7 @@ describe("completeHostedPrivyVerification", () => {
       inviteCode: "public-phone-only-invite",
       joinUrl: "https://join.example.test/join/public-phone-only-invite",
       memberId: "member_phone_only",
+      messagingSetupRequired: false,
       stage: "checkout",
     });
 
@@ -422,7 +429,9 @@ describe("completeHostedPrivyVerification", () => {
       },
       hostedMember: {
         create: vi.fn().mockResolvedValue(createdMember),
-        findUnique: vi.fn().mockResolvedValue(null),
+        findUnique: vi.fn().mockImplementation(async ({ where }: { where: Record<string, unknown> }) => (
+          where.id === createdMember.id ? createdMember : null
+        )),
       },
       hostedMemberIdentity: {
         findFirst: vi.fn().mockResolvedValue(null),
@@ -451,6 +460,7 @@ describe("completeHostedPrivyVerification", () => {
       inviteCode: "public-telegram-invite",
       joinUrl: "https://join.example.test/join/public-telegram-invite",
       memberId: "member_telegram_only",
+      messagingSetupRequired: false,
       stage: "checkout",
     });
 
@@ -528,6 +538,7 @@ describe("completeHostedPrivyVerification", () => {
       inviteCode: "invite-code",
       joinUrl: "https://join.example.test/join/invite-code",
       memberId: inviteMember.id,
+      messagingSetupRequired: false,
       stage: "checkout",
     });
 
@@ -880,6 +891,7 @@ describe("completeHostedPrivyVerification", () => {
       inviteCode: "invite-code",
       joinUrl: "https://join.example.test/join/invite-code",
       memberId: inviteMember.id,
+      messagingSetupRequired: false,
       stage: "checkout",
     });
 
@@ -898,6 +910,7 @@ function asCompleteHostedPrivyVerificationPrisma<T extends Record<string, unknow
   prisma: T,
 ): T & CompleteHostedPrivyVerificationPrisma {
   const prismaWithQueryRaw = prisma as T & CompleteHostedPrivyVerificationPrisma;
+  const routingRecordsByMemberId = new Map<string, Record<string, unknown>>();
   const hostedInvite = prismaWithQueryRaw.hostedInvite as unknown as
     | {
         findUnique?: ((input: { where?: Record<string, unknown> }) => Promise<unknown>) | undefined;
@@ -908,6 +921,12 @@ function asCompleteHostedPrivyVerificationPrisma<T extends Record<string, unknow
         create?: ((input: { data?: Record<string, unknown> }) => Promise<unknown>) | undefined;
         findUnique?: ((input: { where?: Record<string, unknown> }) => Promise<unknown>) | undefined;
         update?: ((input: { data?: Record<string, unknown>; where?: Record<string, unknown> }) => Promise<unknown>) | undefined;
+      }
+    | undefined;
+  const hostedMemberRouting = prismaWithQueryRaw.hostedMemberRouting as unknown as
+    | {
+        findUnique?: ((input: { where?: Record<string, unknown> }) => Promise<unknown>) | undefined;
+        upsert?: ((input: { create: Record<string, unknown>; update: Record<string, unknown>; where?: Record<string, unknown> }) => Promise<unknown>) | undefined;
       }
     | undefined;
   const executionOutbox = prismaWithQueryRaw.executionOutbox as unknown as
@@ -921,7 +940,13 @@ function asCompleteHostedPrivyVerificationPrisma<T extends Record<string, unknow
       configurable: true,
       value: {
         ...(hostedMember ?? {}),
-        findUnique: vi.fn(async ({ where }: { where?: Record<string, unknown> }) => {
+        findUnique: vi.fn(async ({
+          include,
+          where,
+        }: {
+          include?: { billingRef?: boolean; identity?: boolean; routing?: boolean };
+          where?: Record<string, unknown>;
+        }) => {
           const invite = await hostedInvite?.findUnique?.({ where: {} });
           const inviteMember = (invite as { member?: unknown } | null)?.member ?? null;
 
@@ -930,13 +955,76 @@ function asCompleteHostedPrivyVerificationPrisma<T extends Record<string, unknow
             && typeof where?.id === "string"
             && (inviteMember as { id?: unknown }).id === where.id
           ) {
-            return inviteMember;
+            if (!include || typeof inviteMember !== "object") {
+              return inviteMember;
+            }
+
+            const memberRecord = inviteMember as Record<string, unknown>;
+            const memberId = typeof memberRecord.id === "string" ? memberRecord.id : null;
+            return {
+              ...memberRecord,
+              ...(include.billingRef ? { billingRef: (memberRecord.billingRef as unknown) ?? null } : {}),
+              ...(include.identity ? { identity: (memberRecord.identity as unknown) ?? readMemberIdentity(memberRecord) } : {}),
+              ...(include.routing
+                ? {
+                    routing:
+                      (memberRecord.routing as unknown)
+                      ?? (memberId ? routingRecordsByMemberId.get(memberId) ?? null : null),
+                  }
+                : {}),
+            };
           }
 
           return null;
         }),
       },
     });
+  } else {
+    const hostedMemberRecord = prismaWithQueryRaw.hostedMember;
+    const originalFindUnique =
+      typeof hostedMemberRecord.findUnique === "function"
+        ? hostedMemberRecord.findUnique.bind(hostedMemberRecord)
+        : undefined;
+
+    if (originalFindUnique) {
+      Object.defineProperty(hostedMemberRecord, "findUnique", {
+        configurable: true,
+        value: vi.fn(async ({
+          include,
+          where,
+        }: {
+          include?: { billingRef?: boolean; identity?: boolean; routing?: boolean };
+          where: Record<string, unknown>;
+        }) => {
+          const result = await Reflect.apply(originalFindUnique, hostedMemberRecord, [
+            {
+              include,
+              where,
+            },
+          ]);
+
+          if (!include || !result || typeof result !== "object") {
+            return result;
+          }
+
+          const memberRecord = result as Record<string, unknown>;
+          const memberId = typeof memberRecord.id === "string" ? memberRecord.id : null;
+
+          return {
+            ...memberRecord,
+            ...(include.billingRef ? { billingRef: (memberRecord.billingRef as unknown) ?? null } : {}),
+            ...(include.identity ? { identity: (memberRecord.identity as unknown) ?? readMemberIdentity(memberRecord) } : {}),
+            ...(include.routing
+              ? {
+                  routing:
+                    (memberRecord.routing as unknown)
+                    ?? (memberId ? routingRecordsByMemberId.get(memberId) ?? null : null),
+                }
+              : {}),
+          };
+        }),
+      });
+    }
   }
 
   if (!("executionOutbox" in prismaWithQueryRaw) || !prismaWithQueryRaw.executionOutbox || typeof executionOutbox?.findFirst !== "function") {
@@ -945,6 +1033,42 @@ function asCompleteHostedPrivyVerificationPrisma<T extends Record<string, unknow
       value: {
         ...(executionOutbox ?? {}),
         findFirst: vi.fn().mockResolvedValue(null),
+      },
+    });
+  }
+
+  if (!("hostedMemberRouting" in prismaWithQueryRaw) || !prismaWithQueryRaw.hostedMemberRouting) {
+    Object.defineProperty(prismaWithQueryRaw, "hostedMemberRouting", {
+      configurable: true,
+      value: {
+        ...(hostedMemberRouting ?? {}),
+        findUnique: vi.fn(async ({ where }: { where?: Record<string, unknown> }) => {
+          const memberId = typeof where?.memberId === "string" ? where.memberId : null;
+          return memberId ? routingRecordsByMemberId.get(memberId) ?? null : null;
+        }),
+        upsert: vi.fn(async ({
+          create,
+          update,
+        }: {
+          create: Record<string, unknown>;
+          update: Record<string, unknown>;
+        }) => {
+          const memberId = typeof create.memberId === "string"
+            ? create.memberId
+            : typeof update.memberId === "string"
+              ? update.memberId
+              : null;
+          const nextRecord = {
+            ...create,
+            ...update,
+          };
+
+          if (memberId) {
+            routingRecordsByMemberId.set(memberId, nextRecord);
+          }
+
+          return nextRecord;
+        }),
       },
     });
   }

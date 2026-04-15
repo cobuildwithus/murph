@@ -10,6 +10,7 @@ import type {
   HostedInviteStatusPayload,
   HostedPrivyCompletionPayload,
 } from "@/src/lib/hosted-onboarding/types";
+import type { PrivyLinkedAccountLike } from "@/src/lib/hosted-onboarding/privy-shared";
 
 import { requestHostedBillingCheckout } from "./client-api";
 import {
@@ -30,6 +31,8 @@ import {
 import { useJoinInviteShareImport } from "./use-join-invite-share-import";
 
 interface JoinInviteClientProps {
+  authenticated: boolean;
+  initialLinkedAccounts: readonly PrivyLinkedAccountLike[];
   initialStatus: HostedInviteStatusPayload;
   inviteCode: string;
   shareCode: string | null;
@@ -37,6 +40,8 @@ interface JoinInviteClientProps {
 }
 
 export function JoinInviteClient({
+  authenticated: _authenticated,
+  initialLinkedAccounts,
   initialStatus,
   inviteCode,
   shareCode,
@@ -147,17 +152,26 @@ export function JoinInviteClient({
   });
 
   useEffect(() => {
-    if (!autoCheckoutArmed || !status.capabilities.billingReady || pendingAction !== null) {
+    if (
+      !autoCheckoutArmed
+      || !status.capabilities.billingReady
+      || status.messagingSetupRequired
+      || pendingAction !== null
+    ) {
       return;
     }
 
     startAutoCheckout();
-  }, [autoCheckoutArmed, pendingAction, status.capabilities.billingReady]);
+  }, [autoCheckoutArmed, pendingAction, startAutoCheckout, status.capabilities.billingReady, status.messagingSetupRequired]);
 
   async function handlePhoneVerified(payload: HostedPrivyCompletionPayload) {
     const nextStatus = resolveInviteStatusAfterPrivyCompletion(status, payload);
     setStatus(nextStatus);
-    setAutoCheckoutArmed(nextStatus.capabilities.billingReady && payload.stage === "checkout");
+    setAutoCheckoutArmed(
+      nextStatus.capabilities.billingReady
+      && payload.stage === "checkout"
+      && !payload.messagingSetupRequired,
+    );
   }
 
   return (
@@ -165,7 +179,7 @@ export function JoinInviteClient({
       <Card className="shadow-sm">
         <CardHeader className="gap-3">
           <Badge variant="secondary" className="w-fit">
-            Text signup
+            Murph signup
           </Badge>
           <div className="space-y-3">
             <CardTitle className="text-4xl font-bold tracking-tight text-stone-900 md:text-5xl">
@@ -190,8 +204,10 @@ export function JoinInviteClient({
           ) : null}
 
           <JoinInviteStageContent
+            authenticated={status.session.authenticated}
             awaitingInviteSessionResolution={awaitingInviteSessionResolution}
             checkoutPending={checkoutPending}
+            initialLinkedAccounts={initialLinkedAccounts}
             inviteCode={inviteCode}
             pendingAction={pendingAction}
             shareImportState={shareImportState}

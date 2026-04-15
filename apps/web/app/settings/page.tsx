@@ -4,6 +4,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { HostedBillingSettings } from "@/src/components/settings/hosted-billing-settings";
 import { HostedDeviceSyncSettings } from "@/src/components/settings/hosted-device-sync-settings";
 import { HostedEmailSettings } from "@/src/components/settings/hosted-email-settings";
+import { HostedPhoneSettings } from "@/src/components/settings/hosted-phone-settings";
 import { HostedTelegramSettings } from "@/src/components/settings/hosted-telegram-settings";
 import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 
@@ -17,7 +18,6 @@ export default async function SettingsPage() {
 
   return (
     <main className="min-h-screen bg-cream">
-      {/* Header panel */}
       <div className="border-b border-stone-200/80 bg-cream-dark/50">
         <div className="mx-auto max-w-3xl px-5 pb-10 pt-14 md:px-8">
           <div className="flex items-center gap-2.5 text-xs font-semibold uppercase tracking-widest text-olive/70">
@@ -33,7 +33,6 @@ export default async function SettingsPage() {
         </div>
       </div>
 
-      {/* Content */}
       <div className="mx-auto max-w-3xl px-5 py-10 md:px-8">
         <div className="space-y-8">
           <section className="animate-fade-up">
@@ -49,15 +48,20 @@ export default async function SettingsPage() {
               <span className="inline-block h-1 w-1 rounded-full bg-olive/50" />
               Messaging
             </div>
-            <div className="grid gap-6 xl:grid-cols-2">
+            <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
               <Card className="border-stone-200/80 shadow-sm transition-shadow hover:shadow-md">
                 <CardContent>
-                  <HostedEmailSettings authenticated={authenticated} initialLinkedAccounts={linkedAccounts} />
+                  <HostedPhoneSettings authenticated={authenticated} initialLinkedAccounts={linkedAccounts} />
                 </CardContent>
               </Card>
               <Card className="border-stone-200/80 shadow-sm transition-shadow hover:shadow-md">
                 <CardContent>
                   <HostedTelegramSettings authenticated={authenticated} initialLinkedAccounts={linkedAccounts} />
+                </CardContent>
+              </Card>
+              <Card className="border-stone-200/80 shadow-sm transition-shadow hover:shadow-md">
+                <CardContent>
+                  <HostedEmailSettings authenticated={authenticated} initialLinkedAccounts={linkedAccounts} />
                 </CardContent>
               </Card>
             </div>

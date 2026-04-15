@@ -18,6 +18,7 @@ import {
   readHostedMemberRoutingPrivateState,
 } from "./member-private-codecs";
 import { normalizePhoneNumber } from "./phone";
+import { hostedOnboardingError } from "./errors";
 import {
   type HostedOnboardingPrismaClient,
   withHostedOnboardingTransaction,
@@ -64,6 +65,7 @@ export interface HostedMemberRoutingStateSnapshot {
   memberId: string;
   pendingLinqChatId: string | null;
   pendingLinqRecipientPhone: string | null;
+  telegramUserId: string | null;
   telegramUserLookupKey: string | null;
 }
 
@@ -268,6 +270,27 @@ export async function upsertHostedMemberTelegramRoutingBinding(input: {
   });
 }
 
+export async function syncHostedMemberTelegramRoutingBinding(input: {
+  memberId: string;
+  prisma: HostedOnboardingPrismaClient;
+  telegramUserId: string;
+}): Promise<void> {
+  try {
+    await upsertHostedMemberTelegramRoutingBinding(input);
+  } catch (error) {
+    if (isPrismaUniqueConstraintError(error)) {
+      throw hostedOnboardingError({
+        code: "TELEGRAM_IDENTITY_CONFLICT",
+        message:
+          "That Telegram account is already linked to a different Murph account. Contact support so we can merge it safely.",
+        httpStatus: 409,
+      });
+    }
+
+    throw error;
+  }
+}
+
 export function projectHostedMemberRoutingState(
   routing: HostedMemberRoutingRecord,
 ): HostedMemberRoutingStateSnapshot {
@@ -279,6 +302,7 @@ export function projectHostedMemberRoutingState(
     memberId: routing.memberId,
     pendingLinqChatId: privateState.pendingLinqChatId,
     pendingLinqRecipientPhone: privateState.pendingLinqRecipientPhone,
+    telegramUserId: privateState.telegramUserId,
     telegramUserLookupKey: routing.telegramUserLookupKey ?? null,
   };
 }

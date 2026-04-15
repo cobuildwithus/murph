@@ -1,6 +1,7 @@
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import type { HostedSharePreview } from "@/src/lib/hosted-share/service";
 import type { HostedInviteStatusPayload, HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
+import type { PrivyLinkedAccountLike } from "@/src/lib/hosted-onboarding/privy-shared";
 
 import {
   formatHostedSharePreviewSummary,
@@ -10,6 +11,7 @@ import {
   JoinInviteActivePanel,
   JoinInviteBlockedAlert,
   JoinInviteCheckoutButton,
+  JoinInviteMessagingSetupPanel,
   JoinInviteSignedInMismatchAlert,
   JoinInviteVerificationPanel,
 } from "./join-invite-stage-panels";
@@ -20,8 +22,10 @@ interface JoinInviteSharePreviewAlertProps {
 }
 
 interface JoinInviteStageContentProps {
+  authenticated: boolean;
   awaitingInviteSessionResolution: boolean;
   checkoutPending: boolean;
+  initialLinkedAccounts: readonly PrivyLinkedAccountLike[];
   inviteCode: string;
   pendingAction: "checkout" | "share" | null;
   shareImportState: JoinInviteShareImportState;
@@ -58,8 +62,10 @@ export function JoinInviteSharePreviewAlert({ sharePreview }: JoinInviteSharePre
 }
 
 export function JoinInviteStageContent({
+  authenticated,
   awaitingInviteSessionResolution,
   checkoutPending,
+  initialLinkedAccounts,
   inviteCode,
   pendingAction,
   shareImportState,
@@ -94,7 +100,15 @@ export function JoinInviteStageContent({
 
       {status.stage === "blocked" ? <JoinInviteBlockedAlert /> : null}
 
-      {status.stage === "checkout" ? (
+      {status.stage === "checkout" && status.messagingSetupRequired ? (
+        <JoinInviteMessagingSetupPanel
+          authenticated={authenticated}
+          initialLinkedAccounts={initialLinkedAccounts}
+          onRefreshStatus={onRefreshStatus}
+        />
+      ) : null}
+
+      {status.stage === "checkout" && !status.messagingSetupRequired ? (
         <JoinInviteCheckoutButton
           billingReady={status.capabilities.billingReady}
           checkoutPending={checkoutPending}

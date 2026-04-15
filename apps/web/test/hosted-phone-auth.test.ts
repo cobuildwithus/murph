@@ -590,6 +590,7 @@ describe("HostedPhoneAuth", () => {
           activationPending: false,
           inviteCode: "invite-code",
           joinUrl: "/join/invite-code",
+          messagingSetupRequired: false,
           stage: "active",
         },
       }),
@@ -602,6 +603,7 @@ describe("HostedPhoneAuth", () => {
           activationPending: false,
           inviteCode: "invite-code",
           joinUrl: "/join/invite-code",
+          messagingSetupRequired: false,
           stage: "active",
         },
       }),
@@ -614,6 +616,7 @@ describe("HostedPhoneAuth", () => {
           activationPending: false,
           inviteCode: "invite-code",
           joinUrl: "https://www.withmurph.ai/join/invite-code",
+          messagingSetupRequired: false,
           stage: "checkout",
         },
       }),
@@ -630,6 +633,7 @@ describe("HostedPhoneAuth", () => {
         activationPending: false,
         inviteCode: "invite-code",
         joinUrl: "/join/invite-code",
+        messagingSetupRequired: false,
         stage: "checkout",
       })
       .mockResolvedValueOnce({

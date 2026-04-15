@@ -88,6 +88,7 @@ describe("hosted-member-store", () => {
       memberId: core.id,
       pendingLinqChatId: null,
       pendingLinqRecipientPhone: null,
+      telegramUserId: null,
       telegramUserLookupKey: "telegram_lookup_123",
     };
     const billingRef: HostedMemberStripeBillingRefSnapshot = {
@@ -419,6 +420,7 @@ describe("hosted-member-store", () => {
       memberId: "member_123",
       pendingLinqChatId: null,
       pendingLinqRecipientPhone: null,
+      telegramUserId: null,
       telegramUserLookupKey: "tg_user_123",
     });
   });
@@ -1092,6 +1094,7 @@ describe("hosted-member-store", () => {
         memberId: "member_123",
         pendingLinqChatId: null,
         pendingLinqRecipientPhone: null,
+        telegramUserId: null,
         telegramUserLookupKey: "tg_user_123",
       },
     });
