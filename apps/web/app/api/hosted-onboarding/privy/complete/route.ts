@@ -1,6 +1,3 @@
-import { after } from "next/server";
-
-import { scheduleManagedUserCryptoWarmupBestEffort } from "@/src/lib/hosted-execution/control";
 import { jsonOk, withJsonError, readOptionalJsonObject } from "@/src/lib/hosted-onboarding/http";
 import {
   deriveHostedOnboardingTimingErrorName,
@@ -22,19 +19,10 @@ export const POST = withJsonError(async (request: Request) => {
       identity: auth.identity,
       inviteCode: typeof body.inviteCode === "string" ? body.inviteCode : null,
     });
-    const warmupScheduled = result.stage === "checkout" && !result.messagingSetupRequired;
-
-    if (warmupScheduled) {
-      scheduleManagedUserCryptoWarmupBestEffort({
-        schedule: after,
-        trigger: "privy-complete-checkout",
-        userId: result.memberId,
-      });
-    }
 
     finishHostedOnboardingTiming(timing, "completed", {
       stage: result.stage,
-      warmupScheduled,
+      messagingSetupRequired: result.messagingSetupRequired,
     });
 
     return jsonOk({

@@ -9,7 +9,6 @@ const mocks = vi.hoisted(() => ({
   readHostedMemberSnapshot: vi.fn(),
   readHostedRevnetPaymentReceipt: vi.fn(),
   resolveHostedMemberEmailLinked: vi.fn(),
-  runHostedMemberActivationPostCommitEffects: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/member-activation", async () => {
@@ -21,8 +20,6 @@ vi.mock("@/src/lib/hosted-onboarding/member-activation", async () => {
     ...actual,
     activateHostedMemberFromConfirmedRevnetIssuanceTx:
       mocks.activateHostedMemberFromConfirmedRevnetIssuanceTx,
-    runHostedMemberActivationPostCommitEffects:
-      mocks.runHostedMemberActivationPostCommitEffects,
   };
 });
 
@@ -66,7 +63,6 @@ describe("hosted Stripe RevNet reconciliation", () => {
       hostedExecutionEventId:
         "member.activated:hosted.revnet.issuance.confirmed:member_123:iss_confirmed_123",
       memberId: "member_123",
-      postCommitProvisionUserId: "member_123",
     });
     mocks.isHostedOnboardingRevnetEnabled.mockReturnValue(true);
     mocks.readHostedMemberSnapshot.mockResolvedValue({ core: { id: "member_123" } });
@@ -159,9 +155,6 @@ describe("hosted Stripe RevNet reconciliation", () => {
       expect.any(Function),
       HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
     );
-    expect(mocks.runHostedMemberActivationPostCommitEffects).toHaveBeenCalledWith({
-      postCommitProvisionUserId: "member_123",
-    });
     expect(updateMany).not.toHaveBeenCalled();
   });
 
@@ -203,73 +196,6 @@ describe("hosted Stripe RevNet reconciliation", () => {
     expect(prisma.$transaction).not.toHaveBeenCalled();
     expect(mocks.readHostedMemberSnapshot).not.toHaveBeenCalled();
     expect(mocks.activateHostedMemberFromConfirmedRevnetIssuanceTx).not.toHaveBeenCalled();
-    expect(mocks.runHostedMemberActivationPostCommitEffects).not.toHaveBeenCalled();
-  });
-
-  it("reschedules a submitted issuance when post-commit provisioning fails", async () => {
-    mocks.runHostedMemberActivationPostCommitEffects.mockRejectedValueOnce(
-      new Error("control unavailable"),
-    );
-    const update = vi.fn().mockResolvedValue(undefined);
-    const updateMany = vi.fn().mockResolvedValue({ count: 1 });
-    const transactionClient = {
-      hostedRevnetIssuance: {
-        update,
-      },
-    };
-    const transaction = vi.fn(async <T>(callback: (tx: typeof transactionClient) => Promise<T>) =>
-      callback(transactionClient));
-    const prisma = asReconcilePrisma({
-      $transaction: transaction,
-      hostedRevnetIssuance: {
-        findMany: vi.fn().mockResolvedValue([
-          makeIssuance({
-            attemptCount: 1,
-            id: "iss_retry_123",
-            payTxHash: "0xretry123",
-            status: HostedRevnetIssuanceStatus.submitted,
-          }),
-        ]),
-        update: vi.fn(),
-        updateMany,
-      },
-    });
-
-    await expect(
-      reconcileSubmittedHostedRevnetIssuances({
-        prisma,
-      }),
-    ).rejects.toThrow("control unavailable");
-
-    expect(transaction).toHaveBeenCalledWith(
-      expect.any(Function),
-      HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
-    );
-    expect(update).toHaveBeenCalledWith({
-      where: {
-        id: "iss_retry_123",
-      },
-      data: expect.objectContaining({
-        confirmedAt: expect.any(Date),
-        failureCode: null,
-        failureMessage: null,
-        status: HostedRevnetIssuanceStatus.confirmed,
-      }),
-    });
-    expect(updateMany).toHaveBeenCalledWith({
-      where: {
-        id: "iss_retry_123",
-        status: HostedRevnetIssuanceStatus.confirmed,
-      },
-      data: {
-        attemptCount: 2,
-        confirmedAt: null,
-        failureCode: "Error",
-        failureMessage: "control unavailable",
-        nextAttemptAt: expect.any(Date),
-        status: HostedRevnetIssuanceStatus.submitted,
-      },
-    });
   });
 });
 

@@ -198,11 +198,6 @@ export class HostedUserRunner {
       bucket: this.bucket,
       ensureRunnerStores: (userId?: string) => this.ensureRunnerStores(userId),
       env: this.env,
-      provisionManagedUserCrypto: async (userId: string) => {
-        await this.userKeyStore.bootstrapManagedUserCryptoContext(userId, {
-          reason: "member-activation-dispatch",
-        });
-      },
       queueStore: this.queueStore,
       readRunnerRuntimeConfigSource: () => this.readRunnerRuntimeConfigSource(),
       readWorkerStringEnvSource: () => this.readWorkerStringEnvSource(),
@@ -341,15 +336,23 @@ export class HostedUserRunner {
     return { userId };
   }
 
-  async provisionManagedUserCrypto(userId: string): Promise<{ recipientKinds: string[]; rootKeyId: string; userId: string }> {
+  async provisionManagedUserCrypto(userId: string): Promise<{
+    recipientKinds: string[];
+    rootKeyId: string;
+    userId: string;
+  }> {
     await this.queueStore.bootstrapUser(userId);
-    const crypto = await this.userKeyStore.bootstrapManagedUserCryptoContext(userId, {
+    const status = await this.userKeyStore.ensureManagedUserCryptoEnvelope(userId, {
       reason: "managed-user-provisioning",
     });
-    this.runnerStores = null;
+
+    if (status.needsRunnerStoreRefresh && this.runnerStores?.userId === userId) {
+      this.runnerStores = null;
+    }
+
     return {
-      recipientKinds: crypto.envelope.recipients.map((recipient) => recipient.kind),
-      rootKeyId: crypto.rootKeyId,
+      recipientKinds: status.envelope.recipients.map((recipient) => recipient.kind),
+      rootKeyId: status.envelope.rootKeyId,
       userId,
     };
   }
@@ -486,7 +489,7 @@ export class HostedUserRunner {
 
   async dispatch(input: HostedExecutionDispatchRequest): Promise<HostedExecutionUserStatus> {
     await this.queueStore.bootstrapUser(input.event.userId);
-    await this.provisionManagedUserCryptoForActivationIfNeeded(input);
+    await this.ensureManagedUserCryptoForActivationIfNeeded(input);
     await this.ensureRunnerStores(input.event.userId);
     return this.dispatchProcessor.dispatchBootstrapped(input);
   }
@@ -496,7 +499,7 @@ export class HostedUserRunner {
     stagedPayloadId: string | null = null,
   ): Promise<HostedExecutionDispatchResult> {
     await this.queueStore.bootstrapUser(input.event.userId);
-    await this.provisionManagedUserCryptoForActivationIfNeeded(input);
+    await this.ensureManagedUserCryptoForActivationIfNeeded(input);
     await this.ensureRunnerStores(input.event.userId);
     const initialStatus = await this.queueStore.readEventDispatchStatus(input.eventId);
     const status = await this.dispatchProcessor.dispatchBootstrapped(input, stagedPayloadId);
@@ -513,17 +516,20 @@ export class HostedUserRunner {
     };
   }
 
-  private async provisionManagedUserCryptoForActivationIfNeeded(
+  private async ensureManagedUserCryptoForActivationIfNeeded(
     input: HostedExecutionDispatchRequest,
   ): Promise<void> {
     if (input.event.kind !== "member.activated") {
       return;
     }
 
-    await this.userKeyStore.bootstrapManagedUserCryptoContext(input.event.userId, {
+    const status = await this.userKeyStore.ensureManagedUserCryptoEnvelope(input.event.userId, {
       reason: "member-activation-dispatch",
     });
-    this.runnerStores = null;
+
+    if (status.needsRunnerStoreRefresh && this.runnerStores?.userId === input.event.userId) {
+      this.runnerStores = null;
+    }
   }
 
   async alarm(): Promise<void> {

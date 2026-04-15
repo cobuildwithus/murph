@@ -3935,7 +3935,7 @@ async function resolveHostedUserCryptoContextForTest(input: {
   environment: HostedExecutionEnvironment;
   userId: string;
 }) {
-  return createHostedUserKeyStore({
+  const store = createHostedUserKeyStore({
     automationRecipientKeyId: input.environment.automationRecipientKeyId,
     automationRecipientPrivateKey: input.environment.automationRecipientPrivateKey,
     automationRecipientPrivateKeysById: input.environment.automationRecipientPrivateKeysById,
@@ -3948,5 +3948,7 @@ async function resolveHostedUserCryptoContextForTest(input: {
     recoveryRecipientPublicKey: input.environment.recoveryRecipientPublicKey,
     teeAutomationRecipientKeyId: input.environment.teeAutomationRecipientKeyId,
     teeAutomationRecipientPublicKey: input.environment.teeAutomationRecipientPublicKey,
-  }).bootstrapManagedUserCryptoContext(input.userId);
+  });
+  await store.ensureManagedUserCryptoEnvelope(input.userId);
+  return store.requireUserCryptoContext(input.userId);
 }

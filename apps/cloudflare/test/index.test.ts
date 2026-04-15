@@ -2648,7 +2648,7 @@ async function resolveHostedUserCryptoContextForTest(
     env as unknown as Readonly<Record<string, string | undefined>>,
   );
 
-  return createHostedUserKeyStore({
+  const store = createHostedUserKeyStore({
     automationRecipientKeyId: environment.automationRecipientKeyId,
     automationRecipientPrivateKey: environment.automationRecipientPrivateKey,
     automationRecipientPrivateKeysById: environment.automationRecipientPrivateKeysById,
@@ -2661,7 +2661,9 @@ async function resolveHostedUserCryptoContextForTest(
     recoveryRecipientPublicKey: environment.recoveryRecipientPublicKey,
     teeAutomationRecipientKeyId: environment.teeAutomationRecipientKeyId,
     teeAutomationRecipientPublicKey: environment.teeAutomationRecipientPublicKey,
-  }).bootstrapManagedUserCryptoContext(userId);
+  });
+  await store.ensureManagedUserCryptoEnvelope(userId);
+  return store.requireUserCryptoContext(userId);
 }
 
 function createUserRunnerDurableObject(

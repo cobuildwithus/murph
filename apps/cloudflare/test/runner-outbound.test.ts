@@ -598,7 +598,7 @@ async function ensureRunnerOutboundUserEnvelope(
     env as Readonly<Record<string, string | undefined>>,
   );
 
-  await createHostedUserKeyStore({
+  const store = createHostedUserKeyStore({
     automationRecipientKeyId: environment.automationRecipientKeyId,
     automationRecipientPrivateKey: environment.automationRecipientPrivateKey,
     automationRecipientPrivateKeysById: environment.automationRecipientPrivateKeysById,
@@ -611,5 +611,6 @@ async function ensureRunnerOutboundUserEnvelope(
     recoveryRecipientPublicKey: environment.recoveryRecipientPublicKey,
     teeAutomationRecipientKeyId: environment.teeAutomationRecipientKeyId,
     teeAutomationRecipientPublicKey: environment.teeAutomationRecipientPublicKey,
-  }).bootstrapManagedUserCryptoContext(userId);
+  });
+  await store.ensureManagedUserCryptoEnvelope(userId);
 }

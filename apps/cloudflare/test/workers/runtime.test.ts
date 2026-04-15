@@ -345,7 +345,7 @@ async function resolveHostedUserCryptoContext(userId: string) {
     env as unknown as Readonly<Record<string, string | undefined>>,
   );
 
-  return createHostedUserKeyStore({
+  const store = createHostedUserKeyStore({
     automationRecipientKeyId: environment.automationRecipientKeyId,
     automationRecipientPrivateKey: environment.automationRecipientPrivateKey,
     automationRecipientPrivateKeysById: environment.automationRecipientPrivateKeysById,
@@ -358,7 +358,9 @@ async function resolveHostedUserCryptoContext(userId: string) {
     recoveryRecipientPublicKey: environment.recoveryRecipientPublicKey,
     teeAutomationRecipientKeyId: environment.teeAutomationRecipientKeyId,
     teeAutomationRecipientPublicKey: environment.teeAutomationRecipientPublicKey,
-  }).bootstrapManagedUserCryptoContext(userId);
+  });
+  await store.ensureManagedUserCryptoEnvelope(userId);
+  return store.requireUserCryptoContext(userId);
 }
 
 async function createJournalStore(userId: string) {

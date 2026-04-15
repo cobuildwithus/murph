@@ -9,7 +9,6 @@ import {
   type HostedExecutionMemberActivatedEvent,
 } from "@murphai/hosted-execution";
 
-import { provisionManagedUserCryptoInHostedExecution } from "../hosted-execution/control";
 import {
   enqueueHostedExecutionOutbox,
 } from "../hosted-execution/outbox";
@@ -45,10 +44,6 @@ export type HostedMemberActivationResult = {
   memberId: string;
 };
 
-export type HostedMemberActivationTransactionResult = HostedMemberActivationResult & {
-  postCommitProvisionUserId: string | null;
-};
-
 export async function activateHostedMemberFromConfirmedRevnetIssuanceTx(input: {
   emailLinked?: boolean;
   member: HostedMemberSnapshot;
@@ -56,7 +51,7 @@ export async function activateHostedMemberFromConfirmedRevnetIssuanceTx(input: {
   prisma: Prisma.TransactionClient;
   sourceEventId: string;
   sourceType: string;
-}): Promise<HostedMemberActivationTransactionResult> {
+}): Promise<HostedMemberActivationResult> {
   const timing = startHostedOnboardingTiming(
     "hosted-onboarding.member-activation.revnet-confirmed",
     {
@@ -80,7 +75,6 @@ export async function activateHostedMemberFromConfirmedRevnetIssuanceTx(input: {
         activated: false,
         hostedExecutionEventId: null,
         memberId: input.member.core.id,
-        postCommitProvisionUserId: null,
       };
     }
 
@@ -106,14 +100,12 @@ export async function activateHostedMemberFromConfirmedRevnetIssuanceTx(input: {
     finishHostedOnboardingTiming(timing, "completed", {
       activated: true,
       outboxEnqueued: true,
-      postCommitProvisionScheduled: true,
     });
 
     return {
       activated: true,
       hostedExecutionEventId: dispatch.eventId,
       memberId: input.member.core.id,
-      postCommitProvisionUserId: input.member.core.id,
     };
   } catch (error) {
     finishHostedOnboardingTiming(timing, "failed", {
@@ -129,7 +121,7 @@ export async function activateHostedMemberForPositiveSourceTx(input: {
   member: Pick<HostedMemberBillingSnapshot, "core">;
   prisma: Prisma.TransactionClient;
   skipIfBillingAlreadyActive?: boolean;
-}): Promise<HostedMemberActivationTransactionResult> {
+}): Promise<HostedMemberActivationResult> {
   const timing = startHostedOnboardingTiming(
     "hosted-onboarding.member-activation.positive-source",
     {
@@ -143,7 +135,6 @@ export async function activateHostedMemberForPositiveSourceTx(input: {
     finishHostedOnboardingTiming(timing, "completed", {
       activated: result.activated,
       existingDispatch: !result.activated && Boolean(result.hostedExecutionEventId),
-      postCommitProvisionScheduled: Boolean(result.postCommitProvisionUserId),
     });
 
     return result;
@@ -161,7 +152,7 @@ async function activateHostedMemberForPositiveSourceTxInner(input: {
   member: Pick<HostedMemberBillingSnapshot, "core">;
   prisma: Prisma.TransactionClient;
   skipIfBillingAlreadyActive?: boolean;
-}): Promise<HostedMemberActivationTransactionResult> {
+}): Promise<HostedMemberActivationResult> {
   await lockHostedMemberRow(input.prisma, input.member.core.id);
 
   const currentMember = await readHostedMemberSnapshot({
@@ -197,7 +188,6 @@ async function activateHostedMemberForPositiveSourceTxInner(input: {
           activated: false,
           hostedExecutionEventId: existingDispatch.eventId,
           memberId: currentMember.core.id,
-          postCommitProvisionUserId: currentMember.core.id,
         }
       : buildHostedInactiveMemberActivationResult(currentMember.core.id);
   }
@@ -240,7 +230,6 @@ async function activateHostedMemberForPositiveSourceTxInner(input: {
     activated: true,
     hostedExecutionEventId: outboxRecord.eventId,
     memberId: currentMember.core.id,
-    postCommitProvisionUserId: currentMember.core.id,
   };
 }
 
@@ -302,34 +291,6 @@ export function buildHostedMemberActivationFirstContact(input: {
   });
 }
 
-export async function runHostedMemberActivationPostCommitEffects(input: {
-  postCommitProvisionUserId: string | null;
-}): Promise<void> {
-  const timing = startHostedOnboardingTiming(
-    "hosted-onboarding.member-activation.post-commit-provision",
-    {
-      provisionScheduled: Boolean(input.postCommitProvisionUserId),
-    },
-  );
-
-  if (!input.postCommitProvisionUserId) {
-    finishHostedOnboardingTiming(timing, "skipped", {
-      reason: "not-scheduled",
-    });
-    return;
-  }
-
-  try {
-    await provisionManagedUserCryptoInHostedExecution(input.postCommitProvisionUserId);
-    finishHostedOnboardingTiming(timing, "completed");
-  } catch (error) {
-    finishHostedOnboardingTiming(timing, "failed", {
-      errorName: deriveHostedOnboardingTimingErrorName(error),
-    });
-    throw error;
-  }
-}
-
 async function resolveHostedMemberActivationFirstContactLinqRoute(input: {
   member: HostedMemberSnapshot;
   prisma: Prisma.TransactionClient;
@@ -388,12 +349,11 @@ async function tryActivateHostedMemberIfStillAllowedTx(input: {
 
 function buildHostedInactiveMemberActivationResult(
   memberId: string,
-): HostedMemberActivationTransactionResult {
+): HostedMemberActivationResult {
   return {
     activated: false,
     hostedExecutionEventId: null,
     memberId,
-    postCommitProvisionUserId: null,
   };
 }
 

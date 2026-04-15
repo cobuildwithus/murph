@@ -5,7 +5,6 @@ import {
 
 import {
   activateHostedMemberFromConfirmedRevnetIssuanceTx,
-  runHostedMemberActivationPostCommitEffects,
 } from "./member-activation";
 import { resolveHostedMemberEmailLinked } from "./member-channel-sync";
 import { readHostedMemberSnapshot } from "./hosted-member-store";
@@ -14,9 +13,6 @@ import {
   isHostedOnboardingRevnetEnabled,
   readHostedRevnetPaymentReceipt,
 } from "./revnet";
-import {
-  computeHostedRevnetNextAttemptAt,
-} from "./stripe-revnet-issuance";
 
 export async function reconcileSubmittedHostedRevnetIssuances(input: {
   limit?: number;
@@ -70,7 +66,7 @@ export async function reconcileSubmittedHostedRevnetIssuances(input: {
       continue;
     }
 
-    const activationResult = await input.prisma.$transaction(async (transaction) => {
+    await input.prisma.$transaction(async (transaction) => {
       await transaction.hostedRevnetIssuance.update({
         where: {
           id: issuance.id,
@@ -89,10 +85,10 @@ export async function reconcileSubmittedHostedRevnetIssuances(input: {
       });
 
       if (!member) {
-        return null;
+        return;
       }
 
-      return activateHostedMemberFromConfirmedRevnetIssuanceTx({
+      await activateHostedMemberFromConfirmedRevnetIssuanceTx({
         emailLinked: await resolveHostedMemberEmailLinked({
           memberId: issuance.memberId,
           onUnconfirmed: "disable",
@@ -104,71 +100,9 @@ export async function reconcileSubmittedHostedRevnetIssuances(input: {
         sourceType: "hosted.revnet.issuance.confirmed",
       });
     }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
-    try {
-      await runHostedMemberActivationPostCommitEffects({
-        postCommitProvisionUserId: activationResult?.postCommitProvisionUserId ?? null,
-      });
-    } catch (error) {
-      await scheduleHostedRevnetConfirmationRetry({
-        attemptCount: issuance.attemptCount + 1,
-        error,
-        issuanceId: issuance.id,
-        prisma: input.prisma,
-      });
-      throw error;
-    }
 
     confirmedIssuanceIds.push(issuance.id);
   }
 
   return confirmedIssuanceIds;
-}
-
-async function scheduleHostedRevnetConfirmationRetry(input: {
-  attemptCount: number;
-  error: unknown;
-  issuanceId: string;
-  prisma: PrismaClient;
-}): Promise<void> {
-  await input.prisma.hostedRevnetIssuance.updateMany({
-    where: {
-      id: input.issuanceId,
-      status: HostedRevnetIssuanceStatus.confirmed,
-    },
-    data: {
-      attemptCount: input.attemptCount,
-      confirmedAt: null,
-      failureCode: deriveHostedRevnetConfirmationRetryErrorCode(input.error),
-      failureMessage: deriveHostedRevnetConfirmationRetryErrorMessage(input.error),
-      nextAttemptAt: computeHostedRevnetConfirmationNextAttemptAt(input.attemptCount),
-      status: HostedRevnetIssuanceStatus.submitted,
-    },
-  });
-}
-
-function computeHostedRevnetConfirmationNextAttemptAt(
-  attemptCount: number,
-  now = new Date(),
-): Date {
-  return computeHostedRevnetNextAttemptAt(attemptCount, now);
-}
-
-function deriveHostedRevnetConfirmationRetryErrorCode(error: unknown): string {
-  if (error && typeof error === "object" && "code" in error && typeof error.code === "string") {
-    return error.code;
-  }
-
-  if (error instanceof Error && error.name) {
-    return error.name;
-  }
-
-  return "REVNET_CONFIRMATION_POST_COMMIT_FAILED";
-}
-
-function deriveHostedRevnetConfirmationRetryErrorMessage(error: unknown): string {
-  if (error instanceof Error && error.message) {
-    return error.message;
-  }
-
-  return "Hosted RevNet confirmation post-commit work failed.";
 }

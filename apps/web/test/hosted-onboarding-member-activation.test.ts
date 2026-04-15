@@ -7,15 +7,9 @@ import type { HostedStripeDispatchContext } from "@/src/lib/hosted-onboarding/st
 const mocks = vi.hoisted(() => ({
   enqueueHostedExecutionOutbox: vi.fn(),
   lockHostedMemberRow: vi.fn(),
-  provisionManagedUserCryptoInHostedExecution: vi.fn(),
   readHostedMemberSnapshot: vi.fn(),
   resolveHostedMemberActivationLinqRoute: vi.fn(),
   updateHostedMemberCoreState: vi.fn(),
-}));
-
-vi.mock("@/src/lib/hosted-execution/control", () => ({
-  provisionManagedUserCryptoInHostedExecution:
-    mocks.provisionManagedUserCryptoInHostedExecution,
 }));
 
 vi.mock("@/src/lib/hosted-execution/outbox", () => ({
@@ -53,7 +47,6 @@ import {
   activateHostedMemberForPositiveSourceTx,
   activateHostedMemberFromConfirmedRevnetIssuanceTx,
   buildHostedMemberActivationFirstContact,
-  runHostedMemberActivationPostCommitEffects,
 } from "@/src/lib/hosted-onboarding/member-activation";
 
 describe("hosted onboarding member activation", () => {
@@ -62,7 +55,6 @@ describe("hosted onboarding member activation", () => {
     vi.spyOn(console, "info").mockImplementation(() => {});
 
     mocks.lockHostedMemberRow.mockResolvedValue(undefined);
-    mocks.provisionManagedUserCryptoInHostedExecution.mockResolvedValue(undefined);
     mocks.readHostedMemberSnapshot.mockResolvedValue(makeMemberSnapshot());
     mocks.resolveHostedMemberActivationLinqRoute.mockResolvedValue({
       firstContact: {
@@ -104,7 +96,6 @@ describe("hosted onboarding member activation", () => {
       activated: true,
       hostedExecutionEventId: "member.activated:stripe.invoice.paid:member_123:evt_123",
       memberId: "member_123",
-      postCommitProvisionUserId: "member_123",
     });
 
     expect(mocks.resolveHostedMemberActivationLinqRoute).toHaveBeenCalledWith({
@@ -150,10 +141,8 @@ describe("hosted onboarding member activation", () => {
       activated: true,
       hostedExecutionEventId: "member.activated:hosted.revnet.issuance.confirmed:member_123:revnet_evt_123",
       memberId: "member_123",
-      postCommitProvisionUserId: "member_123",
     });
 
-    expect(mocks.provisionManagedUserCryptoInHostedExecution).not.toHaveBeenCalled();
     expect(mocks.resolveHostedMemberActivationLinqRoute).toHaveBeenCalledWith({
       member,
       prisma: expect.anything(),
@@ -193,7 +182,6 @@ describe("hosted onboarding member activation", () => {
       activated: true,
       hostedExecutionEventId: "member.activated:stripe.invoice.paid:member_123:evt_123",
       memberId: "member_123",
-      postCommitProvisionUserId: "member_123",
     });
 
     expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith({
@@ -247,7 +235,6 @@ describe("hosted onboarding member activation", () => {
       activated: true,
       hostedExecutionEventId: "member.activated:stripe.invoice.paid:member_123:evt_123",
       memberId: "member_123",
-      postCommitProvisionUserId: "member_123",
     });
 
     expect(mocks.resolveHostedMemberActivationLinqRoute).not.toHaveBeenCalled();
@@ -379,30 +366,11 @@ describe("hosted onboarding member activation", () => {
       activated: false,
       hostedExecutionEventId: "member.activated:stripe.customer.subscription.updated:member_123:evt_123",
       memberId: "member_123",
-      postCommitProvisionUserId: "member_123",
     });
 
     expect(mocks.updateHostedMemberCoreState).not.toHaveBeenCalled();
     expect(mocks.resolveHostedMemberActivationLinqRoute).not.toHaveBeenCalled();
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
-  });
-
-  it("runs the shared post-commit crypto provision helper only when activation scheduled it", async () => {
-    await expect(
-      runHostedMemberActivationPostCommitEffects({
-        postCommitProvisionUserId: null,
-      }),
-    ).resolves.toBeUndefined();
-
-    expect(mocks.provisionManagedUserCryptoInHostedExecution).not.toHaveBeenCalled();
-
-    await expect(
-      runHostedMemberActivationPostCommitEffects({
-        postCommitProvisionUserId: "member_123",
-      }),
-    ).resolves.toBeUndefined();
-
-    expect(mocks.provisionManagedUserCryptoInHostedExecution).toHaveBeenCalledWith("member_123");
   });
 });
 

@@ -3,9 +3,6 @@ import {
   type CloudflareHostedControlClient,
 } from "@murphai/cloudflare-hosted-control/client";
 import type {
-  CloudflareHostedManagedUserCryptoStatus,
-} from "@murphai/cloudflare-hosted-control/contracts";
-import type {
   HostedExecutionDispatchRequest,
 } from "@murphai/hosted-execution/contracts";
 import type {
@@ -20,22 +17,11 @@ import { createHostedExecutionVercelOidcBearerTokenProvider } from "./auth-adapt
 import { readHostedExecutionControlBaseUrl } from "./environment";
 import { formatHostedExecutionSafeLogError } from "./logging";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
-import {
-  deriveHostedOnboardingTimingErrorName,
-  finishHostedOnboardingTiming,
-  startHostedOnboardingTiming,
-} from "../hosted-onboarding/logging";
 
 export interface HostedVerifiedEmailSyncResult {
   emailAddress: string;
   verifiedAt: string;
 }
-
-export type HostedManagedUserCryptoWarmupTrigger =
-  | "billing-checkout-route"
-  | "privy-complete-checkout";
-
-export type HostedDeferredWorkScheduler = (callback: () => Promise<void> | void) => void;
 
 export function readHostedExecutionControlClientIfConfigured(
   timeoutMs?: number,
@@ -130,65 +116,5 @@ export async function hasHostedVerifiedEmailUserEnv(userId: string): Promise<boo
       formatHostedExecutionSafeLogError(error),
     );
     return null;
-  }
-}
-
-export async function provisionManagedUserCryptoInHostedExecution(
-  userId: string,
-): Promise<CloudflareHostedManagedUserCryptoStatus> {
-  return requireHostedExecutionControlClient().provisionManagedUserCrypto(userId);
-}
-
-export async function preProvisionManagedUserCryptoInHostedExecutionBestEffort(input: {
-  trigger: HostedManagedUserCryptoWarmupTrigger;
-  userId: string;
-}): Promise<boolean> {
-  const timing = startHostedOnboardingTiming("hosted-onboarding.crypto-warmup", {
-    trigger: input.trigger,
-  });
-  const client = readHostedExecutionControlClientIfConfigured();
-
-  if (!client) {
-    finishHostedOnboardingTiming(timing, "skipped", {
-      reason: "control-unconfigured",
-    });
-    return false;
-  }
-
-  try {
-    await client.provisionManagedUserCrypto(input.userId);
-    finishHostedOnboardingTiming(timing, "completed");
-    return true;
-  } catch (error) {
-    finishHostedOnboardingTiming(timing, "failed", {
-      errorName: deriveHostedOnboardingTimingErrorName(error),
-    });
-    console.error(
-      `Hosted managed user crypto warmup failed during ${input.trigger}.`,
-      formatHostedExecutionSafeLogError(error),
-    );
-    return false;
-  }
-}
-
-export function scheduleManagedUserCryptoWarmupBestEffort(input: {
-  schedule: HostedDeferredWorkScheduler;
-  trigger: HostedManagedUserCryptoWarmupTrigger;
-  userId: string;
-}): "after" | "fallback-inline" {
-  const runWarmup = () => preProvisionManagedUserCryptoInHostedExecutionBestEffort(input);
-
-  try {
-    input.schedule(async () => {
-      await runWarmup();
-    });
-    return "after";
-  } catch (error) {
-    console.error(
-      `Hosted managed user crypto warmup scheduling failed during ${input.trigger}. Falling back to inline dispatch.`,
-      formatHostedExecutionSafeLogError(error),
-    );
-    void runWarmup();
-    return "fallback-inline";
   }
 }

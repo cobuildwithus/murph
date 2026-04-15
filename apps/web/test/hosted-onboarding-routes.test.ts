@@ -5,14 +5,11 @@ import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
 import { hostedWebConfigurationError } from "../src/lib/hosted-web/encryption";
 
 const mocks = vi.hoisted(() => ({
-  after: vi.fn(),
   abortHostedInvitePhoneCode: vi.fn(),
   assertHostedOnboardingMutationOrigin: vi.fn(),
   completeHostedPrivyVerification: vi.fn(),
   confirmHostedInvitePhoneCode: vi.fn(),
   createHostedBillingCheckout: vi.fn(),
-  preProvisionManagedUserCryptoInHostedExecutionBestEffort: vi.fn(),
-  scheduleManagedUserCryptoWarmupBestEffort: vi.fn(),
   prepareHostedInvitePhoneCode: vi.fn(),
   requirePrivyCompletionSession: vi.fn(),
   requireHostedInviteCodeFromRequest: vi.fn(),
@@ -21,15 +18,6 @@ const mocks = vi.hoisted(() => ({
     hostedOnboardingPublicBaseUrl: "https://join.example.test" as string | null,
   },
 }));
-
-vi.mock("next/server", async () => {
-  const actual = await vi.importActual<typeof import("next/server")>("next/server");
-
-  return {
-    ...actual,
-    after: mocks.after,
-  };
-});
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", async () => {
   const actual = await vi.importActual<typeof import("@/src/lib/hosted-onboarding/runtime")>(
@@ -51,13 +39,6 @@ vi.mock("@/src/lib/hosted-onboarding/member-service", () => ({
 
 vi.mock("@/src/lib/hosted-onboarding/billing-service", () => ({
   createHostedBillingCheckout: mocks.createHostedBillingCheckout,
-}));
-
-vi.mock("@/src/lib/hosted-execution/control", () => ({
-  preProvisionManagedUserCryptoInHostedExecutionBestEffort:
-    mocks.preProvisionManagedUserCryptoInHostedExecutionBestEffort,
-  scheduleManagedUserCryptoWarmupBestEffort:
-    mocks.scheduleManagedUserCryptoWarmupBestEffort,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/invite-service", async () => {
@@ -122,35 +103,6 @@ describe("hosted onboarding routes", () => {
   beforeEach(() => {
     setHostedOnboardingTestNodeEnv(ORIGINAL_NODE_ENV);
     vi.clearAllMocks();
-    mocks.after.mockImplementation((callback: () => void | Promise<void>) => {
-      const result = callback();
-
-      if (result && typeof (result as Promise<void>).catch === "function") {
-        void (result as Promise<void>).catch(() => {});
-      }
-    });
-    mocks.scheduleManagedUserCryptoWarmupBestEffort.mockImplementation(
-      (input: {
-        schedule: (callback: () => Promise<void> | void) => void;
-        trigger: string;
-        userId: string;
-      }) => {
-        const { schedule, ...warmupInput } = input;
-        try {
-          schedule(() =>
-            mocks.preProvisionManagedUserCryptoInHostedExecutionBestEffort(warmupInput),
-          );
-          return "after";
-        } catch (error) {
-          console.error(
-            `Hosted managed user crypto warmup scheduling failed during ${warmupInput.trigger}. Falling back to inline dispatch.`,
-            error instanceof Error ? error.message : String(error),
-          );
-          void mocks.preProvisionManagedUserCryptoInHostedExecutionBestEffort(warmupInput);
-          return "fallback-inline";
-        }
-      },
-    );
     mocks.requirePrivyCompletionSession.mockResolvedValue({
       identity: {
         phone: {
@@ -182,7 +134,6 @@ describe("hosted onboarding routes", () => {
       alreadyActive: false,
       url: "https://billing.example.test/session_123",
     });
-    mocks.preProvisionManagedUserCryptoInHostedExecutionBestEffort.mockResolvedValue(true);
     mocks.confirmHostedInvitePhoneCode.mockResolvedValue({
       ok: true,
     });
