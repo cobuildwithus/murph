@@ -30,19 +30,21 @@ describe('assistant provider registry attempts', () => {
       'Codex OSS',
     )
     expect(resolveAssistantProviderTargetCapabilities({ oss: true })).toEqual({
+      supportedUserMessageContentTypes: ['text', 'image'],
       supportsModelDiscovery: false,
       supportsNativeResume: true,
       supportsReasoningEffort: true,
-      supportsRichUserMessageContent: false,
+      supportsRichUserMessageContent: true,
       supportsZeroDataRetention: false,
     })
     expect(resolveAssistantProviderTargetExecutionCapabilities({ oss: true })).toEqual({
       murphCommandSurface: 'direct-cli',
       requestFormat: 'flat-prompt',
+      supportedUserMessageContentTypes: ['text', 'image'],
       supportsModelDiscovery: false,
       supportsNativeResume: true,
       supportsReasoningEffort: true,
-      supportsRichUserMessageContent: false,
+      supportsRichUserMessageContent: true,
       supportsZeroDataRetention: false,
       supportsToolRuntime: false,
     })
@@ -59,6 +61,7 @@ describe('assistant provider registry attempts', () => {
     expect(
       resolveAssistantProviderTargetCapabilities(inferredOpenAiTarget),
     ).toEqual({
+      supportedUserMessageContentTypes: ['text', 'image', 'file'],
       supportsModelDiscovery: true,
       supportsNativeResume: false,
       supportsReasoningEffort: false,
@@ -70,6 +73,7 @@ describe('assistant provider registry attempts', () => {
     ).toEqual({
       murphCommandSurface: 'bound-tools',
       requestFormat: 'messages',
+      supportedUserMessageContentTypes: ['text', 'image', 'file'],
       supportsModelDiscovery: true,
       supportsNativeResume: false,
       supportsReasoningEffort: false,

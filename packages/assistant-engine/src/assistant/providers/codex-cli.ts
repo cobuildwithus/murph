@@ -13,17 +13,29 @@ import {
   mergeCodexConfigOverrides,
   resolveAssistantProviderPrompt,
 } from './helpers.js'
-import type { AssistantProviderDefinition } from './types.js'
-import type { AssistantUserMessageContentPart } from '../../model-harness.js'
+import {
+  supportsAnyAssistantRichUserMessageContent,
+  type AssistantProviderDefinition,
+} from './types.js'
+import type {
+  AssistantModelImagePart,
+  AssistantUserMessageContentPart,
+} from '../../model-harness.js'
+import type { CodexExecImageInput } from '../../assistant-codex.js'
+import { fileURLToPath } from 'node:url'
 
 export const codexCliProviderDefinition: AssistantProviderDefinition = {
   capabilities: {
     murphCommandSurface: 'direct-cli',
     requestFormat: 'flat-prompt',
+    supportedUserMessageContentTypes: ['text', 'image'],
     supportsModelDiscovery: false,
     supportsNativeResume: true,
     supportsReasoningEffort: true,
-    supportsRichUserMessageContent: false,
+    supportsRichUserMessageContent: supportsAnyAssistantRichUserMessageContent([
+      'text',
+      'image',
+    ]),
     supportsZeroDataRetention: false,
     supportsToolRuntime: false,
   },
@@ -116,19 +128,99 @@ export const codexCliProviderDefinition: AssistantProviderDefinition = {
 
 function extractCodexUserMessageImages(
   userMessageContent: readonly AssistantUserMessageContentPart[] | null | undefined,
-) {
-  const images = (userMessageContent ?? []).flatMap((part) => {
+) : readonly CodexExecImageInput[] | undefined {
+  const images: CodexExecImageInput[] = []
+
+  for (const part of userMessageContent ?? []) {
     if (part.type !== 'image') {
-      return []
+      continue
     }
 
-    return [
-      {
-        data: part.image,
+    images.push(
+      toCodexExecImageInput({
+        image: part.image,
         mimeType: part.mimeType ?? part.mediaType ?? null,
-      },
-    ]
-  })
+      }),
+    )
+  }
 
   return images.length > 0 ? images : undefined
+}
+
+function toCodexExecImageInput(input: {
+  image: AssistantModelImagePart['image']
+  mimeType: string | null
+}): CodexExecImageInput {
+  if (typeof input.image === 'string') {
+    if (input.image.startsWith('data:')) {
+      return {
+        bytes: decodeCodexDataUrlToBytes(input.image),
+        mimeType: input.mimeType,
+      }
+    }
+
+    return {
+      path: input.image,
+      mimeType: input.mimeType,
+    }
+  }
+
+  if (input.image instanceof URL) {
+    if (input.image.protocol === 'data:') {
+      return {
+        bytes: decodeCodexDataUrlToBytes(input.image.href),
+        mimeType: input.mimeType,
+      }
+    }
+
+    if (input.image.protocol === 'file:') {
+      return {
+        path: fileURLToPath(input.image),
+        mimeType: input.mimeType,
+      }
+    }
+
+    throw new VaultCliError(
+      'ASSISTANT_CODEX_IMAGE_INVALID',
+      `Codex CLI image input does not support URL scheme "${input.image.protocol}".`,
+    )
+  }
+
+  if (input.image instanceof ArrayBuffer) {
+    return {
+      bytes: new Uint8Array(input.image),
+      mimeType: input.mimeType,
+    }
+  }
+
+  return {
+    bytes: input.image,
+    mimeType: input.mimeType,
+  }
+}
+
+function decodeCodexDataUrlToBytes(dataUrl: string): Uint8Array {
+  const match = /^data:([^,]*?),(.*)$/su.exec(dataUrl)
+  if (!match) {
+    throw new VaultCliError(
+      'ASSISTANT_CODEX_IMAGE_INVALID',
+      'Codex CLI image input data URL is malformed.',
+    )
+  }
+
+  const metadata = match[1] ?? ''
+  const payload = match[2] ?? ''
+  const metadataParts = metadata
+    .split(';')
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0)
+
+  if (metadataParts.includes('base64')) {
+    return Uint8Array.from(Buffer.from(payload, 'base64'))
+  }
+
+  throw new VaultCliError(
+    'ASSISTANT_CODEX_IMAGE_INVALID',
+    'Codex CLI image input data URLs must use base64 encoding.',
+  )
 }

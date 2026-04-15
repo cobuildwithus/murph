@@ -333,10 +333,12 @@ function resolveAssistantCatalogModelCapabilities(
   profile: AssistantProviderProfile,
   capabilities: AssistantProviderCapabilities,
 ): AssistantCatalogModel['capabilities'] {
+  const supportedContentTypes = new Set(capabilities.supportedUserMessageContentTypes)
+
   if (profile.provider === 'codex-cli') {
     return {
-      images: false,
-      pdf: false,
+      images: supportedContentTypes.has('image'),
+      pdf: supportedContentTypes.has('file'),
       reasoning: true,
       streaming: true,
       tools: true,
@@ -344,8 +346,8 @@ function resolveAssistantCatalogModelCapabilities(
   }
 
   return {
-    images: false,
-    pdf: false,
+    images: supportedContentTypes.has('image'),
+    pdf: supportedContentTypes.has('file'),
     reasoning: capabilities.supportsReasoningEffort,
     streaming: true,
     tools: true,

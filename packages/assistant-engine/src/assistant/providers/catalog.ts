@@ -7,7 +7,7 @@ import type {
 const MAX_DISCOVERED_MODELS = 12
 
 export const DEFAULT_CODEX_MODEL_CAPABILITIES: AssistantModelCapabilities = {
-  images: false,
+  images: true,
   pdf: false,
   reasoning: true,
   streaming: true,
@@ -15,8 +15,8 @@ export const DEFAULT_CODEX_MODEL_CAPABILITIES: AssistantModelCapabilities = {
 }
 
 export const DEFAULT_OPENAI_COMPATIBLE_MODEL_CAPABILITIES: AssistantModelCapabilities = {
-  images: false,
-  pdf: false,
+  images: true,
+  pdf: true,
   reasoning: false,
   streaming: true,
   tools: true,

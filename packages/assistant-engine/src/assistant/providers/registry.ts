@@ -13,6 +13,7 @@ import {
 import { codexCliProviderDefinition } from './codex-cli.js'
 import { createCatalogModel } from './catalog.js'
 import { openAiCompatibleProviderDefinition } from './openai-compatible.js'
+import { supportsAnyAssistantRichUserMessageContent } from './types.js'
 import type {
   AssistantCatalogModel,
   AssistantModelCapabilities,
@@ -27,6 +28,7 @@ import type {
   AssistantProviderTurnExecutionInput,
   AssistantProviderTurnExecutionResult,
   AssistantProviderTurnInput,
+  AssistantUserMessageContentType,
 } from './types.js'
 
 const ASSISTANT_PROVIDER_DEFINITIONS: Readonly<Record<
@@ -274,10 +276,13 @@ function stripAssistantProviderExecutionCapabilities(
   capabilities: AssistantProviderExecutionCapabilities,
 ): AssistantProviderCapabilities {
   return {
+    supportedUserMessageContentTypes: [...capabilities.supportedUserMessageContentTypes],
     supportsModelDiscovery: capabilities.supportsModelDiscovery,
     supportsNativeResume: capabilities.supportsNativeResume,
     supportsReasoningEffort: capabilities.supportsReasoningEffort,
-    supportsRichUserMessageContent: capabilities.supportsRichUserMessageContent,
+    supportsRichUserMessageContent: supportsAnyAssistantRichUserMessageContent(
+      capabilities.supportedUserMessageContentTypes,
+    ),
     supportsZeroDataRetention: capabilities.supportsZeroDataRetention,
   }
 }

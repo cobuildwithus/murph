@@ -1,6 +1,7 @@
 import type { AssistantUserMessageContentPart } from '../model-harness.js'
 import type { ResolvedAssistantFailoverRoute } from './failover.js'
 import { resolveAssistantProviderTargetCapabilities } from './provider-registry.js'
+import type { AssistantUserMessageContentType } from './providers/types.js'
 
 export function hasAssistantRichUserMessageContent(
   userMessageContent: readonly AssistantUserMessageContentPart[] | null | undefined,
@@ -73,6 +74,15 @@ export function assistantRouteSupportsRichUserMessageContent(
   }).supportsRichUserMessageContent
 }
 
+export function resolveAssistantRouteSupportedUserMessageContentTypes(
+  route: ResolvedAssistantFailoverRoute,
+): readonly AssistantUserMessageContentType[] {
+  return resolveAssistantProviderTargetCapabilities({
+    provider: route.provider,
+    ...route.providerOptions,
+  }).supportedUserMessageContentTypes
+}
+
 function normalizeAssistantUserMessageContent(
   userMessageContent: readonly AssistantUserMessageContentPart[] | null | undefined,
 ): AssistantUserMessageContentPart[] | null {
@@ -96,16 +106,12 @@ function filterAssistantRouteUserMessageContent(input: {
   route: ResolvedAssistantFailoverRoute
   userMessageContent: readonly AssistantUserMessageContentPart[]
 }): AssistantUserMessageContentPart[] {
-  if (assistantRouteSupportsRichUserMessageContent(input.route)) {
-    return [...input.userMessageContent]
-  }
+  const supportedTypes = new Set(
+    resolveAssistantRouteSupportedUserMessageContentTypes(input.route),
+  )
 
   return input.userMessageContent.flatMap<AssistantUserMessageContentPart>((part) => {
-    if (part.type === 'text') {
-      return [part]
-    }
-
-    if (input.route.provider === 'codex-cli' && part.type === 'image') {
+    if (supportedTypes.has(part.type)) {
       return [part]
     }
 

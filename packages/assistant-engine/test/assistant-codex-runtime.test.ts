@@ -237,7 +237,7 @@ describe('assistant codex runtime', () => {
         },
         images: [
           {
-            data: imageBytes,
+            bytes: imageBytes,
             mimeType: 'image/jpeg',
           },
         ],
@@ -287,6 +287,66 @@ describe('assistant codex runtime', () => {
         ],
       }),
     )
+  })
+
+  it('passes readable image paths through to Codex without rematerializing them', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-path-image-')
+    const imagePath = path.join(workingDirectory, 'evidence.png')
+
+    await writeFile(imagePath, Buffer.from([0x89, 0x50, 0x4e, 0x47]))
+
+    codexMocks.spawn.mockImplementation((_command, args) => {
+      const child = new MockChildProcess()
+
+      queueMicrotask(() => {
+        expect(readImagePath(args)).toBe(imagePath)
+        child.emit('close', 0, null)
+      })
+
+      return child
+    })
+
+    await expect(
+      executeCodexPrompt({
+        images: [
+          {
+            path: imagePath,
+            mimeType: 'image/png',
+          },
+        ],
+        prompt: 'use the existing image path',
+        workingDirectory,
+      }),
+    ).resolves.toMatchObject({
+      finalMessage: '',
+      sessionId: null,
+    })
+  })
+
+  it('rejects unreadable image paths before spawning Codex', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-unreadable-image-')
+    const imagePath = path.join(workingDirectory, 'private.png')
+
+    await writeFile(imagePath, Buffer.from([0x89, 0x50, 0x4e, 0x47]))
+    await chmod(imagePath, 0o000)
+
+    await expect(
+      executeCodexPrompt({
+        images: [
+          {
+            path: imagePath,
+            mimeType: 'image/png',
+          },
+        ],
+        prompt: 'fail on unreadable path',
+        workingDirectory,
+      }),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_CODEX_IMAGE_INVALID',
+      message: `Codex CLI image input path is not readable: ${imagePath}`,
+    })
+
+    expect(codexMocks.spawn).not.toHaveBeenCalled()
   })
 
   it('falls back to streamed assistant text when the output file is missing', async () => {
