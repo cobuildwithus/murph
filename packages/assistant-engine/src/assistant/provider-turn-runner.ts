@@ -32,6 +32,7 @@ import {
   buildAssistantNotificationDecisionSystemPrompt,
   buildAssistantSystemPrompt,
 } from './system-prompt.js'
+import { resolveAssistantModelBehaviorProfile } from './model-behavior.js'
 import { errorMessage } from './shared.js'
 import { resolveAssistantCliSurfaceBootstrapContext } from './cli-surface-bootstrap.js'
 import { buildAssistantVaultOverviewBlock } from './vault-overview.js'
@@ -472,6 +473,9 @@ async function resolveAssistantRouteTurnPlan(input: {
             currentLocalDate: input.promptTimeContext.currentLocalDate,
             currentTimeZone: input.promptTimeContext.currentTimeZone,
             firstTurnCheckIn: shouldInjectFirstTurnCheckIn,
+            modelBehaviorProfile: resolveAssistantModelBehaviorProfile(
+              input.route.providerOptions,
+            ),
             turnTrigger: input.input.turnTrigger ?? null,
             vaultOverview,
           }),

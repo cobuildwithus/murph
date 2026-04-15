@@ -6,6 +6,10 @@ import type { AssistantTurnTrigger } from "@murphai/operator-config/assistant-cl
 import type { AssistantMurphCommandAccessMode } from "./providers/types.js";
 import { isAssistantUserFacingChannel } from "./channel-presentation.js";
 import { ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE } from "./first-contact-welcome.js";
+import {
+  buildAssistantExecutionBehaviorText,
+  type AssistantModelBehaviorProfile,
+} from "./model-behavior.js";
 
 export interface AssistantSystemPromptInput {
   assistantCliContract: string | null;
@@ -18,6 +22,7 @@ export interface AssistantSystemPromptInput {
   currentLocalDate: string;
   currentTimeZone: string;
   firstTurnCheckIn: boolean;
+  modelBehaviorProfile: AssistantModelBehaviorProfile;
   turnTrigger?: AssistantTurnTrigger | null;
   vaultOverview?: string | null;
 }
@@ -57,6 +62,9 @@ export function buildAssistantSystemPrompt(
       assistantCommandAccessMode: input.assistantCommandAccessMode,
       assistantHostedDeviceConnectAvailable:
         input.assistantHostedDeviceConnectAvailable ?? false,
+    }),
+    buildAssistantExecutionBehaviorText({
+      profile: input.modelBehaviorProfile,
     }),
     input.vaultOverview ?? null,
     buildAssistantAudienceSafetyText(input.allowSensitiveHealthContext),
