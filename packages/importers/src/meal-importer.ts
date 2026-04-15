@@ -1,4 +1,9 @@
-import { type MealNutrition, mealNutritionSchema } from "@murphai/contracts";
+import {
+  type EventSource,
+  type MealNutrition,
+  eventSourceSchema,
+  mealNutritionSchema,
+} from "@murphai/contracts";
 import { z } from "zod";
 
 import { assertCanonicalWritePort } from "./core-port.ts";
@@ -18,7 +23,7 @@ export interface MealImportInput {
   vaultRoot?: string;
   occurredAt?: string | number | Date;
   note?: string;
-  source?: string;
+  source?: EventSource;
   ingredients?: string[];
   nutrition?: MealNutrition;
 }
@@ -34,7 +39,7 @@ const mealImportInputSchema = z
     vaultRoot: optionalTrimmedStringSchema("vaultRoot"),
     occurredAt: optionalTimestampSchema("occurredAt"),
     note: optionalTrimmedStringSchema("note"),
-    source: optionalTrimmedStringSchema("source"),
+    source: optionalTrimmedStringSchema("source").pipe(eventSourceSchema.optional()),
     ingredients: optionalStringListSchema("ingredients"),
     nutrition: mealNutritionSchema.optional(),
   })
