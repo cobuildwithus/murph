@@ -1,6 +1,6 @@
 # Data Model Seams
 
-Last verified: 2026-04-12
+Last verified: 2026-04-14
 
 ## Implemented in this patch
 
@@ -468,6 +468,26 @@ The hosted-execution package owns the real payload/storage model (`HostedExecuti
 Web does not redefine inline-vs-reference payload semantics; it just adapts the shared owner to Prisma.
 
 **Main failure mode if changed poorly:** moving the payload model back into web or letting Prisma types leak into the shared hosted-execution package would recreate a cross-layer contract fork and make Cloudflare/web rollouts harder to keep aligned.
+
+### 24. Keep locally persisted assistant cron routes and schedules owned by the canonical automation contract
+
+**Seam:** `packages/contracts/src/automation.ts`, `packages/operator-config/src/assistant-cli-contracts.ts`, `packages/operator-config/src/operator-config/self-delivery-targets.ts`, `packages/assistant-engine/src/assistant/cron.ts`
+
+The local assistant cron store and saved self-delivery defaults were still restating the same persisted schedule records and the same saved-route record that `@murphai/contracts` already owns for canonical vault automations.
+That left one product concept looking local to operator-config again even though the local files and the vault are both carrying the same schedule and saved-routing meaning.
+
+This patch:
+
+- reuses `automationScheduleKindValues`, `automationSchedule*Schema`, `automationScheduleSchema`, `AutomationSchedule`, `automationRouteSchema`, and `AutomationRoute` from `packages/contracts/src/automation.ts`
+- makes `assistantSelfDeliveryTargetSchema` a direct alias of the canonical automation route, while `assistantCronTargetSchema` now composes the shared route fields and keeps only the local deltas it actually needs (`channel` may be null for route-less local jobs, plus `alias` and `sessionId`)
+- keeps the CLI-only cron input schema that still allows an omitted `timeZone` before persistence
+- adds `packages/operator-config/test/assistant-cli-contracts.test.ts` to lock the seam so future route/schedule changes flow from the canonical owner into local assistant state without a second schema edit pass
+
+**Why this is simpler:** vault automations and local assistant state now share one owner for the real persisted schedule meaning and for saved outbound routes.
+The local cron layer keeps only the selector fields and the one route-less case it actually needs for local-only jobs.
+
+**Main refactor risk:** do not collapse the input-only cron schema into the persisted owner by making `timeZone` optional everywhere.
+That would weaken the canonical stored schedule contract instead of narrowing local duplication.
 
 #### C. Keep the canonical preferences document owned by contracts/core with thin workflow adapters
 
