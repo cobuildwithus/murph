@@ -267,13 +267,15 @@ test('resolveAssistantProviderDefaults only returns the active saved backend tar
 
 test('resolveAssistantProviderCapabilities reports shared backend-facing capabilities', () => {
   assert.deepEqual(resolveAssistantProviderCapabilities('codex-cli'), {
+    supportedUserMessageContentTypes: ['text', 'image'],
     supportsModelDiscovery: false,
     supportsNativeResume: true,
     supportsReasoningEffort: true,
-    supportsRichUserMessageContent: false,
+    supportsRichUserMessageContent: true,
     supportsZeroDataRetention: false,
   })
   assert.deepEqual(resolveAssistantProviderCapabilities('openai-compatible'), {
+    supportedUserMessageContentTypes: ['text', 'image', 'file'],
     supportsModelDiscovery: true,
     supportsNativeResume: false,
     supportsReasoningEffort: false,
@@ -292,6 +294,7 @@ test('resolveAssistantTargetCapabilities enables reasoning effort for OpenAI-com
       providerName: 'openai',
     }),
     {
+      supportedUserMessageContentTypes: ['text', 'image', 'file'],
       supportsModelDiscovery: true,
       supportsNativeResume: true,
       supportsReasoningEffort: true,
@@ -307,6 +310,7 @@ test('resolveAssistantTargetCapabilities enables reasoning effort for OpenAI-com
       providerName: 'ollama',
     }),
     {
+      supportedUserMessageContentTypes: ['text', 'image', 'file'],
       supportsModelDiscovery: true,
       supportsNativeResume: false,
       supportsReasoningEffort: false,
@@ -385,8 +389,8 @@ test('resolveAssistantModelCatalog normalizes discovery objects for official Ope
           description: 'Discovered from OpenAI.',
           source: 'discovered',
           capabilities: {
-            images: false,
-            pdf: false,
+            images: true,
+            pdf: true,
             reasoning: false,
             streaming: true,
             tools: true,
@@ -704,7 +708,7 @@ test('executeAssistantProviderTurn forwards image attachments to the Codex adapt
   const call = providerMocks.executeCodexPrompt.mock.calls[0]?.[0]
   assert.deepEqual(call?.images, [
     {
-      data: imageBytes,
+      bytes: imageBytes,
       mimeType: 'image/png',
     },
   ])
@@ -1763,8 +1767,8 @@ function createDiscoveryResult(
       description: `Discovered ${id}.`,
       source: 'discovered',
       capabilities: {
-        images: false,
-        pdf: false,
+        images: true,
+        pdf: true,
         reasoning: false,
         streaming: true,
         tools: true,

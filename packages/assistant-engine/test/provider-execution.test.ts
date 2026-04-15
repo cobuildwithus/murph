@@ -1152,4 +1152,297 @@ describe('codexCliProviderDefinition', () => {
       }),
     )
   })
+
+  it('rethrows non-stale Codex execution failures without retrying', async () => {
+    providerMocks.prepareAssistantDirectCliEnv.mockReturnValue({
+      PATH: '/prepared/bin',
+    })
+    providerMocks.executeCodexPrompt.mockRejectedValue(
+      new VaultCliError(
+        'ASSISTANT_CODEX_EXECUTION_FAILED',
+        'Codex CLI failed to execute the prompt.',
+      ),
+    )
+
+    await expect(
+      codexCliProviderDefinition.executeTurn({
+        env: {},
+        prompt: '  fail without retry  ',
+        providerConfig: normalizeAssistantProviderConfig({
+          provider: 'codex-cli',
+          model: 'codex-mini',
+          oss: false,
+        }),
+        resumeProviderSessionId: 'resume-session',
+        workingDirectory: WORKING_DIRECTORY,
+      }),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_CODEX_EXECUTION_FAILED',
+      message: 'Codex CLI failed to execute the prompt.',
+    })
+
+    expect(providerMocks.executeCodexPrompt).toHaveBeenCalledTimes(1)
+    expect(providerMocks.executeCodexPrompt).toHaveBeenCalledWith(
+      expect.objectContaining({
+        resumeSessionId: 'resume-session',
+      }),
+    )
+  })
+
+  it('passes only image user message parts through to the Codex CLI adapter', async () => {
+    providerMocks.prepareAssistantDirectCliEnv.mockReturnValue({
+      PATH: '/prepared/bin',
+    })
+    providerMocks.executeCodexPrompt.mockResolvedValue({
+      finalMessage: 'Image-aware answer',
+      jsonEvents: [],
+      sessionId: 'codex-session-images',
+      stderr: '',
+      stdout: '',
+    })
+
+    await codexCliProviderDefinition.executeTurn({
+      env: {},
+      prompt: '  inspect image evidence  ',
+      providerConfig: normalizeAssistantProviderConfig({
+        provider: 'codex-cli',
+        model: 'codex-mini',
+        oss: false,
+      }),
+      userMessageContent: [
+        {
+          type: 'text',
+          text: 'What is shown here?',
+        },
+        {
+          type: 'image',
+          image: new Uint8Array([1, 2, 3]),
+          mediaType: 'image/png',
+          mimeType: 'image/png',
+        },
+        {
+          type: 'file',
+          data: new Uint8Array([9, 8, 7]),
+          filename: 'report.pdf',
+          mediaType: 'application/pdf',
+        },
+      ],
+      workingDirectory: WORKING_DIRECTORY,
+    })
+
+    expect(providerMocks.executeCodexPrompt).toHaveBeenCalledWith(
+      expect.objectContaining({
+        images: [
+          {
+            bytes: new Uint8Array([1, 2, 3]),
+            mimeType: 'image/png',
+          },
+        ],
+      }),
+    )
+  })
+
+  it('passes filesystem-backed image references through to the Codex CLI adapter', async () => {
+    providerMocks.prepareAssistantDirectCliEnv.mockReturnValue({
+      PATH: '/prepared/bin',
+    })
+    providerMocks.executeCodexPrompt.mockResolvedValue({
+      finalMessage: 'Image-aware answer',
+      jsonEvents: [],
+      sessionId: 'codex-session-paths',
+      stderr: '',
+      stdout: '',
+    })
+
+    await codexCliProviderDefinition.executeTurn({
+      env: {},
+      prompt: '  inspect image evidence  ',
+      providerConfig: normalizeAssistantProviderConfig({
+        provider: 'codex-cli',
+        model: 'codex-mini',
+        oss: false,
+      }),
+      userMessageContent: [
+        {
+          type: 'image',
+          image: '/tmp/evidence.jpg',
+          mediaType: 'image/jpeg',
+          mimeType: 'image/jpeg',
+        },
+        {
+          type: 'image',
+          image: new URL('file:///tmp/evidence-2.png'),
+          mediaType: 'image/png',
+          mimeType: 'image/png',
+        },
+      ],
+      workingDirectory: WORKING_DIRECTORY,
+    })
+
+    expect(providerMocks.executeCodexPrompt).toHaveBeenCalledWith(
+      expect.objectContaining({
+        images: [
+          {
+            path: '/tmp/evidence.jpg',
+            mimeType: 'image/jpeg',
+          },
+          {
+            path: '/tmp/evidence-2.png',
+            mimeType: 'image/png',
+          },
+        ],
+      }),
+    )
+  })
+
+  it('decodes inline data URLs and ArrayBuffers for the Codex CLI adapter', async () => {
+    providerMocks.prepareAssistantDirectCliEnv.mockReturnValue({
+      PATH: '/prepared/bin',
+    })
+    providerMocks.executeCodexPrompt.mockResolvedValue({
+      finalMessage: 'Image-aware answer',
+      jsonEvents: [],
+      sessionId: 'codex-session-inline-images',
+      stderr: '',
+      stdout: '',
+    })
+
+    await codexCliProviderDefinition.executeTurn({
+      env: {},
+      prompt: '  inspect image evidence  ',
+      providerConfig: normalizeAssistantProviderConfig({
+        provider: 'codex-cli',
+        model: 'codex-mini',
+        oss: false,
+      }),
+      userMessageContent: [
+        {
+          type: 'image',
+          image: 'data:image/png;base64,AQID',
+          mediaType: 'image/png',
+          mimeType: 'image/png',
+        },
+        {
+          type: 'image',
+          image: new URL('data:image/jpeg;base64,BAUG'),
+          mediaType: 'image/jpeg',
+          mimeType: 'image/jpeg',
+        },
+        {
+          type: 'image',
+          image: Uint8Array.from([7, 8, 9]).buffer,
+          mediaType: 'image/webp',
+          mimeType: 'image/webp',
+        },
+      ],
+      workingDirectory: WORKING_DIRECTORY,
+    })
+
+    expect(providerMocks.executeCodexPrompt).toHaveBeenCalledWith(
+      expect.objectContaining({
+        images: [
+          {
+            bytes: Uint8Array.from([1, 2, 3]),
+            mimeType: 'image/png',
+          },
+          {
+            bytes: Uint8Array.from([4, 5, 6]),
+            mimeType: 'image/jpeg',
+          },
+          {
+            bytes: Uint8Array.from([7, 8, 9]),
+            mimeType: 'image/webp',
+          },
+        ],
+      }),
+    )
+  })
+
+  it('rejects unsupported remote image URLs for the Codex CLI adapter', async () => {
+    providerMocks.prepareAssistantDirectCliEnv.mockReturnValue({
+      PATH: '/prepared/bin',
+    })
+
+    await expect(
+      codexCliProviderDefinition.executeTurn({
+        env: {},
+        prompt: '  inspect image evidence  ',
+        providerConfig: normalizeAssistantProviderConfig({
+          provider: 'codex-cli',
+          model: 'codex-mini',
+          oss: false,
+        }),
+        userMessageContent: [
+          {
+            type: 'image',
+            image: new URL('https://example.com/evidence.png'),
+            mediaType: 'image/png',
+            mimeType: 'image/png',
+          },
+        ],
+        workingDirectory: WORKING_DIRECTORY,
+      }),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_CODEX_IMAGE_INVALID',
+      message: 'Codex CLI image input does not support URL scheme "https:".',
+    })
+
+    expect(providerMocks.executeCodexPrompt).not.toHaveBeenCalled()
+  })
+
+  it('rejects malformed or non-base64 inline image data for the Codex CLI adapter', async () => {
+    providerMocks.prepareAssistantDirectCliEnv.mockReturnValue({
+      PATH: '/prepared/bin',
+    })
+
+    await expect(
+      codexCliProviderDefinition.executeTurn({
+        env: {},
+        prompt: '  inspect image evidence  ',
+        providerConfig: normalizeAssistantProviderConfig({
+          provider: 'codex-cli',
+          model: 'codex-mini',
+          oss: false,
+        }),
+        userMessageContent: [
+          {
+            type: 'image',
+            image: 'data:image/png,not-base64',
+            mediaType: 'image/png',
+            mimeType: 'image/png',
+          },
+        ],
+        workingDirectory: WORKING_DIRECTORY,
+      }),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_CODEX_IMAGE_INVALID',
+      message: 'Codex CLI image input data URLs must use base64 encoding.',
+    })
+
+    await expect(
+      codexCliProviderDefinition.executeTurn({
+        env: {},
+        prompt: '  inspect image evidence  ',
+        providerConfig: normalizeAssistantProviderConfig({
+          provider: 'codex-cli',
+          model: 'codex-mini',
+          oss: false,
+        }),
+        userMessageContent: [
+          {
+            type: 'image',
+            image: 'data:image/png;base64',
+            mediaType: 'image/png',
+            mimeType: 'image/png',
+          },
+        ],
+        workingDirectory: WORKING_DIRECTORY,
+      }),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_CODEX_IMAGE_INVALID',
+      message: 'Codex CLI image input data URL is malformed.',
+    })
+
+    expect(providerMocks.executeCodexPrompt).not.toHaveBeenCalled()
+  })
 })

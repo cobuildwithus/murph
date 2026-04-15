@@ -48,19 +48,34 @@ const runtimeMocks = vi.hoisted(() => ({
   routeInboxCaptureWithModel: vi.fn(),
   runAssistantChatWithInk: vi.fn(),
   resolveAssistantProviderCapabilities: vi.fn((provider: string) => ({
+    supportedUserMessageContentTypes:
+      provider === 'codex-cli'
+        ? ['text', 'image']
+        : provider === 'openai-compatible'
+          ? ['text', 'image', 'file']
+          : ['text'],
     supportsModelDiscovery: provider === 'openai-compatible',
     supportsNativeResume: true,
     supportsReasoningEffort: provider !== 'openai-compatible',
-    supportsRichUserMessageContent: provider === 'openai-compatible',
+    supportsRichUserMessageContent:
+      provider === 'codex-cli' || provider === 'openai-compatible',
   })),
   resolveAssistantProviderTargetCapabilities: vi.fn(
     (input: { provider?: string | null; baseUrl?: string | null }) => ({
+      supportedUserMessageContentTypes:
+        input?.provider === 'codex-cli'
+          ? ['text', 'image']
+          : input?.provider === 'openai-compatible'
+            ? ['text', 'image', 'file']
+            : ['text'],
       supportsModelDiscovery: input?.provider === 'openai-compatible',
       supportsNativeResume: true,
       supportsReasoningEffort:
         input?.provider === 'codex-cli' ||
         input?.baseUrl === 'https://api.openai.com/v1',
-      supportsRichUserMessageContent: input?.provider === 'openai-compatible',
+      supportsRichUserMessageContent:
+        input?.provider === 'codex-cli' ||
+        input?.provider === 'openai-compatible',
     }),
   ),
 }))
@@ -701,20 +716,35 @@ beforeEach(() => {
   runtimeMocks.runAssistantChatWithInk.mockReset()
   runtimeMocks.resolveAssistantProviderCapabilities.mockReset()
   runtimeMocks.resolveAssistantProviderCapabilities.mockImplementation((provider: string) => ({
+    supportedUserMessageContentTypes:
+      provider === 'codex-cli'
+        ? ['text', 'image']
+        : provider === 'openai-compatible'
+          ? ['text', 'image', 'file']
+          : ['text'],
     supportsModelDiscovery: provider === 'openai-compatible',
     supportsNativeResume: true,
     supportsReasoningEffort: provider !== 'openai-compatible',
-    supportsRichUserMessageContent: provider === 'openai-compatible',
+    supportsRichUserMessageContent:
+      provider === 'codex-cli' || provider === 'openai-compatible',
   }))
   runtimeMocks.resolveAssistantProviderTargetCapabilities.mockReset()
   runtimeMocks.resolveAssistantProviderTargetCapabilities.mockImplementation(
     (input: { provider?: string | null; baseUrl?: string | null }) => ({
+      supportedUserMessageContentTypes:
+        input?.provider === 'codex-cli'
+          ? ['text', 'image']
+          : input?.provider === 'openai-compatible'
+            ? ['text', 'image', 'file']
+            : ['text'],
       supportsModelDiscovery: input?.provider === 'openai-compatible',
       supportsNativeResume: true,
       supportsReasoningEffort:
         input?.provider === 'codex-cli' ||
         input?.baseUrl === 'https://api.openai.com/v1',
-      supportsRichUserMessageContent: input?.provider === 'openai-compatible',
+      supportsRichUserMessageContent:
+        input?.provider === 'codex-cli' ||
+        input?.provider === 'openai-compatible',
     }),
   )
   runtimeMocks.executeAssistantProviderTurnAttempt.mockImplementation(

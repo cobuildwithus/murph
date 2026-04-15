@@ -19,6 +19,13 @@ import type {
 } from '../../model-harness.js'
 
 export type AssistantProviderProgressEvent = SharedAssistantProviderProgressEvent
+export type AssistantUserMessageContentType = AssistantUserMessageContentPart['type']
+
+export function supportsAnyAssistantRichUserMessageContent(
+  supportedTypes: readonly AssistantUserMessageContentType[],
+): boolean {
+  return supportedTypes.some((type) => type !== 'text')
+}
 
 export interface AssistantModelCapabilities {
   images: boolean
@@ -43,6 +50,7 @@ export interface AssistantModelDiscoveryResult {
 }
 
 export interface AssistantProviderCapabilities {
+  supportedUserMessageContentTypes: readonly AssistantUserMessageContentType[]
   supportsModelDiscovery: boolean
   supportsNativeResume: boolean
   supportsReasoningEffort: boolean

@@ -3,7 +3,6 @@ import { constants as fsConstants } from 'node:fs'
 import { access, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
 
 import { normalizeNullableString } from '@murphai/operator-config/text/shared'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
@@ -57,8 +56,9 @@ export interface CodexExecInput {
 }
 
 export interface CodexExecImageInput {
-  data: string | Uint8Array | Buffer | ArrayBuffer | URL
+  bytes?: Uint8Array | Buffer
   mimeType?: string | null
+  path?: string
 }
 
 export interface CodexExecResult {
@@ -477,52 +477,22 @@ async function materializeCodexImagePath(input: {
   index: number
   tempRoot: string
 }): Promise<string> {
-  const source = input.image.data
   const inferredMimeType = normalizeNullableString(input.image.mimeType)
-
-  if (typeof source === 'string') {
-    if (source.startsWith('data:')) {
-      const decoded = decodeCodexDataUrl(source)
-      return writeCodexImageBytes({
-        bytes: decoded.bytes,
-        index: input.index,
-        mimeType: inferredMimeType ?? decoded.mimeType,
-        tempRoot: input.tempRoot,
-      })
-    }
-
-    return resolveReadableCodexImagePath(source)
+  const normalizedPath = normalizeNullableString(input.image.path)
+  if (normalizedPath) {
+    return resolveReadableCodexImagePath(normalizedPath)
   }
 
-  if (source instanceof URL) {
-    if (source.protocol === 'data:') {
-      const decoded = decodeCodexDataUrl(source.href)
-      return writeCodexImageBytes({
-        bytes: decoded.bytes,
-        index: input.index,
-        mimeType: inferredMimeType ?? decoded.mimeType,
-        tempRoot: input.tempRoot,
-      })
-    }
-
-    if (source.protocol === 'file:') {
-      return resolveReadableCodexImagePath(fileURLToPath(source))
-    }
-
+  const bytes = input.image.bytes
+  if (!bytes) {
     throw new VaultCliError(
       'ASSISTANT_CODEX_IMAGE_INVALID',
-      `Codex CLI image input does not support URL scheme "${source.protocol}".`,
+      'Codex CLI image input requires either bytes or a readable path.',
     )
   }
 
-  const bytes = Buffer.isBuffer(source)
-    ? source
-    : source instanceof Uint8Array
-      ? Buffer.from(source)
-      : Buffer.from(source)
-
   return writeCodexImageBytes({
-    bytes,
+    bytes: Buffer.from(bytes),
     index: input.index,
     mimeType: inferredMimeType,
     tempRoot: input.tempRoot,
@@ -556,36 +526,6 @@ async function resolveReadableCodexImagePath(candidatePath: string): Promise<str
   }
 
   return resolvedPath
-}
-
-function decodeCodexDataUrl(dataUrl: string): {
-  bytes: Buffer
-  mimeType: string | null
-} {
-  const match = /^data:([^,]*?),(.*)$/su.exec(dataUrl)
-  if (!match) {
-    throw new VaultCliError(
-      'ASSISTANT_CODEX_IMAGE_INVALID',
-      'Codex CLI image input data URL is malformed.',
-    )
-  }
-
-  const metadata = match[1] ?? ''
-  const payload = match[2] ?? ''
-  const metadataParts = metadata
-    .split(';')
-    .map((part) => part.trim())
-    .filter((part) => part.length > 0)
-  const mimeType =
-    metadataParts[0] && metadataParts[0] !== 'base64' ? metadataParts[0] : null
-  const isBase64 = metadataParts.includes('base64')
-
-  return {
-    bytes: isBase64
-      ? Buffer.from(payload, 'base64')
-      : Buffer.from(decodeURIComponent(payload), 'utf8'),
-    mimeType,
-  }
 }
 
 function resolveCodexImageExtension(mimeType: string | null): string {

@@ -45,6 +45,16 @@ const TEXT_AND_FILE_USER_MESSAGE_CONTENT: AssistantUserMessageContentPart[] = [
   },
 ]
 
+const TEXT_IMAGE_FILE_USER_MESSAGE_CONTENT: AssistantUserMessageContentPart[] = [
+  ...TEXT_AND_IMAGE_USER_MESSAGE_CONTENT,
+  {
+    type: 'file',
+    data: new Uint8Array([4, 5, 6]),
+    filename: 'report.pdf',
+    mediaType: 'application/pdf',
+  },
+]
+
 describe('rich-content-routing', () => {
   it('detects when a user message contains multimodal evidence', () => {
     expect(hasAssistantRichUserMessageContent(TEXT_ONLY_USER_MESSAGE_CONTENT)).toBe(false)
@@ -79,13 +89,19 @@ describe('rich-content-routing', () => {
     const codexRoute = createRoute('codex-cli')
     const openAiRoute = createRoute('openai-compatible')
 
-    expect(assistantRouteSupportsRichUserMessageContent(codexRoute)).toBe(false)
+    expect(assistantRouteSupportsRichUserMessageContent(codexRoute)).toBe(true)
     expect(assistantRouteSupportsRichUserMessageContent(openAiRoute)).toBe(true)
 
     expect(
       resolveAssistantRouteUserMessageContent({
         route: openAiRoute,
         userMessageContent: TEXT_AND_IMAGE_USER_MESSAGE_CONTENT,
+      }),
+    ).toEqual(TEXT_AND_IMAGE_USER_MESSAGE_CONTENT)
+    expect(
+      resolveAssistantRouteUserMessageContent({
+        route: codexRoute,
+        userMessageContent: TEXT_IMAGE_FILE_USER_MESSAGE_CONTENT,
       }),
     ).toEqual(TEXT_AND_IMAGE_USER_MESSAGE_CONTENT)
     expect(

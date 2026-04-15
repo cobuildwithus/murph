@@ -484,10 +484,11 @@ describe('assistant provider registry helpers', () => {
     expect(listAssistantProviderDefinitions()).toHaveLength(2)
 
     expect(resolveAssistantProviderCapabilities('codex-cli')).toEqual({
+      supportedUserMessageContentTypes: ['text', 'image'],
       supportsModelDiscovery: false,
       supportsNativeResume: true,
       supportsReasoningEffort: true,
-      supportsRichUserMessageContent: false,
+      supportsRichUserMessageContent: true,
       supportsZeroDataRetention: false,
     })
 
@@ -496,6 +497,7 @@ describe('assistant provider registry helpers', () => {
     ).toEqual({
       murphCommandSurface: 'bound-tools',
       requestFormat: 'messages',
+      supportedUserMessageContentTypes: ['text', 'image', 'file'],
       supportsModelDiscovery: true,
       supportsNativeResume: false,
       supportsReasoningEffort: false,
@@ -511,6 +513,7 @@ describe('assistant provider registry helpers', () => {
         presetId: 'openai',
       }),
     ).toEqual({
+      supportedUserMessageContentTypes: ['text', 'image', 'file'],
       supportsModelDiscovery: true,
       supportsNativeResume: true,
       supportsReasoningEffort: true,
@@ -527,6 +530,7 @@ describe('assistant provider registry helpers', () => {
     ).toEqual({
       murphCommandSurface: 'bound-tools',
       requestFormat: 'messages',
+      supportedUserMessageContentTypes: ['text', 'image', 'file'],
       supportsModelDiscovery: true,
       supportsNativeResume: true,
       supportsReasoningEffort: true,
@@ -595,8 +599,8 @@ describe('assistant provider registry helpers', () => {
       models: [
         {
           capabilities: {
-            images: false,
-            pdf: false,
+            images: true,
+            pdf: true,
             reasoning: false,
             streaming: true,
             tools: true,
@@ -608,8 +612,8 @@ describe('assistant provider registry helpers', () => {
         },
         {
           capabilities: {
-            images: false,
-            pdf: false,
+            images: true,
+            pdf: true,
             reasoning: false,
             streaming: true,
             tools: true,

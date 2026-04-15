@@ -23,7 +23,7 @@ const providerMocks = vi.hoisted(() => ({
             description: 'Frontier model',
             source: 'static',
             capabilities: {
-              images: false,
+              images: true,
               pdf: false,
               reasoning: true,
               streaming: true,
@@ -73,13 +73,16 @@ describe('assistant provider catalog', () => {
 
   it('forwards provider capability resolution through the registry helpers', () => {
     providerMocks.resolveAssistantProviderRegistryCapabilities.mockReturnValueOnce({
+      supportedUserMessageContentTypes: ['text', 'image'],
       supportsReasoningEffort: true,
     })
     providerMocks.resolveAssistantProviderRegistryTargetCapabilities.mockReturnValueOnce({
+      supportedUserMessageContentTypes: ['text', 'image', 'file'],
       supportsReasoningEffort: false,
     })
 
     expect(resolveAssistantProviderCapabilities('codex-cli')).toEqual({
+      supportedUserMessageContentTypes: ['text', 'image'],
       supportsReasoningEffort: true,
     })
     expect(
@@ -87,6 +90,7 @@ describe('assistant provider catalog', () => {
         provider: 'openai-compatible',
       }),
     ).toEqual({
+      supportedUserMessageContentTypes: ['text', 'image', 'file'],
       supportsReasoningEffort: false,
     })
   })
@@ -96,6 +100,7 @@ describe('assistant provider catalog', () => {
       profile.provider === 'codex-cli' ? 'Codex CLI' : 'OpenAI Compatible',
     )
     providerMocks.resolveAssistantProviderRegistryTargetCapabilities.mockReturnValue({
+      supportedUserMessageContentTypes: ['text', 'image'],
       supportsReasoningEffort: true,
     })
     providerMocks.resolveAssistantProviderStaticModels.mockImplementation((profile) =>
@@ -107,7 +112,7 @@ describe('assistant provider catalog', () => {
               description: 'Frontier model',
               source: 'static',
               capabilities: {
-                images: false,
+                images: true,
                 pdf: false,
                 reasoning: true,
                 streaming: true,
@@ -122,8 +127,8 @@ describe('assistant provider catalog', () => {
               description: 'Static compatible model',
               source: 'static',
               capabilities: {
-                images: false,
-                pdf: false,
+                images: true,
+                pdf: true,
                 reasoning: false,
                 streaming: true,
                 tools: true,
@@ -174,6 +179,7 @@ describe('assistant provider catalog', () => {
   it('normalizes discovery capabilities for non-codex providers and discovers compatible models', async () => {
     providerMocks.resolveAssistantProviderLabel.mockReturnValue('OpenAI Compatible')
     providerMocks.resolveAssistantProviderRegistryTargetCapabilities.mockReturnValue({
+      supportedUserMessageContentTypes: ['text', 'image', 'file'],
       supportsReasoningEffort: false,
     })
     providerMocks.resolveAssistantProviderStaticModels.mockReturnValue([
@@ -183,8 +189,8 @@ describe('assistant provider catalog', () => {
         description: 'Static compatible model',
         source: 'static',
         capabilities: {
-          images: false,
-          pdf: false,
+          images: true,
+          pdf: true,
           reasoning: false,
           streaming: true,
           tools: true,
@@ -273,8 +279,8 @@ describe('assistant provider catalog', () => {
 
     expect(catalog.selectedModel?.id).toBe('omni-large')
     expect(catalog.selectedModel?.capabilities).toEqual({
-      images: false,
-      pdf: false,
+      images: true,
+      pdf: true,
       reasoning: false,
       streaming: true,
       tools: true,
@@ -308,6 +314,7 @@ describe('assistant provider catalog', () => {
   it('handles empty catalogs and uses the openai-compatible current-model description branch', () => {
     providerMocks.resolveAssistantProviderLabel.mockReturnValue('OpenAI Compatible')
     providerMocks.resolveAssistantProviderRegistryTargetCapabilities.mockReturnValue({
+      supportedUserMessageContentTypes: ['text', 'image', 'file'],
       supportsReasoningEffort: true,
     })
     providerMocks.resolveAssistantProviderStaticModels.mockReturnValue([])

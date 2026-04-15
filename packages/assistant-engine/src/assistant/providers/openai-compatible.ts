@@ -36,7 +36,10 @@ import {
   supportsAssistantReasoningEffort,
 } from '@murphai/operator-config/assistant/provider-config'
 import { resolveAssistantModelSpecFromProviderConfig } from '../provider-config.js'
-import type { AssistantProviderDefinition } from './types.js'
+import {
+  supportsAnyAssistantRichUserMessageContent,
+  type AssistantProviderDefinition,
+} from './types.js'
 
 const OPENAI_COMPATIBLE_PROVIDER_TIMEOUT_MS = 10 * 60 * 1000
 const OPENAI_COMPATIBLE_PROVIDER_MAX_RETRIES = 2
@@ -47,10 +50,15 @@ export const openAiCompatibleProviderDefinition: AssistantProviderDefinition = {
   capabilities: {
     murphCommandSurface: 'bound-tools',
     requestFormat: 'messages',
+    supportedUserMessageContentTypes: ['text', 'image', 'file'],
     supportsModelDiscovery: true,
     supportsNativeResume: false,
     supportsReasoningEffort: false,
-    supportsRichUserMessageContent: true,
+    supportsRichUserMessageContent: supportsAnyAssistantRichUserMessageContent([
+      'text',
+      'image',
+      'file',
+    ]),
     supportsZeroDataRetention: false,
     supportsToolRuntime: true,
   },
