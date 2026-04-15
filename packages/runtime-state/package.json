@@ -22,6 +22,26 @@
     "./node": {
       "types": "./dist/node/index.d.ts",
       "default": "./dist/node/index.js"
+    },
+    "./node/assistant-usage": {
+      "types": "./dist/node/assistant-usage.d.ts",
+      "default": "./dist/node/assistant-usage.js"
+    },
+    "./node/loopback-control-plane-auth": {
+      "types": "./dist/node/loopback-control-plane-auth.d.ts",
+      "default": "./dist/node/loopback-control-plane-auth.js"
+    },
+    "./node/runtime-paths": {
+      "types": "./dist/node/runtime-paths.d.ts",
+      "default": "./dist/node/runtime-paths.js"
+    },
+    "./node/sqlite-warning-filter": {
+      "types": "./dist/node/sqlite-warning-filter.d.ts",
+      "default": "./dist/node/sqlite-warning-filter.js"
+    },
+    "./node/ulid": {
+      "types": "./dist/node/ulid.d.ts",
+      "default": "./dist/node/ulid.js"
     }
   },
   "files": [

@@ -6,7 +6,7 @@ import {
   parseAssistantUsageRecord,
   type AssistantUsageCredentialSource,
   type AssistantUsageRecord,
-} from "@murphai/runtime-state/node";
+} from "@murphai/runtime-state/node/assistant-usage";
 
 import { readHostedMemberBillingPrivateState } from "../hosted-onboarding/member-private-codecs";
 import { getPrisma } from "../prisma";
