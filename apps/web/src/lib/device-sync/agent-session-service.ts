@@ -17,7 +17,6 @@ import {
   type HostedAgentUser,
 } from "../hosted-agent-sessions";
 import {
-  buildHostedDeviceSyncRuntimeSeedFromPublicAccount,
   requireHostedDeviceSyncStoredTokenBundle,
 } from "./internal-runtime";
 import type { HostedLocalHeartbeatPatch } from "./local-heartbeat";
@@ -28,7 +27,6 @@ import {
   type HostedStoredDeviceSyncAccount,
   PrismaDeviceSyncControlPlaneStore,
 } from "./prisma-store";
-import { readHostedDeviceSyncRuntimeClientIfConfigured } from "./runtime-client";
 import { parseInteger, toIsoTimestamp } from "./shared";
 
 const HOSTED_DEVICE_SYNC_AGENT_PAIR_PATH = "/api/device-sync/agents/pair";
@@ -303,41 +301,6 @@ export class HostedDeviceSyncAgentSessionService {
         tx,
       });
 
-      const runtimeClient = readHostedDeviceSyncRuntimeClientIfConfigured();
-
-      if (runtimeClient) {
-        try {
-          await runtimeClient.applyDeviceSyncRuntimeUpdates(session.userId, {
-            occurredAt: now,
-            updates: [
-              {
-                connection: {
-                  status: "active",
-                },
-                connectionId,
-                localState: {
-                  clearError: true,
-                },
-                observedTokenVersion: currentTokenBundle.tokenVersion,
-                seed: buildHostedDeviceSyncRuntimeSeedFromPublicAccount({
-                  account: nextConnection,
-                  externalAccountId: currentConnection.externalAccountId,
-                  localState: {
-                    lastErrorCode: null,
-                    lastErrorMessage: null,
-                    lastSyncErrorAt: null,
-                  },
-                  tokenBundle: nextStoredTokenBundle,
-                }),
-                tokenBundle: nextStoredTokenBundle,
-              },
-            ],
-          });
-        } catch (error) {
-          console.warn(`Hosted device-sync runtime projection write failed for token refresh ${connectionId}.`, error);
-        }
-      }
-
       return {
         status: "success",
         connection: nextConnection,
@@ -532,46 +495,6 @@ export class HostedDeviceSyncAgentSessionService {
           tx: input.tx,
         });
 
-        const runtimeClient = readHostedDeviceSyncRuntimeClientIfConfigured();
-
-        if (runtimeClient) {
-          try {
-            await runtimeClient.applyDeviceSyncRuntimeUpdates(input.userId, {
-              occurredAt: input.now,
-              updates: [
-                {
-                  connection: {
-                    status: error.accountStatus,
-                  },
-                  connectionId: input.account.id,
-                  localState: {
-                    lastErrorCode: sanitizedErrorCode,
-                    lastErrorMessage: sanitizedErrorMessage,
-                    lastSyncErrorAt: input.now,
-                    ...(error.accountStatus === "disconnected" ? { nextReconcileAt: null } : {}),
-                  },
-                  observedTokenVersion: input.currentTokenBundle.tokenVersion,
-                  seed: buildHostedDeviceSyncRuntimeSeedFromPublicAccount({
-                    account: seedAccount,
-                    externalAccountId: input.account.externalAccountId,
-                    localState: {
-                      lastErrorCode: sanitizedErrorCode,
-                      lastErrorMessage: sanitizedErrorMessage,
-                      lastSyncErrorAt: input.now,
-                      ...(error.accountStatus === "disconnected" ? { nextReconcileAt: null } : {}),
-                    },
-                    tokenBundle: error.accountStatus === "disconnected"
-                      ? null
-                      : { ...input.currentTokenBundle },
-                  }),
-                  ...(error.accountStatus === "disconnected" ? { tokenBundle: null } : {}),
-                },
-              ],
-            });
-          } catch (runtimeError) {
-            console.warn(`Hosted device-sync runtime projection write failed for ${input.account.id}.`, runtimeError);
-          }
-        }
       }
 
       return {

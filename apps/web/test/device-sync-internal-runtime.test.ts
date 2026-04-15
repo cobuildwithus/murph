@@ -185,9 +185,8 @@ describe("device-sync hosted runtime helpers", () => {
     });
   });
 
-  it("redacts secret-bearing hosted runtime error text across heartbeat, apply, projection, and seed helpers", async () => {
+  it("redacts secret-bearing hosted runtime error text across heartbeat, apply, and durable account helpers", async () => {
     const {
-      buildHostedDeviceSyncRuntimeSeedFromPublicAccount,
       buildHostedPublicDeviceSyncAccount,
     } = await import(
       "@/src/lib/device-sync/internal-runtime"
@@ -259,36 +258,6 @@ describe("device-sync hosted runtime helpers", () => {
     })).toMatchObject({
       lastErrorCode: "refresh_token=[redacted]",
       lastErrorMessage: "authorization=[redacted] refresh_token=[redacted] [redacted.jwt]",
-    });
-
-    expect(buildHostedDeviceSyncRuntimeSeedFromPublicAccount({
-      account: {
-        externalAccountId: "oura_alice",
-        id: "dsc_123",
-        provider: "oura",
-        displayName: "Oura",
-        status: "active",
-        scopes: ["heartrate"],
-        accessTokenExpiresAt: null,
-        metadata: {},
-        connectedAt: "2026-03-26T12:00:00.000Z",
-        lastWebhookAt: null,
-        lastSyncStartedAt: null,
-        lastSyncCompletedAt: null,
-        lastSyncErrorAt: "2026-03-26T12:00:00.000Z",
-        lastErrorCode: "id_token=seed-secret",
-        lastErrorMessage: errorText,
-        nextReconcileAt: null,
-        createdAt: "2026-03-26T12:00:00.000Z",
-        updatedAt: "2026-03-26T12:00:00.000Z",
-      },
-      externalAccountId: "oura_alice",
-      tokenBundle: null,
-    })).toMatchObject({
-      localState: {
-        lastErrorCode: "id_token=[redacted]",
-        lastErrorMessage: "authorization=[redacted] refresh_token=[redacted] [redacted.jwt]",
-      },
     });
   });
 });

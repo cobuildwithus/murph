@@ -29,86 +29,12 @@ const SESSION: HostedAgentSessionRecord = {
   replacedBySessionId: null,
 };
 
-const mocks = vi.hoisted(() => ({
-  getDeviceSyncRuntimeSnapshot: vi.fn(),
-  applyDeviceSyncRuntimeUpdates: vi.fn(),
-}));
-
-vi.mock("@/src/lib/device-sync/runtime-client", () => ({
-  requireHostedDeviceSyncRuntimeClient: vi.fn(() => ({
-    applyDeviceSyncRuntimeUpdates: mocks.applyDeviceSyncRuntimeUpdates,
-    getDeviceSyncRuntimeSnapshot: mocks.getDeviceSyncRuntimeSnapshot,
-  })),
-}));
-
 describe("HostedDeviceSyncAgentSessionService.refreshTokenBundle", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
   it("persists provider-directed status changes before surfacing refresh errors", async () => {
-    mocks.getDeviceSyncRuntimeSnapshot.mockResolvedValue({
-      connections: [
-        {
-          connection: {
-            accessTokenExpiresAt: "2026-04-01T00:20:00.000Z",
-            connectedAt: "2026-03-20T00:00:00.000Z",
-            createdAt: "2026-03-20T00:00:00.000Z",
-            displayName: "WHOOP User",
-            externalAccountId: "whoop-user-1",
-            id: "conn-1",
-            metadata: {},
-            provider: "whoop",
-            scopes: ["offline"],
-            status: "active",
-            updatedAt: "2026-03-20T00:00:00.000Z",
-          },
-          localState: {
-            lastErrorCode: null,
-            lastErrorMessage: null,
-            lastSyncCompletedAt: null,
-            lastSyncErrorAt: null,
-            lastSyncStartedAt: null,
-            lastWebhookAt: null,
-            nextReconcileAt: null,
-          },
-          tokenBundle: {
-            accessToken: "access-token",
-            accessTokenExpiresAt: "2026-04-01T00:20:00.000Z",
-            keyVersion: "v1",
-            refreshToken: "refresh-token",
-            tokenVersion: 7,
-          },
-        },
-      ],
-      generatedAt: "2026-04-01T00:00:00.000Z",
-      userId: "user-1",
-    });
-    mocks.applyDeviceSyncRuntimeUpdates.mockResolvedValue({
-      appliedAt: "2026-04-01T00:10:00.000Z",
-      updates: [
-        {
-          connection: {
-            accessTokenExpiresAt: "2026-04-01T00:20:00.000Z",
-            connectedAt: "2026-03-20T00:00:00.000Z",
-            createdAt: "2026-03-20T00:00:00.000Z",
-            displayName: "WHOOP User",
-            externalAccountId: "whoop-user-1",
-            id: "conn-1",
-            metadata: {},
-            provider: "whoop",
-            scopes: ["offline"],
-            status: "reauthorization_required",
-            updatedAt: "2026-04-01T00:10:00.000Z",
-        },
-        connectionId: "conn-1",
-        status: "updated",
-        tokenUpdate: "unchanged",
-        writeUpdate: "applied",
-      },
-    ],
-    userId: "user-1",
-    });
     const tx = {
       deviceConnection: {
         findFirst: vi.fn(async () => createConnectionRecord()),
@@ -196,6 +122,12 @@ describe("HostedDeviceSyncAgentSessionService.refreshTokenBundle", () => {
             },
           });
         },
+        async getStoredConnectionAccountForUser() {
+          return createConnectionRecord();
+        },
+        async persistStoredConnectionTokenBundle() {
+          return;
+        },
         async withConnectionRefreshLock<TResult>(
           _connectionId: string,
           callback: (tx: HostedPrismaTransactionClient) => Promise<TResult>,
@@ -250,173 +182,6 @@ describe("HostedDeviceSyncAgentSessionService.refreshTokenBundle", () => {
         userId: "user-1",
       },
     });
-    expect(mocks.applyDeviceSyncRuntimeUpdates).toHaveBeenCalledTimes(1);
-    expect(mocks.applyDeviceSyncRuntimeUpdates).toHaveBeenCalledWith("user-1", {
-      occurredAt: expect.any(String),
-      updates: [
-        expect.objectContaining({
-          connection: {
-            status: "reauthorization_required",
-          },
-          connectionId: "conn-1",
-          localState: expect.objectContaining({
-            lastErrorCode: "WHOOP_REFRESH_TOKEN_MISSING",
-            lastErrorMessage: "WHOOP refresh token is missing.",
-          }),
-          observedTokenVersion: 7,
-        }),
-      ],
-    });
-    expect(rotateAgentSession).not.toHaveBeenCalled();
-  });
-
-  it("rejects refreshes when the Cloudflare runtime does not persist the expected token bundle", async () => {
-    mocks.getDeviceSyncRuntimeSnapshot
-      .mockResolvedValueOnce({
-        connections: [
-          {
-            connection: {
-              accessTokenExpiresAt: "2026-04-01T00:20:00.000Z",
-              connectedAt: "2026-03-20T00:00:00.000Z",
-              createdAt: "2026-03-20T00:00:00.000Z",
-              displayName: "WHOOP User",
-              externalAccountId: "whoop-user-1",
-              id: "conn-1",
-              metadata: {},
-              provider: "whoop",
-              scopes: ["offline"],
-              status: "active",
-              updatedAt: "2026-03-20T00:00:00.000Z",
-            },
-            localState: {
-              lastErrorCode: null,
-              lastErrorMessage: null,
-              lastSyncCompletedAt: null,
-              lastSyncErrorAt: null,
-              lastSyncStartedAt: null,
-              lastWebhookAt: null,
-              nextReconcileAt: null,
-            },
-            tokenBundle: {
-              accessToken: "access-token",
-              accessTokenExpiresAt: "2026-04-01T00:20:00.000Z",
-              keyVersion: "v1",
-              refreshToken: "refresh-token",
-              tokenVersion: 7,
-            },
-          },
-        ],
-        generatedAt: "2026-04-01T00:00:00.000Z",
-        userId: "user-1",
-      })
-      .mockResolvedValueOnce({
-        connections: [
-          {
-            connection: {
-              accessTokenExpiresAt: "2026-04-01T00:20:00.000Z",
-              connectedAt: "2026-03-20T00:00:00.000Z",
-              createdAt: "2026-03-20T00:00:00.000Z",
-              displayName: "WHOOP User",
-              externalAccountId: "whoop-user-1",
-              id: "conn-1",
-              metadata: {},
-              provider: "whoop",
-              scopes: ["offline"],
-              status: "active",
-              updatedAt: "2026-03-20T00:00:00.000Z",
-            },
-            localState: {
-              lastErrorCode: null,
-              lastErrorMessage: null,
-              lastSyncCompletedAt: null,
-              lastSyncErrorAt: null,
-              lastSyncStartedAt: null,
-              lastWebhookAt: null,
-              nextReconcileAt: null,
-            },
-            tokenBundle: {
-              accessToken: "access-token",
-              accessTokenExpiresAt: "2026-04-01T00:20:00.000Z",
-              keyVersion: "v1",
-              refreshToken: "refresh-token",
-              tokenVersion: 7,
-            },
-          },
-        ],
-        generatedAt: "2026-04-01T00:10:00.000Z",
-        userId: "user-1",
-      });
-    mocks.applyDeviceSyncRuntimeUpdates.mockResolvedValue({
-      appliedAt: "2026-04-01T00:10:00.000Z",
-      updates: [
-        {
-          connection: {
-            accessTokenExpiresAt: "2026-04-02T00:20:00.000Z",
-            connectedAt: "2026-03-20T00:00:00.000Z",
-            createdAt: "2026-03-20T00:00:00.000Z",
-            displayName: "WHOOP User",
-            externalAccountId: "whoop-user-1",
-            id: "conn-1",
-            metadata: {},
-            provider: "whoop",
-            scopes: ["offline"],
-            status: "active",
-            updatedAt: "2026-04-01T00:10:00.000Z",
-        },
-        connectionId: "conn-1",
-        status: "updated",
-        tokenUpdate: "skipped_version_mismatch",
-        writeUpdate: "skipped_version_mismatch",
-      },
-    ],
-    userId: "user-1",
-    });
-    const tx = {
-      deviceConnection: {
-        findFirst: vi.fn(async () => createConnectionRecord()),
-        update: vi.fn(async () => ({
-          ...createConnectionRecord(),
-          accessTokenExpiresAt: new Date("2026-04-02T00:20:00.000Z"),
-          status: "active",
-        })),
-      },
-    };
-    const createTokenAudit = vi.fn(async () => {
-      throw new Error("token audit should not run after a runtime conflict");
-    });
-    const rotateAgentSession = vi.fn(async () => {
-      throw new Error("session rotation should not run after a runtime conflict");
-    });
-    const transactionClient: HostedPrismaTransactionClient = Object.assign(Object.create(null), tx);
-    const store: PrismaDeviceSyncControlPlaneStore = Object.assign(
-      Object.create(PrismaDeviceSyncControlPlaneStore.prototype),
-      {
-        createTokenAudit,
-        async withConnectionRefreshLock<TResult>(
-          _connectionId: string,
-          callback: (tx: HostedPrismaTransactionClient) => Promise<TResult>,
-        ): Promise<TResult> {
-          return callback(transactionClient);
-        },
-        rotateAgentSession,
-      },
-    );
-    const registry = createDeviceSyncRegistry([createWhoopRefreshingProvider()]);
-    const service = new HostedDeviceSyncAgentSessionService({
-      request: new Request("https://murph.example/api/device-sync/agent/connections/conn-1/refresh-token-bundle"),
-      store,
-      registry,
-    });
-
-    await expect(service.refreshTokenBundle(SESSION, "conn-1", { force: true })).rejects.toMatchObject({
-      code: "RUNTIME_STATE_CONFLICT",
-      httpStatus: 409,
-      retryable: true,
-    });
-
-    expect(tx.deviceConnection.update).not.toHaveBeenCalled();
-    expect(mocks.applyDeviceSyncRuntimeUpdates).toHaveBeenCalledTimes(1);
-    expect(createTokenAudit).not.toHaveBeenCalled();
     expect(rotateAgentSession).not.toHaveBeenCalled();
   });
 });
@@ -442,33 +207,6 @@ function createWhoopProvider(): DeviceSyncProvider {
         retryable: false,
         accountStatus: "reauthorization_required",
       });
-    },
-    async executeJob() {
-      return {};
-    },
-  };
-}
-
-function createWhoopRefreshingProvider(): DeviceSyncProvider {
-  return {
-    provider: WHOOP_DEVICE_PROVIDER_DESCRIPTOR.provider,
-    descriptor: {
-      ...WHOOP_DEVICE_PROVIDER_DESCRIPTOR,
-      oauth: {
-        ...WHOOP_DEVICE_PROVIDER_DESCRIPTOR.oauth,
-        defaultScopes: ["offline"],
-      },
-    },
-    buildConnectUrl: () => "https://provider.example/connect",
-    async exchangeAuthorizationCode() {
-      throw new Error("not used");
-    },
-    async refreshTokens() {
-      return {
-        accessToken: "access-token-new",
-        accessTokenExpiresAt: "2026-04-02T00:20:00.000Z",
-        refreshToken: "refresh-token-new",
-      };
     },
     async executeJob() {
       return {};

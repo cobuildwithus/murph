@@ -3,7 +3,6 @@ import {
   DEVICE_SYNC_WEBHOOK_TRACE_COMPLETED,
   createDeviceSyncPublicIngress,
   deviceSyncError,
-  sanitizeStoredDeviceSyncMetadata,
   type BeginConnectionResult,
   type CompleteConnectionResult,
   type HandleWebhookResult,
@@ -12,7 +11,6 @@ import {
 } from "@murphai/device-syncd/public-ingress";
 
 import type { HostedDeviceSyncControlPlaneContext } from "./control-plane-context";
-import { buildHostedDeviceSyncRuntimeSeedFromPublicAccount } from "./internal-runtime";
 import {
   createHostedBrowserConnectionId,
   toHostedBrowserDeviceSyncConnection,
@@ -24,7 +22,6 @@ import {
   handleHostedDeviceSyncWebhookAccepted,
 } from "./wake-service";
 import { readRawBodyBuffer } from "./http";
-import { readHostedDeviceSyncRuntimeClientIfConfigured } from "./runtime-client";
 import { HostedDeviceSyncWebhookAdminService } from "./webhook-admin-service";
 
 export class HostedDeviceSyncPublicIngressService {
@@ -41,67 +38,6 @@ export class HostedDeviceSyncPublicIngressService {
       store: this.context.store,
       hooks: {
         onConnectionEstablished: async ({ account, connection, now, provider }) => {
-          const userId = await this.requireHostedConnectionOwnerId(account.id);
-          const runtimeClient = readHostedDeviceSyncRuntimeClientIfConfigured();
-          const metadata = sanitizeStoredDeviceSyncMetadata(connection.metadata ?? {});
-          const storedAccount = await this.context.store.getStoredConnectionAccountForUser(userId, account.id);
-          const tokenBundle = storedAccount
-            ? {
-              accessToken: storedAccount.accessToken,
-              accessTokenExpiresAt: storedAccount.accessTokenExpiresAt ?? null,
-              keyVersion: storedAccount.keyVersion,
-              refreshToken: storedAccount.refreshToken,
-              tokenVersion: storedAccount.tokenVersion,
-            }
-            : {
-              accessToken: connection.tokens.accessToken,
-              accessTokenExpiresAt: connection.tokens.accessTokenExpiresAt ?? null,
-              keyVersion: this.context.env.encryptionKeyVersion,
-              refreshToken: connection.tokens.refreshToken ?? null,
-              tokenVersion: 1,
-            } as const;
-          const projectionAccount = storedAccount ?? {
-            ...account,
-            accessTokenExpiresAt: tokenBundle.accessTokenExpiresAt,
-            metadata,
-          };
-
-          if (runtimeClient) {
-            try {
-              await runtimeClient.applyDeviceSyncRuntimeUpdates(userId, {
-                occurredAt: now,
-                updates: [
-                  {
-                    connectionId: account.id,
-                    connection: {
-                      displayName: account.displayName,
-                      metadata,
-                      scopes: account.scopes,
-                      status: account.status,
-                    },
-                    localState: {
-                      lastErrorCode: account.lastErrorCode,
-                      lastErrorMessage: account.lastErrorMessage,
-                      lastSyncCompletedAt: account.lastSyncCompletedAt,
-                      lastSyncErrorAt: account.lastSyncErrorAt,
-                      lastSyncStartedAt: account.lastSyncStartedAt,
-                      lastWebhookAt: account.lastWebhookAt,
-                      nextReconcileAt: account.nextReconcileAt,
-                    },
-                    seed: buildHostedDeviceSyncRuntimeSeedFromPublicAccount({
-                      account: projectionAccount,
-                      externalAccountId: connection.externalAccountId,
-                      tokenBundle,
-                    }),
-                    tokenBundle,
-                  },
-                ],
-              });
-            } catch (error) {
-              console.warn(`Hosted device-sync runtime projection write failed for connection ${account.id}.`, error);
-            }
-          }
-
           await handleHostedDeviceSyncConnectionEstablished({
             account,
             connection,
@@ -247,18 +183,4 @@ export class HostedDeviceSyncPublicIngressService {
     });
   }
 
-  private async requireHostedConnectionOwnerId(connectionId: string): Promise<string> {
-    const ownerId = await this.context.store.getConnectionOwnerId(connectionId);
-
-    if (ownerId) {
-      return ownerId;
-    }
-
-    throw deviceSyncError({
-      code: "CONNECTION_NOT_FOUND",
-      message: "Hosted device-sync connection was not found for the current user.",
-      retryable: false,
-      httpStatus: 404,
-    });
-  }
 }

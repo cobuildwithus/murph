@@ -2,7 +2,6 @@ import { DEFAULT_DEVICE_SYNC_HTTP_BODY_LIMIT_BYTES } from "@murphai/device-syncd
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  applyDeviceSyncRuntimeUpdates: vi.fn(),
   completeWebhookTrace: vi.fn(),
   createDeviceSyncPublicIngress: vi.fn(),
   createSignal: vi.fn(),
@@ -15,7 +14,6 @@ const mocks = vi.hoisted(() => ({
   listConnectionsForUser: vi.fn(),
   persistStoredConnectionTokenBundle: vi.fn(),
   readHostedDeviceSyncEnvironment: vi.fn(),
-  readHostedDeviceSyncRuntimeClientIfConfigured: vi.fn(),
   registryGet: vi.fn(),
   registryList: vi.fn(),
   syncDurableConnectionState: vi.fn(),
@@ -47,11 +45,6 @@ vi.mock("@/src/lib/prisma", () => ({
 vi.mock("@/src/lib/hosted-execution/outbox", () => ({
   drainHostedExecutionOutboxBestEffort: mocks.drainHostedExecutionOutboxBestEffort,
   enqueueHostedExecutionOutbox: mocks.enqueueHostedExecutionOutbox,
-}));
-
-vi.mock("@/src/lib/device-sync/runtime-client", () => ({
-  readHostedDeviceSyncRuntimeClientIfConfigured:
-    mocks.readHostedDeviceSyncRuntimeClientIfConfigured,
 }));
 
 vi.mock("@/src/lib/device-sync/auth", () => ({
@@ -244,35 +237,7 @@ function buildPublicConnectionId(connectionId: string): string {
 describe("dispatchHostedDeviceSyncWake", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.readHostedDeviceSyncRuntimeClientIfConfigured.mockReturnValue({
-      applyDeviceSyncRuntimeUpdates: mocks.applyDeviceSyncRuntimeUpdates,
-    });
     mocks.readHostedDeviceSyncEnvironment.mockImplementation(() => createHostedEnv());
-    mocks.applyDeviceSyncRuntimeUpdates.mockResolvedValue({
-      appliedAt: "2026-03-26T12:00:00.000Z",
-      updates: [
-        {
-          connection: {
-            accessTokenExpiresAt: null,
-            connectedAt: "2026-03-26T12:00:00.000Z",
-            createdAt: "2026-03-26T12:00:00.000Z",
-            displayName: "Oura",
-            externalAccountId: "acct_sensitive",
-            id: "dsc_123",
-            metadata: {},
-            provider: "oura",
-            scopes: ["heartrate"],
-            status: "disconnected",
-            updatedAt: "2026-03-26T12:00:00.000Z",
-        },
-        connectionId: "dsc_123",
-        status: "updated",
-        tokenUpdate: "cleared",
-        writeUpdate: "applied",
-      },
-    ],
-    userId: "user-123",
-    });
     mocks.ensureWebhookSubscriptions.mockResolvedValue(undefined);
     mocks.prisma.$transaction.mockImplementation(async (callback: (tx: typeof mocks.prismaTx) => Promise<unknown>) =>
       callback(mocks.prismaTx),
@@ -623,9 +588,6 @@ describe("dispatchHostedDeviceSyncWake", () => {
         userId: "user-123",
       }),
     );
-    expect(mocks.applyDeviceSyncRuntimeUpdates.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.createSignal.mock.invocationCallOrder[0],
-    );
     expect(mocks.createSignal.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.enqueueHostedExecutionOutbox.mock.invocationCallOrder[0],
     );
@@ -675,25 +637,6 @@ describe("dispatchHostedDeviceSyncWake", () => {
     });
 
     expect(revokeAccess).toHaveBeenCalledTimes(1);
-    expect(mocks.applyDeviceSyncRuntimeUpdates).toHaveBeenCalledWith(
-      "user-123",
-      expect.objectContaining({
-        updates: [
-          expect.objectContaining({
-            localState: expect.objectContaining({
-              lastErrorCode: "PROVIDER_REVOKE_FAILED",
-              lastErrorMessage: "authorization=[redacted] refresh_token=[redacted]",
-            }),
-            seed: expect.objectContaining({
-              localState: expect.objectContaining({
-                lastErrorCode: "PROVIDER_REVOKE_FAILED",
-                lastErrorMessage: "authorization=[redacted] refresh_token=[redacted]",
-              }),
-            }),
-          }),
-        ],
-      }),
-    );
     expect(mocks.createSignal).toHaveBeenCalledWith(
       expect.objectContaining({
         revokeWarning: {
@@ -741,7 +684,6 @@ describe("dispatchHostedDeviceSyncWake", () => {
       },
     });
 
-    expect(mocks.applyDeviceSyncRuntimeUpdates).not.toHaveBeenCalled();
     expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledTimes(1);
   });
 
@@ -818,20 +760,6 @@ describe("dispatchHostedDeviceSyncWake", () => {
 
     await controlPlane.handleOAuthCallback("oura");
 
-    expect(mocks.applyDeviceSyncRuntimeUpdates).toHaveBeenCalledWith(
-      "user-123",
-      expect.objectContaining({
-        updates: [
-          expect.objectContaining({
-            connectionId: "dsc_123",
-            tokenBundle: expect.objectContaining({
-              accessToken: "access-token",
-              refreshToken: "refresh-token",
-            }),
-          }),
-        ],
-      }),
-    );
     expect(mocks.createSignal).toHaveBeenCalledWith(
       expect.objectContaining({
         connectionId: "dsc_123",

@@ -28,11 +28,9 @@ import {
   type HostedDeviceSyncWakeSource,
 } from "./hosted-dispatch";
 import {
-  buildHostedDeviceSyncRuntimeSeedFromPublicAccount,
   composeHostedRuntimeDeviceSyncAccount,
 } from "./internal-runtime";
 import { PrismaDeviceSyncControlPlaneStore, type HostedPrismaTransactionClient } from "./prisma-store";
-import { readHostedDeviceSyncRuntimeClientIfConfigured } from "./runtime-client";
 import {
   normalizeNullableString,
   sha256Hex,
@@ -127,46 +125,6 @@ export async function disconnectHostedDeviceSyncConnection(input: {
     provider: existing.provider,
     tokenBundle: null,
   });
-
-  const runtimeClient = readHostedDeviceSyncRuntimeClientIfConfigured();
-
-  if (runtimeClient && storedAccount?.externalAccountId) {
-    try {
-      await runtimeClient.applyDeviceSyncRuntimeUpdates(input.userId, {
-        occurredAt: now,
-        updates: [
-          {
-            connection: {
-              status: "disconnected",
-            },
-            connectionId: input.connectionId,
-            localState: {
-              clearError: true,
-              lastErrorCode: disconnectLocalState.lastErrorCode,
-              lastErrorMessage: disconnectLocalState.lastErrorMessage,
-              nextReconcileAt: null,
-            },
-            observedTokenVersion: storedAccount.tokenVersion,
-            seed: buildHostedDeviceSyncRuntimeSeedFromPublicAccount({
-              account: connection,
-              externalAccountId: storedAccount.externalAccountId,
-              localState: disconnectLocalState,
-              tokenBundle: {
-                accessToken: storedAccount.accessToken,
-                accessTokenExpiresAt: storedAccount.accessTokenExpiresAt ?? null,
-                keyVersion: storedAccount.keyVersion,
-                refreshToken: storedAccount.refreshToken,
-                tokenVersion: storedAccount.tokenVersion,
-              },
-            }),
-            tokenBundle: null,
-          },
-        ],
-      });
-    } catch (error) {
-      console.warn(`Hosted device-sync runtime projection write failed for disconnect ${input.connectionId}.`, error);
-    }
-  }
 
   const hint = {
     reason: "user_disconnect",

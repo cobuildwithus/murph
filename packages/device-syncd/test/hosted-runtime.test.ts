@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 
+import * as hostedRuntime from "../src/hosted-runtime.ts";
 import {
   buildHostedExecutionDeviceSyncConnectLinkPath,
-  buildHostedExecutionUserDeviceSyncRuntimePath,
   normalizeHostedDeviceSyncJobHints,
   parseHostedExecutionDeviceSyncConnectLinkResponse,
   parseHostedExecutionDeviceSyncWakeHint,
@@ -18,9 +18,6 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
   it("parses hosted runtime link and snapshot payloads with normalized timestamps", () => {
     expect(buildHostedExecutionDeviceSyncConnectLinkPath("oura/webhook")).toBe(
       "/api/internal/device-sync/providers/oura%2Fwebhook/connect-link",
-    );
-    expect(buildHostedExecutionUserDeviceSyncRuntimePath("user/123")).toBe(
-      "/internal/users/user%2F123/device-sync/runtime",
     );
     expect(
       parseHostedExecutionDeviceSyncConnectLinkResponse({
@@ -127,6 +124,16 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
       generatedAt: "2026-04-07T00:00:00.000Z",
       userId: "user_123",
     });
+  });
+
+  it("keeps only the supported internal projection paths", () => {
+    expect(hostedRuntime.HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH).toBe(
+      "/api/internal/device-sync/runtime/snapshot",
+    );
+    expect(hostedRuntime.HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_PATH).toBe(
+      "/api/internal/device-sync/runtime/apply",
+    );
+    expect("buildHostedExecutionUserDeviceSyncRuntimePath" in hostedRuntime).toBe(false);
   });
 
   it("accepts string error fields while keeping timestamp fields strict", () => {

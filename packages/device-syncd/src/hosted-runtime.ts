@@ -175,10 +175,6 @@ export function buildHostedExecutionDeviceSyncConnectLinkPath(provider: string):
   return `/api/internal/device-sync/providers/${encodeURIComponent(provider)}/connect-link`;
 }
 
-export function buildHostedExecutionUserDeviceSyncRuntimePath(userId: string): string {
-  return `/internal/users/${encodeURIComponent(userId)}/device-sync/runtime`;
-}
-
 export function parseHostedExecutionDeviceSyncConnectLinkResponse(
   value: unknown,
 ): HostedExecutionDeviceSyncConnectLinkResponse {
