@@ -40,7 +40,7 @@ describe("createHostedUserKeyStore", () => {
     ).rejects.toThrow(/Provision managed user crypto before runtime access/u);
   });
 
-  it("bootstraps automation, recovery, and optional tee recipients", async () => {
+  it("ensures automation, recovery, and optional tee recipients", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
     const automationKeys = await generateHostedUserRecipientKeyPair();
     const recoveryKeys = await generateHostedUserRecipientKeyPair();
@@ -62,11 +62,12 @@ describe("createHostedUserKeyStore", () => {
       teeAutomationRecipientPublicKey: teeKeys.publicKeyJwk,
     });
 
-    const context = await store.bootstrapManagedUserCryptoContext(USER_ID, {
+    const status = await store.ensureManagedUserCryptoEnvelope(USER_ID, {
       reason: "test-bootstrap",
     });
 
-    expect(context.envelope.recipients.map((recipient) => recipient.kind)).toEqual([
+    expect(status.needsRunnerStoreRefresh).toBe(true);
+    expect(status.envelope.recipients.map((recipient) => recipient.kind)).toEqual([
       "automation",
       "recovery",
       "tee-automation",
@@ -76,7 +77,7 @@ describe("createHostedUserKeyStore", () => {
         action: "root-key-bootstrap",
         reason: "test-bootstrap",
         recipientKinds: ["automation", "recovery", "tee-automation"],
-        rootKeyId: context.rootKeyId,
+        rootKeyId: status.envelope.rootKeyId,
         userId: USER_ID,
       },
     ]);
@@ -103,8 +104,11 @@ describe("createHostedUserKeyStore", () => {
       recoveryRecipientKeyId: "recovery:v1",
       recoveryRecipientPublicKey: initialRecoveryKeys.publicKeyJwk,
     });
-    const initialContext = await initialStore.bootstrapManagedUserCryptoContext(USER_ID, {
+    const ensured = await initialStore.ensureManagedUserCryptoEnvelope(USER_ID, {
       reason: "test-bootstrap",
+    });
+    const initialContext = await initialStore.requireUserCryptoContext(USER_ID, {
+      reason: "test-initial-runtime",
     });
     const storedEnvelope = await readStoredEnvelope(bucket, USER_ID);
     const envelopeObjectKey = readOnlyObjectKey(bucket);
@@ -115,7 +119,7 @@ describe("createHostedUserKeyStore", () => {
         publicKeyJwk: futureUserUnlockKeys.publicKeyJwk,
       },
       rootKey: initialContext.rootKey,
-      rootKeyId: storedEnvelope.rootKeyId,
+      rootKeyId: ensured.envelope.rootKeyId,
       userId: USER_ID,
     });
 
@@ -175,15 +179,22 @@ describe("createHostedUserKeyStore", () => {
     expect(auditLog.map((record) => record.action)).toEqual([
       "root-key-bootstrap",
       "root-key-unwrap",
+      "root-key-unwrap",
       "root-key-reconcile",
     ]);
     expect(auditLog[1]).toMatchObject({
+      action: "root-key-unwrap",
+      reason: "test-initial-runtime",
+      rootKeyId: reconciled.rootKeyId,
+      userId: USER_ID,
+    });
+    expect(auditLog[2]).toMatchObject({
       action: "root-key-unwrap",
       reason: "managed-recipient-reconciliation",
       rootKeyId: reconciled.rootKeyId,
       userId: USER_ID,
     });
-    expect(auditLog[2]).toMatchObject({
+    expect(auditLog[3]).toMatchObject({
       action: "root-key-reconcile",
       reason: "managed-recipient-reconciliation",
       recipientKinds: ["user-unlock", "automation", "recovery", "tee-automation"],
@@ -210,7 +221,7 @@ describe("createHostedUserKeyStore", () => {
       teeAutomationRecipientPublicKey: teeKeys.publicKeyJwk,
     });
 
-    await initialStore.bootstrapManagedUserCryptoContext(USER_ID, {
+    await initialStore.ensureManagedUserCryptoEnvelope(USER_ID, {
       reason: "test-bootstrap",
     });
 
@@ -249,7 +260,7 @@ describe("createHostedUserKeyStore", () => {
       recoveryRecipientPublicKey: recoveryKeys.publicKeyJwk,
     });
 
-    await store.bootstrapManagedUserCryptoContext(USER_ID, {
+    await store.ensureManagedUserCryptoEnvelope(USER_ID, {
       reason: "test-bootstrap",
     });
 

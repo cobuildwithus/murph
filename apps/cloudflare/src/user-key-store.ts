@@ -25,6 +25,11 @@ export interface HostedUserCryptoContext {
   keysById: Readonly<Record<string, Uint8Array>>;
 }
 
+export interface HostedManagedUserCryptoEnvelopeStatus {
+  envelope: HostedUserRootKeyEnvelope;
+  needsRunnerStoreRefresh: boolean;
+}
+
 export interface HostedUserKeyAuditRecord {
   action: "root-key-bootstrap" | "root-key-reconcile" | "root-key-unwrap";
   reason: string;
@@ -34,10 +39,10 @@ export interface HostedUserKeyAuditRecord {
 }
 
 export interface HostedUserKeyStore {
-  bootstrapManagedUserCryptoContext(
+  ensureManagedUserCryptoEnvelope(
     userId: string,
     options?: { reason?: string },
-  ): Promise<HostedUserCryptoContext>;
+  ): Promise<HostedManagedUserCryptoEnvelopeStatus>;
   requireUserCryptoContext(
     userId: string,
     options?: { reason?: string },
@@ -83,8 +88,8 @@ export function createHostedUserKeyStore(input: {
   });
 
   return {
-    async bootstrapManagedUserCryptoContext(userId, options = {}) {
-      return resolveHostedUserCryptoContext({
+    async ensureManagedUserCryptoEnvelope(userId, options = {}) {
+      const resolved = await resolveHostedUserRootKeyEnvelope({
         auditLog: input.auditLog ?? null,
         automationRecipientPrivateKeysById: automationPrivateKeysById,
         bucket: input.bucket,
@@ -96,6 +101,11 @@ export function createHostedUserKeyStore(input: {
         reason: options.reason ?? "managed-user-provisioning",
         userId,
       });
+
+      return {
+        envelope: resolved.envelope,
+        needsRunnerStoreRefresh: resolved.rootKey !== null,
+      };
     },
     async requireUserCryptoContext(userId, options = {}) {
       return resolveHostedUserCryptoContext({

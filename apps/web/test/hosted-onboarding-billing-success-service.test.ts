@@ -25,7 +25,6 @@ const mocks = vi.hoisted(() => {
     resolveHostedMemberEmailLinked: vi.fn(),
     requireHostedInviteForAuthentication: vi.fn(),
     requireHostedStripeApi: vi.fn(),
-    runHostedMemberActivationPostCommitEffects: vi.fn(),
     stripe,
     updateHostedMemberStripeBillingIfFresh: vi.fn(),
     writeHostedMemberStripeBillingRef: vi.fn(),
@@ -54,7 +53,6 @@ vi.mock("@/src/lib/hosted-onboarding/invite-service", async () => {
 
 vi.mock("@/src/lib/hosted-onboarding/member-activation", () => ({
   activateHostedMemberForPositiveSourceTx: mocks.activateHostedMemberForPositiveSourceTx,
-  runHostedMemberActivationPostCommitEffects: mocks.runHostedMemberActivationPostCommitEffects,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/member-channel-sync", () => ({
@@ -111,7 +109,6 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
       activated: true,
       hostedExecutionEventId: "member.activated:stripe.checkout.session.success_redirect:member_123:cs_123",
       memberId: "member_123",
-      postCommitProvisionUserId: "member_123",
     });
     mocks.getHostedInviteStatus.mockResolvedValue(createStatus({
       activationPending: true,
@@ -173,9 +170,6 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
       prisma: tx,
       skipIfBillingAlreadyActive: false,
     }));
-    expect(mocks.runHostedMemberActivationPostCommitEffects).toHaveBeenCalledWith({
-      postCommitProvisionUserId: "member_123",
-    });
     expect(mocks.drainHostedExecutionOutboxBestEffort).toHaveBeenCalledWith({
       eventIds: ["member.activated:stripe.checkout.session.success_redirect:member_123:cs_123"],
       limit: 1,
@@ -224,7 +218,6 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
     });
     expect(mocks.updateHostedMemberStripeBillingIfFresh).not.toHaveBeenCalled();
     expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
-    expect(mocks.runHostedMemberActivationPostCommitEffects).not.toHaveBeenCalled();
     expect(mocks.drainHostedExecutionOutboxBestEffort).not.toHaveBeenCalled();
   });
 

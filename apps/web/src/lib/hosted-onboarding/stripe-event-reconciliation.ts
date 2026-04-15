@@ -14,9 +14,6 @@ import {
   applyStripeRefundCreated,
   applyStripeSubscriptionUpdated,
 } from "./stripe-billing-events";
-import {
-  runHostedMemberActivationPostCommitEffects,
-} from "./member-activation";
 import { resolveStripeCustomerContext } from "./stripe-billing-lookup";
 import {
   buildHostedStripeDispatchContext,
@@ -210,7 +207,6 @@ async function processHostedStripeEventRecord(
   activatedMemberId: string | null;
   createdOrUpdatedRevnetIssuance: boolean;
   hostedExecutionEventId: string | null;
-  postCommitProvisionUserId: string | null;
 }> {
   const payload = event.data.object;
   const dispatchContext: HostedStripeDispatchContext = buildHostedStripeDispatchContext(event);
@@ -368,7 +364,6 @@ async function processClaimedHostedStripeEvent(
         transaction,
       );
     }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
-    await runHostedMemberActivationPostCommitEffects(result);
     await prisma.hostedStripeEvent.update({
       where: {
         eventId: claimed.eventId,
@@ -385,7 +380,6 @@ async function processClaimedHostedStripeEvent(
       activatedMember: Boolean(result.activatedMemberId),
       createdOrUpdatedRevnetIssuance: result.createdOrUpdatedRevnetIssuance,
       hostedExecutionEventScheduled: Boolean(result.hostedExecutionEventId),
-      postCommitProvisionScheduled: Boolean(result.postCommitProvisionUserId),
     });
 
     return {
@@ -465,19 +459,16 @@ function mapHostedStripeActivationOutcome(
     activatedMemberId: string | null;
     createdOrUpdatedRevnetIssuance?: boolean;
     hostedExecutionEventId: string | null;
-    postCommitProvisionUserId?: string | null;
   },
 ): {
   activatedMemberId: string | null;
   createdOrUpdatedRevnetIssuance: boolean;
   hostedExecutionEventId: string | null;
-  postCommitProvisionUserId: string | null;
 } {
   return {
     activatedMemberId: outcome.activatedMemberId,
     createdOrUpdatedRevnetIssuance: outcome.createdOrUpdatedRevnetIssuance ?? false,
     hostedExecutionEventId: outcome.hostedExecutionEventId,
-    postCommitProvisionUserId: outcome.postCommitProvisionUserId ?? null,
   };
 }
 
@@ -485,13 +476,11 @@ function buildEmptyHostedStripeEventProcessingResult(): {
   activatedMemberId: string | null;
   createdOrUpdatedRevnetIssuance: boolean;
   hostedExecutionEventId: string | null;
-  postCommitProvisionUserId: string | null;
 } {
   return {
     activatedMemberId: null,
     createdOrUpdatedRevnetIssuance: false,
     hostedExecutionEventId: null,
-    postCommitProvisionUserId: null,
   };
 }
 

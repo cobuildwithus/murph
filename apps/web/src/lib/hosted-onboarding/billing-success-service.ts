@@ -14,7 +14,6 @@ import { readHostedMemberSnapshot } from "./hosted-member-store";
 import { getHostedInviteStatus, requireHostedInviteForAuthentication } from "./invite-service";
 import {
   activateHostedMemberForPositiveSourceTx,
-  runHostedMemberActivationPostCommitEffects,
 } from "./member-activation";
 import { resolveHostedMemberEmailLinked } from "./member-channel-sync";
 import type { PrivyLinkedAccountLike } from "./privy-shared";
@@ -149,10 +148,6 @@ async function applyHostedCheckoutSessionSuccess(input: {
   if (!activation) {
     return;
   }
-
-  await runHostedMemberActivationPostCommitEffects({
-    postCommitProvisionUserId: activation.postCommitProvisionUserId,
-  });
 
   if (activation.hostedExecutionEventId) {
     await drainHostedExecutionOutboxBestEffort({
