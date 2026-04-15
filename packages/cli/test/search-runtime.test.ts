@@ -337,6 +337,29 @@ test('search query accepts matching positional and named text on the built CLI',
   }
 })
 
+test('search query rejects blank mixed input on the built CLI', async () => {
+  const fixture = await makeRetrievalFixture()
+
+  try {
+    const result = await runCli([
+      'search',
+      'query',
+      'afternoon crash pasta',
+      '--text',
+      '   ',
+      '--limit',
+      '10',
+      '--vault',
+      fixture.vaultRoot,
+    ])
+
+    assert.equal(result.ok, false)
+    assert.equal(result.error?.code, 'invalid_query')
+  } finally {
+    await rm(fixture.vaultRoot, { recursive: true, force: true })
+  }
+})
+
 test('search applies date bounds and echoes renamed filter keys', async () => {
   const fixture = await makeSourceRetrievalFixture()
 
