@@ -7,7 +7,6 @@ import { normalizeNullableString as normalizeDeviceSyncNullableString } from "..
 export { maskPhoneNumber, normalizePhoneNumber, normalizePhoneNumberForCountry } from "./phone";
 
 export type HostedOnboardingReadClient = PrismaClient | Prisma.TransactionClient;
-export type HostedOnboardingPrismaClient = HostedOnboardingReadClient;
 export const HOSTED_ONBOARDING_TRANSACTION_OPTIONS = { maxWait: 5_000 } as const;
 
 export async function lockHostedMemberRow(

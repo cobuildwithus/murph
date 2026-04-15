@@ -14,7 +14,7 @@ import {
 import { requireHostedStripeApi } from "./runtime";
 import {
   lockHostedMemberRow,
-  type HostedOnboardingPrismaClient,
+  type HostedOnboardingReadClient,
 } from "./shared";
 import {
   type HostedStripeDispatchContext,
@@ -27,7 +27,7 @@ import {
 export async function prepareHostedMemberStripeBillingWrite(input: {
   dispatchContext: HostedStripeDispatchContext;
   member: HostedMemberBillingSnapshot;
-  prisma: HostedOnboardingPrismaClient;
+  prisma: HostedOnboardingReadClient;
   stripeSubscriptionId?: string | null;
 }): Promise<{
   canonicalBillingStatus: HostedBillingStatus | null;
@@ -46,11 +46,11 @@ export async function prepareHostedMemberStripeBillingWrite(input: {
 
   return {
     canonicalBillingStatus: requiresCanonicalBillingStatus
-    ? await readHostedCanonicalStripeBillingStatus({
-        member,
-        stripeSubscriptionId: input.stripeSubscriptionId,
-      })
-    : null,
+      ? await readHostedCanonicalStripeBillingStatus({
+          member,
+          stripeSubscriptionId: input.stripeSubscriptionId,
+        })
+      : null,
     member,
   };
 }

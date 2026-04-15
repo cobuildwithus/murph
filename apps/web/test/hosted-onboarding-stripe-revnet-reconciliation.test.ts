@@ -1,6 +1,8 @@
 import { HostedRevnetIssuanceStatus } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "@/src/lib/hosted-onboarding/shared";
+
 const mocks = vi.hoisted(() => ({
   activateHostedMemberFromConfirmedRevnetIssuanceTx: vi.fn(),
   isHostedOnboardingRevnetEnabled: vi.fn(),
@@ -76,9 +78,10 @@ describe("hosted Stripe RevNet reconciliation", () => {
         update,
       },
     };
+    const transaction = vi.fn(async <T>(callback: (tx: typeof transactionClient) => Promise<T>) =>
+      callback(transactionClient));
     const prisma = asReconcilePrisma({
-      $transaction: async <T>(callback: (tx: typeof transactionClient) => Promise<T>) =>
-        callback(transactionClient),
+      $transaction: transaction,
       hostedRevnetIssuance: {
         findMany: vi.fn().mockResolvedValue([
           makeIssuance({
@@ -141,6 +144,10 @@ describe("hosted Stripe RevNet reconciliation", () => {
       sourceEventId: "iss_confirmed_123",
       sourceType: "hosted.revnet.issuance.confirmed",
     });
+    expect(transaction).toHaveBeenCalledWith(
+      expect.any(Function),
+      HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+    );
     expect(mocks.runHostedMemberActivationPostCommitEffects).toHaveBeenCalledWith({
       postCommitProvisionUserId: "member_123",
     });
@@ -199,9 +206,10 @@ describe("hosted Stripe RevNet reconciliation", () => {
         update,
       },
     };
+    const transaction = vi.fn(async <T>(callback: (tx: typeof transactionClient) => Promise<T>) =>
+      callback(transactionClient));
     const prisma = asReconcilePrisma({
-      $transaction: async <T>(callback: (tx: typeof transactionClient) => Promise<T>) =>
-        callback(transactionClient),
+      $transaction: transaction,
       hostedRevnetIssuance: {
         findMany: vi.fn().mockResolvedValue([
           makeIssuance({
@@ -222,6 +230,10 @@ describe("hosted Stripe RevNet reconciliation", () => {
       }),
     ).rejects.toThrow("control unavailable");
 
+    expect(transaction).toHaveBeenCalledWith(
+      expect.any(Function),
+      HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+    );
     expect(update).toHaveBeenCalledWith({
       where: {
         id: "iss_retry_123",

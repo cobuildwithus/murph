@@ -9,7 +9,7 @@ import {
   readHostedMemberBillingSnapshot,
 } from "./hosted-member-store";
 import { requireHostedStripeApi } from "./runtime";
-import { type HostedOnboardingPrismaClient } from "./shared";
+import { type HostedOnboardingReadClient } from "./shared";
 
 /**
  * Owns Stripe-object-to-member lookup and customer-context reads so billing
@@ -20,7 +20,7 @@ export async function findMemberForStripeObject(input: {
   clientReferenceId: string | null;
   customerId: string | null;
   memberId: string | null;
-  prisma: HostedOnboardingPrismaClient;
+  prisma: HostedOnboardingReadClient;
   subscriptionId: string | null;
 }): Promise<HostedMemberBillingSnapshot | null> {
   if (input.memberId) {
@@ -80,7 +80,7 @@ export async function findMemberForStripeReversal(input: {
   chargeId: string | null;
   customerId: string | null;
   paymentIntentId: string | null;
-  prisma: HostedOnboardingPrismaClient;
+  prisma: HostedOnboardingReadClient;
   subscriptionId: string | null;
 }): Promise<HostedMemberBillingSnapshot | null> {
   const directMember = await findMemberForStripeObject({
