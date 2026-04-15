@@ -348,6 +348,7 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
             effectsPortBound: true,
             usageExportBound: false,
           }),
+          runElapsedMs: expect.any(Number),
           resumeFromCommit: false,
           sharePackAttached: false,
           userEnvCategories: {
@@ -358,6 +359,18 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
           verifiedEmailPresent: true,
         }),
         message: "Hosted runtime starting.",
+        phase: "runtime.starting",
+      }),
+    );
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "runtime",
+        details: expect.objectContaining({
+          bundlePresent: true,
+          restoreLatencyMs: expect.any(Number),
+          runElapsedMs: expect.any(Number),
+        }),
+        message: "Hosted runtime restored execution context.",
         phase: "runtime.starting",
       }),
     );

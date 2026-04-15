@@ -151,7 +151,11 @@ describe("hosted runtime typing helpers", () => {
   it("starts and stops Linq typing with the parsed chat id and runtime env", async () => {
     const indicator = startHostedDispatchTypingIndicator({
       dispatch: createLinqDispatch(),
-      run: null,
+      run: {
+        attempt: 1,
+        runId: "run_123",
+        startedAt: "2026-04-08T00:00:00.000Z",
+      },
       runtimeEnv: {
         LINQ_API_TOKEN: "linq-token",
       },
@@ -170,6 +174,22 @@ describe("hosted runtime typing helpers", () => {
             LINQ_API_TOKEN: "linq-token",
           },
         },
+      );
+    });
+    await vi.waitFor(() => {
+      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          component: "runtime",
+          details: expect.objectContaining({
+            chatIdPresent: true,
+            operation: "typing_start",
+            provider: "linq",
+            runElapsedMs: expect.any(Number),
+            startLatencyMs: expect.any(Number),
+          }),
+          message: "Hosted Linq typing indicator started.",
+          phase: "dispatch.running",
+        }),
       );
     });
 

@@ -199,6 +199,7 @@ function createAsyncHostedTypingIndicator(input: {
   let activeIndicator: HostedTypingHandle | null = null;
   let stopRequested = false;
   let stopPromise: Promise<void> | null = null;
+  const typingStartRequestedAtMs = Date.now();
 
   const stopActiveIndicator = (indicator: HostedTypingHandle) => {
     if (!stopPromise) {
@@ -222,6 +223,18 @@ function createAsyncHostedTypingIndicator(input: {
   const startPromise = input.start()
     .then(async (indicator) => {
       activeIndicator = indicator;
+      emitHostedExecutionStructuredLog({
+        component: "runtime",
+        details: {
+          ...(input.startLogDetails ?? {}),
+          runElapsedMs: computeHostedRunElapsedMs(input.run),
+          startLatencyMs: Date.now() - typingStartRequestedAtMs,
+        },
+        dispatch: input.dispatch,
+        message: `Hosted ${input.channelLabel} typing indicator started.`,
+        phase: "dispatch.running",
+        run: input.run,
+      });
       if (stopRequested) {
         await stopActiveIndicator(indicator);
       }
@@ -265,6 +278,21 @@ function createAsyncHostedTypingIndicator(input: {
       }
     },
   };
+}
+
+function computeHostedRunElapsedMs(
+  run: HostedAssistantRuntimeJobInput["request"]["run"] | null,
+): number | null {
+  if (!run?.startedAt) {
+    return null;
+  }
+
+  const startedAtMs = Date.parse(run.startedAt);
+  if (!Number.isFinite(startedAtMs)) {
+    return null;
+  }
+
+  return Math.max(0, Date.now() - startedAtMs);
 }
 
 function isHostedTelegramMessageReceivedDispatch(

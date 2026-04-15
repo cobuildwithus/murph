@@ -54,10 +54,14 @@ export async function executeHostedDispatchForCommit(input: {
   emitHostedExecutionStructuredLog({
     component: "runtime",
     dispatch: input.request.dispatch,
+    details: {
+      runElapsedMs: computeHostedRunElapsedMs(input.request.run ?? null),
+    },
     message: "Hosted runtime executing dispatch handlers.",
     phase: "dispatch.running",
     run: input.request.run ?? null,
   });
+  const dispatchHandlersStartedAtMs = Date.now();
   const dispatchMetrics = await executeHostedDispatchEvent({
     dispatch: input.request.dispatch,
     runtime: input.runtime,
@@ -65,6 +69,18 @@ export async function executeHostedDispatchForCommit(input: {
     sharePack: input.request.sharePack ?? null,
     vaultRoot: input.restored.vaultRoot,
   });
+  emitHostedExecutionStructuredLog({
+    component: "runtime",
+    dispatch: input.request.dispatch,
+    details: {
+      dispatchHandlerLatencyMs: Date.now() - dispatchHandlersStartedAtMs,
+      runElapsedMs: computeHostedRunElapsedMs(input.request.run ?? null),
+    },
+    message: "Hosted runtime finished dispatch handlers.",
+    phase: "dispatch.running",
+    run: input.request.run ?? null,
+  });
+  const maintenanceStartedAtMs = Date.now();
   const maintenanceMetrics = await runHostedMaintenanceLoop({
     artifactMaterializer: input.artifactMaterializer ?? null,
     deviceSyncPort: input.runtime.platform.deviceSyncPort,
@@ -77,6 +93,19 @@ export async function executeHostedDispatchForCommit(input: {
     timeoutMs: input.runtime.commitTimeoutMs,
     vaultRoot: input.restored.vaultRoot,
   });
+  emitHostedExecutionStructuredLog({
+    component: "runtime",
+    dispatch: input.request.dispatch,
+    details: {
+      maintenanceLatencyMs: Date.now() - maintenanceStartedAtMs,
+      nextWakeAt: maintenanceMetrics.nextWakeAt,
+      runElapsedMs: computeHostedRunElapsedMs(input.request.run ?? null),
+    },
+    message: "Hosted runtime finished maintenance loop.",
+    phase: "dispatch.running",
+    run: input.request.run ?? null,
+  });
+  const snapshotStartedAtMs = Date.now();
   const committedSnapshot = await snapshotHostedExecutionContext({
     artifactSink: createHostedArtifactUploadSink({
       artifactStore: input.runtime.platform.artifactStore,
@@ -90,6 +119,17 @@ export async function executeHostedDispatchForCommit(input: {
       materializedArtifactPaths: input.materializedArtifactPaths ?? new Set(),
     }),
     vaultRoot: input.restored.vaultRoot,
+  });
+  emitHostedExecutionStructuredLog({
+    component: "runtime",
+    dispatch: input.request.dispatch,
+    details: {
+      runElapsedMs: computeHostedRunElapsedMs(input.request.run ?? null),
+      snapshotLatencyMs: Date.now() - snapshotStartedAtMs,
+    },
+    message: "Hosted runtime snapshotted execution context.",
+    phase: "commit.recorded",
+    run: input.request.run ?? null,
   });
   const committedAssistantDeliveryEffects = await collectHostedAssistantDeliverySideEffects(
     input.restored.vaultRoot,
@@ -132,10 +172,14 @@ export async function completeHostedExecutionAfterCommit(input: {
   emitHostedExecutionStructuredLog({
     component: "runtime",
     dispatch: input.dispatch,
+    details: {
+      runElapsedMs: computeHostedRunElapsedMs(input.run ?? null),
+    },
     message: "Hosted runtime draining committed side effects.",
     phase: "side-effects.draining",
     run: input.run ?? null,
   });
+  const sideEffectsStartedAtMs = Date.now();
   await drainHostedCommittedAssistantDeliveriesAfterCommit({
     dispatch: input.dispatch,
     effectsPort: input.runtime.platform.effectsPort,
@@ -152,7 +196,19 @@ export async function completeHostedExecutionAfterCommit(input: {
     vaultRoot: input.restored.vaultRoot,
   });
   await refreshAssistantStatusSnapshot(input.restored.vaultRoot);
+  emitHostedExecutionStructuredLog({
+    component: "runtime",
+    dispatch: input.dispatch,
+    details: {
+      runElapsedMs: computeHostedRunElapsedMs(input.run ?? null),
+      sideEffectsDrainLatencyMs: Date.now() - sideEffectsStartedAtMs,
+    },
+    message: "Hosted runtime drained committed side effects.",
+    phase: "side-effects.draining",
+    run: input.run ?? null,
+  });
 
+  const finalSnapshotStartedAtMs = Date.now();
   const finalSnapshot = await snapshotHostedExecutionContext({
     artifactSink: createHostedArtifactUploadSink({
       artifactStore: input.runtime.platform.artifactStore,
@@ -166,6 +222,17 @@ export async function completeHostedExecutionAfterCommit(input: {
       materializedArtifactPaths: input.materializedArtifactPaths ?? new Set(),
     }),
     vaultRoot: input.restored.vaultRoot,
+  });
+  emitHostedExecutionStructuredLog({
+    component: "runtime",
+    dispatch: input.dispatch,
+    details: {
+      finalSnapshotLatencyMs: Date.now() - finalSnapshotStartedAtMs,
+      runElapsedMs: computeHostedRunElapsedMs(input.run ?? null),
+    },
+    message: "Hosted runtime snapshotted final execution state.",
+    phase: "completed",
+    run: input.run ?? null,
   });
   const finalGatewayProjectionSnapshot = await exportGatewayProjectionSnapshotLocal(
     input.restored.vaultRoot,
@@ -218,4 +285,19 @@ function collectPreservedHostedArtifacts(input: {
   } catch {
     return [];
   }
+}
+
+function computeHostedRunElapsedMs(
+  run: HostedAssistantRuntimeJobRequest["run"] | null | undefined,
+): number | null {
+  if (!run?.startedAt) {
+    return null;
+  }
+
+  const startedAtMs = Date.parse(run.startedAt);
+  if (!Number.isFinite(startedAtMs)) {
+    return null;
+  }
+
+  return Math.max(0, Date.now() - startedAtMs);
 }
