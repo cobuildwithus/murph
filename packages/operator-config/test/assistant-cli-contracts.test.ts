@@ -21,6 +21,7 @@ import {
   assistantCronExpressionScheduleInputSchema,
   assistantCronExpressionScheduleSchema,
   assistantCronJobSchema,
+  assistantCronJobStateSchema,
   assistantCronScheduleKindValues,
   assistantCronScheduleSchema,
   assistantCronTargetSchema,
@@ -225,13 +226,33 @@ describe('assistant CLI delivery contracts', () => {
 })
 
 describe('assistant CLI automation shape ownership', () => {
-  it('reuses the canonical automation schedule owners directly', () => {
+  it('keeps non-recurring schedules on the canonical owners while making recurring schedules vault-local', () => {
     expect(assistantCronScheduleKindValues).toBe(automationScheduleKindValues)
     expect(assistantCronAtScheduleSchema).toBe(automationScheduleAtSchema)
     expect(assistantCronEveryScheduleSchema).toBe(automationScheduleEverySchema)
-    expect(assistantCronExpressionScheduleSchema).toBe(automationScheduleCronSchema)
-    expect(assistantCronDailyLocalScheduleSchema).toBe(automationScheduleDailyLocalSchema)
-    expect(assistantCronScheduleSchema).toBe(automationScheduleSchema)
+    expect(assistantCronExpressionScheduleSchema).not.toBe(automationScheduleCronSchema)
+    expect(assistantCronDailyLocalScheduleSchema).not.toBe(automationScheduleDailyLocalSchema)
+    expect(assistantCronScheduleSchema).not.toBe(automationScheduleSchema)
+
+    expect(
+      assistantCronExpressionScheduleSchema.parse({
+        kind: 'cron',
+        expression: '0 9 * * *',
+      }),
+    ).toEqual({
+      kind: 'cron',
+      expression: '0 9 * * *',
+    })
+
+    expect(
+      assistantCronDailyLocalScheduleSchema.parse({
+        kind: 'dailyLocal',
+        localTime: '09:00',
+      }),
+    ).toEqual({
+      kind: 'dailyLocal',
+      localTime: '09:00',
+    })
   })
 
   it('reuses the canonical automation route for saved self-delivery targets', () => {
@@ -291,7 +312,7 @@ describe('assistant CLI automation shape ownership', () => {
     })
   })
 
-  it('keeps cron schedule input-only optionality separate from persisted schedules', () => {
+  it('drops timezone from recurring cron inputs and persisted schedules', () => {
     expect(
       assistantCronExpressionScheduleInputSchema.parse({
         kind: 'cron',
@@ -302,15 +323,36 @@ describe('assistant CLI automation shape ownership', () => {
       expression: '0 9 * * *',
     })
 
-    expect(() =>
+    expect(
       assistantCronScheduleSchema.parse({
         kind: 'cron',
         expression: '0 9 * * *',
       }),
-    ).toThrow()
+    ).toEqual({
+      kind: 'cron',
+      expression: '0 9 * * *',
+    })
 
     expect(
       assistantCronScheduleSchema.parse({
+        kind: 'dailyLocal',
+        localTime: '09:00',
+      }),
+    ).toEqual({
+      kind: 'dailyLocal',
+      localTime: '09:00',
+    })
+
+    expect(() =>
+      assistantCronScheduleSchema.parse({
+        kind: 'cron',
+        expression: '0 9 * * *',
+        timeZone: 'America/Los_Angeles',
+      }),
+    ).toThrow()
+
+    expect(
+      automationScheduleSchema.parse({
         kind: 'cron',
         expression: '0 9 * * *',
         timeZone: 'America/Los_Angeles',
@@ -322,5 +364,51 @@ describe('assistant CLI automation shape ownership', () => {
         timeZone: 'America/Los_Angeles',
       }),
     )
+
+    expect(() =>
+      assistantCronDailyLocalScheduleSchema.parse({
+        kind: 'dailyLocal',
+        localTime: '09:00',
+        timeZone: 'America/Los_Angeles',
+      }),
+    ).toThrow()
+  })
+
+  it('keeps the public cron job state surface stable on nextRunAt', () => {
+    expect(
+      assistantCronJobStateSchema.parse({
+        nextRunAt: null,
+        lastRunAt: null,
+        lastSucceededAt: null,
+        lastFailedAt: null,
+        consecutiveFailures: 0,
+        lastError: null,
+        runningAt: null,
+        runningPid: null,
+      }),
+    ).toEqual({
+      nextRunAt: null,
+      lastRunAt: null,
+      lastSucceededAt: null,
+      lastFailedAt: null,
+      consecutiveFailures: 0,
+      lastError: null,
+      runningAt: null,
+      runningPid: null,
+    })
+
+    expect(() =>
+      assistantCronJobStateSchema.parse({
+        pendingOccurrenceAt: null,
+        retryAfterAt: null,
+        lastRunAt: null,
+        lastSucceededAt: null,
+        lastFailedAt: null,
+        consecutiveFailures: 0,
+        lastError: null,
+        runningAt: null,
+        runningPid: null,
+      }),
+    ).toThrow()
   })
 })

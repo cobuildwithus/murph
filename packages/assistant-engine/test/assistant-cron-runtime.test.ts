@@ -605,7 +605,7 @@ describe('assistant cron runtime orchestration', () => {
     expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
       expect.objectContaining({
         deliveryDedupeToken: expect.stringContaining(
-          'assistant-cron|automation-1|2026-04-08T08:00:00.000Z',
+          'assistant-cron|automation-1|2026-04-08T10:00:00.000Z',
         ),
         turnTrigger: 'automation-cron',
       }),
@@ -663,7 +663,6 @@ async function createLocalFoodJob(
     schedule: {
       kind: 'dailyLocal',
       localTime: '09:30',
-      timeZone: 'UTC',
     },
     vault: vaultRoot,
   })
@@ -682,7 +681,6 @@ async function createCanonicalJob(
     schedule: {
       kind: 'dailyLocal',
       localTime: '10:00',
-      timeZone: 'UTC',
     },
     vault: vaultRoot,
   })

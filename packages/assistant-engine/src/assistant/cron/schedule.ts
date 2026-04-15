@@ -32,6 +32,19 @@ interface ParsedCronExpression {
   dayOfWeek: ParsedCronField
 }
 
+type AssistantCronComputableSchedule =
+  | AssistantCronSchedule
+  | {
+      kind: 'cron'
+      expression: string
+      timeZone?: string
+    }
+  | {
+      kind: 'dailyLocal'
+      localTime: string
+      timeZone?: string
+    }
+
 export function buildAssistantCronSchedule(input: {
   at?: string | null
   every?: string | null
@@ -92,16 +105,11 @@ export function buildAssistantCronSchedule(input: {
 
   validateAssistantCronExpression(cron)
 
-    return {
-      kind: 'cron',
-      expression: cron,
-      ...(normalizeNullableString(input.timeZone)
-        ? {
-            timeZone: normalizeNullableString(input.timeZone) ?? undefined,
-          }
-        : {}),
-    }
+  return {
+    kind: 'cron',
+    expression: cron,
   }
+}
 
 export function parseAssistantCronEveryDuration(value: string): number {
   const normalized = normalizeNullableString(value)?.toLowerCase() ?? null
@@ -142,7 +150,7 @@ export function parseAssistantCronEveryDuration(value: string): number {
 }
 
 export function computeAssistantCronNextRunAt(
-  schedule: AssistantCronSchedule,
+  schedule: AssistantCronComputableSchedule,
   after: Date,
 ): string | null {
   switch (schedule.kind) {
@@ -155,14 +163,14 @@ export function computeAssistantCronNextRunAt(
     case 'dailyLocal':
       return findNextAssistantDailyLocalOccurrence(
         schedule.localTime,
-        schedule.timeZone,
+        'timeZone' in schedule ? schedule.timeZone : undefined,
         after,
       )
     case 'cron':
       return findNextAssistantCronOccurrence(
         schedule.expression,
         after,
-        schedule.timeZone,
+        'timeZone' in schedule ? schedule.timeZone : undefined,
       )
   }
 }
@@ -370,7 +378,7 @@ function invalidCronFieldError(label: string, value: string): VaultCliError {
 
 function findNextAssistantDailyLocalOccurrence(
   localTime: string,
-  timeZone: string,
+  timeZone: string | undefined,
   after: Date,
 ): string | null {
   const parsedTime = parseDailyTime(localTime)

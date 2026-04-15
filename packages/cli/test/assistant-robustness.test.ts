@@ -7,8 +7,9 @@ import {
   initializeVault,
   readJsonlRecords,
   toMonthlyShardRelativePath,
-  upsertFood,
 } from '@murphai/core'
+import { createAssistantFoodAutoLogHooks } from '@murphai/assistant-engine/assistant-cron'
+import { upsertFoodRecord } from '@murphai/vault-usecases/records'
 
 const robustnessMocks = vi.hoisted(() => ({
   deliverAssistantMessageOverBinding: vi.fn(),
@@ -42,8 +43,8 @@ vi.mock('@murphai/assistant-engine/assistant-provider', async () => {
 })
 
 import {
-  addAssistantCronJob,
   getAssistantCronJob,
+  listAssistantCronJobs,
   runAssistantAutomation,
 } from '@murphai/assistant-cli/assistant/runtime'
 import { getAssistantStatus, readAssistantStatusSnapshot } from '@murphai/assistant-cli/assistant/status'
@@ -1233,39 +1234,34 @@ test('runAssistantAutomation processes due recurring food autolog jobs on startu
     vaultRoot,
     timezone: 'America/New_York',
   })
+  vi.setSystemTime(new Date('2026-03-07T13:30:00.000Z'))
 
-  const food = await upsertFood({
-    vaultRoot,
-    title: 'Morning Smoothie',
-    slug: 'morning-smoothie',
-    note: 'Bone broth protein, creatine, inulin, GOS, coconut water.',
-    ingredients: [
-      'bone broth protein',
-      'creatine',
-      'inulin',
-      'GOS',
-      'coconut water',
-    ],
-    autoLogDaily: {
-      time: '08:00',
-    },
-  })
-
-  const job = await addAssistantCronJob({
+  const food = await upsertFoodRecord({
     vault: vaultRoot,
-    name: 'food-daily:morning-smoothie',
-    prompt: 'Auto-log recurring food "Morning Smoothie" as a note-only meal.',
-    foodAutoLog: {
-      foodId: food.record.foodId,
+    hooks: createAssistantFoodAutoLogHooks(),
+    payload: {
+      status: 'active',
+      title: 'Morning Smoothie',
+      slug: 'morning-smoothie',
+      note: 'Bone broth protein, creatine, inulin, GOS, coconut water.',
+      ingredients: [
+        'bone broth protein',
+        'creatine',
+        'inulin',
+        'GOS',
+        'coconut water',
+      ],
+      autoLogDaily: {
+        time: '08:00',
+      },
     },
-    schedule: {
-      kind: 'dailyLocal',
-      localTime: '08:00',
-      timeZone: 'America/New_York',
-    },
-    now: new Date('2026-03-07T13:30:00.000Z'),
   })
 
+  const [job] = (await listAssistantCronJobs(vaultRoot)).filter(
+    (candidate) => candidate.foodAutoLog?.foodId === food.foodId,
+  )
+
+  assert.ok(job)
   assert.equal(job.state.nextRunAt, '2026-03-08T12:00:00.000Z')
   vi.setSystemTime(new Date('2026-03-08T12:05:00.000Z'))
 

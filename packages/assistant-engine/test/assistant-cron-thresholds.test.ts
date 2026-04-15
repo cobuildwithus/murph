@@ -442,7 +442,6 @@ describe('assistant cron runtime threshold coverage', () => {
       schedule: {
         kind: 'dailyLocal',
         localTime: '09:00',
-        timeZone: 'UTC',
       },
       vault: vaultRoot,
     })
@@ -473,7 +472,6 @@ describe('assistant cron runtime threshold coverage', () => {
       schedule: {
         kind: 'dailyLocal',
         localTime: '09:00',
-        timeZone: 'UTC',
       },
       vault: vaultRoot,
     })
@@ -651,7 +649,6 @@ describe('assistant cron runtime threshold coverage', () => {
       schedule: {
         kind: 'dailyLocal',
         localTime: '09:00',
-        timeZone: 'UTC',
       },
       vault: vaultRoot,
     })
@@ -697,7 +694,6 @@ describe('assistant cron runtime threshold coverage', () => {
       schedule: {
         kind: 'dailyLocal',
         localTime: '09:00',
-        timeZone: 'UTC',
       },
       vault: vaultRoot,
     })
@@ -743,7 +739,6 @@ describe('assistant cron runtime threshold coverage', () => {
         schedule: {
           kind: 'dailyLocal',
           localTime: '09:00',
-          timeZone: 'UTC',
         },
         vault: vaultRoot,
       }),
