@@ -35,7 +35,6 @@ describe("automation contract seams", () => {
       schedule: {
         kind: "dailyLocal",
         localTime: "08:30",
-        timeZone: "UTC",
       },
       title: "Daily summary",
     });
@@ -50,7 +49,6 @@ describe("automation contract seams", () => {
       schedule: {
         kind: "dailyLocal",
         localTime: "08:30",
-        timeZone: "UTC",
       },
       status: "active",
       title: "Daily summary",
@@ -65,6 +63,30 @@ describe("automation contract seams", () => {
         timeZone: "Mars/Olympus",
       }),
     ).toThrow(/IANA timezone/u);
+  });
+
+  it("accepts recurring schedules with and without a legacy timezone field", () => {
+    expect(
+      automationScheduleSchema.parse({
+        expression: "0 8 * * *",
+        kind: "cron",
+      }),
+    ).toEqual({
+      expression: "0 8 * * *",
+      kind: "cron",
+    });
+
+    expect(
+      automationScheduleSchema.parse({
+        kind: "dailyLocal",
+        localTime: "08:30",
+        timeZone: "UTC",
+      }),
+    ).toEqual({
+      kind: "dailyLocal",
+      localTime: "08:30",
+      timeZone: "UTC",
+    });
   });
 });
 

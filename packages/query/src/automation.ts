@@ -97,6 +97,17 @@ function requireValidTimeZone(value: unknown, fieldName: string): string {
   return timeZone;
 }
 
+function normalizeOptionalRecurringTimeZone(
+  value: unknown,
+  fieldName: string,
+): string | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+
+  return requireValidTimeZone(value, fieldName);
+}
+
 function normalizeAutomationStatus(value: unknown): AutomationStatus {
   const normalized = normalizeNullableString(typeof value === "string" ? value : null);
   if (normalized && automationStatusValues.includes(normalized as AutomationStatus)) {
@@ -146,10 +157,10 @@ function normalizeAutomationSchedule(value: unknown): AutomationSchedule {
       };
     }
     case "cron":
+      normalizeOptionalRecurringTimeZone(object.timeZone, "schedule.timeZone");
       return {
         kind,
         expression: requireStringValue(object.expression, "schedule.expression"),
-        timeZone: requireValidTimeZone(object.timeZone, "schedule.timeZone"),
       };
     case "dailyLocal": {
       const localTime = requireStringValue(object.localTime, "schedule.localTime");
@@ -157,10 +168,11 @@ function normalizeAutomationSchedule(value: unknown): AutomationSchedule {
         throw new Error("schedule.localTime must use HH:MM format.");
       }
 
+      normalizeOptionalRecurringTimeZone(object.timeZone, "schedule.timeZone");
+
       return {
         kind,
         localTime,
-        timeZone: requireValidTimeZone(object.timeZone, "schedule.timeZone"),
       };
     }
   }

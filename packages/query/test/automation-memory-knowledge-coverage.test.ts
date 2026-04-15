@@ -70,7 +70,6 @@ describe("automation helpers", () => {
         "schedule:",
         "  kind: dailyLocal",
         "  localTime: 08:30",
-        "  timeZone: UTC",
         "route:",
         "  channel: email",
         "  deliverResponse: true",
@@ -177,7 +176,15 @@ describe("automation helpers", () => {
         channel: "email",
         deliveryTarget: "123",
       },
+      schedule: {
+        kind: "dailyLocal",
+        localTime: "08:30",
+      },
       status: "paused",
+    });
+    expect(records[2]?.schedule).toEqual({
+      kind: "cron",
+      expression: "0 8 * * 1",
     });
 
     const filtered = await listAutomations(vaultRoot, {
@@ -215,7 +222,6 @@ describe("automation helpers", () => {
         "schedule:",
         "  kind: dailyLocal",
         "  localTime: 8:30",
-        "  timeZone: UTC",
         "route:",
         "  channel: email",
         "  deliverResponse: true",

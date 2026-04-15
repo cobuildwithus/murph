@@ -46,6 +46,17 @@ function requireValidTimeZone(value: unknown, fieldName: string): string {
   return timeZone;
 }
 
+function normalizeOptionalRecurringTimeZone(
+  value: unknown,
+  fieldName: string,
+): string | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+
+  return requireValidTimeZone(value, fieldName);
+}
+
 export type {
   AutomationContinuityPolicy,
   AutomationRoute,
@@ -161,10 +172,10 @@ function normalizeAutomationSchedule(
         everyMs: object.everyMs,
       };
     case "cron":
+      normalizeOptionalRecurringTimeZone(object.timeZone, "schedule.timeZone");
       return {
         kind,
         expression: requireString(object.expression, "schedule.expression", 400),
-        timeZone: requireValidTimeZone(object.timeZone, "schedule.timeZone"),
       };
     case "dailyLocal": {
       const localTime = requireString(object.localTime, "schedule.localTime", 5);
@@ -172,10 +183,11 @@ function normalizeAutomationSchedule(
         throw new VaultError("VAULT_INVALID_INPUT", "schedule.localTime must use HH:MM format.");
       }
 
+      normalizeOptionalRecurringTimeZone(object.timeZone, "schedule.timeZone");
+
       return {
         kind,
         localTime,
-        timeZone: requireValidTimeZone(object.timeZone, "schedule.timeZone"),
       };
     }
   }
@@ -254,13 +266,11 @@ function buildAutomationScheduleFrontmatter(schedule: AutomationSchedule): Front
       return {
         kind: schedule.kind,
         expression: schedule.expression,
-        timeZone: schedule.timeZone,
       };
     case "dailyLocal":
       return {
         kind: schedule.kind,
         localTime: schedule.localTime,
-        timeZone: schedule.timeZone,
       };
   }
 
@@ -404,7 +414,6 @@ export function scaffoldAutomationPayload(): AutomationScaffoldPayload {
     schedule: {
       kind: "cron",
       expression: "0 9 * * 1",
-      timeZone: "Australia/Sydney",
     },
     route: {
       channel: "telegram",
@@ -565,8 +574,8 @@ export function buildAutomationMarkdownPreview(
     title: normalizeAutomationTitle(input.title),
     status: normalizeAutomationStatus(input.status),
     summary: normalizeAutomationSummary(input.summary),
-    schedule: input.schedule,
-    route: input.route,
+    schedule: normalizeAutomationSchedule(input.schedule),
+    route: normalizeAutomationRoute(input.route),
     continuityPolicy: normalizeAutomationContinuityPolicy(input.continuityPolicy),
     tags: normalizeAutomationTags(input.tags),
     createdAt: new Date().toISOString(),
