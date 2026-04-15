@@ -1,0 +1,150 @@
+import Link from "next/link";
+import { Button } from "@/src/components/ui/button";
+import type { ExperimentStatus } from "@/src/types/experiments";
+
+interface ExperimentHeaderProps {
+  title: string;
+  category: string;
+  durationDays: number;
+  evidenceLevel: number;
+  evidenceLabel: string;
+  matchPercent?: number;
+  status: ExperimentStatus;
+  day?: number;
+  dateRange?: string;
+  baselineDays: number;
+  completionPercent?: number;
+  description?: string;
+}
+
+export function ExperimentHeader({
+  title,
+  category,
+  durationDays,
+  evidenceLevel,
+  evidenceLabel,
+  matchPercent,
+  status,
+  day,
+  dateRange,
+  baselineDays,
+  completionPercent,
+  description,
+}: ExperimentHeaderProps) {
+  return (
+    <div className="flex flex-col gap-7">
+      {/* Breadcrumb */}
+      <div className="flex items-center gap-2 text-[13px]/4">
+        <Link href="/experiments" className="text-muted-foreground/70 hover:text-foreground">
+          Experiments
+        </Link>
+        <span className="text-secondary">→</span>
+        <span className="text-muted-foreground">{title}</span>
+      </div>
+
+      {/* Title row with CTA or ring */}
+      <div className="flex items-start justify-between gap-10">
+        <div className="flex max-w-[700px] flex-col gap-3.5">
+          {/* Metadata line */}
+          <div className="flex items-center gap-3">
+            <span className="shrink-0 font-mono text-[11px]/3.5 tracking-[0.12em] text-chart-5">
+              {category.toUpperCase()}
+            </span>
+            <span className="shrink-0 text-[11px]/3.5 text-secondary">·</span>
+            <span className="shrink-0 font-mono text-[11px]/3.5 text-chart-5">
+              {durationDays} DAYS
+            </span>
+            <span className="shrink-0 text-[11px]/3.5 text-secondary">·</span>
+            <div className="flex gap-[3px]">
+              {Array.from({ length: evidenceLevel }, (_, i) => (
+                <div key={i} className="size-1.5 shrink-0 rounded-full bg-ring" />
+              ))}
+            </div>
+            <span className="shrink-0 font-mono text-[11px]/3.5 text-ring">
+              {evidenceLabel}
+            </span>
+            {matchPercent && (
+              <>
+                <span className="shrink-0 text-[11px]/3.5 text-secondary">·</span>
+                <span className="rounded-[10px] bg-primary/10 px-2 py-0.5 text-[9px]/3 text-foreground">
+                  {matchPercent}% match
+                </span>
+              </>
+            )}
+            {status === "active" && day && (
+              <>
+                <span className="shrink-0 text-[11px]/3.5 text-secondary">·</span>
+                <span className="flex shrink-0 items-center gap-1.5 text-[11px]/3.5 text-chart-5">
+                  <span className="size-1.5 rounded-full bg-amber-500" />
+                  Day {day} of {durationDays}
+                </span>
+              </>
+            )}
+            {status === "finished" && dateRange && (
+              <>
+                <span className="shrink-0 text-[11px]/3.5 text-secondary">·</span>
+                <span className="flex shrink-0 items-center gap-1.5 text-[11px]/3.5 text-ring">
+                  <span className="size-1.5 rounded-full bg-ring" />
+                  {dateRange}
+                </span>
+              </>
+            )}
+          </div>
+
+          {/* Title */}
+          <h1 className="font-serif text-[38px] font-semibold leading-[110%] tracking-[-0.03em] text-foreground">
+            {title}
+          </h1>
+
+          {/* Description */}
+          {description && (
+            <p className="text-[16px] leading-[160%] text-muted-foreground">
+              {description}
+            </p>
+          )}
+        </div>
+
+        {/* CTA or completion ring */}
+        {status === "upcoming" && (
+          <div className="flex shrink-0 flex-col items-center gap-2">
+            <Button
+              size="lg"
+              className="rounded-[10px] bg-primary px-12 py-4 text-base font-semibold text-background hover:bg-primary/90"
+            >
+              Start Experiment →
+            </Button>
+            <span className="text-[11px]/3.5 text-muted-foreground/70">
+              {baselineDays}-day baseline · {durationDays - baselineDays}-day protocol
+            </span>
+          </div>
+        )}
+
+        {status === "active" && completionPercent != null && (
+          <div className="relative flex size-16 shrink-0 items-center justify-center">
+            <svg viewBox="0 0 36 36" className="size-16 -rotate-90">
+              <path
+                d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                fill="none"
+                stroke="#D4C4A8"
+                strokeWidth="2.5"
+              />
+              <path
+                d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                fill="none"
+                stroke="#5A6E32"
+                strokeWidth="2.5"
+                strokeDasharray={`${completionPercent}, 100`}
+              />
+            </svg>
+            <div className="absolute flex flex-col items-center">
+              <span className="text-sm font-semibold text-foreground">
+                {completionPercent}%
+              </span>
+              <span className="text-[8px] text-ring">complete</span>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
