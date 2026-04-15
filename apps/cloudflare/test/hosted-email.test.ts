@@ -200,9 +200,9 @@ describe("hosted email routing and transport", () => {
       identityId: TEST_CONFIG.fromAddress,
       schema: "murph.hosted-email-verified-sender-route.v1",
       senderHash: await deriveVerifiedSenderHash(TEST_CONFIG.signingSecret!, verifiedEmailAddress),
-      senderKey: await deriveVerifiedSenderKey(TEST_CONFIG.signingSecret!, verifiedEmailAddress),
       userId: "user_123",
     });
+    expect(storedRecord).not.toHaveProperty("senderKey");
     expect(storedRecord).not.toHaveProperty("verifiedEmailAddress");
   });
 

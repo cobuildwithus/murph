@@ -15,10 +15,8 @@ import {
 } from "../crypto.ts";
 
 export interface HostedEmailUserRouteRecord {
-  aliasKey: string;
   identityId: string;
   schema: "murph.hosted-email-user-route.v1";
-  updatedAt: string;
   userId: string;
 }
 
@@ -26,8 +24,6 @@ export interface HostedEmailVerifiedSenderRouteRecord {
   identityId: string;
   schema: "murph.hosted-email-verified-sender-route.v1";
   senderHash: string;
-  senderKey: string;
-  updatedAt: string;
   userId: string;
 }
 
@@ -122,10 +118,8 @@ export function createHostedEmailRouteStore(input: HostedEmailRouteStoreInput): 
         keyId: input.cryptoKeyId,
         scope: "email-route",
         value: {
-          aliasKey: writeInput.aliasKey,
           identityId: writeInput.identityId,
           schema: HOSTED_EMAIL_USER_ROUTE_SCHEMA,
-          updatedAt: new Date().toISOString(),
           userId: writeInput.userId,
         } satisfies HostedEmailUserRouteRecord,
       });
@@ -149,8 +143,6 @@ export function createHostedEmailRouteStore(input: HostedEmailRouteStoreInput): 
           identityId: writeInput.identityId,
           schema: HOSTED_EMAIL_VERIFIED_SENDER_ROUTE_SCHEMA,
           senderHash: writeInput.senderHash,
-          senderKey: writeInput.senderKey,
-          updatedAt: new Date().toISOString(),
           userId: writeInput.userId,
         } satisfies HostedEmailVerifiedSenderRouteRecord,
       });
@@ -190,10 +182,8 @@ function parseHostedEmailUserRouteRecord(value: unknown): HostedEmailUserRouteRe
   }
 
   return {
-    aliasKey: requireHostedEmailRecordString(record.aliasKey, "Hosted email user route aliasKey"),
     identityId: requireHostedEmailRecordString(record.identityId, "Hosted email user route identityId"),
     schema: HOSTED_EMAIL_USER_ROUTE_SCHEMA,
-    updatedAt: requireHostedEmailRecordString(record.updatedAt, "Hosted email user route updatedAt"),
     userId: requireHostedEmailRecordString(record.userId, "Hosted email user route userId"),
   };
 }
@@ -210,14 +200,6 @@ function parseHostedEmailVerifiedSenderRouteRecord(
     identityId: requireHostedEmailRecordString(
       record.identityId,
       "Hosted email verified sender route identityId",
-    ),
-    senderKey: requireHostedEmailRecordString(
-      record.senderKey,
-      "Hosted email verified sender route senderKey",
-    ),
-    updatedAt: requireHostedEmailRecordString(
-      record.updatedAt,
-      "Hosted email verified sender route updatedAt",
     ),
     userId: requireHostedEmailRecordString(
       record.userId,
