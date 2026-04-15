@@ -23,6 +23,8 @@ type HostedTypingHandle = {
 
 type HostedDispatchTypingIndicator = {
   channelLabel: "Linq" | "Telegram";
+  startLogDetails?: Record<string, boolean | string>;
+  stopLogDetails?: Record<string, boolean | string>;
   stop(): Promise<void>;
 };
 
@@ -62,6 +64,7 @@ export async function stopHostedDispatchTypingIndicator(input: {
   } catch (error) {
     emitHostedExecutionStructuredLog({
       component: "runtime",
+      details: input.typingIndicator.stopLogDetails,
       dispatch: input.dispatch,
       error,
       level: "warn",
@@ -93,6 +96,11 @@ function startHostedLinqDispatchTypingIndicator(input: {
   } catch (error) {
     emitHostedExecutionStructuredLog({
       component: "runtime",
+      details: {
+        chatIdPresent: false,
+        operation: "typing_start",
+        provider: "linq",
+      },
       dispatch: input.dispatch,
       error,
       level: "warn",
@@ -107,6 +115,16 @@ function startHostedLinqDispatchTypingIndicator(input: {
     channelLabel: "Linq",
     dispatch: input.dispatch,
     run: input.run,
+    startLogDetails: {
+      chatIdPresent: true,
+      operation: "typing_start",
+      provider: "linq",
+    },
+    stopLogDetails: {
+      chatIdPresent: true,
+      operation: "typing_stop",
+      provider: "linq",
+    },
     start: async () => {
       await startLinqChatTypingIndicator(
         {
@@ -173,6 +191,8 @@ function createAsyncHostedTypingIndicator(input: {
   channelLabel: HostedDispatchTypingIndicator["channelLabel"];
   dispatch: HostedAssistantRuntimeJobInput["request"]["dispatch"];
   run: HostedAssistantRuntimeJobInput["request"]["run"] | null;
+  startLogDetails?: Record<string, boolean | string>;
+  stopLogDetails?: Record<string, boolean | string>;
   start(): Promise<HostedTypingHandle>;
 }): HostedDispatchTypingIndicator {
   let activeIndicator: HostedTypingHandle | null = null;
@@ -184,6 +204,7 @@ function createAsyncHostedTypingIndicator(input: {
       stopPromise = indicator.stop().catch((error) => {
         emitHostedExecutionStructuredLog({
           component: "runtime",
+          details: input.stopLogDetails,
           dispatch: input.dispatch,
           error,
           level: "warn",
@@ -207,6 +228,7 @@ function createAsyncHostedTypingIndicator(input: {
     .catch((error: unknown) => {
       emitHostedExecutionStructuredLog({
         component: "runtime",
+        details: input.startLogDetails,
         dispatch: input.dispatch,
         error,
         level: "warn",
@@ -218,6 +240,8 @@ function createAsyncHostedTypingIndicator(input: {
 
   return {
     channelLabel: input.channelLabel,
+    startLogDetails: input.startLogDetails,
+    stopLogDetails: input.stopLogDetails,
     async stop() {
       if (stopRequested) {
         await (stopPromise ?? startPromise);

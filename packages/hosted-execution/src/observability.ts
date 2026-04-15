@@ -445,10 +445,14 @@ export function buildHostedExecutionSafeErrorDetails(
     return null;
   }
 
+  const nestedContext = sanitizeHostedExecutionStructuredLogDetails(
+    readHostedExecutionObjectErrorProperty(error, ["context"]),
+  );
   const nestedDetails = sanitizeHostedExecutionStructuredLogDetails(
     readHostedExecutionObjectErrorProperty(error, ["details"]),
   );
   const details: HostedExecutionStructuredLogDetails = {
+    ...(nestedContext ?? {}),
     ...(nestedDetails ?? {}),
   };
   const errorDetail = normalizeHostedExecutionDiagnosticMessage(error.message);

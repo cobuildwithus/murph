@@ -136,6 +136,11 @@ describe("hosted runtime typing helpers", () => {
     assert.equal(indicator, null);
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
+        details: {
+          chatIdPresent: false,
+          operation: "typing_start",
+          provider: "linq",
+        },
         level: "warn",
         message: "Hosted Linq typing indicator could not be started.",
         phase: "dispatch.running",

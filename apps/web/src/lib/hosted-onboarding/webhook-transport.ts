@@ -83,15 +83,29 @@ async function performHostedWebhookSideEffect(
   switch (effect.kind) {
     case "hosted_execution_dispatch":
       throw new Error("Hosted execution dispatch effects must be queued through the execution outbox.");
-    case "linq_message_send":
-      await sendHostedLinqChatMessage({
-        chatId: effect.payload.chatId,
-        idempotencyKey: effect.effectId,
-        message: await buildHostedLinqSideEffectMessage(effect, options.prisma),
-        replyToMessageId: effect.payload.replyToMessageId,
-        signal: options.signal,
-      });
+    case "linq_message_send": {
+      const startedAtMs = Date.now();
+      try {
+        await sendHostedLinqChatMessage({
+          chatId: effect.payload.chatId,
+          idempotencyKey: effect.effectId,
+          message: await buildHostedLinqSideEffectMessage(effect, options.prisma),
+          replyToMessageId: effect.payload.replyToMessageId,
+          signal: options.signal,
+        });
+      } catch (error) {
+        console.error(
+          "Hosted Linq side-effect delivery failed.",
+          buildHostedLinqSideEffectLogDetails(effect, error, Date.now() - startedAtMs),
+        );
+        throw error;
+      }
+      console.info(
+        "Hosted Linq side-effect delivery completed.",
+        buildHostedLinqSideEffectLogDetails(effect, null, Date.now() - startedAtMs),
+      );
       return { delivered: true };
+    }
     case "revnet_invoice_issue": {
       const member = await readHostedMemberSnapshot({
         memberId: effect.payload.memberId,
@@ -119,6 +133,78 @@ async function performHostedWebhookSideEffect(
     default:
       throw new Error(`Unsupported hosted webhook side effect kind: ${JSON.stringify(effect)}`);
   }
+}
+
+function buildHostedLinqSideEffectLogDetails(
+  effect: Extract<HostedWebhookSideEffect, { kind: "linq_message_send" }>,
+  error: unknown,
+  elapsedMs: number,
+): Record<string, boolean | number | string> {
+  const errorRecord = error && typeof error === "object" ? error as Record<string, unknown> : null;
+  const nestedDetails = errorRecord?.details && typeof errorRecord.details === "object"
+    ? errorRecord.details as Record<string, unknown>
+    : null;
+
+  return {
+    elapsedMs: Math.max(0, elapsedMs),
+    effectId: effect.effectId,
+    hasIdempotencyKey: true,
+    hasReplyToMessageId: typeof effect.payload.replyToMessageId === "string"
+      && effect.payload.replyToMessageId.trim().length > 0,
+    operation: "send_message",
+    provider: "linq",
+    retryable: readHostedLinqSideEffectRetryable(error),
+    template: effect.payload.template,
+    ...sanitizeHostedLinqLogDetails({
+      errorCode: readHostedLinqSideEffectString(errorRecord, "code"),
+      errorName: error instanceof Error ? error.name : null,
+      ...(nestedDetails ?? {}),
+    }),
+  };
+}
+
+function sanitizeHostedLinqLogDetails(
+  details: Record<string, unknown>,
+): Record<string, boolean | number | string> {
+  const sanitizedEntries: Array<readonly [string, boolean | number | string]> = [];
+  for (const [key, value] of Object.entries(details)) {
+    if (typeof value === "boolean") {
+      sanitizedEntries.push([key, value]);
+      continue;
+    }
+    if (typeof value === "number") {
+      if (Number.isFinite(value)) {
+        sanitizedEntries.push([key, value]);
+      }
+      continue;
+    }
+    const sanitizedValue = sanitizeHostedOnboardingLogString(
+      typeof value === "string" ? value : null,
+    );
+    if (sanitizedValue) {
+      sanitizedEntries.push([key, sanitizedValue]);
+    }
+  }
+  return Object.fromEntries(sanitizedEntries);
+}
+
+function readHostedLinqSideEffectRetryable(error: unknown): boolean {
+  return Boolean(
+    error
+      && typeof error === "object"
+      && "retryable" in error
+      && typeof error.retryable === "boolean"
+      && error.retryable,
+  );
+}
+
+function readHostedLinqSideEffectString(
+  record: Record<string, unknown> | null,
+  key: string,
+): string | null {
+  return record && typeof record[key] === "string"
+    ? record[key] as string
+    : null;
 }
 
 async function buildHostedLinqSideEffectMessage(
