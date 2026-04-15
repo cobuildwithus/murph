@@ -1,5 +1,4 @@
 import {
-  HostedRevnetIssuanceStatus,
   HostedStripeEventStatus,
   Prisma,
   type PrismaClient,
@@ -16,7 +15,6 @@ import {
   applyStripeSubscriptionUpdated,
 } from "./stripe-billing-events";
 import {
-  activateHostedMemberFromConfirmedRevnetIssuance,
   runHostedMemberActivationPostCommitEffects,
 } from "./member-activation";
 import { resolveStripeCustomerContext } from "./stripe-billing-lookup";
@@ -27,7 +25,6 @@ import {
 import {
   coerceStripeObjectId,
 } from "./billing";
-import { readHostedMemberSnapshot } from "./hosted-member-store";
 import {
   sanitizeHostedOnboardingPersistedErrorCode,
   sanitizeHostedOnboardingPersistedErrorMessage,
@@ -37,10 +34,6 @@ import {
   finishHostedOnboardingTiming,
   startHostedOnboardingTiming,
 } from "./logging";
-import {
-  isHostedOnboardingRevnetEnabled,
-  readHostedRevnetPaymentReceipt,
-} from "./revnet";
 import { requireHostedStripeApi } from "./runtime";
 import { drainHostedRevnetIssuanceSubmissionQueue } from "./stripe-revnet-issuance";
 
@@ -175,91 +168,6 @@ export async function reconcileHostedStripeEventById(input: {
   }
 
   return processClaimedHostedStripeEvent(claimed, input.prisma);
-}
-
-export async function reconcileSubmittedHostedRevnetIssuances(input: {
-  limit?: number;
-  prisma: PrismaClient;
-}): Promise<string[]> {
-  if (!isHostedOnboardingRevnetEnabled()) {
-    return [];
-  }
-
-  const confirmedIssuanceIds: string[] = [];
-  const issuances = await input.prisma.hostedRevnetIssuance.findMany({
-    where: {
-      payTxHash: {
-        not: null,
-      },
-      status: HostedRevnetIssuanceStatus.submitted,
-    },
-    orderBy: [
-      {
-        createdAt: "asc",
-      },
-    ],
-    take: input.limit ?? 25,
-  });
-
-  for (const issuance of issuances) {
-    const receipt = await readHostedRevnetPaymentReceipt({
-      chainId: issuance.chainId,
-      payTxHash: issuance.payTxHash as `0x${string}`,
-    });
-
-    if (!receipt) {
-      continue;
-    }
-
-    if (receipt.status === "reverted") {
-      await input.prisma.hostedRevnetIssuance.update({
-        where: {
-          id: issuance.id,
-        },
-        data: {
-          failureCode: "REVNET_PAYMENT_REVERTED",
-          failureMessage: "The submitted Hosted RevNet payment reverted onchain.",
-          status: HostedRevnetIssuanceStatus.failed,
-        },
-      });
-      continue;
-    }
-
-    await input.prisma.$transaction(async (transaction) => {
-      await transaction.hostedRevnetIssuance.update({
-        where: {
-          id: issuance.id,
-        },
-        data: {
-          confirmedAt: new Date(),
-          failureCode: null,
-          failureMessage: null,
-          status: HostedRevnetIssuanceStatus.confirmed,
-        },
-      });
-
-      const member = await readHostedMemberSnapshot({
-        memberId: issuance.memberId,
-        prisma: transaction,
-      });
-
-      if (!member) {
-        return;
-      }
-
-      await activateHostedMemberFromConfirmedRevnetIssuance({
-        member,
-        occurredAt: new Date().toISOString(),
-        prisma: transaction as Prisma.TransactionClient,
-        sourceEventId: issuance.id,
-        sourceType: "hosted.revnet.issuance.confirmed",
-      });
-    });
-
-    confirmedIssuanceIds.push(issuance.id);
-  }
-
-  return confirmedIssuanceIds;
 }
 
 async function claimHostedStripeEvent(input: {

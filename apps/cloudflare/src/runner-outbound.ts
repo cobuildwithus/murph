@@ -1,8 +1,11 @@
 import { createHostedArtifactStore } from "./bundle-store.ts";
 import { readHostedExecutionEnvironment } from "./env.ts";
 import {
+  buildHostedExecutionSafeErrorDetails,
   deriveHostedExecutionErrorCode,
   emitHostedExecutionStructuredLog,
+  readHostedExecutionSafeErrorName,
+  summarizeHostedExecutionError,
 } from "@murphai/hosted-execution";
 import { asWorkerStringEnvironment } from "./worker-contracts.ts";
 import { CLOUDFLARE_HOSTED_RUNTIME_HOSTS } from "./internal-hosts.ts";
@@ -105,10 +108,14 @@ export async function handleRunnerOutboundRequest(
       phase: "dispatch.running",
     });
 
+    const details = buildHostedExecutionSafeErrorDetails(error);
+    const errorName = readHostedExecutionSafeErrorName(error);
+
     return json({
       code: deriveHostedExecutionErrorCode(error),
-      error: error instanceof Error ? error.message : String(error),
-      ...(error instanceof Error ? { errorName: error.name } : {}),
+      error: summarizeHostedExecutionError(error),
+      ...(details ? { details } : {}),
+      ...(errorName ? { errorName } : {}),
     }, 500);
   }
 }
@@ -184,7 +191,6 @@ async function handleRunnerUsageRecordRequest(input: {
     bucket: input.bucket,
     dirtyKey: input.environment.platformEnvelopeKey,
     dirtyKeyId: input.environment.platformEnvelopeKeyId,
-    dirtyKeysById: input.environment.platformEnvelopeKeysById,
     key: crypto.rootKey,
     keyId: crypto.rootKeyId,
     keysById: crypto.keysById,

@@ -9,17 +9,13 @@ import {
   readEncryptedR2Json,
   writeEncryptedR2Json,
 } from "./crypto.js";
+import {
+  deleteHostedPendingUsageDirtyUser,
+  writeHostedPendingUsageDirtyUser,
+} from "./usage-store/dirty-users.ts";
 
-const HOSTED_PENDING_USAGE_DIRTY_USER_SCHEMA = "murph.hosted-pending-usage-dirty.v1";
 const HOSTED_PENDING_USAGE_RECORD_SCHEMA = "murph.hosted-pending-usage-record.v1";
-const HOSTED_PENDING_USAGE_DIRTY_PREFIX = "transient/assistant-usage-dirty/";
 const HOSTED_PENDING_USAGE_RECORD_PREFIX = "transient/assistant-usage/";
-
-interface StoredHostedPendingUsageDirtyUser {
-  schema: typeof HOSTED_PENDING_USAGE_DIRTY_USER_SCHEMA;
-  updatedAt: string;
-  userId: string;
-}
 
 interface StoredHostedPendingUsageRecord {
   record: Record<string, unknown>;
@@ -45,15 +41,10 @@ export interface HostedPendingUsageStore {
   }): Promise<Record<string, unknown>[]>;
 }
 
-export interface HostedPendingUsageDirtyUserStore {
-  listDirtyUsers(input?: { limit?: number | null }): Promise<string[]>;
-}
-
 export function createHostedPendingUsageStore(input: {
   bucket: R2BucketLike;
   dirtyKey: Uint8Array;
   dirtyKeyId: string;
-  dirtyKeysById?: Readonly<Record<string, Uint8Array>>;
   key: Uint8Array;
   keyId: string;
   keysById?: Readonly<Record<string, Uint8Array>>;
@@ -91,7 +82,9 @@ export function createHostedPendingUsageStore(input: {
         }
 
         await writeStoredHostedPendingUsageRecord({
-          ...input,
+          bucket: input.bucket,
+          key: input.key,
+          keyId: input.keyId,
           record,
           userId: request.userId,
         });
@@ -175,54 +168,6 @@ export function createHostedPendingUsageStore(input: {
       const sorted = sortHostedPendingUsageRecords(state.records);
       const selected = limit === null ? sorted : sorted.slice(0, limit);
       return selected.map((record) => cloneUsageRecord(record));
-    },
-  };
-}
-
-export function createHostedPendingUsageDirtyUserStore(input: {
-  bucket: R2BucketLike;
-  key: Uint8Array;
-  keyId: string;
-  keysById?: Readonly<Record<string, Uint8Array>>;
-}): HostedPendingUsageDirtyUserStore {
-  return {
-    async listDirtyUsers(request = {}) {
-      const keys = await listHostedR2ObjectKeys({
-        bucket: input.bucket,
-        prefix: HOSTED_PENDING_USAGE_DIRTY_PREFIX,
-      });
-      const seen = new Set<string>();
-      const dirtyUsers: StoredHostedPendingUsageDirtyUser[] = [];
-
-      for (const key of keys) {
-        const record: StoredHostedPendingUsageDirtyUser | null = await readEncryptedR2Json({
-          aad: buildHostedStorageAad({
-            key,
-            purpose: "assistant-usage-dirty",
-          }),
-          bucket: input.bucket,
-          cryptoKey: input.key,
-          cryptoKeysById: input.keysById,
-          expectedKeyId: input.keyId,
-          key,
-          parse(value) {
-            return parseStoredHostedPendingUsageDirtyUser(value);
-          },
-          scope: "assistant-usage-dirty",
-        });
-
-        if (!record || seen.has(record.userId)) {
-          continue;
-        }
-
-        seen.add(record.userId);
-        dirtyUsers.push(record);
-      }
-
-      return dirtyUsers
-        .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt) || left.userId.localeCompare(right.userId))
-        .slice(0, request.limit ?? undefined)
-        .map((record) => record.userId);
     },
   };
 }
@@ -361,45 +306,6 @@ async function writeStoredHostedPendingUsageRecord(input: {
   });
 }
 
-async function writeHostedPendingUsageDirtyUser(input: {
-  bucket: R2BucketLike;
-  key: Uint8Array;
-  keyId: string;
-  updatedAt: string;
-  userId: string;
-}): Promise<void> {
-  const key = await pendingUsageDirtyUserObjectKey(input.key, input.userId);
-  await writeEncryptedR2Json({
-    aad: buildHostedStorageAad({
-      key,
-      purpose: "assistant-usage-dirty",
-    }),
-    bucket: input.bucket,
-    cryptoKey: input.key,
-    key,
-    keyId: input.keyId,
-    scope: "assistant-usage-dirty",
-    value: {
-      schema: HOSTED_PENDING_USAGE_DIRTY_USER_SCHEMA,
-      updatedAt: input.updatedAt,
-      userId: input.userId,
-    } satisfies StoredHostedPendingUsageDirtyUser,
-  });
-}
-
-async function deleteHostedPendingUsageDirtyUser(input: {
-  bucket: R2BucketLike;
-  key: Uint8Array;
-  userId: string;
-}): Promise<void> {
-  if (!input.bucket.delete) {
-    return;
-  }
-
-  const key = await pendingUsageDirtyUserObjectKey(input.key, input.userId);
-  await input.bucket.delete(key);
-}
-
 function parseStoredHostedPendingUsageRecord(value: unknown): StoredHostedPendingUsageRecord {
   const record = requireRecord(value, "Hosted pending usage record");
   const usageRecord = cloneUsageRecord(
@@ -418,23 +324,6 @@ function parseStoredHostedPendingUsageRecord(value: unknown): StoredHostedPendin
       "Hosted pending usage record.schema",
       HOSTED_PENDING_USAGE_RECORD_SCHEMA,
     ),
-  };
-}
-
-function parseStoredHostedPendingUsageDirtyUser(value: unknown): StoredHostedPendingUsageDirtyUser {
-  const record = requireRecord(value, "Hosted pending usage dirty user record");
-
-  return {
-    schema: requireSchema(
-      record.schema,
-      "Hosted pending usage dirty user record.schema",
-      HOSTED_PENDING_USAGE_DIRTY_USER_SCHEMA,
-    ),
-    updatedAt: normalizeRequiredString(
-      record.updatedAt,
-      "Hosted pending usage dirty user record.updatedAt",
-    ),
-    userId: normalizeRequiredString(record.userId, "Hosted pending usage dirty user record.userId"),
   };
 }
 
@@ -485,17 +374,6 @@ async function pendingUsageRecordObjectPrefix(rootKey: Uint8Array, userId: strin
   });
 
   return `${HOSTED_PENDING_USAGE_RECORD_PREFIX}${userSegment}/`;
-}
-
-async function pendingUsageDirtyUserObjectKey(rootKey: Uint8Array, userId: string): Promise<string> {
-  const userSegment = await deriveHostedStorageOpaqueId({
-    length: 24,
-    rootKey,
-    scope: "assistant-usage-dirty-path",
-    value: `user:${userId}`,
-  });
-
-  return `${HOSTED_PENDING_USAGE_DIRTY_PREFIX}${userSegment}.json`;
 }
 
 async function listHostedR2ObjectKeys(input: {
