@@ -7,6 +7,9 @@ const BLIND_INDEX_PREFIX = "hbdi";
 const AES_256_GCM = "aes-256-gcm";
 const GCM_IV_BYTES = 12;
 const HOSTED_SECRET_SCOPE_SALT = Buffer.from("murph.hosted.device-sync.secret.v1", "utf8");
+const GCM_AUTH_TAG_BYTES = 16;
+const BASE64_CANONICAL_PATTERN = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u;
+const BASE64URL_CANONICAL_PATTERN = /^[A-Za-z0-9_-]*$/u;
 
 export interface HostedSecretCipherOptions {
   aad?: Buffer | Uint8Array | string;
@@ -30,9 +33,10 @@ export function decodeHostedEncryptionKey(value: string): Buffer {
     return Buffer.from(normalized, "hex");
   }
 
-  const normalizedBase64 = normalized.replace(/-/gu, "+").replace(/_/gu, "/");
-  const padding = normalizedBase64.length % 4 === 0 ? "" : "=".repeat(4 - (normalizedBase64.length % 4));
-  const base64Decoded = Buffer.from(`${normalizedBase64}${padding}`, "base64");
+  const base64Decoded = decodeStrictHostedBase64(
+    normalizeHostedBase64(normalized),
+    "Hosted encryption key must decode to exactly 32 bytes (hex or base64/base64url).",
+  );
 
   if (base64Decoded.length === 32) {
     return base64Decoded;
@@ -199,9 +203,21 @@ export function createHostedSecretCodec(input: {
       ].join(":");
     },
     decrypt(payload: string, options?: HostedSecretCipherOptions): string {
-      const [prefix, payloadKeyVersion, ivText, tagText, ciphertextText] = payload.split(":");
+      const parts = payload.split(":");
 
-      if (prefix !== ENCRYPTED_SECRET_PREFIX || !payloadKeyVersion || !ivText || !tagText || !ciphertextText) {
+      if (parts.length !== 5) {
+        throw new TypeError("Encrypted hosted secret payload is malformed.");
+      }
+
+      const [prefix, payloadKeyVersion, ivText, tagText, ciphertextText] = parts;
+
+      if (
+        prefix !== ENCRYPTED_SECRET_PREFIX
+        || !payloadKeyVersion
+        || !ivText
+        || !tagText
+        || ciphertextText === undefined
+      ) {
         throw new TypeError("Encrypted hosted secret payload is malformed.");
       }
 
@@ -280,22 +296,85 @@ function decryptHostedSecretPayload(input: {
   key: Buffer;
   tagText: string;
 }): string {
+  const iv = decodeStrictHostedBase64Url(
+    input.ivText,
+    "Encrypted hosted secret payload is malformed.",
+  );
+  const authTag = decodeStrictHostedBase64Url(
+    input.tagText,
+    "Encrypted hosted secret payload is malformed.",
+  );
+
+  if (iv.byteLength !== GCM_IV_BYTES || authTag.byteLength !== GCM_AUTH_TAG_BYTES) {
+    throw new TypeError("Encrypted hosted secret payload is malformed.");
+  }
+
   const decipher = createDecipheriv(
     AES_256_GCM,
     input.key,
-    Buffer.from(input.ivText, "base64url"),
+    iv,
   );
 
   if (input.aad) {
     decipher.setAAD(input.aad);
   }
 
-  decipher.setAuthTag(Buffer.from(input.tagText, "base64url"));
+  decipher.setAuthTag(authTag);
   const plaintext = Buffer.concat([
-    decipher.update(Buffer.from(input.ciphertextText, "base64url")),
+    decipher.update(
+      decodeStrictHostedBase64Url(
+        input.ciphertextText,
+        "Encrypted hosted secret payload is malformed.",
+      ),
+    ),
     decipher.final(),
   ]);
   return plaintext.toString("utf8");
+}
+
+function normalizeHostedBase64(value: string): string {
+  const normalized = value.trim().replace(/-/gu, "+").replace(/_/gu, "/");
+  const remainder = normalized.length % 4;
+
+  if (remainder === 0) {
+    return normalized;
+  }
+
+  return normalized.padEnd(normalized.length + (4 - remainder), "=");
+}
+
+function decodeStrictHostedBase64(value: string, errorMessage: string): Buffer {
+  const normalized = value.trim();
+
+  if (
+    normalized.length === 0
+    || normalized.length % 4 !== 0
+    || !BASE64_CANONICAL_PATTERN.test(normalized)
+  ) {
+    throw new TypeError(errorMessage);
+  }
+
+  const decoded = Buffer.from(normalized, "base64");
+
+  if (decoded.toString("base64") !== normalized) {
+    throw new TypeError(errorMessage);
+  }
+
+  return decoded;
+}
+
+function decodeStrictHostedBase64Url(value: string, errorMessage: string): Buffer {
+  if (!BASE64URL_CANONICAL_PATTERN.test(value) || value.length % 4 === 1) {
+    throw new TypeError(errorMessage);
+  }
+
+  const decoded = Buffer.from(value, "base64url");
+
+  if (decoded.toString("base64url") !== value) {
+    throw new TypeError(errorMessage);
+  }
+
+  return decoded;
 }
 
 function sameBytes(left: Uint8Array, right: Uint8Array): boolean {

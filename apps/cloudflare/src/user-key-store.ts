@@ -306,12 +306,30 @@ async function readStoredHostedUserRootKeyEnvelope(input: {
     }
 
     return {
-      envelope: parseHostedUserRootKeyEnvelope(JSON.parse(new TextDecoder().decode(plaintext)) as unknown),
+      envelope: parseStoredHostedUserRootKeyEnvelope(
+        JSON.parse(new TextDecoder().decode(plaintext)) as unknown,
+        input.userId,
+      ),
       objectKey,
     };
   }
 
   return null;
+}
+
+function parseStoredHostedUserRootKeyEnvelope(
+  value: unknown,
+  expectedUserId: string,
+): HostedUserRootKeyEnvelope {
+  const envelope = parseHostedUserRootKeyEnvelope(value);
+
+  if (envelope.userId !== expectedUserId) {
+    throw new Error(
+      `Hosted user root key envelope user mismatch: expected ${expectedUserId}, received ${envelope.userId}.`,
+    );
+  }
+
+  return envelope;
 }
 
 async function writeHostedUserRootKeyEnvelope(input: {

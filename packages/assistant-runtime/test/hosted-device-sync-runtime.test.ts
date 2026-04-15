@@ -4,7 +4,7 @@ import path from "node:path";
 
 import { describe, test } from "vitest";
 
-import { createSecretCodec } from "@murphai/device-syncd/crypto";
+import { buildDeviceSyncTokenCipherOptions, createSecretCodec } from "@murphai/device-syncd/crypto";
 import { createDeviceSyncService } from "@murphai/device-syncd/service";
 import {
   type DeviceSyncAccount,
@@ -505,6 +505,39 @@ describe("hosted device-sync runtime", () => {
       assert.ok(stored);
       assert.equal(stored.nextReconcileAt, "2026-04-04T12:00:00.000Z");
       assert.equal(stored.hostedObservedTokenVersion, 4);
+      assert.equal(
+        createSecretCodec(DEVICE_SYNC_SECRET).decrypt(
+          stored.accessTokenEncrypted,
+          buildDeviceSyncTokenCipherOptions({
+            externalAccountId: stored.externalAccountId,
+            provider: stored.provider,
+            purpose: "device-sync-access-token",
+          }),
+        ),
+        "hosted-inline-access",
+      );
+      assert.throws(
+        () =>
+          createSecretCodec(DEVICE_SYNC_SECRET).decrypt(
+            stored.accessTokenEncrypted,
+            buildDeviceSyncTokenCipherOptions({
+              externalAccountId: stored.externalAccountId,
+              provider: stored.provider,
+              purpose: "device-sync-refresh-token",
+            }),
+          ),
+      );
+      assert.equal(
+        createSecretCodec(DEVICE_SYNC_SECRET).decrypt(
+          stored.refreshTokenEncrypted ?? "",
+          buildDeviceSyncTokenCipherOptions({
+            externalAccountId: stored.externalAccountId,
+            provider: stored.provider,
+            purpose: "device-sync-refresh-token",
+          }),
+        ),
+        "hosted-inline-refresh",
+      );
 
       const jobs = readJobsForAccount(service, connected.account.id);
       assert.equal(jobs.length, 1);
@@ -1331,12 +1364,28 @@ describe("hosted device-sync runtime", () => {
       service.store.markSyncStarted(localAccountId, "2026-04-02T13:06:00.000Z");
 
       const codec = createSecretCodec(DEVICE_SYNC_SECRET);
+      const storedLocalAccount = service.store.getAccountById(localAccountId);
+      assert.ok(storedLocalAccount);
       const updated = service.store.updateAccountTokens(localAccountId, {
         accessToken: "local-access",
-        accessTokenEncrypted: codec.encrypt("local-access"),
+        accessTokenEncrypted: codec.encrypt(
+          "local-access",
+          buildDeviceSyncTokenCipherOptions({
+            externalAccountId: storedLocalAccount.externalAccountId,
+            provider: storedLocalAccount.provider,
+            purpose: "device-sync-access-token",
+          }),
+        ),
         accessTokenExpiresAt: "2026-04-04T00:00:00.000Z",
         refreshToken: "local-refresh",
-        refreshTokenEncrypted: codec.encrypt("local-refresh"),
+        refreshTokenEncrypted: codec.encrypt(
+          "local-refresh",
+          buildDeviceSyncTokenCipherOptions({
+            externalAccountId: storedLocalAccount.externalAccountId,
+            provider: storedLocalAccount.provider,
+            purpose: "device-sync-refresh-token",
+          }),
+        ),
       });
       assert.ok(updated);
 

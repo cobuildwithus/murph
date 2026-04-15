@@ -5,6 +5,7 @@ import { test, vi } from "vitest";
 import { openSqliteRuntimeDatabase, writeSqliteRuntimeUserVersion } from "@murphai/runtime-state/node";
 
 import { createWhoopDeviceSyncProvider } from "../src/providers/whoop.ts";
+import { buildDeviceSyncTokenCipherOptions, createSecretCodec } from "../src/crypto.ts";
 import { DeviceSyncError, deviceSyncError } from "../src/errors.ts";
 import { createDeviceSyncService } from "../src/service.ts";
 import { scopeWebhookTraceId } from "../src/shared.ts";
@@ -258,6 +259,76 @@ test("device sync service redacts connection metadata from public account respon
   assert.deepEqual(seenMetadata, {
     connectedBy: "sensitive-connect-code",
   });
+
+  service.close();
+});
+
+test("device sync service fails closed when stored token integrity validation fails", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-token-integrity");
+  const service = createDeviceSyncService({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    providers: [createFakeProvider()],
+  });
+
+  const begin = await service.startConnection({
+    provider: "demo",
+    returnTo: "/settings/devices",
+  });
+  const connected = await service.handleOAuthCallback({
+    provider: "demo",
+    state: begin.state,
+    code: "tampered",
+  });
+  const stored = service.store.getAccountById(connected.account.id);
+  assert.ok(stored);
+
+  const codec = createSecretCodec("secret-for-tests");
+  const updated = service.store.updateAccountTokens(stored.id, {
+    accessToken: "tampered-access-token",
+    accessTokenEncrypted: codec.encrypt(
+      "tampered-access-token",
+      buildDeviceSyncTokenCipherOptions({
+        externalAccountId: `${stored.externalAccountId}-other`,
+        provider: stored.provider,
+        purpose: "device-sync-access-token",
+      }),
+    ),
+    refreshToken: "tampered-refresh-token",
+    refreshTokenEncrypted: codec.encrypt(
+      "tampered-refresh-token",
+      buildDeviceSyncTokenCipherOptions({
+        externalAccountId: stored.externalAccountId,
+        provider: stored.provider,
+        purpose: "device-sync-refresh-token",
+      }),
+    ),
+  });
+  assert.ok(updated);
+
+  service.queueManualReconcile(stored.id);
+  await service.runWorkerOnce();
+
+  const failedJob = service.store.database.prepare(`
+    select
+      status,
+      last_error_code as lastErrorCode,
+      last_error_message as lastErrorMessage
+    from device_job
+    where account_id = ?
+    order by created_at desc, id desc
+    limit 1
+  `).get(stored.id) as { lastErrorCode?: string; lastErrorMessage?: string; status?: string } | undefined;
+  const reauthorizationAccount = service.store.getAccountById(stored.id);
+
+  assert.equal(failedJob?.status, "dead");
+  assert.equal(failedJob?.lastErrorCode, "ACCOUNT_TOKEN_DECRYPT_FAILED");
+  assert.match(failedJob?.lastErrorMessage ?? "", /failed integrity validation/u);
+  assert.equal(reauthorizationAccount?.status, "reauthorization_required");
 
   service.close();
 });
