@@ -487,41 +487,6 @@ async function listCanonicalAssistantCronRecords(
   ]
 }
 
-async function findCanonicalAssistantCronRecord(
-  vault: string,
-  lookup: string,
-): Promise<CanonicalAssistantCronJobRecord | null> {
-  const normalizedLookup = normalizeRequiredAssistantCronText(lookup, 'job')
-  const timeZone = await resolveAssistantCronDefaultTimeZone(vault)
-  const directAutomationRecord = await showCanonicalAutomation(vault, normalizedLookup)
-  const directAutomationMatch = directAutomationRecord
-    ? normalizeCanonicalAssistantCronRecord(directAutomationRecord, timeZone)
-    : null
-  if (directAutomationMatch) {
-    return directAutomationMatch
-  }
-
-  const [automationRecords, foodRecords] = await Promise.all([
-    listCanonicalAutomations(vault, {
-      status: ['active', 'paused'],
-    }),
-    listCanonicalFoodAutoLogRecords(vault, timeZone),
-  ])
-
-  const automationMatch = findCanonicalAssistantCronRecordInList(
-    automationRecords.flatMap((record) => {
-      const normalized = normalizeCanonicalAssistantCronRecord(record, timeZone)
-      return normalized ? [normalized] : []
-    }),
-    normalizedLookup,
-  )
-  if (automationMatch) {
-    return automationMatch
-  }
-
-  return findCanonicalAssistantCronRecordInList(foodRecords, normalizedLookup)
-}
-
 function normalizeCanonicalAssistantCronRecord(
   record: AutomationQueryRecord & {
     instructions?: string
@@ -1629,10 +1594,10 @@ async function claimNextDueAssistantCronJob(
       readAssistantCronCanonicalRuntimeStore(paths),
     ])
     const now = new Date().toISOString()
-    const canonicalFoodIds = new Set(
-      canonicalRecords.flatMap((record) =>
-        record.kind === 'foodAutoLog' ? [record.foodId] : [],
-      ),
+    const canonicalFoodIds = buildCanonicalFoodIdSet(canonicalRecords)
+    const visibleLocalStore = buildVisibleLocalAssistantCronStore(
+      store,
+      canonicalFoodIds,
     )
     const canonicalEntries = canonicalRecords.map((source) => {
       const runtimeState = resolveCanonicalRuntimeState(
@@ -1652,10 +1617,7 @@ async function claimNextDueAssistantCronJob(
       }
     })
     const candidate = sortAssistantCronJobs([
-      ...store.jobs.filter(
-        (job) =>
-          !job.foodAutoLog || !canonicalFoodIds.has(job.foodAutoLog.foodId),
-      ),
+      ...visibleLocalStore.jobs,
       ...canonicalEntries.map((entry) => entry.job),
     ]).find((job) =>
       isAssistantCronJobDue(job, now),
