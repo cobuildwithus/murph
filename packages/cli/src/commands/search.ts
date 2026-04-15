@@ -110,6 +110,45 @@ const queryProjectionRebuildSchema = queryProjectionStatusSchema.extend({
   rebuilt: z.literal(true),
 })
 
+function normalizeSearchQueryInput(input: {
+  positionalQuery?: string
+  namedQuery?: string
+}): string {
+  const positionalQuery = input.positionalQuery?.trim()
+  const namedQuery = input.namedQuery?.trim()
+
+  if (input.positionalQuery !== undefined && !positionalQuery) {
+    throw new VaultCliError(
+      'invalid_query',
+      'Positional search text must not be blank.',
+    )
+  }
+
+  if (input.namedQuery !== undefined && !namedQuery) {
+    throw new VaultCliError(
+      'invalid_query',
+      'Search text passed to `--text` must not be blank.',
+    )
+  }
+
+  if (positionalQuery && namedQuery && positionalQuery !== namedQuery) {
+    throw new VaultCliError(
+      'invalid_query',
+      'Positional search text and `--text` must match when both are provided.',
+    )
+  }
+
+  const text = positionalQuery ?? namedQuery
+  if (!text) {
+    throw new VaultCliError(
+      'invalid_query',
+      'Search text is required for `search query`. Use `search query <query>` or `search query --text "<query>"`.',
+    )
+  }
+
+  return text
+}
+
 export function registerSearchCommands(
   cli: Cli.Cli,
   _services: VaultServices,
@@ -205,27 +244,10 @@ export function registerSearchCommands(
     output: searchResultSchema,
     async run({ args, options }) {
       const query = await loadQueryRuntime()
-      const positionalQuery = args.query?.trim()
-      const namedQuery = options.text?.trim()
-      const text = positionalQuery || namedQuery
-
-      if (!text) {
-        throw new VaultCliError(
-          'invalid_query',
-          'Search text is required for `search query`. Use `search query <query>` or `search query --text "<query>"`.',
-        )
-      }
-
-      if (
-        positionalQuery &&
-        namedQuery &&
-        positionalQuery !== namedQuery
-      ) {
-        throw new VaultCliError(
-          'invalid_query',
-          'Positional search text and `--text` must match when both are provided.',
-        )
-      }
+      const text = normalizeSearchQueryInput({
+        positionalQuery: args.query,
+        namedQuery: options.text,
+      })
 
       const recordTypes =
         normalizeRepeatableEnumFlagOption(

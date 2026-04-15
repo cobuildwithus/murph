@@ -214,6 +214,36 @@ test('search query accepts positional or named text, rejects blank text, and det
   }
   assert.equal(rejected.envelope.error.code, 'invalid_query')
 
+  const rejectedBlankNamedWithPositional = await runSearchCli(cli, [
+    'search',
+    'query',
+    'magnesium',
+    '--text',
+    '   ',
+    '--vault',
+    '/vaults/search',
+  ])
+  assert.equal(rejectedBlankNamedWithPositional.envelope.ok, false)
+  if (rejectedBlankNamedWithPositional.envelope.ok) {
+    throw new Error('Expected blank `--text` to be rejected even when positional text is present.')
+  }
+  assert.equal(rejectedBlankNamedWithPositional.envelope.error.code, 'invalid_query')
+
+  const rejectedBlankPositionalWithNamed = await runSearchCli(cli, [
+    'search',
+    'query',
+    '   ',
+    '--text',
+    'magnesium',
+    '--vault',
+    '/vaults/search',
+  ])
+  assert.equal(rejectedBlankPositionalWithNamed.envelope.ok, false)
+  if (rejectedBlankPositionalWithNamed.envelope.ok) {
+    throw new Error('Expected blank positional text to be rejected even when `--text` is present.')
+  }
+  assert.equal(rejectedBlankPositionalWithNamed.envelope.error.code, 'invalid_query')
+
   const conflicting = await runSearchCli(cli, [
     'search',
     'query',
@@ -318,6 +348,7 @@ test('search query accepts positional or named text, rejects blank text, and det
       },
     },
   ])
+
 })
 
 test('search query omits optional repeatable filters when none are provided', async () => {
@@ -395,6 +426,63 @@ test('search query omits optional repeatable filters when none are provided', as
     tags: [],
     limit: 20,
   })
+})
+
+test('search query accepts matching positional and named text in the schema smoke path', async () => {
+  loadQueryRuntimeMock.mockResolvedValue({
+    ...createSearchRuntime(),
+    async searchVaultRuntime(
+      vaultRoot: string,
+      query: string,
+      filters: {
+        experimentSlug?: string
+        from?: string
+        kinds?: string[]
+        limit: number
+        recordTypes?: string[]
+        streams?: string[]
+        tags?: string[]
+        to?: string
+      },
+    ) {
+      assert.equal(vaultRoot, '/vaults/search')
+      assert.equal(query, 'magnesium')
+      assert.deepEqual(filters, {
+        recordTypes: undefined,
+        kinds: undefined,
+        streams: undefined,
+        experimentSlug: undefined,
+        from: undefined,
+        to: undefined,
+        tags: undefined,
+        limit: 20,
+      })
+
+      return {
+        format: 'murph.search.v1',
+        query,
+        total: 1,
+        hits: [],
+      }
+    },
+  })
+  const cli = createSearchSliceCli()
+
+  const matchingDualInput = await runSearchCli<{
+    query: string
+    total: number
+  }>(cli, [
+    'search',
+    'query',
+    'magnesium',
+    '--text',
+    'magnesium',
+    '--vault',
+    '/vaults/search',
+  ])
+  assert.equal(matchingDualInput.envelope.ok, true)
+  assert.equal(requireData(matchingDualInput.envelope).query, 'magnesium')
+  assert.equal(requireData(matchingDualInput.envelope).total, 1)
 })
 
 test('query projection status and rebuild use the shared query runtime', async () => {
