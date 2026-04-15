@@ -3,12 +3,16 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
 
 const mocks = vi.hoisted(() => ({
+  drainHostedExecutionOutboxBestEffort: vi.fn(),
+  enqueueHostedMemberChannelsUpdatedTx: vi.fn(),
   getPrisma: vi.fn(),
   prismaClient: {
     label: "test-prisma",
+    $transaction: vi.fn(),
   },
   readHostedPhoneHint: vi.fn(),
-  reconcileHostedPrivyIdentityOnMember: vi.fn(),
+  reconcileHostedPrivyIdentityOnMemberTx: vi.fn(),
+  resolveHostedMemberChannelSyncEmailLinked: vi.fn(),
   requirePrivyMemberAuth: vi.fn(),
 }));
 
@@ -21,11 +25,20 @@ vi.mock("@/src/lib/hosted-onboarding/contact-privacy", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/member-identity-service", () => ({
-  reconcileHostedPrivyIdentityOnMember: mocks.reconcileHostedPrivyIdentityOnMember,
+  reconcileHostedPrivyIdentityOnMemberTx: mocks.reconcileHostedPrivyIdentityOnMemberTx,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({
   requirePrivyMemberAuth: mocks.requirePrivyMemberAuth,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/member-channel-sync", () => ({
+  enqueueHostedMemberChannelsUpdatedTx: mocks.enqueueHostedMemberChannelsUpdatedTx,
+  resolveHostedMemberChannelSyncEmailLinked: mocks.resolveHostedMemberChannelSyncEmailLinked,
+}));
+
+vi.mock("@/src/lib/hosted-execution/outbox", () => ({
+  drainHostedExecutionOutboxBestEffort: mocks.drainHostedExecutionOutboxBestEffort,
 }));
 
 type SettingsPhoneSyncRouteModule = typeof import("../app/api/settings/phone/sync/route");
@@ -44,15 +57,26 @@ describe("settings phone sync route", () => {
     vi.clearAllMocks();
     mocks.getPrisma.mockReturnValue(mocks.prismaClient);
     mocks.readHostedPhoneHint.mockReturnValue("+1 415 555 2671");
-    mocks.reconcileHostedPrivyIdentityOnMember.mockResolvedValue(undefined);
+    mocks.prismaClient.$transaction.mockImplementation(async (callback: (tx: unknown) => Promise<unknown>) =>
+      callback(mocks.prismaClient)
+    );
+    mocks.reconcileHostedPrivyIdentityOnMemberTx.mockResolvedValue(undefined);
+    mocks.resolveHostedMemberChannelSyncEmailLinked.mockResolvedValue(false);
+    mocks.enqueueHostedMemberChannelsUpdatedTx.mockResolvedValue({
+      eventId: "member.channels.updated:settings.phone.sync:member_123:evt_123",
+    });
+    mocks.drainHostedExecutionOutboxBestEffort.mockResolvedValue(undefined);
     mocks.requirePrivyMemberAuth.mockResolvedValue({
       identity: {
         phone: {
           number: "+14155552671",
         },
       },
+      linkedAccounts: [],
       member: {
+        billingStatus: "active",
         id: "member_123",
+        suspendedAt: null,
       },
     });
   });
@@ -68,23 +92,108 @@ describe("settings phone sync route", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("Cache-Control")).toBe("no-store");
     expect(mocks.requirePrivyMemberAuth).toHaveBeenCalledWith(expect.any(Request));
-    expect(mocks.reconcileHostedPrivyIdentityOnMember).toHaveBeenCalledWith({
+    expect(mocks.reconcileHostedPrivyIdentityOnMemberTx).toHaveBeenCalledWith({
       identity: {
         phone: {
           number: "+14155552671",
         },
       },
       member: {
+        billingStatus: "active",
         id: "member_123",
+        suspendedAt: null,
       },
       now: expect.any(Date),
       prisma: mocks.prismaClient,
+    });
+    expect(mocks.resolveHostedMemberChannelSyncEmailLinked).toHaveBeenCalledWith({
+      linkedAccounts: [],
+      memberId: "member_123",
+    });
+    expect(mocks.enqueueHostedMemberChannelsUpdatedTx).toHaveBeenCalledWith({
+      emailLinked: false,
+      memberId: "member_123",
+      occurredAt: expect.any(String),
+      prisma: mocks.prismaClient,
+      sourceType: "settings.phone.sync",
+    });
+    expect(mocks.drainHostedExecutionOutboxBestEffort).toHaveBeenCalledWith({
+      eventIds: ["member.channels.updated:settings.phone.sync:member_123:evt_123"],
     });
     expect(mocks.readHostedPhoneHint).toHaveBeenCalledWith("+14155552671");
     await expect(response.json()).resolves.toEqual({
       ok: true,
       phoneNumber: "+14155552671",
       phoneNumberHint: "+1 415 555 2671",
+      runTriggered: true,
+    });
+  });
+
+  it("updates the hosted member identity without dispatching channel sync before activation", async () => {
+    mocks.requirePrivyMemberAuth.mockResolvedValue({
+      identity: {
+        phone: {
+          number: "+14155552671",
+        },
+      },
+      linkedAccounts: [],
+      member: {
+        billingStatus: "not_started",
+        id: "member_123",
+        suspendedAt: null,
+      },
+    });
+
+    const response = await settingsPhoneSyncRoute.POST(
+      new Request("https://join.example.test/api/settings/phone/sync", {
+        headers: SAME_ORIGIN_HEADERS,
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.reconcileHostedPrivyIdentityOnMemberTx).toHaveBeenCalledTimes(1);
+    expect(mocks.enqueueHostedMemberChannelsUpdatedTx).not.toHaveBeenCalled();
+    expect(mocks.drainHostedExecutionOutboxBestEffort).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      phoneNumber: "+14155552671",
+      phoneNumberHint: "+1 415 555 2671",
+      runTriggered: false,
+    });
+  });
+
+  it("skips the hosted channel dispatch when hosted access is not active yet", async () => {
+    mocks.requirePrivyMemberAuth.mockResolvedValue({
+      identity: {
+        phone: {
+          number: "+14155552671",
+        },
+      },
+      linkedAccounts: [],
+      member: {
+        billingStatus: "incomplete",
+        id: "member_123",
+        suspendedAt: null,
+      },
+    });
+
+    const response = await settingsPhoneSyncRoute.POST(
+      new Request("https://join.example.test/api/settings/phone/sync", {
+        headers: SAME_ORIGIN_HEADERS,
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.resolveHostedMemberChannelSyncEmailLinked).not.toHaveBeenCalled();
+    expect(mocks.enqueueHostedMemberChannelsUpdatedTx).not.toHaveBeenCalled();
+    expect(mocks.drainHostedExecutionOutboxBestEffort).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      phoneNumber: "+14155552671",
+      phoneNumberHint: "+1 415 555 2671",
+      runTriggered: false,
     });
   });
 
@@ -103,7 +212,7 @@ describe("settings phone sync route", () => {
     );
 
     expect(response.status).toBe(401);
-    expect(mocks.reconcileHostedPrivyIdentityOnMember).not.toHaveBeenCalled();
+    expect(mocks.reconcileHostedPrivyIdentityOnMemberTx).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       error: {
         code: "AUTH_REQUIRED",
@@ -131,7 +240,7 @@ describe("settings phone sync route", () => {
     );
 
     expect(response.status).toBe(409);
-    expect(mocks.reconcileHostedPrivyIdentityOnMember).not.toHaveBeenCalled();
+    expect(mocks.reconcileHostedPrivyIdentityOnMemberTx).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       error: {
         code: "PRIVY_PHONE_NOT_READY",
@@ -156,7 +265,7 @@ describe("settings phone sync route", () => {
     );
 
     expect(response.status).toBe(403);
-    expect(mocks.reconcileHostedPrivyIdentityOnMember).not.toHaveBeenCalled();
+    expect(mocks.reconcileHostedPrivyIdentityOnMemberTx).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       error: {
         code: "HOSTED_MEMBER_NOT_FOUND",
@@ -167,7 +276,7 @@ describe("settings phone sync route", () => {
   });
 
   it("surfaces identity conflicts when the verified phone belongs to a different hosted member", async () => {
-    mocks.reconcileHostedPrivyIdentityOnMember.mockRejectedValue(hostedOnboardingError({
+    mocks.reconcileHostedPrivyIdentityOnMemberTx.mockRejectedValue(hostedOnboardingError({
       code: "PRIVY_IDENTITY_CONFLICT",
       httpStatus: 409,
       message: "That phone number is already linked to a different Murph account.",
@@ -181,7 +290,7 @@ describe("settings phone sync route", () => {
     );
 
     expect(response.status).toBe(409);
-    expect(mocks.reconcileHostedPrivyIdentityOnMember).toHaveBeenCalledTimes(1);
+    expect(mocks.reconcileHostedPrivyIdentityOnMemberTx).toHaveBeenCalledTimes(1);
     await expect(response.json()).resolves.toEqual({
       error: {
         code: "PRIVY_IDENTITY_CONFLICT",

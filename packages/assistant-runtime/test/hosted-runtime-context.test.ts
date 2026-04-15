@@ -35,13 +35,19 @@ vi.mock("@murphai/vault-usecases/vault-services", () => ({
 
 import {
   prepareHostedDispatchContext,
-  reconcileHostedAssistantChannelCapabilities,
+  reconcileHostedAssistantChannelState,
 } from "../src/hosted-runtime/context.ts";
 import {
   createHostedRuntimeWorkspace,
   HOSTED_RUNTIME_RESOLVED_CONFIG,
   HOSTED_RUNTIME_EMAIL_CAPABILITY_ENV,
 } from "./hosted-runtime-test-helpers.ts";
+
+const DEFAULT_MEMBER_CHANNELS = {
+  email: true,
+  linq: true,
+  telegram: true,
+} as const;
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -123,18 +129,20 @@ async function withOperatorHomeRoot<T>(
   }
 }
 
-test("hosted channel capability reconciliation enables email and telegram auto-reply exactly once", async () => {
+test("hosted channel state reconciliation enables linked hosted auto-reply channels exactly once", async () => {
   const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace("hosted-runtime-context-");
 
   try {
-    const firstResult = await reconcileHostedAssistantChannelCapabilities(
+    const firstResult = await reconcileHostedAssistantChannelState(
       vaultRoot,
+      DEFAULT_MEMBER_CHANNELS,
       HOSTED_RUNTIME_RESOLVED_CONFIG.channelCapabilities,
       true,
     );
 
     assert.deepEqual(firstResult, {
       emailAutoReplyEnabled: true,
+      linqAutoReplyEnabled: true,
       telegramAutoReplyEnabled: true,
     });
     assert.deepEqual((await readAutomationState(vaultRoot)).autoReply, [
@@ -143,19 +151,25 @@ test("hosted channel capability reconciliation enables email and telegram auto-r
         cursor: null,
       },
       {
+        channel: "linq",
+        cursor: null,
+      },
+      {
         channel: "telegram",
         cursor: null,
       },
     ]);
 
-    const secondResult = await reconcileHostedAssistantChannelCapabilities(
+    const secondResult = await reconcileHostedAssistantChannelState(
       vaultRoot,
+      DEFAULT_MEMBER_CHANNELS,
       HOSTED_RUNTIME_RESOLVED_CONFIG.channelCapabilities,
       true,
     );
 
     assert.deepEqual(secondResult, {
       emailAutoReplyEnabled: true,
+      linqAutoReplyEnabled: true,
       telegramAutoReplyEnabled: true,
     });
     assert.equal(mocks.inboxList.mock.calls.length, 1);
@@ -164,7 +178,7 @@ test("hosted channel capability reconciliation enables email and telegram auto-r
   }
 });
 
-test("hosted channel capability reconciliation preserves unmanaged entries while pruning disabled hosted channels", async () => {
+test("hosted channel state reconciliation preserves unmanaged entries while pruning unlinked or unavailable hosted channels", async () => {
   const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace("hosted-runtime-context-");
 
   try {
@@ -197,8 +211,13 @@ test("hosted channel capability reconciliation preserves unmanaged entries while
       updatedAt: "2026-03-28T09:03:00.000Z",
     });
 
-    const result = await reconcileHostedAssistantChannelCapabilities(
+    const result = await reconcileHostedAssistantChannelState(
       vaultRoot,
+      {
+        email: false,
+        linq: true,
+        telegram: true,
+      },
       {
         emailSendReady: false,
         telegramBotConfigured: true,
@@ -208,6 +227,7 @@ test("hosted channel capability reconciliation preserves unmanaged entries while
 
     assert.deepEqual(result, {
       emailAutoReplyEnabled: false,
+      linqAutoReplyEnabled: true,
       telegramAutoReplyEnabled: true,
     });
     assert.deepEqual((await readAutomationState(vaultRoot)).autoReply, [
@@ -260,6 +280,11 @@ test("hosted dispatch context still requires member activation bootstrap before 
         {
           event: {
             kind: "member.activated",
+            memberChannels: {
+              email: false,
+              linq: false,
+              telegram: false,
+            },
             userId: "member_123",
           },
           eventId: "evt_activation",
@@ -275,6 +300,7 @@ test("hosted dispatch context still requires member activation bootstrap before 
         assistantProvider: null,
         assistantSeeded: false,
         emailAutoReplyEnabled: false,
+        linqAutoReplyEnabled: false,
         telegramAutoReplyEnabled: false,
         vaultCreated: true,
       });
@@ -302,6 +328,7 @@ test("hosted member activation enables managed Linq auto-reply when first contac
               threadId: "chat_123",
               threadIsDirect: true,
             },
+            memberChannels: DEFAULT_MEMBER_CHANNELS,
             userId: "member_123",
           },
           eventId: "evt_activation_linq",
@@ -317,6 +344,7 @@ test("hosted member activation enables managed Linq auto-reply when first contac
         assistantProvider: "openai-compatible",
         assistantSeeded: true,
         emailAutoReplyEnabled: true,
+        linqAutoReplyEnabled: true,
         telegramAutoReplyEnabled: true,
         vaultCreated: true,
       });
@@ -359,6 +387,7 @@ test("hosted activation replay preserves managed Linq auto-reply after Linq boot
               threadId: "chat_123",
               threadIsDirect: true,
             },
+            memberChannels: DEFAULT_MEMBER_CHANNELS,
             userId: "member_123",
           },
           eventId: "evt_activation_linq_initial",
@@ -373,6 +402,7 @@ test("hosted activation replay preserves managed Linq auto-reply after Linq boot
         {
           event: {
             kind: "member.activated",
+            memberChannels: DEFAULT_MEMBER_CHANNELS,
             userId: "member_123",
           },
           eventId: "evt_activation_linq_replay",
@@ -404,7 +434,7 @@ test("hosted activation replay preserves managed Linq auto-reply after Linq boot
   }
 });
 
-test("hosted dispatch context does not enable new auto-reply channels on non-activation follow-up events", async () => {
+test("hosted dispatch context does not change auto-reply state on non-channel follow-up events", async () => {
   const { cleanup, operatorHomeRoot, vaultRoot } = await createHostedRuntimeWorkspace("hosted-runtime-context-");
 
   try {
@@ -414,6 +444,11 @@ test("hosted dispatch context does not enable new auto-reply channels on non-act
         {
           event: {
             kind: "member.activated",
+            memberChannels: {
+              email: false,
+              linq: false,
+              telegram: false,
+            },
             userId: "member_123",
           },
           eventId: "evt_activation",

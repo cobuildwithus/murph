@@ -26,6 +26,7 @@ import {
 import { resolveHostedMemberActivationLinqRoute } from "./linq-home-routing";
 import {
   resolveHostedMemberFirstContactTarget,
+  resolveHostedMemberChannels,
   resolveHostedMemberMessagingState,
 } from "./messaging-state";
 import {
@@ -49,6 +50,7 @@ export type HostedMemberActivationTransactionResult = HostedMemberActivationResu
 };
 
 export async function activateHostedMemberFromConfirmedRevnetIssuanceTx(input: {
+  emailLinked?: boolean;
   member: HostedMemberSnapshot;
   occurredAt: string;
   prisma: Prisma.TransactionClient;
@@ -87,6 +89,7 @@ export async function activateHostedMemberFromConfirmedRevnetIssuanceTx(input: {
       prisma: input.prisma,
     });
     const dispatch = buildHostedMemberActivationDispatchForMember({
+      emailLinked: input.emailLinked ?? false,
       firstContact: linqRoute.firstContact,
       member: input.member,
       occurredAt: input.occurredAt,
@@ -122,6 +125,7 @@ export async function activateHostedMemberFromConfirmedRevnetIssuanceTx(input: {
 
 export async function activateHostedMemberForPositiveSourceTx(input: {
   dispatchContext: HostedStripeDispatchContext;
+  emailLinked?: boolean;
   member: Pick<HostedMemberBillingSnapshot, "core">;
   prisma: Prisma.TransactionClient;
   skipIfBillingAlreadyActive?: boolean;
@@ -153,6 +157,7 @@ export async function activateHostedMemberForPositiveSourceTx(input: {
 
 async function activateHostedMemberForPositiveSourceTxInner(input: {
   dispatchContext: HostedStripeDispatchContext;
+  emailLinked?: boolean;
   member: Pick<HostedMemberBillingSnapshot, "core">;
   prisma: Prisma.TransactionClient;
   skipIfBillingAlreadyActive?: boolean;
@@ -217,6 +222,7 @@ async function activateHostedMemberForPositiveSourceTxInner(input: {
     prisma: input.prisma,
   });
   const dispatch = buildHostedMemberActivationDispatchForMember({
+    emailLinked: input.emailLinked ?? false,
     firstContact: linqRoute.firstContact,
     member: currentMember,
     occurredAt: input.dispatchContext.occurredAt,
@@ -239,6 +245,7 @@ async function activateHostedMemberForPositiveSourceTxInner(input: {
 }
 
 export function buildHostedMemberActivationDispatch(input: {
+  emailLinked?: boolean;
   firstContact?: HostedExecutionMemberActivatedEvent["firstContact"];
   linqChatId?: string | null;
   linqRecipientPhone?: string | null;
@@ -260,6 +267,15 @@ export function buildHostedMemberActivationDispatch(input: {
       telegramUserId: input.telegramUserId ?? null,
     })),
     memberId: input.memberId,
+    memberChannels: resolveHostedMemberChannels({
+      emailLinked: input.emailLinked ?? false,
+      identity: {
+        phoneLookupKey: input.phoneLookupKey ?? null,
+      },
+      routing: {
+        telegramUserId: input.telegramUserId ?? null,
+      },
+    }),
     occurredAt: input.occurredAt,
   });
 }
@@ -382,6 +398,7 @@ function buildHostedInactiveMemberActivationResult(
 }
 
 function buildHostedMemberActivationDispatchForMember(input: {
+  emailLinked: boolean;
   firstContact: HostedExecutionMemberActivatedEvent["firstContact"];
   member: HostedMemberSnapshot;
   occurredAt: string;
@@ -389,6 +406,7 @@ function buildHostedMemberActivationDispatchForMember(input: {
   sourceType: string;
 }): HostedExecutionDispatchRequest {
   return buildHostedMemberActivationDispatch({
+    emailLinked: input.emailLinked,
     firstContact: input.firstContact,
     memberId: input.member.core.id,
     memberPhoneNumber: input.member.identity?.phoneNumber ?? null,

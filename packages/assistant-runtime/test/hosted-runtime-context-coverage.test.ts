@@ -79,10 +79,16 @@ vi.mock("@murphai/operator-config/operator-config", async () => {
 import {
   prepareHostedDispatchContext,
   readHostedAssistantRuntimeState,
-  reconcileHostedAssistantChannelCapabilities,
+  reconcileHostedAssistantChannelState,
   requireHostedBootstrapForDispatch,
 } from "../src/hosted-runtime/context.ts";
 import { createHostedRuntimeResolvedConfig } from "./hosted-runtime-test-helpers.ts";
+
+const DEFAULT_MEMBER_CHANNELS = {
+  email: true,
+  linq: true,
+  telegram: true,
+} as const;
 
 async function createWorkspace(): Promise<{ cleanup: () => Promise<void>; vaultRoot: string }> {
   const root = await mkdtemp(path.join(tmpdir(), "hosted-runtime-context-coverage-"));
@@ -224,6 +230,11 @@ describe("hosted runtime context coverage", () => {
         {
           event: {
             kind: "member.activated",
+            memberChannels: {
+              email: false,
+              linq: false,
+              telegram: false,
+            },
             userId: "member_123",
           },
           eventId: "evt_activation",
@@ -247,6 +258,7 @@ describe("hosted runtime context coverage", () => {
         assistantProvider: null,
         assistantSeeded: false,
         emailAutoReplyEnabled: false,
+        linqAutoReplyEnabled: false,
         telegramAutoReplyEnabled: false,
         vaultCreated: true,
       });
@@ -355,19 +367,18 @@ describe("hosted runtime context coverage", () => {
       });
 
       await expect(
-        reconcileHostedAssistantChannelCapabilities(
+        reconcileHostedAssistantChannelState(
           vaultRoot,
+          DEFAULT_MEMBER_CHANNELS,
           {
             emailSendReady: true,
             telegramBotConfigured: true,
           },
           true,
-          {
-            linqAutoReplyEnabled: true,
-          },
         ),
       ).resolves.toEqual({
         emailAutoReplyEnabled: true,
+        linqAutoReplyEnabled: true,
         telegramAutoReplyEnabled: true,
       });
 
@@ -433,19 +444,22 @@ describe("hosted runtime context coverage", () => {
       });
 
       await expect(
-        reconcileHostedAssistantChannelCapabilities(
+        reconcileHostedAssistantChannelState(
           vaultRoot,
+          {
+            email: true,
+            linq: true,
+            telegram: false,
+          },
           {
             emailSendReady: true,
             telegramBotConfigured: false,
           },
           true,
-          {
-            linqAutoReplyEnabled: true,
-          },
         ),
       ).resolves.toEqual({
         emailAutoReplyEnabled: true,
+        linqAutoReplyEnabled: true,
         telegramAutoReplyEnabled: false,
       });
 
@@ -501,6 +515,11 @@ describe("hosted runtime context coverage", () => {
         requireHostedBootstrapForDispatch(vaultRoot, {
           event: {
             kind: "member.activated",
+            memberChannels: {
+              email: false,
+              linq: false,
+              telegram: false,
+            },
             userId: "member_123",
           },
           eventId: "evt_activation",

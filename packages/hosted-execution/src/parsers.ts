@@ -10,6 +10,8 @@ import { parseHostedExecutionBundleRef as parseRuntimeHostedExecutionBundleRef }
 
 import type {
   HostedExecutionAssistantCronTickEvent,
+  HostedExecutionMemberChannels,
+  HostedExecutionMemberChannelsUpdatedEvent,
   HostedExecutionEventDispatchStatus,
   HostedExecutionDeviceSyncRuntimeSnapshotResponse,
   HostedExecutionDeviceSyncWakeEvent,
@@ -317,8 +319,21 @@ export function parseHostedExecutionEvent(value: unknown): HostedExecutionEvent 
                 : parseHostedExecutionFirstContactTarget(record.firstContact),
             }),
         kind,
+        memberChannels: parseHostedExecutionMemberChannels(
+          record.memberChannels,
+          "Hosted execution member.activated memberChannels",
+        ),
         userId,
       };
+    case "member.channels.updated":
+      return {
+        kind,
+        memberChannels: parseHostedExecutionMemberChannels(
+          record.memberChannels,
+          "Hosted execution member.channels.updated memberChannels",
+        ),
+        userId,
+      } satisfies HostedExecutionMemberChannelsUpdatedEvent;
     case "linq.message.received":
       return {
         kind,
@@ -506,6 +521,19 @@ function parseHostedExecutionFirstContactTarget(
       record.threadIsDirect,
       "Hosted execution member.activated firstContact threadIsDirect",
     ),
+  };
+}
+
+function parseHostedExecutionMemberChannels(
+  value: unknown,
+  label: string,
+): HostedExecutionMemberChannels {
+  const record = requireObject(value, label);
+
+  return {
+    email: requireBoolean(record.email, `${label}.email`),
+    linq: requireBoolean(record.linq, `${label}.linq`),
+    telegram: requireBoolean(record.telegram, `${label}.telegram`),
   };
 }
 

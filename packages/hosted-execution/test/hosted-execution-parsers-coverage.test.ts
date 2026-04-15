@@ -19,6 +19,11 @@ const TEST_BUNDLE_REF = {
   size: 128,
   updatedAt: "2026-04-08T00:00:00.000Z",
 } as const;
+const DEFAULT_MEMBER_CHANNELS = {
+  email: false,
+  linq: false,
+  telegram: false,
+} as const;
 
 describe("hosted execution parsers coverage", () => {
   describe("runner request validation", () => {
@@ -141,6 +146,7 @@ describe("hosted execution parsers coverage", () => {
         dispatch: {
           event: {
             kind: "member.activated",
+            memberChannels: DEFAULT_MEMBER_CHANNELS,
             userId: "user_123",
           },
           eventId: "evt_member",
@@ -151,6 +157,7 @@ describe("hosted execution parsers coverage", () => {
         dispatch: {
           event: {
             kind: "member.activated",
+            memberChannels: DEFAULT_MEMBER_CHANNELS,
             userId: "user_123",
           },
           eventId: "evt_member",
@@ -364,6 +371,7 @@ describe("hosted execution parsers coverage", () => {
             threadIsDirect: true,
           },
           kind: "member.activated",
+          memberChannels: DEFAULT_MEMBER_CHANNELS,
           userId: "user_123",
         },
         eventId: "evt_member",
@@ -431,6 +439,7 @@ describe("hosted execution parsers coverage", () => {
           threadIsDirect: true,
         },
         kind: "member.activated",
+        memberChannels: DEFAULT_MEMBER_CHANNELS,
         userId: "user_123",
       });
       expect(linqEvent).toEqual({
@@ -553,6 +562,7 @@ describe("hosted execution parsers coverage", () => {
             threadIsDirect: true,
           },
           kind: "member.activated",
+          memberChannels: DEFAULT_MEMBER_CHANNELS,
           userId: "user_123",
         }),
       ).toThrow(/firstContact channel is invalid/i);

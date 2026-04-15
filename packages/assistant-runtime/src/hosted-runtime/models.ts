@@ -69,6 +69,7 @@ export interface HostedBootstrapResult {
   assistantProvider: "openai-compatible" | null;
   assistantSeeded: boolean;
   emailAutoReplyEnabled: boolean;
+  linqAutoReplyEnabled: boolean;
   telegramAutoReplyEnabled: boolean;
   vaultCreated: boolean;
 }

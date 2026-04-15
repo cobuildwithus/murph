@@ -27,6 +27,11 @@ const activationDispatch = buildHostedExecutionMemberActivatedDispatch({
     threadIsDirect: true,
   },
   memberId: userId,
+  memberChannels: {
+    email: false,
+    linq: true,
+    telegram: false,
+  },
   occurredAt: new Date().toISOString(),
 });
 

@@ -34,6 +34,11 @@ const userId = `member_local_e2e_${Date.now()}`;
 const activationDispatch = buildHostedExecutionMemberActivatedDispatch({
   eventId: `member.activated:local:${userId}:evt_local_e2e`,
   memberId: userId,
+  memberChannels: {
+    email: false,
+    linq: false,
+    telegram: false,
+  },
   occurredAt: new Date().toISOString(),
 });
 const devEnv: NodeJS.ProcessEnv = {

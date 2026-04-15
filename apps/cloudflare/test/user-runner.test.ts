@@ -860,6 +860,11 @@ describe("HostedUserRunner", () => {
     const status = await runner.dispatch({
       event: {
         kind: "member.activated",
+        memberChannels: {
+          email: false,
+          linq: false,
+          telegram: false,
+        },
         userId: "member_123",
       },
       eventId: "evt_123",
@@ -943,6 +948,11 @@ describe("HostedUserRunner", () => {
     const status = await runner.dispatch({
       event: {
         kind: "member.activated",
+        memberChannels: {
+          email: false,
+          linq: false,
+          telegram: false,
+        },
         userId: "member_123",
       },
       eventId: "evt_native_container",
@@ -1177,6 +1187,11 @@ describe("HostedUserRunner", () => {
     await runner.dispatch({
       event: {
         kind: "member.activated",
+        memberChannels: {
+          email: false,
+          linq: false,
+          telegram: false,
+        },
         userId: "member_123",
       },
       eventId: "evt_native_runtime_env",
@@ -1436,6 +1451,11 @@ describe("HostedUserRunner", () => {
     const status = await runner.dispatch({
       event: {
         kind: "member.activated",
+        memberChannels: {
+          email: false,
+          linq: false,
+          telegram: false,
+        },
         userId: "member_123",
       },
       eventId: "evt_final_bundles",
@@ -1652,6 +1672,11 @@ describe("HostedUserRunner", () => {
     const status = await runner.dispatch({
       event: {
         kind: "member.activated",
+        memberChannels: {
+          email: false,
+          linq: false,
+          telegram: false,
+        },
         userId: "member_123",
       },
       eventId: "evt_finalized_recovery",
@@ -1727,6 +1752,11 @@ describe("HostedUserRunner", () => {
     const firstStatus = await runner.dispatch({
       event: {
         kind: "member.activated",
+        memberChannels: {
+          email: false,
+          linq: false,
+          telegram: false,
+        },
         userId: "member_123",
       },
       eventId: "evt_finalize_retry",
@@ -1946,6 +1976,11 @@ describe("HostedUserRunner", () => {
     const first = await runner.dispatch({
       event: {
         kind: "member.activated",
+        memberChannels: {
+          email: false,
+          linq: false,
+          telegram: false,
+        },
         userId: "member_123",
       },
       eventId: "evt_first",
@@ -3016,6 +3051,11 @@ describe("HostedUserRunner", () => {
     await runner.dispatch({
       event: {
         kind: "member.activated",
+        memberChannels: {
+          email: false,
+          linq: false,
+          telegram: false,
+        },
         userId: "member_123",
       },
       eventId: "evt_bootstrap",
@@ -3106,6 +3146,11 @@ describe("HostedUserRunner", () => {
     await runner.dispatch({
       event: {
         kind: "member.activated",
+        memberChannels: {
+          email: false,
+          linq: false,
+          telegram: false,
+        },
         userId: "member_123",
       },
       eventId: "evt_alarm_clear",

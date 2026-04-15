@@ -268,6 +268,11 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
           dispatch: {
             event: {
               kind: "member.activated",
+              memberChannels: {
+                email: false,
+                linq: false,
+                telegram: false,
+              },
               userId: "member_123",
             },
             eventId: "evt_123",
@@ -900,6 +905,11 @@ describe("runHostedAssistantRuntimeJobInProcessDetailed", () => {
             dispatch: {
               event: {
                 kind: "member.activated",
+                memberChannels: {
+                  email: false,
+                  linq: false,
+                  telegram: false,
+                },
                 userId: "member_123",
               },
               eventId: "evt_missing_device_sync",

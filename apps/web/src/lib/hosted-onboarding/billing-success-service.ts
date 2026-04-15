@@ -16,6 +16,8 @@ import {
   activateHostedMemberForPositiveSourceTx,
   runHostedMemberActivationPostCommitEffects,
 } from "./member-activation";
+import { resolveHostedMemberActivationEmailLinked } from "./member-channel-sync";
+import type { PrivyLinkedAccountLike } from "./privy-shared";
 import { requireHostedStripeApi } from "./runtime";
 import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
@@ -28,6 +30,7 @@ const STRIPE_CHECKOUT_SUCCESS_REDIRECT_SOURCE_TYPE = "stripe.checkout.session.su
 
 export async function reconcileHostedBillingCheckoutSuccess(input: {
   inviteCode: string;
+  linkedAccounts?: readonly PrivyLinkedAccountLike[];
   member: HostedMember;
   prisma?: PrismaClient;
   sessionId: string;
@@ -55,6 +58,10 @@ export async function reconcileHostedBillingCheckoutSuccess(input: {
   });
 
   await applyHostedCheckoutSessionSuccess({
+    emailLinked: await resolveHostedMemberActivationEmailLinked({
+      linkedAccounts: input.linkedAccounts,
+      memberId: invite.memberId,
+    }),
     memberId: invite.memberId,
     prisma,
     session,
@@ -68,6 +75,7 @@ export async function reconcileHostedBillingCheckoutSuccess(input: {
 }
 
 async function applyHostedCheckoutSessionSuccess(input: {
+  emailLinked: boolean;
   memberId: string;
   prisma: PrismaClient;
   session: Stripe.Checkout.Session;
@@ -130,6 +138,7 @@ async function applyHostedCheckoutSessionSuccess(input: {
 
     return activateHostedMemberForPositiveSourceTx({
       dispatchContext,
+      emailLinked: input.emailLinked,
       member: updatedMember,
       prisma: tx,
       skipIfBillingAlreadyActive: hadActiveBilling,

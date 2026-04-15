@@ -96,6 +96,7 @@ describe("hosted onboarding member activation", () => {
     await expect(
       activateHostedMemberForPositiveSourceTx({
         dispatchContext,
+        emailLinked: true,
         member,
         prisma: makeTransactionHarness() as never,
       }),
@@ -121,6 +122,11 @@ describe("hosted onboarding member activation", () => {
             threadIsDirect: true,
           },
           kind: "member.activated",
+          memberChannels: {
+            email: true,
+            linq: true,
+            telegram: false,
+          },
         }),
       }),
       sourceId: "stripe:evt_123",
@@ -254,6 +260,11 @@ describe("hosted onboarding member activation", () => {
             threadId: "telegram_user_123",
             threadIsDirect: true,
           },
+          memberChannels: {
+            email: false,
+            linq: false,
+            telegram: true,
+          },
         }),
       }),
       sourceId: "stripe:evt_telegram",
@@ -290,6 +301,52 @@ describe("hosted onboarding member activation", () => {
       identityId: "hbidx:phone:v1:lookup",
       kind: "linq-materialize-home-thread",
       toPhoneNumber: "+15550100001",
+    });
+  });
+
+  it("encodes explicit member channels on activation dispatches", async () => {
+    const member = makeMemberSnapshot({
+      identity: {
+        phoneLookupKey: null,
+        phoneNumber: null,
+      },
+      routing: {
+        linqChatId: null,
+        linqRecipientPhone: null,
+        memberId: "member_123",
+        pendingLinqChatId: null,
+        pendingLinqRecipientPhone: null,
+        telegramUserId: "telegram_user_456",
+        telegramUserLookupKey: "telegram_lookup_456",
+      },
+    });
+    mocks.readHostedMemberSnapshot.mockResolvedValue(member);
+
+    await activateHostedMemberForPositiveSourceTx({
+      dispatchContext: {
+        eventCreatedAt: new Date("2026-04-12T00:00:00.000Z"),
+        occurredAt: "2026-04-12T00:00:00.000Z",
+        sourceEventId: "evt_member_channels",
+        sourceType: "stripe.invoice.paid",
+      },
+      member,
+      prisma: makeTransactionHarness() as never,
+    });
+
+    expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith({
+      dispatch: expect.objectContaining({
+        event: expect.objectContaining({
+          kind: "member.activated",
+          memberChannels: {
+            email: false,
+            linq: false,
+            telegram: true,
+          },
+        }),
+      }),
+      sourceId: "stripe:evt_member_channels",
+      sourceType: "hosted_stripe_event",
+      tx: expect.anything(),
     });
   });
 

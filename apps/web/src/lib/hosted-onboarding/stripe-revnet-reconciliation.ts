@@ -8,6 +8,7 @@ import {
   activateHostedMemberFromConfirmedRevnetIssuanceTx,
   runHostedMemberActivationPostCommitEffects,
 } from "./member-activation";
+import { resolveHostedMemberActivationEmailLinked } from "./member-channel-sync";
 import { readHostedMemberSnapshot } from "./hosted-member-store";
 import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "./shared";
 import {
@@ -93,6 +94,9 @@ export async function reconcileSubmittedHostedRevnetIssuances(input: {
       }
 
       return activateHostedMemberFromConfirmedRevnetIssuanceTx({
+        emailLinked: await resolveHostedMemberActivationEmailLinked({
+          memberId: issuance.memberId,
+        }),
         member,
         occurredAt: new Date().toISOString(),
         prisma: transaction,

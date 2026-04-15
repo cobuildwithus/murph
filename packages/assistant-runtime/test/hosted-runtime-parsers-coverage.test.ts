@@ -6,6 +6,12 @@ import {
   parseHostedAssistantRuntimeJobRequest,
 } from "../src/hosted-runtime/parsers.ts";
 
+const defaultMemberChannels = {
+  email: false,
+  linq: false,
+  telegram: false,
+} as const;
+
 describe("hosted runtime parser coverage", () => {
   it("parses nullable commit and resume branches without injecting optional runtime state", () => {
     const parsed = parseHostedAssistantRuntimeJobInput({
@@ -14,6 +20,7 @@ describe("hosted runtime parser coverage", () => {
         dispatch: {
           event: {
             kind: "member.activated",
+            memberChannels: defaultMemberChannels,
             userId: "member_123",
           },
           eventId: "evt_123",
@@ -29,6 +36,7 @@ describe("hosted runtime parser coverage", () => {
         dispatch: {
           event: {
             kind: "member.activated",
+            memberChannels: defaultMemberChannels,
             userId: "member_123",
           },
           eventId: "evt_123",
@@ -107,11 +115,12 @@ describe("hosted runtime parser coverage", () => {
   it("rejects invalid runner summaries and runtime numeric fields", () => {
     expect(() => parseHostedAssistantRuntimeJobRequest({
       bundle: null,
-      dispatch: {
-        event: {
-          kind: "member.activated",
-          userId: "member_123",
-        },
+        dispatch: {
+          event: {
+            kind: "member.activated",
+            memberChannels: defaultMemberChannels,
+            userId: "member_123",
+          },
         eventId: "evt_invalid_summary",
         occurredAt: "2026-04-08T00:00:00.000Z",
       },
@@ -143,11 +152,12 @@ describe("hosted runtime parser coverage", () => {
   it("rejects invalid non-null next wake timestamps and empty summaries", () => {
     expect(() => parseHostedAssistantRuntimeJobRequest({
       bundle: null,
-      dispatch: {
-        event: {
-          kind: "member.activated",
-          userId: "member_123",
-        },
+        dispatch: {
+          event: {
+            kind: "member.activated",
+            memberChannels: defaultMemberChannels,
+            userId: "member_123",
+          },
         eventId: "evt_invalid_next_wake",
         occurredAt: "2026-04-08T00:00:00.000Z",
       },
@@ -168,6 +178,7 @@ describe("hosted runtime parser coverage", () => {
       dispatch: {
         event: {
           kind: "member.activated",
+          memberChannels: defaultMemberChannels,
           userId: "member_123",
         },
         eventId: "evt_empty_summary",
@@ -192,6 +203,11 @@ describe("hosted runtime parser coverage", () => {
       dispatch: {
         event: {
           kind: "member.activated",
+          memberChannels: {
+            email: false,
+            linq: false,
+            telegram: false,
+          },
           userId: "member_123",
         },
         eventId: "evt_removed_side_effects",

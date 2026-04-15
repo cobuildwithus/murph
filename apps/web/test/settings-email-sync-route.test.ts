@@ -3,12 +3,31 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
 
 const mocks = vi.hoisted(() => ({
+  drainHostedExecutionOutboxBestEffort: vi.fn(),
+  enqueueHostedMemberChannelsUpdatedTx: vi.fn(),
+  getPrisma: vi.fn(),
+  prismaClient: {
+    label: "test-prisma",
+    $transaction: vi.fn(),
+  },
   requireActivePrivyMemberAuth: vi.fn(),
   syncHostedVerifiedEmailToHostedExecution: vi.fn(),
 }));
 
+vi.mock("@/src/lib/prisma", () => ({
+  getPrisma: mocks.getPrisma,
+}));
+
 vi.mock("@/src/lib/hosted-execution/control", () => ({
   syncHostedVerifiedEmailToHostedExecution: mocks.syncHostedVerifiedEmailToHostedExecution,
+}));
+
+vi.mock("@/src/lib/hosted-execution/outbox", () => ({
+  drainHostedExecutionOutboxBestEffort: mocks.drainHostedExecutionOutboxBestEffort,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/member-channel-sync", () => ({
+  enqueueHostedMemberChannelsUpdatedTx: mocks.enqueueHostedMemberChannelsUpdatedTx,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({
@@ -35,6 +54,10 @@ describe("settings email sync route", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.getPrisma.mockReturnValue(mocks.prismaClient);
+    mocks.prismaClient.$transaction.mockImplementation(async (callback: (tx: unknown) => Promise<unknown>) =>
+      callback(mocks.prismaClient)
+    );
     mocks.requireActivePrivyMemberAuth.mockResolvedValue({
       linkedAccounts: [
         {
@@ -44,8 +67,10 @@ describe("settings email sync route", () => {
         },
       ],
       member: {
+        billingStatus: "active",
         id: "member_123",
         privyUserId: "did:privy:user_123",
+        suspendedAt: null,
       },
       verifiedPrivyUser: {
         id: "did:privy:user_123",
@@ -53,9 +78,12 @@ describe("settings email sync route", () => {
     });
     mocks.syncHostedVerifiedEmailToHostedExecution.mockResolvedValue({
       emailAddress: "user@example.com",
-      runTriggered: true,
       verifiedAt: "2025-03-27T09:10:00.000Z",
     });
+    mocks.enqueueHostedMemberChannelsUpdatedTx.mockResolvedValue({
+      eventId: "member.channels.updated:settings.email.sync:member_123:evt_123",
+    });
+    mocks.drainHostedExecutionOutboxBestEffort.mockResolvedValue(undefined);
   });
 
   it("verifies the server-side Privy cookie-backed session and syncs the verified email into hosted user env", async () => {
@@ -76,6 +104,16 @@ describe("settings email sync route", () => {
       emailAddress: "user@example.com",
       userId: "member_123",
       verifiedAt: "2025-03-27T08:30:00.000Z",
+    });
+    expect(mocks.enqueueHostedMemberChannelsUpdatedTx).toHaveBeenCalledWith({
+      emailLinked: true,
+      memberId: "member_123",
+      occurredAt: expect.any(String),
+      prisma: mocks.prismaClient,
+      sourceType: "settings.email.sync",
+    });
+    expect(mocks.drainHostedExecutionOutboxBestEffort).toHaveBeenCalledWith({
+      eventIds: ["member.channels.updated:settings.email.sync:member_123:evt_123"],
     });
     await expect(response.json()).resolves.toEqual({
       emailAddress: "user@example.com",

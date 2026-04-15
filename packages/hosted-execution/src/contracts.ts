@@ -30,6 +30,7 @@ export const HOSTED_EXECUTION_SIGNING_KEY_ID_HEADER =
 
 export const HOSTED_EXECUTION_EVENT_KINDS = [
   "member.activated",
+  "member.channels.updated",
   "linq.message.received",
   "telegram.message.received",
   "email.message.received",
@@ -52,6 +53,7 @@ export const HOSTED_EXECUTION_REFERENCE_ONLY_OUTBOX_EVENT_KINDS = [
 
 export const HOSTED_EXECUTION_INLINE_ONLY_OUTBOX_EVENT_KINDS = [
   "member.activated",
+  "member.channels.updated",
   "assistant.cron.tick",
   "vault.share.accepted",
 ] as const satisfies readonly HostedExecutionEventKind[];
@@ -61,9 +63,21 @@ export interface HostedExecutionBaseEvent {
   userId: string;
 }
 
+export interface HostedExecutionMemberChannels {
+  email: boolean;
+  linq: boolean;
+  telegram: boolean;
+}
+
 export interface HostedExecutionMemberActivatedEvent extends HostedExecutionBaseEvent {
   firstContact?: HostedExecutionFirstContactTarget | null;
   kind: "member.activated";
+  memberChannels: HostedExecutionMemberChannels;
+}
+
+export interface HostedExecutionMemberChannelsUpdatedEvent extends HostedExecutionBaseEvent {
+  kind: "member.channels.updated";
+  memberChannels: HostedExecutionMemberChannels;
 }
 
 export interface HostedExecutionThreadFirstContactTarget {
@@ -167,6 +181,7 @@ export interface HostedExecutionGatewayMessageSendEvent extends HostedExecutionB
 
 export type HostedExecutionEvent =
   | HostedExecutionMemberActivatedEvent
+  | HostedExecutionMemberChannelsUpdatedEvent
   | HostedExecutionLinqMessageReceivedEvent
   | HostedExecutionTelegramMessageReceivedEvent
   | HostedExecutionEmailMessageReceivedEvent

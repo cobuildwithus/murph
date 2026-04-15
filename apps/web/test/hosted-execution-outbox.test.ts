@@ -523,6 +523,11 @@ function createMemberActivatedDispatch(): HostedExecutionDispatchRequest {
         threadIsDirect: true,
       },
       kind: "member.activated",
+      memberChannels: {
+        email: false,
+        linq: true,
+        telegram: false,
+      },
       userId: "member_123",
     },
     eventId: "member.activated:stripe:member_123:evt_invoice_paid_123",

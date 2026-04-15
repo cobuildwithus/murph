@@ -4,6 +4,12 @@ import {
   parseHostedAssistantRuntimeJobInput,
 } from "../src/hosted-runtime.ts";
 
+const defaultMemberChannels = {
+  email: false,
+  linq: false,
+  telegram: false,
+} as const;
+
 describe("parseHostedAssistantRuntimeJobInput", () => {
   it("parses the nested runtime envelope", () => {
     const parsed = parseHostedAssistantRuntimeJobInput({
@@ -24,6 +30,7 @@ describe("parseHostedAssistantRuntimeJobInput", () => {
               threadIsDirect: true,
             },
             kind: "member.activated",
+            memberChannels: defaultMemberChannels,
             userId: "member_123",
           },
           eventId: "evt_123",
@@ -61,6 +68,7 @@ describe("parseHostedAssistantRuntimeJobInput", () => {
         threadIsDirect: true,
       },
       kind: "member.activated",
+      memberChannels: defaultMemberChannels,
       userId: "member_123",
     });
     expect(parsed.request.bundle).toBe("vault-bundle");
@@ -83,6 +91,7 @@ describe("parseHostedAssistantRuntimeJobInput", () => {
               toPhoneNumber: "+15550002222",
             },
             kind: "member.activated",
+            memberChannels: defaultMemberChannels,
             userId: "member_123",
           },
           eventId: "evt_materialize_linq_home",
@@ -100,6 +109,7 @@ describe("parseHostedAssistantRuntimeJobInput", () => {
         toPhoneNumber: "+15550002222",
       },
       kind: "member.activated",
+      memberChannels: defaultMemberChannels,
       userId: "member_123",
     });
   });
@@ -111,6 +121,7 @@ describe("parseHostedAssistantRuntimeJobInput", () => {
         dispatch: {
           event: {
             kind: "member.activated",
+            memberChannels: defaultMemberChannels,
             userId: "member_123",
           },
           eventId: "evt_123",
@@ -132,6 +143,7 @@ describe("parseHostedAssistantRuntimeJobInput", () => {
         dispatch: {
           event: {
             kind: "member.activated",
+            memberChannels: defaultMemberChannels,
             userId: "member_123",
           },
           eventId: "evt_123",
@@ -153,6 +165,7 @@ describe("parseHostedAssistantRuntimeJobInput", () => {
         dispatch: {
           event: {
             kind: "member.activated",
+            memberChannels: defaultMemberChannels,
             userId: "member_123",
           },
           eventId: "evt_legacy_side_effects",
@@ -185,6 +198,7 @@ describe("parseHostedAssistantRuntimeJobInput", () => {
         dispatch: {
           event: {
             kind: "member.activated",
+            memberChannels: defaultMemberChannels,
             userId: "member_123",
           },
           eventId: "evt_missing_run",

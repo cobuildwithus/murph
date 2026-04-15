@@ -9,6 +9,7 @@ import {
   buildHostedExecutionLinqMessageReceivedDispatch,
   buildHostedExecutionGatewayMessageSendDispatch,
   buildHostedExecutionMemberActivatedDispatch,
+  buildHostedExecutionMemberChannelsUpdatedDispatch,
   buildHostedExecutionTelegramMessageReceivedDispatch,
   buildHostedExecutionVaultShareAcceptedDispatch,
 } from "@murphai/hosted-execution";
@@ -20,6 +21,11 @@ describe("summarizeDispatch", () => {
     const dispatch = buildHostedExecutionMemberActivatedDispatch({
       eventId: "evt_activation",
       memberId: "member_123",
+      memberChannels: {
+        email: false,
+        linq: false,
+        telegram: false,
+      },
       occurredAt: "2026-04-08T00:00:00.000Z",
     });
 
@@ -41,6 +47,11 @@ describe("summarizeDispatch", () => {
     const dispatch = buildHostedExecutionMemberActivatedDispatch({
       eventId: "evt_activation",
       memberId: "member_123",
+      memberChannels: {
+        email: true,
+        linq: true,
+        telegram: false,
+      },
       occurredAt: "2026-04-08T00:00:00.000Z",
     });
 
@@ -52,6 +63,7 @@ describe("summarizeDispatch", () => {
           assistantProvider: "openai-compatible",
           assistantSeeded: true,
           emailAutoReplyEnabled: true,
+          linqAutoReplyEnabled: true,
           telegramAutoReplyEnabled: false,
           vaultCreated: true,
         },
@@ -62,7 +74,7 @@ describe("summarizeDispatch", () => {
         shareImportResult: null,
         shareImportTitle: null,
       }),
-      "Processed member activation (created the canonical vault; seeded explicit hosted assistant config (openai-compatible); hosted email auto-reply ready; hosted Telegram auto-reply unavailable) and ran the hosted maintenance loop. Parser jobs: 0. Device sync jobs: 0.",
+      "Processed member activation (created the canonical vault; seeded explicit hosted assistant config (openai-compatible); hosted email auto-reply ready; hosted Linq auto-reply ready; hosted Telegram auto-reply unavailable) and ran the hosted maintenance loop. Parser jobs: 0. Device sync jobs: 0.",
     );
   });
 
@@ -70,6 +82,11 @@ describe("summarizeDispatch", () => {
     const dispatch = buildHostedExecutionMemberActivatedDispatch({
       eventId: "evt_activation",
       memberId: "member_123",
+      memberChannels: {
+        email: false,
+        linq: false,
+        telegram: true,
+      },
       occurredAt: "2026-04-08T00:00:00.000Z",
     });
 
@@ -81,6 +98,7 @@ describe("summarizeDispatch", () => {
           assistantProvider: null,
           assistantSeeded: false,
           emailAutoReplyEnabled: false,
+          linqAutoReplyEnabled: false,
           telegramAutoReplyEnabled: true,
           vaultCreated: false,
         },
@@ -91,7 +109,7 @@ describe("summarizeDispatch", () => {
         shareImportResult: null,
         shareImportTitle: null,
       }),
-      "Processed member activation (reused the canonical vault; hosted assistant config missing; hosted email auto-reply unavailable; hosted Telegram auto-reply ready) and ran the hosted maintenance loop. Parser jobs: 0. Device sync jobs: 0.",
+      "Processed member activation (reused the canonical vault; hosted assistant config missing; hosted email auto-reply unavailable; hosted Linq auto-reply unavailable; hosted Telegram auto-reply ready) and ran the hosted maintenance loop. Parser jobs: 0. Device sync jobs: 0.",
     );
   });
 
@@ -99,20 +117,25 @@ describe("summarizeDispatch", () => {
     const dispatch = buildHostedExecutionMemberActivatedDispatch({
       eventId: "evt_activation",
       memberId: "member_123",
+      memberChannels: {
+        email: false,
+        linq: false,
+        telegram: false,
+      },
       occurredAt: "2026-04-08T00:00:00.000Z",
     });
 
     const statuses = [
       {
-        expected: "Processed member activation (created the canonical vault; hosted assistant config invalid; hosted email auto-reply unavailable; hosted Telegram auto-reply unavailable) and ran the hosted maintenance loop. Parser jobs: 0. Device sync jobs: 0.",
+        expected: "Processed member activation (created the canonical vault; hosted assistant config invalid; hosted email auto-reply unavailable; hosted Linq auto-reply unavailable; hosted Telegram auto-reply unavailable) and ran the hosted maintenance loop. Parser jobs: 0. Device sync jobs: 0.",
         status: "invalid" as const,
       },
       {
-        expected: "Processed member activation (created the canonical vault; hosted assistant config not ready; hosted email auto-reply unavailable; hosted Telegram auto-reply unavailable) and ran the hosted maintenance loop. Parser jobs: 0. Device sync jobs: 0.",
+        expected: "Processed member activation (created the canonical vault; hosted assistant config not ready; hosted email auto-reply unavailable; hosted Linq auto-reply unavailable; hosted Telegram auto-reply unavailable) and ran the hosted maintenance loop. Parser jobs: 0. Device sync jobs: 0.",
         status: "unready" as const,
       },
       {
-        expected: "Processed member activation (created the canonical vault; hosted assistant config unavailable; hosted email auto-reply unavailable; hosted Telegram auto-reply unavailable) and ran the hosted maintenance loop. Parser jobs: 0. Device sync jobs: 0.",
+        expected: "Processed member activation (created the canonical vault; hosted assistant config unavailable; hosted email auto-reply unavailable; hosted Linq auto-reply unavailable; hosted Telegram auto-reply unavailable) and ran the hosted maintenance loop. Parser jobs: 0. Device sync jobs: 0.",
         status: "hosted-env" as const,
       },
     ];
@@ -126,6 +149,7 @@ describe("summarizeDispatch", () => {
             assistantProvider: null,
             assistantSeeded: false,
             emailAutoReplyEnabled: false,
+            linqAutoReplyEnabled: false,
             telegramAutoReplyEnabled: false,
             vaultCreated: true,
           },
@@ -139,6 +163,32 @@ describe("summarizeDispatch", () => {
         entry.expected,
       );
     }
+  });
+
+  it("summarizes explicit member channel sync events", () => {
+    const dispatch = buildHostedExecutionMemberChannelsUpdatedDispatch({
+      eventId: "evt_member_channels",
+      memberChannels: {
+        email: true,
+        linq: false,
+        telegram: true,
+      },
+      memberId: "member_123",
+      occurredAt: "2026-04-08T00:00:00.000Z",
+    });
+
+    assert.equal(
+      summarizeDispatch(dispatch, {
+        bootstrapResult: null,
+        deviceSyncProcessed: 0,
+        deviceSyncSkipped: false,
+        nextWakeAt: null,
+        parserProcessed: 0,
+        shareImportResult: null,
+        shareImportTitle: null,
+      }),
+      "Processed member channel sync and ran the hosted maintenance loop. Parser jobs: 0. Device sync jobs: 0.",
+    );
   });
 
   it("uses the share id fallback and notes logged meal imports", () => {

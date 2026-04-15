@@ -135,6 +135,7 @@ beforeEach(() => {
       assistantProvider: null,
       assistantSeeded: false,
       emailAutoReplyEnabled: false,
+      linqAutoReplyEnabled: false,
       telegramAutoReplyEnabled: false,
       vaultCreated: true,
     },
@@ -188,6 +189,11 @@ describe("executeHostedDispatchForCommit", () => {
         dispatch: {
           event: {
             kind: "member.activated",
+            memberChannels: {
+              email: false,
+              linq: false,
+              telegram: false,
+            },
             userId: "member_123",
           },
           eventId: "evt_123",
@@ -237,6 +243,11 @@ describe("executeHostedDispatchForCommit", () => {
       dispatch: {
         event: {
           kind: "member.activated",
+          memberChannels: {
+            email: false,
+            linq: false,
+            telegram: false,
+          },
           userId: "member_123",
         },
         eventId: "evt_123",

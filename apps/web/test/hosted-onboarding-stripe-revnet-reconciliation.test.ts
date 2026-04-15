@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   isHostedOnboardingRevnetEnabled: vi.fn(),
   readHostedMemberSnapshot: vi.fn(),
   readHostedRevnetPaymentReceipt: vi.fn(),
+  resolveHostedMemberActivationEmailLinked: vi.fn(),
   runHostedMemberActivationPostCommitEffects: vi.fn(),
 }));
 
@@ -48,6 +49,10 @@ vi.mock("@/src/lib/hosted-onboarding/revnet", async () => {
   };
 });
 
+vi.mock("@/src/lib/hosted-onboarding/member-channel-sync", () => ({
+  resolveHostedMemberActivationEmailLinked: mocks.resolveHostedMemberActivationEmailLinked,
+}));
+
 import { reconcileSubmittedHostedRevnetIssuances } from "@/src/lib/hosted-onboarding/stripe-revnet-reconciliation";
 
 type ReconcileSubmittedHostedRevnetIssuancesPrisma =
@@ -68,6 +73,7 @@ describe("hosted Stripe RevNet reconciliation", () => {
     mocks.readHostedRevnetPaymentReceipt.mockResolvedValue({
       status: "confirmed",
     });
+    mocks.resolveHostedMemberActivationEmailLinked.mockResolvedValue(false);
   });
 
   it("confirms submitted issuances and activates the matching member", async () => {
@@ -137,7 +143,11 @@ describe("hosted Stripe RevNet reconciliation", () => {
       memberId: "member_123",
       prisma: transactionClient,
     });
+    expect(mocks.resolveHostedMemberActivationEmailLinked).toHaveBeenCalledWith({
+      memberId: "member_123",
+    });
     expect(mocks.activateHostedMemberFromConfirmedRevnetIssuanceTx).toHaveBeenCalledWith({
+      emailLinked: false,
       member: { core: { id: "member_123" } },
       occurredAt: expect.any(String),
       prisma: transactionClient,

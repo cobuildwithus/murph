@@ -303,39 +303,25 @@ export async function upsertHostedMemberTelegramRoutingBindingTx(input: {
     telegramUserId: input.telegramUserId,
   });
 
-  await input.prisma.hostedMemberRouting.upsert({
-    where: {
-      memberId: input.memberId,
-    },
-    create: {
-      ...routingPrivateColumns,
-      linqChatLookupKey: null,
-      linqRecipientPhoneLookupKey: null,
-      memberId: input.memberId,
-      pendingLinqChatLookupKey: null,
-      pendingLinqRecipientPhoneLookupKey: null,
-      telegramUserLookupKey,
-    },
-    update: {
-      telegramUserIdEncrypted: routingPrivateColumns.telegramUserIdEncrypted,
-      telegramUserLookupKey,
-    },
-  });
-}
-
-export async function syncHostedMemberTelegramRoutingBinding(input: {
-  memberId: string;
-  prisma?: PrismaClient;
-  telegramUserId: string;
-}): Promise<void> {
   try {
-    const prisma = input.prisma ?? getPrisma();
-
-    await prisma.$transaction((tx) => upsertHostedMemberTelegramRoutingBindingTx({
-      memberId: input.memberId,
-      prisma: tx,
-      telegramUserId: input.telegramUserId,
-    }), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+    await input.prisma.hostedMemberRouting.upsert({
+      where: {
+        memberId: input.memberId,
+      },
+      create: {
+        ...routingPrivateColumns,
+        linqChatLookupKey: null,
+        linqRecipientPhoneLookupKey: null,
+        memberId: input.memberId,
+        pendingLinqChatLookupKey: null,
+        pendingLinqRecipientPhoneLookupKey: null,
+        telegramUserLookupKey,
+      },
+      update: {
+        telegramUserIdEncrypted: routingPrivateColumns.telegramUserIdEncrypted,
+        telegramUserLookupKey,
+      },
+    });
   } catch (error) {
     if (isPrismaUniqueConstraintError(error)) {
       throw hostedOnboardingError({
@@ -348,6 +334,20 @@ export async function syncHostedMemberTelegramRoutingBinding(input: {
 
     throw error;
   }
+}
+
+export async function syncHostedMemberTelegramRoutingBinding(input: {
+  memberId: string;
+  prisma?: PrismaClient;
+  telegramUserId: string;
+}): Promise<void> {
+  const prisma = input.prisma ?? getPrisma();
+
+  await prisma.$transaction((tx) => upsertHostedMemberTelegramRoutingBindingTx({
+    memberId: input.memberId,
+    prisma: tx,
+    telegramUserId: input.telegramUserId,
+  }), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 }
 
 export function projectHostedMemberRoutingState(

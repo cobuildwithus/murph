@@ -251,6 +251,11 @@ function createDispatch(
   return {
     event: {
       kind: "member.activated",
+      memberChannels: {
+        email: false,
+        linq: false,
+        telegram: false,
+      },
       userId,
     },
     eventId,

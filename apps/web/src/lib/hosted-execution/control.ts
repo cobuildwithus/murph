@@ -11,7 +11,10 @@ import type {
 import type {
   HostedExecutionOutboxPayload,
 } from "@murphai/hosted-execution/outbox-payload";
-import { createHostedVerifiedEmailUserEnv } from "@murphai/runtime-state";
+import {
+  HOSTED_USER_VERIFIED_EMAIL_ENV_KEY,
+  createHostedVerifiedEmailUserEnv,
+} from "@murphai/runtime-state";
 
 import { createHostedExecutionVercelOidcBearerTokenProvider } from "./auth-adapter";
 import { readHostedExecutionControlBaseUrl } from "./environment";
@@ -25,7 +28,6 @@ import {
 
 export interface HostedVerifiedEmailSyncResult {
   emailAddress: string;
-  runTriggered: boolean;
   verifiedAt: string;
 }
 
@@ -106,25 +108,28 @@ export async function syncHostedVerifiedEmailToHostedExecution(input: {
     mode: "merge",
   });
 
-  try {
-    await client.run(input.userId);
+  return {
+    emailAddress: input.emailAddress,
+    verifiedAt: input.verifiedAt,
+  };
+}
 
-    return {
-      emailAddress: input.emailAddress,
-      runTriggered: true,
-      verifiedAt: input.verifiedAt,
-    };
+export async function hasHostedVerifiedEmailUserEnv(userId: string): Promise<boolean | null> {
+  const client = readHostedExecutionControlClientIfConfigured();
+
+  if (!client) {
+    return null;
+  }
+
+  try {
+    const status = await client.getUserEnvStatus(userId);
+    return status.configuredUserEnvKeys.includes(HOSTED_USER_VERIFIED_EMAIL_ENV_KEY);
   } catch (error) {
     console.error(
-      "Hosted verified email sync saved user env but could not trigger a hosted run.",
+      "Hosted verified email status lookup failed.",
       formatHostedExecutionSafeLogError(error),
     );
-
-    return {
-      emailAddress: input.emailAddress,
-      runTriggered: false,
-      verifiedAt: input.verifiedAt,
-    };
+    return null;
   }
 }
 

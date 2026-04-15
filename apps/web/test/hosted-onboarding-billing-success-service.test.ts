@@ -22,6 +22,7 @@ const mocks = vi.hoisted(() => {
     findMemberForStripeObject: vi.fn(),
     getHostedInviteStatus: vi.fn(),
     readHostedMemberSnapshot: vi.fn(),
+    resolveHostedMemberActivationEmailLinked: vi.fn(),
     requireHostedInviteForAuthentication: vi.fn(),
     requireHostedStripeApi: vi.fn(),
     runHostedMemberActivationPostCommitEffects: vi.fn(),
@@ -56,6 +57,10 @@ vi.mock("@/src/lib/hosted-onboarding/member-activation", () => ({
   runHostedMemberActivationPostCommitEffects: mocks.runHostedMemberActivationPostCommitEffects,
 }));
 
+vi.mock("@/src/lib/hosted-onboarding/member-channel-sync", () => ({
+  resolveHostedMemberActivationEmailLinked: mocks.resolveHostedMemberActivationEmailLinked,
+}));
+
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
   requireHostedStripeApi: mocks.requireHostedStripeApi,
 }));
@@ -78,6 +83,7 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.requireHostedStripeApi.mockReturnValue(mocks.stripe);
+    mocks.resolveHostedMemberActivationEmailLinked.mockResolvedValue(false);
     mocks.requireHostedInviteForAuthentication.mockResolvedValue({
       inviteCode: "invite-code",
       memberId: "member_123",
@@ -134,6 +140,10 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
     expect(mocks.stripe.checkout.sessions.retrieve).toHaveBeenCalledWith("cs_123", {
       expand: ["subscription"],
     });
+    expect(mocks.resolveHostedMemberActivationEmailLinked).toHaveBeenCalledWith({
+      linkedAccounts: undefined,
+      memberId: "member_123",
+    });
     expect(prisma.$transaction).toHaveBeenCalledTimes(1);
     expect(prisma.$transaction).toHaveBeenCalledWith(
       expect.any(Function),
@@ -152,6 +162,7 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
       tx,
     }));
     expect(mocks.activateHostedMemberForPositiveSourceTx).toHaveBeenCalledWith(expect.objectContaining({
+      emailLinked: false,
       member: expect.objectContaining({
         core: expect.objectContaining({
           billingStatus: HostedBillingStatus.active,

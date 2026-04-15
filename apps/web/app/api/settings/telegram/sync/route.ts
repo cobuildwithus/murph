@@ -1,10 +1,17 @@
 import { getPrisma } from "@/src/lib/prisma";
+import { drainHostedExecutionOutboxBestEffort } from "@/src/lib/hosted-execution/outbox";
 import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
+import { hasHostedMemberActiveAccess } from "@/src/lib/hosted-onboarding/entitlement";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
-import { syncHostedMemberTelegramRoutingBinding } from "@/src/lib/hosted-onboarding/hosted-member-routing-store";
+import { upsertHostedMemberTelegramRoutingBindingTx } from "@/src/lib/hosted-onboarding/hosted-member-routing-store";
 import { jsonOk, withJsonError, readOptionalJsonObject } from "@/src/lib/hosted-onboarding/http";
+import {
+  enqueueHostedMemberChannelsUpdatedTx,
+  resolveHostedMemberChannelSyncEmailLinked,
+} from "@/src/lib/hosted-onboarding/member-channel-sync";
 import { resolveHostedPrivyTelegramAccountSelection } from "@/src/lib/hosted-onboarding/privy-shared";
 import { requirePrivyMemberAuth } from "@/src/lib/hosted-onboarding/request-auth";
+import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "@/src/lib/hosted-onboarding/shared";
 import { buildHostedTelegramBotLink } from "@/src/lib/hosted-onboarding/telegram";
 
 export const POST = withJsonError(async (request: Request) => {
@@ -45,16 +52,45 @@ export const POST = withJsonError(async (request: Request) => {
     });
   }
 
-  await syncHostedMemberTelegramRoutingBinding({
-    memberId: auth.member.id,
-    prisma: getPrisma(),
-    telegramUserId: telegramAccount.telegramUserId,
-  });
+  const prisma = getPrisma();
+  const shouldDispatchChannelsUpdate = hasHostedMemberActiveAccess(auth.member);
+  const now = new Date();
+  const emailLinked = shouldDispatchChannelsUpdate
+    ? await resolveHostedMemberChannelSyncEmailLinked({
+      linkedAccounts: auth.linkedAccounts,
+      memberId: auth.member.id,
+    })
+    : false;
+  const channelSyncDispatch = await prisma.$transaction(async (tx) => {
+    await upsertHostedMemberTelegramRoutingBindingTx({
+      memberId: auth.member.id,
+      prisma: tx,
+      telegramUserId: telegramAccount.telegramUserId,
+    });
+
+    if (!shouldDispatchChannelsUpdate) {
+      return null;
+    }
+
+    return enqueueHostedMemberChannelsUpdatedTx({
+      emailLinked,
+      memberId: auth.member.id,
+      occurredAt: now.toISOString(),
+      prisma: tx,
+      sourceType: "settings.telegram.sync",
+    });
+  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+
+  if (channelSyncDispatch) {
+    await drainHostedExecutionOutboxBestEffort({
+      eventIds: [channelSyncDispatch.eventId],
+    });
+  }
 
   return jsonOk({
     botLink: buildHostedTelegramBotLink("connect"),
     ok: true,
-    runTriggered: false,
+    runTriggered: channelSyncDispatch !== null,
     telegramUserId: telegramAccount.telegramUserId,
     telegramUsername: telegramAccount.username,
   });

@@ -27,6 +27,11 @@ import {
 import { parseHostedExecutionOutboxPayload } from "../src/parsers.ts";
 
 const occurredAt = "2026-04-08T00:00:00.000Z";
+const defaultMemberChannels = {
+  email: false,
+  linq: false,
+  telegram: false,
+} as const;
 
 describe("hosted execution builders", () => {
   it("preserves optional member activation first-contact data when present", () => {
@@ -39,6 +44,7 @@ describe("hosted execution builders", () => {
         threadIsDirect: true,
       },
       memberId: "user_123",
+      memberChannels: defaultMemberChannels,
       occurredAt,
     });
 
@@ -65,6 +71,7 @@ describe("hosted execution builders", () => {
         toPhoneNumber: "+15550002222",
       },
       memberId: "user_123",
+      memberChannels: defaultMemberChannels,
       occurredAt,
     });
 
@@ -371,6 +378,7 @@ describe("dispatch refs and outbox payloads", () => {
     const inlineDispatch = buildHostedExecutionMemberActivatedDispatch({
       eventId: "member-inline-1",
       memberId: "user_123",
+      memberChannels: defaultMemberChannels,
       occurredAt,
     });
     const referenceDispatch = buildHostedExecutionEmailMessageReceivedDispatch({
@@ -440,6 +448,7 @@ describe("dispatch refs and outbox payloads", () => {
       dispatch: buildHostedExecutionMemberActivatedDispatch({
         eventId: "member-inline-3",
         memberId: "user_123",
+        memberChannels: defaultMemberChannels,
         occurredAt,
       }),
       dispatchRef: {
