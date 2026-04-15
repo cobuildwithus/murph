@@ -1,7 +1,6 @@
 import {
   type EventSource,
   type MealNutrition,
-  eventSourceSchema,
   mealNutritionSchema,
 } from "@murphai/contracts";
 import { z } from "zod";
@@ -10,6 +9,7 @@ import { assertCanonicalWritePort } from "./core-port.ts";
 import type { MealImportPayload } from "./core-port.ts";
 import {
   inspectFileAsset,
+  optionalEventSourceSchema,
   optionalStringListSchema,
   optionalTimestampSchema,
   optionalTrimmedStringSchema,
@@ -39,7 +39,7 @@ const mealImportInputSchema = z
     vaultRoot: optionalTrimmedStringSchema("vaultRoot"),
     occurredAt: optionalTimestampSchema("occurredAt"),
     note: optionalTrimmedStringSchema("note"),
-    source: optionalTrimmedStringSchema("source").pipe(eventSourceSchema.optional()),
+    source: optionalEventSourceSchema("source"),
     ingredients: optionalStringListSchema("ingredients"),
     nutrition: mealNutritionSchema.optional(),
   })
