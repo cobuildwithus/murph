@@ -410,10 +410,20 @@ test('assistant CLI inbox foreground logging redacts by default and exposes rich
   assert.equal(
     formatInboxRunEventForTerminal({
         capture: {
+          actor: {
+            displayName: null,
+            id: null,
+            isSelf: false,
+          },
           externalId: 'capture_1',
           occurredAt: '2026-04-08T00:00:00.000Z',
           source: 'telegram',
           attachments: [{ kind: 'document' }],
+          raw: {},
+          text: null,
+          thread: {
+            id: 'thread_1',
+          },
         },
       connectorId: 'connector_telegram',
       phase: 'watch',
@@ -435,6 +445,7 @@ test('assistant CLI inbox foreground logging redacts by default and exposes rich
           externalId: 'capture_2',
           occurredAt: '2026-04-08T00:00:00.000Z',
           source: 'telegram',
+          raw: {},
           text: '  Need a quick follow-up on the parser status.  ',
           thread: {
             id: 'thread_123',
@@ -488,6 +499,7 @@ test('assistant CLI inbox foreground logging redacts by default and exposes rich
           externalId: 'capture_signal',
           occurredAt: '2026-04-08T00:00:00.000Z',
           source: 'signal' as never,
+          raw: {},
           text: `${'x'.repeat(120)}   `,
           thread: {
             id: 'thread_signal_123',
@@ -517,7 +529,12 @@ test('assistant CLI inbox foreground logging redacts by default and exposes rich
           attachments: [],
           externalId: 'capture_email_self',
           occurredAt: '2026-04-08T00:00:00.000Z',
+          raw: {},
           source: 'email',
+          text: null,
+          thread: {
+            id: '   ',
+          },
         },
         connectorId: 'connector_email',
         phase: 'watch',
@@ -534,10 +551,20 @@ test('assistant CLI inbox foreground logging redacts by default and exposes rich
     formatInboxRunEventForTerminal(
       {
         capture: {
+          actor: {
+            displayName: null,
+            id: null,
+            isSelf: false,
+          },
           attachments: [{ kind: 'image' }],
           externalId: 'capture_attachment_only',
           occurredAt: '2026-04-08T00:00:00.000Z',
+          raw: {},
           source: 'telegram',
+          text: null,
+          thread: {
+            id: '   ',
+          },
         },
         connectorId: 'connector_telegram',
         phase: 'watch',

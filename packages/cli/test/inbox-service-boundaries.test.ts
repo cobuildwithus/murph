@@ -165,6 +165,9 @@ test('instantiateConnector delegates Telegram polling through the explicit takeo
         }) => {
           received = options
           return {
+            async backfill() {
+              return null
+            },
             id: options.id ?? 'telegram:bot',
             source: 'telegram',
             kind: 'poll',
@@ -175,6 +178,7 @@ test('instantiateConnector delegates Telegram polling through the explicit takeo
               watch: true,
               webhooks: false,
             },
+            async watch() {},
           }
         },
       })
@@ -277,6 +281,9 @@ function createStubPollConnector(input: {
   accountId?: string | null
 }): PollConnector {
   return {
+    async backfill() {
+      return null
+    },
     id: input.id,
     source: input.source,
     accountId: input.accountId ?? null,
@@ -287,6 +294,7 @@ function createStubPollConnector(input: {
       watch: true,
       webhooks: false,
     },
+    async watch() {},
   }
 }
 

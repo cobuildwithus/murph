@@ -140,8 +140,39 @@ function createRuntimeStore(
   onClose?: () => void,
 ): RuntimeStore {
   return {
+    claimNextAttachmentParseJob() {
+      return null
+    },
     close() {
       onClose?.()
+    },
+    completeAttachmentParseJob() {
+      return {
+        applied: false,
+        job: {
+          attachmentId: 'attachment-1',
+          attempts: 1,
+          captureId: 'capture-1',
+          createdAt: '2026-04-08T00:00:00.000Z',
+          jobId: 'job-1',
+          pipeline: 'attachment_text',
+          state: 'succeeded',
+        },
+      }
+    },
+    failAttachmentParseJob() {
+      return {
+        applied: false,
+        job: {
+          attachmentId: 'attachment-1',
+          attempts: 1,
+          captureId: 'capture-1',
+          createdAt: '2026-04-08T00:00:00.000Z',
+          jobId: 'job-1',
+          pipeline: 'attachment_text',
+          state: 'failed',
+        },
+      }
     },
     getCapture(captureId: string) {
       return captures.find((capture) => capture.captureId === captureId) ?? null
@@ -149,9 +180,15 @@ function createRuntimeStore(
     getCursor() {
       return null
     },
+    listAttachmentParseJobs() {
+      return []
+    },
     listCaptures(filters) {
       const limit = filters?.limit ?? captures.length
       return captures.slice(0, limit)
+    },
+    requeueAttachmentParseJobs() {
+      return 0
     },
     searchCaptures() {
       return []

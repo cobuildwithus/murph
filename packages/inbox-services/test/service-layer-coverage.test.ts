@@ -122,6 +122,9 @@ function createPollConnector(
   id: string,
 ): PollConnector {
   return {
+    async backfill() {
+      return null
+    },
     id,
     source,
     kind: 'poll',
@@ -131,6 +134,7 @@ function createPollConnector(
       watch: true,
       webhooks: source === 'linq',
     },
+    async watch() {},
   }
 }
 
@@ -168,15 +172,52 @@ function createRuntimeStore(
   captures: RuntimeCaptureRecord[],
 ): RuntimeStore {
   return {
+    claimNextAttachmentParseJob() {
+      return null
+    },
     close() {},
+    completeAttachmentParseJob() {
+      return {
+        applied: false,
+        job: {
+          attachmentId: 'attachment-1',
+          attempts: 1,
+          captureId: 'capture-1',
+          createdAt: '2026-04-08T00:00:00.000Z',
+          jobId: 'job-1',
+          pipeline: 'attachment_text',
+          state: 'succeeded',
+        },
+      }
+    },
+    failAttachmentParseJob() {
+      return {
+        applied: false,
+        job: {
+          attachmentId: 'attachment-1',
+          attempts: 1,
+          captureId: 'capture-1',
+          createdAt: '2026-04-08T00:00:00.000Z',
+          jobId: 'job-1',
+          pipeline: 'attachment_text',
+          state: 'failed',
+        },
+      }
+    },
     getCapture(captureId) {
       return captures.find((capture) => capture.captureId === captureId) ?? null
     },
     getCursor() {
       return null
     },
+    listAttachmentParseJobs() {
+      return []
+    },
     listCaptures(filters) {
       return captures.slice(0, filters?.limit)
+    },
+    requeueAttachmentParseJobs() {
+      return 0
     },
     searchCaptures(filters) {
       return captures.slice(0, filters.limit).map((capture) => ({
@@ -496,17 +537,54 @@ test('service-layer helpers cover connector, query, state, daemon, and vault pat
       async ensureInboxVault() {},
       async openInboxRuntime() {
         return {
+          claimNextAttachmentParseJob() {
+            return null
+          },
           close() {},
+          completeAttachmentParseJob() {
+            return {
+              applied: false,
+              job: {
+                attachmentId: 'attachment-1',
+                attempts: 1,
+                captureId: 'capture-1',
+                createdAt: '2026-04-08T00:00:00.000Z',
+                jobId: 'job-1',
+                pipeline: 'attachment_text',
+                state: 'succeeded',
+              },
+            }
+          },
+          failAttachmentParseJob() {
+            return {
+              applied: false,
+              job: {
+                attachmentId: 'attachment-1',
+                attempts: 1,
+                captureId: 'capture-1',
+                createdAt: '2026-04-08T00:00:00.000Z',
+                jobId: 'job-1',
+                pipeline: 'attachment_text',
+                state: 'failed',
+              },
+            }
+          },
           getCapture() {
             return null
           },
           getCursor() {
             return null
           },
+          listAttachmentParseJobs() {
+            return []
+          },
           listCaptures(filters) {
             const limit = filters?.limit ?? 0
             const count = limit < 800 ? limit : 400
             return Array.from({ length: count }, () => createCapture())
+          },
+          requeueAttachmentParseJobs() {
+            return 0
           },
           searchCaptures() {
             return []

@@ -24,15 +24,52 @@ import type {
 
 function createRuntimeStore(): RuntimeStore {
   return {
+    claimNextAttachmentParseJob() {
+      return null
+    },
     close() {},
+    completeAttachmentParseJob() {
+      return {
+        applied: false,
+        job: {
+          attachmentId: 'attachment-1',
+          attempts: 1,
+          captureId: 'capture-1',
+          createdAt: '2026-04-08T00:00:00.000Z',
+          jobId: 'job-1',
+          pipeline: 'attachment_text',
+          state: 'succeeded',
+        },
+      }
+    },
+    failAttachmentParseJob() {
+      return {
+        applied: false,
+        job: {
+          attachmentId: 'attachment-1',
+          attempts: 1,
+          captureId: 'capture-1',
+          createdAt: '2026-04-08T00:00:00.000Z',
+          jobId: 'job-1',
+          pipeline: 'attachment_text',
+          state: 'failed',
+        },
+      }
+    },
     getCapture() {
       return null
     },
     getCursor() {
       return null
     },
+    listAttachmentParseJobs() {
+      return []
+    },
     listCaptures() {
       return []
+    },
+    requeueAttachmentParseJobs() {
+      return 0
     },
     searchCaptures() {
       return []
@@ -47,6 +84,9 @@ function createPollConnector(
   webhooks: boolean,
 ): PollConnector {
   return {
+    async backfill() {
+      return null
+    },
     capabilities: {
       attachments: true,
       backfill: true,
@@ -56,6 +96,7 @@ function createPollConnector(
     id,
     kind: 'poll',
     source,
+    async watch() {},
   }
 }
 

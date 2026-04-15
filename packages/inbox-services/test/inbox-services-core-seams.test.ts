@@ -31,8 +31,6 @@ import {
   assertBootstrapStrictReady,
   buildAttachmentParseStatus,
   createParserServiceContext,
-  requireAttachmentParseJobs,
-  requireAttachmentReparseSupport,
   summarizeParserDrain,
   toCliParserToolchain,
   toParserToolChecks,
@@ -117,16 +115,53 @@ function createCapture(overrides: Partial<RuntimeCaptureRecord> = {}): RuntimeCa
 
 function createRuntimeStore(captures: RuntimeCaptureRecord[]): RuntimeStore {
   return {
+    claimNextAttachmentParseJob() {
+      return null
+    },
     close() {},
+    completeAttachmentParseJob() {
+      return {
+        applied: false,
+        job: {
+          attachmentId: 'attachment-1',
+          attempts: 1,
+          captureId: 'capture-1',
+          createdAt: '2026-04-08T00:00:00.000Z',
+          jobId: 'job-1',
+          pipeline: 'attachment_text',
+          state: 'succeeded',
+        },
+      }
+    },
+    failAttachmentParseJob() {
+      return {
+        applied: false,
+        job: {
+          attachmentId: 'attachment-1',
+          attempts: 1,
+          captureId: 'capture-1',
+          createdAt: '2026-04-08T00:00:00.000Z',
+          jobId: 'job-1',
+          pipeline: 'attachment_text',
+          state: 'failed',
+        },
+      }
+    },
     getCapture(captureId: string) {
       return captures.find((capture) => capture.captureId === captureId) ?? null
     },
     getCursor() {
       return null
     },
+    listAttachmentParseJobs() {
+      return []
+    },
     listCaptures(filters) {
       const limit = filters?.limit ?? captures.length
       return captures.slice(0, limit)
+    },
+    requeueAttachmentParseJobs() {
+      return 0
     },
     searchCaptures() {
       return []
@@ -137,6 +172,9 @@ function createRuntimeStore(captures: RuntimeCaptureRecord[]): RuntimeStore {
 
 function createPollConnector(id: string) {
   return {
+    async backfill() {
+      return null
+    },
     id,
     source: 'test',
     kind: 'poll' as const,
@@ -146,6 +184,7 @@ function createPollConnector(id: string) {
       watch: false,
       webhooks: false,
     },
+    async watch() {},
   }
 }
 
@@ -800,37 +839,6 @@ test('parser helpers build service context, summarize drains, and enforce runtim
     ]
   }
   const requeueAttachmentParseJobs = () => 1
-
-  assert.equal(
-    requireAttachmentParseJobs({ ...runtime, listAttachmentParseJobs }, 'show status'),
-    listAttachmentParseJobs,
-  )
-  assert.equal(
-    requireAttachmentReparseSupport({
-      ...runtime,
-      listAttachmentParseJobs,
-      requeueAttachmentParseJobs,
-    }).requeueAttachmentParseJobs,
-    requeueAttachmentParseJobs,
-  )
-  assert.throws(
-    () => requireAttachmentParseJobs(runtime, 'parse'),
-    (error: unknown) =>
-      error instanceof VaultCliError &&
-      error.code === 'INBOX_ATTACHMENT_PARSE_UNSUPPORTED' &&
-      error.message.includes('parse'),
-  )
-  assert.throws(
-    () =>
-      requireAttachmentReparseSupport({
-        ...runtime,
-        listAttachmentParseJobs,
-      }),
-    (error: unknown) =>
-      error instanceof VaultCliError &&
-      error.code === 'INBOX_ATTACHMENT_PARSE_UNSUPPORTED' &&
-      error.message.includes('reparse'),
-  )
 
   const status = buildAttachmentParseStatus({
     attachmentId: 'attachment-1',

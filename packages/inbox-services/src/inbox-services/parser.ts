@@ -128,36 +128,9 @@ export function toParserToolChecks(
   ]
 }
 
-export function requireAttachmentParseJobs(
-  runtime: RuntimeStore,
-  action: 'show status' | 'parse' | 'reparse',
-): NonNullable<RuntimeStore['listAttachmentParseJobs']> {
-  if (!runtime.listAttachmentParseJobs) {
-    throw unsupportedAttachmentParse(action)
-  }
-
-  return runtime.listAttachmentParseJobs
-}
-
-export function requireAttachmentReparseSupport(
-  runtime: RuntimeStore,
-): {
-  listAttachmentParseJobs: NonNullable<RuntimeStore['listAttachmentParseJobs']>
-  requeueAttachmentParseJobs: NonNullable<RuntimeStore['requeueAttachmentParseJobs']>
-} {
-  if (!runtime.listAttachmentParseJobs || !runtime.requeueAttachmentParseJobs) {
-    throw unsupportedAttachmentParse('reparse')
-  }
-
-  return {
-    listAttachmentParseJobs: runtime.listAttachmentParseJobs,
-    requeueAttachmentParseJobs: runtime.requeueAttachmentParseJobs,
-  }
-}
-
 export function buildAttachmentParseStatus(input: {
   runtime: RuntimeStore
-  listAttachmentParseJobs: NonNullable<RuntimeStore['listAttachmentParseJobs']>
+  listAttachmentParseJobs: RuntimeStore['listAttachmentParseJobs']
   captureId: string
   attachmentId: string
   fallbackAttachment: RuntimeAttachmentRecord
@@ -245,15 +218,6 @@ function toParserToolCheck(
   return tool.available
     ? passCheck(`parser-${name}`, tool.reason, details)
     : warnCheck(`parser-${name}`, tool.reason, details)
-}
-
-function unsupportedAttachmentParse(
-  action: 'show status' | 'parse' | 'reparse',
-): VaultCliError {
-  return new VaultCliError(
-    'INBOX_ATTACHMENT_PARSE_UNSUPPORTED',
-    `Attachment parse ${action} is not available through the current inbox runtime boundary.`,
-  )
 }
 
 export { isParseableAttachment }

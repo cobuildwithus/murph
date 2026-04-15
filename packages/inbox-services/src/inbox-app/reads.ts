@@ -9,8 +9,6 @@ import {
   buildAttachmentParseStatus,
   createParserServiceContext,
   isParseableAttachment,
-  requireAttachmentParseJobs,
-  requireAttachmentReparseSupport,
   summarizeParserDrain,
 } from '../inbox-services/parser.js'
 import {
@@ -116,7 +114,7 @@ export function createInboxReadOps(
   const buildInboxAttachmentStatus = (input: {
     runtime: RuntimeStore
     attachmentId: string
-    listAttachmentParseJobs: NonNullable<RuntimeStore['listAttachmentParseJobs']>
+    listAttachmentParseJobs: RuntimeStore['listAttachmentParseJobs']
     match: ReturnType<typeof requireInboxAttachmentMatch>
   }) =>
     buildAttachmentParseStatus({
@@ -189,10 +187,7 @@ export function createInboxReadOps(
     async showAttachmentStatus(input) {
       return withInboxRuntime(input, async ({ paths, runtime }) => {
         const match = requireInboxAttachmentMatch(runtime, input.attachmentId)
-        const listAttachmentParseJobs = requireAttachmentParseJobs(
-          runtime,
-          'show status',
-        )
+        const listAttachmentParseJobs = runtime.listAttachmentParseJobs
         const status = buildInboxAttachmentStatus({
           runtime,
           attachmentId: input.attachmentId,
@@ -212,7 +207,7 @@ export function createInboxReadOps(
 
     async parseAttachment(input) {
       return withInboxRuntime(input, async ({ paths, runtime }) => {
-        const listAttachmentParseJobs = requireAttachmentParseJobs(runtime, 'parse')
+        const listAttachmentParseJobs = runtime.listAttachmentParseJobs
         const match = requireParseableInboxAttachmentMatch(
           runtime,
           input.attachmentId,
@@ -254,7 +249,7 @@ export function createInboxReadOps(
         const {
           listAttachmentParseJobs,
           requeueAttachmentParseJobs,
-        } = requireAttachmentReparseSupport(runtime)
+        } = runtime
         const match = requireParseableInboxAttachmentMatch(
           runtime,
           input.attachmentId,
